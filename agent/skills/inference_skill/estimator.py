@@ -87,12 +87,41 @@ _STATIC_MS_PER_FLOP: float = 6e-10
 # ── VRAM ─────────────────────────────────────────────────────────────────────
 
 
+def resolve_forecast_batch(explicit: int | None, model_type: str) -> int:
+    """The batch the wall-time forecast prices at.
+
+    An explicit override when the caller supplies one, else the registry
+    default (``inference_batch_for`` — the K.2.5-8 silent fallback to 25 for
+    unregistered model types).
+
+    V21 PR G G1 — the inert seam. The override lets the tuner price the
+    forecast at the batch the runtime will ACTUALLY run (the probe-derived
+    value in ``active_params["inference_batch"]``), restoring
+    forecast==runtime coherence on the ``training_warmup_x2.7`` path. With
+    ``explicit is None`` the result is byte-identical to pre-G1 behaviour;
+    no caller passes an override until G2. An invalid override is rejected
+    loudly — never silently clamped or fallen back (fail-closed).
+    """
+    if explicit is None:
+        return inference_batch_for(model_type)
+    # bool is an int subclass; a True/False batch is a caller bug, not 1/0.
+    if isinstance(explicit, bool) or not isinstance(explicit, int) or explicit <= 0:
+        raise ValueError(f"inference_batch override must be a positive int; got {explicit!r}.")
+    return explicit
+
+
 def estimate_peak_bytes(
     model_type: str,
     model_config: dict[str, Any],
     num_params: int,
 ) -> dict[str, Any]:
     """Estimate peak inference-phase VRAM.
+
+    NOTE (V21 PR G): this VRAM entry point takes NO explicit-batch override.
+    It is production-dead on the forecast path — the live VRAM gate probes
+    the batch directly (``evaluate_vram_skill``) rather than pricing it from
+    this formula (§0.R.2) — so the G1 seam is added only to the wall-time
+    entry point below. It still reports ``inference_batch`` for audit.
 
     Worst-case float32 inference memory:
       * weights:           ``num_params × 4 B`` (no grads / Adam)
@@ -216,6 +245,7 @@ def estimate_wall_time_seconds(
     *,
     inference_ms_per_step: float | None = None,
     num_params: int | None = None,
+    inference_batch: int | None = None,
 ) -> dict[str, Any]:
     """Estimate inference wall-time in seconds.
 
@@ -229,6 +259,14 @@ def estimate_wall_time_seconds(
             has a warmup measurement. ``None`` → internal static fallback.
         num_params: Only needed by the static fallback. If absent, the
             model is instantiated internally via ``_count_params``.
+        inference_batch: V21 PR G G1 — an explicit batch to price the
+            forecast at, overriding the registry default. ``None`` (the
+            default, and every caller until G2) → byte-identical pre-G1
+            behaviour. When supplied it must be a positive int, else a
+            ``ValueError`` is raised (no silent clamp). It does NOT change
+            ``inference_batch_uncalibrated``, which keeps its registration
+            meaning ("is this model_type in the table"), not "was a batch
+            supplied".
 
     Returns:
         ``{"phase": "inference", "seconds": float, "breakdown": {...}}``.
@@ -237,7 +275,7 @@ def estimate_wall_time_seconds(
         ``model_type`` (K.2.5-8).
     """
     inference_batch_uncalibrated = not is_inference_batch_registered(model_type)
-    inf_batch = inference_batch_for(model_type)
+    inf_batch = resolve_forecast_batch(inference_batch, model_type)
 
     # V21 PR B1 — see the training estimator; the margin is the
     # time-conservative direction (smaller `seg` means more steps).

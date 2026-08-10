@@ -587,20 +587,39 @@ outside the implementation commits.
 - Dependencies: none.
 
 #### 3. Implementation plan
-- [ ] Inspect both estimator entry points' exact signatures and the
+- [x] Inspect both estimator entry points' exact signatures and the
       breakdown dict shape before finalizing the argument name/threading
-      (rule: no guessed interfaces).
-- [ ] Add optional `inference_batch: int | None = None` to
+      (rule: no guessed interfaces). *(Done — both entry points and the
+      wrapper's `run_skill` re-read in full before each edit.)*
+- [x] Add optional `inference_batch: int | None = None` to
       `estimate_wall_time_seconds`; when provided, it replaces the
       VALUE of the existing `inference_batch` breakdown key. **NO new
       output key on ANY path (0.R.1)** — the authoritative batch is
       already recorded at `record_params["inference_batch"]` (:4697).
       `estimate_peak_bytes` is NOT given the argument (production-dead
       on the forecast path, 0.R.2) — its docstring gains one line
-      stating that.
-- [ ] Same optional input for the time-skill wrapper's `inf_batch`
+      stating that. *(Done — implemented via a new module-level
+      `resolve_forecast_batch(explicit, model_type)` resolver:
+      fail-closed (`bool`/non-int/≤0 → `ValueError`, no silent clamp);
+      `None` → `inference_batch_for` exactly as before. A set-equality
+      test pins that no breakdown key was added.)*
+- [x] Same optional input for the time-skill wrapper's `inf_batch`
       (:746), threading through the `inference_ms` scaling (:749).
-- [ ] Unit tests per §4 below.
+      *(Done — `run_skill` reads an optional `inference_batch` kwarg,
+      resolves it through the same `resolve_forecast_batch` (inside the
+      `try`, so an invalid value surfaces as the structured
+      `status: "error"` return), uses it for the hint scaling AND
+      passes the same value into `estimate_wall_time_seconds` — the
+      0.R.3 both-sides coherence is wrapper-internal from G1 on; G2
+      adds only the tuner→wrapper hop.)*
+- [x] Unit tests per §4 below. *(9 estimator tests in
+      `tests/unit/agent/inference_skill/test_estimator.py`
+      (`TestResolveForecastBatch`, `TestG1ExplicitBatchSeam`) + 7
+      wrapper tests in `tests/unit/agent/tune_ml_hyperparam_agent/`
+      `test_evaluate_time_skill_g1_batch_seam.py`. Parity pins are
+      full-dict `==` against HARDCODED pre-G1 algebra (rnn B=10 →
+      25 000 steps; fallback B=25 → 10 000 steps at seg 16000 /
+      400 PSDs), for a registered and an unregistered model.)*
 
 #### 4. Validation plan
 - Unit: with the argument absent, the returned estimate/breakdown is
@@ -632,14 +651,51 @@ outside the implementation commits.
 | Hint absent | Exactly today's behavior, proven by parity test |
 
 #### 7. Verification commands and evidence
-- [ ] `pytest tests/unit/agent/inference_skill/ tests/unit/core/test_inference_batch_absence_is_observability_only.py tests/unit/agent/evaluate_time_skill* -q` — counts/wall time **to record**
-- [ ] Targeted mutation evidence — **to record**
-- [ ] ruff + format + pyright on touched files — **to record**
+- [x] Targeted suite (2026-08-10): `pytest tests/unit/agent/inference_skill/
+      tests/unit/core/test_inference_batch_absence_is_observability_only.py
+      tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill.py
+      tests/unit/agent/tune_ml_hyperparam_agent/test_inference_hint_path.py
+      tests/unit/agent/tune_ml_hyperparam_agent/test_evaluate_time_skill_g1_batch_seam.py
+      tests/unit/agent/tune_ml_hyperparam_agent/test_c8_timeeval_authority.py -q`
+      → **116 passed in 1.24 s, rc=0** (rc read from pytest itself, log
+      captured; identical result re-run after `ruff format`). *Deviation:
+      the planned glob `tests/unit/agent/evaluate_time_skill*` matches no
+      existing path — wrapper tests live under
+      `tests/unit/agent/tune_ml_hyperparam_agent/` (existing convention),
+      so the new file was placed there and the command lists the real
+      wrapper test files.*
+- [x] Targeted mutation evidence (3 attempted / 3 caught / 0 equivalent /
+      0 invalid; each site count==1, `__pycache__` cleared per round,
+      files restored from backups — NOT `git checkout`, which would have
+      destroyed the uncommitted seam — and baseline re-run green,
+      39 passed):
+      1. estimator precedence reversal (`return explicit` →
+         `return inference_batch_for(model_type)`): caught by the named
+         `test_explicit_overrides_table_precedence` + 3 others.
+      2. wrapper→estimator hop deleted (drop
+         `inference_batch=explicit_inference_batch` at the estimator
+         call): caught by `test_explicit_batch_reaches_both_sides_with_
+         same_value` + `test_explicit_batch_reaches_real_estimator_
+         breakdown`.
+      3. scaling side ignores the hint (`resolve_forecast_batch(None,
+         model_type)`): caught by the both-sides test (+ the invalid-
+         value tests, which stop rejecting).
+- [x] ruff check clean; `ruff format` applied (wrapping only) and
+      `--check` clean on all four touched files. **pyright: NOT runnable
+      on this host** — system Node is v10.19.0 and the pyright bundle
+      fails to load (`SyntaxError: Unexpected token =`); no newer Node
+      exists on the machine. Recorded per the environment-assumptions
+      rule: pyright is a CI-only check for this PR; no local pyright
+      claim is made.
 
 #### 8. Commit boundary
-- [ ] Diff contains only the two forecast surfaces + tests; no tuner,
-      no executor, no runtime_control changes.
-- [ ] Show diff summary + staged list + test evidence, then commit.
+- [x] Diff contains only the two forecast surfaces + tests (+ this
+      ledger and the folder README status row); no tuner, no executor,
+      no runtime_control changes.
+- [x] ~~Show diff summary + staged list + test evidence, then commit.~~
+      Superseded by the operator's Implementation Working Rules
+      (2026-08-10): semantic commits are autonomous; the evidence is
+      recorded above instead of shown at an operator stop.
 
 ---
 
@@ -1026,13 +1082,91 @@ Acceptance evidence:      parity matrix + coherence invariant + one
 
 ---
 
-**Nothing in this document is implemented.** All operator questions are
-now discharged: Q-G-1 / Q-G-4 / Q-G-5 approved (rev-2); Q-G-2 approved
-(rev-3, both conditions — the two-sided pricing error and the bounded
-per-file ceil residual — closed by source audit); Q-G-3 approved —
-Option A (thread the probed batch into the live planned-identity payload,
-proven inert to training hash / comparability / worker / reuse by 0.R.12).
-On this freeze, the sequence is G1 → G2 (evidence checkpoint) → G3
-(Option A) → G4 → PR-level validation. Every commit stops to show its
-diff summary, staged files, test evidence, and deviations before
-committing.
+## Implementation status (live — updated as work proceeds)
+
+**IMPLEMENTATION IN PROGRESS** (started 2026-08-10).
+
+```text
+branch   feat/pr-g-capability-derived-inference-batch
+base     master @ 51bc3a7a (the rev-3 design commit)
+HEAD     f48c1dee (design freeze) + G1 committed on top
+G1       DONE — both seams + 16 tests + 3/3 mutations caught
+         (evidence in §G1.7; sha recorded at the G2 checkpoint)
+G2-G4    not started (G2 next)
+PR       none opened yet
+Gate     not run
+jobs     no background jobs
+```
+
+All operator questions are discharged: Q-G-1 / Q-G-4 / Q-G-5 approved
+(rev-2); Q-G-2 approved (rev-3, both conditions — the two-sided pricing
+error and the bounded per-file ceil residual — closed by source audit);
+Q-G-3 approved — Option A (thread the probed batch into the live
+planned-identity payload, proven inert to training hash / comparability
+/ worker / reuse by 0.R.12). The sequence is G1 → G2 (evidence
+checkpoint) → G3 (Option A) → G4 → PR-level validation.
+
+**Workflow supersession (operator directive, 2026-08-10):** the freeze
+text's closing sentence ("Every commit stops to show its diff summary
+… before committing") is superseded by the operator's Implementation
+Working Rules: semantic commits are AUTONOMOUS; the evidence that would
+have been shown at each stop is recorded in this ledger instead, and
+implementation continues without operator checkpoints until PR G is
+READY FOR OPERATOR REVIEW (PR opened, CI green on the exact final
+HEAD). G2's evidence checkpoint is an EVIDENCE checkpoint, not an
+operator stop, unless it materially contradicts the frozen design.
+DO NOT MERGE — merge authority remains the operator's.
+
+### Session-recovery record (2026-08-10, session 2)
+
+- A stale PR-F-era durable handoff (written at master `c1925586`,
+  clean tree) was injected at session start; its own guard flagged the
+  HEAD/fingerprint mismatch. It was REJECTED in favor of repository
+  truth per its recovery procedure. Repository evidence re-derived:
+  branch `feat/pr-g-capability-derived-inference-batch` @ `f48c1dee`
+  (1 commit ahead of master = the design freeze), one uncommitted
+  file: `agent/skills/inference_skill/estimator.py` (+41/−1).
+- Three parallel read-only audit agents re-established project state
+  (docs/ledger, source tree, last 20 PRs). Load-bearing findings,
+  verified against source by the main agent:
+  - The uncommitted estimator diff implements the G1 seam exactly as
+    designed: `resolve_forecast_batch(explicit, model_type)`
+    (fail-closed; rejects `bool`/non-int/≤0), the optional
+    `inference_batch: int | None = None` parameter on
+    `estimate_wall_time_seconds` (no new output key;
+    `inference_batch_uncalibrated` semantics untouched), and the
+    `estimate_peak_bytes` production-dead docstring note (0.R.2).
+  - The wrapper's own `inf_batch = inference_batch_for(model_type)`
+    at `evaluate_time_skill/wrapper.py:746` is the second G1 surface
+    (frozen scope §G1.2) — initially misread in-session as G2 work;
+    corrected by the operator and confirmed against §G1 before any
+    edit. G1 is PARTIAL until the wrapper seam + tests land.
+  - `docs/design/v21_priorities/README.md` tracked PR E as
+    "in-progress" during implementation (`b8ea7b50`), so it IS an
+    in-progress status surface — its PR G row is updated now.
+    `v21_priorities.md` follows the post-merge convention (PR F
+    STATUS landed with/after the merge) and is deliberately NOT
+    updated until PR G merges.
+
+### G1 implementation record (COMPLETE — evidence in §G1.3/§G1.7)
+
+- `agent/skills/inference_skill/estimator.py` — `resolve_forecast_batch`
+  resolver + `inference_batch` parameter on `estimate_wall_time_seconds`
+  + `estimate_peak_bytes` production-dead note (0.R.2).
+- `agent/skills/evaluate_time_skill/wrapper.py` — optional
+  `inference_batch` kwarg on `run_skill`; resolved through the same
+  fail-closed `resolve_forecast_batch`; used for the `:749`
+  `inference_ms` hint scaling AND passed into
+  `estimate_wall_time_seconds` so the two sides cannot diverge once a
+  caller supplies the hint (0.R.3). Invalid values surface through the
+  wrapper's existing structured `status: "error"` path (the resolve
+  happens inside the `try`).
+- 16 new tests (9 estimator + 7 wrapper), 116-test targeted suite green,
+  3/3 mutations caught. Bounded deviations recorded in §G1.7: test
+  location (no `tests/unit/agent/evaluate_time_skill*` path exists) and
+  pyright being CI-only on this host (Node v10.19.0). One clarification
+  vs the §G1.6 failure table: the *estimator* entry point rejects an
+  invalid override by raising `ValueError` (it has no structured error
+  return of its own); the structured error path named by the table is
+  the skill surface — the wrapper catches and returns
+  `status: "error"`. Both are pinned by tests.

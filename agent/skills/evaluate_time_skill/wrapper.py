@@ -595,7 +595,13 @@ def run_skill(sandbox, **kwargs) -> dict:
 
     Required kwargs: model_type, model_config, train_config, loss_config,
                      sample_set, time_budget_minutes.
-    Optional kwargs: train_portion (default 1.0), data_dir (enables warmup).
+    Optional kwargs: train_portion (default 1.0), data_dir (enables warmup),
+                     inference_batch (V21 PR G G1 — explicit batch to price
+                     the inference forecast at, overriding the registry
+                     default; None → pre-G1 behaviour, byte-identical. Must
+                     be a positive int; an invalid value surfaces via the
+                     structured ``status: "error"`` return, never a silent
+                     clamp. No caller supplies it until G2).
 
     Returns a dict with keys: status, feasible, verdict, suggestion,
     estimated_minutes, limit_minutes, breakdown, dominant_phase,
@@ -743,7 +749,12 @@ def run_skill(sandbox, **kwargs) -> dict:
         #      explicitly here so audit logs distinguish "we passed
         #      None" from a measured path.
         inference_per_psd_seg_ms_hint = kwargs.get("inference_per_psd_seg_ms_hint")
-        inf_batch = _inference_est.inference_batch_for(model_type)
+        # V21 PR G G1 — both forecast sides must price the same batch: this
+        # hint scaling AND the estimator call below receive the SAME explicit
+        # value (0.R.3), so a caller-supplied probe batch can never apply to
+        # one side only. None → registry default, exactly pre-G1.
+        explicit_inference_batch = kwargs.get("inference_batch")
+        inf_batch = _inference_est.resolve_forecast_batch(explicit_inference_batch, model_type)
         ml_per_psd = max(PSD_SEGMENT_LENGTH // max(seg_size, 1), 1)
         if inference_per_psd_seg_ms_hint is not None and inference_per_psd_seg_ms_hint > 0:
             inference_ms = float(inference_per_psd_seg_ms_hint) * inf_batch / ml_per_psd
@@ -761,6 +772,7 @@ def run_skill(sandbox, **kwargs) -> dict:
             eval_sample_set,
             inference_ms_per_step=inference_ms,
             num_params=num_params,
+            inference_batch=explicit_inference_batch,
         )
 
         scoring = _scoring_est.estimate_wall_time_seconds(eval_sample_set)

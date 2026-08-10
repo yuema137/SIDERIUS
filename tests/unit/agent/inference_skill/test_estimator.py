@@ -268,3 +268,172 @@ class TestEstimateWallTimeSeconds:
         )
         assert out["breakdown"]["inference_batch"] == 25
         assert out["breakdown"]["inference_batch_uncalibrated"] is True
+
+
+# ---------------------------------------------------------------------------
+# V21 PR G G1 — explicit-batch forecast seam
+# ---------------------------------------------------------------------------
+
+
+class TestResolveForecastBatch:
+    """``resolve_forecast_batch`` — the G1 override resolver."""
+
+    def test_none_returns_registry_value(self):
+        assert est.resolve_forecast_batch(None, "rnn") == 10
+        assert est.resolve_forecast_batch(None, "unregistered_plugin") == 25
+
+    def test_explicit_overrides_table_precedence(self):
+        """NAMED MUTATION PIN (G1 acceptance): reversing the explicit-vs-
+        table precedence (returning the registry value when an explicit
+        batch is supplied) fails BOTH asserts — the explicit values differ
+        from the table entries (rnn: 10, fallback: 25) by construction."""
+        assert est.resolve_forecast_batch(64, "rnn") == 64
+        assert est.resolve_forecast_batch(7, "unregistered_plugin") == 7
+
+    @pytest.mark.parametrize("bad", [0, -3, True, False, 25.0, "25"])
+    def test_invalid_explicit_rejected_loudly(self, bad):
+        """Fail-closed: no silent clamp, no fallback. ``bool`` is rejected
+        despite being an ``int`` subclass — a True/False batch is a caller
+        bug, not batch 1/0."""
+        with pytest.raises(ValueError, match="inference_batch override"):
+            est.resolve_forecast_batch(bad, "rnn")
+
+
+class TestG1ExplicitBatchSeam:
+    """G1 acceptance: default-path parity (deep-equal, hardcoded
+    expectations), explicit value used verbatim, and
+    ``inference_batch_uncalibrated`` unchanged by supplying a hint."""
+
+    # Fixture algebra (hardcoded, independent of the code under test):
+    # SEGMENT_LENGTH = 10_000_000, seg 16000 → ml_per_psd = 625;
+    # _sample_set() = 400 PSDs → total_ml = 250_000.
+
+    def test_default_parity_registered_deep_equal(self):
+        """Absent hint → byte-identical pre-G1 output. Full-dict pin, not
+        just the batch field: rnn table batch 10 → 25_000 steps × 2 ms."""
+        out = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+        )
+        assert out == {
+            "phase": "inference",
+            "seconds": 50.0,
+            "breakdown": {
+                "total_inference_steps": 25_000,
+                "inference_batch": 10,
+                "ms_per_step": 2.0,
+                "ms_source": "derived_from_training_warmup",
+                "inference_batch_uncalibrated": False,
+            },
+        }
+
+    def test_default_parity_unregistered_deep_equal(self):
+        """Absent hint, unregistered model → fallback batch 25 →
+        10_000 steps × 2 ms; flag True. Full-dict pin."""
+        out = est.estimate_wall_time_seconds(
+            "unregistered_plugin",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+        )
+        assert out == {
+            "phase": "inference",
+            "seconds": 20.0,
+            "breakdown": {
+                "total_inference_steps": 10_000,
+                "inference_batch": 25,
+                "ms_per_step": 2.0,
+                "ms_source": "derived_from_training_warmup",
+                "inference_batch_uncalibrated": True,
+            },
+        }
+
+    def test_explicit_none_identical_to_absent(self):
+        """``inference_batch=None`` is the declared no-op form of the seam."""
+        absent = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+        )
+        explicit_none = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+            inference_batch=None,
+        )
+        assert absent == explicit_none
+
+    def test_explicit_value_used_verbatim_with_ceil_algebra(self):
+        """Explicit 64 on rnn (table 10): the breakdown reports 64 in the
+        EXISTING key (no new key on any path — 0.R.1) and the step count
+        follows ceil(250_000 / 64) = 3907."""
+        out = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+            inference_batch=64,
+        )
+        assert out["breakdown"]["inference_batch"] == 64
+        assert out["breakdown"]["total_inference_steps"] == 3907
+        assert out["seconds"] == pytest.approx(3907 * 2.0 / 1000.0)
+        assert set(out["breakdown"].keys()) == {
+            "total_inference_steps",
+            "inference_batch",
+            "ms_per_step",
+            "ms_source",
+            "inference_batch_uncalibrated",
+        }
+
+    def test_uncalibrated_flag_unchanged_by_explicit_batch(self):
+        """The flag keeps its registration meaning ("is this model_type in
+        the table"), NOT "was a batch supplied": registered stays False,
+        unregistered stays True, hint or no hint."""
+        registered = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+            inference_batch=64,
+        )
+        unregistered = est.estimate_wall_time_seconds(
+            "unregistered_plugin",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+            inference_batch=64,
+        )
+        assert registered["breakdown"]["inference_batch_uncalibrated"] is False
+        assert unregistered["breakdown"]["inference_batch_uncalibrated"] is True
+
+    def test_explicit_equal_to_table_value_is_deep_equal_to_default(self):
+        """Supplying the table's own value must be indistinguishable from
+        not supplying one (Q-G-5 no-hint parity in its boundary case)."""
+        default = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+        )
+        explicit = est.estimate_wall_time_seconds(
+            "rnn",
+            {"segmentation_size": 16000},
+            _sample_set(),
+            inference_ms_per_step=2.0,
+            inference_batch=10,
+        )
+        assert default == explicit
+
+    def test_invalid_explicit_raises_through_entry_point(self):
+        with pytest.raises(ValueError, match="inference_batch override"):
+            est.estimate_wall_time_seconds(
+                "rnn",
+                {"segmentation_size": 16000},
+                _sample_set(),
+                inference_ms_per_step=2.0,
+                inference_batch=0,
+            )

@@ -91,7 +91,10 @@ reuses production's own primitive. Execution is wall-bounded (30-min
 pilot wall, ramped), not estimate-bounded: the honest theoretical worst
 case is ~2 700 s per entry per repeat. Zero production diff; CPU-only.
 
-**PR G is not started, and carries an update block** derived
+**PR G is design-FROZEN (operator-approved 2026-08-10) and its
+implementation is IN PROGRESS** on
+`feat/pr-g-capability-derived-inference-batch`; its doc is the live
+implementation ledger. It carries an update block derived
 from what A/B/C actually proved — see `v21_priorities.md` §E.3d, which is
 binding on all of them. The single most reusable finding: three PRs in a
 row found **a correct rule that nothing called**, so every remaining PR
@@ -146,7 +149,7 @@ Two consequences for other PRs:
 | **D** | [`pr_d_scientific_authority_reachable.md`](./pr_d_scientific_authority_reachable.md) | V21 launch blocker | **MERGED** — PR #189, `aace4abb` |
 | **E** | [`pr_e_proposal_scale_funnel.md`](./pr_e_proposal_scale_funnel.md) | Before first V21 data | **MERGED** — PR #190, `f1f4c30a` |
 | **F** | [`pr_f_inspection_cost_study.md`](./pr_f_inspection_cost_study.md) | Blocks only a budget change | **MERGED** — PR #191, `fd7c8816` (measure-only) |
-| **G** | `pr_g_capability_derived_inference_batch.md` | Non-blocking | not started |
+| **G** | [`pr_g_capability_derived_inference_batch.md`](./pr_g_capability_derived_inference_batch.md) | Non-blocking | **IN PROGRESS** — design FROZEN 2026-08-10; implementing on `feat/pr-g-capability-derived-inference-batch` |
 
 Recommended serialization: **A → C → B → D → E**, then F, then G.
 
