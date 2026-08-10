@@ -2714,8 +2714,9 @@ corrective change to advice or thresholds in the diff.
 > `v21_priorities/pr_f_inspection_cost_study.md`; deliverable:
 > `reports/v21_pr_f_inspection_cost/report.md`. Zero production diff.
 >
-> **What the study established (pilot + reproducibility rerun, real CPU,
-> operator-scoped population):** the V20 inspection timeout is a
+> **What the F2a pilot + reproducibility rerun established (real CPU;
+> the final formal F2b evidence is the bounded subset below):** the V20
+> inspection timeout is a
 > REPRODUCIBLE measurement — `wavenet_30layer_baseline` (7.09 M params)
 > probes 143–150 s exact at B=64 (two repeats per run) against the
 > post-hoc 120 s budget and raises the native

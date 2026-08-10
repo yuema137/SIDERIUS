@@ -16,17 +16,23 @@ single-entry sub-manifest hash `0834abda…`) · **Design ledger:**
 > The pilot is sufficient to reject the simplistic "parameter count →
 > inspection timeout" hypothesis and to motivate a separate targeted
 > budget-policy study if a budget change is pursued.
-> *(Operator decision, 2026-08-09 — the pilot + reproducibility rerun IS
-> the formal F2b population, via the frozen wall-expiry rule's explicit
-> subset-approval path. Subsequently amended by the operator's
-> MINIMUM-SUFFICIENT-EVIDENCE correction, which added the bounded
-> stratified subset — see "The bounded F2b subset" below.)*
+> *(Final operator decision chain, 2026-08-09: F2a pilot +
+> reproducibility rerun → full sweep projected at 10–30 h and STOPped at
+> the operator gate → an intermediate resolution briefly designated the
+> pilot alone as the formal population → the operator's
+> MINIMUM-SUFFICIENT-EVIDENCE correction superseded it → the
+> deterministic, timing-blind 8-entry stratified F2b subset was executed.
+> **The final formal F2b evidence is the bounded subset — see "The
+> bounded F2b subset" below; the pilot alone is NOT the final F2b
+> population.**)*
 
-Measured coverage: **3 of 12 pilot entries, 64 + 64 measurements across
-two independent wall-bounded runs** (the 1800 s wall fired in both, by
-design). The full manifest (112 entries, of which 107 are measurable —
-5 builtin ladder steps are `invalid_config`) remains frozen and hashed
-for any future targeted study.
+Measured coverage: the pilot (**3 of 12 pilot entries, 64 + 64
+measurements across two independent wall-bounded runs** — the 1800 s
+wall fired in both, by design) **plus the bounded stratified subset
+(163 measurements — the final F2b evidence)**. The full manifest
+(112 entries, of which 107 are measurable — 5 builtin ladder steps are
+`invalid_config`) remains frozen and hashed for any future targeted
+study.
 
 ## The budgets under study (from the consumer census — only the ENFORCED ones)
 
@@ -103,11 +109,14 @@ censor. The disposition column, not the search-budget verdict, carries
 that story; reading only the CLEAR count would miss it, which is why
 dispositions and verdicts are reported together.
 
-Disposition accounting over the approved (operator-scoped) population:
+Disposition accounting over the PILOT (the F2a evidence — the final
+formal F2b evidence is the bounded subset, whose accounting appears in
+its own section below):
 `126 completed(exact) + 2 native_timeout(exact) + 0 backstop + 0
 deadline + 0 unloadable + 0 invalid_config = 128 measurements` — closes
-exactly. Wall markers present in both files (the walls fired; the
-operator then approved the measured coverage as the formal population).
+exactly. Wall markers present in both pilot files (the 1800 s pilot
+walls fired, by design; wall expiry is a clean interruption, not
+completion).
 
 ## P6.3 overlay (ledger-recorded values only)
 

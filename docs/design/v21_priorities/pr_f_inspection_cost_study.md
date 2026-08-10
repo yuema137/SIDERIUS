@@ -1028,14 +1028,20 @@ future dynamic budget policy.
 > GO projection. **Observed:** the pilot priced the full sweep at
 > 10–30 h and simultaneously answered the study's causal question — the
 > V20 incident reproduced repeatedly, and censoring proved
-> architecture-shaped, not size-shaped. **Correction (operator, quoted
-> in the report's Scope section):** the pilot + reproducibility rerun IS
-> the formal F2b population, via the frozen subset-approval path;
+> architecture-shaped, not size-shaped. **First correction (operator,
+> intermediate — itself superseded the same day):** the pilot +
+> reproducibility rerun was briefly designated the formal F2b
+> population via the frozen subset-approval path;
 > *"the design serves the question, not the other way around"* — a full
 > mechanical sweep of 83 historical candidates would answer only
 > population-prevalence, which is not needed unless a budget change is
 > actually pursued, and a future budget-policy study would be better
-> served by targeted per-family ladders. **Consequence:** the deliverable
+> served by targeted per-family ladders. **Final decision (operator
+> MINIMUM-SUFFICIENT-EVIDENCE correction, executed):** the bounded,
+> deterministic, timing-blind 8-entry stratified F2b subset — designed,
+> run, and recorded in the F2b-subset.R block above. **The final formal
+> F2b evidence is the executed subset; the pilot alone is NOT the
+> formal F2b population.** **Consequence:** the deliverable
 > below is REPLACED by `reports/v21_pr_f_inspection_cost/report.md`
 > (generated from schema-validated evidence via `report.build_report`;
 > classification exclusively via `classify.classify_point`); the frozen
@@ -1158,7 +1164,14 @@ budgets. **Dependencies:** F2a GO or operator-approved subset.
    pooled; the two INERT budgets reported as findings, not measured
    against.
 6. A written recommendation that changes nothing; FU-F-1 filed.
-7. Full checker set green at the final head (§E.3d.12).
+7. Checker evidence at the final heads (§E.3d.12), per the recorded
+   standard: PR-F-specific tests, unit scope, ruff, `ruff format
+   --check` and pyright are green; the full repository `pytest tests/`
+   additionally carries ONE independently reproduced PRE-EXISTING
+   baseline integration failure (byte-identical at the merge base
+   `c0989e5d` from a clean checkout; outside PR F and outside CI scope;
+   unchanged by PR F — terminal-validation block above); terminal
+   GitHub CI must be green on the exact final HEAD.
 
 ### V21 review fields
 
