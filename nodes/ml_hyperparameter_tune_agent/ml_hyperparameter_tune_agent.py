@@ -755,9 +755,15 @@ def _handle_prephase_gpu_measurement(
     ceiling_gib = getattr(agent_input, "gpu_pair_ceiling_gib", None)
     workspace = Path(sandbox.base_dir) / "prephase_measurement"
     request_id = _uuid.uuid4().hex
-    # Resolved from the canonical production source so the probe cannot
-    # drift from what `execute_inference` will really run.
-    _inference_batch = resolve_inference_batch(model_type)
+    # V21 PR G G3 — resolved exactly as `execute_inference` resolves it:
+    # the current attempt's probe-derived batch when the preflight produced
+    # one (already captured into active_params at :4696, before this site
+    # runs — 0.R.5 ordering), else the registry table. The recorded
+    # planned-identity payload now states the batch production would
+    # really run instead of a table value runtime would override.
+    _inference_batch = resolve_inference_batch(
+        model_type, explicit=active_params.get("inference_batch")
+    )
 
     spec = GpuMeasurementSpec(
         label=f"{exp_id}:training",

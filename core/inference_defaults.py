@@ -1,29 +1,50 @@
 """
 core/inference_defaults.py
 
-Single source of truth for the inference batch size used by
-``sandbox_executor.execute_inference`` and by the per-phase estimators in
-``agent/skills/inference_skill/estimator.py``.
+The calibrated name-keyed inference-batch table and its NO-HINT
+fallback resolution.
 
-Colocating both callers on one function means the VRAM/time forecast for
-the inference phase cannot drift from what actually runs: changing an
-inference batch size for any model type means editing exactly one table.
+**Not the agent path's batch authority (V21 PR G, Q-G-1/Q-G-4).** On
+the live agent path the batch is probe-derived
+(``evaluate_vram_skill/batch_resolver.py``, name-blind), captured into
+``active_params["inference_batch"]`` (tuner :4696) and preferred by
+every consumer: runtime (``execute_inference``), the wall-time forecast
+(``inference_skill/estimator.resolve_forecast_batch``), and the
+measurement identity (``gpu_measurement_identity.resolve_inference_batch``).
+Every feasible/CPU-mode ``evaluate_vram_skill`` return carries
+``inference_batch: int >= 1`` — a contract pinned by
+``tests/unit/agent/evaluate_vram_skill/test_g4_feasible_return_batch_contract.py``
+— so this table is unreachable on the agent path by construction. The
+old A.7→A.9 plan to delete the fallback is formally retired in favour
+of that tested contract.
 
-Three callers, two tiers of tolerance for unknown ``model_type``:
+Legitimate consumers of the table (the §0.B census, PR G design doc):
 
-- ``inference_batch_for`` — used by ``sandbox_executor.execute_inference``
-  at **runtime**. Falls back silently to ``_DEFAULT_INFERENCE_BATCH``
-  (25), matching pre-K.2.5 ``.get(model_type, 25)`` behaviour so plugin
-  models that never registered a custom batch keep running.
+- ``run_comparison.py`` baselines — no hint by design; entries are
+  paper/VRAM-calibrated for the builtin types (``transformer: 1`` for
+  O(T²) attention; ``rnn: 10``). Do not delete the table.
+- Legacy validation scripts (``c2_prephase_validation.py``,
+  ``pregate_runtime_control_validation.py``).
+- The proposer's advisory preflight (``proposer_preflight.py``) — no
+  candidate exists yet, so no hint can; ``advisory_only`` and
+  batch-insensitive up to the bounded ceil residual on its static path.
+- Any no-hint fallback arm of the resolvers above.
+
+Three functions, two tiers of tolerance for unknown ``model_type``:
+
+- ``inference_batch_for`` — the fallback resolution. Falls back
+  silently to ``_DEFAULT_INFERENCE_BATCH`` (25), matching pre-K.2.5
+  ``.get(model_type, 25)`` behaviour so plugin models that never
+  registered a custom batch keep running on no-hint paths.
 
 - ``is_inference_batch_registered`` — used by the planning-time
   estimator in ``inference_skill/estimator.py`` (post-K.2.5-8).
-  Returns ``bool`` so the estimator can call ``inference_batch_for``
-  unconditionally (matching runtime) and surface the substitution as
-  an ``inference_batch_uncalibrated`` flag through the gate breakdown.
-  See docs/resource_estimator_implement.md §10.14 K.2.5-8 for the
-  rationale (the original loud-assert path crashed every gate that ran
-  on a proposer-invented model_type).
+  Returns ``bool`` so the estimator can resolve unconditionally and
+  surface the substitution as an ``inference_batch_uncalibrated`` flag
+  through the gate breakdown (observability-only, never a predicate —
+  the C3b pin). See docs/resource_estimator_implement.md §10.14
+  K.2.5-8 for the rationale (the original loud-assert path crashed
+  every gate that ran on a proposer-invented model_type).
 
 - ``assert_inference_batch_registered`` — kept for callers that still
   want the loud-fail semantics (no in-tree caller uses it post-K.2.5-8;
@@ -31,7 +52,7 @@ Three callers, two tiers of tolerance for unknown ``model_type``:
   ``ValueError`` on unknown model types.
 
 See docs/resource_estimator_implement.md §10.5 (Phase K.2.5) +
-§10.14 K.2.5-8 (soft fallback for unregistered model_type).
+§10.14 K.2.5-8, and the PR G design doc §0.B (consumer census).
 """
 
 # Inference batch sizes chosen to keep single-process GPU memory under ~2 GB
@@ -61,13 +82,14 @@ _DEFAULT_INFERENCE_BATCH: int = 25
 
 
 def inference_batch_for(model_type: str) -> int:
-    """Return the inference batch size for ``model_type``.
+    """Return the table/fallback inference batch for ``model_type``.
 
     Unknown model types fall back to ``_DEFAULT_INFERENCE_BATCH`` (25),
     matching the silent fallback used by sandbox_executor pre-K.2.5.
-    Estimator callers should call ``assert_inference_batch_registered``
-    first so a missing plugin entry surfaces as a loud gate error rather
-    than a silent forecast against a guessed batch.
+    NO-HINT resolution only: on the agent path every consumer prefers
+    the probe-derived ``active_params["inference_batch"]`` and reaches
+    this function only when no hint exists (see the module docstring's
+    consumer census, V21 PR G).
     """
     return _INFERENCE_BATCH_SIZES.get(model_type, _DEFAULT_INFERENCE_BATCH)
 
