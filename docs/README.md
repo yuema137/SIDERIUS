@@ -40,8 +40,6 @@ that live outside `docs/design/`.
 |------|---------------|--------|-------|---------|
 | `docs/architecture.md` | Architecture overview | active | generic | Full system design (graph, nodes, protocols, skills) — canonical entry point for new contributors |
 | `docs/adaptive_new_model_proposer.md` | Adaptive New Model Proposer | active | mixed | Cumulative negative feedback for proposer (`disallowed_architectural_patterns`) |
-| `docs/adaptive_new_model_proposer_overall_review.md` | Overall review of adaptive proposer | archived | mixed | Historical review notes |
-| `docs/adaptive_new_model_proposer_phase_C_review.md` | Phase C review | archived | mixed | Historical review notes |
 | `docs/aggregated_score_table_awareness.md` | Aggregated score-table awareness | active | mixed | Score-table rendering for LLM prompts |
 | `docs/align_denoising_score.md` | Align denoising score | active | task-specific | Canonical scoring formula (anchor-normalized) + legacy parity proof |
 | `docs/audit_and_optimize_token_usage_and_growth.md` | Token-usage audit | active | generic | Token-consumption profile per agent + growth analysis |
@@ -54,11 +52,8 @@ that live outside `docs/design/`.
 | `docs/dynamic_search_pilot.md` | Dynamic search pilot | active | generic | Multi-round paper search loop for the lit-review node |
 | `docs/external_agents_architecture.md` | External agents architecture | active | generic | Vision doc for external-agent interoperability |
 | `docs/external_agents_for_proposer.md` | External agents for proposer | active | generic | Delegating proposer decisions to external agent implementations |
-| `docs/first_model_proposal_demo_architecture.md` | First model-proposal demo | archived | generic | Historical demo architecture |
 | `docs/full_loop_5_agents.md` | Full loop with 5 agents | active | generic | End-to-end loop across proposer / implementor / validator / tuner / interpreter |
-| `docs/hyperparameter_tuner_features.md` | Tuner prompt features | active | generic | Tuner prompt affordances and constraints |
 | `docs/improving_validation_awareness.md` | Improving validation awareness | active | generic | Validator improvements (7-check pipeline) |
-| `docs/learning_from_sota_agents.md` | Learning from SOTA agents | active | generic | Cross-project comparison notes |
 | `docs/optimize_inference_and_scoring.md` | Optimize inference + scoring | active | mixed | Fix-1 (RSS ceiling), Fix-2 (subprocess spawn), Fix-3 (sentinel) — historical hardening |
 | `docs/paper_extract_pilot.md` | Paper extract pilot | active | generic | Lit-review compression pilot |
 | `docs/paper_resolver_pilot.md` | Paper resolver pilot | active | generic | Semantic Scholar + arXiv resolver pilot |
@@ -68,7 +63,6 @@ that live outside `docs/design/`.
 | `docs/phase67_infra_hardening_and_feedback_integrity.md` | Phase 6.7 infra hardening | archived | generic | Historical Phase 6.7 |
 | `docs/phase68_orchestrator_memory_and_resume.md` | Phase 6.8 memory + resume | archived | generic | Orchestrator memory hygiene + resume design |
 | `docs/phase68_task1_memory_diagnostic_20260427.md` | Phase 6.8 memory diagnostic | archived | generic | Diagnostic report dated 2026-04-27 |
-| `docs/pr_description_loss_inventory.md` | PR description — loss inventory | archived | generic | Historical PR write-up |
 | `docs/proposer_prompt_audit.md` | Proposer prompt audit | active | generic | Audit of proposer prompt structure |
 | `docs/pseudo_test_infra.md` | Pseudo test infra | active | generic | Dual-mode pseudo/real integration test design |
 | `docs/refactor_formal_round_strategy.md` | Formal round strategy | active | generic | Strategy-based formal-round dispatch |
@@ -79,10 +73,8 @@ that live outside `docs/design/`.
 | `docs/running_chain_test.md` | Chain runbook | active | mixed | Operational runbook for lilab + SDSC chain runs |
 | `docs/run_scoped_plugins.md` | Run-scoped plugins | active | generic | Per-run plugin isolation |
 | `docs/search_quality_validation.md` | Search quality validation | active | generic | Checkpoint S sign-off for lit-review search |
-| `docs/small_sample_trial_dependencies_improve.md` | Small sample trial deps | active | mixed | Trial-mode dependency improvements |
 | `docs/small_sample_trial.md` | Small sample trial | active | mixed | Multi-fidelity trial/formal mode |
 | `docs/soft_edge_for_all_nodes.md` | Soft edge for all nodes | active | generic | Graph edge soft-error handling |
-| `docs/training_scale.md` | Training scale | active | task-specific | TIDMAD training data scale analysis |
 | `docs/trial_epoch_default.md` | Trial epoch default | active | mixed | Rationale for `--max_epochs 1` trial default |
 | `docs/V8_Gap_Report.md` | V8 Gap Report | archived | mixed | Historical v8 gap analysis |
 | `docs/validation_suite_runs.md` | Validation suite runs | active | generic | Validator suite documentation |
