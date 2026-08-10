@@ -1093,15 +1093,40 @@ consumer census per §0.B/0.R.2).
 - Dependencies: G2 (so "agent path" has its final meaning).
 
 #### 3. Implementation plan
-- [ ] Contract test: every feasible/CPU-mode wrapper return shape
+- [x] Contract test: every feasible/CPU-mode wrapper return shape
       carries `inference_batch: int ≥ 1` (parametrized over the return
       sites found in 0.R.6; fails if a new return path omits it).
-- [ ] Update `inference_defaults.py` docstring + executor comments to
+      *(Done —
+      `tests/unit/agent/evaluate_vram_skill/test_g4_feasible_return_batch_contract.py`
+      EXECUTES both agent-inference-capable families (0.R.6): the
+      CPU-mode short-circuit (`device_available=False` context →
+      `inference_batch: 1`) and the feasible probe path (tiny rnn @
+      seg 1000, real resolver → positive-int probed batch; `bool`
+      excluded explicitly). The other return families
+      (schema_violation / infeasible / timeout / oom / inconclusive /
+      error) never reach inference per 0.R.6, so the contract
+      quantifies over exactly `status=="success" and feasible is True`.
+      Bounded deviation from the sketch: two executed return-family
+      cases rather than a parametrized shape list — executing the real
+      paths is stronger than asserting over hand-copied shapes.)*
+- [x] Update `inference_defaults.py` docstring + executor comments to
       the post-G4 truth (who legitimately consults the table; the A.9
-      promise replaced by the tested contract).
-- [ ] Record in this doc that the k9 "Feasible"-stdout failure is the
+      promise replaced by the tested contract). *(Done — module
+      docstring now carries the §0.B consumer census (baselines,
+      legacy scripts, proposer advisory, no-hint fallback arms) and
+      names the contract test; `inference_batch_for` docstring states
+      NO-HINT-only resolution; the executor docstring was corrected in
+      G3 (same retirement text).)*
+- [x] Record in this doc that the k9 "Feasible"-stdout failure is the
       isolated-preflight print relocation (observation only — a test
       fix belongs to its own maintenance change, not PR G).
+      *(Recorded: the pre-existing k9 integration failure is explained
+      by 0.R.6's audit — the "Feasible" verdict print moved into the
+      isolated preflight SUBPROCESS when PR A landed, so a
+      parent-process `capsys` assertion can never see it again. NOT
+      fixed in PR G. Note: the G2 pseudo test in this PR asserts on
+      the same choreography via RETURN VALUES and records, not stdout,
+      and passes.)*
 
 #### 4. Validation plan
 - Unit: the contract test over every feasible/CPU-mode return shape.
@@ -1124,14 +1149,32 @@ consumer census per §0.B/0.R.2).
 | A future wrapper return path omits the hint | The contract test fails — the regression is caught at test time, before production |
 
 #### 7. Verification commands and evidence
-- [ ] Targeted executor tests — **to record**
-- [ ] Doc-sync check (node/skill `.md`s quote the merged flags/defaults)
-      — **to record**
+- [x] Targeted tests: the full existing `evaluate_vram_skill` suite +
+      the new contract file → **275 passed, rc=0** (20.9 s); C3b
+      module re-run green alongside.
+- [x] Mutations (2/2 attempted, 2/2 caught, exact-line site count==1,
+      pycache cleared, backup-restore, baseline re-run green):
+      CPU-mode return drops `"inference_batch": 1` → caught;
+      feasible probe return drops the batch → caught (first sed
+      REFUSED at count==2 — the infeasible return shares the
+      expression with a trailing comment — re-anchored to the exact
+      indented line per the mutation-hygiene rule, then count==1).
+- [x] Doc-sync check for the G-touched surfaces: `evaluate_time_skill.md`
+      (new `inference_batch` kwarg row) and the new minimal
+      `inference_skill.md` landed in G2; the tuner node `.md` gained the
+      PR G pricing bullet in G2; `inference_defaults.py` census updated
+      here. Final quote-the-merged-source verification pass repeated at
+      PR completion per the standing doc-sync rule.
+- [x] ruff + format clean; pyright CI-only on this host (G1 note).
 
 #### 8. Commit boundary
-- [ ] Diff = contract test + comment/docstring truth + docs — zero
-      runtime diff, mechanically shown at the boundary.
-- [ ] Show diff summary + evidence, then commit.
+- [x] Diff = contract test (+ new test-package `__init__.py`, matching
+      the sibling convention) + `inference_defaults.py` docstring truth
+      + this ledger — **zero runtime diff**, mechanically shown: the
+      only non-test `.py` change is `core/inference_defaults.py`, whose
+      diff is entirely inside docstrings.
+- [x] ~~Show diff summary + evidence, then commit.~~ Superseded by the
+      Implementation Working Rules (autonomous semantic commits).
 
 ---
 
@@ -1280,9 +1323,16 @@ G2       DONE — zero tuner code change needed (§G2.0: the
 G3       DONE — Option A: resolver prefers the probed hint + live
          pre-phase caller threading + comment truth; 0.R.12 pins;
          2/2 mutations caught (evidence in §G3.7)
-G4       not started (next)
+G4       DONE — executed contract pin over both agent-inference-capable
+         return families; census/docstring truth; 2/2 mutations caught;
+         zero runtime diff (evidence in §G4.7)
 PR       none opened yet
-Gate     not run
+Gate     next — the PR-level bounded real Gate (§4 criterion 5); its
+         "operator-approved separately" clause is DISCHARGED by the
+         operator's Implementation Working Rules (2026-08-10): bounded
+         Gate 1/2 runs within the ~1 h / non-destructive envelope are
+         launched autonomously, and the resume directive explicitly
+         orders this one Gate. Cold-start per the standing rule.
 jobs     no background jobs
 ```
 
