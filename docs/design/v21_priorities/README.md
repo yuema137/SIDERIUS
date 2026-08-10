@@ -54,8 +54,9 @@ native owners; the validator records BOTH parameter-count conventions
 under unambiguous names; `stopped_at_stage` is derived on read; one
 bounded pseudo-mode complete iteration is a merge requirement.
 
-**PR F's study is COMPLETE and awaiting PR review** (branch
-`feat/pr-f-inspection-cost-study`, not merged; zero production diff).
+**PR F is MERGED** (PR #191, merge commit `fd7c8816`, 2026-08-10;
+reviewed head `86355479`, CI green on that exact sha; zero production
+diff — measure-only).
 The pilot reproduced the V20 inspection timeout as an exact measurement
 — six over-budget observations across two runs — and rejected the
 "parameter count → timeout" story
@@ -142,9 +143,9 @@ Two consequences for other PRs:
 | **A** | [`pr_a_reachable_output_contract.md`](./pr_a_reachable_output_contract.md) | V21 launch blocker | **MERGED** — PR #186, `b9f88ae5` |
 | **B** | [`pr_b_resource_budget_semantics.md`](./pr_b_resource_budget_semantics.md) | V21 launch blocker | **MERGED** — PR #188, `0aae3f4b`; Q-B-1 frozen as S3 |
 | **C** | [`pr_c_generated_model_production_compat.md`](./pr_c_generated_model_production_compat.md) | V21 launch blocker | **MERGED** — PR #187, `cac86c94` |
-| **D** | `pr_d_scientific_authority_reachable.md` | **V21 launch blocker** | **RE-SCOPED 2026-08-08** (ledger §E.3e) — design doc not yet written |
-| **E** | `pr_e_scale_funnel_instrumentation.md` | Before first V21 data | not started |
-| **F** | `pr_f_inspection_cost_study.md` | Blocks only a budget change | not started |
+| **D** | [`pr_d_scientific_authority_reachable.md`](./pr_d_scientific_authority_reachable.md) | V21 launch blocker | **MERGED** — PR #189, `aace4abb` |
+| **E** | [`pr_e_proposal_scale_funnel.md`](./pr_e_proposal_scale_funnel.md) | Before first V21 data | **MERGED** — PR #190, `f1f4c30a` |
+| **F** | [`pr_f_inspection_cost_study.md`](./pr_f_inspection_cost_study.md) | Blocks only a budget change | **MERGED** — PR #191, `fd7c8816` (measure-only) |
 | **G** | `pr_g_capability_derived_inference_batch.md` | Non-blocking | not started |
 
 Recommended serialization: **A → C → B → D → E**, then F, then G.

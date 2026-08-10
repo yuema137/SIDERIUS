@@ -1,7 +1,8 @@
 # PR F — Inspection-cost scaling study (measure only)
 
-**Status: STUDY COMPLETE 2026-08-09 (operator-corrected bounded scope) —
-awaiting operator review of the PR. NOT merged. Zero production diff.**
+**Status: MERGED 2026-08-10 — PR #191, merge commit `fd7c8816`,
+reviewed final head `86355479` (CI green on that exact sha). Zero
+production diff (measure-only).**
 Q-F-1/Q-F-2/Q-F-3 all APPROVED FINAL. F1 (harness, `b680ea17`) froze the
 methodology before data; F2a (`2e2c6465`) ran the real pilot twice under
 its wall and reproduced the V20 incident in six over-budget
@@ -1234,5 +1235,7 @@ the original F2b full sweep is SUPERSEDED by the operator's
 minimum-sufficient-evidence correction, and the bounded stratified
 subset is executed with results in the F2b-subset.R block above. Zero
 production files were changed. Findings F-A1/F-A2/F-A3/**F-A4** and
-FU-F-1 are recorded for a future PR and remain untouched here. PR F is
-awaiting operator review; **it must not be merged by the assistant.**
+FU-F-1 are recorded for a future PR and remain untouched here.
+**MERGED 2026-08-10 as PR #191 (`fd7c8816`) after operator review and
+explicit merge authorization; two operator-review documentation fixes
+landed as `86355479` before merge.**
