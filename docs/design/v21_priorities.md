@@ -2708,11 +2708,42 @@ corrective change to advice or thresholds in the diff.
 
 ## PR F — Inspection-cost scaling study (measure only)
 
-> ## STATUS: STUDY COMPLETE 2026-08-09 — awaiting operator review, NOT merged
+> ## STATUS: MERGED 2026-08-10 — PR #191, merge commit `fd7c8816`
 >
-> Branch `feat/pr-f-inspection-cost-study`. Live ledger:
-> `v21_priorities/pr_f_inspection_cost_study.md`; deliverable:
-> `reports/v21_pr_f_inspection_cost/report.md`. Zero production diff.
+> Reviewed final PR head `86355479` (CI run 31347520286 green on that
+> exact sha); merged 2026-08-10T01:56:17Z; master fast-forwarded
+> `c0989e5d` → `fd7c8816`. Branch `feat/pr-f-inspection-cost-study`.
+> Historical authority: `v21_priorities/pr_f_inspection_cost_study.md`;
+> deliverable: `reports/v21_pr_f_inspection_cost/report.md`.
+> **PR F remained measure-only: zero production behavior or budget
+> changes.** The exhaustive 10–30 h sweep was deliberately rejected;
+> the final evidence is MINIMUM SUFFICIENT EVIDENCE — the F2a pilot +
+> reproducibility rerun plus the bounded timing-blind stratified F2b
+> subset. The study does NOT estimate population-wide censoring
+> prevalence.
+>
+> **Merged conclusions (details in the blocks below and the PR F doc):**
+> (1) the V20 WaveNet inspection incident is reproducible; (2)
+> inspection cost is architecture/configuration-shaped — raw parameter
+> count alone is not a sufficient timing proxy; (3) host-memory
+> pressure is a separate censoring/failure dimension (F-A4), not
+> merely wall time; (4) F-A1/F-A2 — the inert/inconsistent declared
+> budgets remain findings for future work, not fixed; (5) F-A3 — the
+> torchinfo/SIGALRM laundering observation remains a recorded
+> follow-up; (6) **absolute timeout calibration is hardware/runtime
+> LOCAL** — PR F does not establish a universal 120 s threshold, and a
+> materially different deployment should run a small bounded local
+> calibration rather than assuming these wall times transfer; (7)
+> long-term recommendation (future design only, implemented nowhere):
+> deployment-aware, potentially dynamic inspection budgets — local
+> calibration → local baseline → operation/architecture-aware policy →
+> staged/adaptive inspection where justified.
+> **Supported:** behavior on the measured environment; concrete
+> censoring/non-censoring examples; parameter count alone
+> insufficient. **Not supported:** a universal optimal timeout;
+> portability of absolute timings across hardware; a global
+> parameter-count→cost law; population-wide censoring prevalence; the
+> exact future dynamic-budget design.
 >
 > **What the F2a pilot + reproducibility rerun established (real CPU;
 > the final formal F2b evidence is the bounded subset below):** the V20
