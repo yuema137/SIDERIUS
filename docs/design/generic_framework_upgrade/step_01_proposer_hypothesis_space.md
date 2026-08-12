@@ -36,6 +36,25 @@ durable transcript was mined for further findings (none beyond F1 —
 the other F-numbers found there were quotations of the STEP-00 design,
 verified as such, not Step-01 findings).
 
+**Adversarial review COMPLETE and reconciled (2026-08-12, §19A).** A
+fresh read-only reviewer attacked the draft against the roadmap, the
+merged Step-00 design and the source; 12 findings were CONFIRMED (each
+re-verified in source by the main auditor) and are corrected in place —
+decisively: the F1/F3 extraction row was split per-site because the
+shape prose is NOT uniformly renderable (§4.1, OD-S1-7); a
+frozenset-iteration renderer would have made the goldens flaky across
+processes (§6.2 rule 5, measured); the landed PB-3 fixture leaves
+`num_classes=0`, so a prerequisite fixture-completion commit S1-A0 is
+now first (§8.1a); an empty ForwardContract would have silently
+stripped the I/O contract on a reachable path (§6.2 rule 6); PB-0 was
+misidentified and the legacy reasoning SYSTEM prompt has no oracle
+(§8.1, §13 R3); 13.4-B was split into two same-axis rungs (§9.2); and
+the JOIN's departure from the A-cell's exact-equality text is now an
+explicit operator grant (**OD-S1-8**) instead of a design-side
+reinterpretation. The document is therefore **READY FOR OPERATOR
+REVIEW**; the remaining blockers are the §19 decisions, not further
+audit.
+
 **Flexible data input (operator requirement, 2026-08-12)** is designed
 in the new §6A: capability matrix, strict Step-1-compatible
 terminology, Mode A/Mode B authoring model, the presets-are-not-an-
@@ -138,12 +157,16 @@ When Step 01 is complete, the following is TRUE about SIDERIUS
    description renders into the production pipeline prompts (the
    JOIN — Step-00 §15.2's assigned A-work), and a changed description
    provably changes the rendered prompt.
-3. **TIDMAD proposals unchanged**: under the shipped TIDMAD task
-   config, extraction commits render byte-identical prompts (Step-00
-   PB-3/PB-4/PB-0 goldens stay green UNMODIFIED); the single
-   deliberate render change (the JOIN) is its own commit with an
-   explicit, provenance-stamped golden regeneration (§13) — nothing
-   changes silently.
+3. **TIDMAD proposals unchanged by the EXTRACTION**: under the
+   shipped TIDMAD task config, every extraction commit renders
+   byte-identical prompts (the Step-00 goldens stay green UNMODIFIED).
+   Exactly three regeneration events exist, each declared in advance
+   (§13 R1/R2/R3): a test-only fixture completion, the JOIN, and the
+   optional literal cleanup. The JOIN deliberately makes TIDMAD
+   proposals BETTER-INFORMED (the LLM is finally told the task) —
+   that is the step's purpose, it is contained in one commit, and it
+   requires the explicit operator grant OD-S1-8. Nothing changes
+   silently.
 4. **A different task renders a different hypothesis space with zero
    SQUID residue in the derived blocks**: the Stage-B fixtures prove
    that swapping ONLY the task-description text (13.4-A) or ONLY the
@@ -178,14 +201,14 @@ material deviation requiring an operator stop.
 |---|---|---|
 | N1 | Implementor/validator mechanics: probe recipes, probe tensor shapes, `_PROBE_NUM_CLASSES=256` (FU-A-1 transport), generated-plugin templates/`_OUTPUT_CONTRACT_COMMENTS`, implementor self-check, validator LLM prompt, implementor code/loss/repair prompts | 6-M, step 04 |
 | N2 | Planner/reflector prompts (incl. the >3-history condensed branch — OD-1's step-07a predecessor), interpretation, cache-consolidator, lit-review prompts (incl. the CFG-3a duplicate task_description collapse) | steps 04/07a/09 |
-| N3 | Dataset Profile / DatasetConfig extraction; the known-constraints block stays regime-A on the `DATASET_CONFIG` singleton (`agent/prompts.py:722`, call :1569); segmentation legality (`nodes/ml_model_proposal_agent/proposal.py` divisibility reads) | step 02 |
+| N3 | Dataset Profile / DatasetConfig extraction; the known-constraints block stays regime-A on the `DATASET_CONFIG` singleton (renderer `agent/prompts.py:722-760`; call site `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:1569` — citation corrected, finding F13); segmentation legality (`agent/schemas/proposal.py:1095-1130` divisibility gate) | step 02 |
 | N4 | Model/Loss Contract SEMANTICS: output_type alphabet, hybrid disposition, loss-family membership, custom-loss probe recipes — Step 01 RENDERS declarations, never redefines them | step 03 (§5) |
 | N5 | Task composition root / regime-B fail-closed binding; no mega TaskConfig; no new YAML file | step 12 |
 | N6 | Metric identity: `denoising_score` grammar in causal_reasoning_stage.md:107 stays as-is (MIGRATION PARITY) | step 06 |
 | N7 | Transport/schema changes: NO new `ProposalInput`/`ProposalOutput` fields, no protocol changes, no parser allow-list changes (§3.5 shows no new fact needs to survive PAST the prompt render) | n/a — see §6.4 |
 | N8 | Hardware/resource facts into task config: the [HARDWARE CONTEXT] runtime block remains the sole budget authority (roadmap §14 resolved row); no VRAM/param literals introduced or "extracted" into config | framework invariant |
 | N9 | Forbidden-pattern list extraction: source audit found the forbidden-pattern surface lives ENTIRELY in the validator (`agent/skills/forbidden_pattern_skill.py`, consumed only by `ml_code_validator_agent.py:51,534`; ZERO forbidden-pattern prose in any proposer surface) — despite the roadmap step-1 line naming "forbidden-pattern lists". Recorded as a roadmap-vs-source discrepancy; recommended disposition: 6-M (step 04) owns it with the validator surfaces. OPERATOR DECISION REQUIRED (§19 OD-S1-1) — not silently dropped, not silently absorbed | §19 OD-S1-1 |
-| N10 | Prompt WORDING improvements, persona rewrites, dead-code cleanup (e.g. the five ad-hoc test bridges), retry-policy changes, `StubLLMBridge`/pseudo-fidelity work | n/a |
+| N10 | Prompt WORDING improvements, persona rewrites, dead-code cleanup (e.g. the five ad-hoc test bridges), retry-policy changes, `StubLLMBridge`/pseudo-fidelity work. **Single declared carve-out (finding F12): commit S1-E**, IF and only if OD-S1-2 approves it — deleting the two stale budget numerals is a wording change by the letter of this non-goal, but it is the roadmap §14-resolved disposition for a surface with no later owner. It is isolated, capture-then-edit (§13 R3), and skippable; nothing else in this PR edits prompt wording | n/a |
 | N11 | The lit-review `task_description` duplicate (`configs/lit_review_config.yaml`) — guarded by CFG-3a, collapses at step 04 | step 04 |
 | N12 | Renaming/moving prompt template files for cleanliness | n/a |
 | N13 | **Inventing a structured tensor/axis schema, a preset vocabulary, or preset↔shape consistency VALIDATION** — §6A.1 proves there is nothing structured to validate today and §6A.5 freezes Outcome B; building it here would seize Dataset/Model-I/O semantic ownership | steps 02/03 (binding dependency recorded in §6A.5) |
@@ -389,8 +412,8 @@ Task-fact rows (F-numbers from the Area-B audit; class per §5 legend):
 
 | # | Fact | Where hardcoded (evidence) | Class | Step-01 action |
 |---|---|---|---|---|
-| F1/F3 | 256 classes; shapes `[B,T] int64 → [B,256,T] float32` / `[B,T] float32` | commit prompt :330,:332,:365-370; proposing_stage.md:41,:70-71,:74 ("256 amplitude bins") — literals with zero config read; the SAME fact reaches proposing_stage.md:131 correctly via `{forward_contract}` | (e) restatements of a live authority | **EXTRACT-RENDER** from ForwardContract (Stage A, byte-parity) |
-| F5 | loss legality per output_type | 7 proposer-owned prose sites: commit :330,:367-370; proposing_stage.md:41,:68-71,:85-86,:92,:168 (+2 indirect: `agent/schemas/proposal.py:974-975,:1247-1248` error text) — NONE imports the frozensets; 6 more sites in OTHER nodes (planner `agent/prompts.py:183-184,:1036-1054,:1072-1073` incl. a model-name-keyed rule of the shape V21 PR A deleted from code; reflector :1272; `check_config_format_skill/wrapper.py:22`; implementor :1574) | (e) proposer sites; other-node sites stay per roadmap | **EXTRACT-RENDER** the 7 proposer prose sites from `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES` (+"custom" from the Literal alphabet); the schema error-text sites KEEP (validation-side, §5 owns); other nodes' 6 sites DEFER to steps 04/07a |
+| F1/F3 | 256 classes; shapes `[B,T] int64 → [B,256,T] float32` / `[B,T] float32` | commit prompt :330,:332,:365-370; proposing_stage.md:41,:70-71,:74 ("256 amplitude bins") — literals with zero config read; the SAME fact reaches proposing_stage.md:131 correctly via `{forward_contract}` | (e) restatements of a live authority | **SPLIT PER SITE** — see §4.1 (adversarial finding F4: these sites are NOT uniformly renderable; the un-split row would have forced either a banned conditional rule or a self-contradictory regressor prompt) |
+| F5 | loss legality per output_type | 7 proposer-owned prose sites: commit :330,:367-370; proposing_stage.md:41,:68-71,:85-86,:92,:168 (+2 indirect: `agent/schemas/proposal.py:972-976` — a Field DESCRIPTION, not error text — and `:1247-1248`, the actual validation error text; citation corrected, finding F13) — NONE imports the frozensets; 6 more sites in OTHER nodes (planner `agent/prompts.py:183-184,:1036-1054,:1072-1073` incl. a model-name-keyed rule of the shape V21 PR A deleted from code; reflector :1272; `check_config_format_skill/wrapper.py:22`; implementor :1574) | (e) proposer sites; other-node sites stay per roadmap | **EXTRACT-RENDER** the 7 proposer prose sites from `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES` (+"custom" from the Literal alphabet); the schema error-text sites KEEP (validation-side, §5 owns); other nodes' 6 sites DEFER to steps 04/07a |
 | F4 | output_type alphabet (proposals: 2-valued Literal, `agent/schemas/proposal.py:970`; runtime 3-valued with hybrid builtin-only; validator excludes hybrid `ml_code_validator_agent.py:318`) | prose restatements inside commit prompt + proposing template | (d)+(a) | RENDER the 2-valued proposal alphabet from the schema Literal (or keep literal where it is JSON-skeleton structure); the hybrid disposition is D2 (§5/step 03) — untouched |
 | F8 | task description / SQUID prose | reaches the LEGACY path only ({TASK_BACKGROUND}); PIPELINE: `template_vars["task_description"]` supplied :1597, consumed by NO template | (e) dangling seam | **THE JOIN** (§8.3) |
 | F6 | segmentation legality | known-constraints block PARAMETERIZED on the singleton (agent/prompts.py:745-746) — regime-A, stays; schema gate `agent/schemas/proposal.py:1095-1130` reads DATASET_CONFIG | (b) rendered from an authority (the singleton) | KEEP (step 02 swaps the object behind it) |
@@ -398,11 +421,37 @@ Task-fact rows (F-numbers from the Area-B audit; class per §5 legend):
 | F7 | persona "senior ML architect specialising in deep learning for signal denoising" | S1 :276 (legacy); stage personas in templates | (a)/(e) | KEEP AS-IS (MIGRATION PARITY): outside the roadmap-narrowed 6-P fact scope (shapes/classes/task_type/loss legality); no persona authority exists to render from — inventing one violates §0.8. Recorded §18 deferred question |
 | F9 | `denoising_score` grammar | causal_reasoning_stage.md:107 | (e) metric identity | KEEP (MIGRATION PARITY; step 06 owns the metric handle) |
 | F10 | "baseline=4000" segments anchor | legacy user prompt :1168-1170 | (e) dataset volume fact, underived (200×20) | KEEP (MIGRATION PARITY; step 02 owns dataset facts) |
-| F12/F13/F20 | budget prose: "~100M params" S1:284; "10 GB VRAM" causal_reasoning_stage.md:146; "≤ 80% of the effective cap" :540-541 | contradict the runtime [HARDWARE CONTEXT] block (the roadmap §14 RESOLVED row: derive from the runtime block, no config) | (e) | OD-S1-2 (§19): optional clearly-labeled cleanup commit deleting/re-pointing the two stale numerals (proposer templates have NO later owner — step 04's prompt scope excludes proposer surfaces), with golden regeneration; recommendation INCLUDE |
+| F12/F13/F20 | budget prose: "~100M params" S1:284; "10 GB VRAM" causal_reasoning_stage.md:**145** (citation corrected, finding F13); "≤ 80% of the effective cap" :540-541 | contradict the runtime [HARDWARE CONTEXT] block (the roadmap §14 RESOLVED row: derive from the runtime block, no config) | (e) | OD-S1-2 (§19): optional clearly-labeled cleanup commit deleting/re-pointing the two stale numerals (proposer templates have NO later owner — step 04's prompt scope excludes proposer surfaces), with golden regeneration; recommendation INCLUDE |
 | F14/F15 | forbidden patterns: skill validator-only (`forbidden_pattern_skill.py`, consumers `ml_code_validator_agent.py:51,:534`); "T ≥ 80,000" never shown to the proposer; proposer's [DISALLOWED PATTERNS] block renders from a DIFFERENT authority (`architectural_pattern_tagger.ARCHITECTURAL_PATTERNS`, :701-709) | skill-local | (a) validator-side | OD-S1-1 (§19): roadmap names "forbidden-pattern lists" in step 1, source says validator-owned → recommend DEFER to 6-M; the tagger↔skill non-sharing is RECORDED as a coupling gap for step 04 |
-| F16/F18 | model roster examples + "5.57 SOTA" scores (comparison_stage.md:50-76,:139; causal :121-122); frequency-band file prose (comparison :54-55 — contradicting :308-309/:343's own no-fixed-index rule) | template literals | (e) | KEEP (MIGRATION PARITY): catalogue = V11 (§5+§6 owned, steps 03/04); band semantics = V7 (§4, step 02). Both recorded; the internal contradiction registered as defect-not-blessed |
+| F16/F18 | model roster examples + "5.57 SOTA" scores (comparison_stage.md:50-76,:139; causal :121-122); frequency-band file prose (comparison :54-55 — contradicting the no-fixed-index rules at `ml_model_proposal_agent.py:308-309` (reasoning prompt) and `:343` (commit prompt) — a CROSS-SURFACE contradiction, not an internal one; citation corrected, finding F13) | template literals | (e) | KEEP (MIGRATION PARITY): catalogue = V11 (§5+§6 owned, steps 03/04); band semantics = V7 (§4, step 02). Both recorded; the internal contradiction registered as defect-not-blessed |
 | F2/F11/F17 | int8/+128 encoding, 20-files/10M, CH1/CH2 | ABSENT from proposer prompts (encoding implied by "ADC class indices"/config's "0-255") | (d) | no action (correctly not exposed); recorded so nobody "extracts" a fact that is not there |
 | — | quirks: registry blocks double-substituted (proposing :30/:177, :32/:235); `proposing_stage` loaded WITHOUT `mindset` (:1887-1891, asymmetric with the 3 reasoning-stage sites); `ProposalInput.constraints` never populated in production (absent from the protocol; only scripts inject it); shipped YAML `output_head_note` contains the un-substituted token `[output_shape]` rendered verbatim | verified | (e) | ALL KEPT byte-identical (parity); registered in §17.3 known-quirk list, never blessed |
+
+### 4.1 F1/F3 per-site renderability (adversarial finding F4 — decisive)
+
+The shipped `ForwardContract` declares ONE output form
+(`output_shape: "[B, 256, T] float32"`, `num_classes: 256`,
+`task_type: "classification"`); there is NO declared regressor form
+anywhere in-tree. The prompt sites state the fact in ≥4 incompatible
+surface forms. Splitting them:
+
+| Tier | Sites | Why | Step-01 action |
+|---|---|---|---|
+| **(i) Verbatim-renderable** — the literal equals a ForwardContract field byte-for-byte | commit :332's `[B, T] int64 (per-timestep ADC class indices)` and `[B, 256, T] float32 (per-timestep logits over 256 denoising classes)`; commit :365's `The input is fixed: [B, T] int64`; proposing_stage.md:131 (ALREADY rendered) | pure field insertion; satisfies §6.2 rule 1 without any transformation | **EXTRACT-RENDER** (S1-A/S1-B) |
+| **(ii) Needs a DECLARED formatting rule** — same fact, different surface form (dtype dropped, backticks, "float" vs "float32") | commit :330 (`[B, 256, T] per-timestep class logits`); proposing_stage.md:41, :70-71 (`` `[B, 256, T]` float ``) | rendering these from `output_shape` requires a dtype-stripping/formatting transformation — a rule, not an insertion | **DEFERRED out of Step 01** unless OD-S1-7 approves the single explicit formatting rule below; default = KEEP LITERAL with a template-layer note pointing at §5's future contract |
+| **(iii) No authority — KEEP LITERAL** | the REGRESSOR branch text everywhere (commit :330/:369, proposing_stage.md:41/:71); "256 amplitude bins" (:74) and "256 denoising bins" (commit :332's third citation) — invented nouns with no declared counterpart | no declared regressor form exists; inventing one is §0.8 speculative abstraction and §5-owned semantics | **KEEP** (MIGRATION PARITY), recorded as a step-03 convergence candidate (DQ-3) |
+
+Consequence for §1: the step's final effect stands (the
+hypothesis-space facts DERIVE where an authority exists), but the
+honest scope is **tier (i) + loss legality + the JOIN**, not "all 256
+literals disappear". The remaining literals are named, classified and
+routed — never silently left as unexamined hardcodes.
+
+Optional single formatting rule (OD-S1-7, recommended REJECT for this
+step): "a `<shape-without-dtype>` token derives from `output_shape` by
+dropping the trailing dtype word". It is one rule, testable, and would
+move tier (ii) into scope; it is nonetheless a semantic decision about
+the contract's surface forms, which §5 owns.
 
 ## 5. Authority and ownership map
 
@@ -496,6 +545,42 @@ UNCHANGED: dispatch, stage order, retry/boldness/correction loops,
    frozensets are imported module-level). A new typed transport would
    only be justified if a fact could not be rendered from an existing
    authoritative input — none qualifies (§3.5).
+5. **Deterministic render ORDER is part of the contract (adversarial
+   finding F4b — verified by the main auditor: three fresh processes
+   produced `['ce','focal','focal_cw']`, `['focal','ce','focal_cw']`,
+   `['focal','focal_cw','ce']`).** A renderer must NEVER iterate a
+   frozenset directly — that would make every prompt golden flaky
+   across processes, defeating the §2 exact-equality criterion. Rules:
+   legality lists render via `sorted()` over the frozensets; the
+   built-in loss ALPHABET list (proposing_stage.md:85-86, :168 — the
+   `focal, focal_cw, ce, smooth_l1` order) renders from
+   `LossConfig.loss_type`'s `Literal.__args__` declaration order
+   (`ml_models/models_format_sandbox.py:458`), a DIFFERENT authority
+   with its own intentional order. Both orderings are pinned by a
+   unit test, and mutation M-8 (shuffle the source order) must turn
+   the goldens red.
+   Byte-parity consequence: `sorted()` gives `ce, focal, focal_cw`,
+   which MATCHES commit :330/:367 and proposing_stage.md:70 as
+   written — so those sites extract at byte parity. Any site whose
+   literal order differs from both authorities is tier-(ii)/(iii) by
+   §4.1 and stays literal.
+6. **Empty/absent contract must FAIL VISIBLY, not silently degrade
+   (adversarial finding F9 — verified).** The node's standalone CLI
+   (`ml_model_proposal_agent.py:2163-2170`) builds `ProposalInput`
+   with NO `task_description` and NO `forward_contract`, then runs the
+   LEGACY path — so after extraction, a naive "empty contract → empty
+   render" (today's `_render_task_background` regime-A behavior,
+   :409) would send a commit prompt with the I/O contract REMOVED on a
+   production-reachable path (§3.2 entry iii). That is a behavioral
+   regression, not parity. Required: the commit-prompt render is
+   FAIL-CLOSED on an empty contract (raise with a message naming the
+   missing declaration), pinned by a test AND by an extension of the
+   re-targeted contract-reassertion suite; the CLI's own construction
+   is then either fixed to load the task config or left to raise
+   loudly (decide at implementation inspect-first, record the choice).
+   The legacy REASONING prompt's existing empty-collapse behavior is
+   NOT changed (that surface has always degraded; changing it is out
+   of scope).
 
 ## 6A. Flexible data input — rank-agnostic boundary (operator requirement, 2026-08-12)
 
@@ -754,17 +839,31 @@ hold for a split; none does):
    task-background renderer if the JOIN PR slipped.
 5. *Independent validation boundary*: one acceptance-pack family
    (§12) covers everything; the packs do not partition.
-6. *No half-enabled sibling state*: an extraction-only merge leaves
-   `template_vars["task_description"]` STILL consumer-less on master —
-   the audited defect this step is assigned to fix — i.e. the split
-   ships a half-enabled state by construction.
+6. *No half-enabled sibling state*: **restated after adversarial
+   finding F8** — the original wording ("an extraction-only merge
+   leaves `template_vars["task_description"]` consumer-less") was
+   fallacious: that key is ALREADY dead on master (roadmap §0 rule 8
+   catalogues it), so leaving it dead is a pre-existing condition, not
+   a state the split creates. The honest form: an extraction-only PR
+   would land renderers whose ONLY prompt-visible effect is
+   byte-identical output, i.e. a change no reviewer can behaviorally
+   verify at merge time, with its verification deferred to a sibling
+   PR — the split moves evidence away from the change rather than
+   creating a defect. Criteria 1 and 4 carry the decision; this one
+   is supporting, not decisive.
 7. *Risk/review isolation*: the whole diff is one module + its
    templates + tests; measured inner loop is 3 s; review isolation
    gains nothing.
 
-Commit-level separation (§14) provides the attribution the two-stage
-rule wants: extraction commits are individually byte-parity-proven
-before the single JOIN commit changes any rendered byte.
+Honest counter-argument on the record (finding F8): the JOIN **is**
+an independently reviewable behavioral unit — §18.2 risk 6 says so
+plainly. The one-PR decision therefore rests on the shared blast
+surface (same templates, same goldens, same tests touched twice) and
+on evidence locality, NOT on a claim that the JOIN lacks independent
+meaning. Commit-level separation (§14) provides the attribution the
+two-stage rule wants: extraction commits are individually
+byte-parity-proven BEFORE the single JOIN commit changes any rendered
+byte, so a bisect still isolates the behavioral change to one commit.
 
 ## 8. Stage A — TIDMAD extraction parity (exact Step-00 baseline IDs)
 
@@ -772,13 +871,47 @@ Criterion (roadmap §2 row 1 + 6-P matrix row A): rendered proposer
 prompts EXACT string equality for the TIDMAD profile, all surfaces;
 plus the boundary-capture invariant (labels/components) unchanged.
 
+**Declared exception to that criterion (adversarial finding F14 —
+requires operator authorization, OD-S1-8).** The JOIN commit (§8.3)
+deliberately CHANGES the rendered TIDMAD bytes of the stage system
+prompts. The roadmap's A-cell for 6-P says "rendered proposer prompts
+(all 3 stages incl. commit) EXACT-equal for TIDMAD", so the design
+does not get to redefine A quietly — it states the exception, names
+the authorities that permit it, and asks the operator to authorize it:
+
+- *Permitting*: Step-00 §15.2's last row assigns the
+  shipped-description→proposer JOIN to Step 01 **as its own A-work**
+  (the later, more specific authority); roadmap §0 rule 8 requires
+  Stage-A seams to land WITH their first consumer and names this exact
+  dead key as an instance of the repository's most-repeated defect;
+  roadmap §17 Checkpoint C forbids a consumer-less seam surviving the
+  PR; roadmap fixture 13.4-A demands "zero SQUID residue in the
+  description-derived blocks", which is unsatisfiable on the pipeline
+  path while no description-derived block exists; roadmap §13.2
+  defines genericization as "MORE placeholders/blocks per node, each
+  landed with its consuming template in the same PR".
+- *Excepted text*: roadmap §2 row 1 (exact equality) and the §15.1
+  6-P A-cell, for the JOIN commit only; and the A-cell's companion
+  phrase "TIDMAD proposals unchanged", which this design reads as
+  "unchanged by the EXTRACTION; deliberately better-informed by the
+  JOIN" — a narrowing that is now named rather than assumed
+  (finding F12).
+- *Containment*: every OTHER commit is byte-exact; the exception is
+  one commit, one declared golden set, §13-governed, with diffs
+  attached.
+
+Everything below assumes this exception is granted; if OD-S1-8 is
+refused, the JOIN moves out of Step 01 and §1's effect 2, fixture
+13.4-A/F1 and Checkpoint C all have to be re-planned (recorded so the
+consequence of refusal is visible).
+
 ### 8.1 Baseline map (every claim names a landed Step-00 ID)
 
 | Step-00 baseline (status at 71f6b31f) | What it pins | Stage-A use in Step 01 |
 |---|---|---|
-| **PB-3** (9 goldens: 3 stage system prompts × explore/exploit + 3 mode-invariant user prompts; + label-sequence pin) — landed, green | the PRODUCTION pipeline render through real `run()` under a pinned environment with a TEST-OWNED ForwardContract/description fixture | extraction commits S1-A/S1-B must keep all 9 byte-identical and the label sequence unchanged; regenerated ONCE in S1-C (JOIN) per §13 |
+| **PB-3** (9 goldens: 3 stage system prompts × explore/exploit + 3 mode-invariant user prompts; + label-sequence pin) — landed, green | the PRODUCTION pipeline render through real `run()` under a pinned environment with a TEST-OWNED ForwardContract/description fixture | regenerated in S1-A0 (fixture completion, §8.1a) and again in S1-C (JOIN, system prompts only); extraction commits S1-A/S1-B must keep all 9 byte-identical against the S1-A0 set, label sequence unchanged; the three `pb3_*_user.txt` goldens never change |
 | **PB-4** (2 goldens: commit system constant + commit user render) — landed, green | the legacy commit surface | S1-A: golden BYTES unchanged; the system-side assert moves constant→render (§11.1) |
-| **PB-0** (legacy proposer reasoning golden) — landed (REG), green | the legacy reasoning render incl. {TASK_BACKGROUND} substitution | untouched, stays green through every commit (unless OD-S1-2 approves the budget-literal cleanup, which would regenerate it with provenance) |
+| **PB-0** (the 4 pre-existing goldens registered by Step-00 §13:699; the proposer member is `goldens/reasoning_prompt_structured_evidence.txt`) — landed (REG), green | **CORRECTED (adversarial finding F6a, main-auditor verified)**: its owning test is `test_health_prompt_parity.py:27,:36`, which asserts `_build_reasoning_prompt(inp) == GOLDEN` — the legacy **USER** prompt. The legacy **SYSTEM** prompt (`_build_reasoning_system_prompt`, the `{TASK_BACKGROUND}` path at :423-435) has **NO full-string golden anywhere** | untouched by S1-A..D. **Gap consequence**: OD-S1-2's cleanup at `PROPOSAL_REASONING_PROMPT:284` would edit a surface with NO parity oracle — so S1-E, if approved, must FIRST capture a Step-01 baseline of the legacy reasoning SYSTEM render (a new golden, captured pre-edit, §13 rule 5) and only then make the edit |
 | **WF-3** proposer half (component-key-set golden `wf3_proposer_components_key_sets.json` + per-surface label asserts + `components is not None`) — landed, green | label=/components= crossing `generate`/`generate_text` at the proposer sites | "same kwargs reach LLMBridge": key sets and labels unchanged by extraction; JOIN renders into `system_prompt` (an EXISTING component key) so the key-set golden stays valid — any key-set change is a design failure, not a regeneration |
 | **CFG-1** (resolved shipped task-config dict), **CFG-2** (2 rendered task strings) — landed, green | the shipped authority content Step 01 renders FROM | untouched (Step 01 never edits YAML/loader); they anchor the JOIN's "shipped description" claim |
 | **CFG-3a/3b** (lit-review duplicate + semantics) — landed, green | the duplicate-description channel | untouched guard (N11) |
@@ -793,6 +926,45 @@ goldens, the 2 PB-4 goldens, PB-0's
 goldens — and the consuming suites run green here (proposer package +
 CFG task-config baselines: **526 passed, 2.3 s**). No row is claimed
 from the Step-00 design text alone.
+
+### 8.1a PB-3 fixture upgrade is a PREREQUISITE, not an option (adversarial finding F6b — main-auditor verified)
+
+The landed PB-3 fixture builds its contract as `ForwardContract(
+input_shape="[B, T] int64", input_description="per-timestep ADC class
+indices", output_shape="[B, 256, T] float32",
+output_description="per-timestep logits over 256 classes")`
+(`tests/unit/agent/ml_model_proposal_agent/
+test_step00_prompt_goldens.py:153-166`) — i.e. **`num_classes`
+defaults to 0** (`agent/schemas/task_config.py:69`), `task_type` is
+empty, and the description differs from the shipped one ("256 classes"
+vs "256 **denoising** classes").
+
+Consequence: any `num_classes`-derived token renders `0` under this
+fixture, so §14.2's "all 9 PB-3 goldens unmodified" is UNACHIEVABLE as
+originally written — the goldens would go red for a FIXTURE-ROT reason
+(§17 triage class 3), not a production reason.
+
+Resolution (chosen; alternatives recorded):
+
+- **CHOSEN — commit S1-A0 (new, first in the sequence)**: upgrade the
+  PB-3 fixture contract to a complete, self-consistent TEST-OWNED
+  declaration (populated `num_classes` + `task_type` + descriptions
+  matching the tokens the templates actually carry) BEFORE any
+  extraction. Because fixture inputs change, the affected PB-3 goldens
+  are regenerated — a **second §13-governed regeneration event,
+  declared here in advance** with its own provenance message and
+  attached diffs. It is a TEST-ONLY commit with zero production diff,
+  and after it every later byte-parity claim is meaningful.
+- Rejected A: derive only from fields the current fixture populates —
+  leaves `num_classes`, the headline 6-P fact, permanently un-derived.
+- Rejected B: special-case the renderer when `num_classes == 0` — a
+  conditional semantic rule, banned by §6.2 rule 1.
+
+Scope note absorbed from the review: under OD-S1-3(a) the JOIN touches
+the **6** `pb3_*_system.txt` goldens, not 9 — the three
+`pb3_*_user.txt` goldens are USER prompts and must stay byte-identical
+through every commit; a JOIN that reds a user golden is a scope leak
+(§17 case 2).
 
 ### 8.2 Parity mechanics per extraction commit
 
@@ -847,8 +1019,13 @@ boundary bridge, pinned environment), proposer surfaces only.
   (`tests/unit/agent/test_planner_prompt_task_config.py:32`, "audio
   enhancement for speech synthesis: spectrogram → waveform") as
   `task_description`; the SHIPPED TIDMAD ForwardContract UNCHANGED.
-- Asserts: (1) `_ALT_TD` appears in each stage system prompt's
-  task-background block; (2) ZERO SQUID residue in the
+- Asserts: (1) `_ALT_TD` appears in the task-background block of
+  **every stage system prompt the JOIN targets** — three stages under
+  OD-S1-3(a), the proposing stage alone under (b). *(Adversarial
+  finding F13: the original wording presupposed outcome (a); the
+  fixture is now written against whatever OD-S1-3 decides, and §18.2
+  risk 1's golden count follows the same outcome.)*; (2) ZERO SQUID
+  residue in the
   description-DERIVED blocks — `"SQUID"`, `"dark-matter"`,
   `"magnetometry"` absent from the task-background block (NOT from
   the whole prompt: contract prose legitimately still says
@@ -860,17 +1037,30 @@ boundary bridge, pinned environment), proposer surfaces only.
 
 ### 9.2 Fixture 13.4-B — declared ForwardContract only (PROSE rendering only)
 
-- Input: the in-tree regressor-style contrast contract (the
-  `test_task_config.py:267-292` non-SQUID-shapes precedent, extended
-  to a full fixture with `num_classes=16`-class variant where the
-  classifier-form token is exercised); `task_description` = SHIPPED
-  TIDMAD string UNCHANGED.
-- Asserts: (1) derived contract tokens track the declaration —
-  declared input/output shape strings render; `256` absent from every
-  contract-DERIVED token; the num_classes-derived classifier-form
-  token shows the fixture's value; (2) loss-legality prose UNCHANGED
-  (frozensets are not the varied axis); (3) the TIDMAD description
-  renders unchanged in the task-background block.
+**Two rungs on ONE axis (adversarial finding F7 — the single-fixture
+form silently fused two incompatible contract profiles).** A regressor
+contract has `num_classes = 0` **by schema contract**
+(`agent/schemas/task_config.py:69-73`: "Set to 0 for regressor or
+hybrid tasks"), so it cannot exercise a classifier-form token; the two
+must be separate fixtures on the same axis:
+
+- **B-i (the roadmap's named 13.4-B)** — the in-tree regressor
+  precedent `tests/unit/workflows/test_task_config.py:267-289`
+  (`test_custom_non_squid_shapes_replace_defaults`: regressor shapes,
+  `num_classes=0`, `task_type="regression"`, already asserting
+  `"[B, 256, T]" not in rendered` and `"256-class" not in rendered`).
+  `task_description` = SHIPPED TIDMAD string UNCHANGED.
+- **B-ii (num_classes rung)** — a 16-class CLASSIFIER contract, same
+  description held fixed. This is the rung that exercises the
+  `num_classes`-derived token and the contrast half of the re-targeted
+  contract-reassertion pins (§11.1 row 1).
+
+- Asserts (both rungs): (1) derived contract tokens track the
+  declaration — declared input/output shape strings render; `256`
+  absent from every contract-DERIVED token; on B-ii the
+  num_classes-derived token shows `16`; (2) loss-legality prose
+  UNCHANGED (frozensets are not the varied axis); (3) the TIDMAD
+  description renders unchanged in the task-background block.
 - Proves: shapes/classes/task_type prose derives from the declaration;
   no shadow literal survives.
 - Scope honesty (roadmap matrix B cell: "PROSE-rendering only"): this
@@ -880,10 +1070,13 @@ boundary bridge, pinned environment), proposer surfaces only.
 
 ### 9.3 Ladder note
 
-The roadmap B cell for 6-P names exactly 13.4-A + 13.4-B. Loss-family
-variation is NOT a fixture axis (the frozensets are production
-authorities, not per-task profiles yet — step 03); authority-tracking
-is proven by mutation M-5 instead (§15).
+The roadmap B cell for 6-P names exactly 13.4-A + 13.4-B; B is landed
+as its two same-axis rungs B-i/B-ii (§9.2) plus the operator's F2/F5
+prose rungs (§9.4) — every fixture varies exactly one axis, and the
+count of fixtures is not the same thing as the count of axes.
+Loss-family variation is NOT a fixture axis (the frozensets are
+production authorities, not per-task profiles yet — step 03);
+authority-tracking is proven by mutations M-5/M-8 instead (§15).
 
 ### 9.4 Flexible-input contrast rungs F1-F5 (operator ladder, 2026-08-12)
 
@@ -934,6 +1127,16 @@ seam survives the PR:
    existing `debug_dump_proposing_prompt_path` hook and checked for
    the shipped description + derived contract tokens; log attached to
    the PR. No real-LLM Gate.
+   **Coverage limit (adversarial finding F11, verified)**: the dump
+   hook writes ONLY the proposing-stage system prompt
+   (`ml_model_proposal_agent.py:1897-1901`). Under OD-S1-3(a) it
+   therefore evidences 1 of the 3 JOIN surfaces. This is ACCEPTED
+   rather than fixed (adding a dump hook for stages 1-2 is production
+   scope creep); the other two surfaces are covered by item 2's
+   workflow-tier capture (which records every stage's system prompt at
+   the bridge boundary) and by the S1-C unit goldens. The chain
+   evidence is a production-entry smoke, not the primary oracle —
+   stated so no reviewer over-reads it.
 
 ## 11. Test-disposition table
 
@@ -966,7 +1169,7 @@ tests and rendered-TIDMAD equality tests prove different things
 | `test_prompt_ceiling_policy.py` — 2 of 7 (`test_vram_limit_requirement_retained` :65-68, `test_capacity_constraints_require_justification_language` :72-81 — presence pins on the CONSTANT via `_all_template_texts()`) | VRAM-mandate language never silently dropped | legacy + templates | **KEEP with capture-layer widening**: these two sentences are proposer-owned FRAMEWORK prose (not task facts — §5 map) and STAY LITERAL in the template, so the pins stay green as-is; if the implementation moves any pinned sentence into a rendered block (not planned), the pin follows to the render in the same commit. The 3 absence pins (mandate regexes, `<10 GB VRAM`) and the rendered-layer twin KEEP unchanged — they are anti-hardcode template pins (roadmap §13.3(b)) | The pinned sentences are budget-DISCIPLINE prose deferring to [HARDWARE CONTEXT], not extractable task facts | n/a (no move planned); if moved: same-commit pin move, M-4 guards reintroduction |
 | `tests/unit/agent/test_output_contract_end_to_end.py::test_json_skeletons_request_output_type` (`'"output_type"' in PROPOSAL_COMMIT_PROMPT` + in raw proposing_stage.md) | Both JSON skeletons REQUEST output_type (V21 PR A reachability) | both | **KEEP, layer-verified**: the `"output_type"` key is JSON-skeleton STRUCTURE (proposer-owned framework content), planned to stay literal in both templates; pin stays green. If the skeleton line gains placeholders around it, the token itself remains literal | Skeleton structure is not a task fact; PR A's reachability intent is untouched | n/a; the PR-A allow-list source-count pin (`:287-294`) independently guards the parse side |
 
-### 11.2 Step-00 baselines consumed as HARD GATES (green UNMODIFIED through extraction; §13 governs the single JOIN regeneration)
+### 11.2 Step-00 baselines consumed as HARD GATES (green UNMODIFIED through extraction; §13's R1/R2/R3 govern every declared regeneration)
 
 | Baseline | Test | Role in Step 01 |
 |---|---|---|
@@ -1085,11 +1288,19 @@ golden is no longer authoritative). Step-01-specific rules:
    (everything except the JOIN) leave every PB-0/PB-3/PB-4/WF-3/CFG
    golden FILE byte-identical — a red golden in those commits is
    production drift by definition (fix the code, never the golden).
-2. **Exactly ONE planned regeneration event**: the JOIN commit
-   (§14, commit S1-C) changes rendered pipeline prompts by inserting
-   the task-description block. In that commit ONLY: the affected PB-3
-   goldens (and the WF-3 component-key-set golden IFF a new component
-   key is added) are regenerated, with the commit message recording
+2. **Planned regeneration events — exactly THREE, all declared in
+   advance (corrected after adversarial findings F6a/F6b/F13; the
+   original "exactly ONE" was contradicted by §8.1a and §14.5 and is
+   restated here):**
+
+   | # | Commit | What regenerates | Why it is not silent drift |
+   |---|---|---|---|
+   | R1 | **S1-A0** (test-only, first) | the affected `pb3_*` goldens, because the PB-3 FIXTURE contract is completed (§8.1a) | fixture-input change declared before any extraction; zero production diff; provenance message + diffs attached |
+   | R2 | **S1-C** (the JOIN) | the `pb3_*_system.txt` goldens the JOIN targets (6 under OD-S1-3(a), 1 under (b)); the WF-3 component-key-set golden ONLY IF a new component key appears (it should not — §8.1 WF-3 row) | the sole intentional rendered-byte change, authorized by OD-S1-8 |
+   | R3 | **S1-E** (optional, only if OD-S1-2 approves) | a NEW Step-01 golden for the legacy reasoning SYSTEM render must first be CAPTURED (no oracle exists today — §8.1 PB-0 row), then regenerated by the literal deletion in the same commit | otherwise the cleanup edits an unpinned surface; capture-then-edit makes the change reviewable |
+
+   No other golden changes anywhere in the PR. For R2 the commit
+   message records
    (a) the intended behavior change (production pipeline now renders
    the shipped task description), (b) affected surfaces (the named
    golden files + the roadmap 6-P A-surface), (c) why the old goldens
@@ -1111,16 +1322,57 @@ golden is no longer authoritative). Step-01-specific rules:
 
 ## 14. Implementation phases (per-commit 8-section checklists)
 
-**NOT AUTHORIZED YET** — implementation starts only after (a) the
-§Status freeze preconditions are met (Step-00 merged; this design
-re-synced onto master) and (b) operator approval of this design incl.
-the §19 decisions. One PR, branch
+**NOT AUTHORIZED YET.** Precondition (a) — the §Status freeze
+preconditions — is now SATISFIED (Step 00 merged; this design synced
+onto that master; baselines re-verified green). Precondition (b),
+operator approval of this design including the §19 decisions
+(OD-S1-1..8), is OUTSTANDING and is the only remaining blocker.
+Commit sequence: **S1-A0 → S1-A → S1-B → S1-C → S1-D → [S1-E if
+OD-S1-2 approves] → S1-F**. One PR, branch
 `feat/generic-framework-step-01-proposer-hypothesis-space`, semantic
 commits below (autonomous per the §18.1 standing rules). All boxes
 `[ ]` — NOTHING is implemented. Checklists are specific enough to
 track but deliberately do not invent code-level detail ahead of the
 per-commit inspect-first step; if inspection reveals ambiguity or
 larger scope, STOP AND ASK.
+
+### 14.0 Commit S1-A0 — PB-3 fixture completion (test-only prerequisite)
+
+**Goal.** Make the PB-3 fixture contract a complete, self-consistent
+TEST-OWNED declaration so that later extraction commits' byte-parity
+claims are meaningful (§8.1a; adversarial finding F6b).
+
+**Scope.** `tests/unit/agent/ml_model_proposal_agent/
+test_step00_prompt_goldens.py` fixture contract (`:153-166`) +
+regeneration R1 of the affected `pb3_*` goldens. NON-goals: zero
+production diff; no renderer yet; no template edit; PB-4/PB-0/CFG/WF-3
+goldens untouched.
+
+**Implementation plan.**
+- [ ] Inspect the fixture and each `pb3_*` golden to determine exactly
+      which tokens the templates carry today.
+- [ ] Populate `num_classes`, `task_type` and align the descriptions
+      with those tokens (test-owned values, NOT the shipped ones — the
+      no-production-source-in-goldens rule stands).
+- [ ] Regenerate the affected goldens; attach diffs; provenance
+      message per §13 R1.
+
+**Validation plan.** Packs 1-2; confirm the ONLY changed goldens are
+the declared ones (`git status` review).
+
+**Acceptance criteria (observable).** The fixture contract has no
+defaulted semantic field; the regenerated goldens differ from their
+predecessors ONLY where the fixture's declared values appear; PB-4,
+PB-0, CFG-1/2/3a/3b and WF-3 goldens are byte-unchanged.
+
+**Failure/edge cases.** If a golden turns out NOT to change, the
+fixture upgrade was inert for that surface — record it (that is
+evidence the surface derives nothing from the contract yet), do not
+force a diff.
+
+**Verification commands and evidence.** (recorded after execution)
+
+**Commit boundary.** Test-only, no production file touched.
 
 ### 14.1 Commit S1-A — legacy commit-prompt extraction + renderers (byte-parity)
 
@@ -1175,10 +1427,13 @@ surface only; no pipeline template touched; goldens byte-identical.
 
 ### 14.2 Commit S1-B — pipeline template extraction (byte-parity)
 
-**Goal.** proposing_stage.md's hardcoded fact lines (:41, :70-71,
-:74, :85-92, :168 loss/shape tokens) derive via template_vars from
-the same renderers; TIDMAD render byte-identical (all 9 PB-3 goldens
-unmodified).
+**Goal.** proposing_stage.md's **tier-(i)** hardcoded fact lines
+(§4.1) and its loss-legality prose derive via template_vars from the
+S1-A renderers; TIDMAD render byte-identical (all 9 PB-3 goldens
+unmodified, on top of the S1-A0 fixture completion). Tier-(ii)/(iii)
+lines (:41, :70-71's dtype-stripped forms, :74's "amplitude bins", the
+regressor branch) stay LITERAL unless OD-S1-7 approves the formatting
+rule.
 
 **Scope.** `agent/prompt_templates/proposal/proposing_stage.md` (+
 `_run_pipeline` template_vars additions); tests: new rendered-layer
@@ -1193,7 +1448,9 @@ double-substitution quirk (kept byte-identical).
       placeholder name exists elsewhere in the template (the :177/:235
       double-render hazard — choose collision-free names).
 - [ ] template_vars entries from the S1-A renderers.
-- [ ] Byte-parity check of all 9 PB-3 goldens.
+- [ ] Byte-parity check of all 9 PB-3 goldens (against the S1-A0
+      regenerated set — §8.1a; a red here after S1-A0 is production
+      drift, not fixture rot).
 - [ ] Rendered-layer pins: TIDMAD tokens present; template file no
       longer contains the extracted literals (template-layer absence
       pin, new).
@@ -1201,10 +1458,14 @@ double-substitution quirk (kept byte-identical).
 **Validation plan.** Pack 1 + 2; mutation M-5 (one-sided template
 edit) executed and recorded.
 
-**Acceptance criteria.** All 9 PB-3 goldens + label-sequence pin +
-WF-3 key-set golden pass UNMODIFIED; grep shows the extracted
-literals absent from the template; new absence pin red if a literal
-is reintroduced (M-4 pre-check).
+**Acceptance criteria.** All 9 PB-3 goldens (as regenerated by
+S1-A0) + label-sequence pin + WF-3 key-set golden pass UNMODIFIED by
+this commit; grep shows the tier-(i) literals absent from the
+template while the tier-(ii)/(iii) literals are still present AND
+listed in the commit message as knowingly retained; new absence pin
+red if an extracted literal is reintroduced (M-4 pre-check);
+loss-list render order matches §6.2 rule 5 (mutation M-8 red on a
+shuffled source).
 
 **Failure/edge cases.** Placeholder-name collision with prose (global
 str.replace) — checked by inspection + a collision guard assert in
@@ -1216,7 +1477,7 @@ placeholder to the LLM (silent no-op) — covered by the rendered pins.
 **Commit boundary.** proposing_stage.md + template_vars + tests;
 rendered TIDMAD bytes unchanged.
 
-### 14.3 Commit S1-C — the JOIN (single deliberate render change)
+### 14.3 Commit S1-C — the JOIN (the mandatory scope's one deliberate render change)
 
 **Goal.** The production pipeline renders the shipped task
 description (task-background block in stage system prompts),
@@ -1258,9 +1519,11 @@ budget tests must stay green).
 
 **Verification commands and evidence.** (after execution)
 
-**Commit boundary.** The ONLY commit that changes rendered TIDMAD
-bytes; everything needed to review that change (templates, goldens,
-diffs, tests) is inside it.
+**Commit boundary.** The only commit that changes rendered TIDMAD
+bytes **in the mandatory scope** (S1-E, if OD-S1-2 approves it, is a
+second and clearly-labeled one — finding F13 contradiction fixed);
+everything needed to review this change (templates, goldens, diffs,
+tests) is inside it.
 
 ### 14.4 Commit S1-D — Stage-B contrast fixtures + mutation battery closeout
 
@@ -1274,8 +1537,10 @@ any production diff.
 
 **Implementation plan.**
 - [ ] 13.4-A fixture + asserts (§9.1).
-- [ ] 13.4-B fixture + asserts (§9.2), incl. the num_classes contrast
-      variant of the re-targeted contract-reassertion pins.
+- [ ] 13.4-B rungs **B-i** (regressor, the roadmap's named fixture)
+      and **B-ii** (16-class classifier) as SEPARATE same-axis
+      fixtures (§9.2), B-ii carrying the contrast half of the
+      re-targeted contract-reassertion pins.
 - [ ] F2 rung (§9.4): rank-4 NEUTRAL-axis contract profile; assert the
       declared text renders on all Step-01 surfaces AND zero
       `[B, 256, T]`/`[B, T]`/"amplitude bins"/`256 denoising` residue.
@@ -1285,7 +1550,7 @@ any production diff.
       series" is not assumed scalar).
 - [ ] Record F3/F4 as DEFERRED prerequisites for the contract-owning
       step (§6A.5 binding dependency) — no stub, no placeholder test.
-- [ ] Execute remaining mutations (M-3, M-4, M-7) + the flexible-input
+- [ ] Execute remaining mutations (M-3, M-4, M-7, M-8, M-9) + the flexible-input
       mutations N-RANK/N-RESIDUE/N-OPAQUE (§15.1) with mutation-proof
       hygiene (cache clear, count==1, baseline re-run); record the
       dossier in this document.
@@ -1311,11 +1576,19 @@ axes (e.g. alt description that also implies different shapes) — the
 ### 14.5 Commit S1-E (OPTIONAL — exists only if OD-S1-2 approves) — stale budget-literal cleanup
 
 **Goal.** Delete/re-point the two stale budget numerals ("~100M"
-S1:284; "10 GB" causal_reasoning_stage.md:146) to the [HARDWARE
-CONTEXT] deferral pattern (roadmap §14 resolved row).
-**Scope.** Two prose lines + PB-0/PB-3 golden regeneration
-(§13-compliant) + the 2 pinned `test_prompt_ceiling_policy` sentences
-if touched. **Implementation plan.** [ ] per inspection.
+`PROPOSAL_REASONING_PROMPT:284`; "10 GB" causal_reasoning_stage.md:145)
+to the [HARDWARE CONTEXT] deferral pattern (roadmap §14 resolved row).
+Also the single declared carve-out from non-goal N10.
+**Scope.** Two prose lines + regeneration R3 (§13) + the 2 pinned
+`test_prompt_ceiling_policy` sentences if touched.
+**Implementation plan.**
+- [ ] **CAPTURE FIRST**: the legacy reasoning SYSTEM render has NO
+      golden today (§8.1 PB-0 row, finding F6a) — capture a Step-01
+      baseline of it BEFORE editing :284, otherwise the edit lands on
+      an unpinned surface.
+- [ ] Edit the two lines; regenerate the just-captured golden + any
+      affected `pb3_*` golden in the same commit with provenance.
+- [ ] per further inspection.
 **Validation.** Packs 1-2. **Acceptance.** No numeral budget literal
 in proposer surfaces (extending the existing `<10 GB VRAM` absence
 pin); goldens regenerated with provenance. **Failure cases.** none
@@ -1350,6 +1623,8 @@ hygiene rules apply). Battery (directive-mandated cases instantiated):
 | M-4 | reintroduce a hardcoded task fact: paste a literal `256`-token line into the template beside the placeholder | 13.4-B contrast fixture (literal survives the contrast profile) + template-layer absence pin (S1-B) |
 | M-5 | one-sided template/profile update: edit a derived-block line in the template without regenerating goldens | PB-3/PB-4 parity golden |
 | M-6 | transport loss at the workflow boundary: comment out `propose_input.task_description = …` (model_exploration.py:2290) | workflow-tier JOIN assert (§10.2) |
+| M-8 | render-order nondeterminism: shuffle/reverse the source used by the loss-legality renderer (and run the goldens twice in separate processes) | the legality goldens go red on the shuffled source and are byte-identical across two fresh processes on the unshuffled one (§6.2 rule 5) |
+| M-9 | empty-contract fail-closed: construct the legacy input with no `forward_contract` (the node-CLI shape) and render the commit prompt | the fail-closed guard raises; a silent empty render is a RED test (§6.2 rule 6) |
 | M-7 | alternate-task SQUID-residue check: run 13.4-A and grep the description-derived block for SQUID tokens | 13.4-A itself (this is its steady-state assertion, executed as a mutation-class check once with a deliberately SQUID-contaminated renderer to prove the assert can fire) |
 
 Negative controls: (NC-1) changing a `label=` string reds WF-3 label
@@ -1370,9 +1645,9 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 
 | Checkpoint | Instantiation | Status |
 |---|---|---|
-| 0 BASELINE AVAILABLE | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed and green — TRUE on the Step-00 branch head; blocked on merge for master (§Status) | PENDING MERGE |
-| A EXTRACTION PARITY | §8: every extraction commit leaves all named goldens byte-identical; JOIN is the sole §13-governed regeneration; boundary kwargs (labels/components) unchanged | design |
-| B GENERIC CONTRAST | §9: exactly the two roadmap-declared rungs 13.4-A + 13.4-B, one axis each | design |
+| 0 BASELINE AVAILABLE | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed on MASTER (PR #198) and green in this worktree (526 passed, 2.3 s); PB-0's true surface corrected per §8.1 | **MET** |
+| A EXTRACTION PARITY (with the declared OD-S1-8 exception) | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | design |
+| B GENERIC CONTRAST | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's F2/F5 prose rungs — one axis per fixture; F3/F4 DEFERRED with a named owner | design |
 | C LIVE INTEGRATION | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4); the :1597 seam is WIRED — no consumer-less seam survives | design |
 | D REGRESSION | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | design |
 | E ROADMAP SYNC | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | design |
@@ -1477,7 +1752,42 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 | OD-S1-3 | **JOIN placement**: which stage system prompts render the task-background block | (a) all three stages (comparison/causal currently task-blind — they choose the architecture family); (b) proposing stage only (minimal byte change) | **(a) all three** — the step's final effect is about the HYPOTHESIS SPACE, which is formed in stages 1-2; (b) would satisfy the letter of the JOIN while leaving the deciding stages task-blind |
 | OD-S1-4 | **Checkpoint-C chain evidence form** (roadmap C cell says "a real chain iteration"; §17 exempts prompt extractions from real Gates) | (a) bounded `--is_pseudo_llm` production-entry iteration with prompt dump, log attached (no API cost); (b) one real-LLM bounded iteration; (c) unit+pseudo-workflow evidence only | **(a)** — exercises the production entry + real renders at zero API cost; (b) adds LLM nondeterminism and cost without adding parity evidence |
 | OD-S1-6 | **Flexible-input scope (new, operator requirement 2026-08-12)**: §6A.1 proves the contract is prose-only end-to-end and §6A.5 freezes Outcome B (preset/tensor validation belongs to step 02/03) | (a) accept Outcome B and land the F2/F5 PROSE contrast rungs in commit S1-D (they are the only tests that actually prove template rank-agnosticism, and cost one extra profile fixture each); (b) accept Outcome B but land no flexible-input rungs (13.4-A/B only); (c) reject Outcome B and require a structured tensor contract inside Step 01 | **(a)** — Outcome B is source-forced (nothing structured exists to validate; building it seizes step-02/03 ownership), and the two prose rungs are cheap, atomic and are the difference between *claiming* rank-agnosticism and *proving* it. (c) would make Step 01 the Dataset/Model-contract owner, contradicting the frozen 6-P/6-M split |
+| OD-S1-7 | **Tier-(ii) shape formatting rule (adversarial finding F4)**: the commit prompt and proposing template state the output shape in dtype-stripped/backticked forms that `output_shape` cannot produce by verbatim insertion | (a) REJECT for Step 01 — those sites stay literal, recorded as step-03 convergence candidates; (b) APPROVE one explicit, unit-tested formatting rule ("drop the trailing dtype word") and extract them too | **(a) REJECT** — the rule is a decision about the contract's surface forms, which §5 owns; §4.1 already names and routes every retained literal, so nothing goes unexamined |
+| OD-S1-8 | **A-cell exception for the JOIN (adversarial finding F14)**: the roadmap A-cell says all three proposer stages render EXACT-equal for TIDMAD, and the JOIN deliberately changes those bytes | (a) AUTHORIZE the declared, contained exception (§8 header: one commit, declared golden set, §13-governed, diffs attached), on the authority of Step-00 §15.2's JOIN assignment + roadmap §0 rule 8 / §13.2 / §17-C; (b) REFUSE — move the JOIN out of Step 01 (then §1 effect 2, fixture 13.4-A/F1 and Checkpoint C must be re-planned) | **(a) AUTHORIZE** — Step-00 §15.2 is the later, more specific authority and explicitly calls the JOIN "step 01's own A-work"; without it 13.4-A is unsatisfiable and the named dead seam survives the step meant to fix it. It must nonetheless be an explicit operator grant, not a design-side reinterpretation |
 | OD-S1-5 | **Design freeze** after Step-00 merge + re-sync: confirm the §8.1 baseline map against master and authorize implementation | — | freeze only after the §Status preconditions are all TRUE |
+
+## 19A. Adversarial design review record (2026-08-12)
+
+A fresh read-only reviewer attacked the draft (`fd9bfea6`) against the
+frozen roadmap, the merged Step-00 design and the actual source, with
+source re-opened per criticism; **every load-bearing finding was
+independently re-verified by the main auditor before reconciliation**
+(frozenset order measured across three fresh interpreter processes;
+PB-3 fixture read at `test_step00_prompt_goldens.py:153-166`; PB-0's
+owner read at `test_health_prompt_parity.py:27,:36`; the node CLI's
+input construction read at `ml_model_proposal_agent.py:2163-2170`).
+
+| # | Finding | Verdict | Reconciliation |
+|---|---|---|---|
+| F1 | §3.4's per-template placeholder inventory was wrong and contradicted §4 | CONFIRMED | §3.4 rewritten from grep (committed earlier as `ac5581b4`) |
+| F4 | §4 said EXTRACT-RENDER for commit `:330/:332/:365-370` while §6.2 said the two-output catalogue stays literal — the same bytes; and ≥4 incompatible surface forms make verbatim insertion impossible; no declared regressor form exists | CONFIRMED (most serious) | new **§4.1** per-site tier split (i/ii/iii); §1 scope honesty paragraph; **OD-S1-7** raised |
+| F4b | §6.2 authorised "membership listing" from frozensets with no ordering rule — iteration order varies per process, which would make every legality golden flaky | CONFIRMED (verified: 3 processes, 3 orders) | **§6.2 rule 5** (sorted() for legality, `Literal.__args__` for the alphabet, both pinned) + mutation **M-8**; byte-parity consequence recorded |
+| F6a | PB-0 misidentified: its proposer member pins the legacy **USER** prompt; the legacy SYSTEM prompt has NO golden, so S1-E would edit an unpinned surface | CONFIRMED | §8.1 PB-0 row corrected; §13 **R3** = capture-then-edit; §14.5 plan gains the capture step |
+| F6b | The landed PB-3 fixture leaves `num_classes=0` / `task_type` empty, so S1-B's "9 goldens unmodified" was unachievable | CONFIRMED | new **§8.1a** + new prerequisite commit **S1-A0** (test-only) + regeneration **R1**; S1-B goal/criteria rewritten |
+| F7 | §9.2 fused a regressor contract (`num_classes=0` by schema) with a 16-class classifier into one "fixture" — a multi-axis conflation | CONFIRMED | §9.2 split into same-axis rungs **B-i** (roadmap's named regressor fixture) and **B-ii** (16-class classifier); §9.3 ladder note reconciled |
+| F8 | §7 criterion 6 was fallacious (a pre-existing dead key is not a state the split creates) | CONFIRMED | criterion 6 restated as evidence-locality; explicit counter-argument recorded that the JOIN IS an independently reviewable unit |
+| F9 | After extraction, an empty ForwardContract would silently strip the I/O contract from the commit prompt on the production-reachable node-CLI path | CONFIRMED | **§6.2 rule 6** fail-closed requirement + mutation **M-9**; recorded as a behavioral change, not "regime-A parity" |
+| F11 | The chain-evidence dump hook covers only the proposing stage — 1 of 3 JOIN surfaces under OD-S1-3(a) | CONFIRMED | §10.3 coverage-limit paragraph: accepted, not fixed; workflow-tier capture covers the rest |
+| F12 | N10 forbids prompt-wording changes while S1-E performs one; and the A-cell's "TIDMAD proposals unchanged" was silently re-read | CONFIRMED | N10 gains a single declared carve-out; §8 header names the narrowing explicitly |
+| F13 | Four bad citations; §13 rule 2 ("exactly ONE regeneration") contradicted by §8.1a/§14.5; §14.3's "ONLY commit" claim; §9.1 presupposed OD-S1-3(a) | CONFIRMED | all four citations fixed; §13 rule 2 replaced by the **three-declared-events table (R1/R2/R3)**; §14.3 boundary scoped to "mandatory scope"; §9.1 made outcome-conditional |
+| F14 | The JOIN breaks the A-cell's EXACT-equality text and no OD asked the operator to authorize the deviation | CONFIRMED | §8 header now states the exception, cites permitting vs excepted authorities, and **OD-S1-8** raises it for explicit grant |
+| 1,2,3,5,10,11,12 (partial) | production-path audit, authorities, runtime-state discipline, seam wiring, pack sizes, live-integration machinery, no step-02/04 smuggling | CLEARED (with the nits folded in above) | pack-1 count re-measured 861/861; `--is_pseudo_llm`, the dump hook and all pack-4 targets verified present |
+
+Reviewer's own scope note: the review ran against the pre-sync draft,
+so its §Status/§8.1 dependency observations were already superseded by
+the post-merge sync (`f30ef9be`); its source-grounded findings above
+are unaffected and were reconciled in full. No finding was dismissed
+without source evidence, and no finding was manufactured.
 
 ## 20. Governance persistence (for later propagation)
 
