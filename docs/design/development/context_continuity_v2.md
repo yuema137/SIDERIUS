@@ -372,7 +372,7 @@ is unknown.
 
 - [x] **C0** kickoff: precondition verified, branch cut, this document,
       fresh PR handoff initialized.
-- [ ] **C1** tracked shared foundation + canonical template.
+- [x] **C1** tracked shared foundation + canonical template.
 - [ ] **C2** strict MANUAL PreCompact path.
 - [ ] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
 - [ ] **C4** dynamic SessionStart / resume injection.
@@ -405,3 +405,121 @@ NON-goals: any `tools/` code, any hook change, any registration change.
 no PR-01a content remains active; the guard passes on the C0 head.
 
 **Commit boundary.** Docs + runtime handoff only. Zero code.
+
+**Evidence.** `46ae5904`. Guard PASS at that head with the new handoff;
+clean tree.
+
+### C1 — tracked shared foundation + canonical template
+
+**Goal.** One tracked module both hook entry points will consume, plus
+the canonical template beside it, with the fingerprint contract
+preserved bit-for-bit so migration cannot invalidate a live handoff.
+
+**Scope.** `tools/claude_hooks/context_state.py`,
+`tools/claude_hooks/templates/before_end_memory.template.md`,
+`tests/unit/tools/claude_hooks/` (+ `__init__.py`, `conftest.py`).
+NON-goals: no hook entry point yet, no registration change, no deletion
+of the ignored implementation.
+
+**Implementation.**
+- [x] `context_state.py` — repository truth (`repo_root`, `head_sha`,
+      `branch_name`), the fingerprint, handoff section/field parsing,
+      template lookup, generated-region rendering/replacement, atomic
+      write, rescue path, and `validate()`.
+- [x] The fingerprint algorithm is ported **unchanged in behaviour** —
+      required, because the live handoff records a value computed by the
+      legacy code and migration must not invalidate it. Proven by the
+      clean-tree constant `bd3e625c…` matching across both.
+- [x] `template_path()` resolves from `Path(__file__).parent/templates/`
+      — the §1.7 fix.
+- [x] Canonical template assembled programmatically: the
+      first-principles block is copied **byte-identically** from the
+      legacy template (verified `True` in the assembly script) so the
+      live handoff validates against BOTH implementations throughout
+      migration; the legacy template's trailing V20 campaign history
+      (lines 312-454) is dropped as initiative-specific prose.
+- [x] New required fields — `PROJECT / PR`, `PRIMARY DESIGN DOC`,
+      `CONTEXT STATE` — plus `PRIdentity` / `context_state()` parsing,
+      tolerant of the documented `CLOSED / AWAITING OPERATOR ACTION`
+      closeout wording.
+- [x] Two validator additions beyond the legacy behaviour: a
+      **duplicate-field** check (see the finding below) and a
+      **design-doc existence** check (a handoff naming a missing design
+      file points the resumed session at nothing).
+
+**Validation.** `pytest tests/unit/tools/claude_hooks/ -q` →
+**23 passed, 0.45 s**. `ruff check` + `ruff format --check` clean on
+both new directories. Cross-check: the tracked `validate()` and the
+legacy guard agree on the live handoff.
+
+**FINDING — the duplicate-field hazard is real, and the template had it.**
+
+```text
+Previous assumption:
+  restating PRIMARY DESIGN DOC under `## Design-Document
+  Synchronization` is harmless redundancy.
+
+Audit / implementation evidence:
+  `read_field()` returns the FIRST regex match. The new duplicate check
+  fired on the very first run of the fixture built FROM the shipped
+  template — the template declared the field twice (lines 257 and 322),
+  and so did the live handoff.
+
+Corrected understanding:
+  a duplicated field is a silent-staleness generator: an agent editing
+  the later copy sees its correction ignored forever.
+
+Implementation consequence:
+  the field is declared ONCE, under `## PR Identity`; both the template
+  and the live handoff now say so explicitly at the old site.
+
+Validation consequence:
+  `test_duplicate_field_is_reported_not_silently_first_wins` pins it,
+  and building the fixture from the shipped template is what made the
+  defect visible rather than hypothetical.
+```
+
+**FINDING — a fixture ordering bug that made staleness tests vacuous.**
+
+```text
+Previous assumption:
+  the handoff factory could apply caller overrides while filling the
+  template, then pin HEAD/fingerprint afterwards.
+
+Audit / implementation evidence:
+  `test_stale_head_is_named` passed a stale HEAD and the validator did
+  not complain — because the post-fill freshness pin overwrote the
+  override. The test asserted on a handoff that was actually CURRENT.
+
+Corrected understanding:
+  overrides must be applied LAST, after the freshness pin.
+
+Implementation consequence:
+  the factory reorders: create design doc -> commit -> fill -> pin
+  HEAD/fingerprint -> apply overrides -> write.
+
+Validation consequence:
+  without this, every staleness test in the file would have passed for
+  the wrong reason. It surfaced only because the duplicate-field check
+  changed which problem the validator reported first.
+```
+
+**Failure/edge cases exercised.** `git init -b` requires git >= 2.28 and
+the local git is 2.25.1 — classified as a FIXTURE/environment defect,
+not an implementation defect, and fixed by not pinning the default
+branch name (it is not load-bearing for any test here). Recorded because
+CI's git version is not guaranteed to match a developer's.
+
+**Deferred (recorded, not silently dropped).** The first-principles
+block does not yet carry an explicit PR-scoped clause. Adding one
+requires editing the template and the live handoff in the same commit,
+and while the LEGACY guard is still registered it would also have to be
+mirrored into the legacy template. It therefore lands with the
+registration switch in C6, where only the tracked implementation is
+authoritative. The PR-scoped contract is already encoded in the
+template's semantic skeleton (`## PR Identity`, `CONTEXT STATE`, and the
+"belongs to exactly ONE pull request" preamble).
+
+**Commit boundary.** Tracked foundation + template + tests. No hook
+entry point, no registration change; the ignored implementation remains
+the live one.
