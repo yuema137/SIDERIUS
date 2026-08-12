@@ -386,6 +386,28 @@ def count_field(text: str, key: str) -> int:
     return len(_field_re(key).findall(text))
 
 
+def section_body(handoff: str, heading: str) -> str:
+    """The text under a ``## Heading``, up to the next heading of any level.
+
+    Used to inject the few sections a resumed session actually needs
+    (checkpoint, next actions, stop conditions) instead of the whole
+    file. Returns an empty string when the heading is absent — the caller
+    decides whether that is worth reporting.
+    """
+    marker = f"\n{heading}\n"
+    padded = "\n" + handoff
+    index = padded.find(marker)
+    if index == -1:
+        return ""
+    rest = padded[index + len(marker) :]
+    lines: list[str] = []
+    for line in rest.splitlines():
+        if line.startswith("#"):
+            break
+        lines.append(line)
+    return "\n".join(lines).strip()
+
+
 def is_placeholder(value: str | None) -> bool:
     return value is None or value.strip().lower().strip("`<>*") in PLACEHOLDERS
 

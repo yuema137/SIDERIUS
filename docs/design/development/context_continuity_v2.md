@@ -375,7 +375,7 @@ is unknown.
 - [x] **C1** tracked shared foundation + canonical template.
 - [x] **C2** strict MANUAL PreCompact path.
 - [x] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
-- [ ] **C4** dynamic SessionStart / resume injection.
+- [x] **C4** dynamic SessionStart / resume injection.
 - [ ] **C5** PR-scoped lifecycle (init / continuation / closeout).
 - [ ] **C6** local registration migration + developer documentation.
 - [ ] **C7** adversarial validation, dry-run dossier, closeout.
@@ -627,3 +627,56 @@ state.
 
 **Commit boundary.** Auto path + snapshot module + tests. Manual path
 untouched; registration unchanged.
+
+**Evidence.** `355aded5`. 55 passed, 1.76 s; ruff + format clean.
+
+### C4 — dynamic SessionStart / resume injection
+
+**Goal.** Resume the PR that is actually active, read from the handoff
+at run time, with zero project literals in the hook.
+
+**Scope.** `tools/claude_hooks/inject_session_memory.py`,
+`context_state.section_body()`,
+`tests/unit/tools/claude_hooks/test_session_start_injection.py`.
+
+**Implementation.**
+- [x] Three deterministic output shapes: **normal**, **recovery**,
+      **cold**.
+- [x] The `source` field (`startup`/`resume`/`clear`/`compact`) is read
+      from the payload and reported. The audited implementation drained
+      stdin and discarded it, so it could not tell a fresh startup from
+      a post-compact resume.
+- [x] Injected content: live repo state, the PR identity block, the
+      validation verdict, and only three sections — `## Current
+      Checkpoint`, `## Exact Next Actions`, `## Stop Conditions`. The
+      rest of the handoff stays one `Read` away; the previous
+      implementation dumped up to 24 000 characters of it into the
+      window it was trying to protect.
+- [x] CLOSED contexts get an explicit notice that the PR is history and
+      that a new PR needs a fresh contract + a handoff initialised from
+      the tracked template.
+- [x] Cold start names the template and says "do not infer an active
+      task from this message" — it must not invent work.
+
+**PRECEDENCE RULE (frozen).** Recovery mode is entered when
+`validate() != []` **AND** a rescue snapshot exists. It is therefore
+**state-derived, not timestamp-derived**: once the handoff validates
+clean, the incident the snapshot describes has been repaired and normal
+mode is correct. A leftover rescue file can never pin future sessions in
+emergency mode. Comparing file mtimes was rejected — it would make
+resume behaviour depend on filesystem accidents rather than on
+repository truth.
+
+**Validation.** **90 passed, 2.66 s**; ruff + format clean. Matrix
+coverage: **H** (dynamic identity + the three action sections),
+**I** (stale + snapshot → banner naming the snapshot path),
+**J** (clean handoff outranks an existing snapshot — the precedence
+pin), **K** (missing and malformed handoff → generic guidance, no
+crash, no historical fallback), **L** (repeated resumes report the same
+PR and design), **M** (CLOSED → "new PR needs fresh kickoff", and ACTIVE
+gets no such notice), **N** (the template names no specific PR),
+**R** (six historical literals asserted absent from injected output AND
+from every `.py`/`.md` file under `tools/claude_hooks/`).
+
+**Commit boundary.** SessionStart + its helper + tests. Registration
+still points at the legacy hooks.
