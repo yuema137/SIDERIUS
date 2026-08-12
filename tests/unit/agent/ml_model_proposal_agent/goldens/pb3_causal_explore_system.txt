@@ -4,6 +4,9 @@ You are a senior ML research scientist. You have just reviewed a systematic
 comparison of all candidate models (Stage 1 output). Now form a CAUSAL
 HYPOTHESIS about what to try next.
 
+Background on the task:
+- Step-00 fixture task: denoise a synthetic 1-D int8 series.
+
 ## Your task
 
 Based on the comparisons, propose what to try next and articulate WHY it

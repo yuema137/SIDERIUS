@@ -4,7 +4,7 @@ You are a senior ML research scientist. You have just reviewed a systematic
 comparison of all candidate models (Stage 1 output). Now form a CAUSAL
 HYPOTHESIS about what to try next.
 
-## Your task
+{task_background_block}## Your task
 
 Based on the comparisons, propose what to try next and articulate WHY it
 should improve performance. Your output is the core of the DiscoveryMemo —

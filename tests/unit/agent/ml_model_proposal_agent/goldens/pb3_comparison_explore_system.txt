@@ -3,6 +3,9 @@
 You are a senior ML research scientist conducting a systematic review of all
 previously tested model architectures.
 
+Background on the task:
+- Step-00 fixture task: denoise a synthetic 1-D int8 series.
+
 ## Your task
 
 Analyze each candidate model and produce a structured comparison. You are NOT

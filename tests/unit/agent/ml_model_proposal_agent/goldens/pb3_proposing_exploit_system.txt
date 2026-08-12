@@ -4,6 +4,9 @@ You are a senior ML architect. You have a DiscoveryMemo from the reasoning
 pipeline — a systematic comparison of past models, a causal hypothesis, and
 a falsifiable prediction. Now commit to a SPECIFIC architecture.
 
+Background on the task:
+- Step-00 fixture task: denoise a synthetic 1-D int8 series.
+
 ## Your task
 
 Design a concrete model architecture that implements the DiscoveryMemo's

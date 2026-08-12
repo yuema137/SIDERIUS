@@ -250,25 +250,35 @@ persistence.
 Depends on: PR 01a merged. Nothing later in this PR.
 
 **3. Implementation plan.**
-- [ ] Re-read the existing task-background renderer and BOTH its call
+- [x] Re-read the existing task-background renderer and BOTH its call
       sites before writing anything; choose the reuse shape and record
-      which and why (§0 implementation-time).
-- [ ] Wire a description-only block into the pipeline `template_vars`
-      per OD-S1-9(b), satisfying F2/F3/F4.
-- [ ] Correct the stale `{TASK_DESCRIPTION}` comment (§3.1).
-- [ ] Add the placeholder to all three stage base templates at a fixed,
+      which and why (§0 implementation-time). → **thin sibling**
+      `_render_pipeline_task_background`, §14.1 decision D1.
+- [x] Wire a description-only block into the pipeline `template_vars`
+      per OD-S1-9(b), satisfying F2/F3/F4. → the dead `"task_description"`
+      key is REPLACED by `"task_background_block"`; no second transport
+      survives.
+- [x] Correct the stale `{TASK_DESCRIPTION}` comment (§3.1).
+- [x] Add the placeholder to all three stage base templates at a fixed,
       reviewed position; confirm from the WF-3 component audit that the
-      position falls inside the `system_prompt` component.
-- [ ] Regenerate exactly the six R2 goldens IN THIS COMMIT with §13
-      rule-2 provenance; attach before/after diffs.
-- [ ] JOIN evidence at the boundary (properties in §4 below).
-- [ ] Attributability check (adversarial finding A6): demonstrate
+      position falls inside the `system_prompt` component. → placed
+      immediately before `## Your task` in each base template;
+      `wf3_proposer_components_key_sets.json` unchanged (§14.2).
+- [x] Regenerate exactly the six R2 goldens IN THIS COMMIT with §13
+      rule-2 provenance; attach before/after diffs. → `git diff --stat`
+      over the golden directory lists exactly those six, `3 +++` each.
+- [x] JOIN evidence at the boundary (properties in §4 below). → new
+      module `tests/unit/agent/ml_model_proposal_agent/
+      test_step01b_task_description_join.py`.
+- [x] Attributability check (adversarial finding A6): demonstrate
       mechanically that each regenerated golden equals the OLD golden
-      plus the inserted block — nothing else rode along.
-- [ ] Workflow-tier pseudo assert: inspect first whether an existing
+      plus the inserted block — nothing else rode along. → §14.3, all
+      six `attributable=True`.
+- [x] Workflow-tier pseudo assert: inspect first whether an existing
       dual-mode test already captures the proposer prompt and can take
-      one added assert, before adding a new bounded test.
-- [ ] Fill §5 prompt-delta accounting with measured bytes.
+      one added assert, before adding a new bounded test. → inspect-first
+      performed; result and bounded deviation in §14.4.
+- [x] Fill §5 prompt-delta accounting with measured bytes.
 
 **4. Validation plan — properties, not implementations.**
 
@@ -534,15 +544,17 @@ rather than withholding it.
 
 **7-8.** Recorded at execution; docs-only boundary.
 
-## 5. Prompt-delta accounting (required at implementation)
+## 5. Prompt-delta accounting (MEASURED at S1-C, HEAD `f223956d` + working tree)
 
-| Field | Requirement |
+| Field | Value |
 |---|---|
-| files/goldens changed | exact list (expected: the six R2 `pb3_*_system.txt`) |
-| added bytes / characters | measured per stage, from the golden diff |
-| token delta | ONLY if a trustworthy local tokenizer is already available; otherwise state "token count unavailable — bytes/characters recorded instead". **Do not add a tokenizer dependency for this.** |
-| why intentional | one line tying it to the dead-seam closure (roadmap §0 rule 8) |
-| unchanged surfaces | explicit confirmation that USER prompts, `label=` values and `components=` key sets are unchanged |
+| files/goldens changed | exactly the six R2 goldens: `pb3_{comparison,causal,proposing}_{explore,exploit}_system.txt`. `git diff --stat` over `tests/unit/agent/ml_model_proposal_agent/goldens/` lists those six and nothing else, `3 +++` each (18 insertions, 0 deletions) |
+| added bytes — GOLDEN fixture render | **+86 bytes on every one of the six**, from the test-owned fixture description (`"Step-00 fixture task: denoise a synthetic 1-D int8 series."`). Identical on all six because the block is description-only and stage-independent |
+| added bytes — PRODUCTION (shipped description) | **+262 chars / +262 UTF-8 bytes** on every stage system prompt. Shipped description = 234 chars over 4 lines; block = label + bullet + one blank line. Relative growth: comparison +2.87 % (explore) / +2.90 % (exploit); causal +2.56 % / +2.61 %; proposing +1.69 % / +1.68 % |
+| token delta | **token count unavailable — bytes/characters recorded instead.** No trustworthy local tokenizer is already available and the design forbids adding a dependency for this |
+| why intentional | closes the audited dead seam (roadmap §0 rule 8): the transported `task_description` had NO consuming template on the production pipeline path, so the two stages that choose the architecture family were task-blind. OD-S1-8 authorizes this one rendered-byte change |
+| unchanged surfaces | CONFIRMED: the three `pb3_*_user.txt` USER goldens byte-identical; `wf3_proposer_components_key_sets.json` byte-identical (the block lands inside the existing `system_prompt` component, introducing no key); `pb4_legacy_commit_{system,user}.txt` byte-identical; all CFG goldens untouched; stage `label=` values and stage order unchanged (the JOIN tests re-assert the exact `proposer.comparison → proposer.causal_reasoning → proposer.proposing` label sequence) |
+| ceiling / guard headroom | `test_prompt_ceiling_policy.py` green unmodified after the JOIN — no ceiling was raised (§4.1 failure table) |
 
 ## 6. Checkpoint C — production-entry pseudo evidence (PRE-MERGE)
 
@@ -837,3 +849,228 @@ and the source.
 
 **Nothing remains open.** The design is frozen; implementation is
 authorized to begin in a fresh context (see Status).
+
+---
+
+# LIVE IMPLEMENTATION LEDGER
+
+Implementation began 2026-08-12 in a fresh context on branch
+`feat/generic-framework-step-01b-task-description-join`.
+
+**Kickoff verification (repository truth, not conversation):** HEAD
+`f223956d`; `master` = `origin/master` = `a7cf42d1` = the merge-base, so
+master has NOT advanced since the freeze (branch 4 ahead, 0 behind).
+`39f89f52` (PR #199 / PR 01a) and `adbc835d` (PR #200 / Context
+Continuity v2) both verified as ancestors of HEAD. Working tree clean;
+no PR open for the branch; no implementation commit present. A second
+worktree exists at `.claude/worktrees/agent-a20add3fd68ee21ed` on branch
+`docs/generic-framework-step-01-design` — a different branch, so it
+cannot mutate this checkout.
+
+> **Previous assumption:** the Implementation Working Rules contract
+> names the frozen design HEAD as `adca5079`.
+> **Audit evidence:** HEAD is `f223956d`, one commit further on. That
+> commit is docs-only — the §7a amendment making both Gates use
+> `llm_configs/openai_tiered_pro.json`.
+> **Corrected understanding:** the contract text already REQUIRES the
+> `pro` config, so it incorporates this amendment; the two agree.
+> **Implementation consequence:** none. Implementation proceeds from
+> `f223956d`.
+> **Validation consequence:** Gate 1 / Gate 2 use
+> `openai_tiered_pro.json`, per §7a and the contract.
+
+## 14. S1-C — the JOIN (implemented)
+
+### 14.1 Implementation-time decisions
+
+**D1 — reuse shape (§0 leaves this open; three shapes were acceptable).**
+CHOSEN: a thin sibling, `_render_pipeline_task_background(task_description)`
+in `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`, which
+delegates to the existing `_render_task_background` with an EMPTY
+`ForwardContract`.
+
+Why this over the alternatives:
+
+- *Reuse `_render_task_background` directly at the call site* — would
+  satisfy F3 but not F2. Its empty guard is
+  `not task_description and fc.is_empty()`, so a WHITESPACE-ONLY
+  description renders a label over a blank bullet: exactly the "orphan
+  label over blank space" §4.1's failure table forbids. The sibling
+  strips first, and that strip is the only guard for the case.
+- *Give the existing helper an optional-contract form* — would change a
+  helper the LEGACY reasoning path renders through, i.e. touch bytes
+  outside S1-C's declared R2 set for no gain.
+- The sibling also owns the ONE trailing blank line (see D2), which the
+  legacy caller must not gain: `PROPOSAL_REASONING_PROMPT` deliberately
+  runs the block straight into its next bullet.
+
+F3 is preserved because the label string `"Background on the task:"`
+still has exactly one definition, inside `_render_task_background`. F10
+is preserved because the empty contract means no contract prose enters
+the comparison or causal stages; the proposing stage continues to render
+the contract through its own pre-existing `{forward_contract}`.
+
+**D2 — placeholder name and placement.** Key `task_background_block`,
+matching the sibling `*_block` keys already in the same `template_vars`
+dict. Placed immediately before the `## Your task` heading in each of the
+three BASE templates, written adjacently as
+`{task_background_block}## Your task`, with the rendered block carrying
+its own trailing blank line.
+
+Measured consequence: with an EMPTY description the rendered stage prompt
+is **byte-identical to the pre-JOIN template render** — verified
+mechanically against `git show HEAD:...comparison_stage.md` with the
+mode overlay applied. The alternative (placeholder on its own line)
+would have left one stray blank line whenever the description is empty.
+
+**D3 — the dead key is REMOVED, not kept alongside.** Under OD-S1-9(b)
+the invariant is semantic, so `"task_description": inp.task_description`
+is replaced by `"task_background_block": _render_pipeline_task_background(...)`.
+The TRANSPORT (`inp.task_description`, `ProposalInput.task_description`,
+the workflow injection) is untouched — only the unconsumed
+`template_vars` key is gone, so F4 holds with no duplicate transport.
+
+**D4 — the stale comment.** Rewritten in place to state the real
+mechanism, including WHY the key must be lowercase
+(`load_stage_prompt` builds `f"{{{key}}}"` from the key verbatim), so the
+next reader cannot repeat the §3.1 mistake.
+
+### 14.2 Source audit — every frozen assumption re-verified at `f223956d`
+
+| Frozen assumption | Verified |
+|---|---|
+| dead key transported into pipeline `template_vars` | YES — `ml_model_proposal_agent.py:1708` (pre-edit) |
+| NO proposal template consumes it | YES — the only placeholders in the three base templates were `{# EXPLORATION_MODE_BLOCK #}`, `{available_losses_block}`, `{available_models_block}`, `{minimum_boldness}`, `{CLASSIFIER_LOSS_LIST}`, `{REGRESSOR_LOSS_LIST}`, `{known_constraints_block}`, `{recent_gate_exhaustions_block}`, `{recent_trial_validity_block}`, `{healthgate_evidence_block}`, `{existing_model_types}`, `{forward_contract}`. Zero `{task_description}` |
+| substitution literal, lowercase-keyed, sequential | YES — `agent/prompt_templates/proposal/__init__.py:76` |
+| renderer + label + empty-collapse already exist | YES — `:400`, `:417`, consumed at `:441-442` via `{TASK_BACKGROUND}` at `:290` |
+| description-only shape already pinned | YES — `test_proposer_task_config.py:88` and `:100` |
+| shipped description is stripped | YES — `workflows/task_config.py:168`; 234 chars, 4 lines, no trailing newline |
+| PB-3 fixture uses a TEST-OWNED description | YES — `test_step00_prompt_goldens.py:167` |
+| WF-3 key set unaffected | YES — `_audit_proposer_components` reports 10 fixed CONTENT keys; system-prompt growth lands in `LLMBridge`'s derived `template_and_scaffolding` VALUE, not a new key. The golden is byte-identical after the JOIN |
+| all production `load_stage_prompt` call sites share one `template_vars` | YES — `:1742` (main loop), `:1845` (boldness retry), `:1940` (causal correction), `:1998` (proposing) all pass the same dict, so one wiring point covers every surface |
+
+### 14.3 CP1 evidence — CHECKPOINT 1 **PASS**
+
+| Required evidence | Result |
+|---|---|
+| shipped description reaches 3 stages × 2 modes | PASS — `TestJoinReachesEveryStageSystemPrompt::test_shipped_description_present_exactly_once_per_stage[explore\|exploit]`, asserted PER STAGE at the LLM boundary through the real `run()` |
+| exactly-once placement | PASS — the same test counts `== 1` for both the description and the label on every surface; `TestTemplateLayerJoinPins` additionally pins one placeholder per base template and none in any mode overlay |
+| zero surviving placeholders | PASS — `test_no_unsubstituted_placeholder_reaches_the_boundary` scans all six captures with `\{[A-Za-z_][A-Za-z0-9_]*\}`; zero hits. (The pattern is identifier-only, so it does not false-positive on `proposing_stage.md`'s literal `{loss_name, description, ...}` JSON sketch or `{# EXPLORATION_MODE_BLOCK #}`) |
+| exactly R2 goldens change | PASS — `git diff --stat` over the golden directory: the six `pb3_*_system.txt`, `3 +++` each, nothing else |
+| each R2 golden = old + intended block | PASS — see the attributability table below |
+| render deterministic across fresh processes | PASS — `test_join_render_is_byte_stable_across_fresh_processes` renders all six surfaces in two subprocesses under `PYTHONHASHSEED=0` and `=1` and compares SHA-256 |
+| M-1 RED then restored GREEN | PASS — see mutation dossier |
+| M-6 RED then restored GREEN | PASS — see mutation dossier |
+
+**Attributability proof (adversarial finding A6).** For each golden:
+`new.count(BLOCK) == 1` **and** `new.replace(BLOCK, "", 1) == old`, where
+`old` is read from `git show HEAD:<path>` and `BLOCK` is the renderer's
+output for the fixture description. The second equality proves every
+OTHER byte is unchanged — no reflow, no smuggled edit.
+
+| Golden | block count | old → new | delta | attributable |
+|---|---|---|---|---|
+| `pb3_comparison_explore_system.txt` | 1 | 9114 → 9200 | +86 | **True** |
+| `pb3_comparison_exploit_system.txt` | 1 | 8985 → 9071 | +86 | **True** |
+| `pb3_causal_explore_system.txt` | 1 | 10934 → 11020 | +86 | **True** |
+| `pb3_causal_exploit_system.txt` | 1 | 10730 → 10816 | +86 | **True** |
+| `pb3_proposing_explore_system.txt` | 1 | 19801 → 19887 | +86 | **True** |
+| `pb3_proposing_exploit_system.txt` | 1 | 19839 → 19925 | +86 | **True** |
+
+**Capture provenance (§13 rule 2).** The six goldens were regenerated by
+an explicit developer act — a throwaway script driving the SAME
+production path the PB-3 test drives (real `MLModelProposalAgent.run()`,
+`_CannedProposerBridge` boundary capture, `pin_environment`), asserting
+the exact stage-label sequence and refusing to CREATE any golden file
+that did not already exist. Tests never regenerate
+(`tests/helpers/golden.py`).
+
+**Mutation dossier.**
+
+| ID | Mutation | Site count | Expected RED | Observed | Restored |
+|---|---|---|---|---|---|
+| **M-1** | remove `{task_background_block}` from ONE stage template (`causal_reasoning_stage.md`) | 1 (asserted before mutating) | the causal stage's JOIN evidence + its two goldens | **RED, 6 failed / 17 passed**: both `test_shipped_description_present_exactly_once_per_stage` params, the causal template pin, the brace-token case (same stage), AND both `TestPB3PipelineProposer` golden tests | GREEN, 23 passed — file restored from backup, `git diff` clean, `__pycache__` cleared before both runs |
+| **M-6** | delete the workflow injection `propose_input.task_description = get_task_description(_task_cfg)` in `workflows/model_exploration.py` | 1 (asserted before mutating) | the workflow-tier JOIN assert | **RED**: `AssertionError: the workflow's task-config injection did not reach the proposer's rendered SYSTEM prompt` in `test_pr_e_funnel_gate_pseudo.py` | GREEN, 1 passed in 14.5 s — `git diff` on `workflows/model_exploration.py` empty |
+
+No mutation was committed.
+
+### 14.4 Bounded deviation — where the workflow-tier assert landed
+
+```text
+Deviation:
+  The workflow-tier JOIN assert (parent §10.2, mutation M-6's RED target)
+  was added to the LEGACY proposer system surface inside
+  tests/integration/workflows/test_pr_e_funnel_gate_pseudo.py, rather
+  than to a pipeline-path workflow capture.
+
+Reason / source evidence (inspect-first, as §4.1 requires):
+  - test_vocab_accumulation.py::test_vocab_discoveries_appear_in_
+    proposal_prompt builds its ProposalInput DIRECTLY and never calls
+    run_workflow, so it cannot see the injection hop at all.
+  - test_chain_candidate_graduation.py patches the proposer AGENT with a
+    side-effect, so no prompt is ever rendered.
+  - test_full_exploration_loop.py needs a real API key and a GPU.
+  - test_pr_e_funnel_gate_pseudo.py is the ONLY in-tree pseudo test that
+    runs the REAL proposer run() through the REAL run_workflow. It
+    passes no llm_config, so propose=None selects the LEGACY path
+    (parent §11.3 records this).
+  - Flipping it to the pipeline path is not a minimal extension: its
+    bridge is a MagicMock with ONE generate.return_value, and the
+    pipeline needs three distinct stage responses. That would mean
+    rewriting the canned choreography of an unrelated merge-requirement
+    Gate test.
+
+Impact:
+  The assert proves the hop this PR depends on — that run_workflow
+  actually DELIVERS the shipped description into a rendered proposer
+  SYSTEM prompt. It does NOT prove the three-stage pipeline JOIN; that is
+  proven by the S1-C unit captures, the six R2 goldens, and Checkpoint C
+  (production entry, pipeline path, dumped proposing prompt).
+
+Validation:
+  M-6 observed RED against it and GREEN after restore (§14.3).
+```
+
+### 14.5 Discovery — the brace-token hazard is NOT introduced by the JOIN
+
+> **Previous assumption:** §4.1 lists "a description containing
+> brace-like tokens must not corrupt other substitutions", with a STOP
+> branch if sequential replace makes this "genuinely unsafe".
+> **Audit evidence:** `load_stage_prompt` substitutes with `str.replace`
+> over DISTINCT tokens at DISTINCT sites, so no other placeholder's own
+> site can ever receive the wrong value. The only order-dependent effect
+> is confined to the injected block itself: a token inside the
+> description either survives verbatim (its key was substituted earlier
+> in the dict) or expands (its key comes later).
+> **Corrected understanding:** this is a pre-existing property of EVERY
+> rendered `*_block` value — `known_constraints_block`,
+> `available_losses_block` and the vocab blocks have carried it since
+> they were introduced. The JOIN adds no new risk class, so the STOP
+> branch is not triggered and the shipped config is NOT sanitised.
+> **Implementation consequence:** none.
+> **Validation consequence:** the negative test asserts the honest
+> property — every other placeholder site still renders its own value,
+> the block is rendered rather than sanitised away, and the substitution
+> loop neither raises nor aborts. Its unique failure class is a future
+> refactor to `str.format` / `string.Template`, which would raise on
+> brace-bearing content.
+>
+> Recorded limitation (no action in this PR): a FUTURE
+> `configs/task_config.yaml` description containing a literal
+> `{identifier}` token could ship that token to the LLM, or absorb a
+> later block. No in-tree description does. Owner: whoever introduces a
+> task profile with brace syntax.
+
+### 14.6 Validation run at S1-C
+
+| Validation | Result |
+|---|---|
+| `pytest tests/unit/agent/ml_model_proposal_agent/test_step01b_task_description_join.py tests/.../test_step00_prompt_goldens.py` | **23 passed, 4.3 s** |
+| `pytest tests/unit/agent/ml_model_proposal_agent/ tests/unit/agent/prompt_templates/ tests/unit/workflows/test_step00_task_config_baselines.py` | **761 passed, 5.3 s** (includes `test_prompt_ceiling_policy.py`, `test_contract_reassertion.py`, `test_proposer_task_config.py`, `test_audit_components.py`, WF-3) |
+| `pytest tests/unit/agent/ml_model_proposal_agent/ ... + tests/unit/agent/llm_bridge/test_step00_prompt_goldens.py` | **767 passed, 4.8 s** |
+| `pytest tests/integration/workflows/test_pr_e_funnel_gate_pseudo.py` | **1 passed, 15.5 s** (pseudo, never CI per repository policy) |
+| `ruff check` on touched files | clean |
+| `ruff format --check` on touched files | clean (the new test module was formatted before commit) |
+| full unit suite | **deliberately NOT run** — §10.A: terminal gate only. Targeted evidence shows a bounded blast radius (three templates, one node function, one `template_vars` key) |
+
+No test was skipped, and none is claimed as passed without being run.

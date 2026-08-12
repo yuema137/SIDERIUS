@@ -428,6 +428,39 @@ def _render_task_background(task_description: str, fc: ForwardContract) -> str:
     return "\n".join(parts)
 
 
+def _render_pipeline_task_background(task_description: str) -> str:
+    """Render the ``{task_background_block}`` block for the THREE pipeline
+    stage SYSTEM prompt templates (comparison, causal reasoning, proposing).
+
+    Delegates to :func:`_render_task_background` with an EMPTY
+    ``ForwardContract`` so that:
+
+    * the ``Background on the task:`` label has exactly ONE authority in
+      the codebase (PR 01b invariant F3) — it is never duplicated into
+      the three ``.md`` templates; and
+    * the forward contract is NOT expanded into the comparison and causal
+      stages (PR 01b invariant F10). The proposing stage renders the
+      contract separately through its own ``{forward_contract}``
+      placeholder, which this block deliberately does not duplicate.
+
+    Returns ``""`` for an absent or whitespace-only description, so the
+    placeholder collapses to nothing and no label is emitted over blank
+    space. A non-empty description renders the labelled block followed by
+    ONE blank line; the templates therefore place the placeholder
+    immediately against the next heading (``{task_background_block}##
+    Your task``) and an empty description leaves the pre-JOIN bytes
+    byte-identical.
+
+    See ``docs/design/generic_framework_upgrade/
+    step_01_proposer_hypothesis_space/pr_01b_task_description_join.md``
+    § 4.1 (commit S1-C).
+    """
+    description = task_description.strip()
+    if not description:
+        return ""
+    return _render_task_background(description, ForwardContract()) + "\n"
+
+
 def _build_reasoning_system_prompt(inp: ProposalInput) -> str:
     """Substitute the ``{TASK_BACKGROUND}`` placeholder in
     ``PROPOSAL_REASONING_PROMPT`` from ``inp``.
@@ -1700,12 +1733,26 @@ class MLModelProposalAgent:
                 if inp.enable_structured_health_feedback
                 else ""
             ),
-            # T3 — task config injection. {FORWARD_CONTRACT} is rendered into
-            # proposing_stage.md (line 68 area); {TASK_DESCRIPTION} is rendered
-            # into any future template that wants the bare task string. Both
-            # placeholders are no-ops in stages that don't reference them.
-            # See docs/design/enable_global_task_config.md § Commit T3.
-            "task_description": inp.task_description,
+            # T3 — task config injection, JOINed to the pipeline stages by
+            # PR 01b (S1-C). {forward_contract} is rendered into
+            # proposing_stage.md; {task_background_block} is rendered into
+            # ALL THREE stage base templates, so the stages that choose the
+            # architecture family are no longer task-blind.
+            #
+            # Both keys are LOWERCASE because load_stage_prompt builds its
+            # search token as f"{{{key}}}" from the key verbatim
+            # (agent/prompt_templates/proposal/__init__.py) — an UPPERCASE
+            # {TASK_DESCRIPTION} placeholder in a proposal stage template
+            # could never substitute and would ship a literal brace token to
+            # the LLM. (The uppercase form IS correct for the literature-
+            # review templates and for PROPOSAL_REASONING_PROMPT, which do
+            # their own explicit replace — a different surface.)
+            #
+            # See docs/design/enable_global_task_config.md § Commit T3 and
+            # docs/design/generic_framework_upgrade/
+            # step_01_proposer_hypothesis_space/pr_01b_task_description_join.md
+            # § 4.1.
+            "task_background_block": _render_pipeline_task_background(inp.task_description),
             "forward_contract": render_forward_contract(inp.forward_contract),
             # L5b — loss-registry awareness. Rendered once per run() so all
             # stage prompts see a consistent snapshot of the registry — a
