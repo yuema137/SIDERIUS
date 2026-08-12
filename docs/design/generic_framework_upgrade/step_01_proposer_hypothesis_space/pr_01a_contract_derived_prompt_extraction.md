@@ -2,9 +2,23 @@
 
 ## Status
 
-**DRAFT — READY FOR IMPLEMENTATION AUTHORIZATION pending OD-S1-5.**
-Design/audit only; nothing here authorizes implementation until the
-operator answers OD-S1-5 in the parent.
+**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-12).**
+OD-S1-5 approved: PR 01a implementation is authorized. This document
+is now the LIVE IMPLEMENTATION LEDGER — checklists, evidence,
+deviations and discoveries are recorded here as work proceeds.
+
+### Kickoff record (mechanical, 2026-08-12)
+
+| Item | Value |
+|---|---|
+| master at kickoff | `9400ec73ba43f007230592abffc9387d71a94767` |
+| parent design SHA | `9400ec73` (same commit — designs live on master) |
+| PR-01a child design SHA | `9400ec73` |
+| branch point | master `9400ec73` |
+| implementation branch | `feat/generic-framework-step-01a-contract-derived-prompt-extraction` |
+| clean-tree fingerprint at kickoff | `bd3e625c9ea6d5e075b10911e42031bcb0c64e28fa9bda9c040f81b5b2a5ebf1` |
+| prerequisite | Step 00 merged `e80da078` (ancestor of HEAD — verified), post-merge sync `47fdf6e5` |
+| working tree at kickoff | clean (0 changes) |
 
 Parent design (the audit, authority map, coupling inventory, baseline
 map, flexible-input boundary, test-disposition inventory, acceptance

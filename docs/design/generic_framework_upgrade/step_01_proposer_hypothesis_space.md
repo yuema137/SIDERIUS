@@ -2,10 +2,11 @@
 
 ## Status
 
-**PARENT DESIGN — APPROVED IN PRINCIPLE (operator, 2026-08-12);
-SPLIT INTO TWO CHILD PRs; OD-S1-5 (freeze/authorization) PENDING.**
-Design/audit only — nothing in this document authorizes
-implementation.
+**PARENT DESIGN — FROZEN / OPERATOR APPROVED (2026-08-12).**
+OD-S1-1..8 all decided (§19). **PR 01a implementation AUTHORIZED**
+by the operator on 2026-08-12; PR 01b remains blocked on PR 01a's
+merge. This parent stays the status authority; the child designs are
+the live implementation ledgers.
 
 Children (one PR = one doc):
 - [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
@@ -1594,7 +1595,7 @@ verdict table.
 | OD-S1-2 | **APPROVED** — delete the stale "~100M" / "10 GB" literals, but in **PR 01b** as an isolated capture-first semantic commit. |
 | OD-S1-3 | **APPROVED (a)** — the task background reaches ALL THREE pipeline stages. |
 | OD-S1-4 | **APPROVED (a) WITH CORRECTION** — bounded `--is_pseudo_llm` production-entry iteration, and it is **PRE-MERGE on PR 01b's final executable head**, required before READY FOR OPERATOR REVIEW. Every "post-merge chain evidence" formulation is superseded. |
-| OD-S1-5 | **PENDING** — design freeze / implementation authorization, after this reconciliation. Operator has indicated PR 01a may be authorized first. |
+| OD-S1-5 | **APPROVED (2026-08-12)** — design FROZEN; **PR 01a implementation authorized**. PR 01b stays blocked on PR 01a merge. Implementation branch: `feat/generic-framework-step-01a-contract-derived-prompt-extraction`, cut from master `9400ec73`. |
 | OD-S1-6 | **APPROVED (a)** — flexible-input Outcome B; FX-2/FX-5 prose rungs land in **PR 01a**; FX-3/FX-4 remain binding dependencies on step 02/03. |
 | OD-S1-7 | **APPROVED (a)** — reject inventing a dtype-stripping formatting rule in Step 01; tier-(ii) literals stay and route to step 03. |
 | OD-S1-8 | **AUTHORIZED, ISOLATED** — the JOIN's A-cell exception is granted, but confined to **PR 01b**; PR 01a remains exact-parity. |
