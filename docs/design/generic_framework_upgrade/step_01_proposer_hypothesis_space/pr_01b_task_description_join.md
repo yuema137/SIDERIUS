@@ -91,7 +91,7 @@ Line numbers are **evidence as of this date**, not frozen addresses.
 | The legacy reasoning SYSTEM render has NO golden | only behavioural asserts (`test_proposer_task_config.py:107-120`); no `pb0_*` in `goldens/` — hence S1-E is capture-first |
 | Gate entry points exist | `sdsc_submission_scripts/run_one_iteration.py` — `--is_pseudo_training:1328`, `--is_pseudo_llm:1320`, `--llm_config:1020`, `--debug_dump_prompts:1306`, `--data_scope:1056`, `--health_gate_files:1078` |
 | Chain gate flags are really parsed | `_chain_common.sh` parses `--no-force_formal_round`, `--data_scope`, `--health_gate_files`, `--llm_config`, `--trial_time_budget_minutes`, `--formal_time_budget_minutes`, `--max_rounds`, `--trial_portion`, `--max_proposal_attempts`, `--debug_dump_prompts` |
-| The gate LLM config exists and is per-stage | `llm_configs/openai_tiered_v1.json` — `propose.comparison` = gpt-5.4-mini, `propose.reasoning` = gpt-5.4, `propose.proposing` = gpt-5.4 → **all three JOIN surfaces are exercised by real models** |
+| The gate LLM config exists and is per-stage | **`llm_configs/openai_tiered_pro.json`** (mechanically verified 2026-08-13: exists, 865 B, valid JSON) — `propose.comparison` / `propose.reasoning` / `propose.proposing` all `openai/gpt-5.5`, plus `interpret`, `implement`, `validate`, `tune.planner`, `tune.reflector` → every role Gate 1 and Gate 2 exercise is defined, and **all three JOIN surfaces are exercised by real top-tier models** |
 
 ## 1. Final effect of THIS PR
 
@@ -572,6 +572,47 @@ superseded.
   cover the other two. Accepted, recorded, not glossed.
 - **When**: pre-merge, on the final executable head, before Gate 1.
 
+## 7a. Gate LLM configuration — `openai_tiered_pro.json` (operator amendment, 2026-08-13)
+
+**Both gates use `--llm_config llm_configs/openai_tiered_pro.json`.**
+
+Standing SIDERIUS policy is to use the `pro` config explicitly for
+formal/official production campaigns rather than relying on or
+substituting `openai_tiered_v1`. PR-01b's Gate 1 and Gate 2 are
+**official pre-merge production validation**, so they take the `pro`
+config.
+
+Mechanical verification performed before this amendment (2026-08-13):
+
+| Check | Result |
+|---|---|
+| file exists / parses | YES — `llm_configs/openai_tiered_pro.json`, 865 bytes, valid JSON |
+| proposer stages exercised by the JOIN | `propose.comparison`, `propose.reasoning`, `propose.proposing` — **all present, all `openai/gpt-5.5`** |
+| other roles Gate 1 / Gate 2 traverse | `interpret`, `implement`, `validate`, `tune.planner`, `tune.reflector` — all present |
+| new provider dependency introduced? | NO — `lit_review.*` is `deepseek/deepseek-v4-pro` in BOTH configs, and lit review is not forced on (`--ml_lit_review_enabled` defaults to unset) |
+
+Effect on the Gate-1 rationale: **strengthened, not weakened.** Under
+`v1`, `propose.comparison` ran on `gpt-5.4-mini`; under `pro` all three
+JOIN surfaces run on the same top-tier model, so the gate exercises the
+enlarged prompts uniformly.
+
+**Honest cost note (no budget change authorized or made).** The
+budget figures quoted in §7/§8 come from
+`docs/gates/gate_testing_standard.md`, which derived them with
+`openai_tiered_v1` (a mixed 5.4 / mini / nano tiering). `pro` is
+uniformly `gpt-5.5`, so ACTUAL cost may exceed those estimates. The
+figures are left unchanged because this amendment is config-only and
+changing budgets was explicitly excluded; the deviation is recorded
+here so the eventual gate evidence can be compared against a stated
+expectation rather than a silently stale one.
+
+**Relationship to the gate standard.** `docs/gates/gate_testing_standard.md`
+still names `openai_tiered_v1.json` as mandatory. That document is NOT
+edited by this PR — amending a repository-wide standard is outside PR
+01b's scope. For this PR the operator's production-validation policy
+governs; if the standard should be updated repo-wide, that is a
+separate change with its own approval.
+
 ## 7. Gate 1 — real LLM + pseudo training
 
 Instantiated from `docs/gates/gate_testing_standard.md` "Gate 1 — Real
@@ -588,7 +629,7 @@ is **required, not optional**.
 |---|---|
 | **Unique failure class** | Every layer below uses a canned/stub bridge, so none can answer: *does a REAL model, given the enlarged and re-framed system prompts, still return schema-valid output?* A JOIN that renders perfectly can still degrade the contract — e.g. the added task framing competes with the JSON instructions, or the three-stage handoff breaks because stage 1's output shifts. Only a real LLM call surfaces that. |
 | **Boundary exercised** | Production entry → real workflow → interpretation → **all three real proposer stage calls** → implementor → validator dummy-tensor check. Note the tiered config assigns real models to `propose.comparison`, `propose.reasoning` and `propose.proposing`, so **all three JOIN surfaces get a real model** — this gate is unusually well matched to this PR. |
-| **Uses** | Real LLM: YES (`llm_configs/openai_tiered_v1.json`). Real training: NO (`--is_pseudo_training`, dummy-tensor check only). GPU: none required. |
+| **Uses** | Real LLM: YES (**`llm_configs/openai_tiered_pro.json`** — official production-validation config, §7a). Real training: NO (`--is_pseudo_training`, dummy-tensor check only). GPU: none required. |
 | **Budget** | Standard's estimate ~2-5 min, ~$0.05-0.20. Bounded to ONE iteration. |
 | **Inputs/profile** | Shipped `configs/task_config.yaml` (the whole point is the shipped description); cold-start (no `--seed_paths`, per the operator rule); `--debug_dump_prompts` on, so the real-LLM run also yields a prompt dump. |
 | **PASS** | (1) all LLM calls complete without error; (2) every stage output passes Pydantic validation; (3) the proposal reaches the implementor and the generated code compiles + passes the dummy-tensor check; (4) the dumped proposing-stage prompt contains the shipped description. |
@@ -609,9 +650,9 @@ aggregate closeout), so Gate 2 applies.
 |---|---|
 | **Unique failure class** | Gate 1 validates ONE proposal's structure. Gate 2 asks whether the chain still COMPLETES end-to-end with the new prompts across iterations: the proposal must survive implementor → validator → real training → scoring, and iteration 2's proposer consumes iteration 1's real interpretation. A prompt change that shifts the proposal distribution toward exotic-but-schema-valid architectures would pass Gate 1 and fail here. That cross-node, cross-iteration consequence is unreachable from Gate 1. |
 | **Boundary exercised** | Full chain, production entry, real LLM + real training. |
-| **Uses** | Real LLM: YES (`openai_tiered_v1.json` — the standard makes this mandatory; `certify_minimal` cannot reliably pass the validator). Real training: YES (trial rounds only). GPU: yes, bounded. |
+| **Uses** | Real LLM: YES (**`openai_tiered_pro.json`** — official production-validation config, §7a; `certify_minimal` remains forbidden, it cannot reliably pass the validator). Real training: YES (trial rounds only). GPU: yes, bounded. |
 | **Plan chosen** | The **trial-only smoke** (`--no-force_formal_round`), NOT the Lite/Regular formal-round plans. Justification from the standard: "The trial-only smoke remains correct for features that don't touch the formal path", and Lite's forced formal round is "required when the feature under test must exercise real formal admission". **This PR touches no formal-admission logic** — it changes prompt text only. Choosing Lite would buy a formal round that tests nothing this PR can break. |
-| **Scope/config** | Partial scope with the DS8-mandatory pairing (`--data_scope` + matching `--health_gate_files`), **cold-start — no `--seed_paths`** (operator rule 2026-07-27; pre-DS8 seeds cannot be admitted into a partial-scope run). Mandatory guards from the standard: `--trial_portion 0.02`, `--trial_time_budget_minutes 5`, `--formal_time_budget_minutes` as a safety net, `--llm_config openai_tiered_v1.json`. `--num_iterations 2`, `--max_rounds 2`, `--max_proposal_attempts 3`. `--debug_dump_prompts` on. Exact invocation assembled at execution from the standard (§0: command shapes may drift). |
+| **Scope/config** | Partial scope with the DS8-mandatory pairing (`--data_scope` + matching `--health_gate_files`), **cold-start — no `--seed_paths`** (operator rule 2026-07-27; pre-DS8 seeds cannot be admitted into a partial-scope run). Mandatory guards from the standard: `--trial_portion 0.02`, `--trial_time_budget_minutes 5`, `--formal_time_budget_minutes` as a safety net, `--llm_config llm_configs/openai_tiered_pro.json` (§7a). `--num_iterations 2`, `--max_rounds 2`, `--max_proposal_attempts 3`. `--debug_dump_prompts` on. Exact invocation assembled at execution from the standard (§0: command shapes may drift). |
 | **Budget** | ~30-45 min, ~$1-1.5 (below the standard's $1.50-2.50 for the heavier plans, because no formal round runs). |
 | **PASS** | The standard's HealthGate-framework criteria verbatim — chain exits 0; every round has a recorded `gate_action`; every `denoising_score` is finite OR `None`/`-inf` with a corresponding `INVALIDATE_ROUND`/`ABORT_CHAIN`; no phantom `5.5762667` accepted; at least one HealthGate evaluation fires. **Plus one PR-specific criterion**: the dumped proposing prompt from a real chain iteration contains the shipped description. |
 | **NOT pass/fail** | Per the standard, explicitly: whether `denoising_score` beat baseline, whether the model learned to denoise, or any score threshold. This PR must not be judged on model quality. |
