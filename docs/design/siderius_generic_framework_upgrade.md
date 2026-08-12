@@ -28,6 +28,44 @@ explicitly (§7c, §15 step 5); adds the long-lived status table (§15.1);
 and corrects the Seam-2/Seam-3 inheritance mapping (§0.A). A second
 adversarial pass reviewed this revision (record appended below).
 
+**Revision 3 (2026-08-11, operator planner-contract review):** narrows
+this document to its GOVERNANCE role — principles, per-module FINAL
+EFFECTS, the compatibility iron law, uniform validation checkpoints
+(0/A-E), dependency order, and completion milestones; implementation
+detail stays in future per-module designs. Adds: the module
+COMPLETION-CONTRACT MATRIX (§15.1, replacing the status-only table —
+one table, still the single meter); the standardized checkpoint model
+(§17); the PROPOSER-FIRST sequencing reconciliation (§15.0 — a
+planner-level conflict with a prior operator decision, resolved from
+the source dependency graph with options presented; the prior decision
+was NOT recorded in-repo and is recorded now); and the D1
+consumer classification from source (§16). A third adversarial
+planning pass reviewed this revision (record below).
+
+**Third adversarial review record (2026-08-11, planning pass on
+Revision 3):** a fresh planning-only reviewer attacked the governance
+revision; 14 findings CONFIRMED and corrected in place — decisively:
+the O1 loss-legality claim was FALSE (the commit prompt is a plain
+string with zero substitution; extraction is NEW placeholder work
+extending the live mechanism, its sources of truth existing —
+corrected with 6-P's scope honestly narrowed and its constraints-block
+slice deferred to step 2); the 6-P/6-M split had not propagated into
+§6/§13 (now it has, incl. the contract-reassertion pin re-targeting
+moving to step 1's design); §10's live-integration consumer at step 6
+is production scoring through the interface (incumbents remain §7a's
+step-7 C); the Deliverable Contract row is STAGED 5→11 with an
+ownership tie-break rule; the dashboard's peripheral classification is
+now operative in the debt list; checkpoint-B's definition unified with
+§16.5 (design-declared required rungs); the two previously
+un-instantiated §2 surfaces (prior-plugin loadability; LLM-boundary
+kwargs) now appear in the relevant A cells; step 0 exempted from
+checkpoints A-C; §8's final effect made behavioral; §12's completion
+claim scoped to its own surfaces; checkpoint-E given a blocking
+deadline; one stale step number and one citation defect fixed.
+Cleared: dependency graph acyclic (after the two named fixes), no
+premature architecture decisions found (§8-of-brief clean), all
+spot-checked citations verified.
+
 **Second adversarial review record (2026-08-11, on Revision 2):** a
 fresh reviewer attacked the revised document against the operator's
 seven Rev-2 questions plus a consistency sweep; 8 finding groups were
@@ -542,8 +580,8 @@ the DELIVERABLE CONTRACT (Rev 2 — moved OUT of §4 ownership, §3.1);
 data_shape_class (runtime-control). DO NOT MERGE YET — record only.
 (Second pass F7: every row here obeys the §14 ≥2-designs bar.)
 #### 4.10 Dependencies / follow-up
-First production module in the roadmap (§15 step 1) — nearly everything
-reads it; Stage A is injection-with-TIDMAD-default, killing bare
+First PROFILE module in the roadmap (§15 step 2; 6-P precedes it per
+§15.0) — nearly everything reads it; Stage A is injection-with-TIDMAD-default, killing bare
 constant imports module-by-module (the ledger's REMAINING entries).
 Detailed design: `docs/design/generic_framework/pr_dataset_topology.md`.
 
@@ -660,7 +698,10 @@ patterns) as per-task config.
 Candidate-creation contract view (probe tensor recipes, expected
 shapes per output_type — derived from §5); per-task forbidden-pattern
 lists; prompt task blocks (commit-prompt facts) — rendered via §6's
-own templates but sourced from the task profile (§13). Resource-budget
+own templates but sourced from the task profile (§13); NOTE (Rev 3):
+the PROPOSER's prompt task blocks (commit-prompt facts) moved to 6-P,
+step 1 — this section's remaining prompt scope is the implementor/
+validator surfaces (6-M, step 4). Resource-budget
 prose is NOT config (adversarial finding 2): the proposer already
 defers to the live [HARDWARE CONTEXT] block
 (ml_model_proposal_agent.py:282-284, rendered from runtime hardware
@@ -671,11 +712,11 @@ is fixed by DERIVING from the same runtime block, not by a new field.
 Rendered proposer/implementor/validator prompts EXACT golden equality;
 generated plugin file byte-identical for a fixed spec under the TIDMAD
 profile; validator verdicts identical on existing fixture plugins.
-Test-disposition nuance (finding 13): contract-reassertion's pins are
-TEMPLATE-structure pins (regex over PROPOSAL_COMMIT_PROMPT); after
-extraction they become PROFILE-PARAMETERIZED pins (assert the TIDMAD
-profile renders those tokens) — a semantic change the §13 design must
-state, not a silent re-target.
+Test-disposition nuance (finding 13; re-assigned by the 3rd review,
+F4): contract-reassertion's pins are TEMPLATE-structure pins (regex
+over PROPOSAL_COMMIT_PROMPT); they break at STEP 1, so the semantic
+change to PROFILE-PARAMETERIZED pins is stated by 6-P's design
+(`pr_proposer_hypothesis_space.md`), not deferred to §13's.
 #### 6.5 Contrast fixtures (ATOMIC ladder, Rev 2)
 - 6.5-A class count only: num_classes=16 classifier — probes/templates
   derive; the 256 literals are dead paths.
@@ -689,7 +730,8 @@ Model I/O contract (with §5); sample-shape legality (with §4).
 review, finding 2: derive from the runtime [HARDWARE CONTEXT] block;
 §14 row marks it resolved.)
 #### 6.7 Follow-up
-`docs/design/generic_framework/pr_candidate_creation_contract.md`
+6-P (step 1): `docs/design/generic_framework/pr_proposer_hypothesis_space.md`.
+6-M (step 4): `docs/design/generic_framework/pr_candidate_creation_contract.md`
 (includes the FU-A-1 transport and the hybrid-alphabet decision with
 §5).
 
@@ -1035,7 +1077,8 @@ binding.md`.
 #### 13.1 Current state (the decisive facts)
 `task_config.yaml` parameterizes exactly TWO things (task_description,
 forward_contract) reaching 5 injection sites. FIFTEEN hardcoded prose
-families remain (audit B §2): the fully-hardcoded PROPOSAL_COMMIT_
+families remain (audit B §2; the PROPOSER family below moved to 6-P,
+step 1, per §15.0): the fully-hardcoded PROPOSAL_COMMIT_
 PROMPT; the entire loss-generation prompt path (zero task_config
 reads); validator prompt + probe literal; planner roster/collapse
 advice/data-volume anchors/CH1-CH2 semantics; REFLECTOR_PROMPT (no
@@ -1079,7 +1122,7 @@ would make them vacuous. Nothing is deleted.
   (test_task_config.py:267-292) with the TIDMAD description.
 #### 13.5 Follow-up
 `docs/design/generic_framework/pr_task_profile_prompts.md` (likely
-split per node group).
+split per node group; the proposer group is 6-P's doc, step 1).
 
 ---
 
@@ -1106,10 +1149,80 @@ evidence.
 
 ## 15. Incremental migration roadmap
 
-Order chosen by: dependency (profile producers before consumers), risk,
-parity provability, genericity unlocked, validation cost. Every step
-leaves master working; every step = its own detailed design + PR(s)
-following the §17 ladder.
+### 15.0 Proposer-first reconciliation (Rev 3 — planner-level conflict, resolved from source)
+
+```text
+Prior operator decision (conversational; NOT previously recorded
+in-repo — recorded here): after V21, genericization begins with the
+PROPOSER, because the proposer defines the hypothesis space; then
+proceed downstream. (The nearest in-repo statement is the V21 ledger's
+governing judgement, v21_priorities.md:893: V21 "must begin by making
+the hypothesis space the agent can explore real, symmetric and
+executable" — philosophically aligned.)
+Rev-2 order: Dataset (1) → Model/Loss (2) → Candidate Creation (3).
+Conflict: planner-level; must be resolved before freeze.
+```
+
+Source dependency audit (no architectural preference used):
+
+1. **Independent TODAY (no new upstream contract needed):** the
+   proposer's task-content surfaces already have a LIVE injection seam
+   — `{TASK_BACKGROUND}` + `render_forward_contract`
+   (ml_model_proposal_agent.py:392-433, workflows/task_config.py:171)
+   and the known-constraints block is ALREADY parameterized on the
+   dataset-config OBJECT (`_format_known_constraints_block(
+   DATASET_CONFIG)`, prompts.py:722; call site
+   ml_model_proposal_agent.py:1569). The one fully
+   hardcoded surface is the COMMIT prompt (zero placeholders).
+   Extracting its task facts onto the EXISTING seam is golden-parity
+   work with live consumers — no speculative contract. CORRECTED by the
+   third review (finding 1): the commit prompt is a plain string with
+   ZERO substitution today (passed verbatim at :1385), so extracting it
+   is NEW placeholder/render work — an EXTENSION of the live
+   single-template+placeholder mechanism (the sanctioned pattern, Rev-2
+   finding 15), landed WITH its first consumer (the rendered prompt) in
+   the same PR. Its sources of truth already EXIST: shapes/classes/
+   task_type from ForwardContract (live, consumed); the loss-legality
+   facts from models_format_sandbox's CLASSIFICATION_LOSSES/
+   REGRESSION_LOSSES frozensets — today the VALIDATION authority only,
+   gaining their first prompt-render consumer in this PR (prompt-side
+   loss legality is currently re-prosed in ≥5 more places, which stay
+   until their own steps). No dependency on §5's FUTURE config is
+   created; §5 still owns the contract's SEMANTICS.
+   Forbidden-pattern lists likewise. This slice = "6-P: proposer hypothesis-space
+   & prompt surfaces" (it IS the proposer slice of §13, pulled
+   forward — single ownership, no duplication).
+2. **Genuinely requires §5 (and §4 for legality):** validator/
+   implementor PROBE recipes and generated TEMPLATES (the 256/T=64
+   literals), custom-loss probe shapes — deriving them needs the model
+   I/O contract; inventing that contract from the proposer side would
+   be the speculative-abstraction anti-pattern (§0 rule 8).
+   Segmentation legality (proposal.py:1113-1128) stays regime-A on the
+   singleton until §4 lands its legality function — it does not block
+   6-P. This slice = "6-M: candidate-creation mechanics".
+3. **What "proposer first" can mean:**
+   - **O1 (recommended): 6-P is step 1** — first detailed design AND
+     first production module PR, on the existing seam; Dataset and
+     Model/Loss follow as steps 2-3; 6-M lands after §5. Honors the
+     decision literally; zero speculative contracts; zero consumer-less
+     seams; the hypothesis space is genericized before anything
+     downstream.
+   - O2: proposer first in DESIGN only (its detailed design is written
+     first) while implementation stays Dataset→Model→Candidate. Weaker
+     reading; only preferable if the operator wants the dataset seam
+     landed before ANY prompt extraction.
+   - O3: the whole Candidate Creation module first — REJECTED by
+     evidence: 6-M's probes/templates need §5; doing them first forces
+     inventing the model contract speculatively.
+4. **This document adopts O1 as the working order below, subject to
+   operator confirmation at roadmap freeze** (a prior operator decision
+   is being interpreted, not overwritten; O2 remains open if the
+   operator prefers it).
+
+Order rationale otherwise unchanged: dependency (profile producers
+before consumers), risk, parity provability, genericity unlocked,
+validation cost. Every step leaves master working; every step = its own
+detailed design + PR(s) following the §17 checkpoint model.
 
 ```text
 0. GOLDEN BASELINE HARNESS (test-only, zero production diff).
@@ -1121,21 +1234,22 @@ following the §17 ladder.
    serialized-record compatibility; CI-usable scorer/reference pins
    where feasible (the committed reference scalars). Cheap,
    immediately protective.
-1. §4 Dataset & Sample Topology — Stage A (inject profile, TIDMAD
+1. **6-P Proposer hypothesis-space & prompt surfaces** (Rev 3, O1 —
+   the proposer slice of §13 pulled forward): commit-prompt task facts
+   extracted onto the EXISTING ForwardContract/task-profile seam;
+   forbidden-pattern lists; golden parity. Needs only step 0.
+2. §4 Dataset & Sample Topology — Stage A (inject profile, TIDMAD
    default; input-identity indexing only — the Deliverable Contract
    stays in the §14 ledger; kill bare-constant imports per the
-   old ledger's REMAINING list) → Stage B (3-file contrast fixture).
-2. §5 Model/Loss Contract — Stage A (class-count/encoding into the
+   old ledger's REMAINING list) → Stage B (atomic ladder §4.8).
+3. §5 Model/Loss Contract — Stage A (class-count/encoding into the
    contract; dtype routing by contract, killing fcnet branches per the
-   estimator precedent) → Stage B (16-class + regressor-loss fixtures).
-3. §6 Candidate Creation, NON-PROMPT scope — probes, templates,
-   generated artifacts, FU-A-1 transport (needs only steps 1-2).
-   Its PROMPT surfaces (commit prompt, validator prompt, implementor
-   loss prompts) land WITH step 4's assembly seam — the adversarial
-   review (finding 6) showed they cannot precede it.
-4. §13 Task Profile & Prompts — per-node-group extraction with exact
-   golden parity (planner/reflector; the §6 prompt surfaces;
-   lit-review + duplicate collapse) → completes §6's Stage B.
+   estimator precedent) → Stage B (atomic ladder §5.5).
+4. **6-M Candidate-creation mechanics** — probes, templates, generated
+   artifacts, FU-A-1 transport (needs steps 2-3), PLUS §13's remaining
+   node groups (planner/reflector; validator prompt; implementor loss
+   prompts; lit-review + duplicate collapse) with exact golden parity
+   → completes §6's and §13's Stage B.
 5. §7 Tuner data/execution submodules: 7b data selection → 7d
    resource/time (derived terms) → 7c execution contracts (launch
    mechanics + transport + contract encode/decode ONLY — scorer
@@ -1157,39 +1271,50 @@ following the §17 ladder.
     which binds the composed contrast task through it.
 ```
 
-The operator's stated interest (tuner + proposer) is honored: proposer
-genericization starts at step 3 (non-prompt scope, unblocked after two
-profile steps) and completes with step 4; the tuner begins at step 5
-with its highest-value submodule first. Both REQUIRE steps 1-2, which
-are deliberately small.
+The operator's interests are honored in O1 order: the PROPOSER'S
+hypothesis-space surfaces are step 1 (immediately after the baseline
+harness, per the prior operator decision — §15.0), its mechanics
+complete at step 4; the tuner begins at step 5 with its highest-value
+submodule first.
 
-### 15.1 Roadmap status table (Rev 2 — the long-lived navigation surface)
+### 15.1 Module completion-contract matrix (Rev 3 — the single navigation + definition-of-done surface)
 
-This table is the synchronization point after EVERY future module
-merge; it never replaces per-module detailed evidence. Column key:
-A = Stage A extraction/parity; Compat = TIDMAD compatibility evidence;
-B = Stage B genericization; Fix = contrast-fixture rungs landed;
-Conv = convergence decisions unlocked; Debt = remaining known debt.
+Synchronized after EVERY module merge; never replaces per-module
+detailed evidence. Columns: **Final effect** = what is TRUE about
+SIDERIUS when the module is done (behavioral outcome, §2-of-the-review
+standard); **A** = Stage-A/TIDMAD-parity checkpoint (its global §2
+surface); **B** = Stage-B contrast DIMENSION (fixture data belongs to
+the detailed design); **C** = live-integration checkpoint (the real
+production consumer that proves the seam); **Deps** = must land before;
+**Design** = detailed-design doc under `docs/design/generic_framework/`;
+**Status**. All checkpoints follow the §17 model (0/A-E).
 
-| Module/submodule | Step | Status | Detailed design doc | A | Compat | B | Fix | Merged PR(s) | Conv | Debt |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Golden baseline harness | 0 | **PLANNING** (its design doc is the first work item once the operator freezes this Rev-2 roadmap) | `generic_framework/pr0_golden_baseline_harness.md` (to create) | n/a | — | n/a | n/a | — | — | — |
-| §4 Dataset & sample topology | 1 | NOT STARTED | `generic_framework/pr_dataset_topology.md` | — | — | — | — | — | — | — |
-| §5 Model/loss contract | 2 | NOT STARTED | `generic_framework/pr_model_output_contract.md` | — | — | — | — | — | — | — |
-| §6 Candidate creation (non-prompt) | 3 | NOT STARTED | `generic_framework/pr_candidate_creation_contract.md` | — | — | — | — | — | — | — |
-| §13 Task profile & prompts (+ §6 prompt surfaces) | 4 | NOT STARTED | `generic_framework/pr_task_profile_prompts.md` | — | — | — | — | — | — | — |
-| §7b Tuner data selection | 5 | NOT STARTED | `generic_framework/pr_tuner_data_selection.md` | — | — | — | — | — | — | — |
-| §7d Tuner resource/time planning | 5 | NOT STARTED | `generic_framework/pr_tuner_resource_time.md` | — | — | — | — | — | — | — |
-| §7c Tuner execution contracts | 5 | NOT STARTED | `generic_framework/pr_tuner_execution_contracts.md` | — | — | — | — | — | — | — |
-| §10 Metric interface | 6 | NOT STARTED | `generic_framework/pr_metric_interface.md` | — | — | — | — | — | — | per_file_best direction+LOG_BASE (M2 blocker, §16) |
-| §7a Tuner planning & policy | 7 | NOT STARTED | `generic_framework/pr_tuner_policy.md` | — | — | — | — | — | — | — |
-| §7e Tuner measurement/verification | 7 | NOT STARTED | `generic_framework/pr_tuner_measurement.md` | — | — | — | — | — | — | — |
-| §8 HealthGates | 8 | NOT STARTED | `generic_framework/pr_health_check_task_profile.md` | — | — | — | — | — | — | fresh-workspace sha-lock boundary (§8.3) |
-| §11 Interpretation | 9 | NOT STARTED | `generic_framework/pr_interpretation_task_blocks.md` | — | — | — | — | — | — | sign-band fix (M2 blocker, §16) |
-| §12 Orchestration binding | 10 | NOT STARTED | `generic_framework/pr_orchestration_task_binding.md` | — | — | — | — | — | — | campaign_artifacts.py cleanup (M2 blocker, §16) |
-| §9 Execution infrastructure | 11 | NOT STARTED | `generic_framework/pr_execution_infrastructure.md` | — | — | — | — | — | — | rlimit precedence vs env override (§9.3) |
-| Deliverable Contract (owner TBD) | with §7c or §10 | NOT STARTED — ledger row governs | decided by the first §7c/§10 design | — | — | — | — | — | ownership decision | — |
-| Task composition root (§0 rule 9) | 12 (after ≥3 module configs; before Milestone 1) | NOT STARTED (D12 governs timing) | `generic_framework/pr_task_composition_binding.md` | — | — | — | — | — | regime-A→B switch | — |
+| Module | Step | Final effect | A (parity) | B (contrast dimension) | C (live integration) | Deps | Design | Status |
+|---|---|---|---|---|---|---|---|---|
+| Golden baseline harness | 0 | Every behavior later extraction PRs claim to preserve has a trustworthy, reviewable baseline BEFORE any production refactoring | n/a (it CREATES the baselines) | n/a | baselines consumed by every later Stage-A checkpoint | — | `pr0_golden_baseline_harness.md` | PLANNING (first work item at freeze) |
+| 6-P Proposer hypothesis-space & prompts | 1 | Proposer prompts DERIVE from the declared task profile: task facts + contract PROSE (shapes/classes/task_type/loss legality) render from existing authorities instead of literals; TIDMAD proposals unchanged. Scope limits (3rd review, F2): the dataset-constraints block stays regime-A on the singleton until step 2; contract SEMANTICS stay §5-owned — 6-P only renders the declaration | rendered proposer prompts (all 3 stages incl. commit) EXACT-equal for TIDMAD + same kwargs reach LLMBridge (§2 nondeterministic surface) | 13.4-A (task-description text) + 13.4-B (declared forward contract, PROSE-rendering only) | the PRODUCTION proposer renders from the profile in a real chain iteration; contract-reassertion pins re-targeted to profile-parameterized form IN THIS PR (its design states the semantic change) | 0 (constraints-block slice completes after step 2) | `pr_proposer_hypothesis_space.md` | NOT STARTED |
+| §4 Dataset & sample topology | 2 | A task declares different topology/geometry/groups in config and every consumer resolves it; no module-level dataset constant read anywhere in the loop | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `pr_dataset_topology.md` | NOT STARTED |
+| §5 Model/loss contract | 3 | A task declares a different model I/O contract (classes, dtype, output forms) and models/losses/probes DERIVE from it; builtins byte-identical under TIDMAD | builtin forwards byte-identical; registry contents identical; guardrail targets extended; PRIOR ON-DISK GENERATED PLUGINS remain loadable or a workspace boundary is declared (§2 records surface) | atomic ladder §5.5 (class count / input contract / output type / custom-loss capability) | executor dtype routing + VRAM-probe recipes consume the contract in production | 0, §4 (encoding declaration) | `pr_model_output_contract.md` | NOT STARTED |
+| 6-M Candidate-creation mechanics (+ §13 remainder) | 4 | Generated candidates (plugin/test/description) are produced AND validated against the declared contract with zero task literals; every LLM node's task content comes from the profile | generated plugin byte-identical for a fixed spec; validator verdicts identical; ALL remaining rendered prompts EXACT-equal + same kwargs reach LLMBridge; prior-plugin loadability (§2 records surface) | atomic ladders §6.5 + §13.4 (class count / shape / output type / description text / contract) | production implementor+validator emit/validate a candidate from the profile; all nodes render from it | 1, 2, 3 | `pr_candidate_creation_contract.md` + `pr_task_profile_prompts.md` | NOT STARTED |
+| §7b Tuner data selection | 5 | A different topology flows through TrialConfig→SampleSets with tuner code untouched | SampleSet hashes + trial_config JSON deep-equal | dataset-profile axis (reuses 4.8-A through the tuner path) | the production tuner builds its train/eval sets from the resolved profile | 2 | `pr_tuner_data_selection.md` | NOT STARTED |
+| §7d Tuner resource/time planning | 5 | Forecast task-terms (class count, decomposition unit, probe shapes) derive from profiles; calibration values unchanged and separately owned | forecasts byte-identical under TIDMAD (deep-equal breakdowns, PR-G pattern); policy identities unchanged | profile-term axis: a contrast profile changes derived terms while calibration stays fixed | production VRAM/time gates price a real attempt from derived terms | 2, 3 | `pr_tuner_resource_time.md` | NOT STARTED |
+| §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | argv/file-IPC byte-identical; artifacts byte-identical; sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `pr_tuner_execution_contracts.md` | NOT STARTED |
+| §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; records/incumbents consume the handle | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `pr_metric_interface.md` | NOT STARTED |
+| §7a Tuner planning & policy | 7 | Round/attempt/incumbent policy is metric-agnostic (direction/thresholds via the handle); planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `pr_tuner_policy.md` | NOT STARTED |
+| §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `pr_tuner_measurement.md` | NOT STARTED |
+| §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `pr_health_check_task_profile.md` | NOT STARTED |
+| §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `pr_interpretation_task_blocks.md` | NOT STARTED |
+| §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `pr_orchestration_task_binding.md` | NOT STARTED |
+| §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `pr_execution_infrastructure.md` | NOT STARTED |
+| Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `pr_task_composition_binding.md` | NOT STARTED (D12 governs) |
+| Deliverable Contract (owner TBD) | 5→11 (STAGED — 3rd review F6) | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction byte-identical | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11) — the row COMPLETES at step 11 | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | decided by first §7c/§10 design | NOT STARTED (ledger) |
+
+Debt column (tracked here, not repeated per row): §8 fresh-workspace
+sha-lock boundary; §12 campaign_artifacts.py (M2 blocker); §10
+per_file_best direction+LOG_BASE (M2 blocker); §11 sign-band (M2
+blocker); §9 rlimit precedence vs env override; DASHBOARD explicitly
+classified PERIPHERAL (per the §16 D1 table) — may remain
+TIDMAD-profile-bound at M2.
 
 ## 16. Framework-level acceptance criteria (Rev 2 — two milestones)
 
@@ -1213,6 +1338,19 @@ Conv = convergence decisions unlocked; Debt = remaining known debt.
    the required rungs of its atomic fixture ladder landed; no seam is
    consumer-less.
 
+**D1 consumer classification (Rev 3, from source — not filenames):**
+
+| D1 consumer | Evidence | Class |
+|---|---|---|
+| Tuner incumbent selection + skip/bypass gates | max-based 4-track best :6018-6064; `_best_trial_winner` :1435-1449; delta gates | CORE scientific loop — M2 blocker |
+| Workflow best-score comparison | model_exploration.py:2740 bare `>` | CORE — M2 blocker |
+| Resume best-pick | core/resume.py:438 `score > best_score` | CORE resume semantics — M2 blocker |
+| campaign_artifacts | :39 denoising_score required; :57 band triplet; :88-92 TIDMAD import | CORE (inside core/) — M2 blocker |
+| per_file_best | `_row_beats` :478-480 higher-is-better; :310 nonpositive skip; :62 LOG_BASE | CORE incumbent surface — M2 blocker |
+| interpretation_helpers sign-band + metric grammar | :284-286; :309-355 | CORE interpretation path — M2 blocker |
+| Dashboard (api/models, local_json sort, base direction note) | read-only FastAPI viewer; ZERO imports from the loop (verified: no `import dashboard` anywhere in workflows/nodes/core/execute_tools) | PERIPHERAL UI — may remain TIDMAD-profile-bound at completion if classified in the matrix debt list |
+| scripts/ summaries (v18_wave_summary etc.) | offline reporting over artifacts | compatibility-only legacy surface — out of completion scope |
+
 **MILESTONE 2 — FINAL FRAMEWORK-COMPLETE.** Reached only when NO
 approved TIDMAD-specific exception remains in the CORE execution /
 planning / resume / incumbent-selection / scoring loop. In particular,
@@ -1230,25 +1368,53 @@ scores), and every other core reader MUST be migrated — **D1 remains
 deferred in SEQUENCING but is NOT exempt from this definition**. Only genuinely peripheral surfaces
 (e.g. the read-only dashboard) may remain TIDMAD-profile-bound at
 completion, and only if explicitly classified as peripheral in the §15.1
-status table's debt column.
+completion-contract matrix's debt list (the dashboard is so
+classified there).
 
-## 17. Standard migration ladder (per detailed module design)
+## 17. Uniform validation checkpoints (Rev 3 — the per-module definition of done)
+
+Every module passes SIX checkpoints — EXCEPT step 0, which CREATES
+the baselines and passes only 0 (trivially), D and E (3rd review F10);
+the §15.1 matrix instantiates A-C per module; exact commands/test
+implementations belong to detailed designs:
 
 ```text
-A. source/coupling audit (this doc's section = the seed)
-B. capture/extend golden baselines for the module's surfaces
-C. extract TIDMAD behavior into typed module-local config
-D. prove TIDMAD exact/default parity (goldens + deep-equal)
-E. introduce the generic seam WITH its first consumer
-F. add the smallest contrast fixture
-G. remove/reduce old hardcoding (guardrail targets grow)
-H. targeted + mutation tests (delete-the-hop, precedence reversal)
-I. bounded real Gate only if the module touches real execution
-J. full unit suite + CI on the exact final head
-K. merge (operator-owned) + synchronize THIS roadmap's status
+CHECKPOINT 0 — BASELINE AVAILABLE
+  the TIDMAD behavior being extracted is actually pinned (step 0
+  harness or the module's own pre-captured goldens).
+CHECKPOINT A — EXTRACTION PARITY
+  module-local config/contract exists; TIDMAD behavior unchanged under
+  the STRONGEST applicable §2 surface criterion (each module's matrix
+  row names its surface).
+CHECKPOINT B — GENERIC CONTRAST
+  the rung subset of the module's atomic ladder that its detailed
+  design DECLARED REQUIRED (declared upfront in that design; recorded
+  in the matrix B cell at completion) is landed — each rung varying
+  exactly one axis. §16 criterion 5 requires exactly these declared
+  rungs; the two definitions are one (3rd review F8).
+CHECKPOINT C — LIVE INTEGRATION
+  the matrix row's named REAL production consumer uses the new
+  contract; no consumer-less seam survives the PR.
+CHECKPOINT D — REGRESSION
+  relevant TIDMAD module tests, cross-module compatibility tests,
+  mutations (delete-the-hop, precedence reversal), and CI green on the
+  exact final head.
+CHECKPOINT E — ROADMAP SYNC
+  the §15.1 matrix row is updated in the same PR, or in an immediate
+  docs follow-up that MERGES BEFORE the next module PR opens (a
+  blocking rule — an unbounded deferral is how the 2026-07-28 ledger
+  went stale, §0.A).
 ```
-Minimum sufficient evidence throughout; no second scientific campaign
-per module.
+
+Bounded real Gates: conceptually REQUIRED (decided and bounded by the
+detailed design, minimum sufficient evidence) for modules that change
+real execution behavior — §7c, §7e, §9, and §8's blocking-verdict
+changes; NOT required for prompt/config/metric-handle extractions whose
+parity is fully deterministic. The implementation ladder inside each
+detailed design remains: audit → baseline → extract → parity → seam
+WITH first consumer → contrast rung(s) → de-hardcode (guardrail targets
+grow) → mutations → (Gate) → CI → merge → sync. No second scientific
+campaign per module.
 
 ## 18. Deferred decisions
 
