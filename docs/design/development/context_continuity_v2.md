@@ -2,11 +2,28 @@
 
 ## Status
 
-**READY FOR OPERATOR REVIEW — NOT MERGED (2026-08-12).**
-PR [#200](https://github.com/Galileo-Sandbox/SIDERIUS/pull/200).
-All eight phases C0-C7 complete; mutation and dry-run dossiers
-recorded below; full suite, static gates and exact-head CI green.
-Merge is operator-owned.
+**MERGED (2026-08-12).** PR
+[#200](https://github.com/Galileo-Sandbox/SIDERIUS/pull/200) was
+approved at the operator merge gate and merged into `master`.
+
+| Item | Value |
+|---|---|
+| Merge commit | **`adbc835d5f8d6708e9cee107b35ab7f56f8a1487`** |
+| PR | **#200**, merged 2026-08-12T21:37:03Z, merge-commit strategy (matching PRs #198/#199) |
+| Final PR head | **`1a4f97d1`** |
+| Final EXECUTABLE head | **`941fa70e`** — the two trailing commits are docs-only |
+| Exact-head CI | **SUCCESS** on `1a4f97d1` (run 31641605375), includes pyright |
+| Merge gate | **PASS** — local == origin == PR headRefOid == CI headSha, tree clean, MERGEABLE |
+
+All eight phases C0-C7 complete; mutation and dry-run dossiers recorded
+below. This document remains the implementation ledger for the PR and is
+now CLOSED: no further implementation is recorded here.
+
+Ledger convention note: the sections below were written DURING
+implementation and are preserved in that voice. They are history, not
+current instructions. The developer-facing contract — what the system
+guarantees and how to install it — lives in
+`docs/development/claude_context_continuity.md`.
 
 This document is the **PRIMARY DESIGN DOC** — the semantic
 implementation authority for this PR and its live ledger.
