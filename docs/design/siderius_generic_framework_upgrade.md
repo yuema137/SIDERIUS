@@ -1,10 +1,14 @@
 # SIDERIUS Generic Framework Upgrade — overall architecture & roadmap
 
-**Status: DRAFT — operator review pending. Audit + architecture direction
-only; this document authorizes NO implementation.** Each module named
-here receives its own detailed design document before any code changes.
-This document decides direction, module ownership, compatibility
-surfaces, and migration order — never exact schemas or field names.
+**Status: FROZEN — operator approved (2026-08-11). O1 proposer-first
+sequencing CONFIRMED. No implementation is authorized by this document
+alone.** Each module named here receives its own detailed design
+document (operator-reviewed) before any code changes. This document
+decides direction, module ownership, compatibility surfaces, and
+migration order — never exact schemas or field names.
+**Next work item: the Step-0 Golden Baseline Harness DETAILED DESIGN**
+(`docs/design/generic_framework/pr0_golden_baseline_harness.md`) — the
+design only; Step-0 implementation follows its own operator review.
 
 Created 2026-08-10 from an 11-area parallel source audit at master
 `c636c624` (post-V21: all seven V21 PRs merged; V21 ledger CLOSED).
@@ -509,7 +513,9 @@ HDF5 via `create_abra_file` with hardcoded attrs
   keyed on dataset geometry.
 
 #### 4.3 Target generic responsibility
-One owner answering: what files exist (topology/identity/families);
+One owner answering (for consumers migrated under §4 ownership — the
+launcher/infra binding residue clears at its own later rows, §12/§9):
+what files exist (topology/identity/families);
 how a file decomposes into addressable samples (geometry + legality);
 which samples belong to which selection (split semantics/strategies +
 packing rules); what systematic structure exists (named groups); how
@@ -1009,6 +1015,9 @@ Generic metrics plug in BESIDE it.
 Metric identity (name/direction/aggregation semantics); reference
 artifact locations; scoreability contract. NOT config: s_max, log base,
 formula internals — those are the frozen instance's OWN constants.
+Lifecycle note (freeze reconciliation 2): §10 (step 6) delivers the
+interface + scoring-side consumption + record-facing payload;
+incumbent/policy consumption lands at §7a (step 7).
 #### 10.4 Compatibility
 Frozen-formula byte identity (existing pins + the offline scalar
 baseline + real_run legacy parity); `denoising_score` FIELD NAMES in
@@ -1214,10 +1223,8 @@ Source dependency audit (no architectural preference used):
    - O3: the whole Candidate Creation module first — REJECTED by
      evidence: 6-M's probes/templates need §5; doing them first forces
      inventing the model contract speculatively.
-4. **This document adopts O1 as the working order below, subject to
-   operator confirmation at roadmap freeze** (a prior operator decision
-   is being interpreted, not overwritten; O2 remains open if the
-   operator prefers it).
+4. **O1 CONFIRMED by the operator at roadmap freeze (2026-08-11).**
+   The working order below is final; O2/O3 are closed.
 
 Order rationale otherwise unchanged: dependency (profile producers
 before consumers), risk, parity provability, genericity unlocked,
@@ -1291,16 +1298,16 @@ production consumer that proves the seam); **Deps** = must land before;
 
 | Module | Step | Final effect | A (parity) | B (contrast dimension) | C (live integration) | Deps | Design | Status |
 |---|---|---|---|---|---|---|---|---|
-| Golden baseline harness | 0 | Every behavior later extraction PRs claim to preserve has a trustworthy, reviewable baseline BEFORE any production refactoring | n/a (it CREATES the baselines) | n/a | baselines consumed by every later Stage-A checkpoint | — | `pr0_golden_baseline_harness.md` | PLANNING (first work item at freeze) |
+| Golden baseline harness | 0 | Every behavior later extraction PRs claim to preserve has a trustworthy, reviewable baseline BEFORE any production refactoring | n/a (it CREATES the baselines) | n/a | baselines consumed by every later Stage-A checkpoint | — | `pr0_golden_baseline_harness.md` | PLANNING — detailed design is the AUTHORIZED next work item (roadmap frozen 2026-08-11) |
 | 6-P Proposer hypothesis-space & prompts | 1 | Proposer prompts DERIVE from the declared task profile: task facts + contract PROSE (shapes/classes/task_type/loss legality) render from existing authorities instead of literals; TIDMAD proposals unchanged. Scope limits (3rd review, F2): the dataset-constraints block stays regime-A on the singleton until step 2; contract SEMANTICS stay §5-owned — 6-P only renders the declaration | rendered proposer prompts (all 3 stages incl. commit) EXACT-equal for TIDMAD + same kwargs reach LLMBridge (§2 nondeterministic surface) | 13.4-A (task-description text) + 13.4-B (declared forward contract, PROSE-rendering only) | the PRODUCTION proposer renders from the profile in a real chain iteration; contract-reassertion pins re-targeted to profile-parameterized form IN THIS PR (its design states the semantic change) | 0 (constraints-block slice completes after step 2) | `pr_proposer_hypothesis_space.md` | NOT STARTED |
-| §4 Dataset & sample topology | 2 | A task declares different topology/geometry/groups in config and every consumer resolves it; no module-level dataset constant read anywhere in the loop | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `pr_dataset_topology.md` | NOT STARTED |
+| §4 Dataset & sample topology | 2 | All dataset-semantic behavior under §4 OWNERSHIP (topology, geometry, selection, groups, input identity/indexing) resolves from the task's Dataset Profile, and MIGRATED consumers no longer independently restate those semantics. Launcher/orchestration/execution-infrastructure task-binding residue (workflow TIDMAD binding, sandbox data-dir, runtime-control fallbacks, cleanup globs) remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination (freeze reconciliation 1) | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `pr_dataset_topology.md` | NOT STARTED |
 | §5 Model/loss contract | 3 | A task declares a different model I/O contract (classes, dtype, output forms) and models/losses/probes DERIVE from it; builtins byte-identical under TIDMAD | builtin forwards byte-identical; registry contents identical; guardrail targets extended; PRIOR ON-DISK GENERATED PLUGINS remain loadable or a workspace boundary is declared (§2 records surface) | atomic ladder §5.5 (class count / input contract / output type / custom-loss capability) | executor dtype routing + VRAM-probe recipes consume the contract in production | 0, §4 (encoding declaration) | `pr_model_output_contract.md` | NOT STARTED |
 | 6-M Candidate-creation mechanics (+ §13 remainder) | 4 | Generated candidates (plugin/test/description) are produced AND validated against the declared contract with zero task literals; every LLM node's task content comes from the profile | generated plugin byte-identical for a fixed spec; validator verdicts identical; ALL remaining rendered prompts EXACT-equal + same kwargs reach LLMBridge; prior-plugin loadability (§2 records surface) | atomic ladders §6.5 + §13.4 (class count / shape / output type / description text / contract) | production implementor+validator emit/validate a candidate from the profile; all nodes render from it | 1, 2, 3 | `pr_candidate_creation_contract.md` + `pr_task_profile_prompts.md` | NOT STARTED |
 | §7b Tuner data selection | 5 | A different topology flows through TrialConfig→SampleSets with tuner code untouched | SampleSet hashes + trial_config JSON deep-equal | dataset-profile axis (reuses 4.8-A through the tuner path) | the production tuner builds its train/eval sets from the resolved profile | 2 | `pr_tuner_data_selection.md` | NOT STARTED |
 | §7d Tuner resource/time planning | 5 | Forecast task-terms (class count, decomposition unit, probe shapes) derive from profiles; calibration values unchanged and separately owned | forecasts byte-identical under TIDMAD (deep-equal breakdowns, PR-G pattern); policy identities unchanged | profile-term axis: a contrast profile changes derived terms while calibration stays fixed | production VRAM/time gates price a real attempt from derived terms | 2, 3 | `pr_tuner_resource_time.md` | NOT STARTED |
 | §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | argv/file-IPC byte-identical; artifacts byte-identical; sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `pr_tuner_execution_contracts.md` | NOT STARTED |
-| §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; records/incumbents consume the handle | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `pr_metric_interface.md` | NOT STARTED |
-| §7a Tuner planning & policy | 7 | Round/attempt/incumbent policy is metric-agnostic (direction/thresholds via the handle); planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `pr_tuner_policy.md` | NOT STARTED |
+| §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; PRODUCTION SCORING invokes it through the interface; the record-facing metric payload/identity the interface needs is available. Incumbent/comparison/threshold/skip-bypass consumption is NOT claimed here — that is §7a's step-7 final effect (freeze reconciliation 2) | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `pr_metric_interface.md` | NOT STARTED |
+| §7a Tuner planning & policy | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `pr_tuner_policy.md` | NOT STARTED |
 | §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `pr_tuner_measurement.md` | NOT STARTED |
 | §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `pr_health_check_task_profile.md` | NOT STARTED |
 | §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `pr_interpretation_task_blocks.md` | NOT STARTED |
