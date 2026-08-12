@@ -851,3 +851,12 @@ dossier table).
 | Loss authority still single | the diff only ADDS consumers of `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES`; no second definition |
 | Schemas / protocols / scorer / dataset / model execution untouched | branch touches exactly 4 non-test files: `ml_model_proposal_agent.py`, `proposing_stage.md`, and the two design docs. The one file under `tests/unit/agent/protocols/` is a test FIXTURE given a contract by the fail-closed fallout, not a protocol change |
 | Step-00 hard gates | PB-3/PB-4 + CFG-1/2/3a/3b → **11 passed** |
+
+**Final validation at head `fe4ec2e5`, clean tree.**
+
+| Gate | Result |
+|---|---|
+| `pytest tests/unit/ -m "not real_run"` | **8407 passed, 3 skipped, 538.05 s**; pytest's OWN exit code `0`, verdict read from `/tmp/full_suite_01a.log` (zero `FAILED`/`ERROR` lines), not from a wrapper |
+| `ruff check .` | All checks passed |
+| `ruff format --check .` | 802 files already formatted |
+| `pyright` | **CANNOT RUN LOCALLY** — Node v10.19.0; pyright-python refuses to bootstrap. CI is the only pyright, per the repo's environment-assumptions rule. Not claimed as locally validated |
