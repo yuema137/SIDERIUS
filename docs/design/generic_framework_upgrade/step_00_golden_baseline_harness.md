@@ -1111,8 +1111,12 @@ the widened helper, and every other golden uses the diff helper.
       Pin suite updated + 4 new WF-3 regression pins in the same commit.
       Blast radius: zero unit-tier consumers beyond the pin suite
       (verified by grep); integration consumers exercised at 0E.
-- [ ] Create test-owned frozen fixture classes/modules for every
-      source-embedding input (§13.1).
+- [x] Test-owned frozen values for every source-embedding input:
+      implementor reference_code + descriptions; proposer plugin source
+      via a patched `_SIDERIUS_ROOT` tmp tree (unpatched, builtin
+      candidates embed `ml_models/models_sandbox.py` class bodies —
+      confirmed by recon); frozen validator error strings (live errors
+      carry pydantic version URLs/abs paths/unseeded torch values).
 - [x] PB-1 captured (2 variants: auto + force_model=punet classifier
       branch; system prompt proven force_model-independent and shared)
       and PB-2 captured, through the REAL bridge renders
@@ -1123,14 +1127,48 @@ the widened helper, and every other golden uses the diff helper.
       auto-scans the machine-local gitignored plugin tree (stdout noise
       only) — rendered bytes depend only on the BUILTIN punet output
       type; CI tree is empty; recorded as accepted coupling.
-- [ ] Capture PB-3 ×5 under pinned registry/tree/MODEL_REGISTRY stub;
-      PB-4..PB-9 per §13.1.
-- [ ] Register PB-0 (docstring provenance corrected where stale).
+- [x] PB-3 captured: full production pipeline via run() with canned
+      schema-valid stage JSON (exact label sequence asserted; 3 explore
+      + 3 exploit system goldens + 3 MODE-INVARIANT user goldens —
+      invariance asserted); env fully pinned (_SIDERIUS_ROOT,
+      _GLOBAL_LOSS_DIR, MODEL_REGISTRY stub, tmp capability index).
+      CAPTURE-TIME DEFECT CAUGHT: candidate selection reads
+      per_model_best_valid (not per_model_best) — first capture had
+      "Candidates: []" and the source-embedding block silently vanished;
+      fixture corrected and the reason documented in the test.
+- [x] PB-4 captured (commit system constant + 2-input user render).
+- [x] PB-5 captured: reasoning/code via run() with an aborting recorder
+      (stops before the env-coupled smoke test), loss reasoning/code via
+      _generate_loss, repair ×2 variants + loss repair via real
+      producers with frozen error strings; system constants goldened
+      (13 goldens).
+- [x] PB-6 captured: clean + frozen-error branches via the real
+      _llm_review wrapper (3 goldens).
+- [x] PB-7 captured: per-model FLAG-ON user+system (system's structural
+      identity flag-OFF + HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS also
+      asserted), synthesis system+user (workspace pinned to a FROZEN
+      literal — verbatim interpolation labeled MIGRATION PARITY), dedup
+      via agent._dedup_promoted (6 goldens).
+- [x] PB-8 captured via the real consolidate() (bottlenecks empty side
+      pins the exactly-one-call branch; 2 goldens).
+- [x] PB-9 captured: extract (arxiv_source + pdfplumber system, user),
+      search_decision (first-round via _run_search_loop with
+      max_rounds=1 — no network reachable; prior/escalation/coverage
+      via the real producer), synthesis (v1/moderate + v0 + strict
+      systems, user with equations-present/pseudocode-empty) — 9
+      goldens. All node drives bypass run() (disk caches/network);
+      root_cache_dir pinned to tmp_path.
+- [x] PB-0 registered: the 4 existing goldens byte-untouched; their
+      suites re-run green alongside the new families (19 passed).
+      (Stale-docstring correction is a doc concern tracked at 0F.)
 
 **Validation plan.**
 - [ ] Unit: every golden asserts byte equality via the shared helper.
 - [ ] Negative/invalid: no-network guard test (mis-targeted patch →
       loud offline failure); recorder fires-≥1 assertion test.
+- [x] Mutation C (md-template loader path): token swap in
+      `agent/prompt_templates/proposal/comparison_stage.md` (site
+      count 1) → BOTH PB-3 system-variant tests red; restored; green.
 - [x] Mutation A (template token, `agent/prompts.py` force_model
       constraint text, site count 1): RED exactly on the force_model
       variant golden; restored; green. Mutation B (render substitution:

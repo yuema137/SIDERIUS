@@ -1,0 +1,13 @@
+## Your Reasoning
+
+Step-00 fixture reasoning.
+
+1. The bottleneck is low-frequency recovery.
+2. A dilated causal stack widens the receptive field.
+
+
+---
+
+## Reminder — your model_name must NOT be any of: ['step00_alpha_net', 'step00_beta_net']
+
+Now output the JSON proposal.

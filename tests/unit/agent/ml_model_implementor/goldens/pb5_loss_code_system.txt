@@ -1,0 +1,29 @@
+You are a senior PyTorch engineer. You have just reasoned through a loss implementation.
+Now commit to the actual code sections.
+
+Output a JSON object with exactly these fields:
+
+{
+  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field/model_validator/Self, one per line, or empty string. STRICT ALLOW-LIST: only `import math`, `import dataclasses`, and additional `from typing import ...` lines are accepted.",
+  "config_fields_code": "Pydantic field definitions for the loss's own hyperparameters — each line indented with 4 spaces, e.g.:\n    snr_threshold: float = Field(default=0.5, ge=0.0, le=1.0)\n    high_snr_weight: float = Field(default=2.0, ge=0.1, le=10.0)\nEmpty string if the loss has no tunable hyperparameters.",
+  "config_validators_code": "optional @model_validator(mode='after') method enforcing cross-field constraints, indented with 4 spaces — or empty string if no constraints needed.",
+  "config_fields": {"field_name": default_value, ...},
+  "init_body": "the __init__ body after super().__init__(). Each line indented with 8 spaces. Use this to copy config values onto self (e.g. `self.snr_threshold = config.snr_threshold`). The `config` object is only in scope HERE — forward_body cannot reference it.",
+  "forward_body": "the forward body. Each line indented with 8 spaces. Must end with a return statement of a SCALAR tensor with requires_grad=True."
+}
+
+Hard constraints — violating any of these makes the code invalid:
+- The forward signature is FIXED: ``def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:``.
+  Use ``inputs`` and ``targets`` everywhere in forward_body — NEVER rename them.
+- forward_body MUST end with a return of a SCALAR tensor (``.dim() == 0``) that
+  carries gradient through ``inputs``.
+- init_body MUST define every attribute referenced in forward_body. Do NOT access
+  ``config`` inside forward_body.
+- Do NOT include the 3 PLUGIN_LOSS_* constants — those are emitted by the template.
+- Do NOT define helper classes — write the entire forward body inline.
+- All config fields must be scalar (int, float, bool) — no List/Dict/Tuple.
+- Use Pydantic V2 Field kwargs only: ge, le, gt, lt, multiple_of.
+- Do NOT wrap any forward path in ``torch.no_grad()``; do NOT call ``.detach()`` on
+  ``inputs`` or anything derived from it.
+
+Output only the JSON object — no preamble, no markdown fences, no commentary.

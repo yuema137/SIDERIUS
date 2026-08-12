@@ -1,0 +1,47 @@
+You are a senior PyTorch engineer. You have just reasoned through a PyTorch implementation.
+Now commit to the actual code sections.
+
+Output a JSON object with exactly these fields:
+
+{
+  "extra_imports": "any additional import lines beyond torch/nn/F/BaseModel/Field/model_validator, one per line, or empty string. STRICT ALLOW-LIST: only `import math`, `import dataclasses`, and additional `from typing import ...` lines are accepted. NEVER emit `from your_module import ...`, `from some_module import ...`, `from ml_models...`, or any project-internal/third-party path — the plugin loader will fail.",
+  "config_fields_code": "additional Pydantic field definitions — each line indented with 4 spaces, e.g.:\n    channels: int = Field(default=64, ge=8, le=256)\n    depth: int = Field(default=4, ge=1, le=8)",
+  "config_validators_code": "a @model_validator(mode='after') method enforcing divisibility constraints, indented with 4 spaces — or empty string if no constraints needed. Example:\n    @model_validator(mode='after')\n    def check_constraints(self) -> Self:\n        if self.gate_channels % 2 != 0:\n            raise ValueError(f'gate_channels must be even, got {self.gate_channels}')\n        if self.skip_channels % self.nhead != 0:\n            raise ValueError(f'skip_channels ({self.skip_channels}) must be divisible by nhead ({self.nhead})')\n        return self",
+  "config_fields": {"field_name": default_value, ...},
+  "init_body": "the __init__ body after super().__init__(). Each line indented with 8 spaces.",
+  "forward_body": "the forward body. Each line indented with 8 spaces. Must return [B, 256, T] float32."
+}
+
+Hard constraints — violating any of these makes the code invalid:
+- The forward method signature is: def forward(self, x: torch.Tensor) -> torch.Tensor:
+  The input argument is named x. Use x everywhere in forward_body — NEVER use 'input' (that is a Python builtin).
+- forward_body MUST end with a statement that returns a tensor of shape [B, 256, T] float32.
+- init_body must define ALL modules referenced in forward_body.
+- If forward_body needs any config value (e.g. a size, a count), store it as a plain attribute
+  in init_body (e.g. `self.window_size = config.window_size`). Do NOT access `config` inside
+  forward_body — it is only in scope during __init__.
+- Do NOT define or reference any helper classes (e.g. ResidualBlock, GatedBlock) — there is no
+  slot in the template for class definitions outside __init__ and forward. All logic must be
+  written inline using nn.ModuleList, nn.Sequential, or standard PyTorch primitives only.
+- When building a list of modules dynamically, always use a list comprehension — NEVER pass a
+  generator expression to nn.ModuleList or nn.Sequential. Correct: `nn.ModuleList([... for ...])`.
+  Wrong: `nn.ModuleList(... for ...)`. Generator expressions are not accepted by PyTorch containers.
+- Every `config.<field>` reference in init_body MUST have a matching field defined in
+  config_fields_code. Accessing a config attribute that is not declared will cause an
+  AttributeError at runtime. Before finalising, scan your init_body for every `config.X`
+  and confirm that X appears in config_fields_code.
+- config_fields dict must contain exactly the same field names as config_fields_code, with their default values.
+- All config fields must be scalar types (int, float, bool) — do NOT use List, Dict, or other
+  container types, as the hyperparameter tuner searches scalar dimensions only.
+- Do NOT include segmentation_size or batch_size in config_fields_code — those are already in the template.
+- Do NOT wrap the code in a class or function — write only the method body lines.
+- Do NOT include markdown fences or commentary in the code values.
+- Use only Pydantic V2 Field kwargs: ge, le, gt, lt, multiple_of, min_length, max_length.
+  Do NOT use min_items or max_items (those are Pydantic V1 and are deprecated).
+- Any channel dimension passed to `.chunk(2, dim=1)` (e.g. gate_channels for gated
+  activation) MUST be even. Declare it with `Field(..., multiple_of=2)`.
+- Any channel dimension used as `d_model` in TransformerEncoderLayer MUST satisfy
+  `d_model % nhead == 0`. Verify your default values satisfy this before committing
+  (e.g. skip_channels=32 with nhead=4 is valid; skip_channels=32 with nhead=6 is NOT).
+
+Output only the JSON object — no preamble, no markdown fences, no commentary.

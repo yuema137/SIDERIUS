@@ -1,0 +1,31 @@
+## Model Description
+
+Fixture description: a gated residual 1-D denoiser.
+
+## Mathematical Definition
+
+y = x + f(x) with f a dilated conv stack (fixture math).
+
+## Plugin Implementation
+
+```python
+# TEST-OWNED plugin source (design §13.1 — never production code)
+class Step00FixtureModel(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.net = nn.Conv1d(1, config.channels, 3)
+    def forward(self, x):
+        return self.net(x.float().unsqueeze(1))
+
+```
+
+No runtime errors observed. Review the implementation against the specification above.
+
+## Expert Guidance (from upstream agents)
+
+Prefer small dilation stacks; keep channels <= 128.
+
+
+## Human Guidance (high priority)
+
+Keep the receptive field under 1000 samples.

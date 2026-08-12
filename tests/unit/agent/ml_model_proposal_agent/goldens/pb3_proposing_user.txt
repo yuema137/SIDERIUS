@@ -1,0 +1,146 @@
+[HARDWARE CONTEXT]
+Device:            NVIDIA RTX 3090
+Total VRAM:        24.00 GB
+Usable cap (80%):  19.20 GB
+Host:              step00-fixture-host
+Regime:            PHYSICAL — no operator budget set; cap = 19.20 GB.
+
+Your baseline_config must fit within the **effective cap** shown above. The VRAM engine will reject any architecture whose predicted peak exceeds this ceiling; a rejection consumes a tuner attempt with no scored round. Size your baseline to stay comfortably below the cap (target ≤ 80% of the effective cap at baseline) so the tuner has headroom to vary batch_size and segmentation_size upward.
+
+## Constraints
+Existing model type keys (your `model_name` must NOT be any of these): ['step00_alpha_net', 'step00_beta_net']
+  - VRAM < 10 GB
+  - params < 50M
+
+## External Contributors
+
+Read each contributor's trust level and trust guidance before reading their findings.
+
+### ml_literature_review
+  Trust Level: soft_prior
+  Role: Surface ML denoising literature.
+  Expertise Domain: ML denoising architectures.
+  Coverage: arXiv/S2.
+  Limitations: Cannot run experiments.
+  Trust Guidance: Treat findings as inspirational priors.
+
+
+## Expert Context
+
+[LITERATURE REFERENCE] (from ml_literature_review, confidence=0.85, source_ref=arxiv:0000.00000)
+  A frequency-aware composite loss may widen spectral coverage.
+
+
+## Candidate Models — detailed view
+
+### Candidate: step00_alpha_net
+
+| file | score |
+|---|---|
+| 0 | **-2.9100** |
+
+
+#### Source Code
+```python
+# test-owned frozen plugin source; NOT production code (design §13.1)
+PLUGIN_MODEL_TYPE = "step00_alpha_net"
+class Step00AlphaNet:
+    def __init__(self, hidden_dim: int = 32) -> None:
+        self.hidden_dim = hidden_dim
+
+```
+
+---
+
+### Candidate: step00_beta_net
+
+_Score table unavailable._
+
+#### Source Code
+_Source code unavailable._
+
+---
+
+## Accumulated context
+
+```json
+{
+  "candidates": [
+    {
+      "model_type": "step00_alpha_net",
+      "best_score": -2.55,
+      "raw_best_score": -2.55,
+      "raw_best_health_validity": "unknown",
+      "worst_score": -2.91,
+      "model_params": null,
+      "description": "Fixture alpha.",
+      "training_segments": null,
+      "source": "proposed"
+    },
+    {
+      "model_type": "step00_beta_net",
+      "best_score": -3.1,
+      "raw_best_score": -3.1,
+      "raw_best_health_validity": "unknown",
+      "worst_score": -3.4,
+      "model_params": null,
+      "description": "Fixture beta.",
+      "training_segments": null,
+      "source": "proposed"
+    }
+  ],
+  "non_candidates_overview": [],
+  "interpretation_summary": {
+    "model_types": [
+      "step00_alpha_net",
+      "step00_beta_net"
+    ],
+    "total_experiments": 3,
+    "best_denoising_score": -2.55,
+    "worst_denoising_score": -3.1,
+    "key_findings": [
+      "alpha beats beta at low frequency."
+    ],
+    "bottlenecks": [
+      "Low-frequency recovery is the binding limit."
+    ],
+    "take_home_message": "Target low-frequency recovery next.",
+    "per_model_best": {
+      "step00_alpha_net": -2.55,
+      "step00_beta_net": -3.1
+    },
+    "per_model_worst": {
+      "step00_alpha_net": -2.91,
+      "step00_beta_net": -3.4
+    }
+  },
+  "existing_model_types": [
+    "step00_alpha_net",
+    "step00_beta_net"
+  ],
+  "previous_failures": [
+    "step00_gamma_net: diverged at lr=1e-3."
+  ],
+  "comparison": {
+    "comparisons": [],
+    "proposed_vocab_links": [],
+    "proposed_vocab_candidates": [],
+    "sota_model_type": "step00_alpha_net",
+    "sota_score": -2.55,
+    "sota_mechanism": "Fixture mechanism."
+  },
+  "causal_reasoning": {
+    "proposed_change": "Fixture change.",
+    "causal_hypothesis": "Fixture hypothesis.",
+    "falsifiable_prediction": {
+      "metric": "mean(file_vector[0:3])",
+      "current_value": 0.5,
+      "predicted_value": 1.5,
+      "threshold_for_refutation": 0.7,
+      "rationale": "Fixture."
+    },
+    "predicted_failure_modes": [],
+    "inherited_components": []
+  }
+}
+```

@@ -1,0 +1,14 @@
+## Your Reasoning
+
+FIXTURE REASONING TEXT (test-owned, frozen)
+
+---
+
+## Model name: `step00_fixture_model`
+## Class name: `Step00FixtureModel`
+## Baseline model_config (use these as Field defaults): {"channels": 64, "depth": 2}
+
+## Implement Advice (high priority)
+Keep the receptive field under 1000 samples.
+
+Now output the JSON code sections.
