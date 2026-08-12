@@ -1,0 +1,10 @@
+## Candidate term (newly promoted)
+Name       : gated_recurrence
+Kind       : feature
+Description: Hidden-state gating.
+
+## Existing canonical terms (kind: feature)
+  - gated_rnn: Gating in RNNs.
+  - dilated_convolution: Dilated conv stack.
+
+Is "gated_recurrence" a near-duplicate or synonym of any of the existing terms above?

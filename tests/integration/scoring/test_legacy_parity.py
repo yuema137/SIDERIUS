@@ -1,31 +1,31 @@
 """
-End-to-end parity test — canonical merge gate for the scoring alignment.
+Legacy-parity evidence — Step-00 NUM-7 (real_run higher tier).
 
-Asserts that our byte-strict scoring path reproduces
+Asserts that the production scoring entry point in legacy mode,
+``score_vector(legacy_mode=True)``, reproduces
 ``denoising_score_old.calculateBenchmark`` bit-for-bit on a real TIDMAD
-validation file. See ``docs/align_denoising_score.md`` §5.1.
+validation file. The reference is the fixture at
+``tests/fixtures/legacy_scoring.py`` — a verbatim copy of the five legacy
+functions with a **one-line** ``TS.astype(np.float64)`` patch inside
+``GetOneSecPSD`` to restore the numpy-1.x implicit promotion under which
+the canonical TIDMAD benchmark numbers were generated.
 
-Three comparisons, all against the same legacy reference:
+Step-00 OD-4 disposition (operator-approved 2026-08-12; design
+``docs/design/generic_framework_upgrade/step_00_golden_baseline_harness.md``
+§22.2): the former tests 1-2 (``_calculate_score`` coarse/fine parity)
+were DELETED — their bit-parity property is obsolete by three intentional
+frozen decisions (global ``s_max`` ruler vs legacy file-local ``amax``;
+``round(·, 2)`` removal; ``+1e-10`` offset removal), so it is
+unsatisfiable by design, and their signature had already drifted
+(missing the now-required ``s_max``). Their still-valid coverage is owned
+by ``tests/unit/test_compute_raw_baseline.py`` (1e-12 aggregation pins)
+and the Step-00 NUM-1/NUM-4 full-precision committed-artifact pins.
 
-1. ``compute_raw_baseline._calculate_score(coarse=True)``
-   — fast (~seconds). Covers the legacy aggregation when driven through
-   our ``process_segment`` helper.
-
-2. ``compute_raw_baseline._calculate_score(coarse=False)``
-   — the full fine scan. Slower (a few minutes) but guards against any
-   subtle coarse-vs-fine divergence.
-
-3. ``score_vector(legacy_mode=True)`` with ``sample_set = {0: range(200)}``
-   — validates the production scoring entry point. This is the function
-   that the rest of SIDERIUS actually calls; its parity is the merge
-   gate for the whole alignment effort.
-
-The reference is the fixture at ``tests/fixtures/legacy_scoring.py`` —
-a verbatim copy of the five legacy functions with a **one-line**
-``TS.astype(np.float64)`` patch inside ``GetOneSecPSD`` to restore the
-numpy-1.x implicit promotion under which the canonical TIDMAD
-benchmark numbers were generated. See §1.3 of the plan doc for why
-this patch is necessary on numpy ≥ 2.0.
+The remaining test IS the legacy-reproduction property: ``legacy_mode``
+re-derives the file-local ``np.amax`` internally, matching legacy
+semantics. GREEN-BEFORE-CITE (design §16 tier 3): any Stage-A claim
+citing NUM-7 must attach a fresh green run of this test from the data
+machine.
 
 Markers: ``@pytest.mark.real_run`` — requires ``abra_validation_0000.h5``
 at ``TIDMAD_DATA_DIR``. Skipped automatically if absent.
@@ -61,19 +61,6 @@ def data_paths():
 
 
 @pytest.fixture(scope="module")
-def legacy_coarse_score(data_paths):
-    """Reference scalar from the patched-legacy fixture, coarse mode.
-
-    Computed once per module so fine/coarse consumers don't re-run the
-    ~20-segment scan. Uses ``parallel=True, num_workers=8`` to match
-    the legacy invocation pattern.
-    """
-    data_dir, fname = data_paths
-    args = argparse.Namespace(coarse=True, parallel=True, num_workers=8)
-    return legacy_scoring.calculateBenchmark(data_dir, [fname], args)
-
-
-@pytest.fixture(scope="module")
 def legacy_fine_score(data_paths):
     """Reference scalar from the patched-legacy fixture, fine mode.
 
@@ -85,42 +72,6 @@ def legacy_fine_score(data_paths):
 
 
 class TestLegacyParity:
-    def test_calculate_score_coarse(self, data_paths, legacy_coarse_score):
-        """``compute_raw_baseline._calculate_score`` — coarse parity."""
-        from scripts.compute_raw_baseline import _calculate_score
-
-        data_dir, fname = data_paths
-        score_new = _calculate_score(
-            data_dir=data_dir,
-            fname=fname,
-            coarse=True,
-            parallel=True,
-            num_workers=8,
-        )
-        delta = abs(score_new - legacy_coarse_score)
-        assert delta < _PARITY_TOL, (
-            f"coarse parity FAILED: new={score_new!r} legacy={legacy_coarse_score!r} "
-            f"|Δ|={delta:.3e} (tol {_PARITY_TOL:.0e})"
-        )
-
-    def test_calculate_score_fine(self, data_paths, legacy_fine_score):
-        """``compute_raw_baseline._calculate_score`` — fine parity (slow)."""
-        from scripts.compute_raw_baseline import _calculate_score
-
-        data_dir, fname = data_paths
-        score_new = _calculate_score(
-            data_dir=data_dir,
-            fname=fname,
-            coarse=False,
-            parallel=True,
-            num_workers=8,
-        )
-        delta = abs(score_new - legacy_fine_score)
-        assert delta < _PARITY_TOL, (
-            f"fine parity FAILED: new={score_new!r} legacy={legacy_fine_score!r} "
-            f"|Δ|={delta:.3e} (tol {_PARITY_TOL:.0e})"
-        )
-
     def test_score_vector_legacy_mode_fine(self, data_paths, legacy_fine_score):
         """``score_vector(legacy_mode=True)`` — the production scorer's
         parity against legacy. This is the canonical merge gate: the

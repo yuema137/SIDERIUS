@@ -1,0 +1,50 @@
+[
+  {
+    "label": "proposer.comparison",
+    "component_keys": [
+      "agent_cards_block",
+      "candidates_markdown",
+      "expert_context_block",
+      "interpretation_json",
+      "non_candidates_overview",
+      "previous_failures",
+      "prior_stage_outputs",
+      "recent_gate_block",
+      "recent_trial_validity_block",
+      "system_prompt",
+      "vocab_block"
+    ]
+  },
+  {
+    "label": "proposer.causal_reasoning",
+    "component_keys": [
+      "agent_cards_block",
+      "candidates_markdown",
+      "expert_context_block",
+      "interpretation_json",
+      "non_candidates_overview",
+      "previous_failures",
+      "prior_stage_outputs",
+      "recent_gate_block",
+      "recent_trial_validity_block",
+      "system_prompt",
+      "vocab_block"
+    ]
+  },
+  {
+    "label": "proposer.proposing",
+    "component_keys": [
+      "agent_cards_block",
+      "candidates_markdown",
+      "expert_context_block",
+      "interpretation_json",
+      "non_candidates_overview",
+      "previous_failures",
+      "prior_stage_outputs",
+      "recent_gate_block",
+      "recent_trial_validity_block",
+      "system_prompt",
+      "vocab_block"
+    ]
+  }
+]

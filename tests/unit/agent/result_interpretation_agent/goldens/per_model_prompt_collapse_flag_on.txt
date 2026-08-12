@@ -1,0 +1,27 @@
+## Model: wavenet
+Run: round_health_summary_test | Status: completed | Rounds: 2
+Raw best score       : None (health=unknown)
+Best valid score     : None
+Worst denoising score: 1.25
+Formal round score   : 1.25
+Best model params    : 120,000
+Trial portion (best) : 0.05
+
+### Architecture Description
+A test architecture.
+
+### Best Config
+none
+
+### Score Trajectory (chronological)
+  Round 1: score=invalidated [portion=0.05, params=120,000] [GATE invalidate_round — output_diversity_blocking:n_unique_int8_values=1] — 
+  Round 2: score=1.2500 [portion=0.05, params=120,000] — 
+
+### HealthGate summary
+Round validity: 0 valid, 1 invalid, 1 unknown (of 2)
+Distinct collapse fingerprints (deterministic, from persisted gate evidence):
+  - output_diversity_blocking:n_unique_int8_values=1  (x1, round 1) — output_diversity_blocking: n_unique_int8_values=1.0
+
+---
+## Expert Guidance
+Focus on stability.

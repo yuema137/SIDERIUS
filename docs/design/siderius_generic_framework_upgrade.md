@@ -1,10 +1,14 @@
 # SIDERIUS Generic Framework Upgrade — overall architecture & roadmap
 
-**Status: DRAFT — operator review pending. Audit + architecture direction
-only; this document authorizes NO implementation.** Each module named
-here receives its own detailed design document before any code changes.
-This document decides direction, module ownership, compatibility
-surfaces, and migration order — never exact schemas or field names.
+**Status: FROZEN — operator approved (2026-08-11). O1 proposer-first
+sequencing CONFIRMED. No implementation is authorized by this document
+alone.** Each module named here receives its own detailed design
+document (operator-reviewed) before any code changes. This document
+decides direction, module ownership, compatibility surfaces, and
+migration order — never exact schemas or field names.
+**Next work item: the Step-0 Golden Baseline Harness DETAILED DESIGN**
+(`docs/design/generic_framework_upgrade/step_00_golden_baseline_harness.md`) — the
+design only; Step-0 implementation follows its own operator review.
 
 Created 2026-08-10 from an 11-area parallel source audit at master
 `c636c624` (post-V21: all seven V21 PRs merged; V21 ledger CLOSED).
@@ -15,6 +19,79 @@ G plugins/models/losses, H runtime/execution infrastructure, I
 tests/fixtures/compatibility, J documentation/history. Load-bearing
 claims were re-verified in source by the main auditor; every important
 current-state claim below carries `file:line` evidence from that audit.
+
+**Revision 2 (2026-08-11, operator-directed reconciliation):** adds the
+task-COMPOSITION principle (§0 rule 9); splits absent-config semantics
+into a legacy adapter vs fail-closed generic binding (§2); separates the
+DELIVERABLE contract from the input dataset contract with ownership
+moved to the convergence ledger (§3.1, V9, §4/§7c/§9/§10/§14); makes
+every contrast fixture ATOMIC (one axis per fixture, §0.7); splits
+framework completion into CORE and FINAL milestones with D1 no longer
+exempt from FINAL (§16); states the 7c/metric sequencing boundary
+explicitly (§7c, §15 step 5); adds the long-lived status table (§15.1);
+and corrects the Seam-2/Seam-3 inheritance mapping (§0.A). A second
+adversarial pass reviewed this revision (record appended below).
+
+**Revision 3 (2026-08-11, operator planner-contract review):** narrows
+this document to its GOVERNANCE role — principles, per-module FINAL
+EFFECTS, the compatibility iron law, uniform validation checkpoints
+(0/A-E), dependency order, and completion milestones; implementation
+detail stays in future per-module designs. Adds: the module
+COMPLETION-CONTRACT MATRIX (§15.1, replacing the status-only table —
+one table, still the single meter); the standardized checkpoint model
+(§17); the PROPOSER-FIRST sequencing reconciliation (§15.0 — a
+planner-level conflict with a prior operator decision, resolved from
+the source dependency graph with options presented; the prior decision
+was NOT recorded in-repo and is recorded now); and the D1
+consumer classification from source (§16). A third adversarial
+planning pass reviewed this revision (record below).
+
+**Third adversarial review record (2026-08-11, planning pass on
+Revision 3):** a fresh planning-only reviewer attacked the governance
+revision; 14 findings CONFIRMED and corrected in place — decisively:
+the O1 loss-legality claim was FALSE (the commit prompt is a plain
+string with zero substitution; extraction is NEW placeholder work
+extending the live mechanism, its sources of truth existing —
+corrected with 6-P's scope honestly narrowed and its constraints-block
+slice deferred to step 2); the 6-P/6-M split had not propagated into
+§6/§13 (now it has, incl. the contract-reassertion pin re-targeting
+moving to step 1's design); §10's live-integration consumer at step 6
+is production scoring through the interface (incumbents remain §7a's
+step-7 C); the Deliverable Contract row is STAGED 5→11 with an
+ownership tie-break rule; the dashboard's peripheral classification is
+now operative in the debt list; checkpoint-B's definition unified with
+§16.5 (design-declared required rungs); the two previously
+un-instantiated §2 surfaces (prior-plugin loadability; LLM-boundary
+kwargs) now appear in the relevant A cells; step 0 exempted from
+checkpoints A-C; §8's final effect made behavioral; §12's completion
+claim scoped to its own surfaces; checkpoint-E given a blocking
+deadline; one stale step number and one citation defect fixed.
+Cleared: dependency graph acyclic (after the two named fixes), no
+premature architecture decisions found (§8-of-brief clean), all
+spot-checked citations verified.
+
+**Second adversarial review record (2026-08-11, on Revision 2):** a
+fresh reviewer attacked the revised document against the operator's
+seven Rev-2 questions plus a consistency sweep; 8 finding groups were
+CONFIRMED and are corrected in place: the regime-A/B split had not
+propagated into module sections and its regime-B switch had no roadmap
+step (now: propagation rule in §0 rule 9, step 12 scheduled, and
+regime dispositions attached to the two named silent core defaults in
+§5/§9); §4/§9/§8 residue still conflating input data with deliverables
+(now fully re-pointed at the §3.1 contract); Rev 2's own composition
+text violated its no-semantic-ownership rule via the task_config
+"embryo" claim (corrected: content is §13-owned, the root only binds);
+four fixture passages remained multi-axis and §7e had none (all now
+atomic ladders, the unsatisfiable 7c fixture corrected, the cumulative-
+rung rule added, the non-HDF5 deliverable rung given an owner);
+Milestone 2's enumeration missed campaign_artifacts.py,
+per_file_best.py and the interpretation sign-band (now named, with
+status-table debt ties); 7c's step-5 consumption of a not-yet-owned
+contract resolved via provisional extraction; three §14 rows sat below
+the ledger's own ≥2-designs bar and §6.6 carried a stale entry (all
+reconciled); six numbering/cross-reference defects fixed (§0.A rename,
+step-12 addition, single-progress-meter rule, D8/§16 pointer,
+step-0 status wording, dangling §E.3d.1 reference).
 
 **Adversarial review record (2026-08-10):** a fresh reviewer agent
 attacked the first draft against the §0 rules with source re-opened per
@@ -67,8 +144,8 @@ Binding method:
    Multi-file topology, systematic groups, split semantics, output
    structure → config. A probed `inference_batch=16`, measured VRAM,
    warm-up timings, the current incumbent, HealthGate evidence → runtime
-   state/records, exactly as today. §9 of every module section separates
-   the three explicitly.
+   state/records, exactly as today. The inputs-vs-config-vs-runtime-state
+   item of every module section separates the three explicitly.
 5. **Two-stage pattern per module.** Stage A (extraction/parity):
    TIDMAD-specific behavior → explicit module-local config/contract →
    SAME behavior, proven. Stage B (generalization): the contract
@@ -77,16 +154,23 @@ Binding method:
    regression is attributable to "extraction" or "new capability".
 6. **TIDMAD is the golden compatibility profile** — an INSTANCE of the
    generic contract, never `if tidmad` branches in core code.
-7. **Genericity is proven, not asserted.** Moving strings into YAML
-   proves nothing. Every module ends with (a) TIDMAD parity evidence and
-   (b) a minimal contrast fixture varying the ONE dimension the module's
-   abstraction claims to own.
+7. **Genericity is proven, not asserted — with ATOMIC fixtures (Rev 2).**
+   Moving strings into YAML proves nothing. Every module ends with (a)
+   TIDMAD parity evidence and (b) contrast fixtures from an ATOMIC
+   LADDER: each fixture varies exactly ONE audited axis RELATIVE TO ITS
+   LADDER'S ESTABLISHED BASELINE (later rungs may build on already-
+   proven earlier rungs — e.g. a regressor custom loss builds on the
+   proven regressor rung), so a failing fixture identifies WHICH
+   abstraction failed. A module's detailed
+   design picks the minimum ladder subset its landed abstraction
+   requires — not every rung in one PR, and never a multi-axis fixture
+   presented as proof of one abstraction.
 8. **Minimum sufficient abstraction.** No abstract base classes with one
    implementation, no config fields with no caller, no registries
    without a second implementation, no universal schemas from
    hypotheticals. The repository's most-repeated defect shape — *a
    correct mechanism exists but no live caller supplies/uses it*
-   (§E.3d.1, found eight times across V21) — must not be reproduced by
+   (the V21 ledger's §E.3d.1 defect shape, docs/design/v21_priorities.md — found eight times across V21) — must not be reproduced by
    the genericization itself. The audit found existing instances to heed:
    `DatasetConfig.validation_file_pattern` has ZERO production consumers
    (dataset_config.py:46-49,298 — a seam built before its consumer);
@@ -98,8 +182,34 @@ Binding method:
    .py:1597); `score_vector`'s `anchor_map` parameter is dead in its
    body (scoring_utils.py:473 vs :575-586, re-verified). Stage A work
    must land seams WITH their first consumer.
+9. **Task composition is a thin binding layer, not an owner (Rev 2).**
+   Independently-owned module configs still eventually need a
+   composition/binding root so ONE task can select its dataset/input
+   profile, model/output contract, metric instance, health profile,
+   prompt/task blocks, deliverable contract, and future module-owned
+   configs. Principle: *task composition is a thin binding/REFERENCE
+   layer over module-owned configs — never an owner of their semantics
+   and never a merged mega-config.* Its exact physical representation
+   (file layout, schema) is DEFERRED until several module configs exist
+   (D12; scheduled as §15 step 12). NO composition root exists in-tree
+   today: `configs/task_config.yaml` is §13's module-owned config —
+   its CONTENT (task_description, forward_contract) is semantic and
+   §13-owned; only its snapshot/injection MECHANICS
+   (workflows/task_config.py + _snapshot_task_config) hint at binding.
+   genericity_contract.md Seam 3's "one pluggable unit" anticipated
+   composition as a BINDING concept while the unit's contents remain
+   module-owned. Rules a future composition design must satisfy: it
+   references module configs by identity, adds no semantic fields of
+   its own, and binding a task through it switches the framework from
+   legacy-adapter defaulting to fail-closed resolution (§2, Rev 2).
+   Regime PROPAGATION rule (second pass, F1): every module section's
+   "TIDMAD default" wording is regime-A ADAPTER wording by definition;
+   per-module fail-closed (regime-B) tests land WITH step 12's
+   composition design, not with each module's Stage A — module designs
+   only ensure their resolution path can DISTINGUISH "unbound legacy
+   caller" from "bound task" when step 12 arrives.
 
-### 0.1 Relationship to prior genericization commitments
+### 0.A Relationship to prior genericization commitments
 
 This roadmap SUPERSEDES-BY-ABSORPTION the two 2026-07-28 artifacts and
 corrects the record:
@@ -120,11 +230,26 @@ Audit evidence: docs/design/genericity_contract.md has existed since
   V20 PR C1 with no DECOUPLED entry; the "47 abra_* literals in 7
   scripts" count is now 53 in 13 files.
 Corrected understanding: the seam definitions in genericity_contract.md
-  remain sound and are inherited here (Seam 1 → §4; Seam 2 → §13 config
-  rules; Seams 3/4 placeholders → §5 and §10 of this document, which
-  now define them from audit evidence). The coupling ledger's per-entry
-  statuses are absorbed into this document's module sections and the
-  ledger is retired as a separate progress meter.
+  remain sound and are inherited here. CORRECTED MAPPING (Rev 2 — the
+  Rev-1 line "Seam 2 → §13 config rules; Seams 3/4 → §5 and §10" was
+  wrong twice): Seam 1 (indexed dataset) → §4. Seam 2
+  (proposed/override/resolved config governance + the
+  agent-settable/operator-overridable/chain-locked/frozen taxonomy) →
+  the §0 config rules and the §17 ladder — NOT §13, which is the
+  prompt/task-profile module. Seam 3 (task pack: "task description,
+  forward contract, and task-specific prompt fragments travelling as
+  one pluggable unit", genericity_contract.md:134-145) → §13 PLUS the
+  new composition principle (§0 rule 9) — its "one pluggable unit"
+  anticipated composition as BINDING; it was never about the model/loss
+  contract, and mapping it to §5 was a name-over-semantics error.
+  Seam 4 (metric, frozen exception) → §10 (correct in Rev 1). Roadmap
+  consequence: Seam 3's CONTENT (task description, forward contract,
+  prompt fragments) is §13-owned; the composition root (D12, step 12)
+  eventually BINDS/references that unit and never owns its semantics —
+  the second adversarial pass caught Rev 2's own draft violating this
+  (F3) by calling the root the unit's "home". The coupling ledger's
+  per-entry statuses are absorbed into this document's module sections
+  and the ledger is retired as a separate progress meter.
 Generic-framework consequence: this document is the single seam
   authority going forward; CLAUDE.md's pointer must be updated when the
   first module PR lands (not in this docs-only change). CLAUDE.md:8's
@@ -244,7 +369,7 @@ the strongest feasible criterion — never "roughly the same":
 | Surface | Criterion | Mechanism |
 |---|---|---|
 | Rendered prompts | **Exact string equality** for the TIDMAD profile, including whitespace/ordering/formatting: `render(current prompt) == render(framework prompt + TIDMAD config)` | Golden snapshot per prompt-producing call site, captured from CURRENT master BEFORE extraction (see baseline gap below) |
-| Config/default resolution | Absent module config ⇒ resolves to the TIDMAD profile; resolved objects and derived values **deep-equal** current behavior | Parity tests on resolved config objects |
+| Config/default resolution — TWO regimes (Rev 2) | **(A) Legacy/migration adapter**: an EXISTING TIDMAD caller may omit newly-extracted module config and resolve to exactly today's TIDMAD behavior, deep-equal — this is a backward-compatibility ADAPTER, kept for the migration and for un-migrated callers. **(B) Generic binding**: once a task is explicitly bound through the composition mechanism (§0 rule 9), required task semantics resolve EXPLICITLY; missing required semantics FAIL CLOSED — they never silently inherit TIDMAD assumptions. Principle: *TIDMAD defaults are a backward-compatibility adapter, not the universal framework default.* Exact API/config syntax deferred to the module designs | (A): parity tests on resolved objects; (B): fail-closed tests land WITH step 12 (§0 rule 9 propagation rule) |
 | Scoring/evaluation | Frozen TIDMAD scorer byte-identical (standing operator rule; genericity_contract.md Seam 4 frozen exception: `log_{5.27}`, global `s_max` ruler, grand-mean aggregation). Generic metrics land BESIDE it | Existing pins + legacy-parity test (real_run) + the offline numeric baseline (`test_scoring_reference_default.py` scalar pins) |
 | Records/schemas/trajectories | Operational criterion: field-set + semantics pins on every restored field; a resume replay over a recorded TIDMAD workspace reconstructs identical state; ON-DISK GENERATED PLUGINS are part of this surface (finding 12b — core/resume.py:1290-1303 re-loads prior iterations' plugin .py files, warns-not-fails on validation breaks; §5/§6 contract changes must keep prior plugins loadable or declare the workspace boundary). NO migration merely for genericization | Schema-shape pins + resume replay + prior-plugin load tests |
 | Deterministic runtime behavior | Exact parity (same inputs → same artifacts); SampleSet determinism already hash-pinned (sha16 goldens @seed 42, test_sample_set_builder.py:244-264) | Targeted parity tests per module |
@@ -291,13 +416,47 @@ the same concept.
 | V6 | Split/selection semantics | snapshot/anchors/target strategies; ANCHOR_FILES=[0,10,19]; portions; formal-eval locked to snapshot; trial packing asymmetry | dataset, tuner data selection, scoring | Dataset (§4) + tuner data-selection (§7b) | strategy definitions as data; group-aware anchors |
 | V7 | Systematic structure (groups/bands) | informal in FOUR places: anchors triplet, health peek [3,10,17] "low/mid/high", scripts band tables, AND core/campaign_artifacts.py:57 (`if requested == [3, 10, 17]`) — which also requires a `denoising_score` field (:39) and imports TIDMAD for the full-scope default (:88-92); a task coupling inside core/ with no owner | dataset, health, interpretation, scripts | Dataset (§4) as named groups | groups as declared data consumed by all three |
 | V8 | Metric identity (name, direction, aggregation, references) | `denoising_score` literal in schemas/prompts/~40 tuner sites; higher-is-better implicit everywhere; frozen formula; committed anchor/reference artifacts; scalar-per-record authority object | scoring, tuner, orchestration, interpretation, dashboard | Metric interface (§10) | named metric instance w/ direction + aggregation; TIDMAD frozen instance beside |
-| V9 | Deliverable/artifact form | denoised int8 HDF5 `timeseries/channel000N`, template re-inlined ≥6 sites; attrs hardcoded | execution, scoring, health, cleanup | Dataset (§4, artifact naming) + execution contract (§7c) | artifact spec (template+layout+dtype) owned once |
+| V9 | Deliverable/artifact form — a DISTINCT contract from the input dataset (Rev 2, §3.1) | denoised int8 HDF5 `timeseries/channel000N`, template re-inlined ≥6 sites; attrs hardcoded; INDEXED by input file identity but its FORM is the task deliverable | producer: inference execution (writes, inference_single:561-563,:700-705; layout array2h5:26,44-72); readers: scorer (scoring_utils:148,:389), health peeks (_peek/_multi_file_peek channel0001), cleanup globs (sandbox:1652, tuner:5401), run_comparison | **UNKNOWN — convergence ledger** (§14); NOT the Dataset module: TIDMAD's input/output sharing HDF5 conventions is coincidence, not shared semantics | one Deliverable Contract (naming, layout, dtype, attrs) whose owner is decided by evidence (§14 row) |
 | V10 | Prompt task content | 15 hardcoded prose families beyond the 2 injected placeholders (audit B §2: commit prompt, loss prompts, validator prompt, personas, SQUID worked examples, full-spectrum doctrine, data-volume anchors, CH1/CH2 semantics, collapse advice, budgets) | every LLM node | Task profile & prompts (§6) with per-node blocks | framework instruction + module instruction + task blocks; golden-equal for TIDMAD |
 | V11 | Model catalogue & descriptions | 5-model roster in PLANNER_PROMPT:16-21; description.md files embed SQUID/axion prose; builtin config map duplicated | tuner prompts, model registry, interpretation | Model/loss contract (§5) + task profile (§6) | catalogue from registry; descriptions carry task-block seams |
 | V12 | Resource/time calibration | ×2.7 ratio (N=2), 800k intensity cap, RSS caps 40/60/24 GiB (dataset-sized rationale), overhead 185/50 MB, batch table, store-reuse bounds, seg defaults 40000/1000 | estimators, gates, sandbox | Resource planning (§7d) — mostly RUNTIME/CALIBRATION state, not task config | calibration records keyed by (hardware, workload-class); task-shaped terms derived from profile |
 | V13 | Health-check semantics | int8 diversity/amplitude/mV-scale checks; _MV_PER_LSB=40/128 ×4 copies; range(20) ×3; peek [3,10,17]; class-127 literals | health checks, prompts | HealthGates (§8) | checks declare task-profile inputs; thresholds per-task config |
 | V14 | Hardware assumptions | device index 0; 0.80 cap; CUDA-sized RSS ceilings on CPU; nvidia-smi dependency | hardware context, sandbox, measurement | Execution infra (§9) — framework invariants + calibration | already mostly framework; keep out of task config |
 | V15 | Workflow/iteration semantics | rounds/attempts/formal-promotion; incumbent gates; -inf bootstrap; skip/bypass deltas | tuner policy (§7a), orchestration (§11) | Tuner policy (§7a) | already largely task-free; metric-direction dependency via V8 |
+
+### 3.1 Four contracts, not one (Rev 2 — operator-directed re-audit)
+
+TIDMAD's inputs and outputs both being flat-int8 HDF5 seduced Rev 1
+into assigning derived-artifact naming/layout to the Dataset module.
+The audit evidence does not support that ownership:
+
+```text
+INPUT DATASET CONTRACT   what exists to READ: file families, index
+                         spaces, decomposition, truth channels.
+                         Owner: §4. Evidence: dataset_config,
+                         sample_set_builder, training/inference reads.
+MODEL I/O CONTRACT       what a model accepts/emits in memory.
+                         Owner: §5 (declared encoding from §4).
+DELIVERABLE CONTRACT     what an attempt PERSISTS as its product:
+                         naming, layout, dtype, attrs, completeness.
+                         Producer: inference execution; readers:
+                         scorer, health peeks, cleanup, scripts.
+                         TIDMAD instance: the denoised-HDF5 family.
+                         A future task may emit a JSON report, a
+                         trained-model package, a geometry+scalar —
+                         forms with NO input-dataset kinship.
+                         Owner: UNKNOWN → §14 ledger row.
+METRIC SCOREABILITY      what makes a deliverable SCOREABLE by a
+CONTRACT                 given metric. Owner: §10, defined AGAINST
+                         the deliverable contract (today implicit —
+                         no scoreability validation exists; §10.2).
+```
+
+What §4 keeps: derived-artifact INDEXING (deliverables are keyed by
+input identity — file_index today) and nothing else about their form.
+What moves to the ledger: the Deliverable Contract's owner, decided by
+whichever detailed design first NEEDS it (§7c writes it, §10 reads it
+— the first of those two designs proposes ownership; §14 row).
 
 ---
 
@@ -312,8 +471,9 @@ convergence candidates → dependencies → detailed-design follow-up.
 ## 4. Module: Dataset & Sample Topology
 
 `execute_tools/dataset_config.py`, `sample_set_builder.py`,
-`data_paths.py`, `array2h5.py`, + the SampleSet type and artifact
-naming. (Audit C.)
+`data_paths.py`, + the SampleSet type and derived-artifact INDEXING.
+(`array2h5.py` is the DELIVERABLE writer — Deliverable Contract, §3.1 —
+covered by audit C but not §4-owned.)
 
 #### 4.1 Current responsibility
 Declares THE dataset as module-level singleton `TIDMAD`
@@ -353,15 +513,18 @@ HDF5 via `create_abra_file` with hardcoded attrs
   keyed on dataset geometry.
 
 #### 4.3 Target generic responsibility
-One owner answering: what files exist (topology/identity/families);
+One owner answering (for consumers migrated under §4 ownership — the
+launcher/infra binding residue clears at its own later rows, §12/§9):
+what files exist (topology/identity/families);
 how a file decomposes into addressable samples (geometry + legality);
 which samples belong to which selection (split semantics/strategies +
 packing rules); what systematic structure exists (named groups); how
-derived artifacts are named/laid out. Consumers receive a RESOLVED
-profile object — never module-level constants.
+derived artifacts are INDEXED by input identity — their form/naming
+belongs to the Deliverable Contract (§3.1). Consumers receive a
+RESOLVED profile object — never module-level constants.
 
 #### 4.4 Module-local config (conceptual — CANDIDATE groups; the
-systematic-structure, artifact-spec and encoding groups below overlap
+systematic-structure and encoding groups below overlap
 §14 rows whose merge evidence is still pending, so §4's detailed
 design must re-confirm each against §14's rules before freezing it)
 - Topology: file families + index spaces + counts + patterns (the
@@ -380,8 +543,12 @@ design must re-confirm each against §14's rules before freezing it)
   corrected a draft that listed them as config, violating §0.4.
 - Systematic structure: named groups as data (bands), consumed by
   anchors, health peeks, interpretation, scripts.
-- Artifact spec: derived-output naming template + HDF5 layout + attrs
-  (single owner for the ≥6 inlined copies).
+- Derived-artifact INDEXING only (Rev 2, §3.1): how deliverables are
+  keyed by input identity. The Deliverable Contract itself (naming
+  template, layout, dtype, attrs — the ≥6 inlined copies) is a
+  DISTINCT contract whose owner is UNKNOWN → §14 ledger row; §4 does
+  NOT own it merely because TIDMAD's inputs and outputs share HDF5
+  conventions.
 #### 4.5 Inputs vs config vs runtime state
 Inputs: DataScope, seeds, portions chosen by plan. Config: the five
 groups above. Runtime: resolved SampleSets, seed derivations, packing
@@ -396,10 +563,16 @@ NEW pin, none exists); SampleSet sha16 goldens unchanged; filename
 renders byte-identical; anchors artifact untouched; +128/int8 encoding
 declaration produces byte-identical tensors; `data_shape_class` strings
 unchanged (measurement-store keys must not be invalidated).
-#### 4.8 Generic contrast fixture
-A synthetic 3-file, single-family dataset with a different
-decomposition arithmetic (non-10M length), variable sample shape, and
-no truth channel. Seeds already in-tree (corrected, finding 18d): the
+#### 4.8 Generic contrast fixtures (ATOMIC ladder, Rev 2)
+One axis per fixture; the detailed design picks the minimum subset:
+- 4.8-A topology only: 3 files, single family, TIDMAD geometry
+  otherwise unchanged.
+- 4.8-B sample geometry only: 20-file two-family shape, non-10M
+  decomposition length.
+- 4.8-C group semantics only: TIDMAD shape with a DIFFERENT declared
+  group map (proves anchors/peeks read groups, not literals).
+- 4.8-D truth availability only: TIDMAD shape, no truth channel.
+Seeds already in-tree (corrected, finding 18d): the
 non-TIDMAD `_cfg` helper in test_dataset_config.py:15-23 (used at
 :74,:122), and — the actual seam-with-first-consumer precedent §0.8
 asks for — test_dataset_contract.py:32-42's non-TIDMAD config probed
@@ -409,13 +582,14 @@ generalized.
 #### 4.9 Convergence candidates
 SampleSet type ownership (15 consumer families); sample-shape legality
 (proposer duplicates); group semantics (health/anchors/scripts);
-artifact naming (execution+scoring+cleanup); data_shape_class
-(runtime-control). DO NOT MERGE YET — record only.
+the DELIVERABLE CONTRACT (Rev 2 — moved OUT of §4 ownership, §3.1);
+data_shape_class (runtime-control). DO NOT MERGE YET — record only.
+(Second pass F7: every row here obeys the §14 ≥2-designs bar.)
 #### 4.10 Dependencies / follow-up
-First production module in the roadmap (§15 step 1) — nearly everything
-reads it; Stage A is injection-with-TIDMAD-default, killing bare
+First PROFILE module in the roadmap (§15 step 2; 6-P precedes it per
+§15.0) — nearly everything reads it; Stage A is injection-with-TIDMAD-default, killing bare
 constant imports module-by-module (the ledger's REMAINING entries).
-Detailed design: `docs/design/generic_framework/pr_dataset_topology.md`.
+Detailed design: `docs/design/generic_framework_upgrade/step_02_dataset_sample_topology.md`.
 
 ## 5. Module: Model/Loss Contract & Plugin Registry
 
@@ -442,7 +616,10 @@ loaders, `core/inference_defaults.py`. (Audit G.)
   decided in this module's detailed design.
 - Two tolerance tiers: plugin_loader silently defaults missing
   PLUGIN_OUTPUT_TYPE→classifier (:81-87) vs fail-closed get_output_type
-  (:192-214).
+  (:192-214). Regime disposition (second pass, F1): the silent
+  classifier default is a regime-A adapter for legacy on-disk plugins;
+  §5's detailed design decides its regime-B fate (fail closed for
+  task-bound loads) — it is NOT left undecided.
 - Loss: closed Literal(5); families {ce,focal,focal_cw}/{smooth_l1};
   FocalLoss1D paper-frozen; loss math class-agnostic (shape[1]) but
   estimators hardcode ×256; custom-loss config instantiated with ZERO
@@ -476,15 +653,19 @@ skill, two estimators, inference_defaults), so its empty pending list
 is evidence about THOSE paths only; extending its targets to each
 newly-cleaned file is part of this module's Stage-A acceptance, not
 pre-existing evidence.
-#### 5.5 Contrast fixture
-num_classes≠256 classifier + contract-keyed float-input model + a
-regressor custom loss (impossible today). Existing paired seed:
-`test_generated_model_transport_chain.py` classifier/regressor pair.
+#### 5.5 Contrast fixtures (ATOMIC ladder, Rev 2)
+- 5.5-A class count only: num_classes≠256 classifier, int64 input.
+- 5.5-B input contract only: contract-keyed float-input model at 256
+  classes (kills the fcnet name branches attributably).
+- 5.5-C output type only: regressor beside classifier (seed exists:
+  `test_generated_model_transport_chain.py` pair).
+- 5.5-D custom-loss capability separately: a regressor custom loss
+  (impossible today — probe classifier-shaped).
 #### 5.6 Convergence candidates
 ForwardContract ownership (shared reads from §6 candidate creation);
 estimator ×256 terms (§7d derives from this module's profile).
 #### 5.7 Follow-up
-`docs/design/generic_framework/pr_model_output_contract.md`.
+`docs/design/generic_framework_upgrade/step_03_model_loss_contract.md`.
 
 ## 6. Module: Candidate Creation (Proposer → Implementor → Validator)
 
@@ -523,7 +704,10 @@ patterns) as per-task config.
 Candidate-creation contract view (probe tensor recipes, expected
 shapes per output_type — derived from §5); per-task forbidden-pattern
 lists; prompt task blocks (commit-prompt facts) — rendered via §6's
-own templates but sourced from the task profile (§13). Resource-budget
+own templates but sourced from the task profile (§13); NOTE (Rev 3):
+the PROPOSER's prompt task blocks (commit-prompt facts) moved to 6-P,
+step 1 — this section's remaining prompt scope is the implementor/
+validator surfaces (6-M, step 4). Resource-budget
 prose is NOT config (adversarial finding 2): the proposer already
 defers to the live [HARDWARE CONTEXT] block
 (ml_model_proposal_agent.py:282-284, rendered from runtime hardware
@@ -534,19 +718,26 @@ is fixed by DERIVING from the same runtime block, not by a new field.
 Rendered proposer/implementor/validator prompts EXACT golden equality;
 generated plugin file byte-identical for a fixed spec under the TIDMAD
 profile; validator verdicts identical on existing fixture plugins.
-Test-disposition nuance (finding 13): contract-reassertion's pins are
-TEMPLATE-structure pins (regex over PROPOSAL_COMMIT_PROMPT); after
-extraction they become PROFILE-PARAMETERIZED pins (assert the TIDMAD
-profile renders those tokens) — a semantic change the §13 design must
-state, not a silent re-target.
-#### 6.5 Contrast fixture
-A num_classes=16, T=128 classifier task + the regressor custom-loss
-case: all probes/templates derive; the 256 literals are dead paths.
+Test-disposition nuance (finding 13; re-assigned by the 3rd review,
+F4): contract-reassertion's pins are TEMPLATE-structure pins (regex
+over PROPOSAL_COMMIT_PROMPT); they break at STEP 1, so the semantic
+change to PROFILE-PARAMETERIZED pins is stated by 6-P's design
+(`step_01_proposer_hypothesis_space.md`), not deferred to §13's.
+#### 6.5 Contrast fixtures (ATOMIC ladder, Rev 2)
+- 6.5-A class count only: num_classes=16 classifier — probes/templates
+  derive; the 256 literals are dead paths.
+- 6.5-B shape/T only: T=128 at 256 classes (validator/implementor probe
+  recipes derive T).
+- 6.5-C output type only: declared-regressor generation end-to-end.
+- 6.5-D custom-loss capability: the regressor custom loss (with 5.5-D).
 #### 6.6 Convergence candidates
-Model I/O contract (with §5); sample-shape legality (with §4);
-resource-budget prose (with §7d).
+Model I/O contract (with §5); sample-shape legality (with §4).
+(Resource-budget prose REMOVED — resolved by the first adversarial
+review, finding 2: derive from the runtime [HARDWARE CONTEXT] block;
+§14 row marks it resolved.)
 #### 6.7 Follow-up
-`docs/design/generic_framework/pr_candidate_creation_contract.md`
+6-P (step 1): `docs/design/generic_framework_upgrade/step_01_proposer_hypothesis_space.md`.
+6-M (step 4): `docs/design/generic_framework_upgrade/step_04_candidate_creation_mechanics.md`
 (includes the FU-A-1 transport and the hybrid-alphabet decision with
 §5).
 
@@ -594,18 +785,40 @@ anchors-required-in-trial (:3800-3808), divisibility validation
 **Fixture**: §4's 3-file dataset flows through TrialConfig→SampleSet.
 
 ### 7c. Execution contracts (training/inference/scoring launches)
+
+**Sequencing boundary with the metric interface (Rev 2, operator
+question resolved from source):** step-5 7c genericizes launch
+MECHANICS (argv/file-IPC/sentinels), dataset/deliverable TRANSPORT, and
+model-contract ENCODE/DECODE (the +128/argmax family — the decode rule
+is already contract-keyed at inference_single:262-273). It does NOT
+touch scorer selection or metric semantics: the scoring launch keeps
+invoking `denoising_score_single.py` exactly as today, TIDMAD-bound,
+until step 6 lands the metric interface. This separation is viable in
+source because the scoring spawn is already an isolated argv contract
+(sandbox_executor:1792-1817) whose internals 7c never needs to open.
+Scoring is NOT generic after step 5 — only its launch plumbing is.
 Audit E2-A/B/C + §9: skill wrappers splat active_params; sandbox argv/
 file IPC; per-file inference loop; int8 HDF5 writes; sentinel protocol.
 Couplings: filename templates at the engines; +128/argmax/int8 in
 inference_single (:188-189,:264-284); fcnet branches; fix-mode
 input_size=40000; class-weight 256 bins in train_engine.
-**Target**: engines consume §4's artifact spec + §5's contract (decode
+**Target**: engines consume the Deliverable Contract — at step 5 as a
+PROVISIONAL extraction of the TIDMAD instance (regime-A; §14 row,
+second pass F6), with §7c's design proposing final ownership — + §5's
+contract (decode
 rule per output_type is ALREADY contract-keyed at :262-273 — extend the
 precedent); launch mechanics stay framework.
 **Compatibility**: argv/file-IPC byte-identical for TIDMAD; artifacts
 byte-identical; sentinel semantics untouched.
-**Fixture**: contrast dataset + contract produce correctly-shaped
-artifacts with no abra_* literal executed.
+**Fixture (atomic, second pass F4)**: single axis = deliverable
+transport: under the TIDMAD profile with a renamed deliverable template
+(from the provisional contract), the ENGINES write/clean exclusively
+via the contract — no inlined template executed in engine/cleanup
+code. Scorer-side `abra_*` literals (scoring_utils:389,:444)
+legitimately REMAIN until step 6 per the boundary note; the Rev-2
+fixture wording ("no abra_* literal executed") was unsatisfiable at
+step 5 and is corrected. Dataset-axis coverage comes from 4.8-A via
+7b, not from this fixture.
 
 ### 7d. Resource & time planning (VRAM/time gates, estimators)
 Audit E2-D/E: analytic estimators (partly production-dead per
@@ -643,6 +856,11 @@ owned here. Most of this subsystem is genuinely runtime state — the
 smallest task surface of the tuner.
 **Compatibility**: identity hashes/comparability unchanged (the PR G
 0.R.12 pin pattern); measurement-store keys stable.
+**Fixture (atomic, second pass F4)**: single axis = measurement data
+feeding: probe/measurement batches built from a contrast dataset
+profile (4.8-B geometry) while identity keys and comparability stay
+byte-stable — proves the data-feeding derivation carries no TIDMAD
+residue independent of any other axis.
 
 ### 7f. HealthGates → §8 (its own module; fires at tuner round
 boundaries but owns independent semantics).
@@ -652,7 +870,7 @@ THEN §10 lands the metric handle; THEN 7a → 7e (smallest task
 surface). The §15 steps encode this: tuner data/execution = step 5,
 metric interface = step 6, tuner policy = step 7.
 Each subphase is its own PR with its own detailed design under
-`docs/design/generic_framework/pr_tuner_<submodule>.md`. The
+`docs/design/generic_framework_upgrade/step_05x_/step_07x_ tuner submodule docs (per the naming convention)`. The
 responsibility-oriented decomposition rule (CLAUDE.md, binding) governs
 every extraction: typed boundaries, reachability tests, no new
 responsibilities into `run()`.
@@ -674,8 +892,12 @@ importing the TIDMAD singleton for fs. Check IDs restated in planner
 prose (prompts.py:72-75) and interpreter fingerprints (:171).
 #### 8.2 Target generic responsibility
 Runner/policy/aggregation stay framework. Each CHECK declares the
-task-profile inputs it needs (encoding, mV scale, file groups, channel
-layout — from §4) and per-task thresholds live in the task's health
+task-profile inputs it needs: file groups from §4 (NOTE: this design
+IS the "first group-aware consumer" the §14 systematic-groups row
+names as its required evidence — it supplies that evidence, never
+presumes the merge); encoding + mV scale + channel layout of the
+DELIVERABLE from the Deliverable Contract (§3.1 — the peeks read the
+denoised artifact, _peek.py:93-100, not the input dataset) and per-task thresholds live in the task's health
 config. Collapse-detection checks become the first family of TASK
 health plugins, with TIDMAD's six as the golden instances.
 #### 8.3 Compatibility
@@ -687,11 +909,15 @@ existing workspace (core/run_invariants.py:475-488, remediation =
 "start a new workspace") — so this step's content changes MUST land at
 a fresh-workspace boundary between campaigns; the detailed design
 states this migration note explicitly.
-#### 8.4 Fixture
-A float-valued regressor output where int8-diversity checks are
-inapplicable-by-declaration and a generic dispersion check still fires.
+#### 8.4 Fixtures (ATOMIC ladder, second pass F4)
+- 8.4-A group semantics only: TIDMAD-shaped outputs, peek files
+  resolved from a DIFFERENT declared group map.
+- 8.4-B encoding declaration only: float-valued output → int8-diversity
+  checks inapplicable-by-declaration (no other axis varied).
+- 8.4-C generic-check firing only: a dispersion check fires on the same
+  declared-float output that 8.4-B established.
 #### 8.5 Follow-up
-`docs/design/generic_framework/pr_health_check_task_profile.md`
+`docs/design/generic_framework_upgrade/step_08_health_check_task_profile.md`
 (absorbs the stale collapse_detection_framework_generic.md intent —
 that doc's phantom-fingerprint/byte-identity machinery remains
 NOT-built and is NOT resurrected without new evidence).
@@ -713,12 +939,18 @@ independently in the child; import-time data-dir resolution with silent
 example fallback (data_paths.py:24-40); device index-0 binding;
 OOM regex string-sniffing.
 #### 9.2 Target
-Task-shaped elements (data dir wiring, artifact globs) flow from §4;
+Task-shaped elements: data dir wiring flows from §4; the cleanup
+globs' TEMPLATE flows from the Deliverable Contract (§3.1/§14 — §9 is
+a READER of that contract, sandbox_executor:1650-1652), §4 supplying
+only input-identity indexing;
 per-role resource ceilings become explicit calibration config with
 recorded provenance (NOT task config); the rest stays framework.
 UNKNOWN (needs its detailed design): whether the probe worker's
 missing-`env` asymmetry (probe_subprocess.py:336-341 vs the measurement
-runner) is deliberate.
+runner) is deliberate. Regime disposition (second pass, F1): the
+import-time silent example-fallback in data_paths.py:24-40 is regime-A
+adapter behavior; §9's design classifies its regime-B fate (a bound
+task with no data config fails closed, not silently on the example).
 #### 9.3 Compatibility
 argv/IPC/sentinels byte-identical; per-role rlimits resolve to the
 SAME VALUES for the TIDMAD profile — and any calibration config must
@@ -728,7 +960,7 @@ sandbox_executor.py:134-143; finding 14: a third layer with unstated
 ordering is not acceptable); kill/cleanup semantics untouched
 (operator-stop-critical plain-vs-session launch split preserved).
 #### 9.4 Follow-up
-`docs/design/generic_framework/pr_execution_infrastructure.md`
+`docs/design/generic_framework_upgrade/step_11_execution_infrastructure.md`
 (late in the roadmap; highest blast radius, smallest genericity gain).
 
 ## 10. Module: Scoring & Metric Interface
@@ -783,6 +1015,9 @@ Generic metrics plug in BESIDE it.
 Metric identity (name/direction/aggregation semantics); reference
 artifact locations; scoreability contract. NOT config: s_max, log base,
 formula internals — those are the frozen instance's OWN constants.
+Lifecycle note (freeze reconciliation 2): §10 (step 6) delivers the
+interface + scoring-side consumption + record-facing payload;
+incumbent/policy consumption lands at §7a (step 7).
 #### 10.4 Compatibility
 Frozen-formula byte identity (existing pins + the offline scalar
 baseline + real_run legacy parity); `denoising_score` FIELD NAMES in
@@ -793,7 +1028,7 @@ dashboards/prompts keep reading today's fields for TIDMAD.
 A scalar lower-is-better metric on stub outputs, entering records and
 incumbent selection through the metric handle.
 #### 10.6 Follow-up
-`docs/design/generic_framework/pr_metric_interface.md`.
+`docs/design/generic_framework_upgrade/step_06_metric_interface.md`.
 
 ## 11. Module: Interpretation & Cross-Iteration Knowledge
 
@@ -812,10 +1047,10 @@ physical rejections) is task-agnostic mechanics.
 Target: prompts split framework/module/task blocks (golden-equal for
 TIDMAD — 3 of the 4 existing goldens live here); table rendering +
 prediction grammar parameterized by the §10 metric handle.
-Fixture: interpretation over the stub task's metric with a per-sample
-table that is not per-FILE.
-Follow-up: `docs/design/generic_framework/pr_interpretation_task_
-blocks.md`.
+Fixtures (atomic, second pass F4): 11-A metric identity only (stub
+metric handle, table stays per-file); 11-B table indexing only (TIDMAD
+metric, per-sample rows instead of per-file).
+Follow-up: `docs/design/generic_framework_upgrade/step_09_interpretation_task_blocks.md`.
 
 ## 12. Module: Orchestration & Chain
 
@@ -838,8 +1073,7 @@ or profiled. The caller-resolves-capability pattern
 launcher owns task binding, the workflow stays generic.
 Compatibility: iteration choreography byte-stable (k9/l_fail canned
 choreographies keep passing unmodified); resume inventory field-stable.
-Follow-up: `docs/design/generic_framework/pr_orchestration_task_
-binding.md`.
+Follow-up: `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding.md`.
 
 ## 13. Module: Task Profile & Prompt Assembly (incl. lit review)
 
@@ -850,7 +1084,8 @@ binding.md`.
 #### 13.1 Current state (the decisive facts)
 `task_config.yaml` parameterizes exactly TWO things (task_description,
 forward_contract) reaching 5 injection sites. FIFTEEN hardcoded prose
-families remain (audit B §2): the fully-hardcoded PROPOSAL_COMMIT_
+families remain (audit B §2; the PROPOSER family below moved to 6-P,
+step 1, per §15.0): the fully-hardcoded PROPOSAL_COMMIT_
 PROMPT; the entire loss-generation prompt path (zero task_config
 reads); validator prompt + probe literal; planner roster/collapse
 advice/data-volume anchors/CH1-CH2 semantics; REFLECTOR_PROMPT (no
@@ -886,13 +1121,15 @@ test_planner_prompt_task_config.py:52-59) STAY template-scoped — their
 purpose is anti-hardcode proof of the template layer, and rendered
 TIDMAD output legitimately contains SQUID prose; re-targeting them
 would make them vacuous. Nothing is deleted.
-#### 13.4 Fixture
-The in-tree alternative task string ("audio enhancement…" _ALT_TD) +
-the regressor ForwardContract (test_task_config.py:267-292) rendered
-through every producing node with zero SQUID residue.
+#### 13.4 Fixtures (ATOMIC ladder, second pass F4)
+- 13.4-A task-description text only: the in-tree _ALT_TD string with
+  the TIDMAD forward contract, rendered through every producing node
+  with zero SQUID residue in the description-derived blocks.
+- 13.4-B forward contract only: the in-tree regressor ForwardContract
+  (test_task_config.py:267-292) with the TIDMAD description.
 #### 13.5 Follow-up
-`docs/design/generic_framework/pr_task_profile_prompts.md` (likely
-split per node group).
+`docs/design/generic_framework_upgrade/step_04_candidate_creation_mechanics.md` (likely
+split per node group; the proposer group is 6-P's doc, step 1).
 
 ---
 
@@ -906,46 +1143,123 @@ evidence.
 | Concept | Modules needing it | Current meanings | Same semantics? | Candidate future owner | Merge now? | Evidence needed |
 |---|---|---|---|---|---|---|
 | Model I/O contract / ForwardContract | §5, §6, §7c, §7d, §13 | prompt-rendered dict; probe recipes; estimator terms; decode rule | UNKNOWN | §5 | NO | §5+§6 detailed designs complete |
-| SampleSet type + JSON key coercion | §4, §7b, §7c, §10, estimators | dict[int→list[int]] with per-consumer re-int | YES (mechanical) | §4 | NO (typed wrapper only when §4 lands) | §4 Stage A parity |
+| SampleSet type + JSON key coercion | §4, §7b, §7c, §10, estimators | dict[int→list[int]] with per-consumer re-int | YES (mechanical) | §4 | NO — a typed wrapper INSIDE §4 is ordinary Stage-A refactoring, but cross-module adoption is a merge and follows the rule | ≥2 completed designs (§4 + one consumer module) |
 | Systematic groups (bands) | §4, §8, §11, scripts | anchors triplet / peek triplet / band tables | UNKNOWN (three ad-hoc encodings) | §4 | NO | first group-aware consumer in §8 |
-| Derived-artifact naming | §4, §7c, §9, §10, §8 | ≥6 inlined template copies | YES | §4 artifact spec | NO | §4 design |
+| DELIVERABLE CONTRACT (naming/layout/dtype/attrs/completeness) | §7c (producer), §10 (scoreability reader), §8 (peek reader), §9 (cleanup), scripts | ≥6 inlined template copies; no owner today | YES (one contract) | **UNKNOWN** (Rev 2): §7c and §10 are the candidates. Second-pass refinement (F6): at step 5, §7c may extract the TIDMAD deliverable instance PROVISIONALLY (regime-A adapter) and propose ownership in its design; FINAL ownership is confirmed by the owning design, which also lands the non-HDF5 deliverable rung as part of ITS fixture ladder. §4 keeps only input-identity indexing | NO | the §7c or §10 detailed design + the non-HDF5 deliverable rung (owned by whichever design wins ownership) |
 | Metric identity (name/direction/aggregation) | §7a, §10, §11, §12, dashboard | schema field names + implicit max() | YES (single metric today) | §10 | NO | §10 design + stub second metric |
-| Sample-shape legality (divisibility) | §4, §6, §7b | 3 enforcement layers | YES | §4 | NO | §4 design |
+| Sample-shape legality (divisibility) | §4, §6, §7b | 3 enforcement layers | YES | §4 | NO | ≥2 completed designs (§4 + §6, the duplicate site) |
 | Seg-size fallback defaults (40000/1000) | §7d, §7e, §9, §6 | bare .get defaults post-B1-resolver | UNKNOWN (deliberate margins vs drift) | §7d resolver | NO | audit in §7d design |
 | Value encoding (+128/int8/256) | §4, §5, §7c, §7e, §8 | independent literals | YES conceptually | §4 declares, §5 derives | NO | §4+§5 designs |
 | Resource-budget prose (10GB/100M) | §6, §7d | prompt literals vs runtime hardware block | NO (prose vs measured) | NONE — derive from the runtime [HARDWARE CONTEXT] precedent (ml_model_proposal_agent.py:282-284); delete the stale implementor literal | resolved by review | n/a |
-| data_shape_class measurement key | §4, §7e | geometry-derived string | YES | §4 emits, §7e consumes | NO | key-stability plan in §7e |
+| data_shape_class measurement key | §4, §7e | geometry-derived string | YES | UNKNOWN (emit/consume split is a hypothesis) | NO | ≥2 completed designs (§4 + §7e) incl. the key-stability plan |
 | Baseline-config authority | §7a prompts, run_comparison, legacy_baseline_configs.json | paper-spec JSON + prompt prose | UNKNOWN | out of scope (frozen paper alignment) | NO | none — stays frozen |
 
 ## 15. Incremental migration roadmap
 
-Order chosen by: dependency (profile producers before consumers), risk,
-parity provability, genericity unlocked, validation cost. Every step
-leaves master working; every step = its own detailed design + PR(s)
-following the §17 ladder.
+### 15.0 Proposer-first reconciliation (Rev 3 — planner-level conflict, resolved from source)
 
 ```text
-0. GOLDEN BASELINE HARNESS (test-only, zero production diff)
-   Capture the missing goldens (§2.1): all rendered prompts; shipped
-   task_config resolved content; TIDMAD DatasetConfig constants; one
-   serialized success-record golden; CI-runnable scorer replay against
-   the committed reference scalars. Cheap, immediately protective.
-1. §4 Dataset & Sample Topology — Stage A (inject profile, TIDMAD
-   default; artifact-spec owner; kill bare-constant imports per the
-   old ledger's REMAINING list) → Stage B (3-file contrast fixture).
-2. §5 Model/Loss Contract — Stage A (class-count/encoding into the
+Prior operator decision (conversational; NOT previously recorded
+in-repo — recorded here): after V21, genericization begins with the
+PROPOSER, because the proposer defines the hypothesis space; then
+proceed downstream. (The nearest in-repo statement is the V21 ledger's
+governing judgement, v21_priorities.md:893: V21 "must begin by making
+the hypothesis space the agent can explore real, symmetric and
+executable" — philosophically aligned.)
+Rev-2 order: Dataset (1) → Model/Loss (2) → Candidate Creation (3).
+Conflict: planner-level; must be resolved before freeze.
+```
+
+Source dependency audit (no architectural preference used):
+
+1. **Independent TODAY (no new upstream contract needed):** the
+   proposer's task-content surfaces already have a LIVE injection seam
+   — `{TASK_BACKGROUND}` + `render_forward_contract`
+   (ml_model_proposal_agent.py:392-433, workflows/task_config.py:171)
+   and the known-constraints block is ALREADY parameterized on the
+   dataset-config OBJECT (`_format_known_constraints_block(
+   DATASET_CONFIG)`, prompts.py:722; call site
+   ml_model_proposal_agent.py:1569). The one fully
+   hardcoded surface is the COMMIT prompt (zero placeholders).
+   Extracting its task facts onto the EXISTING seam is golden-parity
+   work with live consumers — no speculative contract. CORRECTED by the
+   third review (finding 1): the commit prompt is a plain string with
+   ZERO substitution today (passed verbatim at :1385), so extracting it
+   is NEW placeholder/render work — an EXTENSION of the live
+   single-template+placeholder mechanism (the sanctioned pattern, Rev-2
+   finding 15), landed WITH its first consumer (the rendered prompt) in
+   the same PR. Its sources of truth already EXIST: shapes/classes/
+   task_type from ForwardContract (live, consumed); the loss-legality
+   facts from models_format_sandbox's CLASSIFICATION_LOSSES/
+   REGRESSION_LOSSES frozensets — today the VALIDATION authority only,
+   gaining their first prompt-render consumer in this PR (prompt-side
+   loss legality is currently re-prosed in ≥5 more places, which stay
+   until their own steps). No dependency on §5's FUTURE config is
+   created; §5 still owns the contract's SEMANTICS.
+   Forbidden-pattern lists likewise. This slice = "6-P: proposer hypothesis-space
+   & prompt surfaces" (it IS the proposer slice of §13, pulled
+   forward — single ownership, no duplication).
+2. **Genuinely requires §5 (and §4 for legality):** validator/
+   implementor PROBE recipes and generated TEMPLATES (the 256/T=64
+   literals), custom-loss probe shapes — deriving them needs the model
+   I/O contract; inventing that contract from the proposer side would
+   be the speculative-abstraction anti-pattern (§0 rule 8).
+   Segmentation legality (proposal.py:1113-1128) stays regime-A on the
+   singleton until §4 lands its legality function — it does not block
+   6-P. This slice = "6-M: candidate-creation mechanics".
+3. **What "proposer first" can mean:**
+   - **O1 (recommended): 6-P is step 1** — first detailed design AND
+     first production module PR, on the existing seam; Dataset and
+     Model/Loss follow as steps 2-3; 6-M lands after §5. Honors the
+     decision literally; zero speculative contracts; zero consumer-less
+     seams; the hypothesis space is genericized before anything
+     downstream.
+   - O2: proposer first in DESIGN only (its detailed design is written
+     first) while implementation stays Dataset→Model→Candidate. Weaker
+     reading; only preferable if the operator wants the dataset seam
+     landed before ANY prompt extraction.
+   - O3: the whole Candidate Creation module first — REJECTED by
+     evidence: 6-M's probes/templates need §5; doing them first forces
+     inventing the model contract speculatively.
+4. **O1 CONFIRMED by the operator at roadmap freeze (2026-08-11).**
+   The working order below is final; O2/O3 are closed.
+
+Order rationale otherwise unchanged: dependency (profile producers
+before consumers), risk, parity provability, genericity unlocked,
+validation cost. Every step leaves master working; every step = its own
+detailed design + PR(s) following the §17 checkpoint model.
+
+```text
+0. GOLDEN BASELINE HARNESS (test-only, zero production diff).
+   Purpose: CAPTURE CURRENT TRUTH before any extraction — a
+   compatibility harness, NOT a second benchmark; do not overbuild.
+   Its detailed design considers at minimum: all missing
+   rendered-prompt goldens (§2.1); shipped task_config resolved
+   content; the TIDMAD dataset-profile constants; representative
+   serialized-record compatibility; CI-usable scorer/reference pins
+   where feasible (the committed reference scalars). Cheap,
+   immediately protective.
+1. **6-P Proposer hypothesis-space & prompt surfaces** (Rev 3, O1 —
+   the proposer slice of §13 pulled forward): commit-prompt task facts
+   extracted onto the EXISTING ForwardContract/task-profile seam;
+   forbidden-pattern lists; golden parity. Needs only step 0.
+2. §4 Dataset & Sample Topology — Stage A (inject profile, TIDMAD
+   default; input-identity indexing only — the Deliverable Contract
+   stays in the §14 ledger; kill bare-constant imports per the
+   old ledger's REMAINING list) → Stage B (atomic ladder §4.8).
+3. §5 Model/Loss Contract — Stage A (class-count/encoding into the
    contract; dtype routing by contract, killing fcnet branches per the
-   estimator precedent) → Stage B (16-class + regressor-loss fixtures).
-3. §6 Candidate Creation, NON-PROMPT scope — probes, templates,
-   generated artifacts, FU-A-1 transport (needs only steps 1-2).
-   Its PROMPT surfaces (commit prompt, validator prompt, implementor
-   loss prompts) land WITH step 4's assembly seam — the adversarial
-   review (finding 6) showed they cannot precede it.
-4. §13 Task Profile & Prompts — per-node-group extraction with exact
-   golden parity (planner/reflector; the §6 prompt surfaces;
-   lit-review + duplicate collapse) → completes §6's Stage B.
+   estimator precedent) → Stage B (atomic ladder §5.5).
+4. **6-M Candidate-creation mechanics** — probes, templates, generated
+   artifacts, FU-A-1 transport (needs steps 2-3), PLUS §13's remaining
+   node groups (planner/reflector; validator prompt; implementor loss
+   prompts; lit-review + duplicate collapse) with exact golden parity
+   → completes §6's and §13's Stage B.
 5. §7 Tuner data/execution submodules: 7b data selection → 7d
-   resource/time (derived terms) → 7c execution contracts.
+   resource/time (derived terms) → 7c execution contracts (launch
+   mechanics + transport + contract encode/decode ONLY — scorer
+   selection and metric semantics stay TIDMAD-bound until step 6; see
+   the 7c boundary note).
 6. §10 Metric Interface — TIDMAD instance frozen-byte-identical;
    EXTENDS the existing per_file_best metric-identity precedent.
 7. §7 Tuner policy submodules: 7a (consumes the step-6 handle) →
@@ -954,26 +1268,70 @@ following the §17 ladder.
    see the §8.3 sha-lock note).
 9. §11 Interpretation task blocks.
 10. §12 Orchestration binding cleanup.
-11. §9 Execution infrastructure (last: high blast radius, low gain).
+11. §9 Execution infrastructure (high blast radius, low gain).
+12. TASK COMPOSITION ROOT + regime-B binding (D12; requires ≥3 landed
+    module configs — expected viable after step 5): the thin reference
+    layer of §0 rule 9, the regime-A→B switch of §2, and the
+    per-module fail-closed tests. REQUIRED BEFORE Milestone 1 (§16),
+    which binds the composed contrast task through it.
 ```
 
-The operator's stated interest (tuner + proposer) is honored: proposer
-genericization starts at step 3 (non-prompt scope, unblocked after two
-profile steps) and completes with step 4; the tuner begins at step 5
-with its highest-value submodule first. Both REQUIRE steps 1-2, which
-are deliberately small.
+The operator's interests are honored in O1 order: the PROPOSER'S
+hypothesis-space surfaces are step 1 (immediately after the baseline
+harness, per the prior operator decision — §15.0), its mechanics
+complete at step 4; the tuner begins at step 5 with its highest-value
+submodule first.
 
-## 16. Framework-level acceptance criteria
+### 15.1 Module completion-contract matrix (Rev 3 — the single navigation + definition-of-done surface)
 
-The migration is complete when, simultaneously:
-1. A materially different second task (the accumulated contrast
-   fixtures composed: different topology, encoding, output form,
-   metric) runs the FULL loop end-to-end from configs + task-owned
-   modules only — zero core-code edits, zero `if tidmad` — EXCEPT the
-   consumers explicitly parked under D1 (metric field-name/direction
-   readers: dashboard, resume/workflow comparisons), which are listed
-   and re-tested as TIDMAD-profile-only until the D1 migration is
-   separately approved.
+Synchronized after EVERY module merge; never replaces per-module
+detailed evidence. Columns: **Final effect** = what is TRUE about
+SIDERIUS when the module is done (behavioral outcome, §2-of-the-review
+standard); **A** = Stage-A/TIDMAD-parity checkpoint (its global §2
+surface); **B** = Stage-B contrast DIMENSION (fixture data belongs to
+the detailed design); **C** = live-integration checkpoint (the real
+production consumer that proves the seam); **Deps** = must land before;
+**Design** = detailed-design doc under `docs/design/generic_framework_upgrade/`;
+**Status**. All checkpoints follow the §17 model (0/A-E).
+
+| Module | Step | Final effect | A (parity) | B (contrast dimension) | C (live integration) | Deps | Design | Status |
+|---|---|---|---|---|---|---|---|---|
+| Golden baseline harness | 0 | Every behavior later extraction PRs claim to preserve has a trustworthy, reviewable baseline BEFORE any production refactoring | n/a (it CREATES the baselines) | n/a | baselines consumed by every later Stage-A checkpoint | — | `step_00_golden_baseline_harness.md` | IMPLEMENTED (six test-only semantic commits; Checkpoint 0 MET; k9/WF-4 green; zero production diff) — PR open, awaiting CI + operator review, NOT merged |
+| 6-P Proposer hypothesis-space & prompts | 1 | Proposer prompts DERIVE from the declared task profile: task facts + contract PROSE (shapes/classes/task_type/loss legality) render from existing authorities instead of literals; TIDMAD proposals unchanged. Scope limits (3rd review, F2): the dataset-constraints block stays regime-A on the singleton until step 2; contract SEMANTICS stay §5-owned — 6-P only renders the declaration | rendered proposer prompts (all 3 stages incl. commit) EXACT-equal for TIDMAD + same kwargs reach LLMBridge (§2 nondeterministic surface) | 13.4-A (task-description text) + 13.4-B (declared forward contract, PROSE-rendering only) | the PRODUCTION proposer renders from the profile in a real chain iteration; contract-reassertion pins re-targeted to profile-parameterized form IN THIS PR (its design states the semantic change) | 0 (constraints-block slice completes after step 2) | `step_01_proposer_hypothesis_space.md` | NOT STARTED |
+| §4 Dataset & sample topology | 2 | All dataset-semantic behavior under §4 OWNERSHIP (topology, geometry, selection, groups, input identity/indexing) resolves from the task's Dataset Profile, and MIGRATED consumers no longer independently restate those semantics. Launcher/orchestration/execution-infrastructure task-binding residue (workflow TIDMAD binding, sandbox data-dir, runtime-control fallbacks, cleanup globs) remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination (freeze reconciliation 1) | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `step_02_dataset_sample_topology.md` | NOT STARTED |
+| §5 Model/loss contract | 3 | A task declares a different model I/O contract (classes, dtype, output forms) and models/losses/probes DERIVE from it; builtins byte-identical under TIDMAD | builtin forwards byte-identical; registry contents identical; guardrail targets extended; PRIOR ON-DISK GENERATED PLUGINS remain loadable or a workspace boundary is declared (§2 records surface) | atomic ladder §5.5 (class count / input contract / output type / custom-loss capability) | executor dtype routing + VRAM-probe recipes consume the contract in production | 0, §4 (encoding declaration) | `step_03_model_loss_contract.md` | NOT STARTED |
+| 6-M Candidate-creation mechanics (+ §13 remainder) | 4 | Generated candidates (plugin/test/description) are produced AND validated against the declared contract with zero task literals; every LLM node's task content comes from the profile | generated plugin byte-identical for a fixed spec; validator verdicts identical; ALL remaining rendered prompts EXACT-equal + same kwargs reach LLMBridge; prior-plugin loadability (§2 records surface) | atomic ladders §6.5 + §13.4 (class count / shape / output type / description text / contract) | production implementor+validator emit/validate a candidate from the profile; all nodes render from it | 1, 2, 3 | `step_04_candidate_creation_mechanics.md` (canonical; may propose a step_04a split) | NOT STARTED |
+| §7b Tuner data selection | 5 | A different topology flows through TrialConfig→SampleSets with tuner code untouched | SampleSet hashes + trial_config JSON deep-equal | dataset-profile axis (reuses 4.8-A through the tuner path) | the production tuner builds its train/eval sets from the resolved profile | 2 | `step_05a_tuner_data_selection.md` | NOT STARTED |
+| §7d Tuner resource/time planning | 5 | Forecast task-terms (class count, decomposition unit, probe shapes) derive from profiles; calibration values unchanged and separately owned | forecasts byte-identical under TIDMAD (deep-equal breakdowns, PR-G pattern); policy identities unchanged | profile-term axis: a contrast profile changes derived terms while calibration stays fixed | production VRAM/time gates price a real attempt from derived terms | 2, 3 | `step_05b_tuner_resource_time.md` | NOT STARTED |
+| §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | argv/file-IPC byte-identical; artifacts byte-identical; sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `step_05c_tuner_execution_contracts.md` | NOT STARTED |
+| §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; PRODUCTION SCORING invokes it through the interface; the record-facing metric payload/identity the interface needs is available. Incumbent/comparison/threshold/skip-bypass consumption is NOT claimed here — that is §7a's step-7 final effect (freeze reconciliation 2) | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `step_06_metric_interface.md` | NOT STARTED |
+| §7a Tuner planning & policy | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `step_07a_tuner_policy.md` | NOT STARTED |
+| §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07b_tuner_measurement.md` | NOT STARTED |
+| §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `step_08_health_check_task_profile.md` | NOT STARTED |
+| §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `step_09_interpretation_task_blocks.md` | NOT STARTED |
+| §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | NOT STARTED |
+| §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `step_11_execution_infrastructure.md` | NOT STARTED |
+| Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `step_12_task_composition_binding.md` | NOT STARTED (D12 governs) |
+| Deliverable Contract (owner TBD) | 5→11 (STAGED — 3rd review F6) | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction byte-identical | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11) — the row COMPLETES at step 11 | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | decided by first §7c/§10 design | NOT STARTED (ledger) |
+
+Debt column (tracked here, not repeated per row): §8 fresh-workspace
+sha-lock boundary; §12 campaign_artifacts.py (M2 blocker); §10
+per_file_best direction+LOG_BASE (M2 blocker); §11 sign-band (M2
+blocker); §9 rlimit precedence vs env override; DASHBOARD explicitly
+classified PERIPHERAL (per the §16 D1 table) — may remain
+TIDMAD-profile-bound at M2.
+
+## 16. Framework-level acceptance criteria (Rev 2 — two milestones)
+
+**MILESTONE 1 — CORE GENERICIZATION.** Reached when, simultaneously:
+1. A materially different composed contrast task (accumulated atomic
+   fixtures: different topology, encoding, output form, metric) runs
+   the intended generic scientific path end-to-end from configs +
+   task-owned modules, bound through the composition mechanism (§0 rule 9)
+   with fail-closed resolution (§2 regime B) — with an EXPLICITLY
+   ENUMERATED list of remaining legacy/peripheral TIDMAD-only surfaces,
+   each named, classified (core vs peripheral), and re-tested as
+   TIDMAD-profile-only.
 2. Every TIDMAD golden (prompts, defaults, SampleSets, scorer scalars,
    records, choreographies) is green on the SAME head.
 3. The frozen TIDMAD metric is byte-identical; authority matrix
@@ -981,26 +1339,87 @@ The migration is complete when, simultaneously:
 4. Guardrail families extended and green: no model-name branches
    (targets grown), no dataset-constant imports outside §4, no
    task-literal in health checks/estimators/templates.
-5. Every module section above has its Stage A parity evidence AND
-   Stage B contrast fixture landed; no seam is consumer-less.
+5. Every migrated module has its Stage A parity evidence AND at least
+   the required rungs of its atomic fixture ladder landed; no seam is
+   consumer-less.
 
-## 17. Standard migration ladder (per detailed module design)
+**D1 consumer classification (Rev 3, from source — not filenames):**
+
+| D1 consumer | Evidence | Class |
+|---|---|---|
+| Tuner incumbent selection + skip/bypass gates | max-based 4-track best :6018-6064; `_best_trial_winner` :1435-1449; delta gates | CORE scientific loop — M2 blocker |
+| Workflow best-score comparison | model_exploration.py:2740 bare `>` | CORE — M2 blocker |
+| Resume best-pick | core/resume.py:438 `score > best_score` | CORE resume semantics — M2 blocker |
+| campaign_artifacts | :39 denoising_score required; :57 band triplet; :88-92 TIDMAD import | CORE (inside core/) — M2 blocker |
+| per_file_best | `_row_beats` :478-480 higher-is-better; :310 nonpositive skip; :62 LOG_BASE | CORE incumbent surface — M2 blocker |
+| interpretation_helpers sign-band + metric grammar | :284-286; :309-355 | CORE interpretation path — M2 blocker |
+| Dashboard (api/models, local_json sort, base direction note) | read-only FastAPI viewer; ZERO imports from the loop (verified: no `import dashboard` anywhere in workflows/nodes/core/execute_tools) | PERIPHERAL UI — may remain TIDMAD-profile-bound at completion if classified in the matrix debt list |
+| scripts/ summaries (v18_wave_summary etc.) | offline reporting over artifacts | compatibility-only legacy surface — out of completion scope |
+
+**MILESTONE 2 — FINAL FRAMEWORK-COMPLETE.** Reached only when NO
+approved TIDMAD-specific exception remains in the CORE execution /
+planning / resume / incumbent-selection / scoring loop. In particular,
+metric-name/direction assumptions in workflow comparisons
+(model_exploration.py:2740), resume (`core/resume.py:438`), incumbent
+selection (the tuner's max-based 4-track best + `_best_trial_winner`),
+**`core/campaign_artifacts.py`** (denoising_score requirement :39,
+band-triplet literal :57, TIDMAD import :88-92 — the doc's own finding
+10, inside core/), **`execute_tools/per_file_best.py`** (a per-file
+INCUMBENT selector, not a dashboard: `_row_beats` higher-is-better
+:478-480, nonpositive-score skip :310, duplicate LOG_BASE :62), the
+**`nodes/interpretation_helpers.py:284-286` sign-band** (the
+`sota*(1-margin)` arithmetic invalid for negative/lower-is-better
+scores), and every other core reader MUST be migrated — **D1 remains
+deferred in SEQUENCING but is NOT exempt from this definition**. Only genuinely peripheral surfaces
+(e.g. the read-only dashboard) may remain TIDMAD-profile-bound at
+completion, and only if explicitly classified as peripheral in the §15.1
+completion-contract matrix's debt list (the dashboard is so
+classified there).
+
+## 17. Uniform validation checkpoints (Rev 3 — the per-module definition of done)
+
+Every module passes SIX checkpoints — EXCEPT step 0, which CREATES
+the baselines and passes only 0 (trivially), D and E (3rd review F10);
+the §15.1 matrix instantiates A-C per module; exact commands/test
+implementations belong to detailed designs:
 
 ```text
-A. source/coupling audit (this doc's section = the seed)
-B. capture/extend golden baselines for the module's surfaces
-C. extract TIDMAD behavior into typed module-local config
-D. prove TIDMAD exact/default parity (goldens + deep-equal)
-E. introduce the generic seam WITH its first consumer
-F. add the smallest contrast fixture
-G. remove/reduce old hardcoding (guardrail targets grow)
-H. targeted + mutation tests (delete-the-hop, precedence reversal)
-I. bounded real Gate only if the module touches real execution
-J. full unit suite + CI on the exact final head
-K. merge (operator-owned) + synchronize THIS roadmap's status
+CHECKPOINT 0 — BASELINE AVAILABLE
+  the TIDMAD behavior being extracted is actually pinned (step 0
+  harness or the module's own pre-captured goldens).
+CHECKPOINT A — EXTRACTION PARITY
+  module-local config/contract exists; TIDMAD behavior unchanged under
+  the STRONGEST applicable §2 surface criterion (each module's matrix
+  row names its surface).
+CHECKPOINT B — GENERIC CONTRAST
+  the rung subset of the module's atomic ladder that its detailed
+  design DECLARED REQUIRED (declared upfront in that design; recorded
+  in the matrix B cell at completion) is landed — each rung varying
+  exactly one axis. §16 criterion 5 requires exactly these declared
+  rungs; the two definitions are one (3rd review F8).
+CHECKPOINT C — LIVE INTEGRATION
+  the matrix row's named REAL production consumer uses the new
+  contract; no consumer-less seam survives the PR.
+CHECKPOINT D — REGRESSION
+  relevant TIDMAD module tests, cross-module compatibility tests,
+  mutations (delete-the-hop, precedence reversal), and CI green on the
+  exact final head.
+CHECKPOINT E — ROADMAP SYNC
+  the §15.1 matrix row is updated in the same PR, or in an immediate
+  docs follow-up that MERGES BEFORE the next module PR opens (a
+  blocking rule — an unbounded deferral is how the 2026-07-28 ledger
+  went stale, §0.A).
 ```
-Minimum sufficient evidence throughout; no second scientific campaign
-per module.
+
+Bounded real Gates: conceptually REQUIRED (decided and bounded by the
+detailed design, minimum sufficient evidence) for modules that change
+real execution behavior — §7c, §7e, §9, and §8's blocking-verdict
+changes; NOT required for prompt/config/metric-handle extractions whose
+parity is fully deterministic. The implementation ladder inside each
+detailed design remains: audit → baseline → extract → parity → seam
+WITH first consumer → contrast rung(s) → de-hardcode (guardrail targets
+grow) → mutations → (Gate) → CI → merge → sync. No second scientific
+campaign per module.
 
 ## 18. Deferred decisions
 
@@ -1013,13 +1432,23 @@ per module.
 | D5 | `tidmad_data_config.yaml` rename | inherited: deployment-touching PR only |
 | D6 | Metric-store / measurement-key versioning when geometry varies | needs §7e design |
 | D7 | `agent/skills/` → `agent/tools/` rename | inherited deferral; orthogonal |
-| D8 | Second real scientific task selection | after the composed fixture passes §16.1; a real task is NOT required per module |
+| D8 | Second real scientific task selection | after the composed contrast task passes §16 Milestone 1 criterion 1; a real task is NOT required per module |
 | D9 | Retire vs re-scope collapse_detection_framework_generic.md's unbuilt machinery | needs §8 design; default retire |
 | D10 | Dead seams disposition (tune→interp protocol; validation_file_pattern gains consumers in §4/§10 or is dropped) | per owning module's design |
 | D11 | CLAUDE.md task-agnostic claim + seam-authority pointer update | with the first landed module PR |
+| D12 | Task-composition root's physical representation (file layout/schema; when legacy-adapter defaulting is retired per §2 regime split) | by §0 rule 9: after several module configs exist; the composition design also fixes the binding switch from regime A to regime B |
 
 ## 19. Detailed-design documents this roadmap requires
 
-`docs/design/generic_framework/` (new folder; one doc per §15 step,
-named in each module section above; the folder README tracks per-module
-status exactly as `v21_priorities/` did for PRs).
+`docs/design/generic_framework_upgrade/` — operator-frozen naming
+convention (2026-08-11): `step_<two-digit>_<roadmap-step-name>.md`, one
+CANONICAL step-level document per §15 step (subordinate `step_NNa_*`
+names allowed where a step genuinely comprises multiple submodule
+designs — steps 5 and 7 use them, jointly constituting that step's
+acceptance entry; step 4's canonical doc covers 6-M plus the §13
+remainder and may propose a `step_04a` split in its own design). This
+supersedes the earlier `generic_framework/pr_*` names. The §15.1 table in THIS document
+is the ONE status authority — the folder README is an index (links +
+a one-line mirror of §15.1 rows), never a second progress meter; the
+second adversarial pass flagged that duplicate meters are exactly how
+the 2026-07-28 coupling ledger went stale (§0.A).

@@ -1,0 +1,41 @@
+POLICY PARAMETERS (numerical caps referenced by the system-prompt rules):
+  MAX_SURVIVORS = 8
+  MAX_PRIOR_SUMMARY_CHARS = 80
+  MAX_STATEMENT_CHARS = 500
+
+POLICY EXAMPLES (illustrative — apply the same logic to the DATA below; do not echo these examples verbatim):
+
+  RULE 1 — same-meaning merge:
+    PRIOR: "ridge near 50 Hz dominates" (evidence_iters=[2], strength=moderate)
+    NEW  : "the 50 Hz ridge is the dominant feature" (current_iter=5)
+    → ONE survivor, statement = "ridge near 50 Hz dominates" (or the clearer of the two), evidence_iters=[2, 5], strength=moderate.
+
+  RULE 2 — supersession replacement:
+    PRIOR: "VRAM spike around 16 GB" (evidence_iters=[2], strength=moderate)
+    NEW  : "VRAM ceiling measured at 15.8 GB" (current_iter=5)
+    → ONE survivor, statement = "[SUPERSEDES iter-2: VRAM spike ~16 GB] VRAM ceiling measured at 15.8 GB", evidence_iters=[2, 5], strength=moderate.
+
+  RULE 3 — contradiction preservation:
+    PRIOR: "loss improved by 12% with dropout=0.3" (evidence_iters=[2], strength=moderate)
+    NEW  : "loss degraded by 12% with dropout=0.3" (current_iter=5)
+    → TWO survivors. PRIOR unchanged. NEW statement = "[CONFLICT iter-5 vs iter-2] loss degraded by 12% with dropout=0.3", evidence_iters=[5], strength=moderate.
+
+  RULE 4 — distinct (no match):
+    PRIOR: "ridge near 50 Hz dominates" (evidence_iters=[2], strength=moderate)
+    NEW  : "training time scales linearly with batch_size" (current_iter=5)
+    → TWO survivors. PRIOR unchanged. NEW emitted as its own survivor with evidence_iters=[5].
+
+DATA:
+  MODEL_TYPE: wavenet
+  FIELD: key_findings
+  CURRENT_ITER: 5
+
+  PRIOR items (already in cache, from earlier iters):
+  P1. statement="S1" evidence_iters=[3] strength='strong'
+  P2. statement="S2" evidence_iters=[4] strength='weak'
+
+  NEW items (current iter 5):
+  N1. statement="N1" current_iter=5
+  N2. statement="N2" current_iter=5
+
+Apply the four rules. Return the structured JSON decision.

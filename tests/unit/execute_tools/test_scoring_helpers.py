@@ -659,54 +659,32 @@ class TestSecondaryBlock:
 
 
 class TestPostPathAReferenceConsistency:
-    @pytest.mark.xfail(
-        strict=False,
-        reason=(
-            "KNOWN DEFECT (FU-P2-4): the on-disk ground-truth artifacts and the "
-            "current production formula are on different rulers. The artifacts "
-            "(computed 2026-05-01) used the legacy soft floor "
-            "log_5.27(v + 1e-10); file_vector_to_log_space has since removed it "
-            "and computes log_5.27(v). Bit-exact evidence for file 0: "
-            "linear=1.0892888977496993e-06 -> helper -8.260971502899364 vs "
-            "on-disk -8.260916269975333, and log_5.27(linear + 1e-10) reproduces "
-            "the on-disk value EXACTLY. "
-            "This assertion is CORRECT and is left strict on purpose — the "
-            "tolerance must not be loosened, because this test exists to catch "
-            "precisely this drift. Resolving it requires an operator decision "
-            "(regenerate the reference artifacts under the current formula, or "
-            "keep a legacy-reference conversion path for old artifacts), and "
-            "touches frozen reference data, so it is deliberately OUT OF SCOPE "
-            "for V19 PR 2. xfail(strict=False) so the run goes green today and "
-            "flips to XPASS the moment the mismatch is resolved."
-        ),
-    )
     def test_post_path_a_reference_consistency(self):
-        # Load-bearing test: the helper applied to a ground_truth linear
-        # file_vector reproduces the on-disk ground_truth per_file_log
-        # values produced by ``compute_ground_truth.py`` after the Path-A
-        # regen. If the production formula and the helper drift apart, the
-        # model column will end up on a different ruler than the reference
-        # columns — exactly the bug P0 was introduced to fix.
+        """Step-00 OD-4: the FU-P2-4 ``xfail`` is RETIRED. It guarded a
+        soft-floor drift against a STALE machine-local copy
+        (``/home/klz/Data/SIDEREIS_DATA/``, itself a portability
+        violation); the COMMITTED ``reference_data/`` was regenerated
+        2026-07-22 under the offset-free formula and already satisfies
+        the assertion exactly (audit D). The property now runs LIVE
+        against the committed artifacts — the same surface NUM-1/NUM-3/
+        NUM-4 pin at full precision
+        (``tests/unit/{nodes,execute_tools}/test_step00_*``): the helper
+        applied to the committed ceiling file_vector reproduces the
+        committed per-file ground-truth scores bit-for-bit.
+        """
         import json
-        import os
+        from pathlib import Path
 
-        gt_path = "/home/klz/Data/SIDEREIS_DATA/ground_truth/ceiling_anchor_normalized.json"
-        if not os.path.exists(gt_path):
-            pytest.skip("Path-A reference data not available in this environment")
-        ceiling = json.load(open(gt_path))
-        gt_linear_fv = ceiling["file_vector"]
-
-        # Hand-compute expected per-file log values via the helper, then
-        # compare to the on-disk per-file ground_truth scores.
-        helper_out = file_vector_to_log_space(gt_linear_fv)
+        reference = Path(__file__).resolve().parents[3] / "reference_data" / "ground_truth"
+        ceiling = json.loads(
+            (reference / "ceiling_anchor_normalized.json").read_text(encoding="utf-8")
+        )
+        helper_out = file_vector_to_log_space(ceiling["file_vector"])
         for i, expected_log in enumerate(helper_out):
-            per_file = json.load(
-                open(
-                    f"/home/klz/Data/SIDEREIS_DATA/ground_truth/ground_truth_score_file_{i:04d}.json"
-                )
+            per_file = json.loads(
+                (reference / f"ground_truth_score_file_{i:04d}.json").read_text(encoding="utf-8")
             )
-            assert per_file["score"] == pytest.approx(expected_log, rel=1e-9), (
-                f"helper output for file {i} ({expected_log:.6f}) disagrees "
-                f"with on-disk ground_truth score ({per_file['score']:.6f}) "
-                "— production formula and helper have drifted apart."
+            assert per_file["score"] == expected_log, (
+                f"helper output for file {i} disagrees with the committed "
+                "ground_truth score — production formula and helper drifted."
             )

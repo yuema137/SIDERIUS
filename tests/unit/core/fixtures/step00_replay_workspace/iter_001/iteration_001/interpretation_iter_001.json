@@ -1,0 +1,22 @@
+{
+  "runtime_vocab": [
+    {
+      "name": "dilated_causal_conv",
+      "kind": "feature",
+      "description": "Exponential receptive field growth.",
+      "tier": "canonical"
+    }
+  ],
+  "key_findings": [
+    "step00 replay fixture finding"
+  ],
+  "model_knowledge_cache": {
+    "pe_wavenet_delta": {
+      "key_findings": [
+        "cached fixture finding"
+      ],
+      "bottlenecks": []
+    }
+  },
+  "collapse_fingerprint_history": {}
+}

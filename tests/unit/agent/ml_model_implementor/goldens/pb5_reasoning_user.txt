@@ -1,0 +1,74 @@
+## Model to implement: `step00_fixture_model`
+
+## Description
+Fixture description: a gated residual 1-D denoiser.
+
+## Mathematical definition
+y = x + f(x) with f a dilated conv stack (fixture math).
+
+## Baseline configuration
+model_config:
+{
+  "channels": 64,
+  "depth": 2
+}
+
+train_config (for context only — do not implement training logic):
+  segmentation_size: 40000 (if present)
+  batch_size: 1
+
+## Forward contract (non-negotiable)
+The model must satisfy this forward contract (non-negotiable):
+    input:  [B, T] int64   — noisy int8 samples shifted to class indices
+    output: [B, 256, T] float32  — per-timestep logits over 256 denoising classes
+
+Task type: classification (per-timestep 256-class).
+
+## Expert Guidance (from upstream agents)
+Prefer small dilation stacks; keep channels <= 128.
+
+## Human Guidance (high priority)
+Keep the receptive field under 1000 samples.
+
+## Reference Code (from ancestor models — for ARCHITECTURAL INSPIRATION ONLY)
+
+⚠ WARNING — read before using the snippets below:
+
+1. Private helper classes (e.g. `CausalConv1d`, `WaveNetBlock`,
+   `DoubleConv`, `PositionalEncoding`, `Down`, `Up`, etc.) shown below
+   are NOT available in your plugin's runtime — they live in
+   `ml_models/models_sandbox.py` which the plugin loader does not import.
+   You MUST inline their logic using only the allowed primitives
+   (torch, torch.nn, torch.nn.functional). Do NOT reference these helper
+   class names in your `init_body` or `forward_body` — that produces
+   `NameError` at smoke-test time.
+
+2. The `self.config = config` + `self.config.X` access pattern that some
+   reference samples use is FORBIDDEN in your plugin. The `config` object
+   is only in scope during `__init__`. Store every value you need as a
+   plain attribute on `self` (e.g. `self.channels = config.channels`)
+   inside `init_body`, then reference `self.channels` in `forward_body`.
+
+3. Use the references for architectural ideas (block structure, dilation
+   schedules, skip-connection topology) — not as code to copy verbatim.
+
+### step00_fixture_ref (reference implementation — inspiration only)
+```python
+# TEST-OWNED reference snippet (design §13.1 — never production source)
+class Step00RefBlock(nn.Module):
+    def forward(self, x):
+        return x
+
+```
+
+
+## ⚠ Previous Implementation Failed Validation — Fix This
+
+Your previous implementation of this same proposal was rejected by the
+validator with the following error. Address it explicitly in your reasoning
+before committing to code:
+
+Previous attempt failed: fixture shape mismatch [B, 255, T].
+
+Do NOT reproduce the same mistake. Your reasoning must explain how you will
+fix each issue raised above.

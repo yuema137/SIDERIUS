@@ -1,0 +1,24 @@
+## Current experiment state (PRIMARY — ground every finding in these)
+
+Open bottlenecks:
+- b1
+
+Key findings:
+- kf1
+
+Take-home message: thm
+
+## Papers retrieved this iteration
+
+### WaveNet (2016)
+**source_ref / content_paper_id (use this exact string for both):** `arxiv:1609.03499`
+Extraction: arxiv_source (Tier 1 — ground-truth LaTeX; quote equations verbatim)
+
+Architecture: dilated causal conv
+Results: SOTA
+Relevance: rel
+
+Key equations (verbatim from source — quote as-is in Mechanism):
+EQ
+
+Produce the findings JSON. Omit any paper that does not address one of the bottlenecks above.

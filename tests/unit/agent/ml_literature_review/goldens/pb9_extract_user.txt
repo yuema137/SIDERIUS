@@ -1,0 +1,5 @@
+Here is the full extracted text of one paper. Compress it into the JSON object described in the system instructions.
+
+--- BEGIN PAPER TEXT ---
+PB-9 frozen fixture paper text.
+--- END PAPER TEXT ---

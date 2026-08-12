@@ -70,13 +70,70 @@ class TestRecordingLLMBridge:
         bridge.reflect("exp_001", "hypo", {"loss": 0.5}, {"baseline": 1.0})
 
         assert len(bridge.calls) == 2
-        assert bridge.calls[0] == ("generate", "sys1", "user1")
+        # Step-00 WF-3 tuple shapes (design §13.5, updated in the same
+        # commit as the helper widening per §17 rule 3): generate records
+        # its kwargs dict as the 4th element; reflect keeps its 5-tuple.
+        assert bridge.calls[0] == ("generate", "sys1", "user1", {})
         assert bridge.calls[1] == (
             "reflect",
             "exp_001",
             "hypo",
             {"loss": 0.5},
             {"baseline": 1.0},
+        )
+
+    def test_wf3_generate_records_label_and_components(self):
+        """WF-3: label/components crossing ``generate`` are RECORDED, not
+        dropped (the audited capture hole). Fails if the helper reverts to
+        the 3-tuple that discarded kwargs."""
+        bridge = RecordingLLMBridge(responses={"generate": {"ok": 1}})
+        bridge.generate("s", "u", label="tuner.planner", components={"history": 42})
+        assert bridge.calls[0] == (
+            "generate",
+            "s",
+            "u",
+            {"label": "tuner.planner", "components": {"history": 42}},
+        )
+
+    def test_wf3_generate_text_accepts_and_records_production_label(self):
+        """WF-3 regression: production passes keyword-only ``label=`` at
+        every ``generate_text`` site; the pre-widening helper raised
+        ``TypeError`` here (audited latent break)."""
+        bridge = RecordingLLMBridge(responses={"generate_text": "text"})
+        out = bridge.generate_text("s", "u", label="proposer.compare")
+        assert out == "text"
+        assert bridge.calls[0] == (
+            "generate_text",
+            "s",
+            "u",
+            {"label": "proposer.compare"},
+        )
+
+    def test_wf3_tool_call_accepts_and_records_kwargs(self):
+        """WF-3: same ``**kwargs`` hole existed on ``tool_call``."""
+        bridge = RecordingLLMBridge(responses={"tool_call": {"tool": "x"}})
+        tools = [{"type": "function"}]
+        bridge.tool_call("s", "u", tools, label="lit.search")
+        assert bridge.calls[0] == ("tool_call", "s", "u", tools, {"label": "lit.search"})
+
+    def test_wf3_reflect_accepts_production_keyword_names(self):
+        """WF-3: the helper's reflect parameter names now match production
+        (``actual_results``/``reflection_context``) so a keyword call that
+        works against the real bridge works against the fake — previously a
+        latent ``TypeError``."""
+        bridge = RecordingLLMBridge(responses={"reflect": {"conclusion": "ok"}})
+        bridge.reflect(
+            "exp_002",
+            "hyp",
+            actual_results={"denoising_score": 1.0},
+            reflection_context={"baseline_score": 0.9},
+        )
+        assert bridge.calls[0] == (
+            "reflect",
+            "exp_002",
+            "hyp",
+            {"denoising_score": 1.0},
+            {"baseline_score": 0.9},
         )
 
     def test_fifo_queue_returns_responses_in_order(self):

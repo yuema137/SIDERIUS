@@ -1,0 +1,130 @@
+{
+  "_captured_at": {
+    "commit": "e9c9e91e3d53181b5e36429174438e4eca06d2a1",
+    "note": "legacy preflight dicts captured from the REAL run_production_preflight during a bounded pseudo iteration (mocked 32GB CUDA, budget 0.3GB); frozen as fixture inputs so the unit-tier stub is machine-independent (design SS22.1)"
+  },
+  "results": [
+    {
+      "status": "success",
+      "preflight_outcome": "MEASURED_PEAK_ABOVE_VRAM_CAP",
+      "message": "\u274c OVER-BUDGET (VRAM) \u2014 estimated 0.4 GB > cap 0.3 GB (1% of 31.3 GB).",
+      "verdict": "\u274c OVER-BUDGET (VRAM) \u2014 estimated 0.4 GB > cap 0.3 GB (1% of 31.3 GB).",
+      "suggestion": "Layer 'embedding' accounts for 2% of estimated VRAM. Reduce its output tensor size \u2014 e.g. shrink the channel dimension, shorten segmentation_size, or replace the quadratic term with a linear-complexity alternative.",
+      "feasible": false,
+      "estimated_gb": 0.428,
+      "inference_batch": 2,
+      "limit_gb": 0.3,
+      "dominant_phase": "training",
+      "memory_killer": {
+        "binding_cap": "vram",
+        "dominant_layer": "embedding",
+        "dominant_layer_class": "Embedding",
+        "dominant_layer_bytes": 8192000,
+        "dominant_fraction": 0.0178,
+        "per_layer": [
+          {
+            "name": "embedding",
+            "class_name": "Embedding",
+            "output_shape": [
+              1,
+              1000,
+              2048
+            ],
+            "bytes": 8192000
+          },
+          {
+            "name": "l1",
+            "class_name": "Linear",
+            "output_shape": [
+              1,
+              1000,
+              2048
+            ],
+            "bytes": 8192000
+          },
+          {
+            "name": "l2",
+            "class_name": "Linear",
+            "output_shape": [
+              1,
+              1000,
+              2048
+            ],
+            "bytes": 8192000
+          },
+          {
+            "name": "head",
+            "class_name": "Linear",
+            "output_shape": [
+              1,
+              1000,
+              256
+            ],
+            "bytes": 1024000
+          }
+        ],
+        "batch_size": null,
+        "segmentation_size": null,
+        "intensity_product": null,
+        "intensity_cap": null
+      },
+      "truncated": false,
+      "num_params": 9441536,
+      "timeout_record": {
+        "operation": "vram_gate",
+        "budget_seconds": null,
+        "elapsed_seconds": null,
+        "phase": "vram_gate"
+      },
+      "effective_vram_limit_gb": 0.3,
+      "effective_limit_source": "operator_vram_budget",
+      "operator_vram_budget_gb": 0.3
+    },
+    {
+      "status": "success",
+      "preflight_outcome": "COMPLETED_MEASUREMENT",
+      "message": "\u2705 FITS \u2014 estimated 0.23 GB \u2264 cap 0.30 GB (usable 25.1 GB of 31.3 GB on NVIDIA GeForce RTX 5090). Dominant phase: training. Inference B: 32.",
+      "verdict": "\u2705 FITS \u2014 estimated 0.23 GB \u2264 cap 0.30 GB (usable 25.1 GB of 31.3 GB on NVIDIA GeForce RTX 5090). Dominant phase: training. Inference B: 32.",
+      "suggestion": "",
+      "feasible": true,
+      "estimated_gb": 0.235,
+      "inference_batch": 32,
+      "limit_gb": 0.3,
+      "dominant_phase": "training",
+      "truncated": false,
+      "num_params": 98816,
+      "timeout_record": {
+        "operation": "complete",
+        "budget_seconds": null,
+        "elapsed_seconds": null,
+        "phase": "complete"
+      },
+      "effective_vram_limit_gb": 0.3,
+      "effective_limit_source": "operator_vram_budget",
+      "operator_vram_budget_gb": 0.3
+    },
+    {
+      "status": "success",
+      "preflight_outcome": "COMPLETED_MEASUREMENT",
+      "message": "\u2705 FITS \u2014 estimated 0.24 GB \u2264 cap 25.07 GB (usable 25.1 GB of 31.3 GB on NVIDIA GeForce RTX 5090). Dominant phase: inference. Inference B: 64.",
+      "verdict": "\u2705 FITS \u2014 estimated 0.24 GB \u2264 cap 25.07 GB (usable 25.1 GB of 31.3 GB on NVIDIA GeForce RTX 5090). Dominant phase: inference. Inference B: 64.",
+      "suggestion": "",
+      "feasible": true,
+      "estimated_gb": 0.243,
+      "inference_batch": 64,
+      "limit_gb": 25.068,
+      "dominant_phase": "inference",
+      "truncated": false,
+      "num_params": 98816,
+      "timeout_record": {
+        "operation": "complete",
+        "budget_seconds": null,
+        "elapsed_seconds": null,
+        "phase": "complete"
+      },
+      "effective_vram_limit_gb": 25.06801757775247,
+      "effective_limit_source": "hardware_snapshot_defensive_cap",
+      "operator_vram_budget_gb": null
+    }
+  ]
+}

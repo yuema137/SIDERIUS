@@ -1,0 +1,30 @@
+## Current experiment state
+
+Models already explored (do not rediscover): wavenet
+
+Key findings so far:
+- kf1
+
+Open bottlenecks:
+- b1
+
+Take-home message: thm
+
+## Queries already tried this run
+- "dilated conv denoising" → 7 hits
+- "squid magnetometer transformer" → 0 hits
+  (too specific — try broader terms for the same concept)
+
+Coverage so far: bottleneck=2, take_home=0, architectural_gap=1, adjacent_technique=0.
+
+A query that returned 0 hits was too narrow or off-vocabulary — broaden it or try different keywords; do NOT repeat a 0-hit query.
+
+## Escalations already attempted this run
+- [arxiv:1609.03499] no-change — paper was already at the requested verbosity OR fetch returned no new content (your reasoning: "tried deep read")
+
+Do NOT re-escalate a paper whose last status was 'no-change' or 'error' — pick a different paper, search for a new one, or stop.
+
+## Papers retrieved so far this run
+- [arxiv:1609.03499] (v1) WaveNet (2016) — raw audio
+
+Decide the single best next action as one JSON object.

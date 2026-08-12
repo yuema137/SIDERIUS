@@ -1,0 +1,18 @@
+## Current experiment state
+
+Models already explored (do not rediscover): wavenet
+
+Key findings so far:
+- kf1
+
+Open bottlenecks:
+- b1
+
+Take-home message: thm
+
+## Papers retrieved so far this run
+None yet — this is the first round.
+
+Escalation is DISABLED this run — choose "search" or "done" only.
+
+Decide the single best next action as one JSON object.

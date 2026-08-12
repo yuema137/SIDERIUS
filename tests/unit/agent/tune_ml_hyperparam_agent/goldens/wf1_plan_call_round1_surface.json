@@ -1,0 +1,39 @@
+{
+  "_captured_at": {
+    "commit": "6a1a0674f796da8143c8de8e4ba450b4637874a3",
+    "note": "captured at clean tree (Step-00 closure-audit reconciliation); design \u00a717 rule 4"
+  },
+  "memory_history": {
+    "type": "list",
+    "length": 0
+  },
+  "expert_advice": "",
+  "force_model": "pe_wavenet_delta",
+  "registry_type": "CapabilityRegistry",
+  "kwargs": {
+    "model_description": null,
+    "exploration_checklist": "",
+    "plugin_source_excerpt": "## PLUGIN CONFIG SCHEMA (authoritative \u2014 read validators carefully)\nThe planner prompt's JSON schema below cannot represent `@model_validator(mode='after')` or cross-field `@field_validator` bodies. Treat the source below as the single source of truth for any cross-field invariants; a proposed config that violates one will be rejected by the resource-eval skill and burn a retry attempt.\n\n```python\nclass PeWavenetDeltaConfig(BaseModel):\n    model_type: str = Field(default=\"pe_wavenet_delta\")\n    segmentation_size: int = Field(default=1000, ge=1)\n    batch_size: int = Field(default=1, ge=1)\n    hidden_dim: int = Field(default=128, ge=8, le=8192)\n\n```\n",
+    "current_round": 1,
+    "max_rounds": 2,
+    "trial_allowed": true,
+    "force_formal_round": true,
+    "plan_overrides": {},
+    "max_epochs": null,
+    "resolved_data_scope": null,
+    "trial_vram_budget_gb": 0.3,
+    "formal_vram_budget_gb": null,
+    "trial_time_budget_minutes": null,
+    "formal_time_budget_minutes": null,
+    "last_vram_estimate_gb": null,
+    "last_time_estimate_minutes": null,
+    "last_batch_size": null,
+    "last_mode": null,
+    "score_table_md": null,
+    "task_description": "",
+    "config_manual_keys": [
+      "quick_notes",
+      "schemas"
+    ]
+  }
+}

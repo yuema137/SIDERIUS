@@ -1,0 +1,15 @@
+## Loss to implement: `step00_fixture_loss`
+
+## Description
+Fixture loss: focal variant with amplitude weighting.
+
+## Mathematical definition
+L = -(1-p)^gamma log(p) * w(a) (fixture math).
+
+## Pre-specified config fields (from proposer)
+{
+  "gamma": 2.0,
+  "amp_weight": 0.5
+}
+
+These are hints — keep, drop, or adjust ranges as needed. The plugin's config class is independent of LossConfig and carries only this loss's own hyperparameters.

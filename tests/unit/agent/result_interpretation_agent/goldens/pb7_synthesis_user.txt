@@ -1,0 +1,32 @@
+## Overall Performance
+Raw best across all models   : -2.1
+Best valid across all models : None
+Worst score across all models: -3.3
+Config that produced overall best:
+{
+  "lr": 0.001
+}
+
+---
+## Model: wavenet
+Raw best   : -2.1 (health=unknown)
+Best valid : None
+Worst score: -3.0
+
+### Key Findings
+  - f1
+
+### Bottlenecks
+  - b1
+
+### Best Config Analysis
+bca
+
+### Score Trend
+st
+
+---
+## Stable Architectures (Compressed)
+[1 older architectures compressed for context budget — see /siderius/pb7/ws/iter_003/iter_*/interpretation.json for full detail]
+
+- **punet** (best=-2.5, n_rounds=3): tk

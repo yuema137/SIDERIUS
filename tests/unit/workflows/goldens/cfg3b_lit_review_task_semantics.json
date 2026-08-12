@@ -1,0 +1,47 @@
+{
+  "_captured_at": {
+    "commit": "4d3e460bb8817e62f002128fd49b535fa07513c0",
+    "note": "captured at clean tree (Step-00 0B capture); design \u00a717 rule 4"
+  },
+  "enabled": false,
+  "root_papers": [
+    {
+      "source_type": "arxiv",
+      "identifier": "2406.04378",
+      "verbosity": 1
+    }
+  ],
+  "dynamic_search": {
+    "enabled": true,
+    "max_rounds": 3,
+    "initial_verbosity": 0,
+    "escalation_allowed": true,
+    "results_per_query": 10,
+    "max_escalations_per_round": 2
+  },
+  "findings_verbosity": 1,
+  "synthesis": {
+    "transfer_tolerance": "moderate"
+  },
+  "confidence_rubric": {
+    "omit_below": 0.4,
+    "abstract_only_ceiling": 0.79,
+    "bands": [
+      {
+        "lower": 0.8,
+        "upper": 1.0,
+        "criteria": "deep-read (verbosity >= 1 extract) AND on-domain (1D / broadband signal denoising) AND directly addresses a current bottleneck"
+      },
+      {
+        "lower": 0.6,
+        "upper": 0.79,
+        "criteria": "deep-read with a clear mechanism transfer, OR an on-domain abstract with a strong specific signal"
+      },
+      {
+        "lower": 0.4,
+        "upper": 0.59,
+        "criteria": "abstract-only evidence, OR cross-domain with a plausible (unvalidated) transfer rationale"
+      }
+    ]
+  }
+}

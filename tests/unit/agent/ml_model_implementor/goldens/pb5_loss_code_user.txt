@@ -1,0 +1,10 @@
+## Your Reasoning
+
+FIXTURE REASONING TEXT (test-owned, frozen)
+
+---
+
+## Loss name: `step00_fixture_loss`
+## Class name: `Step00FixtureLoss`
+
+Now output the JSON code sections.
