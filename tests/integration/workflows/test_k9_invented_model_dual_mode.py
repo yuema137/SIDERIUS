@@ -262,10 +262,36 @@ def test_invented_model_type_triggers_k2_5_8_fallback_path(tmp_path, request, mo
     # model choreography below (gate verdicts, OOM-skip taxonomy, planner
     # reaction, Phase-K budget fields, formal promotion) remains the value
     # of this test.
-    stdout = capsys.readouterr().out
-    # Verdict line printed by the wrapper. Both 'YES' (round 2 fits) and
-    # 'NO' (round 1 over budget) outcomes are reachable here.
-    assert "Feasible" in stdout, "Gate should print a verdict line."
+    capsys.readouterr()  # drain; stdout is no longer an assertion surface
+    # Step-00 OD-5 (operator-approved 2026-08-12; design
+    # docs/design/generic_framework_upgrade/step_00_golden_baseline_harness.md
+    # §22.3): the former ``assert "Feasible" in stdout`` went stale when
+    # the verdict print stopped reaching the parent stdout on this path
+    # (pre-existing red, proven at base 844a329f). TEST-ONLY assertion
+    # migration: the same property — the VRAM gate ran and produced a
+    # verdict for every attempt — is asserted on production-owned
+    # STRUCTURED evidence instead: each persisted record carries the
+    # gate's measured verdict fields. No production print was restored
+    # or moved (that disposition belongs to step 05a). Both modes.
+    # The stdout property was "at least one verdict line was printed";
+    # the equivalent-strength structured property is "at least one record
+    # carries the gate's measured verdict evidence" (production stamps
+    # ``memory.vram_estimate_gb`` on gated trial attempts; the formal
+    # round's record does not carry it by existing production behavior —
+    # verified during this migration). Layer 2 below keeps the strong
+    # per-record taxonomy in pseudo mode.
+    assert output.all_records, "gate choreography must persist at least one record"
+    gate_evidence = [
+        rec
+        for rec in output.all_records
+        if rec.status == "skipped_oom_risk"
+        or (rec.memory is not None and rec.memory.vram_estimate_gb is not None)
+    ]
+    assert gate_evidence, (
+        "no record carries any VRAM-gate verdict evidence — the pre-flight "
+        "gate did not run (OD-5 escalation guard: STOP for operator review, "
+        "do not weaken this assertion)"
+    )
 
     # ------------------------------------------------------------------
     # Layer 2 — per-record memory. Pseudo mode only (real-LLM may diverge).

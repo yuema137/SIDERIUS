@@ -960,6 +960,7 @@ re-worded), then each surface is mapped to baseline IDs or an explicit
 | "generated plugin byte-identical for a fixed spec" (step-04 A) | requires an LLM-output fixture pipeline; owned by step 04's own design | step 04 design |
 | byte-level sandbox artifact-content pins (step-05c A) | artifact CONTENT is run-dependent; key sets pinned by REC-3; content pins need 05c's deliverable-contract fixtures | step 05c design |
 | tuner override-chain resolution deep-equal (step-07a A) | resolution spans planner plan + operator overrides; needs 07a's fixture design | step 07a design |
+| training-argv full byte pin (step-05c/11 A) | EXE-1 covers env transport/forwarding/sentinels; the byte pin IS step 05c's own A-checkpoint — no earlier consumer (0E verify-strength verdict) | step 05c design |
 
 ## 16. Fixture and artifact organization
 
@@ -1491,39 +1492,76 @@ test_k9_invented_model_dual_mode.py`. No production change. Depends
 on: 0A (widened helper).
 
 **Implementation plan.**
-- [ ] Inspect the tuner call sites (`:4162-4197`, `:5557-5560`) and
-      the pseudo-iteration entry used by existing unit tests before
-      finalizing the harness.
-- [ ] WF-1: capture the 25-param surface (1 positional + 24 kw);
-      deep-equal serializable subset; justified exclusions asserted
-      by type/identity.
-- [ ] WF-2: reflect kwargs at the sole call site.
-- [ ] WF-3: label-inventory baseline (set of labels from one pseudo
-      iteration per node).
-- [ ] Verify-strength pass over MD-1/FC-1/EXE-1/EXE-2: read each
-      registered test; strengthen to the stated criterion where
-      weaker (each strengthening is its own checklist line recorded
-      here at implementation time).
-- [ ] k9 TEST-ONLY assertion migration per §22.3: replace
-      `assert "Feasible" in stdout` (`test_k9_invented_model_
-      dual_mode.py:268`) with assertions on the production-owned
-      structured evidence (gate verdict via the record status
-      taxonomy / wrapper result fields), preserving the same
-      choreography; run k9 and confirm GREEN. If the migrated
-      assertions reveal the gate does not fire (no
-      `skipped_oom_risk` record), STOP — material finding, operator
-      decision (§22.3 escalation guard).
-- [ ] Register WF-4 (only once k9 is green) with the tier-2
-      invocation contract (§16).
+- [x] Harness = the shared 0C bounded pseudo iteration (real tuner
+      call sites crossed; RecordingLLMBridge records transitively).
+- [x] WF-1: round-1 plan() surface deep-equal golden (path-leak
+      checked at capture: zero) + kwarg key-set golden asserted
+      identical across all 3 calls (22 kwargs + expert_advice/
+      force_model + positional memory_history = the 25-param surface);
+      registry pinned by type name (CapabilityRegistry),
+      memory_history by type/length (content owned by WF-4/k9).
+- [x] WF-2: both reflect calls' surfaces (exp_id presence,
+      hypothesis type, actual_results/reflection_context sorted key
+      sets) as a JSON golden.
+- [x] WF-3 disposition (bounded deviation, recorded): the recording
+      capability landed in 0A (helper widened + 4 regression pins);
+      label COVERAGE is realized as the explicit per-surface label
+      asserts distributed across the PB/boundary tests (tuner.planner,
+      tuner.reflector, proposer.comparison/causal_reasoning/proposing,
+      implementor ×4 captured labels + 2 repair constants, validator.
+      code_review, interpretation.per_model/synthesis/dedup,
+      cache_consolidator.list_merge, lit_review.paper_extract/
+      search_decision/synthesis) — a single-run consolidated inventory
+      would require executing every node in one test, duplicating all
+      PB fixtures for no added sensitivity; the audited 20-label table
+      remains in §4.3.
+- [x] Verify-strength verdicts (each test read):
+      MD-1 SUFFICIENT — builtin→class identity mapping pinned
+      (`test_models_forward.py:44-49`) + per-builtin forward shape
+      contract; exact registry key-set equality is structurally
+      impossible while the registry auto-extends from the machine
+      plugin tree (subset + identity mapping is the honest pin).
+      FC-1 SUFFICIENT — estimator suites pin breakdown key sets and
+      exact byte arithmetic (e.g. `weights_bytes == 100_000*4`,
+      `inference_batch == 25`).
+      EXE-2 SUFFICIENT — `test_sandbox_rlimit.py` pins scoring 24 /
+      training 40 / inference 60 GiB on BOTH the function and the
+      table, plus env override + zero-disable.
+      EXE-1 PARTIAL → env transport (SIDERIUS_PLUGIN_DIRS subprocess
+      asserts), CLI forwarding, and sentinel recognition are
+      registered; the full training-argv BYTE pin is moved to §15.2
+      as an explicit deferral owned by step 05c (whose own
+      A-checkpoint IS "argv/file-IPC byte-identical" — pinning it in
+      Step 00 would duplicate that checkpoint with no earlier
+      consumer).
+- [x] k9 migration DONE (test-only): the stale stdout assert
+      replaced by equivalent-strength structured evidence — ≥1 record
+      carrying a gate verdict (skipped_oom_risk OR
+      memory.vram_estimate_gb) with the escalation guard in the
+      failure message; Layer 2 keeps the strong pseudo taxonomy.
+      Migration discovery: production does NOT stamp vram_estimate_gb
+      on the FORMAL record (the gate runs — its preflight was captured
+      live in 0C — but the stamp is trial-scoped); a per-record
+      assertion was therefore stronger than the original property and
+      was corrected, documented in the test. k9 GREEN: 1 passed,
+      11.7 s (rc=0 from the log). l_fail GREEN: 1 passed, 72.7 s
+      (rc=0). The gate FIRES (skip record + trial evidence) — the
+      §22.3 escalation case did not arise.
+- [x] WF-4 REGISTERED (k9 + l_fail fresh green logs recorded above;
+      tier-2 invocation contract per §16 — citing Stage-A claims must
+      attach fresh green runs).
 
 **Validation plan.**
-- [ ] Unit: WF-1/2/3 tests.
-- [ ] Mutations (§19.1): kwarg drop/rename at call site; label-string
-      change → label-inventory diff (and PB goldens stay green —
-      §19.2's separation control).
-- [ ] Determinism: run the WF family twice; byte-identical verdicts.
-- [ ] Cost: wall time of the bounded iteration recorded; must keep
-      the family inside the §16 budget.
+- [x] Unit: 3 passed (WF family, 1.4 s).
+- [x] Mutation: deleted the `max_epochs=` line at the production plan
+      call site → BOTH WF-1 tests red (surface + key-set); restored;
+      green. (Label-separation control was recorded at 0A: label
+      mutation fails only the capture-site integrity assert, golden
+      bytes green.)
+- [x] Determinism: family run twice back-to-back — 3 passed both
+      (module-scoped fresh iterations each run).
+- [x] Cost: bounded pseudo iteration ≈1.4 s per module run (well
+      inside the §16 budget).
 
 **Acceptance criteria.**
 - [ ] Dropping any single VALUE-carrying plan kwarg at the call site
