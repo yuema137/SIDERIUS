@@ -17,8 +17,8 @@ and 7), jointly constituting that step's acceptance entry.
 
 | Step | Document | Status (mirror of §15.1) |
 |---|---|---|
-| 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | IMPLEMENTED — PR open, awaiting CI + operator review (NOT merged) |
-| 01 | `step_01_proposer_hypothesis_space.md` | not created |
+| 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | COMPLETE — merged (PR #198, 2026-08-12) |
+| 01 | `step_01_proposer_hypothesis_space.md` | DESIGN IN PROGRESS (parallel worktree, branch `docs/generic-framework-step-01-design`; implementation blocked until design freeze) |
 | 02 | `step_02_dataset_sample_topology.md` | not created |
 | 03 | `step_03_model_loss_contract.md` | not created |
 | 04 | `step_04_candidate_creation_mechanics.md` | not created |
@@ -30,3 +30,26 @@ and 7), jointly constituting that step's acceptance entry.
 | 10 | `step_10_orchestration_task_binding.md` | not created |
 | 11 | `step_11_execution_infrastructure.md` | not created |
 | 12 | `step_12_task_composition_binding.md` | not created |
+
+## Step design kickoff protocol (operator-frozen, 2026-08-12)
+
+Every step design follows:
+
+```text
+frozen overall roadmap review
+  -> prerequisite design/evidence review
+  -> preliminary PR-decomposition hypothesis
+  -> focused source audit for the step
+  -> source-grounded FINAL one-PR vs multi-PR decision
+  -> parent (+ child PR) detailed designs
+  -> adversarial review
+  -> operator review / design freeze
+  -> implementation only after prerequisite merges + authorization
+```
+
+The PR split is never frozen before the source audit. Default:
+one step = one PR. **One PR = one design doc**: when one PR suffices,
+the parent `step_NN_<name>.md` IS the PR doc; a real multi-PR split
+adds `step_NN_<name>/pr_NNa_<unit>.md` children, each owning one
+independently mergeable behavioral outcome. Per-PR docs carry the
+operator's per-commit 8-section checklists ([ ]/[x]).
