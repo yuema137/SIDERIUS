@@ -7,6 +7,26 @@ OD-S1-5 approved: PR 01a implementation is authorized. This document
 is now the LIVE IMPLEMENTATION LEDGER — checklists, evidence,
 deviations and discoveries are recorded here as work proceeds.
 
+### Live implementation status (mechanical, 2026-08-12)
+
+| Semantic commit | State | SHA | Title |
+|---|---|---|---|
+| `S1-A0` | **COMPLETE** | `4a11e4e8` | `test(step01a-S1-A0): complete the PB-3 test-owned ForwardContract fixture` |
+| `S1-A` | **COMPLETE** | `a3a97014` | `feat(step01a-S1-A): render the legacy commit prompt from its declarations` |
+| `S1-B` | **COMPLETE** | `aa1127d7` | `feat(step01a-S1-B): derive the proposing stage's loss legality from the authority` |
+| `S1-D` (§4.4) | **COMPLETE** | (this commit) | contrast rungs B-i / B-ii / FX-2 / FX-5 + second surface + mutation closeout |
+| PR closeout (§5/§6) | **NOT STARTED** | — | full suite, static, push, PR, exact-head CI |
+
+Branch base: master `6f3866b6` (designs frozen) — the four
+implementation commits are the only commits ahead of master on this
+branch. **PR 01b has NOT started** — no branch, no commit, no file
+touched.
+
+S1-D lands one new test file
+(`tests/unit/agent/ml_model_proposal_agent/test_step01a_contrast_rungs.py`,
+372 lines / 31 cases) plus this ledger and the parent's status pointer.
+**Zero production diff in S1-D.**
+
 ### Kickoff record (mechanical, 2026-08-12)
 
 | Item | Value |
@@ -376,7 +396,35 @@ str.replace) — checked by inspection + a collision guard assert in
 the new tests; a missing template_vars key ships the literal
 placeholder to the LLM (silent no-op) — covered by the rendered pins.
 
-**Verification commands and evidence.** (after execution)
+**Verification commands and evidence.**
+- `pytest tests/unit/agent/ml_model_proposal_agent/ -q` → **539 passed,
+  2.0 s** at the S1-B head (`aa1127d7`). Corroborated by the rescue
+  session's read-only re-run on the same head WITH the uncommitted
+  S1-D rung file present: **558 passed, 1.91 s** — 539 + the 19 new
+  rung cases, i.e. the S1-B figure is exactly reproduced and nothing
+  regressed.
+- All **9 PB-3 goldens byte-identical** (unmodified on top of the
+  S1-A0 regeneration); `git status --short` on the goldens directory
+  showed no change through this commit.
+- Mutations, each restored and re-verified green: **M-5b** (one-sided
+  template edit — placeholder re-inlined while the renderer stays
+  wired) → **RED** on the absence pin; **M-5c** (loss AUTHORITY
+  `+zz_probe`) → **RED**, 4 tests including the PB-3 goldens.
+- ruff check + ruff format --check → clean on every touched file.
+
+**SCOPE FINDING RECORDED AS THE COMMIT'S PRIMARY EVIDENCE.** The
+audited tier-(i) extraction is NARROWER than a naive loss-alphabet
+sweep would be. Of the four F5 loss sites in `proposing_stage.md`,
+only the output-contract TABLE cells are byte-identical to
+`_render_loss_legality`; the other three state the same fact in three
+DIFFERENT surface formats (`:41` slash-separated, `:92`
+slash-separated inside quoted backticks, `:168` "or"-joined, `:85-86`
+line-wrapped mid-list). Deriving those would require INVENTING new
+formatting rules, which **OD-S1-7 explicitly rejects for this step**.
+S1-B therefore extracted ONLY the source-audited tier-(i) legality
+cells and left the rest literal, with a tier-(ii) RETENTION pin so a
+later contributor cannot "finish the job" by inventing the formatting
+semantics OD-S1-7 refused.
 
 **Commit boundary.** proposing_stage.md + template_vars + tests;
 rendered TIDMAD bytes unchanged.
@@ -396,27 +444,302 @@ executed and recorded; contract-reassertion contrast variant lands.
 any production diff.
 
 **Implementation plan.**
-- [ ] 13.4-A fixture + asserts (§9.1).
-- [ ] 13.4-B rungs **B-i** (regressor, the roadmap's named fixture)
+- [n/a] 13.4-A fixture + asserts (§9.1) — **MOVED to PR 01b** by the
+      operator carve-out below (it is rung FX-1, the description axis).
+- [x] 13.4-B rungs **B-i** (regressor, the roadmap's named fixture)
       and **B-ii** (16-class classifier) as SEPARATE same-axis
       fixtures (§9.2), B-ii carrying the contrast half of the
       re-targeted contract-reassertion pins.
-- [ ] FX-2 rung (§9.4): rank-4 NEUTRAL-axis contract profile + an
+      → `test_step01a_contrast_rungs.py::TestRungBi` (4 cases),
+      `::TestRungBii` (3), `::TestContractReassertionContrast` (3).
+- [x] FX-2 rung (§9.4): rank-4 NEUTRAL-axis contract profile + an
       unfamiliar `task_type`; assert (a) the declared rank-4 text and
       the opaque `task_type` label render on all Step-01 surfaces, and
       (b) zero `[B, 256, T]`/`[B, T]`/"amplitude bins"/"256 denoising"
       residue **within the contract-DERIVED blocks only** — the three
       §9.5 whitelisted survivors are expected and must not be
       "fixed". One axis only — description and losses untouched.
-- [ ] FX-5 rung (§9.4): multi-channel temporal declaration; assert it
+      → `::TestRungFX2` (4) + `::TestSecondStepOneSurface` (8, the
+      "all Step-01 surfaces" half — see the SURFACE-COVERAGE finding).
+- [x] FX-5 rung (§9.4): multi-channel temporal declaration; assert it
       renders verbatim with no scalar-`[B,T]` residue in the derived
       blocks (proves "time series" is not assumed scalar).
-- [ ] Record FX-3/FX-4 as DEFERRED prerequisites for the contract-owning
+      → `::TestRungFX5` (3) + the FX-5 case in `::TestSecondStepOneSurface`.
+- [x] Record FX-3/FX-4 as DEFERRED prerequisites for the contract-owning
       step (§6A.5 binding dependency) — no stub, no placeholder test.
-- [ ] Execute remaining mutations (M-3, M-4, M-7, M-8, M-9) + the flexible-input
+      → recorded in the DEFERRAL REGISTER below; parent §9.4 already
+      carries the rows. No test file was created for either rung, by
+      design: a skipped placeholder would read as coverage.
+- [x] Execute remaining mutations (M-3, M-4, M-7, M-8, M-9) + the flexible-input
       mutations N-RANK/N-RESIDUE/N-OPAQUE (§15.1) with mutation-proof
       hygiene (cache clear, count==1, baseline re-run); record the
       dossier in this document.
+      → S1-D DOSSIER below. M-8/M-9 were already executed RED at S1-A
+      (§14.1 dossier) against the same production sites and are
+      cross-referenced rather than re-run; M-7 is DEFERRED with PR 01b
+      because its steady-state assertion IS fixture 13.4-A.
+
+**RE-JUSTIFICATION ON RESUME (required by the rescue record below).**
+Every assertion in the rung file was re-derived from source before this
+commit, not accepted because it was green. The re-justification produced
+two corrections and one gap, all recorded below. The rendered commit
+prompt was dumped under a rank-4 profile and read line by line to
+separate DERIVED tokens from literal survivors:
+
+| Line in the render | Class |
+|---|---|
+| `mathematical_definition` "Input: … Output: …" citation | DERIVED (`{INPUT_SHAPE}`, `{OUTPUT_SHAPE}`, `{OUTPUT_DESCRIPTION}`) |
+| "- The input is fixed: …" hard-constraint line | DERIVED (`{INPUT_SHAPE}`) |
+| `"classifier"` → output … (per-timestep class logits) | shape DERIVED, parenthetical LITERAL |
+| `output_type` catalogue `[B, 256, T] per-timestep class logits` | LITERAL — tier (ii), §9.5 survivor |
+| `[B, T] float32 (the denoised waveform directly)` (×2) | LITERAL — tier (iii), §9.5 survivor |
+| `256 denoising bins per time step is contract-fixed` | LITERAL — tier (iii), §9.5 survivor |
+
+That table is what licenses `_TIDMAD_DERIVED_ONLY_TOKENS =
+("[B, T] int64", "[B, 256, T] float32")`: both tokens are reachable
+ONLY through substitution (the catalogue's copy drops the dtype, so it
+does not collide), while every whitelisted survivor is asserted
+PRESENT rather than absent.
+
+**FINDING — the rungs covered only ONE of the two Step-01 surfaces
+(gap found by the resume re-justification; now closed).**
+
+```text
+Previous state (as written before the context break):
+  all four rungs asserted against `_render_commit_system_prompt`
+  alone — the LEGACY commit surface.
+
+Audit evidence:
+  §4.4 requires FX-2 to assert "the declared rank-4 text and the
+  opaque `task_type` label render on ALL Step-01 surfaces". The
+  production PIPELINE surface is the proposing stage, which receives
+  the declaration through the pre-existing `{forward_contract}`
+  placeholder fed at `ml_model_proposal_agent.py:1709` with
+  `render_forward_contract(inp.forward_contract)`, plus the S1-B
+  legality cells at `proposing_stage.md:70-71`. None of that was
+  exercised by any rung.
+
+Corrected understanding:
+  the rank-agnosticism claim was demonstrated only on the surface the
+  pipeline does NOT use. An in-tree precedent for rendering the other
+  surface already existed
+  (`test_proposer_task_config.py::TestProposingStageMdSubstitution`),
+  so the gap was coverage, not feasibility.
+
+Implementation consequence:
+  added `TestSecondStepOneSurface` (8 cases) rendering
+  `load_stage_prompt("proposing_stage", …)` with production-shaped
+  template_vars. NO production change.
+
+Validation consequence:
+  mutation N-OPAQUE now reds on this surface specifically — before the
+  addition, a `task_type` branch inside `render_forward_contract`
+  would have left every PR-01a rung green.
+```
+
+**FINDING — residue must be judged relative to EACH rung's own
+declaration (correction made during this commit).**
+
+```text
+Previous assumption:
+  "TIDMAD residue" is a fixed token set that must be absent from every
+  rung's derived block.
+
+Evidence:
+  the first run of the new surface test failed on rung B-ii with
+  `'[B, T] int64' is contained here: input: [B, T] int64`. B-ii is the
+  CLASS-COUNT rung: by the one-axis rule it holds the input shape at
+  the TIDMAD value and varies only `num_classes`/`output_shape`. That
+  token is its DECLARATION, not residue.
+
+Corrected understanding:
+  a blanket absence set silently mis-classifies a declared value as a
+  shadow literal, and the "fix" would have been to weaken or exempt
+  the rung — i.e. to damage the atomicity that makes the ladder
+  meaningful.
+
+Implementation consequence:
+  `test_derived_block_states_this_rung_and_nothing_else` now asserts
+  (a) both declared shapes are present and (b) each TIDMAD shape this
+  rung does NOT declare is absent, computed as a set difference
+  against the rung's own fields.
+
+Validation consequence:
+  strictly stronger — it now also catches a derived block that DROPS a
+  declaration, which the absence-only form could not see. N-RESIDUE
+  reds all four rungs through it.
+```
+
+**DEFERRAL REGISTER (§4.4 bookkeeping).**
+
+| Item | State | Owner | Why not here |
+|---|---|---|---|
+| **FX-3** preset resolution | DEFERRED | step 02/03 contract owner | no preset mechanism exists (§6A.1); PR 01a is forbidden from creating one |
+| **FX-4** mismatch rejection | DEFERRED — binding dependency (§6A.5) | step 02/03 contract owner | Step 01 cannot fail closed on a conflict it has no structured contract to represent |
+| **FX-1 / 13.4-A** description axis | MOVED | PR 01b | needs the JOIN |
+| **M-7** SQUID-residue check | MOVED | PR 01b | its steady-state assertion IS 13.4-A |
+
+No stub or `skip`-marked placeholder was added for any of these: a
+skipped test in the rung file would show up in a coverage read as a
+rung that exists, which is the opposite of the record intended here.
+
+**S1-D MUTATION DOSSIER** (hygiene for every row: target-string site
+count asserted `== 1`, file backed up and restored, all `__pycache__`
+cleared before AND after, mutated run RED, restored run re-verified
+GREEN at **570 passed** for the proposer pack / **789 passed** for
+proposer + workflows).
+
+| Mutation | Site | Result |
+|---|---|---|
+| **M-3** authority disconnected pre-render (`_render_loss_legality(frozenset())` at the `{CLASSIFIER_LOSSES}` call site) | `ml_model_proposal_agent.py` | **RED** — 45 failed + 13 errors; the fail-closed guard raises and the re-targeted contract-reassertion pins error out. Overlaps M-9 by construction (both reach the same guard) — recorded rather than counted twice |
+| **M-4 canonical** hardcoded task fact pasted BESIDE the placeholder (`{INPUT_SHAPE} (i.e. [B, 256, T] float32)`) | `ml_model_proposal_agent.py:373` | **RED** — 6 failed, and critically on the **13.4-B contrast fixture** exactly as §15 predicted (`TestRungBii::test_no_256_class_derived_residue`, `TestRungBi::test_no_classifier_derived_residue`, `TestRungFX2::…residue…`, plus the PB-4 raw-template pin). The S1-A run of M-4 used the shadow-at-a-substitution-site variant and needed a strengthened test; the canonical variant is caught by the rungs that did not exist then |
+| **N-RANK** rank branch substituting TIDMAD for an unrecognised rank (`fc.input_shape if fc.input_shape.count(",") <= 2 else "[B, T] int64"`) | `ml_model_proposal_agent.py` | **RED** — 6 failed, **including FX-2's POSITIVE assertion** (`test_rank4_declaration_renders_verbatim`), which is the specific outcome §15.1 requires: a rank branch cannot be added without reddening FX-2 |
+| **N-OPAQUE** renderer branches on `task_type` instead of rendering it as an opaque label | `workflows/task_config.py:206-212` | **RED** — 8 failed, including `TestSecondStepOneSurface::test_fx2_rank4_and_opaque_task_type_render_on_the_proposing_stage`. This is the mutation that the single-surface rungs would have MISSED |
+| **N-RESIDUE** hardcoded `[B, 256, T] float32` reintroduced into the derived output line | `workflows/task_config.py:197` | **RED** — 10 failed, all four rungs through the derived-block pin. **Shipped-profile parity stayed GREEN**: CFG-2 (`test_forward_contract_render`) and the PB-4 commit goldens are absent from the mutated run's failure list, which is the §15.1 claim — the rungs catch a shadow literal that TIDMAD parity alone cannot |
+| **M-8** iterate the frozenset instead of `sorted()` | — | **RED at S1-A** (§14.1 dossier, 2 tests). Same production site, unchanged by S1-D; not re-run |
+| **M-9** remove the fail-closed guard | — | **RED at S1-A** (§14.1 dossier, 4 tests). Same site; not re-run |
+| **M-7** SQUID-residue check | — | **DEFERRED to PR 01b** — its steady-state assertion is fixture 13.4-A, which the carve-out moved |
+
+Zero surviving behavior-changing mutations. No mutation was excused;
+the one gap the battery exposed (single-surface coverage) was closed by
+adding tests, not by weakening the mutation.
+
+**IMPLEMENTATION STATE — COMPLETE.** The rescue-session record below
+is preserved verbatim because it is what forced the re-justification
+that found the surface-coverage gap; read it as history, not as
+current state.
+
+The rung test file EXISTS and is untracked:
+`tests/unit/agent/ml_model_proposal_agent/test_step01a_contrast_rungs.py`
+(then 244 lines / 19 test cases; now 372 lines / 31 cases). It
+implements exactly the four rungs this
+PR owns — **B-i** (regressor contract), **B-ii** (16-class
+classifier), **FX-2** (rank-4 neutral-axis + unfamiliar `task_type`),
+**FX-5** (multi-channel temporal) — plus a `TestRungAtomicity` class
+pinning that loss legality is identical across every rung and that the
+description axis (PR 01b) physically cannot be varied here.
+
+Sequence of events, as durably recoverable:
+
+1. the file was created and its first targeted run produced **two
+   failures**;
+2. the first failure's diagnosis IS durably recorded — it is the
+   `input_description` finding below, written into the file as an
+   in-test NOTE (`test_channel_axis_survives_to_the_prompt`,
+   lines 198-206);
+3. **the second failure's diagnosis is NOT durably recovered.** No log
+   of that run survives. It is NOT reconstructed here from memory.
+   Both corrections appear to have been applied before the context was
+   lost, because the rescue session's read-only re-run of the file is
+   green (below) — but WHY the second assertion failed, and therefore
+   whether its correction was source-grounded or merely
+   assertion-weakening, is unverified. **The resuming session must
+   re-read the four rung bodies against §9.2/§9.4/§9.5 and satisfy
+   itself that every assertion still names a defect, before committing
+   S1-D.**
+
+Rescue-session evidence (read-only; no file was edited, no test added):
+
+- `pytest tests/unit/agent/ml_model_proposal_agent/test_step01a_contrast_rungs.py -q`
+  → **19 passed, 1.09 s**;
+- `pytest tests/unit/agent/ml_model_proposal_agent/ -q`
+  → **558 passed, 1.91 s** (= the S1-B head's 539 + these 19).
+
+**RESOLUTION OF THE UNRECOVERED SECOND FAILURE (resuming session).**
+Its diagnosis was NOT reconstructed from memory. Instead the assertion
+it had produced was re-derived from source and found to be weak on its
+own terms, so it was REPLACED rather than trusted:
+
+```text
+What was there:
+  `test_rungs_cannot_vary_the_task_description_axis` asserted
+  `inspect.signature(_render_commit_system_prompt).parameters == ["fc"]`
+  — a structural proxy for "a PR-01a rung cannot vary the description".
+
+Why that was not good enough:
+  it pins the renderer's ARITY, which is a fact about the function's
+  shape, not about the prompt. It would pass unchanged if the commit
+  surface began carrying description prose by some other route, and it
+  would fail as a FALSE alarm the moment PR 01b legitimately threads a
+  description argument. Neither behaviour names a defect in this PR.
+
+What replaced it (source-grounded):
+  `test_commit_surface_carries_no_task_description_prose` — verified
+  from source before writing: the shipped `task_description` is a
+  single sentence and appears NOWHERE in `PROPOSAL_COMMIT_PROMPT`, and
+  the surface contains none of "SQUID" / "TIDMAD" / "dark-matter".
+  So the atomicity claim is true by CONTENT: on this surface the
+  description is not an axis at all, which is exactly why the rungs
+  can hold it fixed and remain single-axis.
+```
+
+This closes the rescue record's open item: no assertion in the file now
+rests on an unrecovered diagnosis, and the one that did has been
+re-derived from source rather than kept because it was green.
+
+**S1-D COMPLETE (this commit).** The FX-3/FX-4 deferral register, the
+full §15/§15.1 battery with hygiene, the surface-coverage gap and the
+two corrections are all recorded above. Final targeted evidence:
+
+| Run | Result |
+|---|---|
+| `pytest …/test_step01a_contrast_rungs.py -q` | **31 passed, 1.15 s** (19 → 31: +8 second-surface, +3 reassertion contrast, atomicity pin replaced) |
+| `pytest tests/unit/agent/ml_model_proposal_agent/ -q` | **570 passed, 2.50 s** |
+| `pytest tests/unit/agent/ml_model_proposal_agent/ tests/unit/workflows/ -q` | **789 passed, 25.8 s** |
+| `ruff check` + `ruff format` on the touched test file | clean |
+
+**SOURCE FINDING — `input_description` is NOT a tier-(i) surface
+(bounded implementation correction, NOT a scope deviation).**
+
+```text
+Previous assumption:
+  every semantic field of ForwardContract that names an input or
+  output fact is extractable as a tier-(i) verbatim-renderable token,
+  so a contrast rung may assert that a rung's declared
+  `input_description` appears in the rendered commit prompt.
+
+Audit / implementation evidence:
+  the commit prompt's input parenthetical is the literal
+  "(per-timestep ADC class indices)", which is NOT byte-identical to
+  the shipped `ForwardContract.input_description`
+  ("raw signal, integer class indices 0-255"),
+  configs/task_config.yaml:19-35. S1-A had ALREADY recorded this at
+  §14.1 ("the prompt's `(per-timestep ADC class indices)`
+  parenthetical is NOT the shipped `input_description` ... so it stays
+  literal") and therefore never placed it in the tier-(i) placeholder
+  set (`{INPUT_SHAPE}` x3, `{OUTPUT_SHAPE}` x2,
+  `{OUTPUT_DESCRIPTION}` x1, `{CLASSIFIER_LOSSES}` x1,
+  `{REGRESSOR_LOSSES}` x1). The S1-D rung re-derived the same fact
+  from the failing assertion.
+
+Corrected understanding:
+  `input_description` remains OUTSIDE tier-(i) extraction. Making it
+  derive would be a default prompt-BYTE change, which §1 forbids for
+  this PR; making the surfaces agree by rewording would be an
+  intentional wording change, which §2 also excludes.
+
+Implementation consequence:
+  NONE for production — no production file changes as a result. The
+  extraction set stays exactly as S1-A landed it. The field is routed
+  with the tier-(ii)/(iii) set to the contract-owning step.
+
+Validation consequence:
+  a contrast rung may assert only against (a) Step-01-owned
+  contract-DERIVED blocks and (b) declarations actually extracted in
+  S1-A/S1-B. It must NOT assert that prose which is literal BY DESIGN
+  renders as though it had been extracted. The FX-5 rung now asserts
+  the NEGATIVE (`"multi-channel sensor stream" not in rendered`) with
+  the reason recorded in-test, which is the honest form: it pins the
+  current boundary instead of pretending the boundary is elsewhere.
+```
+
+**Classification.** This is a **bounded implementation correction, not
+a deviation from the design.** The design already requires
+source-driven tier classification (§4.1, §6.2) and OD-S1-7 already
+forbids inventing formatting/derivation semantics in this step; the
+S1-A ledger already carried the finding. The rung was written against
+a stale assumption and was corrected TO the design, not away from it.
+No operator decision is required.
 
 **Validation plan.** Packs 1-3; full battery dossier.
 
@@ -432,7 +755,11 @@ rows read DEFERRED with an owner, never "covered".
 axes (e.g. alt description that also implies different shapes) — the
 §9 fixtures pin the OTHER axis explicitly to the TIDMAD value.
 
-**Verification commands and evidence.** (after execution)
+**Verification commands and evidence.** Recorded in the S1-D
+dossier and the final-evidence table above; mutation logs at
+`/tmp/mut_{M-3,M-4,N-RANK,N-OPAQUE,N-RESIDUE}.log` with their restored
+counterparts at `/tmp/res_*.log` (transient — the durable record is the
+dossier table).
 
 **Commit boundary.** Test-only.
 
