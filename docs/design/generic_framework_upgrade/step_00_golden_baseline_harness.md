@@ -1092,29 +1092,56 @@ the widened helper, and every other golden uses the diff helper.
       are CLOSED, §22).
 
 **Implementation plan.**
-- [ ] Inspect `render_proposer_prompts_for_audit.py` + `StubLLMBridge`
-      and choose the recorder mechanism per capture site (§4.2/§4.6).
-- [ ] Build the shared diff-assert helper (utf-8 reads, unified diff).
-- [ ] Build the no-network guard (patch retry/HTTP entry to raise;
-      assert ≥1 capture) — §13.1/§14.
-- [ ] Widen `RecordingLLMBridge` (4 holes, §13.5) + update its own
-      pin tests in this commit with the §17-rule-3 message.
+- [x] Recorder mechanism chosen and landed:
+      `tests/helpers/llm_boundary_recorder.py::BoundaryRecorderBridge`
+      subclasses the production `LLMBridge` and overrides ONLY the three
+      create-owning methods (`_chat_json`/`generate_text`/`tool_call`) —
+      plan()/reflect()/generate() bodies run unmodified, so capture is
+      one layer BELOW method entry (exactly the API payload).
+- [x] `tests/helpers/golden.py::assert_golden` — utf-8 reads, unified
+      diff, explicit trailing-newline divergence message, §19.3 triage
+      text, capture instructions on missing golden.
+- [x] No-network guard: both clients replaced with a raising sentinel
+      (`NetworkEscapeError`) after construction; dummy api_key so env
+      keys are never read; tests assert the recorder fired.
+- [x] `RecordingLLMBridge` widened (all 4 holes): generate records its
+      kwargs dict (4th elem); generate_text + tool_call gain **kwargs
+      (accepted AND recorded — closes the audited latent TypeError);
+      reflect renamed to production `actual_results`/`reflection_context`.
+      Pin suite updated + 4 new WF-3 regression pins in the same commit.
+      Blast radius: zero unit-tier consumers beyond the pin suite
+      (verified by grep); integration consumers exercised at 0E.
 - [ ] Create test-owned frozen fixture classes/modules for every
       source-embedding input (§13.1).
-- [ ] Capture PB-1 (≤3-record + force_model variants), PB-2 through
-      the real bridge render; PB-3 ×5 under pinned registry/tree/
-      MODEL_REGISTRY stub; PB-4..PB-9 per §13.1.
+- [x] PB-1 captured (2 variants: auto + force_model=punet classifier
+      branch; system prompt proven force_model-independent and shared)
+      and PB-2 captured, through the REAL bridge renders
+      (`tests/unit/agent/llm_bridge/test_step00_prompt_goldens.py` + 5
+      goldens). OD-1 deferral recorded mechanically
+      (`test_pb1_full_window_boundary_is_the_deferral_line`). Ledger
+      note: the force_model variant's `get_output_type` import
+      auto-scans the machine-local gitignored plugin tree (stdout noise
+      only) — rendered bytes depend only on the BUILTIN punet output
+      type; CI tree is empty; recorded as accepted coupling.
+- [ ] Capture PB-3 ×5 under pinned registry/tree/MODEL_REGISTRY stub;
+      PB-4..PB-9 per §13.1.
 - [ ] Register PB-0 (docstring provenance corrected where stale).
 
 **Validation plan.**
 - [ ] Unit: every golden asserts byte equality via the shared helper.
 - [ ] Negative/invalid: no-network guard test (mis-targeted patch →
       loud offline failure); recorder fires-≥1 assertion test.
-- [ ] Render-layer mutation (§19.1 PB rows): template token swap AND
-      a render-substitution mutation each turn the right golden red —
-      recorded red/green evidence.
-- [ ] Negative control: editing a `label=` string leaves all PB
-      goldens green.
+- [x] Mutation A (template token, `agent/prompts.py` force_model
+      constraint text, site count 1): RED exactly on the force_model
+      variant golden; restored; green. Mutation B (render substitution:
+      swapped plugin_source_excerpt/exploration_checklist append order
+      inside `plan()`, args unchanged): RED on BOTH planner goldens —
+      proves capture at the render output (§10.1); restored; green.
+      __pycache__ cleared around each; backups verified.
+- [x] Negative control: mutating `label="tuner.planner"` fails ONLY
+      the capture-site label integrity assert — both golden byte
+      comparisons unaffected (prompt bytes provably label-independent;
+      the label surface belongs to WF-3). Restored; green.
 - [ ] Backward-compat: the widened helper's DIRECT consumer suites
       green (`test_recording_fakes.py`, the five ad-hoc-bridge test
       files, and every suite importing `recording_llm_bridge`) — this

@@ -1,0 +1,72 @@
+
+### Experiment Outcome for punet_step00_fixture_003:
+- **Original Hypothesis**: Moderate width with focal loss beats the trial.
+- **Actual Results**:
+{
+  "denoising_score": -2.55,
+  "final_loss": 0.0123,
+  "params": {
+    "model_config": {
+      "hidden_dim": 64,
+      "depth": 3
+    },
+    "train_config": {
+      "lr": 0.0005,
+      "batch_size": 8,
+      "epochs": 1
+    },
+    "loss_config": {
+      "loss_type": "focal"
+    }
+  },
+  "status": "success"
+}
+  ⚠ NOTE: final_loss/loss_history above = TRAINING dataset.
+           denoising_score above = VALIDATION dataset (different data).
+           Reason about the gap between them to detect overfitting or underfitting.
+
+### Comparison Context (use this to judge the result):
+  baseline_score        : -2.98
+  best_score_so_far     : -2.91
+  this_experiment_score : -2.55
+  is_new_best           : True
+  denoising_score rank  : 1 / 3 (1 = best)
+  best_final_loss seen (same loss_type='focal') : N/A (first of this type)
+  final_loss rank (loss_type='focal') : first experiment with this loss type
+  best_config_so_far    : {
+  "model_config": {
+    "hidden_dim": 32,
+    "depth": 2
+  }
+}
+### Efficiency Context:
+  baseline_params       : 1200000
+  baseline_epochs       : 1
+  current_params        : 850000
+  current_epochs        : 1
+  params_ratio          : 0.71  (current / baseline params; <1.0 = smaller model)
+  epochs_ratio          : 1.0  (current / baseline epochs; <1.0 = faster training)
+  is_more_efficient     : True  (True = score within 5% of best AND fewer params or epochs)
+### Data Volume Context:
+  training_psd_segments : 200  (PSD segments used for training)
+  eval_psd_segments     : 40  (PSD segments used for scoring)
+  baseline_psd_segments : 4000  (baseline trained on this many)
+  trial_portion         : 0.05
+  eval_portion          : 0.1
+  ⚠ If training_psd_segments << baseline_psd_segments, poor scores may be from
+     insufficient data, NOT bad hyperparameters. Recommend increasing trial_portion.
+
+### INSTRUCTIONS:
+1. Use the Comparison Context to judge whether this result is good, neutral, or bad.
+2. Identify the key factor (loss_type, lr, architecture, etc.) that drove the result.
+3. Compare final_loss ONLY against experiments with the same loss_type.
+4. Synthesize a new Memory Entry.
+5. Output a strict JSON containing the new insights.
+
+### OUTPUT FORMAT (Strict JSON):
+{
+    "conclusion": "Clear verdict: good/neutral/bad relative to baseline and best score, with reason",
+    "key_factor": "The specific hyperparameter change most responsible for this result",
+    "discovery": "One technical insight gained from this experiment",
+    "memory_update": "Actionable advice for the next round based on this result"
+}

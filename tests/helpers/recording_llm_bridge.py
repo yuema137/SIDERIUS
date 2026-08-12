@@ -65,22 +65,30 @@ class RecordingLLMBridge:
     ) -> dict[str, Any]:
         """Mirror of :meth:`LLMBridge.generate`. Returns a parsed-dict response.
 
-        ``**kwargs`` swallows real-bridge keyword args (``label``, ``components``,
-        and any future optional kwarg) so adding telemetry/labeling parameters
-        to the real bridge doesn't require touching every test fixture.
+        Step-00 WF-3 widening: ``**kwargs`` (``label``, ``components``, any
+        future optional kwarg) is RECORDED as the 4th tuple element instead
+        of being dropped, so tests can assert what actually crossed the
+        method boundary. Tuple indexes 0-2 are unchanged for existing
+        consumers.
         """
-        self.calls.append(("generate", system_prompt, user_prompt))
+        self.calls.append(("generate", system_prompt, user_prompt, dict(kwargs)))
         return self._pop("generate")
 
     def reflect(
         self,
         exp_id: str,
         hypothesis: str,
-        results: dict[str, Any],
-        context: dict[str, Any],
+        actual_results: dict[str, Any],
+        reflection_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Mirror of :meth:`LLMBridge.reflect`. Returns a parsed-dict reflection."""
-        self.calls.append(("reflect", exp_id, hypothesis, results, context))
+        """Mirror of :meth:`LLMBridge.reflect`. Returns a parsed-dict reflection.
+
+        Step-00 WF-3 widening: parameter names now MATCH the production
+        signature (``actual_results``, ``reflection_context`` — previously
+        ``results``/``context``), closing the audited latent break for
+        keyword callers. The recorded tuple shape is unchanged.
+        """
+        self.calls.append(("reflect", exp_id, hypothesis, actual_results, reflection_context))
         return self._pop("reflect")
 
     def plan(
@@ -124,9 +132,16 @@ class RecordingLLMBridge:
         self.calls.append(("plan", memory_history, expert_advice, force_model, recorded_kwargs))
         return self._pop("generate")
 
-    def generate_text(self, system_prompt: str, user_prompt: str) -> str:
-        """Mirror of :meth:`LLMBridge.generate_text`. Returns a plain string."""
-        self.calls.append(("generate_text", system_prompt, user_prompt))
+    def generate_text(self, system_prompt: str, user_prompt: str, **kwargs: Any) -> str:
+        """Mirror of :meth:`LLMBridge.generate_text`. Returns a plain string.
+
+        Step-00 WF-3 widening: production passes keyword-only ``label``/
+        ``components`` at every call site; the previous signature had no
+        ``**kwargs`` so a production-style ``label=`` call raised
+        ``TypeError`` (audited latent break). Kwargs are now accepted AND
+        recorded as the 4th tuple element.
+        """
+        self.calls.append(("generate_text", system_prompt, user_prompt, dict(kwargs)))
         return self._pop("generate_text")
 
     def tool_call(
@@ -134,10 +149,15 @@ class RecordingLLMBridge:
         system_prompt: str,
         user_prompt: str,
         tools: list[dict[str, Any]],
+        **kwargs: Any,
     ) -> Any:
         """Mirror of :meth:`LLMBridge.tool_call`. Returns whatever the test
-        registered (typically a ToolCallResult-shaped object or a dict)."""
-        self.calls.append(("tool_call", system_prompt, user_prompt, tools))
+        registered (typically a ToolCallResult-shaped object or a dict).
+
+        Step-00 WF-3 widening: same ``**kwargs`` acceptance+recording as
+        ``generate_text`` (5th tuple element).
+        """
+        self.calls.append(("tool_call", system_prompt, user_prompt, tools, dict(kwargs)))
         return self._pop("tool_call")
 
     def emit_marker(self, *, label: str, extra: dict[str, Any] | None = None) -> None:
