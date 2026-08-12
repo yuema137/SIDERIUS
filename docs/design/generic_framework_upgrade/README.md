@@ -18,7 +18,7 @@ and 7), jointly constituting that step's acceptance entry.
 | Step | Document | Status (mirror of §15.1) |
 |---|---|---|
 | 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | COMPLETE — merged (PR #198, 2026-08-12) |
-| 01 | `step_01_proposer_hypothesis_space.md` | DESIGN IN PROGRESS (parallel worktree, branch `docs/generic-framework-step-01-design`; implementation blocked until design freeze) |
+| 01 | [`step_01_proposer_hypothesis_space.md`](./step_01_proposer_hypothesis_space.md) | DESIGN READY FOR OPERATOR REVIEW — OD-S1-1..8 pending; implementation blocked on design freeze |
 | 02 | `step_02_dataset_sample_topology.md` | not created |
 | 03 | `step_03_model_loss_contract.md` | not created |
 | 04 | `step_04_candidate_creation_mechanics.md` | not created |
