@@ -271,11 +271,20 @@ hardcoded inside it (each restated relative to an existing authority):
   forward_contract (rendered via `render_forward_contract`, consumed
   ONLY by proposing_stage.md:131), available_losses_block,
   available_models_block.
-- Placeholders per template (verified): comparison_stage.md →
-  {minimum_boldness}, {available_losses_block}; causal_reasoning_
-  stage.md → {minimum_boldness}; proposing_stage.md →
-  {known_constraints_block} (:109), {forward_contract} (:131), plus
-  policy vars. NO stage template renders the task description.
+- Placeholders per template (corrected by adversarial review F1):
+  comparison_stage.md → ONLY the `{# EXPLORATION_MODE_BLOCK #}` hook
+  (:143); comparison_stage_explore.md → {n_agent_proposed};
+  comparison_stage_exploit.md → {n_agent_proposed} +
+  {n_confirmed_links}; causal_reasoning_stage.md →
+  {available_losses_block} (:37) + {minimum_boldness} ×2 (:140);
+  proposing_stage.md → {available_losses_block} (:30, again :177),
+  {available_models_block} (:32, again :235),
+  {recent_gate_exhaustions_block} (:103),
+  {recent_trial_validity_block} (:105), {healthgate_evidence_block}
+  (:107), {known_constraints_block} (:109), {existing_model_types}
+  (:124,:212,:244), {forward_contract} (:131); the three
+  causal/proposing mode files carry none. NO stage template renders
+  the task description.
 - **Consequence (the JOIN gap, Step-00 §15.2 last row)**: on the
   PRODUCTION pipeline path the shipped `task_description` NEVER
   reaches any rendered prompt — only the forward contract does
