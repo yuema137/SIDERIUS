@@ -375,16 +375,23 @@ description string (`test_planner_prompt_task_config.py:32`). Placement
 Depends on S1-C.
 
 **3. Implementation plan.**
-- [ ] Build the 13.4-A fixture: alternative description, SHIPPED
-      ForwardContract UNCHANGED — one axis only.
-- [ ] Assert the alternative text reaches the task-background block of
-      all three stage system prompts.
-- [ ] Assert ZERO SQUID residue **inside the description-derived block
+- [x] Build the 13.4-A fixture: alternative description, SHIPPED
+      ForwardContract UNCHANGED — one axis only. → new module
+      `test_step01b_description_axis_contrast.py`; the in-tree `_ALT_TD`
+      is imported from `test_planner_prompt_task_config.py`, and the
+      contract is read from `load_task_config()` and passed IDENTICALLY
+      to both variants.
+- [x] Assert the alternative text reaches the task-background block of
+      all three stage system prompts. → plus the displacement half (the
+      shipped description must be ABSENT), which is what fails when the
+      channel is a constant rather than a live read.
+- [x] Assert ZERO SQUID residue **inside the description-derived block
       only** — not the whole prompt (contract prose legitimately still
       says "denoising classes" because the CONTRACT is still TIDMAD's;
       parent §9.1 and the §9.5 whitelist discipline).
-- [ ] Assert contract-derived tokens are byte-identical to the
-      TIDMAD-description variant of the same render (axis isolation).
+- [x] Assert contract-derived tokens are byte-identical to the
+      TIDMAD-description variant of the same render (axis isolation). →
+      implemented in the STRONGEST available form (§14.7).
 
 **4. Validation plan.** Targeted unit only. Mutation: reintroduce a
 hardcoded SQUID phrase into the block rendering → 13.4-A red while
@@ -1074,3 +1081,83 @@ Validation:
 | full unit suite | **deliberately NOT run** — §10.A: terminal gate only. Targeted evidence shows a bounded blast radius (three templates, one node function, one `template_vars` key) |
 
 No test was skipped, and none is claimed as passed without being run.
+
+## 15. S1-C2 — fixture 13.4-A / rung FX-1 (implemented)
+
+Test-only. Zero production diff, zero golden diff (verified:
+`git diff --stat` over the golden directory is empty for this commit).
+
+### 15.1 What landed
+
+`tests/unit/agent/ml_model_proposal_agent/test_step01b_description_axis_contrast.py`
+renders the SAME PB-3 fixture twice IN ONE PROCESS, varying only
+`task_description` (shipped ⇄ the in-tree `_ALT_TD`) and passing the
+SHIPPED `ForwardContract` identically to both. Four properties, each
+parameterised over both modes:
+
+1. the alternative text reaches the task-background block of all three
+   stage system prompts, **and the shipped description is absent** from
+   them (the displacement half);
+2. zero `SQUID` / `dark-matter` / `magnetometry` inside the
+   description-DERIVED BLOCK — scoped by slicing between the label and
+   the `## Your task` heading, never whole-prompt (parent §9.5);
+3. **axis isolation in its strongest form**: delete the
+   description-derived block from both renders and the remainders must
+   be BYTE-IDENTICAL. This subsumes the planned "contract-derived tokens
+   byte-identical" criterion and additionally catches a description
+   leaking anywhere else in the prompt;
+4. the positive half — the fixed TIDMAD contract tokens
+   (`[B, T] int64`, `[B, 256, T] float32`) are present under BOTH
+   descriptions, so criterion 3 cannot pass by rendering no contract at
+   all. Scoped to the proposing stage, because F10 keeps the contract
+   out of stages 1-2.
+
+The S1-C harness `capture_stage_systems` gained an optional
+`forward_contract` argument for this; the rung remains single-axis
+because that contract is held IDENTICAL across the two variants.
+
+The block locator asserts loudly if it cannot find the block, with the
+§4.2 rule written into the message: an unlocatable block means S1-C
+chose an unstable placement, and the fix is S1-C — never a loosened
+residue assertion.
+
+### 15.2 CP2 evidence — CHECKPOINT 2 **PASS**
+
+| Required evidence | Result |
+|---|---|
+| alternative description reaches all three stages | PASS — `test_alternative_description_reaches_every_stage[explore\|exploit]` |
+| `task_description` is the only varied axis | PASS — `test_only_the_description_block_moves`: block-deleted remainders byte-identical across variants, all three stages, both modes |
+| no SQUID-specific residue inside the description-derived block | PASS — `test_no_squid_residue_inside_the_description_derived_block` |
+| contract-derived tokens byte-identical | PASS — covered by the isolation assertion, plus the positive presence check |
+| description-contamination mutation RED then restored GREEN | PASS — MUT-A and MUT-B′ below |
+
+**Mutation dossier (S1-C2).**
+
+| ID | Mutation | Site count | Result | Classification |
+|---|---|---|---|---|
+| **MUT-A** (§4.2's named SQUID-contamination mutation) | append `" (SQUID dark-matter magnetometry data)"` to the description inside `_render_pipeline_task_background` | 1 | **13.4-A RED — 2 failed / 6 passed**, both `test_no_squid_residue_...` params. PB-3 goldens ALSO red (2 failed / 4 passed) | behaviour-changing; target hit |
+| **MUT-B** (hypothesised "channel does not vary") | decorate the renderer with `functools.lru_cache(maxsize=1)` | 1 | **SURVIVED** — 8 passed, goldens 6 passed, JOIN 17 passed | **EQUIVALENT MUTANT.** The renderer is a pure function of its argument, and the cache key IS that argument, so memoisation cannot change any observable value. Not a test gap; the mutation was invalid |
+| **MUT-B′** (the corrected form) | stash the FIRST rendered block in a module-level list and return it forever, ignoring the argument thereafter | 1 | **13.4-A RED — 4 failed / 4 passed** (both `test_alternative_description_reaches_every_stage` params AND both residue params), while **every PB-3 golden stayed GREEN — 6 passed** | behaviour-changing; this is 13.4-A's unique failure class |
+
+Restored after each: `git diff` over `nodes/` empty, `__pycache__`
+cleared before every run, baseline re-verified — **769 passed, 5.0 s**
+over the proposer package + templates + task-config baselines. No
+mutation was committed.
+
+> **Previous assumption:** §4.2 predicted the SQUID-contamination
+> mutation would red 13.4-A "while every shipped-profile golden stays
+> green".
+> **Audit evidence:** MUT-A reddened the PB-3 goldens too.
+> **Corrected understanding:** the prediction assumed the PB-3 fixture
+> renders the SHIPPED profile. PR 01a's S1-A0 deliberately made it
+> TEST-OWNED (fixture description, 192-class contract) precisely so an
+> accidentally-hardcoded production literal becomes visible. Against a
+> test-owned fixture the goldens are NOT blind to an unconditional
+> hardcode — which is the goldens working as intended, not a defect.
+> **Implementation consequence:** none; no test or production change.
+> **Validation consequence:** the "golden-blind" half of the design's
+> expectation is demonstrated by MUT-B′ instead, which is the sharper
+> statement of what 13.4-A alone owns — a channel that renders a valid
+> description but does not VARY with its input. Every golden pins one
+> profile per process and cannot see that; two profiles in one process
+> is the only way to.

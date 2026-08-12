@@ -84,18 +84,23 @@ def capture_stage_systems(
     *,
     mode: str,
     task_description: str,
+    forward_contract=None,
 ) -> dict[str, str]:
     """Run the REAL pipeline and return ``{stage: system_prompt}``.
 
     Uses the PB-3 machinery (real ``MLModelProposalAgent.run()``, canned
     boundary bridge, pinned environment) so the captured strings are the
     exact bytes the LLM would receive — not a test-side re-assembly.
-    Only ``task_description`` is varied off the shared fixture.
+    Only ``task_description`` is varied off the shared fixture, unless
+    ``forward_contract`` is given as well — the S1-C2 contrast rung pins
+    the contract to the SHIPPED one and holds it IDENTICAL across both
+    description variants, so the fixture still varies exactly one axis.
     """
     index_path = pin_environment(tmp_path, monkeypatch)
-    inp = fixture_proposal_input(tmp_path, mode=mode).model_copy(
-        update={"task_description": task_description}
-    )
+    overrides: dict = {"task_description": task_description}
+    if forward_contract is not None:
+        overrides["forward_contract"] = forward_contract
+    inp = fixture_proposal_input(tmp_path, mode=mode).model_copy(update=overrides)
     agent = MLModelProposalAgent(
         provider="openai",
         model_id="step01b-capture",
