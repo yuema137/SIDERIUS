@@ -1,0 +1,12 @@
+[
+  "files_covered",
+  "iterations_included",
+  "log_base",
+  "metric_id",
+  "rows",
+  "schema_version",
+  "score_transform",
+  "skipped_nonpositive_count",
+  "unverified_sources",
+  "validity_semantics"
+]

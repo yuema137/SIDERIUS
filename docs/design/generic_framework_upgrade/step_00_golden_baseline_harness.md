@@ -1417,23 +1417,41 @@ the FU-P2-4 xfail); zero scorer/production change (frozen-scorer rule
       digest).
 - [ ] NUM-3/NUM-4/NUM-5 via production helpers per §12-rule-3
       exemption (inspect `scoring_helpers`/`per_file_best` first).
-- [ ] NUM-6 mechanism replay: synthetic tiny-N HDF5 at `tmp_path`,
-      `channel0001` attrs, int8 both channels, monkeypatched
-      `SEGMENT_LENGTH`, `parallel=False`; assert grand-mean choreo,
-      `-inf` sentinels, `None` gaps, NaN drop, frozen raw filename
-      (MIGRATION PARITY label in the test docstring).
-- [ ] NUM-8 `per_file_best` artifact key-set pin incl. `metric_id`.
-- [ ] Register NUM-7; apply OD-4 disposition if approved.
+- [x] NUM-6: 6 mechanism tests on runtime-generated tiny-N HDF5
+      (real TIDMAD group layout `timeseries/chNNNN/timeseries` —
+      discovered at first run; attrs on the group): length-20 vector +
+      None gaps + GRAND-MEAN aggregation proven with unequal per-file
+      counts against the production log helper; bit-identical
+      determinism; empty-set -inf; NaN-drop on a MIXED good/degenerate
+      fixture; frozen raw-filename FileNotFoundError (MIGRATION
+      PARITY); partial-segment reshape ValueError (discovery: an EMPTY
+      slice reshapes cleanly to (0,N) and silent-drops — only a
+      partial tail errors; both documented as the frozen mechanism).
+- [x] NUM-8: real `build_table` over the RES-1 staged workspace →
+      `metric_id == "tidmad_denoising_score"` + sorted key-set golden
+      (10 keys).
+- [x] NUM-7 registered + OD-4 APPLIED: legacy-parity tests 1-2
+      DELETED with the §22.2 justification in the re-scoped file
+      docstring (dead doc citation removed); the FU-P2-4 xfail RETIRED
+      — replaced by a LIVE exact-equality test against the COMMITTED
+      reference_data (also fixing its hardcoded /home/klz portability
+      violation).
 
 **Validation plan.**
-- [ ] Unit: all above.
-- [ ] Invalid-input: NUM-6 asserts the reshape error class for a
-      short dataset (boundary behavior of the frozen slice/reshape).
-- [ ] Mutations (§19.1 NUM rows): artifact-digit, anchor-value,
-      aggregation-flip, NaN-drop-skip — each red→green recorded.
-- [ ] Backward-compat: the 5 legacy 1e-3 pins remain satisfied by the
-      new exact pins (strictly stronger — assert both during the
-      transition commit, then keep only the strong form).
+- [x] Unit: 46 passed (NUM family + strengthened reference test +
+      scoring_helpers incl. the retired-xfail replacement, 2.3 s);
+      scoring-affected suites 95 passed.
+- [x] Invalid-input: partial-segment reshape ValueError pinned.
+- [x] Mutations red→green: artifact one-digit → NUM-1 AND NUM-4 red;
+      anchor value → NUM-2 AND NUM-3 red; aggregation flip (count
+      files not segments) → NUM-6 grand-mean red; NaN-drop skip —
+      first target (`:231` subnormal guard) SURVIVED, CLASSIFIED
+      EQUIVALENT for synthesizable fixtures (zero-PSD → 0/0 NaN caught
+      by the downstream isfinite drop), re-aimed at the REAL drop site
+      (`_collect_raw_pairs`) with a strengthened mixed fixture → RED.
+      All restored; family green.
+- [x] Backward-compat: the strong pins strictly imply the old 1e-3
+      pins (replaced in place per the keep-only-strong rule).
 
 **Acceptance criteria.**
 - [ ] Every committed reference number is pinned at full precision;

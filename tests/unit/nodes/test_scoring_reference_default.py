@@ -8,8 +8,12 @@ committed data loads and matches the documented reference values.
 """
 
 import os
+from pathlib import Path
 
 from nodes.scoring_reference import _default_reference_dir, load_reference_scores
+from tests.helpers.golden import assert_json_golden
+
+GOLDENS = Path(__file__).parent / "goldens"
 
 
 def test_default_prefers_committed_reference_data():
@@ -27,12 +31,27 @@ def test_default_is_cwd_independent(tmp_path, monkeypatch):
 
 
 def test_committed_reference_data_loads_and_matches_doc():
+    """Step-00 NUM-1 (STR): FULL-PRECISION pins on every committed
+    reference number, replacing the previous 5-value/1e-3 surface (which
+    left ~4 significant digits unprotected — audit D). The JSON golden
+    holds exact repr round-trip values for all 40 per-file scores, both
+    anchor-normalized scalars, and the global s_max; comparison is exact
+    equality on the parsed floats.
+
+    Design: docs/design/generic_framework_upgrade/
+    step_00_golden_baseline_harness.md §13.4 / §22 OD-3.
+    """
     scores = load_reference_scores(use_cache=False)
     assert len(scores.raw_per_file_log) == 20
     assert len(scores.gt_per_file_log) == 20
-    # Values from reference_data/raw_and_ground_score.md (global s_max convention).
-    assert abs(scores.s_max - 295715680.14248306) < 1e-3
-    assert abs(scores.raw_per_file_log[0] - (-11.4402)) < 1e-3
-    assert abs(scores.gt_per_file_log[0] - (-8.2610)) < 1e-3
-    assert abs(scores.raw_scalar_full - 1.0007) < 1e-3
-    assert abs(scores.gt_scalar_full - 10.1134) < 1e-3
+    assert_json_golden(
+        {
+            "s_max": scores.s_max,
+            "raw_per_file_log": list(scores.raw_per_file_log),
+            "gt_per_file_log": list(scores.gt_per_file_log),
+            "raw_scalar_full": scores.raw_scalar_full,
+            "gt_scalar_full": scores.gt_scalar_full,
+        },
+        GOLDENS / "num1_reference_scores_full_precision.json",
+        surface="NUM-1 full-precision committed reference scores",
+    )
