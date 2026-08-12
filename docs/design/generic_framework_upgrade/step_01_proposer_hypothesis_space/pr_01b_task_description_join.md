@@ -1270,3 +1270,127 @@ implementor prompt surface; the detector built here is directly reusable.
 | proposer package + templates + task-config baselines + llm_bridge step00 goldens | **780 passed, 5.0 s** (includes `test_health_prompt_parity.py`, whose PB-0 legacy USER golden is untouched) |
 | `ruff check` / `ruff format --check` on touched files | clean |
 | repository-wide grep for other consumers of the removed literals | none outside the guard's own documentation and positive-control assertions |
+
+## 17. Production-boundary ladder — BLOCKED at Checkpoint C, awaiting operator launch approval
+
+**Status: all three code commits are landed and CP1/CP2/CP3 have PASSED.
+The assembled executable head is `5dee6c4a`. Checkpoint C, Gate 1 and
+Gate 2 have NOT run.**
+
+### 17.1 What blocked
+
+The repository carries a launch guard,
+`.claude/hooks/require_launch_approval.sh`, which intercepts any command
+that would execute `run_one_iteration.py`:
+
+```text
+BLOCKED: this command would execute run_one_iteration.py, which can start
+a real SIDERIUS chain or training run.
+Launching production runs requires explicit operator approval.
+If the operator has approved THIS launch, prefix the command with
+SIDERIUS_ALLOW_LAUNCH=1 to record that approval explicitly.
+```
+
+The Implementation Working Rules contract for this PR authorizes the
+bounded Checkpoint C / Gate 1 / Gate 2 launches in writing, so the
+documented approval mechanism was used — the command was re-issued with
+the `SIDERIUS_ALLOW_LAUNCH=1` prefix. **That invocation was then DENIED
+at the session permission layer.**
+
+A denial is an operator decision and is treated as one: the ladder stops
+here rather than being worked around. No alternative launch path was
+attempted, and no gate result is claimed.
+
+### 17.2 The exact Checkpoint C command, assembled from CURRENT source
+
+Audited before assembly, at `5dee6c4a`:
+`run_one_iteration.py` defines `--is_pseudo_llm` and `--is_pseudo_training`
+(the pseudo-mode pair), `--debug_dump_prompts`, `--llm_config`,
+`--start_iteration`, `--max_rounds`, `--max_proposal_attempts`,
+`--is_trial`, `--trial_portion`, `--max_epochs`; only `--workspace` and
+`--run_name` are `required=True`; `--seed_paths` is genuinely optional
+("omit the flag entirely to start a cold chain").
+
+```bash
+SIDERIUS_ALLOW_LAUNCH=1 ./.venv/bin/python \
+    sdsc_submission_scripts/run_one_iteration.py \
+    --workspace "$WS" \
+    --run_name step01b_checkpoint_c \
+    --start_iteration 1 \
+    --llm_config llm_configs/openai_tiered_pro.json \
+    --is_pseudo_llm \
+    --is_pseudo_training \
+    --debug_dump_prompts \
+    --max_rounds 1 \
+    --max_proposal_attempts 1 \
+    --is_trial \
+    --trial_portion 0.02 \
+    --max_epochs 1
+```
+
+Two choices in it deserve to be visible rather than assumed:
+
+- **`--llm_config` is REQUIRED even in pseudo mode**, and this is not
+  cosmetic. `run_workflow` without an `llm_config` leaves `propose=None`
+  and dispatches the **LEGACY** proposer path (parent §11.3). The legacy
+  path already rendered the description before this PR, so a Checkpoint C
+  run without `--llm_config` would exercise the wrong surface and prove
+  nothing about the JOIN. `openai_tiered_pro.json` is used for
+  consistency with §7a; under `--is_pseudo_llm` the bridge is stubbed, so
+  it costs nothing.
+- **`--is_pseudo_training` is paired with `--is_pseudo_llm`** so the run
+  matches §6's declared cost class ("no real LLM, no GPU, no API cost").
+  `--is_pseudo_llm` alone would still train for real
+  (`run_one_iteration.py`: `require_probe_runner=not (args.is_pseudo_training
+  or args.is_pseudo_llm)` shows the two flags are independent switches).
+  Precedent: DS8's pseudo chain smoke used exactly this pair,
+  cold-start, and exited 0 with a graceful `no_records` manifest
+  (`enable_partial_file_list.md`).
+
+Expected: ~1-2 minutes, no GPU, no API cost. PASS = the run completes
+and the dumped proposing-stage system prompt at
+`{run_dir}/debug/iter001_attempt001_proposing_system_prompt.md`
+(`model_exploration.py`, the `debug_dump_prompts` branch) contains the
+shipped description.
+
+### 17.3 Gate 1 and Gate 2 — unchanged from the frozen design
+
+Not assembled or launched. Their frozen shapes stand as written in §7 and
+§8; both go through the same `run_one_iteration.py` / `run_chain.sh`
+launch guard and therefore need the same operator approval. Nothing about
+the audit performed so far suggests any deviation from the frozen shapes
+will be needed.
+
+### 17.4 Consequence for readiness
+
+PR 01b **cannot** reach READY FOR OPERATOR REVIEW until Checkpoint C,
+Gate 1 and Gate 2 have run and passed on the final executable head. §11
+acceptance items 6, 7 and 8 are open. This is recorded as a blocked
+dependency, not a waiver — no gate is being skipped or excused.
+
+### 17.5 Terminal validation run early, deliberately
+
+The gate ladder is blocked, but the terminal unit suite does not depend
+on it, and running it now hands the operator complete non-gated evidence
+with their launch decision. It was run from a CLEAN tree at the assembled
+executable head `5dee6c4a`.
+
+```text
+pytest tests/unit/ -m "not real_run"
+  8540 passed, 3 skipped, 404 warnings in 498.92s (0:08:18)
+  PYTEST EXIT: 0        <- pytest's OWN status, captured before `tail`
+  grep -cE "^(FAILED|ERROR)" over the log: 0
+  log: <scratchpad>/full_unit_suite.log
+```
+
+`ruff check .` — All checks passed. `ruff format --check .` — 817 files
+already formatted.
+
+**pyright: NOT run locally.** The box has Node v10.19.0, which cannot
+bootstrap pyright. Recorded as unavailable, never as green; blocking CI
+is the only pyright for this PR.
+
+Standing obligation (§10.F): if any gate forces an executable fix, the
+targeted evidence is re-run first and then this suite is re-run on the
+NEW final executable head. `5dee6c4a` is the final executable head only
+if the gates require no change.
