@@ -954,8 +954,8 @@ safely at 95%" — describes a trigger that does not exist.
 - [x] a fresh checkout works without `.claude/memory/...`;
 - [x] all 9 mutations RED and restored;
 - [x] dry-run matrix green;
-- [ ] full unit suite green from a clean tree;
-- [ ] ruff + format green repository-wide;
+- [x] full unit suite green from a clean tree — **8510 passed, 3 skipped**, 503 s, pytest exit 0 at `3156caa0`;
+- [x] ruff + format green repository-wide — `ruff check .` clean, `ruff format --check .` 814 files;
 - [ ] exact-head CI green (includes pyright);
 - [x] no Generic Framework production behaviour changed;
 - [x] PR 01b untouched.
