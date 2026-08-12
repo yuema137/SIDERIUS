@@ -14,8 +14,32 @@ deviations and discoveries are recorded here as work proceeds.
 | `S1-A0` | **COMPLETE** | `4a11e4e8` | `test(step01a-S1-A0): complete the PB-3 test-owned ForwardContract fixture` |
 | `S1-A` | **COMPLETE** | `a3a97014` | `feat(step01a-S1-A): render the legacy commit prompt from its declarations` |
 | `S1-B` | **COMPLETE** | `aa1127d7` | `feat(step01a-S1-B): derive the proposing stage's loss legality from the authority` |
-| `S1-D` (§4.4) | **COMPLETE** | (this commit) | contrast rungs B-i / B-ii / FX-2 / FX-5 + second surface + mutation closeout |
-| PR closeout (§5/§6) | **IN PROGRESS** | — | §7 audit + CLI reachability landed; remaining: full suite, static, push, PR, exact-head CI |
+| `S1-D` (§4.4) | **COMPLETE** | `e27e6af0` | `test(step01a-S1-D): contrast rungs B-i/B-ii/FX-2/FX-5 + mutation closeout` |
+| closeout evidence | **COMPLETE** | `fe4ec2e5` | `test(step01a): prove the standalone-CLI disposition is reachable` |
+| final validation record | **COMPLETE** | `8a05bbe8` | `docs(step01a): record final-head validation evidence` |
+| merge-gate reconciliation | **COMPLETE** | (this commit) | §8 shipped-profile parity proof, §1 claim reconciliation, this table |
+| PR closeout (§5/§6) | **COMPLETE — READY FOR OPERATOR REVIEW** | — | PR #199 open; full suite, static gates and exact-head CI all recorded below |
+
+**PR: [#199](https://github.com/Galileo-Sandbox/SIDERIUS/pull/199)**
+(`feat/generic-framework-step-01a-contract-derived-prompt-extraction`
+→ `master`). Final executable head **`fe4ec2e5`**; docs-only commits
+follow it. **STATUS: READY FOR OPERATOR REVIEW — NOT MERGED.** Merge is
+operator-owned.
+
+| Final gate | Result |
+|---|---|
+| `pytest tests/unit/ -m "not real_run"` at `fe4ec2e5`, clean tree | **8407 passed, 3 skipped**, 538 s, pytest exit code 0 |
+| `ruff check .` / `ruff format --check .` | clean / 802 files formatted |
+| **Exact-head CI** on `8a05bbe8` | **SUCCESS** — run 31633988555, "Lint + Type + Unit Tests", 11m05s, including the **pyright strict (blocking)** step that cannot run locally (Node v10.19.0) |
+
+A NOTE ON THIS TABLE'S HISTORY (operator merge-gate finding, kept as a
+process record): the `8a05bbe8` version of this document still showed
+`S1-D` as "(this commit)" and the closeout as IN PROGRESS, with no PR
+number, no final SHA and no CI record. The cause was a deliberate but
+wrong decision to keep CI state OUT of the ledger to avoid moving the
+head — which silently left the whole closeout state unrecorded, not
+just the CI line. The correct handling is the one used here: record it,
+push, and re-verify CI on the new exact head.
 
 Branch base: master `6f3866b6` (designs frozen) — the four
 implementation commits are the only commits ahead of master on this
@@ -60,10 +84,33 @@ legal for which output type — is RENDERED from its existing authority
 `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES`) at every surface that
 states it, instead of being restated as a prompt literal.
 
-**Central acceptance claim: the final TIDMAD prompt bytes are
-UNCHANGED.** This PR is pure Stage-A extraction parity. It contains no
-intentional default-prompt-byte change; if any golden's bytes move,
-that is a defect, not an expected diff.
+**Central acceptance claim (stated with its one approved exception —
+operator merge-gate reconciliation, 2026-08-12).**
+
+1. **Exact parity where it is claimed.** Every Step-00-goldened
+   proposer surface and the STANDARD PRODUCTION WORKFLOW path are
+   byte-identical under the shipped TIDMAD profile. This is pure
+   Stage-A extraction parity: if a golden's bytes move, that is a
+   defect, not an expected diff.
+2. **No default production-pipeline prompt change.** There is no
+   task-description JOIN and no PR-01b prompt-behavior change here.
+3. **One explicitly approved compatibility repair.** The documented
+   STANDALONE node CLI now receives the canonical shipped task framing
+   it previously omitted — see §6 item 5 and §3.1. Its reasoning
+   prompt therefore differs from before this PR, by design and by
+   prior operator approval of the §3.1 disposition. It is not covered
+   by any golden and does not touch the workflow path.
+
+The earlier phrasing of this section — "the final TIDMAD prompt bytes
+are UNCHANGED … no intentional default-prompt-byte change" — was too
+strong once §3.1 landed, because it read as an unqualified claim over
+EVERY surface including the CLI. Corrected here rather than in a
+footnote so the top-level claim and the §6 exception cannot be read as
+contradicting each other.
+
+**Direct shipped-profile evidence (merge-gate, §8).** The parity claim
+is proven against the merge base for the SHIPPED 256-class profile, not
+only against the 192-class PB-3 fixture — see §8.
 
 ## 2. Scope
 
@@ -84,7 +131,10 @@ Explicitly does NOT own (they are PR 01b's):
 - the task-description contrast (13.4-A / FX-1);
 - the stale budget-literal cleanup (former `S1-E`);
 - Checkpoint-C chain evidence;
-- ANY intentional default TIDMAD prompt-byte change.
+- ANY intentional default TIDMAD prompt-byte change on a
+  Step-00-goldened surface or the standard workflow path. (The one
+  approved CLI convergence repair of §3.1 is NOT such a change — see
+  §1 item 3; it is owned here, not by PR 01b.)
 
 ## 3. Frozen dispositions resolved for this PR (source-grounded)
 
@@ -860,3 +910,74 @@ dossier table).
 | `ruff check .` | All checks passed |
 | `ruff format --check .` | 802 files already formatted |
 | `pyright` | **CANNOT RUN LOCALLY** — Node v10.19.0; pyright-python refuses to bootstrap. CI is the only pyright, per the repo's environment-assumptions rule. Not claimed as locally validated |
+
+
+## 8. Merge-gate evidence — shipped-TIDMAD parity, base vs final
+
+Requested by the operator at the merge gate (2026-08-12) and executed
+as one-off merge evidence, NOT as a new permanent test.
+
+**Why it was needed.** S1-A0 deliberately moved the PB-3 TEST-OWNED
+fixture from a shipped-like 256 classes to 192. That is a strong
+anti-hardcode fixture — but it means "the nine PB-3 goldens are
+byte-identical" proves extraction parity *under the 192 profile*. It is
+no longer, by itself, a direct proof that the production pipeline's
+prompt under the REAL shipped 256-class profile is byte-identical to
+the merge base. The legacy commit surface already had a shipped-profile
+probe (PB-4); the pipeline did not.
+
+**Method.** Two clean `git archive` extractions — merge base
+`6f3866b6` and final executable head `fe4ec2e5` — neither tree
+modified. In each, the same probe ran the SAME production pipeline path
+PB-3 exercises (`MLModelProposalAgent.run` with the canned
+`_CannedProposerBridge`, fully pinned environment) with exactly ONE
+fixture override: the forward contract and task description forced to
+the **shipped** values from `load_task_config()`. Prompts were hashed
+at the LLM boundary.
+
+Pre-checks: `configs/task_config.yaml` is byte-identical across the two
+trees (`a627350d…`), and the shared harness (`pin_environment`,
+`fixture_interpretation`, `fixture_proposal_input` apart from the
+contract fields, `_CannedProposerBridge`, `run_pipeline`) is
+byte-identical across them — so the ONLY difference between the two
+runs is the production code under test.
+
+| Surface (shipped 256-class profile) | base `6f3866b6` | final `fe4ec2e5` | exact_equal |
+|---|---|---|---|
+| explore / comparison — system | `a9120e37b782` | `a9120e37b782` | **true** |
+| explore / comparison — user | `0f3ac3832aaf` | `0f3ac3832aaf` | **true** |
+| explore / causal_reasoning — system | `0e4acd29a31e` | `0e4acd29a31e` | **true** |
+| explore / causal_reasoning — user | `a1c72673941d` | `a1c72673941d` | **true** |
+| explore / proposing — system | `e5dc7eba7290` | `e5dc7eba7290` | **true** |
+| explore / proposing — user | `80a4b75a95b0` | `80a4b75a95b0` | **true** |
+| exploit / comparison — system | `fc69830b2d5c` | `fc69830b2d5c` | **true** |
+| exploit / comparison — user | `0f3ac3832aaf` | `0f3ac3832aaf` | **true** |
+| exploit / causal_reasoning — system | `56ecc3173bf3` | `56ecc3173bf3` | **true** |
+| exploit / causal_reasoning — user | `a1c72673941d` | `a1c72673941d` | **true** |
+| exploit / proposing — system | `0ec3bdc5a4e8` | `0ec3bdc5a4e8` | **true** |
+| exploit / proposing — user | `80a4b75a95b0` | `80a4b75a95b0` | **true** |
+| shipped `forward_contract` declaration | `7e3690006d0b` | `7e3690006d0b` | **true** |
+| shipped `task_description` | `1bbb764b545a` | `1bbb764b545a` | **true** |
+
+**Legacy commit surface, same comparison** (base evaluates the raw
+constant, final evaluates `_render_commit_system_prompt(shipped)`):
+both `b93997951b04…`, length 5221 — **exact_equal = true**. So the
+extraction is byte-transparent on that surface too, under the shipped
+profile rather than a fixture.
+
+**NEGATIVE CONTROL — the comparison can actually fail.** An all-equal
+table is worthless if the probe is incapable of detecting a difference.
+In the throwaway `final` archive only, `_render_loss_legality` was
+changed to `sorted(losses, reverse=True)`. The probe then reported
+`explore/proposing` and `exploit/proposing` system prompts CHANGED —
+and only those two, exactly the surfaces S1-B touched. The archive was
+restored and re-hashed to the original final values. This proves two
+things at once: the probe is sensitive, and the shipped-profile
+pipeline render genuinely flows through the extracted renderer, so the
+equality above is substantive rather than vacuous.
+
+**Verdict.** Shipped-TIDMAD byte parity between merge base and final
+executable head is **directly proven** for every standard production
+pipeline proposer surface and for the legacy commit surface. The
+standalone CLI is excluded by construction and handled as the approved
+§1 item 3 exception.

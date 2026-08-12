@@ -19,8 +19,16 @@ Children (one PR = one doc):
 Landed: `S1-A0` (`4a11e4e8`), `S1-A` (`a3a97014`), `S1-B`
 (`aa1127d7`), `S1-D` (the §4.4 contrast rungs B-i / B-ii / FX-2 /
 FX-5, their second-surface half, and the mutation closeout). All four
-implementation commits are complete; PR closeout (full suite, static
-gates, PR, exact-head CI) is the only remaining work. Checkpoint A not
+implementation commits are complete. Closeout COMPLETE: **PR #199**
+is open against `master`, full suite green at the final executable head
+`fe4ec2e5` (8407 passed / 3 skipped), static gates clean, exact-head CI
+SUCCESS including pyright strict. A merge-gate reconciliation then
+added §8 to the child ledger — a direct base-vs-final byte-parity proof
+under the SHIPPED 256-class profile (the PB-3 goldens run on a
+deliberately non-shipped 192-class fixture, so they did not by
+themselves establish it) — and narrowed the §1 parity claim to name its
+one approved exception, the standalone-CLI convergence repair.
+**STATUS: READY FOR OPERATOR REVIEW — NOT MERGED.** Checkpoint A not
 yet closed. The child doc is the live ledger and holds all evidence,
 mutations and findings — this Status is only the pointer.
 
