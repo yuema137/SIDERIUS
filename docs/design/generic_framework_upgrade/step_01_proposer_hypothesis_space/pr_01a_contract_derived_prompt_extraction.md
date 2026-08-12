@@ -15,7 +15,7 @@ deviations and discoveries are recorded here as work proceeds.
 | `S1-A` | **COMPLETE** | `a3a97014` | `feat(step01a-S1-A): render the legacy commit prompt from its declarations` |
 | `S1-B` | **COMPLETE** | `aa1127d7` | `feat(step01a-S1-B): derive the proposing stage's loss legality from the authority` |
 | `S1-D` (§4.4) | **COMPLETE** | (this commit) | contrast rungs B-i / B-ii / FX-2 / FX-5 + second surface + mutation closeout |
-| PR closeout (§5/§6) | **NOT STARTED** | — | full suite, static, push, PR, exact-head CI |
+| PR closeout (§5/§6) | **IN PROGRESS** | — | §7 audit + CLI reachability landed; remaining: full suite, static, push, PR, exact-head CI |
 
 Branch base: master `6f3866b6` (designs frozen) — the four
 implementation commits are the only commits ahead of master on this
@@ -783,15 +783,71 @@ dossier table).
 
 ## 6. Acceptance criteria (observable)
 
-- [ ] Every named Stage-A golden is byte-identical after the last
+- [x] Every named Stage-A golden is byte-identical after the last
       commit — `git diff` on `tests/unit/agent/**/goldens/` and
       `tests/unit/workflows/goldens/` shows ZERO changed bytes.
-- [ ] The re-targeted PB-4 system assert captures at the legacy `run()`
+      → `git diff --stat 4a11e4e8..HEAD -- '*goldens*'` lists only the
+      PB-4 test MODULE (the re-target), no golden content file. The two
+      `pb3_proposing_*_system.txt` regenerations are confined to the
+      pre-declared S1-A0 fixture commit, exactly as §1 permits.
+- [x] The re-targeted PB-4 system assert captures at the legacy `run()`
       LLM boundary, proven by mutation **M-1b** going RED when the
       render call at `ml_model_proposal_agent.py:1385` is deleted.
-- [ ] FX-2/FX-5 assert derived-block residue only, and the three §9.5
+      → re-run at the FINAL head (call site is now `:1488`): replacing
+      `_render_commit_system_prompt(inp.forward_contract)` with the raw
+      `PROPOSAL_COMMIT_PROMPT` reds exactly
+      `TestPB4LegacyCommit::test_commit_system_rendered_at_the_llm_boundary`
+      (1 failed / 571 passed), restored **572 passed**.
+- [x] FX-2/FX-5 assert derived-block residue only, and the three §9.5
       whitelisted survivors are present and untouched.
-- [ ] The standalone CLI runs end-to-end with a complete commit prompt
+      → `_assert_whitelisted_survivors_present` asserts all three are
+      PRESENT under every rung; residue is scoped to
+      `_TIDMAD_DERIVED_ONLY_TOKENS` on the commit surface and to
+      `render_forward_contract`'s block on the pipeline surface.
+- [x] The standalone CLI runs end-to-end with a complete commit prompt
       (§3.1), and the fail-closed path fires only on a missing/invalid
       config.
-- [ ] No production default prompt bytes changed anywhere in this PR.
+      → `TestStandaloneCliDisposition` (2 cases) drives the real
+      `main()` with a captured agent, asserting no `{PLACEHOLDER}`
+      survives the render and that the contract is byte-equal to
+      `load_task_config()`'s. **Reachability proven** by mutation
+      **M-CLI**: reverting `main()` to its pre-PR-01a shape (contract
+      omitted) reds both cases with `ProposalContractRenderError` —
+      i.e. without §3.1 the extraction really would have broken this
+      surface, and no other test in the repo would have noticed.
+- [x] No production default prompt bytes changed anywhere in this PR.
+      → All pipeline and legacy `run()` prompt surfaces are byte-pinned
+      unchanged (PB-3 ×9, PB-4 ×2, CFG-1/2/3a/3b, WF-3).
+
+      **One bounded, design-approved exception, stated precisely.** The
+      standalone CLI's OWN reasoning prompt does change — and only
+      because it was previously degenerate. `main()` supplied neither
+      `task_description` nor `forward_contract`, so
+      `_render_task_background` hit its "both empty" branch
+      (`ml_model_proposal_agent.py:417`) and the `{TASK_BACKGROUND}`
+      block collapsed to `""`. Under §3.1 the CLI now loads the shipped
+      config, so its prompt gains the SAME task-background block the
+      workflow path has always produced. This is convergence onto the
+      production framing, not a new wording: no golden covers the CLI
+      path, no workflow-path byte moves, and the alternative — leaving
+      it empty — would have raised `ProposalContractRenderError` at the
+      commit render (proven by M-CLI). Recorded here rather than left
+      implicit because "no prompt bytes changed" would otherwise be an
+      overstatement.
+
+      Note also that `main()` now populates `ProposalInput
+      .task_description`. That is NOT the PR-01b JOIN: no stage
+      template references a task-description placeholder (verified —
+      `grep task_description agent/prompt_templates/proposal/*.md`
+      returns nothing), so the pipeline seam at `:1708` stays inert.
+      PR 01b still owns making it render.
+
+## 7. Closeout audit (final head)
+
+| Check | Evidence |
+|---|---|
+| No PR-01b scope in the diff | no `{TASK_DESCRIPTION}` placeholder, no JOIN, no `~100M parameters` / `10 GB VRAM` budget cleanup in the production diff |
+| No shape parsing / rank branching | diff of `nodes/` greps clean for `.split(`, `.count(`, `ndim`, `rank`, `task_type ==`, `if …shape` |
+| Loss authority still single | the diff only ADDS consumers of `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES`; no second definition |
+| Schemas / protocols / scorer / dataset / model execution untouched | branch touches exactly 4 non-test files: `ml_model_proposal_agent.py`, `proposing_stage.md`, and the two design docs. The one file under `tests/unit/agent/protocols/` is a test FIXTURE given a contract by the fail-closed fallout, not a protocol change |
+| Step-00 hard gates | PB-3/PB-4 + CFG-1/2/3a/3b → **11 passed** |

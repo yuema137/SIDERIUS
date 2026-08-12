@@ -13,6 +13,7 @@ opaque pass-through of an undeclared task.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import typing
@@ -226,3 +227,74 @@ class TestS1BProposingStageDerivation:
             "three alphabet prose sites are tier-(ii) literals routed to step 03"
         )
         assert "accepts five values" in self.TEMPLATE.read_text(encoding="utf-8")
+
+
+class TestStandaloneCliDisposition:
+    """PR 01a §3.1 — the CLI must still reach a COMPLETE commit prompt.
+
+    Before the extraction an absent contract was harmless (the prompt was
+    a zero-placeholder constant). After it, the render is fail-closed, so
+    a CLI that omitted the declaration would raise on a documented
+    architectural surface (`docs/architecture.md` "Has CLI interface").
+    This is the reachability evidence for the frozen disposition: the
+    production entry point is exercised, not a helper standing in for it.
+    """
+
+    def _run_main_capturing_input(self, tmp_path, monkeypatch):
+        import argparse
+        import importlib
+
+        mod = importlib.import_module("nodes.ml_model_proposal_agent.ml_model_proposal_agent")
+
+        # The CLI derives its input path from --workspace/--run_name
+        # (there is no --interpretation flag); mirror that exactly.
+        (tmp_path / "interpretation_cli_probe.json").write_text(
+            json.dumps({"model_types": ["punet"], "total_experiments": 1}),
+            encoding="utf-8",
+        )
+
+        monkeypatch.setattr(
+            mod.argparse.ArgumentParser,
+            "parse_args",
+            lambda self: argparse.Namespace(
+                workspace=str(tmp_path),
+                run_name="cli_probe",
+                provider="openai",
+                model_id="gpt-5.5",
+            ),
+        )
+
+        captured: dict[str, object] = {}
+
+        class _CapturingAgent:
+            def __init__(self, *a, **kw):
+                pass
+
+            def run(self, agent_input):
+                captured["input"] = agent_input
+                raise SystemExit(0)  # stop before any LLM call
+
+        monkeypatch.setattr(mod, "MLModelProposalAgent", _CapturingAgent)
+        with pytest.raises(SystemExit):
+            mod.main()
+        return captured["input"]
+
+    def test_cli_supplies_a_contract_that_renders(self, tmp_path, monkeypatch):
+        """The exact defect this catches: extraction silently breaking the
+        standalone CLI, which no script or test invokes and which would
+        therefore fail only in an operator's hands."""
+        agent_input = self._run_main_capturing_input(tmp_path, monkeypatch)
+
+        rendered = _render_commit_system_prompt(agent_input.forward_contract)
+        assert re.findall(r"\{[A-Z][A-Z_]*\}", rendered) == []
+        assert "[B, T] int64" in rendered
+
+    def test_cli_contract_comes_from_the_canonical_loader(self, tmp_path, monkeypatch):
+        """§3.1 forbids inventing a second config path: the CLI's contract
+        must be byte-equal to what `load_task_config()` yields."""
+        from workflows.task_config import load_task_config
+
+        agent_input = self._run_main_capturing_input(tmp_path, monkeypatch)
+        assert agent_input.forward_contract == ForwardContract(
+            **load_task_config()["forward_contract"]
+        )
