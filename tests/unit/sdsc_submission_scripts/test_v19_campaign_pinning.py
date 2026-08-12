@@ -266,10 +266,11 @@ class TestTheDocumentedDefaultsMatchTheCode:
     """
 
     #: Docs that state the default, and must therefore state the real one.
-    DOCS = (
-        "docs/running_chain_test.md",
-        "docs/design/runtime_estimation_and_calibration.md",
-    )
+    #: ``docs/running_chain_test.md`` was removed by the operator-directed
+    #: docs sweep (PR #195, commit 6bc1f536) — master CI has been red on
+    #: this test since; the dangling entry is dropped here (inherited-red
+    #: repair carried on the Step-00 branch, not Step-00 scope).
+    DOCS = ("docs/design/runtime_estimation_and_calibration.md",)
 
     def _code_default(self) -> int:
         return int(_sourced("echo $WAVE_WALL_SECONDS"))
