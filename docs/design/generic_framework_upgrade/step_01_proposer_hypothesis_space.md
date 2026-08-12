@@ -183,11 +183,16 @@ When Step 01 is complete, the following is TRUE about SIDERIUS
 
 5. **The proposer's generic templates stop assuming a data shape.**
    After extraction, no generic proposer template independently asserts
-   rank, axis names or TIDMAD semantics: `[B, 256, T]` / `[B, T]` /
-   "256 amplitude bins" appear only as text DERIVED from the declared
-   contract. A profile declaring a rank-4 neutral-axis contract renders
+   rank, axis names or TIDMAD semantics **in its contract-derived
+   blocks**: there, `[B, 256, T]` / `[B, T]` / "256 amplitude bins"
+   appear only as text DERIVED from the declared contract. Three
+   literal survivors remain by explicit decision, each with a named
+   later owner — the shipped description's own prose, the
+   two-output-form catalogue (§4.1 tier iii, step 03), and the
+   renderer's `per-timestep` descriptor (§4 row F21) — enumerated in
+   §9.5 (2nd-review R2-1). A profile declaring a rank-4 neutral-axis contract renders
    prompts carrying that declaration with zero TIDMAD shape residue
-   (§9.4 F2/F5). This makes the proposer **Step-1-compatible** with
+   (§9.4 FX-2/FX-5). This makes the proposer **Step-1-compatible** with
    arbitrary declared shapes in the strict sense defined in §6A.2 —
    and explicitly NOT end-to-end capable of executing such a task,
    which remains steps 02/03/04+ work.
@@ -424,6 +429,7 @@ Task-fact rows (F-numbers from the Area-B audit; class per §5 legend):
 | F12/F13/F20 | budget prose: "~100M params" S1:284; "10 GB VRAM" causal_reasoning_stage.md:**145** (citation corrected, finding F13); "≤ 80% of the effective cap" :540-541 | contradict the runtime [HARDWARE CONTEXT] block (the roadmap §14 RESOLVED row: derive from the runtime block, no config) | (e) | OD-S1-2 (§19): optional clearly-labeled cleanup commit deleting/re-pointing the two stale numerals (proposer templates have NO later owner — step 04's prompt scope excludes proposer surfaces), with golden regeneration; recommendation INCLUDE |
 | F14/F15 | forbidden patterns: skill validator-only (`forbidden_pattern_skill.py`, consumers `ml_code_validator_agent.py:51,:534`); "T ≥ 80,000" never shown to the proposer; proposer's [DISALLOWED PATTERNS] block renders from a DIFFERENT authority (`architectural_pattern_tagger.ARCHITECTURAL_PATTERNS`, :701-709) | skill-local | (a) validator-side | OD-S1-1 (§19): roadmap names "forbidden-pattern lists" in step 1, source says validator-owned → recommend DEFER to 6-M; the tagger↔skill non-sharing is RECORDED as a coupling gap for step 04 |
 | F16/F18 | model roster examples + "5.57 SOTA" scores (comparison_stage.md:50-76,:139; causal :121-122); frequency-band file prose (comparison :54-55 — contradicting the no-fixed-index rules at `ml_model_proposal_agent.py:308-309` (reasoning prompt) and `:343` (commit prompt) — a CROSS-SURFACE contradiction, not an internal one; citation corrected, finding F13) | template literals | (e) | KEEP (MIGRATION PARITY): catalogue = V11 (§5+§6 owned, steps 03/04); band semantics = V7 (§4, step 02). Both recorded; the internal contradiction registered as defect-not-blessed |
+| **F21** (2nd-review R2-2) | `render_forward_contract`'s task-type descriptor `Task type: {task_type} (per-timestep {num_classes}-class).` — a TEMPORAL-axis assertion emitted by PRODUCTION CODE from a STRUCTURED field, not by prompt prose | `workflows/task_config.py:206-212`; shipped bytes pinned by CFG-2 golden `cfg2_forward_contract_block.txt` ("Task type: classification (per-timestep 256-class)."); reaches proposing_stage.md:131 and (post-JOIN) the commit surface | (e) authority-rendered, but the AUTHORITY ITSELF hardcodes a rank assumption | **KEEP byte-identical** in Step 01 (regime-A parity; any change regenerates CFG-2, which Step 01 does not own) + **whitelist it in §9.5** so FX-2/FX-5 do not fail on it + **route to step 02/03**: a rank-4 spatial contract with `num_classes>0` would render "per-timestep 16-class", which is wrong for that task. Recorded as a defect-not-blessed |
 | F2/F11/F17 | int8/+128 encoding, 20-files/10M, CH1/CH2 | ABSENT from proposer prompts (encoding implied by "ADC class indices"/config's "0-255") | (d) | no action (correctly not exposed); recorded so nobody "extracts" a fact that is not there |
 | — | quirks: registry blocks double-substituted (proposing :30/:177, :32/:235); `proposing_stage` loaded WITHOUT `mindset` (:1887-1891, asymmetric with the 3 reasoning-stage sites); `ProposalInput.constraints` never populated in production (absent from the protocol; only scripts inject it); shipped YAML `output_head_note` contains the un-substituted token `[output_shape]` rendered verbatim | verified | (e) | ALL KEPT byte-identical (parity); registered in §17.3 known-quirk list, never blessed |
 
@@ -636,10 +642,17 @@ Source facts (main-auditor verified at this head):
 | dtype | PROSE ONLY | embedded inside the shape string |
 | batch/sample semantics | PROSE ONLY | `B` is prose convention, not declared |
 
-**Consequence.** The transport is already rank-agnostic in the only
-sense it can be: it never inspects rank, because it never parses. Every
-rank assumption that exists today lives in **prompt PROSE**, not in the
-contract object — which is precisely the §4 coupling inventory
+**Consequence (corrected by 2nd-review R2-2).** The transport is
+rank-agnostic in the only sense it can be: it never inspects rank,
+because it never parses. Rank assumptions therefore live almost
+entirely in **prompt PROSE** — the §4 coupling inventory — with ONE
+exception that must not be glossed: `render_forward_contract`
+(`workflows/task_config.py:206-212`) itself emits
+`(per-timestep {num_classes}-class)`, a temporal-axis assertion
+generated by production code from a structured field, and it branches
+on `if fc.num_classes:`. That is §4 row F21: kept byte-identical here
+(CFG-2 owns its bytes), whitelisted in §9.5, and routed to step 02/03
+as the first thing a real tensor contract must fix. Everything else is
 (F1/F3 `[B, 256, T]`/`[B, T]` restatements at `PROPOSAL_COMMIT_PROMPT`
 :330,:332,:365-370 and `proposing_stage.md`:41,:70-71,:74; F4
 output_type alphabet; F5 loss legality). Step 01's extraction of those
@@ -710,7 +723,11 @@ elif data_is_spatiotemporal: ...
 
 **Step 01's binding obligation under this principle:** the proposer
 consumes the ONE resolved declaration and must not branch on a preset
-label, a rank, or an axis name. This is enforceable today and is
+label, a rank, or an axis name. **One pre-existing branch is
+grandfathered, not blessed** (2nd-review R2-2): `if fc.num_classes:`
+in `render_forward_contract:209`. Step 01 may not add branches and may
+not remove that one (CFG-2 pins its output); §4 row F21 assigns its
+removal to the contract owner. This is enforceable today and is
 asserted by N-RANK (§15) — no Step-01 renderer may read `task_type` or
 any shape text to select a code path; `task_type` is rendered as an
 opaque label, exactly as its schema docstring already requires.
@@ -746,6 +763,13 @@ renders an already-resolved declaration.** Grounds:
 **Recorded as a BINDING DEPENDENCY on the contract-owning step** (02 or
 03, whichever introduces the structured tensor contract):
 
+- the consistency axis is NOT only preset↔tensor. **After S1-C the
+  shipped `task_description` and the rendered `ForwardContract` are
+  two independent prose channels describing the same tensors**
+  (`configs/task_config.yaml:11-14` hardcodes `[B, T]`/`[B, 256, T]`),
+  so a profile can contradict itself across channels with nothing
+  validating it (2nd-review R2-6). The structured check MUST cover
+  description↔contract consistency, not just preset↔tensor;
 - resolution and consistency validation MUST run before proposer
   rendering, and MUST fail closed with a typed error;
 - the resolved output MUST be a single normalized rank-agnostic
@@ -758,7 +782,7 @@ renders an already-resolved declaration.** Grounds:
 
 (a) introduce no new rank/axis assumption into any generic template;
 (b) render whatever the declaration says, so a rank-N prose contract
-    already flows end-to-end to the LLM boundary (F2/F5-prose, §9.4);
+    already flows end-to-end to the LLM boundary (FX-2/FX-5-prose, §9.4);
 (c) branch on nothing (§6A.4, N-RANK);
 (d) leave the transport untouched, so the later structured contract can
     replace the prose source without a second proposer migration.
@@ -771,9 +795,20 @@ renders an already-resolved declaration.** Grounds:
   (§8): the shipped `configs/task_config.yaml` remains the default
   source, so nothing about legacy behaviour changes.
 - **What fails closed TODAY (pre-existing, not new):**
-  `ForwardContract` is `extra="forbid"`, so a mistyped YAML key raises
+  `ForwardContract` is `extra="forbid"`, so a MISTYPED YAML key raises
   a `ValidationError` rather than rendering empty; the loader rejects a
   missing/empty `task_description`.
+- **What does NOT fail closed today (2nd-review R2-9 — stated so the
+  bullet above is not read as completeness):** every `ForwardContract`
+  field has a default, so an OMITTED key validates fine and renders an
+  empty shape; and a downstream consumer silently substitutes a
+  TIDMAD-ish rank-3 default —
+  `ml_model_implementor.py:980`
+  (`output_shape = inp.forward_contract.output_shape or "[B, C, T] float32"`).
+  Both are outside 6-P (the implementor is step 03/04 territory) and
+  Step 01 must not touch them; recorded here with owners so the
+  "no silent TIDMAD inheritance" claim stays honest. §6.2 rule 6's
+  fail-closed requirement covers only the proposer's own surfaces.
 - **What Step 01 adds:** once F1/F3/F5 literals are derived, an
   explicitly declared non-TIDMAD profile can no longer inherit TIDMAD
   shape/class/loss prose — the derived text tracks the profile, and
@@ -1071,7 +1106,7 @@ must be separate fixtures on the same axis:
 ### 9.3 Ladder note
 
 The roadmap B cell for 6-P names exactly 13.4-A + 13.4-B; B is landed
-as its two same-axis rungs B-i/B-ii (§9.2) plus the operator's F2/F5
+as its two same-axis rungs B-i/B-ii (§9.2) plus the operator's FX-2/FX-5
 prose rungs (§9.4) — every fixture varies exactly one axis, and the
 count of fixtures is not the same thing as the count of axes.
 Loss-family variation is NOT a fixture axis (the frozensets are
@@ -1086,16 +1121,48 @@ description AND rank AND dtype together.
 
 | Rung | Varies | Step-01 disposition | Evidence / owner |
 |---|---|---|---|
-| **F1** — task description only | description text; TIDMAD contract untouched | **LANDS** — it IS fixture 13.4-A (§9.1) | asserts the JOIN carries the profile text and nothing else moves |
-| **F2** — explicit rank/axes only | one contract declaration with rank-4 NEUTRAL axis names (e.g. `[B, S, F1, F2] float32`), description untouched, no preset | **LANDS as a PROSE contrast** (extends 13.4-B, §9.2) | proves no generic template re-asserts rank: the rendered prompts must carry the declared rank-4 text and contain ZERO `[B, 256, T]`/`[B, T]`/"amplitude bins" residue. Deliberately neutral axis names so the test does not merely swap one domain's assumptions for another's |
-| **F3** — preset resolution only | a semantic preset resolving over a fixed explicit contract | **DEFERRED — prerequisite for step 02/03** | no preset mechanism exists (§6A.1); the rung becomes the contract owner's Stage-B requirement, recorded here so it is not lost |
-| **F4** — mismatch rejection (typed failure before the LLM boundary; no prompt capture fires) | preset vs explicit contract conflict | **DEFERRED — binding dependency, §6A.5** | Step 01 cannot fail closed on a conflict it cannot represent; the contract owner MUST land this rung with its structured contract |
-| **F5** — multi-channel time series (proves "time series" ≠ scalar `[B,T]`) | a multi-channel temporal declaration | **LANDS as a PROSE contrast** (one extra profile alongside F2); STRUCTURAL form deferred with F3 | at the prompt layer the property is real and testable today: a `[B, C, T]`-style declaration must render verbatim with no scalar-`[B,T]` residue |
+| **FX-1** — task description only | description text; TIDMAD contract untouched | **LANDS** — it IS fixture 13.4-A (§9.1) | asserts the JOIN carries the profile text and nothing else moves |
+| **FX-2** — explicit rank/axes only | one contract declaration with rank-4 NEUTRAL axis names (e.g. `[B, S, F1, F2] float32`) and an unfamiliar `task_type` (e.g. `operator_defined_xyz`, proving §6A.4's opaque-label rule); description untouched, no preset | **LANDS as a PROSE contrast** (extends 13.4-B, §9.2) | proves no generic template re-asserts rank. **Residue assertion is SCOPED (2nd-review R2-1)**: zero `[B, 256, T]`/`[B, T]`/"amplitude bins"/"256 denoising" inside the CONTRACT-DERIVED blocks only — see §9.5's whitelist of three literal survivors that this rung must NOT attempt to remove. Neutral axis names so the test does not merely swap one domain's assumptions for another's |
+| **FX-3** — preset resolution only | a semantic preset resolving over a fixed explicit contract | **DEFERRED — prerequisite for step 02/03** | no preset mechanism exists (§6A.1); the rung becomes the contract owner's Stage-B requirement, recorded here so it is not lost |
+| **FX-4** — mismatch rejection (typed failure before the LLM boundary; no prompt capture fires) | preset vs explicit contract conflict | **DEFERRED — binding dependency, §6A.5** | Step 01 cannot fail closed on a conflict it cannot represent; the contract owner MUST land this rung with its structured contract |
+| **FX-5** — multi-channel time series (proves "time series" ≠ scalar `[B,T]`) | a multi-channel temporal declaration | **LANDS as a PROSE contrast** (one extra profile alongside F2); STRUCTURAL form deferred with F3 | at the prompt layer the property is real and testable today: a `[B, C, T]`-style declaration must render verbatim with no scalar-`[B,T]` residue |
 
-Honesty clause: F2/F5 as landed here prove **template rank-agnosticism
-at the prompt layer**, not structured arbitrary-tensor support. The
-design claims nothing else, and §6A.2's "not yet end-to-end
-compatible" wording governs every statement about them.
+Honesty clause: FX-2/FX-5 as landed here prove **template
+rank-agnosticism at the prompt layer**, not structured
+arbitrary-tensor support. The design claims nothing else, and §6A.2's
+"not yet end-to-end compatible" wording governs every statement about
+them.
+
+Naming note (2nd-review R2-12): the rungs are `FX-n` precisely because
+§4's task-fact IDs are already `F1..F20` — an implementer reading
+"F2" must not confuse the rank rung with §4's int8-encoding row.
+
+Deliberate-artefact note (2nd-review R2-6): fixtures 13.4-B/FX-2/FX-5
+vary the contract while PINNING the TIDMAD description, so the
+captured prompt intentionally carries two disagreeing shape prose
+channels. That is a bounded TEST artefact proving the derived blocks
+track the declaration — it is NOT a supported profile, and §6A.5
+records the missing cross-channel validation as the contract owner's
+FX-4 obligation.
+
+### 9.5 Literal survivors — the residue whitelist (2nd-review R2-1, BLOCKER)
+
+The FX-2/FX-5 residue assertions would be UNSATISFIABLE if written
+against the whole prompt, because three sources of the forbidden
+tokens survive Step 01 **by this design's own decisions**. Each is
+listed here with its owner so no implementer "fixes" a scope
+violation to make a test green:
+
+| Survivor | Evidence | Why it survives Step 01 | Owner |
+|---|---|---|---|
+| The shipped `task_description` itself contains `[B, T]` and `[B, 256, T]` | `configs/task_config.yaml:11-14` ("map a noisy `[B, T]` integer signal to a clean `[B, 256, T]` reconstruction") | FX-2/FX-5 hold the description axis FIXED (one-axis rule); after S1-C the JOIN renders that exact string into the stage system prompts | the task profile itself — editing shipped YAML is out of Step-01 scope (and would regenerate CFG-1/CFG-2) |
+| The two-output-form catalogue `[B, 256, T]` / `[B, T]` | `proposing_stage.md:69-71`; commit `:330`, `:365-373` | §6.2 rule 2 + §4.1 tier (iii): NO declared regressor form exists in `ForwardContract`, so it is not renderable — it stays literal | step 03 (DQ-3) |
+| `render_forward_contract`'s `(per-timestep {N}-class)` descriptor | `workflows/task_config.py:206-212`; shipped in golden `cfg2_forward_contract_block.txt` | production renderer output, byte-pinned by CFG-2 — see §4 row F21 | step 02/03 (§4 row F21) |
+
+Consequently the assertion form is: **derived-block residue == 0**,
+plus a POSITIVE assertion that the declared rank-4 text is present.
+A whole-prompt residue assertion is explicitly forbidden by this
+design.
 
 ## 10. Live integration checkpoint (Checkpoint C)
 
@@ -1165,7 +1232,7 @@ tests and rendered-TIDMAD equality tests prove different things
 | Test | Current intent | Path | Disposition | Reason / replacement owner | Mutation proving the replacement owns the property |
 |---|---|---|---|---|---|
 | `test_contract_reassertion.py` (5 def / 15 collected; regex-extracts the `mathematical_definition` spec from the CONSTANT; pins 11 tokens + co-occurrence + ≥600-char floor + hard-constraint block tokens + `"forward contract is fixed"` absence) | Golden-Paragraph drift guard on the commit TEMPLATE | legacy | **RETARGET + PROFILE-PARAMETERIZE (the roadmap-mandated semantic change, stated here per matrix row 6-P column C)**: the pins move from the module constant to the RENDERED commit system prompt under (i) the TIDMAD profile — same tokens must appear, now derived (e.g. `[B, 256, T] float32` from ForwardContract, loss families from the frozensets) — and (ii) a contrast profile — the DERIVED tokens must track the profile (e.g. num_classes=16 ⇒ `256 denoising bins` absent, `16 …` present). The structural pins (Golden-Paragraph header, no-concrete-dims clause, length floor, co-occurrence-of-derived-tokens) stay, applied to the render. The absence pin (`forward contract is fixed`) stays on the render | The template no longer carries the tokens literally — asserting the constant would pin nothing; the PROPERTY (the agent is never left without the I/O contract and the fixed-dimension clause) lives on what the LLM sees, which is the render | M-4 (§15): reintroduce a hardcoded `256` in the commit template shadowing the placeholder → contrast-profile pin goes red; M-2: perturb one ForwardContract field → TIDMAD render pin goes red |
-| `test_step00_prompt_goldens.py::TestPB4LegacyCommit::test_commit_system_constant` (golden `pb4_legacy_commit_system.txt`) | Step-00 baseline of the commit SYSTEM surface — captured as the raw constant because today constant == render (zero substitution) | legacy | **RETARGET, GOLDEN BYTES UNCHANGED (HARD GATE on content)**: the assert target becomes the RENDERED commit system prompt under the shipped TIDMAD profile; the golden FILE is byte-identical (that is the Stage-A parity claim itself). The sibling `test_commit_user_render` already rendered-layer — KEEP | The golden IS the parity oracle; keeping it aimed at the constant would force the constant to stay literal forever, defeating the step; re-aiming preserves every byte as the acceptance criterion | M-2: change one rendered token (e.g. ForwardContract.output_shape) → red with a unified diff naming the golden; M-1: delete the placeholder consumer (render call) → red (constant ≠ golden once placeholders exist unrendered) |
+| `test_step00_prompt_goldens.py::TestPB4LegacyCommit::test_commit_system_constant` (golden `pb4_legacy_commit_system.txt`) | Step-00 baseline of the commit SYSTEM surface — captured as the raw constant because today constant == render (zero substitution) | legacy | **RETARGET, GOLDEN BYTES UNCHANGED (HARD GATE on content)**: the assert target becomes the RENDERED commit system prompt under the shipped TIDMAD profile; the golden FILE is byte-identical (that is the Stage-A parity claim itself). The sibling `test_commit_user_render` already rendered-layer — KEEP. **CAPTURE LAYER IS MANDATORY (2nd-review R2-4)**: the re-targeted system assert MUST capture at the LLM boundary through the legacy `run()` path (`BoundaryRecorderBridge`, label `proposer.legacy_commit`), NOT by calling a new render helper directly. Source reason: today `test_commit_system_constant` asserts the module constant and `test_commit_user_render` calls `_build_commit_prompt(...)` directly (`test_step00_prompt_goldens.py:381-393`) — the legacy commit surface has NO boundary capture at all, and WF-3's golden covers only the three PIPELINE labels. A direct-helper re-target would leave deletion of the render call at `ml_model_proposal_agent.py:1385` GREEN while a template full of unrendered `{...}` reaches the LLM (hazard §17.5) | The golden IS the parity oracle; keeping it aimed at the constant would force the constant to stay literal forever, defeating the step; re-aiming preserves every byte as the acceptance criterion | M-2: change one rendered token (e.g. ForwardContract.output_shape) → red with a unified diff naming the golden; M-1: delete the placeholder consumer (render call) → red (constant ≠ golden once placeholders exist unrendered) |
 | `test_prompt_ceiling_policy.py` — 2 of 7 (`test_vram_limit_requirement_retained` :65-68, `test_capacity_constraints_require_justification_language` :72-81 — presence pins on the CONSTANT via `_all_template_texts()`) | VRAM-mandate language never silently dropped | legacy + templates | **KEEP with capture-layer widening**: these two sentences are proposer-owned FRAMEWORK prose (not task facts — §5 map) and STAY LITERAL in the template, so the pins stay green as-is; if the implementation moves any pinned sentence into a rendered block (not planned), the pin follows to the render in the same commit. The 3 absence pins (mandate regexes, `<10 GB VRAM`) and the rendered-layer twin KEEP unchanged — they are anti-hardcode template pins (roadmap §13.3(b)) | The pinned sentences are budget-DISCIPLINE prose deferring to [HARDWARE CONTEXT], not extractable task facts | n/a (no move planned); if moved: same-commit pin move, M-4 guards reintroduction |
 | `tests/unit/agent/test_output_contract_end_to_end.py::test_json_skeletons_request_output_type` (`'"output_type"' in PROPOSAL_COMMIT_PROMPT` + in raw proposing_stage.md) | Both JSON skeletons REQUEST output_type (V21 PR A reachability) | both | **KEEP, layer-verified**: the `"output_type"` key is JSON-skeleton STRUCTURE (proposer-owned framework content), planned to stay literal in both templates; pin stays green. If the skeleton line gains placeholders around it, the token itself remains literal | Skeleton structure is not a task fact; PR A's reachability intent is untouched | n/a; the PR-A allow-list source-count pin (`:287-294`) independently guards the parse side |
 
@@ -1255,7 +1322,7 @@ packs are pytest path lists.
 |---|---|---|---|
 | 1. FAST INNER LOOP | `tests/unit/agent/ml_model_proposal_agent/` (521) + `tests/unit/workflows/test_step00_task_config_baselines.py` (5) + `tests/unit/agent/llm_bridge/test_step00_prompt_goldens.py` + the 3 proposer-edge protocol files (`test_ml_literature_review_to_ml_model_propose.py`, `test_ml_model_propose_to_ml_model_impl.py`, `test_ml_result_interp_to_ml_model_propose.py`) + `tests/unit/agent/schemas/` (295) — 861 tests | **3.0 s wall** (single invocation) | ≤ 2 min (measured 3 s — two orders of margin) |
 | 2. STAGE-A PARITY | the Step-00 proposer/config baseline files (`ml_model_proposal_agent/test_step00_prompt_goldens.py`, `llm_bridge/test_step00_prompt_goldens.py`, `workflows/test_step00_task_config_baselines.py` — 16 tests, 1.9 s) + `test_contract_reassertion.py` + `test_proposer_task_config.py` + the full proposer suite (already inside pack 1) | ≈ pack 1 + 2 s | ≤ 2 min |
-| 3. STAGE-B CONTRAST | the NEW 13.4-A/13.4-B proposer contrast fixtures + (per OD-S1-6(a)) the F2/F5 rank-agnosticism prose rungs (§9.4) (this PR's own tests — land inside `tests/unit/agent/ml_model_proposal_agent/`) | expected O(seconds) (same fixture machinery as PB-3) | ≤ 1 min |
+| 3. STAGE-B CONTRAST | the NEW 13.4-A/13.4-B proposer contrast fixtures + (per OD-S1-6(a)) the FX-2/FX-5 rank-agnosticism prose rungs (§9.4) (this PR's own tests — land inside `tests/unit/agent/ml_model_proposal_agent/`) | expected O(seconds) (same fixture machinery as PB-3) | ≤ 1 min |
 | 4. LIVE INTEGRATION | bounded production-path proposer runs, NO live API: `tests/integration/nodes/test_ml_model_proposal_agent.py::test_proposal_pipeline_dual_mode` (pseudo mode) + `tests/integration/workflows/test_pr_e_persistence_layout_pseudo.py::TestNodePersistence::test_proposer_persists_proposal_json` + `tests/integration/workflows/test_vocab_accumulation.py::test_vocab_discoveries_appear_in_proposal_prompt` (collect-verified present; never in CI per repo policy — run manually with fresh green logs attached to the claim) | bounded, minutes | manual, green-before-cite |
 | 5. FINAL FULL SUITE | full `pytest tests/unit/ -m "not real_run"` + ruff check + `ruff format --check` + pyright strict + CI on the exact final head ONLY (~8.3k tests, ~440 s CI precedent) | once, terminal | terminal gate only |
 
@@ -1528,7 +1595,7 @@ tests) is inside it.
 ### 14.4 Commit S1-D — Stage-B contrast fixtures + mutation battery closeout
 
 **Goal.** 13.4-A and 13.4-B land (§9), plus — under OD-S1-6(a) — the
-F2/F5 rank-agnosticism prose rungs (§9.4) that convert "the templates
+FX-2/FX-5 rank-agnosticism prose rungs (§9.4) that convert "the templates
 are rank-agnostic" from a claim into a test; the §15 battery is fully
 executed and recorded; contract-reassertion contrast variant lands.
 
@@ -1541,14 +1608,17 @@ any production diff.
       and **B-ii** (16-class classifier) as SEPARATE same-axis
       fixtures (§9.2), B-ii carrying the contrast half of the
       re-targeted contract-reassertion pins.
-- [ ] F2 rung (§9.4): rank-4 NEUTRAL-axis contract profile; assert the
-      declared text renders on all Step-01 surfaces AND zero
-      `[B, 256, T]`/`[B, T]`/"amplitude bins"/`256 denoising` residue.
-      One axis only — description and losses untouched.
-- [ ] F5 rung (§9.4): multi-channel temporal declaration; assert it
-      renders verbatim with no scalar-`[B,T]` residue (proves "time
-      series" is not assumed scalar).
-- [ ] Record F3/F4 as DEFERRED prerequisites for the contract-owning
+- [ ] FX-2 rung (§9.4): rank-4 NEUTRAL-axis contract profile + an
+      unfamiliar `task_type`; assert (a) the declared rank-4 text and
+      the opaque `task_type` label render on all Step-01 surfaces, and
+      (b) zero `[B, 256, T]`/`[B, T]`/"amplitude bins"/"256 denoising"
+      residue **within the contract-DERIVED blocks only** — the three
+      §9.5 whitelisted survivors are expected and must not be
+      "fixed". One axis only — description and losses untouched.
+- [ ] FX-5 rung (§9.4): multi-channel temporal declaration; assert it
+      renders verbatim with no scalar-`[B,T]` residue in the derived
+      blocks (proves "time series" is not assumed scalar).
+- [ ] Record FX-3/FX-4 as DEFERRED prerequisites for the contract-owning
       step (§6A.5 binding dependency) — no stub, no placeholder test.
 - [ ] Execute remaining mutations (M-3, M-4, M-7, M-8, M-9) + the flexible-input
       mutations N-RANK/N-RESIDUE/N-OPAQUE (§15.1) with mutation-proof
@@ -1561,7 +1631,7 @@ any production diff.
 (reviewed against §9/§9.4 atomicity notes — no fixture changes
 description AND rank AND dtype); every §15/§15.1 mutation has a
 recorded RED and a restored GREEN; zero surviving behavior-changing
-mutations; N-RESIDUE specifically proves the F2/F5 rungs catch a
+mutations; N-RESIDUE specifically proves the FX-2/FX-5 rungs catch a
 shadow literal that TIDMAD parity alone cannot; the design's F3/F4
 rows read DEFERRED with an owner, never "covered".
 
@@ -1618,6 +1688,7 @@ hygiene rules apply). Battery (directive-mandated cases instantiated):
 | # | Mutation | Expected RED |
 |---|---|---|
 | M-1 | delete a NEW placeholder consumer: remove `{task_description}` from one stage template (post-JOIN) | JOIN test + the regenerated PB-3 golden for that stage |
+| M-1b (2nd-review R2-4) | delete the commit-prompt RENDER CALL at `ml_model_proposal_agent.py:1385` so the placeholder-bearing template is passed verbatim | the re-targeted PB-4 system assert, captured at the legacy `run()` boundary, goes RED (unrendered `{...}` ≠ golden). **This mutation is the acceptance proof that the capture layer was implemented as specified** — if it stays green, the test was wired to a helper instead of the boundary |
 | M-2 | change one TIDMAD rendered token: perturb one ForwardContract-derived token in the renderer (e.g. drop the dtype suffix) | PB-4-retargeted golden (S1-A) / PB-3 goldens (S1-B) with unified diff naming the surface |
 | M-3 | parser/transport-loss analog: make the loss-legality renderer read an empty iterable (authority disconnected pre-render) | re-targeted contract-reassertion legality pins + rendered legality golden |
 | M-4 | reintroduce a hardcoded task fact: paste a literal `256`-token line into the template beside the placeholder | 13.4-B contrast fixture (literal survives the contrast profile) + template-layer absence pin (S1-B) |
@@ -1637,9 +1708,9 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 
 | ID | Mutation | Expected |
 |---|---|---|
-| **N-RANK** | add a rank/axis branch to any Step-01 renderer (e.g. `if "T]" in fc.output_shape:` or a `task_type == "classification"` code path selecting different prose) | forbidden by §6A.4; the reviewer/test must catch it — the F2 rank-4 contrast goes red or renders TIDMAD-shaped text |
-| **N-RESIDUE** | after extraction, reintroduce one hardcoded `[B, 256, T]` (or "256 amplitude bins") into a generic template while the contrast profile is active | F2/F5 contrast fixtures go red on the residue assertion; the TIDMAD golden stays green — proving the fixtures catch shadow literals that parity alone cannot |
-| **N-OPAQUE** | make a renderer read `task_type` to choose a branch instead of rendering it as an opaque label | violates the field's own schema docstring and §6A.4; caught by the F2 fixture (neutral contract with an unfamiliar `task_type` must still render) |
+| **N-RANK** | add a rank/axis branch to any Step-01 renderer (e.g. `if "T]" in fc.output_shape:` or a `task_type == "classification"` code path selecting different prose) | **named failing assertion** (2nd-review R2-7): the FX-2 rung's POSITIVE assertion — "the declared rank-4 text and the unfamiliar `task_type` label render verbatim" — goes RED, because any such branch emits the non-declared alternative for a contract it does not recognise. If a candidate branch can be added WITHOUT reddening FX-2, that proves the rung is too weak and the rung must be strengthened, not the mutation excused |
+| **N-RESIDUE** | after extraction, reintroduce one hardcoded `[B, 256, T]` (or "256 amplitude bins") into a generic template while the contrast profile is active | FX-2/FX-5 contrast fixtures go red on the residue assertion (scoped to the derived blocks, §9.5); the TIDMAD golden stays green — proving the fixtures catch shadow literals that parity alone cannot |
+| **N-OPAQUE** | make a renderer read `task_type` to choose a branch instead of rendering it as an opaque label | violates the field's own schema docstring (`agent/schemas/task_config.py:86-92`, "consumers should treat unknown values as opaque labels") and §6A.4; RED on FX-2, whose profile now explicitly carries an unfamiliar `task_type` that must render verbatim (§9.4) |
 
 ## 16. Checkpoints instantiated (roadmap §17)
 
@@ -1647,7 +1718,7 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 |---|---|---|
 | 0 BASELINE AVAILABLE | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed on MASTER (PR #198) and green in this worktree (526 passed, 2.3 s); PB-0's true surface corrected per §8.1 | **MET** |
 | A EXTRACTION PARITY (with the declared OD-S1-8 exception) | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | design |
-| B GENERIC CONTRAST | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's F2/F5 prose rungs — one axis per fixture; F3/F4 DEFERRED with a named owner | design |
+| B GENERIC CONTRAST | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's FX-2/FX-5 prose rungs — one axis per fixture; FX-3/FX-4 DEFERRED with a named owner | design |
 | C LIVE INTEGRATION | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4); the :1597 seam is WIRED — no consumer-less seam survives | design |
 | D REGRESSION | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | design |
 | E ROADMAP SYNC | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | design |
@@ -1717,9 +1788,10 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
    rules (e.g. parsing shape strings). Guarded by §6.2 rule 1 and
    review trigger: any conditional logic beyond verbatim-field
    insertion + membership listing is a scope question.
-4. **Step-00 dependency risk**: if the Step-00 PR changes under review
-   (goldens renamed/moved), §8.1's map must be re-verified at the
-   freeze re-sync — recorded as the §Status precondition.
+4. **Step-00 dependency risk — CLOSED 2026-08-12**: Step 00 merged
+   (`e80da078`) and this branch is synchronized onto that master;
+   §8.1's map was re-verified artifact-by-artifact on master and the
+   consuming suites re-run green here. No open dependency remains.
 5. **Legacy-surface divergence**: after Step 01 the legacy and
    pipeline paths still differ (commit prompt has no hardware block;
    known-constraints only in pipeline; description in both). Step 01
@@ -1751,7 +1823,7 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 | OD-S1-2 | **Stale budget literals** ("~100M" PROPOSAL_REASONING_PROMPT:284; "10 GB" causal_reasoning_stage.md:146): roadmap §14 already RESOLVED the semantics (derive from [HARDWARE CONTEXT]; delete stale literals) but proposer templates have NO later owner (step 04's prompt scope excludes proposer surfaces) | (a) include optional commit S1-E (isolated, golden-regenerating, clearly labeled); (b) defer and accept an ownership gap | **(a) INCLUDE S1-E** — otherwise the two literals become permanently unowned; the commit is isolated and skippable |
 | OD-S1-3 | **JOIN placement**: which stage system prompts render the task-background block | (a) all three stages (comparison/causal currently task-blind — they choose the architecture family); (b) proposing stage only (minimal byte change) | **(a) all three** — the step's final effect is about the HYPOTHESIS SPACE, which is formed in stages 1-2; (b) would satisfy the letter of the JOIN while leaving the deciding stages task-blind |
 | OD-S1-4 | **Checkpoint-C chain evidence form** (roadmap C cell says "a real chain iteration"; §17 exempts prompt extractions from real Gates) | (a) bounded `--is_pseudo_llm` production-entry iteration with prompt dump, log attached (no API cost); (b) one real-LLM bounded iteration; (c) unit+pseudo-workflow evidence only | **(a)** — exercises the production entry + real renders at zero API cost; (b) adds LLM nondeterminism and cost without adding parity evidence |
-| OD-S1-6 | **Flexible-input scope (new, operator requirement 2026-08-12)**: §6A.1 proves the contract is prose-only end-to-end and §6A.5 freezes Outcome B (preset/tensor validation belongs to step 02/03) | (a) accept Outcome B and land the F2/F5 PROSE contrast rungs in commit S1-D (they are the only tests that actually prove template rank-agnosticism, and cost one extra profile fixture each); (b) accept Outcome B but land no flexible-input rungs (13.4-A/B only); (c) reject Outcome B and require a structured tensor contract inside Step 01 | **(a)** — Outcome B is source-forced (nothing structured exists to validate; building it seizes step-02/03 ownership), and the two prose rungs are cheap, atomic and are the difference between *claiming* rank-agnosticism and *proving* it. (c) would make Step 01 the Dataset/Model-contract owner, contradicting the frozen 6-P/6-M split |
+| OD-S1-6 | **Flexible-input scope (new, operator requirement 2026-08-12)**: §6A.1 proves the contract is prose-only end-to-end and §6A.5 freezes Outcome B (preset/tensor validation belongs to step 02/03) | (a) accept Outcome B and land the FX-2/FX-5 PROSE contrast rungs in commit S1-D (they are the only tests that actually prove template rank-agnosticism, and cost one extra profile fixture each); (b) accept Outcome B but land no flexible-input rungs (13.4-A/B only); (c) reject Outcome B and require a structured tensor contract inside Step 01 | **(a)** — Outcome B is source-forced (nothing structured exists to validate; building it seizes step-02/03 ownership), and the two prose rungs are cheap, atomic and are the difference between *claiming* rank-agnosticism and *proving* it. (c) would make Step 01 the Dataset/Model-contract owner, contradicting the frozen 6-P/6-M split |
 | OD-S1-7 | **Tier-(ii) shape formatting rule (adversarial finding F4)**: the commit prompt and proposing template state the output shape in dtype-stripped/backticked forms that `output_shape` cannot produce by verbatim insertion | (a) REJECT for Step 01 — those sites stay literal, recorded as step-03 convergence candidates; (b) APPROVE one explicit, unit-tested formatting rule ("drop the trailing dtype word") and extract them too | **(a) REJECT** — the rule is a decision about the contract's surface forms, which §5 owns; §4.1 already names and routes every retained literal, so nothing goes unexamined |
 | OD-S1-8 | **A-cell exception for the JOIN (adversarial finding F14)**: the roadmap A-cell says all three proposer stages render EXACT-equal for TIDMAD, and the JOIN deliberately changes those bytes | (a) AUTHORIZE the declared, contained exception (§8 header: one commit, declared golden set, §13-governed, diffs attached), on the authority of Step-00 §15.2's JOIN assignment + roadmap §0 rule 8 / §13.2 / §17-C; (b) REFUSE — move the JOIN out of Step 01 (then §1 effect 2, fixture 13.4-A/F1 and Checkpoint C must be re-planned) | **(a) AUTHORIZE** — Step-00 §15.2 is the later, more specific authority and explicitly calls the JOIN "step 01's own A-work"; without it 13.4-A is unsatisfiable and the named dead seam survives the step meant to fix it. It must nonetheless be an explicit operator grant, not a design-side reinterpretation |
 | OD-S1-5 | **Design freeze** after Step-00 merge + re-sync: confirm the §8.1 baseline map against master and authorize implementation | — | freeze only after the §Status preconditions are all TRUE |
@@ -1788,6 +1860,38 @@ so its §Status/§8.1 dependency observations were already superseded by
 the post-merge sync (`f30ef9be`); its source-grounded findings above
 are unaffected and were reconciled in full. No finding was dismissed
 without source evidence, and no finding was manufactured.
+
+## 19B. Second adversarial review record (post-sync, 2026-08-12)
+
+A SECOND fresh read-only reviewer ran against the post-sync document
+(including the new §6A/§9.4 material, which the first review never
+saw). Because it started while the first agent's own reconciliation
+pass was still landing, four of its findings were already fixed in the
+tree when it reported; the main agent re-verified every finding
+against source at the CURRENT head before accepting or rejecting it.
+
+| # | Finding | Verdict (main-agent source check) | Reconciliation |
+|---|---|---|---|
+| R2-1 | **BLOCKER** — the FX-2/FX-5 "zero residue" assertions are unsatisfiable as written: the shipped `task_description` itself contains `[B, T]`/`[B, 256, T]`, the two-output catalogue stays literal by §6.2 rule 2, and the renderer emits `per-timestep` | **CONFIRMED** (`configs/task_config.yaml:11-14` read directly) | assertions rescoped to CONTRACT-DERIVED blocks; new **§9.5 whitelist** of the three survivors with owners; §1 item 5 over-claim corrected; §14.4 checklist rewritten |
+| R2-2 | **MAJOR** — `render_forward_contract` emits `(per-timestep {N}-class)`: a temporal assertion from PRODUCTION CODE branching on a structured field; no §4/§5 row covered it | **CONFIRMED** (`workflows/task_config.py:206-212`; golden `cfg2_forward_contract_block.txt` ends "Task type: classification (per-timestep 256-class).") | new §4 row **F21** (KEEP byte-identical, whitelisted, routed to step 02/03 as defect-not-blessed); §6A.1's "Consequence" corrected; §6A.4 grandfathers the pre-existing `if fc.num_classes:` branch explicitly |
+| R2-3 | MAJOR — §4 row F1/F3 says EXTRACT-RENDER for a family §6.2 keeps literal | **REJECTED — already fixed** before the review reported: the row reads "**SPLIT PER SITE** — see §4.1" (first review's F4) | none needed |
+| R2-4 | **MAJOR** — the PB-4 re-target's capture layer is unspecified, so the natural implementation leaves the `:1385` render call unguarded while M-1 still reports green | **CONFIRMED** (`test_step00_prompt_goldens.py:381-393`: constant assert + direct helper call; no boundary capture; WF-3 covers pipeline labels only) | §11.1 PB-4 row now MANDATES boundary capture through the legacy `run()` path; new mutation **M-1b** makes that the acceptance proof |
+| R2-5 | MAJOR — the JOIN breaks the A-cell without an operator grant | **REJECTED — already fixed**: **OD-S1-8** exists and asks exactly that (first review's F14) | none needed |
+| R2-6 | **MAJOR** — the JOIN opens a second, unvalidated shape-prose channel (description vs contract), which §6A.5's own rule forbids | **CONFIRMED** | §6A.5's binding dependency now names description↔contract consistency as part of the contract owner's FX-4 obligation; §9.4 records the fixtures' contradiction as a bounded, deliberate test artefact |
+| R2-7 | MINOR — N-RANK/N-OPAQUE had no real expected-RED ("the reviewer must catch it"); FX-2 never specified the unfamiliar `task_type` the N-OPAQUE claim relies on | **CONFIRMED** | FX-2's profile now carries an unfamiliar `task_type` with a verbatim-render assertion; both mutations restated against named failing assertions, with the "if it stays green, strengthen the rung" rule |
+| R2-8 | MINOR — 13.4-B fuses a regressor contract with `num_classes=16` | **REJECTED — already fixed**: §9.2 is split into same-axis rungs B-i/B-ii (first review's F7) | none needed |
+| R2-9 | MINOR — §6A.6's "what fails closed today" reads as completeness | **CONFIRMED** (omitted keys validate via defaults; `ml_model_implementor.py:980` silently substitutes `"[B, C, T] float32"`) | §6A.6 gains an explicit "what does NOT fail closed" bullet with owners |
+| R2-10 | MINOR — post-merge staleness (Checkpoint 0, risk 4) | **PARTIALLY CONFIRMED**: Checkpoint 0 already read MET; risk 4 was still stale | risk 4 converted to CLOSED with the merge SHA |
+| R2-11 | MINOR — S1-E's plan is "[ ] per inspection" | **REJECTED — already fixed**: S1-E carries a CAPTURE-FIRST plan (first review's F6a) | none needed |
+| R2-12 | MINOR — `F1..F5` rung IDs collide with §4's `F1..F20` fact IDs | **CONFIRMED** | rungs renamed **FX-1..FX-5** throughout §9.4/§14.4/§15.1 with a naming note |
+| R2-13 | NIT — cross-reference hygiene (§10.2, §0.8, `run_one_iteration.py` path, OD ordering, F19 gap) | ACCEPTED as editorial | folded into this pass where unambiguous; the F19 gap is external audit numbering and is left, now explained here |
+
+Cleared by the second review with source evidence: no Step-04
+smuggling; no roadmap line silently dropped; **no code anywhere parses
+a shape string** (independently re-verified); no premature tensor
+schema; presets role-based and non-API; every cited Step-00 baseline
+present on master and green (526 passed); pack-1 re-measured at
+861 tests / 3.0 s; no consumer-less seam; no half-enabled commit state.
 
 ## 20. Governance persistence (for later propagation)
 
