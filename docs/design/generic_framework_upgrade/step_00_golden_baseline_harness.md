@@ -2,11 +2,12 @@
 
 ## Status
 
-**READY FOR OPERATOR REVIEW — NOT IMPLEMENTED. Design only; NO
-implementation authorized.** The implementation PR this design
-authorizes-on-approval is TEST-ONLY with ZERO production behavior
-change. Adversarially reviewed and reconciled 2026-08-11 (§23);
-operator decisions OD-1..5 (§22) required before implementation.
+**DESIGN FROZEN — OPERATOR APPROVED FOR IMPLEMENTATION (pending
+confirmation of the §22.1-22.3 audit results) — NOT IMPLEMENTED.**
+The implementation PR this design authorizes is TEST-ONLY with ZERO
+production behavior change. Adversarially reviewed and reconciled
+2026-08-11 (§23); operator-reviewed and finally reconciled 2026-08-12
+(§23a); all operator decisions OD-1..5 CLOSED (§22).
 
 Created 2026-08-11 on branch `docs/generic-framework-step-00-design`
 from a six-area parallel source/test audit (A prompts/LLM-boundary,
@@ -156,7 +157,8 @@ Empirically confirmed by the original audit (5 processes, 5 orders) and
 re-confirmed by the rescue session (3 processes, 3 orders). These are
 the only set-iteration-into-output sites found across the prompt-render
 modules; all other set usages are membership-only or `sorted()`.
-Disposition NOT decided — see §11.1.
+Disposition: CLOSED as OD-1 (§22) — ≤3-record fixture now; two-site
+ordering fix as the step-07a predecessor.
 
 Environment/filesystem couplings that a planner/proposer golden must pin
 (deterministic given a pinned environment, not given a fixture alone):
@@ -269,7 +271,8 @@ tree + `MODEL_REGISTRY` stub: pipeline proposer ×5. Requires resolving
   real success record with a populated `score_table` in
   `siderius_workspace/` FAILS the current schema
   (`headroom_vs_gt >= 0`, `agent/schemas/score_table.py:67-69`) —
-  a known defect that must NOT be blessed (§2). Choice = §11.2.
+  a known defect that must NOT be blessed (§2). Fixture-source choice
+CLOSED as OD-2 outcome A (§22.1).
 - Resume replay: `RestoredState` (13 fields) reconstructed from
   `iter_NNN/manifest.json` (+ sha256 integrity), run_output,
   `plugins/iter_NNN/*.py`, interpretation digest, proposal JSON,
@@ -519,11 +522,11 @@ under a pinned registry + pinned `agent_generated/` tree +
 
 ## 11. Genuine open design/policy questions
 
-These cannot be resolved by further source inspection; each requires a
-design decision (some operator-facing). None is silently decided by
-this document — each is carried to §22 as OD-1..OD-5 with
-source-grounded options and a recommendation (item 1 → OD-1, 2 → OD-2,
-3 → OD-3, 4 → OD-4, 5 → OD-5).
+HISTORICAL (kept as the audit-time statement of the questions): each
+was carried to §22 as OD-1..OD-5 (item 1 → OD-1, 2 → OD-2, 3 → OD-3,
+4 → OD-4, 5 → OD-5). **All five are now CLOSED** — OD-1/OD-3 by
+direct operator approval (2026-08-12), OD-2/OD-4/OD-5 by the
+operator-directed narrow source audits recorded in §22.1-22.3.
 
 1. **Planner-history nondeterminism disposition** (§4.4, §10.2). A
    genuine choice remains among: (a) FIXTURE CONSTRAINT — capture the
@@ -670,7 +673,7 @@ inspect-first rule.
 | DS-3 | SampleSet sha16 selection digests | 4 | REG+STR | existing 3 digests registered; ADD one normal-mode + one partial-scope digest |
 | HC-1 | shipped `health_checks.yaml` resolved config | 2 | NEW | deep-equal of `load_health_gates_config().model_dump(mode="json")`; values MIGRATION PARITY, mechanism REQUIRED |
 | REC-1 | `ExperimentRecord` + `HyperparamTuningOutput` ordered full field lists | 3 | NEW | closes the deliberate key-set-pin exemption for migration purposes; duplicate `file_vector` registered as defect |
-| REC-2 | canonical record deep-equal projection (load-bearing subset incl. resume-consumed 11 fields) | 2 | NEW | pseudo-derived fixture + typed-schema-built gate/gpu sub-fixtures (OD-2) |
+| REC-2 | canonical record deep-equal projection (load-bearing subset incl. resume-consumed fields + `status` + tuner-read fields) | 2 | NEW | fixture captured from a RecordingSandbox pseudo iteration at the `_emit_record` seam with a length-20 fixture vector (§22.1 outcome A); typed-schema gate/gpu sub-fixtures pin shapes only; StubSandbox NEVER a source |
 | REC-3 | artifact key sets: manifest.json (3 status branches), run_output (46), interpretation (35), summary shape | 3 | NEW | producers §6/audit-C |
 | REC-4 | `exp_id` format `{model}_{run}_{NNN}` at BOTH production sites | 5 | NEW | pins `:4089` and `:4440` render identically; the `:03d` padding is SEMANTIC — `core/resume.py:438-441` breaks score ties lexicographically on `exp_id` (review F12) |
 | RES-1 | resume replay from a COMMITTED minimal workspace fixture → `RestoredState` projection | 6 | NEW | 2 mandatory + degradable optional files; exercises the real `restore_prior_state` |
@@ -684,7 +687,7 @@ inspect-first rule.
 | NUM-4 | `score == log_5.27(linear_sum/n_segments)` across all 40 per-file JSONs | 4 | NEW | |
 | NUM-5 | log-base cross-module identity (scoring_utils inline ≡ scoring_helpers ≡ `per_file_best._log`) | 4 | NEW | bit-equal over representative values |
 | NUM-6 | `score_vector(legacy_mode=False)` MECHANISM replay on synthetic tiny-N HDF5 | 5 | NEW | aggregation choreography only (grand-mean, `-inf` sentinels, `None` gaps, NaN drop, `channel0001` attrs read, frozen raw filename) — explicitly NOT numeric parity (OD-3); `parallel=False`; files under `tmp_path`, never committed |
-| NUM-7 | real-data numeric evidence tier (anchor consistency; legacy-parity test 3) | 4 | REG | registered as `real_run` higher-tier evidence, never claimed as CI |
+| NUM-7 | real-data numeric evidence tier (anchor consistency; legacy-parity test 3 `test_score_vector_legacy_mode_fine`) | 4 | REG | `real_run` higher-tier evidence, never claimed as CI; GREEN-BEFORE-CITE — a Stage-A claim citing NUM-7 attaches a fresh green data-machine log (§22.2); legacy-parity tests 1-2 DELETED per OD-4 |
 | NUM-8 | `per_file_best` emitted-artifact key set incl. `metric_id` | 3 | NEW | roadmap step-06 A-surface; producer `execute_tools/per_file_best.py:357-360` |
 | MD-1 | builtin model forwards + `MODEL_REGISTRY` contents | 3+5 | REG "verify strength" | roadmap step-03 A-surface; `tests/unit/ml_models/test_models_forward.py` + registry-population suite; strengthen to an exact registry key-set pin if absent |
 | FC-1 | runtime forecast deep-equal breakdowns (PR-G pattern) | 2 | REG | roadmap step-05b A-surface; the PR-G estimator test family (`tests/unit/agent/{training_skill,inference_skill,denoising_score_skill}/test_estimator.py` + estimator-resolution suites) |
@@ -693,7 +696,7 @@ inspect-first rule.
 | WF-1 | full `plan()` kwarg surface (25 params excl. `self`: `memory_history` POSITIONAL + 24 keyword) reaches the bridge | 5 | NEW | deep-equal of serializable subset; the positional binding of `memory_history` is part of the captured surface (review F11); `registry` (live object → type/identity pin) and `memory_history` (content pinned via K.9) excluded with justification |
 | WF-2 | `reflect()` kwarg surface at its sole call site | 5 | NEW | positional-name latency registered as known-latent break |
 | WF-3 | label/components inventory crossing `generate`/`generate_text` | 5 | NEW | requires widening `RecordingLLMBridge` (test helper) to record `(method, system, user, label, components)`; its own tuple-shape pins updated in the same commit per §17 |
-| WF-4 | k9 + l_fail choreographies, attempt-budget pins, 12/12 protocol mappings, incumbent chain, stub determinism | 5 | REG | k9's pre-existing failure documented, not blessed (OD-5) |
+| WF-4 | k9 + l_fail choreographies, attempt-budget pins, 12/12 protocol mappings, incumbent chain, stub determinism | 5 | REG+STR | k9's stale stdout assertion migrated to structured evidence in commit 0E (§22.3 outcome A); WF-4 is registered/citable ONLY once k9 is green |
 
 ### 13.1 Prompt family (PB) — capture design
 
@@ -768,14 +771,17 @@ absolute paths). The honest exclusion claim (review F4): **every field
 whose VALUE drives a production decision is compared; pass-through and
 measured-volatile fields are excluded by value but pinned by PRESENCE
 via REC-1/REC-3** (a renamed/dropped key still fails; only the
-measured number itself is free). Fixture source per OD-2:
-pseudo-derived record NORMALIZED TO PRODUCTION SHAPE (strip
-`_pseudo_origin`; replace the stub's length-9 `file_vector` with a
-typed length-20 value — each normalization recorded in fixture
-provenance) + `PersistedHealthGateResult` / gpu-evidence sub-fixtures
-constructed through their typed schemas — so the three
-structurally-empty pseudo fields still get shape coverage without
-committing absolute paths.
+measured number itself is free). Fixture source per OD-2 outcome A
+(§22.1): the record is captured from a RecordingSandbox-driven pseudo
+tuner iteration AT the production `_emit_record` seam (the validated
+record, pre-serialization), with the capture fixture supplying a
+typed length-20 score vector — the fixture is the output of the REAL
+production record assembly under pinned inputs, no normalization step
+required. StubSandbox-derived records are NEVER a fixture source.
+`PersistedHealthGateResult` / gpu-evidence sub-fixtures constructed
+through their typed schemas give the three structurally-empty pseudo
+fields SHAPE coverage (Type-3 evidence, no producer-parity claim)
+without committing absolute paths.
 
 RES-1 is a **rewritten-header replay**, not byte-consumption of a
 production artifact (review F10): production manifests carry an
@@ -867,9 +873,9 @@ deferred to step 05c's design (owner of the execution-contract shapes).
 | `RecordingLLMBridge` capture holes | §4.2 | WF-3 fixes the helper (test-only) |
 | stale key-set docstring "53 fields" | §6 | corrected by REC-1's commit docs |
 | schema-invalid historical record (`headroom_vs_gt < 0`) | §6 | documented only; never a fixture |
-| k9 `assert "Feasible"` failure | §8, pre-existing at base | OD-5 |
-| stale legacy-parity calls (missing `s_max`) + missing `docs/align_denoising_score.md` citation | §7 | OD-4 |
-| stale FU-P2-4 xfail (committed copy already satisfies it) | §7 | disposition folded into OD-4's test-hygiene decision |
+| k9 `assert "Feasible"` failure | §8, pre-existing at base | RESOLVED §22.3: test-only assertion migration in 0E; green before WF-4 registration; escalation guard if the gate proves not to fire |
+| stale legacy-parity calls (missing `s_max`) + missing `docs/align_denoising_score.md` citation | §7 | RESOLVED §22.2: tests 1-2 deleted in 0D (property obsolete by intentional frozen decisions); test 3 kept as NUM-7 with green-before-cite; docstring re-scoped |
+| stale FU-P2-4 xfail (committed copy already satisfies it) | §7 | retired in 0D with pointer to NUM-1 (§22.2) |
 | pseudo sandbox-shape divergences | §8 | registered NOT BLESSED; checker deferred to step 05c |
 | dangling `docs/pseudo_test_infra.md` citations | §9 | out of scope; registered |
 | `validation_file_pattern` unwired (raw filename frozen literal) | §7 | MIGRATION PARITY label on NUM-6's filename pin; owning module step 02/06 (roadmap D10) |
@@ -966,7 +972,9 @@ Extends existing conventions; no new mechanism where one exists:
      choreography — a red or unexecuted registration cannot be cited
      (OD-5).
   3. **`real_run` evidence tier** (NUM-7): real data/API; registered
-     as higher-tier evidence, never claimed as CI.
+     as higher-tier evidence, never claimed as CI; same
+     green-before-cite rule as tier 2 — a Stage-A claim citing it
+     attaches a fresh green data-machine log (§22.2).
   No new marker vocabulary; the `dual_mode` registration split is not
   replicated.
 - Budget: the whole family adds O(seconds) — target < 30 s on top of
@@ -1001,26 +1009,44 @@ Extends existing conventions; no new mechanism where one exists:
 **One test-only PR** on a dedicated branch, six semantic commits —
 matching the one-PR-per-tier precedent. Commits 0A-0D are mutually
 independent; 0E depends on 0A (helper widening); 0F closes.
-Checkpoint 0 is complete at PR merge. Step 01 is BLOCKED on: this
-design approved, the PR merged, and OD-1..5 resolved (a §15.2 deferral
-counts as resolution). No phase begins before the operator approves
-this design.
+Checkpoint 0 is complete at PR merge.
 
-Standing rules for every commit below (operator standard, 2026-08-11):
+Prerequisite state: OD-1..5 are CLOSED (§22); implementation begins
+only on the operator's explicit implementation authorization. Step 01
+is BLOCKED on the implementation PR merging (a §15.2 deferral counts
+as baseline resolution).
+
+Standing rules for every commit below (reconciled 2026-08-12 with the
+Implementation Working Rules — semantic commits are AUTONOMOUS):
 - `[ ]` = not finished; `[x]` = implemented AND verified with recorded
   evidence. All boxes are `[ ]` now — NOTHING is implemented.
 - Inspect the relevant code before finalizing each commit's low-level
   steps; the checklists below are specific enough to track but
   deliberately do not invent implementation details ahead of
-  inspection. If inspection reveals ambiguity or a larger scope than
-  this design assumes, STOP AND ASK before changing the plan.
+  inspection.
+- Per commit: inspect source before editing → update this live design
+  ledger continuously → inspect the diff and staged file list before
+  committing → record tests, decisions and deviations here → COMMIT
+  AUTONOMOUSLY → continue to the next phase. Commits 0A-0F do NOT
+  require individual operator approval.
+- STOP only for: a material design/scope deviation; validation
+  exceeding the approved cost envelope; an unresolved operator policy
+  question; PR READY FOR OPERATOR REVIEW; merge approval (never
+  merge).
 - Update this document immediately after each implementation or test
   checkpoint — never batched at the end.
-- Before each commit: stop and show the exact diff summary, staged
-  file list, tests run, and any deviations from the approved design.
 - Verification evidence = test counts + wall time recorded here after
   execution; any test that could not run is recorded with the reason,
   never claimed as passed.
+- **Minimum-sufficient test cadence (operator, 2026-08-12)** — per
+  semantic commit: targeted new tests + directly affected existing
+  suites + mutation/adversarial checks + ruff/format on touched
+  files; broader suites only where a shared-helper blast radius
+  justifies them (run autonomously and record why). The FULL
+  `pytest tests/unit/ -m "not real_run"` + ruff + `ruff format
+  --check` + pyright strict + terminal CI run ONCE, at the final
+  executable head (0F). Do not mechanically run the ~8k-test suite
+  after every commit.
 - No real-training Gates arise anywhere in this PR (test-only, no
   execution-behavior change); if any commit turns out to need one,
   that is a material deviation — stop for operator approval.
@@ -1049,7 +1075,8 @@ the widened helper, and every other golden uses the diff helper.
   `execute_tools/`, `core/`, `ml_models/` untouched); no LLM calls;
   PB-1's >3-record branch stays deferred per OD-1; existing PB-0
   goldens byte-untouched.
-- Depends on: operator approval of this design + OD-1 resolution.
+- Depends on: the operator's implementation authorization (OD-1..5
+      are CLOSED, §22).
 
 **Implementation plan.**
 - [ ] Inspect `render_proposer_prompts_for_audit.py` + `StubLLMBridge`
@@ -1075,8 +1102,11 @@ the widened helper, and every other golden uses the diff helper.
       recorded red/green evidence.
 - [ ] Negative control: editing a `label=` string leaves all PB
       goldens green.
-- [ ] Backward-compat: full existing unit suite green (the helper
-      widening must not break the 5 ad-hoc bridges' tests).
+- [ ] Backward-compat: the widened helper's DIRECT consumer suites
+      green (`test_recording_fakes.py`, the five ad-hoc-bridge test
+      files, and every suite importing `recording_llm_bridge`) — this
+      is the shared-helper blast radius that justifies a broader run
+      under the cadence rule.
 
 **Acceptance criteria.**
 - [ ] Every §13 PB row exists as a committed golden + test, or is in
@@ -1099,13 +1129,14 @@ the widened helper, and every other golden uses the diff helper.
 
 **Verification commands (evidence recorded after execution).**
 - [ ] `pytest tests/unit/<pb test paths> -q` → counts + wall time.
-- [ ] `pytest tests/unit/ -m "not real_run" -q` (full-suite
-      regression at the commit boundary) → counts + wall time.
-- [ ] `ruff check . && ruff format --check .` + pyright strict.
+- [ ] Helper blast-radius suites (direct consumers of the widened
+      recording bridge) → counts + wall time.
+- [ ] `ruff check`/`ruff format --check` on touched files.
 
 **Commit boundary.** Independently reviewable (capture mechanics + PB
-only); no unrelated cleanup (the five ad-hoc bridges stay); show diff
-summary + staged list + deviations before committing.
+only); no unrelated cleanup (the five ad-hoc bridges stay); inspect
+diff summary + staged list, record deviations in this ledger, commit
+autonomously.
 
 ### 18.2 Commit 0B — config / dataset / health-config baselines
 
@@ -1153,10 +1184,11 @@ the gitignored `tidmad_data_config.yaml` machine fallback (excluded
 surface — tests must not import-couple, §13.2).
 
 **Verification commands.**
-- [ ] Family pytest run + full-suite regression + ruff/pyright, as 0A.
+- [ ] Family pytest run + directly affected loader suites +
+      ruff/format on touched files (cadence rule; no full suite).
 
 **Commit boundary.** Config/dataset pins only; no prompt or record
-content; show diff + deviations before committing.
+content; inspect diff, record in ledger, commit autonomously.
 
 ### 18.3 Commit 0C — record / resume / plugin baselines
 
@@ -1165,7 +1197,7 @@ and no committed-plugin load test exist (§6); this commit lands
 REC-1..4, RES-1 (registering RES-2/3), PLG-1 (registering PLG-2).
 
 **Scope.** New: normalized pseudo-derived record fixture + typed
-sub-fixtures (OD-2 as approved); committed minimal replay workspace
+sub-fixtures (OD-2 outcome A, §22.1); committed minimal replay workspace
 (text files only); the `.py.txt` plugin fixture (§13.3). No schema or
 production changes; the duplicate `file_vector` and the stale "53
 fields" docstring are NOT fixed here (register only; the docstring
@@ -1217,24 +1249,27 @@ optional workspace files (warning-path assertions, not failures);
 plugin `sys.modules` registration/rollback (use the real loader's
 semantics, assert no residue).
 
-**Verification commands.** As 0A (family + full suite + static).
+**Verification commands.** Family pytest run + directly affected
+suites (resume, plugin-loader, schema-pin suites) + ruff/format on
+touched files (cadence rule; no full suite).
 
-**Commit boundary.** Record/resume/plugin only; show diff +
-deviations before committing.
+**Commit boundary.** Record/resume/plugin only; inspect diff, record
+in ledger, commit autonomously.
 
 ### 18.4 Commit 0D — scorer / numeric baselines
 
 **Goal.** The CI numeric surface is 5 scalars at 1e-3 and the
 production `score_vector(legacy_mode=False)` path has zero tests (§7);
-this commit lands NUM-1..6, NUM-8, registers NUM-7, and (if OD-4
-approves) applies the legacy-parity disposition.
+this commit lands NUM-1..6, NUM-8, registers NUM-7, and applies the
+APPROVED OD-4 legacy-parity disposition (§22.2).
 
 **Scope.** New tests under `tests/unit/{nodes,execute_tools}/`;
 strengthens `test_scoring_reference_default.py` (STR — inspect before
-editing); OD-4's delete-2-keep-1 in
-`tests/integration/scoring/test_legacy_parity.py` ONLY if approved;
-zero scorer/production change (frozen-scorer rule §13.4). Depends on:
-0A's diff helper; OD-3/OD-4 resolutions.
+editing); the §22.2 disposition in
+`tests/integration/scoring/test_legacy_parity.py` (delete tests 1-2,
+keep test 3, re-scope the "canonical merge gate" docstring, retire
+the FU-P2-4 xfail); zero scorer/production change (frozen-scorer rule
+§13.4). Depends on: 0A's diff helper. OD-3/OD-4: RESOLVED (§22).
 
 **Implementation plan.**
 - [ ] NUM-1 full-precision pins (all 40 + 2 scalars + s_max) —
@@ -1274,11 +1309,13 @@ by construction, asserted); spawn-path exclusion documented in-test;
 numpy-version sensitivity recorded as limitation (§21.4), not
 asserted.
 
-**Verification commands.** As 0A (family + full suite + static).
+**Verification commands.** Family pytest run + directly affected
+scoring suites + ruff/format on touched files (cadence rule; no full
+suite).
 
-**Commit boundary.** Numeric family only; the OD-4 edit, if approved,
-is called out separately in the commit message; show diff +
-deviations before committing.
+**Commit boundary.** Numeric family only; the OD-4 deletions
+(approved, §22.2) are called out separately in the commit message
+citing §22.2; inspect diff, record in ledger, commit autonomously.
 
 ### 18.5 Commit 0E — choreography / kwargs baselines (WF)
 
@@ -1291,7 +1328,9 @@ strength-verification.
 **Scope.** New unit-tier tests driving one bounded pseudo tuner
 iteration; registration entries (docstring/manifest cross-refs) for
 the REG rows incl. reading each registered test and recording its
-actual assert strength (§13 legend). No production change. Depends
+actual assert strength (§13 legend); the §22.3 TEST-ONLY k9 assertion
+migration in `tests/integration/workflows/
+test_k9_invented_model_dual_mode.py`. No production change. Depends
 on: 0A (widened helper).
 
 **Implementation plan.**
@@ -1308,8 +1347,17 @@ on: 0A (widened helper).
       registered test; strengthen to the stated criterion where
       weaker (each strengthening is its own checklist line recorded
       here at implementation time).
-- [ ] Register WF-4 with the OD-5 disposition + tier-2 invocation
-      contract (§16).
+- [ ] k9 TEST-ONLY assertion migration per §22.3: replace
+      `assert "Feasible" in stdout` (`test_k9_invented_model_
+      dual_mode.py:268`) with assertions on the production-owned
+      structured evidence (gate verdict via the record status
+      taxonomy / wrapper result fields), preserving the same
+      choreography; run k9 and confirm GREEN. If the migrated
+      assertions reveal the gate does not fire (no
+      `skipped_oom_risk` record), STOP — material finding, operator
+      decision (§22.3 escalation guard).
+- [ ] Register WF-4 (only once k9 is green) with the tier-2
+      invocation contract (§16).
 
 **Validation plan.**
 - [ ] Unit: WF-1/2/3 tests.
@@ -1328,6 +1376,8 @@ on: 0A (widened helper).
       difference is explained in the test docstring.
 - [ ] Each REG "verify strength" row has a recorded verdict
       (sufficient as-is / strengthened here).
+- [ ] k9 is GREEN under the migrated assertions (fresh log recorded
+      here) — WF-4's registration is invalid without it.
 - [ ] Commit touches only `tests/`.
 
 **Failure/edge cases.** Live-object kwargs (excluded by rule, §13's
@@ -1335,11 +1385,13 @@ WF-1 row); positional `memory_history` binding (asserted); the
 reflect param-name latency (registered known-latent break — NOT fixed
 in production here).
 
-**Verification commands.** As 0A (family ×2 for determinism + full
-suite + static).
+**Verification commands.** Family pytest run ×2 (determinism) + the
+migrated k9 run (green log recorded) + directly affected suites +
+ruff/format on touched files (cadence rule; no full suite).
 
-**Commit boundary.** Choreography family + registrations only; show
-diff + deviations before committing.
+**Commit boundary.** Choreography family + registrations + the k9
+test-only migration; inspect diff, record in ledger, commit
+autonomously.
 
 ### 18.6 Commit 0F — manifest closeout
 
@@ -1436,10 +1488,14 @@ record why the exclusion list missed it.
 
 ## 20. Checkpoint acceptance criteria (roadmap §17: Step 00 passes 0, D, E)
 
-- **Checkpoint 0 (trivial for this step)**: every §13 inventory row is
-  landed as NEW/STR/REG, or moved to §15.2 with justification; the
-  §15.1 manifest holds (each step 01-12 row maps to existing baselines
-  or registered deferrals).
+- **Checkpoint 0 — PRIMARY STEP-00 ACCEPTANCE CHECKPOINT** (corrected
+  2026-08-12: creating trustworthy baselines IS this step's mission,
+  so this checkpoint is its principal acceptance, not a formality):
+  every §13 inventory row is landed as NEW/STR/REG, or moved to §15.2
+  with justification; the §15.1 manifest holds (each step 01-12 row
+  maps to existing baselines or registered deferrals); no later
+  Stage-A claim can cite a missing or red baseline (the WF-4/NUM-7
+  green-before-cite rules are part of this checkpoint).
 - **Checkpoint D (regression)**: full unit suite + ruff (check+format)
   + pyright strict green in CI on the exact final head; the §19.1
   mutation battery executed with recorded red/green evidence in the PR;
@@ -1483,7 +1539,147 @@ record why the exclusion list missed it.
    compatibility, not quality; no score thresholds, no performance
    assertions anywhere in the family.
 
-## 22. Operator decisions required before implementation
+## 22. Operator decisions — FINAL STATES (reconciliation 2026-08-12)
+
+All five are now CLOSED. OD-1/OD-3 were approved by the operator
+directly; OD-2/OD-4/OD-5 were closed by the narrow source audits the
+operator directed (evidence in §22.1-22.3), pending only the
+operator's confirmation of those three audit results.
+
+| OD | Final state |
+|---|---|
+| OD-1 | **APPROVED (operator, 2026-08-12)**: Step 00 captures the planner golden with the deterministic ≤3-history fixture; the >3 condensed-history branch is explicitly DEFERRED. Before Step 07a: a separate operator-approved deterministic-ordering correction for BOTH frozenset-derived render sites (`agent/prompts.py:896,899` / constants `:852,867`) lands as a predecessor PR, then the >3-history planner golden is captured BEFORE tuner knowledge/prompt extraction. PYTHONHASHSEED pinning REJECTED. |
+| OD-2 | **RESOLVED — outcome A** (§22.1): same production record producer on both paths; capture via a RecordingSandbox-based pseudo iteration at the `_emit_record` seam; StubSandbox-derived records are NEVER a fixture source. |
+| OD-3 | **APPROVED (operator, 2026-08-12)** as recommended: numeric/mechanism split; NUM-1..5 committed numeric pins; NUM-6 runtime-generated shrunken-N Type-5 MECHANISM replay only; NUM-7 real-data higher tier; no committed large HDF5; zero frozen-scorer change. |
+| OD-4 | **RESOLVED per-test** (§22.2): tests 1-2 DELETE (property obsolete by three intentional frozen decisions; coverage owned elsewhere); test 3 KEEP and register as NUM-7 with a green-before-cite rule. |
+| OD-5 | **RESOLVED — outcome A** (§22.3): test-only assertion migration inside commit 0E; k9 must be GREEN before WF-4 is registered/citable; "register red as-is" is withdrawn. |
+
+### 22.1 OD-2 — record-producer path audit (source-grounded)
+
+The eight operator questions, answered from source:
+
+1. **Which function builds the final record dict?** The production
+   tuner's record-construction sites, all funneled through the single
+   validate-and-persist seam `_emit_record`
+   (`ml_hyperparameter_tune_agent.py:560-588`): attach runtime
+   evidence (when an executor status exists) → stamp `candidate_id` →
+   `ExperimentRecord.model_validate` → `sandbox.save_record`.
+2. **Identical on pseudo and production?** YES. The sandbox and
+   bridge enter by constructor dependency-injection (`:3533-3540`,
+   `:3750`); grep of the tuner for `pseudo` finds only docstrings and
+   DI comments — ZERO pseudo branches in record assembly.
+3. **Fields from common assembly**: all identity/round/status/plan-
+   derived/DataScope/ordering fields and the record STRUCTURE.
+4. **Differences introduced only by doubles**: VALUE-level — canned
+   plan/train/score results; absent `gpu_evidence` /
+   `failure_attribution`; empty `health_gate_results` when gates are
+   disabled. Plus, for **StubSandbox only**, two serialization-layer
+   artifacts: the `_pseudo_origin` stamp added in its `save_record`
+   AFTER common assembly+validation (`core/sandbox_executor.py:
+   2095-2097`) and the length-9 fake scorer vector (`:2080`).
+5. **Bypass/reimplementation?** NONE found. `RecordingSandbox`
+   (`tests/helpers/recording_sandbox.py:193`) appends the validated
+   record verbatim (no stamp) and mirrors the summary write;
+   `score_vector` (`:102-117`) returns the FIXTURE-defined
+   `(file_vector, scalar)` — shape is capture-input-controlled.
+6. **`_pseudo_origin` post-assembly?** YES (StubSandbox only; after
+   `model_validate`, at serialization).
+7. **Length-9 the only score-shape difference?** For StubSandbox yes;
+   for RecordingSandbox the shape is whatever the fixture defines —
+   the capture fixture supplies a typed length-20 vector, so no
+   post-hoc replacement is needed.
+8. **Typed gate/gpu sub-fixtures**: they pin SCHEMA SHAPES only
+   (Type-3 evidence); they claim no production-producer parity —
+   production-value parity for `health_gate_results`/`gpu_evidence`
+   remains deferred with the gate-enabled choreography (§15.2).
+
+**Frozen outcome A**: REC-2's fixture is captured from a
+RecordingSandbox-driven pseudo tuner iteration AT the `_emit_record`
+seam (the validated record, pre-serialization) with a length-20
+fixture score vector — the record is the output of the REAL production
+assembly given pinned inputs, so §12 rule 3 is satisfied without any
+normalization step. StubSandbox-derived records are NEVER used as a
+fixture source (its two serialization artifacts stay in the §13.8
+register). REC-3 separately pins the SERIALIZATION-layer key sets
+against the production writers.
+
+### 22.2 OD-4 — legacy-parity tests, audited by name
+
+File: `tests/integration/scoring/test_legacy_parity.py`
+(`pytestmark = real_run`; reference = `tests/fixtures/legacy_scoring.py`,
+verbatim legacy + one-line float64 patch).
+
+| Test | Intended property | Verdict |
+|---|---|---|
+| `TestLegacyParity::test_calculate_score_coarse` (:88) | `compute_raw_baseline._calculate_score(coarse=True)` reproduces patched-legacy `calculateBenchmark` bit-for-bit (1e-10) via `process_segment` | **DELETE** |
+| `TestLegacyParity::test_calculate_score_fine` (:106) | same, fine scan (n=200) | **DELETE** |
+| `TestLegacyParity::test_score_vector_legacy_mode_fine` (:124) | `score_vector(legacy_mode=True)`, `sample_set={0: range(200)}` — the production entry point reproduces legacy | **KEEP** (= NUM-7) |
+
+Mechanical justification for DELETE (not "broken therefore
+worthless" — the property itself is obsolete by THREE intentional
+frozen decisions, documented in `_calculate_score`'s own docstring,
+`scripts/compute_raw_baseline.py:69-133`):
+- normalization ruler: legacy divides by the FILE-LOCAL
+  `np.amax(snr_sg)` (`legacy_scoring.py:169`); current
+  `_calculate_score` divides by the GLOBAL anchor `s_max` — the
+  deliberate one-ruler alignment with `score_vector` and the ceiling;
+- quantization: legacy applies `np.round(·, decimals=2)`
+  (`legacy_scoring.py:170`); removed intentionally;
+- offset: legacy adds `+ 1e-10` (`:170`); removed intentionally.
+Bit-parity at 1e-10 against the legacy scalar is therefore
+unsatisfiable by design (the round alone quantizes to 2 decimals);
+even repairing the missing-`s_max` signature cannot restore a
+scientifically valid property. Unique coverage accounting: the
+still-valid properties of `_calculate_score` are owned by
+`tests/unit/test_compute_raw_baseline.py` (1e-12 aggregation pins,
+mocked `process_segment`), NUM-1 (full-precision pins on this exact
+function's committed outputs), NUM-4 (artifact self-consistency), and
+NUM-5 (log-base identity). The LEGACY-reproduction property survives
+solely through test 3, whose `legacy_mode=True` path re-derives the
+file-local `np.amax` internally (`scoring_utils.py:615-627`) —
+signature-valid and semantically coherent today.
+
+Consequences: (a) tests 1-2 deleted in commit 0D with this section
+cited in the commit message; (b) the "canonical merge gate" docstring
+wording is re-scoped in the same commit to test 3 + the NUM family
+(the file docstring's three-comparison framing and the dead
+`docs/align_denoising_score.md` citation are corrected); (c) the
+stale FU-P2-4 `xfail` is retired in 0D with a pointer to NUM-1;
+(d) NUM-7 inherits a **green-before-cite rule** (same governance as
+WF-4): test 3's last real execution is not recoverable from the tree,
+so any Stage-A claim citing NUM-7 must attach a fresh green
+`real_run` log from the data machine.
+
+### 22.3 OD-5 — k9 red-baseline contradiction, resolved
+
+Audited failure path: the ONLY failing assertion is
+`assert "Feasible" in stdout` (`test_k9_invented_model_dual_mode.py:268`,
+Layer 1 "gate stdout"); the run completes and writes its `run_output`
+first (Area-C measurement). The string is printed by the VRAM/time
+gate wrappers (`agent/skills/evaluate_vram_skill/wrapper.py:700,733`,
+`evaluate_time_skill/wrapper.py:956`); at HEAD that print no longer
+reaches the parent stdout on this path. The wrappers RETURN a
+structured dict (`{"status", "feasible", "verdict", "suggestion",
+...}` — `wrapper.py:701-705`) that the tuner consumes, and the
+choreography's outcome is already production-owned structured
+evidence: the record taxonomy (one `skipped_oom_risk` + two
+`success`) that the test's own Layer 2 asserts.
+
+**Frozen outcome A — test-only assertion migration**: commit 0E
+replaces the stale stdout assertion with assertions on the structured
+evidence (gate verdict via the records/status taxonomy in both modes),
+preserving and still EXECUTING the same production choreography, with
+no production print restored or moved. k9 must then be GREEN before
+WF-4 is registered or cited by any Stage-A claim; the §15.1 step-10
+row's use of WF-4 is conditional on that green registration.
+Escalation guard: if the migrated assertions reveal the gate itself no
+longer fires on this path (no `skipped_oom_risk` record), that is a
+MATERIAL FINDING — stop, reclassify to outcome B (deferral) or C
+(predecessor PR), operator decision. "Register the red baseline
+as-is" is withdrawn. Whether the verdict PRINT should be restored is a
+step-05a question, out of Step-00 scope.
+
+### 22.4 Original decision table (superseded record)
 
 | OD | Question | Options (§11) | Recommendation |
 |---|---|---|---|
@@ -1527,12 +1723,34 @@ monolithic snapshots, real-data-as-CI claims, consumer-less baselines,
 hidden production changes, benchmark drift) are recorded in the review
 transcript; the reviewer's sampled factual claims all verified.
 
+## 23a. Operator review + final reconciliation record (2026-08-12)
+
+The operator reviewed the design: architecture, taxonomy, inventory,
+coverage-manifest approach and phasing APPROVED IN PRINCIPLE; OD-1 and
+OD-3 approved directly; three narrow source audits directed and
+completed (§22.1-22.3: record-producer path → outcome A; legacy-parity
+per-test audit → delete 2 / keep 1; k9 → test-only assertion
+migration). Governance corrections applied in the same pass: §18
+realigned with the Implementation Working Rules (autonomous semantic
+commits; stop only for material deviation / cost envelope / policy
+question / PR-ready / merge); minimum-sufficient test cadence (full
+suite + static + CI once at the 0F final head, targeted+affected
+suites per commit); Checkpoint 0 re-titled PRIMARY STEP-00 ACCEPTANCE
+CHECKPOINT. Mechanical path/status verification at HEAD: roadmap
+FROZEN; canonical folder `docs/design/generic_framework_upgrade/`;
+canonical filename `step_00_golden_baseline_harness.md`; zero live
+references to `docs/design/generic_framework/` or
+`pr0_golden_baseline_harness.md` (the operator's uploaded snapshot was
+stale — repository truth verified, no edit needed).
+
 ## 24. Design status
 
-READY FOR OPERATOR REVIEW — NOT IMPLEMENTED. §§1-22 written from the
-six consolidated audits; the §23 adversarial review fully reconciled;
-§18 carries the per-commit implementation checklists (all items `[ ]`
-— nothing implemented). Implementation requires: operator approval of
-this design + resolution of OD-1..5 (§22). NO implementation, no
-Step-01 work, and no production/test/config/scorer change is
-authorized by any part of this document.
+**DESIGN FROZEN — OPERATOR APPROVED FOR IMPLEMENTATION (pending the
+operator's confirmation of the §22.1-22.3 audit results) — NOT
+IMPLEMENTED.** All OD-1..5 closed (§22). §18 carries the per-commit
+implementation checklists (all items `[ ]` — nothing implemented).
+Implementation begins only on the operator's explicit authorization
+message; no Step-01 work; no production/config/scorer change is
+authorized by any part of this document (the only test-file changes
+authorized are the §22.2 and §22.3 test-only dispositions, inside
+commits 0D/0E of the implementation PR).
