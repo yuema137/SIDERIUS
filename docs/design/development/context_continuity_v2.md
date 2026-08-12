@@ -109,8 +109,7 @@ guard's own docstring ("there is no hook that fires at '10%
 remaining'"). The v2 design does not build one.
 
 `PostToolUse` exists and fires after tool calls, so a *reminder* is
-mechanically possible — see §6.3 for why it is used only as a clock,
-never as a commit detector.
+mechanically possible — see §4A for why this PR does not build one.
 
 ### 1.3 FINDING — the subagent guard is dead code (audit item 2)
 
@@ -856,6 +855,44 @@ verified by checksum rather than by inspection.
 **Commit boundary.** Design ledger only — the mutation driver lives in
 the scratchpad and is deliberately not tracked; it is a one-shot
 verification tool, not infrastructure.
+
+---
+
+## 4A. Proactive freshness — why no commit-event reminder was built
+
+The root cause was not only compaction behaviour: the handoff stayed
+stale through several semantic commits. The authorization allowed an
+ergonomic reminder "ONLY if the installed hook API exposes the event
+reliably". It does not, in the sense that matters:
+
+- `PostToolUse` fires after every tool call and carries `tool_input`, so
+  detecting a commit means **matching the command string** — the
+  explicitly forbidden approach, and brittle against `git commit`,
+  `git commit -F -`, heredocs, `&&` chains, `gh pr merge`, or a commit
+  made in another terminal entirely.
+- The state-derived alternative — compare HEAD to the handoff's recorded
+  HEAD on every `PostToolUse` — is correct but would run `git` on every
+  single tool call, and a `tools/`-wide fingerprint on many of them, to
+  produce a message the agent already has a rule about.
+
+So **no reminder hook is registered.** The freshness contract is carried
+where it already works:
+
+```text
+current HEAD        vs  handoff HEAD
+current fingerprint vs  handoff fingerprint
+current branch      vs  handoff IMPLEMENTATION BRANCH
+```
+
+checked at the two moments that matter — every compaction attempt and
+every session start — plus the written rule in the developer doc and the
+canonical template. This PR's own history is the evidence that the check
+works on its author: the dry run's step 1 caught a two-milestone-stale
+handoff and the refresh happened before the step was re-run.
+
+If a future Claude Code exposes a structured post-commit event, adding a
+reminder is a small, isolated change. Correctness will not depend on it
+then either.
 
 ---
 
