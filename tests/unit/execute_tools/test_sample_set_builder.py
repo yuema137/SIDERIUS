@@ -270,6 +270,38 @@ class TestDataScopeBehavioralIdentity:
         assert ss_none == ss_full
 
 
+class TestStep00SelectionDigests:
+    """Step-00 DS-3 (STR): two additional atomic selection digests.
+
+    Design §13.2 / §15.1 (roadmap steps 02/05a). The pre-existing GOLDEN
+    digests cover the three trial strategies at one (seed, portion) under
+    full scope only; normal mode and partial scope previously had
+    structural asserts but no digest. Captured at clean tree on the 0B
+    capture commit (same ``_sha16`` convention). Known, accepted
+    environment assumption (design §13.2): digests bind to CPython's
+    ``random.sample`` implementation.
+    """
+
+    GOLDEN_NORMAL_MODE = "1cdcc3997db777b1"
+    GOLDEN_PARTIAL_SCOPE = "70481a8ad4ddeecb"
+
+    def test_normal_mode_digest(self):
+        ss = build_sample_set(is_trial=False, file_index=6)
+        assert _sha16(ss) == self.GOLDEN_NORMAL_MODE
+        assert sorted(ss) == [6] and len(ss[6]) == SEGMENTS_PER_FILE
+
+    def test_partial_scope_snapshot_digest(self):
+        ss = build_sample_set(
+            is_trial=True,
+            trial_strategy="snapshot",
+            trial_portion=0.05,
+            seed=42,
+            scope=DataScope(file_indices=[4, 5, 6, 7, 8, 9]),
+        )
+        assert _sha16(ss) == self.GOLDEN_PARTIAL_SCOPE
+        assert ss[4][:5] == [6, 26, 28, 35, 57]
+
+
 class TestDataScopePartial:
     SCOPE = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
 

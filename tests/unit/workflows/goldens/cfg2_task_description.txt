@@ -1,0 +1,4 @@
+full-spectrum 1-D time-series denoising of SQUID dark-matter
+detector data: map a noisy [B, T] integer signal to a clean
+[B, 256, T] reconstruction, trained across the whole frequency
+spectrum at once (not split into per-band models).

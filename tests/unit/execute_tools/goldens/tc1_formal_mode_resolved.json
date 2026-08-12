@@ -1,0 +1,21 @@
+{
+  "_captured_at": {
+    "commit": "4d3e460bb8817e62f002128fd49b535fa07513c0",
+    "note": "captured at clean tree (Step-00 0B capture); design \u00a717 rule 4"
+  },
+  "is_trial": false,
+  "mode": "formal",
+  "trial_strategy": "snapshot",
+  "trial_portion": 0.02,
+  "train_portion": 0.1,
+  "target_files": [],
+  "eval_strategy": "snapshot",
+  "eval_portion": 0.02,
+  "train_validation_align": true,
+  "file_index": null,
+  "resolved_order_strategy": "shuffle",
+  "resolved_file_order": null,
+  "train_sampling_seed": 12345,
+  "eval_sampling_seed": 12345,
+  "train_base_seed": 67890
+}

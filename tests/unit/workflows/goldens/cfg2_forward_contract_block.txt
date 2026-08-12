@@ -1,0 +1,11 @@
+The model must satisfy this forward contract (non-negotiable):
+    input:  [B, T] int64   — raw signal, integer class indices 0-255
+    output: [B, 256, T] float32  — per-timestep logits over 256 denoising classes
+
+Input values are integer class indices — use nn.Embedding(num_classes, embed_dim) to convert [B, T] int64 → [B, T, embed_dim], then transpose to [B, embed_dim, T] for Conv1d layers.
+
+Output must be exactly [output_shape] — use a final Conv1d(channels, num_classes, 1) or Linear + transpose.
+
+Offline denoising — output at position t may depend on all positions. Causal constraints are not required.
+
+Task type: classification (per-timestep 256-class).

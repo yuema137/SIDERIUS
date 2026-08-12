@@ -64,3 +64,41 @@ def assert_golden(actual: str, golden_path: Path, *, surface: str) -> None:
         "golden; intentional change -> regenerate in the SAME commit per §17 "
         "rule 3; fixture rot -> fix the fixture.\n" + diff
     )
+
+
+def assert_json_golden(actual: object, golden_path: Path, *, surface: str) -> None:
+    """Deep-equal a JSON-serializable object against a committed ``.json`` golden.
+
+    Type-2 criterion (design §12). The golden may carry a top-level
+    ``_captured_at`` provenance key (§17 rule 4) — excluded from comparison.
+    Comparison is on the parsed structures; the failure diff is over
+    pretty-printed, key-sorted JSON so it is stable and readable.
+    """
+    import json
+
+    if not golden_path.exists():
+        raise AssertionError(
+            f"[{surface}] golden missing: {golden_path}\n"
+            "Step-00 policy (design §17): capture in an explicit test-only "
+            "commit; tests never write goldens."
+        )
+    expected = json.loads(golden_path.read_text(encoding="utf-8"))
+    if isinstance(expected, dict):
+        expected.pop("_captured_at", None)
+    if actual == expected:
+        return
+    a = json.dumps(actual, indent=2, sort_keys=True, default=str)
+    e = json.dumps(expected, indent=2, sort_keys=True, default=str)
+    diff = "\n".join(
+        difflib.unified_diff(
+            e.splitlines(),
+            a.splitlines(),
+            fromfile=f"golden/{golden_path.name}",
+            tofile="actual",
+            lineterm="",
+        )
+    )
+    raise AssertionError(
+        f"[{surface}] object diverged from golden {golden_path.name} "
+        f"(triage per design §19.3):\n" + diff
+    )

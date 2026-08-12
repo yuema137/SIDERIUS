@@ -1190,26 +1190,48 @@ config-file changes; DS-3 adds two digests without touching the
 existing three. Depends on: 0A's diff helper only.
 
 **Implementation plan.**
-- [ ] Inspect `task_config.py`, `dataset_config.py`, health-config
-      loader, and the TrialConfig resolution path before finalizing
-      fixtures (explicit paths; cache-clear fixtures per §13.2).
-- [ ] CFG-1 deep-equal; CFG-2 two rendered strings (verify
-      `ed34ede6803eb6f8` at capture); CFG-3a byte-equality across the
-      two YAMLs; CFG-3b deep-equal.
-- [ ] DS-1 (six fields + 36-entry list + filename renders + resolve);
-      DS-2 (shape-class string + identity component order); DS-3 +2
-      digests (normal mode, one partial scope).
-- [ ] HC-1 deep-equal with explicit path + cache clear.
-- [ ] TC-1: inspect the trial-decision path, then deep-equal pinned
-      resolved TrialConfig for fixed planner inputs.
+- [x] Producers inspected. LEDGER CORRECTION (TC-1): the tuner's
+      TrialConfig composition is INLINE in run() (tuner:4362), not
+      unit-invokable — TC-1 pins the SCHEMA-resolution surface
+      (model_validate + model_dump with defaults materialized; the
+      validated schema object is the declared single source of truth),
+      with in-run stamps pinned by REC-2 and selection by DS-3. Also
+      pinned as fact: the three sampling seeds are REQUIRED fields.
+- [x] CFG-1/CFG-2/CFG-3a/CFG-3b landed
+      (`tests/unit/workflows/test_step00_task_config_baselines.py` + 4
+      goldens). CFG-2's forward-contract render sha256[:16] verified at
+      capture == `ed34ede6803eb6f8` (the audit-B value, exact).
+- [x] DS-1 (six-field deep-equal, exact 36-entry segmentation list,
+      filename renders, module constants, full-scope resolve) + DS-2
+      (`resolve_tidmad_measurement_capability` with explicit
+      dataset_root → shape-class string; MeasurementIdentity 8-tuple
+      component order + identity_key join) in
+      `tests/unit/execute_tools/test_step00_dataset_baselines.py`;
+      DS-3 +2 digests (normal `1cdcc3997db777b1`, partial-scope
+      `70481a8ad4ddeecb`) appended to `test_sample_set_builder.py`.
+- [x] HC-1 deep-equal with explicit path + autouse cache-clear
+      (`tests/unit/execute_tools/health_checks/
+      test_step00_health_config_baseline.py` + JSON golden, 5.6 KB).
+- [x] TC-1: two goldens (trial-mode full inputs; formal-mode minimal
+      inputs with defaults materialized).
 
 **Validation plan.**
-- [ ] Unit: all above; each with the shared diff helper.
-- [ ] Invalid-input: none required beyond existing loader suites (no
-      new mechanism is added) — recorded as N/A with this reason.
-- [ ] Mutations (§19.1 CFG/DS/HC rows) red→green recorded.
-- [ ] Negative control: cwd-independence — run the family from a
-      non-root cwd; all green.
+- [x] Unit: 52 passed (family + full sample-set suite, 0.8 s);
+      `assert_json_golden` added to the shared helper (Type-2 variant,
+      `_captured_at` provenance excluded per §17 rule 4).
+- [x] Invalid-input: N/A — no new mechanism added (existing loader
+      suites own invalid-input behavior).
+- [x] Mutations red→green: M1 output_description in shipped YAML →
+      CFG-1 AND CFG-2 both red (two-distinct-surfaces criterion; first
+      attempt was an invalid mutation — token absent, classified and
+      re-aimed); M2 health threshold 25→26 → HC-1 red; M3
+      segments_per_file 200→100 (temp production mutation, restored) →
+      11 red incl. DS-1 and both new digests; M4 TrialConfig
+      trial_portion default 0.02→0.021 (line-anchored; block text
+      appears twice in the schema file) → TC-1 formal-defaults golden
+      red. All restored; family green after each.
+- [x] Negative control: full family run from `/tmp` cwd — 15 passed
+      (explicit-path/cwd-independence + cache isolation).
 
 **Acceptance criteria.**
 - [ ] Every CFG/DS/HC/TC §13 row landed; the §19.1 CFG mutation shows

@@ -1,0 +1,18 @@
+{
+  "_captured_at": {
+    "commit": "4d3e460bb8817e62f002128fd49b535fa07513c0",
+    "note": "captured at clean tree (Step-00 0B capture); design \u00a717 rule 4"
+  },
+  "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
+  "forward_contract": {
+    "input_shape": "[B, T] int64",
+    "input_description": "raw signal, integer class indices 0-255",
+    "output_shape": "[B, 256, T] float32",
+    "output_description": "per-timestep logits over 256 denoising classes",
+    "num_classes": 256,
+    "embedding_note": "Input values are integer class indices \u2014 use nn.Embedding(num_classes, embed_dim) to convert [B, T] int64 \u2192 [B, T, embed_dim], then transpose to [B, embed_dim, T] for Conv1d layers.\n",
+    "output_head_note": "Output must be exactly [output_shape] \u2014 use a final Conv1d(channels, num_classes, 1) or Linear + transpose.\n",
+    "task_type": "classification",
+    "task_note": "Offline denoising \u2014 output at position t may depend on all positions. Causal constraints are not required.\n"
+  }
+}
