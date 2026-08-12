@@ -373,7 +373,7 @@ is unknown.
 - [x] **C0** kickoff: precondition verified, branch cut, this document,
       fresh PR handoff initialized.
 - [x] **C1** tracked shared foundation + canonical template.
-- [ ] **C2** strict MANUAL PreCompact path.
+- [x] **C2** strict MANUAL PreCompact path.
 - [ ] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
 - [ ] **C4** dynamic SessionStart / resume injection.
 - [ ] **C5** PR-scoped lifecycle (init / continuation / closeout).
@@ -523,3 +523,54 @@ template's semantic skeleton (`## PR Identity`, `CONTEXT STATE`, and the
 **Commit boundary.** Tracked foundation + template + tests. No hook
 entry point, no registration change; the ignored implementation remains
 the live one.
+
+**Evidence.** `900e6242`. 23 passed, 0.45 s; ruff + format clean.
+
+### C2 — strict MANUAL PreCompact path
+
+**Goal.** A tracked guard entry point whose manual path is a faithful
+migration of the legacy strict behaviour, with the mode resolved
+explicitly and the §1.3 subagent defect fixed.
+
+**Scope.** `tools/claude_hooks/precompact_memory_guard.py`,
+`tests/unit/tools/claude_hooks/test_precompact_guard.py`. NON-goals: the
+auto fail-safe branch (C3), any registration change.
+
+**Implementation.**
+- [x] `main(argv, *, stdin)` — injectable argv and stdin, so every test
+      runs in-process without Claude Code.
+- [x] Mode resolution `--mode` → payload `trigger` → **`manual`**.
+      Defaulting to the strict path means an upstream field rename
+      degrades to "too strict", never to "silently never checks".
+- [x] `is_subagent()` reads `agent_id` / `agent_type` — the §1.3 fix.
+- [x] `sys.path` is anchored to the repository root
+      (`parents[2]`) so the module has ONE identity whether executed as
+      a script (as registered) or imported by tests.
+- [x] The missing-handoff diagnostic now names the canonical template
+      path, so an agent that has never seen this system knows how to
+      create one.
+- [x] Auto shares the strict path in this commit, documented in the
+      module docstring rather than implied.
+
+**Validation.** `pytest tests/unit/tools/claude_hooks/ -q` →
+**42 passed, 1.12 s** (23 from C1 + 19 here). ruff + format clean.
+Matrix coverage: **A** (manual+current → allow, no rescue file),
+**B** (stale HEAD → block, names the commit), **C** (stale fingerprint →
+block, names the tree), **D** (design not synchronized → block), plus
+missing-handoff, all-failures-at-once, mode resolution, subagent skip,
+payload robustness, generated-region refresh, and a subprocess test
+proving the file works when invoked exactly as the hook registers it.
+
+**Reachability note.** `test_the_legacy_field_name_does_not_grant_a_skip`
+asserts `is_subagent({"is_subagent": True})` is **False**. That is the
+inverse of the legacy test, and it is the pin that would have caught the
+original defect: the old suite asserted the skip using the same invented
+field the production code read, so both agreed with each other and
+neither agreed with Claude Code.
+
+**Failure/edge cases exercised.** Malformed JSON payload, empty payload,
+and a cwd outside any repository — none may crash and none may block
+unrelated work.
+
+**Commit boundary.** Tracked guard + its tests. Behaviour still
+identical to the legacy guard; registration unchanged.
