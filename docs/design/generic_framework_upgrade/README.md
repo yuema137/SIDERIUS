@@ -17,7 +17,7 @@ and 7), jointly constituting that step's acceptance entry.
 
 | Step | Document | Status (mirror of §15.1) |
 |---|---|---|
-| 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | DESIGN FROZEN — operator approved for implementation (OD-1..5 closed; §22.1-22.3 confirmation pending) — NOT IMPLEMENTED |
+| 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | IMPLEMENTED — PR open, awaiting CI + operator review (NOT merged) |
 | 01 | `step_01_proposer_hypothesis_space.md` | not created |
 | 02 | `step_02_dataset_sample_topology.md` | not created |
 | 03 | `step_03_model_loss_contract.md` | not created |

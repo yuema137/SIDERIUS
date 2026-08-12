@@ -2,8 +2,13 @@
 
 ## Status
 
-**IMPLEMENTATION IN PROGRESS — operator-authorized 2026-08-12 — NOT
-MERGED.** Design FROZEN at commit `0b92cd60`; the operator confirmed
+**IMPLEMENTED — PR OPEN, AWAITING CI + OPERATOR REVIEW — NOT
+MERGED.** All six semantic commits (0A.1/0A.2/0B/0C/0D/0E + this 0F
+closeout) landed on
+`feat/generic-framework-step-00-golden-baseline-harness`; Checkpoint 0
+MET (§20); zero production diff proven mechanically (no changed file
+outside `tests/` and `docs/` across the whole branch).
+Original authorization record: Design FROZEN at commit `0b92cd60`; the operator confirmed
 the §22.1-22.3 audit results and issued the final OD-1..5 decisions
 verbatim (all APPROVED: OD-1 ≤3-history capture + >3 deferral +
 step-07a two-site predecessor, PYTHONHASHSEED rejected; OD-2 outcome A
@@ -653,6 +658,31 @@ Selection rules:
    or replaced by the owning module's Stage-B design.
 
 ## 13. Baseline inventory
+
+**IMPLEMENTATION RECONCILIATION (0F, 2026-08-12): every row below is
+LANDED.** Test-file map: PB → `tests/unit/agent/{llm_bridge,
+ml_model_proposal_agent,ml_model_implementor,ml_code_validator_agent,
+result_interpretation_agent,ml_literature_review}/
+test_step00_prompt_goldens.py` (44 goldens); CFG/DS/HC/TC →
+`tests/unit/workflows/test_step00_task_config_baselines.py`,
+`tests/unit/execute_tools/test_step00_dataset_baselines.py`,
+`.../health_checks/test_step00_health_config_baseline.py`,
+`test_sample_set_builder.py` (STR); REC/RES/PLG →
+`tests/unit/agent/tune_ml_hyperparam_agent/
+test_step00_record_baselines.py`, `tests/unit/core/
+test_step00_resume_replay.py` (+ committed workspace fixture),
+`tests/unit/ml_models/test_step00_prior_plugin_loadability.py`
+(+ byte-identical `.py.txt` plugin); NUM →
+`tests/unit/execute_tools/test_step00_numeric_baselines.py` +
+`tests/unit/nodes/test_scoring_reference_default.py` (STR) +
+retired-xfail replacement in `test_scoring_helpers.py` + OD-4-scoped
+`tests/integration/scoring/test_legacy_parity.py`; WF →
+`tests/unit/agent/tune_ml_hyperparam_agent/
+test_step00_choreography_baselines.py` + the OD-5-migrated k9.
+Shared infrastructure: `tests/helpers/{golden,llm_boundary_recorder,
+step00_pseudo_iteration}.py` + the widened `recording_llm_bridge.py`.
+71 committed golden/fixture files, all text, total well under 1 MB.
+Per-commit evidence lives in the §18 checklists; deferrals in §15.2.
 
 Legend — Status: NEW (captured by Step 00), REG (existing test
 registered as the baseline, unchanged), STR (existing test
@@ -1671,6 +1701,36 @@ baseline re-run). Not committed as always-on tests.
   verdicts (no hidden wall-clock/hash coupling) — the §13.6 ground
   truth makes this expected, the run makes it evidence.
 
+### 19.2a Executed mutation dossier (0F closeout — all restored, family green after each)
+
+| # | Mutation (site count verified) | Result |
+|---|---|---|
+| PB-A | prompts.py force_model constraint token | RED on exactly the force_model golden |
+| PB-B | plan() render-order swap (args unchanged) | RED on both planner goldens (capture is at the render — §10.1) |
+| PB-C | md-template token (comparison_stage.md) | RED on both PB-3 system tests |
+| PB-NC | label string mutation | goldens GREEN; only the capture-site integrity assert fired (§19.2 separation) |
+| CFG | shipped-YAML output_description | RED on CFG-1 AND CFG-2 (two distinct surfaces) |
+| HC | health threshold 25→26 | RED on HC-1 |
+| DS | segments_per_file 200→100 (temp production) | 11 RED incl. DS-1 + both new digests |
+| TC | TrialConfig trial_portion default 0.02→0.021 (line-anchored; block text ×2 in file) | RED on the formal-defaults golden |
+| REC-1 | schema field rename | RED on the ordered field list |
+| REC-2 | canned-plan lr value | RED on both record projections |
+| RES | staged-manifest sha tamper | ReplayIntegrityError |
+| RES | workspace layout break | ResumeError |
+| PLG | PLUGIN_MODEL_CLASS strip | loader skips; zero loaded |
+| NUM | one digit in one per-file artifact | RED on NUM-1 AND NUM-4 |
+| NUM | one anchor value | RED on NUM-2 AND NUM-3 |
+| NUM | aggregation flip (count files, not segments) | RED on the NUM-6 grand-mean test |
+| NUM | NaN-drop skip | first target (`:231` subnormal guard) SURVIVED → CLASSIFIED EQUIVALENT for synthesizable fixtures (0/0→NaN caught downstream); re-aimed at the REAL drop site with a strengthened mixed fixture → RED |
+| WF | max_epochs kwarg deleted at the plan call site | RED on both WF-1 tests |
+| Global-NC | volatile-only record variant | projections identical (REC-2 in-test control) |
+| Global-NC | /tmp-cwd family run | 15 passed (path/cache isolation) |
+| Global-NC | WF family run twice | byte-identical verdicts |
+
+By category: 16 behavior-changing mutations caught; 1 equivalent
+mutation classified with evidence and re-aimed; 0 surviving
+behavior-changing mutations; 3 negative controls green.
+
 ### 19.3 Failure diagnostics and ownership
 
 Every baseline failure message names: the baseline ID, the producing
@@ -1683,7 +1743,11 @@ record why the exclusion list missed it.
 
 ## 20. Checkpoint acceptance criteria (roadmap §17: Step 00 passes 0, D, E)
 
-- **Checkpoint 0 — PRIMARY STEP-00 ACCEPTANCE CHECKPOINT** (corrected
+- **Checkpoint 0 — PRIMARY STEP-00 ACCEPTANCE CHECKPOINT — MET at the
+  0F head** (every §13 row landed NEW/STR/REG per the reconciliation
+  preamble; every §15.1 A-surface maps to landed baselines or §15.2
+  deferrals incl. the two added during implementation; WF-4 and NUM-7
+  carry green-before-cite; k9 is GREEN). Definition (corrected
   2026-08-12: creating trustworthy baselines IS this step's mission,
   so this checkpoint is its principal acceptance, not a formality):
   every §13 inventory row is landed as NEW/STR/REG, or moved to §15.2
@@ -1938,14 +2002,15 @@ references to `docs/design/generic_framework/` or
 `pr0_golden_baseline_harness.md` (the operator's uploaded snapshot was
 stale — repository truth verified, no edit needed).
 
-## 24. Design status
+## 24. Design + implementation status
 
-**DESIGN FROZEN — OPERATOR APPROVED FOR IMPLEMENTATION (pending the
-operator's confirmation of the §22.1-22.3 audit results) — NOT
-IMPLEMENTED.** All OD-1..5 closed (§22). §18 carries the per-commit
-implementation checklists (all items `[ ]` — nothing implemented).
-Implementation begins only on the operator's explicit authorization
-message; no Step-01 work; no production/config/scorer change is
-authorized by any part of this document (the only test-file changes
-authorized are the §22.2 and §22.3 test-only dispositions, inside
-commits 0D/0E of the implementation PR).
+**IMPLEMENTED — PR OPEN, AWAITING CI + OPERATOR REVIEW — NOT MERGED —
+DO NOT MERGE (operator-owned).** The operator authorized
+implementation 2026-08-12 with OD-1..5 final; six semantic commits
+landed (0A.1 capture infra + PB-1/2 + WF-3 widening; 0A.2 PB-3..9;
+0B CFG/DS/HC/TC; 0C REC/RES/PLG per OD-2 outcome A; 0D NUM + OD-4
+dispositions; 0E WF + OD-5 k9 migration GREEN + verify-strength) plus
+this 0F closeout. §18's checklists carry per-commit evidence; §19.2a
+is the executed mutation dossier; §13's reconciliation preamble maps
+every inventory row to its landed test; Checkpoint 0 MET, Checkpoint
+D/E complete at the final head per §20. No Step-01 work.
