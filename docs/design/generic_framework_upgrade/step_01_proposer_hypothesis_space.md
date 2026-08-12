@@ -10,22 +10,38 @@ based on the Step-00 implementation head `71f6b31f`
 (`feat/generic-framework-step-00-golden-baseline-harness`) so the
 landed Step-00 baselines could be read directly.
 
-**STEP-00 IS AN UNMERGED DESIGN DEPENDENCY (blocking freeze).** This
-design cites Step-00 baseline IDs (PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b,
-…) that exist on the Step-00 PR branch (PR #198, open, CI pending,
-merge pending in another session) but NOT yet on master. Freeze
-preconditions (directive rule 9 — none of them performed here):
+**STEP-00 DEPENDENCY: RESOLVED 2026-08-12.** Step 00 merged (PR #198 →
+`e80da078`; post-merge sync `47fdf6e5`, Checkpoint E complete) and this
+branch was synchronized onto that master by merge (not rebase — the
+repo hook correctly blocks history rewriting). All five freeze
+preconditions are now satisfied:
 
-1. Step-00 PR merged to master.
-2. Updated master contains the actual baseline IDs cited in §8/§11.
-3. Step-00 Checkpoint E roadmap sync complete.
-4. THIS design rebased/re-synchronized onto that master, with every
-   cited baseline re-verified present and green there.
-5. Any Step-00 closure-audit correction affecting Step 01 incorporated.
+1. [x] Step-00 PR merged to master.
+2. [x] Master contains every baseline ID cited in §8/§11 — verified
+   artifact-by-artifact with `git ls-tree master` (§8.1).
+3. [x] Step-00 Checkpoint E roadmap sync complete (`47fdf6e5`).
+4. [x] THIS design synchronized onto that master; cited baselines
+   re-verified present AND green here (proposer package + CFG
+   task-config baselines: 526 passed, 2.3 s).
+5. [x] Step-00 closure-audit corrections incorporated — the one that
+   touches Step 01 is WF-3's components half (now a landed golden,
+   `wf3_proposer_components_key_sets.json`), cited in §8.1.
 
-Until then no Stage-A claim in this document is FINAL evidence — each
-is a claim against the Step-00 branch head `71f6b31f`, re-verifiable at
-freeze.
+**Session-limit recovery (2026-08-12).** The first design agent was
+terminated mid-task by a session limit. Nothing was lost: the worktree,
+the committed draft (`fd9bfea6`) and the in-flight review correction
+were all recovered; the correction was committed as `ac5581b4` (review
+finding F1 — corrected per-template placeholder inventory), and the
+durable transcript was mined for further findings (none beyond F1 —
+the other F-numbers found there were quotations of the STEP-00 design,
+verified as such, not Step-01 findings).
+
+**Flexible data input (operator requirement, 2026-08-12)** is designed
+in the new §6A: capability matrix, strict Step-1-compatible
+terminology, Mode A/Mode B authoring model, the presets-are-not-an-
+authority principle, and the fail-closed decision (**Outcome B**,
+source-proven). §9.4 maps the F1-F5 contrast ladder onto what this step
+can honestly land.
 
 ## 0. Relationship to the frozen roadmap and to Step 00
 
@@ -142,6 +158,17 @@ When Step 01 is complete, the following is TRUE about SIDERIUS
    change updates prompt and validation together or fails the parity
    goldens loudly.
 
+5. **The proposer's generic templates stop assuming a data shape.**
+   After extraction, no generic proposer template independently asserts
+   rank, axis names or TIDMAD semantics: `[B, 256, T]` / `[B, T]` /
+   "256 amplitude bins" appear only as text DERIVED from the declared
+   contract. A profile declaring a rank-4 neutral-axis contract renders
+   prompts carrying that declaration with zero TIDMAD shape residue
+   (§9.4 F2/F5). This makes the proposer **Step-1-compatible** with
+   arbitrary declared shapes in the strict sense defined in §6A.2 —
+   and explicitly NOT end-to-end capable of executing such a task,
+   which remains steps 02/03/04+ work.
+
 ## 2. Non-goals and deferrals
 
 Everything below is EXPLICITLY out of scope. Touching any of it is a
@@ -161,6 +188,7 @@ material deviation requiring an operator stop.
 | N10 | Prompt WORDING improvements, persona rewrites, dead-code cleanup (e.g. the five ad-hoc test bridges), retry-policy changes, `StubLLMBridge`/pseudo-fidelity work | n/a |
 | N11 | The lit-review `task_description` duplicate (`configs/lit_review_config.yaml`) — guarded by CFG-3a, collapses at step 04 | step 04 |
 | N12 | Renaming/moving prompt template files for cleanliness | n/a |
+| N13 | **Inventing a structured tensor/axis schema, a preset vocabulary, or preset↔shape consistency VALIDATION** — §6A.1 proves there is nothing structured to validate today and §6A.5 freezes Outcome B; building it here would seize Dataset/Model-I/O semantic ownership | steps 02/03 (binding dependency recorded in §6A.5) |
 
 ## 3. Source audit — current production proposer flow
 
@@ -469,6 +497,236 @@ UNCHANGED: dispatch, stage order, retry/boldness/correction loops,
    only be justified if a fact could not be rendered from an existing
    authoritative input — none qualifies (§3.5).
 
+## 6A. Flexible data input — rank-agnostic boundary (operator requirement, 2026-08-12)
+
+Added after the first draft, on operator direction. The framework
+target is NOT an enumeration of 1D/2D/3D/spatiotemporal; those are
+instances. The target boundary is:
+
+> A task may expose one or more named tensors of arbitrary rank, with
+> declared dtype, ordered axes, axis semantics and dimension
+> constraints. Framework prompt consumers do not branch on 1D/2D/3D or
+> hardcoded axis names.
+
+This section states, from source, exactly how much of that Step 01 can
+honour — and refuses to claim the rest.
+
+### 6A.1 Capability matrix — what the CURRENT surfaces can express
+
+Source facts (main-auditor verified at this head):
+
+- `ForwardContract` (`agent/schemas/task_config.py:31-99`) has exactly
+  nine fields: `input_shape`, `input_description`, `output_shape`,
+  `output_description` (all `str`), `num_classes` (`int`, ge=0),
+  `embedding_note`, `output_head_note`, `task_type` (free-form `str`,
+  its own docstring says "consumers should treat unknown values as
+  opaque labels"), `task_note`. `extra="forbid"`.
+- `ProposalInput.forward_contract` (`agent/schemas/proposal.py:678`)
+  is that same type — the proposer receives no other contract object.
+- `render_forward_contract` (`workflows/task_config.py:191-205`)
+  emits two fixed lines (`input:` / `output:`) plus the optional notes.
+- **No code anywhere parses a shape string.** A repository-wide search
+  for `.split(`/`.strip(`/`.replace(`/`.startswith(`/`re.*` applied to
+  `input_shape`/`output_shape` across `agent/`, `nodes/`, `workflows/`,
+  `execute_tools/`, `ml_models/`, `core/` returns ZERO hits. The
+  strings are transported and rendered verbatim.
+- `num_classes` is the ONLY structured field, and it is an output-class
+  count, not an axis length; the validator's own comment says it "is
+  consumed only for prompt rendering"
+  (`ml_code_validator_agent.py:327`).
+- **No Dataset Contract or Model I/O Contract module exists yet** —
+  `agent/schemas/` contains nothing matching dataset/contract/tensor.
+
+| Capability | Classification | Evidence |
+|---|---|---|
+| arbitrary tensor rank | **REPRESENTABLE AS PROSE ONLY** | shape is a free `str`; nothing parses it |
+| ordered axes | PROSE ONLY | no axis list exists in any schema |
+| semantic axis roles (temporal/spatial/channel/batch) | PROSE ONLY | no role vocabulary anywhere in source |
+| fixed dimensions | PROSE ONLY | `num_classes` is the sole structured number and is not an axis length |
+| symbolic dimensions (`B`, `T`) | PROSE ONLY | they are characters inside the string |
+| dynamic dimensions | PROSE ONLY | same |
+| multiple NAMED input tensors | **REQUIRES STEP-02 DATASET CONTRACT / STEP-03 MODEL I/O CONTRACT** | single unnamed `input_shape` field; no name/multiplicity concept |
+| multiple NAMED output tensors | REQUIRES STEP-02/03 CONTRACT | single unnamed `output_shape` |
+| cross-tensor dimension relationships | PROSE ONLY (expressible only as free text in `task_note`) | no relational structure |
+| dtype | PROSE ONLY | embedded inside the shape string |
+| batch/sample semantics | PROSE ONLY | `B` is prose convention, not declared |
+
+**Consequence.** The transport is already rank-agnostic in the only
+sense it can be: it never inspects rank, because it never parses. Every
+rank assumption that exists today lives in **prompt PROSE**, not in the
+contract object — which is precisely the §4 coupling inventory
+(F1/F3 `[B, 256, T]`/`[B, T]` restatements at `PROPOSAL_COMMIT_PROMPT`
+:330,:332,:365-370 and `proposing_stage.md`:41,:70-71,:74; F4
+output_type alphabet; F5 loss legality). Step 01's extraction of those
+literals into rendered declarations IS the rank-agnostic work available
+at this step.
+
+### 6A.2 Strict capability terminology (frozen)
+
+**Step-1-compatible.** A task is Step-1-compatible when its hypothesis
+space can be communicated to the current Proposer through an explicit
+task description and a normalized model-facing data/forward-contract
+description, while preserving the current `ProposalOutput` schema and
+the unchanged downstream handoff. Concretely, after Step 01: supplying
+a profile whose contract prose declares a rank-4 tensor with neutral
+axis names produces proposer prompts that carry that declaration and
+carry NO contradicting TIDMAD shape text.
+
+**Not yet end-to-end compatible.** Such a task is still NOT executable:
+data loading, batching/collation, probe tensors, generated-plugin
+execution, artifact writing, scoring and HealthGates all remain bound
+to TIDMAD until steps 02/03/04+. Step 01 must never be described as
+arbitrary-task end-to-end support. The §12 acceptance packs assert
+prompt-level properties only.
+
+### 6A.3 Mode A / Mode B — the target authoring model (recorded, NOT built here)
+
+**Mode A — explicit tensor contract (canonical).** The user names each
+tensor and declares dtype, ordered axes, axis semantics, fixed/symbolic/
+dynamic dimensions, batch/sample role and cross-tensor relationships.
+Explicit specification is the canonical semantic representation; exact
+fields and syntax belong to the contract-owning step (02/03), not here
+(§6.2 rule: Step 01 renders declarations, never defines them).
+
+**Mode B — semantic preset (convenience).** Provisional families,
+recorded as design input for the contract owner, deliberately NOT
+frozen as API values by this step:
+
+| Family | Defining requirement (axis-ROLE based, never rank-number based) |
+|---|---|
+| `generic_tensor` | no rank-specific assumption; user supplies axes/dims; universal escape hatch |
+| `time_series` | ≥1 axis declared temporal; MAY carry one or more channel/feature axes (a multi-channel series is a valid instance — "time series" must never mean scalar `[B,T]`); no `[B,T]`/`[B,C,T]` ordering assumption |
+| `spatial_grid` | ≥1 axis declared spatial; images and volumes are instances of ONE family — core logic must not branch "2D image" vs "3D volume" |
+| `spatiotemporal` | ≥1 temporal AND ≥1 spatial axis; no fixed rank or ordering |
+
+### 6A.4 Presets are convenience, not a second authority (FROZEN PRINCIPLE)
+
+> A semantic preset is authoring convenience that resolves into,
+> constrains or validates an explicit normalized tensor contract. It is
+> never an independent competing source of truth.
+
+The required shape is:
+
+```text
+user authoring form (Mode A or Mode B)
+    -> resolution / consistency validation      [owner: step 02/03]
+    -> ONE normalized rank-agnostic contract
+    -> proposer rendering                        [owner: step 01]
+```
+
+Forbidden anywhere in the framework — including in anything Step 01
+lands:
+
+```python
+if data_is_1d: ...
+elif data_is_2d: ...
+elif data_is_spatiotemporal: ...
+```
+
+**Step 01's binding obligation under this principle:** the proposer
+consumes the ONE resolved declaration and must not branch on a preset
+label, a rank, or an axis name. This is enforceable today and is
+asserted by N-RANK (§15) — no Step-01 renderer may read `task_type` or
+any shape text to select a code path; `task_type` is rendered as an
+opaque label, exactly as its schema docstring already requires.
+
+### 6A.5 Fail-closed on preset/shape inconsistency — **OUTCOME B (frozen, source-proven)**
+
+The rule the framework must eventually enforce: when a preset and
+explicit tensor information are both present and inconsistent (e.g.
+`time_series` with no temporal axis; `spatial_grid` with no spatial
+axis; a declared `output.H == input.H` relation contradicted by the
+contracts; a dense preset over a ragged structure), the run must fail
+with an explicit typed/configuration error **before any LLM request is
+constructed**. Silently rewriting the shape, silently dropping the
+preset, silently defaulting to TIDMAD, inferring semantics from model
+names or filenames, or letting contradictory prose reach the Proposer
+are all forbidden.
+
+**Decision: OUTCOME B — the validation belongs to Step 02/03; Step 01
+renders an already-resolved declaration.** Grounds:
+
+1. There is nothing to validate against. Consistency checking requires
+   structured axes/roles/dims; §6A.1 shows the entire contract is prose
+   and that no component parses it. A check written now could only
+   regex free text.
+2. Building the structure here would take semantic ownership of the
+   Dataset (step 02) and Model I/O (step 03) contracts — forbidden by
+   the roadmap's 6-P/6-M split and by this design's §2/§6.2.
+3. Outcome C is unavailable: a child PR needs an *already-authoritative*
+   surface with a live consumer. Source shows no authority (no contract
+   module), no parser, no consumer. Splitting would create exactly the
+   consumer-less seam the roadmap forbids.
+
+**Recorded as a BINDING DEPENDENCY on the contract-owning step** (02 or
+03, whichever introduces the structured tensor contract):
+
+- resolution and consistency validation MUST run before proposer
+  rendering, and MUST fail closed with a typed error;
+- the resolved output MUST be a single normalized rank-agnostic
+  contract, not a preset label plus loose fields;
+- the proposer's rendering seam landed by Step 01 is the intended
+  consumer — the later step wires the resolved contract into it and
+  does not add a second rendering path.
+
+**Step 01's own obligations under Outcome B** (all testable here):
+
+(a) introduce no new rank/axis assumption into any generic template;
+(b) render whatever the declaration says, so a rank-N prose contract
+    already flows end-to-end to the LLM boundary (F2/F5-prose, §9.4);
+(c) branch on nothing (§6A.4, N-RANK);
+(d) leave the transport untouched, so the later structured contract can
+    replace the prose source without a second proposer migration.
+
+### 6A.6 Transitional absent-contract semantics
+
+- **Regime A (legacy/TIDMAD adapter, unchanged by this step).**
+  Un-migrated callers that omit the extracted profile keep exactly
+  today's TIDMAD prompt bytes — that IS the Stage-A parity contract
+  (§8): the shipped `configs/task_config.yaml` remains the default
+  source, so nothing about legacy behaviour changes.
+- **What fails closed TODAY (pre-existing, not new):**
+  `ForwardContract` is `extra="forbid"`, so a mistyped YAML key raises
+  a `ValidationError` rather than rendering empty; the loader rejects a
+  missing/empty `task_description`.
+- **What Step 01 adds:** once F1/F3/F5 literals are derived, an
+  explicitly declared non-TIDMAD profile can no longer inherit TIDMAD
+  shape/class/loss prose — the derived text tracks the profile, and
+  N11/N-RESIDUE (§15) assert zero `TIDMAD`/`SQUID`/`[B, 256, T]`
+  residue under a contrast profile. That is a real, enforced
+  anti-silent-default property at the prompt layer.
+- **What remains for Step 12:** universal fail-closed on a MISSING
+  declaration (regime B). Step 01 must not invent the composition root
+  to get there early.
+
+### 6A.7 Prompt responsibility — the six required answers
+
+1. **Which authority produces the text?** `configs/task_config.yaml` →
+   `load_task_config()` → `ForwardContract` → `render_forward_contract`
+   for shapes/classes/notes; `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES`
+   (`ml_models/models_format_sandbox.py:368,371`) for loss legality;
+   the shipped `task_description` string for the task block.
+2. **Structured fields or already-rendered prose?** Step 01 renders
+   from the EXISTING typed fields (it calls the existing renderer and
+   the existing frozensets). It does not define new structured fields;
+   when step 02/03 introduces the normalized contract, it substitutes
+   the SOURCE behind the same seam.
+3. **Same resolved block in commit prompt and pipeline stages?** Yes —
+   one renderer feeding both surfaces is the design (§8.2); today the
+   commit prompt has ZERO placeholders and the stages have their own,
+   which is exactly the duplication being removed.
+4. **How does TIDMAD stay byte-exact?** The extraction commits are
+   byte-parity commits: PB-0/PB-3/PB-4 goldens must stay unchanged
+   (§8.1/§13), with the single deliberate JOIN regeneration in S1-C.
+5. **Does any parser/schema hop drop it?** No — audited in §3.5: the
+   contract travels as `ProposalInput.forward_contract` and is rendered
+   into prompt text; the proposal PARSE side is independent
+   (`ProposalOutput`), so nothing to drop. This is also why no
+   transport change is required (§2 non-goal).
+6. **Who owns the real contract semantics?** Step 02 (dataset/topology)
+   and Step 03 (model I/O). Step 01 owns rendering only, and says so in
+   §5's ownership map.
+
 ## 7. PR decomposition decision — ONE PR (frozen AFTER the audit)
 
 **Decision: ONE STEP = ONE PR.** This document is both the step-level
@@ -525,10 +783,16 @@ plus the boundary-capture invariant (labels/components) unchanged.
 | **CFG-1** (resolved shipped task-config dict), **CFG-2** (2 rendered task strings) — landed, green | the shipped authority content Step 01 renders FROM | untouched (Step 01 never edits YAML/loader); they anchor the JOIN's "shipped description" claim |
 | **CFG-3a/3b** (lit-review duplicate + semantics) — landed, green | the duplicate-description channel | untouched guard (N11) |
 
-Dependency honesty: all rows exist and are green on the Step-00 BRANCH
-head this design was audited at; none is on master yet. Per §Status,
-no row is FINAL evidence until the Step-00 PR merges and this design
-re-verifies them on master.
+Dependency status: **VERIFIED ON MASTER 2026-08-12.** Step 00 merged
+(PR #198 → `e80da078`; post-merge sync `47fdf6e5`) and this branch is
+synchronized onto it. Every row above was re-verified as an actually
+committed artifact on master — `git ls-tree master` shows the 9 PB-3
+goldens, the 2 PB-4 goldens, PB-0's
+`reasoning_prompt_structured_evidence.txt`, WF-3's
+`wf3_proposer_components_key_sets.json`, and CFG-1/2/3b's four
+goldens — and the consuming suites run green here (proposer package +
+CFG task-config baselines: **526 passed, 2.3 s**). No row is claimed
+from the Step-00 design text alone.
 
 ### 8.2 Parity mechanics per extraction commit
 
@@ -616,10 +880,29 @@ boundary bridge, pinned environment), proposer surfaces only.
 
 ### 9.3 Ladder note
 
-No further rungs: the roadmap B cell for 6-P names exactly 13.4-A +
-13.4-B. Loss-family variation is NOT a fixture axis (the frozensets
-are production authorities, not per-task profiles yet — step 03);
-authority-tracking is proven by mutation M-5 instead (§15).
+The roadmap B cell for 6-P names exactly 13.4-A + 13.4-B. Loss-family
+variation is NOT a fixture axis (the frozensets are production
+authorities, not per-task profiles yet — step 03); authority-tracking
+is proven by mutation M-5 instead (§15).
+
+### 9.4 Flexible-input contrast rungs F1-F5 (operator ladder, 2026-08-12)
+
+Mapped onto what Step 01 can honestly land given §6A.1/§6A.5. Each rung
+is ATOMIC — exactly one axis varies per fixture; no fixture changes
+description AND rank AND dtype together.
+
+| Rung | Varies | Step-01 disposition | Evidence / owner |
+|---|---|---|---|
+| **F1** — task description only | description text; TIDMAD contract untouched | **LANDS** — it IS fixture 13.4-A (§9.1) | asserts the JOIN carries the profile text and nothing else moves |
+| **F2** — explicit rank/axes only | one contract declaration with rank-4 NEUTRAL axis names (e.g. `[B, S, F1, F2] float32`), description untouched, no preset | **LANDS as a PROSE contrast** (extends 13.4-B, §9.2) | proves no generic template re-asserts rank: the rendered prompts must carry the declared rank-4 text and contain ZERO `[B, 256, T]`/`[B, T]`/"amplitude bins" residue. Deliberately neutral axis names so the test does not merely swap one domain's assumptions for another's |
+| **F3** — preset resolution only | a semantic preset resolving over a fixed explicit contract | **DEFERRED — prerequisite for step 02/03** | no preset mechanism exists (§6A.1); the rung becomes the contract owner's Stage-B requirement, recorded here so it is not lost |
+| **F4** — mismatch rejection (typed failure before the LLM boundary; no prompt capture fires) | preset vs explicit contract conflict | **DEFERRED — binding dependency, §6A.5** | Step 01 cannot fail closed on a conflict it cannot represent; the contract owner MUST land this rung with its structured contract |
+| **F5** — multi-channel time series (proves "time series" ≠ scalar `[B,T]`) | a multi-channel temporal declaration | **LANDS as a PROSE contrast** (one extra profile alongside F2); STRUCTURAL form deferred with F3 | at the prompt layer the property is real and testable today: a `[B, C, T]`-style declaration must render verbatim with no scalar-`[B,T]` residue |
+
+Honesty clause: F2/F5 as landed here prove **template rank-agnosticism
+at the prompt layer**, not structured arbitrary-tensor support. The
+design claims nothing else, and §6A.2's "not yet end-to-end
+compatible" wording governs every statement about them.
 
 ## 10. Live integration checkpoint (Checkpoint C)
 
@@ -769,7 +1052,7 @@ packs are pytest path lists.
 |---|---|---|---|
 | 1. FAST INNER LOOP | `tests/unit/agent/ml_model_proposal_agent/` (521) + `tests/unit/workflows/test_step00_task_config_baselines.py` (5) + `tests/unit/agent/llm_bridge/test_step00_prompt_goldens.py` + the 3 proposer-edge protocol files (`test_ml_literature_review_to_ml_model_propose.py`, `test_ml_model_propose_to_ml_model_impl.py`, `test_ml_result_interp_to_ml_model_propose.py`) + `tests/unit/agent/schemas/` (295) — 861 tests | **3.0 s wall** (single invocation) | ≤ 2 min (measured 3 s — two orders of margin) |
 | 2. STAGE-A PARITY | the Step-00 proposer/config baseline files (`ml_model_proposal_agent/test_step00_prompt_goldens.py`, `llm_bridge/test_step00_prompt_goldens.py`, `workflows/test_step00_task_config_baselines.py` — 16 tests, 1.9 s) + `test_contract_reassertion.py` + `test_proposer_task_config.py` + the full proposer suite (already inside pack 1) | ≈ pack 1 + 2 s | ≤ 2 min |
-| 3. STAGE-B CONTRAST | the NEW 13.4-A/13.4-B proposer contrast fixtures (this PR's own tests — land inside `tests/unit/agent/ml_model_proposal_agent/`) | expected O(seconds) (same fixture machinery as PB-3) | ≤ 1 min |
+| 3. STAGE-B CONTRAST | the NEW 13.4-A/13.4-B proposer contrast fixtures + (per OD-S1-6(a)) the F2/F5 rank-agnosticism prose rungs (§9.4) (this PR's own tests — land inside `tests/unit/agent/ml_model_proposal_agent/`) | expected O(seconds) (same fixture machinery as PB-3) | ≤ 1 min |
 | 4. LIVE INTEGRATION | bounded production-path proposer runs, NO live API: `tests/integration/nodes/test_ml_model_proposal_agent.py::test_proposal_pipeline_dual_mode` (pseudo mode) + `tests/integration/workflows/test_pr_e_persistence_layout_pseudo.py::TestNodePersistence::test_proposer_persists_proposal_json` + `tests/integration/workflows/test_vocab_accumulation.py::test_vocab_discoveries_appear_in_proposal_prompt` (collect-verified present; never in CI per repo policy — run manually with fresh green logs attached to the claim) | bounded, minutes | manual, green-before-cite |
 | 5. FINAL FULL SUITE | full `pytest tests/unit/ -m "not real_run"` + ruff check + `ruff format --check` + pyright strict + CI on the exact final head ONLY (~8.3k tests, ~440 s CI precedent) | once, terminal | terminal gate only |
 
@@ -981,7 +1264,9 @@ diffs, tests) is inside it.
 
 ### 14.4 Commit S1-D — Stage-B contrast fixtures + mutation battery closeout
 
-**Goal.** 13.4-A and 13.4-B land (§9); the §15 battery is fully
+**Goal.** 13.4-A and 13.4-B land (§9), plus — under OD-S1-6(a) — the
+F2/F5 rank-agnosticism prose rungs (§9.4) that convert "the templates
+are rank-agnostic" from a claim into a test; the §15 battery is fully
 executed and recorded; contract-reassertion contrast variant lands.
 
 **Scope.** New tests + fixtures only (test-only commit). NON-goals:
@@ -991,16 +1276,29 @@ any production diff.
 - [ ] 13.4-A fixture + asserts (§9.1).
 - [ ] 13.4-B fixture + asserts (§9.2), incl. the num_classes contrast
       variant of the re-targeted contract-reassertion pins.
-- [ ] Execute remaining mutations (M-3, M-4, M-7) with
-      mutation-proof hygiene (cache clear, count==1, baseline re-run);
-      record the dossier in this document.
+- [ ] F2 rung (§9.4): rank-4 NEUTRAL-axis contract profile; assert the
+      declared text renders on all Step-01 surfaces AND zero
+      `[B, 256, T]`/`[B, T]`/"amplitude bins"/`256 denoising` residue.
+      One axis only — description and losses untouched.
+- [ ] F5 rung (§9.4): multi-channel temporal declaration; assert it
+      renders verbatim with no scalar-`[B,T]` residue (proves "time
+      series" is not assumed scalar).
+- [ ] Record F3/F4 as DEFERRED prerequisites for the contract-owning
+      step (§6A.5 binding dependency) — no stub, no placeholder test.
+- [ ] Execute remaining mutations (M-3, M-4, M-7) + the flexible-input
+      mutations N-RANK/N-RESIDUE/N-OPAQUE (§15.1) with mutation-proof
+      hygiene (cache clear, count==1, baseline re-run); record the
+      dossier in this document.
 
 **Validation plan.** Packs 1-3; full battery dossier.
 
 **Acceptance criteria.** Each fixture varies exactly one axis
-(reviewed against §9's atomicity notes); every §15 mutation has a
+(reviewed against §9/§9.4 atomicity notes — no fixture changes
+description AND rank AND dtype); every §15/§15.1 mutation has a
 recorded RED and a restored GREEN; zero surviving behavior-changing
-mutations.
+mutations; N-RESIDUE specifically proves the F2/F5 rungs catch a
+shadow literal that TIDMAD parity alone cannot; the design's F3/F4
+rows read DEFERRED with an owner, never "covered".
 
 **Failure/edge cases.** A contrast fixture accidentally varying two
 axes (e.g. alt description that also implies different shapes) — the
@@ -1059,6 +1357,14 @@ asserts, NOT the prompt goldens (separation stays real); (NC-2) an
 unrelated template_vars value change (e.g. minimum_boldness fixture
 value) does not red the contract goldens; (NC-3) the extraction
 commits re-run PB-3/PB-4 twice with byte-identical verdicts.
+
+### 15.1 Flexible-input mutations (added 2026-08-12)
+
+| ID | Mutation | Expected |
+|---|---|---|
+| **N-RANK** | add a rank/axis branch to any Step-01 renderer (e.g. `if "T]" in fc.output_shape:` or a `task_type == "classification"` code path selecting different prose) | forbidden by §6A.4; the reviewer/test must catch it — the F2 rank-4 contrast goes red or renders TIDMAD-shaped text |
+| **N-RESIDUE** | after extraction, reintroduce one hardcoded `[B, 256, T]` (or "256 amplitude bins") into a generic template while the contrast profile is active | F2/F5 contrast fixtures go red on the residue assertion; the TIDMAD golden stays green — proving the fixtures catch shadow literals that parity alone cannot |
+| **N-OPAQUE** | make a renderer read `task_type` to choose a branch instead of rendering it as an opaque label | violates the field's own schema docstring and §6A.4; caught by the F2 fixture (neutral contract with an unfamiliar `task_type` must still render) |
 
 ## 16. Checkpoints instantiated (roadmap §17)
 
@@ -1170,6 +1476,7 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 | OD-S1-2 | **Stale budget literals** ("~100M" PROPOSAL_REASONING_PROMPT:284; "10 GB" causal_reasoning_stage.md:146): roadmap §14 already RESOLVED the semantics (derive from [HARDWARE CONTEXT]; delete stale literals) but proposer templates have NO later owner (step 04's prompt scope excludes proposer surfaces) | (a) include optional commit S1-E (isolated, golden-regenerating, clearly labeled); (b) defer and accept an ownership gap | **(a) INCLUDE S1-E** — otherwise the two literals become permanently unowned; the commit is isolated and skippable |
 | OD-S1-3 | **JOIN placement**: which stage system prompts render the task-background block | (a) all three stages (comparison/causal currently task-blind — they choose the architecture family); (b) proposing stage only (minimal byte change) | **(a) all three** — the step's final effect is about the HYPOTHESIS SPACE, which is formed in stages 1-2; (b) would satisfy the letter of the JOIN while leaving the deciding stages task-blind |
 | OD-S1-4 | **Checkpoint-C chain evidence form** (roadmap C cell says "a real chain iteration"; §17 exempts prompt extractions from real Gates) | (a) bounded `--is_pseudo_llm` production-entry iteration with prompt dump, log attached (no API cost); (b) one real-LLM bounded iteration; (c) unit+pseudo-workflow evidence only | **(a)** — exercises the production entry + real renders at zero API cost; (b) adds LLM nondeterminism and cost without adding parity evidence |
+| OD-S1-6 | **Flexible-input scope (new, operator requirement 2026-08-12)**: §6A.1 proves the contract is prose-only end-to-end and §6A.5 freezes Outcome B (preset/tensor validation belongs to step 02/03) | (a) accept Outcome B and land the F2/F5 PROSE contrast rungs in commit S1-D (they are the only tests that actually prove template rank-agnosticism, and cost one extra profile fixture each); (b) accept Outcome B but land no flexible-input rungs (13.4-A/B only); (c) reject Outcome B and require a structured tensor contract inside Step 01 | **(a)** — Outcome B is source-forced (nothing structured exists to validate; building it seizes step-02/03 ownership), and the two prose rungs are cheap, atomic and are the difference between *claiming* rank-agnosticism and *proving* it. (c) would make Step 01 the Dataset/Model-contract owner, contradicting the frozen 6-P/6-M split |
 | OD-S1-5 | **Design freeze** after Step-00 merge + re-sync: confirm the §8.1 baseline map against master and authorize implementation | — | freeze only after the §Status preconditions are all TRUE |
 
 ## 20. Governance persistence (for later propagation)
