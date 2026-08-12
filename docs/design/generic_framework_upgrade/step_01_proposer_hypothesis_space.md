@@ -3,20 +3,26 @@
 ## Status
 
 **PARENT DESIGN — FROZEN / OPERATOR APPROVED (2026-08-12).**
-OD-S1-1..8 all decided (§19). **PR 01a implementation AUTHORIZED**
-by the operator on 2026-08-12; PR 01b remains blocked on PR 01a's
-merge. This parent stays the status authority; the child designs are
-the live implementation ledgers.
+OD-S1-1..8 all decided (§19).
+
+**STEP 01 STATUS: IN PROGRESS.** Child **PR 01a is MERGED**
+(PR #199, merge commit `39f89f52`, 2026-08-12); child **PR 01b is
+UNBLOCKED and NOT STARTED**. This parent stays the status authority;
+the child designs are the live implementation ledgers.
 
 Children (one PR = one doc):
 - [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
-  — exact-parity extraction; **IN IMPLEMENTATION** (see below).
+  — exact-parity extraction; **MERGED** (PR #199 → `39f89f52`).
 - [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md)
-  — the intentional JOIN; **blocked on PR 01a merge; NOT STARTED**.
+  — the intentional JOIN; **UNBLOCKED / NOT STARTED**. Its blocking
+  dependency (PR 01a merge) is now satisfied; starting it is a separate
+  operator decision, not implied by this merge.
 
-**Implementation progress (mechanical, 2026-08-12).** Branch
-`feat/generic-framework-step-01a-contract-derived-prompt-extraction`,
-Landed: `S1-A0` (`4a11e4e8`), `S1-A` (`a3a97014`), `S1-B`
+**PR 01a outcome (mechanical, 2026-08-12).** Branch
+`feat/generic-framework-step-01a-contract-derived-prompt-extraction`
+merged into `master` as **`39f89f52`** (parents `6f3866b6` +
+`d84f6711`). Final PR head `d84f6711`; final EXECUTABLE head
+`fe4ec2e5` (the three trailing commits are docs-only). Landed: `S1-A0` (`4a11e4e8`), `S1-A` (`a3a97014`), `S1-B`
 (`aa1127d7`), `S1-D` (the §4.4 contrast rungs B-i / B-ii / FX-2 /
 FX-5, their second-surface half, and the mutation closeout). All four
 implementation commits are complete. Closeout COMPLETE: **PR #199**
@@ -28,6 +34,21 @@ under the SHIPPED 256-class profile (the PB-3 goldens run on a
 deliberately non-shipped 192-class fixture, so they did not by
 themselves establish it) — and narrowed the §1 parity claim to name its
 one approved exception, the standalone-CLI convergence repair.
+
+**Merge gate (operator, 2026-08-12): PASS.** local HEAD == PR
+headRefOid == successful CI headSha at `d84f6711`; tree clean;
+mergeable; trailing changes docs-only; shipped-TIDMAD proposer parity
+proven directly base-vs-final with a sensitivity/negative control
+(child §8); the standalone-CLI prompt change classified as the approved
+compatibility exception; no PR-01b scope leakage.
+
+**Aggregate Step-level implication.** The declaration→prompt seam now
+exists and has a first production consumer, so a non-TIDMAD contract
+renders correctly in the Step-01-owned derived blocks. What Step 01
+still owes: the task-description JOIN and its FX-1 contrast (PR 01b),
+and Checkpoint C chain evidence (PR 01b). FX-3/FX-4 remain DEFERRED
+prerequisites for the contract-owning step (§6A.5), unchanged by this
+merge. Checkpoint A is closed by PR 01a; Checkpoint C is NOT.
 **STATUS: READY FOR OPERATOR REVIEW — NOT MERGED.** Checkpoint A not
 yet closed. The child doc is the live ledger and holds all evidence,
 mutations and findings — this Status is only the pointer.

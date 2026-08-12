@@ -2,10 +2,27 @@
 
 ## Status
 
-**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-12).**
-OD-S1-5 approved: PR 01a implementation is authorized. This document
-is now the LIVE IMPLEMENTATION LEDGER — checklists, evidence,
-deviations and discoveries are recorded here as work proceeds.
+**MERGED (2026-08-12).** PR [#199](https://github.com/Galileo-Sandbox/SIDERIUS/pull/199)
+was approved at the operator merge gate and merged into `master`.
+
+| Item | Value |
+|---|---|
+| Merge commit | **`39f89f52eea12901ee0ae4254bba56d2248f5418`** (parents `6f3866b6` + `d84f6711`) |
+| PR | **#199**, merged 2026-08-12T20:19:27Z, merge-commit strategy (matching PR #198) |
+| Final PR head | **`d84f6711`** |
+| Final EXECUTABLE head | **`fe4ec2e5`** — the three trailing commits are docs-only |
+| Exact-head CI | **SUCCESS** on `d84f6711` (run 31635897741, 11m44s) and on `8a05bbe8` (run 31633988555, 11m05s); both include **pyright strict (blocking)** |
+| Full unit suite | **8407 passed, 3 skipped** at `fe4ec2e5` from a clean tree |
+| Merge gate | **PASS** — see the parent's "Merge gate" block and §8 below |
+
+This document remains the historical implementation ledger for PR 01a.
+It is now CLOSED: no further implementation is recorded here. PR 01b
+has its own document and is UNBLOCKED / NOT STARTED.
+
+Ledger convention note: the sections below were written DURING
+implementation and are preserved in that voice (including the
+merge-gate finding that this status table was once stale). They are
+history, not current instructions.
 
 ### Live implementation status (mechanical, 2026-08-12)
 
@@ -18,13 +35,14 @@ deviations and discoveries are recorded here as work proceeds.
 | closeout evidence | **COMPLETE** | `fe4ec2e5` | `test(step01a): prove the standalone-CLI disposition is reachable` |
 | final validation record | **COMPLETE** | `8a05bbe8` | `docs(step01a): record final-head validation evidence` |
 | merge-gate reconciliation | **COMPLETE** | (this commit) | §8 shipped-profile parity proof, §1 claim reconciliation, this table |
-| PR closeout (§5/§6) | **COMPLETE — READY FOR OPERATOR REVIEW** | — | PR #199 open; full suite, static gates and exact-head CI all recorded below |
+| PR closeout (§5/§6) | **COMPLETE** | — | PR #199 open, CI green, full suite + static gates recorded below |
+| MERGE | **DONE** | `39f89f52` | `Merge pull request #199` — operator-approved 2026-08-12 |
 
 **PR: [#199](https://github.com/Galileo-Sandbox/SIDERIUS/pull/199)**
 (`feat/generic-framework-step-01a-contract-derived-prompt-extraction`
 → `master`). Final executable head **`fe4ec2e5`**; docs-only commits
-follow it. **STATUS: READY FOR OPERATOR REVIEW — NOT MERGED.** Merge is
-operator-owned.
+follow it. **STATUS: MERGED** as `39f89f52` after operator approval at
+the merge gate.
 
 | Final gate | Result |
 |---|---|
