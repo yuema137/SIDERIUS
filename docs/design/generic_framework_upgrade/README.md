@@ -18,7 +18,9 @@ and 7), jointly constituting that step's acceptance entry.
 | Step | Document | Status (mirror of §15.1) |
 |---|---|---|
 | 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | COMPLETE — merged (PR #198, 2026-08-12) |
-| 01 | [`step_01_proposer_hypothesis_space.md`](./step_01_proposer_hypothesis_space.md) | DESIGN READY FOR OPERATOR REVIEW — OD-S1-1..8 pending; implementation blocked on design freeze |
+| 01 | [`step_01_proposer_hypothesis_space.md`](./step_01_proposer_hypothesis_space.md) (parent) | APPROVED IN PRINCIPLE; split into two child PRs; OD-S1-5 freeze pending |
+| 01a | [`step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md) | exact-parity extraction — READY FOR IMPLEMENTATION AUTHORIZATION |
+| 01b | [`step_01_proposer_hypothesis_space/pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md) | intentional task-description JOIN — BLOCKED on PR 01a merge |
 | 02 | `step_02_dataset_sample_topology.md` | not created |
 | 03 | `step_03_model_loss_contract.md` | not created |
 | 04 | `step_04_candidate_creation_mechanics.md` | not created |

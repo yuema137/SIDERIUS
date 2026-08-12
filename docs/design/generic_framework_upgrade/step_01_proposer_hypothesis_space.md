@@ -2,8 +2,26 @@
 
 ## Status
 
-**DRAFT — OPERATOR REVIEW PENDING. Design/audit only — NOTHING in this
-document authorizes implementation.**
+**PARENT DESIGN — APPROVED IN PRINCIPLE (operator, 2026-08-12);
+SPLIT INTO TWO CHILD PRs; OD-S1-5 (freeze/authorization) PENDING.**
+Design/audit only — nothing in this document authorizes
+implementation.
+
+Children (one PR = one doc):
+- [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
+  — exact-parity extraction; **ready for implementation authorization**.
+- [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md)
+  — the intentional JOIN; **blocked on PR 01a merge**.
+
+Two implementation questions the earlier draft left open are now
+FROZEN from source in PR 01a's design: the standalone node CLI loads
+the shipped config through the canonical `load_task_config()` (it is a
+documented architectural surface, `docs/architecture.md:164,:273`, and
+extraction would otherwise break it), and the loss authority is
+imported directly at module level from `ml_models/
+models_format_sandbox.py:368,371` (that module imports only `typing`
+and `pydantic` — no circularity, no side effects, and Step 01 is its
+first production consumer).
 
 Created 2026-08-12 on branch `docs/generic-framework-step-01-design`,
 based on the Step-00 implementation head `71f6b31f`
@@ -141,10 +159,10 @@ When Step 01 is complete, the following is TRUE about SIDERIUS
 1. **The proposer's hypothesis space is declared, not memorized.** The
    task facts that bound what the proposer may propose — input/output
    tensor shapes, class count, task type, and which loss families are
-   legal for which output type — reach every proposer prompt surface
-   (pipeline comparison/causal/proposing stages AND the legacy
-   reasoning/commit surfaces) by RENDERING from their existing
-   authorities (`ForwardContract` from the shipped task config; the
+   legal for which output type — are RENDERED from their existing
+   authorities **at every proposer surface that semantically states or
+   consumes that fact** (not: every fact injected into every stage —
+   operator wording correction 2026-08-12; the per-site map is §4.1) (`ForwardContract` from the shipped task config; the
    `CLASSIFICATION_LOSSES`/`REGRESSION_LOSSES` frozensets), never from
    prompt-resident literals. Editing `configs/task_config.yaml`
    changes what the proposer is told; editing prompt files cannot
@@ -181,7 +199,7 @@ When Step 01 is complete, the following is TRUE about SIDERIUS
    change updates prompt and validation together or fails the parity
    goldens loudly.
 
-5. **The proposer's generic templates stop assuming a data shape.**
+6. **The proposer's generic templates stop assuming a data shape.**
    After extraction, no generic proposer template independently asserts
    rank, axis names or TIDMAD semantics **in its contract-derived
    blocks**: there, `[B, 256, T]` / `[B, T]` / "256 amplitude bins"
@@ -665,10 +683,26 @@ at this step.
 space can be communicated to the current Proposer through an explicit
 task description and a normalized model-facing data/forward-contract
 description, while preserving the current `ProposalOutput` schema and
-the unchanged downstream handoff. Concretely, after Step 01: supplying
-a profile whose contract prose declares a rank-4 tensor with neutral
-axis names produces proposer prompts that carry that declaration and
-carry NO contradicting TIDMAD shape text.
+the unchanged downstream handoff. Concretely, after Step 01: supplying a profile whose contract prose
+declares a rank-4 tensor with neutral axis names produces proposer
+prompts whose **Step-01-owned contract-derived blocks** carry that
+declaration with no contradicting TIDMAD shape residue. It does NOT
+mean the whole prompt is free of TIDMAD shape text — §9.5 enumerates
+three legitimate survivors (the shipped description's own prose, the
+two-output-form catalogue, the renderer's `per-timestep` descriptor),
+each with a named later owner.
+
+**Name precision (operator correction 2026-08-12).** Read
+"Step-1-compatible" strictly as **Step-1 PROMPT-CONTRACT
+compatibility**: compatibility at the task-description and
+declared-contract surfaces only. After Step 01 the proposer still
+carries other TIDMAD-era priors OUTSIDE this slice — persona/domain
+prose (F7), the model catalogue and its SOTA scores (F16/F18), the
+metric grammar (F9), dataset anchors (F10/F6'), the two-output-form
+catalogue (§4.1 tier iii) and the grandfathered `per-timestep`
+renderer (F21). None of them is removed here; each is recorded with
+its owning step. Step 01 therefore makes the proposer neither
+task-agnostic nor end-to-end compatible.
 
 **Not yet end-to-end compatible.** Such a task is still NOT executable:
 data loading, batching/collation, probe tensors, generated-plugin
@@ -847,58 +881,59 @@ renders an already-resolved declaration.** Grounds:
    and Step 03 (model I/O). Step 01 owns rendering only, and says so in
    §5's ownership map.
 
-## 7. PR decomposition decision — ONE PR (frozen AFTER the audit)
+## 7. PR decomposition decision — PARENT + TWO CHILD PRs (operator-frozen 2026-08-12)
 
-**Decision: ONE STEP = ONE PR.** This document is both the step-level
-and PR-level design/ledger (operator ONE-PR-ONE-DOC standard; no child
-docs). Branch: `feat/generic-framework-step-01-proposer-hypothesis-space`
-(created from post-Step-00 master only — §Status freeze preconditions).
+**The earlier ONE-PR freeze is SUPERSEDED by operator decision.** The
+audited work contains two materially different behavioural units, and
+the operator's splitting standard (independent final effect, independent
+validation boundary, different risk) is met:
 
-Evidence against each child-PR justification criterion (all seven must
-hold for a split; none does):
+| | PR 01a — contract-derived prompt extraction | PR 01b — task-description JOIN |
+|---|---|---|
+| Design | [`step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md) | [`step_01_proposer_hypothesis_space/pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md) |
+| Central claim | final TIDMAD prompt bytes **UNCHANGED** | the production proposer **now consumes the declared task description** — an intentional behaviour change |
+| Commits | S1-A0, S1-A, S1-B, contract/rank/loss half of S1-D, PB-4 boundary re-target | S1-C (JOIN, all 3 stages), FX-1/13.4-A contrast, S1-E budget cleanup, closeout |
+| Golden regeneration | **NONE** (any byte change is a defect) | the declared R2 set only |
+| Checkpoints closed | 0, A, D (own head) | B, C, D (own head), E |
+| Roadmap A-cell | satisfied exactly | the declared OD-S1-8 exception |
+| Risk profile | behaviour-preserving refactor | changes what the LLM sees on every production proposal |
 
-1. *Independent behavioral final effect*: the only candidate split is
-   EXTRACTION (byte-identical renders) vs JOIN (render change). An
-   extraction-only PR's behavioral effect ("YAML edits now reach the
-   commit prompt") is real but is proven by the SAME contrast fixtures
-   this PR ships; a JOIN-only PR would re-touch the same templates,
-   goldens and tests a week later — shared blast surface, no
-   independence.
-2. *Master fully usable when merged*: both halves leave master usable —
-   criterion neutral, does not force a split.
-3. *Own TIDMAD parity evidence*: both halves cite the SAME baselines
-   (PB-3/PB-4/PB-0/WF-3/CFG) — no independent parity boundary exists.
-4. *Live production consumer*: the extraction's renderers reach
-   production only through the same call sites the JOIN touches; a
-   split risks exactly the §0.8 consumer-less shape for the
-   task-background renderer if the JOIN PR slipped.
-5. *Independent validation boundary*: one acceptance-pack family
-   (§12) covers everything; the packs do not partition.
-6. *No half-enabled sibling state*: **restated after adversarial
-   finding F8** — the original wording ("an extraction-only merge
-   leaves `template_vars["task_description"]` consumer-less") was
-   fallacious: that key is ALREADY dead on master (roadmap §0 rule 8
-   catalogues it), so leaving it dead is a pre-existing condition, not
-   a state the split creates. The honest form: an extraction-only PR
-   would land renderers whose ONLY prompt-visible effect is
-   byte-identical output, i.e. a change no reviewer can behaviorally
-   verify at merge time, with its verification deferred to a sibling
-   PR — the split moves evidence away from the change rather than
-   creating a defect. Criteria 1 and 4 carry the decision; this one
-   is supporting, not decisive.
-7. *Risk/review isolation*: the whole diff is one module + its
-   templates + tests; measured inner loop is 3 s; review isolation
-   gains nothing.
+**Why they must not share a PR.** A reviewer of a mixed diff cannot
+separate "byte-identical extraction" from "we deliberately changed the
+prompt": the extraction's entire acceptance claim is *zero golden
+diff*, while the JOIN's is *these specific goldens changed on
+purpose*. Merging them destroys the strongest available review signal.
+The split also isolates the roadmap-A-cell exception (§2 iron law:
+exact string equality for TIDMAD) into one small, clearly-labelled PR.
 
-Honest counter-argument on the record (finding F8): the JOIN **is**
-an independently reviewable behavioral unit — §18.2 risk 6 says so
-plainly. The one-PR decision therefore rests on the shared blast
-surface (same templates, same goldens, same tests touched twice) and
-on evidence locality, NOT on a claim that the JOIN lacks independent
-meaning. Commit-level separation (§14) provides the attribution the
-two-stage rule wants: extraction commits are individually
-byte-parity-proven BEFORE the single JOIN commit changes any rendered
-byte, so a bisect still isolates the behavioral change to one commit.
+**Child criteria, checked (the operator's seven):** (1) independent
+final effects — see the table; (2) master usable after either merge —
+01a is behaviour-preserving; 01b is self-contained and additive;
+(3) own parity evidence — 01a's is zero-diff on the whole Stage-A
+golden set, 01b's is the declared R2 diff plus FX-1; (4) live consumer
+each — 01a's renderers are consumed by the production commit/pipeline
+render calls, 01b's JOIN is consumed by the three stage templates and
+proven at the production entry; (5) independent validation boundaries
+— 01a needs no chain evidence, 01b closes Checkpoint C pre-merge;
+(6) no half-enabled sibling state — 01a leaves the pre-existing dead
+key exactly as it found it (a pre-existing condition, first-review
+F8), and 01b starts from merged 01a; (7) real risk isolation — see
+the risk row.
+
+**Dependency DAG (strict):**
+
+```text
+Step 00 (merged, e80da078)
+        ↓
+PR 01a  contract-derived prompt extraction   [Checkpoints 0, A]
+        ↓  (must MERGE first — never parallel)
+PR 01b  task-description JOIN                [Checkpoints B, C, E]
+        ↓
+Step 01 COMPLETE  → step 02 unblocked
+```
+
+The parent Step is COMPLETE only when BOTH children merge and the
+aggregate Checkpoint E (roadmap §15.1 row sync) closes.
 
 ## 8. Stage A — TIDMAD extraction parity (exact Step-00 baseline IDs)
 
@@ -1322,7 +1357,7 @@ packs are pytest path lists.
 |---|---|---|---|
 | 1. FAST INNER LOOP | `tests/unit/agent/ml_model_proposal_agent/` (521) + `tests/unit/workflows/test_step00_task_config_baselines.py` (5) + `tests/unit/agent/llm_bridge/test_step00_prompt_goldens.py` + the 3 proposer-edge protocol files (`test_ml_literature_review_to_ml_model_propose.py`, `test_ml_model_propose_to_ml_model_impl.py`, `test_ml_result_interp_to_ml_model_propose.py`) + `tests/unit/agent/schemas/` (295) — 861 tests | **3.0 s wall** (single invocation) | ≤ 2 min (measured 3 s — two orders of margin) |
 | 2. STAGE-A PARITY | the Step-00 proposer/config baseline files (`ml_model_proposal_agent/test_step00_prompt_goldens.py`, `llm_bridge/test_step00_prompt_goldens.py`, `workflows/test_step00_task_config_baselines.py` — 16 tests, 1.9 s) + `test_contract_reassertion.py` + `test_proposer_task_config.py` + the full proposer suite (already inside pack 1) | ≈ pack 1 + 2 s | ≤ 2 min |
-| 3. STAGE-B CONTRAST | the NEW 13.4-A/13.4-B proposer contrast fixtures + (per OD-S1-6(a)) the FX-2/FX-5 rank-agnosticism prose rungs (§9.4) (this PR's own tests — land inside `tests/unit/agent/ml_model_proposal_agent/`) | expected O(seconds) (same fixture machinery as PB-3) | ≤ 1 min |
+| 3. STAGE-B CONTRAST | the NEW 13.4-A/13.4-B proposer contrast fixtures + (per OD-S1-6(a)) the FX-2/FX-5 rank-agnosticism prose rungs (§9.4) (the owning child PR's own tests — land inside `tests/unit/agent/ml_model_proposal_agent/`) | expected O(seconds) (same fixture machinery as PB-3) | ≤ 1 min |
 | 4. LIVE INTEGRATION | bounded production-path proposer runs, NO live API: `tests/integration/nodes/test_ml_model_proposal_agent.py::test_proposal_pipeline_dual_mode` (pseudo mode) + `tests/integration/workflows/test_pr_e_persistence_layout_pseudo.py::TestNodePersistence::test_proposer_persists_proposal_json` + `tests/integration/workflows/test_vocab_accumulation.py::test_vocab_discoveries_appear_in_proposal_prompt` (collect-verified present; never in CI per repo policy — run manually with fresh green logs attached to the claim) | bounded, minutes | manual, green-before-cite |
 | 5. FINAL FULL SUITE | full `pytest tests/unit/ -m "not real_run"` + ruff check + `ruff format --check` + pyright strict + CI on the exact final head ONLY (~8.3k tests, ~440 s CI precedent) | once, terminal | terminal gate only |
 
@@ -1386,298 +1421,23 @@ golden is no longer authoritative). Step-01-specific rules:
    test-only commits with provenance messages; `assert_golden`
    helpers; text-only artifacts; no production source text embedded
    (test-owned frozen fixture classes only).
+## 14. Implementation phases — delegated to the child PR designs
 
-## 14. Implementation phases (per-commit 8-section checklists)
+The per-commit 8-section checklists live in the child designs, one PR
+per document (operator standard: ONE PR = ONE DOC):
 
-**NOT AUTHORIZED YET.** Precondition (a) — the §Status freeze
-preconditions — is now SATISFIED (Step 00 merged; this design synced
-onto that master; baselines re-verified green). Precondition (b),
-operator approval of this design including the §19 decisions
-(OD-S1-1..8), is OUTSTANDING and is the only remaining blocker.
-Commit sequence: **S1-A0 → S1-A → S1-B → S1-C → S1-D → [S1-E if
-OD-S1-2 approves] → S1-F**. One PR, branch
-`feat/generic-framework-step-01-proposer-hypothesis-space`, semantic
-commits below (autonomous per the §18.1 standing rules). All boxes
-`[ ]` — NOTHING is implemented. Checklists are specific enough to
-track but deliberately do not invent code-level detail ahead of the
-per-commit inspect-first step; if inspection reveals ambiguity or
-larger scope, STOP AND ASK.
+| Child | Commits | Document |
+|---|---|---|
+| PR 01a | S1-A0 · S1-A · S1-B · 01a-D (contract/rank/loss contrasts + mutations) | [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md) |
+| PR 01b | S1-C (JOIN) · FX-1/13.4-A contrast · S1-E budget cleanup · closeout | [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md) |
 
-### 14.0 Commit S1-A0 — PB-3 fixture completion (test-only prerequisite)
-
-**Goal.** Make the PB-3 fixture contract a complete, self-consistent
-TEST-OWNED declaration so that later extraction commits' byte-parity
-claims are meaningful (§8.1a; adversarial finding F6b).
-
-**Scope.** `tests/unit/agent/ml_model_proposal_agent/
-test_step00_prompt_goldens.py` fixture contract (`:153-166`) +
-regeneration R1 of the affected `pb3_*` goldens. NON-goals: zero
-production diff; no renderer yet; no template edit; PB-4/PB-0/CFG/WF-3
-goldens untouched.
-
-**Implementation plan.**
-- [ ] Inspect the fixture and each `pb3_*` golden to determine exactly
-      which tokens the templates carry today.
-- [ ] Populate `num_classes`, `task_type` and align the descriptions
-      with those tokens (test-owned values, NOT the shipped ones — the
-      no-production-source-in-goldens rule stands).
-- [ ] Regenerate the affected goldens; attach diffs; provenance
-      message per §13 R1.
-
-**Validation plan.** Packs 1-2; confirm the ONLY changed goldens are
-the declared ones (`git status` review).
-
-**Acceptance criteria (observable).** The fixture contract has no
-defaulted semantic field; the regenerated goldens differ from their
-predecessors ONLY where the fixture's declared values appear; PB-4,
-PB-0, CFG-1/2/3a/3b and WF-3 goldens are byte-unchanged.
-
-**Failure/edge cases.** If a golden turns out NOT to change, the
-fixture upgrade was inert for that surface — record it (that is
-evidence the surface derives nothing from the contract yet), do not
-force a diff.
-
-**Verification commands and evidence.** (recorded after execution)
-
-**Commit boundary.** Test-only, no production file touched.
-
-### 14.1 Commit S1-A — legacy commit-prompt extraction + renderers (byte-parity)
-
-**Goal.** The commit prompt's task facts (shapes/classes/loss
-legality) derive from ForwardContract + the loss frozensets; TIDMAD
-render byte-identical; the two new proposer-local renderers exist WITH
-their first consumer.
-
-**Scope.** `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py`
-(PROPOSAL_COMMIT_PROMPT → template + render at the :1385 call site;
-new renderer helpers, module-local); tests:
-`test_step00_prompt_goldens.py` PB-4 system assert re-target,
-`test_contract_reassertion.py` re-target (§11.1),
-new renderer unit tests. NON-goals: pipeline templates (S1-B), any
-rendered-byte change, schemas, protocols, other nodes.
-
-**Implementation plan.**
-- [ ] Inspect the commit prompt + call site + `render_forward_contract`
-      + frozensets; fix the exact placeholder set (inspect-first).
-- [ ] Loss-legality renderer (frozensets → legality prose tokens) +
-      contract-prose renderer (ForwardContract → shape/class tokens),
-      typed, docstringed, module-local.
-- [ ] Template conversion + render at :1385 (first consumer, same
-      commit).
-- [ ] PB-4 re-target (golden bytes untouched) + render-vs-constant
-      differential (§8.2).
-- [ ] `test_contract_reassertion.py` re-target to the render, TIDMAD
-      variant (§11.1 row 1; contrast variant lands in S1-D).
-- [ ] Renderer unit tests incl. empty-input behavior pins.
-
-**Validation plan.** Pack 1 + pack 2 (§12); ruff/format on touched
-files; mutations M-2 partial (commit-prompt token) executed and
-recorded.
-
-**Acceptance criteria (observable).** `pb4_legacy_commit_system.txt`
-passes UNMODIFIED against the render; `git diff` shows zero template
-literal for the extracted tokens (grep evidence recorded); the
-differential test proves constant ≠ golden while render == golden;
-contract-reassertion re-target red under mutation M-2, green
-otherwise.
-
-**Failure/edge cases.** Empty ForwardContract (legacy CLI main(),
-test fixtures) → render degrades exactly as `_render_task_background`
-does today (regime-A, pinned); regex-extraction in the re-targeted
-reassertion test must tolerate the placeholder line shape.
-
-**Verification commands and evidence.** (recorded after execution;
-never claim an unrun test passed)
-
-**Commit boundary.** Test-and-production change for the LEGACY commit
-surface only; no pipeline template touched; goldens byte-identical.
-
-### 14.2 Commit S1-B — pipeline template extraction (byte-parity)
-
-**Goal.** proposing_stage.md's **tier-(i)** hardcoded fact lines
-(§4.1) and its loss-legality prose derive via template_vars from the
-S1-A renderers; TIDMAD render byte-identical (all 9 PB-3 goldens
-unmodified, on top of the S1-A0 fixture completion). Tier-(ii)/(iii)
-lines (:41, :70-71's dtype-stripped forms, :74's "amplitude bins", the
-regressor branch) stay LITERAL unless OD-S1-7 approves the formatting
-rule.
-
-**Scope.** `agent/prompt_templates/proposal/proposing_stage.md` (+
-`_run_pipeline` template_vars additions); tests: new rendered-layer
-pins mirroring `test_proposer_task_config.py`'s shape. NON-goals: the
-task-description placeholder (S1-C); comparison/causal templates
-(no extractable fact rows — §4); wording changes; the
-double-substitution quirk (kept byte-identical).
-
-**Implementation plan.**
-- [ ] Inspect proposing_stage.md line-by-line against the §4 fact
-      rows; fix the placeholder set; verify no prose mention of a new
-      placeholder name exists elsewhere in the template (the :177/:235
-      double-render hazard — choose collision-free names).
-- [ ] template_vars entries from the S1-A renderers.
-- [ ] Byte-parity check of all 9 PB-3 goldens (against the S1-A0
-      regenerated set — §8.1a; a red here after S1-A0 is production
-      drift, not fixture rot).
-- [ ] Rendered-layer pins: TIDMAD tokens present; template file no
-      longer contains the extracted literals (template-layer absence
-      pin, new).
-
-**Validation plan.** Pack 1 + 2; mutation M-5 (one-sided template
-edit) executed and recorded.
-
-**Acceptance criteria.** All 9 PB-3 goldens (as regenerated by
-S1-A0) + label-sequence pin + WF-3 key-set golden pass UNMODIFIED by
-this commit; grep shows the tier-(i) literals absent from the
-template while the tier-(ii)/(iii) literals are still present AND
-listed in the commit message as knowingly retained; new absence pin
-red if an extracted literal is reintroduced (M-4 pre-check);
-loss-list render order matches §6.2 rule 5 (mutation M-8 red on a
-shuffled source).
-
-**Failure/edge cases.** Placeholder-name collision with prose (global
-str.replace) — checked by inspection + a collision guard assert in
-the new tests; a missing template_vars key ships the literal
-placeholder to the LLM (silent no-op) — covered by the rendered pins.
-
-**Verification commands and evidence.** (after execution)
-
-**Commit boundary.** proposing_stage.md + template_vars + tests;
-rendered TIDMAD bytes unchanged.
-
-### 14.3 Commit S1-C — the JOIN (the mandatory scope's one deliberate render change)
-
-**Goal.** The production pipeline renders the shipped task
-description (task-background block in stage system prompts),
-consuming the dead template_vars key; §13 rule-2 golden regeneration.
-
-**Scope.** Stage base templates (per OD-S1-3 placement) +
-`_run_pipeline` (no new key needed — :1597 exists); PB-3 golden
-regeneration (provenance per §13); JOIN tests (§8.3, §10.2);
-WF-3 key-set golden verified UNCHANGED. NON-goals: forward-contract
-expansion to stages 1-2; wording beyond the minimal labeled block;
-legacy surfaces (already render the description).
-
-**Implementation plan.**
-- [ ] Inspect stage templates + the WF-3 component audit to confirm
-      the block lands inside the `system_prompt` component.
-- [ ] Add the labeled task-background block + placeholder per
-      OD-S1-3.
-- [ ] Regenerate affected PB-3 goldens in THIS commit with the §13
-      rule-2 message + attached diffs.
-- [ ] JOIN test: shipped description (via `load_task_config()`)
-      appears verbatim in the captured production render.
-- [ ] Workflow-tier pseudo assert (§10.2) — inspect-first whether to
-      extend an existing dual-mode test or add a bounded one.
-
-**Validation plan.** Pack 1 + 2 + the touched integration test (pack
-4, manual, log recorded); mutations M-1 and M-6 executed and
-recorded.
-
-**Acceptance criteria.** The regenerated goldens contain the shipped
-description exactly once per stage system prompt; WF-3 key sets
-unchanged; M-1 (remove the placeholder) turns the JOIN test red;
-M-6 (drop the workflow post-hoc injection) turns the workflow-tier
-assert red.
-
-**Failure/edge cases.** Empty description (node CLI main()) → block
-collapses to "" (legacy precedent), pinned by a test; prompt-size
-growth is bounded (description is ~4 lines; `test_prompt_ceiling`
-budget tests must stay green).
-
-**Verification commands and evidence.** (after execution)
-
-**Commit boundary.** The only commit that changes rendered TIDMAD
-bytes **in the mandatory scope** (S1-E, if OD-S1-2 approves it, is a
-second and clearly-labeled one — finding F13 contradiction fixed);
-everything needed to review this change (templates, goldens, diffs,
-tests) is inside it.
-
-### 14.4 Commit S1-D — Stage-B contrast fixtures + mutation battery closeout
-
-**Goal.** 13.4-A and 13.4-B land (§9), plus — under OD-S1-6(a) — the
-FX-2/FX-5 rank-agnosticism prose rungs (§9.4) that convert "the templates
-are rank-agnostic" from a claim into a test; the §15 battery is fully
-executed and recorded; contract-reassertion contrast variant lands.
-
-**Scope.** New tests + fixtures only (test-only commit). NON-goals:
-any production diff.
-
-**Implementation plan.**
-- [ ] 13.4-A fixture + asserts (§9.1).
-- [ ] 13.4-B rungs **B-i** (regressor, the roadmap's named fixture)
-      and **B-ii** (16-class classifier) as SEPARATE same-axis
-      fixtures (§9.2), B-ii carrying the contrast half of the
-      re-targeted contract-reassertion pins.
-- [ ] FX-2 rung (§9.4): rank-4 NEUTRAL-axis contract profile + an
-      unfamiliar `task_type`; assert (a) the declared rank-4 text and
-      the opaque `task_type` label render on all Step-01 surfaces, and
-      (b) zero `[B, 256, T]`/`[B, T]`/"amplitude bins"/"256 denoising"
-      residue **within the contract-DERIVED blocks only** — the three
-      §9.5 whitelisted survivors are expected and must not be
-      "fixed". One axis only — description and losses untouched.
-- [ ] FX-5 rung (§9.4): multi-channel temporal declaration; assert it
-      renders verbatim with no scalar-`[B,T]` residue in the derived
-      blocks (proves "time series" is not assumed scalar).
-- [ ] Record FX-3/FX-4 as DEFERRED prerequisites for the contract-owning
-      step (§6A.5 binding dependency) — no stub, no placeholder test.
-- [ ] Execute remaining mutations (M-3, M-4, M-7, M-8, M-9) + the flexible-input
-      mutations N-RANK/N-RESIDUE/N-OPAQUE (§15.1) with mutation-proof
-      hygiene (cache clear, count==1, baseline re-run); record the
-      dossier in this document.
-
-**Validation plan.** Packs 1-3; full battery dossier.
-
-**Acceptance criteria.** Each fixture varies exactly one axis
-(reviewed against §9/§9.4 atomicity notes — no fixture changes
-description AND rank AND dtype); every §15/§15.1 mutation has a
-recorded RED and a restored GREEN; zero surviving behavior-changing
-mutations; N-RESIDUE specifically proves the FX-2/FX-5 rungs catch a
-shadow literal that TIDMAD parity alone cannot; the design's F3/F4
-rows read DEFERRED with an owner, never "covered".
-
-**Failure/edge cases.** A contrast fixture accidentally varying two
-axes (e.g. alt description that also implies different shapes) — the
-§9 fixtures pin the OTHER axis explicitly to the TIDMAD value.
-
-**Verification commands and evidence.** (after execution)
-
-**Commit boundary.** Test-only.
-
-### 14.5 Commit S1-E (OPTIONAL — exists only if OD-S1-2 approves) — stale budget-literal cleanup
-
-**Goal.** Delete/re-point the two stale budget numerals ("~100M"
-`PROPOSAL_REASONING_PROMPT:284`; "10 GB" causal_reasoning_stage.md:145)
-to the [HARDWARE CONTEXT] deferral pattern (roadmap §14 resolved row).
-Also the single declared carve-out from non-goal N10.
-**Scope.** Two prose lines + regeneration R3 (§13) + the 2 pinned
-`test_prompt_ceiling_policy` sentences if touched.
-**Implementation plan.**
-- [ ] **CAPTURE FIRST**: the legacy reasoning SYSTEM render has NO
-      golden today (§8.1 PB-0 row, finding F6a) — capture a Step-01
-      baseline of it BEFORE editing :284, otherwise the edit lands on
-      an unpinned surface.
-- [ ] Edit the two lines; regenerate the just-captured golden + any
-      affected `pb3_*` golden in the same commit with provenance.
-- [ ] per further inspection.
-**Validation.** Packs 1-2. **Acceptance.** No numeral budget literal
-in proposer surfaces (extending the existing `<10 GB VRAM` absence
-pin); goldens regenerated with provenance. **Failure cases.** none
-beyond golden hygiene. **Evidence.** (after execution).
-**Boundary.** Isolated, clearly-labeled, skippable.
-
-### 14.6 Commit S1-F — docs closeout + PR readiness
-
-**Goal.** This ledger fully reconciled ([x] with evidence); node doc
-sync (`nodes/ml_model_proposal_agent/ml_model_proposal_agent.md` —
-prompt-surface documentation current per the pre-merge doc-sync rule);
-final full-suite + static gates at the executable head (pack 5),
-clean tree; PR READY FOR OPERATOR REVIEW (never merge).
-**Scope.** docs + any final test bookkeeping. **Plan.** [ ] ledger
-reconciliation; [ ] node .md quote-verified against merged-state
-flags/defaults; [ ] pack-5 run from a clean tree, verdict from the
-log. **Acceptance.** CI green on the exact head; every §14 box [x]
-with evidence or explicitly deferred with reason; §16 checkpoint
-table filled. **Boundary.** docs-only.
+Standing implementation rules (§18.1) apply to both children
+unchanged. The shared material each child references rather than
+duplicates: the source audit (§3-§5), the target flow (§6), the
+flexible-input boundary (§6A), the Stage-A baseline map (§8), the
+contrast catalogue (§9), the test-disposition inventory (§11), the
+acceptance packs (§12), the golden-update policy (§13) and the
+mutation catalogue (§15).
 
 ## 15. Validation and mutation plan
 
@@ -1714,14 +1474,21 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 
 ## 16. Checkpoints instantiated (roadmap §17)
 
-| Checkpoint | Instantiation | Status |
-|---|---|---|
-| 0 BASELINE AVAILABLE | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed on MASTER (PR #198) and green in this worktree (526 passed, 2.3 s); PB-0's true surface corrected per §8.1 | **MET** |
-| A EXTRACTION PARITY (with the declared OD-S1-8 exception) | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | design |
-| B GENERIC CONTRAST | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's FX-2/FX-5 prose rungs — one axis per fixture; FX-3/FX-4 DEFERRED with a named owner | design |
-| C LIVE INTEGRATION | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4); the :1597 seam is WIRED — no consumer-less seam survives | design |
-| D REGRESSION | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | design |
-| E ROADMAP SYNC | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | design |
+| Checkpoint | Owner (child PR) | Instantiation | Status |
+|---|---|---|---|
+| 0 BASELINE AVAILABLE | **PR 01a** | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed on MASTER (PR #198) and green in this worktree (526 passed, 2.3 s); PB-0's true surface corrected per §8.1 | **MET** |
+| A EXTRACTION PARITY (exact — the OD-S1-8 exception now lives in PR 01b, NOT here) | **PR 01a** | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | design |
+| B GENERIC CONTRAST | **PR 01a** (contract/rank/loss rungs) + **PR 01b** (FX-1 description rung) | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's FX-2/FX-5 prose rungs — one axis per fixture; FX-3/FX-4 DEFERRED with a named owner | design |
+| C LIVE INTEGRATION | **PR 01b** (PRE-MERGE, on its final head) | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4), which runs **PRE-MERGE on PR 01b's final executable head**, never post-merge; the :1597 seam is WIRED — no consumer-less seam survives | design |
+| D REGRESSION | **each child on its own final head** | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | design |
+| E ROADMAP SYNC | **PR 01b** (aggregate) | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | design |
+
+
+**Split consequence (operator decision 2026-08-12).** Checkpoint A is
+closed by PR 01a with ZERO golden diff — the roadmap A-cell is
+satisfied exactly there. The A-cell exception (OD-S1-8) applies ONLY
+to PR 01b, whose declared regeneration is its acceptance evidence.
+Nothing in PR 01a may regenerate a golden.
 
 ## 17. Failure cases and diagnostics
 
@@ -1815,7 +1582,27 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 | DQ-6 | `[output_shape]` pseudo-placeholder in shipped YAML `output_head_note` (rendered verbatim to the LLM); fixing it breaks CFG-2 → needs its own §13-compliant regeneration | operator config edit post-Step-01, or step 02 |
 | DQ-7 | genericity_contract.md Seam-3 section update (the roadmap is the seam authority now; the contract doc still says "update this section first") | with this PR's docs commit or D11 |
 
-## 19. Operator decisions required
+## 19. Operator decisions — FINAL STATES (operator, 2026-08-12)
+
+All eight are now decided except OD-S1-5 (freeze), which awaits this
+reconciliation. The original option analyses are preserved below the
+verdict table.
+
+| ID | Operator verdict |
+|---|---|
+| OD-S1-1 | **APPROVED (a)** — forbidden-pattern extraction DEFERRED to step 04 / 6-M with the validator surfaces. |
+| OD-S1-2 | **APPROVED** — delete the stale "~100M" / "10 GB" literals, but in **PR 01b** as an isolated capture-first semantic commit. |
+| OD-S1-3 | **APPROVED (a)** — the task background reaches ALL THREE pipeline stages. |
+| OD-S1-4 | **APPROVED (a) WITH CORRECTION** — bounded `--is_pseudo_llm` production-entry iteration, and it is **PRE-MERGE on PR 01b's final executable head**, required before READY FOR OPERATOR REVIEW. Every "post-merge chain evidence" formulation is superseded. |
+| OD-S1-5 | **PENDING** — design freeze / implementation authorization, after this reconciliation. Operator has indicated PR 01a may be authorized first. |
+| OD-S1-6 | **APPROVED (a)** — flexible-input Outcome B; FX-2/FX-5 prose rungs land in **PR 01a**; FX-3/FX-4 remain binding dependencies on step 02/03. |
+| OD-S1-7 | **APPROVED (a)** — reject inventing a dtype-stripping formatting rule in Step 01; tier-(ii) literals stay and route to step 03. |
+| OD-S1-8 | **AUTHORIZED, ISOLATED** — the JOIN's A-cell exception is granted, but confined to **PR 01b**; PR 01a remains exact-parity. |
+
+### 19.1 Original option analyses (preserved)
+
+| ID | Question | Options | Recommendation |
+|---|---|---|---|
 
 | ID | Question | Options | Recommendation |
 |---|---|---|---|
@@ -1823,10 +1610,10 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 | OD-S1-2 | **Stale budget literals** ("~100M" PROPOSAL_REASONING_PROMPT:284; "10 GB" causal_reasoning_stage.md:146): roadmap §14 already RESOLVED the semantics (derive from [HARDWARE CONTEXT]; delete stale literals) but proposer templates have NO later owner (step 04's prompt scope excludes proposer surfaces) | (a) include optional commit S1-E (isolated, golden-regenerating, clearly labeled); (b) defer and accept an ownership gap | **(a) INCLUDE S1-E** — otherwise the two literals become permanently unowned; the commit is isolated and skippable |
 | OD-S1-3 | **JOIN placement**: which stage system prompts render the task-background block | (a) all three stages (comparison/causal currently task-blind — they choose the architecture family); (b) proposing stage only (minimal byte change) | **(a) all three** — the step's final effect is about the HYPOTHESIS SPACE, which is formed in stages 1-2; (b) would satisfy the letter of the JOIN while leaving the deciding stages task-blind |
 | OD-S1-4 | **Checkpoint-C chain evidence form** (roadmap C cell says "a real chain iteration"; §17 exempts prompt extractions from real Gates) | (a) bounded `--is_pseudo_llm` production-entry iteration with prompt dump, log attached (no API cost); (b) one real-LLM bounded iteration; (c) unit+pseudo-workflow evidence only | **(a)** — exercises the production entry + real renders at zero API cost; (b) adds LLM nondeterminism and cost without adding parity evidence |
+| OD-S1-5 | **Design freeze** after Step-00 merge + re-sync: confirm the §8.1 baseline map against master and authorize implementation | — | freeze only after the §Status preconditions are all TRUE |
 | OD-S1-6 | **Flexible-input scope (new, operator requirement 2026-08-12)**: §6A.1 proves the contract is prose-only end-to-end and §6A.5 freezes Outcome B (preset/tensor validation belongs to step 02/03) | (a) accept Outcome B and land the FX-2/FX-5 PROSE contrast rungs in commit S1-D (they are the only tests that actually prove template rank-agnosticism, and cost one extra profile fixture each); (b) accept Outcome B but land no flexible-input rungs (13.4-A/B only); (c) reject Outcome B and require a structured tensor contract inside Step 01 | **(a)** — Outcome B is source-forced (nothing structured exists to validate; building it seizes step-02/03 ownership), and the two prose rungs are cheap, atomic and are the difference between *claiming* rank-agnosticism and *proving* it. (c) would make Step 01 the Dataset/Model-contract owner, contradicting the frozen 6-P/6-M split |
 | OD-S1-7 | **Tier-(ii) shape formatting rule (adversarial finding F4)**: the commit prompt and proposing template state the output shape in dtype-stripped/backticked forms that `output_shape` cannot produce by verbatim insertion | (a) REJECT for Step 01 — those sites stay literal, recorded as step-03 convergence candidates; (b) APPROVE one explicit, unit-tested formatting rule ("drop the trailing dtype word") and extract them too | **(a) REJECT** — the rule is a decision about the contract's surface forms, which §5 owns; §4.1 already names and routes every retained literal, so nothing goes unexamined |
 | OD-S1-8 | **A-cell exception for the JOIN (adversarial finding F14)**: the roadmap A-cell says all three proposer stages render EXACT-equal for TIDMAD, and the JOIN deliberately changes those bytes | (a) AUTHORIZE the declared, contained exception (§8 header: one commit, declared golden set, §13-governed, diffs attached), on the authority of Step-00 §15.2's JOIN assignment + roadmap §0 rule 8 / §13.2 / §17-C; (b) REFUSE — move the JOIN out of Step 01 (then §1 effect 2, fixture 13.4-A/F1 and Checkpoint C must be re-planned) | **(a) AUTHORIZE** — Step-00 §15.2 is the later, more specific authority and explicitly calls the JOIN "step 01's own A-work"; without it 13.4-A is unsatisfiable and the named dead seam survives the step meant to fix it. It must nonetheless be an explicit operator grant, not a design-side reinterpretation |
-| OD-S1-5 | **Design freeze** after Step-00 merge + re-sync: confirm the §8.1 baseline map against master and authorize implementation | — | freeze only after the §Status preconditions are all TRUE |
 
 ## 19A. Adversarial design review record (2026-08-12)
 
