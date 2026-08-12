@@ -406,7 +406,15 @@ NON-goals: any `tools/` code, any hook change, any registration change.
 - [x] §1 current-state audit written from source + installed binary.
 - [x] Two findings recorded (§1.3 dead subagent guard, §1.7 template
       fresh-checkout defect).
-- [ ] `before_end_memory.md` re-initialized for THIS PR.
+- [x] `before_end_memory.md` re-initialized for THIS PR. (Ledger
+      correction at closeout: this box was left unticked when C0 was
+      committed, while the same section's own evidence line already
+      recorded "Guard PASS at that head with the new handoff; clean
+      tree" — which is only obtainable from a handoff naming this PR.
+      The dry-run dossier reconfirms it independently: step 8 shows
+      SessionStart reporting `PROJECT / PR: SIDERIUS Context Continuity
+      v2` from the live file. Corrected from that existing evidence; no
+      new evidence was produced for it.)
 
 **Acceptance.** The active handoff names this PR and this design doc;
 no PR-01a content remains active; the guard passes on the C0 head.
@@ -967,3 +975,69 @@ safely at 95%" — describes a trigger that does not exist.
 - [x] exact-head CI green (includes pyright) — **SUCCESS** on `941fa70e`, run 31640421436; local HEAD == PR headRefOid == CI headSha verified;
 - [x] no Generic Framework production behaviour changed;
 - [x] PR 01b untouched.
+
+---
+
+## 7. Terminal reconciliation (closeout, 2026-08-12)
+
+**CONTEXT CONTINUITY V2 — READY FOR OPERATOR REVIEW — NOT MERGED.**
+
+### Identity
+
+| Item | Value |
+|---|---|
+| PR | [#200](https://github.com/Galileo-Sandbox/SIDERIUS/pull/200) |
+| Branch | `feat/context-continuity-v2` |
+| Implementation base | `aec6db05` (post-PR-01a master) |
+| Final EXECUTABLE head | `941fa70e` — last commit touching `tools/` or `tests/` |
+| Final PR head | recorded in the closeout commit message; every commit after `941fa70e` is docs-only |
+
+### Phase states — all complete
+
+`C0` kickoff/audit · `C1` tracked foundation + template · `C2` strict
+manual guard · `C3` fail-safe auto + rescue snapshot · `C4` dynamic
+SessionStart · `C5` PR lifecycle · `C6` registration + developer doc ·
+`C7` adversarial validation and closeout.
+
+### Evidence
+
+| Gate | Result |
+|---|---|
+| New unit tests | **103**, `tests/unit/tools/claude_hooks/` (5 files) |
+| Mutation dossier M-C1..M-C9 | **all RED, zero survivors, all restored GREEN** |
+| Real-installation dry-run matrix | **green** (10 steps; handoff sha256-verified byte-identical after restore) |
+| Full unit suite, clean tree | **8510 passed, 3 skipped**, pytest rc **0**, 503 s |
+| `ruff check .` | **green** |
+| `ruff format --check .` | **green** (814 files) |
+| Local pyright | **unavailable** — Node v10.19.0 cannot parse the bundle |
+| CI pyright | **authoritative**; exact-head CI SUCCESS |
+
+### Ownership and scope — mechanically verified
+
+- `.gitignore` **unchanged** (`git diff master -- .gitignore` empty).
+- **Zero** tracked `.claude/` paths (`git ls-files | grep '^\.claude/'` → 0).
+- Local `.claude/settings.local.json` points **only** at
+  `tools/claude_hooks` entry points — 6 of 6 hook commands; none
+  reference `.claude/hooks`.
+- Legacy local hooks **remain on disk, unregistered**, deliberately not
+  deleted.
+- Full tracked diff vs base: **15 files, all additions, no deletions or
+  renames**, every path inside `tools/claude_hooks/`,
+  `tests/unit/tools/claude_hooks/` or the two design/developer
+  documents. **No unrelated production surface.**
+- **No Generic Framework production behaviour change.** **PR 01b
+  untouched.**
+
+### Why the full suite was not re-run after this reconciliation
+
+Every commit after the final executable head `941fa70e` changes only
+files under `docs/`. Proven mechanically, not asserted:
+
+```bash
+git diff 941fa70e HEAD --name-only -- tools/ tests/   # -> empty
+```
+
+An empty executable diff cannot change test outcomes, so the 8510-test
+result recorded at `941fa70e` stands for the final head. Exact-head CI
+is still re-run on the final head regardless — the local suite is
+reasoned about, the CI result is not.
