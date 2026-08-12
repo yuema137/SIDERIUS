@@ -14,15 +14,19 @@ Children (one PR = one doc):
 - [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
   — exact-parity extraction; **MERGED** (PR #199 → `39f89f52`).
 - [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md)
-  — the intentional JOIN; **DESIGN READY FOR OPERATOR REVIEW**
-  (2026-08-13), implementation NOT authorized. Its blocking dependency
-  (PR 01a merge) is satisfied. It raises ONE new blocking operator
-  decision, **OD-S1-9** (child §3.3): the frozen §8.3 wording
-  "consuming the audited dead key … WIRE, not REMOVE" and the frozen
-  empty-description collapse requirement are not jointly satisfiable;
-  the child recommends replacing the bare `task_description`
-  template_vars key with a rendered `TASK_BACKGROUND` block, mirroring
-  the legacy surface, which requires amending §8.3's wording.
+  — the intentional JOIN; **DESIGN FROZEN / OPERATOR APPROVED FOR
+  IMPLEMENTATION (2026-08-13)**. Implementation has NOT started and
+  must begin in a fresh context (child §Status). Decisions at freeze:
+  **OD-S1-9 = option (b)** — the invariant is semantic (the transported
+  description authority must become a LIVE CONSUMED prompt channel),
+  not the survival of a dictionary key; §8.3 is amended accordingly
+  below. **Gate 1 and Gate 2 are both required**; Gate 2 is frozen at a
+  bounded trial-only shape (one chain, no forced formal round, partial
+  scope with matching health-gate files, cold start, 0.02 trial
+  portion, 2 iterations / 2 rounds, at most one standard-permitted
+  retry). The child also freezes a blocking checkpoint ladder and an
+  Evidence Economy policy (the full unit suite is a TERMINAL gate run
+  once at the final executable head).
 
 **PR 01a outcome (mechanical, 2026-08-12).** Branch
 `feat/generic-framework-step-01a-contract-derived-prompt-extraction`
@@ -1106,10 +1110,27 @@ reading the shipped description) is step 01's own A-work."
 
 Design: a labeled task-background block containing the (already
 transported) `inp.task_description` renders into the pipeline stage
-SYSTEM prompts via the existing `template_vars` mechanism — consuming
-the audited dead key at :1597 (WIRE, not REMOVE — §0.8; removal is
-foreclosed because roadmap fixture 13.4-A requires description-derived
-blocks in the proposer render). Placement recommendation (OD-S1-3):
+SYSTEM prompts via the existing `template_vars` mechanism.
+
+**Wording amended by OD-S1-9 (operator, 2026-08-13).** This paragraph
+previously read "consuming the audited dead key at :1597 (WIRE, not
+REMOVE)". That phrasing froze a DICTIONARY KEY NAME, which is not the
+invariant. The requirement is semantic:
+
+> the existing transported task-description authority must become a
+> LIVE CONSUMED prompt channel — not: a particular `template_vars` key
+> must survive forever.
+
+What must hold: the description reaches all three stage system prompts;
+the empty description collapses the block; there is ONE label
+authority; and NO duplicate dead key is left behind. Replacing the bare
+`task_description` key with a rendered task-background block satisfies
+every one of those and is the approved shape (child §3.3). Removal of
+the bare key is therefore NOT foreclosed — what is foreclosed is
+removing the description TRANSPORT, which roadmap fixture 13.4-A needs.
+Reuse the existing in-tree task-background rendering pattern where the
+source audit supports it; the exact helper decomposition is an
+implementation-time decision made after re-reading the callers. Placement recommendation (OD-S1-3):
 all three stage base templates (comparison + causal today receive ZERO
 task framing — the hypothesis-space-defining stages; proposing gains
 the description beside its existing contract block). Forward-contract
