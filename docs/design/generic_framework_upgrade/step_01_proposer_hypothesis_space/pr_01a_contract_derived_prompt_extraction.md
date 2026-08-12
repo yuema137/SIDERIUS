@@ -149,28 +149,58 @@ production diff; no renderer yet; no template edit; PB-4/PB-0/CFG/WF-3
 goldens untouched.
 
 **Implementation plan.**
-- [ ] Inspect the fixture and each `pb3_*` golden to determine exactly
-      which tokens the templates carry today.
-- [ ] Populate `num_classes`, `task_type` and align the descriptions
-      with those tokens (test-owned values, NOT the shipped ones — the
-      no-production-source-in-goldens rule stands).
-- [ ] Regenerate the affected goldens; attach diffs; provenance
-      message per §13 R1.
+- [x] Inspected the fixture (`test_step00_prompt_goldens.py:153-170`)
+      and all nine `pb3_*` goldens. FINDING: only
+      `pb3_proposing_{explore,exploit}_system.txt` carry the contract
+      block at all (via `{forward_contract}` at
+      `proposing_stage.md:131`); the comparison/causal systems and all
+      three user prompts carry ZERO contract tokens — confirming §8.1a
+      and bounding this commit's blast radius to two goldens.
+- [x] Populated `num_classes=192` + `task_type="classification"` and
+      aligned the shapes/descriptions (`[B, 192, T] float32`,
+      "logits over 192 classes"). **Deliberately 192, not the shipped
+      256** — a test-owned value makes an accidentally-hardcoded
+      production literal visible in later commits instead of silently
+      agreeing with the fixture. Rationale comment landed in-file.
+- [x] Regenerated the two affected goldens through the same real
+      `run()` capture the Step-00 harness uses. Diff is EXACTLY the
+      declared values (6 lines total across both files):
+      `output: [B, 256, T]…256 classes` → `[B, 192, T]…192 classes`,
+      plus the newly-emitted
+      `Task type: classification (per-timestep 192-class).`
 
-**Validation plan.** Packs 1-2; confirm the ONLY changed goldens are
-the declared ones (`git status` review).
+**Validation plan.** [x] Packs 1-2: **860 passed, 21.6 s**
+(`tests/unit/agent/ml_model_proposal_agent/ tests/unit/workflows/
+tests/unit/agent/llm_bridge/ tests/helpers/test_recording_fakes.py`).
+[x] `git status` confirms the ONLY changed goldens are the two
+declared ones. [x] ruff check + format clean on the touched test.
 
 **Acceptance criteria (observable).** The fixture contract has no
 defaulted semantic field; the regenerated goldens differ from their
 predecessors ONLY where the fixture's declared values appear; PB-4,
 PB-0, CFG-1/2/3a/3b and WF-3 goldens are byte-unchanged.
 
-**Failure/edge cases.** If a golden turns out NOT to change, the
-fixture upgrade was inert for that surface — record it (that is
-evidence the surface derives nothing from the contract yet), do not
-force a diff.
+**Failure/edge cases.** [x] EXERCISED: seven of the nine goldens did
+NOT change. That is the designed outcome, recorded as evidence rather
+than forced — those surfaces derive nothing from the contract today,
+which is precisely the gap S1-B closes for the proposing stage and
+which the roadmap leaves for the comparison/causal stages (they
+receive the contract only via the JOIN in PR 01b, if at all).
 
-**Verification commands and evidence.** (recorded after execution)
+**Empirical confirmation of §4 row F21 (2nd-review R2-2).** The
+regenerated goldens now literally contain
+`Task type: classification (per-timestep 192-class).` — produced by
+`render_forward_contract:206-212`, not by any template. This is the
+production renderer asserting a TEMPORAL axis for a contract that
+never declared one, visible in a test-owned fixture that is not
+TIDMAD. It is kept byte-identical here (grandfathered, §6A.4) and
+routed to step 02/03; §9.5 whitelists it so the FX-2/FX-5 rungs do
+not fail on it.
+
+**Verification commands and evidence.**
+- `pytest tests/unit/agent/ml_model_proposal_agent/ tests/unit/workflows/ tests/unit/agent/llm_bridge/ tests/helpers/test_recording_fakes.py -q` → **860 passed, 21.6 s**.
+- `git status --short tests/` → exactly 2 golden files + the fixture file.
+- `ruff check` / `ruff format --check` on the touched test → clean.
 
 **Commit boundary.** Test-only, no production file touched.
 

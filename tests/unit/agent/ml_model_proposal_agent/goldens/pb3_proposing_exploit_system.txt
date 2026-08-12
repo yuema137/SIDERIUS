@@ -172,7 +172,9 @@ of your retry attempts. Pick valid values now.
 
 The model must satisfy this forward contract (non-negotiable):
     input:  [B, T] int64   — per-timestep ADC class indices
-    output: [B, 256, T] float32  — per-timestep logits over 256 classes
+    output: [B, 192, T] float32  — per-timestep logits over 192 classes
+
+Task type: classification (per-timestep 192-class).
 
    This is non-negotiable.
 

@@ -156,11 +156,22 @@ def fixture_proposal_input(tmp_path, *, mode: str) -> ProposalInput:
         existing_model_types=["step00_alpha_net", "step00_beta_net"],
         cold_start=False,
         task_description="Step-00 fixture task: denoise a synthetic 1-D int8 series.",
+        # S1-A0 (PR 01a): a COMPLETE, self-consistent TEST-OWNED contract.
+        # Before this commit num_classes/task_type were left at their
+        # defaults, so `render_forward_contract` emitted no task-type
+        # descriptor and the fixture could not exercise the class-count
+        # token at all — which made the later extraction commits'
+        # byte-parity claims vacuous for those fields (design §8.1a).
+        # The class count is deliberately 192, NOT the shipped 256: a
+        # test-owned value makes an accidentally-hardcoded production
+        # literal visible instead of silently agreeing with the fixture.
         forward_contract=ForwardContract(
             input_shape="[B, T] int64",
             input_description="per-timestep ADC class indices",
-            output_shape="[B, 256, T] float32",
-            output_description="per-timestep logits over 256 classes",
+            output_shape="[B, 192, T] float32",
+            output_description="per-timestep logits over 192 classes",
+            num_classes=192,
+            task_type="classification",
         ),
         constraints=["VRAM < 10 GB", "params < 50M"],
         hardware_context=HardwareContext(
