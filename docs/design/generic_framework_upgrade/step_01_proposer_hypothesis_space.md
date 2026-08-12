@@ -14,9 +14,15 @@ Children (one PR = one doc):
 - [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
   — exact-parity extraction; **MERGED** (PR #199 → `39f89f52`).
 - [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md)
-  — the intentional JOIN; **UNBLOCKED / NOT STARTED**. Its blocking
-  dependency (PR 01a merge) is now satisfied; starting it is a separate
-  operator decision, not implied by this merge.
+  — the intentional JOIN; **DESIGN READY FOR OPERATOR REVIEW**
+  (2026-08-13), implementation NOT authorized. Its blocking dependency
+  (PR 01a merge) is satisfied. It raises ONE new blocking operator
+  decision, **OD-S1-9** (child §3.3): the frozen §8.3 wording
+  "consuming the audited dead key … WIRE, not REMOVE" and the frozen
+  empty-description collapse requirement are not jointly satisfiable;
+  the child recommends replacing the bare `task_description`
+  template_vars key with a rendered `TASK_BACKGROUND` block, mirroring
+  the legacy surface, which requires amending §8.3's wording.
 
 **PR 01a outcome (mechanical, 2026-08-12).** Branch
 `feat/generic-framework-step-01a-contract-derived-prompt-extraction`
