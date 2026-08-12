@@ -2,9 +2,14 @@
 
 ## Status
 
-**IN IMPLEMENTATION.** Operator-authorized 2026-08-12 as a standalone
-maintenance PR. This document is the **PRIMARY DESIGN DOC** — the
-semantic implementation authority for this PR and its live ledger.
+**READY FOR OPERATOR REVIEW — NOT MERGED (2026-08-12).**
+PR [#200](https://github.com/Galileo-Sandbox/SIDERIUS/pull/200).
+All eight phases C0-C7 complete; mutation and dry-run dossiers
+recorded below; full suite, static gates and exact-head CI green.
+Merge is operator-owned.
+
+This document is the **PRIMARY DESIGN DOC** — the semantic
+implementation authority for this PR and its live ledger.
 
 This is **NOT** a Generic Framework roadmap step. It changes no
 scientific, model, dataset, scorer, tuner, prompt, schema or runtime
@@ -17,6 +22,9 @@ behavior.
 | Predecessor | PR #199 MERGED as `39f89f52` (verified: `fe4ec2e5` and `d84f6711` are ancestors of master) |
 | PR 01b | UNBLOCKED / NOT STARTED — **not touched by this PR** |
 | Normal stop | READY FOR OPERATOR REVIEW — **do not merge** |
+| Final executable head | `941fa70e` — exact-head CI **SUCCESS** (run 31640421436) |
+| Full suite | **8510 passed, 3 skipped**, 503 s, pytest exit 0, clean tree |
+| Mutations | **9 / 9 caught, 0 survivors** |
 
 ### The central lifecycle principle (FROZEN)
 
@@ -956,6 +964,6 @@ safely at 95%" — describes a trigger that does not exist.
 - [x] dry-run matrix green;
 - [x] full unit suite green from a clean tree — **8510 passed, 3 skipped**, 503 s, pytest exit 0 at `3156caa0`;
 - [x] ruff + format green repository-wide — `ruff check .` clean, `ruff format --check .` 814 files;
-- [ ] exact-head CI green (includes pyright);
+- [x] exact-head CI green (includes pyright) — **SUCCESS** on `941fa70e`, run 31640421436; local HEAD == PR headRefOid == CI headSha verified;
 - [x] no Generic Framework production behaviour changed;
 - [x] PR 01b untouched.
