@@ -376,7 +376,7 @@ is unknown.
 - [x] **C2** strict MANUAL PreCompact path.
 - [x] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
 - [x] **C4** dynamic SessionStart / resume injection.
-- [ ] **C5** PR-scoped lifecycle (init / continuation / closeout).
+- [x] **C5** PR-scoped lifecycle (init / continuation / closeout).
 - [ ] **C6** local registration migration + developer documentation.
 - [ ] **C7** adversarial validation, dry-run dossier, closeout.
 
@@ -680,3 +680,77 @@ from every `.py`/`.md` file under `tools/claude_hooks/`).
 
 **Commit boundary.** SessionStart + its helper + tests. Registration
 still points at the legacy hooks.
+
+**Evidence.** `fa943bcd`. 90 passed, 2.66 s; ruff + format clean.
+
+### C5 — PR-scoped lifecycle support
+
+**Goal.** Make "a new PR does not inherit the previous PR's context" a
+mechanical fact rather than a discipline, without building a PR-management
+system.
+
+**Scope.** `context_state.initialize_handoff()`, the branch-mismatch check
+in `validate()`, `tools/claude_hooks/init_pr_handoff.py`,
+`tests/unit/tools/claude_hooks/test_pr_lifecycle.py`.
+
+**Implementation.**
+- [x] `initialize_handoff()` renders the canonical template with ONLY the
+      PR identity filled in. Objective, checkpoints and next actions stay
+      at their placeholders on purpose — pre-filling them would be the
+      tooling fabricating semantic content, and inheriting them is the
+      exact failure being prevented.
+- [x] **Branch-mismatch check** — `validate()` reports when
+      `IMPLEMENTATION BRANCH` names a branch other than the checkout's.
+      This is the one carry-over failure nothing else could see: HEAD and
+      fingerprint can both be perfectly current while the handoff
+      describes a different PR entirely. Detached HEAD is exempt (normal
+      during bisect/review, not evidence of carry-over).
+- [x] `init_pr_handoff.py` — refuses to clobber an ACTIVE handoff, tells a
+      CLOSED one that `--force` is appropriate, and refuses a
+      `--design` path that does not exist (a handoff pointing at a
+      non-existent authority is worse than none).
+- [x] A CLOSED context still VALIDATES. The operator may need to compact
+      while waiting for a merge; blocking then would be the same deadlock
+      in a different costume.
+
+**Validation.** **103 passed, 3.18 s**; ruff + format clean. Matrix **N**
+(a second PR's handoff carries no trace of the first — name, design path,
+branch or base), plus the branch-mismatch pin, the detached-HEAD
+exemption, the four `init_pr_handoff` refusal/defaulting behaviours, and
+CLOSED-context terminality.
+
+**FINDING — the new check exposed a dishonest fixture.**
+
+```text
+Previous assumption:
+  the shared handoff fixture was a faithful stand-in for a real handoff.
+
+Audit / implementation evidence:
+  adding the branch check turned 11 previously-green tests red at once.
+  The fixture filled IMPLEMENTATION BRANCH with the generic "filled-in"
+  placeholder while the fixture repo was on a real branch — so every
+  fixture handoff was, by its own declaration, describing a different
+  PR.
+
+Corrected understanding:
+  a handoff belongs to the branch it was written on; a fixture that does
+  not record that is not modelling a handoff.
+
+Implementation consequence:
+  none in production — the check is correct and unchanged. The fixture
+  now pins the branch to the checkout's.
+
+Validation consequence:
+  the 11 failures were the new check working on its first run, not a
+  regression. Recorded because "many tests went red" is exactly the
+  moment a weaker response would have been to relax the check.
+```
+
+**Failure/edge cases exercised.** Detached HEAD; CLOSED context;
+non-existent design path; clobber refusal against both ACTIVE and CLOSED
+handoffs. One test defect found and fixed (a test that did not create
+`DESIGN.md` before invoking the init command — the command was right to
+refuse).
+
+**Commit boundary.** Lifecycle helpers + the branch check + tests.
+Registration still legacy.

@@ -563,6 +563,40 @@ def rescue_path(root: Path) -> Path:
     return root / RESCUE_RELDIR / RESCUE_BASENAME
 
 
+def initialize_handoff(
+    *,
+    project: str,
+    primary_design: str,
+    base: str,
+    branch: str,
+    binding_docs: str = "",
+) -> str:
+    """A fresh handoff for a NEW pull request, from the canonical template.
+
+    This exists so that starting a PR is a mechanical act rather than an
+    editing exercise. The failure it prevents is specific: an agent that
+    "continues" the previous PR's handoff inherits its checkpoints, its
+    next actions and its stop conditions, and the new PR silently adopts
+    the old one's identity. Everything except the identity is left at its
+    template placeholder — deliberately, because the agent must fill in
+    its own objective rather than inherit someone else's.
+    """
+    text = template_path().read_text(encoding="utf-8")
+    for field, value in (
+        (FIELD_PROJECT, project),
+        (FIELD_PRIMARY_DESIGN, primary_design),
+        (FIELD_BASE, base),
+        (FIELD_BRANCH, branch),
+        (FIELD_CONTEXT_STATE, STATE_ACTIVE),
+    ):
+        text = _field_re(field).sub(f"{field}: {value}", text, count=1)
+    if binding_docs:
+        text = _field_re(FIELD_BINDING_DOCS).sub(
+            f"{FIELD_BINDING_DOCS}: {binding_docs}", text, count=1
+        )
+    return text
+
+
 def load_memory(root: Path) -> str:
     path = memory_path(root)
     if not path.is_file():
@@ -652,6 +686,21 @@ def validate(root: Path, text: str) -> list[str]:
             f"'{FIELD_FINGERPRINT}' is {recorded_fp[:12]}… but the tree is "
             f"{actual_fp[:12]}… — uncommitted work changed since the handoff was written"
         )
+
+    recorded_branch = read_field(handoff, FIELD_BRANCH)
+    if recorded_branch and not is_placeholder(recorded_branch):
+        actual_branch = branch_name(root)
+        if recorded_branch.strip() != actual_branch and actual_branch != "(detached)":
+            # THE lifecycle guard. Continuity is intra-PR: a handoff that
+            # names a different branch is the previous PR's context still
+            # sitting in the active slot, which is how a new PR inherits
+            # an old one's checkpoints and stop conditions.
+            problems.append(
+                f"'{FIELD_BRANCH}' is {recorded_branch.strip()!r} but the checkout is on "
+                f"{actual_branch!r} — this handoff belongs to a different PR. Continuity is "
+                f"intra-PR: initialise a fresh handoff for this PR instead of editing that "
+                f"one (tools/claude_hooks/init_pr_handoff.py)"
+            )
 
     design = read_field(handoff, FIELD_PRIMARY_DESIGN)
     if design and not is_placeholder(design):

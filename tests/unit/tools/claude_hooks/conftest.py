@@ -76,6 +76,10 @@ def handoff_factory(repo: Path):
         text = fill(cs.template_path().read_text(encoding="utf-8"))
         text = set_field(text, cs.FIELD_HEAD, cs.head_sha(repo))
         text = set_field(text, cs.FIELD_FINGERPRINT, cs.working_tree_fingerprint(repo))
+        # A handoff belongs to the branch it was written on. Leaving this
+        # at the generic filler made every fixture claim to belong to a
+        # different PR, which the branch-mismatch guard correctly rejects.
+        text = set_field(text, cs.FIELD_BRANCH, cs.branch_name(repo))
         # Overrides land LAST so a test asking for a stale value actually
         # gets one — applying them before the freshness pin silently
         # overwrote them, and every staleness test passed for the wrong
