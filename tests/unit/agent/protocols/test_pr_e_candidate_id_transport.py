@@ -41,6 +41,7 @@ from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fi
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
@@ -78,6 +79,16 @@ def _run_proposer(tmp_path, commit_response=None, run_name="e2"):
         return agent.run(
             ProposalInput(
                 interpretation=FAKE_INTERPRETATION,
+                # PR 01a: the legacy commit render is fail-closed on an empty
+                # contract (design rule 6.2-6); production always declares one.
+                forward_contract=ForwardContract(
+                    input_shape="[B, T] int64",
+                    input_description="per-timestep ADC class indices",
+                    output_shape="[B, 256, T] float32",
+                    output_description="per-timestep logits over 256 denoising classes",
+                    num_classes=256,
+                    task_type="classification",
+                ),
                 existing_model_types=[],
                 constraints=[],
                 storage={

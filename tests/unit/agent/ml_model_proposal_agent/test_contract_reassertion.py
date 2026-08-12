@@ -16,7 +16,33 @@ import re
 
 import pytest
 
+from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import PROPOSAL_COMMIT_PROMPT
+from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
+    _render_commit_system_prompt,
+)
+from workflows.task_config import load_task_config
+
+
+def _shipped_contract() -> ForwardContract:
+    """The SHIPPED TIDMAD declaration — the profile these pins describe."""
+    return ForwardContract(**load_task_config()["forward_contract"])
+
+
+def _rendered_commit_prompt() -> str:
+    """PR 01a re-target (design §11.1 row 1).
+
+    These pins used to read the module CONSTANT. After the extraction the
+    constant carries placeholders, so asserting on it would pin nothing —
+    the property (the agent is never left without its I/O contract) lives
+    in what the LLM actually receives. They therefore assert on the
+    RENDER under the shipped TIDMAD profile. The template-layer property
+    (the placeholders still exist) is pinned separately in
+    ``test_step01a_contract_renderers.py``; the contrast-profile variant
+    of these same pins lands with the S1-D rungs.
+    """
+    return _render_commit_system_prompt(_shipped_contract())
+
 
 # ---------------------------------------------------------------------------
 # Extract the mathematical_definition field spec
@@ -31,7 +57,7 @@ def _extract_mathematical_definition_spec() -> str:
     """
     m = re.search(
         r'"mathematical_definition":\s*"(.+?)"\s*,\s*\n',
-        PROPOSAL_COMMIT_PROMPT,
+        _rendered_commit_prompt(),
         re.DOTALL,
     )
     assert m is not None, (
@@ -141,15 +167,20 @@ class TestFieldSpecPresence:
         A refactor that drops either contract, or that silently reverts to
         classification-only, still flips this red.
         """
-        # input side, unchanged
-        assert "[B, T] int64" in PROPOSAL_COMMIT_PROMPT
+        # PR 01a: asserted on the RENDER (what the LLM receives), not the
+        # template — the shape/loss tokens are now derived, so the constant
+        # carries placeholders and pinning it would pin nothing.
+        rendered = _rendered_commit_prompt()
+
+        # input side, unchanged (now DERIVED from ForwardContract.input_shape)
+        assert "[B, T] int64" in rendered
 
         # both output contracts, each with its legal losses
-        assert "[B, 256, T] float32" in PROPOSAL_COMMIT_PROMPT
-        assert "[B, T] float32" in PROPOSAL_COMMIT_PROMPT
-        assert '`"classifier"`' in PROPOSAL_COMMIT_PROMPT
-        assert '`"regressor"`' in PROPOSAL_COMMIT_PROMPT
-        assert "smooth_l1" in PROPOSAL_COMMIT_PROMPT
+        assert "[B, 256, T] float32" in rendered
+        assert "[B, T] float32" in rendered
+        assert '`"classifier"`' in rendered
+        assert '`"regressor"`' in rendered
+        assert "smooth_l1" in rendered
         assert "focal_cw" in PROPOSAL_COMMIT_PROMPT
 
     def test_commit_prompt_does_not_present_one_contract_as_fixed(self):

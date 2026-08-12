@@ -53,7 +53,16 @@ from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     PROPOSAL_COMMIT_PROMPT,
     _build_commit_prompt,
+    _render_commit_system_prompt,
 )
+from workflows.task_config import load_task_config
+
+
+def _shipped_forward_contract() -> ForwardContract:
+    """The SHIPPED declaration — the profile PB-4's golden was captured under."""
+    return ForwardContract(**load_task_config()["forward_contract"])
+
+
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 
@@ -389,13 +398,96 @@ _FIXTURE_REASONING = (
 )
 
 
+class _LegacyCommitRecorder(BoundaryRecorderBridge):
+    """Captures the legacy path's two boundary calls.
+
+    ``generate_text`` (the reasoning stage) returns canned text so the
+    run reaches the commit call; ``_chat_json`` returns a schema-valid
+    proposal so ``run()`` completes normally.
+    """
+
+    def generate_text(self, *a, **k):
+        super().generate_text(*a, **k)
+        return _FIXTURE_REASONING
+
+    def _chat_json(self, *a, **k):
+        super()._chat_json(*a, **k)
+        return {
+            "model_name": "step00_delta_net",
+            "output_type": "classifier",
+            "model_description": "Fixture.",
+            "mathematical_definition": "Fixture.",
+            "motivation": "Fixture.",
+            "expert_advice": {
+                "focus_areas": ["low-freq"],
+                "constraints": ["VRAM < 10 GB"],
+                "known_failures": [],
+                "suggested_directions": ["start small"],
+                "rationale": "Fixture.",
+            },
+            "baseline_config": {
+                "model_config": {},
+                "train_config": {"lr": 1e-4, "epochs": 1},
+                "loss_config": {"loss_type": "focal"},
+            },
+            "parameter_count_estimate": 1_000_000,
+        }
+
+
+def _run_legacy_capture(tmp_path, pinned_env, **input_overrides):
+    """Drive the LEGACY path end-to-end and return the recorder."""
+    inp = fixture_proposal_input(tmp_path, mode="explore")
+    # empty stage list => legacy dispatch (ml_model_proposal_agent.py:1432-1434)
+    inp = inp.model_copy(
+        update={"reasoning_pipeline": ReasoningPipelineConfig(stages=[]), **input_overrides}
+    )
+    agent = MLModelProposalAgent(
+        provider="openai",
+        model_id="step01a-capture",
+        bridge_factory=_LegacyCommitRecorder,
+        capability_index_path=pinned_env,
+    )
+    agent.run(inp)
+    return agent.bridge
+
+
 class TestPB4LegacyCommit:
-    def test_commit_system_constant(self):
-        assert_golden(
-            PROPOSAL_COMMIT_PROMPT,
-            GOLDENS / "pb4_legacy_commit_system.txt",
-            surface="PB-4 legacy commit system prompt",
+    def test_commit_system_rendered_at_the_llm_boundary(self, tmp_path, pinned_env):
+        """PB-4 re-target (PR 01a; 2nd-review R2-4).
+
+        The assert target moved from the raw module constant to the
+        RENDERED system prompt captured at the real LLM boundary through
+        the legacy ``run()`` path. Capturing at the boundary — rather
+        than calling the renderer directly — is what makes deleting the
+        render call at the production call site observable (mutation
+        M-1b). The golden FILE is byte-identical: that IS the extraction
+        parity claim.
+        """
+        # PB-4's golden pins the SHIPPED TIDMAD render, so the capture must
+        # run under the shipped declaration — not the test-owned PB-3 fixture
+        # profile (which declares 192 classes). Discovered by this very
+        # boundary capture on its first run: a direct-helper assert would
+        # have hidden the profile mismatch.
+        bridge = _run_legacy_capture(
+            tmp_path, pinned_env, forward_contract=_shipped_forward_contract()
         )
+        commit = [c for c in bridge.captures if c[1] == "proposer.legacy_commit"]
+        assert len(commit) == 1, "the legacy commit call must reach the boundary exactly once"
+        _method, _label, system, _user = commit[0]
+        assert_golden(
+            system,
+            GOLDENS / "pb4_legacy_commit_system.txt",
+            surface="PB-4 legacy commit system prompt (rendered, at the boundary)",
+        )
+
+    def test_raw_template_is_no_longer_the_golden(self):
+        """Differential (design §8.2): the template now carries live
+        placeholders, so the CONSTANT must NOT equal the golden while the
+        RENDER does. If both matched, the placeholders would be dead."""
+        golden = (GOLDENS / "pb4_legacy_commit_system.txt").read_text(encoding="utf-8")
+        assert PROPOSAL_COMMIT_PROMPT != golden
+        assert "{INPUT_SHAPE}" in PROPOSAL_COMMIT_PROMPT
+        assert _render_commit_system_prompt(_shipped_forward_contract()) == golden
 
     def test_commit_user_render(self):
         user = _build_commit_prompt(_FIXTURE_REASONING, ["step00_alpha_net", "step00_beta_net"])

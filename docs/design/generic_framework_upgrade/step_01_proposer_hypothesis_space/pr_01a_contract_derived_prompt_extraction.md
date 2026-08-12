@@ -220,22 +220,45 @@ new renderer unit tests. NON-goals: pipeline templates (S1-B), any
 rendered-byte change, schemas, protocols, other nodes.
 
 **Implementation plan.**
-- [ ] Inspect the commit prompt + call site + `render_forward_contract`
-      + frozensets; fix the exact placeholder set (inspect-first).
-- [ ] Loss-legality renderer (frozensets → legality prose tokens) +
-      contract-prose renderer (ForwardContract → shape/class tokens),
-      typed, docstringed, module-local.
-- [ ] Template conversion + render at :1385 (first consumer, same
-      commit).
-- [ ] PB-4 re-target (golden bytes untouched) + render-vs-constant
-      differential (§8.2).
-- [ ] `test_contract_reassertion.py` re-target to the render, TIDMAD
-      variant (§11.1 row 1; contrast variant lands in S1-D).
-- [ ] Renderer unit tests incl. empty-input behavior pins.
+- [x] Inspected all sites. Placeholder set fixed to TIER (i) ONLY, from
+      the shipped declaration's actual byte values: `{INPUT_SHAPE}` ×3,
+      `{OUTPUT_SHAPE}` ×2, `{OUTPUT_DESCRIPTION}` ×1,
+      `{CLASSIFIER_LOSSES}` ×1, `{REGRESSOR_LOSSES}` ×1. Verified
+      byte-identity of each against `configs/task_config.yaml:19-35`
+      BEFORE substituting: `input_shape="[B, T] int64"`,
+      `output_shape="[B, 256, T] float32"`,
+      `output_description="per-timestep logits over 256 denoising
+      classes"`. NOTE: the prompt's `(per-timestep ADC class indices)`
+      parenthetical is NOT the shipped `input_description`
+      ("raw signal, integer class indices 0-255"), so it stays literal
+      — a source discovery that keeps one more token out of tier (i).
+- [x] `_render_loss_legality(frozenset) -> str` (sorted, backticked)
+      and `_render_commit_system_prompt(fc) -> str`, both typed,
+      docstringed, module-local; plus `ProposalContractRenderError`.
+      Import of the authority is module-level per §3.2.
+- [x] Template conversion + render wired at the real call site
+      (first consumer, same commit).
+- [x] PB-4 re-targeted to a BOUNDARY capture through the legacy
+      `run()` path (`_LegacyCommitRecorder` + `_run_legacy_capture`),
+      golden bytes untouched; render-vs-constant differential added.
+- [x] `test_contract_reassertion.py` re-targeted to the render under
+      the shipped profile (helper `_rendered_commit_prompt()`).
+- [x] Renderer unit suite added:
+      `tests/unit/agent/ml_model_proposal_agent/
+      test_step01a_contract_renderers.py` (14 tests).
 
-**Validation plan.** Pack 1 + pack 2 (§12); ruff/format on touched
-files; mutations M-2 partial (commit-prompt token) executed and
-recorded.
+**SOURCE DISCOVERY — the boundary capture immediately earned its keep.**
+The first run of the re-targeted PB-4 test FAILED because the capture
+ran under the PB-3 *fixture* profile (192 classes) while the golden
+pins the *shipped* render (256). A direct-helper assert would have
+silently passed the wrong profile. Fixed by driving the capture with
+`forward_contract=_shipped_forward_contract()`; recorded in-test.
+
+**Validation plan.** [x] Proposer package **536 passed, 2.0 s**;
+affected suites (`tests/unit/agent/ tests/unit/workflows/
+tests/unit/ml_models/`) **4030 passed** at the point of measurement,
+with the five remaining fail-closed fixtures then fixed (below).
+[x] ruff check + format clean on every touched file.
 
 **Acceptance criteria (observable).** `pb4_legacy_commit_system.txt`
 passes UNMODIFIED against the render; `git diff` shows zero template
@@ -244,13 +267,36 @@ differential test proves constant ≠ golden while render == golden;
 contract-reassertion re-target red under mutation M-2, green
 otherwise.
 
-**Failure/edge cases.** Empty ForwardContract (legacy CLI main(),
-test fixtures) → render degrades exactly as `_render_task_background`
-does today (regime-A, pinned); regex-extraction in the re-targeted
-reassertion test must tolerate the placeholder line shape.
+**Failure/edge cases.** [x] EXERCISED. The design's rule 6.2-6
+(fail-closed) fired in 20 pre-existing tests whose fixtures never
+declared a contract — 15 in the proposer package, 5 in
+`tests/unit/agent/protocols/test_pr_e_candidate_id_transport.py`.
+Diagnosis (not a production defect, not a reason to weaken the rule):
+production ALWAYS supplies a contract (the workflow via
+`load_task_config()`, and now the CLI per §3.1), so the fixtures were
+relying on a laxness that the extraction legitimately removes. Each
+fixture now declares a hermetic test-owned contract (explicit, not
+config-loaded, to keep the unit tier cwd-independent). Files touched:
+`test_proposal_agent.py`, `test_preflight_advisory.py`,
+`test_pipeline_runner.py`, `test_pr_e_candidate_id_transport.py`.
 
-**Verification commands and evidence.** (recorded after execution;
-never claim an unrun test passed)
+**MUTATION BATTERY (executed; each restored and re-verified green).**
+
+| Mutation | Result |
+|---|---|
+| **M-1b** delete the render call at the production call site | **RED** on the PB-4 boundary assert — *this is the acceptance proof that the capture is at the boundary*; a direct-helper test would have stayed green |
+| **M-2** perturb a rendered token (`output_shape + " "`) | **RED** (2 tests) |
+| **M-4** re-inline a hardcoded `[B, T] int64` at ONE of three `{INPUT_SHAPE}` sites | **SURVIVED at first** → classified as a TEST-ARCHITECTURE gap, not an equivalent mutation: `"<declared>" in rendered` is satisfied by the other two sites, so an `in` assertion cannot see a partial shadow. **Suite strengthened** with `test_no_shadow_literal_survives_a_non_tidmad_profile` (absence of `[B, T] int64` / `[B, 256, T] float32` under a rank-4 profile, scoped to exclude the §9.5 whitelisted survivors). M-4 re-run → **RED** |
+| **M-5** change the loss AUTHORITY (`CLASSIFICATION_LOSSES + zz_probe`) | **RED** — proves the prompt derives from the authority, not a copy |
+| **M-8** iterate the frozenset instead of `sorted()` | **RED** (2 tests) — the flaky-order defect rule 6.2-5 exists to prevent |
+| **M-9** remove the fail-closed guard | **RED** (4 tests) |
+
+**Verification commands and evidence.**
+- `pytest tests/unit/agent/ml_model_proposal_agent/ -q` → **536 passed, 2.0 s**.
+- `pytest tests/unit/agent/ tests/unit/workflows/ tests/unit/ml_models/ -q` → 4030 passed / 5 fail-closed fixtures (since fixed).
+- `pytest tests/unit/agent/protocols/ -q` → **106 passed**.
+- Byte-parity probe: `_render_commit_system_prompt(shipped) == pb4 golden` → **True**; `PROPOSAL_COMMIT_PROMPT != golden` → **True**.
+- ruff check + ruff format → clean on all touched files.
 
 **Commit boundary.** Test-and-production change for the LEGACY commit
 surface only; no pipeline template touched; goldens byte-identical.

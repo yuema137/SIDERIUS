@@ -30,7 +30,24 @@ from agent.schemas.score_table import (
     ScoreComparisonTable,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
+
+
+# PR 01a: the commit-prompt render is FAIL-CLOSED on an empty contract
+# (design rule 6.2-6). Production ALWAYS supplies one — the workflow via
+# load_task_config(), and now the standalone CLI too — so legacy-path unit
+# fixtures must declare it as well. Declared explicitly (not loaded from
+# configs/) to keep these unit tests hermetic and cwd-independent.
+def _legacy_test_contract() -> ForwardContract:
+    return ForwardContract(
+        input_shape="[B, T] int64",
+        input_description="per-timestep ADC class indices",
+        output_shape="[B, 256, T] float32",
+        output_description="per-timestep logits over 256 denoising classes",
+        num_classes=256,
+        task_type="classification",
+    )
 
 
 def _make_score_table_dict(fv):
@@ -143,6 +160,7 @@ def make_input(
 ):
     return ProposalInput(
         interpretation=FAKE_INTERPRETATION,
+        forward_contract=_legacy_test_contract(),
         existing_model_types=existing_model_types or [],
         constraints=constraints or [],
         human_advice=human_advice,
@@ -367,6 +385,7 @@ class TestBuildReasoningPromptEnriched:
         interp.update(extra_interp)
         return ProposalInput(
             interpretation=interp,
+            forward_contract=_legacy_test_contract(),
             existing_model_types=["punet"],
             storage={"backend": "local", "local": {"workspace": "/tmp/test", "run_name": "r1"}},
         )
