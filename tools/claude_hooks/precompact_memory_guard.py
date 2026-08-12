@@ -15,13 +15,14 @@ Two modes, because the two compactions mean different things:
     auto     Claude Code ran out of room. Blocking here does not buy a
              synchronized handoff; it fails the current request and
              leaves the session with no way forward — which is exactly
-             the deadlock this tool exists to remove.
+             the deadlock this tool exists to remove. So the automatic
+             path NEVER blocks on a stale handoff. It writes mechanical
+             rescue evidence to the gitignored runtime directory and
+             lets compaction proceed.
 
-**As of this commit (C2) both modes share the strict path**, which is
-byte-for-byte the legacy behaviour. The mode is resolved and recorded but
-not yet acted upon. C3 gives ``auto`` its fail-safe branch — mechanical
-rescue snapshot, then allow. Until then this module is a faithful
-migration of the guard, not a behaviour change.
+Neither path ever writes semantic content. The strict path refuses and
+says what to fix; the fail-safe path records what a shell process can
+know for certain and says plainly that the handoff may be wrong.
 
 Mode resolution, in order:
 
@@ -53,6 +54,7 @@ from pathlib import Path
 # whether this file is executed as a script or imported by tests.
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from tools.claude_hooks import rescue_snapshot
 from tools.claude_hooks.context_state import (
     MEMORY_BASENAME,
     ContinuityError,
@@ -136,6 +138,46 @@ def instructions() -> str:
     )
 
 
+def _fail_safe(
+    root: Path,
+    *,
+    event: dict,
+    handoff_text: str | None,
+    problems: list[str],
+    reason: str,
+) -> int:
+    """Automatic compaction over a stale handoff: record, then ALLOW.
+
+    A snapshot failure is reported but never converted into a block. The
+    entire purpose of this path is that an automatic compaction cannot
+    deadlock; trading one deadlock for another because the rescue file
+    could not be written would defeat it. The operator still sees the
+    failure on stderr.
+    """
+    try:
+        path = rescue_snapshot.write(
+            root, event=event, handoff_text=handoff_text, problems=problems
+        )
+        where = str(path)
+    except (ContinuityError, OSError) as exc:
+        print(
+            f"[precompact] AUTO compaction proceeding, but the rescue snapshot "
+            f"could not be written: {exc}. Repository state is unrecorded — "
+            f"audit git truth before editing after this compaction.",
+            file=sys.stderr,
+        )
+        return EXIT_ALLOW
+
+    print(
+        f"[precompact] AUTO compaction proceeding over a handoff that is not "
+        f"current ({reason}). Mechanical rescue evidence written to {where}. "
+        f"It is evidence, not memory: after compaction, audit git truth and "
+        f"the PRIMARY DESIGN DOC before editing anything.",
+        file=sys.stderr,
+    )
+    return EXIT_ALLOW
+
+
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, add_help=True)
     parser.add_argument(
@@ -172,6 +214,14 @@ def main(argv: list[str] | None = None, *, stdin: object = None) -> int:
     try:
         text = load_memory(root)
     except ContinuityError as exc:
+        if mode == MODE_AUTO:
+            return _fail_safe(
+                root,
+                event=event,
+                handoff_text=None,
+                problems=[str(exc)],
+                reason="the handoff could not be read",
+            )
         print(
             f"BLOCKED: compaction would lose this session's state.\n\n{exc}\n\n{instructions()}",
             file=sys.stderr,
@@ -194,6 +244,14 @@ def main(argv: list[str] | None = None, *, stdin: object = None) -> int:
             atomic_write(memory_path(root), refreshed)
         text = refreshed
     except ContinuityError as exc:
+        if mode == MODE_AUTO:
+            return _fail_safe(
+                root,
+                event=event,
+                handoff_text=text,
+                problems=[str(exc)],
+                reason="the handoff is malformed",
+            )
         print(
             f"BLOCKED: {MEMORY_BASENAME} is malformed and cannot be refreshed.\n\n"
             f"{exc}\n\n{instructions()}",
@@ -206,6 +264,15 @@ def main(argv: list[str] | None = None, *, stdin: object = None) -> int:
         if args.check:
             print(f"[precompact] {MEMORY_BASENAME} is complete and current — safe to compact.")
         return EXIT_ALLOW
+
+    if mode == MODE_AUTO:
+        return _fail_safe(
+            root,
+            event=event,
+            handoff_text=text,
+            problems=problems,
+            reason=f"{len(problems)} freshness condition(s) failed",
+        )
 
     numbered = "\n".join(f"  {i}. {p}" for i, p in enumerate(problems, start=1))
     print(

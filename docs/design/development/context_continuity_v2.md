@@ -374,7 +374,7 @@ is unknown.
       fresh PR handoff initialized.
 - [x] **C1** tracked shared foundation + canonical template.
 - [x] **C2** strict MANUAL PreCompact path.
-- [ ] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
+- [x] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
 - [ ] **C4** dynamic SessionStart / resume injection.
 - [ ] **C5** PR-scoped lifecycle (init / continuation / closeout).
 - [ ] **C6** local registration migration + developer documentation.
@@ -574,3 +574,56 @@ unrelated work.
 
 **Commit boundary.** Tracked guard + its tests. Behaviour still
 identical to the legacy guard; registration unchanged.
+
+**Evidence.** `c5fe657c`. 42 passed, 1.12 s; ruff + format clean.
+
+### C3 — fail-safe AUTO PreCompact + mechanical rescue snapshot
+
+**Goal.** Automatic compaction must never deadlock on a stale handoff,
+and what it leaves behind must be evidence rather than invented memory.
+
+**Scope.** `tools/claude_hooks/rescue_snapshot.py`, the auto branches in
+the guard, `tests/unit/tools/claude_hooks/test_auto_failsafe.py`.
+NON-goals: any change to the manual path; SessionStart (C4).
+
+**Implementation.**
+- [x] `rescue_snapshot.render()/write()` — schema
+      `siderius.context_rescue/1`, written to
+      `.claude/context_rescue/latest_auto_compact.md`.
+- [x] Three auto branches in the guard, covering every way the handoff
+      can fail to be current: unreadable, malformed, and stale.
+- [x] `_fail_safe()` returns ALLOW even when the snapshot write itself
+      fails, reporting the failure on stderr. Trading one deadlock for
+      another because a file could not be written would defeat the whole
+      path.
+- [x] The snapshot records the handoff's OWN recorded HEAD/fingerprint
+      and PR identity verbatim, explicitly labelled unverified, so a
+      resumed session can see what the stale handoff claimed without
+      being told to believe it.
+
+**Snapshot schema (mechanical facts only).** `schema`,
+`generated_at_utc`, `trigger`, `session_id`, `transcript_path`,
+`repository_root`, `branch`, `head_sha`, `working_fingerprint`,
+`changed_file_count`; the handoff's verbatim `PROJECT / PR`,
+`PRIMARY DESIGN DOC`, `BINDING DOCS`; the handoff's recorded HEAD and
+fingerprint; the list of freshness failures; `git status --short`,
+changed files vs HEAD, `diff --stat`, recent commits; and the fixed
+recovery instruction. **No summary, no diagnosis, no next steps.**
+
+**Validation.** **55 passed, 1.76 s**; ruff + format clean. Matrix
+coverage: **E** (auto+current → allow, NO snapshot — a snapshot on a
+healthy handoff would train the reader to ignore rescue files),
+**F** (auto+stale → allow, snapshot carries real HEAD, fingerprint,
+uncommitted filenames, session id, transcript path and the handoff's own
+stale value), **G** (hygiene: no fabricated narrative sections, states
+plainly that it is not memory, declares a schema version). Plus:
+missing handoff, malformed handoff, snapshot-write failure, the
+self-reference proof that writing a snapshot cannot invalidate the
+handoff, and a divergence pin that manual still BLOCKS on the identical
+state.
+
+**Failure/edge cases exercised.** Handoff absent; handoff malformed;
+`rescue_snapshot.write` raising `OSError`.
+
+**Commit boundary.** Auto path + snapshot module + tests. Manual path
+untouched; registration unchanged.
