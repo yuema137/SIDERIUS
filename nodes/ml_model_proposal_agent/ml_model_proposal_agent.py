@@ -45,7 +45,15 @@ from agent.utils.proposer_preflight import estimate_proposal_time
 from agent_generated._registry import CapabilityRegistry
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from workflows.task_config import render_forward_contract
+from ml_models.models_format_sandbox import (
+    CLASSIFICATION_LOSSES,
+    REGRESSION_LOSSES,
+)
+from workflows.task_config import (
+    get_task_description,
+    load_task_config,
+    render_forward_contract,
+)
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
@@ -329,7 +337,7 @@ Output a JSON object with exactly these fields:
   "model_name": "short_snake_case_key",
   "output_type": "classifier" or "regressor" — REQUIRED. The output representation this model commits to. "classifier" emits [B, 256, T] per-timestep class logits and admits loss_type ce/focal/focal_cw; "regressor" emits [B, T] the denoised waveform directly and admits loss_type smooth_l1. This is an INDEPENDENT design decision: do NOT pick a loss first and let the output follow, and do NOT infer one from the other. An inconsistent pair is rejected before training.",
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
-  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, 256, T] float32 (per-timestep logits over 256 denoising classes)'; for 'regressor': 'Input: [B, T] int64 (per-timestep ADC class indices). Output: [B, T] float32 (the denoised waveform directly)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '256 denoising bins per time step is contract-fixed, not a hyperparameter'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
+  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: {INPUT_SHAPE} (per-timestep ADC class indices). Output: {OUTPUT_SHAPE} ({OUTPUT_DESCRIPTION})'; for 'regressor': 'Input: {INPUT_SHAPE} (per-timestep ADC class indices). Output: [B, T] float32 (the denoised waveform directly)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '256 denoising bins per time step is contract-fixed, not a hyperparameter'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
@@ -362,12 +370,12 @@ Output a JSON object with exactly these fields:
 Hard constraints — violating any of these makes the proposal invalid:
 - model_name must NOT be any of the existing model types listed in the context
 - model_name must be snake_case: lowercase letters, digits, and underscores only
-- The input is fixed: [B, T] int64. The OUTPUT depends on the `output_type` you
+- The input is fixed: {INPUT_SHAPE}. The OUTPUT depends on the `output_type` you
   choose — it is a design decision, not a fixed constant:
-    * `"classifier"` → output [B, 256, T] float32 (per-timestep class logits);
-      legal `loss_type`: `ce`, `focal`, `focal_cw`
+    * `"classifier"` → output {OUTPUT_SHAPE} (per-timestep class logits);
+      legal `loss_type`: {CLASSIFIER_LOSSES}
     * `"regressor"`  → output [B, T] float32 (the denoised waveform directly);
-      legal `loss_type`: `smooth_l1`
+      legal `loss_type`: {REGRESSOR_LOSSES}
   Choose the pair deliberately and state it in `output_type`. Do NOT pick a loss
   first and let the output follow — they are independent choices, and an
   inconsistent pair is rejected before training.
@@ -1261,6 +1269,101 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     return "\n".join(lines)
 
 
+class ProposalContractRenderError(ValueError):
+    """The commit system prompt cannot be rendered from the declaration.
+
+    Raised instead of silently emitting a prompt whose I/O contract has
+    collapsed to empty text. See ``_render_commit_system_prompt``.
+    """
+
+
+def _render_loss_legality(losses: frozenset[str]) -> str:
+    """Render a loss-legality family as the prompt's backticked list.
+
+    The ONE semantic authority for loss legality is
+    ``ml_models.models_format_sandbox.CLASSIFICATION_LOSSES`` /
+    ``REGRESSION_LOSSES``; this proposer-local renderer is a CONSUMER of
+    that authority, never a second definition of it.
+
+    Ordering is ``sorted()`` and that is part of the contract, not a
+    convenience: frozenset iteration order varies per process (measured:
+    three fresh interpreters produced three different orders), so
+    iterating directly would make every prompt golden flaky across
+    processes and defeat the exact-equality parity criterion.
+
+    Args:
+        losses: the authoritative family, e.g. ``CLASSIFICATION_LOSSES``.
+
+    Returns:
+        The families' names in ``sorted()`` order, each backticked and
+        comma-separated — e.g. ``` `ce`, `focal`, `focal_cw` ```.
+
+    Raises:
+        ProposalContractRenderError: if the family is empty (an empty
+            legality list would tell the agent that no loss is legal).
+    """
+    if not losses:
+        raise ProposalContractRenderError(
+            "loss-legality family is empty; refusing to render a prompt "
+            "that declares no legal loss_type"
+        )
+    return ", ".join(f"`{name}`" for name in sorted(losses))
+
+
+def _render_commit_system_prompt(fc: ForwardContract) -> str:
+    """Render the legacy commit SYSTEM prompt from its declarations.
+
+    Substitutes the tier-(i) verbatim-renderable task facts — those whose
+    prompt literal equals a ``ForwardContract`` field byte-for-byte — plus
+    the loss-legality families. Tier-(ii) surface variants (dtype-dropped
+    shapes, slash-separated loss lists) and tier-(iii) undeclared text
+    (the regressor output form, the "denoising bins" nouns) deliberately
+    remain literal in the template: no authority declares them, and
+    inventing a formatting rule for them is a Model/Loss-Contract
+    decision owned by a later step.
+
+    FAIL-CLOSED: an empty declaration raises rather than rendering a
+    prompt with the I/O contract removed. The standalone CLI reaches this
+    path, so a silent empty render would be a behavioural regression
+    (the agent would be asked to design against no contract at all),
+    not extraction parity.
+
+    Args:
+        fc: the declared forward contract (production: from
+            ``load_task_config()``).
+
+    Returns:
+        The fully substituted system prompt — byte-identical to the
+        previous constant under the shipped TIDMAD declaration.
+
+    Raises:
+        ProposalContractRenderError: if any substituted field is empty.
+    """
+    missing = [
+        name
+        for name, value in (
+            ("input_shape", fc.input_shape),
+            ("output_shape", fc.output_shape),
+            ("output_description", fc.output_description),
+        )
+        if not value
+    ]
+    if missing:
+        raise ProposalContractRenderError(
+            "cannot render the proposal commit prompt: the forward contract "
+            f"declares no {', '.join(missing)}. Populate configs/task_config.yaml "
+            "(or pass a complete ForwardContract) — refusing to send a commit "
+            "prompt whose I/O contract is empty."
+        )
+    return (
+        PROPOSAL_COMMIT_PROMPT.replace("{INPUT_SHAPE}", fc.input_shape)
+        .replace("{OUTPUT_SHAPE}", fc.output_shape)
+        .replace("{OUTPUT_DESCRIPTION}", fc.output_description)
+        .replace("{CLASSIFIER_LOSSES}", _render_loss_legality(CLASSIFICATION_LOSSES))
+        .replace("{REGRESSOR_LOSSES}", _render_loss_legality(REGRESSION_LOSSES))
+    )
+
+
 def _build_commit_prompt(reasoning: str, existing_model_types: list) -> str:
     """Build the user prompt for the commit call, injecting the reasoning."""
     return (
@@ -1382,7 +1485,7 @@ class MLModelProposalAgent:
 
         commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
         raw = self.bridge.generate(
-            PROPOSAL_COMMIT_PROMPT,
+            _render_commit_system_prompt(inp.forward_contract),
             commit_prompt,
             label="proposer.legacy_commit",
         )
@@ -1563,6 +1666,14 @@ class MLModelProposalAgent:
             "n_agent_proposed": str(len([c for c in candidates if c.get("source") != "seed"])),
             "n_confirmed_links": str(n_confirmed_links),
             "existing_model_types": ", ".join(inp.existing_model_types),
+            # PR 01a (S1-B): the proposing stage's output-contract table
+            # states loss legality; it now DERIVES from the same authority
+            # the validator uses instead of restating it. Only the legality
+            # cells are extracted — the table's dtype-dropped shape column
+            # is a different surface form with no declared formatting rule
+            # (design §4.1 tier (ii); OD-S1-7 rejected inventing one).
+            "CLASSIFIER_LOSS_LIST": _render_loss_legality(CLASSIFICATION_LOSSES),
+            "REGRESSOR_LOSS_LIST": _render_loss_legality(REGRESSION_LOSSES),
             # Proposing-stage placeholder. Other stages don't reference it; the
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.
@@ -2160,9 +2271,21 @@ def main():
     with open(interp_path, encoding="utf-8") as f:
         interpretation = json.load(f)
 
+    # PR 01a: the standalone CLI must supply the task declaration.
+    # Before the commit-prompt extraction an absent contract was harmless
+    # (the prompt was a zero-placeholder constant); now the render is
+    # FAIL-CLOSED, so a CLI that omitted the contract would raise. This
+    # entry point is a documented architectural surface
+    # (docs/architecture.md "Has CLI interface"), so it loads the shipped
+    # declaration through the SAME canonical loader every other production
+    # caller uses (workflows/model_exploration.py, scripts/...): no second
+    # config path is introduced.
+    _task_cfg = load_task_config()
     agent_input = ProposalInput.model_validate(
         {
             "interpretation": interpretation,
+            "task_description": get_task_description(_task_cfg),
+            "forward_contract": _task_cfg["forward_contract"],
             "storage": {
                 "backend": "local",
                 "local": {"workspace": args.workspace, "run_name": args.run_name},

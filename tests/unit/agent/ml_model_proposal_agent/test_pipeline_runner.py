@@ -22,6 +22,7 @@ from agent.schemas.proposal import (
     ReasoningStage,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.proposal_helpers import resolve_exploration_mode, select_candidate_models
 
@@ -380,6 +381,16 @@ class TestPipelineRunner:
         )
         inp = ProposalInput(
             interpretation=FAKE_INTERPRETATION,
+            # PR 01a: legacy path renders the commit prompt from the
+            # declaration and is fail-closed when it is empty (rule 6.2-6).
+            forward_contract=ForwardContract(
+                input_shape="[B, T] int64",
+                input_description="per-timestep ADC class indices",
+                output_shape="[B, 256, T] float32",
+                output_description="per-timestep logits over 256 denoising classes",
+                num_classes=256,
+                task_type="classification",
+            ),
             storage=StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(

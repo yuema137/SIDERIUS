@@ -34,10 +34,26 @@ from agent.schemas.proposal import (
     ReasoningStage,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import (
     MLModelProposalAgent,
     _build_preflight_advisory_note,
 )
+
+
+# PR 01a: the commit-prompt render is FAIL-CLOSED on an empty contract
+# (design rule 6.2-6); production always supplies one, so legacy-path
+# fixtures declare it too. Hermetic (not loaded from configs/).
+def _legacy_test_contract() -> ForwardContract:
+    return ForwardContract(
+        input_shape="[B, T] int64",
+        input_description="per-timestep ADC class indices",
+        output_shape="[B, 256, T] float32",
+        output_description="per-timestep logits over 256 denoising classes",
+        num_classes=256,
+        task_type="classification",
+    )
+
 
 # ---------------------------------------------------------------------------
 # Shared fixtures — minimal interpretation + canned stage outputs
@@ -166,6 +182,7 @@ def _pipeline_input(
 ) -> ProposalInput:
     return ProposalInput(
         interpretation=FAKE_INTERPRETATION,
+        forward_contract=_legacy_test_contract(),
         existing_model_types=["wavenet"],
         reasoning_pipeline=ReasoningPipelineConfig(
             stages=[
@@ -198,6 +215,7 @@ def _legacy_input(
 ) -> ProposalInput:
     return ProposalInput(
         interpretation=FAKE_INTERPRETATION,
+        forward_contract=_legacy_test_contract(),
         existing_model_types=["wavenet"],
         is_trial=is_trial,
         trial_time_budget_minutes=trial_budget,
