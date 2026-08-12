@@ -83,7 +83,23 @@ def run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=None):
 
         monkeypatch.setattr(_tuner, "run_production_preflight", _canned_preflight)
 
+    # CUDA mock must cover the FULL discovery surface, not just the VRAM
+    # gate: `core/hardware_context` calls `device_count()` and
+    # `get_device_properties()` once `is_available()` is True, which
+    # raises "Found no NVIDIA driver" on driverless CI runners (caught by
+    # the first CI run of this helper; invisible locally where a real GPU
+    # absorbed the difference, and invisible in k9 which never runs in CI).
+    class _FixtureDeviceProps:
+        name = "Step00 Mock GPU"
+        total_memory = 32 * 1024**3
+        major = 8
+        minor = 6
+        multi_processor_count = 82
+        uuid = None
+
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda *a, **kw: _FixtureDeviceProps())
     monkeypatch.setattr(torch.cuda, "mem_get_info", lambda *a, **kw: (20 * 1024**3, 32 * 1024**3))
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 

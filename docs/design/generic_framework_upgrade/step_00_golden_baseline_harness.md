@@ -1655,9 +1655,21 @@ material deviation → stop for operator decision (never silently
 re-scope).
 
 **Verification commands.**
-- [ ] `pytest tests/unit/ -m "not real_run" -q > /tmp/pytest.log;
-      rc=$?; tail -20 /tmp/pytest.log` — verdict from the LOG.
-- [ ] CI status from the exact final head.
+- [x] Full suite on the pre-CI final head: 8354 passed, 3 skipped,
+      PYTEST_RC=0 (log-read), 460 s. Ruff check+format clean repo-wide.
+      Pyright: local Node v10 cannot launch it (documented limitation);
+      validated by CI's pyright step (passed on the first CI run).
+- [x] CI repair round 1 (routine, autonomous): the first CI run failed
+      with 9 setup ERRORS — `core/hardware_context` calls
+      `device_count()`/`get_device_properties()` once `is_available()`
+      is mocked True, raising "Found no NVIDIA driver" on the
+      driverless runner (invisible locally where a real GPU absorbed
+      it; k9 never runs in CI). Fix: the shared helper's CUDA mock
+      widened to the full discovery surface (fixture device props).
+      Local: 11 passed with goldens UNCHANGED under the fixture props
+      overriding the real GPU — extra evidence the compared surfaces
+      are hardware-independent. CI: 8322 passed/0 failed otherwise.
+- [ ] CI green on the exact final head (pending re-run).
 
 **Commit boundary.** Closeout only; no new baselines enter here.
 
