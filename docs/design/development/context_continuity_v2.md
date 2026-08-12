@@ -377,7 +377,7 @@ is unknown.
 - [x] **C3** fail-safe AUTO PreCompact + mechanical rescue snapshot.
 - [x] **C4** dynamic SessionStart / resume injection.
 - [x] **C5** PR-scoped lifecycle (init / continuation / closeout).
-- [ ] **C6** local registration migration + developer documentation.
+- [x] **C6** local registration migration + developer documentation.
 - [ ] **C7** adversarial validation, dry-run dossier, closeout.
 
 Each phase records: Goal, Scope, Implementation, Validation,
@@ -754,3 +754,46 @@ refuse).
 
 **Commit boundary.** Lifecycle helpers + the branch check + tests.
 Registration still legacy.
+
+**Evidence.** `cc2d7494`. 103 passed, 3.18 s; ruff + format clean.
+
+### C6 — local registration migration + developer documentation
+
+**Goal.** Point this machine's Claude Code at the tracked scripts, and
+give a teammate everything needed to do the same without reading the
+implementation.
+
+**Scope.** `docs/development/claude_context_continuity.md` (tracked);
+`.claude/settings.local.json` (LOCAL, gitignored — changed on this
+machine, not committed and not trackable).
+
+**Implementation.**
+- [x] Developer doc: the one principle and the lifecycle diagram, what
+      the system does and explicitly does NOT do (no 95% trigger, with
+      the event enumeration as evidence), copy-pasteable registration,
+      the `--check` verification command, how to start a new PR, how to
+      keep the handoff current, both fingerprint properties, what the
+      rescue snapshot contains and does not contain, and five concrete
+      troubleshooting entries.
+- [x] Registration switched: both `PreCompact` matchers now invoke
+      `tools/claude_hooks/precompact_memory_guard.py` with an explicit
+      `--mode`, and all four `SessionStart` matchers invoke
+      `tools/claude_hooks/inject_session_memory.py`.
+- [x] `--mode` duplicates what the matcher already routes, deliberately:
+      it keeps the scripts runnable and testable without Claude Code, and
+      a future payload change cannot silently flip the strict path into
+      the fail-safe one.
+- [x] The previous `.claude/settings.local.json` was backed up before the
+      edit, and **the legacy hooks remain on disk**, unregistered. They
+      are deleted only after the operator has lived with the tracked
+      implementation — not for tidiness.
+
+**Ownership boundary.** `.claude/settings.local.json` is per-machine and
+stays gitignored, so **this switch does not travel with the PR**. Each
+teammate applies the doc's snippet once. `.gitignore` is unchanged and
+`.claude/` is not force-added.
+
+**Validation.** Dry-run matrix — see C7.
+
+**Commit boundary.** Tracked documentation only. The registration edit is
+local runtime configuration and is intentionally not part of the commit.
