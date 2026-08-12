@@ -289,7 +289,8 @@ architecture could best overcome the identified bottlenecks.
 
 {TASK_BACKGROUND}- The VRAM ceiling is published in the [HARDWARE CONTEXT] block at the top of
   the user message — treat that block's "Effective cap" as the hard limit,
-  and keep `parameter_count_estimate` under ~100M for initial exploration.
+  and justify `parameter_count_estimate` against that cap rather than
+  against a fixed parameter budget.
 
 In your reasoning, cover all of the following:
 1. What structural weakness do the bottlenecks and take-home message specifically point to?

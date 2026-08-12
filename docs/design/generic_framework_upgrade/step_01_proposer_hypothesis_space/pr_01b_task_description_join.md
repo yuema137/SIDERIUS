@@ -448,17 +448,20 @@ Depends on nothing in this PR; ordered last among code commits so it
 can be dropped without disturbing S1-C/S1-C2.
 
 **3. Implementation plan.**
-- [ ] **CAPTURE FIRST** — add a Step-01 golden for the legacy reasoning
+- [x] **CAPTURE FIRST** — add a Step-01 golden for the legacy reasoning
       SYSTEM render BEFORE editing the literal. It has no oracle today;
-      editing first would change an unpinned surface.
-- [ ] Widen the guard scan set to include the legacy reasoning constant
+      editing first would change an unpinned surface. → captured at
+      3642 bytes, sha256 `bb8e974b88a98e4b7b1d543002eec3e51a8742bded2043711cdce87914a7ff41`,
+      with the `~100M` literal still present in it (§16.2).
+- [x] Widen the guard scan set to include the legacy reasoning constant
       and generalise the VRAM pin beyond the exact `<10 GB VRAM`
       string; **observe RED** against the current literals before
-      deleting anything.
-- [ ] Delete/repoint the two literals.
-- [ ] Regenerate the just-captured golden and any affected `pb3_*`
-      golden in the SAME commit, with §13 R3 provenance.
-- [ ] Re-run the widened guards → green.
+      deleting anything. → RED observed, naming BOTH literals (§16.2).
+- [x] Delete/repoint the two literals.
+- [x] Regenerate the just-captured golden and any affected `pb3_*`
+      golden in the SAME commit, with §13 R3 provenance. → exactly three
+      files; every diff shows only the literal's removal (§16.3).
+- [x] Re-run the widened guards → green.
 
 **4. Validation plan.** Targeted unit plus the widened guards.
 Negative: the generalised pattern must NOT fire on legitimate text —
@@ -1161,3 +1164,109 @@ mutation was committed.
 > description but does not VARY with its input. Every golden pins one
 > profile per process and cannot see that; two profiles in one process
 > is the only way to.
+
+## 16. S1-E — stale budget-literal cleanup (implemented)
+
+Isolated and independently droppable: it touches no file S1-C depends on
+for the JOIN, and reverting this commit alone leaves S1-C/S1-C2 intact.
+
+### 16.1 The two literals and how they were repointed
+
+| # | Surface | Before | After |
+|---|---|---|---|
+| 1 | `PROPOSAL_REASONING_PROMPT` (`ml_model_proposal_agent.py`) | "and keep `parameter_count_estimate` under **~100M** for initial exploration." | "and justify `parameter_count_estimate` against that cap rather than against a fixed parameter budget." |
+| 2 | `agent/prompt_templates/proposal/causal_reasoning_stage.md`, rule 3's devil's-advocate EXAMPLE | "…may exceed the **10 GB VRAM budget**" is. | "…may exceed the **Effective cap in [HARDWARE CONTEXT]**" is. |
+
+Both edits repoint at the live `[HARDWARE CONTEXT]` effective cap, which
+the same sentence already names as the hard limit — so each literal is
+replaced by the authority it was contradicting, not merely deleted.
+
+§4.3's STOP branch (subjective rewriting of the devil's-advocate
+example) was **not** triggered: the example's point is a concrete,
+checkable capacity failure mode, and swapping the stale number for the
+live cap preserves it mechanically. Recorded so the operator can see the
+branch was evaluated rather than skipped.
+
+### 16.2 CP3 evidence — CHECKPOINT 3 **PASS**
+
+| Required evidence | Result |
+|---|---|
+| legacy reasoning SYSTEM surface captured BEFORE modification | **PASS, and ordering is provable**: the capture ran against the unedited tree and its content still contained `~100M` (asserted at capture time). New golden `goldens/s1e_legacy_reasoning_system.txt`, 3642 bytes, sha256 `bb8e974b…`, taken at the LLM boundary through the REAL legacy `run()` path (reusing PB-4's `_run_legacy_capture`, pinned to the SHIPPED contract per PB-4's precedent) |
+| widened guards observed RED against the old literals | **PASS** — `1 failed, 9 passed`; the failure message named BOTH offenders with their surrounding sentences: `PROPOSAL_REASONING_PROMPT` (`~100M`) and `causal_reasoning_stage.md` (`10 GB`) |
+| literals removed / reworded | PASS — §16.1 |
+| guards GREEN after modification | **PASS** — `10 passed` |
+| widened numeral/budget pattern does NOT fire on the JOIN block | **PASS** — asserted directly against `_render_pipeline_task_background(get_task_description(load_task_config()))`, which carries `256` and `[B, 256, T]`. Adversarial finding A9 closed |
+| legitimate VRAM requirement remains | **PASS** — `test_vram_requirement_prose_survives_the_cleanup` pins "must include at least one VRAM limit" in `PROPOSAL_COMMIT_PROMPT` and "VRAM ceiling" + "HARDWARE CONTEXT" in `PROPOSAL_REASONING_PROMPT`; `test_vram_limit_requirement_retained` unchanged and green |
+| only R3-declared goldens change | **PASS** — §16.3 |
+
+**What the widened guard actually is.** Two blind spots, closed
+separately because they are different defects:
+
+1. *Scan-set blindness.* `_all_template_texts()` was
+   `PROPOSAL_COMMIT_PROMPT` + the `*.md` files. `PROPOSAL_REASONING_PROMPT`
+   was never in it, which is the ONLY reason `~100M` survived the
+   original C2 sweep. It is now in the set — so every existing member of
+   that family (the mandate patterns, the `<10 GB VRAM` pin) now also
+   covers the reasoning constant.
+2. *Pattern blindness.* The old pin matched the exact string
+   `"<10 GB VRAM"`; the surviving literal read "the 10 GB VRAM budget"
+   and differed by one `<`. The replacement is a CONCEPT detector,
+   `_numeric_capacity_literals`: a magnitude with a size/count unit
+   (`GiB|GB|MB|M|B`) within 90 whitespace-normalised characters of
+   capacity language (`vram|memory|budget|parameter|param|ceiling|cap`).
+   Both halves are required, because the templates legitimately contain
+   bare numerals (`segmentation_size > 20000`, `[B, 256, T]`, boldness
+   ratios) AND legitimately contain numeral-free capacity prose. Only the
+   conjunction is the defect.
+
+   Precision measured against every real surface before the edit: exactly
+   two hits, both the S1-E targets, zero elsewhere; and zero hits on all
+   six rendered stage prompts other than the causal one. The dated
+   exact-string pin is KEPT alongside it as the historical regression
+   marker.
+
+The negative control is its own test, with a positive half so it cannot
+silently degenerate into a tautology: the detector must NOT fire on the
+VRAM-requirement prose, on `segmentation_size > 20000`, or on the JOIN
+block — and MUST still fire on the two removed literals.
+
+**Reachability.** The RED observation IS this commit's reachability
+evidence: the guard was seen failing against the real, unedited
+production surfaces before anything was deleted. No separate mutation was
+needed, and none is claimed.
+
+### 16.3 R3 golden event — exactly three files, each diff attributable
+
+| Golden | Event | Diff |
+|---|---|---|
+| `s1e_legacy_reasoning_system.txt` | **NEW** — captured pre-edit, regenerated post-edit in the same commit | the three-line literal sentence only |
+| `pb3_causal_explore_system.txt` | regenerated | `- may exceed the 10 GB VRAM budget" is.` / `+ may exceed the Effective cap in [HARDWARE CONTEXT]" is.` |
+| `pb3_causal_exploit_system.txt` | regenerated | identical single-line change |
+
+`pb3_comparison_*`, `pb3_proposing_*`, all three `pb3_*_user.txt`, PB-4,
+WF-3 and every CFG golden are **byte-identical** — the regeneration
+script refuses to write any file outside the declared R3 set.
+
+### 16.4 Follow-up recorded, deliberately NOT fixed here
+
+`nodes/ml_model_implementor/ml_model_implementor.py:363` carries the same
+stale literal class in the IMPLEMENTOR's reasoning prompt:
+`"GPU budget: <10 GB VRAM, <100M parameters for initial exploration."`
+— both halves, including the exact `<10 GB VRAM` string the proposer-side
+pin has forbidden since C2.
+
+It is OUT of PR 01b's scope: §4.3 names exactly two literals, both
+proposer-side, and `test_prompt_ceiling_policy.py` is a proposer guard.
+Widening the scan set to another node would turn a droppable cleanup
+commit into a cross-node change. Owner: whoever next touches the
+implementor prompt surface; the detector built here is directly reusable.
+
+### 16.5 Validation run at S1-E
+
+| Validation | Result |
+|---|---|
+| `pytest .../test_prompt_ceiling_policy.py` BEFORE the edit | **1 failed, 9 passed** (intended RED) |
+| `pytest .../test_prompt_ceiling_policy.py` AFTER the edit | **10 passed, 1.1 s** |
+| proposer package + templates + task-config baselines + llm_bridge step00 goldens | **780 passed, 5.0 s** (includes `test_health_prompt_parity.py`, whose PB-0 legacy USER golden is untouched) |
+| `ruff check` / `ruff format --check` on touched files | clean |
+| repository-wide grep for other consumers of the removed literals | none outside the guard's own documentation and positive-control assertions |

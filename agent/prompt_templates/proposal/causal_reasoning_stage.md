@@ -143,7 +143,7 @@ A JSON object with these fields:
 
 3. **Devil's advocate**: name at least one realistic failure mode. "It might
    not work" is not a failure mode. "The FNO layer doubles memory usage and
-   may exceed the 10 GB VRAM budget" is.
+   may exceed the Effective cap in [HARDWARE CONTEXT]" is.
 
 4. **Architecturally tethered**: the `proposed_change` must be concrete
    enough for the proposing stage (Stage 3) to implement it unambiguously.
