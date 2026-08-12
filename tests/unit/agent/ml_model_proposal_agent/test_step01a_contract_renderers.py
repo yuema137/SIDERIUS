@@ -13,7 +13,9 @@ opaque pass-through of an undeclared task.
 
 from __future__ import annotations
 
+import pathlib
 import re
+import typing
 
 import pytest
 
@@ -170,3 +172,57 @@ class TestCommitSystemPromptRenderer:
         rendered = _render_commit_system_prompt(_contract())
         assert "[B, T] float32 (the denoised waveform directly)" in rendered
         assert "256 denoising bins per time step is contract-fixed" in rendered
+
+
+class TestS1BProposingStageDerivation:
+    """S1-B — the production proposing stage derives its loss legality.
+
+    Byte-parity is proven by the nine PB-3 goldens (unchanged). These
+    pins prove the *derivation* underneath that parity, which byte
+    equality alone cannot distinguish from a lucky literal.
+    """
+
+    TEMPLATE = (
+        pathlib.Path(__file__).resolve().parents[4]
+        / "agent"
+        / "prompt_templates"
+        / "proposal"
+        / "proposing_stage.md"
+    )
+
+    def test_template_no_longer_carries_the_extracted_legality_literals(self):
+        """Template-layer ABSENCE pin (kept distinct from the rendered
+        pins per the roadmap's §13.3 rule: template properties and
+        output properties prove different things)."""
+        raw = self.TEMPLATE.read_text(encoding="utf-8")
+        assert "{CLASSIFIER_LOSS_LIST}" in raw
+        assert "{REGRESSOR_LOSS_LIST}" in raw
+        # the extracted cells must not survive as literals in the table
+        assert "| `ce`, `focal`, `focal_cw` |" not in raw
+
+    def test_tier_ii_shape_column_deliberately_stays_literal(self):
+        """OD-S1-7: the table's dtype-dropped shape column has no declared
+        formatting rule, so it is NOT extracted. Pinned so a later
+        contributor does not "finish the job" by inventing one."""
+        raw = self.TEMPLATE.read_text(encoding="utf-8")
+        assert "`[B, 256, T]` float" in raw
+        assert "`[B, T]` float" in raw
+
+    def test_builtin_alphabet_count_matches_the_declaration(self):
+        """The template says the slot "accepts five values". That count is
+        a restatement of `LossConfig.loss_type`'s Literal alphabet, whose
+        three prose sites each use a DIFFERENT surface form (slash-
+        separated, "or"-joined, line-wrapped) and are therefore tier (ii)
+        — not extracted here. This consistency pin catches the drift the
+        extraction cannot: the alphabet growing while the prose still
+        says five.
+        """
+        from ml_models.models_format_sandbox import LossConfig
+
+        alphabet = typing.get_args(LossConfig.model_fields["loss_type"].annotation)
+        assert len(alphabet) == 5, (
+            f"loss_type alphabet is now {alphabet!r}; proposing_stage.md still "
+            'says "accepts five values" at the built-in-loss section, and the '
+            "three alphabet prose sites are tier-(ii) literals routed to step 03"
+        )
+        assert "accepts five values" in self.TEMPLATE.read_text(encoding="utf-8")

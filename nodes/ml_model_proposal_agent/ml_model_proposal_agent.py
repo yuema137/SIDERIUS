@@ -1666,6 +1666,14 @@ class MLModelProposalAgent:
             "n_agent_proposed": str(len([c for c in candidates if c.get("source") != "seed"])),
             "n_confirmed_links": str(n_confirmed_links),
             "existing_model_types": ", ".join(inp.existing_model_types),
+            # PR 01a (S1-B): the proposing stage's output-contract table
+            # states loss legality; it now DERIVES from the same authority
+            # the validator uses instead of restating it. Only the legality
+            # cells are extracted — the table's dtype-dropped shape column
+            # is a different surface form with no declared formatting rule
+            # (design §4.1 tier (ii); OD-S1-7 rejected inventing one).
+            "CLASSIFIER_LOSS_LIST": _render_loss_legality(CLASSIFICATION_LOSSES),
+            "REGRESSOR_LOSS_LIST": _render_loss_legality(REGRESSION_LOSSES),
             # Proposing-stage placeholder. Other stages don't reference it; the
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.

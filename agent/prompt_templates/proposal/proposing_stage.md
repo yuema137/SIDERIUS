@@ -67,8 +67,8 @@ representation your architecture actually needs, then a loss compatible with it:
 
 | `output_type`  | forward output      | legal `loss_type`        |
 |----------------|---------------------|--------------------------|
-| `"classifier"` | `[B, 256, T]` float | `ce`, `focal`, `focal_cw` |
-| `"regressor"`  | `[B, T]` float      | `smooth_l1`               |
+| `"classifier"` | `[B, 256, T]` float | {CLASSIFIER_LOSS_LIST} |
+| `"regressor"`  | `[B, T]` float      | {REGRESSOR_LOSS_LIST}               |
 
 Both are fully supported. Regression predicts the denoised waveform directly;
 classification predicts a distribution over 256 amplitude bins per timestep.
