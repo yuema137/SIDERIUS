@@ -2,12 +2,25 @@
 
 ## Status
 
-**DESIGN FROZEN — OPERATOR APPROVED FOR IMPLEMENTATION (pending
-confirmation of the §22.1-22.3 audit results) — NOT IMPLEMENTED.**
-The implementation PR this design authorizes is TEST-ONLY with ZERO
-production behavior change. Adversarially reviewed and reconciled
-2026-08-11 (§23); operator-reviewed and finally reconciled 2026-08-12
-(§23a); all operator decisions OD-1..5 CLOSED (§22).
+**IMPLEMENTATION IN PROGRESS — operator-authorized 2026-08-12 — NOT
+MERGED.** Design FROZEN at commit `0b92cd60`; the operator confirmed
+the §22.1-22.3 audit results and issued the final OD-1..5 decisions
+verbatim (all APPROVED: OD-1 ≤3-history capture + >3 deferral +
+step-07a two-site predecessor, PYTHONHASHSEED rejected; OD-2 outcome A
+corrected final form — `_emit_record` seam via RecordingSandbox,
+pinned length-20 vector, no `_pseudo_origin`, no test-side
+normalization, sub-fixtures schema-shape only; OD-3 numeric/mechanism
+split, no committed HDF5, zero scorer change; OD-4 delete
+`test_calculate_score_coarse`+`test_calculate_score_fine`, keep
+`test_score_vector_legacy_mode_fine` as NUM-7, fix merge-gate wording,
+retire FU-P2-4 xfail; OD-5 outcome A — test-only k9 assertion
+migration, no print restoration, green before WF-4, STOP if the gate
+no longer fires). Implementation branch:
+`feat/generic-framework-step-00-golden-baseline-harness`, base =
+frozen design commit `0b92cd60` (clean tree at branch creation).
+The implementation PR is TEST-ONLY with ZERO production behavior
+change. Adversarially reviewed 2026-08-11 (§23); operator-reconciled
+2026-08-12 (§23a).
 
 Created 2026-08-11 on branch `docs/generic-framework-step-00-design`
 from a six-area parallel source/test audit (A prompts/LLM-boundary,
