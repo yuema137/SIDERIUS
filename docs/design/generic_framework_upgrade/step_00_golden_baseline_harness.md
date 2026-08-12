@@ -2,12 +2,14 @@
 
 ## Status
 
-**IMPLEMENTED — PR OPEN, AWAITING CI + OPERATOR REVIEW — NOT
-MERGED.** All six semantic commits (0A.1/0A.2/0B/0C/0D/0E + this 0F
-closeout) landed on
-`feat/generic-framework-step-00-golden-baseline-harness`; Checkpoint 0
-MET (§20); zero production diff proven mechanically (no changed file
-outside `tests/` and `docs/` across the whole branch).
+**MERGED — STEP 00 COMPLETE.** PR #198 merged 2026-08-12
+(merge commit `e80da078`; final head `71f6b31f`) with operator merge
+authorization, after: CI green on the exact final head (Lint + Type +
+Unit Tests, 11m58s — pyright validated there), the operator-directed
+adversarial closure audit fully reconciled (§23b), and the full local
+suite 8354 passed / 3 skipped / rc=0 on the same head. Checkpoints
+0 (PRIMARY — MET), D and E complete. Zero production diff proven
+mechanically across the whole branch.
 Original authorization record: Design FROZEN at commit `0b92cd60`; the operator confirmed
 the §22.1-22.3 audit results and issued the final OD-1..5 decisions
 verbatim (all APPROVED: OD-1 ≤3-history capture + >3 deferral +
@@ -1649,7 +1651,7 @@ Depends on: 0A-0E.
       over 800 files); pyright strict via CI's own step (local Node
       v10 cannot launch it — documented limitation; the first CI run's
       pyright step PASSED).
-- [ ] CI green on the PR head.
+- [x] CI green on the PR head (71f6b31f, 11m58s; pyright passed).
 
 **Acceptance criteria.**
 - [x] §20's Checkpoint-0 and Checkpoint-D bullets all check.
@@ -1676,7 +1678,7 @@ re-scope).
       Local: 11 passed with goldens UNCHANGED under the fixture props
       overriding the real GPU — extra evidence the compared surfaces
       are hardware-independent. CI: 8322 passed/0 failed otherwise.
-- [ ] CI green on the exact final head (pending re-run).
+- [x] CI green on the exact final head 71f6b31f; MERGED as e80da078.
 
 **Commit boundary.** Closeout only; no new baselines enter here.
 
@@ -2063,8 +2065,7 @@ JOIN recorded in §15.2 as step 01's own A-work.
 
 ## 24. Design + implementation status
 
-**IMPLEMENTED — PR OPEN, AWAITING CI + OPERATOR REVIEW — NOT MERGED —
-DO NOT MERGE (operator-owned).** The operator authorized
+**STEP 00 COMPLETE — MERGED (PR #198, `e80da078`, 2026-08-12).** The operator authorized
 implementation 2026-08-12 with OD-1..5 final; six semantic commits
 landed (0A.1 capture infra + PB-1/2 + WF-3 widening; 0A.2 PB-3..9;
 0B CFG/DS/HC/TC; 0C REC/RES/PLG per OD-2 outcome A; 0D NUM + OD-4
