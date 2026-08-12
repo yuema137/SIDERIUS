@@ -281,14 +281,44 @@ class TestREC3ArtifactShapes:
         )
 
 
+class TestTC1bOnDiskTrialConfigArtifact:
+    def test_tuner_written_trial_config_deep_equal(self, pseudo_run):
+        """TC-1b (closure-audit F2): the REAL trial-decision resolution.
+        The tuner composes and validates ``TrialConfig`` inline in
+        ``run()`` and persists it per attempt
+        (`ml_hyperparameter_tune_agent.py:4448-4452`) — this pins the
+        ON-DISK artifacts the real resolution produced, closing the gap
+        the schema-round-trip TC-1 tests could not (rewriting the inline
+        composition now goes red here). Seeds are sha256-derived from
+        `{run_name}_{total_attempts}` — deterministic for the fixture
+        run, so pinned as values."""
+        _output, _bridge, sandbox, _ws = pseudo_run
+        configs_dir = Path(sandbox.dirs["configs"])
+        artifacts = sorted(configs_dir.glob("trial_config_*.json"))
+        assert artifacts, "the tuner must persist trial_config artifacts"
+        assert_json_golden(
+            [
+                {"file": a.name, "config": json.loads(a.read_text(encoding="utf-8"))}
+                for a in artifacts
+            ],
+            GOLDENS / "tc1b_on_disk_trial_configs.json",
+            surface="TC-1b tuner-resolved on-disk TrialConfig artifacts",
+        )
+
+
 class TestREC4ExpIdFormat:
     def test_exp_id_format_and_ordering(self, pseudo_run):
         """REC-4 (Type 5): `{model}_{run}_{NNN}` with zero-padded,
         strictly increasing attempt counters. The `:03d` padding is
         SEMANTIC — `core/resume.py:438-441` breaks score ties
-        lexicographically on exp_id (design §13, review F12). Both
-        production composition sites render this same f-string
-        (tuner:4089 and :4440); the pseudo run exercises the live path.
+        lexicographically on exp_id (design §13, review F12).
+
+        Scope (closure-audit F4): this pins the POST-PLAN composition
+        site (tuner:4440) — the one every record in this fixture flows
+        through. The pre-plan site (:4089) is only observable on a
+        planning-stage failure record, which the bounded fixture does
+        not produce; that variant is an explicit §15.2 deferral owned
+        by step 05a.
         """
         output, _bridge, _sandbox, _ws = pseudo_run
         pattern = re.compile(rf"^{PLUGIN_MODEL_TYPE}_step00_pseudo_(\d{{3}})$")

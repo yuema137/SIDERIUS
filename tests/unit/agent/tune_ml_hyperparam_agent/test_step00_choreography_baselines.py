@@ -51,10 +51,22 @@ def pseudo_run(tmp_path_factory):
 
 
 def project_plan_call(call: tuple) -> dict:
-    """Serializable projection of one recorded ``plan()`` call."""
+    """Serializable projection of one recorded ``plan()`` call.
+
+    ``config_manual`` is reduced to its sorted top-level key list:
+    production populates it with schema docstrings/manual PROSE, and
+    embedding that text here would red a choreography baseline on any
+    editorial production-comment edit (closure-audit F3 — the §13.1
+    no-production-source-text rule). Content parity for manuals belongs
+    to PB goldens built from test-owned fixtures.
+    """
     _method, memory_history, expert_advice, force_model, kwargs = call
     projected = dict(kwargs)
     registry = projected.pop("registry", None)
+    config_manual = projected.pop("config_manual", None)
+    projected["config_manual_keys"] = (
+        sorted(config_manual) if isinstance(config_manual, dict) else config_manual
+    )
     return {
         "memory_history": {
             "type": type(memory_history).__name__,

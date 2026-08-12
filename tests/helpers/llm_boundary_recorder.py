@@ -49,6 +49,11 @@ class BoundaryRecorderBridge(LLMBridge):
     Attributes:
         captures: list of ``(method, label, system_prompt, user_prompt)``
             tuples, one per intercepted would-be API call, in order.
+        components_log: list of ``(label, sorted_component_keys | None)``
+            per intercepted call — the ``components`` telemetry breakdown
+            crossing the boundary (WF-3's second half; closure-audit F1).
+            Kept as a parallel attribute so the 4-tuple ``captures`` shape
+            every PB test unpacks stays stable.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -60,6 +65,10 @@ class BoundaryRecorderBridge(LLMBridge):
         self.client = _RaisingClientProxy()  # type: ignore[assignment]
         self.reflect_client = _RaisingClientProxy()  # type: ignore[assignment]
         self.captures: list[tuple[str, str, str, str]] = []
+        self.components_log: list[tuple[str, list[str] | None]] = []
+
+    def _log_components(self, label: str, components: dict | None) -> None:
+        self.components_log.append((label, sorted(components) if components is not None else None))
 
     # --- the three create-owning methods (design §4.1) -----------------
 
@@ -75,6 +84,7 @@ class BoundaryRecorderBridge(LLMBridge):
         components: dict[str, int] | None = None,
     ) -> dict:
         self.captures.append(("_chat_json", label, system_prompt, user_prompt))
+        self._log_components(label, components)
         return {}
 
     def generate_text(
@@ -86,6 +96,7 @@ class BoundaryRecorderBridge(LLMBridge):
         components: dict[str, int] | None = None,
     ) -> str:
         self.captures.append(("generate_text", label, system_prompt, user_prompt))
+        self._log_components(label, components)
         return ""
 
     def tool_call(
@@ -98,4 +109,5 @@ class BoundaryRecorderBridge(LLMBridge):
         components: dict[str, int] | None = None,
     ) -> Any:
         self.captures.append(("tool_call", label, system_prompt, user_prompt))
+        self._log_components(label, components)
         return None

@@ -1,0 +1,62 @@
+[
+  {
+    "file": "trial_config_pe_wavenet_delta_step00_pseudo_001.json",
+    "config": {
+      "is_trial": true,
+      "mode": "trial",
+      "trial_strategy": "snapshot",
+      "trial_portion": 0.05,
+      "train_portion": 0.1,
+      "target_files": [],
+      "eval_strategy": "snapshot",
+      "eval_portion": 0.05,
+      "train_validation_align": true,
+      "file_index": null,
+      "resolved_order_strategy": "shuffle",
+      "resolved_file_order": null,
+      "train_sampling_seed": 1974530640,
+      "eval_sampling_seed": 1974530640,
+      "train_base_seed": 532100910
+    }
+  },
+  {
+    "file": "trial_config_pe_wavenet_delta_step00_pseudo_002.json",
+    "config": {
+      "is_trial": true,
+      "mode": "trial",
+      "trial_strategy": "snapshot",
+      "trial_portion": 0.05,
+      "train_portion": 0.1,
+      "target_files": [],
+      "eval_strategy": "snapshot",
+      "eval_portion": 0.05,
+      "train_validation_align": true,
+      "file_index": null,
+      "resolved_order_strategy": "shuffle",
+      "resolved_file_order": null,
+      "train_sampling_seed": 2074996016,
+      "eval_sampling_seed": 2074996016,
+      "train_base_seed": 1800081021
+    }
+  },
+  {
+    "file": "trial_config_pe_wavenet_delta_step00_pseudo_003.json",
+    "config": {
+      "is_trial": false,
+      "mode": "formal",
+      "trial_strategy": "snapshot",
+      "trial_portion": 0.1,
+      "train_portion": 1.0,
+      "target_files": [],
+      "eval_strategy": "snapshot",
+      "eval_portion": 1.0,
+      "train_validation_align": true,
+      "file_index": null,
+      "resolved_order_strategy": "shuffle",
+      "resolved_file_order": null,
+      "train_sampling_seed": 1259130770,
+      "eval_sampling_seed": 1259130770,
+      "train_base_seed": 947181658
+    }
+  }
+]

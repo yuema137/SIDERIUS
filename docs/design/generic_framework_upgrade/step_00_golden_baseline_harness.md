@@ -663,7 +663,7 @@ Selection rules:
 LANDED.** Test-file map: PB → `tests/unit/agent/{llm_bridge,
 ml_model_proposal_agent,ml_model_implementor,ml_code_validator_agent,
 result_interpretation_agent,ml_literature_review}/
-test_step00_prompt_goldens.py` (44 goldens); CFG/DS/HC/TC →
+test_step00_prompt_goldens.py` (50 `.txt` goldens; count corrected per closure-audit F10); CFG/DS/HC/TC →
 `tests/unit/workflows/test_step00_task_config_baselines.py`,
 `tests/unit/execute_tools/test_step00_dataset_baselines.py`,
 `.../health_checks/test_step00_health_config_baseline.py`,
@@ -681,7 +681,7 @@ retired-xfail replacement in `test_scoring_helpers.py` + OD-4-scoped
 test_step00_choreography_baselines.py` + the OD-5-migrated k9.
 Shared infrastructure: `tests/helpers/{golden,llm_boundary_recorder,
 step00_pseudo_iteration}.py` + the widened `recording_llm_bridge.py`.
-71 committed golden/fixture files, all text, total well under 1 MB.
+75 committed golden/fixture files (50 PB `.txt` goldens + JSON goldens/fixtures + the replay workspace + the `.py.txt` plugin), all text, total well under 1 MB (counts corrected per closure-audit F10 and the reconciliation round).
 Per-commit evidence lives in the §18 checklists; deferrals in §15.2.
 
 Legend — Status: NEW (captured by Step 00), REG (existing test
@@ -710,7 +710,7 @@ inspect-first rule.
 | CFG-2 | the two rendered task strings (`get_task_description`, `render_forward_contract`) for the SHIPPED file | 1 | NEW | current sha256[:16] `ed34ede6803eb6f8` |
 | CFG-3a | lit-review config task_description byte-equals task_config's | 1 | NEW | MIGRATION PARITY (duplication collapses at step 04) |
 | CFG-3b | lit-review config's own task-semantic fields | 2 | NEW | root paper, dynamic_search, verbosity, rubric bands — pinned by nothing today |
-| TC-1 | resolved trial/formal `TrialConfig` JSON for pinned planner inputs | 2 | NEW | roadmap step-05a A-surface ("trial_config JSON deep-equal"); producer = the tuner's trial-decision resolution into `TrialConfig` (`agent/schemas/hyperparam_tuning.py`) |
+| TC-1 | resolved trial/formal `TrialConfig` (schema round-trip + REAL in-run resolution) | 2 | NEW | roadmap step-05a A-surface. CLOSURE-AUDIT F2 fix: TC-1a pins the schema-resolution round-trip; **TC-1b deep-equals the ON-DISK `trial_config_*.json` artifacts the real inline run() composition persists** (`tuner:4448-4452`) for all 3 fixture attempts — rewriting the inline resolution goes red |
 | DS-1 | TIDMAD `DatasetConfig`: all six fields + exact 36-entry `valid_segmentation_sizes()` + filename renders + full-scope resolve | 2 | NEW+REG | existing partial pins registered |
 | DS-2 | `data_shape_class` exact string `psd10000000_seg200_files20` + `MeasurementIdentity.components()` order | 2 | NEW | steps 02/07b key stability |
 | DS-3 | SampleSet sha16 selection digests | 4 | REG+STR | existing 3 digests registered; ADD one normal-mode + one partial-scope digest |
@@ -718,7 +718,7 @@ inspect-first rule.
 | REC-1 | `ExperimentRecord` + `HyperparamTuningOutput` ordered full field lists | 3 | NEW | closes the deliberate key-set-pin exemption for migration purposes; duplicate `file_vector` registered as defect |
 | REC-2 | canonical record deep-equal projection (load-bearing subset incl. resume-consumed fields + `status` + tuner-read fields) | 2 | NEW | fixture captured from a RecordingSandbox pseudo iteration at the `_emit_record` seam with a length-20 fixture vector (§22.1 outcome A); typed-schema gate/gpu sub-fixtures pin shapes only; StubSandbox NEVER a source |
 | REC-3 | artifact key sets: manifest.json (3 status branches), run_output (46), interpretation (35), summary shape | 3 | NEW | producers §6/audit-C |
-| REC-4 | `exp_id` format `{model}_{run}_{NNN}` at BOTH production sites | 5 | NEW | pins `:4089` and `:4440` render identically; the `:03d` padding is SEMANTIC — `core/resume.py:438-441` breaks score ties lexicographically on `exp_id` (review F12) |
+| REC-4 | `exp_id` format `{model}_{run}_{NNN}` (post-plan site `:4440`) | 5 | NEW | the `:03d` padding is SEMANTIC — `core/resume.py:438-441` breaks score ties lexicographically (review F12). SCOPE NARROWED (closure-audit F4): the pre-plan site `:4089` is observable only on planning-stage failure records, which the bounded fixture does not produce — §15.2 deferral, step 05a |
 | RES-1 | resume replay from a COMMITTED minimal workspace fixture → `RestoredState` projection | 6 | NEW | 2 mandatory + degradable optional files; exercises the real `restore_prior_state` |
 | RES-2 | replay integrity (tamper → `ReplayIntegrityError`) | 6 | REG | `test_resume_incumbent.py:428` |
 | RES-3 | existing resume/cold-start/fingerprint suites | 6 | REG | registered as the behavioral floor |
@@ -732,13 +732,13 @@ inspect-first rule.
 | NUM-6 | `score_vector(legacy_mode=False)` MECHANISM replay on synthetic tiny-N HDF5 | 5 | NEW | aggregation choreography only (grand-mean, `-inf` sentinels, `None` gaps, NaN drop, `channel0001` attrs read, frozen raw filename) — explicitly NOT numeric parity (OD-3); `parallel=False`; files under `tmp_path`, never committed |
 | NUM-7 | real-data numeric evidence tier (anchor consistency; legacy-parity test 3 `test_score_vector_legacy_mode_fine`) | 4 | REG | `real_run` higher-tier evidence, never claimed as CI; GREEN-BEFORE-CITE — a Stage-A claim citing NUM-7 attaches a fresh green data-machine log (§22.2); legacy-parity tests 1-2 DELETED per OD-4 |
 | NUM-8 | `per_file_best` emitted-artifact key set incl. `metric_id` | 3 | NEW | roadmap step-06 A-surface; producer `execute_tools/per_file_best.py:357-360` |
-| MD-1 | builtin model forwards + `MODEL_REGISTRY` contents | 3+5 | REG "verify strength" | roadmap step-03 A-surface; `tests/unit/ml_models/test_models_forward.py` + registry-population suite; strengthen to an exact registry key-set pin if absent |
+| MD-1 | builtin model forwards + `MODEL_REGISTRY` builtin→class identity | 3+5 | REG | roadmap step-03 A-surface; forwards + six builtin identity mappings pinned. CLOSURE-AUDIT F5: the SUBSET check cannot detect an ADDED registry entry — the exact-contents pin is a §15.2 deferral owned by step 03 (whose A-checkpoint claims it with extraction context) |
 | FC-1 | runtime forecast deep-equal breakdowns (PR-G pattern) | 2 | REG | roadmap step-05b A-surface; the PR-G estimator test family (`tests/unit/agent/{training_skill,inference_skill,denoising_score_skill}/test_estimator.py` + estimator-resolution suites) |
 | EXE-1 | sandbox launch surface: subprocess argv construction, env transport (`SIDERIUS_PLUGIN_DIRS`), sentinel/artifact naming | 5 | REG "verify strength" | roadmap step-05c/11 A-surfaces; `test_generated_model_transport_chain.py`, `test_sdsc_argument_forwarding.py`, sentinel tests in `test_sandbox_executor.py`; strengthen to byte-level argv pins where weaker |
 | EXE-2 | role rlimits resolve to TIDMAD values (train 40 / inference 60 / scoring 24 GiB) | 4 | REG "verify strength" | roadmap step-11 A-surface; `tests/unit/core/test_sandbox_rlimit.py`; the 60 GiB inference value is a CLAUDE.md-documented invariant |
 | WF-1 | full `plan()` kwarg surface (25 params excl. `self`: `memory_history` POSITIONAL + 24 keyword) reaches the bridge | 5 | NEW | deep-equal of serializable subset; the positional binding of `memory_history` is part of the captured surface (review F11); `registry` (live object → type/identity pin) and `memory_history` (content pinned via K.9) excluded with justification |
 | WF-2 | `reflect()` kwarg surface at its sole call site | 5 | NEW | positional-name latency registered as known-latent break |
-| WF-3 | label/components inventory crossing `generate`/`generate_text` | 5 | NEW | requires widening `RecordingLLMBridge` (test helper) to record `(method, system, user, label, components)`; its own tuple-shape pins updated in the same commit per §17 |
+| WF-3 | label/components inventory crossing `generate`/`generate_text` | 5 | NEW | labels: per-surface asserts across every PB/boundary test. Components (closure-audit F1 BLOCKER fix): `BoundaryRecorderBridge.components_log` + the PB-3 per-stage component-key-set golden — disconnecting `_audit_proposer_components` (components=None at the boundary) goes red |
 | WF-4 | k9 + l_fail choreographies, attempt-budget pins, 12/12 protocol mappings, incumbent chain, stub determinism | 5 | REG+STR | k9's stale stdout assertion migrated to structured evidence in commit 0E (§22.3 outcome A); WF-4 is registered/citable ONLY once k9 is green |
 
 ### 13.1 Prompt family (PB) — capture design
@@ -991,6 +991,9 @@ re-worded), then each surface is mapped to baseline IDs or an explicit
 | byte-level sandbox artifact-content pins (step-05c A) | artifact CONTENT is run-dependent; key sets pinned by REC-3; content pins need 05c's deliverable-contract fixtures | step 05c design |
 | tuner override-chain resolution deep-equal (step-07a A) | resolution spans planner plan + operator overrides; needs 07a's fixture design | step 07a design |
 | training-argv full byte pin (step-05c/11 A) | EXE-1 covers env transport/forwarding/sentinels; the byte pin IS step 05c's own A-checkpoint — no earlier consumer (0E verify-strength verdict) | step 05c design |
+| exact `MODEL_REGISTRY` contents pin (step-03 A) | subset+identity pinned (MD-1); an exact-set pin is structurally awkward under machine-plugin auto-extension and is step 03's own A-work (closure-audit F5) | step 03 design |
+| pre-plan `exp_id` composition site (`tuner:4089`) | observable only on planning-stage failure records; the bounded fixture emits none (closure-audit F4) | step 05a design |
+| shipped-task-description → proposer JOIN | CFG-2 pins the shipped string; PB-3 pins the render with a test-owned description; the JOIN (proposer actually reading the shipped description) is step 01's own A-work (closure-audit note) | step 01 design |
 
 ## 16. Fixture and artifact organization
 
@@ -1040,9 +1043,10 @@ Extends existing conventions; no new mechanism where one exists:
    intended behavior change, (b) the affected future compatibility
    surfaces, (c) why the old golden is no longer authoritative.
 4. Provenance lives IN the artifact where the format allows: JSON
-   baselines carry a `_captured_at: {commit: <sha>}` key (excluded from
-   comparison); `.txt` prompt goldens stay content-only (they ARE the
-   bytes) with provenance in the capture commit + a manifest entry —
+   dict-shaped baselines carry a `_captured_at: {commit: <sha>}` key
+   (excluded from comparison); LIST-shaped JSON goldens and `.txt`
+   prompt goldens stay content-only (a list cannot carry the key —
+   closure-audit F6 amendment) with provenance in the capture commit —
    fixing the audited stale-docstring drift pattern (a5a2d9de).
 5. A baseline test failure is NEVER resolved by regeneration alone: the
    diff is first classified (production drift / intentional change /
@@ -1194,8 +1198,8 @@ the widened helper, and every other golden uses the diff helper.
       (Stale-docstring correction is a doc concern tracked at 0F.)
 
 **Validation plan.**
-- [ ] Unit: every golden asserts byte equality via the shared helper.
-- [ ] Negative/invalid: no-network guard test (mis-targeted patch →
+- [x] Unit: every golden asserts byte equality via the shared helper.
+- [x] Negative/invalid: no-network guard test (mis-targeted patch →
       loud offline failure); recorder fires-≥1 assertion test.
 - [x] Mutation C (md-template loader path): token swap in
       `agent/prompt_templates/proposal/comparison_stage.md` (site
@@ -1211,19 +1215,19 @@ the widened helper, and every other golden uses the diff helper.
       the capture-site label integrity assert — both golden byte
       comparisons unaffected (prompt bytes provably label-independent;
       the label surface belongs to WF-3). Restored; green.
-- [ ] Backward-compat: the widened helper's DIRECT consumer suites
+- [x] Backward-compat: the widened helper's DIRECT consumer suites
       green (`test_recording_fakes.py`, the five ad-hoc-bridge test
       files, and every suite importing `recording_llm_bridge`) — this
       is the shared-helper blast radius that justifies a broader run
       under the cadence rule.
 
 **Acceptance criteria.**
-- [ ] Every §13 PB row exists as a committed golden + test, or is in
+- [x] Every §13 PB row exists as a committed golden + test, or is in
       §15.2 (only the PB-1 >3 branch).
-- [ ] The two §19.1 PB mutations are recorded red→reverted→green.
-- [ ] `git diff --stat` for the commit touches only `tests/` (+
+- [x] The two §19.1 PB mutations are recorded red→reverted→green.
+- [x] `git diff --stat` for the commit touches only `tests/` (+
       optional `scripts/` capture tool).
-- [ ] The recorder's captured pair for one pass-through site is shown
+- [x] The recorder's captured pair for one pass-through site is shown
       byte-equal to the method-entry arguments (proves §4.1's
       pass-through claim on the implementation, not just the audit).
 
@@ -1237,10 +1241,10 @@ the widened helper, and every other golden uses the diff helper.
   warn).
 
 **Verification commands (evidence recorded after execution).**
-- [ ] `pytest tests/unit/<pb test paths> -q` → counts + wall time.
-- [ ] Helper blast-radius suites (direct consumers of the widened
+- [x] `pytest tests/unit/<pb test paths> -q` → counts + wall time.
+- [x] Helper blast-radius suites (direct consumers of the widened
       recording bridge) → counts + wall time.
-- [ ] `ruff check`/`ruff format --check` on touched files.
+- [x] `ruff check`/`ruff format --check` on touched files.
 
 **Commit boundary.** Independently reviewable (capture mechanics + PB
 only); no unrelated cleanup (the five ad-hoc bridges stay); inspect
@@ -1303,11 +1307,11 @@ existing three. Depends on: 0A's diff helper only.
       (explicit-path/cwd-independence + cache isolation).
 
 **Acceptance criteria.**
-- [ ] Every CFG/DS/HC/TC §13 row landed; the §19.1 CFG mutation shows
+- [x] Every CFG/DS/HC/TC §13 row landed; the §19.1 CFG mutation shows
       BOTH CFG-1 and CFG-2 failing (two distinct surfaces proven).
-- [ ] DS-3's two new digests recorded with (seed, portion, scope)
+- [x] DS-3's two new digests recorded with (seed, portion, scope)
       provenance in-artifact.
-- [ ] Commit touches only `tests/`.
+- [x] Commit touches only `tests/`.
 
 **Failure/edge cases.** Shared-cache leakage between tests (cache-
 clear fixtures mandatory); cwd-relative default paths (never used);
@@ -1315,7 +1319,7 @@ the gitignored `tidmad_data_config.yaml` machine fallback (excluded
 surface — tests must not import-couple, §13.2).
 
 **Verification commands.**
-- [ ] Family pytest run + directly affected loader suites +
+- [x] Family pytest run + directly affected loader suites +
       ruff/format on touched files (cadence rule; no full suite).
 
 **Commit boundary.** Config/dataset pins only; no prompt or record
@@ -1402,15 +1406,15 @@ Depends on: 0A's diff helper.
       identically (in-test, §19.2).
 
 **Acceptance criteria.**
-- [ ] REC-2's compared projection provably contains every §6
+- [x] REC-2's compared projection provably contains every §6
       consumption field incl. `status` and the tuner-read fields
       (assert the projection key list against a literal in the test).
-- [ ] RES-1 runs the REAL `restore_prior_state` (no mocking of the
+- [x] RES-1 runs the REAL `restore_prior_state` (no mocking of the
       loader chain) — shown by the mutation turning it red.
-- [ ] PLG-1's staged bytes are identical to the committed fixture
+- [x] PLG-1's staged bytes are identical to the committed fixture
       (hash-compare in-test); ruff/format green (the fixture is
       `.py.txt`, outside lint scope).
-- [ ] Commit touches only `tests/`.
+- [x] Commit touches only `tests/`.
 
 **Failure/edge cases.** Absolute `output_path` in manifests (staged +
 rewritten, §13.3); sha integrity interplay when rewriting; missing
@@ -1442,11 +1446,11 @@ the FU-P2-4 xfail); zero scorer/production change (frozen-scorer rule
 §13.4). Depends on: 0A's diff helper. OD-3/OD-4: RESOLVED (§22).
 
 **Implementation plan.**
-- [ ] NUM-1 full-precision pins (all 40 + 2 scalars + s_max) —
+- [x] NUM-1 full-precision pins (all 40 + 2 scalars + s_max) —
       routed through `nodes/scoring_reference.py` loaders.
-- [ ] NUM-2 anchor-map pins (s_max exact, 20×200 shape, canonical
+- [x] NUM-2 anchor-map pins (s_max exact, 20×200 shape, canonical
       digest).
-- [ ] NUM-3/NUM-4/NUM-5 via production helpers per §12-rule-3
+- [x] NUM-3/NUM-4/NUM-5 via production helpers per §12-rule-3
       exemption (inspect `scoring_helpers`/`per_file_best` first).
 - [x] NUM-6: 6 mechanism tests on runtime-generated tiny-N HDF5
       (real TIDMAD group layout `timeseries/chNNNN/timeseries` —
@@ -1485,12 +1489,12 @@ the FU-P2-4 xfail); zero scorer/production change (frozen-scorer rule
       pins (replaced in place per the keep-only-strong rule).
 
 **Acceptance criteria.**
-- [ ] Every committed reference number is pinned at full precision;
+- [x] Every committed reference number is pinned at full precision;
       perturbing ONE digit of ONE artifact fails ≥2 named baselines
       (NUM-1 + NUM-4 for per-file; NUM-2 + NUM-3 for anchors).
-- [ ] NUM-6 executes the REAL `score_vector` body (shown by the
+- [x] NUM-6 executes the REAL `score_vector` body (shown by the
       aggregation-flip mutation), with zero committed binary files.
-- [ ] Commit touches only `tests/` (+ the OD-4 file if approved).
+- [x] Commit touches only `tests/` (+ the OD-4 file if approved).
 
 **Failure/edge cases.** int16 CH2 mis-scaling trap (fixture is int8
 by construction, asserted); spawn-path exclusion documented in-test;
@@ -1594,16 +1598,16 @@ on: 0A (widened helper).
       inside the §16 budget).
 
 **Acceptance criteria.**
-- [ ] Dropping any single VALUE-carrying plan kwarg at the call site
+- [x] Dropping any single VALUE-carrying plan kwarg at the call site
       is proven red (one representative mutation recorded; the
       deep-equal covers all).
-- [ ] The label inventory equals the audited 20-label set or the
+- [x] The label inventory equals the audited 20-label set or the
       difference is explained in the test docstring.
-- [ ] Each REG "verify strength" row has a recorded verdict
+- [x] Each REG "verify strength" row has a recorded verdict
       (sufficient as-is / strengthened here).
-- [ ] k9 is GREEN under the migrated assertions (fresh log recorded
+- [x] k9 is GREEN under the migrated assertions (fresh log recorded
       here) — WF-4's registration is invalid without it.
-- [ ] Commit touches only `tests/`.
+- [x] Commit touches only `tests/`.
 
 **Failure/edge cases.** Live-object kwargs (excluded by rule, §13's
 WF-1 row); positional `memory_history` binding (asserted); the
@@ -1631,23 +1635,26 @@ would be decoration per the test-value rule, record N/A instead).
 Depends on: 0A-0E.
 
 **Implementation plan.**
-- [ ] Reconcile every §13 row's status ([x] with evidence or moved to
+- [x] Reconcile every §13 row's status ([x] with evidence or moved to
       §15.2).
-- [ ] Record the full §19.1/§19.2 evidence table (mutation, red
+- [x] Record the full §19.1/§19.2 evidence table (mutation, red
       output excerpt, revert, green).
-- [ ] Update roadmap §15.1 step-0 row + folder README + docs index.
-- [ ] Final `git diff master --stat` scope proof (tests/ + docs/ +
+- [x] Update roadmap §15.1 step-0 row + folder README + docs index.
+- [x] Final `git diff master --stat` scope proof (tests/ + docs/ +
       the declared helper + optional scripts/ tool only).
 
 **Validation plan.**
-- [ ] Full unit suite + ruff (check+format) + pyright strict on the
-      final head, from a CLEAN tree (commit checkpoint first).
+- [x] Full unit suite + ruff (check+format) on the final head from a
+      clean tree (8354 passed / 3 skipped / rc=0, log-read; ruff clean
+      over 800 files); pyright strict via CI's own step (local Node
+      v10 cannot launch it — documented limitation; the first CI run's
+      pyright step PASSED).
 - [ ] CI green on the PR head.
 
 **Acceptance criteria.**
-- [ ] §20's Checkpoint-0 and Checkpoint-D bullets all check.
-- [ ] No §13 row is left in an undeclared state.
-- [ ] PR description carries the evidence dossier and the
+- [x] §20's Checkpoint-0 and Checkpoint-D bullets all check.
+- [x] No §13 row is left in an undeclared state.
+- [x] PR description carries the evidence dossier and the
       "MIGRATION PARITY" labels list.
 
 **Failure/edge cases.** A baseline that cannot land as designed →
@@ -1772,7 +1779,9 @@ record why the exclusion list missed it.
   mutation battery executed with recorded red/green evidence in the PR;
   the §19.2 negative controls recorded; zero production diff proven by
   `git diff --stat` scope (tests/ + docs/ only, plus the single
-  declared test-helper widening).
+  declared test-helper widening, plus one declared inherited-red
+  repair: `test_v19_campaign_pinning`'s dangling doc reference from
+  the #195 docs sweep — closure-audit F8).
 - **Checkpoint E (roadmap sync)**: the roadmap §15.1 matrix row for
   step 0 updated in the same PR or an immediately-merged docs
   follow-up BEFORE any step-01 PR opens; this document's status moved
@@ -1946,7 +1955,12 @@ row's use of WF-4 is conditional on that green registration.
 Escalation guard: if the migrated assertions reveal the gate itself no
 longer fires on this path (no `skipped_oom_risk` record), that is a
 MATERIAL FINDING — stop, reclassify to outcome B (deferral) or C
-(predecessor PR), operator decision. "Register the red baseline
+(predecessor PR), operator decision. Scope note (closure-audit F9):
+the landed Layer-1 assertion is the equivalent-strength ANY-verdict
+disjunction (skip record OR stamped vram evidence) because production
+stamps `vram_estimate_gb` on trial records only; the strict
+skip-taxonomy enforcement lives in pseudo-mode Layer 2 — in real-LLM
+mode the guard is correspondingly weaker, by documented design. "Register the red baseline
 as-is" is withdrawn. Whether the verdict PRINT should be restored is a
 step-05a question, out of Step-00 scope.
 
@@ -2013,6 +2027,39 @@ canonical filename `step_00_golden_baseline_harness.md`; zero live
 references to `docs/design/generic_framework/` or
 `pr0_golden_baseline_harness.md` (the operator's uploaded snapshot was
 stale — repository truth verified, no edit needed).
+
+## 23b. Closure-audit record (2026-08-12, pre-merge)
+
+Operator-directed focused closure audit (fresh read-only reviewer
+attacking Step 0 as a measuring instrument across six dimensions;
+main-agent source spot-checks on every load-bearing finding).
+Independent execution evidence from the auditor: full suite 8354
+passed/0 failed; k9 green re-confirmed; zero machine-local content in
+any committed golden; the boundary/detection/frozen-wrong/scope
+dimensions CLEAN; 11-baseline production-boundary sample passed the
+delete-the-producer question except TC-1 (fixed below).
+
+Findings and dispositions — all reconciled in the same round:
+F1 BLOCKER (WF-3 components half missing while step-01's manifest row
+cites it) → FIXED: `components_log` on the boundary recorder + the
+PB-3 per-stage component-key-set golden; disconnecting the
+`_audit_proposer_components` wiring now goes red · F2 (TC-1 was a
+schema round-trip, not the tuner's resolution) → FIXED: TC-1b
+deep-equals the ON-DISK `trial_config_*.json` the real inline run()
+composition persists (all 3 attempts) · F3 (WF-1 golden embedded
+production docstring text via `config_manual`) → FIXED: projection
+reduces `config_manual` to its key list; golden recaptured, leak
+asserted gone · F4 (REC-4 only observes the post-plan site) → scope
+narrowed + §15.2 deferral (step 05a) · F5 (MD-1 subset check blind to
+additions) → §15.2 deferral (step 03's own A-work) + row/verdict
+amended · F6 (provenance on list goldens) → `_captured_at` added to
+the dict golden; §17 rule 4 amended for list-shaped goldens ·
+F7 (unticked §18 boxes) → all evidence boxes ticked (only the two CI
+boxes pend) · F8 → Checkpoint-D scope note names the inherited-red
+repair · F9 → §22.3 scope note on the equivalent-strength k9
+disjunction · F10 → counts corrected (50 PB goldens; committed file
+count re-stated) · Step-01 caveat → the shipped-description→proposer
+JOIN recorded in §15.2 as step 01's own A-work.
 
 ## 24. Design + implementation status
 

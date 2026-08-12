@@ -239,6 +239,7 @@ class _CannedProposerBridge(BoundaryRecorderBridge):
         components=None,
     ) -> dict:
         self.captures.append(("_chat_json", label, system_prompt, user_prompt))
+        self._log_components(label, components)
         if label == "proposer.comparison":
             return {
                 "comparisons": [],
@@ -293,6 +294,7 @@ def run_pipeline(tmp_path, index_path: str, mode: str):
         capability_index_path=index_path,
     )
     agent.run(inp)
+    run_pipeline._last_components_log = list(agent.bridge.components_log)
     return agent.bridge.captures
 
 
@@ -337,6 +339,36 @@ class TestPB3PipelineProposer:
                 GOLDENS / f"pb3_{stem}_user.txt",
                 surface=f"PB-3 {label} user prompt (mode-invariance)",
             )
+
+
+class TestWF3ComponentsInventory:
+    def test_pipeline_components_key_sets(self, tmp_path, pinned_env):
+        """WF-3 second half (closure-audit F1): the ``components``
+        char-count breakdown crossing ``generate`` at every pipeline
+        stage. Production wires ``_audit_proposer_components`` output
+        into each stage call (`ml_model_proposal_agent.py:1688,1696,
+        1979`); deleting that wiring makes ``components=None`` reach the
+        boundary and this golden goes red. Key sets only — the values
+        are char counts that legitimately move with any fixture edit."""
+        from tests.helpers.golden import assert_json_golden
+
+        caps = run_pipeline(tmp_path, pinned_env, "explore")
+        assert len(caps) == 3
+        bridge_log = run_pipeline._last_components_log
+        assert [label for label, _keys in bridge_log] == [
+            "proposer.comparison",
+            "proposer.causal_reasoning",
+            "proposer.proposing",
+        ]
+        assert all(keys is not None for _label, keys in bridge_log), (
+            "components=None reached the boundary — the "
+            "_audit_proposer_components wiring is disconnected"
+        )
+        assert_json_golden(
+            [{"label": label, "component_keys": keys} for label, keys in bridge_log],
+            GOLDENS / "wf3_proposer_components_key_sets.json",
+            surface="WF-3 proposer components inventory",
+        )
 
 
 _FIXTURE_REASONING = (
