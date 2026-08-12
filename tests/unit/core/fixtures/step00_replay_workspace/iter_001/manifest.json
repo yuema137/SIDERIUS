@@ -1,0 +1,9 @@
+{
+  "status": "completed",
+  "iteration_dir": "iter_001",
+  "output_path": "iter_001/iteration_001/pe_wavenet_delta/run_output_iter_001.json",
+  "model_name": "pe_wavenet_delta",
+  "best_score": 0.5,
+  "completed_rounds": 3,
+  "run_output_sha256": null
+}

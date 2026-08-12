@@ -1,0 +1,94 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from pydantic import BaseModel, Field, model_validator
+from typing import Self
+
+
+PLUGIN_MODEL_TYPE = "compact_wavenet_ce_coldstart_v1"
+
+
+class CompactWavenetCeColdstartV1Config(BaseModel):
+    model_type: str = Field(default="compact_wavenet_ce_coldstart_v1", description="Plugin model type key.")
+    segmentation_size: int = Field(default=2000, ge=1)
+    batch_size: int = Field(default=16, ge=1)
+    embedding_dim: int = Field(default=32, ge=8, le=256)
+    residual_channels: int = Field(default=64, ge=16, le=256)
+    gate_channels: int = Field(default=64, ge=16, le=256)
+    skip_channels: int = Field(default=32, ge=8, le=256)
+    num_blocks: int = Field(default=6, ge=1, le=12)
+    kernel_size: int = Field(default=2, ge=2, le=8)
+    use_bias: bool = Field(default=True)
+    dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    @model_validator(mode='after')
+    def check_constraints(self):
+        return self
+
+PLUGIN_CONFIG_CLASS = CompactWavenetCeColdstartV1Config
+
+
+class CompactWavenetCeColdstartV1(nn.Module):
+    def __init__(self, config: "CompactWavenetCeColdstartV1Config"):
+        super().__init__()
+        self.embedding_dim = config.embedding_dim
+        self.residual_channels = config.residual_channels
+        self.gate_channels = config.gate_channels
+        self.skip_channels = config.skip_channels
+        self.num_blocks = config.num_blocks
+        self.kernel_size = config.kernel_size
+        self.use_bias = config.use_bias
+        self.dropout_p = config.dropout
+        self.num_classes = 256
+        self.embedding = nn.Embedding(self.num_classes, self.embedding_dim)
+        self.input_proj = nn.Conv1d(self.embedding_dim, self.residual_channels, kernel_size=1, bias=self.use_bias)
+        self.dilations = [2 ** i for i in range(self.num_blocks)]
+        self.dilated_convs = nn.ModuleList([
+            nn.Conv1d(
+                self.residual_channels,
+                2 * self.gate_channels,
+                kernel_size=self.kernel_size,
+                dilation=self.dilations[i],
+                bias=self.use_bias,
+            )
+            for i in range(self.num_blocks)
+        ])
+        self.res_projs = nn.ModuleList([
+            nn.Conv1d(self.gate_channels, self.residual_channels, kernel_size=1, bias=self.use_bias)
+            for _ in range(self.num_blocks)
+        ])
+        self.skip_projs = nn.ModuleList([
+            nn.Conv1d(self.gate_channels, self.skip_channels, kernel_size=1, bias=self.use_bias)
+            for _ in range(self.num_blocks)
+        ])
+        self.dropout = nn.Dropout(self.dropout_p)
+        self.head_conv1 = nn.Conv1d(self.skip_channels, self.skip_channels, kernel_size=1, bias=self.use_bias)
+        self.head_conv2 = nn.Conv1d(self.skip_channels, self.num_classes, kernel_size=1, bias=self.use_bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # forward contract: input [B, T] int64 → output [B, 256, T] float32
+        x = x.long()
+        h = self.embedding(x)
+        h = h.transpose(1, 2)
+        r = self.input_proj(h)
+        skip_sum = None
+        for i in range(self.num_blocks):
+            pad_left = self.dilations[i] * (self.kernel_size - 1)
+            r_pad = F.pad(r, (pad_left, 0))
+            u = self.dilated_convs[i](r_pad)
+            u_f, u_g = u.chunk(2, dim=1)
+            z = torch.tanh(u_f) * torch.sigmoid(u_g)
+            z = self.dropout(z)
+            delta = self.res_projs[i](z)
+            s_i = self.skip_projs[i](z)
+            r = r + delta
+            skip_sum = s_i if skip_sum is None else (skip_sum + s_i)
+        h = F.relu(skip_sum)
+        h = self.head_conv1(h)
+        h = F.relu(h)
+        h = self.dropout(h)
+        h = self.head_conv2(h)
+        return h.float()
+
+
+PLUGIN_MODEL_CLASS = CompactWavenetCeColdstartV1
+PLUGIN_OUTPUT_TYPE = "classifier"  # [B, 256, T] → 256-class classification

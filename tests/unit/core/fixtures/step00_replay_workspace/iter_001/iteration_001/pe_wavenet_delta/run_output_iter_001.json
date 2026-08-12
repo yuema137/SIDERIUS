@@ -1,0 +1,12 @@
+{
+  "run_name": "iter_001",
+  "model_type": "pe_wavenet_delta",
+  "file_index": 6,
+  "status": "completed",
+  "completed_rounds": 3,
+  "total_attempts": 5,
+  "best_exp_id": "pe_wavenet_delta_iter_001_001",
+  "best_denoising_score": 0.5,
+  "started_at": "2026-04-27T10:00:00",
+  "finished_at": "2026-04-27T11:00:00"
+}

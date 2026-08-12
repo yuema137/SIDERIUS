@@ -1,0 +1,395 @@
+{
+  "_captured_at": {
+    "commit": "e9c9e91e3d53181b5e36429174438e4eca06d2a1",
+    "note": "captured at clean tree (Step-00 0C capture); design \u00a717 rule 4"
+  },
+  "record_type": "experiment",
+  "exp_id": "<present>",
+  "status": "success",
+  "model_type": "pe_wavenet_delta",
+  "candidate_id": null,
+  "timestamp": "<present>",
+  "file_index": 6,
+  "params": {
+    "exp_id": "<present>",
+    "run_name": "<present>",
+    "model_type": "pe_wavenet_delta",
+    "model_config": {
+      "model_type": "pe_wavenet_delta",
+      "segmentation_size": 1000,
+      "batch_size": 1,
+      "hidden_dim": 128
+    },
+    "train_config": {
+      "lr": 0.0001,
+      "epochs": 1,
+      "batch_size": 1,
+      "optimizer_type": "adamw",
+      "weight_decay": 1e-05,
+      "device": "cuda"
+    },
+    "loss_config": {
+      "loss_type": "ce",
+      "reduction": "mean",
+      "use_class_weights": false
+    },
+    "inference_batch": 64
+  },
+  "logical_round": null,
+  "attempt_index": null,
+  "failure_stage": null,
+  "failure_type": null,
+  "proposed_config": null,
+  "gpu_evidence": null,
+  "failure_attribution": null,
+  "traceback_summary": null,
+  "counts_toward_completed_rounds": null,
+  "counts_toward_attempt_budget": true,
+  "final_loss": 0.5712,
+  "loss_history": [
+    1.532,
+    1.041,
+    0.812,
+    0.6431,
+    0.5712
+  ],
+  "model_params": 98432,
+  "denoising_score": 0.65,
+  "file_vector": [
+    0.45,
+    0.45,
+    0.45,
+    0.45,
+    0.45,
+    0.65,
+    0.65,
+    0.65,
+    0.65,
+    0.65,
+    0.65,
+    0.85,
+    0.85,
+    0.85,
+    0.85,
+    0.85,
+    0.85,
+    0.85,
+    0.85,
+    0.85
+  ],
+  "score_table": {
+    "rows": [
+      {
+        "file_index": 0,
+        "raw_baseline": -11.44018140741106,
+        "ground_truth": -8.260971502899364,
+        "model": -0.48044110036057064,
+        "gain_vs_raw": 10.95974030705049,
+        "headroom_vs_gt": 0.0,
+        "linear_weight": 0.03260869565217391,
+        "impact_score": 0.0
+      },
+      {
+        "file_index": 1,
+        "raw_baseline": -11.948617948347023,
+        "ground_truth": -9.373732984874882,
+        "model": -0.48044110036057064,
+        "gain_vs_raw": 11.468176847986452,
+        "headroom_vs_gt": 0.0,
+        "linear_weight": 0.03260869565217391,
+        "impact_score": 0.0
+      },
+      {
+        "file_index": 2,
+        "raw_baseline": -10.30801894434243,
+        "ground_truth": -4.684699065264205,
+        "model": -0.48044110036057064,
+        "gain_vs_raw": 9.82757784398186,
+        "headroom_vs_gt": 0.0,
+        "linear_weight": 0.03260869565217391,
+        "impact_score": 0.0
+      },
+      {
+        "file_index": 3,
+        "raw_baseline": -6.679410780737672,
+        "ground_truth": 0.09191762649534234,
+        "model": -0.48044110036057064,
+        "gain_vs_raw": 6.198969680377101,
+        "headroom_vs_gt": 0.5723587268559129,
+        "linear_weight": 0.03260869565217391,
+        "impact_score": 0.030395306391962473
+      },
+      {
+        "file_index": 4,
+        "raw_baseline": -2.92605420089486,
+        "ground_truth": 4.941370563632354,
+        "model": -0.48044110036057064,
+        "gain_vs_raw": 2.445613100534289,
+        "headroom_vs_gt": 5.421811663992925,
+        "linear_weight": 0.03260869565217391,
+        "impact_score": 3.3643507546161464
+      },
+      {
+        "file_index": 5,
+        "raw_baseline": -1.8655721306860713,
+        "ground_truth": 7.461660298695126,
+        "model": -0.25919076197300633,
+        "gain_vs_raw": 1.606381368713065,
+        "headroom_vs_gt": 7.720851060668132,
+        "linear_weight": 0.04710144927536232,
+        "impact_score": 5.882498705249278
+      },
+      {
+        "file_index": 6,
+        "raw_baseline": -0.48380402721712784,
+        "ground_truth": 6.562305361173452,
+        "model": -0.25919076197300633,
+        "gain_vs_raw": 0.2246132652441215,
+        "headroom_vs_gt": 6.821496123146459,
+        "linear_weight": 0.04710144927536232,
+        "impact_score": 4.983256272998393
+      },
+      {
+        "file_index": 7,
+        "raw_baseline": -0.008400978976049108,
+        "ground_truth": 6.921165512569271,
+        "model": -0.25919076197300633,
+        "gain_vs_raw": -0.2507897829969572,
+        "headroom_vs_gt": 7.1803562745422775,
+        "linear_weight": 0.04710144927536232,
+        "impact_score": 5.342051271772455
+      },
+      {
+        "file_index": 8,
+        "raw_baseline": 0.2964351203935588,
+        "ground_truth": 7.7323832419060645,
+        "model": -0.25919076197300633,
+        "gain_vs_raw": -0.5556258823665652,
+        "headroom_vs_gt": 7.991574003879071,
+        "linear_weight": 0.04710144927536232,
+        "impact_score": 6.153209859431983
+      },
+      {
+        "file_index": 9,
+        "raw_baseline": 0.4707612789583073,
+        "ground_truth": 8.180288847136051,
+        "model": -0.25919076197300633,
+        "gain_vs_raw": -0.7299520409313136,
+        "headroom_vs_gt": 8.439479609109057,
+        "linear_weight": 0.04710144927536232,
+        "impact_score": 6.601104572459529
+      },
+      {
+        "file_index": 10,
+        "raw_baseline": 0.6754418312176024,
+        "ground_truth": 8.651924521071505,
+        "model": -0.25919076197300633,
+        "gain_vs_raw": -0.9346325931906088,
+        "headroom_vs_gt": 8.911115283044511,
+        "linear_weight": 0.04710144927536232,
+        "impact_score": 7.072734891454444
+      },
+      {
+        "file_index": 11,
+        "raw_baseline": -0.06538754235075349,
+        "ground_truth": 8.808778170918506,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -0.032395827411581965,
+        "headroom_vs_gt": 8.906561540680842,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 7.229587455835067
+      },
+      {
+        "file_index": 12,
+        "raw_baseline": 0.36097169113878685,
+        "ground_truth": 10.116534257425393,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -0.4587550609011223,
+        "headroom_vs_gt": 10.214317627187729,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 8.53734051609943
+      },
+      {
+        "file_index": 13,
+        "raw_baseline": 1.3150384346271444,
+        "ground_truth": 9.708503403725546,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.4128218043894798,
+        "headroom_vs_gt": 9.806286773487882,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 8.129310039356358
+      },
+      {
+        "file_index": 14,
+        "raw_baseline": 1.6726513800913516,
+        "ground_truth": 10.194889450431186,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.770434749853687,
+        "headroom_vs_gt": 10.292672820193522,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 8.615695661665352
+      },
+      {
+        "file_index": 15,
+        "raw_baseline": 1.5108382921224444,
+        "ground_truth": 10.32048652097345,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.6086216618847797,
+        "headroom_vs_gt": 10.418269890735786,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 8.74129266794932
+      },
+      {
+        "file_index": 16,
+        "raw_baseline": 1.5429389954678931,
+        "ground_truth": 10.708954927248902,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.6407223652302285,
+        "headroom_vs_gt": 10.806738297011238,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 9.12976094254909
+      },
+      {
+        "file_index": 17,
+        "raw_baseline": 1.8325764929473227,
+        "ground_truth": 11.221261756675732,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.930359862709658,
+        "headroom_vs_gt": 11.319045126438068,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 9.642067688778628
+      },
+      {
+        "file_index": 18,
+        "raw_baseline": 1.7313539958039308,
+        "ground_truth": 11.02153354568228,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.8291373655662662,
+        "headroom_vs_gt": 11.119316915444616,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 9.442339502172178
+      },
+      {
+        "file_index": 19,
+        "raw_baseline": 1.0027175698789683,
+        "ground_truth": 10.567642717789957,
+        "model": -0.09778336976233545,
+        "gain_vs_raw": -1.1005009396413037,
+        "headroom_vs_gt": 10.665426087552293,
+        "linear_weight": 0.06159420289855072,
+        "impact_score": 8.988448771514804
+      }
+    ],
+    "aggregate": {
+      "raw_baseline_scalar": 1.0006820423449074,
+      "ground_truth_scalar": 10.113400947352815,
+      "model_scalar": 0.65,
+      "percent_of_ceiling_log": 0.0642711589685503,
+      "num_sampled_files": 20
+    },
+    "s_max_global": 295715680.14248306,
+    "reference_source": "reference_data/raw_and_ground_score.md",
+    "rendered_markdown": "### Per-file performance (log-space, all three columns on global s_max)\n\n| file | raw_baseline | ground_truth | **model** | gain vs raw | headroom vs gt | Impact | Weight % |\n|-----:|-------------:|-------------:|----------:|------------:|---------------:|-------:|---------:|\n|    0 |     \u221211.4402 |      \u22128.2610 |   \u22120.4804 |     10.9597 |         0.0000 | 0.0000 |     3.3% |\n|    1 |     \u221211.9486 |      \u22129.3737 |   \u22120.4804 |     11.4682 |         0.0000 | 0.0000 |     3.3% |\n|    2 |     \u221210.3080 |      \u22124.6847 |   \u22120.4804 |      9.8276 |         0.0000 | 0.0000 |     3.3% |\n|    3 |      \u22126.6794 |       0.0919 |   \u22120.4804 |      6.1990 |         0.5724 | 0.0304 |     3.3% |\n|    4 |      \u22122.9261 |       4.9414 |   \u22120.4804 |      2.4456 |         5.4218 | 3.3644 |     3.3% |\n|    5 |      \u22121.8656 |       7.4617 |   \u22120.2592 |      1.6064 |         7.7209 | 5.8825 |     4.7% |\n|    6 |      \u22120.4838 |       6.5623 |   \u22120.2592 |      0.2246 |         6.8215 | 4.9833 |     4.7% |\n|    7 |      \u22120.0084 |       6.9212 |   \u22120.2592 |     \u22120.2508 |         7.1804 | 5.3421 |     4.7% |\n|    8 |       0.2964 |       7.7324 |   \u22120.2592 |     \u22120.5556 |         7.9916 | 6.1532 |     4.7% |\n|    9 |       0.4708 |       8.1803 |   \u22120.2592 |     \u22120.7300 |         8.4395 | 6.6011 |     4.7% |\n|   10 |       0.6754 |       8.6519 |   \u22120.2592 |     \u22120.9346 |         8.9111 | 7.0727 |     4.7% |\n|   11 |      \u22120.0654 |       8.8088 |   \u22120.0978 |     \u22120.0324 |         8.9066 | 7.2296 |     6.2% |\n|   12 |       0.3610 |      10.1165 |   \u22120.0978 |     \u22120.4588 |        10.2143 | 8.5373 |     6.2% |\n|   13 |       1.3150 |       9.7085 |   \u22120.0978 |     \u22121.4128 |         9.8063 | 8.1293 |     6.2% |\n|   14 |       1.6727 |      10.1949 |   \u22120.0978 |     \u22121.7704 |        10.2927 | 8.6157 |     6.2% |\n|   15 |       1.5108 |      10.3205 |   \u22120.0978 |     \u22121.6086 |        10.4183 | 8.7413 |     6.2% |\n|   16 |       1.5429 |      10.7090 |   \u22120.0978 |     \u22121.6407 |        10.8067 | 9.1298 |     6.2% |\n|   17 |       1.8326 |      11.2213 |   \u22120.0978 |     \u22121.9304 |        11.3190 | 9.6421 |     6.2% |\n|   18 |       1.7314 |      11.0215 |   \u22120.0978 |     \u22121.8291 |        11.1193 | 9.4423 |     6.2% |\n|   19 |       1.0027 |      10.5676 |   \u22120.0978 |     \u22121.1005 |        10.6654 | 8.9884 |     6.2% |\n\n### Aggregated scalar (log space, global s_max)\n\nSingle number per row \u2014 the `final_scalar` returned by `score_vector()` for each source. This is the only aggregation in the pipeline.\n\n| metric               | log scalar |\n|----------------------|-----------:|\n| ground_truth ceiling |    10.1134 |\n| **model**            | **0.6500** |\n| raw baseline         |     1.0007 |\n\nRecovery: < 0% (Model performance is below raw baseline).\n\n### Sampled files re-ranked by Impact_Score (descending)\n\nHighest-impact rows first \u2014 the marginal log-scalar gain available if each file were lifted to its ground-truth ceiling. Use this column to pick the next-iteration lever.\n\n| file | Impact | Weight % | headroom vs gt | model |\n|-----:|-------:|---------:|---------------:|------:|\n|   17 | 9.6421 |     6.2% |        11.3190 | \u22120.0978 |\n|   18 | 9.4423 |     6.2% |        11.1193 | \u22120.0978 |\n|   16 | 9.1298 |     6.2% |        10.8067 | \u22120.0978 |\n|   19 | 8.9884 |     6.2% |        10.6654 | \u22120.0978 |\n|   15 | 8.7413 |     6.2% |        10.4183 | \u22120.0978 |\n|   14 | 8.6157 |     6.2% |        10.2927 | \u22120.0978 |\n|   12 | 8.5373 |     6.2% |        10.2143 | \u22120.0978 |\n|   13 | 8.1293 |     6.2% |         9.8063 | \u22120.0978 |\n|   11 | 7.2296 |     6.2% |         8.9066 | \u22120.0978 |\n|   10 | 7.0727 |     4.7% |         8.9111 | \u22120.2592 |\n|    9 | 6.6011 |     4.7% |         8.4395 | \u22120.2592 |\n|    8 | 6.1532 |     4.7% |         7.9916 | \u22120.2592 |\n|    5 | 5.8825 |     4.7% |         7.7209 | \u22120.2592 |\n|    7 | 5.3421 |     4.7% |         7.1804 | \u22120.2592 |\n|    6 | 4.9833 |     4.7% |         6.8215 | \u22120.2592 |\n|    4 | 3.3644 |     3.3% |         5.4218 | \u22120.4804 |\n|    3 | 0.0304 |     3.3% |         0.5724 | \u22120.4804 |\n|    0 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    1 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    2 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |",
+    "linear_weight_total": 1.0
+  },
+  "failure_reason": null,
+  "gate_action": null,
+  "health_gate_results": [],
+  "scientific_authority": {
+    "healthgate_mode": null,
+    "declared_result_authority": null,
+    "formal_validity": "valid",
+    "blocking_reasons": [
+      "legacy_authority_unknown"
+    ],
+    "authoritative": false,
+    "primary_basis": "legacy_authority_unknown",
+    "enters_incumbent_selection": false,
+    "enters_scientific_aggregation": false
+  },
+  "training_psd_segments": 400,
+  "eval_psd_segments": 4000,
+  "timing": {
+    "train_time_s": "<present>",
+    "inference_time_s": "<present>",
+    "scoring_time_s": "<present>"
+  },
+  "memory": {
+    "expert_advice_followed": "<present>",
+    "hypothesis": "<present>",
+    "conclusion": "<present>",
+    "key_factor": "<present>",
+    "discovery": "<present>",
+    "memory_update": "<present>",
+    "time_estimate_minutes": null,
+    "time_budget_minutes": null,
+    "time_mode": null,
+    "vram_estimate_gb": null,
+    "vram_budget_gb": null,
+    "inference_batch_uncalibrated": null,
+    "inference_per_psd_seg_ms_measured": null,
+    "inference_warmup_aggregator": null,
+    "inference_n_timed_files": "<present>",
+    "inference_warmup_fraction": "<present>",
+    "inference_process_startup_ms": null,
+    "inference_ms_source": null,
+    "round_index": "<present>",
+    "attempt_in_round": "<present>"
+  },
+  "is_trial": false,
+  "trial_strategy": null,
+  "trial_portion": null,
+  "eval_strategy": null,
+  "eval_portion": null,
+  "train_portion": null,
+  "target_files": null,
+  "validation_workload_ceiling": {
+    "enabled": false,
+    "configured_ceiling": null,
+    "planned": {
+      "trial_portion": 0.1,
+      "train_portion": 1.0,
+      "eval_portion": 1.0
+    },
+    "resolved": {
+      "trial_portion": 0.1,
+      "train_portion": 1.0,
+      "eval_portion": 1.0
+    }
+  },
+  "resolved_data_scope": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19
+  ],
+  "health_gate_enabled": false,
+  "planned_trial_strategy": null,
+  "planned_eval_strategy": null,
+  "strategy_normalization_reason": null,
+  "proposed_order_strategy": null,
+  "proposed_file_order": null,
+  "ordering_proposal_rejected": false,
+  "ordering_proposal_rejection_reason": null,
+  "override_order_strategy": null,
+  "override_file_order": null,
+  "resolved_order_strategy": "shuffle",
+  "resolved_file_order": null,
+  "ordering_resolution_source": "default"
+}

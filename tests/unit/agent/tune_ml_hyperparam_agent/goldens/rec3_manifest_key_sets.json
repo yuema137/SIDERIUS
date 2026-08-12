@@ -1,0 +1,68 @@
+{
+  "_captured_at": {
+    "commit": "e9c9e91e3d53181b5e36429174438e4eca06d2a1",
+    "note": "captured at clean tree (Step-00 0C capture); design \u00a717 rule 4"
+  },
+  "completed": {
+    "status": "completed",
+    "keys": [
+      "best_score",
+      "best_valid_formal_score",
+      "best_valid_score",
+      "best_valid_trial_score",
+      "chain_incumbent_source",
+      "chain_incumbent_used",
+      "completed_rounds",
+      "fixed_candidate_provenance",
+      "formal_comparison_reference_source",
+      "formal_reference_score",
+      "health_checks_config",
+      "health_config_sha256",
+      "health_feedback_policy",
+      "health_gate_enabled",
+      "healthgate_mode",
+      "iteration_dir",
+      "model_name",
+      "ordering_by_experiment",
+      "output_path",
+      "preflight_execution_mode",
+      "raw_best_formal_score",
+      "raw_best_score",
+      "resolved_bypass_formal_threshold",
+      "resolved_data_scope",
+      "resolved_skip_formal_threshold",
+      "result_authority",
+      "status"
+    ]
+  },
+  "no_records": {
+    "status": "no_records",
+    "keys": [
+      "best_score",
+      "fixed_candidate_provenance",
+      "health_feedback_policy",
+      "healthgate_mode",
+      "iteration_dir",
+      "model_name",
+      "output_path",
+      "preflight_execution_mode",
+      "result_authority",
+      "status"
+    ]
+  },
+  "failed": {
+    "status": "failed",
+    "keys": [
+      "best_score",
+      "fixed_candidate_provenance",
+      "health_feedback_policy",
+      "healthgate_mode",
+      "iteration_dir",
+      "model_name",
+      "output_path",
+      "preflight_execution_mode",
+      "result_authority",
+      "status"
+    ]
+  }
+}

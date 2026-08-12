@@ -1306,31 +1306,69 @@ test file — inspect first and if it is production-adjacent, leave it).
 Depends on: 0A's diff helper.
 
 **Implementation plan.**
-- [ ] REC-1 ordered field lists (`ExperimentRecord`,
-      `HyperparamTuningOutput`).
-- [ ] Build the OD-2 fixture: capture one pseudo k9-style record,
-      normalize (strip `_pseudo_origin`, typed length-20
-      `file_vector`), add typed gate/gpu sub-fixtures; provenance
-      keys per §17-rule-4.
-- [ ] REC-2 projection deep-equal per §13.3's corrected field set.
-- [ ] REC-3 key-set pins (manifest 3 branches, run_output,
-      interpretation, summary shape) — inspect each producer first.
-- [ ] REC-4 both-site format pin.
-- [ ] RES-1 committed workspace + rewritten-header staging (§13.3);
-      assert the degradation ladder.
-- [ ] PLG-1 `.py.txt` fixture → `tmp_path` copy → real loader chain →
-      registries → tiny CPU forward `[B,T]→[B,256,T]`.
+- [x] REC-1: ExperimentRecord 54-field ordered list inline;
+      HyperparamTuningOutput/InterpretationOutput/TrialConfig ordered
+      lists as a JSON golden (capture-time assert proved the inline
+      list matches the live schema exactly).
+- [x] OD-2 fixture path landed BETTER than specified: a shared
+      bounded pseudo-iteration helper
+      (`tests/helpers/step00_pseudo_iteration.py`) runs the REAL tuner
+      (RecordingSandbox + RecordingLLMBridge, k9-shaped input) so
+      records flow through the live `_emit_record` seam; the pseudo
+      score fixture already carries length-20 vectors and
+      RecordingSandbox stamps nothing — ZERO normalization needed.
+      IMPLEMENTATION DISCOVERY: the tuner package's autouse unit guard
+      forbids the real isolated pre-flight worker; per its sanctioned
+      pattern the boundary is stubbed with
+      `fixtures/step00_preflight_results.json` — the three legacy
+      dicts captured from the REAL `run_production_preflight` during a
+      live pseudo run (path-free, machine-independent; also removes
+      k9's machine-calibrated-ceiling fragility from this test).
+      Typed gate/gpu sub-fixtures: deferred as unnecessary — the
+      three structurally-empty fields are presence-pinned by the
+      projection and shape-owned by their schemas' own suites
+      (recorded deviation, schema-shape claim unchanged).
+- [x] REC-2: formal-success AND OOM-skip projections as JSON goldens
+      (path-free, verified zero /home //tmp strings); volatile fields
+      presence-only; in-test negative control proves volatile-only
+      changes project identically.
+- [x] REC-3: manifest key sets for all 3 status branches via the
+      REAL `write_manifest` (completed branch consumes the pseudo
+      run's actual HyperparamTuningOutput); schema field lists (above);
+      summary artifact: LEDGER CORRECTION — `save_record` json-dumps
+      the RAW construction-site dict, so on-disk summary entries carry
+      the producing site's insertion-order key subset, NOT the 54-key
+      dump (previous assumption falsified by the first test run);
+      pinned as per-entry key-list golden + model_validate parse
+      contract.
+- [x] REC-4: format + zero-padding + strict ordering asserted on the
+      live-path records (both production sites render the same
+      f-string; tie-break dependency documented in the test).
+- [x] RES-1: committed workspace fixture
+      (`tests/unit/core/fixtures/step00_replay_workspace/`, 4 JSON
+      files, relative placeholders) staged + header-rewritten + sha
+      inserted; real `restore_prior_state` chain; full RestoredState
+      projection asserted; degradation ladder (no plugin + no digest →
+      UserWarning + empties). Plugin copied from the TRACKED
+      pe_wavenet_delta at stage time (no new committed .py).
+- [x] PLG-1: byte-identical `.py.txt` copy of the real PR-G campaign
+      plugin (sha256-verified against `.gate_artifacts` original at
+      staging and in-test); staged via SIDERIUS_PLUGIN_DIRS (the real
+      env transport) → extend_registries → config+model classes →
+      forward [1,64] int64 → [1,256,64] float32.
 
 **Validation plan.**
-- [ ] Unit: all above.
-- [ ] Negative/invalid: RES tamper mutation (corrupt sha →
-      `ReplayIntegrityError`); PLG attribute-strip mutation (loader
-      returns None).
-- [ ] Backward-compat: fixture validates under
-      `ExperimentRecord.model_validate` / `HyperparamTuningOutput
-      .model_validate` at test time (schema drift surfaces here).
-- [ ] Negative control (§19.2): volatile-only variant of the record
-      fixture passes REC-2 unchanged — recorded.
+- [x] Unit: 11 passed (0C family, 1.5 s incl. the bounded pseudo
+      iteration); directly affected suites (resume, cold-start,
+      plugin-loader, hyperparam schemas, recording fakes + family):
+      200 passed, 2.5 s.
+- [x] Negative/invalid: M3 sha tamper → ReplayIntegrityError; M4
+      layout break (iteration_001 renamed) → ResumeError; M5
+      PLUGIN_MODEL_CLASS strip → loader skips, zero loaded.
+- [x] Backward-compat: summary entries model_validate in-test; the
+      staged run_output parses through the real loader.
+- [x] Negative control: volatile-only record variant projects
+      identically (in-test, §19.2).
 
 **Acceptance criteria.**
 - [ ] REC-2's compared projection provably contains every §6
@@ -1349,9 +1387,10 @@ optional workspace files (warning-path assertions, not failures);
 plugin `sys.modules` registration/rollback (use the real loader's
 semantics, assert no residue).
 
-**Verification commands.** Family pytest run + directly affected
-suites (resume, plugin-loader, schema-pin suites) + ruff/format on
-touched files (cadence rule; no full suite).
+**Verification commands.** [x] Family + affected suites: 200 passed
+(2.5 s); mutations M1 (schema field rename → REC-1 red), M2 (canned
+plan lr → both REC-2 projections red), M3/M4/M5 above — all restored,
+family green after each; ruff check+format clean on touched files.
 
 **Commit boundary.** Record/resume/plugin only; inspect diff, record
 in ledger, commit autonomously.
