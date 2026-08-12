@@ -378,7 +378,7 @@ is unknown.
 - [x] **C4** dynamic SessionStart / resume injection.
 - [x] **C5** PR-scoped lifecycle (init / continuation / closeout).
 - [x] **C6** local registration migration + developer documentation.
-- [ ] **C7** adversarial validation, dry-run dossier, closeout.
+- [x] **C7** adversarial validation, dry-run dossier, closeout.
 
 Each phase records: Goal, Scope, Implementation, Validation,
 Acceptance, Failure cases, Evidence, Commit boundary.
@@ -797,3 +797,128 @@ teammate applies the doc's snippet once. `.gitignore` is unchanged and
 
 **Commit boundary.** Tracked documentation only. The registration edit is
 local runtime configuration and is intentionally not part of the commit.
+
+**Evidence.** `6e0b89ea`.
+
+### C7 — adversarial validation and closeout
+
+#### Mutation dossier — 9 of 9 caught, 0 survivors
+
+Hygiene per mutation: **exact occurrence count asserted (must be 1)**,
+file backed up in memory, mutation applied, named test run, RED required,
+file restored, test re-run and required GREEN. `__pycache__` cleared
+before every single run so a stale `.pyc` could not fake either verdict.
+Baseline confirmed green before the first mutation; working tree verified
+clean afterwards. **No mutation was committed.**
+
+| Mutation | What it breaks | Result |
+|---|---|---|
+| **M-C1** | accept a stale HEAD | **RED** → restored GREEN |
+| **M-C2** | disable the fingerprint comparison | **RED** → restored GREEN |
+| **M-C3** | make auto block like manual | **RED** → restored GREEN |
+| **M-C4** | remove the rescue-snapshot write | **RED** → restored GREEN |
+| **M-C5** | hardcode a historical project path | **RED** → restored GREEN |
+| **M-C6** | let a snapshot force recovery mode forever | **RED** → restored GREEN |
+| **M-C7** | remove CLOSED-context handling | **RED** → restored GREEN |
+| **M-C8** | point the template back under `.claude/` | **RED** → restored GREEN |
+| **M-C9** | exclude tracked hook source from the fingerprint | **RED** → restored GREEN |
+
+#### Dry-run dossier — against the REAL installation
+
+The live handoff was backed up and sha256-pinned before any deliberate
+staleness, and verified byte-identical after restoration.
+
+| # | Step | Result |
+|---|---|---|
+| 1 | manual guard on the current handoff | **exit 0**, "complete and current" |
+| 2 | HEAD made deliberately stale → **manual** | **exit 2**, BLOCKED, names the commit mismatch; **no rescue file written** |
+| 3 | same stale state → **auto** | **exit 0**, ALLOWED, rescue file written, stderr explains it is evidence not memory |
+| 4 | snapshot inspected by hand | schema `siderius.context_rescue/1`, real branch/HEAD/fingerprint, session id and transcript path from the payload, the handoff's own `0000…` stale HEAD, the failing condition, PR identity verbatim under "unverified" — **no summary, no next steps** |
+| 5 | handoff restored | `sha256sum -c` → **OK** (byte-identical) |
+| 6 | guard re-run | **exit 0** |
+| 7 | SessionStart with stale handoff + snapshot | **AUTO-COMPACT RECOVERY MODE** banner emitted |
+| 8 | SessionStart with current handoff + the SAME leftover snapshot | **no banner** — live proof of the state-derived precedence rule |
+| 9 | historical-literal scan of both injected outputs | **zero** occurrences of five historical literals |
+| 10 | registration audit | 6 hook commands, **all** referencing `tools/claude_hooks`, **none** referencing `.claude/hooks`; legacy files still present on disk |
+
+Step 1 initially reported exit 2 — correctly, because C5 and C6 had
+landed since the last handoff refresh. That is the system working on its
+own author, and the refresh was done before re-running rather than the
+step being reinterpreted.
+
+The dry-run rescue artifact was removed afterwards so a later genuine
+staleness cannot cite a test file as evidence.
+
+**Failure/edge cases exercised.** Deliberate HEAD staleness under both
+modes; a leftover snapshot against a healthy handoff; restoration
+verified by checksum rather than by inspection.
+
+**Commit boundary.** Design ledger only — the mutation driver lives in
+the scratchpad and is deliberately not tracked; it is a one-shot
+verification tool, not infrastructure.
+
+---
+
+## 5. The guarantee this PR actually makes
+
+Stated precisely, because the tempting overstatement — "it compacts
+safely at 95%" — describes a trigger that does not exist.
+
+**What is guaranteed:**
+
+- the semantic handoff is refreshed at normal implementation milestones,
+  **by the agent as part of its work** — no hook writes semantic content;
+- a **manual** compact refuses to run over a stale handoff and names
+  every failing condition;
+- an **automatic** compact **never deadlocks** on stale memory;
+- a stale automatic compaction produces a **deterministic mechanical
+  rescue snapshot**;
+- **resume** points the session at the PR that is actually active, read
+  from the handoff at run time;
+- the resumed agent is instructed to audit repository truth before
+  editing, and told the repository outranks the handoff;
+- a **CLOSED** context is never presented as an instruction to continue;
+- freshness is **state-derived** — HEAD, working-tree fingerprint and
+  branch versus what the handoff recorded — and never depends on having
+  observed a `git commit`.
+
+**What is NOT guaranteed, and why:**
+
+- **No context-percentage trigger.** Claude Code 2.1.228 exposes no such
+  event (§1.2 enumerates the full hook surface). Nothing here polls,
+  scrapes or infers remaining context.
+- **No protection against an agent that simply stops updating the
+  handoff.** The automatic fail-safe bounds the damage to "mechanical
+  evidence survives"; it cannot reconstruct reasoning nobody wrote down.
+- **Local pyright is unavailable** (Node v10.19.0); CI is the only
+  authority for type checking.
+
+## 6. Acceptance criteria
+
+- [x] tracked continuity logic under `tools/claude_hooks/`;
+- [x] tracked canonical template beside it;
+- [x] tracked unit tests under `tests/unit/tools/claude_hooks/`;
+- [x] developer documentation;
+- [x] `.claude/` remains ignored and untracked;
+- [x] `.gitignore` unchanged;
+- [x] local settings invoke the tracked code (6/6 commands);
+- [x] no duplicate ACTIVE implementation — the legacy hooks remain on
+      disk but unregistered;
+- [x] manual stale compact BLOCKS; manual current compact PASSES;
+- [x] auto stale compact PASSES with a mechanical rescue snapshot; auto
+      current compact PASSES without one;
+- [x] SessionStart resolves the current PR/design dynamically;
+- [x] zero historical hardcoding in active hook behaviour;
+- [x] a CLOSED PR does not reopen itself as the next PR's context;
+- [x] a new PR context initialises without prior-PR identity;
+- [x] compact/resume preserves PR identity;
+- [x] tracked hook edits affect the fingerprint;
+- [x] runtime continuity files do not recursively stale it;
+- [x] a fresh checkout works without `.claude/memory/...`;
+- [x] all 9 mutations RED and restored;
+- [x] dry-run matrix green;
+- [ ] full unit suite green from a clean tree;
+- [ ] ruff + format green repository-wide;
+- [ ] exact-head CI green (includes pyright);
+- [x] no Generic Framework production behaviour changed;
+- [x] PR 01b untouched.
