@@ -3,10 +3,29 @@
 ## Status
 
 **LIVING PARENT — DELIBERATELY NOT FROZEN (operator decision,
-2026-08-13). PR 02a MERGED (PR #202, merge commit `47359538`).
-PR 02b IMPLEMENTATION AUTHORIZED AND IN PROGRESS (branch
-`feat/generic-framework-step-02b-selection-sampleset`, design frozen at
-`dc26bb75`); 02c NOT AUTHORIZED.**
+2026-08-13).**
+
+**STEP 02 — READY FOR OPERATOR REVIEW (2026-08-13). NOT MERGED.**
+
+| Child | State |
+|---|---|
+| **02a** Dataset Profile injection | **MERGED** — PR #202, merge `47359538` |
+| **02b** Selection & SampleSet | **MERGED** — PR #203, merge `c17469ec` |
+| **02c** Task-owned file-set semantics + FINALIZER | **IMPLEMENTATION COMPLETE — awaiting operator review**, branch `feat/generic-framework-step-02c-task-owned-file-sets` |
+
+Checkpoint E is recorded in the 02c ledger (`pr_02c_systematic_groups.md`
+§24). Step-level evidence, both run exactly once at the assembled head:
+
+- **terminal local full unit suite** — 8739 passed / 3 skipped / 0 failed
+  (535 s, clean tree);
+- **Step-02 Gate 2** — chain exit 0, 16 min 17 s, under
+  `llm_configs/openai_tiered_pro.json`; all five framework criteria plus
+  both Step-02 criteria PASS (the resolved profile deep-equals TIDMAD;
+  the production SampleSet equals the deterministic reference for the
+  run's ACTUAL inputs).
+
+**Step 02 is not COMPLETE until 02c merges** — the closeout marks the
+evidence complete, not the merge done.
 
 > **Do not "fix" this by freezing it.** The operator decided this parent
 > stays a LIVING document until Step-02 closeout, because it is the

@@ -1396,10 +1396,10 @@ recorded, not silently resolved by picking a third config.
 | C5 — child docs + closeout | **DONE** | §24.17 |
 | **PR-02c CHECKPOINT D — child executable complete** | evidence deferred to the terminal suite | §24.18 |
 | Step-02 aggregate reconciliation | **PASS** | §24.19 |
-| Terminal local full unit suite (ONCE) | — | |
-| Step-02 Gate 2 (ONCE) | — | |
-| C6 / Checkpoint E | — | |
-| Exact-final-head CI | — | |
+| **Terminal local full unit suite (ONCE)** | **PASS** | §24.20 |
+| **Step-02 Gate 2 (ONCE)** | **PASS** | §24.22 |
+| **C6 / CHECKPOINT E — Step-02 closeout** | **COMPLETE** | §24.23 |
+| Exact-final-head CI | pending push | §24.23 |
 
 ### 24.2 C1 source re-audit — every frozen claim re-verified at `0fbe3556`
 
@@ -2290,3 +2290,303 @@ Standing lesson, added to this PR's record:
   harder to notice because the tree is clean again by the time the
   result is read.
 ```
+
+**CHECKPOINT D: PASS**, on the terminal-suite evidence in §24.20 —
+8739 passed / 3 skipped / 0 failed at `8e95f056`, whose only delta from
+the executable head `4d1c107e` is the docs-only C5 commit.
+
+---
+
+### 24.20 TERMINAL LOCAL FULL UNIT SUITE — run ONCE: **PASS**
+
+```text
+SHA:      8e95f056e1afd9e0a8d3e081811bbc8fd8797eba   (clean tree)
+command:  .venv/bin/python -m pytest tests/unit/ -q --no-header
+counts:   8739 passed, 3 skipped, 0 failed
+warnings: 404
+wall:     535.12 s (0:08:55)
+rc:       0   — read from the log's own summary line, not a wrapper's
+                exit status
+log:      $CLAUDE_JOB_DIR/tmp/fullsuite2.log
+```
+
+Executable head `4d1c107e`; the suite ran at `8e95f056`, which adds only
+the docs-only C5 commit. Recorded distinctly per §17.1.
+
+#### The first attempt, and why it was NOT the terminal run
+
+```text
+Previous assumption:
+  a linked worktree needs only its ignored CONFIG files copied in —
+  tidmad_data_config.yaml, dashboard_config.yaml, .env — which is what
+  was done at kickoff (§24.0).
+
+Audit evidence:
+  the first full-suite attempt returned 52 failed / 8687 passed, all 52
+  inside tests/unit/sdsc_submission_scripts/ (+1 in
+  tests/unit/scripts/test_sdsc_argument_forwarding.py) — not one in any
+  module 02c touches.
+
+  Isolated reproduction of a single case showed the runner shell script
+  failing with "No such file or directory" on an interpreter path.
+  Source: `v19_queue_runner.sh:450` invokes "$REPO/.venv/bin/python"
+  — a HARDCODED repo-root venv. A linked worktree has no .venv, and
+  .venv is gitignored, so it is not inherited.
+
+Corrected understanding:
+  the ignored-file list a worktree needs includes the VIRTUALENV, not
+  just config. Nothing about 02c is involved: these are shell-runner
+  tests exercising scripts this PR never touches.
+
+Implementation consequence:
+  .venv symlinked into the worktree ->
+  /home/yuema137/SIDERIUS/.venv (gitignored, so the tree stays clean).
+  Causation was then PROVEN rather than assumed: the six affected
+  modules re-run 581 passed / 0 failed.
+
+  This also de-risked Gate 2, which was still ahead: run_chain.sh's own
+  resolve_py_cmd can be satisfied with $VIRTUAL_ENV, but the inner
+  campaign/queue scripts hardcode "$REPO/.venv/bin/python" the same way
+  and would have failed mid-chain.
+
+Validation consequence:
+  the 52-failure run produced no valid terminal evidence — it measured
+  an incomplete environment — so it is NOT the "exactly once" terminal
+  run. The suite was then run once, cleanly, giving §24.20 above.
+  Recorded rather than quietly re-run, because "we ran the full suite
+  twice" is exactly the kind of thing a ledger exists to explain.
+```
+
+**Follow-up debt filed, not fixed here** (out of 02c's frozen scope):
+`sdsc_submission_scripts/*.sh` hardcode `"$REPO/.venv/bin/python"`
+instead of resolving an interpreter the way `run_chain.sh:86-115`
+already does. That is a real worktree-portability defect under the
+repository's portability rules, it is owned by the launcher scripts, and
+it has nothing to do with task genericity.
+
+---
+
+### 24.21 STEP-02 GATE 2 — attempt 1 ABORTED on wrong import provenance
+
+The Gate ran master's code, not this branch's. It was killed as soon as
+that was established, and it is recorded because the mechanism is subtle
+and will recur for anyone running a chain from a linked worktree.
+
+```text
+Symptom:
+  the chain reached the tuner and then failed the VRAM probe three
+  times with
+    "VRAMEval runtime error: _build_model: unknown
+     model_type='compact_wavenet16_ce_fullspectrum' —
+     get_config_class returned None"
+  while the PARENT had happily "Preloaded 85 global model plugin(s)".
+
+First observation that did not fit:
+  the parent's reuse log named
+  /home/yuema137/SIDERIUS/agent_generated/models/... — the MAIN
+  CHECKOUT. This worktree's agent_generated/models/ holds ZERO plugins
+  (gitignored, not inherited).
+
+Root cause:
+  `AGENT_GENERATED_DIR` is derived from `__file__`
+  (ml_models/plugin_loader.py:20-24), so it names whichever checkout
+  `ml_models` was imported from. `run_chain.sh` `cd`s to PROJECT_DIR and
+  runs `run_one_iteration.py` as a SCRIPT — and for a script
+  `sys.path[0]` is the SCRIPT'S OWN DIRECTORY, not the cwd. The
+  cwd-first rule that makes `python -c "import core"` resolve to the
+  worktree simply does not apply, so the editable-install finder
+  resolved EVERY framework package to /home/yuema137/SIDERIUS.
+
+  Proven, not inferred: replaying that sys.path shape resolved
+  `ml_models` and `execute_tools` to the main checkout, and
+  `hasattr(TIDMAD_PROFILE, "health_peek_files")` was FALSE — the
+  decisive tell, since that attribute only exists on this branch.
+
+  This is the SAME trap that produced the phantom finding in §24.16,
+  now with far more expensive consequences.
+
+Verdict:
+  attempt 1 proved nothing about 02c and is DISCARDED. It is not "the"
+  Gate-2 run; §13.3's "exactly once" refers to a run that measures the
+  thing it claims to.
+
+Fix, verified BEFORE relaunching:
+  export PYTHONPATH=<worktree> in the launcher — ahead of the editable
+  finder, inherited by every subprocess. The launcher now also refuses
+  to start unless `dataset_config.__file__` and `plugin_loader.__file__`
+  both contain "pr02c-impl", so this cannot silently recur.
+
+Cost of the aborted attempt:
+  ~7 min wall; LLM spend limited to one interpret-free cold start, the
+  three proposer stages with two field-validation retries, a validation
+  pass, and three tuner planner attempts. Well inside the approved
+  envelope, and counted against it in §24.22.
+
+Consequence for the plugin dir:
+  with correct provenance the worktree's agent_generated/models/ is
+  empty, so the chain genuinely cold-starts and the implementor
+  generates a model rather than reusing one built against master. That
+  is more faithful to the cold-start rule, not less.
+```
+
+**The same trap fired a THIRD time**, on the script that verifies Gate-2
+criterion (2), and is worth naming because it failed *quietly*: the local
+main checkout sits at `dc26bb75`, which predates the 02b merge, so
+`build_sample_set` there has no `profile` argument. The mismatch raised a
+`TypeError` — but the line ABOVE it had already printed
+`profile deep-equals TIDMAD: True`, because Pydantic ignores extra keys
+by default and master's three-field `DatasetProfile` happily validated
+the five-field artifact and compared equal. A less obvious script would
+have printed a green result computed against the wrong code. Every
+standalone verification script in this PR is run with
+`PYTHONPATH=<worktree>`.
+
+---
+
+### 24.22 STEP-02 GATE 2 — run ONCE: **PASS**
+
+```text
+Gate:       Step-02 Gate 2 — real LLM + real training, trial-only smoke
+SHA:        8e95f056  (executable head 4d1c107e; delta is docs-only)
+launcher:   $CLAUDE_JOB_DIR/tmp/gate2_launch.sh
+log:        $CLAUDE_JOB_DIR/tmp/gate2b.log
+workspace:  /home/klz/Data/SIDEREIS_DATA/step02c_gate2_20260813_120908
+run_id:     step02c_gate2-20260813T190914-3559663
+wall time:  16 min 17 s  (12:09:12 -> 12:25:29 local)
+tokens:     138,107 total (proposer 28,969 · implementor 21,965 ·
+            tuner 83,578 · validator 3,595) over 11 calls
+chain exit: 0
+```
+
+**Command shape**, exactly the frozen §13.3 / parent §10.2 contract:
+`--num_iterations 1 --max_rounds 2 --max_proposal_attempts 3
+--max_epochs 1 --trial_portion 0.02 --train_portion 0.02
+--eval_portion 0.02 --trial_time_budget_minutes 5
+--no-force_formal_round --formal_time_budget_minutes 30
+--data_scope 4-9 --health_gate_files 4,5,6,7,8,9
+--llm_config llm_configs/openai_tiered_pro.json`, **cold start** (no
+`--seed_paths`).
+
+**`--num_iterations 1`, recorded as a deliberate choice.** The standard
+calls 2 "recommended" and 1 "acceptable for simpler features". All four
+Step-02 failure modes the parent §10.2 names — wrong filename resolving
+to the wrong file, truncated/over-read tensors from a wrong segment
+count, shifted class indices from a wrong encoding declaration, a
+SampleSet scoring a different population — live inside ONE
+train → inference → scoring loop, which this run exercised twice. The
+second iteration adds proposer/implementor coverage, which is Step 01's
+territory. The host was also shared and loaded when the Gate was planned.
+
+**LLM config verified from the run, not the banner.** The runner echoes
+`LLM (planner): gemini / gemini-3.1-pro-preview` before resolution; that
+is the UNUSED `--llm_model` default (`run_one_iteration.py:1817` takes
+`--llm_config` when present). The log's resolved config shows
+`openai / gpt-5.5` for every role.
+
+#### Framework criteria (the standard's five, verbatim)
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | chain exits 0 | **PASS** — `chain exit: 0` |
+| 2 | every round records a `gate_action` | **PASS** — both rounds `invalidate_round` |
+| 3 | every `denoising_score` finite, or accounted by a gate action | **PASS** — `-2.130431668820979` and `-1.2443449933583899`, both finite AND both accompanied by `invalidate_round` |
+| 4 | no phantom `5.5762667` accepted | **PASS** — asserted numerically |
+| 5 | ≥1 round triggers a HealthGate evaluation | **PASS** — all SIX gates evaluated in BOTH rounds |
+
+Checked mechanically over the persisted round records, not read off the
+console narrative.
+
+#### Step-02 criteria (parent §10.2)
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | the resolved profile in the run artifacts deep-equals TIDMAD | **PASS** — `dataset_profile_*.json`, written by `_write_dataset_profile_config` and consumed across the real subprocess boundary, validates and compares equal to `TIDMAD_PROFILE`, carrying `anchor_selection_files=[0,10,19]` and `health_peek_files=[3,10,17]` |
+| 2 | for Gate 2's ACTUAL inputs, the production SampleSet equals the deterministic reference resolution | **PASS** — all FOUR persisted sets (train+eval × 2 rounds) equal `build_sample_set(...)` recomputed from the run's own recorded tuple: `snapshot`, `portion=0.02`, `scope=[4,5,6,7,8,9]`, seeds `1463052077` and `1963638745`, that round's profile |
+
+**No digest was compared across different arguments.** The five pinned
+sha16 goldens were captured at `seed=42, portion=0.05` and do not apply
+to this run; §13.3's warning is honoured by recomputing the reference
+from the recorded inputs instead.
+
+#### What the Gate additionally showed about 02c specifically
+
+- `[DATASCOPE] Workflow scope: files=[4,5,6,7,8,9] | health_gate_enabled=True
+  | monitored=[4,5,6,7,8,9]` — the partial scope and its paired monitored
+  list are live.
+- The materialized `health_checks_effective.yaml` (workspace AND
+  per-model) resolves `peek_file_indices: [4,5,6,7,8,9]` on all six
+  checks. **This is the runtime-precedence invariant proven in
+  production**: the declared marker resolved at load, then the explicit
+  `--health_gate_files` override replaced it, exactly as §8.1's
+  precedence chain requires. A declared default never beat an operator
+  choice.
+- Every persisted gate result carries `gate_role` `blocking` /
+  `observational` unchanged, and `files_requested=[4,5,6,7,8,9]` — the
+  blocking/recording distinction survived the migration.
+- The blocking gates **actually blocked**: `output_diversity_blocking`
+  and `output_std_blocking` both `failed` → `invalidate_round`, while
+  `amplitude_collapse_blocking` passed. Verdict semantics are unchanged
+  and demonstrably reachable.
+- 02b's explicit hop ran in production:
+  `ml_hyperparameter_tune_agent.py:4410` resolves `run_profile` ONCE and
+  passes it to both `build_sample_set` sites.
+
+#### What it does NOT show
+
+Both rounds were invalidated for output collapse, so no model passed
+gates and the manifest is `status=no_records`. That is a **scientific**
+outcome of a 1-epoch cold-start run on 2% of six files, and the standard
+is explicit that denoising quality, beating a baseline, and any score
+threshold are **NOT** pass/fail criteria for Gate 2. The Gate's question
+is whether the framework records honest, gated, finite results — it did.
+
+Per §13.3's claim boundary: this proves the assembled Step-02 feature
+under its approved real workflow. It does **not** prove a fully generic
+non-TIDMAD campaign end to end; Step-08 and Step-10 residue stays outside
+its inputs.
+
+#### Budget
+
+| | Approved | Actual |
+|---|---|---|
+| wall time | ~30-45 min, hard ≤ ~1 h | **16 min 17 s** (plus ~7 min for the discarded attempt 1) |
+| cost | ~$1-1.5 | 138,107 gpt-5.5 tokens for the counted run — inside the envelope |
+
+Both attempts together stayed well inside the approved hour.
+
+---
+
+### 24.23 CHECKPOINT E — Step-02 closeout
+
+§17.2's contract, item by item — every one evidence-backed:
+
+- [x] **02a MERGED** — PR #202, merge `47359538`, verified ancestor of
+      `origin/master`.
+- [x] **02b MERGED** — PR #203, merge `c17469ec` (== `origin/master`).
+- [x] **02c implementation complete** — C1-C5 landed; capability
+      evidenced by CP0, CP-C1, Checkpoint A, Checkpoint B and child
+      Checkpoint C.
+- [x] **PR-02c Checkpoint D complete** — §24.18, on the terminal-suite
+      evidence at the executable head.
+- [x] **Aggregate reconciliation complete** — §24.19.
+- [x] **Terminal full suite PASS** — §24.20, 8739 passed / 3 skipped /
+      0 failed at `8e95f056`, clean tree, run ONCE.
+- [x] **Gate 2 PASS** — §24.22, same head, run ONCE.
+- [ ] **Exact-final-head CI green** — recorded to the operator after the
+      push; a commit cannot contain its own SHA (the 02b precedent).
+
+**Documents synchronized** (this is C6):
+
+| Document | Change |
+|---|---|
+| Step-02 parent | status block now states Step 02 READY FOR OPERATOR REVIEW, with all three child states and the two Step-level evidence lines |
+| roadmap §15.1, `§4 Dataset & sample topology` row | rewritten: 02a and 02b MERGED with what each actually delivered; 02c complete-and-awaiting-review with its capability and both Step-level results |
+| roadmap §14 convergence ledger, *"Systematic groups (bands)"* | **the row's premise is recorded as REFUTED.** It was never one concept: two task-owned declarations with no derivation rule, plus a `range(20)` that was only ever "every file" and now derives from `num_files`. Merge verdict stays **NO** — 02c migrated the current consumers only, and §8 keeps consumer-side ownership. Two declarations inside one PR do not meet the ≥2-completed-designs bar |
+| Step-02 folder README | rows 02 / 02b / 02c refreshed; 02c's rename to *"task-owned file-set semantics"* noted with the reason the filename is deliberately unchanged |
+
+**Deliberately NOT marked COMPLETE.** §17.2 says Step 02 may be marked
+complete only when every blocking requirement has evidence — and the last
+one, exact-final-head CI, resolves after the push. The parent therefore
+says READY FOR OPERATOR REVIEW, and both it and the roadmap state
+explicitly that **Step 02 completes when 02c merges**. Marking a step
+done because its code exists is precisely what §17.2 forbids.
