@@ -2,8 +2,34 @@
 
 ## Status
 
-**REVISION 2 — READY FOR OPERATOR FREEZE (2026-08-13).
-IMPLEMENTATION NOT AUTHORIZED.**
+**LIVING PARENT — DELIBERATELY NOT FROZEN (operator decision,
+2026-08-13). IMPLEMENTATION NOT AUTHORIZED.**
+
+> **Do not "fix" this by freezing it.** The operator decided this parent
+> stays a LIVING document until Step-02 closeout, because it is the
+> step's governance and STATUS authority: it carries child status, the
+> aggregate checkpoint ladder, the Step-level Gate, the convergence
+> ledger and the roadmap-sync obligation, all of which must be updated
+> as children land. Freezing it would fight its purpose.
+>
+> **Children freeze individually; the parent does not.**
+>
+> | Document | State |
+> |---|---|
+> | `pr_02a_dataset_profile_injection.md` | **FROZEN / OPERATOR APPROVED** at `cfc83b1e` (2026-08-13) |
+> | `pr_02b_selection_sampleset.md` | DRAFT — to be revised AFTER 02a lands |
+> | `pr_02c_systematic_groups.md` | DRAFT — to be revised AFTER 02a lands |
+> | this parent | LIVING until Step-02 closeout |
+>
+> Expected update points: after 02a merges (child status, any correction
+> its implementation surfaces, and the detailed 02b/02c plans, which are
+> deliberately NOT elaborated yet), and again at Checkpoint E when 02c
+> closes the Step.
+
+Revision 2 content (below) is the operator-reviewed governance the
+children implement against; it changes only by a new operator decision,
+even though the document itself stays open for status and for the
+child-plan detail still to be written.
 
 Revision 2 applies the operator review of 2026-08-13. The three-child
 decomposition is APPROVED IN PRINCIPLE; no fourth behavioural child is
