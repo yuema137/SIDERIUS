@@ -857,9 +857,23 @@ Gate evidence must name the **exact executable HEAD** it ran on.
       EXIT: 0` captured from pytest itself before `tail`; zero
       `FAILED`/`ERROR` lines. `ruff check .` and
       `ruff format --check .` (817 files) clean.
-- [ ] 11. Exact-final-head CI green (CI is the only pyright).
+- [x] 11. Exact-final-head CI green (CI is the only pyright). → PR
+      **[#201](https://github.com/Galileo-Sandbox/SIDERIUS/pull/201)**,
+      CI run **31654760883**, `conclusion: success`, `headSha
+      5946528a9895e6b5cb97deb7667ad6581d8f0aeb` — identical to local
+      HEAD and to the PR's `headRefOid`. Every step green, including
+      **Type check — pyright (strict, blocking)**, which closes the
+      locally-unavailable gap. (Two infrastructure annotations on the
+      run — a Node 20 deprecation notice and a GitHub cache-service
+      outage — are warnings on the runner, not job failures; the job
+      concluded `success`.) A docs-only closeout commit sits on top and
+      is re-verified by its own CI run, per the repository's convention.
 - [x] 12. Clean working tree.
 - [ ] **Not merged.** Stop at READY FOR OPERATOR REVIEW.
+
+**FINAL STATE — PR 01b is READY FOR OPERATOR REVIEW.** Every acceptance
+item above is closed except the deliberate final one. Nothing in this PR
+may be merged without explicit operator approval.
 
 **Executable-head note.** `6b259b93` (S1-F) touched
 `agent/schemas/proposal.py` — two `Field` description strings only, no
