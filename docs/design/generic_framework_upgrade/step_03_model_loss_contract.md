@@ -1423,7 +1423,12 @@ re-reviewed against the code at `4819b44a`: no material NO.
       test_step03_checkpoint_c_subprocess.py` **7 passed** (real
       `subprocess.run`, real HDF5). Found and closed a production gap: the
       3-E cross-check now also runs at the subprocess boundary.
-- [ ] **CHECKPOINT D** — targeted regression + static + mutation (§14)
+- [x] **CHECKPOINT D — PASS.** Mutations D-M1…D-M7 (one survived and
+      hardened the guard); focused test-disposition audit (2 modified, 13
+      added, 0 deleted, 1 merged-away); targeted regression
+      `tests/unit/{execute_tools,core,guardrails}` **3352 passed / 3
+      skipped / 0 failed**; ruff check + ruff format clean; pyright
+      unavailable locally, CI authoritative.
 - [ ] **GATE 2** — required (§13); gate standard re-read immediately
       before launch. **Gate 1 NOT required** unless an LLM-visible byte
       changes, which is itself a STOP
@@ -2350,6 +2355,179 @@ verdicts.
 Hygiene: all four ran with the modified production files **staged**, so
 `git checkout --` restored from the index rather than reverting the M3
 work itself — the generalisation of the §24.7 finding recorded at M2.
+
+#### CHECKPOINT D — mutation dossier (independent failure classes)
+
+Hygiene, corrected mid-campaign: the working state is staged or committed
+**immediately before each mutation**, not once at the start (see the
+third-variant finding below).
+
+| # | Mutation | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| **D-M1** | `output_type` becomes an independent authority (contract projection hardcoded) | the projection class reds | **1 failed** — `test_the_contract_projects_the_legacy_word` | caught, precisely |
+| **D-M2** | the renderer stops deriving (clause back to cardinality truthiness) | rendering + live boundary red | **15 failed** | caught |
+| **D-M3** | the loader stops returning the RESOLVED contract | the M4 regression pin reds | **1 failed** — `test_the_loader_returns_the_resolved_contract_not_the_raw_block` | caught, precisely |
+| **D-M4** | a builtin re-hardcodes its class count | rung 3-C reds | **3 failed** — both contrast cells + the construction-literal guard | caught |
+| **D-M5** | a preset becomes readable outside the resolver | the second-authority scan reds | **1 failed** — `test_no_production_module_reads_a_preset_after_resolution` | caught, precisely |
+| **D-M6** | the dtype guard's `MIGRATED_SURFACES` is emptied | the guard reds | **SURVIVED** — "6 passed, 1 skipped" | **guard hardened**, see below |
+| **D-M7** | the SUBPROCESS 3-E cross-check is removed | C(iii)'s contradiction case reds | **1 failed** — `test_a_contract_contradicting_the_dataset_fails_CLOSED_in_the_child` | caught, precisely |
+
+Baseline re-run **238 passed** from the restored tree after each.
+
+```text
+D-M6 SURVIVED — the most valuable result of the campaign
+
+Emptying `MIGRATED_SURFACES` produced "6 passed, 1 skipped" instead of a
+failure: a parametrized test over an empty list simply does not run, so
+the guard stopped guarding while still reporting green. Nothing else in
+the suite covers that class — re-hardcoding a name branch reproduces the
+A6 matrix exactly, so no behavioural oracle can see it.
+
+It is the same hole the sibling guardrail already paid for: while a label
+sat in its `_PENDING_CLEANUP` dict, a reintroduced name branch was
+reported as `xfail` rather than `failed` — detected, then tolerated.
+
+Hardened: both surfaces are named explicitly, so removing one is a
+deliberate edit to a stated list rather than an invisible disappearance.
+Re-running D-M6 against the hardened guard reds as required.
+```
+
+```text
+MUTATION HYGIENE — a THIRD variant of the same trap, in one session
+
+  1. untracked target   -> `git checkout --` fails silently, mutations
+                           ACCUMULATE (found at M2)
+  2. staged target      -> restores correctly
+  3. STALE INDEX        -> `git checkout --` REVERTS legitimate work made
+                           mid-campaign (found here)
+
+The D-M6 hardening was written, then lost: the index had been staged at
+the START of the campaign, before the hardening existed. Caught only
+because the post-restore run reported 68 passed where the hardened module
+has 69.
+
+Rule: stage or commit immediately before EACH mutation. Staging once at
+the start is not enough.
+```
+
+#### CHECKPOINT D — test-disposition audit (focused, Step-03 surface only)
+
+Enumerated mechanically: `git diff --name-status f865038f..HEAD -- tests/`
+→ **2 modified, 13 added, 0 deleted files**, plus one test removed from
+within a module.
+
+| Test | Disposition | Functional reason |
+|---|---|---|
+| `test_isolated_preflight.py::test_candidate_configs_and_hashes_are_unchanged` | **REWRITE** | The digest was traced to source: `config_identity` is emitted into a run record but nothing outside that run compares it — a report label, not a cache/resume/comparability boundary. The hex froze an incidental JSON serialization. Replaced by explicit semantic value assertions plus a determinism/collision claim for the report field. Every failure the hash could catch still reds, and now names itself |
+| `tests/unit/workflows/goldens/cfg1_task_config_resolved.json` | **RE-CAPTURE** | The resolved config dict genuinely gained `model_io` + `preset`. Delta measured, not assumed: ZERO keys removed, ZERO pre-existing values changed. Non-LLM-visible; the rendered-block golden is untouched. Re-captured by hand per the Step-00 policy, attribution in `_captured_at` |
+| `test_step03_m5_input_dtype_resolution.py::test_the_data_path_contains_no_input_dtype_name_branch` | **MERGE → DELETE** | Counted surviving `== "fcnet"` lines; brittle (would red if a later step legitimately added a constructor branch) and subsumed by `test_no_model_name_dtype_routing.py`, which states the property semantically over the AST and proves it detects both removed forms. A comment marks where the claim went |
+
+**No test was deleted or weakened because it failed.** The two
+reconciliations were each preceded by measuring the delta and tracing the
+pin's consumers; the one deletion is justified independently of whether
+the implementation passes.
+
+**A PRE-EXISTING failure, audited and NOT adopted.**
+`tests/integration/execute_tools/test_step02a_checkpoint_c_profile_boundary.py`
+fails one test at HEAD. `git show f865038f:<path>` contains **zero**
+occurrences of `anchor_selection_files` — it never carried the fields
+Step 02c made required, so it was already broken before Step 03 began.
+Recorded as follow-up debt on the Step-02 integration surface. Adopting
+it would widen this PR into another step's evidence.
+
+#### CHECKPOINT D — static / type / lint
+
+```text
+ruff check .            All checks passed!
+ruff format --check .   851 files already formatted
+pyright                 CANNOT RUN LOCALLY — see below
+```
+
+**pyright, evidenced rather than asserted.** The vendored bundle fails to
+parse under this host's Node:
+
+```text
+$ node --version
+v10.19.0
+$ .venv/bin/python -m pyright agent/schemas/model_io_contract.py
+.venv/.../pyright/dist/dist/vendor.js:2
+SyntaxError: Unexpected token =
+    at Module._compile (internal/modules/cjs/loader.js:723:23)
+```
+
+The bundle uses syntax Node 10 cannot parse, so **strict pyright runs only
+in CI, and CI is authoritative for it.** Per CLAUDE.md this is recorded as
+an environment limitation rather than claimed as a local pass — a
+type-check that cannot execute is not evidence.
+
+#### CHECKPOINT D — targeted regression
+
+```text
+scope    tests/unit/{execute_tools,core,guardrails}
+result   3352 passed / 3 skipped / 0 failed — pytest rc 0, 87.4 s
+```
+
+**Scope justification, stated before launch** (evidence-economy rule):
+
+1. *Which checkpoint property?* Targeted regression around the production
+   files Step 03 changed.
+2. *Which failure class uniquely?* A consumer of the migrated execution
+   surfaces — `sandbox_executor` spawning the engines, the plugin/loss
+   consumers — broken by the Phase-B wiring.
+3. *Why is nothing narrower sufficient?* The directly-affected Step-03
+   tests (238) do not exercise those consumers.
+
+`tests/unit/{agent,workflows}` are deliberately EXCLUDED: Checkpoint A
+already ran them green at `0634bb56`, and the only production change since
+is the subprocess 3-E cross-check, whose consumers are `execute_tools` and
+`core`. Re-running them would be the broad sweep the economy correction
+forbids — exact-head CI owns broad regression.
+
+#### CHECKPOINT D — **PASS**
+
+| Component | Evidence |
+|---|---|
+| mutations | D-M1…D-M7, seven independent classes; six caught (three by a single precise oracle), one SURVIVED and hardened the guard |
+| test disposition | 2 modified / 13 added / 0 deleted files + 1 test merged away; every disposition justified by functional intent, none by failure |
+| targeted regression | 3352 passed / 3 skipped / 0 failed |
+| static | `ruff check` clean, `ruff format --check` 851 files formatted |
+| type | pyright cannot execute on this host; CI authoritative (evidence above) |
+
+#### Process decision — turn continuity vs context continuity (operator, 2026-08-13)
+
+Recorded because it explains this PR's execution shape, not its content.
+
+```text
+Observation
+  Implementation repeatedly yielded control at points that were NOT
+  approval requests and NOT blockers — e.g. "D-M6 fixed, continuing with
+  3-E" — and needed a "continue" to resume.
+
+Diagnosis (operator, from the Claude Code docs)
+  Two distinct layers were being conflated:
+
+    CONTEXT continuity   PreCompact + SessionStart hooks
+                         -> already solved in this repo
+    TURN continuity      the model deciding a RESPONSE is complete
+                         -> not addressed by those hooks at all
+
+  Auto mode removes per-TOOL prompts; it does not start the next turn. A
+  mutation campaign (mutate -> find hole -> fix -> commit -> re-verify ->
+  next mutation) manufactures many local semantic endpoints, each of which
+  reads as "this response is done" while the CHECKPOINT is not.
+
+Resolution
+  Not more "do not stop" prompt text — that treats a turn-boundary
+  mechanism as a compliance problem. The instrument is `/goal`, which
+  attaches a completion condition evaluated after each turn and re-enters
+  automatically until it is met. It is operator-set; implementation cannot
+  invoke it for itself.
+
+Consequence for this ledger
+  None semantic. Recorded so a later reader does not mistake the
+  turn-boundary pauses in this PR's history for design ambiguity,
+  blockers, or requested approvals — none of them were.
+```
 
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
