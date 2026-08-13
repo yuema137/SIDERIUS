@@ -1385,7 +1385,15 @@ oracle exists. Audited at `f865038f`:
       reaching a supported admissible alternative when it does not;
       empty intersection fails closed. **UNBLOCKED** — A-1 approved.
       Run the §24.9 re-review against the code first.
-- [ ] **M6 — Phase B: cardinality derivation.** The 27 construction
+- [x] **M6 — Phase B: cardinality derivation — LANDED.**
+      `BaseConfig.num_classes` (derived, cross-validated, 256 as the
+      declared Regime-A value); all builtin construction literals migrated
+      to `config.num_classes`; `apply_contract_cardinality` injects the
+      contract's count in both engines and fails closed on a contradicting
+      config. Rung **3-C**: every builtin builds and emits at 10 and 64
+      classes; TIDMAD's 256 unchanged; Regime A unchanged. **31 passed.**
+      *(superseded planning text below kept for provenance)*
+- [ ] ~~**M6 — Phase B: cardinality derivation.**~~ The 27 construction
       literals in `ml_models/models_sandbox.py`, derived from /
       cross-validated against `ValueEncoding.num_classes`
       (`execute_tools/dataset_config.py:406`), whose own docstring
@@ -1775,6 +1783,71 @@ scanned raw source and matched the resolver's own DOCSTRING, which quotes
 the branch it replaced. It now parses the function with `ast`, drops the
 docstring and asserts over executable code — a test reading prose as if
 it were code is a test that will lie in the other direction later.
+
+#### M6 — cardinality derivation (Phase B), rung 3-C
+
+```text
+modules  ml_models/models_format_sandbox.py     BaseConfig.num_classes
+         ml_models/models_sandbox.py            11 construction sites migrated
+         execute_tools/model_input_dtype.py     apply_contract_cardinality
+         execute_tools/train_engine_sandbox.py  injection at config build
+         execute_tools/inference_single.py      injection at config build
+tests    tests/unit/ml_models/test_step03_m6_cardinality_derivation.py
+result   31 passed; A6 + Step-00 numeric baselines + ml_models: 285 passed
+```
+
+```text
+Previous implementation assumption
+  §7 and §24.4 both say "the 27 builtin literals" in
+  ml_models/models_sandbox.py.
+
+Source evidence
+  27 is a LINE count — `grep -c 256 ml_models/models_sandbox.py`. Reading
+  them, only ELEVEN are construction sites (`:227` `adc_channel = 256`,
+  `:356`, `:380`, `:403`, `:479`, `:494`, `:526`, `:548`, `:557`, `:632`,
+  `:678`); the other sixteen are comments and docstrings describing the
+  shape, e.g. "Output: [B, 256, T] — class logits per time step".
+
+Corrected implementation understanding
+  Eleven construction sites had to change. The comment/docstring mentions
+  are prose about the TIDMAD instance and are NOT migrated — rewriting
+  them would be the cosmetic literal-hunt §"IMPLEMENTATION PRINCIPLE"
+  warns against ("do NOT judge success by disappearance of literals").
+
+Implementation consequence
+  Same shape as F-2's site-count correction: the frozen SEMANTIC claim is
+  untouched, only a count in the prose was loose. 3-C's source-level guard
+  therefore scans for a class-count literal in a CONSTRUCTION expression
+  (`nn.Embedding` / `nn.Linear` / `nn.Conv1d` / `adc_channel =`) with
+  comments stripped, rather than for the substring `256`.
+
+Validation consequence
+  The rung asserts the count reaching a CONSTRUCTED MODEL — emitted logit
+  count and embedding-table size — not a config field. A test asserting
+  `cfg.num_classes == 10` would pass with every builtin still hardcoding
+  256, which is exactly §11.1's "must red when its consumer re-hardcodes
+  the literal".
+```
+
+**Two builtins needed threading, not just a substitution.** `RNNSeq2Seq`
+builds `Seq2SeqEncoder` / `Seq2SeqDecoder` from loose parameters rather
+than the config, so the count is threaded through their signatures with
+a `num_classes=256` default — a direct constructor call (Regime A) is
+byte-unchanged.
+
+**One authority, enforced.** `apply_contract_cardinality` derives the
+count from the contract's class axis — itself cross-validated against
+`ValueEncoding.num_classes` at load time (rung 3-E) — and raises
+`ContractCardinalityConflictError` when a config declares a contradicting
+value. Neither side is silently adopted: the config winning would make it
+a second authority, and silently overwriting it would let an author
+believe a value that never took effect. Where the output carries no class
+axis, nothing is injected — §4b's deliberate asymmetry.
+
+The `256` default on `BaseConfig.num_classes` is the declared Regime-A
+value, in the same sense as an absent `--dataset_profile_json` resolving
+the shipped profile. A resolved path never reaches it, and 3-C proves the
+resolved path is genuinely derived.
 
 ### 24.7 Mutation dossier
 

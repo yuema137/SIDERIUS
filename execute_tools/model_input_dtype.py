@@ -189,3 +189,51 @@ def resolve_input_dtype(
     if declared is not None:
         return resolve_model_input_dtype(declared, site_preference=site_preference)
     return RUNTIME_SUPPORTED_DTYPES[site_preference]
+
+
+class ContractCardinalityConflictError(RuntimeError):
+    """A model config declares a class count the contract contradicts.
+
+    §4b keeps ONE cardinality authority: the Dataset Profile's
+    ``ValueEncoding.num_classes``, which the contract's class axis is
+    cross-validated against at load time. A config that disagrees is not
+    silently overwritten and does not silently win — either would make the
+    config a second, independently configurable class count.
+    """
+
+
+def apply_contract_cardinality(
+    config_data: dict,
+    task_contract: ModelIOContract | None,
+) -> dict:
+    """Inject the contract's class cardinality into a model config payload.
+
+    Returns a NEW mapping; the caller's dict is not mutated.
+
+    * no contract, or a contract whose output carries no class axis — the
+      payload is returned unchanged. Regime A, and the §4b case where
+      cardinality is *not meaningful* for the output semantic;
+    * a payload that does not mention ``num_classes`` — the derived value is
+      injected, which is the normal path;
+    * a payload that declares a CONTRADICTING value — typed failure. This is
+      §4b's *"derive or explicitly cross-validate"*, and it is why the field
+      on ``BaseConfig`` is not a second authority.
+    """
+    if task_contract is None:
+        return dict(config_data)
+    derived = task_contract.class_cardinality
+    if derived is None:
+        return dict(config_data)
+
+    declared = config_data.get("num_classes")
+    if declared is not None and declared != derived:
+        raise ContractCardinalityConflictError(
+            f"model config declares num_classes={declared} but the Model-I/O "
+            f"contract derives {derived} from its class axis (itself "
+            "cross-validated against the Dataset Profile). The contract is the "
+            "authority; neither value is silently adopted."
+        )
+
+    resolved = dict(config_data)
+    resolved["num_classes"] = derived
+    return resolved

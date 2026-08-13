@@ -18,7 +18,11 @@ from execute_tools.dataset_config import (
     load_dataset_profile,
     resolve_dataset_profile,
 )
-from execute_tools.model_input_dtype import INFERENCE_SITE_DTYPE, resolve_input_dtype
+from execute_tools.model_input_dtype import (
+    INFERENCE_SITE_DTYPE,
+    apply_contract_cardinality,
+    resolve_input_dtype,
+)
 from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
@@ -422,7 +426,8 @@ def main():
             )
 
         # Instantiate Pydantic config and then the Model
-        m_cfg = config_class(**m_data)
+        # Step 03 M6 — same derivation as the training engine.
+        m_cfg = config_class(**apply_contract_cardinality(m_data, args._model_io))
 
         # Special handling for AE (loss_type injection), others use standard config init
         #

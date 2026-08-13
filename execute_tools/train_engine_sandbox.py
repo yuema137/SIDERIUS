@@ -23,7 +23,11 @@ from execute_tools.dataset_config import (
     load_dataset_profile,
     resolve_dataset_profile,
 )
-from execute_tools.model_input_dtype import TRAINING_SITE_DTYPE, resolve_input_dtype
+from execute_tools.model_input_dtype import (
+    TRAINING_SITE_DTYPE,
+    apply_contract_cardinality,
+    resolve_input_dtype,
+)
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
 
@@ -1332,7 +1336,10 @@ def main():
     if config_class is None:
         raise ValueError(f"Unknown model_type in config: {model_type}")
 
-    model_cfg = config_class(**m_data)
+    # Step 03 M6 — the class alphabet is DERIVED from the resolved contract,
+    # never from a builtin literal. A config declaring a contradicting
+    # count fails closed rather than winning (§4b).
+    model_cfg = config_class(**apply_contract_cardinality(m_data, model_io))
     train_cfg = TrainConfig(**t_data)
     loss_cfg = LossConfig(**l_data)
 

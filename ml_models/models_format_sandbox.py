@@ -24,6 +24,19 @@ class BaseConfig(BaseModel):
     model_type: str
     segmentation_size: int = Field(default=40000, ge=1000, description="Input time series length")
     batch_size: int = Field(default=1, ge=1)
+    num_classes: int = Field(
+        default=256,
+        gt=0,
+        description="Size of the output class alphabet, used to build "
+        "embedding tables and output heads. **DERIVED, not authored** — Step "
+        "03 injects it from the resolved Model-I/O contract, whose own class "
+        "cardinality is cross-validated against the Dataset Profile's "
+        "ValueEncoding.num_classes. The 256 default is the Regime-A "
+        "compatibility value for a caller that predates the contract, in the "
+        "same sense that an absent --dataset_profile_json resolves the "
+        "shipped profile; a resolved path never reaches it. Setting it to "
+        "contradict the contract fails closed rather than winning.",
+    )
 
 
 # ==========================================
