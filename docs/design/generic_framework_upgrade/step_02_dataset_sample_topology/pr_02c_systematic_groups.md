@@ -6,13 +6,52 @@
 
 ## Status
 
-**DESIGN — READY FOR OPERATOR FREEZE (revision 3, 2026-08-13).
-NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-13).**
 
-All operator decisions are recorded and FINAL (§21). The final narrow
-genericity re-review (§20) produced **two corrections**, both applied:
-the effective-config injection shape (§8.1) and the falsy-hazard
-reclassification (§4.3). No new material contradiction remains.
+The operator froze this design at **revision 3**. Everything below — the
+capability statement (§1), the declared-vs-derived classification (§2),
+the consumer census (§3-§4), the one-PR decision (§5), ownership (§7),
+the declaration model (§8), the compatibility contract (§9), the blocking
+checkpoint ladder (§10), the commit plan (§11), the child Checkpoint-C
+boundary and stop conditions (§12), the finalizer duties (§13), the
+Q2/Q3/Q4 dispositions (§14-§16), the finalizer sequencing and
+Checkpoint-E contract (§17), convergence (§18), mutation economy (§19)
+and the reviews (§20, §20a) — may not change without a new operator
+decision.
+
+In particular, these are frozen and must not be re-litigated during
+implementation:
+
+- the **three-way classification** (§2): `[0,10,19]` DECLARE,
+  `[3,10,17]` DECLARE, `range(20)` DERIVE. **No catch-all group map**,
+  and **no `all_files` declared field**;
+- the **governing principle** (§2.4): genericization is not moving legacy
+  hardcodes into config — declare task-owned, derive topology-owned,
+  preserve runtime/policy-owned semantics;
+- the **injection shape** (§8.1): declaration B reaches ONLY the three
+  sites that carry `peek_file_indices` today. Neither injecting where the
+  key is absent nor deleting the key is permitted;
+- the **campaign-policy freeze** (§6.1): exact-list, order-sensitive
+  comparison preserved. No `set`, no `sorted`, no normalization;
+- **fallback tiers are not homogenized** (§4.2, §7) — that is Step-08
+  policy;
+- **latent behaviours are recorded, never pinned** (§4.3, §14) —
+  consistent with 02b §6.1.
+
+Revision 3 was rewritten against merged 02a + 02b source after six
+revision-2 claims were refuted (§0.2); the final genericity re-review
+(§20a) then produced two corrections (§8.1, §4.3) and one strengthening
+(§11.4).
+
+**IMPLEMENTATION IS NOT AUTHORIZED IN THIS SESSION.** It begins only
+after a filled **Implementation Working Rules contract** for this child,
+in a NEW, fresh context with its own Context Continuity v2 handoff, in an
+isolated worktree **outside `.claude/`** (the 02a/02b process lesson).
+
+**Frozen design HEAD**: the commit that carries this status line. Resolve
+it mechanically from the repository at kickoff
+(`git log -1 --format=%H -- <this file>`); never from conversational
+memory.
 
 Revision 3 was rewritten against **merged 02a + 02b source**. Six
 load-bearing revision-2 claims were refuted by source audit (§0.2). The
@@ -1261,15 +1300,15 @@ filename is an address.
 
 ## 23. Status
 
-**DESIGN — READY FOR OPERATOR FREEZE (revision 3, 2026-08-13).
-NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (revision 3,
+2026-08-13).**
 
 All six operator decisions are FINAL and applied (§21). The final narrow
 genericity re-review (§20a) produced two corrections — the §8.1 injection
 shape and the §4.3 falsy-hazard reclassification — plus one strengthening
 (§11.4 cardinality). **No remaining operator questions.**
 
-Implementation begins only after operator freeze and a filled
-Implementation Working Rules contract, in a fresh context with its own
-Context Continuity v2 handoff, in an isolated worktree outside
-`.claude/`.
+Implementation begins only after a filled Implementation Working Rules
+contract, in a fresh context with its own Context Continuity v2 handoff,
+in an isolated worktree outside `.claude/`. See the head-of-file status
+block for what may not be re-litigated.
