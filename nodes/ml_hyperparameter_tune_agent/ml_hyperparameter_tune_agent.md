@@ -102,6 +102,33 @@ Strategies:
 | `sampling_seed` | `int \| None` | No | `None` | Seed for `build_sample_set()` — determines which PSD segments form the data scope. When `None`, auto-generated from `SHA-256(run_name + model_type)`. |
 | `train_base_seed` | `int \| None` | No | `None` | Base seed for per-epoch training subsampling. Epoch `n` uses `train_base_seed + n`. When `None`, auto-generated. |
 
+### Selection topology (Step-02b)
+
+Not an input field — a behavioural contract worth stating, because it
+determines which files a round can select at all.
+
+Each trial/formal round resolves the run's **Dataset Profile once** and
+passes it explicitly to **both** `build_sample_set()` calls (training and
+validation):
+
+```python
+run_profile = resolve_dataset_profile()
+train_sample_set = build_sample_set(..., scope=..., profile=run_profile)
+eval_sample_set  = build_sample_set(..., scope=..., profile=run_profile)
+```
+
+Two properties follow, and both are pinned by tests:
+
+- the file population and index space come from the run's profile, not
+  from an ambient default, so a run bound to a non-TIDMAD topology
+  selects against that topology;
+- training and validation provably share one topology, because the
+  profile is resolved once per round rather than once per call site.
+
+`build_sample_set(profile=None)` still resolves ambiently, which is what
+callers without a run-bound profile (`scripts/run_comparison.py`, the
+proposer pre-flight) continue to do.
+
 ### Pre-flight gates (resource budgets)
 
 | Field | Type | Required | Default | Description |

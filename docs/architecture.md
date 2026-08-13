@@ -602,7 +602,15 @@ is layered and never prompt-based:
 
 1. **Constructive** — `build_sample_set(scope=…)` only produces in-scope
    SampleSets; partial scopes are snapshot-only (operator config errors at
-   startup; LLM plans normalize with recorded provenance).
+   startup; LLM plans normalize with recorded provenance). The scope is
+   resolved against the run's **Dataset Profile**, which the caller
+   supplies explicitly: `build_sample_set(scope=…, profile=…)`
+   (Step-02b). The tuner resolves that profile once per round and passes
+   it to both the training and validation construction sites, so a run
+   bound to a non-default topology cannot silently select against the
+   ambient one. `profile=None` keeps ambient resolution (Regime-A) for
+   callers that have no run-bound profile — `scripts/run_comparison.py`
+   and the proposer pre-flight.
 2. **Boundary** — `validate_sample_set` runs at the sandbox before ALL
    file I/O (train / inference / `score_vector`); a violation terminates
    the run, non-retryable.

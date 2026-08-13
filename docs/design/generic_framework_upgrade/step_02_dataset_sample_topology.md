@@ -69,7 +69,7 @@ child-plan detail still to be written.
 | Child | State |
 |---|---|
 | **02a — Dataset Profile injection** | **COMPLETE / MERGED** — PR [#202](https://github.com/Galileo-Sandbox/SIDERIUS/pull/202), merge commit `47359538`, PR head `0d9fc32d`, exact-head CI green. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten |
-| 02b — Selection & SampleSet | **DESIGN FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION** (revision 2, 2026-08-14) at `dc26bb75`. **IMPLEMENTATION IN PROGRESS** on `feat/generic-framework-step-02b-selection-sampleset`; live progress in that child's §13 ledger |
+| 02b — Selection & SampleSet | **IMPLEMENTATION COMPLETE / READY FOR OPERATOR REVIEW.** Design frozen at `dc26bb75` (revision 2, 2026-08-14); implemented on `feat/generic-framework-step-02b-selection-sampleset`. Ladder CP0 → CP-B1 → Checkpoint A → B → C all **PASS**; evidence in that child's §13 ledger. **NOT MERGED.** Surfaced one finding for this parent to route: §13.9 — a contrast topology is misread as a partial DataScope, because `validate_runtime_config` binds the TIDMAD singleton as a **default argument** while the HealthGate validator reads the ambient profile. Not 02b's to fix (§2 excludes HealthGate; §6.2 holds partial-scope rules unchanged); proposed owner 02c or Step-06 |
 | 02c — Systematic groups (Step FINALIZER) | DRAFT — revised after 02b lands |
 
 **Step 02 remains IN PROGRESS.** The overall roadmap §15.1 matrix is the

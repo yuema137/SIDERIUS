@@ -233,14 +233,14 @@ profile and produces the SampleSet the tuner actually uses.
 
 PASS must establish:
 
-- [ ] the tuner's trial **and** formal construction sites supply the
+- [x] the tuner's trial **and** formal construction sites supply the
       resolved profile explicitly;
-- [ ] the SampleSet produced is the one serialized to the subprocess
+- [x] the SampleSet produced is the one serialized to the subprocess
       config (same object, one boundary);
-- [ ] under a contrast topology the production path yields the contrast
+- [x] under a contrast topology the production path yields the contrast
       shape — not TIDMAD's 20 × 200;
-- [ ] no ambient fallback is reachable on that path;
-- [ ] exact executable HEAD, artifacts and log recorded.
+- [x] no ambient fallback is reachable on that path;
+- [x] exact executable HEAD, artifacts and log recorded.
 
 Cheapest bounded mechanism, chosen at implementation time. **No real LLM,
 no GPU, no scientific result.** A pseudo-LLM production-entry run is
@@ -288,21 +288,21 @@ Depends on: nothing.
 **3. Implementation plan.**
 
 **FROZEN production round-trip contract — pin exactly this:**
-- [ ] the SampleSet producer uses **integer** keys;
-- [ ] the JSON boundary emits **string** keys (per JSON), at both
+- [x] the SampleSet producer uses **integer** keys;
+- [x] the JSON boundary emits **string** keys (per JSON), at both
       `core/sandbox_executor.py` sites;
-- [ ] value lists are unchanged across the round trip;
-- [ ] the **LIVE** production consumer converts keys **numerically**,
+- [x] value lists are unchanged across the round trip;
+- [x] the **LIVE** production consumer converts keys **numerically**,
       preserving current selection identity;
-- [ ] `validate_sample_set`'s existing coercion/validation behaviour at
+- [x] `validate_sample_set`'s existing coercion/validation behaviour at
       the boundary (pin, do not change).
 
 **LATENT finding — record, do NOT freeze:**
-- [ ] record in the ledger that `TIDMADDataset`'s `sample_set` branch
+- [x] record in the ledger that `TIDMADDataset`'s `sample_set` branch
       sorts post-JSON keys **lexicographically**, that a source audit
       finds **no production caller reaches that branch**, and that 02b
       does not fix it.
-- [ ] **Do NOT assert its exact ordering** (`0, 1, 10, 11, …`) anywhere.
+- [x] **Do NOT assert its exact ordering** (`0, 1, 10, 11, …`) anywhere.
       Freezing an unreachable bug's output would promote it into a
       compatibility promise nobody can later change — the opposite of
       what a capture-first baseline is for.
@@ -311,7 +311,7 @@ Depends on: nothing.
 production-reachable, **STOP and report** — the classification has
 changed and this is a production defect, not a latent one.
 
-- [ ] Mutation evidence targets *production round-trip / key-coercion
+- [x] Mutation evidence targets *production round-trip / key-coercion
       drift* — **not** preservation of a dead branch's behaviour.
 
 **4. Validation plan.**
@@ -371,16 +371,16 @@ ordering.
 Depends on: B1.
 
 **3. Implementation plan.**
-- [ ] Re-read `build_sample_set()` and its production callers on the
+- [x] Re-read `build_sample_set()` and its production callers on the
       merged head before editing (line numbers in this document are dated
       evidence, not addresses).
-- [ ] Add an explicit profile parameter; keep `None` → Regime-A
+- [x] Add an explicit profile parameter; keep `None` → Regime-A
       resolution so un-migrated callers are unaffected (§1a-F).
-- [ ] Thread the run's resolved profile from the tuner into BOTH the
+- [x] Thread the run's resolved profile from the tuner into BOTH the
       trial and the formal/eval construction sites.
-- [ ] Confirm no new topology authority is introduced — the profile is
+- [x] Confirm no new topology authority is introduced — the profile is
       consumed, never re-derived.
-- [ ] Confirm portions and seeds remain runtime inputs, not config.
+- [x] Confirm portions and seeds remain runtime inputs, not config.
 
 **4. Validation plan.**
 Unit: the five digests unchanged; first-five indices unchanged; explicit
@@ -447,15 +447,15 @@ with no forcing need. `SampleSet`'s type alias stays; no typed wrapper.
 Depends on: B1, B2.
 
 **3. Implementation plan.**
-- [ ] Re-read both `json.dump(sample_set, …)` sites and
+- [x] Re-read both `json.dump(sample_set, …)` sites and
       `validate_sample_set` before editing.
-- [ ] Establish the OBSERVABLE contract: both production serialization
+- [x] Establish the OBSERVABLE contract: both production serialization
       sites obey the same SampleSet boundary contract, and both emit
       byte-identical TIDMAD JSON.
-- [ ] Ensure invalid SampleSets are rejected consistently before/at the
+- [x] Ensure invalid SampleSets are rejected consistently before/at the
       boundary.
-- [ ] Keep B1's production round-trip pin green **unmodified**.
-- [ ] Do **not** add a typed wrapper, and do **not** migrate consumers;
+- [x] Keep B1's production round-trip pin green **unmodified**.
+- [x] Do **not** add a typed wrapper, and do **not** migrate consumers;
       record both as convergence candidates (§12) instead.
 
 **Implementation shape is NOT frozen.** Reuse an existing helper,
@@ -523,14 +523,14 @@ held identical   : segments_per_file, geometry, encoding, channel
                    metric/model semantics
 ```
 
-- [ ] Build the contrast profile varying **only** `num_files`, and assert
+- [x] Build the contrast profile varying **only** `num_files`, and assert
       atomicity mechanically against the TIDMAD declaration, as 02a's
       rungs do — a prose promise would not survive a careless edit.
-- [ ] Drive the **REAL** tuner → `TrialConfig` → `build_sample_set` path
+- [x] Drive the **REAL** tuner → `TrialConfig` → `build_sample_set` path
       and assert the selection follows the **explicit** profile rather
       than the ambient TIDMAD one.
-- [ ] Assert the file population is NOT TIDMAD's 20.
-- [ ] Confirm the rung reds when a consumer re-hardcodes a TIDMAD count
+- [x] Assert the file population is NOT TIDMAD's 20.
+- [x] Confirm the rung reds when a consumer re-hardcodes a TIDMAD count
       (mutation).
 
 **Do NOT vary `num_files` and `segments_per_file` together.** 02a already
@@ -576,10 +576,10 @@ node/skill `.md` per the pre-merge doc-sync rule. Docs-only.
 Depends on: B1-B4.
 
 **3. Implementation plan.**
-- [ ] Reconcile every checklist box with recorded evidence.
-- [ ] Record the Checkpoint-C mechanism actually used.
-- [ ] Update touched module docs, quote-verifying flags/defaults.
-- [ ] Record Checkpoint-D evidence actually run.
+- [x] Reconcile every checklist box with recorded evidence.
+- [x] Record the Checkpoint-C mechanism actually used.
+- [x] Update touched module docs, quote-verifying flags/defaults.
+- [x] Record Checkpoint-D evidence actually run.
 
 **4. Validation plan.** `ruff check`, `ruff format --check`; exact-head CI.
 
@@ -742,7 +742,13 @@ design (§13).
 ## 12. Status
 
 **FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (revision 2,
-2026-08-14). IMPLEMENTATION IN PROGRESS.**
+2026-08-14). IMPLEMENTATION COMPLETE — READY FOR OPERATOR REVIEW.
+NOT MERGED.**
+
+Ladder: CP0 → CP-B1 → Checkpoint A → Checkpoint B → Checkpoint C — all
+**PASS**, each with mutation evidence (§13.3, §13.5, §13.7, §13.8,
+§13.10). Gate 1 not required; **Gate 2 not run — Step-level, owned by
+finalizer 02c** (§7).
 
 > **Reconciliation note (kickoff, 2026-08-14).** The freeze commit
 > `dc26bb75` replaced the status block at the head of this document but
@@ -914,8 +920,8 @@ child's to take.
 | B2 → **CP-B1 PASS** | landed `7cc8c21d` | §13.5 |
 | B3 → **Checkpoint A PASS** | landed `09442a6c` | §13.7 |
 | B4 → **Checkpoint B PASS** | landed `e2d058ef` | §13.8 |
-| Checkpoint C | not started | |
-| B5 → Checkpoint D | not started | |
+| **Checkpoint C PASS** | landed `6f14dcdb` | §13.10 |
+| B5 → Checkpoint D | in progress | |
 
 ### 13.3 CP0 — BASELINE COMPLETE — **PASS**
 
@@ -1162,3 +1168,207 @@ class:
 The digests cannot see it, because under TIDMAD `num_files` **is** 20.
 That is the whole argument for Stage B in one measurement: parity
 evidence and genericity evidence are not substitutes.
+
+### 13.9 FINDING — a contrast topology is misread as a partial DataScope
+
+**Discovered by Checkpoint C, which is exactly what a live-integration
+rung is for.** Not a regression, not introduced by 02b, and **not 02b's
+to fix.**
+
+The first Checkpoint-C run died at tuner startup:
+
+```text
+ValueError: HealthGate monitored files violate the DataScope:
+  - gate 'pearson_dispersion_recording' check 'pearson_dispersion':
+    no explicit peek_file_indices (defaults to full-dataset access)
+    — an explicit in-scope list is required under a partial DataScope
+  ... (3 checks)
+```
+
+There is no partial DataScope in that run. The scope is the default —
+*full* — under a 7-file topology.
+
+**Root cause: two startup validators resolve topology from different
+authorities.**
+
+| Validator | Topology source | Result under a 7-file contrast |
+|---|---|---|
+| `validate_runtime_config` (`agent/schemas/hyperparam_tuning.py:2078-2080`) | `dataset: DatasetConfig = TIDMAD` — the **singleton, bound as a DEFAULT ARGUMENT** at import | resolves the scope to `[0..19]` |
+| `validate_health_gate_files_against_scope` (`execute_tools/health_checks/config.py:333-334`) | `resolve_dataset_profile()` — the **ambient profile** | `scope_is_full` computed against `range(7)` |
+
+The tuner calls `validate_runtime_config(agent_input)` positionally
+(`ml_hyperparameter_tune_agent.py:3636`), so the default always wins and
+the bound profile is never consulted. `{0..19} != {0..6}` → "partial" →
+the HealthGate monitored-file rule fires on a run that is not partial.
+
+A default argument evaluated at import is invisible to `bind_dataset_profile`
+— which is why 02a's accessor migration did not reach it, and why nothing
+before a non-TIDMAD live run could have surfaced it.
+
+**Ownership — recorded and routed, not absorbed.**
+
+- §2 DOES NOT OWN lists **HealthGate** (Steps 03/06/08/10);
+- §6.2 lists **partial-scope rules** among the things B2 leaves
+  **UNCHANGED**;
+- §9 makes "02b creates a second topology authority" a stop condition, and
+  fixing this by teaching selection about scope resolution would do
+  precisely that.
+
+Changing it here would be an unsourced scope expansion of exactly the kind
+§13.1 already declined. **Proposed owner: the DataScope/HealthGate startup
+path — 02c as Step finalizer, or Step-06.** The parent decides.
+
+**Consequence for Checkpoint C:** the run sets `health_gate_enabled=False`
+— the remediation the error message itself names, and a legitimate
+run-level INPUT (per CLAUDE.md, `health_gate_enabled` is a run-level input,
+not YAML policy). This is disclosed in the test's own docstring so no
+future reader mistakes it for an incidental convenience flag.
+
+**Selection is unaffected.** The mismatch is confined to startup
+validation: the tuner passes the `DataScope` *object* to
+`build_sample_set`, which resolves it against the SUPPLIED profile
+(`[0..6]`), and the sandbox's `validate_sample_set` checks
+`{0..6} ⊆ [0..19]`, which holds. No selected index is wrong; only the
+startup partial-scope *classification* is.
+
+### 13.10 Checkpoint C — LIVE INTEGRATION — **PASS**
+
+Commit `6f14dcdb`. Test-only, zero production diff.
+Module: `tests/unit/agent/tune_ml_hyperparam_agent/
+test_step02b_checkpoint_c_live_integration.py`.
+
+**Mechanism chosen (§5 leaves the command open, the boundary frozen).**
+The real `HyperparamTuningAgent.run()` is driven with a **real**
+`TidmadSandbox`, under a contrast profile bound with
+`bind_dataset_profile`. Nothing in the module calls `build_sample_set` —
+§5 rules that out explicitly.
+
+```text
+REAL:  resolve_dataset_profile -> build_sample_set(profile=)
+       -> _run_skill -> skill wrapper
+       -> execute_training / execute_inference
+       -> validate_sample_set -> json.dump -> --sample_set_json
+```
+
+Stubbed, each strictly downstream of the property: the LLM bridge; the
+subprocess launch primitives (stubbed **after** the SampleSet is
+validated and written); post-inference scoring; anchor/reference inputs.
+`score_vector` is replaced by **subclassing** the real sandbox, so
+`execute_training` / `execute_inference` remain inherited production code
+that no patch can hollow out.
+
+**§5 PASS list:**
+
+| Requirement | Evidence |
+|---|---|
+| trial **and** formal sites supply the resolved profile | `test_both_rounds_reached_the_boundary` — ≥2 distinct `exp_id`s reached the boundary; round 2 is formal by the tuner invariant pinned in `test_final_round_always_formal` |
+| the SampleSet produced is the one serialized to the subprocess config | `test_the_serialized_set_is_the_one_handed_to_the_subprocess` — path read from real argv, contents re-asserted |
+| under a contrast topology the path yields the contrast shape | `test_the_real_path_serialized_the_contrast_shape` — every written config has 7 files, not 20 |
+| no ambient fallback reachable | `test_no_ambient_fallback_was_reachable` — the builder's resolver RAISES for the whole run and is asserted un-called |
+| exact head, artifacts, log recorded | this section; head `6f14dcdb` |
+
+**Import provenance (§5).** No child Python process is launched — the
+launch primitives are stubbed — so there is no child interpreter to
+audit, and the test says so rather than performing a ceremonial check.
+What it does assert is that `sample_set_builder` and `sandbox_executor`
+resolve **under the checkout under test**, which is a real risk here:
+the venv carries an editable install pointing at a different clone
+(§13.0).
+
+**Result: 6 passed in 22.04s, rc=0 read from the log.**
+
+**Mutation M11 — the checkpoint is not vacuous.** The tuner is made to
+bind `TIDMAD_PROFILE` instead of the run's resolved profile
+(`ml_hyperparameter_tune_agent.py:4410`) — the exact defect this
+checkpoint exists to catch, and one that leaves the code *running
+normally* rather than raising:
+
+```text
+Round 2/2 Complete. Score: 1.5      <- the run still succeeds
+2 failed, 4 passed                  <- Checkpoint C reds anyway
+  test_the_real_path_serialized_the_contrast_shape
+    "train_sample_set_punet_test_run_002.json carries 20 files"
+  test_the_serialized_set_is_the_one_handed_to_the_subprocess
+```
+
+**CAUGHT.** Note what this rules out: the mutated run completes both
+rounds and reports a score, so a checkpoint that merely asserted "the run
+finished" would have passed. Only reading the serialized artifact catches
+it.
+
+### 13.11 Three harness defects Checkpoint C found in itself
+
+Recorded because each would have produced a green checkpoint that proved
+less than claimed.
+
+> **1. Unbounded cost.** The first pass left `attempts_per_round` /
+> `max_fail_rounds` at their defaults — 9 attempts, each running a **real
+> RTX 5090 VRAM probe** — 854s for a unit-tier checkpoint, and real
+> hardware work that was never intended. Bounded to one attempt per round
+> with the VRAM/config/scoring skills canned; training and inference stay
+> real because only they reach the boundary. **854s → 22s.**
+>
+> **2. The launch stub never wrote the `_OK_<exp_id>` sentinel.**
+> `execute_training` treats "returncode 0, no sentinel" as a silent
+> crash, so inference never ran and the **eval SampleSet was never
+> serialized**. The checkpoint was asserting half the boundary while
+> reporting 4 passed.
+>
+> **3. "5 passed" did not mean both modes ran — and this is the one that
+> matters.** §5 requires the trial AND formal construction sites. The
+> suite was green *without any assertion that both rounds occurred*.
+> Adding `test_both_rounds_reached_the_boundary` turned it **red**: only
+> `punet_test_run_001` had reached the boundary.
+>
+> Root cause: `_handle_prephase_gpu_measurement` launches a real
+> runtime-control GPU measurement worker on a host that has a device
+> identity; with the launch primitives stubbed it read a `MagicMock`
+> `returncode` and raised
+> `TypeError: '<' not supported between MagicMock and int`
+> (`gpu_measurement_runner.py:420`), aborting the run after round 1. It is
+> now stubbed to the function's **own documented `PROCEED` early return**
+> — the path a host without a device identity takes.
+>
+> **Consequence:** without defect 3 being found, Checkpoint C would have
+> been claimed PASS on trial-mode-only evidence. A checkpoint that does
+> not assert its own coverage is not evidence of coverage.
+
+### 13.12 Checklist reconciliation — one bounded deviation
+
+All 31 checklist boxes in §5 and §6 are resolved. One was discharged at a
+different rung than §6.4 literally specifies, and is recorded rather than
+quietly ticked.
+
+```text
+Deviation:
+  §6.4's B4 plan says "Drive the REAL tuner -> TrialConfig ->
+  build_sample_set path and assert the selection follows the explicit
+  profile". B4 as committed (e2d058ef) exercises the contrast at the
+  BUILDER level; the real-tuner contrast drive lives in Checkpoint C
+  (6f14dcdb).
+
+Reason:
+  Checkpoint C already drives the real tuner under the SAME contrast
+  profile (num_files = 7) and asserts something strictly stronger — that
+  the contrast shape reaches the JSON config actually handed to the
+  subprocess, not merely that the builder returned it. Duplicating a full
+  real-tuner run inside B4 would add ~22s and no new failure class.
+
+Source evidence:
+  §5 requires the real-tuner evidence at Checkpoint C regardless, and
+  explicitly rules out a direct build_sample_set() call for THAT rung.
+  B4's own frozen acceptance criteria (§6.4 §5) are "exactly one axis,
+  machine-checked", "the real tuner path follows the explicit profile",
+  "a consumer still assuming 20 files reds it", "zero production diff" —
+  the second is met by Checkpoint C within the same PR.
+
+Impact:
+  None on coverage. Both the builder-level rung and the real-tuner
+  integration exist; only their commit boundary differs from the literal
+  plan.
+
+Validation:
+  B4: 8 passed. Checkpoint C: 6 passed, plus mutation M11 CAUGHT, which
+  is precisely "the real tuner path follows the explicit profile"
+  demonstrated by breaking it.
+```
