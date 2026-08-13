@@ -868,3 +868,350 @@ primary-checkout deviation.
 *"READY FOR OPERATOR FREEZE (revision 2) — not frozen, no
 implementation authorized"*. All revision-1 and revision-2 discussion
 above is preserved unchanged.
+
+---
+
+## 24. Implementation ledger (LIVE — added at implementation kickoff)
+
+Everything from §24 down is the **live implementation ledger**. It never
+edits §1-§23; where implementation contradicts them, the contradiction
+is *recorded here* and, if material, stopped on (§21).
+
+### 24.1 Implementation context
+
+| Fact | Value |
+|---|---|
+| Frozen design SHA | `f865038f` (freeze commit; semantic basis `a490e99e`) |
+| Implementation base | `f865038f` |
+| Implementation branch | `feat/generic-framework-step-03-model-loss-contract` |
+| Working location | **PRIMARY checkout** `/home/yuema137/SIDERIUS` — **no worktree** |
+| PR shape | **ONE PR**; Phase A / Phase B are internal checkpoints (§6) |
+| Handoff | `before_end_memory.md` (per `docs/development/claude_context_continuity.md`) |
+| Current checkpoint | **kickoff** — Checkpoint 0 not yet started |
+
+**Operator deviation (approved 2026-08-13).** The Implementation Working
+Rules default to an isolated worktree outside `.claude/`. The recommended
+branch was already checked out in the primary working directory, so a
+second worktree on it is impossible. The operator directed implementation
+into the primary checkout. No semantic consequence; recorded so a later
+reviewer does not read the missing worktree as a skipped step.
+
+**Base identity (mechanical).** `git diff --name-only 1826f9fd f865038f`
+returns **only** the two Step-03 doc files. The source tree at the
+implementation base is therefore **byte-identical** to the tree at which
+§1 rows 1-10 were audited, and to `136214b9` where rows 11-12 were
+re-verified. **Every §1 audit row holds at the base by construction** —
+no row could have drifted.
+
+### 24.2 Kickoff source re-audit — findings
+
+Five findings. **F-1 is a STOP** (§21: *"inspection reveals ambiguity or
+a scope larger than this design assumes"*). F-2 … F-5 are ordinary
+implementation discoveries with recorded dispositions.
+
+---
+
+#### F-1 — the model-boundary input dtype is **not one value today**: training feeds int32, inference feeds int64 — **STOP, operator decision required**
+
+```text
+Previous implementation assumption
+  §1 row 3 / §4a / §7 treat "the input dtype at the model boundary" as
+  ONE semantic, name-keyed at six sites, to be replaced by ONE
+  contract-supplied value. Row 12's fix template is "make line 660 look
+  like line 668".
+
+Source evidence (re-read at f865038f, dtype observed AT the model call)
+  execute_tools/train_engine_sandbox.py:660   epoch path
+  execute_tools/train_engine_sandbox.py:1029  streaming path
+      input_seq = input_seq.float() if model_cfg.model_type == "fcnet"
+                                    else input_seq.int()      # int32
+      ...
+      output = model(input_seq)                               # :671 / :1036
+
+  execute_tools/inference_single.py:213
+      if args.denoising_model == "fcnet":
+          input_seq = input_seq.float().to(DEVICE)
+      else:
+          input_seq = input_seq.long().to(DEVICE)             # int64
+      ...
+      output = model(input_seq)                               # :228
+
+  configs/task_config.yaml:22
+      input_shape: "[B, T] int64"        <- agrees with INFERENCE only
+
+Corrected implementation understanding
+  On the non-fcnet (embedding) arm the shipped model-boundary input
+  dtype is **torch.int32 in training and torch.int64 in inference**.
+  The fcnet arm is float32 at both. So there is no single shipped
+  "model-boundary input dtype" to lift into the contract, and the
+  declared contract prose already disagrees with the training boundary.
+
+  This is invisible to every existing oracle: nn.Embedding accepts both
+  int32 and int64, so forward OUTPUTS are numerically identical and
+  Step-00's baselines (A4/A7) cannot see it. It is exactly the surface
+  A6 was created to pin — and A6 does not exist yet (§5: "MISSING —
+  capture first").
+
+Why this is MATERIAL, not bounded
+  The frozen contract carries ONE input tensor with ONE dtype (§4c).
+  Routing both boundaries from it forces int32 == int64 at one of them:
+
+    - unify on int64  -> the TRAINING boundary's observed dtype changes
+    - unify on int32  -> the INFERENCE boundary's observed dtype changes
+    - preserve both   -> the contract is NOT the sole authority at both
+                         sites, or the dtype becomes boundary-scoped
+
+  Every branch touches a frozen invariant: A6 ("the exact same tensor
+  dtype reaches each builtin"), §21 ("any builtin forward output
+  changes"), or §4c/§21 ("a declared field lands without a production
+  consumer" / no widening). The design nowhere anticipates a
+  per-boundary dtype, so no reading of §4a resolves it.
+
+Options (operator decision — NOT self-selected)
+  O1  Contract declares ONE model-required input dtype; the two
+      boundaries keep their observed dtypes through an explicit,
+      source-supported adaptation that is boundary-scoped. Preserves
+      A6 exactly. Cost: "supported adaptation" gains a boundary
+      dimension the frozen text does not describe.
+  O2  Contract declares ONE dtype and BOTH boundaries are routed to it,
+      accepting a deliberate change of observed dtype at one boundary.
+      Cleanest contract; requires operator sign-off that the executed
+      tensor change is intended, and A6 is captured as a CHANGED
+      baseline with the delta attributed.
+  O3  Migrate only the boundary that already matches the declared
+      contract (inference, int64) in this PR; record the training
+      int32 site as a named pre-existing divergence routed to a later
+      step. Smallest change; leaves a name branch alive, weakening the
+      §2 final effect.
+
+Validation consequence (any option)
+  A6 must be captured BEFORE any production change and must assert the
+  training and inference boundaries SEPARATELY, per builtin, fcnet
+  distinctly from non-fcnet — a single shared assertion would hide
+  precisely this divergence.
+```
+
+---
+
+#### F-2 — the "6 name branches" are two failure classes; only **3** are dtype
+
+```text
+Previous implementation assumption
+  §7: Phase B "kills the 6 name branches" at
+  train_engine_sandbox.py:614,660,817,1029 + inference_single.py:213,410.
+
+Source evidence
+  INPUT-DTYPE branches (3):
+    train_engine_sandbox.py:660, :1029     input_seq.float()/.int()
+    inference_single.py:213                 input_seq.float()/.long()
+
+  CONSTRUCTOR branches (3):
+    train_engine_sandbox.py:614, :817       model_class(cfg, loss_type=...)
+    inference_single.py:410                 vs model_class(cfg)
+
+Corrected implementation understanding
+  The frozen SEMANTIC claim is untouched — §4a and row 12 describe the
+  dtype class precisely, and line 660 is one of the three. Only the
+  COUNT in §7 conflates dtype routing with a constructor-signature
+  difference (fcnet's __init__ takes loss_type; the others do not).
+
+Implementation consequence
+  Contract-keyed dtype routing migrates the THREE dtype sites.
+  The three constructor sites are **audited and deliberately NOT
+  migrated**: no Model-I/O semantic backs "this model's constructor
+  takes loss_type", so declaring one would be the consumer-less seam
+  §21 forbids, and §8c forbids behaviour-changing existing builtin
+  fcnet/hybrid. Recorded as a decision, not an oversight.
+
+Validation consequence
+  A mutation restoring a model-name branch at any of the three dtype
+  sites must red. No rung asserts anything about the constructor sites.
+```
+
+---
+
+#### F-3 — the class-weight histogram named as a Phase-B consumer **was already migrated by Step 02a**
+
+```text
+Previous implementation assumption
+  §7 lists "the class-weight histogram (train_engine_sandbox.py:80,126,196)"
+  as a Phase-B consumer; §19 routes "class-weight histogram fixed 256
+  bins" to Step 03 as a cardinality derivation.
+
+Source evidence (f865038f)
+  execute_tools/train_engine_sandbox.py:142  np.bincount(alltarget + enc.value_offset,
+                                                         minlength=enc.num_classes)
+  execute_tools/train_engine_sandbox.py:219-221  same, streaming path
+  grep -n "256" execute_tools/train_engine_sandbox.py  ->  NO MATCHES
+
+Corrected implementation understanding
+  The histogram already derives its bin count and offset from the
+  resolved Dataset Profile's ValueEncoding. The cited lines 80/126/196
+  now hold Step-02a profile-resolution code. `train_engine_sandbox.py`
+  contains ZERO `256` literals.
+
+Implementation consequence
+  This Phase-B consumer does not exist. Nothing to migrate — the §4b
+  authority model is already satisfied here by Step 02. Step-03
+  cardinality work is confined to the 27 construction literals in
+  ml_models/models_sandbox.py (§1 row 2, re-counted: 27 lines).
+
+Validation consequence
+  No 3-C rung may be attached to the histogram; it would pass without
+  Step 03 existing. 3-C binds to the builtin construction path.
+```
+
+---
+
+#### F-4 — `agent/prompts.py:1037` is a further **LLM-visible** `[B, 256, T]` site, owned by Step 07a
+
+```text
+Source evidence
+  agent/prompts.py:1035-1041, inside get_planner_user_prompt(:905):
+      "- This model is a **CLASSIFIER** (output [B, 256, T]). "
+      "Valid loss types: **ce, focal, focal_cw**. "
+      "Do NOT use smooth_l1 (regression only)."
+  — keyed on `output_type`, and the surrounding block renders the loss
+  legality the planner is told, raising rather than guessing (:1032).
+
+Corrected implementation understanding
+  This is a real LLM-visible restatement of BOTH contract-owned facts
+  (cardinality 256) and loss legality, and §7's Phase-A consumer list
+  does not name it. Ownership is NOT Step 03's: roadmap §15.1 assigns
+  "planner/reflector prompts render from the profile" to Step 07a,
+  whose A-cell is "planner/reflector prompts EXACT-equal".
+
+Implementation consequence
+  Step 03 does NOT migrate it (that would absorb Step-07a scope).
+  Step 03 MUST hold its rendered bytes EXACT: §8a re-keys loss legality,
+  and this prompt's loss_note is a downstream reader of that authority,
+  so a re-key that changes these bytes is the §21 LLM-visible-drift STOP.
+
+Validation consequence
+  Checkpoint A gains a parity surface the frozen §5 A1 does not name:
+  the rendered planner prompt. A1's `pb3_*` goldens cover the proposer
+  stages only. Recorded here rather than editing §5.
+```
+
+---
+
+#### F-5 — the `[B, 256, T]` prose surface is wider than §1 row 9's four sites
+
+```text
+Source evidence — additional sites, with owners
+  agent/llm_bridge.py:181,192,202,2033,2139,2152   stub/pseudo-mode text
+                                                    + docstrings
+  agent/skills/training_skill/estimator.py:210,421  Step 07d (§19)
+  agent/skills/evaluate_vram_skill/wrapper.py:90,196-197,205,236
+  agent/skills/evaluate_vram_skill/batch_resolver.py:85
+                                                    probe recipes -> Step 04 (§10)
+  ml_models/models_sandbox.py:473,512               builtin comments
+  agent/schemas/task_config.py:62                   ForwardContract field
+                                                    description (an EXAMPLE)
+  ml_models/models_format_sandbox.py (error strings inside
+      validate_output_loss_compatibility)           "[B, 256, T]" / "[B, T]"
+
+Corrected implementation understanding
+  §1 row 9's four sites are the four LLM-visible CONTRACT-PROSE
+  restatements; the wider grep surface is mostly comments, stub text and
+  other steps' property. Two need explicit disposition:
+    - the compatibility authority's own ERROR strings hardcode 256 and
+      are reachable by an agent-facing validation failure;
+    - task_config.py:62's description is an LLM-visible schema byte
+      under §13's Gate-1 condition.
+
+Implementation consequence
+  Neither is migrated for tidiness. Both are held BYTE-EXACT unless the
+  authority re-key (§8a) forces a change — which is a STOP, not a fix.
+
+Roadmap divergence recorded
+  Roadmap §15.1's Step-3 C-cell says "executor dtype routing + VRAM-probe
+  recipes consume the contract in production". The FROZEN Step-03 design
+  routes probe construction to Step 04 (§10) and defines Checkpoint C as
+  §12's three boundaries, which contain no probe. Per the authority
+  order the frozen design outranks the roadmap: **VRAM-probe recipes are
+  NOT a Step-03 Checkpoint-C boundary.** §15.1 is reconciled at
+  Checkpoint E, after merge — not now.
+```
+
+### 24.3 Checkpoint-0 baseline audit (existing oracles)
+
+Per §15 Checkpoint 0, only A2/A3/A6/A8 are captured, and only where no
+oracle exists. Audited at `f865038f`:
+
+| Baseline | Existing oracle? | Disposition |
+|---|---|---|
+| **A2** loss cross-product | **PARTIAL.** `tests/unit/core/test_plugin_loss_compatibility.py:102` parametrizes `CLASSIFICATION_LOSSES` against a regressor plugin; `tests/unit/agent/test_output_contract_end_to_end.py:122-131` asserts one legal + one illegal pair per output type | **CAPTURE.** No test asserts the matrix cell by cell. Universe is exact and small: `output_type` ∈ {classifier, regressor, hybrid} × `loss_type` ∈ {focal, focal_cw, ce, smooth_l1, custom} (`models_format_sandbox.py:458`) = **15 cells**, incl. `custom` permitted everywhere and `hybrid` accepting all |
+| **A3** loader tolerance tiers | **PARTIAL.** `tests/unit/ml_models/test_unknown_contract_consumer_reachability.py` covers the fail-closed lookup tier | **CAPTURE** the two tiers as *distinct* behaviours: load-time invalid/missing `PLUGIN_OUTPUT_TYPE` → warn + default `"classifier"` (`plugin_loader.py:81-88`) vs lookup-time `get_output_type` → `UnknownOutputContractError` (`:192-214`). Divergence is pre-existing and NOT unified (§5 A3) |
+| **A6** model-boundary dtype | **NONE** | **CAPTURE** — and per F-1 it must assert training and inference **separately**, per builtin, fcnet distinctly. This baseline is what makes F-1 decidable |
+| **A8** prior on-disk plugins | **NONE** | **CAPTURE** — `agent_generated/models/` holds **85** `.py` plugins at this checkout |
+
+### 24.4 Implementation checklist (semantic milestones — commit count NOT pre-authorized, §17)
+
+- [ ] **M0 — Checkpoint 0.** Capture A2, A3, A6, A8 per §24.3, before any
+      production change. A6 must be capable of failing on the F-1
+      divergence. → **CHECKPOINT 0**
+- [ ] **M1 — Phase A: normalized contract.** One structured input tensor
+      + one structured output tensor: rank, ordered axes, semantic axis
+      roles, model-required dtype, fixed/symbolic/dynamic dimensions.
+      No multi-tensor container (§4c), no relation DSL (§4e).
+- [ ] **M2 — Phase A: preset resolution + fail-closed consistency.**
+      Authoring form → resolve → ONE normalized contract → consumers.
+      No runtime consumer branches on preset label, modality or rank.
+      FX-3 / FX-4 / 3-E boundaries.
+- [ ] **M3 — Phase A: canonical output semantics + loss re-key.**
+      `output_type` becomes a derived projection (§8b); `hybrid` stays a
+      legacy adapter (§8c); `validate_output_loss_compatibility` re-keyed,
+      **every verdict unchanged** (A2 is the oracle).
+- [ ] **M4 — Phase A: derived rendering, exact bytes.**
+      `workflows/task_config.render_forward_contract` (:171-214) and the
+      shape prose in `agent/schemas/{proposal,implementor,validator}.py`
+      derive from the normalized contract. `:209`'s
+      `" (per-timestep {num_classes}-class)"` derives from axis ROLES
+      (§1 row 7). A1 goldens pass **unmodified**; `prompts.py` planner
+      bytes exact (F-4). → Phase-A invariant: **no executed tensor changes**
+- [ ] **M5 — Phase B: contract-keyed input dtype.** The three dtype sites
+      of F-2, following the `get_target_torch_dtype` precedent on the
+      adjacent line (`train_engine_sandbox.py:668`). Supported adaptation
+      succeeds; unsupported fails closed. **Blocked on the F-1 decision.**
+- [ ] **M6 — Phase B: cardinality derivation.** The 27 construction
+      literals in `ml_models/models_sandbox.py`, derived from /
+      cross-validated against `ValueEncoding.num_classes`
+      (`execute_tools/dataset_config.py:406`), whose own docstring
+      (`:389-392`) assigns this derivation to the model-contract module.
+      NOT the class-weight histogram (F-3). → Phase-B invariant:
+      **no rendered prompt bytes change**
+- [ ] **CHECKPOINT A** — §5 A1-A8, incl. the F-4 planner surface
+- [ ] **CHECKPOINT B** — §11 ladder: 3-A, 3-B, 3-B-neg, 3-C, 3-D, FX-3,
+      FX-4, 3-E, under §11.1
+- [ ] **CHECKPOINT C** — §12's three boundaries, entered at production
+      entry points; (ii) asserts LLMBridge call count == 0
+- [ ] **CHECKPOINT D** — targeted regression + static + mutation (§14)
+- [ ] **GATE 2** — required (§13); gate standard re-read immediately
+      before launch. **Gate 1 NOT required** unless an LLM-visible byte
+      changes, which is itself a STOP
+- [ ] **CLOSEOUT** — ledger synchronized, PR opened, exact-final-head CI
+      green, `local HEAD == PR headRefOid == CI headSha`, tree clean
+
+### 24.5 Gate disposition, resolved mechanically at kickoff
+
+`docs/gates/gate_testing_standard.md` re-read at `f865038f` (283 lines);
+§13's citations verified verbatim: the assignment table at :254-263, the
+*"changed LLM-facing system prompt or schema"* Gate-1 trigger at :29-30,
+and Gate 2 at *"Checkpoint commits (end of a feature's commit plan)"*.
+**§13 stands as written.** Gate 1 stays out of scope iff every
+LLM-visible byte is exact — now including the F-4 planner prompt and the
+F-5 schema-description sites.
+
+### 24.6 Validation ledger
+
+*(empty — no validation has been run; no production file has been
+edited)*
+
+### 24.7 Mutation dossier
+
+*(empty)*
+
+### 24.8 Final state
+
+*(empty — no PR opened)*
