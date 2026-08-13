@@ -1849,6 +1849,44 @@ value, in the same sense as an absent `--dataset_profile_json` resolving
 the shipped profile. A resolved path never reaches it, and 3-C proves the
 resolved path is genuinely derived.
 
+#### CHECKPOINT A — first run, ONE failure, diagnosed
+
+```text
+command  pytest tests/unit/{agent,workflows,ml_models,execute_tools,core,guardrails}
+result   1 failed, 7615 passed, 3 skipped in 414.56 s — pytest rc 1
+```
+
+**The harness reported "exit code 0" for this run while pytest's own
+status was 1.** That is the wrapper's status, not pytest's — the second
+time this session. The verdict came from the log, as CLAUDE.md requires.
+
+Failure:
+`tests/unit/agent/evaluate_vram_skill/test_isolated_preflight.py
+::TestThirdValidationOutcomesUnchanged::test_candidate_configs_and_hashes_are_unchanged`
+
+```text
+Diagnosis
+  M6's BaseConfig.num_classes grows every NORMALIZED model config by one
+  key, so the pinned sha256 of each VRAM-preflight candidate moves.
+  Classification: attributable schema delta, NOT a behaviour change and
+  NOT an LLM-visible surface.
+
+Evidence — measured, not assumed
+  Removing ONLY `num_classes` from each normalized config reproduces the
+  three ORIGINAL digests exactly:
+      fcnet@323M-official   ad0e07aa864a6492  (recovered)
+      wavenet@17M           958440417b837b89  (recovered)
+      transformer@medium    80581a7d24d2f100  (recovered)
+  Zero keys removed, zero pre-existing values changed.
+
+Disposition
+  The pin is UPDATED, and STRENGTHENED rather than hash-swapped. It now
+  asserts BOTH halves: the current digests, and that stripping the new key
+  still reproduces the pre-M6 digests. A bare hash swap would assert
+  nothing about WHAT changed; this version reds specifically when a
+  pre-existing value moves, which is the failure the pin exists for.
+```
+
 ### 24.7 Mutation dossier
 
 | # | Mutation | Expected | Observed | Verdict |

@@ -792,20 +792,58 @@ class TestThirdValidationOutcomesUnchanged:
         assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
 
     def test_candidate_configs_and_hashes_are_unchanged(self):
+        """Candidate configs are byte-stable, and the ONE change since the
+        original capture is proven additive.
+
+        Step 03 M6 added ``BaseConfig.num_classes`` so the class alphabet
+        derives from the Model-I/O contract instead of a builtin literal.
+        That grows every normalized model config by one key and therefore
+        moves these digests.
+
+        Rather than swap in three new opaque hashes — which would assert
+        nothing about WHAT changed — this pins both sides:
+
+        * ``PRE_M6`` are the ORIGINAL digests, unchanged from the first
+          capture. Stripping ``num_classes`` must still reproduce them, which
+          is what proves no pre-existing key or value moved.
+        * ``CURRENT`` are the digests with the new field present.
+
+        If a future change alters an existing value, the ``PRE_M6`` half
+        reds — and that is the failure this test exists for. A bare
+        hash-swap could not tell the two cases apart.
+        """
         import hashlib
         import json as _json
 
         from scripts.vram_preflight_validation import CANDIDATES, validate_config
 
-        expected = {
+        PRE_M6 = {
             "fcnet@323M-official": "ad0e07aa864a6492",
             "wavenet@17M": "958440417b837b89",
             "transformer@medium": "80581a7d24d2f100",
         }
+        CURRENT = {
+            "fcnet@323M-official": "8b255f3763ef76c4",
+            "wavenet@17M": "141773e2b3e5300e",
+            "transformer@medium": "76b783ab94129b30",
+        }
+
+        def _digest(payload: dict) -> str:
+            return hashlib.sha256(
+                _json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+
         for entry in CANDIDATES:
+            label = entry["label"]
             normalized, error = validate_config(entry)
             assert error is None
-            digest = hashlib.sha256(
-                _json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
-            assert digest.startswith(expected[entry["label"]]), entry["label"]
+            assert _digest(normalized).startswith(CURRENT[label]), label
+
+            # The attribution: the ONLY difference from the original capture
+            # is the added key.
+            assert "num_classes" in normalized, label
+            without_new_field = {k: v for k, v in normalized.items() if k != "num_classes"}
+            assert _digest(without_new_field).startswith(PRE_M6[label]), (
+                f"{label}: a pre-existing config key or value changed — the "
+                "Step-03 delta is supposed to be purely additive"
+            )
