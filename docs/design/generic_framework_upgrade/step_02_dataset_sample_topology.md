@@ -19,7 +19,7 @@
 > | Document | State |
 > |---|---|
 > | `pr_02a_dataset_profile_injection.md` | **FROZEN / OPERATOR APPROVED** at `cfc83b1e` (2026-08-13) |
-> | `pr_02b_selection_sampleset.md` | DRAFT — to be revised AFTER 02a lands |
+> | `pr_02b_selection_sampleset.md` | **DESIGN READY FOR OPERATOR FREEZE** (rev 2, post-02a) |
 > | `pr_02c_systematic_groups.md` | DRAFT — to be revised AFTER 02a lands |
 > | this parent | LIVING until Step-02 closeout |
 >
@@ -68,7 +68,7 @@ child-plan detail still to be written.
 | Child | State |
 |---|---|
 | **02a — Dataset Profile injection** | **COMPLETE / MERGED** — PR [#202](https://github.com/Galileo-Sandbox/SIDERIUS/pull/202), merge commit `47359538`, PR head `0d9fc32d`, exact-head CI green. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten |
-| 02b — Selection & SampleSet | **DESIGN — READY FOR OPERATOR REVIEW.** NOT frozen; implementation NOT authorized |
+| 02b — Selection & SampleSet | **DESIGN — READY FOR OPERATOR FREEZE** (revision 2, operator review applied). NOT yet frozen; implementation NOT authorized |
 | 02c — Systematic groups (Step FINALIZER) | DRAFT — revised after 02b lands |
 
 **Step 02 remains IN PROGRESS.** The overall roadmap §15.1 matrix is the
@@ -666,30 +666,47 @@ WHY NOT SPLIT FURTHER (encoding / channel identity as a 4th PR):
 
 **CHILD 02b — Selection & SampleSet semantics**
 
+> **REVISED after 02a merged** (2026-08-14). The block below is the
+> post-02a scope; the original pre-02a wording assumed 02b would migrate
+> `sample_set_builder.py` off the singleton, which **02a already did**
+> (§1a-E and the child's §0). Kept as a correction, not a rewrite of
+> history.
+
 ```text
-CAPABILITY: sample selection resolves counts and index space from the
-  injected profile, so a different topology produces correct SampleSets
-  rather than silently sampling TIDMAD's 200-segment/20-file shape.
-AUTHORITY IT OWNS: strategy definitions, per-family selection rules, the
-  packing rule (the trial asymmetry made explicit), and the SampleSet
-  JSON round-trip contract at one boundary.
-PRODUCTION CONSUMER: sample_set_builder + the tuner's formal/trial
-  sample-set construction, in the same PR.
+CAPABILITY: the production tuner supplies a run-bound Dataset Profile
+  EXPLICITLY to sample selection, replacing ambient resolution, and the
+  SampleSet's serialization contract is pinned at its one production
+  boundary. TIDMAD selection identity is byte-identical throughout.
+AUTHORITY IT OWNS: explicit profile threading into build_sample_set and
+  its production callers; TrialConfig -> SampleSet construction at the
+  tuner boundary; the SampleSet serialization/key-coercion contract at
+  the two core/sandbox_executor.py json.dump sites.
+NOT OWNED (post-02a corrections):
+  - migrating the builder off TIDMAD constants — DONE by 02a;
+  - ANCHOR_FILES / systematic groups — 02c;
+  - strategy definitions as declared data — DEFERRED (no second
+    implementation yet, roadmap §0 rule 8);
+  - trial packing read-layout — NOT selection-owned; forward-routed to
+    the Deliverable Contract / Step-5 §7c audit (§12.1).
+PRODUCTION CONSUMER: the tuner's trial AND formal construction sites,
+  in the same PR.
 TIDMAD PARITY SURFACE: the five sha16 digests + first-five segment
-  indices, byte-identical; the JSON round-trip pin it captures first.
-CONTRAST AXIS: the ESTABLISHED topology contrast (A1/A2) re-used
-  THROUGH the selection path. No new axis.
-CHECKPOINT: local A (digests) + **local B = topology contrast
-  propagated through the SampleSet selection path** (a contrast topology
-  must yield a correctly shaped SampleSet — this IS 02b's Stage-B proof,
-  not a formality) + local C (tuner builds a real run's sample set from
-  the profile).
-DEPENDS ON: 02a (needs a profile to inject).
-CAN MERGE AND BE USEFUL ALONE?: YES, given 02a.
+  indices, byte-identical; TrialConfig JSON goldens; the SampleSet
+  round-trip pin it captures first.
+CONTRAST AXIS: the ESTABLISHED topology axis re-used THROUGH the
+  selection path, narrowed to num_files ONLY. No new axis; segments_per_
+  file is explicitly held.
+CHECKPOINT: CP0 (round-trip baseline) -> CP-B1 (explicit hop live,
+  ambient disabled, digests identical) -> A -> B -> C (REAL tuner path,
+  both sites, no ambient fallback reachable) -> D.
+DEPENDS ON: 02a (merged).
+CAN MERGE AND BE USEFUL ALONE?: YES.
 WHY A PR AND NOT A SEMANTIC COMMIT: its failure class is unique and
-  severe — a changed SampleSet digest shifts every downstream experiment
-  identity, invalidating comparability across the whole chain. It has
-  its own oracle (five digests) that no other child can red.
+  severe — a bound non-TIDMAD run could otherwise silently select
+  against the ambient topology, and a changed SampleSet digest shifts
+  every downstream experiment identity. It owns an oracle (five digests)
+  no other child can red. Being SMALLER than 02a is not a reason to fold
+  it into 02c: the split criterion is semantic and review complexity.
 ```
 
 **CHILD 02c — Systematic groups**
@@ -992,7 +1009,7 @@ the replacement preserves each.
 
 | Boundary | Evidence | Disposition |
 |---|---|---|
-| **Trial packing read-layout** — the scorer reads the denoised file by `local_idx` while reading the raw file by original `seg_idx` (`scoring_utils.py`, both worker paths) | a load-bearing layout contract between inference and scoring | **Unowned.** It is a deliverable-READ layout, not selection, so 02b explicitly does not claim it. Needs an owner; candidate is whichever design first needs the Deliverable Contract (§14 row) |
+| **Trial packing read-layout** — the scorer reads the denoised file by `local_idx` while reading the raw file by original `seg_idx` (`scoring_utils.py`, both worker paths) | a load-bearing layout contract between inference and scoring | **NOT Step-02 selection-owned** (operator decision, 2026-08-14). **Forward-routed**, not left unowned: candidate **Deliverable Contract / Step-5 §7c execution-contract** ownership, with final ownership decided when that detailed design audits the producer-reader boundary |
 | **SampleSet key-coercion divergence** | after a JSON round-trip keys are strings; `TIDMADDataset` sorts lexicographically, `TIDMADEpochDataset` numerically | **Latent, not live** — no production caller passes `sample_set=` to `TIDMADDataset`. 02b pins the contract at the one production boundary; unifying the orders stays deferred as a behaviour change with no forcing need |
 | **Strategy definitions as declared data** | `Literal["snapshot","anchors","target"]` in the builder and `TrialConfig` | Deferred — no second implementation yet (roadmap §0 rule 8), and `anchors` resolves through `ANCHOR_FILES`, which is 02c's |
 

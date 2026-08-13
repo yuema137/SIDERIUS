@@ -2,8 +2,13 @@
 
 ## Status
 
-**DESIGN — READY FOR OPERATOR REVIEW (2026-08-14).
-NOT FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**DESIGN — READY FOR OPERATOR FREEZE (revision 2, 2026-08-14).
+NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+
+Revision 2 applies the operator review of 2026-08-14: Q1/Q2/Q3 answered
+(§11), and four narrow corrections applied — B1 pins the live contract
+instead of freezing a latent bug, B3 freezes observable properties rather
+than helper shape, B2 is Stage A only, and B4 is strictly single-axis.
 
 Rewritten against **merged master after 02a** (`47359538`), not carried
 over from the pre-02a sketch. The old sketch is superseded: its entire
@@ -122,7 +127,7 @@ sha16 digests are unchanged.
 | portions, seeds | **runtime inputs**, LLM-planned / operator-clamped. Never config (roadmap §0 rule 4) |
 | resolved SampleSets as stored artifacts | runtime state |
 | DataLoader ordering / `shuffle` / `file_order` | 02a and the tuner-ordering feature. 02b changes no visited sequence |
-| trial **packing** read-layout (`local_idx` vs `seg_idx` in the scorer) | a deliverable-READ layout contract between inference and scoring, not selection. Flagged in §12 as an open boundary, not claimed here |
+| trial **packing** read-layout (`local_idx` vs `seg_idx` in the scorer) | not Selection/SampleSet-owned — it interprets a persisted/read layout between inference and scoring. **Forward-routed** (operator decision Q3) to the Deliverable Contract / Step-5 §7c execution-contract audit, which decides final ownership. Not left unowned |
 | model I/O · metric · HealthGate · Deliverable Contract · launcher | Steps 03 / 06 / 08 / ledger / 10 |
 
 ---
@@ -250,18 +255,33 @@ Unchanged: ALL production code — zero production diff.
 Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Pin what the boundary WRITES: a `SampleSet` with int keys, after
-      `json.dump` at the two `core/sandbox_executor.py` sites, is read
-      back with **string** keys and unchanged value lists.
-- [ ] Pin each production consumer's re-int at its own seam, as it
-      behaves TODAY — including the divergence:
-      `sorted(items())` (lexicographic) vs `sorted(keys, key=int)`
-      (numeric). **Record the divergence as the pinned fact; do not
-      "fix" it in this commit.**
-- [ ] Pin `validate_sample_set`'s coercion/validation behaviour at the
-      boundary (it already exists — pin, do not change).
-- [ ] Provide mutation evidence for the ONE failure class this adds:
-      *round-trip / key-coercion drift*.
+
+**FROZEN production round-trip contract — pin exactly this:**
+- [ ] the SampleSet producer uses **integer** keys;
+- [ ] the JSON boundary emits **string** keys (per JSON), at both
+      `core/sandbox_executor.py` sites;
+- [ ] value lists are unchanged across the round trip;
+- [ ] the **LIVE** production consumer converts keys **numerically**,
+      preserving current selection identity;
+- [ ] `validate_sample_set`'s existing coercion/validation behaviour at
+      the boundary (pin, do not change).
+
+**LATENT finding — record, do NOT freeze:**
+- [ ] record in the ledger that `TIDMADDataset`'s `sample_set` branch
+      sorts post-JSON keys **lexicographically**, that a source audit
+      finds **no production caller reaches that branch**, and that 02b
+      does not fix it.
+- [ ] **Do NOT assert its exact ordering** (`0, 1, 10, 11, …`) anywhere.
+      Freezing an unreachable bug's output would promote it into a
+      compatibility promise nobody can later change — the opposite of
+      what a capture-first baseline is for.
+
+**Stop condition:** if the current-source audit finds that branch **is**
+production-reachable, **STOP and report** — the classification has
+changed and this is a production defect, not a latent one.
+
+- [ ] Mutation evidence targets *production round-trip / key-coercion
+      drift* — **not** preservation of a dead branch's behaviour.
 
 **4. Validation plan.**
 Unit: the new pins.
@@ -273,19 +293,21 @@ Gate: none.
 
 **5. Acceptance criteria.**
 - `git diff --stat` shows ZERO files outside `tests/`.
-- The lexicographic-vs-numeric divergence is asserted explicitly, with
-  both orders written out, so a later change that silently unifies them
-  reds.
-- The pin fails when the coercion behaviour is perturbed (recorded
-  mutation).
+- The LIVE contract above is pinned at the production boundary, and the
+  pin fails when that behaviour is perturbed (recorded mutation).
+- **No test asserts the latent branch's lexicographic ordering.** A
+  reviewer can grep the new module for `10, 11` / `"10"` and find nothing
+  that enshrines it.
+- The latent divergence is recorded in the ledger with its
+  production-unreachability evidence.
 - No duplicate of anything the five digests already cover.
 
 **6. Failure and edge cases.**
 | Case | Handling |
 |---|---|
 | a pin cannot be written without touching production | STOP — a design finding, not a licence to edit |
-| the divergence turns out to be LIVE, not latent | STOP and report: that is a production defect and a different PR |
-| a consumer's re-int is unreachable in production | record it as latent, do not pin it as live |
+| the divergence turns out to be LIVE, not latent | **STOP and report** — a production defect, a different PR, and the design classification has changed |
+| a consumer's re-int is unreachable in production | record it as latent; do **not** pin it as live, and do not freeze its output |
 
 **7. Verification commands and evidence.**
 Intended: targeted `pytest` over the new module, plus
@@ -339,15 +361,26 @@ still fire.
 Backward-compat: every §3 EXISTS row green, UNMODIFIED.
 Gate: none.
 
-**5. Acceptance criteria.**
-- The five sha16 digests are byte-identical, asserted by the existing
-  module run unmodified.
-- With a contrast profile passed explicitly and a DIFFERENT ambient
-  profile bound, selection follows the **explicit** one — proving the
-  parameter is real and not decorative.
+**5. Acceptance criteria — Stage A: SAME semantics, NEW transport.**
+
+B2 answers *"is the explicit hop live?"* It does **not** answer *"does a
+different topology work?"* — that is B4's question, and using a
+non-TIDMAD contrast here would smuggle Stage B into Stage A.
+
+- An explicit **TIDMAD-equivalent** profile is passed through the real
+  tuner selection path.
+- **Ambient resolution is disabled / made to fail if consulted**, and the
+  production path still succeeds — the sharpest available proof that the
+  explicit hop is real rather than decorative, because a decorative
+  parameter would fall through to the ambient resolver and pass.
+- The five sha16 digests and the first-five indices remain
+  **byte-identical**, asserted by the existing module run unmodified.
 - No production selection call site relies on ambient resolution.
-- Mutation: drop the explicit argument at one tuner site so it falls back
-  to ambient → a test reds.
+- Mutation: drop the explicit argument at one tuner site → with ambient
+  disabled, a test reds.
+
+Exact assertion mechanics (how ambient is disabled) are
+implementation-time.
 
 **6. Failure and edge cases.**
 | Case | Handling |
@@ -385,12 +418,26 @@ Depends on: B1, B2.
 **3. Implementation plan.**
 - [ ] Re-read both `json.dump(sample_set, …)` sites and
       `validate_sample_set` before editing.
-- [ ] State the contract in ONE place: what key type crosses the
-      boundary, and what a reader is entitled to assume.
-- [ ] Ensure both sites go through it — two sites, one contract.
-- [ ] Confirm the emitted JSON is byte-identical for TIDMAD inputs.
+- [ ] Establish the OBSERVABLE contract: both production serialization
+      sites obey the same SampleSet boundary contract, and both emit
+      byte-identical TIDMAD JSON.
+- [ ] Ensure invalid SampleSets are rejected consistently before/at the
+      boundary.
+- [ ] Keep B1's production round-trip pin green **unmodified**.
 - [ ] Do **not** add a typed wrapper, and do **not** migrate consumers;
       record both as convergence candidates (§12) instead.
+
+**Implementation shape is NOT frozen.** Reuse an existing helper,
+introduce one minimal shared helper, or use another source-supported
+shape — whichever the re-read supports. **Do not create a new abstraction
+merely to satisfy prose about centralization.**
+
+**This commit may legitimately shrink.** If the audit shows both
+`json.dump` sites are already simple enough and B1's boundary pin already
+prevents drift, B3 becomes a minimal evidence/documentation commit rather
+than forced helper construction. 02b's real capability is explicit profile
+threading; serialization consolidation is supporting safety work and must
+not be over-engineered to look substantial.
 
 **4. Validation plan.**
 Unit: B1's round-trip pin green UNMODIFIED; emitted JSON byte-identical
@@ -401,11 +448,13 @@ the boundary, not silently written.
 Backward-compat: subprocess consumers unchanged; argv unchanged.
 Gate: none.
 
-**5. Acceptance criteria.**
+**5. Acceptance criteria — observable properties only.**
 - Emitted JSON byte-identical to pre-change for TIDMAD inputs.
-- Exactly one place states the key contract; both sites use it.
-- B1's pins pass without modification.
-- Mutation: bypass the contract at one site → a test reds.
+- Both serialization sites obey the same observable boundary contract.
+- Invalid SampleSets are rejected consistently at/before the boundary.
+- B1's production round-trip pin passes **without modification**.
+- Mutation: make one site diverge from the contract → a test reds.
+- **No new abstraction exists solely to centralize prose.**
 
 **6. Failure and edge cases.**
 | Case | Handling |
@@ -433,17 +482,32 @@ Lands after B2/B3 because the rung needs the fully resolved path.
 Depends on: B2, B3.
 
 **3. Implementation plan.**
-- [ ] Build a **single-axis** contrast profile: `num_files` and
-      `segments_per_file` are the selection-relevant topology; vary the
-      minimum needed and hold geometry, encoding, channels and groups at
-      TIDMAD. State the atomicity baseline explicitly and assert it
-      mechanically, as 02a's rungs do.
-- [ ] Drive `TrialConfig → build_sample_set` with that profile and assert
-      the file population, index space and per-file segment count all
-      follow the declaration.
-- [ ] Assert the shape is NOT TIDMAD's 20 × 200.
+**Approved axis: `num_files` / file index-space ONLY.**
+
+```text
+ambient  profile : TIDMAD, num_files = 20
+explicit profile : num_files != 20
+held identical   : segments_per_file, geometry, encoding, channel
+                   identity, groups, strategy, seed, portion,
+                   metric/model semantics
+```
+
+- [ ] Build the contrast profile varying **only** `num_files`, and assert
+      atomicity mechanically against the TIDMAD declaration, as 02a's
+      rungs do — a prose promise would not survive a careless edit.
+- [ ] Drive the **REAL** tuner → `TrialConfig` → `build_sample_set` path
+      and assert the selection follows the **explicit** profile rather
+      than the ambient TIDMAD one.
+- [ ] Assert the file population is NOT TIDMAD's 20.
 - [ ] Confirm the rung reds when a consumer re-hardcodes a TIDMAD count
       (mutation).
+
+**Do NOT vary `num_files` and `segments_per_file` together.** 02a already
+proved the profile can represent topology and geometry; 02b's unique
+Stage-B question is narrower — does the production SELECTION path consume
+the explicit profile. If implementation proves a `num_files`-only fixture
+cannot be valid, **STOP and report the source reason**; do not silently
+add a second axis.
 
 **4. Validation plan.**
 Unit: the rung.
@@ -453,10 +517,10 @@ Backward-compat: TIDMAD digests still green.
 Gate: none.
 
 **5. Acceptance criteria.**
-- The rung varies exactly its named axis, machine-checked against the
-  TIDMAD declaration.
-- A consumer still assuming 20 files or 200 segments reds it —
-  demonstrated by mutation.
+- The rung varies **exactly one** field (`num_files`), machine-checked
+  against the TIDMAD declaration.
+- The real tuner path follows the explicit profile, not the ambient one.
+- A consumer still assuming 20 files reds it — demonstrated by mutation.
 - Zero production diff.
 
 **6. Failure and edge cases.**
@@ -594,26 +658,60 @@ repository-wide test cleanup.
 
 ---
 
-## 11. Remaining operator decisions
+## 10a. Narrow re-review after the operator revision (2026-08-14, 9 questions)
 
-1. **Is 02b, at this reduced scope, still worth its own PR** — or should
-   the serialization pin fold into 02c and 02b close as "already
-   delivered by 02a"? The design argues ONE PR (§10 Q1); the operator
-   owns the call.
-2. **The latent key-coercion divergence.** 02b pins it. Unifying the two
-   orders is a behaviour change with no forcing need today — confirm it
-   stays deferred rather than being fixed opportunistically.
-3. **Trial packing** (`local_idx` vs `seg_idx`) is currently unowned:
-   a deliverable-READ layout between inference and scoring, not selection.
-   Recorded in §12 of the parent as an open boundary; it needs an owner
-   eventually.
+Scoped exactly as directed. No broadened repository audit.
+
+| # | Question | Verdict |
+|---|---|---|
+| 1 | Is 02b still independently useful? | **YES.** Its capability — the production tuner supplying a run-bound profile to selection — is a correctness property nothing else delivers. 02a made the accessor a Regime-A *adapter*, explicitly not the general injection mechanism, so selection is the consumer still relying on it |
+| 2 | Does Stage A avoid non-TIDMAD behaviour changes? | **YES, now.** B2's acceptance was the one place Stage B had leaked in; it now uses a TIDMAD-**equivalent** profile with ambient resolution disabled. Stage A = same semantics, new transport |
+| 3 | Is B4 exactly one axis? | **YES.** `num_files` only, with `segments_per_file` moved into the explicitly-held list and a STOP condition if a one-axis fixture proves impossible |
+| 4 | Does CP0 pin only LIVE compatibility surfaces? | **YES, now** — this was the sharpest correction. B1 pins int-keys-in / string-keys-out / values-unchanged / live consumer converts numerically, and explicitly forbids asserting the latent branch's ordering. An acceptance criterion makes that greppable |
+| 5 | Does B3 avoid speculative abstraction? | **YES.** "Exactly one place" is gone; the frozen properties are observable (same contract, byte-identical TIDMAD JSON, consistent rejection), and B3 may shrink to evidence/docs if no refactor is warranted |
+| 6 | Can Checkpoint C still catch ambient fallback? | **YES.** Its pass list requires both trial and formal sites, the SampleSet actually serialized for the subprocess, and "no ambient fallback reachable on the migrated production path". A direct `build_sample_set()` call is explicitly insufficient |
+| 7 | Is 02c ownership untouched? | **YES.** `ANCHOR_FILES` stays; strategy-as-data stays deferred; the parent records the 02c implication without editing 02c's document |
+| 8 | Is trial packing explicitly routed forward? | **YES, now.** It was "unowned" in revision 1 — a gap. It is now routed to the Deliverable Contract / Step-5 §7c audit in both this document and the parent |
+| 9 | Is test scope proportional? | **YES.** No local full suite planned; "affected package" is named as the selection + sandbox-executor tests and explicitly *not* most of `tests/unit/`; mutations are by failure class |
+
+**No new material finding.** The four revisions were corrections to how
+the design states its evidence, not to its scope or ownership.
 
 ---
 
+## 11. Operator decisions — ANSWERED (2026-08-14)
+
+| # | Question | Decision |
+|---|---|---|
+| **Q1** | Is 02b still worth its own PR at this reduced scope? | **YES — keep it as its own child.** Explicit profile threading into the REAL tuner selection path carries its own correctness failure class: a bound non-TIDMAD run can otherwise silently select against the ambient/default topology. That is independent of 02c's group/HealthGate capability. Being smaller is fine — the split criterion is semantic and review complexity, not size |
+| **Q2** | Fix the latent lexicographic-vs-numeric divergence? | **NO — stays deferred.** And, sharpened by the review: **do not promote the unreachable lexicographic behaviour into a frozen compatibility invariant.** B1 pins the LIVE contract only (§6.1) |
+| **Q3** | Does trial packing belong to 02b? | **NO — OUT.** Forward-routed, not left unowned: *not Selection/SampleSet-owned; candidate Deliverable Contract / Step-5 §7c execution-contract ownership, decided by that design's producer-reader source audit* |
+
+### 11.1 Revisions applied after the operator review
+
+1. **B1 no longer freezes a dead branch's bug.** It pins the live
+   round-trip contract and records the latent divergence, with a stop
+   condition if the branch turns out to be reachable.
+2. **B3 freezes observable properties, not helper shape** — and may
+   legitimately shrink to an evidence/docs commit if no refactor is
+   warranted.
+3. **B2 is Stage A only.** Its acceptance moved from a non-TIDMAD
+   contrast (which smuggled Stage B in) to: explicit TIDMAD-equivalent
+   profile + ambient resolution disabled + digests byte-identical.
+4. **B4 is strictly single-axis** — `num_files` only, with
+   `segments_per_file` explicitly held.
+
+### 11.2 Remaining operator questions
+
+**None.** Q1-Q3 are answered and the four revisions are applied. The
+remaining choices — assertion mechanics, how ambient resolution is
+disabled, helper shape, fixture placement — are implementation-time by
+design (§13).
+
 ## 12. Status
 
-**DESIGN — READY FOR OPERATOR REVIEW. NOT FROZEN. IMPLEMENTATION NOT
-AUTHORIZED.** Implementation begins only after operator freeze and a
+**DESIGN — READY FOR OPERATOR FREEZE (revision 2, 2026-08-14).
+NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.** Implementation begins only after operator freeze and a
 filled Implementation Working Rules contract, in a fresh context with its
 own Context Continuity v2 handoff — in an isolated worktree **outside
 `.claude/`**.
