@@ -1390,8 +1390,8 @@ recorded, not silently resolved by picking a third config.
 | **CP-C1 — DECLARATIONS LIVE + TIDMAD PARITY** | **PASS** | §24.9 |
 | C3 — campaign trigger + profile-derived all-files | **DONE** | §24.10 |
 | **CHECKPOINT A — Stage-A TIDMAD parity complete** | **PASS** | §24.12 |
-| C4 — 4.8-C atomic contrast | not started | |
-| Checkpoint B | — | |
+| C4 — 4.8-C atomic contrast | **DONE** | §24.13 |
+| **CHECKPOINT B — generic file-set semantics complete** | **PASS** | §24.14 |
 | PR-02c Checkpoint C | — | |
 | C5 / PR-02c Checkpoint D | — | |
 | Step-02 aggregate reconciliation | — | |
@@ -1993,3 +1993,68 @@ Validation:
 The scope is the honest affected set — selection, health checks, core
 and the tuner node — and it is **not** the full local suite. That single
 terminal run is reserved for the assembled Step-02 head (§13.2).
+
+---
+
+### 24.13 C4 — the 4.8-C atomic contrast (test-only)
+
+`tests/unit/execute_tools/test_step02c_c4_file_set_contrast.py`, 13
+tests, **zero production diff**.
+
+Two atomic subcases, never one combined fixture:
+
+```text
+C-anchor   vary ONLY anchor_selection_files -> [2, 7, 11, 15, 18]  (FIVE)
+           anchors follow;  blocking peeks + campaign trigger UNCHANGED
+
+C-health   vary ONLY health_peek_files      -> [6, 13]             (TWO)
+           blocking peeks + campaign trigger follow;
+           anchors UNCHANGED;  recording gates UNCHANGED at all-files
+```
+
+Atomicity is **machine-checked** with 02b B4's `_diff_paths` helper —
+`_diff_paths(TIDMAD.model_dump(), contrast.model_dump())` must equal
+exactly `["anchor_selection_files"]` / `["health_peek_files"]`. A prose
+promise would not survive a careless fixture edit. Topology is asserted
+identical to TIDMAD's in both subcases: 02b's `num_files` contrast is
+deliberately NOT reused (§11.4), because re-answering another child's
+question would also drag in the Step-10 residue §12.1 avoids.
+
+**Cardinality varies, per §20a Q11**: five and two against TIDMAD's
+three, in both directions, with a test asserting `len(declared) != 3` so
+the property cannot silently erode.
+
+**All-files is not a third axis.** It derives from topology, and its
+genericity is proved as derived reachability in C3's
+`test_step02c_derived_all_files.py`.
+
+### 24.14 C4 mutation dossier — the classes only a contrast can expose
+
+The mutations for "consumer still reads its literal" were already killed
+at C2/C3 (M-C2-1, M-C2-2, M-C3-1, M-C3-2) and are not repeated. C4 adds
+the two classes that only an atomic, cardinality-varying contrast can
+reach:
+
+| # | Class | Mutation | Observed |
+|---|---|---|---|
+| M-C4-1 | §12.2 — the two declarations collapse, or a consumer reads the WRONG one | anchors reads `health_peek_files` | **CAUGHT** — `2 failed, 11 passed`: `TestCAnchor::test_the_anchors_strategy_follows_the_declaration` **and** `TestCHealth::test_the_anchors_population_is_UNCHANGED`. The second is the "unvaried consumer" assertion §19 exists for; without it this mutant would look like an ordinary single-consumer bug |
+| M-C4-2 | a consumer silently assumes a TRIPLET | `files = list(profile.anchor_selection_files)[:3]` | **CAUGHT by the rung ALONE** — `1 failed, 67 passed`. Every other test stayed green, **including C2's reachability test**, whose contrast declaration `[1, 5, 12]` is itself three files. This is §20a Q11 vindicated empirically: a membership-only contrast would have missed it |
+
+### 24.15 CHECKPOINT B — generic file-set semantics complete: **PASS**
+
+Against §11.4's acceptance criteria:
+
+- [x] Each subcase varies **exactly one** declaration, machine-checked
+      against the TIDMAD declaration rather than asserted in prose.
+- [x] The **unvaried** consumer is asserted unchanged in each subcase —
+      and M-C4-1 proves that assertion is load-bearing.
+- [x] A consumer still holding its literal reds its subcase (M-C2-1,
+      M-C2-2, M-C3-1 at their own commits; M-C4-1/M-C4-2 here).
+- [x] Zero production diff.
+- [x] No non-declaration axis moves: topology, geometry, encoding,
+      channels, DataScope, strategy, seed and portion are all held, and
+      the topology hold is asserted.
+
+**Both declared task-owned semantics now vary through declarations with
+no source-code edit.** That is the capability statement of §1, and it is
+now evidenced rather than intended.
