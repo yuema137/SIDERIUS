@@ -17,7 +17,12 @@ when a seed is provided.
 import random
 from typing import Literal
 
-from execute_tools.dataset_config import DataScope, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DataScope,
+    DatasetConfig,
+    DatasetProfile,
+    resolve_dataset_profile,
+)
 from execute_tools.scoring_utils import SampleSet
 
 # Files used by the "anchors" strategy: low, mid, high frequency extrema
@@ -32,6 +37,7 @@ def build_sample_set(
     target_files: list[int] | None = None,
     seed: int | None = None,
     scope: DataScope | None = None,
+    profile: DatasetProfile | None = None,
 ) -> SampleSet:
     """
     Build a SampleSet from trial parameters.
@@ -54,6 +60,15 @@ def build_sample_set(
         scope:           DataScope restricting which files may be used.
                          ``None`` = complete dataset (behavior identical to
                          before scope existed).
+        profile:         Dataset Profile supplying the file population
+                         (``num_files``) and index space
+                         (``segments_per_file``) selection runs against.
+                         ``None`` falls back to ambient resolution — the
+                         Regime-A adapter — so un-migrated callers are
+                         unaffected. Production callers that know their
+                         run's profile SHOULD pass it: with ``None`` a run
+                         bound to a non-default topology would silently
+                         select against the ambient one.
 
     Returns:
         A ``SampleSet`` mapping file indices to lists of segment indices.
@@ -64,12 +79,16 @@ def build_sample_set(
             ``"snapshot"``, or (normal mode) ``file_index`` is out of scope.
         ValueError: If ``trial_portion`` results in 0 segments per file.
     """
-    dataset = resolve_dataset_profile().dataset
+    # Resolved ONCE: every topology read below must come from the same
+    # profile, or a rebind between reads could split one SampleSet across
+    # two topologies.
+    resolved_profile = profile if profile is not None else resolve_dataset_profile()
+    dataset = resolved_profile.dataset
     resolved_scope = (scope or DataScope.default()).resolve(dataset)
     scope_is_full = resolved_scope == list(range(dataset.num_files))
 
     if not is_trial:
-        return _build_normal(file_index, resolved_scope)
+        return _build_normal(file_index, resolved_scope, dataset)
 
     # Determine which files to include
     if trial_strategy == "snapshot":
@@ -92,7 +111,7 @@ def build_sample_set(
         raise ValueError(f"Unknown trial_strategy: {trial_strategy!r}")
 
     # Compute number of segments to sample per file
-    segments_per_file = resolve_dataset_profile().dataset.segments_per_file
+    segments_per_file = dataset.segments_per_file
     n_segments = max(1, round(trial_portion * segments_per_file))
 
     rng = random.Random(seed)
@@ -106,12 +125,17 @@ def build_sample_set(
     return sample_set
 
 
-def _build_normal(file_index: int, resolved_scope: list[int]) -> SampleSet:
+def _build_normal(file_index: int, resolved_scope: list[int], dataset: DatasetConfig) -> SampleSet:
     """Normal mode: all segments of a single file (must be in scope).
+
+    Args:
+        dataset: The already-resolved topology. Passed in rather than
+            re-resolved so normal mode cannot disagree with the caller's
+            profile.
 
     Raises:
         ValueError: If ``file_index`` is outside ``resolved_scope``.
     """
     if file_index not in resolved_scope:
         raise ValueError(f"file_index={file_index} is outside the DataScope {resolved_scope}.")
-    return {file_index: list(range(resolve_dataset_profile().dataset.segments_per_file))}
+    return {file_index: list(range(dataset.segments_per_file))}
