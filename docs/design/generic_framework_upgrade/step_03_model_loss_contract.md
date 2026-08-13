@@ -2,487 +2,783 @@
 
 ## 0. Status and verified prerequisites
 
-**STEP 03 DESIGN — READY FOR OPERATOR REVIEW (2026-08-13). NOT FROZEN.**
+**STEP 03 DESIGN — READY FOR OPERATOR FREEZE (revision 2, 2026-08-13).**
 
-Design only. No implementation branch, no worktree, no Gate has been run.
+Design only. No implementation, no branch, no Gate has been run.
 
 ### 0.1 Verified base (mechanical, not conversational)
 
 | Fact | Value |
 |---|---|
-| Design base | `1826f9fd` = `origin/master`, clean tree |
-| Step 00 | MERGED — PR #198 |
-| Step 01 | **COMPLETE / MERGED** — 01a PR #199 (`39f89f52`), 01b PR #201 (`fe05f5f7`) |
+| Design base | `136214b9` = `origin/master`, clean tree |
+| Step 00 / 01 | MERGED — PR #198; 01a PR #199, 01b PR #201 |
 | Step 02 | **COMPLETE / MERGED** — 02a `47359538`, 02b `c17469ec`, 02c `1807054b`; governance sync `1826f9fd` |
-| Roadmap §15.1 Step-02 row | COMPLETE / MERGED |
-| Step-03 document | **DID NOT EXIST before this one** |
+| Step-03 document | created at `136214b9` (revision 1); this is **revision 2** |
 
-### 0.2 There was no Step-03 draft — recorded, because the task assumed one
+### 0.2 Revision 2 — what the operator review changed
 
-The instruction was to *re-read the current Step-03 draft*. Mechanically,
-`docs/design/generic_framework_upgrade/` contained only steps 00, 01 and
-02; the folder README listed step 03 as **"not created"** and roadmap
-§15.1 as **NOT STARTED**.
+Revision 1 was approved **in principle**. Six operator decisions and four
+contract corrections were applied. The two that changed the design's
+shape:
 
-So there is no draft to correct. The Step-03 *hypothesis* lives in three
-places, and this document is the first to treat them as one problem:
+1. **ONE PR, not two** (§6). Revision 1 refuted itself: its own PR-03b
+   block said *"MERGE ALONE? NO — strictly after 03a"*. A unit that can
+   never merge alone is an internal milestone, not a delivery unit.
+   Different Gate classes are not a reason to split.
+2. **Dataset dtype ≠ model-boundary dtype** (§4a). Revision 1's
+   "contradictions with the Dataset Profile fail closed" would have
+   mis-classified the *currently correct shipped conversion* as a
+   contradiction.
 
-1. **roadmap §5** — module couplings, target responsibility, the §5.5
-   contrast ladder, §5.6 convergence candidates;
-2. **Step-01's deferral D13** — FX-3 / FX-4, explicitly assigned to *"the
-   contract owner (step 2 §4 / step 3 §5)"*. **Step 02 did not land them**
-   — it owns dataset facts, not model I/O — so they land here;
-3. **Step-02's completion**, which created the Dataset Profile that
-   Step 03 must derive from and cross-validate against rather than
-   duplicate.
+Two further corrections came from source audits run for this revision
+(§1 rows 11-12): R2-6 is narrower and more concrete than revision 1
+claimed, and there is an in-repo precedent for the dtype fix.
 
-§1 below audits each hypothesis against current source. Several
-roadmap-era claims survive; two are sharpened; none was adopted on the
-strength of already being written down.
+### 0.3 There was no Step-03 draft before revision 1
+
+Recorded because the original task assumed one. The folder held only
+steps 00-02; the README said *"not created"*; roadmap §15.1 said NOT
+STARTED. The hypothesis came from roadmap §5, Step-01's deferred
+decision **D13** (FX-3/FX-4, assigned to *"the contract owner"* — Step 02
+correctly did not land them), and Step 02's completed Dataset Profile.
+
+### 0.4 Revision-2 landing provenance
+
+Revision 2 was authored in a design session that was lost before it
+could write to the repository. It is landed here from that session's
+scratch artifact, **re-verified against the current checkout** rather
+than trusted: every source claim carrying a file, line or count in §1
+was re-run against `136214b9` before this document was written (§1
+footnote).
+
+A second scratch artifact from the same session, a nine-commit
+implementation choreography, was **audited and deliberately not
+appended**. What it contributed, and why the rest is excluded, is §17.
 
 ---
 
 ## 1. Source audit of current master
 
-Every row was re-verified at `1826f9fd`.
+Rows 1-10 verified at `1826f9fd`; rows 11-12 added by revision 2's
+audits.
 
-| # | Hypothesis (roadmap §5 / D13) | Current source evidence | Still true? | Corrected understanding | Design consequence |
+| # | Hypothesis | Current source evidence | Still true? | Corrected understanding | Consequence |
 |---|---|---|---|---|---|
-| 1 | `ForwardContract` carries shapes as PROSE | `agent/schemas/task_config.py:50-99` — `input_shape: str`, `output_shape: str`; the only structured fields are `num_classes: int` and free-form `task_type: str` | **TRUE** | There is **no** structured tensor representation anywhere: no rank, axes, axis roles, dtype field, tensor names or multiplicity | Step 03's core deliverable is a normalized tensor contract |
-| 2 | 256 hardcoded across builtins | **27 occurrences** in `ml_models/models_sandbox.py` | **TRUE** | Class count is a model-construction literal, not a derived value | PR-B derives it |
-| 3 | Dtype at the model boundary is NAME-keyed | **6 production sites**: `train_engine_sandbox.py:614,660,817,1029`; `inference_single.py:213,410` — e.g. `input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()` | **TRUE, and sharper than recorded** | The **input dtype of a real training/inference tensor is chosen by a model-NAME string comparison**. This is the single most dangerous coupling in Step 03's scope: it fails silently, in the data path | PR-B's primary failure class |
-| 4 | `output_type` alphabet is asymmetric; `hybrid` cannot be generated | `plugin_loader.py:82` accepts `{classifier, regressor, hybrid}`; `proposal.py:974` and `implementor.py:189` are `Literal["classifier","regressor"]` | **TRUE — confirmed on master** | `hybrid` is reachable **only** for the builtin `fcnet`. `plugin_loader:82`'s hybrid arm is dead for plugins | The alphabet must be resolved to ONE authority; `hybrid`'s fate is an operator question (§17 Q2) |
-| 5 | Loss compatibility has a single production authority | `models_format_sandbox.py:374` `validate_output_loss_compatibility`, documented as *"THE production authority"*, with two named consumers (`ExperimentConfig`; `SandboxExecutor._validate_configs`) | **TRUE** | Step 03 must **NOT** create a second loss declaration. The frozensets are already the authority | §8: NORMALIZE and re-key, do not re-declare |
-| 6 | Loss families are class-agnostic but shape-coupled | `CLASSIFICATION_LOSSES` is documented as *"losses that consume per-timestep class logits, **[B, C, T]**"*; `REGRESSION_LOSSES` as *"a continuous waveform, **[B, T]**"* | **TRUE** | Loss legality is genuinely a **function of the output tensor contract** — not of a free-standing string. That is why loss cannot be split from the contract (§6) | Loss legality DERIVES from the normalized output contract |
-| 7 | Step 01 left `render_forward_contract` survivors | `workflows/task_config.py:209` — `f" (per-timestep {fc.num_classes}-class)" if fc.num_classes else ""` | **TRUE** | The renderer asserts a **temporal axis exists** whenever a class count is non-zero. A rank/axis assumption leaking into prose | Must derive from axis ROLES, not from `num_classes` being truthy |
-| 8 | FX-3 / FX-4 are owned by "step 2 §4 / step 3 §5" | roadmap §14 D13; `step_01_…md` §1244-1245 | **TRUE, and now unambiguous** | Step 02 closed without them (correctly — no model-I/O authority). **Step 03 is the owner** | Binding Stage-B requirement (§9) |
-| 9 | `[B,256,T]` prose is confined to the contract | **FALSE — it is duplicated** at `validator.py:200`, `implementor.py:195`, `proposal.py:996`, plus `models_format_sandbox.py:367,371` | **NEW FINDING** | The model I/O contract is currently **four+ independent prose restatements**, two of which hardcode `256` | Stage-A parity must cover every restatement site, not just the renderer |
-| 10 | Encoding/class count is unowned | **FALSE since 02a** — `ValueEncoding` declares `num_classes`, `value_offset`, `storage_dtype`, `compute_dtype` on the Dataset Profile | **CHANGED BY STEP 02** | The **data-side** cardinality now has an owner | Step 03 must **DERIVE / cross-validate**, never redeclare (§7) |
+| 1 | `ForwardContract` carries shapes as PROSE | `agent/schemas/task_config.py:50-99` — `input_shape: str`, `output_shape: str`; only `num_classes: int` is structured | **TRUE** | No structured tensor representation exists anywhere | the core deliverable |
+| 2 | 256 hardcoded across builtins | **27 lines** in `ml_models/models_sandbox.py` contain `256` | **TRUE** | class count is a construction literal | Phase B derives it |
+| 3 | Dtype at the model boundary is NAME-keyed | **6 sites**: `train_engine_sandbox.py:614,660,817,1029`; `inference_single.py:213,410` | **TRUE, and sharper** | the **input dtype of a real training tensor** is chosen by a model-NAME comparison — fails silently, in the data path | Phase B's primary failure class |
+| 4 | `output_type` alphabet asymmetric; `hybrid` ungeneratable | `plugin_loader.py:82` accepts 3 values; `proposal.py:974` / `implementor.py:189` are `Literal` of 2 | **TRUE** | `hybrid` is reachable **only** for builtin `fcnet`; the loader's hybrid arm is dead for plugins | §8c — legacy-only adapter |
+| 5 | Loss compatibility has a single authority | `models_format_sandbox.py:374`, documented *"THE production authority"*, two named consumers | **TRUE** | do **not** create a second loss declaration | §8a — re-key only |
+| 6 | Loss families are shape-coupled | frozenset docstrings: *"per-timestep class logits, [B, C, T]"* vs *"a continuous waveform, [B, T]"* | **TRUE** | loss legality is a **function of the output tensor contract** | why loss cannot split from the contract |
+| 7 | Step 01 left renderer survivors | `workflows/task_config.py:209` — `" (per-timestep {num_classes}-class)" if fc.num_classes` | **TRUE** | the renderer asserts a **temporal axis** whenever a class count exists | derive from axis ROLES |
+| 8 | FX-3/FX-4 owned by "step 2 §4 / step 3 §5" | roadmap §14 D13 | **TRUE** | Step 02 closed without them, correctly | **binding** Stage-B rungs |
+| 9 | `[B,256,T]` prose is confined to the contract | **FALSE — duplicated** at `validator.py:200`, `implementor.py:195`, `proposal.py:996`, `models_format_sandbox.py:367,371` | **NEW (rev 1)** | the contract is already **four** independent prose restatements, two hardcoding `256` | Stage-A must cover every site |
+| 10 | Encoding/cardinality unowned | **FALSE since 02a** — `ValueEncoding` declares `num_classes`, `value_offset`, `storage_dtype`, `compute_dtype` | **CHANGED BY STEP 02** | the data-side fact has an owner | DERIVE / cross-validate (§4b) |
+| **11** | R2-6 is "description ↔ contract consistency" | `configs/task_config.yaml:10-14` — the shipped `task_description` literally reads *"map a noisy **[B, T]** integer signal to a clean **[B, 256, T]** reconstruction"* | **TRUE but far narrower than rev 1 claimed** | this is **prose duplication of a contract-owned fact**, not a free-text semantic-agreement problem. It is a **FIFTH restatement site** | §9 — authority fix, NOT an NLP validator |
+| **12** | The dtype fix has no precedent | `agent_generated/_loss_loader.py:220` defines **`LOSS_TARGET_DTYPE_REGISTRY`**; `loss_models_sandbox.py:101` populates it per plugin; `train_engine_sandbox.py:665-668` consumes it, commented *"single source of truth for target dtype routing"* | **NEW** | contract-keyed dtype routing **already exists for TARGETS** (I13). The input side is the un-migrated half | Phase B follows an in-repo precedent, not a new invention |
 
-**Two claims sharpened rather than inherited**: #3 (the name-branch is a
-*data-path dtype* decision, not cosmetic) and #9 (the contract is
-already duplicated four ways, so "extract the contract" is really
-"collapse four restatements into one authority").
+**Row 12 is the sharpest fact in this audit.** The two halves are
+*adjacent lines in the same loop body*:
+
+```text
+train_engine_sandbox.py:660   INPUT dtype   <- model_cfg.model_type == "fcnet"      NAME branch
+train_engine_sandbox.py:668   TARGET dtype  <- get_target_torch_dtype(loss_cfg)     CONTRACT-keyed
+```
+
+Phase B makes line 660 look like line 668. That is the whole of the
+dtype work — a migration to an established in-repo pattern, not a new
+abstraction. Roadmap §5.1's estimator precedent
+(`training_skill/estimator.py:305-319`, migrated to signature
+introspection) is the second such precedent.
+
+> Re-verified at `136214b9` for this landing: rows 2, 3, 7, 11 and 12
+> were re-run mechanically against the current checkout. All hold as
+> written.
 
 ---
 
 ## 2. Final observable Step-03 effect
 
 > **A task declares ONE normalized, rank-agnostic model I/O contract —
+> one structured input tensor and one structured output tensor,
 > optionally authored through a semantic preset — and the production
 > consumers that today restate `[B, 256, T]` prose or branch on a model
-> NAME resolve that single declaration instead; contradictions between
-> the contract, its preset and the Dataset Profile are rejected as typed
-> failures before any LLM-facing or executable consumer sees them, while
-> every TIDMAD model, loss and rendered prompt behaves exactly as today.**
+> NAME resolve that single declaration instead. Machine-checkable
+> contradictions between the contract, its preset and the Dataset
+> Profile's shared facts are rejected as typed failures before any
+> LLM-facing or executable consumer sees them, while every TIDMAD model,
+> loss and rendered prompt byte behaves exactly as today.**
 
-### 2.1 What Step 03 explicitly does NOT prove
+### 2.1 What Step 03 explicitly does NOT prove or claim
 
-- that **generated arbitrary models execute correctly** — implementor /
-  validator / probe mechanics are Step 04;
-- that **arbitrary probe tensors can be constructed** — Step 04;
-- that every implementor and validator *prompt* is generic — Step 04;
-- that arbitrary **metrics** work — Step 06;
-- that runtime **orchestration binds** an arbitrary task — Step 10;
-- that a composed non-TIDMAD task runs end to end — Step 12.
-
-Step 03 delivers the **contract and its consistency boundary**. It does
-not deliver the machinery that consumes the contract to *build* things.
+- **no free-text semantic validation** — arbitrary agreement between a
+  natural-language `task_description` and the tensor contract is not
+  claimed and not implementable (§9);
+- **no arbitrary tensor multiplicity** — single input, single output
+  (§4c);
+- that generated models **execute**, or that arbitrary **probes** can be
+  built — Step 04;
+- that every implementor/validator **prompt** is generic — Step 04;
+- arbitrary **metrics** — Step 06; **HealthGate** — Step 08;
+  **orchestration binding** — Step 10; **composition** — Step 12.
 
 ---
 
 ## 3. Ownership
 
-**Step 03 OWNS:**
+**Step 03 OWNS:** the normalized single-input/single-output tensor
+contract (rank, ordered axes, semantic axis roles, dtype,
+fixed/symbolic/dynamic dimensions, input↔output relationships); preset
+**resolution** into it; the consistency boundary (FX-3/FX-4 + shared
+Dataset-Profile facts); the canonical output semantic authority; loss
+legality as a **derivation**; contract-keyed **model-boundary dtype
+routing** and cardinality derivation.
 
-- the normalized model-I/O tensor contract: named tensors, ordered axes,
-  axis semantic roles, dtype, fixed/symbolic/dynamic dimensions,
-  cross-tensor dimension relationships;
-- preset **resolution** into that one normalized contract;
-- the consistency boundary between contract, preset and Dataset Profile
-  (FX-3 / FX-4), and the description↔contract channel R2-6 opened by 01b;
-- the **output-type alphabet** as a single authority;
-- **loss legality as a derivation** from the output contract (re-keying
-  the existing authority — not a new declaration);
-- contract-keyed **dtype routing** and class-count derivation at the
-  model boundary.
-
-**Step 03 does NOT own** — with the reason:
+**Step 03 does NOT own:**
 
 | Not owned | Owner | Why |
 |---|---|---|
-| file topology, naming, decomposition, dataset legality, channel identity, dataset **encoding declaration**, SampleSet, task-owned file sets | **Step 02 (merged)** | consume and cross-validate; never a second authority |
-| generated-plugin templates, implementor/validator prompt mechanics, **probe tensor construction**, `_PROBE_NUM_CLASSES`, runtime model instantiation, generated-code execution, forbidden-pattern enforcement | **Step 04** | Step 03 owns the CONTRACT those mechanics consume, not their execution (§10) |
-| metric identity, scoreability | Step 06 | |
+| topology, naming, decomposition, dataset legality, channel identity, **dataset encoding declaration**, SampleSet, task-owned file sets | **Step 02 (merged)** | consume and cross-validate; never a second authority |
+| **`task_type`** | **Step 01 / task-description layer** | opaque prompt/task framing. Step 03 must **not** branch on it, validate from it, or derive tensor semantics from it. Preserved unchanged for TIDMAD (operator Q4) |
+| **registry population via import side effect; bare-`except` loading; module discovery** | **Step 11** | execution infrastructure. Step 03 may PIN registry contents/availability for parity, but does not own the loading mechanics (operator Q5) |
+| probe tensor **construction**, `_PROBE_NUM_CLASSES`, shape probes, implementor/validator prompt mechanics, generated-plugin templates, forbidden-pattern enforcement, generated-code execution | **Step 04** | Step 03 owns the CONTRACT those mechanics consume, not their execution (§10) |
+| metric identity | Step 06 | |
+| estimator cardinality / resource derivations | Step 07d | will derive from this contract |
 | HealthGate semantics | Step 08 | |
 | orchestration / task binding | Step 10 | |
-| spawn / IPC / rlimits | Step 11 | |
+| spawn / IPC / rlimits / discovery | Step 11 | |
 | composition root, universal Regime-B "missing required contract" | Step 12 | |
 
-**No mega TaskConfig.** Step 03 adds one contract, not a task-wide
-config object.
+**No mega TaskConfig.** One contract, not a task-wide config object.
+Dataset Profile and Model-I/O Contract remain **distinct concepts**
+(§4a, §18).
 
 ---
 
-## 4. Current authorities and duplicated semantics
+## 4. Contract scope and the three authority boundaries
 
-| Capability | Structured today? | Prose only? | Missing? | Current producer | Live consumers | Step-03 disposition |
-|---|---|---|---|---|---|---|
-| tensor rank (arbitrary) | — | — | **MISSING** | — | — | **DECLARE** |
-| tensor names | — | — | **MISSING** | — | — | **DECLARE** |
-| tensor multiplicity (multi-in/out) | — | — | **MISSING** | — | — | **DECLARE** (representable; no consumer yet ⇒ see §17 Q3) |
-| ordered axes | — | implied by `[B,C,T]` prose | **MISSING** | — | — | **DECLARE** |
-| axis semantic roles | — | implied ("per-timestep") | **MISSING** | — | — | **DECLARE** — this is what replaces rank-specific branching |
-| fixed dimensions | — | in prose | partly | contract prose | renderers | **DECLARE** |
-| symbolic / dynamic dimensions | — | `B`, `T` by convention | **MISSING** | — | — | **DECLARE** |
-| dtype | — | inside the shape string | **MISSING as data** | prose | renderers; **name-branch at 6 exec sites** | **DECLARE** + PR-B derives routing |
-| batch/sample semantics | — | `B` by convention | **MISSING** | — | — | **DECLARE** as an axis role |
-| cross-tensor relationships | — | — | **MISSING** | — | — | **DECLARE** |
-| class count / cardinality | `num_classes: int` (contract) **and** `ValueEncoding.num_classes` (dataset) | — | — | two producers | renderer; 27 builtin literals | **DERIVE / CROSS-VALIDATE** — never two authorities |
-| `task_type` | free-form `str` | — | — | contract | renderer prose | **NORMALIZE or drop** (§17 Q4) |
-| `output_type` | `Literal` ×2 (2 values) + `plugin_loader` (3 values) | — | — | **three surfaces** | validators, loaders | **ONE authority** |
-| output-head semantics | — | `output_head_note` prose | — | contract | implementor prompt | **DERIVE** from output tensor + roles |
-| loss-family legality | frozensets + `validate_output_loss_compatibility` | shape rationale in docstrings | — | **single authority** | `ExperimentConfig`, `_validate_configs` | **RE-KEY to the contract**, do not re-declare |
+### 4a. Model-boundary dtype vs dataset dtype — **DISTINCT, not equal**
 
----
+The most important semantic correction in revision 2.
 
-## 5. Compatibility contract (Stage-A)
-
-Never "behaviour unchanged". Per surface, strongest observable criterion:
-
-| # | Surface | Strongest criterion | Baseline exists? | Owning child |
-|---|---|---|---|---|
-| A1 | rendered proposer prompts (3 stages) | byte-identical for TIDMAD, or a declared, mechanically-attributable golden set (the OD-S1-8 precedent) | **YES** — Step-01 `pb3_*` goldens | PR-A |
-| A2 | rendered forward-contract block | byte-identical for TIDMAD | **YES** — Step-01 | PR-A |
-| A3 | `validate_output_loss_compatibility` verdicts | identical accept/reject for every (output_type, loss_type) pair, including `custom` and `hybrid` | partial — **capture the full matrix first** | PR-A |
-| A4 | plugin load tolerance tiers | silent `classifier` default vs fail-closed `get_output_type` both unchanged for existing on-disk plugins | partial — **capture first** | PR-A |
-| A5 | builtin model forwards | byte-identical outputs for every builtin under TIDMAD | **YES** — Step-00 | PR-B |
-| A6 | registry contents | identical under the TIDMAD profile | **YES** — Step-00 | PR-B |
-| A7 | training/inference dtype at the model boundary | the exact same tensor dtype reaches each builtin, `fcnet` included | **MISSING — capture first** | PR-B |
-| A8 | Step-00 numeric baselines | unchanged | **YES** | PR-B |
-| A9 | **prior on-disk generated plugins remain loadable** | every plugin in `agent_generated/` still loads, or a workspace boundary is declared | **MISSING — capture first** | PR-B |
-
-Reuse Step-00/01/02 baselines; capture only A3, A4, A7, A9.
-
----
-
-## 6. PR decomposition decision — **TWO** children
-
-Tested against the six criteria, not against a wish for symmetry.
-
-**Rejected splits, with reasons:**
-
-- **presets as their own PR** — a preset has **no independent production
-  consumer**; it resolves *into* the normalized contract. A separate PR
-  would ship a consumer-less seam (§0 rule 8). **Folded into PR-A.**
-- **loss as its own PR** — loss legality is documented as a function of
-  the output tensor shape (audit #6), the authority already exists with
-  two consumers, and its parity oracle (accept/reject matrix) is
-  validated at the same boundary as the contract. A separate PR would be
-  a handful of lines plus a full checkpoint ladder. **Folded into PR-A.**
-- **output-type alphabet as its own PR** — same boundary, same oracle.
-  **Folded into PR-A.**
-
-**Accepted split.** PR-B is separable because all six criteria hold
-independently: its own effect (models are keyed by contract, not by
-name), its own consumers (`train_engine_sandbox`, `inference_single`,
-builtins), its own oracle (builtin forward parity + Step-00 numerics),
-its own failure class (**a silently wrong tensor dtype in real
-training** — invisible to any prompt test), its own Stage-B rungs
-(5.5-A/5.5-B), and real rollback value.
-
-The seam is: **PR-A changes no executed tensor; PR-B changes no rendered
-prompt.**
-
----
-
-## 7. Child PR capability blocks
-
-### PR 03a — Normalized model-I/O contract, presets, and the consistency boundary
+Source (`train_engine_sandbox.py:658-660`), verbatim comment and code:
 
 ```text
-CAPABILITY: a task declares ONE structured, rank-agnostic model I/O
-  contract — named tensors, ordered axes with semantic ROLES, dtype,
-  fixed/symbolic/dynamic dims, cross-tensor relations — optionally
-  authored via a preset; every consumer that today restates [B,256,T]
-  prose resolves that one declaration; contradictions with the preset,
-  the Dataset Profile or the task description fail CLOSED before any
-  LLM-facing consumer.
-OWNS: the normalized contract; preset RESOLUTION (never a parallel
-  runtime semantic); the ONE output-type alphabet; loss legality
-  RE-KEYED to the output contract; the FX-3/FX-4/R2-6 consistency
-  boundary.
-DOES NOT OWN: probe construction, implementor/validator mechanics
-  (Step 04); dataset facts (Step 02); execution dtype routing (PR-03b).
-CURRENT PRODUCTION CONSUMERS: workflows/task_config.render_forward_contract
-  and the three proposer stages; agent/schemas/{proposal,implementor,
-  validator}.py shape prose; models_format_sandbox's compatibility
-  authority and its two callers.
-STAGE-A PARITY: A1-A4. Rendered TIDMAD prompts byte-identical or a
-  declared attributable golden set; the loss accept/reject matrix
-  identical including `custom` and `hybrid`.
-STAGE-B CONTRAST: FX-3 (preset resolution only) and FX-4 (preset-vs-
-  explicit mismatch rejected before the LLM boundary) — both BINDING
-  from D13 — plus axis/dtype/output-type rungs (§9).
-CHECKPOINT C: a REAL proposer stage renders from the resolved contract
-  in a live chain iteration, and a REAL contradictory configuration is
-  rejected before any LLMBridge call is made.
-FAILURE CLASS: a model contract that contradicts the data it will be
-  trained on reaches the LLM, producing a plausible model that is wrong
-  in a way no shape assertion catches.
-DEPENDENCIES: Step 01 (renderer), Step 02 (Dataset Profile). None on 03b.
-MERGE ALONE? YES — the contract and its fail-closed boundary are useful
-  without changing one executed tensor.
-GATE: Gate 1 LIKELY REQUIRED — this PR can move LLM-facing prompt bytes
-  (the standard's "New LLM-facing system prompt" row). Gate 2 NOT
-  expected: no training-path behaviour changes. Decided from the gate
-  table at freeze, not now.
-STOP: a preset becomes a second runtime authority; any consumer branches
-  on rank or modality name; dataset cardinality is copied rather than
-  derived/cross-validated; a contradiction can still reach LLMBridge.
+# 1. Input: Based on Architecture
+# The forward contract is [B, T] int64 for all embedding-based models.
+# Only fcnet (AE) uses float input for regression.
+input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
 ```
 
-### PR 03b — Contract-keyed execution: dtype routing and class-count derivation
+The decoded dataset tensor is **converted** at the model boundary, and
+the conversion is selected by model NAME. Both arms are legitimate today.
+
+Therefore the authority model is:
 
 ```text
-CAPABILITY: the model boundary reads its input dtype and class count
-  from the resolved contract instead of from a model NAME, so a task
-  with a different encoding or cardinality trains and infers correctly
-  with no source edit.
-OWNS: contract-keyed dtype routing at the 6 name-branch sites; class
-  count derivation in the builtin catalogue.
-DOES NOT OWN: probe recipes / probe construction (Step 04); estimator
-  ×256 terms (Step 07d derives from this contract — §13); loss math
-  (FocalLoss1D stays paper-frozen, byte-identical).
-CURRENT PRODUCTION CONSUMERS: execute_tools/train_engine_sandbox.py
-  (:614,:660,:817,:1029), execute_tools/inference_single.py (:213,:410),
-  ml_models/models_sandbox.py builtins (27 `256` literals).
-STAGE-A PARITY: A5-A9. Builtin forwards byte-identical; registry
-  identical; **the same dtype reaches each builtin including fcnet**;
-  Step-00 numerics unchanged; prior on-disk plugins still loadable.
-STAGE-B CONTRAST: 5.5-A class count only; 5.5-B input contract only
-  (a contract-keyed float-input model at 256 classes — kills the fcnet
-  branches attributably).
-CHECKPOINT C: a REAL training + inference round feeds a contract-derived
-  dtype and class count through the actual subprocess boundary.
-FAILURE CLASS: a silently wrong tensor dtype or class count in real
-  training — produces a plausible model and a plausible score, and no
-  prompt-level or schema-level test can see it.
-DEPENDENCIES: **PR-03a** (there is no contract to key on before it).
-MERGE ALONE? NO — strictly after 03a.
-GATE: Gate 2 LIKELY REQUIRED — real training on real files is the only
-  boundary where a wrong dtype/class count manifests. Gate 1 not
-  expected (no prompt bytes). Decided from the gate table at freeze.
-STOP: any builtin forward output changes; FocalLoss1D math is touched;
-  a name branch is replaced by a rank branch; prior plugins stop loading
-  without a declared workspace boundary.
+Dataset Profile        what the stored/decoded data PROVIDES
+                       (storage_dtype, compute_dtype, value_offset)
+
+Model I/O Contract     what dtype the model input boundary REQUIRES
+
+Step-03 execution      resolves a SUPPORTED, EXPLICIT adaptation
+                       between the two
+```
+
+**Requiring `dataset.compute_dtype == model.input.dtype` would be wrong**
+— it would classify today's correct shipped conversion as a
+contradiction. Frozen observable semantics:
+
+- TIDMAD reaches **every** builtin with the exact same model-boundary
+  dtype as today, `fcnet` included;
+- a contrast can vary the model-required input dtype **without changing
+  the model name**, and behaviour follows the contract;
+- an **unsupported** adaptation fails closed rather than silently
+  coercing.
+
+**No general dtype-conversion algebra** beyond what current production
+consumers require. Precedent to follow, not invent:
+`LOSS_TARGET_DTYPE_REGISTRY` already does exactly this for *target*
+dtype, on the adjacent line (audit row 12).
+
+### 4b. Cardinality — DERIVE / CROSS-VALIDATE, never redeclare
+
+`ValueEncoding.num_classes` is the **dataset-side data fact** (Step 02).
+For categorical/classifier output semantics, model output cardinality
+**derives from or explicitly cross-validates against** it. **No second
+independently configurable class count.**
+
+Where class cardinality is **not meaningful** for the output semantic
+(e.g. a continuous-output contract), the dataset class-count fact is
+**not** forced into the model output contract. That asymmetry is
+deliberate and must be **explicit in the schema**, not implied by a `0`
+sentinel as today. A legacy magic number is not promoted into the
+contract.
+
+### 4c. Tensor multiplicity — **single in / single out** (operator Q3)
+
+Step-03 v1 represents exactly what is consumed today:
+
+```text
+ONE structured input tensor + ONE structured output tensor
+  arbitrary rank · ordered axes · semantic axis roles · dtype
+  fixed / symbolic / dynamic dimensions as source-supported
+  relationships between that input and that output
+```
+
+**No tensor-multiplicity containers** (`inputs: [...]` / `outputs: [...]`)
+are added to future-proof the schema — that is the consumer-less seam
+roadmap §0 rule 8 forbids. Multi-input/multi-output is recorded as a
+**later additive extension** once a real production consumer exists. The
+final effect, ownership and capability matrix must not claim it as
+delivered, and **it is not a Stage-B rung** (§11).
+
+### 4d. Capability matrix
+
+| Capability | Structured today? | Missing? | Live consumers | Step-03 disposition |
+|---|---|---|---|---|
+| tensor rank, ordered axes, **axis semantic roles** | — | **MISSING** | — | **DECLARE** — roles are what replace rank-specific branching |
+| fixed / symbolic / dynamic dimensions | prose only | **MISSING as data** | renderers | **DECLARE** |
+| model-boundary dtype | inside a prose string | **MISSING as data** | **6 name-branch sites** | **DECLARE** + Phase B routes from it (§4a) |
+| batch/sample semantics | `B` by convention | **MISSING** | — | **DECLARE** as an axis role |
+| input↔output relationships | — | **MISSING** | — | **DECLARE** |
+| tensor names / multiplicity | — | missing | **none** | **DEFER** (§4c) |
+| class cardinality | two producers | — | renderer; 27 builtin literals | **DERIVE / CROSS-VALIDATE** (§4b) |
+| `output_type` | 3 competing surfaces | — | validators, loaders | **ONE authority, as a projection** (§8b) |
+| loss-family legality | single authority + frozensets | — | 2 consumers | **RE-KEY**, do not re-declare (§8a) |
+| output-head semantics | `output_head_note` prose | — | implementor prompt | **DERIVE** from output tensor + roles |
+| `task_type` | free-form `str` | — | prompt framing | **NOT OWNED** — Step 01 (§3) |
+
+---
+
+## 5. Stage-A compatibility contract
+
+The governing principle for every row: **assert the observable, never
+the configuration.** Validate the dtype, shape and cardinality that
+actually reach the model, and the bytes that are actually rendered — not
+the field that was set (§16).
+
+| # | Surface | Strongest criterion | Baseline exists? |
+|---|---|---|---|
+| A1 | rendered proposer prompts (3 stages) + contract block | **TIDMAD bytes BYTE-IDENTICAL.** No pre-authorized golden-delta exception (operator Q6). Goldens pass **unmodified**; `configs/task_config.yaml` round-trips load → normalize → render to today's exact bytes | **YES** — Step-01 `pb3_*` |
+| A2 | `validate_output_loss_compatibility` verdicts | the **full cross-product** asserted cell by cell — every `output_type` × every `loss_type`, including `custom` permitted everywhere and `hybrid`. No cell left unasserted | **capture first** |
+| A3 | plugin load tolerance tiers | **both tiers pinned as distinct behaviours**: load-time missing/invalid `PLUGIN_OUTPUT_TYPE` → silent `classifier` default; lookup-time `get_output_type` on an unregistered model → fails closed. Their divergence is **pre-existing and not Step 03's to unify** | **capture first** |
+| A4 | builtin model forwards | byte-identical outputs, every builtin | **YES** — Step-00 |
+| A5 | registry contents | identical under the TIDMAD profile (contents pinned; loading mechanics are Step 11's) | **YES** — Step-00 |
+| A6 | **model-boundary dtype** | the exact same tensor dtype reaches each builtin, `fcnet` included — observed **at the model call**, not at the branch condition, and `fcnet` asserted distinctly from the non-`fcnet` arm | **MISSING — capture first** |
+| A7 | Step-00 numeric baselines | unchanged | **YES** |
+| A8 | prior on-disk generated plugins | still loadable and registering, or a declared and accepted workspace boundary | **MISSING — capture first** |
+
+Capture only A2, A3, A6, A8 — **before** any production change, since
+those are exactly the surfaces the work changes. Reuse Step-00/01/02 for
+the rest; do not re-pin an existing baseline.
+
+**A1 is a hard byte-identity requirement.** If implementation proves
+exact bytes are materially incompatible with the frozen generic
+contract, that is a **STOP** and an explicit operator decision — not a
+pre-authorized exception (§13, §21).
+
+**Legacy-configuration classes that must keep working** (the Regime-A
+inventory): on-disk plugins with no `PLUGIN_OUTPUT_TYPE`; builtin
+`hybrid`; a `ForwardContract` authored in the old prose form; a legacy
+caller constructing a bare `ForwardContract()`.
+
+---
+
+## 6. PR decomposition — **ONE PR** (operator decision)
+
+```text
+Previous proposal (revision 1): TWO children.
+Refuted by its own text: PR-03b said "MERGE ALONE? NO — strictly after
+03a". A unit that can never merge alone is a milestone, not a PR.
+Different Gate classes are not a split criterion; one PR may run Gate 1
+at its rendering phase and Gate 2 at its final executable head.
+```
+
+Three candidate splits stay rejected for their original source reasons:
+**presets** (no independent production consumer), **loss legality** (the
+authority exists with two consumers and derives from the output
+contract), **output-type alphabet** (same boundary, same oracle).
+
+The phase seam is preserved as a **checkpoint boundary, not a merge
+boundary**: Phase A changes no executed tensor; Phase B changes no
+rendered prompt. **The Step-03 capability exists only when both phases
+are complete.**
+
+---
+
+## 7. The Step-03 PR — capability block
+
+```text
+CAPABILITY: a task declares ONE normalized, rank-agnostic model I/O
+  contract (one structured input tensor, one structured output tensor)
+  with ordered axes, semantic axis ROLES, dtype and dimension
+  constraints — optionally authored via a preset that RESOLVES into it.
+  Every consumer that today restates [B,256,T] prose or branches on a
+  model NAME resolves that one declaration; machine-checkable
+  contradictions fail closed before any LLM-facing or executable
+  consumer; TIDMAD rendering bytes and every executed tensor are
+  unchanged.
+
+PHASE A — semantic authority (changes no executed tensor)
+  normalized contract · preset resolution · consistency validation
+  (FX-3/FX-4 + shared Dataset-Profile facts) · canonical output
+  semantic authority · loss-legality re-keying · exact TIDMAD rendering
+
+PHASE B — production execution consumption (changes no rendered prompt)
+  contract-keyed model-boundary dtype routing (kills the 6 name
+  branches) · cardinality derivation (kills the 27 builtin literals) ·
+  builtin catalogue / runtime consumption · the real training and
+  inference boundary
+
+OWNS / DOES NOT OWN: §3.
+CURRENT PRODUCTION CONSUMERS:
+  Phase A — workflows/task_config.render_forward_contract and the three
+    proposer stages; the shape prose in agent/schemas/{proposal,
+    implementor,validator}.py; models_format_sandbox's compatibility
+    authority and its two callers.
+  Phase B — execute_tools/train_engine_sandbox.py (:614,:660,:817,:1029),
+    execute_tools/inference_single.py (:213,:410), ml_models/
+    models_sandbox.py builtins, and the class-weight histogram
+    (train_engine_sandbox.py:80,126,196).
+STAGE-A PARITY: §5 A1-A8.
+STAGE-B CONTRAST: §11 ladder, incl. BINDING FX-3 and FX-4.
+LIVE CHECKPOINT C: §12.
+FAILURE CLASSES PREVENTED:
+  (a) a model contract contradicting the data it will be trained on
+      reaches the LLM and yields a plausible-but-wrong model;
+  (b) a silently wrong tensor dtype or class count in real training —
+      invisible to every prompt-level and schema-level test.
+DEPENDENCIES: Steps 01 and 02 (merged). No intra-Step dependency —
+  there is one PR.
+GATES: §13.
+STOP CONDITIONS: §21.
 ```
 
 ---
 
-## 8. Loss and output-type authority — findings
+## 8. Output semantics and loss authority
 
-1. **Do not create a loss contract.** `validate_output_loss_compatibility`
-   is already THE authority and its own docstring records the lesson from
-   the defect that produced it. Step 03 **re-keys** it so legality derives
-   from the output tensor contract rather than from the string
-   `"classifier"`; it does not add a second declaration.
-2. **The alphabet is genuinely split three ways** (audit #4) and must
-   collapse to one. Whether `hybrid` survives that collapse is an
-   operator question (§17 Q2) — it has one builtin implementation and is
-   unreachable for generated plugins.
-3. **`custom` is deliberately permissive** for every contract, by design,
-   because the plugin's forward raises at training time. Preserve.
-4. **Custom-loss hyperparameter passing** (`loss_models_sandbox:253-276`,
-   instantiated with zero args) is a real defect but is **execution
-   mechanics** — routed to Step 04 unless PR-03b's audit shows the
-   contract is what is missing (§14).
-5. **Loss-family membership is framework-owned, not task-owned** on
-   current evidence: the frozensets name *implementations that exist in
-   this repository*. A task declaring a new loss family without an
-   implementation would be a consumer-less seam. **DEFER** until a second
-   design needs it.
+### 8a. Loss — re-key, do not re-declare
+
+`validate_output_loss_compatibility` and its frozensets remain the
+**framework implementation-availability authority**. Step 03 only re-keys
+their applicability to the canonical output semantics, so legality stops
+being inferred from the legacy string `"classifier"`.
+
+- **No task-owned `LossContract`. No `allowed_losses` config.**
+  Loss-family membership names implementations that exist *in this
+  repository*; it is framework availability, not task-authored
+  semantics. A task declaring a family with no implementation is a
+  consumer-less seam.
+- `custom` stays deliberately permissive for every contract (the
+  plugin's forward raises at training time).
+- Custom-loss **execution** mechanics (zero-arg instantiation,
+  `loss_models_sandbox:253-276`) remain **Step 04**.
+- **Verdicts do not change.** A changed accept/reject cell is a policy
+  change, not an authority change — that is a **STOP** (§21).
+
+### 8b. `output_type` — a projection, not a second authority
+
+Preferred shape, if current execution consumers permit it:
+
+```text
+normalized output tensor semantics        <- the authority
+        |
+        v
+output_type (classifier / regressor)      <- a DERIVED compatibility
+                                             projection / view
+```
+
+Legacy `Proposal.output_type` and the plugin-loader field may persist as
+**compatibility views** during migration. What must not exist is
+normalized tensor semantics **plus** an independent competing
+`output_type` authority. Exactly one authority must answer *"what output
+semantics does this model have"*.
+
+### 8c. `hybrid` — legacy builtin compatibility only (operator Q2)
+
+```text
+generic authoring alphabet   classifier / regressor
+legacy builtin adapter       hybrid remains accepted for existing
+                             compatible builtin state (fcnet)
+```
+
+Do **not** promote `hybrid` into the canonical generic authoring
+surface: source shows it is reachable for builtin `fcnet` and
+unreachable for generated plugins, so exposing it generically would
+create a contract value with **no generic consumer**. Do not delete or
+behaviour-change existing builtin hybrid. If `hybrid` cannot be projected
+from tensor semantics, it stays an adapter value — **do not invent
+tensor semantics for it**. This is the Regime-A pattern: preserve history
+through an adapter; do not upgrade a historical accident into a
+universal promise.
 
 ---
 
-## 9. Stage-B generic contrast ladder
+## 9. The description ↔ contract channel (R2-6) — narrowed
 
-One semantic axis per rung; neutral names — a rung that swaps
-"time series" for another familiar modality proves nothing.
+Revision 1 claimed contradictions with *"the task description"* fail
+closed. **That claim is withdrawn.** Source audit:
 
-| Rung | Varies ONLY | Held fixed | What failure would expose a fake abstraction | Child |
-|---|---|---|---|---|
-| **3-A** axis structure | rank + ordered axes (roles preserved) | dtype, cardinality, output type, dataset | any consumer branching on rank | 03a |
-| **3-B** dtype | declared input dtype | axes, cardinality, output type | dtype still resolved from a model name | 03a → proven in 03b |
-| **3-C** cardinality | class count only | axes, dtype, output type | `256` surviving anywhere in a resolved path | 03b |
-| **3-D** output type | classifier ↔ regressor | axes, dtype, cardinality | loss legality still keyed on a literal string | 03a |
-| **FX-3** preset resolution | preset only, over a fixed explicit contract | everything else | preset producing a second runtime path instead of one normalized contract | 03a |
-| **FX-4** mismatch rejection | preset contradicts the explicit contract | everything else | the contradiction reaching LLMBridge, or being silently repaired | 03a |
-| **3-E** dataset consistency | contract cardinality vs `ValueEncoding.num_classes` | everything else | silent coercion, or the contradiction reaching training | 03a |
+`configs/task_config.yaml:10-14` — the shipped `task_description` reads
+*"map a noisy **[B, T]** integer signal to a clean **[B, 256, T]**
+reconstruction"*. It **hand-restates the exact shapes the contract
+owns**, making it a **fifth** prose restatement site (audit row 11).
 
-**FX-3 and FX-4 are binding** (D13). **3-E is the Step-02 interface
-obligation** — it is the rung that proves Step 03 derives from the
-Dataset Profile rather than duplicating it.
+So R2-6 is not a semantics-agreement problem; it is **duplication of an
+owned fact**. Dispositions:
 
-Multi-tensor (multi-input / multi-output) is deliberately **not** a rung:
-representable in the contract, but no production consumer exists yet
-(§17 Q3).
+| Channel | Disposition |
+|---|---|
+| preset ↔ normalized contract | **machine-checkable → fail closed** (FX-4) |
+| Dataset Profile ↔ normalized contract | **machine-checkable only for source-defined shared/compatibility facts** — cardinality (§4b) and supported dtype adaptation (§4a). Not a blanket equality check |
+| renderer-generated contract prose ↔ contract | internally consistent **by construction**, because it is DERIVED from the contract |
+| arbitrary free-text `task_description` | **NO automatic validation claimed.** No NLP semantic validator will be built |
+
+**Only machine-checkable overlaps are fail-closed.** The correct fix for
+the shipped duplication is **authority, not validation**:
+`task_description` should stop hand-restating contract-owned shapes, or
+that sentence should be rendered from the contract. Ownership of
+`task_description` is Step-01's (§3), so Step 03 **records** this and
+coordinates; it does not unilaterally rewrite the task description, and
+it does not invent NLP validation. If a future structured
+description-derived field creates a genuine machine-checkable overlap,
+that becomes a new rung — not now.
 
 ---
 
 ## 10. Step-03 vs Step-04 boundary — resolved from source
 
-| Item | Owner | Reason |
-|---|---|---|
-| normalized tensor contract, axis roles, dtype declaration | **03** | it is the contract |
-| output-type alphabet, loss legality derivation | **03** | consumed by config validation, not by execution |
-| preset resolution + fail-closed consistency | **03** | it is contract resolution |
-| **probe tensor construction**, `_PROBE_NUM_CLASSES`, shape probes | **04** | building a tensor is execution mechanics; 03 supplies the contract it is built from |
-| custom-loss "probe recipes" | **04** | same |
-| implementor / validator prompt mechanics, generated-plugin templates | **04** | 03 supplies the declaration they render |
-| forbidden-pattern enforcement, generated-code execution | **04** | |
-| validator **compatibility checks** | **03 declares the rule, 04 executes it** | the rule is contract semantics; running it against generated code is mechanics |
-
-The prior documents routed probes inconsistently. **Resolved: semantic
-contract → 03; construction and execution → 04.** No conflicting
-ownership statement remains in this parent.
-
----
-
-## 11. Checkpoint ladder
-
-| Checkpoint | Meaning for Step 03 |
+| Item | Owner |
 |---|---|
-| **0** | A3, A4, A7, A9 baselines captured before any behaviour changes |
-| **A** | TIDMAD parity across every owned surface — all four prose restatement sites, the loss matrix, builtin forwards, dtype at the boundary |
-| **B** | 3-A/3-B/3-D + **FX-3, FX-4** + 3-E pass atomically; 3-C in 03b |
-| **C** | per child, at a REAL production boundary: 03a a live proposer render + a real pre-LLM rejection; 03b a real training/inference round |
-| **D** | per child, risk-targeted: targeted → affected package → focused mutation → exact-head CI. **No child is pre-assigned a local full suite** |
-| **E** | parent / roadmap §15.1 / §14 convergence / folder README synchronized after the final child merges |
+| normalized tensor contract, axis roles, dtype declaration | **03** |
+| canonical output semantics, loss-legality derivation | **03** |
+| preset resolution + fail-closed consistency | **03** |
+| **probe tensor construction**, `_PROBE_NUM_CLASSES`, shape probes | **04** |
+| custom-loss probe recipes / zero-arg instantiation | **04** |
+| implementor + validator prompt mechanics, plugin templates | **04** |
+| forbidden-pattern enforcement, generated-code execution | **04** |
+| validator compatibility **rule** vs **running it on generated code** | rule **03**, execution **04** |
 
-Evidence economy, carried from Step 02: the finalizer (03b) owns **one**
-terminal local full unit suite if the assembled blast radius justifies
-it; otherwise exact-head CI supplies the broad regression property and
-the parent says so explicitly at freeze.
+Prior documents routed probes inconsistently. **Resolved: semantic
+contract → 03; construction and execution → 04.** No conflicting
+ownership statement remains.
 
 ---
 
-## 12. Gates
+## 11. Stage-B generic contrast ladder
 
-Read from the **current** `docs/gates/gate_testing_standard.md`, not from
-Step-02's shape.
+One semantic axis per rung; neutral names — swapping "time series" for
+another familiar modality proves nothing.
 
-| | PR-03a | PR-03b |
+| Rung | Varies ONLY | Held fixed | What failure exposes a fake abstraction | Phase |
+|---|---|---|---|---|
+| **3-A** axis structure | rank + ordered axes (roles preserved) | dtype, cardinality, output semantics, dataset | any consumer branching on rank | A |
+| **3-B** model-boundary dtype | the dtype the model REQUIRES | axes, cardinality, output semantics, **dataset dtype unchanged** | dtype still resolved from a model name; or a valid adaptation misreported as a contradiction | A → proven in B |
+| **3-B-neg** unsupported adaptation | an adaptation source does not support | everything else | silent coercion instead of a typed failure | A |
+| **3-C** cardinality | class count only | axes, dtype, output semantics | `256` surviving in any resolved path | B |
+| **3-D** canonical output semantic | classifier ↔ regressor | axes, dtype, cardinality | loss legality still keyed on a legacy string | A |
+| **FX-3** preset resolution | preset only, over a fixed explicit contract | everything else | a preset producing a second runtime path | A |
+| **FX-4** preset mismatch | preset contradicts the explicit contract | everything else | the contradiction reaching LLMBridge, or being silently repaired | A |
+| **3-E** dataset consistency | contract cardinality vs `ValueEncoding.num_classes` | everything else | silent coercion, or the contradiction reaching training | A |
+
+**3-B carries the §4a nuance explicitly**: a model-required dtype that
+differs from the decoded dataset dtype is a **valid explicit
+adaptation**, not automatically a contradiction. **3-B-neg** supplies the
+negative evidence that unsupported adaptations still fail closed. The
+pair proves both directions of the correction.
+
+### 11.1 What makes a rung count
+
+Binding quality criteria for the ladder as a whole:
+
+- **atomicity is machine-checked, not asserted in prose** — each rung
+  varies exactly one axis relative to the TIDMAD declaration, proven
+  mechanically (the 02a/02b/02c `_diff_paths` precedent);
+- **the unvaried consumer is asserted unchanged** in each rung. That is
+  what proves independence, and it is the 02c §19 lesson;
+- **vary more than membership** wherever a count could be silently
+  assumed (the 02c cardinality lesson);
+- **each rung must red when its consumer re-hardcodes its literal** —
+  a rung that passes with the literal still present is too weak (02a M9
+  / 02b M10 / 02c M-C2-1);
+- **a rung that needs two axes to be meaningful is a STOP** — it means
+  the contract model, or the rung, is wrong.
+
+**FX-3 and FX-4 are binding** (D13). **Multi-tensor is deferred and is
+NOT a rung** (§4c).
+
+---
+
+## 12. Checkpoint C — the live integration checkpoint
+
+One PR ⇒ **one PR-level live checkpoint**, which must jointly prove that
+**both** semantic phases are live. Three boundaries:
+
+| | Boundary | Required evidence |
 |---|---|---|
-| Gate 1 | **LIKELY REQUIRED** — may move LLM-facing prompt bytes | not expected |
-| Gate 2 | not expected | **LIKELY REQUIRED** — real training is the only boundary where a wrong dtype/class count manifests |
-| Flip condition | if 03a changes no rendered byte, Gate 1 drops to unit-only | if 03b turns out to change no executed tensor, Gate 2 drops |
+| **(i)** | semantic authority — rendering | a **real production LLM-facing rendering path** consumes the normalized contract in a live chain iteration |
+| **(ii)** | semantic authority — fail-closed | a **real machine-checkable contradictory configuration** is rejected before the relevant LLM/executable boundary, asserted by **LLMBridge call count == 0** — not by exception type alone |
+| **(iii)** | execution | a **real training + inference round** feeds a contract-derived input dtype and cardinality through the **actual subprocess/runtime path** |
 
-Unique evidence: Gate 1 proves a real LLM still accepts the re-rendered
-contract; Gate 2 proves a contract-derived dtype survives the real
-subprocess boundary. Neither substitutes for the other. **No intermediate
-tier.** Gates are decided at freeze from the table, and none is run
-during design.
+Binding qualifications:
+
+- **each boundary must be entered at the production entry point**, not by
+  calling a resolver directly (the 02c §12.1 rule);
+- **serialization-only or rendering-only evidence is explicitly
+  insufficient** for Checkpoint C;
+- **arbitrary generated-model execution is NOT required** — that is
+  Step 04. (iii) is satisfied by the existing builtin path.
 
 ---
 
-## 13. Convergence ledger implications
+## 13. Gates
+
+Decided against the **current** `docs/gates/gate_testing_standard.md`
+(283 lines, "Gate assignment by commit type" at :254). With one PR, Gate
+choice is not a decomposition argument.
+
+| Gate | Decision | Basis in the current standard |
+|---|---|---|
+| **Gate 1** | **NOT REQUIRED** by default | The standard triggers Gate 1 on *"a new LLM-facing system prompt"* (:261) and *"new agent node or workflow wiring"* (:262); Step 03 is neither. Its commit types map to *"Config files, YAML, schema-only → Unit only"* (:258) and *"New loader/renderer (pure Python) → Unit only"* (:259). A changed **internal contract representation** is not a trigger |
+| **Gate 2** | **REQUIRED** | *"Checkpoint (end of feature) → Gate 2"* (:263), and Gate 2's stated purpose (:48-55) is end-to-end plumbing with real training. Step 03 changes real training/inference **input dtype** and **cardinality** routing — the only boundary at which a wrong dtype or class count manifests |
+
+**The Gate-1 condition, stated mechanically so it needs no operator
+call at implementation time:** Gate 1 stays out of scope **if and only
+if the entire LLM-visible surface is byte-identical**. That surface is
+both (a) rendered prompt bytes (A1's `pb3_*` goldens) **and** (b) the
+LLM-facing schema descriptions actually shipped to the model from
+`agent/schemas/{proposal,implementor,validator}.py`. Step 03 edits shape
+prose in exactly those schema files (§1 row 9). If any byte the model
+receives changes, the standard's *"changed LLM-facing schema"* trigger
+(:29-30) fires and **Gate 1 becomes required** — and an intentional
+LLM-visible byte change is itself a **STOP** for operator reconciliation
+first (§5 A1, §21).
+
+If both Gates end up required, **one PR runs both** — Gate 1 at the
+rendering phase, Gate 2 at the final executable head. No intermediate
+tier. **No Gate is run at design time.**
+
+---
+
+## 14. Evidence economy
+
+One PR ⇒ no child-by-child broad regression.
+
+```text
+targeted semantic tests
+  -> true affected package tests
+  -> atomic contrast rungs / mutations (§11.1)
+  -> live Checkpoint C (§12)
+  -> required Gate(s) (§13)
+  -> terminal broad regression ONLY if it adds unique evidence
+  -> exact-final-head CI
+```
+
+**A local full suite is not required merely because Step 02 ran one.**
+The default position is that **exact-head CI supplies the broad
+regression property**, since CI is unit + static over the whole tree at
+the exact final SHA. A terminal local full suite is therefore **not
+planned**, and may be added only by naming evidence it uniquely
+provides that exact-head CI does not — stated before it is run, not
+after.
+
+**The number of semantic commits is not pre-authorized** (§17).
+
+---
+
+## 15. Checkpoint ladder
+
+| Checkpoint | Meaning |
+|---|---|
+| **0** | A2, A3, A6, A8 baselines captured **before** any behaviour change |
+| **A** | TIDMAD parity across every owned surface — all five prose restatement sites, the loss matrix, builtin forwards, **model-boundary dtype**, registry contents |
+| **B** | §11 rungs pass atomically under §11.1, incl. **FX-3, FX-4, 3-B-neg, 3-E** |
+| **C** | the three live boundaries of §12 |
+| **D** | risk-targeted regression + static + mutation per §14 |
+| **E** | parent / roadmap §15.1 / §14 convergence / folder README synchronized **after merge** |
+
+---
+
+## 16. Evidence and acceptance principles
+
+The operator's commit standard was written for the ordering-engine PR
+and names `file_order`, `shuffle`, visited sequence and resume — none of
+which exist on Step 03's surface. **Translated, not copied, and not
+silently dropped:**
+
+| Standard's requirement | Step-03 analogue |
+|---|---|
+| *"validate the actual visited sample/file sequence, not only the configuration value"* | validate the **actual dtype, shape and cardinality reaching the model**, and the **actual rendered prompt bytes** — never the config field that was set |
+| *"for the default path prove selection, seed, visited sequence and step count unchanged"* | for the **default TIDMAD path** prove rendered prompt bytes, builtin forward outputs, model-boundary dtype per builtin, registry contents and Step-00 numerics all unchanged |
+| *"invalid `file_order`, missing files, duplicate files, scope mismatch"* | invalid preset name; unknown axis role; duplicate axis name; a dimension that is neither fixed, symbolic nor dynamic; contract↔dataset cardinality mismatch; unsupported dtype adaptation |
+| *"legacy configuration"* | the Regime-A inventory in §5 |
+| *"resume behaviour"* | **not applicable** — Step 03 persists no run state. Recorded so it is visibly considered, not forgotten |
+| *"propagation failures"* | the contract crossing the **real subprocess boundary** (train / inference) |
+
+Standing constraints for the implementation, at parent level:
+
+- **transport is existing, not invented.** The contract reaches the
+  subprocesses through the established config-file/argv mechanism; a new
+  IPC mechanism is out of scope (the 02a C3 lesson, and §3 routes IPC to
+  Step 11).
+- **fail closed on a missing contract at the boundary** — a diagnostic
+  naming the missing config, never a silent fall-back to a name branch.
+- **resolution is applied at call time, never at import time** (the 02b
+  §13.9 lesson).
+- **nothing silently repairs**: no TIDMAD fallback, no shape rewriting,
+  no preset dropping, no dtype coercion.
+- **no preset label is read at runtime after resolution** — greppable.
+- **planner exposure and production-default changes are OUT of scope**;
+  they need separate evidence and operator approval.
+- **no empirical comparison campaign** is authorized by this design.
+- **inspect before editing; if inspection reveals ambiguity or a larger
+  scope than this design assumes, STOP and ask** — do not silently
+  widen (CLAUDE.md design-ambiguity rule).
+
+---
+
+## 17. What this parent deliberately does NOT freeze
+
+The folder README (:56-60) records the convention *"One PR = one design
+doc: when one PR suffices, the parent `step_NN_<name>.md` IS the PR doc"*
+and carries the operator's per-commit 8-section checklists. Step 03 is
+one PR, so those checklists will eventually live in **this** file.
+
+They are **not written at design-freeze time**, by operator decision.
+The parent stops at the abstraction level of the final Step-02 parent:
+capability, ownership, authorities, compatibility, contrasts, checkpoint,
+Gates, evidence economy, routing, stop conditions.
+
+Explicitly **not frozen here**:
+
+- any `C1 … C9` semantic-commit sequence, or a **pre-authorized commit
+  count**;
+- helper/schema decomposition and internal API shape;
+- source-file edit order;
+- test module names and mutation ordering;
+- exact verification command lines.
+
+Those belong to the implementation design/context, authored **after**
+this parent is frozen and implementation is authorized, and after the
+re-read of each touched file that the standard requires. A prior
+session's nine-commit choreography exists as a scratch artifact; its
+**parent-level acceptance content was extracted** into §5, §8a, §11.1,
+§12, §14, §16 and §21, and the choreography itself was **not appended**.
+
+---
+
+## 18. Convergence ledger implications
 
 | Row | Disposition |
 |---|---|
-| ForwardContract / Model I/O contract | Step 03 lands the structured authority. **Shared ownership with §6 candidate creation stays DO-NOT-MERGE** — Step 04 has no completed design yet, so the ≥2-design bar is unmet |
-| Dataset Profile ↔ model-facing tensor contract | **Distinct concepts, deliberately not merged.** Dataset Profile says *what data exists and how it is encoded*; the model contract says *what tensor interface a model consumes*. 3-E cross-validates them; neither derives the other wholesale |
-| num_classes / cardinality | ONE authority after 03: dataset declares the data fact, the model contract derives/cross-validates. Removes today's two-producer split |
-| output_type | collapses from three surfaces to one |
-| loss-family authority | already single; Step 03 re-keys, does not merge it with anything |
-| semantic presets | authoring convenience only. **Never a convergence candidate** — a preset with runtime semantics is the failure mode, not the goal |
-| estimator ×256 terms (§7d) | remains Step-07d's; it will DERIVE from this contract |
+| ForwardContract / Model I/O contract | Step 03 lands the structured authority. Shared ownership with §6 candidate creation stays **DO-NOT-MERGE** — Step 04 has no completed design, so the ≥2-design bar is unmet |
+| Dataset Profile ↔ model-facing contract | **Distinct, deliberately not merged.** Dataset says *what data exists*; the contract says *what the model boundary requires*; §4a resolves the adaptation between them |
+| cardinality | ONE authority: dataset declares the fact, the contract derives/cross-validates (§4b) |
+| `output_type` | collapses from three surfaces to one **projection** (§8b) |
+| loss-family authority | already single; re-keyed, not merged with anything |
+| semantic presets | authoring convenience only — **never** a convergence candidate |
+| estimator ×256 (§7d) | remains Step-07d's; will derive from this contract |
 
 ---
 
-## 14. Cross-step routing
+## 19. Cross-step routing
 
-| Finding | Owner | Why not Step 03 | Blocking? |
-|---|---|---|---|
-| custom-loss zero-arg instantiation (`loss_models_sandbox:253-276`) | **Step 04** | execution mechanics; revisit only if 03b proves the contract is what is missing | NO |
-| `_PROBE_NUM_CLASSES`, probe construction | Step 04 | §10 | NO |
-| second builtin name→config map (`models_format_sandbox:338-345`) | **Step 03, opportunistic** | it is a duplicate catalogue inside 03's own surface — fold into 03b if cheap, else route to Step 04 | NO |
-| registry population as an import side effect with bare `except` (`models_sandbox:749-755`) | **UNKNOWN — operator question §17 Q5** | plausibly Step 11 execution infrastructure | NO |
-| class-weight histogram fixed 256 bins (`train_engine:80,126,196`) | **Step 03 (03b)** | it is a cardinality derivation on the training path | NO |
-| dtype-registry "float" arm with zero implementations | Step 04 | dead until a generated float model exists | NO |
-| estimator ×256 | Step 07d | | NO |
-| metric identity | Step 06 | | NO |
+| Finding | Owner | Blocking? |
+|---|---|---|
+| registry population via import side effect, bare `except` (`models_sandbox:749-755`) | **Step 11** (operator Q5) — Step 03 pins contents only | NO |
+| custom-loss zero-arg instantiation | Step 04 | NO |
+| `_PROBE_NUM_CLASSES`, probe construction | Step 04 | NO |
+| `task_type` ownership | Step 01 / task-description layer | NO |
+| `task_description` restating contract-owned shapes (§9) | Step 01 layer, coordinated with Step 03 | NO |
+| second builtin name→config map (`models_format_sandbox:338-345`) | Step 03, opportunistic; else Step 04 | NO |
+| class-weight histogram fixed 256 bins (`train_engine:80,126,196`) | **Step 03** — a cardinality derivation on the training path | NO |
+| dtype-registry "float" arm with zero implementations | Step 04 | NO |
+| plugin-loader tolerance tiers diverging (§5 A3) | **pre-existing**; pinned, not unified by Step 03 | NO |
+| estimator ×256 | Step 07d | NO |
+| metric identity | Step 06 | NO |
 
-No item is left "owner TBD" except Q5, which is a genuine operator
-question rather than an unaudited gap.
+**No "owner TBD" remains.**
 
 ---
 
-## 15. Adversarial genericity review
+## 20. Adversarial genericity re-review (revision 2)
 
 | # | Attack | Verdict |
 |---|---|---|
-| 1 | Did we convert `[B,256,T]` prose into structured hardcodes? | **Guarded** — the contract declares axis ROLES and symbolic dims; §9's 3-A varies rank with roles preserved, which a structured hardcode cannot survive |
-| 2 | Can it represent unfamiliar rank/axes without source edits? | **This is exactly what 3-A tests.** If it cannot, the abstraction is wrong |
-| 3 | Are presets convenience only? | **Enforced** — one normalized contract is the only runtime representation; FX-4 rejects preset/explicit conflict; a preset producing a second path is a STOP |
-| 4 | Does any code branch on modality / rank / preset name? | **STOP condition in both children** |
-| 5 | Is dataset cardinality duplicated? | **NO** — derived/cross-validated; 3-E proves it |
-| 6 | Can contract and Dataset Profile contradict and still reach the LLM? | **FX-4 + 3-E exist precisely to make this impossible**; Checkpoint C requires a real pre-LLM rejection |
-| 7 | Can contract and preset contradict silently? | **FX-4** |
-| 8 | Any generic schema with no production consumer? | **Multi-tensor is the live risk** — representable but consumer-less; escalated as Q3 rather than quietly shipped |
-| 9 | Did we freeze implementation syntax? | Field names, YAML nesting and helper decomposition are **deliberately not specified here** |
-| 10 | Does loss config duplicate the existing validator authority? | **NO** — §8.1 forbids it; the authority is re-keyed |
-| 11 | Is output_type still split? | It **is** today (audit #4); collapsing it is 03a's job |
-| 12 | Was `hybrid` invented from the roadmap? | **No — it exists**, but is unreachable for plugins. Its fate is Q2, not an assumption |
-| 13 | Did custom-loss semantics absorb Step-04 mechanics? | **NO** — §14 routes them out |
-| 14 | Over-split? | **Two children**, with three candidate splits explicitly rejected in §6 |
-| 15 | Could one broader PR own both? | **Considered and rejected**: PR-A moves prompt bytes and PR-B moves executed tensors — different Gates, different oracles, different failure classes. One PR would need both Gates for a diff whose halves are independently reviewable |
-| 16 | Does each child have a real failure class and merge value? | **YES** (§7); 03b's is the silent-dtype class that no prompt test can see |
-| 17 | Are Stage-B contrasts atomic? | One axis per rung by construction (§9) |
-| 18 | Does Checkpoint C prove production consumption? | **Yes by definition** — a live proposer render + a real pre-LLM rejection; a real training round. Serialization or rendering alone is explicitly insufficient |
-| 19 | Are TIDMAD behaviours being upgraded into universal contracts? | **Watch item** — the frozensets name implementations that exist HERE; §8.5 defers making loss families task-owned for exactly this reason |
-| 20 | Any field configurable only because a literal existed? | `task_type` is the suspect — Q4 asks whether it is a real semantic or prompt framing Step 01 owns |
+| 1 | Does the contract represent only semantics with live consumers? | **YES** — multi-tensor deferred (§4c); `task_type` not owned; no task-owned loss config |
+| 2 | Did single-in/single-out become a hardcoded TIDMAD shape? | **NO** — rank, axes and roles are declared and varied by 3-A. "One tensor" is a multiplicity bound, not a shape |
+| 3 | Are arbitrary rank/axes genuinely supported without modality branches? | **3-A tests exactly this**; branching on rank/modality is a STOP |
+| 4 | Did multi-tensor sneak back in? | **NO** — §4c forbids containers; not a rung |
+| 5 | Did model dtype duplicate dataset dtype? | **NO** — §4a keeps them distinct |
+| 6 | Did we wrongly require model dtype == dataset dtype? | **NO — corrected in rev 2.** This was the live error; 3-B + 3-B-neg encode the fix |
+| 7 | Is cardinality still duplicated? | **NO** — derived/cross-validated (§4b); 3-E proves it |
+| 8 | Is `output_type` a second authority? | **Guarded** — §8b makes it a derived projection |
+| 9 | Did `hybrid` become a generic promise? | **NO** — legacy builtin adapter only (§8c) |
+| 10 | Did `task_type` become model-I/O authority? | **NO** — explicitly not owned (§3) |
+| 11 | Can a machine-checkable contradiction still reach LLM/execution? | **FX-4, 3-E, 3-B-neg + Checkpoint C (ii)** exist to make this impossible |
+| 12 | Did we claim free-text validation we cannot implement? | **NO — corrected in rev 2** (§9). The rev-1 claim is explicitly withdrawn |
+| 13 | Did a second loss authority appear? | **NO** (§8a) |
+| 14 | Did Step-04 probe/execution mechanics leak in? | **NO** (§10, §19) |
+| 15 | Did we split internal milestones into unnecessary PRs? | **NO — corrected in rev 2.** ONE PR (§6) |
+| 16 | Is every Stage-B rung atomic and source-supported? | One axis per rung (§11); §11.1 makes atomicity machine-checked; 3-B-neg added for negative evidence |
+| 17 | Do TIDMAD parity claims use the strongest existing oracle? | §5 reuses Step-00/01/02; A1 is hard byte-identity; A2/A6 assert observables, not configuration |
+| 18 | Any field present only because a legacy literal existed? | **Audited**: `task_type` routed out; `num_classes`'s `0` sentinel replaced by explicit "cardinality not meaningful" semantics (§4b) rather than preserved as a magic value |
+| 19 | Does the parent freeze implementation choreography? | **NO** (§17) — no commit sequence, count, helper design, edit order, test module or command line is frozen |
 
 ---
 
-## 16. Stop conditions
+## 21. Stop conditions
 
 - a preset acquires runtime semantics, or any consumer branches on rank,
   modality or preset name;
-- dataset cardinality/encoding is redeclared instead of derived or
+- dataset cardinality or encoding is **redeclared** instead of derived /
   cross-validated;
+- model-boundary dtype is required to **equal** dataset dtype, or a
+  general dtype-conversion algebra is invented beyond current consumers;
 - a second loss or output-type authority appears;
-- a contradiction between contract, preset, description or Dataset
-  Profile can still reach an LLM-facing consumer or executable workflow;
+- **any loss accept/reject verdict changes** — that is a policy change,
+  not an authority change;
+- `hybrid` is exposed as a generic authoring value;
+- **TIDMAD rendered prompt bytes change**, or any LLM-visible schema byte
+  changes — STOP and return for an explicit operator decision; do not
+  self-authorize a golden delta (§13);
+- a machine-checkable contradiction can still reach an LLM-facing or
+  executable consumer;
 - any builtin forward output changes, or FocalLoss1D math is touched;
 - prior on-disk generated plugins stop loading without a declared,
   accepted workspace boundary;
+- a Stage-A baseline **cannot be captured without a production change** —
+  that is a design finding, not a licence to edit;
+- a Stage-B rung needs two axes to be meaningful (§11.1);
+- multi-tensor containers are added without a live consumer;
 - a declared field lands without a production consumer;
-- Step-04 probe/execution mechanics are absorbed;
-- the child count grows beyond two without a source-grounded capability
-  argument.
+- Step-04 probe/execution or Step-11 loading/IPC mechanics are absorbed;
+- inspection reveals ambiguity or a scope larger than this design
+  assumes — STOP and ask, do not silently widen;
+- the work is split into more than one PR.
 
 ---
 
-## 17. Remaining operator decisions
+## 22. Remaining operator decisions
 
-| # | Question | Why it needs a decision | Recommendation |
-|---|---|---|---|
-| **Q1** | **Two children, or one?** | The §6 seam is clean (prompt bytes vs executed tensors) but a single PR is defensible if you prefer one review | **TWO** — they need different Gates |
-| **Q2** | **What happens to `hybrid`?** | One builtin implementation, unreachable for generated plugins, accepted by `plugin_loader` and by the loss authority. Preserve as a builtin-only legacy value, or normalize it away? | Preserve as legacy-only in 03a; do not extend it to plugins |
-| **Q3** | **Should multi-tensor I/O be representable in this Step?** | Genuinely generic, but **no production consumer exists** — shipping it now would be the consumer-less seam §0 rule 8 forbids | Represent single-tensor now; design the schema so multi-tensor is a later addition, not a rewrite |
-| **Q4** | **Is `task_type` a Step-03 semantic at all?** | Free-form `str`, consumed only for prompt framing. Step 01 may own it | Likely Step-01 prose; confirm at freeze |
-| **Q5** | **Who owns the import-side-effect registry with a bare `except`?** | Source does not decide between Step 03 and Step 11 | Operator call |
-| **Q6** | **Is the A1 prompt-byte exception acceptable again?** | If 03a re-renders the contract, TIDMAD prompt bytes may move, as they did for 01b under OD-S1-8 | Pre-authorize the same declared-golden-set mechanism, or require byte-identity |
+**NONE.**
 
-**Q1-Q6 are genuine.** Everything else in this document was decided from
-source.
+All six revision-1 questions were decided by the operator (Q1 one PR;
+Q2 hybrid legacy-only; Q3 multi-tensor deferred; Q4 `task_type` not
+owned; Q5 registry → Step 11; Q6 byte-identical prompts, no
+pre-authorized exception) and are applied above. Revision 2's own source
+audits (rows 11-12) produced corrections, not new questions. The Gate
+disposition (§13) is decided from the current standard, with its one
+conditional resolved mechanically at implementation time rather than by
+an operator call.
 
 ---
 
-## 18. Status
+## 23. Status
 
-**STEP 03 DESIGN — READY FOR OPERATOR REVIEW.**
+**STEP 03 DESIGN — READY FOR OPERATOR FREEZE (revision 2).**
 
-Not frozen. No implementation authorized. No Implementation Working Rules
-contract exists for any child. Step 04 is not begun.
+Not frozen. No implementation authorized. No Implementation Working
+Rules contract exists. No Gate has been run. Step 04 is not begun.
