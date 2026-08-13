@@ -741,8 +741,153 @@ design (§13).
 
 ## 12. Status
 
-**DESIGN — READY FOR OPERATOR FREEZE (revision 2, 2026-08-14).
-NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.** Implementation begins only after operator freeze and a
-filled Implementation Working Rules contract, in a fresh context with its
-own Context Continuity v2 handoff — in an isolated worktree **outside
-`.claude/`**.
+**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (revision 2,
+2026-08-14). IMPLEMENTATION IN PROGRESS.**
+
+> **Reconciliation note (kickoff, 2026-08-14).** The freeze commit
+> `dc26bb75` replaced the status block at the head of this document but
+> left this trailing §12 asserting the pre-freeze state
+> ("NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED"). That was stale
+> prose, not a competing authority: the freeze commit message, §Status
+> at the head of this file, and the parent's child-status table
+> (`step_02_dataset_sample_topology.md`, both the header table and the
+> child-status row) all agree. Corrected at implementation kickoff with
+> **no change to scope, checkpoints, gates, Stage-A/Stage-B semantics or
+> the live-vs-latent key-coercion distinction.**
+
+Implementation runs in a fresh context with its own Context Continuity
+v2 handoff, in an isolated worktree **outside `.claude/`**.
+
+---
+
+## 13. Implementation ledger (live)
+
+Referenced by §11.2. This section is written DURING implementation and
+is the authoritative record of what actually happened.
+
+**Frozen design HEAD**: `dc26bb752eaf6d49c5a553de95401770f0652713`
+(resolved mechanically: `git log -1 --format=%H -- <this file>`).
+**Implementation base**: master `dc26bb75`.
+**Branch**: `feat/generic-framework-step-02b-selection-sampleset`.
+**Worktree**: `/home/yuema137/siderius-worktrees/pr02b-impl` — outside
+`.claude/`, per §5.
+
+### 13.0 Kickoff source audit (before any production edit)
+
+Line numbers below are dated evidence at base `dc26bb75`.
+
+**F1 CONFIRMED — selection resolves the profile ambiently.**
+`execute_tools/sample_set_builder.py` calls `resolve_dataset_profile()`
+at **three** points, not one: `:67` (`.dataset` for scope resolution),
+`:95` (`segments_per_file` for the trial branch) and `:117`
+(normal-mode segment count). There is no profile parameter.
+
+**Production `build_sample_set` callers — the full audit §6.2 asked
+for.** The tuner's pair is `ml_hyperparameter_tune_agent.py:4403`
+(train) and `:4411` (eval). Both sit inside ONE
+`if trial_config.mode in ("trial", "formal")` branch (`:4402`), so the
+*same two call sites* serve BOTH trial and formal modes — §5's "trial
+and formal construction sites" are these two calls exercised in two
+modes, not four distinct call sites. Other production callers found:
+`scripts/run_comparison.py:381,388`, `agent/utils/proposer_preflight.py:78`,
+and two `scripts/` validation harnesses
+(`c2_prephase_validation.py`, `pregate_runtime_control_validation.py`).
+
+**The tuner holds no profile.** Grep for
+`resolve_dataset_profile|DatasetProfile|dataset_profile` across
+`ml_hyperparameter_tune_agent.py` returns nothing — the run-bound
+profile has to be obtained there before it can be threaded.
+
+**Profile mechanism.** `_ACTIVE_PROFILE` is a `ContextVar`
+(`dataset_config.py:493`) set by `bind_dataset_profile()` (`:571`);
+`resolve_dataset_profile()` (`:498`) returns
+`_ACTIVE_PROFILE.get() or TIDMAD_PROFILE` (`:515`). Because
+`sample_set_builder` binds the name at import, patching
+`execute_tools.sample_set_builder.resolve_dataset_profile` disables
+ambient resolution **for the builder only** — which is how B2's
+"ambient disabled" acceptance can be asserted without disabling the
+tuner's own resolution.
+
+**The two serialization sites CONFIRMED**: `core/sandbox_executor.py:1307`
+(train) and `:1639` (eval), each preceded by
+`validate_sample_set(sample_set, scope=self.data_scope)` (`:1302`,
+`:1627`).
+
+> **Pre-existing asymmetry — pin, do NOT unify.** The train site lets
+> `ScopeViolationError` propagate; the eval site catches it and returns
+> an error dict (`:1628-1634`). That is error *reporting*, downstream of
+> the boundary contract. B3's "rejected consistently" means both sites
+> reject through the same validator, not that they report identically.
+> Unifying them would be a behaviour change (§9).
+
+**F2 CONFIRMED and the B1 STOP CONDITION DOES NOT FIRE.**
+The divergence is real: `train_engine_sandbox.py:179`
+`sorted(sample_set.items())` (LEXICOGRAPHIC, `TIDMADDataset.
+_pull_events_from_sample_set`) vs `:333`
+`sorted(sample_set.keys(), key=int)` (NUMERIC, `TIDMADEpochDataset`).
+
+Reachability audit — every production `TIDMADDataset(...)` construction:
+
+| Site | Branch used | Passes `sample_set=`? |
+|---|---|---|
+| `train_engine_sandbox.py:1351` | `fname_list` (legacy single-file, the `else` arm of `if sample_set is not None`) | **no** |
+| `execute_tools/probe_data.py:29` | `fname_list` (VRAM probe) | **no** |
+
+The live multi-file path constructs `TIDMADEpochDataset`
+(`train_engine_sandbox.py:884-891`), the numeric consumer. Therefore
+`_pull_events_from_sample_set` is **production-unreachable**, the design's
+latent classification holds, and B1 proceeds as written: pin the live
+contract, record the latent branch, assert nothing about its ordering.
+
+**Import provenance (§5 requirement).** The project venv carries an
+editable `siderius` install whose finder hardcodes
+`/home/yuema137/SIDERIUS` — the *main checkout*, not this worktree.
+Empirically, with cwd = worktree, `execute_tools.sample_set_builder` and
+`core.sandbox_executor` both resolve under the worktree (cwd precedes
+the editable finder). **Binding consequence: every `python`/`pytest`
+invocation for this PR must run with cwd = the worktree**, and
+Checkpoint C must additionally assert provenance inside any child
+process it launches.
+
+### 13.1 Open implementation question — the boundary validator's TIDMAD bounds
+
+**Discovered at kickoff; to be decided during B3, on B2's evidence.**
+
+`execute_tools/scoring_utils.py` still reaches the singletons inside
+`validate_sample_set`: `scope.resolve(TIDMAD)` (`:309`),
+`0 <= file_index < NUM_FILES` (`:317`), `seg < SEGMENTS_PER_FILE`
+(`:328`). 02a migrated `sample_set_builder.py` off the constants but not
+this validator.
+
+```text
+Consequence once B2 lands:
+  producer (selection)  -> profile-driven
+  boundary (validator)  -> still TIDMAD-bounded
+  => a profile with num_files > 20 selects files the boundary rejects.
+```
+
+Relevant precedent: parent §D (OD-02a-1) moved `score_table.py`'s
+import-time `NUM_FILES` bounds to profile-resolved `model_validator`s
+**because a required contrast rung was otherwise impossible** — and
+states explicitly that this is *not* a universal rule and must not be
+generalized "without its own source evidence".
+
+Bounded resolution path, in order:
+1. choose the B4 contrast on the unblocked side (`num_files < 20`), which
+   needs zero production diff;
+2. if — and only if — the rung or Checkpoint C is *actually* blocked,
+   that is the missing source evidence and the precedent applies;
+3. otherwise record the residual here with its owner rather than
+   widening 02b.
+
+### 13.2 Commit ladder — live status
+
+| Rung | Status | Evidence |
+|---|---|---|
+| docs reconciliation | landed | this section + §12 + parent §Status |
+| B1 → CP0 | not started | |
+| B2 → CP-B1 | not started | |
+| B3 → Checkpoint A | not started | |
+| B4 → Checkpoint B | not started | |
+| Checkpoint C | not started | |
+| B5 → Checkpoint D | not started | |

@@ -3,9 +3,10 @@
 ## Status
 
 **LIVING PARENT — DELIBERATELY NOT FROZEN (operator decision,
-2026-08-13). PR 02a IMPLEMENTATION AUTHORIZED AND IN PROGRESS
-(branch `feat/generic-framework-step-02a-dataset-profile-injection`);
-02b and 02c NOT AUTHORIZED.**
+2026-08-13). PR 02a MERGED (PR #202, merge commit `47359538`).
+PR 02b IMPLEMENTATION AUTHORIZED AND IN PROGRESS (branch
+`feat/generic-framework-step-02b-selection-sampleset`, design frozen at
+`dc26bb75`); 02c NOT AUTHORIZED.**
 
 > **Do not "fix" this by freezing it.** The operator decided this parent
 > stays a LIVING document until Step-02 closeout, because it is the
@@ -68,7 +69,7 @@ child-plan detail still to be written.
 | Child | State |
 |---|---|
 | **02a — Dataset Profile injection** | **COMPLETE / MERGED** — PR [#202](https://github.com/Galileo-Sandbox/SIDERIUS/pull/202), merge commit `47359538`, PR head `0d9fc32d`, exact-head CI green. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten |
-| 02b — Selection & SampleSet | **DESIGN FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION** (revision 2, 2026-08-14). Implementation not yet started |
+| 02b — Selection & SampleSet | **DESIGN FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION** (revision 2, 2026-08-14) at `dc26bb75`. **IMPLEMENTATION IN PROGRESS** on `feat/generic-framework-step-02b-selection-sampleset`; live progress in that child's §13 ledger |
 | 02c — Systematic groups (Step FINALIZER) | DRAFT — revised after 02b lands |
 
 **Step 02 remains IN PROGRESS.** The overall roadmap §15.1 matrix is the
