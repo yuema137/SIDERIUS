@@ -15,9 +15,20 @@ Constants:
     validation_file_pattern:  Format string for validation file names.
 """
 
+import json
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from string import Formatter
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
 # Arbitrary in-range index used only to probe that a filename pattern
 # actually formats. Never used to build a path that is read.
@@ -108,12 +119,26 @@ class DatasetConfig(BaseModel):
         """Return the training filename for ``file_index``.
 
         The single place a training filename is built from the pattern, so
-        loaders never re-inline a dataset-specific template. (No validation
-        counterpart yet: the validation-side inlined templates live in
-        ``scripts/`` and are coupling-ledger entries, refactored by whichever
-        PR next touches them — bounded in-passing rule.)
+        loaders never re-inline a dataset-specific template.
         """
         return self.training_file_pattern.format(file_index=file_index)
+
+    def validation_file_name(self, file_index: int) -> str:
+        """Return the RAW validation filename for ``file_index``.
+
+        The counterpart to :meth:`training_file_name`, and the first real
+        consumer of ``validation_file_pattern`` — a seam that shipped without
+        one (roadmap §0.8's seam-without-consumer anti-pattern). Before this
+        existed, the raw validation name was re-inlined as an f-string at
+        eight production sites, two of which built it two different ways
+        (``f"{i:04d}"`` vs ``str(i).zfill(4)``).
+
+        **Scope boundary.** This returns the RAW INPUT filename, which is
+        Step-02-owned topology. It must never be used to build a
+        DENOISED/deliverable name: that template belongs to the Deliverable
+        Contract, whose owner is still an open convergence-ledger question.
+        """
+        return self.validation_file_pattern.format(file_index=file_index)
 
     def valid_segmentation_sizes(self, lo: int = 100, hi: int = 100_000) -> list[int]:
         """Return sorted divisors of ``psd_segment_length`` in ``[lo, hi]``.
@@ -302,3 +327,258 @@ TIDMAD = DatasetConfig(
 SEGMENT_LENGTH = TIDMAD.psd_segment_length
 SEGMENTS_PER_FILE = TIDMAD.segments_per_file
 NUM_FILES = TIDMAD.num_files
+
+
+# ---------------------------------------------------------------------------
+# Dataset Profile — the resolved declaration the production data path reads
+# ---------------------------------------------------------------------------
+
+
+class ChannelIdentity(BaseModel):
+    """Which in-file channel is the model INPUT and which is the TRUTH.
+
+    Before this declaration existed the pair was addressed by a hardcoded
+    HDF5 path at ~15 production sites (``"timeseries"/"channel0001"`` for the
+    input, ``"channel0002"`` for the target) with nothing naming the concept
+    — so "which channel is the ground truth" was an undeclared dataset fact
+    that no task could override.
+
+    Identity ONLY. Truth *absence* (an unsupervised task with no clean
+    channel at all) changes what a model must emit and what can be scored,
+    and belongs to the model-contract and metric modules — not here.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    input_channel: str = Field(
+        description="In-file channel holding the model INPUT signal.",
+    )
+    target_channel: str = Field(
+        description="In-file channel holding the TRUTH/target signal.",
+    )
+
+    @field_validator("target_channel")
+    @classmethod
+    def _distinct_from_input(cls, value: str, info: ValidationInfo) -> str:
+        """Reject input == target.
+
+        Loaders read the two channels into the input and target slots
+        independently, so an identical pair would train a model to predict
+        its own input and score it against itself — producing a plausible
+        run with meaningless results rather than any error.
+        """
+        other = info.data.get("input_channel")
+        if other is not None and value == other:
+            raise ValueError(
+                f"target_channel and input_channel are both {value!r}. The truth "
+                f"channel must differ from the input channel, or training and "
+                f"scoring would compare a signal against itself."
+            )
+        return value
+
+
+class ValueEncoding(BaseModel):
+    """How raw stored samples map onto the model's class alphabet.
+
+    TIDMAD stores int8 ADC codes and every loader shifts them by ``+128``
+    into ``[0, 256)`` before use, with ``minlength=256`` on the class
+    histogram. Those three numbers were inlined independently at ~8
+    production sites with no declaration tying them together.
+
+    **Scope (frozen).** This DECLARES the data-side encoding and nothing
+    more. Deriving a model's input/output contract from it — class counts,
+    embedding widths, output heads — belongs to the model-contract module.
+    Declaring an encoding here does NOT assert that any model supports it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    storage_dtype: str = Field(
+        description="NumPy dtype name the samples are stored as on disk, e.g. 'int8'.",
+    )
+    compute_dtype: str = Field(
+        description="NumPy dtype name samples are widened to before the offset is applied.",
+    )
+    value_offset: int = Field(
+        description="Added to a stored sample to move it into [0, num_classes).",
+    )
+    num_classes: int = Field(
+        gt=0,
+        description="Size of the class alphabet; the histogram's minlength.",
+    )
+
+    @field_validator("num_classes")
+    @classmethod
+    def _alphabet_covers_the_shifted_range(cls, value: int, info: ValidationInfo) -> int:
+        """Reject an alphabet that the declared dtype+offset would overflow.
+
+        A too-small ``num_classes`` does not raise at load time — it silently
+        truncates the class histogram, which reweights the loss. Checking it
+        here, at construction, is the only place the three fields are visible
+        together.
+        """
+        dtype_name = info.data.get("storage_dtype")
+        offset = info.data.get("value_offset")
+        if dtype_name is None or offset is None:
+            return value
+        widths = {"int8": (-128, 127), "uint8": (0, 255), "int16": (-32768, 32767)}
+        bounds = widths.get(dtype_name)
+        if bounds is None:
+            return value
+        lo, hi = bounds
+        if lo + offset < 0 or hi + offset >= value:
+            raise ValueError(
+                f"num_classes={value} cannot hold {dtype_name} shifted by "
+                f"{offset}: the range becomes [{lo + offset}, {hi + offset}], "
+                f"which falls outside [0, {value})."
+            )
+        return value
+
+
+class DatasetProfile(BaseModel):
+    """The resolved dataset declaration the production data path reads.
+
+    Composes — rather than replaces — :class:`DatasetConfig`, so the shipped
+    ``TIDMAD`` object and its ``model_dump()`` stay byte-identical. That
+    matters: the Step-00 golden baseline pins ``TIDMAD.model_dump()`` field
+    by field, and adding fields to ``DatasetConfig`` would have broken a
+    frozen compatibility surface in order to introduce a new one.
+
+    Three declarations, one object::
+
+        dataset   file topology, decomposition geometry, the legality rule
+        channels  which channel is input, which is truth
+        encoding  dtype, offset, class-alphabet size
+
+    Consumers receive this object; they do not import module-level dataset
+    constants and do not re-inline a filename template, a channel name or a
+    ``+128``.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    dataset: DatasetConfig = Field(
+        description="File topology, sample geometry, and the sample-shape legality rule.",
+    )
+    channels: ChannelIdentity = Field(
+        description="Which in-file channel is the model input and which is the truth.",
+    )
+    encoding: ValueEncoding = Field(
+        description="Data-side dtype/offset/class-count declaration.",
+    )
+
+
+# The shipped TIDMAD profile.
+#
+# REGIME-A COMPATIBILITY ADAPTER, not a universal framework default. Every
+# value below is a property of the TIDMAD dataset specifically; a bound task
+# declares its own. The adapter exists so an existing caller that predates
+# the profile transport keeps resolving exactly today's behaviour — it is
+# NOT a statement about what a generic dataset looks like.
+TIDMAD_PROFILE = DatasetProfile(
+    dataset=TIDMAD,
+    channels=ChannelIdentity(
+        input_channel="channel0001",
+        target_channel="channel0002",
+    ),
+    encoding=ValueEncoding(
+        storage_dtype="int8",
+        compute_dtype="int16",
+        value_offset=128,
+        num_classes=256,
+    ),
+)
+
+
+_ACTIVE_PROFILE: ContextVar[DatasetProfile | None] = ContextVar(
+    "siderius_active_dataset_profile", default=None
+)
+
+
+def resolve_dataset_profile() -> DatasetProfile:
+    """Return the dataset profile in effect for the current context.
+
+    This is the **Regime-A resolution seam**, for the small number of
+    consumers that need the profile where an argument cannot reach them —
+    Pydantic field validation and module-scope constants, which run at import
+    or validation time with no caller to thread a parameter through.
+
+    **Prefer an explicit argument.** Ordinary consumers take the profile as a
+    parameter, and the subprocess entry points load it from their own
+    explicit config file and pass it down. This accessor is deliberately NOT
+    the general injection mechanism, because an ambient lookup hides the
+    dependency that the profile object exists to make visible.
+
+    With nothing bound it resolves the shipped TIDMAD profile, preserving
+    today's behaviour for every caller that predates the transport.
+    """
+    return _ACTIVE_PROFILE.get() or TIDMAD_PROFILE
+
+
+def load_dataset_profile(path: str) -> DatasetProfile:
+    """Load a resolved profile from a JSON config file. **FAILS CLOSED.**
+
+    This is the subprocess side of the parent→child transport. The rule it
+    enforces is the sharp half of §5c:
+
+    * an explicit profile path that is **missing, unreadable, not JSON, or
+      schema-invalid** raises, with a diagnostic naming the path;
+    * it **never** falls back to the shipped TIDMAD profile.
+
+    The distinction that matters: *"the flag is present but the file is
+    broken"* must fail loudly, because a silent fallback would run a bound
+    task against TIDMAD's topology and produce plausible, wrong numbers.
+    *"an old caller has never heard of the flag"* is a different case
+    entirely — that one keeps Regime-A, and it is handled by the caller
+    choosing not to call this function at all.
+
+    Args:
+        path: Filesystem path to a JSON document produced by
+            ``DatasetProfile.model_dump()``.
+
+    Returns:
+        The validated profile.
+
+    Raises:
+        ValueError: The path is missing, unreadable, malformed JSON, or does
+            not satisfy the :class:`DatasetProfile` schema.
+    """
+    try:
+        with open(path) as handle:
+            payload = json.load(handle)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"dataset profile config not found at {path!r}. A profile path was "
+            f"supplied, so this fails closed rather than falling back to the "
+            f"shipped TIDMAD profile — a silent fallback would run against the "
+            f"wrong dataset topology and produce plausible, wrong numbers."
+        ) from exc
+    except OSError as exc:
+        raise ValueError(f"dataset profile config at {path!r} is unreadable ({exc}).") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"dataset profile config at {path!r} is not valid JSON ({exc}).") from exc
+
+    try:
+        return DatasetProfile.model_validate(payload)
+    except ValidationError as exc:
+        raise ValueError(
+            f"dataset profile config at {path!r} does not satisfy the "
+            f"DatasetProfile schema ({exc})."
+        ) from exc
+
+
+@contextmanager
+def bind_dataset_profile(profile: DatasetProfile) -> Iterator[DatasetProfile]:
+    """Bind ``profile`` for the duration of the ``with`` block.
+
+    Scoped through a :class:`~contextvars.ContextVar` rather than module
+    state, so the previous value is always restored — including on an
+    exception, and independently per thread or async task. A plain mutable
+    global would leak a contrast profile from one test into the next, and
+    the leak would surface as an unrelated failure somewhere downstream.
+    """
+    token = _ACTIVE_PROFILE.set(profile)
+    try:
+        yield profile
+    finally:
+        _ACTIVE_PROFILE.reset(token)

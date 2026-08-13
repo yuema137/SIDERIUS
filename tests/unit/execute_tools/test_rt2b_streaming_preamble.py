@@ -24,6 +24,7 @@ import pytest
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
 
 SEG_SIZE = 1000  # minimum segmentation_size; 1 PSD segment == 1 ML segment below
@@ -35,7 +36,10 @@ def tiny_setup(tmp_path, synthetic_h5, monkeypatch):
     data_dir, _fname = synthetic_h5(seg_size=SEG_SIZE)
     # The synthetic file holds exactly SEG_SIZE samples; shrink the PSD
     # segment so the streaming slicer sees one full PSD segment.
-    monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)
+    # Geometry override is a DECLARATION. Was
+    # ``monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)`` until
+    # PR-02a C3 moved the loaders onto the resolved Dataset Profile, so the
+    # module constant is no longer the authority. Assertions unchanged.
 
     model_cfg = WaveNetConfig(
         segmentation_size=SEG_SIZE,
@@ -65,15 +69,21 @@ def tiny_setup(tmp_path, synthetic_h5, monkeypatch):
 
     monkeypatch.setattr(tes.TIDMADEpochDataset, "__init__", counting_init)
 
-    return {
-        "data_dir": data_dir,
-        "sample_set": {"0": [0]},
-        "model_cfg": model_cfg,
-        "train_cfg": train_cfg,
-        "loss_cfg": loss_cfg,
-        "sandbox_dirs": sandbox_dirs,
-        "counter": counter,
-    }
+    _tiny = TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+        }
+    )
+    with bind_dataset_profile(_tiny):
+        yield {
+            "data_dir": data_dir,
+            "sample_set": {"0": [0]},
+            "model_cfg": model_cfg,
+            "train_cfg": train_cfg,
+            "loss_cfg": loss_cfg,
+            "sandbox_dirs": sandbox_dirs,
+            "counter": counter,
+        }
 
 
 def _run(setup, runtime_session, exp_id: str):

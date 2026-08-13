@@ -33,21 +33,28 @@ from collections.abc import Mapping, Sequence
 
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.workload import ResolvedPhaseWorkload
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
 
 SampleSet = Mapping[str, Sequence[int]] | Mapping[int, Sequence[int]]
 
 
-def _validate_seg(seg_size: int) -> int:
+def _validate_seg(seg_size: int, profile: DatasetProfile | None = None) -> int:
+    """ML segments per PSD segment under the resolved decomposition geometry.
+
+    ``profile`` defaults to the Regime-A resolution so an existing caller
+    that predates the transport is unaffected.
+    """
     if seg_size <= 0:
         raise ValueError(f"seg_size must be positive; got {seg_size!r}.")
-    return PSD_SEGMENT_LENGTH // seg_size
+    profile = profile or resolve_dataset_profile()
+    return profile.dataset.psd_segment_length // seg_size
 
 
 def resolve_training_workload(
     sample_set: SampleSet,
     *,
     seg_size: int,
+    profile: DatasetProfile | None = None,
     batch_size: int,
     train_portion: float | None,
     epochs: int,
@@ -65,7 +72,7 @@ def resolve_training_workload(
         raise ValueError(f"batch_size must be positive; got {batch_size!r}.")
     if epochs < 0:
         raise ValueError(f"epochs must be non-negative; got {epochs!r}.")
-    ml_per_psd = _validate_seg(seg_size)
+    ml_per_psd = _validate_seg(seg_size, profile)
 
     n_psd_kept = 0
     per_file_kept: dict[str, int] = {}
@@ -105,6 +112,7 @@ def resolve_inference_workload(
     *,
     seg_size: int,
     inference_batch_size: int,
+    profile: DatasetProfile | None = None,
 ) -> ResolvedPhaseWorkload:
     """Inference-batch workload, mirroring `inference_single.py`
     sample_set mode exactly.
@@ -119,7 +127,8 @@ def resolve_inference_workload(
     """
     if inference_batch_size <= 0:
         raise ValueError(f"inference_batch_size must be positive; got {inference_batch_size!r}.")
-    ml_per_psd = _validate_seg(seg_size)
+    profile = profile or resolve_dataset_profile()
+    ml_per_psd = _validate_seg(seg_size, profile)
 
     per_file_batches: dict[str, int] = {}
     per_file_ml_segments: dict[str, int] = {}
@@ -136,7 +145,7 @@ def resolve_inference_workload(
         total_ml += dim1
         total_batches += batches
 
-    output_bytes = total_psd * PSD_SEGMENT_LENGTH * 2  # int8 denoised + injected
+    output_bytes = total_psd * profile.dataset.psd_segment_length * 2  # denoised + injected
 
     return ResolvedPhaseWorkload(
         phase="inference",

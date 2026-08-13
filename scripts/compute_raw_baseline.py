@@ -48,7 +48,7 @@ import numpy as np
 from tqdm import tqdm
 
 from execute_tools.build_anchor_map import load_anchor_map
-from execute_tools.dataset_config import NUM_FILES
+from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, process_segment
 
 # ---------------------------------------------------------------------------
@@ -148,7 +148,16 @@ def _calculate_score(
 # Decision 13 in ``docs/aggregated_score_table_awareness.md``.
 # ---------------------------------------------------------------------------
 
-_FINE_INDICES = tuple(range(NUM_FILES))
+
+def _fine_indices() -> tuple[int, ...]:
+    """File indices this generator writes per-file artifacts for.
+
+    Must agree with ``nodes/scoring_reference.py``, which LOADS them. Both
+    now derive the count from the same Dataset Profile, so the generator and
+    its consumer cannot silently disagree about how many files exist — the
+    §8 reachability argument for pulling this script into 02a.
+    """
+    return tuple(range(resolve_dataset_profile().dataset.num_files))
 
 
 def _maybe_write_anchor_normalized_scalar(
@@ -166,7 +175,7 @@ def _maybe_write_anchor_normalized_scalar(
     missing: list[int] = []
     lossy: list[int] = []
 
-    for idx in _FINE_INDICES:
+    for idx in _fine_indices():
         path = os.path.join(output_dir, f"raw_baseline_score_file_{idx:04d}.json")
         if not os.path.exists(path):
             missing.append(idx)
@@ -315,7 +324,7 @@ def main():
 
         coarse = idx >= 20
         mode = "coarse" if coarse else "fine"
-        fname = f"abra_validation_{idx:04d}.h5"
+        fname = resolve_dataset_profile().dataset.validation_file_name(idx)
         out_path = os.path.join(args.output_dir, f"raw_baseline_score_file_{idx:04d}.json")
 
         if os.path.exists(out_path) and not args.override:

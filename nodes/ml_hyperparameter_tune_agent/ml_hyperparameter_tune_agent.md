@@ -683,3 +683,23 @@ for the full design rationale.
   - Worst-case total LLM calls per run = `max_rounds × max(attempts_per_round, attempts_per_formal_round) + max_rounds = 50 × 5 + 50 = 300` planner calls + 50 reflector calls under the default budget envelope.
 - **GPU**: **required** for the training and inference skills. The pre-flight `evaluate_vram_skill` uses architectural pattern tagging to estimate VRAM need; rejected configs never reach the GPU. The training subprocess respects `hardware_context.usable_cap_gb` as a hard ceiling.
 - **External services**: none directly. The tuner is the only node that reads the TIDMAD dataset directly (via the training/inference subprocesses); `data_dir` must point at a real TIDMAD root for any GPU run. The `evaluate_time_skill` real-dataset warmup also reads 1 PSD from `data_dir` when set. No network calls outside `LLMBridge`. Filesystem: writes `run_output_{run_name}.json` + intermediate configs + token usage log + per-run plugin dir under the workspace; reads `data_dir` for TIDMAD HDF5s; spawns subprocesses via `TidmadSandbox`.
+
+---
+
+## Dataset Profile dependency (PR 02a, 2026-08)
+
+`_validate_data_config` no longer restates the sample-shape legality rule.
+It previously re-derived the legal `segmentation_size` list itself:
+
+```python
+sorted(d for d in range(100, psd + 1) if psd % d == 0 and d <= 100_000)
+```
+
+Under TIDMAD that is a **10,000,000-iteration loop on the error path**, and
+a second place the rule could drift from the authority. It now calls
+`dataset_config.valid_segmentation_sizes()` (sqrt enumeration).
+
+**No CLI argument, default value or rejection behaviour changed.** The two
+derivations produce the identical 36-entry list, so the error message —
+which prints the legal values — is byte-identical. Pinned by
+`tests/unit/execute_tools/test_step02a_c5_legality_dedup.py`.

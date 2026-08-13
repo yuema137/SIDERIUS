@@ -17,8 +17,8 @@ when a seed is provided.
 import random
 from typing import Literal
 
-from execute_tools.dataset_config import TIDMAD, DataScope
-from execute_tools.scoring_utils import SEGMENTS_PER_FILE, SampleSet
+from execute_tools.dataset_config import DataScope, resolve_dataset_profile
+from execute_tools.scoring_utils import SampleSet
 
 # Files used by the "anchors" strategy: low, mid, high frequency extrema
 ANCHOR_FILES = [0, 10, 19]
@@ -64,8 +64,9 @@ def build_sample_set(
             ``"snapshot"``, or (normal mode) ``file_index`` is out of scope.
         ValueError: If ``trial_portion`` results in 0 segments per file.
     """
-    resolved_scope = (scope or DataScope.default()).resolve(TIDMAD)
-    scope_is_full = resolved_scope == list(range(TIDMAD.num_files))
+    dataset = resolve_dataset_profile().dataset
+    resolved_scope = (scope or DataScope.default()).resolve(dataset)
+    scope_is_full = resolved_scope == list(range(dataset.num_files))
 
     if not is_trial:
         return _build_normal(file_index, resolved_scope)
@@ -91,14 +92,15 @@ def build_sample_set(
         raise ValueError(f"Unknown trial_strategy: {trial_strategy!r}")
 
     # Compute number of segments to sample per file
-    n_segments = max(1, round(trial_portion * SEGMENTS_PER_FILE))
+    segments_per_file = resolve_dataset_profile().dataset.segments_per_file
+    n_segments = max(1, round(trial_portion * segments_per_file))
 
     rng = random.Random(seed)
     sample_set: SampleSet = {}
-    all_indices = list(range(SEGMENTS_PER_FILE))
+    all_indices = list(range(segments_per_file))
 
     for fi in files:
-        sampled = sorted(rng.sample(all_indices, min(n_segments, SEGMENTS_PER_FILE)))
+        sampled = sorted(rng.sample(all_indices, min(n_segments, segments_per_file)))
         sample_set[fi] = sampled
 
     return sample_set
@@ -112,4 +114,4 @@ def _build_normal(file_index: int, resolved_scope: list[int]) -> SampleSet:
     """
     if file_index not in resolved_scope:
         raise ValueError(f"file_index={file_index} is outside the DataScope {resolved_scope}.")
-    return {file_index: list(range(SEGMENTS_PER_FILE))}
+    return {file_index: list(range(resolve_dataset_profile().dataset.segments_per_file))}

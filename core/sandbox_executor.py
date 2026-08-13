@@ -37,7 +37,11 @@ from core.inference_defaults import inference_batch_for
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from execute_tools.data_paths import TIDMAD_DATA_DIR
-from execute_tools.dataset_config import DataScope, ScopeViolationError
+from execute_tools.dataset_config import (
+    DataScope,
+    ScopeViolationError,
+    resolve_dataset_profile,
+)
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
@@ -1182,6 +1186,30 @@ class TidmadSandbox:
         except Exception as e:
             raise ValueError(f"Experiment Configuration Rejected: {e!s}") from e
 
+    def _write_dataset_profile_config(self, exp_id: str) -> str:
+        """Materialize the resolved Dataset Profile for a subprocess.
+
+        One declaration, one file, three consumers. Training, inference and
+        scoring each receive the SAME resolved profile through the same
+        config-file + argv-flag mechanism already used for ``--model_cfg``
+        and friends, so the three data paths cannot interpret the dataset
+        differently — the exact failure the operator cited when deciding all
+        three boundaries stay in one PR (§3.4).
+
+        Written once per ``exp_id``; re-writing is idempotent because the
+        resolved profile does not change within a run.
+
+        Args:
+            exp_id: Experiment id, used to key the file within the run.
+
+        Returns:
+            Absolute path to the JSON the child loads.
+        """
+        path = os.path.abspath(os.path.join(self.dirs["configs"], f"dataset_profile_{exp_id}.json"))
+        with open(path, "w") as handle:
+            json.dump(resolve_dataset_profile().model_dump(), handle)
+        return path
+
     def execute_training(
         self,
         exp_id: str,
@@ -1246,6 +1274,8 @@ class TidmadSandbox:
                 with open(paths[k], "w") as f:
                     json.dump(v, f)
 
+            dp_path = self._write_dataset_profile_config(exp_id)
+
             cmd = [
                 sys.executable,
                 "execute_tools/train_engine_sandbox.py",
@@ -1255,6 +1285,8 @@ class TidmadSandbox:
                 paths["t"],
                 "--loss_cfg",
                 paths["l"],
+                "--dataset_profile_json",
+                dp_path,
                 "--exp_id",
                 exp_id,
                 "--run_name",
@@ -1566,6 +1598,8 @@ class TidmadSandbox:
             "agent",
             "-m",
             model_type,
+            "--dataset_profile_json",
+            self._write_dataset_profile_config(exp_id),
             "--model_cfg",
             m_path,
             "--loss_cfg",
@@ -1796,6 +1830,8 @@ class TidmadSandbox:
                     "agent",
                     "-m",
                     model_type,
+                    "--dataset_profile_json",
+                    self._write_dataset_profile_config(exp_id),
                     "--exp_id",
                     exp_id,
                     "--run_name",

@@ -52,7 +52,7 @@ from core.inference_defaults import (
     inference_batch_for,
     is_inference_batch_registered,
 )
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
 
 _BYTES_F32 = 4
 
@@ -201,10 +201,12 @@ def _total_inference_steps(
     sample_set: dict[str, list[int]],
     seg_size: int,
     inf_batch: int,
+    profile: DatasetProfile | None = None,
 ) -> int:
     """Total forward-only step count to score the whole eval ``sample_set``."""
     n_psd = sum(len(v) for v in sample_set.values())
-    ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
+    profile = profile or resolve_dataset_profile()
+    ml_per_psd = profile.dataset.psd_segment_length // seg_size
     total_ml = n_psd * ml_per_psd
     return math.ceil(total_ml / max(inf_batch, 1))
 

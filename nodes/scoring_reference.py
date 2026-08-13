@@ -21,9 +21,20 @@ import os
 from dataclasses import dataclass
 
 from execute_tools.data_paths import SIDERIUS_DATA_DIR
-from execute_tools.dataset_config import NUM_FILES
+from execute_tools.dataset_config import resolve_dataset_profile
 
-_FINE_INDICES = tuple(range(NUM_FILES))
+
+def _fine_indices() -> tuple[int, ...]:
+    """File indices the per-file reference artifacts are keyed by.
+
+    Was a module-level ``tuple(range(NUM_FILES))`` evaluated at import, which
+    fixed this node to TIDMAD's 20 files no matter what a task declared. It
+    is now derived per call from the resolved Dataset Profile, so this node
+    and its generator (``scripts/compute_raw_baseline.py``) cannot silently
+    disagree about how many files exist.
+    """
+    return tuple(range(resolve_dataset_profile().dataset.num_files))
+
 
 _RAW_PER_FILE_FMT = "raw_baseline_score_file_{idx:04d}.json"
 _GT_PER_FILE_FMT = "ground_truth_score_file_{idx:04d}.json"
@@ -118,7 +129,7 @@ def load_reference_scores(
     gt_ls: list[float] = []
     gt_ns: list[int] = []
 
-    for idx in _FINE_INDICES:
+    for idx in _fine_indices():
         raw_path = os.path.join(raw_dir, _RAW_PER_FILE_FMT.format(idx=idx))
         gt_path = os.path.join(gt_dir, _GT_PER_FILE_FMT.format(idx=idx))
         raw = _read_json(raw_path)

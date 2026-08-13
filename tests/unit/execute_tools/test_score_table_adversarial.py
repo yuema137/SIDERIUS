@@ -168,19 +168,35 @@ class TestScoreComparisonTableValidation:
     """Validation should reject malformed tables end-to-end when loading
     a serialized dict — this is the path the cache round-trip takes."""
 
-    def test_rows_below_min_length_rejected(self):
+    # PR-02a (OD-02a-1) moved the row-count rule off the static
+    # ``min_length``/``max_length`` field constraints, which were evaluated at
+    # import against TIDMAD's 20 files and made any other topology
+    # unrepresentable, onto a validator resolved from the Dataset Profile.
+    # The RULE is unchanged and these two cases still guard it; the
+    # assertions now name the diagnostic the validator emits instead of
+    # Pydantic's built-in constraint wording.
+
+    def test_rows_below_declared_file_count_rejected(self):
         bad = _good_table_dict([0.1] * 19)
         bad["rows"] = bad["rows"][:19]
         with pytest.raises(ValidationError) as exc_info:
             ScoreComparisonTable.model_validate(bad)
-        assert "at least 20" in str(exc_info.value)
+        message = str(exc_info.value)
+        assert "exactly one row per validation file" in message
+        # Diagnostic: it must name BOTH the count it got and the count it
+        # expected, or an operator cannot tell which side is wrong.
+        assert "got 19 rows" in message
+        assert "20 files" in message
 
-    def test_rows_above_max_length_rejected(self):
+    def test_rows_above_declared_file_count_rejected(self):
         bad = _good_table_dict([0.1] * 20)
         bad["rows"] = bad["rows"] + [bad["rows"][0]]
         with pytest.raises(ValidationError) as exc_info:
             ScoreComparisonTable.model_validate(bad)
-        assert "at most 20" in str(exc_info.value)
+        message = str(exc_info.value)
+        assert "exactly one row per validation file" in message
+        assert "got 21 rows" in message
+        assert "20 files" in message
 
     def test_num_sampled_files_zero_rejected(self):
         # ge=1 — a run with zero sampled files should have returned None

@@ -12,10 +12,44 @@ disposition (§5f), the mutation economy (§5g), the seven commits (§6)
 and the Gate decision (§7) — may not change without a new operator
 decision.
 
-**IMPLEMENTATION IS NOT YET AUTHORIZED.** Per the established lifecycle,
-implementation begins only after a filled **Implementation Working Rules
-contract** for this child, in a NEW, fresh implementation context with
-its own Context Continuity v2 handoff — never in the design session.
+**IMPLEMENTATION COMPLETE / READY FOR OPERATOR REVIEW (2026-08-14).
+NOT MERGED.**
+
+Every blocking rung passed and is recorded in §5a.1 with its evidence:
+CP0, CP-A1, CP-A2, CP-A3, Checkpoint A, Checkpoint B, Checkpoint C,
+Checkpoint D. Acceptance is itemised in §11. PR **#202**.
+
+**Gate 1 NOT REQUIRED** (§7) — no rendered prompt byte moved.
+**Gate 2 NOT RUN** — Step-level, owned once by the finalizer 02c.
+**Merge is the operator's**, and Checkpoint E (parent/roadmap status sync)
+belongs to 02c, not to this child.
+
+The lifecycle precondition was met before any production edit: a filled
+**Implementation Working Rules contract** was issued for this child, and
+implementation ran in a NEW, fresh context with its own Context
+Continuity v2 handoff — not in the design session. **This document is the
+LIVE PR-02a implementation ledger**, updated continuously throughout
+rather than at closeout.
+
+Kickoff facts, resolved mechanically from the repository (never from
+conversational memory):
+
+| Fact | Value |
+|---|---|
+| Frozen design HEAD | `cfc83b1e11f4accbe15f8daecdd8bd37846e91d7` — the commit that froze this document |
+| Implementation base | `a546aff02d1f96b463d689e20bc9856202ca8111` (`cfc83b1e` + the parent's LIVING-document docs commit) |
+| Implementation branch | `feat/generic-framework-step-02a-dataset-profile-injection` |
+| Parent state | **LIVE / not frozen, by operator decision** — see the parent's Status and its authority rule |
+| Gate plan | Gate 1 NOT planned (§7); Gate 2 NOT run by this child (02c owns it) |
+
+**Parent-vs-child authority (operator decision, 2026-08-14).** The
+Step-02 parent is a LIVE governance document and is **not** required to
+be frozen for this child to proceed; only *this* child design had to
+freeze. Implementation discoveries may flow back into the parent and
+into the still-unfrozen 02b/02c designs, but they **may not silently
+rewrite this frozen contract's scope or acceptance criteria** while 02a
+is in progress — a material conflict requires an explicit operator
+decision. The full rule lives in the parent's Status section.
 
 Deliberately left to implementation time (parent §13a): the profile
 object's type and field names, YAML layout, the config-flag name, the
@@ -183,6 +217,139 @@ following exactly this pattern is the bounded, precedented mechanism.
 
 ---
 
+## 3.5 Implementation-time source audit (C1, 2026-08-14, at `bbe91f91`)
+
+Everything here was read from source during C1. It corrects or extends §3,
+which was written at `c7f4a212`. **No frozen invariant changes.**
+
+### D1 — the concentration point is THREE classes, not one
+
+```text
+Previous assumption (§3.1):
+  ONE method — "TIDMADEpochDataset._pull_events_from_sample_set
+  (train_engine_sandbox.py:135-201)" — reads topology, geometry, channel
+  and encoding together, and that is why the four facets cannot be split.
+
+Audit evidence:
+  The method belongs to TIDMADDataset, not TIDMADEpochDataset. The module
+  defines THREE Dataset classes, each independently reading all four
+  facets:
+
+    TIDMADDataset             :48-207   train_events, size=:86,
+                                        _pull_events_from_sample_set
+                                        :135-207, filename :160,
+                                        PSD :156/:178-179, channels
+                                        :167-172, encoding :95/:181-182/:196
+    TIDMADSingleFileDataset   :210-253  PSD :227/:234-235, channels
+                                        :231-232, encoding :237/:240/:251-252
+    TIDMADEpochDataset        :256-352  filename :302, PSD :290/:322-323,
+                                        channels :319-320, encoding
+                                        :325/:328/:350-351, warn-skip :303-305
+
+Corrected understanding:
+  The §2 argument is STRENGTHENED, not weakened — splitting the facets
+  would now mean touching three classes in each of four PRs. But the
+  visited-sequence and step-count surfaces belong specifically to
+  TIDMADDataset: TIDMADEpochDataset has self.inputs and NO train_events.
+
+Implementation consequence:
+  C3 migrates three classes in one commit, not one method. C1's
+  sequence/step-count pins target TIDMADDataset; its channel pins cover
+  BOTH production classes, so C3 cannot migrate one and leave the other
+  addressing the raw literal.
+
+Validation consequence:
+  The channel-identity pin is written twice, once per production loader.
+```
+
+### D2 — `TIDMADSingleFileDataset` is DEAD CODE
+
+`grep -rn "TIDMADSingleFileDataset" --include="*.py" .` returns **exactly
+one** hit: the class statement itself. No production caller, no test, no
+script.
+
+**Disposition deferred to C3, recorded now.** Migrating it would create a
+consumer-less migration; leaving it means a hardcoded-geometry consumer
+survives Stage B (rungs B and D cannot reach it, because nothing
+constructs it). Deleting it is cleanup this PR did not authorise. The C3
+entry must pick one and say why — silently leaving it unexamined is the
+failure mode.
+
+### D3 — production reachability of the other two loaders
+
+| Class | Production constructor |
+|---|---|
+| `TIDMADEpochDataset` | `train_engine_sandbox.py:837` (`run_experiment_streaming`, the main epoch path) and `agent/skills/evaluate_time_skill/wrapper.py:359` |
+| `TIDMADDataset` | `train_engine_sandbox.py:1277` (legacy single-file mode) and `execute_tools/probe_data.py:29` (runtime-control probe batch) |
+
+### D4 — the ordering row of §4 is ALREADY largely pinned
+
+```text
+Previous assumption (§4):
+  "Ordering semantics ... MISSING -> C1" — the whole row needs capture.
+
+Audit evidence:
+  tests/unit/execute_tools/test_ordering_engine.py already pins shuffle
+  ENABLEMENT and the exact DataLoader kwargs through a spy on the REAL
+  engine (test_default_shuffle_path_is_unchanged), the deterministic
+  sampler branch, order_strategy resolution, file_order permutation
+  validation, and step-count equality across strategies.
+
+Corrected understanding:
+  The genuine gap is narrower: nothing asserts the VISITED SEQUENCE
+  itself — the ordered (filename, row_idx) list produced from real data.
+
+Implementation consequence:
+  C1 captures the visited sequence, the step count, and file visit
+  ordering, and does NOT restate the five already-pinned surfaces.
+  Re-asserting them would be decoration under the binding test-economy
+  rule.
+
+Validation consequence:
+  C3's "ordering semantics unchanged" evidence is the C1 sequence pin
+  PLUS the existing test_ordering_engine.py suite, run unmodified.
+```
+
+### D5 — raw-validation-filename inventory is wider than §3.3
+
+Full production inventory of the RAW validation name (denoised/deliverable
+names deliberately excluded — they are the Deliverable Contract's):
+
+| Site | Construction | 02a disposition |
+|---|---|---|
+| `scoring_utils.py:389` (`score_segments`) | `f"...{file_index:04d}.h5"` | C4 — named in the frozen scope |
+| `scoring_utils.py:444` (`_collect_raw_pairs`) | `f"...{file_index:04d}.h5"` | C4 — named in the frozen scope |
+| `inference_single.py:583` | `f"...{file_index:04d}.h5"` | C4 (roadmap §4.2 names it) |
+| `inference_single.py:782` | `str(...).zfill(4)` — **a second construction** | C4 |
+| `denoising_score_single.py:139` | `f"...{idx_str}.h5"` | C4 |
+| `scripts/compute_raw_baseline.py:318` | `f"...{idx:04d}.h5"` | C5 — IN per §8 |
+| `execute_tools/build_anchor_map.py:52` | `f"...{file_index:04d}.h5"` | **NOT named by the frozen design** — decide at C4 |
+| `ml_hyperparameter_tune_agent.py:5157` | `f"...{i:04d}.h5"` | **NOT named by the frozen design** — decide at C4 |
+
+The `:04d` / `zfill(4)` divergence agrees only for non-negative ints; C1
+pins the equivalence across the whole index space so C4 cannot silently
+unify two subtly different names.
+
+### D6 — two more topology literals outside §3.3
+
+`execute_tools/probe_data.py:22` and
+`core/runtime_control/gpu_measurement_data.py:117` both glob
+`"abra_training_*.h5"` directly. These are topology consumers the frozen
+§3.3 list does not enumerate. Recorded; disposition at C3 (probe_data is
+reached from the runtime-control probe path).
+
+### D7 — the raw/denoised boundary also runs through `get_one_sec_psd`
+
+`scoring_utils.py:147` builds `channel_key = f"channel{ch:04d}"` from an
+int argument, and `:158`/`:161` read attrs from a hardcoded
+`"channel0001"`. Callers pass `ch=2` for the RAW truth channel (02a-owned
+channel identity) and `ch=1` for the DENOISED file (Deliverable
+Contract). **One function, both sides of the §1 boundary** — the same
+hazard §1 flags for the filename, and C4 must route only the `ch=2` raw
+side.
+
+---
+
 ## 4. Compatibility contract (strongest observable criterion per surface)
 
 | Surface | Criterion | Baseline |
@@ -266,6 +433,306 @@ C7  docs + ledger closeout
   └─ CHECKPOINT D — regression / static / exact-head CI
 ```
 
+### 5a.1 Checkpoint log (LIVE)
+
+| Rung | State | Evidence |
+|---|---|---|
+| **CP0 — BASELINES COMPLETE** | **PASS** (2026-08-14, `bbe91f91` + C1) | see below |
+| **CP-A1 — in-process parity + reachability** | **PASS** (2026-08-14, `43c440e4`) — the one broad-run failure was diagnosed as a worktree ENVIRONMENT gap, not a C2 regression | see below |
+| **CP-A2 — training subprocess consumes the profile** | **PASS** (2026-08-14, `c3cfa9c4` + `d92f2e1f`) | see below |
+| **CP-A3 — all three data paths agree on ONE profile** | **PASS** (2026-08-14) | see below |
+| **CHECKPOINT A — extraction parity complete** | **PASS** (2026-08-14, `7cf82570`) | see below |
+| **CHECKPOINT B — generic contrast complete** | **PASS** (2026-08-14, `87d1649e`) | see below |
+| **CHECKPOINT C — live production consumption** | **PASS** (2026-08-14, `ce9582f0`) | see §5b below |
+| **CHECKPOINT D — regression / PR readiness** | **PASS** (2026-08-14) | see §5a.3 |
+
+**CP0 PASS — the two conditions, answered.**
+
+*"Every MISSING row in §4 has a pin."*
+
+| §4 MISSING row | Pin |
+|---|---|
+| Validation filename | `TestRawValidationFilename` (4 tests) — captured from the real scorer workers |
+| Encoding | `TestEncodingDeclaration` (2 tests) |
+| Channel identity | `TestChannelIdentity` (3 tests, both production loaders) |
+| Visited sequence | `test_train_events_is_the_exact_ordered_sequence` |
+| Step count | `test_step_count_derives_from_the_sequence` |
+| Ordering semantics | already pinned by `test_ordering_engine.py` (D4); C1 adds the visited-sequence gap, ascending file order and warn-and-skip |
+
+*"Each pin is shown to fail when the behaviour it pins is perturbed."*
+Four mutations, one per §5g failure class, all KILLED (§6.1.9). The
+fourth class (IPC fail-closed) has no target until C3 and is recorded
+there rather than claimed here.
+
+**Zero production diff** — the C1 commit touches exactly one file, under
+`tests/`.
+
+---
+
+**CP-A1 PASS — the three conditions, answered.**
+
+*"Profile deep-equals TIDMAD."* Stronger than deep-equality was achieved:
+`TIDMAD_PROFILE.dataset` **is** the shipped `TIDMAD` object (asserted by
+identity), because the profile COMPOSES `DatasetConfig` rather than
+extending it. Step-00's `test_all_six_fields_deep_equal` therefore still
+pins the object the production path reads, and runs UNMODIFIED — 29
+passed with `test_dataset_config.py`.
+
+*"`data_shape_class` byte-exact."* `psd10000000_seg200_files20`, produced
+through the real `resolve_tidmad_measurement_capability` resolver rather
+than a fixture literal. Measurement-store keys are not invalidated.
+
+*"The eight in-process consumers read the profile, not constants."* Zero
+bare-constant (`SEGMENT_LENGTH` / `SEGMENTS_PER_FILE` / `NUM_FILES`) and
+zero singleton (`TIDMAD`) imports remain in the nine touched modules
+(eight consumers + `sample_set_builder`, whose `scoring_utils` re-export
+hop is collapsed). Reachability is asserted positively, not by absence of
+an import: `TestInjectionReachability` binds a contrast profile and
+requires each consumer's answer to FOLLOW it.
+
+**Mutation — "a disconnected/reverted consumer is caught."** Reverting
+`nodes/scoring_reference._fine_indices()` to `tuple(range(NUM_FILES))`
+**reds** `test_file_count_consumers_follow_the_declaration[scoring_reference]`.
+Restored; suite green again at 15/15.
+
+**Validation actually run** (counts and wall times, not claims):
+
+```text
+tests/unit/execute_tools/ + tests/unit/nodes    708 passed, 1 skipped  13.80s
+  incl. test_step02a_c2_profile_injection.py     15 passed
+  incl. test_step00_dataset_baselines.py         green, UNMODIFIED
+ruff check . / ruff format --check .             clean, whole tree
+tests/unit/agent + core + workflows              6294 passed, 2 skipped  5m24s
+  (launched mid-C2: covers the six runtime consumers, NOT the
+   score_table validators — informational, not the CP-A1 oracle)
+```
+
+**The broad run, and the wrapper-exit-status trap it walked into.**
+
+```text
+harness notification:  "completed (exit code 0)"
+the LOG:               1 failed, 6820 passed, 2 skipped, 341.01s
+```
+
+CLAUDE.md's rule — *"a background-task notification's 'exit code 0' is
+NOT evidence that pytest passed; read the log"* — earned its place again.
+The verdict was taken from the log.
+
+Diagnosis of the one failure, before any fix:
+
+```text
+FAILED tests/unit/scripts/test_sdsc_argument_forwarding.py
+       ::TestPythonIsTheSingleValidator
+       ::test_an_unknown_flag_fails_the_runner_loudly
+  FileNotFoundError: .../pr02a-impl/.venv/bin/python
+
+Classification: ENVIRONMENT CONFIGURATION — not production, not test.
+  The test derives REPO_ROOT from its own file location and spawns
+  REPO_ROOT/.venv/bin/python, which is exactly the portability
+  behaviour CLAUDE.md mandates. The dedicated PR-02a worktree simply
+  had no .venv; the interpreter lives in the main checkout.
+  It fails at subprocess spawn, BEFORE any code C2 touched runs, on
+  sdsc_submission_scripts/run_one_iteration.py argument forwarding —
+  a surface C2 does not go near.
+
+Fix: supply the missing environment, never weaken the test.
+  .venv symlinked into the worktree.
+  .gitignore's ".venv/" is directory-only and does not match a symlink,
+  so the entry went in .git/info/exclude (local, never committed) rather
+  than editing a tracked ignore file.
+
+Re-run after the fix: tests/unit/scripts -> 29 passed, 3.07s.
+```
+
+**Worktree-environment lesson for any resumed session**: a linked
+worktree does not inherit `.venv` or gitignored machine files. Both
+`.venv` and `tidmad_data_config.yaml` had to be supplied. A green run in
+a fresh worktree means nothing until those exist.
+
+**Clean broad re-run after the fix — CP-A1's confirming artifact:**
+
+```text
+pytest tests/unit/{agent,core,workflows,scripts} -q
+  6821 passed, 2 skipped, 331.63s (0:05:31)
+  zero FAILED, zero ERROR   (verdict read from the log, not an exit code)
+```
+
+6820 + 1 is exactly the arithmetic the diagnosis predicted: the same
+6820 that already passed, plus the single test the missing `.venv` had
+been failing. Nothing else moved, which is the positive evidence that the
+failure was environmental and that C2 changed no behaviour outside its
+own surface.
+
+---
+
+**CP-A2 PASS — and the reason its evidence had to be contrast-based.**
+
+```text
+Previous assumption (§6.3 acceptance):
+  "Mutation: delete the argv flag -> subprocess fails closed (does NOT
+  fall back to TIDMAD)."
+
+Audit evidence:
+  That contradicts §5c, which this design FROZE at revision 4: an ABSENT
+  flag is the Regime-A adapter and must NOT fail. §6.3's own failure
+  table states it correctly; the acceptance line is older wording.
+
+Corrected understanding:
+  Under Regime-A, deleting the transport is INVISIBLE to TIDMAD parity —
+  the fallback returns the same answers, so nothing reds. The hop cannot
+  be guarded by a parity test at all.
+
+Implementation consequence:
+  Every reachability assertion runs a NON-TIDMAD profile through the real
+  loaders. Fail-closed applies to a SUPPLIED-but-broken profile, which is
+  what load_dataset_profile() enforces.
+
+Validation consequence:
+  Three mutations instead of one — fallback-instead-of-raise, child
+  ignores the flag, parent drops the flag. All three KILLED.
+```
+
+| CP-A2 criterion | Evidence |
+|---|---|
+| parent serializes, child loads | `TestConfigFileRoundTrip`, TIDMAD + contrast |
+| real data-reading code consumes topology / geometry / channels / encoding | `TestChildConsumesTheTransportedProfile` — 5 facets, each under a declaration that differs from TIDMAD, incl. RENAMED channels |
+| explicit bad profile fails closed | `TestFailClosedVersusRegimeA` — missing / corrupt / schema-invalid, each naming the path; a parametrized case asserts none ever yields the singleton |
+| omitted flag obeys Regime-A | `test_an_absent_flag_keeps_regime_a` |
+| visited sequence, step count, ordering unchanged | C1 pins + `test_ordering_engine.py`, all green; **assertions byte-identical** |
+| no silent singleton fallback | M5/M6/M7, all KILLED |
+
+**Bounded deviation — four fixtures changed their geometry-override
+mechanism.** §6.3 says the C1 pins stay "green UNMODIFIED". C1, ordering,
+RT2-B and RT2-C all shrank geometry with
+`monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", ...)`. C3 removes that
+constant from the authority path, so the patch would silently do nothing.
+All four now bind a profile. **Every assertion in all four is unchanged** —
+the oracle is the assertions, and they are byte-identical; only the
+override moved from patching a global to declaring geometry, which is the
+capability this PR delivers. `test_ordering_engine` additionally reached
+the singleton through `tes.TIDMAD`; ruff's import cleanup surfaced that
+C3 removed the engine's dependency on it entirely.
+
+**Caveat recorded for later rungs**: `model_copy(update=...)` BYPASSES
+Pydantic validation. The C3 offset probe initially built an illegal
+`int8` + `value_offset=0` profile that way and failed inside
+`np.bincount` rather than at construction. Contrast fixtures built with
+`model_copy` are NOT validated — Stage-B rungs must construct through the
+real constructors where legality matters.
+
+**Validation**: `tests/unit/{execute_tools,core,nodes}` 3101 passed,
+3 skipped, 75.59s; new C3 module 16 passed; ruff clean.
+
+---
+
+**CHECKPOINT A PASS — every Stage-A surface against its strongest oracle.**
+
+| §4 surface | Criterion | Result |
+|---|---|---|
+| Resolved profile | deep-equals today's TIDMAD field by field | stronger — `TIDMAD_PROFILE.dataset` **is** the singleton, by identity |
+| Legality list | exact 36-entry `valid_segmentation_sizes()` | unchanged; C5's swap asserted equal to the old inline derivation |
+| Training filename | `training_file_name(0)`/`(19)` byte-identical | Step-00 golden, unmodified |
+| Validation filename | profile render == the string the scorer/inference inlined | pinned at the producing authority (`score_vector`) |
+| `data_shape_class` | exact `psd10000000_seg200_files20` | verified through the real resolver |
+| Encoding | declaration produces byte-identical tensors | C1 pins + C3 offset probe |
+| Channel identity | byte-identical input/target tensors | pinned for BOTH production loaders |
+| Visited sequence | exact ordered `(filename, row_idx)` list | unchanged |
+| Step count | `len(train_events)` and steps/epoch | unchanged |
+| Ordering semantics | §5d set, exact `shuffle=True` order deliberately NOT pinned | `test_ordering_engine.py` green, assertions unmodified |
+| **Rendered prompts** | proposer known-constraints + planner divisor list byte-identical | **green** — 4457 passed across agent/workflows/nodes/scripts |
+
+**Gate 1 flip condition did NOT fire.** No rendered prompt byte moved, so
+§7's decision stands: Gate 1 NOT REQUIRED.
+
+**One failure in the Checkpoint-A run, and it was the guard working.**
+`test_pr3_l2p_preflight::test_preflight_all_invariants` reported
+`no_production_file_modified` because the suite ran over an uncommitted
+production tree — precisely the documented CLAUDE.md behaviour. It was
+answered by committing the checkpoint, never by relaxing the guard, and
+passes from the clean tree (1 passed, 2.11s).
+
+**Mutation dossier through Checkpoint A** — by failure CLASS (§5g), 11
+mutations, all ultimately KILLED, one after strengthening the guard:
+
+| # | Class | Result |
+|---|---|---|
+| M1 | filename authority (scorer, pre-migration) | KILLED |
+| M2 | channel authority (loader swap) | KILLED |
+| M3 | encoding authority (offset) | KILLED |
+| M4 | ordering / step-count (`sorted()` removed) | KILLED |
+| M5 | IPC fail-closed (fallback instead of raise) | KILLED |
+| M6 | transport hop, child side | KILLED |
+| M7 | transport hop, parent side | KILLED |
+| M8 | filename authority (scorer re-inline) | KILLED |
+| M9 | filename authority (inference re-inline) | **SURVIVED → guard strengthened → KILLED** |
+| M10 | filename authority (scoring entry re-inline) | KILLED |
+| M11 | legality authority (inline derivation restored) | KILLED |
+
+---
+
+**CHECKPOINT B PASS — four rungs, each single-axis, each demonstrated strong.**
+
+| Rung | Axis varied | Proves | Strength mutation |
+|---|---|---|---|
+| **A1** | `num_files` only | index space + the score-table row rule follow the count | the rung exists only because OD-02a-1 removed the import-time bound; before it, this topology was unrepresentable |
+| **A2** | family patterns (on A1's baseline) | a SINGLE-family dataset resolves both roles; nothing assumes two parallel families | M14 scorer re-hardcodes the family → **KILLED** |
+| **B** | `psd_segment_length` only | the legality rule returns the divisors of 2048, NOT the frozen 36-entry list | M12 loader re-assumes 10,000,000 → **KILLED** |
+| **D** | channel identity only | loaders read the declaration; the fixture has NO `channel0001`/`channel0002` group at all | M13 loader re-hardcodes `channel0001` → **KILLED** |
+
+**Atomicity is machine-checked.** `_assert_atomic` diffs each rung's
+`model_dump()` against TIDMAD's and requires the changed keys to be exactly
+the declared axis — it also catches a rung that silently adds or drops a
+declaration field. Parent §8 makes atomicity binding and forbids A1/A2 from
+touching geometry, encoding or channels; a prose promise would not survive
+a careless edit.
+
+**Why rung B mattered most.** §8 promoted it from deferred to REQUIRED on
+exactly the gap it now closes: Step 00 froze the 36-divisor list under
+TIDMAD's 10,000,000, which proves the helper still behaves and proves
+NOTHING about whether consumers stop assuming 10M when the profile says
+otherwise. Under `psd_segment_length=2048` the legal set becomes
+`[128, 256, 512, 1024, 2048]`.
+
+**Zero production diff** — C6's commit touches one file, under `tests/`.
+
+---
+
+### 5a.3 Checkpoint D — regression / PR readiness (2026-08-14)
+
+| Requirement | Evidence |
+|---|---|
+| targeted validation complete | every commit ran its own targeted + affected-package suites; counts recorded per commit |
+| package / integration / mutation evidence | `tests/unit/{execute_tools,core,nodes,agent}` 6814 passed; Checkpoint C integration 9 passed; **14 mutations by failure class, all KILLED** (one after strengthening a guard) |
+| terminal full unit suite | **8624 passed, 3 skipped** from a clean tree; the single failure is the worktree-location artifact analysed in §5a.2, proven locational and neither fixed nor weakened |
+| ruff / format | clean, whole tree |
+| pyright | NOT run locally — recorded honestly as unavailable here; blocking exact-head CI runs it (the job is "Lint + Type + Unit Tests") |
+| PR opened | **#202** |
+| exact-final-head CI green | run `31665411466`, conclusion `success`, `head_sha` `937b1d2a` |
+| CI headSha == PR headRefOid == local HEAD | verified all three equal at `937b1d2a` |
+| clean working tree | yes |
+| live child design synchronized | this document, updated continuously rather than at closeout |
+
+**Note on the closing commit.** This Checkpoint-D record is itself a
+docs-only commit, so it becomes a new head and takes its own CI pass. The
+identity above is stated for the code head `937b1d2a`; the final head's CI
+result and the re-verified three-way identity are confirmed before the PR
+is declared ready, and carried in the PR/handoff rather than re-embedded
+here — a SHA cannot contain its own commit.
+
+## 11. Acceptance — PR 02a
+
+- [x] CP0, CP-A1, CP-A2, CP-A3 PASS
+- [x] Checkpoint A — extraction parity, rendered prompt bytes unchanged
+- [x] Checkpoint B — rungs A1 / A2 / B / D, each single-axis, atomicity machine-checked
+- [x] Checkpoint C — real subprocess boundary, real loaders, real HDF5
+- [x] Checkpoint D — regression / static / exact-head CI
+- [x] `data_shape_class` unchanged: `psd10000000_seg200_files20`
+- [x] ZERO Deliverable-Contract leakage — verified on the diff
+- [x] No profile field without an in-PR consumer
+- [x] Gate 1 NOT required (§7) — no rendered prompt byte moved
+- [ ] Gate 2 — **NOT this child's**; owned once at Step level by 02c
+- [ ] **MERGE — operator only**
+
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
 Checkpoint C must prove the resolved Dataset Profile is consumed by the
@@ -293,6 +760,188 @@ PASS must establish at least:
 
 This is live-integration evidence, **not a substitute Gate tier** (§7).
 
+---
+
+**CP-A3 PASS — three entries, one declaration.**
+
+| Criterion | Evidence |
+|---|---|
+| same transport semantics as training | one parent helper, `TidmadSandbox._write_dataset_profile_config(exp_id)`, called at all THREE launch sites; a test asserts the count is exactly 3 |
+| real inference/scoring reads consume the profile | `inference_single` raw name, geometry and channels; `denoising_score_single` raw name and `segments_per_file`; `scoring_utils` raw name |
+| raw validation naming comes from the profile | `validation_file_name()` at every migrated site |
+| `validation_file_pattern` dead seam closed | it now has FOUR production consumers; the contrast test proves the scorer follows a changed pattern |
+| TIDMAD outputs/scoring parity | `test_tidmad_parity_is_preserved`; frozen scorer math untouched |
+| **zero Deliverable Contract leakage** | verified on the diff: every `denoised` line is a variable, comment or test lambda — **no template changed**. Plus two standing guards: the profile can never render a denoised name, and `array2h5` (the deliverable writer) must not mention the profile at all |
+
+**§5f closed — Disposition A, parity-only, no production change.**
+`denoised_filename_fn(file_index)` is pinned: deliverables are keyed by
+the INPUT identity through a callable, and the keying is unchanged. A
+second test asserts the raw and denoised names are resolved by DIFFERENT
+authorities, so a future edit that routed the deliverable name through the
+profile would red.
+
+**Worker processes forced an explicit design choice.** `score_vector`
+fans out to a `ProcessPoolExecutor`, where an ambient ContextVar lookup
+would not survive. The raw filename is therefore resolved ONCE in
+`score_vector` and shipped in the task tuple as data — symmetric with
+`denoised_filename`, which has always travelled that way. Threading a
+profile into the workers instead would have been the wrong shape.
+
+**A SURVIVED mutation, and what it changed.**
+
+```text
+M9 (first attempt): re-inline the raw name in inference_single
+  -> SURVIVED.
+
+Why: the "all three entries" guard asserted that the FLAG, the LOADER and
+the RESOLVER appear in each file. Re-inlining one read removes none of
+those strings. Proving the transport EXISTS is not proving every read
+goes through it.
+
+Fix (§12 — strengthen the architecture, not the assertion): a guard
+mirroring test_dataset_contract.py's training-name precedent, asserting
+no migrated entry contains a raw `abra_validation_{...}` literal.
+DENOISED templates are explicitly exempt — they are not 02a's to move.
+
+M9 retry -> KILLED.  M10 (scoring entry) -> KILLED.
+```
+
+| # | Failure class | Mutation | Result |
+|---|---|---|---|
+| M8 | filename authority | scorer re-inlines the raw name | **KILLED** |
+| M9 | filename authority | inference re-inlines the raw name | SURVIVED → guard strengthened → **KILLED** |
+| M10 | filename authority | scoring entry re-inlines the raw name | **KILLED** |
+
+**Structural note for Checkpoint C.** `denoising_score_single.py` parses
+argv at MODULE level with no `main()`, so it cannot be imported in-process
+— importing it consumes pytest's argv and exits. Its flag is on the
+module-level parser, its surface is guarded from source here, and it is
+exercised for real across a subprocess at Checkpoint C.
+
+---
+
+### 5b.1 Checkpoint C — RESULT (2026-08-14)
+
+**PASS.** `tests/integration/execute_tools/test_step02a_checkpoint_c_profile_boundary.py`
+— **9 passed in 8.98s**, real `subprocess.run`, real HDF5, no stub.
+
+```text
+executable HEAD : ce9582f00222b8ce9a02564ddc44da3f79ccf6c4
+working tree    : clean
+cost            : ~9 s, CPU only. No GPU, no LLM, no API spend.
+```
+
+§5b's required list, each answered:
+
+- [x] **profile serialized by the parent** — the fixture writes the config
+      file; production's writer is `_write_dataset_profile_config`, guarded
+      by mutation M7.
+- [x] **profile loaded inside the child process** — three real entry points,
+      each shown to LOAD the file (a missing path kills each one naming it),
+      not merely to declare the flag.
+- [x] **real data-reading code uses filename, geometry, channel, encoding** —
+      the fixture's files are `cpc_train_000.h5` with channels
+      `cpc_in`/`cpc_truth`. **None of that is discoverable from the TIDMAD
+      singleton.** A deleted transport, an ignored flag or a loader still
+      addressing `channel0001` could not read one sample. It trains and
+      writes results.
+- [x] **training / inference / scoring resolve the same semantics** — all
+      three load the same file and agree.
+- [x] **no silent singleton fallback** — supplied-but-broken fails closed
+      across the real boundary; an OMITTED flag falls back to Regime-A and
+      looks for `abra_training_0000.h5`, which is today's behaviour.
+- [x] **exact executable HEAD recorded** — emitted by the run itself, so the
+      ledger cannot drift from the tree exercised.
+
+**A wrong-clone hazard, caught live — the most valuable thing this
+checkpoint found.**
+
+```text
+Previous assumption:
+  launching the real entry point from the PR worktree exercises the PR.
+
+Evidence (first run):
+  ImportError from /home/yuema137/SIDERIUS/execute_tools/dataset_config.py
+  — the MAIN checkout. A plain `python execute_tools/foo.py` puts the
+  SCRIPT's directory on sys.path[0], not the repo root, so the package
+  import falls through to the venv's editable-install finder, which
+  hardcodes absolute paths into the main checkout.
+
+Corrected understanding:
+  it failed loudly ONLY because the other clone lacks this PR's changes.
+  Had the change been present in both, the run would have PASSED while
+  exercising the wrong tree — exactly CLAUDE.md's motivating failure.
+
+Implementation consequence:
+  PYTHONPATH pins the checkout under test.
+
+Validation consequence:
+  test_the_child_imports_this_checkout asserts the child resolves the
+  package under REPO_ROOT, so a silent recurrence is impossible.
+
+Classification:
+  ENVIRONMENT, not a production defect — in normal deployment the repo IS
+  the checkout the editable install points at. Recorded because any future
+  worktree-based subprocess evidence has the same trap.
+```
+
+**Fixture cost note.** `psd_segment_length` is 4,096 with 2 PSD segments —
+~8 KB per file against TIDMAD's ~2 GB, on an identical production code
+path. `segmentation_size` carries `ge=1000`
+(`models_format_sandbox.py:22`), which sets the floor.
+
+---
+
+### 5a.2 Terminal validation — full unit suite (2026-08-14, `7e15c0e7`)
+
+**Run, and why.** Parent §9.1 makes the local full suite an escape hatch a
+child must justify in writing. 02a qualifies on the parent's own terms —
+it names 02a as "the plausible case": ~13 production modules migrated, a
+public schema's validation MECHANISM changed, and three subprocess entry
+points touched. The blast radius cannot honestly be bounded by targeted
+tests. Run from a CLEAN tree, per the binding rule.
+
+```text
+pytest tests/unit -q
+  1 failed, 8624 passed, 3 skipped, 502.15s (0:08:22)
+```
+
+**The harness reported "exit code 0". The log said "1 failed".** Third
+occurrence in this PR; the verdict came from the log every time.
+
+**The one failure is a worktree-LOCATION artifact, not a defect.**
+
+```text
+FAILED tests/unit/tools/claude_hooks/test_context_state.py
+       ::TestTemplateLookup
+       ::test_template_resolves_beside_the_module_not_under_dot_claude
+  assert ".claude" not in path.parts
+
+Diagnosis:
+  the test forbids the canonical template resolving under a gitignored
+  .claude/ — a real guard (mutation M-C8: a fresh checkout would get the
+  guard without its template and every compaction would block).
+  This PR's dedicated worktree lives AT
+  .claude/worktrees/pr02a-impl, so ".claude" appears in the absolute
+  path for reasons that have nothing to do with where the template sits.
+  The template IS beside its module, in tools/claude_hooks/templates/.
+
+Proof it is locational, not a regression:
+  - the same test class passes 4/4 from the normally-located main
+    checkout;
+  - this PR touches tools/claude_hooks ZERO times
+    (`git diff --name-only cfc83b1e..HEAD | grep -c tools/claude_hooks`
+     -> 0).
+
+Disposition:
+  NOT fixed and NOT weakened. The guard is correct for any normal
+  checkout, which is what CI uses. Recorded instead, with the operational
+  consequence: a future PR worktree should be created OUTSIDE .claude/ to
+  avoid re-triggering it. Exact-head CI is the authority for this row.
+```
+
+Excluding that artifact: **8624 passed, 3 skipped, 0 real failures.**
+
 ## 5c. Regime-A vs fail-closed — FROZEN (was left to implementation)
 
 Revision 3 left "legacy caller without a profile: fail closed or
@@ -317,6 +966,56 @@ must NOT be presented as universal generic defaults. This closes the
 open decision revision 3 left in C2.
 
 Exact API shape remains implementation-time.
+
+---
+
+## C5 — legality de-duplication (implementation record, 2026-08-14)
+
+**A performance defect the de-duplication removed, unplanned.**
+
+```text
+Previous assumption (§1.3):
+  the tuner "restates the rule inline" — a correctness/drift concern only.
+
+Audit evidence (ml_hyperparameter_tune_agent.py:1103):
+  it restated the rule AND re-derived the legal list itself:
+    sorted(d for d in range(100, psd + 1) if psd % d == 0 and d <= 100_000)
+  Under TIDMAD that is a 10,000,000-iteration loop, on the ERROR path.
+  valid_segmentation_sizes() does the same job by sqrt enumeration.
+
+Corrected understanding:
+  de-duplicating is also a real fix, not only tidying.
+
+Implementation consequence:
+  the inline derivation is replaced by the authority call. The function
+  already RECEIVED dataset_config, so no injection was needed.
+
+Validation consequence:
+  the two lists are asserted equal (36 entries), so the diagnostic — which
+  prints the legal values — is byte-identical.
+```
+
+**Prompt-byte parity held; the flip condition did not fire.** The
+time-skill's hardcoded `"10,000,000"` is now `f"{psd_len:,}"`, which
+renders the identical string under TIDMAD. Both directions are pinned:
+byte-identity under TIDMAD, and the message FOLLOWING a contrast
+declaration — byte-identity alone would also hold if the value were still
+hardcoded.
+
+`agent/prompts.py:746` and `agent/schemas/proposal.py:1127` already read
+the authority and are deliberately **untouched**; a test asserts they stay
+that way, so "de-duplicate" cannot drift into "rewrite the sites that were
+already correct".
+
+**§8 closed**: `scripts/compute_raw_baseline.py` and
+`nodes/scoring_reference.py` now derive the file count from one authority,
+so the generator and the node that LOADS its artifacts cannot disagree.
+
+**Two of C5's own guards initially failed by matching prose.** The
+anti-regression checks matched the migration's own comments and docstrings,
+which quote the removed expressions to explain what changed. Both now
+exclude comment lines — a guard that cannot tell code from prose about
+code is not a guard.
 
 ## 5d. Ordering — pin the real invariant, do NOT invent a stronger one
 
@@ -419,26 +1118,43 @@ placement implementation-time); possibly a shared fixture helper.
 Unchanged: ALL production code — this commit has zero production diff.
 Depends on: nothing.
 
-**3. Implementation plan.**
-- [ ] Pin the validation filename: the string `scoring_utils.py:389,444`
+**3. Implementation plan.** — **COMPLETE.** All pins live in
+`tests/unit/execute_tools/test_step02a_c1_baselines.py` (13 tests).
+
+- [x] Pin the validation filename: the string `scoring_utils.py:389,444`
       and `inference_single.py` build today == the pattern render.
-- [ ] Pin encoding: load a synthetic file and assert the exact tensors
+      → `TestRawValidationFilename`. Captured from the REAL workers
+      (`_collect_raw_pairs`, `score_segments`) by spying on
+      `get_one_sec_psd`, so it is a production-path capture, not a
+      restatement of the literal. Plus the `:04d` vs `zfill(4)`
+      equivalence across the whole index space (D5).
+- [x] Pin encoding: load a synthetic file and assert the exact tensors
       after `astype`/`+128`, including the `minlength=256` bincount.
-- [ ] Pin channel identity: assert input comes from `channel0001` and
+      → `TestEncodingDeclaration` (served-tensor dtype/offset and the
+      256-bin `class_count` histogram over the `torch.ones(256)` prior).
+- [x] Pin channel identity: assert input comes from `channel0001` and
       target from `channel0002`, and that swapping them is detectable.
-- [ ] Pin the **visited sequence**: `train_events` as an exact ordered
+      → `TestChannelIdentity`, written for **both** production loaders
+      (D1), with an explicit distinguishability test proving the fixture
+      can see a swap.
+- [x] Pin the **visited sequence**: `train_events` as an exact ordered
       `(filename, row_idx)` list for a fixed sample_set.
-- [ ] Pin the **step count**: `len(train_events)` and steps/epoch for a
-      fixed batch size.
-- [ ] Pin the **default shuffle path** per §5d — shuffle ENABLEMENT and
-      the same seed/generator/kwargs reaching the DataLoader,
-      `order_strategy` resolution, `file_order` permutation validation,
-      and the deterministic `sampler=epoch_indices` branch's emitted
-      order. **Do NOT pin the exact emitted shuffled order** under
-      `shuffle=True`: source audit shows no generator/seed is passed, so
-      pinning it would create a new guarantee (§5d).
-- [ ] Provide mutation/reachability evidence per §5g **failure class**,
-      not one mutation per test.
+      → `test_train_events_is_the_exact_ordered_sequence` — the exact
+      6-element list, hardcoded; non-contiguous PSD indices so a loader
+      ignoring `psd_idx` is caught.
+- [x] Pin the **step count**: `len(train_events)` and steps/epoch for a
+      fixed batch size. → `test_step_count_derives_from_the_sequence`,
+      hardcoded to 6 (asserting `size == len(train_events)` would compare
+      the code under test to itself and pass for any value).
+- [x] Pin the **default shuffle path** per §5d.
+      → **Already pinned; deliberately NOT restated** (D4). The five
+      surfaces are covered by `test_ordering_engine.py`, which spies the
+      REAL engine's DataLoader kwargs. C1 closes the one genuine gap —
+      the visited sequence — and adds `test_files_are_visited_in_
+      ascending_index_order` plus the warn-and-skip pin. The exact
+      emitted `shuffle=True` order is NOT pinned, per §5d.
+- [x] Provide mutation/reachability evidence per §5g **failure class**,
+      not one mutation per test. → four mutations, all KILLED (§6.1.9).
 
 **4. Validation plan.**
 Unit: the new pins themselves.
@@ -466,15 +1182,43 @@ Gate: none.
 | a pin passes for the wrong reason (e.g. empty sequence) | the mutation requirement catches it |
 | synthetic fixture diverges from real HDF5 layout | reuse the existing `synthetic_h5` conftest generator rather than inventing one |
 
-**7. Verification commands and evidence.**
-Intended: targeted `pytest` over the new module(s) plus
-`tests/unit/execute_tools/`. Record counts and wall time here after
-execution. Any test that could not be run is recorded with the reason —
-never claimed as passed.
+**7. Verification commands and evidence.** — EXECUTED 2026-08-14.
+
+```text
+command:  .venv/bin/python -m pytest \
+            tests/unit/execute_tools/test_step02a_c1_baselines.py -q
+result:   13 passed in 2.06s
+
+command:  .venv/bin/python -m pytest tests/unit/execute_tools/ -q
+purpose:  affected package — prove the new module disturbs nothing
+result:   679 passed, 1 skipped in 19.29s   (rc read from pytest itself,
+          not from a pipeline wrapper)
+
+command:  ruff check / ruff format --check on the new module
+result:   clean. RUF012 fired on three class-level dict attributes and was
+          FIXED with ClassVar annotations — never silenced.
+```
 
 **8. Commit boundary.** Test-only, independently reviewable, no
-production diff, no cleanup. Before committing: show diff summary,
-staged file list, test output, deviations.
+production diff, no cleanup.
+
+`git diff --stat` at the C1 commit shows exactly ONE file, under
+`tests/` — the §5 acceptance criterion for this commit.
+
+**9. Mutation dossier (§5g failure classes).** Hygiene per class: exact
+site count asserted == 1, backup, apply, `__pycache__` purged, RED
+required, restore, purge again, GREEN required, `git status` verified
+clean. Harness recorded at `$CLAUDE_JOB_DIR/tmp/mutate.sh`.
+
+| # | Failure class | Mutation | Result |
+|---|---|---|---|
+| M1 | filename authority disconnect | `scoring_utils.py:444` `:04d` → `:03d` | **KILLED** — `test_collect_raw_pairs_builds_the_pattern_render` |
+| M2 | channel authority disconnect | `_pull_events_from_sample_set` reads ch1/ch2 **swapped** | **KILLED** — `test_sample_set_loader_binds_input_to_ch1_and_target_to_ch2` |
+| M3 | encoding authority disconnect | `__getitem__` offset `+128` → `+127` | **KILLED** — `test_served_tensors_are_int16_shifted_by_128` |
+| M4 | ordering / step-count drift | `sorted(sample_set.items())` → `sample_set.items()` | **KILLED** — `test_files_are_visited_in_ascending_index_order` |
+
+The fourth §5g class — **IPC fail-closed** — has no target yet: the
+transport does not exist until C3. It is C3's mutation, recorded there.
 
 ---
 
@@ -496,17 +1240,113 @@ Unchanged: subprocess entries (C3/C4); `data_shape_class` string;
 selection semantics; group literals (02c); prompt bytes.
 Depends on: C1.
 
-**3. Implementation plan.**
-- [ ] Decide the profile shape and record why (parent §13a leaves it
-      open).
-- [ ] Implement the FROZEN class-default disposition (§5c): the TIDMAD
-      filename-pattern class defaults are **KEPT as documented Regime-A
-      adapter semantics** and must be described as a compatibility
-      adapter in code and docs — never as universal generic defaults.
-- [ ] Migrate the eight in-process consumers to injection.
-- [ ] Collapse the `scoring_utils` re-export hop.
-- [ ] Confirm `data_shape_class` still derives to the identical string.
-- [ ] Confirm no profile field lands without an in-PR consumer.
+**0. Operator decision OD-02a-1 (2026-08-14) — import-time consumers.**
+
+```text
+Previous assumption (§6.2 acceptance):
+  "Zero bare-constant imports remain in the eight modules" — i.e. all
+  eight §3.3 consumers can be migrated to injection the same way.
+
+Audit evidence:
+  The eight split into two kinds. SIX read the constants INSIDE
+  functions and inject cleanly:
+    workload_resolvers.py:44/:112/:139   evaluate_time_skill:353/:763
+    inference_skill/estimator.py:207     scoring_helpers.py:204/:266-267/:315-316
+    health_checks/config.py:333          spectral_peak_ratio.py:56
+  TWO consume them at IMPORT time and cannot be injected at all without
+  a structural change:
+    agent/schemas/score_table.py:43/:145/:167-168 — NUM_FILES baked into
+      Pydantic Field(le=...), min_length and max_length, evaluated when
+      the class body runs;
+    nodes/scoring_reference.py:26 — _FINE_INDICES = tuple(range(NUM_FILES))
+      at module scope.
+  §6.2's failure table says "move it to C3/C4", but C3/C4 do not help:
+  the problem is import time, not process boundary.
+  Prompt-byte risk checked and EXCLUDED: neither schema is ever passed
+  through model_json_schema(); the LLM sees ScoreComparisonTable's
+  rendered_markdown, not these field descriptions.
+
+Operator decision:
+  RUNTIME VALIDATOR (full injection). Drop the static NUM_FILES-derived
+  bounds and enforce the identical rule in a validator resolved against
+  the profile. Semantics are unchanged under TIDMAD — only the
+  enforcement mechanism moves.
+
+Implementation consequence:
+  This is a deliberate, operator-authorised public-schema MECHANISM
+  change on a schema imported by agent/schemas/hyperparam_tuning.py:26,
+  agent/schemas/proposal.py:23 and nodes/agent_data_stream.py:31. The
+  CONTRACT ("a file index lies inside the declared topology"; "one row
+  per file") is preserved exactly; the ValidationError shape changes
+  from a constraint violation to a validator error.
+
+Validation consequence:
+  Rung A1 (file count != 20) can now flow THROUGH score_table, so no
+  module has to be declared out of A1's blast radius. C2 must pin: the
+  rejection still fires for an out-of-range index, the row-count rule
+  still fires, and both messages remain diagnostic. Records and JSON
+  serialization must be unchanged — pin the round-trip.
+```
+
+**3. Implementation plan.** — **COMPLETE** (`43c440e4`).
+
+- [x] **Profile shape decided: COMPOSITION, not extension.**
+
+      ```text
+      Options considered:
+        (a) add channel + encoding FIELDS to DatasetConfig
+        (b) a new DatasetProfile COMPOSING DatasetConfig
+        (c) a new flat type replacing DatasetConfig
+
+      Decisive evidence against (a) and (c):
+        Step 00's test_all_six_fields_deep_equal asserts
+        TIDMAD.model_dump() == exactly six keys. Adding fields breaks a
+        FROZEN §4 "EXISTS" compatibility surface in order to introduce a
+        new one — and §6.2 requires every EXISTS row to stay green
+        UNMODIFIED. (c) additionally orphans the 12 production sites that
+        import the singleton.
+
+      Chosen: (b).
+        DatasetProfile{dataset: DatasetConfig, channels: ChannelIdentity,
+                       encoding: ValueEncoding}, all frozen.
+        TIDMAD_PROFILE.dataset IS the shipped TIDMAD object, asserted by
+        identity, so the Step-00 golden keeps pinning the object
+        production actually reads.
+
+      Method vs field: validation_file_name() is a METHOD on
+      DatasetConfig, so it closes the dead seam without touching
+      model_dump().
+      ```
+
+- [x] **Resolution seam** (required by OD-02a-1): `resolve_dataset_profile()`
+      returns the shipped profile when nothing is bound;
+      `bind_dataset_profile()` scopes an override through a
+      **`ContextVar`**, not module state, so the previous value is restored
+      even on an exception. A plain mutable global would leak a contrast
+      profile into the next test and surface as an unrelated failure — and
+      C3's explicit-path fail-closed rule layers on top, because the
+      subprocess entries will pass the profile as an ARGUMENT rather than
+      through this accessor.
+- [x] Implement the FROZEN class-default disposition (§5c): TIDMAD's
+      patterns stay, and `TIDMAD_PROFILE` carries a code-site comment
+      naming it a **"REGIME-A COMPATIBILITY ADAPTER, not a universal
+      framework default"**. `test_the_adapter_is_documented_as_an_adapter_at_the_code_site`
+      asserts that wording is present — §6.2 requires the semantics be
+      stated in code, not implied by a default value.
+- [x] Migrate the eight in-process consumers to injection. Six take an
+      explicit optional `profile` or resolve at call time; the two
+      import-time consumers follow OD-02a-1 (item 0 above).
+- [x] Collapse the `scoring_utils` re-export hop —
+      `sample_set_builder.py` now reads the authority directly. Selection
+      semantics untouched (02b's).
+- [x] Confirm `data_shape_class` still derives to the identical string —
+      `psd10000000_seg200_files20`, produced through the real resolver.
+- [x] Confirm no profile field lands without an in-PR consumer. Each of
+      the six new fields has one: `input_channel`/`target_channel` and
+      `storage_dtype`/`compute_dtype`/`value_offset`/`num_classes` are all
+      consumed by the loaders migrated in **C3/C4** — inside this PR, as
+      §0 rule 8 requires. **If C3/C4 do not land them, they become dead
+      seams and this box reverts.**
 
 **4. Validation plan.**
 Unit: profile deep-equality; the 36-divisor list; `data_shape_class`

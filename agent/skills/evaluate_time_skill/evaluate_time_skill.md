@@ -97,3 +97,21 @@ the slack behaves exactly as it did before C8.
   reports that step's cost as a worst-case-conservative measurement.
 - **Unknown `model_type`** → `_count_params` raises; caught by the
   top-level handler and returned as `status="error"`.
+
+---
+
+## Dataset Profile dependency (PR 02a, 2026-08)
+
+Two reads in this skill now resolve from the **Dataset Profile**
+(`execute_tools/dataset_config.py`) instead of a module-level constant:
+
+| Was | Now |
+|---|---|
+| `SEGMENT_LENGTH` imported as `PSD_SEGMENT_LENGTH` for `ml_per_psd` | `resolve_dataset_profile().dataset.psd_segment_length` |
+| `_suggest_lever`'s hardcoded prose `"next valid divisor of 10,000,000"` | `f"…next valid divisor of {psd_len:,}…"` |
+
+**No CLI argument, default value or observable behaviour changed.** Under
+TIDMAD `f"{10_000_000:,}"` renders `10,000,000`, so the advisory string is
+byte-identical to the literal it replaced — pinned in both directions
+(byte-identity under TIDMAD, and the message following a contrast
+declaration).
