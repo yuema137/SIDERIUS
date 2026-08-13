@@ -43,10 +43,27 @@ N_PSD = 2
 
 
 def _contrast_profile(**dataset_overrides) -> DatasetProfile:
-    """TIDMAD with a shrunk decomposition plus any named override."""
+    """TIDMAD with a shrunk decomposition plus any named override.
+
+    Step 02c: the profile also declares two task-owned file sets, and they
+    must index files the contrast's own topology HAS. TIDMAD's
+    ``[0, 10, 19]`` on a ``num_files=3`` contrast is an incoherent
+    profile — ``model_copy`` does not revalidate, so it survives in memory
+    and is only caught when this very test round-trips it through
+    ``load_dataset_profile``. Narrowing them here keeps the fixture
+    self-consistent; nothing is derived on the production side, where a
+    task declares its own.
+    """
     overrides = {"psd_segment_length": PSD_LEN, **dataset_overrides}
+    dataset = TIDMAD_PROFILE.dataset.model_copy(update=overrides)
+    n = dataset.num_files
     return TIDMAD_PROFILE.model_copy(
-        update={"dataset": TIDMAD_PROFILE.dataset.model_copy(update=overrides)}
+        update={
+            "dataset": dataset,
+            "anchor_selection_files": [i for i in TIDMAD_PROFILE.anchor_selection_files if i < n]
+            or [0],
+            "health_peek_files": [i for i in TIDMAD_PROFILE.health_peek_files if i < n] or [0],
+        }
     )
 
 

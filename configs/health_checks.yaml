@@ -32,7 +32,7 @@ health_gates:
         config:
           min_unique_int8_values: 25      # empirical: FCNet floor=52 → 2.08× margin; baseline max=15 → 40% headroom (2026-07-16 scan)
           peek_samples: 100000
-          peek_file_indices: [3, 10, 17]  # M9: low/mid/high frequency-band triplet
+          peek_file_indices: task_health_peek  # the task's declared health-peek set (TIDMAD: [3, 10, 17])
           aggregation: any_pass           # M9: pass if ANY of the 3 files clears the threshold
     on_pass:
       action: continue
@@ -57,7 +57,7 @@ health_gates:
         config:
           min_std_mv: 1.0                 # FCNet≈7.35 mV, collapse<0.2 mV
           peek_samples: 100000
-          peek_file_indices: [3, 10, 17]  # M9: uniform triplet with output_diversity
+          peek_file_indices: task_health_peek  # same declared set as output_diversity
           aggregation: any_pass           # M9
     on_pass:
       action: continue
@@ -79,7 +79,7 @@ health_gates:
         config:
           collapse_threshold: 0.95
           peek_samples: 100000
-          peek_file_indices: [3, 10, 17]  # M9: uniform triplet with output_diversity + output_std
+          peek_file_indices: task_health_peek  # same declared set as the other two blocking gates
           aggregation: any_pass           # M9
     on_pass:
       action: continue

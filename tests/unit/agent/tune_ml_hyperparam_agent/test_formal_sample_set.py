@@ -24,6 +24,7 @@ from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
     HyperparamTuningInput,
 )
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import NUM_FILES, SEGMENTS_PER_FILE
 from nodes.ml_hyperparameter_tune_agent import _resolve_sample_set_cfg
@@ -207,9 +208,12 @@ def test_trial_mode_still_uses_planner_values():
         trial_portion=cfg["trial_portion"],
         seed=0,
     )
-    # ANCHOR_FILES = [0, 10, 19] — 3-file sample set
-    assert len(sample_set) == 3
-    assert set(sample_set.keys()) == {0, 10, 19}
+    # Step 02c: the anchor population is the bound task's DECLARATION, not
+    # a literal. Read from the profile so this follows a declaration change
+    # instead of silently pinning TIDMAD's triplet into an unrelated test.
+    declared = TIDMAD_PROFILE.anchor_selection_files
+    assert set(sample_set.keys()) == set(declared)
+    assert len(sample_set) == len(declared)
 
 
 # ---------------------------------------------------------------------------

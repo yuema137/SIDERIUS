@@ -1386,8 +1386,8 @@ recorded, not silently resolved by picking a third config.
 |---|---|---|
 | C1 — capture the two missing baselines | **DONE** | §24.3 |
 | **CP0 — BASELINE COMPLETE** | **PASS** | §24.4 |
-| C2 — declarations + anchor / blocking-peek consumers | not started | |
-| CP-C1 | — | |
+| C2 — declarations + anchor / blocking-peek consumers | **DONE** | §24.7 |
+| **CP-C1 — DECLARATIONS LIVE + TIDMAD PARITY** | **PASS** | §24.9 |
 | C3 — campaign trigger + profile-derived all-files | not started | |
 | Checkpoint A | — | |
 | C4 — 4.8-C atomic contrast | not started | |
@@ -1603,3 +1603,276 @@ Classification: BOUNDED.
 ```
 
 No material deviation. No stop condition reached.
+
+---
+
+### 24.7 C2 — the two declarations and their first consumers
+
+#### The decision that shaped this commit, and the fact that forced it
+
+§8 froze the semantics and left the shape open. The shape question is:
+**how can a task's declared health-peek set become the authority behind
+the three blocking checks, when `configs/health_checks.yaml` must stay
+the operator's policy surface?**
+
+The audit found a constraint the frozen design does not mention, and it
+is the one that decides the answer:
+
+```text
+Previous assumption (implied by §8.1's framing):
+  changing the shipped YAML text is the expensive move, because
+  `health_config_sha256` is pinned and every workspace invariant lock
+  keys off it.
+
+Audit evidence:
+  `legacy_config_body_sha` (candidate_eligibility.py:75-95) hashes
+  `load_health_gates_config(path).model_dump(mode="json")` with
+  `gate_role` popped — the RESOLVED MODEL, not the file bytes.
+  `materialize_effective_config` computes its sha the same way
+  (config.py:395). `test_honest_gate_labels.py:187` pins
+  3b5521…655b74 for the shipped config and d133a12d…5ef58d for the
+  observe-mode one, with the explicit acceptance rationale that these
+  must not shift "or every workspace invariant lock would break at the
+  boundary". `test_step00_health_config_baseline.py` additionally
+  deep-equals the resolved dump against a Step-00 golden.
+
+Corrected understanding:
+  the frozen surface is the RESOLVED VALUE, not the YAML text. YAML text
+  is free to change; what may never change is that the three blocking
+  checks resolve to exactly [3, 10, 17] under TIDMAD.
+
+Implementation consequence:
+  the YAML can carry a DECLARED-DEFAULT MARKER in place of the literal,
+  resolved at config-validation time. Both pinned shas and the Step-00
+  golden stay byte-identical, because all three read the resolved model.
+
+Validation consequence:
+  the two config shas and the HC-1 golden become the primary CP-C1
+  parity evidence, asserted by running the existing modules UNMODIFIED.
+```
+
+#### What landed
+
+**Declaration model** — `DatasetProfile` (`execute_tools/dataset_config.py`)
+gains **two separate REQUIRED fields**, `anchor_selection_files` and
+`health_peek_files`, plus one `model_validator(mode="after")`.
+
+Three shape choices, each source-grounded rather than stylistic:
+
+1. **Top-level fields, not a `file_sets` sub-model.** The validation
+   requirement decides it: a declared index must be legal against
+   `dataset.num_files`, and `num_files` is a **sibling** field. A
+   sub-model cannot see it. §8's "two named fields are the default" and
+   the validation contract agree.
+2. **REQUIRED, no default.** `test_step02a_c2_profile_injection.py:240`
+   is a merged 02a invariant named
+   *"the declaration must not smuggle TIDMAD in as a required default"*.
+   A TIDMAD-shaped default for either field is exactly that smuggling —
+   a new task would inherit somebody else's frequency bands silently.
+   Blast radius measured before committing to it: **one** direct
+   `DatasetProfile(...)` construction exists outside the shipped
+   `TIDMAD_PROFILE` (that same 02a test), and profile JSON is always
+   generated fresh from `model_dump()` by
+   `sandbox_executor._write_dataset_profile_config`, so nothing stale
+   round-trips.
+3. **Reject rather than repair.** Empty, duplicate and out-of-range are
+   all rejected. Empty is the sharpest: it does not mean "none" to any
+   consumer — it falls THROUGH into a fallback tier, which is the same
+   falsy-list trap `apply_monitored_files` already refuses
+   (`config.py:304-309`). Duplicates are rejected because the profile's
+   existing validators (`_distinct_from_input`,
+   `_alphabet_covers_the_shifted_range`) establish that this object fails
+   loudly; **consumer-side dedupe of RUNTIME lists is untouched**.
+
+**Consumer A — anchors.** `ANCHOR_FILES` is **deleted**;
+`sample_set_builder.py` now reads
+`list(resolved_profile.anchor_selection_files)` from the profile it
+already resolved once at `:85` (02b's explicit hop). No new resolution
+site, no second authority, and the "resolved ONCE" invariant 02b wrote
+into that function is preserved verbatim.
+
+**Consumer B — blocking peeks.** `TASK_HEALTH_PEEK = "task_health_peek"`
+may stand where a literal list stands; `CheckRef._resolve_declared_peek_selection`
+resolves it at field validation. This satisfies §8.1 exactly:
+
+- it appears at **exactly the sites that carry the key today** — the
+  three blocking checks in each of the two shipped configs;
+- the key is **not deleted**, so nothing falls through to `[min(paths)]`;
+- **no key is added** where none exists, so the three recording checks
+  keep evaluating every file.
+
+Resolution reads the ambient profile rather than an argument because
+Pydantic field validation is precisely the case
+`resolve_dataset_profile`'s own docstring reserves the Regime-A seam for
+(*"Pydantic field validation and module-scope constants, which run at
+import or validation time with no caller to thread a parameter
+through"*). Resolution is idempotent — a concrete list passes through
+untouched — so `apply_monitored_files`' `model_validate` round-trip and
+`core/resume.py`'s mirror are unaffected.
+
+**One safety property added deliberately.** Any *other* string in
+`peek_file_indices` now raises. Without it a typo'd marker is a truthy
+string, and `_resolve_indices` would iterate it **character by
+character**, peeking file indices like `'t'` — a silent wrong answer
+where an error belongs. `CheckRef.config` is `dict[str, Any]`, so no
+type declaration catches this; it is validator logic and it has its own
+test.
+
+**Files changed (production)**: `execute_tools/dataset_config.py`,
+`execute_tools/sample_set_builder.py`,
+`execute_tools/health_checks/config.py`, `configs/health_checks.yaml`,
+`configs/health_checks_baseline_observe_mode.yaml`.
+
+**Tests changed**: `tests/unit/execute_tools/test_sample_set_builder.py`
+(imports the declaration instead of the deleted constant — the assertion
+body is unchanged), `tests/unit/agent/tune_ml_hyperparam_agent/test_formal_sample_set.py:212`
+(the uncoupled `{0, 10, 19}` duplicate §3 identified — now reads the
+declaration, so it follows a declaration change),
+`tests/unit/execute_tools/test_step02a_c2_profile_injection.py:243` (the
+one direct construction; the added fields are legal against **its**
+`num_files=3`, not TIDMAD's 20, which strengthens the very invariant that
+test exists for).
+
+**Test added**: `tests/unit/execute_tools/test_step02c_task_file_set_declarations.py`
+— declaration legality as ONE concept asserted across BOTH fields (per
+the project's "test the concept, not the field" rule), the §8.1 injection
+shape over both shipped configs, marker idempotence, and the
+unrecognized-marker rejection.
+
+**Explicitly NOT in this commit** (they are C3): the campaign validator's
+`[3, 10, 17]` trigger and `_DEFAULT_FILE_RANGE`. `range(20)` was **not**
+converted into a declared field, and no `all_files` field exists.
+
+### 24.8 C2 mutation dossier — including one that SURVIVED
+
+| # | Failure class (§19) | Mutation | Observed |
+|---|---|---|---|
+| M-C2-1 | 1 — anchor consumer still reads a literal | `sample_set_builder.py`: `files = list(resolved_profile.anchor_selection_files)` → `files = [0, 10, 19]` | **SURVIVED at first — see below.** After the fix: **CAUGHT**, `1 failed, 54 passed` |
+| M-C2-2 | 2 — blocking peek consumer ignores declaration B | `config.py`: the resolved value → the literal `[3, 10, 17]` | **CAUGHT** — `1 failed, 311 passed` |
+| M-C2-3 | §8.1 injection leak | resolve the declaration where `peek_file_indices` is **absent** (the tempting-but-wrong shape §8.1 names) | **CAUGHT, hard** — `10 failed, 302 passed`, including BOTH pinned config shas, the Step-00 HC-1 golden deep-equal, and `test_runner.py::test_nonempty_check_config_passed_verbatim` |
+
+#### The survived mutation, and what it exposed
+
+```text
+Previous assumption (implicit in §11.2's acceptance criteria):
+  the existing anchors oracles — GOLDEN["anchors"] and
+  test_only_anchor_files — establish that the migrated consumer reads
+  the declaration.
+
+Audit evidence:
+  M-C2-1 replaced the declaration read with the literal [0,10,19] and
+  the ENTIRE selection suite stayed green (53 passed, 0 failed).
+  Of course it did: under TIDMAD the declaration IS [0,10,19], so no
+  TIDMAD-only assertion can tell "reads the declaration" apart from
+  "still hardcodes the same three numbers". test_only_anchor_files now
+  imports the declaration, which makes it follow a change — but it
+  compares the consumer's output against the same profile the consumer
+  would ignore, so it is satisfied either way.
+
+Corrected understanding:
+  a compatibility oracle can never prove an authority migration. Only a
+  profile declaring something OTHER than TIDMAD separates the two, and
+  that evidence belongs at C2 — §11.2 asks for it — not deferred to C4.
+
+Implementation consequence:
+  added TestTheDeclarationsAreActuallyTheAuthority: one reachability
+  test per declaration, topology held at TIDMAD, only the declaration
+  varied. Anchors is driven through the real `build_sample_set` with an
+  explicitly supplied profile; the blocking peeks are driven by binding
+  a contrast profile and loading the SHIPPED config through an explicit
+  path (the default-path cache would otherwise be able to serve a
+  config resolved under a different profile).
+
+Validation consequence:
+  M-C2-1 and M-C2-2 now both red, each on exactly one test. C4 still
+  owns what these do NOT cover: atomicity (asserting the UNVARIED
+  declaration's consumer is unchanged) and cardinality variation.
+```
+
+This is the 02a-M9 / 02b-M10 lesson recurring, and it is recorded rather
+than quietly patched: **the mutation was the only thing that noticed.**
+
+### 24.9 CP-C1 — DECLARATIONS LIVE + TIDMAD PARITY: **PASS**
+
+```text
+Validation:
+  scope 1:  tests/unit/core/ + test_formal_sample_set.py
+            -> 2395 passed, 2 skipped, 0 failed — 270.58 s
+  scope 2:  tests/unit/execute_tools/ + test_campaign_artifacts.py
+            + test_formal_sample_set.py
+            -> 834 passed, 1 skipped, 0 failed — 17.13 s
+               (the first pass surfaced exactly ONE failure, diagnosed
+               below; this is the re-run after the fixture fix)
+  scope 3:  tests/unit/execute_tools/test_step02c_task_file_set_declarations.py
+            -> 18 passed — 0.09 s
+
+  Timing note: an earlier pass of scope 2 reported 346 s. That was CPU
+  contention from three concurrent pytest processes on this box, not a
+  slow suite — run alone it is 17 s. Recorded so a future session does
+  not mistake the suite for expensive and start trimming scope.
+  static:   ruff check clean; ruff format --check "585 files already
+            formatted"
+  pyright:  UNAVAILABLE LOCALLY — the venv ships pyright but Node is
+            v10.19.0 and its bundled bundle needs >= 14; invoking it
+            throws a JS parse error. Recorded, not worked around;
+            blocking exact-head CI is the type authority.
+```
+
+Acceptance against §11.2's criteria:
+
+- [x] Declaration A resolves to exactly `[0,10,19]`, B to exactly
+      `[3,10,17]` under TIDMAD.
+- [x] `GOLDEN["anchors"] = e025a270e0b1acc1` byte-identical, asserted by
+      running `test_sample_set_builder.py` — the golden and every
+      assertion body are **unmodified**; only the deleted constant's
+      import changed.
+- [x] The **hc1 golden** (`test_step00_health_config_baseline.py`) and
+      **both pinned config shas** (`3b5521…655b74`, `d133a12d…5ef58d`)
+      byte-identical, modules unmodified. Under the §8.1-violating shape
+      all three go red (M-C2-3), so this is a live guard, not a
+      coincidence.
+- [x] `segment_anchors.json` untouched — `test_step00_numeric_baselines.py`
+      green, no file in the diff.
+- [x] **Two** declarations exist, not one merged mapping; no `groups`
+      field, no `all_files` field.
+- [x] No surviving literal at a C2-owned site: `ANCHOR_FILES` is deleted
+      (`grep -rn ANCHOR_FILES` finds no production hit) and the six YAML
+      `[3, 10, 17]` literals are gone from the two shipped configs. The
+      remaining `[3, 10, 17]` in `campaign_artifacts.py:57` is **C3's**,
+      by plan.
+- [x] Mutations: A and B each proven live and independent (§24.8).
+
+#### The one failure, diagnosed before it was touched
+
+```text
+Failure:
+  test_step02a_c3_profile_transport.py::TestConfigFileRoundTrip::
+  test_profile_survives_json[contrast]
+  ValueError: anchor_selection_files=[0, 10, 19] indexes files [10, 19]
+  that this dataset does not have (num_files=3).
+
+Classification: TEST FIXTURE, and the validator behaving correctly.
+
+Evidence:
+  `_contrast_profile` builds its variant with `model_copy`, which does
+  NOT revalidate. Narrowing `num_files` to 3 while inheriting TIDMAD's
+  declared file sets produces an internally incoherent profile — one
+  that claims a 3-file dataset and declares file 19. It survived in
+  memory and was caught only where this test round-trips it through
+  `load_dataset_profile`, i.e. through `model_validate`. That is exactly
+  the defect class the new validator exists to catch, on exactly the
+  parent->child transport 02a built.
+
+Fix: the fixture now narrows its declared sets to its own topology.
+  NOTHING is derived on the production side — a task declares its own
+  sets, and auto-narrowing them would be inventing behaviour.
+
+Broader consequence, recorded for C4:
+  every `model_copy`-built contrast profile in the repo can now be
+  incoherent without failing, because `model_copy` skips validation.
+  Only ONE test round-trips, which is why only one failed. C4's contrast
+  fixtures must declare sets legal for the topology they declare.
+  Production is unaffected: `grep` finds NO production `model_copy` on a
+  `DatasetProfile` — production either uses the shipped `TIDMAD_PROFILE`
+  or validates on load.
+```

@@ -28,6 +28,7 @@ from pydantic import (
     ValidationError,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 
 # Arbitrary in-range index used only to probe that a filename pattern
@@ -467,6 +468,98 @@ class DatasetProfile(BaseModel):
         description="Data-side dtype/offset/class-count declaration.",
     )
 
+    # --- Task-owned file sets (Step 02c) --------------------------------
+    #
+    # Two SEPARATE declarations, deliberately not one mapping. They answer
+    # different scientific questions, are consumed by different subsystems,
+    # and a future task may well set one without the other being
+    # interesting. A generic ``groups: dict[str, list[int]]`` would make
+    # them look interchangeable and would invite a third "all files" entry
+    # — which must never exist, because "every file" already has an
+    # authority in ``dataset.num_files``.
+    #
+    # Both are REQUIRED. A TIDMAD-shaped default here would be exactly the
+    # smuggling that ``DatasetProfile`` was introduced to stop: a new task
+    # would silently inherit somebody else's frequency bands and produce
+    # plausible, wrong selections. There is no formula to fall back on —
+    # neither list is derivable from the topology.
+
+    anchor_selection_files: list[int] = Field(
+        description=(
+            "Files the ``anchors`` selection strategy trains on — the "
+            "task's own choice of maximally informative representatives. "
+            "TIDMAD declares [0, 10, 19] (low/mid/high frequency extrema). "
+            "NOT derived as [0, n//2, n-1]: that expression merely "
+            "coincides with TIDMAD's value at n=20, and a coincidence is "
+            "not a contract for inventing another task's science. "
+            "Declaration order is preserved — it is the order the sample "
+            "set is populated in."
+        ),
+    )
+    health_peek_files: list[int] = Field(
+        description=(
+            "Files the task's blocking health checks peek by default. "
+            "TIDMAD declares [3, 10, 17] — INTERIOR low/mid/high "
+            "frequency-band representatives, which is why no arithmetic on "
+            "``num_files`` produces them and why they must be declared. "
+            "This is the DEFAULT only: an explicit run-level "
+            "``--health_gate_files`` still overrides it, unchanged.\n\n"
+            "It is deliberately NOT the population of the recording-only "
+            "checks. Those ship no ``peek_file_indices`` and evaluate every "
+            "file; giving them this triplet would silently narrow them from "
+            "20 files to 3, which is a HealthGate policy change wearing an "
+            "authority change's clothes."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _declared_file_sets_are_legal_for_this_topology(self) -> "DatasetProfile":
+        """Both declared file sets must index files this dataset has.
+
+        Checked here rather than on a sub-model because ``num_files`` lives
+        on a SIBLING field: only the assembled profile can see a declared
+        index and the topology it must be legal against.
+
+        Empty is rejected. An empty anchor set would build an empty sample
+        set — a run that trains on nothing and reports a score; an empty
+        peek set would fall THROUGH the configured tier into the
+        single-file/all-files fallbacks rather than meaning "monitor
+        nothing", which is the same falsy-list trap
+        ``apply_monitored_files`` already refuses. "Monitor nothing" is
+        spelled ``health_gate_enabled=False``.
+
+        Duplicates are rejected rather than silently deduplicated. Both
+        consumers do dedupe what they are handed, so a duplicate here
+        cannot corrupt a selection — but in a DECLARATION it is an
+        authoring mistake, and the profile's other validators
+        (``_distinct_from_input``, ``_alphabet_covers_the_shifted_range``)
+        establish that this object fails loudly rather than quietly
+        repairing. Consumer-side dedupe of RUNTIME lists is untouched.
+        """
+        num_files = self.dataset.num_files
+        for field_name in ("anchor_selection_files", "health_peek_files"):
+            declared: list[int] = getattr(self, field_name)
+            if not declared:
+                raise ValueError(
+                    f"{field_name} is empty. A task must declare which files "
+                    f"this set contains; an empty list does not mean 'none' "
+                    f"to any consumer — it falls through to a fallback."
+                )
+            duplicates = sorted({i for i in declared if declared.count(i) > 1})
+            if duplicates:
+                raise ValueError(
+                    f"{field_name}={declared} contains duplicate indices "
+                    f"{duplicates}. Declare each file once."
+                )
+            out_of_range = sorted(i for i in declared if not 0 <= i < num_files)
+            if out_of_range:
+                raise ValueError(
+                    f"{field_name}={declared} indexes files {out_of_range} "
+                    f"that this dataset does not have (num_files={num_files}, "
+                    f"valid: 0..{num_files - 1})."
+                )
+        return self
+
 
 # The shipped TIDMAD profile.
 #
@@ -487,6 +580,11 @@ TIDMAD_PROFILE = DatasetProfile(
         value_offset=128,
         num_classes=256,
     ),
+    # TIDMAD's own task-owned file sets. Both were hardcoded before Step
+    # 02c — the anchors list at sample_set_builder.py, the peek triplet as
+    # a YAML literal PLUS a hardcoded copy inside the campaign validator.
+    anchor_selection_files=[0, 10, 19],
+    health_peek_files=[3, 10, 17],
 )
 
 

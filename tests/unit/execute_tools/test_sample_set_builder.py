@@ -10,12 +10,15 @@ from typing import ClassVar
 
 import pytest
 
-from execute_tools.dataset_config import DataScope
-from execute_tools.sample_set_builder import (
-    ANCHOR_FILES,
-    build_sample_set,
-)
+from execute_tools.dataset_config import TIDMAD_PROFILE, DataScope
+from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import NUM_FILES, SEGMENTS_PER_FILE
+
+# Step 02c: the anchor set is a TASK DECLARATION on the Dataset Profile,
+# not a module constant. Reading it from the shipped profile is what makes
+# these assertions follow a declaration change instead of pinning a literal
+# the production path no longer consults.
+ANCHOR_FILES = TIDMAD_PROFILE.anchor_selection_files
 
 # ---------------------------------------------------------------------------
 # Normal mode (is_trial=False)

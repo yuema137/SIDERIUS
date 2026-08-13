@@ -25,9 +25,6 @@ from execute_tools.dataset_config import (
 )
 from execute_tools.scoring_utils import SampleSet
 
-# Files used by the "anchors" strategy: low, mid, high frequency extrema
-ANCHOR_FILES = [0, 10, 19]
-
 
 def build_sample_set(
     is_trial: bool,
@@ -61,8 +58,10 @@ def build_sample_set(
                          ``None`` = complete dataset (behavior identical to
                          before scope existed).
         profile:         Dataset Profile supplying the file population
-                         (``num_files``) and index space
-                         (``segments_per_file``) selection runs against.
+                         (``num_files``), the index space
+                         (``segments_per_file``) selection runs against,
+                         and — for ``trial_strategy="anchors"`` — the
+                         task's declared ``anchor_selection_files``.
                          ``None`` falls back to ambient resolution — the
                          Regime-A adapter — so un-migrated callers are
                          unaffected. Production callers that know their
@@ -102,7 +101,12 @@ def build_sample_set(
                 f"(strategy-level rule; see docs/design/enable_partial_file_list.md)."
             )
         if trial_strategy == "anchors":
-            files = list(ANCHOR_FILES)
+            # The anchor set is the TASK's declaration, read from the same
+            # profile every other topology fact in this function came from.
+            # It was a module-level literal until Step 02c; a module
+            # constant cannot follow a bound task, and there is no formula
+            # to derive it from.
+            files = list(resolved_profile.anchor_selection_files)
         else:
             if not target_files:
                 raise ValueError("trial_strategy='target' requires non-empty target_files.")
