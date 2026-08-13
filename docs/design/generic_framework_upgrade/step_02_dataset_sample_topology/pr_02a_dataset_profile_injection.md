@@ -778,20 +778,65 @@ Validation consequence:
   serialization must be unchanged — pin the round-trip.
 ```
 
-**3. Implementation plan.**
-- [ ] Decide the profile shape and record why (parent §13a leaves it
-      open). Constrained by OD-02a-1: the two import-time consumers need
-      a RESOLUTION accessor, not only a parameter — designed so it is not
-      a mutable global (First Principles: no duplicate mutable state) and
-      so C3's explicit-path fail-closed rule (§5c) can layer on top.
-- [ ] Implement the FROZEN class-default disposition (§5c): the TIDMAD
-      filename-pattern class defaults are **KEPT as documented Regime-A
-      adapter semantics** and must be described as a compatibility
-      adapter in code and docs — never as universal generic defaults.
-- [ ] Migrate the eight in-process consumers to injection.
-- [ ] Collapse the `scoring_utils` re-export hop.
-- [ ] Confirm `data_shape_class` still derives to the identical string.
-- [ ] Confirm no profile field lands without an in-PR consumer.
+**3. Implementation plan.** — **COMPLETE** (`43c440e4`).
+
+- [x] **Profile shape decided: COMPOSITION, not extension.**
+
+      ```text
+      Options considered:
+        (a) add channel + encoding FIELDS to DatasetConfig
+        (b) a new DatasetProfile COMPOSING DatasetConfig
+        (c) a new flat type replacing DatasetConfig
+
+      Decisive evidence against (a) and (c):
+        Step 00's test_all_six_fields_deep_equal asserts
+        TIDMAD.model_dump() == exactly six keys. Adding fields breaks a
+        FROZEN §4 "EXISTS" compatibility surface in order to introduce a
+        new one — and §6.2 requires every EXISTS row to stay green
+        UNMODIFIED. (c) additionally orphans the 12 production sites that
+        import the singleton.
+
+      Chosen: (b).
+        DatasetProfile{dataset: DatasetConfig, channels: ChannelIdentity,
+                       encoding: ValueEncoding}, all frozen.
+        TIDMAD_PROFILE.dataset IS the shipped TIDMAD object, asserted by
+        identity, so the Step-00 golden keeps pinning the object
+        production actually reads.
+
+      Method vs field: validation_file_name() is a METHOD on
+      DatasetConfig, so it closes the dead seam without touching
+      model_dump().
+      ```
+
+- [x] **Resolution seam** (required by OD-02a-1): `resolve_dataset_profile()`
+      returns the shipped profile when nothing is bound;
+      `bind_dataset_profile()` scopes an override through a
+      **`ContextVar`**, not module state, so the previous value is restored
+      even on an exception. A plain mutable global would leak a contrast
+      profile into the next test and surface as an unrelated failure — and
+      C3's explicit-path fail-closed rule layers on top, because the
+      subprocess entries will pass the profile as an ARGUMENT rather than
+      through this accessor.
+- [x] Implement the FROZEN class-default disposition (§5c): TIDMAD's
+      patterns stay, and `TIDMAD_PROFILE` carries a code-site comment
+      naming it a **"REGIME-A COMPATIBILITY ADAPTER, not a universal
+      framework default"**. `test_the_adapter_is_documented_as_an_adapter_at_the_code_site`
+      asserts that wording is present — §6.2 requires the semantics be
+      stated in code, not implied by a default value.
+- [x] Migrate the eight in-process consumers to injection. Six take an
+      explicit optional `profile` or resolve at call time; the two
+      import-time consumers follow OD-02a-1 (item 0 above).
+- [x] Collapse the `scoring_utils` re-export hop —
+      `sample_set_builder.py` now reads the authority directly. Selection
+      semantics untouched (02b's).
+- [x] Confirm `data_shape_class` still derives to the identical string —
+      `psd10000000_seg200_files20`, produced through the real resolver.
+- [x] Confirm no profile field lands without an in-PR consumer. Each of
+      the six new fields has one: `input_channel`/`target_channel` and
+      `storage_dtype`/`compute_dtype`/`value_offset`/`num_classes` are all
+      consumed by the loaders migrated in **C3/C4** — inside this PR, as
+      §0 rule 8 requires. **If C3/C4 do not land them, they become dead
+      seams and this box reverts.**
 
 **4. Validation plan.**
 Unit: profile deep-equality; the 36-divisor list; `data_shape_class`
