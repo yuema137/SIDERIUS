@@ -906,10 +906,17 @@ Bounded resolution path, in order:
 for `num_files <= 20`. A profile declaring MORE files than TIDMAD would
 select legally and then be rejected at the boundary. This is **not** a
 regression — the validator is exactly as TIDMAD-bound as before 02b — but
-it is the next honest step in the same migration. **Proposed owner: 02c**,
-which already owns the boundary's other TIDMAD literal (`ANCHOR_FILES`)
-and is the Step finalizer; the decision is the parent's to make, not this
-child's to take.
+it is the next honest step in the same migration.
+
+**Ownership: UNDETERMINED by this child's audit.** An earlier revision of
+this section proposed 02c "because it already owns the boundary's other
+TIDMAD literal (`ANCHOR_FILES`)". That reason is **factually wrong** and
+is corrected here: `ANCHOR_FILES` lives in
+`execute_tools/sample_set_builder.py`, not in
+`execute_tools/scoring_utils.py` where `validate_sample_set` is defined.
+They are not the same boundary and no shared-module argument supports the
+routing. The decision belongs to the parent, from a producer-consumer
+audit this child did not perform.
 
 ### 13.2 Commit ladder — live status
 
@@ -1215,8 +1222,41 @@ before a non-TIDMAD live run could have surfaced it.
   precisely that.
 
 Changing it here would be an unsourced scope expansion of exactly the kind
-§13.1 already declined. **Proposed owner: the DataScope/HealthGate startup
-path — 02c as Step finalizer, or Step-06.** The parent decides.
+§13.1 already declined.
+
+#### Ownership disposition (corrected 2026-08-13, operator-directed)
+
+> **A previous revision of this section routed the finding to "02c as Step
+> finalizer, or Step-06". That claim was intuition and is REFUTED by the
+> source audit.** It is corrected here rather than carried into merged
+> history.
+
+The residue splits across **two** surfaces with different owners:
+
+| Surface | Candidate owner | Source evidence |
+|---|---|---|
+| `validate_runtime_config(..., dataset=TIDMAD)` + the tuner's full-scope comparison (`ml_hyperparameter_tune_agent.py:3637`, against `DATASET_CONFIG` = TIDMAD) | **Step 10 — §12 Orchestration binding** | The roadmap's Step-02 row explicitly disclaims this class: *"Launcher/orchestration/execution-infrastructure task-binding residue … remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination."* The roadmap's audit A already inventories the **identical construct** as orchestration residue at `workflows/model_exploration.py:104,1817,1856` — `_resolved_scope = _run_scope.resolve(_DATASET_CONFIG)` then `_scope_is_partial = _resolved_scope != list(range(_DATASET_CONFIG.num_files))`. |
+| `validate_health_gate_files_against_scope` (`execute_tools/health_checks/config.py:333-334`) reading `resolve_dataset_profile()` while its caller supplies a TIDMAD-resolved scope | **Step 08 — §8 HealthGates** | §2's non-ownership row maps the list in order: `model I/O · metric · HealthGate · Deliverable Contract · launcher → Steps 03 / 06 / 08 / ledger / 10`. HealthGate is **Step 08**; Step 06 is *metric*. |
+
+**Explicitly recorded, so no later reader re-derives the wrong answer:**
+
+- **PR 02c is NOT supported** as owner — the Step-02 roadmap row disclaims
+  launcher/orchestration task-binding residue outright.
+- **Step 06 is NOT supported** as owner — §2's ordered mapping assigns
+  Step 06 to *metric*, not HealthGate.
+
+**Do not treat the table above as final.** It is the strongest reading the
+current source supports, not a settled assignment: `validate_runtime_config`
+lives in `agent/schemas/hyperparam_tuning.py`, which Step 10's row does not
+name verbatim (it names "workflow binding, campaign_artifacts, orchestration
+inputs to resume"). **The detailed Step-08 and Step-10 designs must confirm
+exact ownership from their own producer-consumer audits.**
+
+**The PR-02b selection capability itself is COMPLETE and is not blocked by
+this residue** — see §13.10-F: `build_sample_set` receives the raw
+`DataScope` object and resolves it against the explicitly supplied profile;
+the mis-resolved `resolved_data_scope` is consumed only by startup
+invariants, HealthGate config materialization, logging and records.
 
 **Consequence for Checkpoint C:** the run sets `health_gate_enabled=False`
 — the remediation the error message itself names, and a legitimate
@@ -1472,15 +1512,51 @@ Ladder: **CP0 → CP-B1 → Checkpoint A → Checkpoint B → Checkpoint C →
 Checkpoint D — all PASS.** Eleven mutations attempted across the five
 evidence rungs; **eleven caught, none survived.**
 
+**The selection capability is COMPLETE.** Neither item below blocks it;
+both are pre-existing residue outside the migrated SampleSet data flow.
+
 Carried forward for the parent to route:
 
-1. **§13.9** — a contrast topology is misread as a partial DataScope
-   (`validate_runtime_config` binds the TIDMAD singleton as a default
-   argument; the HealthGate validator reads the ambient profile).
-   Proposed owner **02c or Step-06**.
+1. **§13.9** — a contrast topology is misread as a partial DataScope.
+   `validate_runtime_config(..., dataset=TIDMAD)` binds the singleton at
+   function-definition time (so no profile binding can reach it), and the
+   HealthGate validator reads the ambient profile, so the two disagree.
+   **Outside the migrated SampleSet data flow**: selection receives the raw
+   `DataScope` and resolves it against the explicit profile. Under the
+   default `health_gate_enabled=True` this pre-existing residue can block a
+   non-TIDMAD run at startup.
+   - runtime/task-binding + full-scope comparison → candidate **Step 10**
+     (orchestration/task-binding);
+   - `validate_health_gate_files_against_scope` → **Step 08** consumer-side;
+   - exact ownership must be confirmed by those detailed designs from their
+     own source audits.
+   - **NOT PR 02c. NOT Step 06.** Both were proposed by an earlier revision
+     and are refuted by the source audit (§13.9 ownership disposition).
 2. **§13.1** — `validate_sample_set` remains TIDMAD-bounded, so 02b's
    capability holds for `num_files <= 20`. No worse than before 02b.
-   Proposed owner **02c**.
+   **Ownership UNDETERMINED**; the earlier "02c" rationale was factually
+   wrong and is corrected in §13.1.
+
+### 14.1 Operator disposition of the §13.12 sequencing deviation
+
+**ACCEPTED — operator decision, 2026-08-13.**
+
+- Checkpoint B was declared PASS before its frozen real-tuner contrast
+  criterion had evidence;
+- that criterion was subsequently proven at Checkpoint C;
+- **zero production-code change** occurred between the B4 executable state
+  (`e2d058ef`) and the Checkpoint-C executable state (`6f14dcdb`) —
+  mechanically verified: `git diff e2d058ef 6f14dcdb` excluding
+  `tests/` and `docs/` is empty;
+- the real-tuner + `num_files`-only contrast property was therefore
+  ultimately proven on the **same** production implementation.
+
+Classified as an **evidence-ordering deviation**, not a substantive
+frozen-contract violation. No re-run was required or performed.
+
+> **This is not a precedent.** It does not create permission to declare a
+> checkpoint before its evidence exists. The deviation was accepted only
+> because the production tree was provably identical across the gap.
 
 Gate 1 not required (§7). **Gate 2 NOT RUN — Step-level, owned by
 finalizer 02c.**
