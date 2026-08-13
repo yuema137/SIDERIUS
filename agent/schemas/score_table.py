@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from execute_tools.dataset_config import NUM_FILES
+from execute_tools.dataset_config import resolve_dataset_profile
 
 # ---------------------------------------------------------------------------
 # Per-file row
@@ -40,8 +40,11 @@ class PerFileRow(BaseModel):
     file_index: int = Field(
         ...,
         ge=0,
-        le=NUM_FILES - 1,
-        description=f"Validation file index (0..{NUM_FILES - 1}).",
+        description=(
+            "Validation file index. The upper bound is the declared topology's "
+            "file count, checked against the resolved Dataset Profile rather "
+            "than a fixed literal."
+        ),
     )
     raw_baseline: float | None = Field(
         ...,
@@ -102,6 +105,23 @@ class PerFileRow(BaseModel):
         "the file was outside the sampled set.",
     )
 
+    @model_validator(mode="after")
+    def _file_index_within_declared_topology(self) -> PerFileRow:
+        """Reject an index the declared topology does not contain.
+
+        This bound used to be the static ``le=NUM_FILES - 1`` evaluated when
+        the class body ran, which pinned every task to TIDMAD's 20 files and
+        made a different file count unrepresentable. The rule is unchanged;
+        only its source moved to the resolved Dataset Profile.
+        """
+        num_files = resolve_dataset_profile().dataset.num_files
+        if self.file_index >= num_files:
+            raise ValueError(
+                f"file_index={self.file_index} is outside the declared topology "
+                f"(num_files={num_files}, valid 0..{num_files - 1})."
+            )
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Aggregate scalars — subset-scoped (Decision 14)
@@ -142,9 +162,23 @@ class AggregateScalars(BaseModel):
     num_sampled_files: int = Field(
         ...,
         ge=1,
-        le=NUM_FILES,
-        description=f"|sampled_indices|. {NUM_FILES} for a formal run, <{NUM_FILES} for trial.",
+        description=(
+            "|sampled_indices|. Equal to the declared file count for a formal "
+            "run, fewer for a trial. The upper bound comes from the resolved "
+            "Dataset Profile."
+        ),
     )
+
+    @model_validator(mode="after")
+    def _sampled_count_within_declared_topology(self) -> AggregateScalars:
+        """A run cannot sample more files than the dataset declares."""
+        num_files = resolve_dataset_profile().dataset.num_files
+        if self.num_sampled_files > num_files:
+            raise ValueError(
+                f"num_sampled_files={self.num_sampled_files} exceeds the declared "
+                f"topology (num_files={num_files})."
+            )
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -164,10 +198,11 @@ class ScoreComparisonTable(BaseModel):
 
     rows: list[PerFileRow] = Field(
         ...,
-        min_length=NUM_FILES,
-        max_length=NUM_FILES,
-        description=f"Always exactly {NUM_FILES} rows (one per validation "
-        "file). Unsampled files carry model/gain/headroom as None.",
+        description=(
+            "Exactly one row per validation file in the declared topology. "
+            "Unsampled files carry model/gain/headroom as None. The row count "
+            "is checked against the resolved Dataset Profile."
+        ),
     )
     aggregate: AggregateScalars = Field(
         ...,
@@ -200,6 +235,23 @@ class ScoreComparisonTable(BaseModel):
         "without per-file impact data (legacy / direct dict "
         "construction).",
     )
+
+    @model_validator(mode="after")
+    def _one_row_per_declared_file(self) -> ScoreComparisonTable:
+        """Exactly one row per file in the declared topology.
+
+        Previously ``min_length=max_length=NUM_FILES`` on the field, fixed at
+        import. Same rule, resolved against the profile so a contrast
+        topology produces a correctly shaped table instead of a length error.
+        """
+        num_files = resolve_dataset_profile().dataset.num_files
+        if len(self.rows) != num_files:
+            raise ValueError(
+                f"ScoreComparisonTable needs exactly one row per validation file: "
+                f"got {len(self.rows)} rows for a declared topology of "
+                f"{num_files} files."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_weight_total(self) -> ScoreComparisonTable:

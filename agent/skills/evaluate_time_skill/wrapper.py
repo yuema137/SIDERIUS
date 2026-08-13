@@ -62,7 +62,7 @@ import traceback
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from execute_tools.dataset_config import resolve_dataset_profile
 
 # Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
 # forward+backward+optimizer step at step 0 already takes ≥ this many ms,
@@ -350,7 +350,7 @@ def _measure_ms_per_step(
         if not first_psds:
             return None, empty_breakdown
 
-        ml_per_psd = PSD_SEGMENT_LENGTH // seg_size
+        ml_per_psd = resolve_dataset_profile().dataset.psd_segment_length // seg_size
         required_segs = (n_warmup_batches + n_timed_batches) * batch_size
         n_psd_needed = max(1, math.ceil(required_segs / max(ml_per_psd, 1)))
         n_psd_needed = min(n_psd_needed, 5, len(first_psds))
@@ -760,7 +760,8 @@ def run_skill(sandbox, **kwargs) -> dict:
         # one side only. None → registry default, exactly pre-G1.
         explicit_inference_batch = kwargs.get("inference_batch")
         inf_batch = _inference_est.resolve_forecast_batch(explicit_inference_batch, model_type)
-        ml_per_psd = max(PSD_SEGMENT_LENGTH // max(seg_size, 1), 1)
+        _psd_len = resolve_dataset_profile().dataset.psd_segment_length
+        ml_per_psd = max(_psd_len // max(seg_size, 1), 1)
         if inference_per_psd_seg_ms_hint is not None and inference_per_psd_seg_ms_hint > 0:
             inference_ms = float(inference_per_psd_seg_ms_hint) * inf_batch / ml_per_psd
             inference_ms_source = "trial_inference_warmup"

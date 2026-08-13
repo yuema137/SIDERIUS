@@ -28,7 +28,7 @@ from typing import Any, ClassVar, Final
 
 import numpy as np
 
-from execute_tools.dataset_config import TIDMAD
+from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks._peek import peek_int8_at_channel
 from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
 from execute_tools.scoring_utils import find_peak
@@ -53,7 +53,7 @@ class SpectralPeakRatioCheck:
     ) -> HealthCheckResult:
         cfg = config or {}
         peek_samples = int(cfg.get("peek_samples", self._DEFAULT_PEEK_SAMPLES))
-        sampling_freq = float(TIDMAD.sampling_frequency)
+        sampling_freq = float(resolve_dataset_profile().dataset.sampling_frequency)
 
         files = self._resolve_files(ctx, cfg)
         if not files:

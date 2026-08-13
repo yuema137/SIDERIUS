@@ -25,11 +25,11 @@ import pytest
 import torch
 
 import execute_tools.inference_single as inf
-import execute_tools.workload_resolvers as wr
 from core.runtime_control.adaptive import AdaptiveVerificationConfig
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.steady_state import SteadyStateConfig
 from core.runtime_control.workload import ResolvedPhaseWorkload
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from ml_models.models_format_sandbox import WaveNetConfig
 from ml_models.models_sandbox import MODEL_REGISTRY
 
@@ -48,9 +48,27 @@ _MODEL_CFG = dict(
 
 
 @pytest.fixture
-def tiny_setup(tmp_path, monkeypatch):
+def tiny_profile():
+    """TIDMAD with only the decomposition length shrunk to SEG_SIZE.
+
+    ``workload_resolvers`` used to expose PSD_SEGMENT_LENGTH as a module
+    constant that this fixture monkeypatched. PR-02a routes it through the
+    resolved Dataset Profile instead, so the geometry override is now a
+    DECLARATION rather than a poke at a module global — which is the point
+    of the migration. ``bind_dataset_profile`` is scoped, so the previous
+    profile is restored even if a test raises.
+    """
+    return TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+        }
+    )
+
+
+@pytest.fixture
+def tiny_setup(tmp_path, monkeypatch, tiny_profile):
+    # inference_single still reads the module constant; C4 migrates it.
     monkeypatch.setattr(inf, "PSD_SEGMENT_LENGTH", SEG_SIZE)
-    monkeypatch.setattr(wr, "PSD_SEGMENT_LENGTH", SEG_SIZE)
 
     n_samples = N_PSD_SEGMENTS * SEG_SIZE
     rng = np.random.default_rng(11)
@@ -98,7 +116,7 @@ def tiny_setup(tmp_path, monkeypatch):
             f,
         )
 
-    return {
+    setup = {
         "tmp": tmp_path,
         "argv": [
             "inference_single.py",
@@ -128,6 +146,8 @@ def tiny_setup(tmp_path, monkeypatch):
             str(rp_path),
         ],
     }
+    with bind_dataset_profile(tiny_profile):
+        yield setup
 
 
 def _run_inference(setup, monkeypatch, sidecar: str):

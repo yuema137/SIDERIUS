@@ -22,7 +22,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from execute_tools.dataset_config import TIDMAD
+from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks.schemas import GateAction
 
 _DEFAULT_CONFIG_PATH: str = os.path.join("configs", "health_checks.yaml")
@@ -330,7 +330,8 @@ def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int])
         ValueError: Listing every offending gate/check with remediation.
     """
     scope_set = set(resolved_scope)
-    scope_is_full = scope_set == set(range(TIDMAD.num_files))
+    num_files = resolve_dataset_profile().dataset.num_files
+    scope_is_full = scope_set == set(range(num_files))
     problems: list[str] = []
     for gate in config.health_gates:
         for check in gate.checks:
