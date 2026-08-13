@@ -2,13 +2,44 @@
 
 ## Status
 
-**DESIGN — READY FOR OPERATOR FREEZE (revision 2, 2026-08-14).
-NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-14).**
 
-Revision 2 applies the operator review of 2026-08-14: Q1/Q2/Q3 answered
-(§11), and four narrow corrections applied — B1 pins the live contract
-instead of freezing a latent bug, B3 freezes observable properties rather
-than helper shape, B2 is Stage A only, and B4 is strictly single-axis.
+The operator froze this design at **revision 2**. Everything below — the
+capability statement (§1), ownership and explicit non-ownership (§2), the
+compatibility contract (§3), the blocking checkpoint ladder (§4), the
+Checkpoint-C boundary (§5), the five commits and their acceptance
+criteria (§6), the Gate decision (§7), evidence economy (§8) and the stop
+conditions (§9) — may not change without a new operator decision.
+
+In particular, these are frozen and must not be re-litigated during
+implementation:
+
+- the **live-vs-latent key-coercion distinction** (§6.1): B1 pins the
+  LIVE round-trip contract and must NOT assert the latent branch's
+  lexicographic ordering;
+- **Stage-A / Stage-B separation**: B2 proves the explicit hop is live
+  using a TIDMAD-**equivalent** profile with ambient resolution disabled;
+  B4 is the only contrast and varies **`num_files` alone**;
+- **B3 freezes observable properties, not helper shape**, and may
+  legitimately shrink to an evidence/documentation commit;
+- **trial packing is OUT**, forward-routed to the Deliverable Contract /
+  Step-5 §7c audit.
+
+Revision 2 applied the operator review of 2026-08-14: Q1/Q2/Q3 answered
+(§11), and four narrow corrections — B1 pins the live contract instead of
+freezing a latent bug, B3 freezes observable properties rather than helper
+shape, B2 is Stage A only, and B4 is strictly single-axis.
+
+**IMPLEMENTATION IS NOT YET AUTHORIZED IN THIS SESSION.** Per the
+established lifecycle, implementation begins only after a filled
+**Implementation Working Rules contract** for this child, in a NEW, fresh
+context with its own Context Continuity v2 handoff — never in the design
+session, and in an isolated worktree **outside `.claude/`** (an 02a
+process lesson, §5).
+
+**Frozen design HEAD**: the commit that carries this status line. Resolve
+it mechanically from the repository at kickoff (`git log -1 --format=%H --
+<this file>`); never from conversational memory.
 
 Rewritten against **merged master after 02a** (`47359538`), not carried
 over from the pre-02a sketch. The old sketch is superseded: its entire

@@ -19,7 +19,7 @@
 > | Document | State |
 > |---|---|
 > | `pr_02a_dataset_profile_injection.md` | **FROZEN / OPERATOR APPROVED** at `cfc83b1e` (2026-08-13) |
-> | `pr_02b_selection_sampleset.md` | **DESIGN READY FOR OPERATOR FREEZE** (rev 2, post-02a) |
+> | `pr_02b_selection_sampleset.md` | **FROZEN / OPERATOR APPROVED** (rev 2, 2026-08-14) |
 > | `pr_02c_systematic_groups.md` | DRAFT — to be revised AFTER 02a lands |
 > | this parent | LIVING until Step-02 closeout |
 >
@@ -68,7 +68,7 @@ child-plan detail still to be written.
 | Child | State |
 |---|---|
 | **02a — Dataset Profile injection** | **COMPLETE / MERGED** — PR [#202](https://github.com/Galileo-Sandbox/SIDERIUS/pull/202), merge commit `47359538`, PR head `0d9fc32d`, exact-head CI green. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten |
-| 02b — Selection & SampleSet | **DESIGN — READY FOR OPERATOR FREEZE** (revision 2, operator review applied). NOT yet frozen; implementation NOT authorized |
+| 02b — Selection & SampleSet | **DESIGN FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION** (revision 2, 2026-08-14). Implementation not yet started |
 | 02c — Systematic groups (Step FINALIZER) | DRAFT — revised after 02b lands |
 
 **Step 02 remains IN PROGRESS.** The overall roadmap §15.1 matrix is the
