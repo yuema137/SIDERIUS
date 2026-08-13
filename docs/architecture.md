@@ -536,6 +536,64 @@ are `/workspace/DATA/TIDMAD_DATA/` and `/workspace/DATA/SIDERIUS_DATA/`.
 
 ---
 
+## Dataset Profile (profile-driven data path — shipped 2026-08, PR 02a)
+
+The production data path resolves its dataset semantics from a **resolved
+Dataset Profile** rather than module-level constants.
+`DatasetProfile` (`execute_tools/dataset_config.py`) composes three
+declarations:
+
+```text
+dataset   DatasetConfig — file topology (patterns, count, index space),
+          sample geometry (psd_segment_length, segments_per_file) and the
+          sample-shape legality rule
+channels  ChannelIdentity — which in-file channel is the model INPUT and
+          which is the TRUTH
+encoding  ValueEncoding — storage/compute dtype, value offset, class count
+```
+
+It **composes** `DatasetConfig` rather than extending it, so the shipped
+`TIDMAD` object and its `model_dump()` are unchanged and the Step-00
+golden keeps pinning the object production reads.
+
+**Resolution has two regimes**, and confusing them is the failure the
+design guards against:
+
+| Situation | Behaviour |
+|---|---|
+| an explicit profile path is supplied but is missing / unreadable / not JSON / schema-invalid | **FAIL CLOSED**, with a diagnostic naming the path. Never falls back to the singleton — a fallback would run a bound task against TIDMAD's topology and produce plausible, wrong numbers |
+| a caller omits the transport entirely | **Regime-A compatibility adapter** — resolve the shipped TIDMAD profile exactly, preserving pre-profile behaviour |
+
+`TIDMAD_PROFILE` is that adapter. It is **not** a universal framework
+default; every value in it is a property of the TIDMAD dataset.
+
+**Transport across the subprocess boundary** reuses the existing
+config-file + argv-flag pattern (`--model_cfg`, `--train_cfg`,
+`--loss_cfg`). `TidmadSandbox._write_dataset_profile_config(exp_id)`
+writes `dataset_profile_{exp_id}.json` into the run's `configs/` directory
+and all three entry points receive its path:
+
+```text
+execute_tools/train_engine_sandbox.py   --dataset_profile_json PATH
+execute_tools/inference_single.py       --dataset_profile_json PATH
+execute_tools/denoising_score_single.py --dataset_profile_json PATH
+```
+
+Omitting the flag is legal and means Regime-A.
+
+**In-process consumers** take the profile as an argument. Two consume it at
+import time — `agent/schemas/score_table.py`'s row/index bounds and
+`nodes/scoring_reference.py`'s file-index tuple — and use
+`resolve_dataset_profile()`, with `bind_dataset_profile()` (a scoped
+`ContextVar`) for tests and future task binding.
+
+**Not owned here**: SampleSet/selection semantics, systematic groups, and
+the Deliverable Contract (denoised naming/layout/attrs). The raw
+validation filename is Step-02 input topology and comes from the profile;
+every denoised name still comes from `denoised_filename_fn`.
+
+---
+
 ## Data Scoping (partial-file runs — shipped 2026-07)
 
 `DataScope` (`execute_tools/dataset_config.py`) restricts a run to a

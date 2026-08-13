@@ -52,3 +52,15 @@ pricing this formula.
 | `inference_ms_per_step` | `float \| None` | `None` | Measured ms/step; `None` → static formula (instantiates the model to count params unless `num_params` given). |
 | `num_params` | `int \| None` | `None` | Skips CPU instantiation on the static path. |
 | `inference_batch` | `int \| None` | `None` | V21 PR G explicit batch (see above). |
+
+---
+
+## Dataset Profile dependency (PR 02a, 2026-08)
+
+`_total_inference_steps` resolves the decomposition length from the
+**Dataset Profile** (`resolve_dataset_profile().dataset.psd_segment_length`)
+instead of importing `SEGMENT_LENGTH`. It also accepts an optional
+`profile` argument for explicit injection.
+
+**No CLI argument, default value or observable behaviour changed** — under
+TIDMAD the resolved value is the same 10,000,000.
