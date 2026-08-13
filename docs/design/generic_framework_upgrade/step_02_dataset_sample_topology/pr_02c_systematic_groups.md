@@ -6,8 +6,13 @@
 
 ## Status
 
-**DESIGN — READY FOR OPERATOR REVIEW (revision 3, 2026-08-13).
-NOT FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**DESIGN — READY FOR OPERATOR FREEZE (revision 3, 2026-08-13).
+NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+
+All operator decisions are recorded and FINAL (§21). The final narrow
+genericity re-review (§20) produced **two corrections**, both applied:
+the effective-config injection shape (§8.1) and the falsy-hazard
+reclassification (§4.3). No new material contradiction remains.
 
 Revision 3 was rewritten against **merged 02a + 02b source**. Six
 load-bearing revision-2 claims were refuted by source audit (§0.2). The
@@ -145,6 +150,24 @@ subsystem already derives it (`config.py:333`); and
 `all_files = [...]` or any equivalent profile field** — that would
 duplicate 02a's topology authority (§12 stop condition).
 
+### 2.4 The governing principle (operator, FINAL 2026-08-13)
+
+> **Genericization is not moving legacy hardcodes into config.**
+>
+> Each semantic must resolve from its **correct authority**:
+>
+> ```text
+> declare  task-owned semantics      (A, B)
+> derive   topology-owned semantics  (C)
+> preserve runtime/policy-owned semantics  (DataScope,
+>          health_gate_files, HealthGate policy — untouched)
+> ```
+
+A catch-all "group map" is forbidden merely because the legacy
+implementation happens to contain several file-list literals. A/B/C are
+**not** forced into one abstraction unless implementation-time source
+evidence truly requires one.
+
 ---
 
 ## 3. Consumer census — anchors
@@ -224,7 +247,20 @@ sorted). This precedence is **runtime-input semantics and is NOT 02c's**
 
 **Falsy-check hazard (all six)**: `if configured:` means an explicit
 `peek_file_indices: []` does **not** mean "monitor nothing" — it falls
-through. Reachable only via hand-edited YAML. **Pin, do not fix.**
+through to the next tier. `apply_monitored_files` refuses an empty list
+(`config.py:293-297`), so this is reachable only via hand-edited YAML.
+
+> **Reclassified by the §20 re-review (was "pin, do not fix").** This is
+> the same class as the Q2 float residue: latent, reachable only through
+> a hand-authored config that does not exist in the shipped path.
+> Pinning it would freeze an unreachable behaviour into a compatibility
+> promise — precisely what 02b §6.1 forbids and what §14 declines for
+> Q2. Treating the two inconsistently was an error in the first draft of
+> this revision.
+>
+> **Disposition: RECORD, do NOT pin, do NOT fix.** Same stop condition:
+> if implementation proves it production-reachable, the classification
+> has changed — STOP and report.
 
 ---
 
@@ -349,6 +385,50 @@ exact Checkpoint-C mechanism.
 **Forbidden**: a generic `groups: dict[str, list[int]]` mapping unless
 source proves one abstraction matches both declarations' semantics,
 lifecycle **and** validation. Two named fields are the default.
+
+### 8.1 The injection-shape trap — found by the §20 re-review
+
+**This is the sharpest implementation hazard in 02c and it is not
+obvious.**
+
+Mechanical fact: `configs/health_checks.yaml` contains the
+`peek_file_indices` key at **exactly three sites — `:35`, `:60`, `:82`,
+all BLOCKING**. The three recording gates have **no key at all** and
+therefore resolve to tier-3 all-files (C).
+
+```text
+TEMPTING BUT WRONG:
+  "inject declaration B wherever peek_file_indices is absent"
+
+CONSEQUENCE:
+  the three RECORDING gates would jump from all-files (20)
+  to the health-peek triplet (3).
+
+  That is a HealthGate POLICY change — a §12.2 stop condition —
+  introduced while nominally only moving an authority.
+```
+
+**Required shape**: declaration B must reach **only the sites that carry
+the key today**. The absent-key path must continue to fall through to
+tier 2/3 exactly as now.
+
+Equally forbidden in the other direction: **removing** the literal from
+the three blocking sites so they "fall back to the declaration" — the
+absent-key tier is `[min(paths)]` / `[0]`, not the declaration, so that
+would silently move blocking gates to a single-file peek.
+
+Resulting precedence, which must be **unchanged** end to end:
+
+```text
+explicit run-level health_gate_files   (apply_monitored_files)
+  > per-check peek_file_indices        (now resolved from declaration B)
+  > tier 2  (blocking [min(paths)] | recording all keys)
+  > tier 3  (blocking [0]           | recording all-files from C)
+```
+
+**Acceptance consequence**: C2 must assert the recording gates' resolved
+population is **still `set(range(20))`** under TIDMAD — i.e. §9's C1 row
+green and unmodified — as direct evidence the injection did not leak.
 
 ---
 
@@ -528,7 +608,13 @@ Depends on: C1.
       behaviour.
 - [ ] Migrate `ANCHOR_FILES` to declaration A.
 - [ ] Migrate the blocking-peek default to declaration B, keeping the
-      YAML as the operator-facing surface.
+      YAML as the operator-facing surface. **Follow §8.1 exactly**:
+      declaration B reaches ONLY the three sites that carry
+      `peek_file_indices` today (`:35,:60,:82`). Do NOT inject where the
+      key is absent, and do NOT delete the key so it "falls back".
+- [ ] Assert the recording gates still resolve to `set(range(20))` under
+      TIDMAD (§9 row C1, unmodified) as direct evidence the injection did
+      not leak into the keyless path.
 - [ ] Update `test_formal_sample_set.py:212` (`{0, 10, 19}` hardcoded).
 - [ ] Confirm no second topology authority is introduced.
 - [ ] Confirm `range(20)` is NOT converted into a declared field (§2.3) —
@@ -653,7 +739,18 @@ Two subcases within the **one** 4.8-C rung:
 - [ ] **C-health**: vary declaration B only; A held fixed → blocking
       monitored-file selection follows B, and the campaign validator's
       trigger follows the same declared semantic **without any policy-matrix
-      change**; **anchors assert UNCHANGED**.
+      change**; **anchors assert UNCHANGED**;
+      **recording gates assert UNCHANGED at all-files** (the §8.1 leak
+      guard).
+- [ ] **Vary CARDINALITY, not only membership** (§20 Q11). A contrast of
+      `[0,10,19] → [1,5,9]` is still "three files" and could pass while a
+      consumer silently assumes a triplet. Each subcase uses a set of a
+      DIFFERENT SIZE (e.g. 2 or 5) so the rung varies the semantic rather
+      than swapping one TIDMAD-shaped list for another. Source shows no
+      consumer asserts cardinality (`sample_set_builder.py:105` copies the
+      list; `_resolve_indices` dedupes; the campaign validator iterates),
+      so a non-3 set is legal — if one proves otherwise, that is itself
+      the finding.
 - [ ] Assert atomicity **mechanically** against the TIDMAD declaration, as
       02a's and 02b's rungs do.
 - [ ] Confirm each subcase reds when its consumer re-hardcodes its literal.
@@ -1099,15 +1196,43 @@ and the "misleading single mutation" note (§19). None were in revision 2.
 
 ---
 
+## 20a. FINAL genericity re-review — contract quality (2026-08-13)
+
+Narrow, pre-freeze, focused on whether the contract is genuinely generic
+rather than a configurable replica of TIDMAD.
+
+| # | Question | Verdict |
+|---|---|---|
+| 1 | Is every declared field genuinely useful for a non-TIDMAD task? | **YES.** A task with different informative bands must set both A and B; neither is inferable from topology |
+| 2 | Is any field merely a configurable replica of a legacy literal? | **A and B are, by construction — and legitimately so.** They are task-owned scientific choices with no formula. The test that separates "legitimate declaration" from "config-ised hardcode" is Q12, which passes |
+| 3 | Can any declared value instead derive from an existing authority? | **Only C, and it does.** A was the live candidate (`[0,n//2,n-1]`); the operator decided DECLARE rather than invent non-TIDMAD behaviour (§2.1) |
+| 4 | Does every declaration have a live production consumer? | **YES** — A: `sample_set_builder.py:105`; B: the three blocking checks **and** the campaign validator. §12.2 makes a consumer-less field a stop condition |
+| 5 | Are anchor-selection and health-peek kept semantically distinct? | **YES** — separate fields, separate consumers, separate Stage-B subcases, and each subcase asserts the *other* is unchanged |
+| 6 | Is all-files derived, never declared? | **YES** (§2.3), and adding an `all_files` field is a stop condition |
+| 7 | Did any latent bug become a frozen compatibility contract? | **NO — and this review CORRECTED one.** The Q2 float residue is routed, not pinned; the falsy-`[]` hazard was originally marked "pin, do not fix" and is now reclassified to RECORD-only (§4.3) for consistency. Two latent, hand-edited-YAML-only behaviours are treated identically |
+| 8 | Did any HealthGate policy behaviour change while migrating authority? | **NO — and this review FOUND the trap that would have caused it.** §8.1: injecting B where the key is absent would move recording gates from 20 files to 3. Required shape and a leak-guard assertion are now specified |
+| 9 | Did campaign validation become more permissive or more enforcing? | **NEITHER.** §6.1 forbids set/sorted comparison; D1-c pins the reordered-skip BEFORE the change |
+| 10 | Did runtime/operator choices migrate into task config? | **NO.** `health_gate_files` and `DataScope` remain runtime inputs; §4.3's precedence is unchanged; failure class 6 mutates it |
+| 11 | Is Stage-B varying semantics, or swapping one TIDMAD-shaped list for another? | **CORRECTED.** Membership-only contrast keeps cardinality at three and could pass with a consumer assuming a triplet. C4 now varies **cardinality too** (§11.4) |
+| 12 | Could the profile describe a task whose anchor/health selections genuinely differ from TIDMAD, with no source edits? | **YES, given §8.1's shape.** A new task sets A and B on its profile; anchors and the three blocking checks resolve from them; all-files derives from `num_files`; the campaign trigger follows B. **Caveat recorded honestly**: the shipped `configs/health_checks.yaml` remains the operator surface, so a task shipping its own health-checks config is a Step-08 concern, not 02c's |
+
+**Two corrections applied** (#7 and #8), plus one strengthening (#11).
+Nothing else changed. The audit was not broadened.
+
+---
+
 ## 21. Remaining operator decisions
 
-| # | Question | Status |
+**ALL DECIDED — operator, 2026-08-13. None remain open.**
+
+| # | Question | FINAL decision |
 |---|---|---|
-| **Q1** | anchors DECLARED vs DERIVED | **DECIDED 2026-08-13 — DECLARED** (§2.1) |
-| **Q2** | float-element false-reject disposition | **Source-answered**: latent unreachable. **Recommendation: ROUTE/DEFER, do not pin** (§14). Operator confirmation requested |
-| **Q3** | stale node docs | **Source-answered**: class B, already false via DS7, **not 02c's** (§15). Operator confirmation requested |
-| **Q4** | Gate-config authority conflict | **Source-answered**: standard is stale; keep `pro`. **Which correction to apply is the operator's call** (§16) |
-| **Q5** | PR rename `Systematic group semantics` → `Task-owned file-set semantics` | Recommended; impact in §22 |
+| **Q1** | anchors DECLARED vs DERIVED | **DECLARED task-owned anchor-selection file set.** Not derived as `[0,n//2,n-1]`: the TIDMAD value merely coincides with that expression, and the "extrema" comment is intent, not a contract for inventing non-TIDMAD behaviour (§2.1) |
+| **Q2** | float-element false-reject | **ROUTE / DEFER.** Do not fix in 02c; do **not** add a compatibility pin; record the finding and its reachability classification. STOP only if an implementation re-audit proves it production-reachable (§14) |
+| **Q3** | stale node docs | **OUT of 02c.** They describe DS7-deleted fields and a warned no-op CLI; recorded as existing documentation debt for the owning cleanup. 02c updates only docs describing a live surface it changes — i.e. the six `configs/health_checks.yaml` comments (§15) |
+| **Q4** | Gate-config authority | **Step-02 Gate 2 uses `llm_configs/openai_tiered_pro.json`** — explicit operator approval. The standard's `openai_tiered_v1` wording is recorded as stale governance debt for the gate-standard owner. 02c does not rewrite the standard beyond a minimal factual correction if one is needed to avoid contradictory repository truth (§16) |
+| **Q5** | PR title | **Renamed in body to "Task-owned file-set semantics"; filename unchanged** to preserve links from merged 02a/02b ledgers (§22) |
+| **Q6** | one PR vs split | **KEEP ONE PR and ONE canonical child design document.** A somewhat broader coherent PR is preferred over proliferating narrowly sliced children. Internal subparts keep separate milestones and atomic contrast subcases inside 02c (§5) |
 
 **Not operator questions** (implementation-time): declaration field names,
 YAML nesting, Pydantic decomposition, helper names, fixture placement,
@@ -1136,11 +1261,15 @@ filename is an address.
 
 ## 23. Status
 
-**DESIGN — READY FOR OPERATOR REVIEW (revision 3, 2026-08-13).
-NOT FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**DESIGN — READY FOR OPERATOR FREEZE (revision 3, 2026-08-13).
+NOT YET FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
 
-Q1 is decided. Q2/Q3/Q4 are source-answered with recommendations awaiting
-confirmation. Q5 is a naming call. Implementation begins only after
-operator freeze and a filled Implementation Working Rules contract, in a
-fresh context with its own Context Continuity v2 handoff, in an isolated
-worktree outside `.claude/`.
+All six operator decisions are FINAL and applied (§21). The final narrow
+genericity re-review (§20a) produced two corrections — the §8.1 injection
+shape and the §4.3 falsy-hazard reclassification — plus one strengthening
+(§11.4 cardinality). **No remaining operator questions.**
+
+Implementation begins only after operator freeze and a filled
+Implementation Working Rules contract, in a fresh context with its own
+Context Continuity v2 handoff, in an isolated worktree outside
+`.claude/`.
