@@ -12,12 +12,24 @@ disposition (§5f), the mutation economy (§5g), the seven commits (§6)
 and the Gate decision (§7) — may not change without a new operator
 decision.
 
-**IMPLEMENTATION AUTHORIZED AND IN PROGRESS (2026-08-14).** The
-lifecycle precondition is met: a filled **Implementation Working Rules
-contract** for this child was issued, and implementation runs in a NEW,
-fresh context with its own Context Continuity v2 handoff — not in the
-design session. **From this point this document is the LIVE PR-02a
-implementation ledger**, updated continuously rather than at closeout.
+**IMPLEMENTATION COMPLETE / READY FOR OPERATOR REVIEW (2026-08-14).
+NOT MERGED.**
+
+Every blocking rung passed and is recorded in §5a.1 with its evidence:
+CP0, CP-A1, CP-A2, CP-A3, Checkpoint A, Checkpoint B, Checkpoint C,
+Checkpoint D. Acceptance is itemised in §11. PR **#202**.
+
+**Gate 1 NOT REQUIRED** (§7) — no rendered prompt byte moved.
+**Gate 2 NOT RUN** — Step-level, owned once by the finalizer 02c.
+**Merge is the operator's**, and Checkpoint E (parent/roadmap status sync)
+belongs to 02c, not to this child.
+
+The lifecycle precondition was met before any production edit: a filled
+**Implementation Working Rules contract** was issued for this child, and
+implementation ran in a NEW, fresh context with its own Context
+Continuity v2 handoff — not in the design session. **This document is the
+LIVE PR-02a implementation ledger**, updated continuously throughout
+rather than at closeout.
 
 Kickoff facts, resolved mechanically from the repository (never from
 conversational memory):
