@@ -429,7 +429,7 @@ C7  docs + ledger closeout
 | **CP-A1 — in-process parity + reachability** | **PASS** (2026-08-14, `43c440e4`) — the one broad-run failure was diagnosed as a worktree ENVIRONMENT gap, not a C2 regression | see below |
 | **CP-A2 — training subprocess consumes the profile** | **PASS** (2026-08-14, `c3cfa9c4` + `d92f2e1f`) | see below |
 | **CP-A3 — all three data paths agree on ONE profile** | **PASS** (2026-08-14) | see below |
-| Checkpoint A | not reached | — |
+| **CHECKPOINT A — extraction parity complete** | **PASS** (2026-08-14, `7cf82570`) | see below |
 | Checkpoint B | not reached | — |
 | Checkpoint C | not reached | — |
 | Checkpoint D | not reached | — |
@@ -610,6 +610,51 @@ real constructors where legality matters.
 
 **Validation**: `tests/unit/{execute_tools,core,nodes}` 3101 passed,
 3 skipped, 75.59s; new C3 module 16 passed; ruff clean.
+
+---
+
+**CHECKPOINT A PASS — every Stage-A surface against its strongest oracle.**
+
+| §4 surface | Criterion | Result |
+|---|---|---|
+| Resolved profile | deep-equals today's TIDMAD field by field | stronger — `TIDMAD_PROFILE.dataset` **is** the singleton, by identity |
+| Legality list | exact 36-entry `valid_segmentation_sizes()` | unchanged; C5's swap asserted equal to the old inline derivation |
+| Training filename | `training_file_name(0)`/`(19)` byte-identical | Step-00 golden, unmodified |
+| Validation filename | profile render == the string the scorer/inference inlined | pinned at the producing authority (`score_vector`) |
+| `data_shape_class` | exact `psd10000000_seg200_files20` | verified through the real resolver |
+| Encoding | declaration produces byte-identical tensors | C1 pins + C3 offset probe |
+| Channel identity | byte-identical input/target tensors | pinned for BOTH production loaders |
+| Visited sequence | exact ordered `(filename, row_idx)` list | unchanged |
+| Step count | `len(train_events)` and steps/epoch | unchanged |
+| Ordering semantics | §5d set, exact `shuffle=True` order deliberately NOT pinned | `test_ordering_engine.py` green, assertions unmodified |
+| **Rendered prompts** | proposer known-constraints + planner divisor list byte-identical | **green** — 4457 passed across agent/workflows/nodes/scripts |
+
+**Gate 1 flip condition did NOT fire.** No rendered prompt byte moved, so
+§7's decision stands: Gate 1 NOT REQUIRED.
+
+**One failure in the Checkpoint-A run, and it was the guard working.**
+`test_pr3_l2p_preflight::test_preflight_all_invariants` reported
+`no_production_file_modified` because the suite ran over an uncommitted
+production tree — precisely the documented CLAUDE.md behaviour. It was
+answered by committing the checkpoint, never by relaxing the guard, and
+passes from the clean tree (1 passed, 2.11s).
+
+**Mutation dossier through Checkpoint A** — by failure CLASS (§5g), 11
+mutations, all ultimately KILLED, one after strengthening the guard:
+
+| # | Class | Result |
+|---|---|---|
+| M1 | filename authority (scorer, pre-migration) | KILLED |
+| M2 | channel authority (loader swap) | KILLED |
+| M3 | encoding authority (offset) | KILLED |
+| M4 | ordering / step-count (`sorted()` removed) | KILLED |
+| M5 | IPC fail-closed (fallback instead of raise) | KILLED |
+| M6 | transport hop, child side | KILLED |
+| M7 | transport hop, parent side | KILLED |
+| M8 | filename authority (scorer re-inline) | KILLED |
+| M9 | filename authority (inference re-inline) | **SURVIVED → guard strengthened → KILLED** |
+| M10 | filename authority (scoring entry re-inline) | KILLED |
+| M11 | legality authority (inline derivation restored) | KILLED |
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
