@@ -1328,10 +1328,17 @@ oracle exists. Audited at `f865038f`:
       and M5/M6 (execute) are its consumers, inside this same PR. A
       consumer-less seam at PR level would be the §21 stop; a
       seam-then-wire split across commits is the established boundary.
-- [ ] **M2 — Phase A: preset resolution + fail-closed consistency.**
-      Authoring form → resolve → ONE normalized contract → consumers.
-      No runtime consumer branches on preset label, modality or rank.
-      FX-3 / FX-4 / 3-E boundaries.
+- [x] **M2 — Phase A: preset resolution + fail-closed — LANDED.**
+      `agent/schemas/model_io_resolution.py` —
+      `resolve_model_io_contract(contract, *, preset, dataset_num_classes)`
+      plus the typed family `ModelIOResolutionError` →
+      `UnknownPresetError` / `PresetContradictionError` (FX-4) /
+      `DatasetContradictionError` (3-E). The preset **does not survive
+      resolution**: the return type is the same `ModelIOContract` every
+      consumer takes, so no runtime consumer *can* branch on a label.
+      Rungs FX-3, FX-4 and 3-E all landed.
+      Tests: `tests/unit/agent/schemas/test_model_io_resolution.py`,
+      **17 passed / 0.21 s**. Four mutations, each isolating its class.
 - [ ] **M3 — Phase A: canonical output semantics + loss re-key.**
       `output_type` becomes a derived projection (§8b); `hybrid` stays a
       legacy adapter (§8c); `validate_output_loss_compatibility` re-keyed,
@@ -1470,6 +1477,69 @@ Design decisions taken at M1, from source:
   two axes claim different roles, because anything stronger would need the
   relationship DSL §4e defers.
 
+#### M2 — preset resolution + fail-closed consistency
+
+```text
+module   agent/schemas/model_io_resolution.py (new)
+tests    tests/unit/agent/schemas/test_model_io_resolution.py
+result   17 passed / 0.21 s, pytest rc 0
+lint     ruff check + ruff format --check clean
+types    pyright still cannot run locally (Node v10.19.0); CI authoritative
+```
+
+**Binding inheritance re-read before implementing.** FX-3/FX-4 are
+roadmap deferred decision **D13**, whose rule is frozen in Step-01
+§6A.5: a preset/contract inconsistency must fail with a typed error
+*"before any LLM request is constructed"*, and silently rewriting the
+shape, dropping the preset, defaulting to TIDMAD or letting the
+contradiction reach the Proposer are all forbidden. §6A.5 also requires
+the resolved output to be *"a single normalized rank-agnostic contract,
+not a preset label plus loose fields"*.
+
+```text
+Previous implementation assumption
+  A preset SUPPLIES structure — the authoring shorthand expands into
+  axes, and resolution merges preset + explicit fields.
+
+Source evidence
+  Step-01 §6A.5's own failure examples are "`time_series` with no
+  temporal axis; `spatial_grid` with no spatial axis" — both are the
+  explicit contract failing to SATISFY the preset, not the preset
+  filling anything in. Nothing in source defines an axis order for a
+  modality, and §4d assigns rank-independence to axis ROLES.
+
+Corrected implementation understanding
+  A preset is a REQUIREMENT: a named set of axis roles the contract must
+  declare. Requirement-only is the narrowest form that satisfies both
+  binding rungs.
+
+Implementation consequence
+  A supplying preset was considered and REJECTED: it would have to invent
+  an axis ORDER no source supports, baking a modality's conventional
+  layout into the framework — the opposite of what roles are for. The
+  shipped registry holds exactly one preset, `sequence`, deliberately NOT
+  named for a modality, requiring `batch` + `temporal` on both tensors.
+  A `spatial_grid` preset is NOT shipped: it would need a `spatial` axis
+  role no production consumer reads — the consumer-less field §21 forbids.
+
+Validation consequence
+  FX-3 becomes provable as an IDENTITY: resolving with the preset returns
+  a contract equal to resolving without it, so "a preset producing a
+  second runtime path" is structurally impossible rather than merely
+  unobserved. §16's *"no preset label is read at runtime after
+  resolution — greppable"* is asserted mechanically by a repo scan that
+  allows exactly one reader, the resolver itself.
+```
+
+**Description↔contract consistency — discharged, not dropped.** Step-01
+§6A.5 and its R2-6 review named *"description↔contract consistency"* as
+part of the contract owner's FX-4 obligation. Step-03's frozen §9
+explicitly **withdrew** that: the shipped `task_description` duplicates
+a contract-owned fact, so the correct fix is *authority* (Step-01's
+surface to own), not an NLP validator Step 03 refuses to build. No new
+contradiction — §9 already records the narrowing, and M2 implements the
+machine-checkable channels only.
+
 ### 24.7 Mutation dossier
 
 | # | Mutation | Expected | Observed | Verdict |
@@ -1572,6 +1642,49 @@ fixture is not decoration.
 A2, A3, A6 and A8 all captured before any production change. Every
 module has zero production diff; every genuinely new oracle is
 mutation-proven (§24.7).
+
+#### M2 mutations
+
+| # | Mutation | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| **M-M2-1** | the preset is silently DROPPED (`if missing:` → `if False:`) | FX-4 family reds | **3 failed** — exactly the FX-4 class | behaviour-changing, **caught** |
+| **M-M2-2** | an unknown preset is silently IGNORED | the invalid-preset-name guard reds | **1 failed** — only `test_an_unknown_preset_fails_closed` | behaviour-changing, **caught precisely** |
+| **M-M2-3** | a dataset contradiction is silently ACCEPTED | 3-E family reds | **3 failed** — the 3-E class + the atomicity claim | behaviour-changing, **caught** |
+| **M-M2-4** | the *"cardinality not meaningful"* guard is dropped (`declared is not None and …` → `declared != …`) | the §4b asymmetry reds | **1 failed** — only `test_an_output_without_class_semantics_is_not_forced_to_match` | behaviour-changing, **caught by its sole oracle** |
+
+Baseline re-run **17 passed** from the restored tree; the three mutated
+lines verified back to their originals by inspection, not assumed.
+
+```text
+FINDING — a mutation-hygiene defect, caught by the restore check
+
+Previous implementation assumption
+  `git checkout -- <file>` restores a mutated file.
+
+Source evidence
+  The first M2 mutation round ran against UNTRACKED new files. Every
+  `git checkout --` printed
+  "error: pathspec ... did not match any file(s) known to git"
+  and restored nothing, so mutations ACCUMULATED: by round 3 all three
+  guards were `if False:` simultaneously and the per-round failure
+  counts (3 / 4 / 7 / 7) were cumulative, not attributable.
+
+Corrected implementation understanding
+  Only the first round of that series was a valid attribution. The
+  accumulation was visible only because the mandatory post-mutation
+  baseline re-run came back RED instead of green.
+
+Implementation consequence
+  The whole series was discarded and re-run after `git add` staged the
+  files, which gives `git checkout --` an index to restore from. Every
+  count in the table above comes from that clean series.
+
+Validation consequence
+  A mutation target must be TRACKED (committed or at least staged)
+  before mutating. The post-mutation baseline re-run is not ceremony —
+  it is the only thing that detected this, and a dossier written without
+  it would have recorded four confident, wrong attributions.
+```
 
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
