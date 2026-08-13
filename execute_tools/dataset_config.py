@@ -15,12 +15,20 @@ Constants:
     validation_file_pattern:  Format string for validation file names.
 """
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from string import Formatter
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
 # Arbitrary in-range index used only to probe that a filename pattern
 # actually formats. Never used to build a path that is read.
@@ -505,6 +513,58 @@ def resolve_dataset_profile() -> DatasetProfile:
     today's behaviour for every caller that predates the transport.
     """
     return _ACTIVE_PROFILE.get() or TIDMAD_PROFILE
+
+
+def load_dataset_profile(path: str) -> DatasetProfile:
+    """Load a resolved profile from a JSON config file. **FAILS CLOSED.**
+
+    This is the subprocess side of the parent→child transport. The rule it
+    enforces is the sharp half of §5c:
+
+    * an explicit profile path that is **missing, unreadable, not JSON, or
+      schema-invalid** raises, with a diagnostic naming the path;
+    * it **never** falls back to the shipped TIDMAD profile.
+
+    The distinction that matters: *"the flag is present but the file is
+    broken"* must fail loudly, because a silent fallback would run a bound
+    task against TIDMAD's topology and produce plausible, wrong numbers.
+    *"an old caller has never heard of the flag"* is a different case
+    entirely — that one keeps Regime-A, and it is handled by the caller
+    choosing not to call this function at all.
+
+    Args:
+        path: Filesystem path to a JSON document produced by
+            ``DatasetProfile.model_dump()``.
+
+    Returns:
+        The validated profile.
+
+    Raises:
+        ValueError: The path is missing, unreadable, malformed JSON, or does
+            not satisfy the :class:`DatasetProfile` schema.
+    """
+    try:
+        with open(path) as handle:
+            payload = json.load(handle)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            f"dataset profile config not found at {path!r}. A profile path was "
+            f"supplied, so this fails closed rather than falling back to the "
+            f"shipped TIDMAD profile — a silent fallback would run against the "
+            f"wrong dataset topology and produce plausible, wrong numbers."
+        ) from exc
+    except OSError as exc:
+        raise ValueError(f"dataset profile config at {path!r} is unreadable ({exc}).") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"dataset profile config at {path!r} is not valid JSON ({exc}).") from exc
+
+    try:
+        return DatasetProfile.model_validate(payload)
+    except ValidationError as exc:
+        raise ValueError(
+            f"dataset profile config at {path!r} does not satisfy the "
+            f"DatasetProfile schema ({exc})."
+        ) from exc
 
 
 @contextmanager

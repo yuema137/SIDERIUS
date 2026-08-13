@@ -17,7 +17,11 @@ from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
-from execute_tools.dataset_config import TIDMAD
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    load_dataset_profile,
+    resolve_dataset_profile,
+)
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
 
@@ -68,6 +72,7 @@ class TIDMADDataset(Dataset):
         sample_size: int = 20,
         max_segments: int | None = None,
         sample_set: dict | None = None,
+        profile: DatasetProfile | None = None,
     ):
         self.filepath = fpath
         self.filelist = fname_list if isinstance(fname_list, list) else [fname_list]
@@ -75,9 +80,13 @@ class TIDMADDataset(Dataset):
         self.sample_size = sample_size
         self.max_segments = max_segments
         self.sample_set = sample_set
+        # Resolved Dataset Profile: filenames, decomposition geometry, channel
+        # identity and value encoding all come from here. ``None`` resolves the
+        # Regime-A adapter, so a caller predating the transport is unaffected.
+        self.profile = profile or resolve_dataset_profile()
         self.idict = {}
         self.tdict = {}
-        self.class_count = torch.ones(256)
+        self.class_count = torch.ones(self.profile.encoding.num_classes)
 
         if self.sample_set is not None:
             self.train_events = self._pull_events_from_sample_set()
@@ -92,7 +101,11 @@ class TIDMADDataset(Dataset):
         filename, row_idx = self.train_events[idx]
         input_data = self.idict[filename][row_idx]
         target_data = self.tdict[filename][row_idx]
-        return (input_data.astype(np.int16) + 128), (target_data.astype(np.int16) + 128)
+        enc = self.profile.encoding
+        return (
+            input_data.astype(enc.compute_dtype) + enc.value_offset,
+            target_data.astype(enc.compute_dtype) + enc.value_offset,
+        )
 
     def get_class_weight(self):
         weights = self.class_count.sum() / (len(self.class_count) * self.class_count)
@@ -106,13 +119,15 @@ class TIDMADDataset(Dataset):
             file_path = os.path.join(self.filepath, filename)
             if not os.path.exists(file_path):
                 continue
+            channels = self.profile.channels
+            enc = self.profile.encoding
             with h5py.File(file_path, "r") as f:
                 alltrain = np.array(
-                    _h5_dataset(f, "timeseries", "channel0001", "timeseries")
-                ).astype(np.int8)
+                    _h5_dataset(f, "timeseries", channels.input_channel, "timeseries")
+                ).astype(enc.storage_dtype)
                 alltarget = np.array(
-                    _h5_dataset(f, "timeseries", "channel0002", "timeseries")
-                ).astype(np.int16)
+                    _h5_dataset(f, "timeseries", channels.target_channel, "timeseries")
+                ).astype(enc.compute_dtype)
                 num_segments = len(alltrain) // (self.sample_size * self.seg_size)
                 random_offset = np.random.randint(0, self.sample_size)
                 self.idict[filename] = alltrain[
@@ -121,9 +136,11 @@ class TIDMADDataset(Dataset):
                 self.tdict[filename] = (
                     alltarget[: num_segments * self.sample_size * self.seg_size]
                     .reshape(num_segments, self.sample_size, self.seg_size)[:, random_offset, :]
-                    .astype(np.int8)
+                    .astype(enc.storage_dtype)
                 )
-                self.class_count += torch.Tensor(np.bincount(alltarget + 128, minlength=256))
+                self.class_count += torch.Tensor(
+                    np.bincount(alltarget + enc.value_offset, minlength=enc.num_classes)
+                )
                 for i in range(num_segments):
                     evlist.append((filename, i))
                 del alltrain, alltarget
@@ -153,11 +170,15 @@ class TIDMADDataset(Dataset):
             )
         sample_set = self.sample_set
         evlist = []
-        ml_segs_per_psd = PSD_SEGMENT_LENGTH // self.seg_size
+        dataset = self.profile.dataset
+        channels = self.profile.channels
+        enc = self.profile.encoding
+        psd_len = dataset.psd_segment_length
+        ml_segs_per_psd = psd_len // self.seg_size
 
         for file_index, psd_segment_indices in sorted(sample_set.items()):
             file_index = int(file_index)  # JSON keys may be strings
-            filename = TIDMAD.training_file_name(file_index)
+            filename = dataset.training_file_name(file_index)
             file_path = os.path.join(self.filepath, filename)
             if not os.path.exists(file_path):
                 print(f"Warning: {file_path} not found, skipping.")
@@ -165,21 +186,23 @@ class TIDMADDataset(Dataset):
 
             with h5py.File(file_path, "r") as f:
                 raw_ch1 = np.array(
-                    _h5_dataset(f, "timeseries", "channel0001", "timeseries")
-                ).astype(np.int8)
+                    _h5_dataset(f, "timeseries", channels.input_channel, "timeseries")
+                ).astype(enc.storage_dtype)
                 raw_ch2 = np.array(
-                    _h5_dataset(f, "timeseries", "channel0002", "timeseries")
-                ).astype(np.int16)
+                    _h5_dataset(f, "timeseries", channels.target_channel, "timeseries")
+                ).astype(enc.compute_dtype)
 
             # Extract only the requested PSD segments and reshape to ML segments
             input_chunks = []
             target_chunks = []
             for psd_idx in psd_segment_indices:
-                start = psd_idx * PSD_SEGMENT_LENGTH
-                end = start + PSD_SEGMENT_LENGTH
+                start = psd_idx * psd_len
+                end = start + psd_len
                 chunk_ch1 = raw_ch1[start:end].reshape(ml_segs_per_psd, self.seg_size)
                 chunk_ch2 = (
-                    raw_ch2[start:end].reshape(ml_segs_per_psd, self.seg_size).astype(np.int8)
+                    raw_ch2[start:end]
+                    .reshape(ml_segs_per_psd, self.seg_size)
+                    .astype(enc.storage_dtype)
                 )
                 input_chunks.append(chunk_ch1)
                 target_chunks.append(chunk_ch2)
@@ -193,7 +216,10 @@ class TIDMADDataset(Dataset):
             self.idict[filename] = input_arr
             self.tdict[filename] = target_arr
             self.class_count += torch.Tensor(
-                np.bincount(target_arr.flatten().astype(np.int16) + 128, minlength=256)
+                np.bincount(
+                    target_arr.flatten().astype(enc.compute_dtype) + enc.value_offset,
+                    minlength=enc.num_classes,
+                )
             )
 
             for i in range(len(input_arr)):
@@ -274,6 +300,7 @@ class TIDMADEpochDataset(Dataset):
         seg_size: int,
         train_portion: float | None = None,
         rng: "random.Random | None" = None,
+        profile: DatasetProfile | None = None,
     ):
         """
         Args:
@@ -287,7 +314,13 @@ class TIDMADEpochDataset(Dataset):
         if rng is None:
             rng = random.Random()
 
-        ml_segs_per_psd = PSD_SEGMENT_LENGTH // seg_size
+        # Regime-A when no profile is supplied (§5c).
+        self.profile = profile or resolve_dataset_profile()
+        dataset = self.profile.dataset
+        channels = self.profile.channels
+        enc = self.profile.encoding
+        psd_len = dataset.psd_segment_length
+        ml_segs_per_psd = psd_len // seg_size
         all_ch1, all_ch2 = [], []
         # Row span each file occupies in the concatenated arrays, recorded as
         # the rows are appended. Sequential ordering needs to address one
@@ -299,7 +332,7 @@ class TIDMADEpochDataset(Dataset):
 
         for file_key in sorted(sample_set.keys(), key=int):
             file_index = int(file_key)
-            file_path = os.path.join(data_dir, TIDMAD.training_file_name(file_index))
+            file_path = os.path.join(data_dir, dataset.training_file_name(file_index))
             if not os.path.exists(file_path):
                 print(f"Warning: {file_path} not found, skipping.")
                 continue
@@ -316,16 +349,20 @@ class TIDMADEpochDataset(Dataset):
                 segments = scope_segments
 
             with h5py.File(file_path, "r") as f:
-                ch1 = _h5_dataset(f, "timeseries", "channel0001", "timeseries")
-                ch2 = _h5_dataset(f, "timeseries", "channel0002", "timeseries")
+                ch1 = _h5_dataset(f, "timeseries", channels.input_channel, "timeseries")
+                ch2 = _h5_dataset(f, "timeseries", channels.target_channel, "timeseries")
                 for psd_idx in segments:
-                    start = psd_idx * PSD_SEGMENT_LENGTH
-                    end = start + PSD_SEGMENT_LENGTH
+                    start = psd_idx * psd_len
+                    end = start + psd_len
                     all_ch1.append(
-                        np.array(ch1[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
+                        np.array(ch1[start:end], dtype=enc.storage_dtype).reshape(
+                            ml_segs_per_psd, seg_size
+                        )
                     )
                     all_ch2.append(
-                        np.array(ch2[start:end], dtype=np.int8).reshape(ml_segs_per_psd, seg_size)
+                        np.array(ch2[start:end], dtype=enc.storage_dtype).reshape(
+                            ml_segs_per_psd, seg_size
+                        )
                     )
 
             file_rows = len(segments) * ml_segs_per_psd
@@ -336,19 +373,24 @@ class TIDMADEpochDataset(Dataset):
             gc.collect()
 
         self.inputs = (
-            np.concatenate(all_ch1, axis=0) if all_ch1 else np.empty((0, seg_size), dtype=np.int8)
+            np.concatenate(all_ch1, axis=0)
+            if all_ch1
+            else np.empty((0, seg_size), dtype=enc.storage_dtype)
         )
         self.targets = (
-            np.concatenate(all_ch2, axis=0) if all_ch2 else np.empty((0, seg_size), dtype=np.int8)
+            np.concatenate(all_ch2, axis=0)
+            if all_ch2
+            else np.empty((0, seg_size), dtype=enc.storage_dtype)
         )
 
     def __len__(self):
         return len(self.inputs)
 
     def __getitem__(self, idx):
+        enc = self.profile.encoding
         return (
-            self.inputs[idx].astype(np.int16) + 128,
-            self.targets[idx].astype(np.int16) + 128,
+            self.inputs[idx].astype(enc.compute_dtype) + enc.value_offset,
+            self.targets[idx].astype(enc.compute_dtype) + enc.value_offset,
         )
 
 
@@ -691,6 +733,7 @@ def run_experiment_streaming(
     runtime_session: RuntimeVerificationSession | None = None,
     order_strategy: str = "shuffle",
     file_order: list[int] | None = None,
+    profile: DatasetProfile | None = None,
 ):
     """
     Multi-file training: rebuild the epoch dataset each epoch, then train on it.
@@ -758,6 +801,10 @@ def run_experiment_streaming(
     # not cover the scope would silently change selection, which no retry
     # would fix.
     validate_ordering_against_scope(order_strategy, file_order, sample_set)
+    # One resolved profile for the whole run: the epoch datasets, the
+    # storage provenance and the scoped-byte estimate must not be able to
+    # disagree about topology or geometry.
+    profile = profile or resolve_dataset_profile()
 
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
     seg_size = model_cfg.segmentation_size
@@ -840,6 +887,7 @@ def run_experiment_streaming(
             seg_size=seg_size,
             train_portion=train_portion,
             rng=epoch_rng,
+            profile=profile,
         )
         if order_strategy == "sequential":
             # Independent RNG stream, seeded from the same epoch seed: the
@@ -881,7 +929,7 @@ def run_experiment_streaming(
             # deterministic per epoch, so every epoch runs the same count.
             steps_per_epoch = len(loader)
             file_paths = [
-                os.path.join(data_dir, TIDMAD.training_file_name(int(k)))
+                os.path.join(data_dir, profile.dataset.training_file_name(int(k)))
                 for k in sorted(sample_set.keys(), key=int)
             ]
             # Scoped read volume (pre-Gate F2): the setup reads only the
@@ -891,7 +939,7 @@ def run_experiment_streaming(
                 storage_provenance=capture_storage_provenance(
                     data_dir,
                     file_paths,
-                    scoped_bytes=n_psd_scoped * PSD_SEGMENT_LENGTH * 3,
+                    scoped_bytes=n_psd_scoped * profile.dataset.psd_segment_length * 3,
                 ),
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
@@ -1115,6 +1163,18 @@ def main():
     parser.add_argument("--train_cfg", type=str, required=True)
     parser.add_argument("--loss_cfg", type=str, required=True)
     parser.add_argument(
+        "--dataset_profile_json",
+        type=str,
+        default=None,
+        help=(
+            "Path to a resolved Dataset Profile JSON (topology, geometry, "
+            "channel identity, value encoding). OMITTED means the Regime-A "
+            "compatibility adapter: resolve the shipped TIDMAD profile, "
+            "exactly as before this flag existed. SUPPLIED but broken fails "
+            "closed — it never falls back to the singleton."
+        ),
+    )
+    parser.add_argument(
         "--data_dir",
         type=str,
         default=None,
@@ -1185,6 +1245,19 @@ def main():
         "Only meaningful together with --runtime_observation_out.",
     )
     args = parser.parse_args()
+
+    # Dataset Profile resolution — the child side of the parent's transport.
+    #
+    #   flag SUPPLIED but broken  -> fail closed, diagnostic names the path
+    #   flag ABSENT               -> Regime-A adapter, shipped TIDMAD profile
+    #
+    # The two are deliberately different: a bound task whose profile file is
+    # unreadable must never be silently run against TIDMAD's topology, while a
+    # caller that predates the flag must not be broken by genericization.
+    if args.dataset_profile_json is not None:
+        dataset_profile = load_dataset_profile(args.dataset_profile_json)
+    else:
+        dataset_profile = resolve_dataset_profile()
 
     # RT2-B: create the verification session FIRST so the measured setup
     # window covers config load and everything after — main() entry is the
@@ -1264,6 +1337,7 @@ def main():
             runtime_session=runtime_session,
             order_strategy=args.order_strategy,
             file_order=file_order,
+            profile=dataset_profile,
         )
         if results is None:
             # Runtime verification rejected the attempt: the structured
@@ -1276,8 +1350,9 @@ def main():
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
         dataset = TIDMADDataset(
             args.data_dir,
-            [TIDMAD.training_file_name(args.file_index)],
+            [dataset_profile.dataset.training_file_name(args.file_index)],
             model_cfg.segmentation_size,
+            profile=dataset_profile,
         )
         loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
         results = run_experiment(model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id)

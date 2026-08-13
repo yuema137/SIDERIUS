@@ -29,6 +29,7 @@ import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.adaptive import AdaptiveVerificationConfig
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.steady_state import SteadyStateConfig
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
 
 SEG_SIZE = 1000
@@ -47,9 +48,12 @@ def _verification_config() -> AdaptiveVerificationConfig:
 
 
 @pytest.fixture
-def tiny_setup(tmp_path, monkeypatch):
+def tiny_setup(tmp_path):
     """Streaming-mode setup with enough segments for live verification."""
-    monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)
+    # Geometry override is a DECLARATION. Was
+    # ``monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)`` until
+    # PR-02a C3 moved the loaders onto the resolved Dataset Profile, so the
+    # module constant is no longer the authority. Assertions unchanged.
     n_samples = N_PSD_SEGMENTS * SEG_SIZE
     rng = np.random.default_rng(7)
     with h5py.File(tmp_path / "abra_training_0000.h5", "w") as f:
@@ -78,14 +82,20 @@ def tiny_setup(tmp_path, monkeypatch):
     }
     os.makedirs(sandbox_dirs["models"], exist_ok=True)
 
-    return {
-        "data_dir": str(tmp_path),
-        "sample_set": {"0": list(range(N_PSD_SEGMENTS))},
-        "model_cfg": model_cfg,
-        "train_cfg": train_cfg,
-        "loss_cfg": LossConfig(),
-        "sandbox_dirs": sandbox_dirs,
-    }
+    _tiny = TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+        }
+    )
+    with bind_dataset_profile(_tiny):
+        yield {
+            "data_dir": str(tmp_path),
+            "sample_set": {"0": list(range(N_PSD_SEGMENTS))},
+            "model_cfg": model_cfg,
+            "train_cfg": train_cfg,
+            "loss_cfg": LossConfig(),
+            "sandbox_dirs": sandbox_dirs,
+        }
 
 
 def _run(setup, runtime_session, exp_id: str):

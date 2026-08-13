@@ -37,7 +37,11 @@ from core.inference_defaults import inference_batch_for
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from execute_tools.data_paths import TIDMAD_DATA_DIR
-from execute_tools.dataset_config import DataScope, ScopeViolationError
+from execute_tools.dataset_config import (
+    DataScope,
+    ScopeViolationError,
+    resolve_dataset_profile,
+)
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
@@ -1246,6 +1250,16 @@ class TidmadSandbox:
                 with open(paths[k], "w") as f:
                     json.dump(v, f)
 
+            # Dataset Profile transport — same config-file + argv-flag
+            # mechanism as --model_cfg/--train_cfg/--loss_cfg above, so the
+            # child reads topology, geometry, channel identity and value
+            # encoding from ONE declaration instead of module constants.
+            dp_path = os.path.abspath(
+                os.path.join(self.dirs["configs"], f"dataset_profile_{exp_id}.json")
+            )
+            with open(dp_path, "w") as f:
+                json.dump(resolve_dataset_profile().model_dump(), f)
+
             cmd = [
                 sys.executable,
                 "execute_tools/train_engine_sandbox.py",
@@ -1255,6 +1269,8 @@ class TidmadSandbox:
                 paths["t"],
                 "--loss_cfg",
                 paths["l"],
+                "--dataset_profile_json",
+                dp_path,
                 "--exp_id",
                 exp_id,
                 "--run_name",

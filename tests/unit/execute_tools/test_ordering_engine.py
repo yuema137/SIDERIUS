@@ -22,6 +22,7 @@ import pytest
 from torch.utils.data import DataLoader, Dataset
 
 import execute_tools.train_engine_sandbox as tes
+from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
 
 SEG_SIZE = 1000
 
@@ -30,17 +31,23 @@ SEG_SIZE = 1000
 
 
 @pytest.fixture
-def multi_file_data(tmp_path, monkeypatch):
+def multi_file_data(tmp_path):
     """Three tiny training files (indices 4, 5, 6), 2 PSD segments each.
 
-    PSD_SEGMENT_LENGTH is shrunk to SEG_SIZE so one PSD segment is exactly
-    one ML row — making row counts trivially predictable in assertions.
+    The declared psd_segment_length is shrunk to SEG_SIZE so one PSD segment
+    is exactly one ML row — making row counts trivially predictable.
+
+    Was ``monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)`` until
+    PR-02a C3 moved the loaders onto the resolved Dataset Profile. Geometry
+    is now declared, not patched; every assertion below is unchanged.
     """
-    monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", SEG_SIZE)
     segments_per_file = 2
     rng = np.random.default_rng(0)
     for file_index in (4, 5, 6):
-        path = tmp_path / tes.TIDMAD.training_file_name(file_index)
+        # Build the name from the DECLARATION, not from whatever the
+        # engine module happens to import — C3 removed the engine's
+        # dependency on the TIDMAD singleton entirely.
+        path = tmp_path / TIDMAD_PROFILE.dataset.training_file_name(file_index)
         n = segments_per_file * SEG_SIZE
         with h5py.File(path, "w") as f:
             ts = f.create_group("timeseries")
@@ -51,7 +58,13 @@ def multi_file_data(tmp_path, monkeypatch):
                 "timeseries", data=rng.integers(-128, 127, size=n, dtype=np.int16)
             )
     sample_set = {"4": [0, 1], "5": [0, 1], "6": [0, 1]}
-    return str(tmp_path), sample_set
+    tiny = TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+        }
+    )
+    with bind_dataset_profile(tiny):
+        yield str(tmp_path), sample_set
 
 
 class _IdentityDataset(Dataset):

@@ -52,7 +52,11 @@ import torch
 
 import execute_tools.scoring_utils as su
 import execute_tools.train_engine_sandbox as tes
-from execute_tools.dataset_config import TIDMAD
+from execute_tools.dataset_config import (
+    TIDMAD,
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+)
 
 # Tiny geometry. PSD_SEGMENT_LENGTH is monkeypatched to PSD_LEN so one PSD
 # segment is exactly ML_PER_PSD rows — the real 10,000,000 would need a
@@ -80,14 +84,20 @@ def _channel_payload(file_index: int, channel: int) -> np.ndarray:
 
 
 @pytest.fixture
-def tiny_dataset(tmp_path, monkeypatch):
+def tiny_dataset(tmp_path):
     """Two training files under the shrunk PSD geometry.
 
     Returns ``(data_dir, {file_index: {channel: payload}})`` so every
     expectation below is computed from TEST-owned data, never read back out
     of the code under test.
+
+    The geometry override is a DECLARATION. It was originally
+    ``monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", PSD_LEN)``; C3 moved the
+    loaders onto the resolved Dataset Profile, so the module constant is no
+    longer the authority and poking it would silently do nothing. Every
+    ASSERTION in this module is byte-identical across that change — only the
+    override mechanism moved, which is exactly what PR-02a delivers.
     """
-    monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", PSD_LEN)
 
     payloads: dict[int, dict[int, np.ndarray]] = {}
     for file_index in (FILE_A, FILE_B):
@@ -98,7 +108,13 @@ def tiny_dataset(tmp_path, monkeypatch):
             ts = f.create_group("timeseries")
             ts.create_group("channel0001").create_dataset("timeseries", data=ch1)
             ts.create_group("channel0002").create_dataset("timeseries", data=ch2)
-    return str(tmp_path), payloads
+    tiny = TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": PSD_LEN})
+        }
+    )
+    with bind_dataset_profile(tiny):
+        yield str(tmp_path), payloads
 
 
 def _expected_rows(payload: np.ndarray, psd_indices: list[int]) -> np.ndarray:
