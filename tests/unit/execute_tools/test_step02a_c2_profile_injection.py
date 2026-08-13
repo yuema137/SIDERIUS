@@ -256,6 +256,12 @@ class TestDeclarationValidators:
                 value_offset=0,
                 num_classes=256,
             ),
+            # Step 02c: the two task-owned file sets are REQUIRED and carry
+            # no default, for exactly the reason this test exists — a
+            # TIDMAD-shaped default would be smuggling. Note they are legal
+            # against THIS dataset's num_files=3, not TIDMAD's 20.
+            anchor_selection_files=[0, 2],
+            health_peek_files=[1],
         )
         assert other.dataset.validation_file_name(2) == "val_02.hdf5"
         assert "abra" not in other.dataset.training_file_name(1)

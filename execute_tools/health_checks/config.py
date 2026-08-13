@@ -32,6 +32,12 @@ _DEFAULT_CONFIG_PATH: str = os.path.join("configs", "health_checks.yaml")
 # override is applied. See docs/design/enable_partial_file_list.md (DS4).
 EFFECTIVE_CONFIG_BASENAME: str = "health_checks_effective.yaml"
 
+# Marker a check's ``peek_file_indices`` may carry INSTEAD of a literal
+# list, meaning "the bound task's declared health-peek file set"
+# (``DatasetProfile.health_peek_files``). Resolved once, at config
+# validation — see ``CheckRef._resolve_declared_peek_selection``. Step 02c.
+TASK_HEALTH_PEEK: str = "task_health_peek"
+
 
 # ---------------------------------------------------------------------------
 # rev-6 HealthGate config classes
@@ -58,9 +64,53 @@ class CheckRef(BaseModel):
         default_factory=dict,
         description=(
             "Per-gate config override passed to the check's ``run()`` method. "
-            "Empty dict (default) means the check uses its own defaults."
+            "Empty dict (default) means the check uses its own defaults.\n\n"
+            f"``peek_file_indices: {TASK_HEALTH_PEEK}`` resolves to the bound "
+            "task's declared health-peek file set at load time; an explicit "
+            "list is taken verbatim."
         ),
     )
+
+    @field_validator("config")
+    @classmethod
+    def _resolve_declared_peek_selection(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the declared-default marker into the task's file set.
+
+        Which files a task's blocking checks watch is a property of the
+        TASK, not of this file — but the YAML must stay the operator's
+        policy surface, so the marker is written where the literal used to
+        be and is resolved here, at the one point every config object is
+        built through (``model_validate``). Resolution is idempotent: a
+        concrete list is already resolved and passes through untouched.
+
+        Read through ``resolve_dataset_profile`` rather than an argument
+        because Pydantic field validation is precisely the case its
+        docstring reserves the ambient seam for — no caller can reach here.
+
+        **Only sites that already carry the key are touched.** A check with
+        no ``peek_file_indices`` keeps falling through to its own tier-2 /
+        tier-3 fallback; injecting the declaration there would move the
+        three recording gates from every file onto a three-file triplet,
+        which is a policy change, not an authority change.
+
+        Any OTHER string is rejected. Left alone, a typo'd marker is
+        truthy, and ``_resolve_indices`` would iterate it CHARACTER by
+        character and peek file indices like ``'t'`` — a silent wrong
+        answer rather than an error.
+        """
+        peek = value.get("peek_file_indices")
+        if not isinstance(peek, str):
+            return value
+        if peek != TASK_HEALTH_PEEK:
+            raise ValueError(
+                f"peek_file_indices={peek!r} is not a recognized marker. Use "
+                f"an explicit list of file indices, or {TASK_HEALTH_PEEK!r} "
+                f"to inherit the bound task's declared health-peek file set."
+            )
+        return {
+            **value,
+            "peek_file_indices": list(resolve_dataset_profile().health_peek_files),
+        }
 
 
 class ActionConfig(BaseModel):

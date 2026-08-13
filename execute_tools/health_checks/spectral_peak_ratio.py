@@ -36,7 +36,6 @@ from execute_tools.scoring_utils import find_peak
 _MV_PER_LSB: float = 40.0 / 128.0
 _SIG_HALF_WIDTH: Final[int] = 1  # matches get_snr sig_range
 _NOISE_HALF_WIDTH: Final[int] = 50  # matches get_snr noise_range
-_DEFAULT_FILE_RANGE: range = range(20)
 
 
 class SpectralPeakRatioCheck:
@@ -144,12 +143,21 @@ class SpectralPeakRatioCheck:
     @staticmethod
     def _resolve_files(ctx: HealthCheckContext, cfg: dict[str, Any]) -> list[int]:
         """Priority: config ``peek_file_indices`` (run-level monitored set,
-        DataScope-aware) > ``ctx.denoised_paths`` keys > 0..19 fallback."""
+        DataScope-aware) > ``ctx.denoised_paths`` keys > every file the
+        bound dataset declares.
+
+        The last tier is DERIVED topology, not a declared group — the
+        profile's ``num_files`` already answers "every file", and it is
+        read at CALL time rather than frozen into a module-level
+        ``range(20)`` at import. This module already resolves the profile
+        for ``sampling_frequency``; the population now comes from the
+        same declaration.
+        """
         configured = cfg.get("peek_file_indices")
         if configured:
             return sorted({int(i) for i in configured})
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:
-            return list(_DEFAULT_FILE_RANGE)
+            return list(range(resolve_dataset_profile().dataset.num_files))
         return []

@@ -3,10 +3,29 @@
 ## Status
 
 **LIVING PARENT — DELIBERATELY NOT FROZEN (operator decision,
-2026-08-13). PR 02a MERGED (PR #202, merge commit `47359538`).
-PR 02b IMPLEMENTATION AUTHORIZED AND IN PROGRESS (branch
-`feat/generic-framework-step-02b-selection-sampleset`, design frozen at
-`dc26bb75`); 02c NOT AUTHORIZED.**
+2026-08-13).**
+
+**STEP 02 — READY FOR OPERATOR REVIEW (2026-08-13). NOT MERGED.**
+
+| Child | State |
+|---|---|
+| **02a** Dataset Profile injection | **MERGED** — PR #202, merge `47359538` |
+| **02b** Selection & SampleSet | **MERGED** — PR #203, merge `c17469ec` |
+| **02c** Task-owned file-set semantics + FINALIZER | **IMPLEMENTATION COMPLETE — awaiting operator review**, branch `feat/generic-framework-step-02c-task-owned-file-sets` |
+
+Checkpoint E is recorded in the 02c ledger (`pr_02c_systematic_groups.md`
+§24). Step-level evidence, both run exactly once at the assembled head:
+
+- **terminal local full unit suite** — 8739 passed / 3 skipped / 0 failed
+  (535 s, clean tree);
+- **Step-02 Gate 2** — chain exit 0, 16 min 17 s, under
+  `llm_configs/openai_tiered_pro.json`; all five framework criteria plus
+  both Step-02 criteria PASS (the resolved profile deep-equals TIDMAD;
+  the production SampleSet equals the deterministic reference for the
+  run's ACTUAL inputs).
+
+**Step 02 is not COMPLETE until 02c merges** — the closeout marks the
+evidence complete, not the merge done.
 
 > **Do not "fix" this by freezing it.** The operator decided this parent
 > stays a LIVING document until Step-02 closeout, because it is the
@@ -21,7 +40,7 @@ PR 02b IMPLEMENTATION AUTHORIZED AND IN PROGRESS (branch
 > |---|---|
 > | `pr_02a_dataset_profile_injection.md` | **FROZEN / OPERATOR APPROVED** at `cfc83b1e` (2026-08-13) |
 > | `pr_02b_selection_sampleset.md` | **FROZEN / OPERATOR APPROVED** (rev 2, 2026-08-14) |
-> | `pr_02c_systematic_groups.md` | DRAFT — to be revised AFTER 02a lands |
+> | `pr_02c_systematic_groups.md` | **FROZEN / OPERATOR APPROVED** (rev 3, 2026-08-13) |
 > | this parent | LIVING until Step-02 closeout |
 >
 > Expected update points: after 02a merges (child status, any correction
@@ -69,8 +88,8 @@ child-plan detail still to be written.
 | Child | State |
 |---|---|
 | **02a — Dataset Profile injection** | **COMPLETE / MERGED** — PR [#202](https://github.com/Galileo-Sandbox/SIDERIUS/pull/202), merge commit `47359538`, PR head `0d9fc32d`, exact-head CI green. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten |
-| 02b — Selection & SampleSet | **IMPLEMENTATION COMPLETE / READY FOR OPERATOR REVIEW.** Design frozen at `dc26bb75` (revision 2, 2026-08-14); implemented on `feat/generic-framework-step-02b-selection-sampleset`. Ladder CP0 → CP-B1 → Checkpoint A → B → C all **PASS**; evidence in that child's §13 ledger. **NOT MERGED.** Surfaced one finding for this parent to route: §13.9 — a contrast topology is misread as a partial DataScope, because `validate_runtime_config` binds the TIDMAD singleton as a **default argument** while the HealthGate validator reads the ambient profile. Not 02b's to fix (§2 excludes HealthGate; §6.2 holds partial-scope rules unchanged); proposed owner 02c or Step-06 |
-| 02c — Systematic groups (Step FINALIZER) | DRAFT — revised after 02b lands |
+| 02b — Selection & SampleSet | **COMPLETE / MERGED** — PR [#203](https://github.com/Galileo-Sandbox/SIDERIUS/pull/203), merge commit `c17469ec`, PR head `6fcbcdd2`, exact-head CI green (run `31678289746`). Design frozen at `dc26bb75` (revision 2, 2026-08-14). Ladder CP0 → CP-B1 → Checkpoint A → B → C → D all **PASS**; 11 mutations attempted, 11 caught. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten. Surfaced one finding for this parent to route: §13.9 — a contrast topology is misread as a partial DataScope, because `validate_runtime_config` binds the TIDMAD singleton as a **default argument** while the HealthGate validator reads the ambient profile. Not 02b's to fix (§2 excludes HealthGate; §6.2 holds partial-scope rules unchanged); proposed owner 02c or Step-06 |
+| 02c — Task-owned file-set semantics (Step FINALIZER) | **DESIGN FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION** (revision 3, 2026-08-13). Implementation not yet started. Rewritten against merged 02a+02b source after six revision-2 claims were refuted: the three literals are **three** semantics, not one group — `[0,10,19]` DECLARE, `[3,10,17]` DECLARE, `range(20)` DERIVE. Body title reframed to "Task-owned file-set semantics"; filename kept to preserve links from the merged 02a/02b ledgers |
 
 **Step 02 remains IN PROGRESS.** The overall roadmap §15.1 matrix is the
 single cross-step progress authority; the table above is a child-status

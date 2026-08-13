@@ -27,11 +27,11 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks._peek import peek_int8_at_channel
 from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
 
 _MV_PER_LSB: float = 40.0 / 128.0
-_DEFAULT_FILE_RANGE: range = range(20)  # TIDMAD NUM_FILES; via _resolve_files
 
 
 class PearsonDispersionCheck:
@@ -154,8 +154,16 @@ class PearsonDispersionCheck:
         Priority: (1) explicit ``peek_file_indices`` in the check config —
         the run-level monitored-file set (DataScope-aware; see
         docs/design/enable_partial_file_list.md), (2) explicit keys in
-        ``ctx.denoised_paths``, (3) fall back to a fixed 0..19 range via
-        ``ctx.denoised_filename_fn``, (4) empty list when none is available.
+        ``ctx.denoised_paths``, (3) fall back to every file the bound
+        dataset declares, via ``ctx.denoised_filename_fn``, (4) empty list
+        when none is available.
+
+        Tier 3 is "every file". That is DERIVED topology, not a declared
+        group: the profile's ``num_files`` already answers it, and adding
+        an ``all_files`` declaration would create a second authority for
+        something Step 02a already owns. Resolved at CALL time — the
+        module-level ``range(20)`` this replaced was evaluated at import,
+        before any task could be bound.
         """
         configured = cfg.get("peek_file_indices")
         if configured:
@@ -163,5 +171,5 @@ class PearsonDispersionCheck:
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:
-            return list(_DEFAULT_FILE_RANGE)
+            return list(range(resolve_dataset_profile().dataset.num_files))
         return []

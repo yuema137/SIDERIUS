@@ -45,6 +45,12 @@ def validate_experiment_completeness(
     missing = [gate_id for gate_id in configured_gate_ids if gate_id not in by_name]
     if missing:
         errors.append(f"missing HealthGate results: {missing}")
+    # Imported here, and read at CALL time, so a bound task is honoured and
+    # nothing freezes a topology at import. Local import mirrors the
+    # existing convention in `validate_phase1_baseline` below.
+    from execute_tools.dataset_config import resolve_dataset_profile
+
+    declared_health_peek = resolve_dataset_profile().health_peek_files
     for gate_id, result in by_name.items():
         status = result.get("execution_status")
         if status not in {"passed", "failed", "not_run", "error"}:
@@ -54,7 +60,19 @@ def validate_experiment_completeness(
         if status in {"passed", "failed"} and not result.get("metrics"):
             errors.append(f"gate {gate_id}: executed gate has no metrics")
         requested = (result.get("aggregation") or {}).get("files_requested") or []
-        if requested == [3, 10, 17]:
+        # The per-file completeness check applies to gates that peeked the
+        # task's DECLARED health-peek set — the same declaration the
+        # blocking checks resolve, rather than a second hardcoded copy of
+        # TIDMAD's triplet.
+        #
+        # The comparison stays an EXACT ORDERED LIST equality, unchanged.
+        # `requested` is copied verbatim from `peek_file_indices` by
+        # health_checks/evaluation.py:202, and today a reordered list such
+        # as [10, 3, 17] takes the else-branch and is silently NOT
+        # enforced. Comparing as a set, or sorting either side, would
+        # newly ENFORCE those records — a POLICY change disguised as an
+        # authority change. Any improvement here is Step-08 work.
+        if requested == declared_health_peek:
             per_file = (result.get("metrics") or {}).get("per_file") or {}
             absent = [str(index) for index in requested if str(index) not in per_file]
             if absent:

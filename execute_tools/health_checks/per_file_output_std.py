@@ -23,11 +23,11 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.health_checks._peek import peek_int8_at_channel
 from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
 
 _MV_PER_LSB: float = 40.0 / 128.0
-_DEFAULT_FILE_RANGE: range = range(20)
 
 
 class PerFileOutputStdCheck:
@@ -109,12 +109,19 @@ class PerFileOutputStdCheck:
     @staticmethod
     def _resolve_files(ctx: HealthCheckContext, cfg: dict[str, Any]) -> list[int]:
         """Priority: config ``peek_file_indices`` (run-level monitored set,
-        DataScope-aware) > ``ctx.denoised_paths`` keys > 0..19 fallback."""
+        DataScope-aware) > ``ctx.denoised_paths`` keys > every file the
+        bound dataset declares.
+
+        The last tier is DERIVED topology, not a declared group — the
+        profile's ``num_files`` already answers "every file", and it is
+        read at CALL time rather than frozen into a module-level
+        ``range(20)`` at import.
+        """
         configured = cfg.get("peek_file_indices")
         if configured:
             return sorted({int(i) for i in configured})
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:
-            return list(_DEFAULT_FILE_RANGE)
+            return list(range(resolve_dataset_profile().dataset.num_files))
         return []

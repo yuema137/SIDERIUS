@@ -6,6 +6,8 @@ import copy
 import hashlib
 from pathlib import Path
 
+import pytest
+
 from core.campaign_artifacts import (
     decide_phase1_reuse,
     validate_experiment_completeness,
@@ -189,3 +191,180 @@ def test_none_expected_scope_skips_check(tmp_path):
     record = _complete_record(tmp_path, outputs)
     record["resolved_data_scope"] = _PARTIAL_SCOPE
     assert _decision(record, outputs).action == "reuse"
+
+
+# ---------------------------------------------------------------------------
+# Step 02c C1 / §9 row D1 — the per-file completeness POLICY MATRIX
+#
+# ``validate_experiment_completeness`` runs a per-file completeness check
+# only when ``files_requested`` is EXACTLY the shipped default health-peek
+# selection, compared as an ordered list (``campaign_artifacts.py:57``).
+# Every other list — including a REORDERED copy of the same three files —
+# takes the else-branch and is silently NOT enforced.
+#
+# Before PR 02c this whole branch had ZERO coverage: every test above
+# builds ``aggregation: {"files_requested": []}``. PR 02c replaces the
+# literal trigger with the DECLARED health-peek semantic, which is an
+# authority change; the matrix below is the pre-change oracle proving it
+# is not also a POLICY change.
+#
+# The sharpest regression this guards is normalization. Comparing with
+# ``set()`` or ``sorted()`` would make the reordered case newly ENFORCE
+# where it skips today — more enforcing, not merely differently sourced.
+# Any genuine policy improvement is Step-08 work, not 02c's.
+# ---------------------------------------------------------------------------
+
+# The shipped default health-peek selection, spelled as the record's
+# producer spells it (``health_checks/evaluation.py:202`` copies
+# ``peek_file_indices`` verbatim from the effective config).
+_DEFAULT_HEALTH_PEEK = [3, 10, 17]
+
+_PER_FILE_ERROR_MARKER = "missing per-file entries"
+
+
+def _peek_gate_result(
+    gate_name: str,
+    *,
+    files_requested: list[int] | None,
+    per_file: dict | None,
+    include_aggregation: bool = True,
+) -> dict:
+    """A gate observation carrying an explicit ``files_requested`` list.
+
+    ``_gate_result`` above always requests ``[]``; this variant is what
+    actually enters the per-file branch.
+    """
+    result = _gate_result(gate_name)
+    metrics = {"aggregate_statistics": {"count": 3}}
+    if per_file is not None:
+        metrics["per_file"] = per_file
+    result["metrics"] = metrics
+    if include_aggregation:
+        aggregation: dict = {}
+        if files_requested is not None:
+            aggregation["files_requested"] = files_requested
+        result["aggregation"] = aggregation
+    else:
+        result.pop("aggregation", None)
+    return result
+
+
+def _peek_record(**kwargs) -> dict:
+    """Minimal complete record whose single gate carries the peek payload."""
+    gate_id = GATE_IDS[0]
+    return {
+        "denoising_score": -1.0,
+        "file_vector": [1.0] * 20,
+        "checkpoint_path": "/checkpoint.pth",
+        "params": PARAMS,
+        "health_gate_results": [_peek_gate_result(gate_id, **kwargs)],
+    }
+
+
+def _errors(record: dict) -> list[str]:
+    return validate_experiment_completeness(record, configured_gate_ids=[GATE_IDS[0]])
+
+
+def _complete_per_file(indices: list[int]) -> dict:
+    return {str(index): {"execution_status": "passed"} for index in indices}
+
+
+class TestDefaultHealthPeekCompletenessIsEnforced:
+    """D1-a / D1-b — the exact default selection DOES trigger the check."""
+
+    def test_complete_per_file_produces_no_error(self):
+        record = _peek_record(
+            files_requested=list(_DEFAULT_HEALTH_PEEK),
+            per_file=_complete_per_file(_DEFAULT_HEALTH_PEEK),
+        )
+        assert _errors(record) == []
+
+    def test_missing_per_file_entry_is_reported_exactly(self):
+        record = _peek_record(
+            files_requested=list(_DEFAULT_HEALTH_PEEK),
+            per_file=_complete_per_file([3, 17]),
+        )
+        assert _errors(record) == [f"gate {GATE_IDS[0]}: missing per-file entries ['10']"]
+
+    def test_per_file_lookup_is_str_keyed(self):
+        """``str(index) not in per_file`` — an INT-keyed ``per_file`` reads
+        as entirely absent.
+
+        This pins the producer/consumer key-type contract. If the lookup
+        were changed to accept int keys, or the producer started emitting
+        int keys, this record's disposition would silently flip.
+        """
+        record = _peek_record(
+            files_requested=list(_DEFAULT_HEALTH_PEEK),
+            per_file={index: {"execution_status": "passed"} for index in _DEFAULT_HEALTH_PEEK},
+        )
+        assert _errors(record) == [
+            f"gate {GATE_IDS[0]}: missing per-file entries ['3', '10', '17']"
+        ]
+
+    def test_absent_metrics_reports_both_the_metrics_and_per_file_errors(self):
+        """An executed gate with no ``metrics`` at all: today BOTH errors
+        fire. Pinned as-is — collapsing them would lose the per-file
+        signal."""
+        record = _peek_record(files_requested=list(_DEFAULT_HEALTH_PEEK), per_file=None)
+        record["health_gate_results"][0]["metrics"] = {}
+        assert _errors(record) == [
+            f"gate {GATE_IDS[0]}: executed gate has no metrics",
+            f"gate {GATE_IDS[0]}: missing per-file entries ['3', '10', '17']",
+        ]
+
+    def test_incomplete_per_file_forces_retrain(self, tmp_path):
+        """The branch is POLICY, not presentation: an enforced failure
+        reaches ``decide_phase1_reuse`` and rejects reuse."""
+        outputs = [str(tmp_path / "output.h5")]
+        record = _complete_record(tmp_path, outputs)
+        record["health_gate_results"] = [
+            _peek_gate_result(
+                gate_id,
+                files_requested=list(_DEFAULT_HEALTH_PEEK),
+                per_file=_complete_per_file([3, 17]),
+            )
+            for gate_id in GATE_IDS
+        ]
+        decision = _decision(record, outputs)
+        assert decision.action == "train"
+        assert not decision.validation.valid
+        assert any(_PER_FILE_ERROR_MARKER in error for error in decision.validation.errors)
+
+
+class TestNonDefaultRequestedListIsNeverEnforced:
+    """D1-c..D1-f — everything that is not list-equal takes the silent
+    else-branch.
+
+    Each case asserts the per-file error is **ABSENT** with a deliberately
+    EMPTY ``per_file``. Asserting only ``valid`` would pass even if the
+    branch started firing, because a record can be invalid for unrelated
+    reasons.
+    """
+
+    @pytest.mark.parametrize(
+        ("case", "files_requested", "include_aggregation"),
+        [
+            # The anti-normalization guard: same members, different order.
+            # ``set()``/``sorted()`` comparison would newly ENFORCE this.
+            ("reordered_default", [10, 3, 17], True),
+            ("custom_operator_list", [4, 7, 9], True),
+            ("out_of_range_member", [3, 10, 99], True),
+            ("all_files_population", list(range(20)), True),
+            ("explicitly_empty", [], True),
+            ("key_absent", None, True),
+            ("aggregation_absent", None, False),
+        ],
+    )
+    def test_no_per_file_enforcement(self, case, files_requested, include_aggregation):
+        record = _peek_record(
+            files_requested=files_requested,
+            per_file={},
+            include_aggregation=include_aggregation,
+        )
+        errors = _errors(record)
+        assert not any(_PER_FILE_ERROR_MARKER in error for error in errors), (
+            f"{case}: per-file completeness was enforced on a list that is "
+            f"not equal to the default health-peek selection — this is a "
+            f"POLICY change, not an authority change"
+        )

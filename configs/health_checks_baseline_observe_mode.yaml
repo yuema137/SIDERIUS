@@ -10,7 +10,7 @@ health_gates:
         config:
           min_unique_int8_values: 25
           peek_samples: 100000
-          peek_file_indices: [3, 10, 17]
+          peek_file_indices: task_health_peek
           aggregation: any_pass
     on_pass: {action: continue}
     on_fail: {action: continue}
@@ -25,7 +25,7 @@ health_gates:
         config:
           min_std_mv: 1.0
           peek_samples: 100000
-          peek_file_indices: [3, 10, 17]
+          peek_file_indices: task_health_peek
           aggregation: any_pass
     on_pass: {action: continue}
     on_fail: {action: continue}
@@ -40,7 +40,7 @@ health_gates:
         config:
           collapse_threshold: 0.95
           peek_samples: 100000
-          peek_file_indices: [3, 10, 17]
+          peek_file_indices: task_health_peek
           aggregation: any_pass
     on_pass: {action: continue}
     on_fail: {action: continue}
