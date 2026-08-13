@@ -432,7 +432,7 @@ C7  docs + ledger closeout
 | **CHECKPOINT A — extraction parity complete** | **PASS** (2026-08-14, `7cf82570`) | see below |
 | **CHECKPOINT B — generic contrast complete** | **PASS** (2026-08-14, `87d1649e`) | see below |
 | **CHECKPOINT C — live production consumption** | **PASS** (2026-08-14, `ce9582f0`) | see §5b below |
-| Checkpoint D | not reached | — |
+| **CHECKPOINT D — regression / PR readiness** | **PASS** (2026-08-14) | see §5a.3 |
 
 **CP0 PASS — the two conditions, answered.**
 
@@ -682,6 +682,44 @@ otherwise. Under `psd_segment_length=2048` the legal set becomes
 `[128, 256, 512, 1024, 2048]`.
 
 **Zero production diff** — C6's commit touches one file, under `tests/`.
+
+---
+
+### 5a.3 Checkpoint D — regression / PR readiness (2026-08-14)
+
+| Requirement | Evidence |
+|---|---|
+| targeted validation complete | every commit ran its own targeted + affected-package suites; counts recorded per commit |
+| package / integration / mutation evidence | `tests/unit/{execute_tools,core,nodes,agent}` 6814 passed; Checkpoint C integration 9 passed; **14 mutations by failure class, all KILLED** (one after strengthening a guard) |
+| terminal full unit suite | **8624 passed, 3 skipped** from a clean tree; the single failure is the worktree-location artifact analysed in §5a.2, proven locational and neither fixed nor weakened |
+| ruff / format | clean, whole tree |
+| pyright | NOT run locally — recorded honestly as unavailable here; blocking exact-head CI runs it (the job is "Lint + Type + Unit Tests") |
+| PR opened | **#202** |
+| exact-final-head CI green | run `31665411466`, conclusion `success`, `head_sha` `937b1d2a` |
+| CI headSha == PR headRefOid == local HEAD | verified all three equal at `937b1d2a` |
+| clean working tree | yes |
+| live child design synchronized | this document, updated continuously rather than at closeout |
+
+**Note on the closing commit.** This Checkpoint-D record is itself a
+docs-only commit, so it becomes a new head and takes its own CI pass. The
+identity above is stated for the code head `937b1d2a`; the final head's CI
+result and the re-verified three-way identity are confirmed before the PR
+is declared ready, and carried in the PR/handoff rather than re-embedded
+here — a SHA cannot contain its own commit.
+
+## 11. Acceptance — PR 02a
+
+- [x] CP0, CP-A1, CP-A2, CP-A3 PASS
+- [x] Checkpoint A — extraction parity, rendered prompt bytes unchanged
+- [x] Checkpoint B — rungs A1 / A2 / B / D, each single-axis, atomicity machine-checked
+- [x] Checkpoint C — real subprocess boundary, real loaders, real HDF5
+- [x] Checkpoint D — regression / static / exact-head CI
+- [x] `data_shape_class` unchanged: `psd10000000_seg200_files20`
+- [x] ZERO Deliverable-Contract leakage — verified on the diff
+- [x] No profile field without an in-PR consumer
+- [x] Gate 1 NOT required (§7) — no rendered prompt byte moved
+- [ ] Gate 2 — **NOT this child's**; owned once at Step level by 02c
+- [ ] **MERGE — operator only**
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
