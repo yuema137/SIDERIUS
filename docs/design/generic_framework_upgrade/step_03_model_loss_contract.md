@@ -128,11 +128,16 @@ introspection) is the second such precedent.
 
 **Step 03 OWNS:** the normalized single-input/single-output tensor
 contract (rank, ordered axes, semantic axis roles, dtype,
-fixed/symbolic/dynamic dimensions, input↔output relationships); preset
-**resolution** into it; the consistency boundary (FX-3/FX-4 + shared
-Dataset-Profile facts); the canonical output semantic authority; loss
-legality as a **derivation**; contract-keyed **model-boundary dtype
-routing** and cardinality derivation.
+fixed/symbolic/dynamic dimensions — including the **shared symbolic
+dimensions and axis roles** through which input and output alignment is
+expressed); preset **resolution** into it; the consistency boundary
+(FX-3/FX-4 + shared Dataset-Profile facts); the canonical output
+semantic authority; loss legality as a **derivation**; contract-keyed
+**model-boundary dtype routing** and cardinality derivation.
+
+**Step 03 does NOT own a general cross-tensor relationship semantic**
+(§4e) — that is deferred, for the same consumer-less-seam reason as
+multi-tensor I/O.
 
 **Step 03 does NOT own:**
 
@@ -223,7 +228,6 @@ Step-03 v1 represents exactly what is consumed today:
 ONE structured input tensor + ONE structured output tensor
   arbitrary rank · ordered axes · semantic axis roles · dtype
   fixed / symbolic / dynamic dimensions as source-supported
-  relationships between that input and that output
 ```
 
 **No tensor-multiplicity containers** (`inputs: [...]` / `outputs: [...]`)
@@ -233,6 +237,48 @@ roadmap §0 rule 8 forbids. Multi-input/multi-output is recorded as a
 final effect, ownership and capability matrix must not claim it as
 delivered, and **it is not a Stage-B rung** (§11).
 
+### 4e. Cross-tensor relationships — **DEFERRED, no relation DSL** (operator decision)
+
+Revision 2 as first landed listed `input↔output relationships` with
+**zero live consumers** and a disposition of **DECLARE**. That
+contradicted this design's own rule — *a declared field lands without a
+production consumer* is a **STOP** (§21) — and it contradicted the
+reasoning that deferred multi-tensor. Corrected:
+
+> **Step-03 v1 introduces no general cross-tensor relationship
+> declaration and no relationship DSL.**
+
+The alignment that current consumers actually need is already
+expressible **inside the normalized tensor contract**, through shared
+axis roles and shared symbolic dimensions:
+
+```text
+input  axis: role = temporal, dim = symbolic T
+output axis: role = temporal, dim = symbolic T
+                      ^ the SAME symbolic dimension expresses the
+                        alignment — no separate surface required
+```
+
+So this is **NOT** added:
+
+```yaml
+relationships:
+  - output.T == input.T        # consumer-less seam — do not build
+```
+
+Disposition:
+
+- general cross-tensor relationship semantics → **DEFERRED**;
+- shared dimension / axis-role consistency required by today's
+  single-input / single-output consumers → **expressed through the
+  normalized axis and dimension contract**;
+- no relation surface is introduced for future extensibility alone.
+
+**If an implementation pre-read identifies an existing production
+consumer that genuinely requires an independently represented
+relationship semantic, that is a material source finding: STOP and
+report it — do not silently add the field.**
+
 ### 4d. Capability matrix
 
 | Capability | Structured today? | Missing? | Live consumers | Step-03 disposition |
@@ -241,7 +287,8 @@ delivered, and **it is not a Stage-B rung** (§11).
 | fixed / symbolic / dynamic dimensions | prose only | **MISSING as data** | renderers | **DECLARE** |
 | model-boundary dtype | inside a prose string | **MISSING as data** | **6 name-branch sites** | **DECLARE** + Phase B routes from it (§4a) |
 | batch/sample semantics | `B` by convention | **MISSING** | — | **DECLARE** as an axis role |
-| input↔output relationships | — | **MISSING** | — | **DECLARE** |
+| shared symbolic dimension / axis-role alignment between input and output | prose only | **MISSING as data** | renderers | **DECLARE** — as ordinary axis/dimension semantics, not a relation surface (§4e) |
+| general cross-tensor relationship declarations / relation DSL | — | missing | **none** | **DEFER** (§4e) |
 | tensor names / multiplicity | — | missing | **none** | **DEFER** (§4c) |
 | class cardinality | two producers | — | renderer; 27 builtin literals | **DERIVE / CROSS-VALIDATE** (§4b) |
 | `output_type` | 3 competing surfaces | — | validators, loaders | **ONE authority, as a projection** (§8b) |
@@ -711,6 +758,7 @@ session's nine-commit choreography exists as a scratch artifact; its
 | 2 | Did single-in/single-out become a hardcoded TIDMAD shape? | **NO** — rank, axes and roles are declared and varied by 3-A. "One tensor" is a multiplicity bound, not a shape |
 | 3 | Are arbitrary rank/axes genuinely supported without modality branches? | **3-A tests exactly this**; branching on rank/modality is a STOP |
 | 4 | Did multi-tensor sneak back in? | **NO** — §4c forbids containers; not a rung |
+| 4b | Did a consumer-less **relationship DSL** survive? | **NO — corrected before freeze.** The matrix listed `input↔output relationships` as DECLARE with zero live consumers, contradicting §21. Now DEFERRED; alignment rides on shared axis roles + shared symbolic dimensions (§4e) |
 | 5 | Did model dtype duplicate dataset dtype? | **NO** — §4a keeps them distinct |
 | 6 | Did we wrongly require model dtype == dataset dtype? | **NO — corrected in rev 2.** This was the live error; 3-B + 3-B-neg encode the fix |
 | 7 | Is cardinality still duplicated? | **NO** — derived/cross-validated (§4b); 3-E proves it |
@@ -753,6 +801,10 @@ session's nine-commit choreography exists as a scratch artifact; its
   that is a design finding, not a licence to edit;
 - a Stage-B rung needs two axes to be meaningful (§11.1);
 - multi-tensor containers are added without a live consumer;
+- **a general cross-tensor relationship surface or relation DSL is
+  introduced** (§4e) — alignment belongs to shared axis roles and shared
+  symbolic dimensions. If a real production consumer needs an
+  independent relationship semantic, STOP and report the finding;
 - a declared field lands without a production consumer;
 - Step-04 probe/execution or Step-11 loading/IPC mechanics are absorbed;
 - inspection reveals ambiguity or a scope larger than this design
