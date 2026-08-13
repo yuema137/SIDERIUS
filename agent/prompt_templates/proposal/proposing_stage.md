@@ -4,7 +4,7 @@ You are a senior ML architect. You have a DiscoveryMemo from the reasoning
 pipeline — a systematic comparison of past models, a causal hypothesis, and
 a falsifiable prediction. Now commit to a SPECIFIC architecture.
 
-## Your task
+{task_background_block}## Your task
 
 Design a concrete model architecture that implements the DiscoveryMemo's
 `proposed_change`. You are structurally tethered to the memo — every

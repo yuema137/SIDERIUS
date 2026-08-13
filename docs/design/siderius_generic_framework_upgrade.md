@@ -179,9 +179,13 @@ Binding method:
    `InterpretationInput` inline, model_exploration.py:2083); the
    proposer's `template_vars["task_description"]` is supplied but no
    proposal template contains the placeholder (ml_model_proposal_agent
-   .py:1597); `score_vector`'s `anchor_map` parameter is dead in its
-   body (scoring_utils.py:473 vs :575-586, re-verified). Stage A work
-   must land seams WITH their first consumer.
+   .py:1597) — **CLOSED by step 1 / PR 01b (S1-C, `a7ffcccf`): the key
+   is now a rendered `{task_background_block}` consumed by all three
+   pipeline stage SYSTEM prompts; the bare unconsumed key is gone, and
+   the in-code comment that documented an unusable UPPERCASE
+   placeholder was corrected**; `score_vector`'s `anchor_map` parameter
+   is dead in its body (scoring_utils.py:473 vs :575-586, re-verified).
+   Stage A work must land seams WITH their first consumer.
 9. **Task composition is a thin binding layer, not an owner (Rev 2).**
    Independently-owned module configs still eventually need a
    composition/binding root so ONE task can select its dataset/input
@@ -686,13 +690,23 @@ estimator ×256 terms (§7d derives from this module's profile).
 - forbidden_pattern_skill assumes named time axes + "T ≥ 80,000".
 - Personas/budgets hardcoded ("signal denoising"; "<10 GB VRAM, <100M
   params" — contradicting the runtime [HARDWARE CONTEXT] block that
-  already exists).
+  already exists). **PROPOSER half CLOSED by step 1 / PR 01b (S1-E,
+  `5dee6c4a`)**: two numeric budget literals this inventory had NOT
+  catalogued — `~100M` in `PROPOSAL_REASONING_PROMPT` and "the 10 GB
+  VRAM budget" in `causal_reasoning_stage.md` — were repointed at the
+  live effective cap, and the two guard blind spots that hid them were
+  closed (the contamination scan set did not include
+  `PROPOSAL_REASONING_PROMPT` at all, and the pin matched only the exact
+  string `<10 GB VRAM`). The IMPLEMENTOR literal at :363 remains open
+  (§6.3, §14).
 - Custom-loss dummy probe classifier-shaped only (a declared-regressor
   custom loss cannot pass — genuine gap).
 - Already generic (preserve as Stage-A precedents): declared
   output_type flows end-to-end and probes DERIVE shapes from it;
   name-blind compat; fail-closed get_output_type; {TASK_BACKGROUND}/
-  {OUTPUT_SHAPE} injection on 2 of 3 prompt surfaces; PR E funnel
+  {OUTPUT_SHAPE} injection on 2 of 3 prompt surfaces (**step 1 / PR 01b
+  extended task-background rendering to the third surface — all three
+  pipeline stage SYSTEM prompts, both exploration modes**); PR E funnel
   name-blind on system-minted candidate_id.
 
 #### 6.2 Target generic responsibility
@@ -714,6 +728,16 @@ defers to the live [HARDWARE CONTEXT] block
 context + vram_budget_gb at :1049,:1512) — the correct precedent. The
 one stale literal (implementor :363 "<10 GB VRAM, <100M parameters")
 is fixed by DERIVING from the same runtime block, not by a new field.
+**Status after step 1 (PR 01b / S1-E):** the proposer surface is now
+clean and, more importantly, GUARDED — `test_prompt_ceiling_policy.py`
+gained a concept detector (`_numeric_capacity_literals`: a magnitude
+with a size/count unit within 90 normalised chars of capacity language)
+over a scan set that now includes `PROPOSAL_REASONING_PROMPT`. The
+implementor literal is deliberately UNTOUCHED and remains this row's
+work; the detector is directly reusable for it. Step 1 also proved the
+precedent end-to-end: in Gate 1 a real gpt-5.5 returned constraints
+citing "Usable VRAM cap is 25.07 GB on the RTX 5090", derived from the
+live block rather than any prompt literal.
 #### 6.4 TIDMAD compatibility
 Rendered proposer/implementor/validator prompts EXACT golden equality;
 generated plugin file byte-identical for a fixed spec under the TIDMAD
@@ -1125,8 +1149,27 @@ would make them vacuous. Nothing is deleted.
 - 13.4-A task-description text only: the in-tree _ALT_TD string with
   the TIDMAD forward contract, rendered through every producing node
   with zero SQUID residue in the description-derived blocks.
+  **LANDED for the PROPOSER group by step 1 / PR 01b (S1-C2,
+  `e67b4651`)** — both description variants render in ONE process, the
+  residue assertion is scoped to the description-derived block (a
+  whole-prompt form is unsatisfiable while the contract stays TIDMAD's),
+  and axis isolation is asserted in its strongest form: delete the block
+  from both renders and the remainders are byte-identical. The
+  implementor/validator producing nodes remain step 4's half.
 - 13.4-B forward contract only: the in-tree regressor ForwardContract
   (test_task_config.py:267-292) with the TIDMAD description.
+**Residue-surface consequence of step 1 (later steps must know this).**
+The shipped `task_description` itself contains `[B, T]` and
+`[B, 256, T]` (`configs/task_config.yaml`). Before step 1 that text
+reached only the LEGACY reasoning prompt; after PR 01b it also renders
+into ALL THREE pipeline stage SYSTEM prompts. Any later residue
+assertion (step 3's DQ-3, step 4's prompt sweep, any contrast rung) must
+therefore stay scoped to the block it is testing — a whole-prompt
+"no `[B, 256, T]` anywhere" assertion is now unsatisfiable on three more
+surfaces, and is a test-design error rather than a production defect.
+Step 1's own whitelist and scoping discipline are in
+`step_01_proposer_hypothesis_space.md` §9.5.
+
 #### 13.5 Follow-up
 `docs/design/generic_framework_upgrade/step_04_candidate_creation_mechanics.md` (likely
 split per node group; the proposer group is 6-P's doc, step 1).
@@ -1150,7 +1193,7 @@ evidence.
 | Sample-shape legality (divisibility) | §4, §6, §7b | 3 enforcement layers | YES | §4 | NO | ≥2 completed designs (§4 + §6, the duplicate site) |
 | Seg-size fallback defaults (40000/1000) | §7d, §7e, §9, §6 | bare .get defaults post-B1-resolver | UNKNOWN (deliberate margins vs drift) | §7d resolver | NO | audit in §7d design |
 | Value encoding (+128/int8/256) | §4, §5, §7c, §7e, §8 | independent literals | YES conceptually | §4 declares, §5 derives | NO | §4+§5 designs |
-| Resource-budget prose (10GB/100M) | §6, §7d | prompt literals vs runtime hardware block | NO (prose vs measured) | NONE — derive from the runtime [HARDWARE CONTEXT] precedent (ml_model_proposal_agent.py:282-284); delete the stale implementor literal | resolved by review | n/a |
+| Resource-budget prose (10GB/100M) | §6, §7d | prompt literals vs runtime hardware block | NO (prose vs measured) | NONE — derive from the runtime [HARDWARE CONTEXT] precedent (ml_model_proposal_agent.py:282-284); delete the stale implementor literal | resolved by review | n/a — **PROPOSER side DONE (step 1 / PR 01b S1-E: two literals removed AND the guard blind spots closed); implementor :363 still OPEN** |
 | data_shape_class measurement key | §4, §7e | geometry-derived string | YES | UNKNOWN (emit/consume split is a hypothesis) | NO | ≥2 completed designs (§4 + §7e) incl. the key-stability plan |
 | Baseline-config authority | §7a prompts, run_comparison, legacy_baseline_configs.json | paper-spec JSON + prompt prose | UNKNOWN | out of scope (frozen paper alignment) | NO | none — stays frozen |
 
@@ -1297,7 +1340,7 @@ production consumer that proves the seam); **Deps** = must land before;
 | Module | Step | Final effect | A (parity) | B (contrast dimension) | C (live integration) | Deps | Design | Status |
 |---|---|---|---|---|---|---|---|---|
 | Golden baseline harness | 0 | Every behavior later extraction PRs claim to preserve has a trustworthy, reviewable baseline BEFORE any production refactoring | n/a (it CREATES the baselines) | n/a | baselines consumed by every later Stage-A checkpoint | — | `step_00_golden_baseline_harness.md` | **COMPLETE — MERGED** (PR #198, e80da078, 2026-08-12; Checkpoints 0/D/E met; closure audit reconciled; zero production diff) |
-| 6-P Proposer hypothesis-space & prompts | 1 | Proposer prompts DERIVE from the declared task profile: task facts + contract PROSE (shapes/classes/task_type/loss legality) render from existing authorities instead of literals; TIDMAD proposals unchanged. Scope limits (3rd review, F2): the dataset-constraints block stays regime-A on the singleton until step 2; contract SEMANTICS stay §5-owned — 6-P only renders the declaration | rendered proposer prompts (all 3 stages incl. commit) EXACT-equal for TIDMAD + same kwargs reach LLMBridge (§2 nondeterministic surface) | 13.4-A (task-description text) + 13.4-B (declared forward contract, PROSE-rendering only) | the PRODUCTION proposer renders from the profile in a real chain iteration; contract-reassertion pins re-targeted to profile-parameterized form IN THIS PR (its design states the semantic change) | 0 (constraints-block slice completes after step 2) | `step_01_proposer_hypothesis_space.md` | **IN PROGRESS** — child PR 01a (contract/loss PROSE rendering, 13.4-B) MERGED as PR #199 (`39f89f52`, 2026-08-12); child PR 01b (task-description JOIN, 13.4-A) UNBLOCKED / NOT STARTED |
+| 6-P Proposer hypothesis-space & prompts | 1 | Proposer prompts DERIVE from the declared task profile: task facts + contract PROSE (shapes/classes/task_type/loss legality) render from existing authorities instead of literals; TIDMAD proposals unchanged. Scope limits (3rd review, F2): the dataset-constraints block stays regime-A on the singleton until step 2; contract SEMANTICS stay §5-owned — 6-P only renders the declaration | rendered proposer prompts (all 3 stages incl. commit) EXACT-equal for TIDMAD + same kwargs reach LLMBridge (§2 nondeterministic surface) | 13.4-A (task-description text) + 13.4-B (declared forward contract, PROSE-rendering only) | the PRODUCTION proposer renders from the profile in a real chain iteration; contract-reassertion pins re-targeted to profile-parameterized form IN THIS PR (its design states the semantic change) | 0 (constraints-block slice completes after step 2) | `step_01_proposer_hypothesis_space.md` | **IN PROGRESS (both children implemented; 01b awaiting operator merge)** — child PR 01a (contract/loss PROSE rendering, 13.4-B) MERGED as PR #199 (`39f89f52`, 2026-08-12); child PR 01b (task-description JOIN, 13.4-A) IMPLEMENTED and READY FOR OPERATOR REVIEW as PR #201 — final executable head `6b259b93`; CP1/CP2/CP3, Checkpoint C, Gate 1 and Gate 2 all PASS; terminal suite 8540 passed / 3 skipped; exact-head CI green incl. strict pyright. **A-cell exception applies (OD-S1-8): 01b intentionally changed rendered TIDMAD bytes on the three stage SYSTEM prompts (+262 chars each), with declared golden sets R2 (six `pb3_*_system.txt`) and R3 (the new legacy reasoning golden + two `pb3_causal_*`), each change mechanically attributable.** Row flips to COMPLETE on merge |
 | §4 Dataset & sample topology | 2 | All dataset-semantic behavior under §4 OWNERSHIP (topology, geometry, selection, groups, input identity/indexing) resolves from the task's Dataset Profile, and MIGRATED consumers no longer independently restate those semantics. Launcher/orchestration/execution-infrastructure task-binding residue (workflow TIDMAD binding, sandbox data-dir, runtime-control fallbacks, cleanup globs) remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination (freeze reconciliation 1) | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `step_02_dataset_sample_topology.md` | NOT STARTED |
 | §5 Model/loss contract | 3 | A task declares a different model I/O contract (classes, dtype, output forms) and models/losses/probes DERIVE from it; builtins byte-identical under TIDMAD | builtin forwards byte-identical; registry contents identical; guardrail targets extended; PRIOR ON-DISK GENERATED PLUGINS remain loadable or a workspace boundary is declared (§2 records surface) | atomic ladder §5.5 (class count / input contract / output type / custom-loss capability) | executor dtype routing + VRAM-probe recipes consume the contract in production | 0, §4 (encoding declaration) | `step_03_model_loss_contract.md` | NOT STARTED |
 | 6-M Candidate-creation mechanics (+ §13 remainder) | 4 | Generated candidates (plugin/test/description) are produced AND validated against the declared contract with zero task literals; every LLM node's task content comes from the profile | generated plugin byte-identical for a fixed spec; validator verdicts identical; ALL remaining rendered prompts EXACT-equal + same kwargs reach LLMBridge; prior-plugin loadability (§2 records surface) | atomic ladders §6.5 + §13.4 (class count / shape / output type / description text / contract) | production implementor+validator emit/validate a candidate from the profile; all nodes render from it | 1, 2, 3 | `step_04_candidate_creation_mechanics.md` (canonical; may propose a step_04a split) | NOT STARTED |
@@ -1436,6 +1479,7 @@ campaign per module.
 | D9 | Retire vs re-scope collapse_detection_framework_generic.md's unbuilt machinery | needs §8 design; default retire |
 | D10 | Dead seams disposition (tune→interp protocol; validation_file_pattern gains consumers in §4/§10 or is dropped) | per owning module's design |
 | D11 | CLAUDE.md task-agnostic claim + seam-authority pointer update | with the first landed module PR |
+| D13 | **Flexible-input rungs FX-3 (preset resolution) and FX-4 (preset-vs-explicit mismatch, fail-closed BEFORE the LLM boundary)** — deferred BY step 1, which could not land them: no preset mechanism exists in-tree, and step 1 cannot fail closed on a conflict it has no way to represent. Step 1 landed FX-1/FX-2/FX-5 as PROSE contrasts only, which prove template rank-agnosticism at the PROMPT layer and claim nothing about structured arbitrary-tensor support. **Owner: the contract owner (step 2 §4 / step 3 §5) MUST land both rungs with its structured contract** — see `step_01_proposer_hypothesis_space.md` §6A.5, §9.4 | blocked on a structured contract that can REPRESENT a preset and a conflict; recorded so the obligation is not lost when step 1 closes |
 | D12 | Task-composition root's physical representation (file layout/schema; when legacy-adapter defaulting is retired per §2 regime split) | by §0 rule 9: after several module configs exist; the composition design also fixes the binding switch from regime A to regime B |
 
 ## 19. Detailed-design documents this roadmap requires

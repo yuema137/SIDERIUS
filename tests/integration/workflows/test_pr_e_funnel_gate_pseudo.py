@@ -129,7 +129,13 @@ def _disable_sleeps(monkeypatch):
     monkeypatch.setattr(_time, "sleep", lambda *a, **kw: None)
 
 
-def _real_proposer_cls():
+def _real_proposer_cls(captured_system_prompts: list[str] | None = None):
+    """Real proposer, mocked bridge.
+
+    ``captured_system_prompts`` (PR 01b / S1-C) collects every SYSTEM
+    prompt the proposer actually hands to the bridge, so the caller can
+    assert on the bytes the LLM boundary received.
+    """
     from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
     class _RealProposerMockBridge:
@@ -145,7 +151,11 @@ def _real_proposer_cls():
             self.bridge = self._agent.bridge
 
         def run(self, inp):
-            return self._agent.run(inp)
+            output = self._agent.run(inp)
+            if captured_system_prompts is not None:
+                for call in self.bridge.generate_text.call_args_list:
+                    captured_system_prompts.append(call.args[0])
+            return output
 
     return _RealProposerMockBridge
 
@@ -220,6 +230,7 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
 
     workspace = str(tmp_path)
     run_name = "e4_gate"
+    proposer_system_prompts: list[str] = []
 
     # Step 0 seed: run_workflow loads the source model's prior output
     # before any agent runs.
@@ -250,7 +261,10 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
         )
         MockInterp.return_value.run.return_value = _INTERP
         stack.enter_context(
-            patch("workflows.model_exploration.MLModelProposalAgent", _real_proposer_cls())
+            patch(
+                "workflows.model_exploration.MLModelProposalAgent",
+                _real_proposer_cls(proposer_system_prompts),
+            )
         )
         stack.enter_context(
             patch("workflows.model_exploration.MLModelImplementor", _real_implementor_cls())
@@ -298,6 +312,29 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
             trial_time_budget_minutes=None,
             health_gate_enabled=False,
         )
+
+    # ---- PR 01b (S1-C): the workflow actually DELIVERS the task config ---
+    # `run_workflow` injects the shipped description post-hoc, right
+    # before the proposer runs (`model_exploration.py`, the
+    # `propose_input.task_description = get_task_description(_task_cfg)`
+    # hop). Nothing else in the repository exercises that hop through the
+    # real workflow: every unit-tier proposer test builds its own
+    # ProposalInput, so deleting the injection leaves them all green.
+    #
+    # Mutation M-6 (parent §15) is exactly that deletion, and this is its
+    # RED target. It is asserted on whichever proposer SYSTEM surface this
+    # Gate renders — the LEGACY reasoning prompt, because the Gate passes
+    # no `llm_config` (so `propose=None` selects the legacy path). The
+    # three-stage pipeline JOIN is proven separately by the S1-C unit
+    # captures, the six regenerated PB-3 goldens, and Checkpoint C.
+    from workflows.task_config import get_task_description, load_task_config
+
+    shipped_description = get_task_description(load_task_config())
+    assert proposer_system_prompts, "the real proposer never reached the LLM boundary"
+    assert any(shipped_description in system for system in proposer_system_prompts), (
+        "the workflow's task-config injection did not reach the proposer's "
+        "rendered SYSTEM prompt — the shipped task description is missing"
+    )
 
     iter_dir = os.path.join(workspace, run_name, "iteration_001")
 

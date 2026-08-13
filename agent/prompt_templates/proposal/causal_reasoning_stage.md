@@ -4,7 +4,7 @@ You are a senior ML research scientist. You have just reviewed a systematic
 comparison of all candidate models (Stage 1 output). Now form a CAUSAL
 HYPOTHESIS about what to try next.
 
-## Your task
+{task_background_block}## Your task
 
 Based on the comparisons, propose what to try next and articulate WHY it
 should improve performance. Your output is the core of the DiscoveryMemo —
@@ -143,7 +143,7 @@ A JSON object with these fields:
 
 3. **Devil's advocate**: name at least one realistic failure mode. "It might
    not work" is not a failure mode. "The FNO layer doubles memory usage and
-   may exceed the 10 GB VRAM budget" is.
+   may exceed the Effective cap in [HARDWARE CONTEXT]" is.
 
 4. **Architecturally tethered**: the `proposed_change` must be concrete
    enough for the proposing stage (Stage 3) to implement it unambiguously.

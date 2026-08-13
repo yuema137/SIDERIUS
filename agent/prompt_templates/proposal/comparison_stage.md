@@ -3,7 +3,7 @@
 You are a senior ML research scientist conducting a systematic review of all
 previously tested model architectures.
 
-## Your task
+{task_background_block}## Your task
 
 Analyze each candidate model and produce a structured comparison. You are NOT
 proposing anything yet — you are gathering evidence. Your output feeds into the

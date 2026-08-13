@@ -18,9 +18,9 @@ and 7), jointly constituting that step's acceptance entry.
 | Step | Document | Status (mirror of §15.1) |
 |---|---|---|
 | 00 | [`step_00_golden_baseline_harness.md`](./step_00_golden_baseline_harness.md) | COMPLETE — merged (PR #198, 2026-08-12) |
-| 01 | [`step_01_proposer_hypothesis_space.md`](./step_01_proposer_hypothesis_space.md) (parent) | **IN PROGRESS** — FROZEN (OD-S1-5); child 01a merged, child 01b unblocked |
+| 01 | [`step_01_proposer_hypothesis_space.md`](./step_01_proposer_hypothesis_space.md) (parent) | **IN PROGRESS** — FROZEN (OD-S1-5); child 01a merged, child 01b implemented and awaiting operator review |
 | 01a | [`step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md) | **COMPLETE — merged (PR #199, 2026-08-12, merge commit `39f89f52`)** |
-| 01b | [`step_01_proposer_hypothesis_space/pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md) | intentional task-description JOIN — **UNBLOCKED / NOT STARTED** (PR 01a merged) |
+| 01b | [`step_01_proposer_hypothesis_space/pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md) | intentional task-description JOIN — **IMPLEMENTED, READY FOR OPERATOR REVIEW — NOT MERGED** (2026-08-12). CP1/CP2/CP3, Checkpoint C, Gate 1 and Gate 2 all PASS; terminal suite green |
 | 02 | `step_02_dataset_sample_topology.md` | not created |
 | 03 | `step_03_model_loss_contract.md` | not created |
 | 04 | `step_04_candidate_creation_mechanics.md` | not created |
