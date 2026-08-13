@@ -1365,7 +1365,19 @@ oracle exists. Audited at `f865038f`:
       byte-identical** against `HEAD:configs/task_config.yaml`.
       `load_task_config` now resolves at the production entry point, so
       M1 and M2 have live consumers.
-- [ ] **M5 — Phase B: requirement-resolved input dtype (§4a.1 A-1).**
+- [x] **M5 — Phase B: requirement-resolved input dtype — LANDED.**
+      `execute_tools/model_input_dtype.py` — `resolve_input_dtype` is the
+      single entry point the three sites call; `RUNTIME_SUPPORTED_DTYPES`
+      is the runtime-capability half of A-1's intersection.
+      `ml_models/models_sandbox.BUILTIN_INPUT_DTYPES` declares only `fcnet`.
+      Transport mirrors `--dataset_profile_json` exactly: `--model_io_json`
+      on both engines, `_write_model_io_config` on the parent,
+      `load_model_io_contract` fail-closed on the child.
+      **A6 passes UNMODIFIED (30 passed)** against the migrated path, and
+      `git diff` shows the A6 module untouched. Zero input-dtype name
+      branches remain. Q7/Q8 proven. **51 passed** with A6.
+      *(superseded planning text below kept for provenance)*
+- [ ] ~~**M5 — Phase B: requirement-resolved input dtype (§4a.1 A-1).**~~
       The three dtype sites of F-2, following the `get_target_torch_dtype`
       precedent on the adjacent line (`train_engine_sandbox.py:668`).
       Resolution is `model-admissible ∩ runtime-supported`, honouring the
@@ -1678,6 +1690,91 @@ test-only commit; tests never write goldens"* — with the attribution above
 recorded in its `_captured_at` note. Following the Step-01 OD-S1-8
 precedent: a declared golden delta, mechanically attributable, never a
 silent regeneration.
+
+#### M5 — contract-keyed model-boundary input dtype (Phase B)
+
+```text
+modules  execute_tools/model_input_dtype.py     NEW — the resolver
+         ml_models/models_sandbox.py            BUILTIN_INPUT_DTYPES
+         ml_models/models_format_sandbox.py     DtypeAdmissibility moved here
+         execute_tools/train_engine_sandbox.py  2 dtype sites + --model_io_json
+         execute_tools/inference_single.py      1 dtype site + --model_io_json
+         core/sandbox_executor.py               _write_model_io_config + 2 spawns
+tests    tests/unit/execute_tools/test_step03_m5_input_dtype_resolution.py
+result   51 passed with A6, pytest rc 0; ruff clean
+```
+
+**A6 passes UNMODIFIED.** `git diff` over
+`test_step03_a6_model_boundary_dtype.py` is empty and the module is green
+against the migrated path — the concrete matrix (embedding arm int32 /
+int32 / int64, `fcnet` float32 ×3) is byte-exact while the model-name
+branches are gone from the data path.
+
+**Zero input-dtype name branches remain.** The only surviving
+`== "fcnet"` occurrences are the three CONSTRUCTOR branches of F-2 —
+audited and deliberately not migrated — plus two comments naming what was
+replaced. A test asserts the count did not grow and that no dtype cast
+sits on one.
+
+```text
+Previous implementation assumption
+  The task's Model-I/O contract alone determines the model-boundary dtype.
+
+Source evidence
+  A6 shows `fcnet` is fed float32 while every other builtin is fed an
+  integer, under the SAME task. One task-level contract cannot express
+  both, and the shipped contract declares ("int64", "int32") — which
+  `fcnet` does not accept in production.
+
+Corrected implementation understanding
+  Admissibility is resolved with a documented PRECEDENCE, mirroring
+  `plugin_loader.get_output_type`'s builtin-then-registry lookup:
+    1. the model's OWN declaration (`BUILTIN_INPUT_DTYPES`), when it has
+       one — a model whose requirement genuinely differs;
+    2. otherwise the TASK contract, which is the declaration rendered to
+       the LLM and therefore what any model built for this task must meet.
+  Not two authorities: one lookup, and the task contract answers for every
+  model that does not override.
+
+Implementation consequence
+  Only `fcnet` declares, and its absence elsewhere is the design: a
+  registry listing every builtin would become a second place to look up
+  every model's dtype. `fcnet` declares `("float32",)` ALONE even though
+  A6 shows it would also RUN under int32/int64 — a permissive declaration
+  would let the training site's int32 preference win and silently change
+  the tensor `fcnet` is fed.
+
+Validation consequence
+  `fcnet` becomes the LIVE production case for §24.9 Q7: its site
+  preference is inadmissible at every boundary, so every real training and
+  inference run exercises the supported-alternative path. Q7 is not a
+  synthetic rung.
+```
+
+**§24.9 Q7 and Q8, now answerable against code.**
+
+| # | Question | Answer, with evidence |
+|---|---|---|
+| **Q7** | can a supported non-default concrete dtype be selected when the legacy site preference is inadmissible? | **YES** — and `fcnet` takes that path in production. The selected alternative is the contract's canonical `admissible[0]` filtered to runtime support, so it is deterministic |
+| **Q8** | does an empty model-admissible ∩ runtime-supported intersection fail closed? | **YES** — `UnsupportedModelInputDtypeError`, naming the declared set and the supported set. A `bfloat16`-only requirement is expressible and refused; a partially-supported requirement still resolves |
+
+**Transport.** `--model_io_json` mirrors `--dataset_profile_json` in
+shape and in its two-case rule: *supplied but broken* fails closed with a
+diagnostic naming the path; *absent* is the Regime-A adapter. Scoring is
+deliberately NOT given the contract — it feeds no model, so a dtype
+requirement would have no consumer there.
+
+**Layering.** `DtypeAdmissibility` moved from `agent/schemas/` to
+`ml_models/models_format_sandbox.py` (re-exported), for the same reason as
+`OutputSemantic` at M3: `ml_models` must not import `agent`, and the
+builtin catalogue has to declare admissibility. The resolver itself lives
+in `execute_tools/` because it needs both `torch` and the contract.
+
+*Test defect found and fixed during M5*: the no-name-branch assertion
+scanned raw source and matched the resolver's own DOCSTRING, which quotes
+the branch it replaced. It now parses the function with `ast`, drops the
+docstring and asserts over executable code — a test reading prose as if
+it were code is a test that will lie in the other direction later.
 
 ### 24.7 Mutation dossier
 

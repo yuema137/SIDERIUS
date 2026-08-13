@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from ml_models.models_format_sandbox import (
     AEConfig,
+    DtypeAdmissibility,
     GatedFNOConfig,
     PUNetConfig,
     RNNSeq2SeqConfig,
@@ -740,6 +741,35 @@ BUILTIN_OUTPUT_TYPES = {
     "wavenet": "classifier",
     "rnn": "classifier",
     "gated_fno": "classifier",
+}
+
+#: Model-boundary INPUT dtype admissibility, where a builtin's requirement
+#: differs from the task's declared Model-I/O contract — Step 03 §4a.1 (A-1).
+#:
+#: A DECLARATION registry keyed by model type, exactly like
+#: ``BUILTIN_OUTPUT_TYPES`` above and ``LOSS_TARGET_DTYPE_REGISTRY`` on the
+#: target side (audit row 12). That is categorically different from the
+#: ``if model_type == "fcnet":`` branch it replaces in the training and
+#: inference data paths: a declaration is data a model owns about itself,
+#: whereas the branch was execution logic reasoning about a name.
+#:
+#: **Only ``fcnet`` appears, and its absence elsewhere is the point.** Every
+#: other builtin accepts the task contract's declared admissibility, so it
+#: declares nothing and resolution falls through to the task contract. A
+#: model appears here only when it genuinely differs — which keeps this from
+#: becoming a second, parallel place to look up every model's dtype.
+#:
+#: ``fcnet`` is the legacy autoencoder arm (``hybrid``, §8c): production has
+#: always fed it float32. Declaring ``float32`` ALONE is deliberate — baseline
+#: A6 shows fcnet would also *run* under int32/int64 via its embedding path,
+#: so a permissive declaration would let a training site's int32 preference
+#: win and silently change the tensor fcnet is fed. Declaring exactly what
+#: production feeds it is what keeps the A6 matrix exact, and it makes fcnet
+#: the live production case for §24.9 Q7: a site preference that is NOT
+#: admissible, resolved to a supported admissible alternative instead of
+#: failing.
+BUILTIN_INPUT_DTYPES: dict[str, DtypeAdmissibility] = {
+    "fcnet": DtypeAdmissibility(admissible=("float32",)),
 }
 
 # Extend MODEL_REGISTRY with any agent-generated plugin models.

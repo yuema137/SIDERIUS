@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ==========================================
 # 1. Base Model Configuration
@@ -49,7 +51,7 @@ class PUNetConfig(BaseConfig):
         return v
 
     @model_validator(mode="after")
-    def check_dimension_reduction(self) -> "PUNetConfig":
+    def check_dimension_reduction(self) -> PUNetConfig:
         """
         Physical/Architecture Constraint:
         Ensures segmentation_size is large enough to sustain the chosen depth.
@@ -113,7 +115,7 @@ class TransformerConfig(BaseConfig):
     pe_factor: float = Field(default=1.0, ge=0.0, le=10.0)
 
     @model_validator(mode="after")
-    def check_memory_risk(self) -> "TransformerConfig":
+    def check_memory_risk(self) -> TransformerConfig:
         if self.segmentation_size > 25000:
             # We could raise a warning here if we had a logger,
             # for now, we just keep it as a known risk.
@@ -372,6 +374,63 @@ CLASSIFICATION_LOSSES: frozenset[str] = frozenset({"ce", "focal", "focal_cw"})
 REGRESSION_LOSSES: frozenset[str] = frozenset({"smooth_l1"})
 
 
+class DtypeAdmissibility(BaseModel):
+    """Which concrete dtypes the model boundary will accept — **A-1**.
+
+    This is the amendment's core correction (§4a.1). The contract owns an
+    *admissibility requirement*, **not** a concrete cast, because baseline
+    A6 proved there is no single shipped concrete dtype to own: the
+    embedding-arm builtins are fed int32 in training and int64 in
+    inference, and both are correct.
+
+    ```text
+    model-admissible  ∩  runtime-supported  ->  deterministic concrete dtype
+                                            ->  empty = typed fail-closed
+    ```
+
+    **Extensible by construction.** ``admissible`` is an ordered tuple of
+    normalized dtype names, not a closed enum, so representing a model
+    that requires ``float16``, ``bfloat16``, ``float64``, ``bool`` or
+    ``complex64`` needs no schema redesign. Execution support for those
+    stays capability-gated: expressing a requirement is not a claim that
+    the adaptation path can materialize it. Today only ``int32``,
+    ``int64`` and ``float32`` are *validated* as executable (A6).
+
+    **Order is meaning.** ``admissible[0]`` is the contract's CANONICAL
+    representation: it is what renders into LLM-facing prose, and it is
+    the deterministic tie-break when no execution site expresses a
+    preference. A site's own preferred dtype still wins whenever it is
+    admissible — that is what keeps TIDMAD's concrete matrix exact — but
+    a site preference is compatibility behaviour, never model semantics
+    (§4a.1), so it lives at the site and never in this model.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    admissible: tuple[str, ...] = Field(
+        min_length=1,
+        description="Ordered normalized dtype names the model boundary "
+        "accepts. admissible[0] is the canonical representation used for "
+        "rendering and as the deterministic default.",
+    )
+
+    @model_validator(mode="after")
+    def _no_duplicates(self) -> DtypeAdmissibility:
+        """A repeated dtype makes 'the canonical one' ambiguous to a reader
+        and hides an authoring mistake behind a set-like intersection."""
+        if len(set(self.admissible)) != len(self.admissible):
+            raise ValueError(f"duplicate dtype in admissible={self.admissible!r}")
+        return self
+
+    @property
+    def canonical(self) -> str:
+        """The representation shown to an LLM and used as the default."""
+        return self.admissible[0]
+
+    def admits(self, dtype_name: str) -> bool:
+        return dtype_name in self.admissible
+
+
 class OutputSemantic(StrEnum):
     """The canonical output semantic — Step 03 §8b.
 
@@ -598,7 +657,7 @@ class LossConfig(BaseModel):
     # non-``smooth_l1`` loss type.
 
     @model_validator(mode="after")
-    def enforce_custom_loss_name(self) -> "LossConfig":
+    def enforce_custom_loss_name(self) -> LossConfig:
         """Custom mode requires ``loss_name``; non-custom modes forbid it.
 
         This pair of checks prevents two silent-failure modes:
@@ -624,7 +683,7 @@ class LossConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def enforce_parameter_consistency(self) -> "LossConfig":
+    def enforce_parameter_consistency(self) -> LossConfig:
         """
         Ensures that only relevant parameters are active for the selected loss_type.
         This prevents the Agent from 'hallucinating' cross-parameter optimizations.
@@ -697,7 +756,7 @@ class ExperimentConfig(BaseModel):
     loss_config: LossConfig
 
     @model_validator(mode="after")
-    def validate_architecture_loss_match(self) -> "ExperimentConfig":
+    def validate_architecture_loss_match(self) -> ExperimentConfig:
         """
         Enforce the physical constraint: loss type must match model output type.
 

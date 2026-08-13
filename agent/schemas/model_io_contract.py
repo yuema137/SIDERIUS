@@ -38,7 +38,25 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ml_models.models_format_sandbox import OutputSemantic, legacy_output_type_for
+from ml_models.models_format_sandbox import (
+    DtypeAdmissibility,
+    OutputSemantic,
+    legacy_output_type_for,
+)
+
+# Re-exported so a reader of the contract finds every part of it here.
+# `DtypeAdmissibility` lives in `ml_models` for the same layering reason as
+# `OutputSemantic`: `agent` imports `ml_models` and not the reverse, and the
+# builtin catalogue in `ml_models/models_sandbox.py` must be able to declare
+# a model's admissibility.
+__all__ = [
+    "AxisRole",
+    "Dimension",
+    "DtypeAdmissibility",
+    "ModelIOContract",
+    "TensorAxis",
+    "TensorContract",
+]
 
 
 class AxisRole(StrEnum):
@@ -133,63 +151,6 @@ class Dimension(BaseModel):
         if self.symbolic is not None:
             return self.symbolic
         return "..."
-
-
-class DtypeAdmissibility(BaseModel):
-    """Which concrete dtypes the model boundary will accept — **A-1**.
-
-    This is the amendment's core correction (§4a.1). The contract owns an
-    *admissibility requirement*, **not** a concrete cast, because baseline
-    A6 proved there is no single shipped concrete dtype to own: the
-    embedding-arm builtins are fed int32 in training and int64 in
-    inference, and both are correct.
-
-    ```text
-    model-admissible  ∩  runtime-supported  ->  deterministic concrete dtype
-                                            ->  empty = typed fail-closed
-    ```
-
-    **Extensible by construction.** ``admissible`` is an ordered tuple of
-    normalized dtype names, not a closed enum, so representing a model
-    that requires ``float16``, ``bfloat16``, ``float64``, ``bool`` or
-    ``complex64`` needs no schema redesign. Execution support for those
-    stays capability-gated: expressing a requirement is not a claim that
-    the adaptation path can materialize it. Today only ``int32``,
-    ``int64`` and ``float32`` are *validated* as executable (A6).
-
-    **Order is meaning.** ``admissible[0]`` is the contract's CANONICAL
-    representation: it is what renders into LLM-facing prose, and it is
-    the deterministic tie-break when no execution site expresses a
-    preference. A site's own preferred dtype still wins whenever it is
-    admissible — that is what keeps TIDMAD's concrete matrix exact — but
-    a site preference is compatibility behaviour, never model semantics
-    (§4a.1), so it lives at the site and never in this model.
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    admissible: tuple[str, ...] = Field(
-        min_length=1,
-        description="Ordered normalized dtype names the model boundary "
-        "accepts. admissible[0] is the canonical representation used for "
-        "rendering and as the deterministic default.",
-    )
-
-    @model_validator(mode="after")
-    def _no_duplicates(self) -> DtypeAdmissibility:
-        """A repeated dtype makes 'the canonical one' ambiguous to a reader
-        and hides an authoring mistake behind a set-like intersection."""
-        if len(set(self.admissible)) != len(self.admissible):
-            raise ValueError(f"duplicate dtype in admissible={self.admissible!r}")
-        return self
-
-    @property
-    def canonical(self) -> str:
-        """The representation shown to an LLM and used as the default."""
-        return self.admissible[0]
-
-    def admits(self, dtype_name: str) -> bool:
-        return dtype_name in self.admissible
 
 
 class TensorAxis(BaseModel):
@@ -346,3 +307,38 @@ class ModelIOContract(BaseModel):
         if axis is None:
             return None
         return axis.dimension.fixed
+
+
+def load_model_io_contract(path: str) -> ModelIOContract:
+    """Load a resolved Model-I/O contract from JSON. **FAILS CLOSED.**
+
+    The subprocess side of the parent→child transport, mirroring
+    ``execute_tools.dataset_config.load_dataset_profile`` exactly — the
+    established config-file + argv-flag mechanism, not a new one (§16 routes
+    IPC to Step 11).
+
+    The distinction that matters is the same one:
+
+    * a path that is **missing, unreadable, not JSON or schema-invalid**
+      raises, with a diagnostic naming the path;
+    * it **never** falls back to the shipped task contract.
+
+    *"the flag is present but the file is broken"* must fail loudly, because
+    a silent fallback would feed a bound task TIDMAD's dtype and produce
+    plausible, wrong tensors. *"an old caller has never heard of the flag"*
+    is a different case entirely — that one keeps Regime A, and the caller
+    handles it by not calling this function at all.
+    """
+    import json
+
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except OSError as exc:
+        raise ValueError(f"model I/O contract unreadable at {path!r}: {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"model I/O contract at {path!r} is not valid JSON: {exc}") from exc
+    try:
+        return ModelIOContract(**payload)
+    except Exception as exc:
+        raise ValueError(f"model I/O contract at {path!r} is schema-invalid: {exc}") from exc

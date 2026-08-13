@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
+from agent.schemas.model_io_contract import load_model_io_contract
 from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
@@ -17,6 +18,7 @@ from execute_tools.dataset_config import (
     load_dataset_profile,
     resolve_dataset_profile,
 )
+from execute_tools.model_input_dtype import INFERENCE_SITE_DTYPE, resolve_input_dtype
 from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
@@ -107,6 +109,16 @@ def get_parser():
     )
 
     # Agent Mode Specific Args
+    parser.add_argument(
+        "--model_io_json",
+        type=str,
+        default=None,
+        help=(
+            "Path to a resolved Model-I/O contract JSON. OMITTED means the "
+            "Regime-A adapter (the model's own declaration, else this site's "
+            "historical dtype). SUPPLIED but broken fails closed."
+        ),
+    )
     parser.add_argument("--model_cfg", type=str, help="Path to model config JSON")
     parser.add_argument("--loss_cfg", type=str, help="Path to loss config JSON")
     parser.add_argument("--exp_id", type=str, default="default_run")
@@ -208,12 +220,18 @@ def process_batch(
         input_seq = input_seq.squeeze(1)
 
     # 3. Model-Specific Execution & Type Casting
-    # The forward contract is [B, T] int64 for all embedding-based models.
-    # Only fcnet (AE) uses float input for regression.
-    if args.denoising_model == "fcnet":
-        input_seq = input_seq.float().to(DEVICE)
-    else:
-        input_seq = input_seq.long().to(DEVICE)
+    # Resolved from the model's declared dtype ADMISSIBILITY intersected with
+    # what the runtime supports (Step 03 §4a.1) — this used to branch on
+    # `args.denoising_model == "fcnet"`. The site preference is int64, which
+    # is what inference has always fed the embedding arm (baseline A6) and
+    # which differs from training's int32 (finding F-1).
+    input_seq = input_seq.to(
+        resolve_input_dtype(
+            args.denoising_model,
+            getattr(args, "_model_io", None),
+            site_preference=INFERENCE_SITE_DTYPE,
+        )
+    ).to(DEVICE)
 
     if trace is not None:
         trace.record(
@@ -300,6 +318,13 @@ def main():
     # 1. Parse arguments locally to avoid NameError scope issues
     parser = get_parser()
     args = parser.parse_args()
+    # Model-I/O contract — child side of the parent's transport, same two-case
+    # rule as the training engine: supplied-but-broken fails closed, absent
+    # keeps Regime A. Carried on `args` because `process_batch` already takes
+    # `args` and adding a parameter would ripple through every call site.
+    args._model_io = (
+        load_model_io_contract(args.model_io_json) if args.model_io_json is not None else None
+    )
     t_process_start = time.perf_counter()
 
     # Dataset Profile: supplied-but-broken fails closed; absent keeps the
