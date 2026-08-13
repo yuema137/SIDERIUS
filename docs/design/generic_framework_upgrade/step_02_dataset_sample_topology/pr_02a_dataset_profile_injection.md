@@ -426,7 +426,7 @@ C7  docs + ledger closeout
 | Rung | State | Evidence |
 |---|---|---|
 | **CP0 — BASELINES COMPLETE** | **PASS** (2026-08-14, `bbe91f91` + C1) | see below |
-| CP-A1 | not reached | — |
+| **CP-A1 — in-process parity + reachability** | **PASS on every stated criterion; one broad run still in flight** (2026-08-14, `43c440e4`) | see below |
 | CP-A2 | not reached | — |
 | CP-A3 | not reached | — |
 | Checkpoint A | not reached | — |
@@ -454,6 +454,54 @@ there rather than claimed here.
 
 **Zero production diff** — the C1 commit touches exactly one file, under
 `tests/`.
+
+---
+
+**CP-A1 PASS — the three conditions, answered.**
+
+*"Profile deep-equals TIDMAD."* Stronger than deep-equality was achieved:
+`TIDMAD_PROFILE.dataset` **is** the shipped `TIDMAD` object (asserted by
+identity), because the profile COMPOSES `DatasetConfig` rather than
+extending it. Step-00's `test_all_six_fields_deep_equal` therefore still
+pins the object the production path reads, and runs UNMODIFIED — 29
+passed with `test_dataset_config.py`.
+
+*"`data_shape_class` byte-exact."* `psd10000000_seg200_files20`, produced
+through the real `resolve_tidmad_measurement_capability` resolver rather
+than a fixture literal. Measurement-store keys are not invalidated.
+
+*"The eight in-process consumers read the profile, not constants."* Zero
+bare-constant (`SEGMENT_LENGTH` / `SEGMENTS_PER_FILE` / `NUM_FILES`) and
+zero singleton (`TIDMAD`) imports remain in the nine touched modules
+(eight consumers + `sample_set_builder`, whose `scoring_utils` re-export
+hop is collapsed). Reachability is asserted positively, not by absence of
+an import: `TestInjectionReachability` binds a contrast profile and
+requires each consumer's answer to FOLLOW it.
+
+**Mutation — "a disconnected/reverted consumer is caught."** Reverting
+`nodes/scoring_reference._fine_indices()` to `tuple(range(NUM_FILES))`
+**reds** `test_file_count_consumers_follow_the_declaration[scoring_reference]`.
+Restored; suite green again at 15/15.
+
+**Validation actually run** (counts and wall times, not claims):
+
+```text
+tests/unit/execute_tools/ + tests/unit/nodes    708 passed, 1 skipped  13.80s
+  incl. test_step02a_c2_profile_injection.py     15 passed
+  incl. test_step00_dataset_baselines.py         green, UNMODIFIED
+ruff check . / ruff format --check .             clean, whole tree
+tests/unit/agent + core + workflows              6294 passed, 2 skipped  5m24s
+  (launched mid-C2: covers the six runtime consumers, NOT the
+   score_table validators — informational, not the CP-A1 oracle)
+```
+
+**Still in flight, and NOT claimed as passed**: the authoritative broad
+run at exactly `43c440e4` over
+`tests/unit/{agent,core,workflows,scripts}`. Log:
+`$CLAUDE_JOB_DIR/tmp/c2_broad2.log`. **A resumed session must read that
+log — or re-run it — and record the result here before starting C3.**
+Everything else CP-A1 requires is met; if that run is red, CP-A1 reverts
+to FAIL and §5a forbids crossing the process boundary until it is fixed.
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
