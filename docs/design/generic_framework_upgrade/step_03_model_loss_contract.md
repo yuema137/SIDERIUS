@@ -1205,13 +1205,146 @@ F-5 schema-description sites.
 
 ### 24.6 Validation ledger
 
-*(empty — no validation has been run; no production file has been
-edited)*
+#### A6 — model-boundary input dtype — **CAPTURED**
+
+```text
+command      .venv/bin/python -m pytest \
+               tests/unit/execute_tools/test_step03_a6_model_boundary_dtype.py \
+               -q --no-header -p no:randomly
+purpose      Checkpoint-0 baseline A6, and the evidence the F-1 decision
+             is made against
+environment  CPU only; no GPU, no LLM, no real dataset
+runtime      5.69 s
+result       30 passed / 0 failed  (pytest rc 0, read from the log)
+production   ZERO diff — the module is new and adds no production edit
+```
+
+**Method.** The dtype is observed **at the model call**, not at the cast,
+by registering a subclass of the real builtin whose `forward` records
+`x.dtype` and delegates unchanged, then driving the **real production
+functions**: `run_experiment` (epoch), `run_experiment_streaming`
+(THE production training path) and `inference_single.process_batch`.
+The synthetic loader serves **int16**, which is what the real loaders
+serve (Step-02a C1 pinned that), so the engine's cast operates on its
+production input.
+
+#### The A6 matrix — concrete dtype reaching `model.forward`
+
+| builtin | `output_type` | epoch training `run_experiment` | streaming training `run_experiment_streaming` | inference `process_batch` |
+|---|---|---|---|---|
+| `punet` | classifier | **int32** | **int32** | **int64** |
+| `transformer` | classifier | **int32** | **int32** | **int64** |
+| `wavenet` | classifier | **int32** | **int32** | **int64** |
+| `rnn` | classifier | **int32** | **int32** | **int64** |
+| `gated_fno` | classifier | **int32** | **int32** | **int64** |
+| `fcnet` | hybrid | float32 | float32 | float32 |
+
+Cast sites: `train_engine_sandbox.py:660` (call `:671`), `:1029`
+(call `:1036`), `inference_single.py:216` (call `:228`).
+
+**F-1 CONFIRMED, exactly as the source read predicted.** The embedding
+arm diverges — int32 in both training paths, int64 in inference. The
+non-embedding arm (`fcnet`) does **not** diverge, so the divergence is a
+property of the embedding arm, not of the boundaries in general.
+
+**Cross-boundary acceptance, executed not assumed.** Every embedding-arm
+builtin runs under **both** int32 and int64 and returns the identical
+`(1, 256, T)` shape. That is why the divergence has survived unnoticed:
+nothing fails today, and no existing oracle can see it — `nn.Embedding`
+accepts both, so Step-00's forward baselines (A4/A7) are numerically
+identical either way.
+
+**The declared contract matches inference only.**
+`configs/task_config.yaml:22` declares `"[B, T] int64"`; that is true of
+`process_batch` and false of both training paths. Pinned in the suite,
+not left as prose.
 
 ### 24.7 Mutation dossier
 
-*(empty)*
+| # | Mutation | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| **M-A6-1** | `train_engine_sandbox.py:660` `.int()` → `.long()` | epoch rung reds on the embedding arm only | **5 failed, 1 passed** — `fcnet` correctly unaffected | behaviour-changing, **caught** |
+| **M-A6-2** | `train_engine_sandbox.py:1029` `.int()` → `.long()` | streaming rung reds on the embedding arm only | **5 failed, 1 passed** | behaviour-changing, **caught** |
+| **M-A6-3** | `inference_single.py:216` `.long()` → `.int()` | inference rung reds on the embedding arm only | **5 failed, 7 passed** | behaviour-changing, **caught** |
 
-### 24.8 Final state
+Hygiene: `__pycache__` cleared before each run; each mutation restored
+with `git checkout --` immediately after; the baseline re-run **green
+(30 passed)** from the restored tree. The `1 passed` / `7 passed` in each
+row is `fcnet` — the per-arm separation is load-bearing, not decoration:
+a single shared expectation across all six builtins would have hidden
+exactly this.
+
+**Failure class covered.** *A Phase-B change silently alters, or quietly
+unifies, the concrete dtype reaching a model.* Nothing else in the suite
+catches it.
+
+#### Baselines still outstanding at Checkpoint 0
+
+**A2**, **A3**, **A8** are NOT yet captured (§24.3 has their scope and
+their existing partial oracles). Checkpoint 0 is therefore **NOT** PASS.
+
+### 24.8 Proposed narrow amendment to §4a — **AWAITING OPERATOR APPROVAL**
+
+Written because A6 confirmed F-1. **Not implemented.** No production
+file may change until this is approved.
+
+**The problem, stated from evidence.** §4a assumes one model-boundary
+input dtype per model. A6 proves there are two concrete ones on the
+embedding arm, both legitimate, both shipped.
+
+**The amendment.** The Model-I/O contract's input tensor declares a
+**dtype REQUIREMENT** — the admissible-dtype semantics of the model
+boundary — rather than one concrete cast:
+
+```text
+input.dtype_requirement : INTEGER_INDEX  admissible {int32, int64}
+                        | REAL_VALUED    admissible {float32}
+```
+
+Both requirement kinds are **source-supported today**, not speculative:
+A6 executes every embedding-arm builtin under both admissible integer
+dtypes with identical results, and `fcnet` under float32.
+
+Each execution site keeps its **own** concrete dtype as a named site
+constant — `int32` in the training engine, `int64` in inference —
+and one shared resolver selects and validates:
+
+```text
+resolve_model_input_dtype(requirement, site_dtype) -> torch.dtype
+    REAL_VALUED     -> float32
+    INTEGER_INDEX   -> site_dtype if admissible
+                       else TYPED FAILURE, never a coercion
+```
+
+so the cast line becomes contract-keyed, exactly mirroring the row-12
+precedent on the adjacent line (`get_target_torch_dtype(loss_cfg)`).
+
+**What this preserves, point by point against the operator's constraints:**
+
+| Constraint | How the amendment meets it |
+|---|---|
+| ONE Model-I/O authority | one `dtype_requirement` on the contract; nothing else answers "what may this model be fed" |
+| EXACT TIDMAD concrete boundary dtypes | training stays int32, inference stays int64, `fcnet` stays float32 — A6 passes **unmodified** |
+| no model-name routing | the branch keys on the declared requirement, never on `model_type` |
+| no boundary dimension in the MODEL contract | `int32`/`int64` live at the execution sites, as properties of those sites; the contract never mentions train or inference |
+| typed failure on an unsatisfiable concrete dtype | the resolver's `else` arm — no silent coercion (this is rung **3-B-neg**) |
+
+**What it does NOT do.** It does not unify int32 and int64; it does not
+add `training_dtype` / `inference_dtype`; it does not invent a
+dtype-conversion algebra; it does not touch `fcnet`'s constructor branch
+(F-2). The int32/inference-int64 divergence is **recorded as a named,
+greppable site constant** instead of an implicit `.int()` vs `.long()` —
+made visible, deliberately not repaired, since repairing it changes
+executed tensors and is a §21 STOP.
+
+**Stage-B consequence.** 3-B varies the declared requirement with the
+dataset dtype held fixed and the concrete site dtypes unchanged;
+3-B-neg supplies a site dtype the requirement does not admit and asserts
+the typed failure.
+
+**Follow-up debt this creates.** The training/inference int32↔int64
+divergence itself remains, now explicit. It is not Step-03's to repair.
+
+### 24.9 Final state
 
 *(empty — no PR opened)*
