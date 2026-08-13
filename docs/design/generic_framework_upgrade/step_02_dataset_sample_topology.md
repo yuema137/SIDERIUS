@@ -63,6 +63,23 @@ children implement against; it changes only by a new operator decision,
 even though the document itself stays open for status and for the
 child-plan detail still to be written.
 
+### Implementation status (2026-08-14)
+
+| Child | State |
+|---|---|
+| **02a — Dataset Profile injection** | **COMPLETE / MERGED** — PR [#202](https://github.com/Galileo-Sandbox/SIDERIUS/pull/202), merge commit `47359538`, PR head `0d9fc32d`, exact-head CI green. Its child document is now an **immutable historical implementation ledger** and must not be retroactively rewritten |
+| 02b — Selection & SampleSet | **DESIGN — READY FOR OPERATOR REVIEW.** NOT frozen; implementation NOT authorized |
+| 02c — Systematic groups (Step FINALIZER) | DRAFT — revised after 02b lands |
+
+**Step 02 remains IN PROGRESS.** The overall roadmap §15.1 matrix is the
+single cross-step progress authority; the table above is a child-status
+mirror, not a second database.
+
+**§1's audit below was taken at `2e716dd2`, BEFORE 02a.** Where 02a's
+implementation superseded it, §1a records the correction rather than
+editing the original finding — the assumption→evidence→correction chain
+is what makes the audit reviewable.
+
 Revision 2 applies the operator review of 2026-08-13. The three-child
 decomposition is APPROVED IN PRINCIPLE; no fourth behavioural child is
 added. Corrections applied: **02c designated Step FINALIZER**;
@@ -269,6 +286,140 @@ a correction to the matrix (§13).
 
 ---
 
+## 1a. What PR 02a actually landed (absorbed 2026-08-14, merge `47359538`)
+
+Read from the merged 02a ledger and merged source, not from memory. §1
+above is preserved as the pre-02a audit; this section records where
+implementation superseded it.
+
+### A. The Dataset Profile is a real production authority — no longer future work
+
+`DatasetProfile` (`execute_tools/dataset_config.py`) **composes**
+`DatasetConfig` with two new declarations, `ChannelIdentity` and
+`ValueEncoding`. Training, inference and scoring all resolve topology,
+decomposition geometry + legality, channel identity and value encoding
+from ONE resolved profile that crosses the real subprocess boundary.
+
+Composition, not extension, was the load-bearing choice: Step 00's golden
+pins `TIDMAD.model_dump()` at exactly six keys, so adding fields would
+have broken a frozen compatibility surface to introduce a new one.
+`TIDMAD_PROFILE.dataset` **is** the shipped singleton, asserted by
+identity.
+
+### B. The transport boundary is concrete
+
+The three data-path consumers are subprocess entry points, so the profile
+crosses a PROCESS boundary. 02a reused the existing config-file + argv
+precedent (`--model_cfg` and friends) rather than inventing a mechanism:
+the parent writes one JSON per experiment into the run's `configs/`
+directory and passes its path to all three children.
+
+*Exact flag and helper names are implementation detail and are recorded in
+the 02a ledger, not here.* What is Step-level is the shape: **one
+declaration, one file, three children, so the three data paths cannot be
+handed different semantics.**
+
+### C. `validation_file_pattern` dead seam — CLOSED
+
+> **Previous assumption (§1.1):** the seam is real and is 02a's to close.
+> **Merged evidence:** `DatasetConfig.validation_file_name()` exists and
+> the raw validation filename is resolved from it in the scorer,
+> inference and the scoring entry point.
+> **Corrected understanding:** the seam went from ZERO production
+> consumers to four. §4.2's roadmap "dead seam" finding is CLOSED.
+> **Consequence:** no later child needs to close it; 02b must not
+> re-derive raw filenames.
+
+Implementation also found the name was built two different ways —
+`f"{i:04d}"` almost everywhere, `str(i).zfill(4)` in one inference site —
+which agree only for non-negative indices. Both now route through one
+method.
+
+### D. Runtime-validator mechanism (operator decision OD-02a-1)
+
+> **Implementation finding:** `agent/schemas/score_table.py` baked
+> `NUM_FILES` into Pydantic `Field(le=…)` / `min_length` / `max_length`,
+> evaluated when the class body runs. A non-20 topology was therefore
+> **literally unrepresentable** — rung A1 could not have existed.
+> **Operator-approved resolution:** those bounds became `model_validator`s
+> resolved from the profile. The RULE is unchanged; only its enforcement
+> mechanism moved.
+> **Verified:** field sets and `model_dump()` round-trip unchanged; index
+> 0/19 accepted, 20/−1 rejected; the non-`NUM_FILES` bounds (`ge=0`,
+> `ge=1`) untouched.
+
+**Scope of this precedent:** it is a landed mechanism for ONE schema whose
+import-time bound blocked a required contrast rung. It is **not** a
+universal schema-architecture rule, and must not be generalized without
+its own source evidence.
+
+### E. The loader structure — three classes, not one
+
+> **Previous assumption (02a §3.1):** one method,
+> `TIDMADEpochDataset._pull_events_from_sample_set`, is the unique
+> concentration point where all four facets are read.
+> **Audit evidence:** that method belongs to `TIDMADDataset`, and
+> `train_engine_sandbox.py` defines THREE sibling `Dataset` classes, each
+> independently reading filenames, geometry, channels and encoding.
+> **Corrected understanding:** the no-split argument is STRENGTHENED —
+> four separate PRs would have touched three classes each — but the
+> visited-sequence and step-count surfaces belong specifically to
+> `TIDMADDataset`; `TIDMADEpochDataset` has no `train_events` at all.
+> **Consequence:** the live epoch training path is `TIDMADEpochDataset`
+> (`run_experiment_streaming`); `TIDMADDataset` is reached only through
+> its `fname_list` branch, by the legacy single-file mode and the
+> runtime-control probe.
+
+### F. Regime-A semantics are exercised in real code
+
+Frozen and now demonstrated across a real subprocess boundary:
+
+| Situation | Behaviour |
+|---|---|
+| explicit profile path supplied but **missing / unreadable / not JSON / schema-invalid** | **FAIL CLOSED**, diagnostic names the path, never falls back to the singleton |
+| a supported legacy caller **omits the transport entirely** | **Regime-A adapter** — resolve the shipped TIDMAD profile exactly |
+
+**Regime B remains Step 12.** Nothing here moves it forward.
+
+### G. Worker-process boundary finding (bounded)
+
+`score_vector` fans out to a `ProcessPoolExecutor`, where an ambient
+`ContextVar` lookup does not survive. The raw-file identity is therefore
+resolved once by the caller and carried **explicitly in the worker task
+data**, symmetric with the denoised filename, which always travelled that
+way.
+
+**Recorded as boundary knowledge, not a framework pattern.** One module's
+worker boundary is not convergence evidence; a second module must show the
+same need before this becomes a rule.
+
+### H. The derived-artifact boundary stayed clean
+
+Deliverables remain keyed by INPUT identity (`file_index`) through the
+injected `denoised_filename_fn` callable — pinned, unchanged, no
+production change. Every denoised/deliverable name, layout and attr is
+untouched, and `array2h5.py` (the deliverable writer) does not mention the
+profile at all. The §3.1 four-contract boundary holds.
+
+### I. `TIDMADSingleFileDataset` — residual dead code, deliberately left
+
+Production-unreachable (one grep hit repo-wide: the class statement).
+Migrating it would have been a consumer-less change; deleting it was
+cleanup 02a did not authorise. **Left untouched by operator directive.**
+Recorded as explicit residual — not a defect, not a task for 02b.
+
+### J. Validation facts relevant downstream
+
+- CP0, CP-A1, CP-A2, CP-A3, Checkpoint A, B, C, D — **all PASS**.
+- Contrast rungs **A1 / A2 / B / D** landed, each single-axis, with
+  atomicity machine-checked against the TIDMAD declaration.
+- **Checkpoint C exercised REAL subprocess data-reading code** on real
+  HDF5 — not a stub, not an in-process call.
+- **Gate 1 remained NOT REQUIRED**: no rendered prompt byte moved.
+- **Gate 2 remains Step-level**, owned by the finalizer 02c.
+
+---
+
 ## 2. Step-02 final effect (observable behaviour)
 
 After all three children merge:
@@ -401,11 +552,11 @@ Per §2: name the criterion, never "behaviour unchanged".
 | Resolved TIDMAD profile | `resolved.model_dump()` deep-equals today's `TIDMAD.model_dump()`, field by field | **EXISTS** — Step-00 `test_all_six_fields_deep_equal` |
 | Legality list | `valid_segmentation_sizes()` returns the exact 36-entry list | **EXISTS** — Step-00 |
 | Training filename | `training_file_name(0)`/`(19)` render byte-identical | **EXISTS** — Step-00 |
-| Validation filename | pattern formats byte-identical **and** the new production read path produces the same string the scorer/inference inline today | **PARTIAL** — pattern pinned; the inlined scorer/inference literals are NOT pinned against the pattern → **02a must add this pin BEFORE routing reads through the profile** |
+| Validation filename | pattern formats byte-identical **and** the production read path produces the same string the scorer/inference inlined | **SATISFIED by 02a (merged)** — pinned capture-first at the producing authority, then routed |
 | `data_shape_class` | exact string `psd10000000_seg200_files20`; measurement-store keys not invalidated | **EXISTS** — Step-00 |
 | SampleSet identity | the five sha16 digests unchanged (3 strategies + normal + partial) and first-five segment indices unchanged | **EXISTS** — `test_sample_set_builder.py` |
 | SampleSet JSON round-trip | key coercion behaviour unchanged at every consumer (keys become strings; consumers re-int) | **MISSING** → 02b must pin the round-trip contract at one boundary before changing the builder |
-| Encoding | `+128`/int8 declaration produces byte-identical loaded tensors | **MISSING** → 02a adds a loader-level pin |
+| Encoding | `+128`/int8 declaration produces byte-identical loaded tensors | **SATISFIED by 02a (merged)** — loader-level tensor pin plus a controlled offset probe |
 | Anchors artifact | anchors selection identity unchanged; `segment_anchors.json` untouched | **EXISTS** — Step-00 numeric baselines |
 | Health peek behaviour | the shipped `[3,10,17]` peek resolves to the same files; gate verdicts identical on fixture outputs | **PARTIAL** — behaviour tested; the *literal-vs-declaration* equivalence is not → 02c pins it |
 | Rendered prompts | proposer known-constraints block + planner divisor list byte-identical under TIDMAD | **EXISTS** — Step-00 PB goldens + Step-01 goldens |
@@ -828,14 +979,31 @@ the replacement preserves each.
 
 | Concept | Step-02 meaning | Other module meaning | Match? | Disposition |
 |---|---|---|---|---|
-| **SampleSet type** | produced by selection | consumed by ~15 families (engines, scoring, estimators, resolvers, tuner) with independent key-coercion | lifecycle matches; **serialization does not** | 02b pins the round-trip at ONE boundary. Ownership merge still needs ≥2 completed designs — **DO NOT MERGE** |
+| **SampleSet type** | produced by selection | consumed by ~15 families with independent key-coercion | lifecycle matches; **serialization does not** | **Post-02a evidence sharpens this.** The divergence is now demonstrable: after a JSON round-trip keys are strings, and `TIDMADDataset` sorts `sorted(items())` (LEXICOGRAPHIC: 0,1,10,11,…) while `TIDMADEpochDataset` sorts `key=int` (NUMERIC). It is **latent, not live** — no production caller passes `sample_set=` to `TIDMADDataset`. 02b pins the round-trip at the ONE production boundary (`core/sandbox_executor.py`, two `json.dump` sites). Ownership merge still needs ≥2 completed designs — **DO NOT MERGE** |
 | **Systematic groups** | declared bands | health peeks, anchors, scripts band tables, campaign validation | semantics match; **no shared source of truth** | 02c declares and consumes. Whether §8 HealthGates should own its own group view is Step-08's call — **DO NOT MERGE** |
-| **Sample-shape legality** | dataset-side rule | proposer validator + tuner restatement + prompt rendering | match | one authority already exists; 02a de-duplicates. **No merge needed** — this row can close |
-| **Value encoding** | dataset declaration (dtype/offset) | §5 derives model input semantics; §7c/§7e/§8 consume | declaration vs derivation — **complementary, not duplicate** | 02a declares; Step 03 derives. **DO NOT MERGE** |
+| **Sample-shape legality** | dataset-side rule | proposer validator + tuner restatement + prompt rendering | match | **CLOSED by 02a (merged).** The tuner's inline restatement is gone; all consumers read `valid_segmentation_sizes()`. Implementation also found the tuner re-derived the legal list with an O(psd) loop — a 10,000,000-iteration scan on the error path — so de-duplication was a correctness AND performance fix. The two derivations were asserted equal (36 entries), so the diagnostic is byte-identical |
+| **Value encoding** | dataset declaration (dtype/offset) | §5 derives model input semantics; §7c/§7e/§8 consume | declaration vs derivation — **complementary, not duplicate** | **02a's half LANDED**: `ValueEncoding` declares storage/compute dtype, offset and class count, and production loaders consume it. Step 03 still owns DERIVATION. **DO NOT MERGE** — the split is the point |
 | **data_shape_class** | geometry Step 02 owns | runtime-control interchangeability key | Step 02 supplies inputs; runtime-control owns the key format | **DO NOT MERGE** — 02a must not change the string |
-| **Deliverable Contract** | Step 02 owns INDEXING only | naming/layout/dtype/attrs re-inlined ≥6 sites | **explicitly distinct** (§3.1) | stays a §14 ledger row with owner TBD. Step 02 must NOT absorb it |
+| **Deliverable Contract** | Step 02 owns INDEXING only | naming/layout/dtype/attrs re-inlined ≥6 sites | **explicitly distinct** (§3.1) | **02a pinned the indexing half** (`denoised_filename_fn(file_index)`, parity-only, no production change) and left naming/layout/attrs untouched — verified on the merged diff. Owner still TBD; stays a §14 row. Step 02 must NOT absorb it |
 
 ---
+
+### 12.1 Open boundaries surfaced by the 02a/02b audits (recorded, not claimed)
+
+| Boundary | Evidence | Disposition |
+|---|---|---|
+| **Trial packing read-layout** — the scorer reads the denoised file by `local_idx` while reading the raw file by original `seg_idx` (`scoring_utils.py`, both worker paths) | a load-bearing layout contract between inference and scoring | **Unowned.** It is a deliverable-READ layout, not selection, so 02b explicitly does not claim it. Needs an owner; candidate is whichever design first needs the Deliverable Contract (§14 row) |
+| **SampleSet key-coercion divergence** | after a JSON round-trip keys are strings; `TIDMADDataset` sorts lexicographically, `TIDMADEpochDataset` numerically | **Latent, not live** — no production caller passes `sample_set=` to `TIDMADDataset`. 02b pins the contract at the one production boundary; unifying the orders stays deferred as a behaviour change with no forcing need |
+| **Strategy definitions as declared data** | `Literal["snapshot","anchors","target"]` in the builder and `TrialConfig` | Deferred — no second implementation yet (roadmap §0 rule 8), and `anchors` resolves through `ANCHOR_FILES`, which is 02c's |
+
+### 12.2 Pending implication for 02c (recorded here, 02c's document untouched)
+
+02a's migration left **exactly one** TIDMAD-shaped literal in
+`execute_tools/sample_set_builder.py`: `ANCHOR_FILES = [0, 10, 19]`. That
+is 02c's systematic-group declaration, and 02b is explicitly forbidden
+from absorbing it. When 02c is designed it should expect the selection
+path to be otherwise fully profile-driven, so its group work is a clean,
+isolated axis rather than a mixed migration.
 
 ## 13. Corrections this design proposes to the overall roadmap
 
