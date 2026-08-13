@@ -66,9 +66,7 @@ def tiny_profile():
 
 
 @pytest.fixture
-def tiny_setup(tmp_path, monkeypatch, tiny_profile):
-    # inference_single still reads the module constant; C4 migrates it.
-    monkeypatch.setattr(inf, "PSD_SEGMENT_LENGTH", SEG_SIZE)
+def tiny_setup(tmp_path, tiny_profile):
 
     n_samples = N_PSD_SEGMENTS * SEG_SIZE
     rng = np.random.default_rng(11)

@@ -56,6 +56,15 @@ parser.add_argument(
     "--data_dir", "-d", type=str, default=None, help="Directory containing the denoised HDF5 file."
 )
 parser.add_argument(
+    "--dataset_profile_json",
+    type=str,
+    default=None,
+    help=(
+        "Path to a resolved Dataset Profile JSON. OMITTED resolves the "
+        "Regime-A TIDMAD adapter; SUPPLIED but broken fails closed."
+    ),
+)
+parser.add_argument(
     "--raw_data_dir",
     type=str,
     default=None,
@@ -118,6 +127,10 @@ if args.weak:
 
 from execute_tools.build_anchor_map import resolve_anchor_map_path  # noqa: E402
 from execute_tools.data_paths import TIDMAD_DATA_DIR  # noqa: E402
+from execute_tools.dataset_config import (  # noqa: E402
+    load_dataset_profile,
+    resolve_dataset_profile,
+)
 
 if args.data_dir is None:
     args.data_dir = TIDMAD_DATA_DIR
@@ -134,9 +147,18 @@ args.anchor_map = resolve_anchor_map_path(args.anchor_map)
 # Filename construction (preserved from legacy for sandbox compatibility)
 # ---------------------------------------------------------------------------
 
+# Dataset Profile: supplied-but-broken fails closed, absent keeps Regime-A.
+if args.dataset_profile_json is not None:
+    dataset_profile = load_dataset_profile(args.dataset_profile_json)
+else:
+    dataset_profile = resolve_dataset_profile()
+
 idx_str = f"{args.file_index:04d}"
 if args.denoising_model == "none":
-    fname = f"abra_validation_{idx_str}.h5"
+    # RAW validation file — Step-02-owned INPUT topology, from the profile.
+    # Every branch below builds a DENOISED name, which is the Deliverable
+    # Contract's and stays exactly as it was.
+    fname = dataset_profile.dataset.validation_file_name(args.file_index)
 elif args.mode == "fix":
     fname = f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5"
 else:  # agent
@@ -156,7 +178,6 @@ if not os.path.exists(full_path):
 # ---------------------------------------------------------------------------
 
 from execute_tools.build_anchor_map import load_anchor_map  # noqa: E402
-from execute_tools.dataset_config import SEGMENTS_PER_FILE  # noqa: E402
 from execute_tools.scoring_utils import (  # noqa: E402
     coerce_nonfinite_to_none,
     score_vector,
@@ -166,7 +187,7 @@ anchor_data = load_anchor_map(args.anchor_map)
 s_max = float(anchor_data["s_max"])
 anchors = anchor_data["anchors"]
 
-sample_set = {args.file_index: list(range(SEGMENTS_PER_FILE))}
+sample_set = {args.file_index: list(range(dataset_profile.dataset.segments_per_file))}
 
 
 def _denoised_fn(_fi: int) -> str:
@@ -187,6 +208,7 @@ file_vector, scalar = score_vector(
     parallel=args.parallel,
     num_workers=args.num_workers,
     legacy_mode=False,
+    profile=dataset_profile,
 )
 
 print(f"\nFinal Denoising Score: {scalar:.4f}")

@@ -362,9 +362,26 @@ class TestRawValidationFilename:
         monkeypatch.setattr(su, "get_snr", lambda freq, pwr, target=None: (1.0, 1.0))
         return seen
 
-    def test_collect_raw_pairs_builds_the_pattern_render(self, captured_raw_names):
-        """``_collect_raw_pairs`` — the worker ``score_vector`` actually uses."""
-        su._collect_raw_pairs((".", "denoised.h5", 7, [0, 1], "."))
+    def test_score_vector_builds_the_pattern_render(self, captured_raw_names):
+        """``score_vector`` — the real scoring entry point.
+
+        Originally this drove ``_collect_raw_pairs`` directly, because that
+        worker built the raw name inline. PR-02a C4 moved the name upstream:
+        ``score_vector`` resolves it once from the Dataset Profile and ships
+        it to the workers as data, because they run in a ProcessPoolExecutor
+        where an ambient lookup would not survive. The INVARIANT asserted is
+        unchanged — the name production reads equals the pattern render —
+        and it is now pinned at the authority that produces it.
+        """
+        su.score_vector(
+            data_dir=".",
+            sample_set={7: [0, 1]},
+            anchor_map={"7": [1.0, 1.0]},
+            s_max=1.0,
+            denoised_filename_fn=lambda fi: "denoised.h5",
+            raw_data_dir=".",
+            parallel=False,
+        )
 
         assert captured_raw_names == ["abra_validation_0007.h5"] * 2
         assert captured_raw_names[0] == TIDMAD.validation_file_pattern.format(file_index=7)

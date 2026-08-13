@@ -13,7 +13,10 @@ from tqdm import tqdm
 from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
-from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
+from execute_tools.dataset_config import (
+    load_dataset_profile,
+    resolve_dataset_profile,
+)
 from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
@@ -93,6 +96,15 @@ def get_parser():
     parser.add_argument("--data_dir", "-d", type=str, default=None)
     parser.add_argument("--denoising_model", "-m", type=str, default="punet")
     parser.add_argument("--file_index", "-i", type=int, default=6)
+    parser.add_argument(
+        "--dataset_profile_json",
+        type=str,
+        default=None,
+        help=(
+            "Path to a resolved Dataset Profile JSON. OMITTED resolves the "
+            "Regime-A TIDMAD adapter; SUPPLIED but broken fails closed."
+        ),
+    )
 
     # Agent Mode Specific Args
     parser.add_argument("--model_cfg", type=str, help="Path to model config JSON")
@@ -290,6 +302,16 @@ def main():
     args = parser.parse_args()
     t_process_start = time.perf_counter()
 
+    # Dataset Profile: supplied-but-broken fails closed; absent keeps the
+    # Regime-A adapter (§5c). Same contract as the training engine.
+    if args.dataset_profile_json is not None:
+        dataset_profile = load_dataset_profile(args.dataset_profile_json)
+    else:
+        dataset_profile = resolve_dataset_profile()
+    profile_dataset = dataset_profile.dataset
+    profile_channels = dataset_profile.channels
+    psd_segment_length = profile_dataset.psd_segment_length
+
     # V20 PR C2, validation only. ``None`` — and therefore completely
     # inert — unless SIDERIUS_C2_INFERENCE_MILESTONE_TRACE names a channel,
     # which production never does. There is no CLI flag and no config key:
@@ -485,7 +507,7 @@ def main():
             resumed_status="inference_started",
         )
 
-    # PSD_SEGMENT_LENGTH imported from dataset_config
+    # Decomposition geometry comes from the resolved Dataset Profile.
 
     if sample_set is not None:
         # --- TRIAL MODE: denoise specific segments from multiple files ---
@@ -562,7 +584,7 @@ def main():
                 out_dir,
                 f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5",
             )
-            expected_samples = len(psd_segment_indices) * PSD_SEGMENT_LENGTH
+            expected_samples = len(psd_segment_indices) * psd_segment_length
             if args.reuse_complete_outputs and _is_complete_trial_output(
                 out_name, expected_samples
             ):
@@ -580,7 +602,8 @@ def main():
                 )
                 continue
 
-            fname = f"abra_validation_{file_index:04d}.h5"
+            # RAW validation input — Step-02 topology, from the declaration.
+            fname = profile_dataset.validation_file_name(file_index)
             fpath = os.path.join(args.data_dir, fname)
 
             if not os.path.exists(fpath):
@@ -599,16 +622,20 @@ def main():
             # array that survives the context exit, which is what we
             # concatenate below.
             with h5py.File(fpath, "r") as ABRAfile:
-                ds_ch1 = _h5_dataset(ABRAfile, "timeseries", "channel0001", "timeseries")
-                ds_ch2 = _h5_dataset(ABRAfile, "timeseries", "channel0002", "timeseries")
+                ds_ch1 = _h5_dataset(
+                    ABRAfile, "timeseries", profile_channels.input_channel, "timeseries"
+                )
+                ds_ch2 = _h5_dataset(
+                    ABRAfile, "timeseries", profile_channels.target_channel, "timeseries"
+                )
 
-                total_psd_segments = ds_ch1.shape[0] // PSD_SEGMENT_LENGTH
+                total_psd_segments = ds_ch1.shape[0] // psd_segment_length
 
                 input_chunks = []
                 target_chunks = []
                 for psd_idx in psd_segment_indices:
-                    start = psd_idx * PSD_SEGMENT_LENGTH
-                    end = start + PSD_SEGMENT_LENGTH
+                    start = psd_idx * psd_segment_length
+                    end = start + psd_segment_length
                     input_chunks.append(ds_ch1[start:end])
                     target_chunks.append(ds_ch2[start:end])
 
@@ -779,15 +806,22 @@ def main():
 
     else:
         # --- NORMAL MODE: denoise all segments of a single file ---
-        fname = f"abra_validation_{str(args.file_index).zfill(4)}.h5"
+        # RAW validation input. Note the pre-migration inconsistency this
+        # removes: this site built the name with ``zfill(4)`` while every
+        # other built it with ``:04d`` — equal only for non-negative ints.
+        fname = profile_dataset.validation_file_name(args.file_index)
         fpath = os.path.join(args.data_dir, fname)
 
         if not os.path.exists(fpath):
             raise FileNotFoundError(f"Validation data missing at {fpath}")
 
         with h5py.File(fpath, "r") as ABRAfile:
-            alltrain = np.array(_h5_dataset(ABRAfile, "timeseries", "channel0001", "timeseries"))
-            alltarget = np.array(_h5_dataset(ABRAfile, "timeseries", "channel0002", "timeseries"))
+            alltrain = np.array(
+                _h5_dataset(ABRAfile, "timeseries", profile_channels.input_channel, "timeseries")
+            )
+            alltarget = np.array(
+                _h5_dataset(ABRAfile, "timeseries", profile_channels.target_channel, "timeseries")
+            )
 
             # Reshape according to input_size from config
             train_loader = alltrain.reshape(-1, 1, input_size)

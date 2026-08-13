@@ -1186,6 +1186,30 @@ class TidmadSandbox:
         except Exception as e:
             raise ValueError(f"Experiment Configuration Rejected: {e!s}") from e
 
+    def _write_dataset_profile_config(self, exp_id: str) -> str:
+        """Materialize the resolved Dataset Profile for a subprocess.
+
+        One declaration, one file, three consumers. Training, inference and
+        scoring each receive the SAME resolved profile through the same
+        config-file + argv-flag mechanism already used for ``--model_cfg``
+        and friends, so the three data paths cannot interpret the dataset
+        differently — the exact failure the operator cited when deciding all
+        three boundaries stay in one PR (§3.4).
+
+        Written once per ``exp_id``; re-writing is idempotent because the
+        resolved profile does not change within a run.
+
+        Args:
+            exp_id: Experiment id, used to key the file within the run.
+
+        Returns:
+            Absolute path to the JSON the child loads.
+        """
+        path = os.path.abspath(os.path.join(self.dirs["configs"], f"dataset_profile_{exp_id}.json"))
+        with open(path, "w") as handle:
+            json.dump(resolve_dataset_profile().model_dump(), handle)
+        return path
+
     def execute_training(
         self,
         exp_id: str,
@@ -1250,15 +1274,7 @@ class TidmadSandbox:
                 with open(paths[k], "w") as f:
                     json.dump(v, f)
 
-            # Dataset Profile transport — same config-file + argv-flag
-            # mechanism as --model_cfg/--train_cfg/--loss_cfg above, so the
-            # child reads topology, geometry, channel identity and value
-            # encoding from ONE declaration instead of module constants.
-            dp_path = os.path.abspath(
-                os.path.join(self.dirs["configs"], f"dataset_profile_{exp_id}.json")
-            )
-            with open(dp_path, "w") as f:
-                json.dump(resolve_dataset_profile().model_dump(), f)
+            dp_path = self._write_dataset_profile_config(exp_id)
 
             cmd = [
                 sys.executable,
@@ -1582,6 +1598,8 @@ class TidmadSandbox:
             "agent",
             "-m",
             model_type,
+            "--dataset_profile_json",
+            self._write_dataset_profile_config(exp_id),
             "--model_cfg",
             m_path,
             "--loss_cfg",
@@ -1812,6 +1830,8 @@ class TidmadSandbox:
                     "agent",
                     "-m",
                     model_type,
+                    "--dataset_profile_json",
+                    self._write_dataset_profile_config(exp_id),
                     "--exp_id",
                     exp_id,
                     "--run_name",

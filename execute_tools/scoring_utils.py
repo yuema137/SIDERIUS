@@ -66,7 +66,9 @@ from execute_tools.dataset_config import (
     SEGMENTS_PER_FILE,
     TIDMAD,
     DataScope,
+    DatasetProfile,
     ScopeViolationError,
+    resolve_dataset_profile,
 )
 
 
@@ -341,6 +343,7 @@ def score_segments(
     anchor_map: dict,
     s_max: float,
     raw_data_dir: str | None = None,
+    raw_filename: str | None = None,
 ) -> float:
     """
     Score specific segments of one denoised file using anchor-normalized weights.
@@ -367,9 +370,11 @@ def score_segments(
                             Keys are file indices as strings, values are lists
                             of per-segment CH2 SNR values.
         s_max:              Global maximum CH2 SNR from the anchor map.
-        raw_data_dir:       Directory containing the raw validation files
-                            (``abra_validation_XXXX.h5``). Defaults to
-                            ``data_dir`` when ``None``.
+        raw_data_dir:       Directory containing the raw validation files.
+                            Defaults to ``data_dir`` when ``None``.
+        raw_filename:       Raw validation filename for ``file_index``.
+                            ``None`` resolves it from the Dataset Profile
+                            (Regime-A), which is what a legacy caller gets.
 
     Returns:
         The file-level score (weighted mean of denoised SNR for the sampled
@@ -380,13 +385,14 @@ def score_segments(
 
     if raw_data_dir is None:
         raw_data_dir = data_dir
+    if raw_filename is None:
+        raw_filename = resolve_dataset_profile().dataset.validation_file_name(file_index)
 
     file_anchors = anchor_map[str(file_index)]
     weighted_snrs = []
 
     for local_idx, seg_idx in enumerate(segment_indices):
         # CH2 center freq from raw validation file (use original segment index)
-        raw_filename = f"abra_validation_{file_index:04d}.h5"
         freq_ch2, psd_ch2 = get_one_sec_psd(raw_data_dir, raw_filename, ch=2, start=seg_idx)
         _, center_freq = get_snr(freq_ch2, psd_ch2)
 
@@ -410,7 +416,15 @@ def _score_one_file(args: tuple) -> tuple[int, float]:
     ``_collect_raw_pairs`` instead so it can operate in both anchor mode
     and ``legacy_mode``.
     """
-    data_dir, denoised_filename, file_index, segment_indices, anchor_map, s_max, raw_data_dir = args
+    (
+        data_dir,
+        denoised_filename,
+        file_index,
+        segment_indices,
+        anchor_map,
+        s_max,
+        raw_data_dir,
+    ) = args
     score = score_segments(
         data_dir=data_dir,
         denoised_filename=denoised_filename,
@@ -435,13 +449,20 @@ def _collect_raw_pairs(
     (anchor ``s_max`` vs legacy file-list-local ``np.amax``).
 
     Args tuple layout:
-        (data_dir, denoised_filename, file_index, segment_indices, raw_data_dir)
+        (data_dir, denoised_filename, file_index, segment_indices,
+         raw_data_dir, raw_filename)
+
+    ``raw_filename`` arrives as DATA rather than being rebuilt here. These
+    workers run in a ProcessPoolExecutor, so an ambient profile lookup would
+    not survive the process boundary; the name is resolved once by
+    ``score_vector`` from the Dataset Profile and shipped in the tuple —
+    symmetric with ``denoised_filename``, which has always travelled that
+    way.
     """
-    data_dir, denoised_filename, file_index, segment_indices, raw_data_dir = args
+    data_dir, denoised_filename, file_index, segment_indices, raw_data_dir, raw_filename = args
     if raw_data_dir is None:
         raw_data_dir = data_dir
 
-    raw_filename = f"abra_validation_{file_index:04d}.h5"
     pairs: list[tuple[float, float]] = []
     for local_idx, seg_idx in enumerate(segment_indices):
         # CH2 (ground truth) from the raw validation file — provides both
@@ -477,6 +498,7 @@ def score_vector(
     parallel: bool = True,
     num_workers: int = 8,
     legacy_mode: bool = False,
+    profile: DatasetProfile | None = None,
 ) -> tuple[list[float | None], float]:
     """
     Score multiple files and return the length-``NUM_FILES`` per-file vector
@@ -573,6 +595,11 @@ def score_vector(
     # ------------------------------------------------------------------
     # Phase 1 — collect raw (snr_sg, snr_squid) pairs
     # ------------------------------------------------------------------
+    # RAW validation names come from the declared INPUT topology; DENOISED
+    # names keep coming from ``denoised_filename_fn``, which is the
+    # Deliverable Contract's and is NOT 02a's to touch (§5f). Both are keyed
+    # by the same input identity, ``file_index``.
+    dataset = (profile or resolve_dataset_profile()).dataset
     tasks = []
     for file_index, segment_indices in sample_set.items():
         denoised_filename = denoised_filename_fn(file_index)
@@ -583,6 +610,7 @@ def score_vector(
                 file_index,
                 segment_indices,
                 raw_data_dir,
+                dataset.validation_file_name(int(file_index)),
             )
         )
 

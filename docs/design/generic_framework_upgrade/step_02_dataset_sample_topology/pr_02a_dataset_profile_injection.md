@@ -428,7 +428,7 @@ C7  docs + ledger closeout
 | **CP0 — BASELINES COMPLETE** | **PASS** (2026-08-14, `bbe91f91` + C1) | see below |
 | **CP-A1 — in-process parity + reachability** | **PASS** (2026-08-14, `43c440e4`) — the one broad-run failure was diagnosed as a worktree ENVIRONMENT gap, not a C2 regression | see below |
 | **CP-A2 — training subprocess consumes the profile** | **PASS** (2026-08-14, `c3cfa9c4` + `d92f2e1f`) | see below |
-| CP-A3 | not reached | — |
+| **CP-A3 — all three data paths agree on ONE profile** | **PASS** (2026-08-14) | see below |
 | Checkpoint A | not reached | — |
 | Checkpoint B | not reached | — |
 | Checkpoint C | not reached | — |
@@ -637,6 +637,64 @@ PASS must establish at least:
 - [ ] exact executable HEAD, artifacts and log recorded.
 
 This is live-integration evidence, **not a substitute Gate tier** (§7).
+
+---
+
+**CP-A3 PASS — three entries, one declaration.**
+
+| Criterion | Evidence |
+|---|---|
+| same transport semantics as training | one parent helper, `TidmadSandbox._write_dataset_profile_config(exp_id)`, called at all THREE launch sites; a test asserts the count is exactly 3 |
+| real inference/scoring reads consume the profile | `inference_single` raw name, geometry and channels; `denoising_score_single` raw name and `segments_per_file`; `scoring_utils` raw name |
+| raw validation naming comes from the profile | `validation_file_name()` at every migrated site |
+| `validation_file_pattern` dead seam closed | it now has FOUR production consumers; the contrast test proves the scorer follows a changed pattern |
+| TIDMAD outputs/scoring parity | `test_tidmad_parity_is_preserved`; frozen scorer math untouched |
+| **zero Deliverable Contract leakage** | verified on the diff: every `denoised` line is a variable, comment or test lambda — **no template changed**. Plus two standing guards: the profile can never render a denoised name, and `array2h5` (the deliverable writer) must not mention the profile at all |
+
+**§5f closed — Disposition A, parity-only, no production change.**
+`denoised_filename_fn(file_index)` is pinned: deliverables are keyed by
+the INPUT identity through a callable, and the keying is unchanged. A
+second test asserts the raw and denoised names are resolved by DIFFERENT
+authorities, so a future edit that routed the deliverable name through the
+profile would red.
+
+**Worker processes forced an explicit design choice.** `score_vector`
+fans out to a `ProcessPoolExecutor`, where an ambient ContextVar lookup
+would not survive. The raw filename is therefore resolved ONCE in
+`score_vector` and shipped in the task tuple as data — symmetric with
+`denoised_filename`, which has always travelled that way. Threading a
+profile into the workers instead would have been the wrong shape.
+
+**A SURVIVED mutation, and what it changed.**
+
+```text
+M9 (first attempt): re-inline the raw name in inference_single
+  -> SURVIVED.
+
+Why: the "all three entries" guard asserted that the FLAG, the LOADER and
+the RESOLVER appear in each file. Re-inlining one read removes none of
+those strings. Proving the transport EXISTS is not proving every read
+goes through it.
+
+Fix (§12 — strengthen the architecture, not the assertion): a guard
+mirroring test_dataset_contract.py's training-name precedent, asserting
+no migrated entry contains a raw `abra_validation_{...}` literal.
+DENOISED templates are explicitly exempt — they are not 02a's to move.
+
+M9 retry -> KILLED.  M10 (scoring entry) -> KILLED.
+```
+
+| # | Failure class | Mutation | Result |
+|---|---|---|---|
+| M8 | filename authority | scorer re-inlines the raw name | **KILLED** |
+| M9 | filename authority | inference re-inlines the raw name | SURVIVED → guard strengthened → **KILLED** |
+| M10 | filename authority | scoring entry re-inlines the raw name | **KILLED** |
+
+**Structural note for Checkpoint C.** `denoising_score_single.py` parses
+argv at MODULE level with no `main()`, so it cannot be imported in-process
+— importing it consumes pytest's argv and exits. Its flag is on the
+module-level parser, its surface is guarded from source here, and it is
+exercised for real across a subprocess at Checkpoint C.
 
 ## 5c. Regime-A vs fail-closed — FROZEN (was left to implementation)
 
