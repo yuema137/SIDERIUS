@@ -243,3 +243,24 @@ class TestTheGuardActuallyDetects:
             path = REPO_ROOT / relative_path
             assert path.is_file(), path
             assert "resolve_input_dtype" in path.read_text(encoding="utf-8")
+
+    def test_the_surface_list_cannot_be_silently_emptied(self):
+        """Found by mutation D-M6, which SURVIVED the first cut of this guard.
+
+        Emptying ``MIGRATED_SURFACES`` produced "6 passed, 1 skipped" rather
+        than a failure: a parametrized test over an empty list simply does
+        not run, so the guard stopped guarding while still reporting green.
+
+        That is the same hole the sibling guardrail learned from — while a
+        label sat in its ``_PENDING_CLEANUP`` dict, a reintroduced name
+        branch was reported as ``xfail`` instead of ``failed``, so the guard
+        detected the regression and then tolerated it.
+
+        Both migrated surfaces are named explicitly here. Removing one is
+        then a deliberate edit to a stated list, not an invisible
+        disappearance.
+        """
+        assert set(MIGRATED_SURFACES) == {
+            "execute_tools/train_engine_sandbox.py",
+            "execute_tools/inference_single.py",
+        }
