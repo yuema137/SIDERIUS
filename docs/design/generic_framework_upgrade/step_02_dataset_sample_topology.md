@@ -5,27 +5,61 @@
 **LIVING PARENT — DELIBERATELY NOT FROZEN (operator decision,
 2026-08-13).**
 
-**STEP 02 — READY FOR OPERATOR REVIEW (2026-08-13). NOT MERGED.**
+## **STEP 02 — COMPLETE (2026-08-13).**
 
-| Child | State |
+Governance order completed as frozen: **02a → 02b → 02c**.
+
+| Child | State | Merge |
+|---|---|---|
+| **02a** Dataset Profile injection | **MERGED** | PR #202, `47359538` |
+| **02b** Selection & SampleSet semantics | **MERGED** | PR #203, `c17469ec` |
+| **02c** Task-owned file-set semantics **+ FINALIZER** | **MERGED / FINALIZER COMPLETE** | PR #204, `1807054b` |
+
+### Final effect
+
+> **Dataset semantics and task-owned static file selections resolve from
+> explicit task declarations or from the authority that already
+> determines them, throughout the Step-02-owned production paths — while
+> TIDMAD's observable behaviour is preserved.**
+
+Concretely, the semantic decomposition Step 02 actually established:
+
+```text
+DATASET PROFILE      topology · file identities · geometry · encoding · channels
+SELECTION            the explicit run-bound profile -> SampleSet construction
+TASK-OWNED FILE SETS anchor-selection  -> DECLARED
+                     health-peek       -> DECLARED
+TOPOLOGY-DERIVED     all-files         -> DERIVED from num_files / index space
+RUNTIME & POLICY     remain with their later owners (below)
+```
+
+This is **not** "hardcodes moved into config", and the three file-set
+literals were **not** one frequency-band group — see §1.4's correction.
+
+### Aggregate evidence
+
+| | |
 |---|---|
-| **02a** Dataset Profile injection | **MERGED** — PR #202, merge `47359538` |
-| **02b** Selection & SampleSet | **MERGED** — PR #203, merge `c17469ec` |
-| **02c** Task-owned file-set semantics + FINALIZER | **IMPLEMENTATION COMPLETE — awaiting operator review**, branch `feat/generic-framework-step-02c-task-owned-file-sets` |
+| Checkpoints | **0 · A · B · C · D · E — all COMPLETE** |
+| Assembled executable SHA | `4d1c107e` (02c's last executable commit) |
+| Terminal local full unit suite | **ONCE** — 8739 passed / 3 skipped / 0 failed, clean tree |
+| Step-level Gate 2 | **ONCE — PASS**, chain exit 0, 16 min 17 s |
+| Gate config | `llm_configs/openai_tiered_pro.json` |
+| Iterations | **1**, accepted by operator decision (the standard permits one; the parent never required two) |
+| Final PR head / exact-head CI | `4aeeca3d` / run `31737156991` **success** |
 
-Checkpoint E is recorded in the 02c ledger (`pr_02c_systematic_groups.md`
-§24). Step-level evidence, both run exactly once at the assembled head:
+Per-run detail lives in the 02c ledger
+(`step_02_dataset_sample_topology/pr_02c_systematic_groups.md` §24).
+**This parent is not a run log.**
 
-- **terminal local full unit suite** — 8739 passed / 3 skipped / 0 failed
-  (535 s, clean tree);
-- **Step-02 Gate 2** — chain exit 0, 16 min 17 s, under
-  `llm_configs/openai_tiered_pro.json`; all five framework criteria plus
-  both Step-02 criteria PASS (the resolved profile deep-equals TIDMAD;
-  the production SampleSet equals the deterministic reference for the
-  run's ACTUAL inputs).
+### Deferred — owned by later Steps, NOT by Step 02
 
-**Step 02 is not COMPLETE until 02c merges** — the closeout marks the
-evidence complete, not the merge done.
+- **Step 08** — HealthGate policy: thresholds, verdicts, blocking-vs-recording
+  fallback-tier policy, and profile-vs-scope consumer semantics.
+- **Step 10** — runtime/task binding: startup full-scope singleton residue
+  and orchestration binding.
+
+Step 02 completing does **not** claim these are generic.
 
 > **Do not "fix" this by freezing it.** The operator decided this parent
 > stays a LIVING document until Step-02 closeout, because it is the
@@ -238,7 +272,31 @@ correctly** and must stay that way: the former is the dataset's own
 decomposition (config), the latter is a proposer-owned model
 hyperparameter (finding 17). Step 02 owns only the legality *rule*.
 
-### 1.4 Systematic groups — three informal encodings, three owners
+### 1.4 "Systematic groups" — three informal encodings, three owners
+
+> **CORRECTED BY IMPLEMENTATION (02c, 2026-08-13).** The audit below is
+> accurate about the SITES, and its heading is wrong about the CONCEPT.
+> These are **not** one group with three encodings; they are **three
+> different semantics with three different correct actions**, and 02c
+> shipped them that way:
+>
+> ```text
+> [0, 10, 19]  anchor selection -> DECLARED  (task-owned; no formula)
+> [3, 10, 17]  health peek      -> DECLARED  (task-owned; interior band
+>                                             representatives — no
+>                                             arithmetic on num_files
+>                                             yields them)
+> range(20)    "all files"      -> DERIVED   (never a group at all; its
+>                                             only meaning is "every
+>                                             file", already owned by
+>                                             DatasetProfile.num_files)
+> ```
+>
+> **No `groups` map exists, and no `all_files` field exists.** Deriving
+> the anchor triplet as `[0, n//2, n-1]` was explicitly rejected: it
+> coincides with TIDMAD at n=20, and a coincidence is not a contract for
+> inventing another task's science. The original table is preserved
+> because its site census is what made the refutation possible.
 
 | Literal | Site | Meaning | Consumer |
 |---|---|---|---|
@@ -479,7 +537,9 @@ explicitly deferred rather than falsely claimed clean.
   as a dataset fact);
 - selection/split semantics: strategy definitions, per-family selection,
   packing rule, group-aware anchor selection;
-- systematic named groups as declared data;
+- task-owned static file sets as declared data (anchor-selection and
+  health-peek — TWO declarations, not one group map; "all files" is
+  DERIVED from topology, not declared);
 - derived-artifact **INDEXING by input identity**.
 
 **Step 02 does NOT own** — each with the reason it was rejected:
@@ -662,7 +722,8 @@ CHECKPOINT: local A (parity) + local B (A1, A2, B, D) + local C
   including at least one load path reading the ENCODING declaration).
 DEPENDS ON: nothing beyond merged Step 01.
 CAN MERGE AND BE USEFUL ALONE?: YES. After 02a the data path is
-  profile-driven end to end; selection and groups still hardcode, which
+  profile-driven end to end; selection and the task-owned file sets still
+  hardcode, which
   is honest and visible rather than silently half-done.
 WHY A PR AND NOT A SEMANTIC COMMIT: it converts ~13 production modules
   from constant-import to injection, closes a dead seam, and carries its
@@ -703,7 +764,7 @@ AUTHORITY IT OWNS: explicit profile threading into build_sample_set and
   the two core/sandbox_executor.py json.dump sites.
 NOT OWNED (post-02a corrections):
   - migrating the builder off TIDMAD constants — DONE by 02a;
-  - ANCHOR_FILES / systematic groups — 02c;
+  - ANCHOR_FILES / the task-owned file-set declarations — 02c;
   - strategy definitions as declared data — DEFERRED (no second
     implementation yet, roadmap §0 rule 8);
   - trial packing read-layout — NOT selection-owned; forward-routed to
@@ -729,25 +790,34 @@ WHY A PR AND NOT A SEMANTIC COMMIT: its failure class is unique and
   it into 02c: the split criterion is semantic and review complexity.
 ```
 
-**CHILD 02c — Systematic groups**
+**CHILD 02c — Task-owned file-set semantics** *(planned as "Systematic
+groups"; renamed at design revision 3 after the single-group premise was
+refuted — see §1.4. The AS-SHIPPED description follows; the planning text
+it replaced claimed a "declared group map", which was never built.)*
 
 ```text
-CAPABILITY: named groups are declared data. Anchors, health peeks and
-  campaign validation read the declared group map instead of three
-  independent literals, so a task can declare its own band structure.
-AUTHORITY IT OWNS: named group declarations (bands) and group-aware
-  anchor selection.
-PRODUCTION CONSUMER: sample_set_builder's anchors strategy, the three
-  health checks' file resolution, and core/campaign_artifacts.py's
-  validator — all in the same PR.
-TIDMAD PARITY SURFACE: anchors selection identity ([0,10,19] resolves
-  identically); the shipped [3,10,17] peek resolves identically; the
-  three range(20) fallbacks resolve to the same files; gate verdicts
-  identical on fixture outputs.
-CONTRAST AXIS: 4.8-C group semantics only (TIDMAD shape, DIFFERENT
-  declared group map — proves anchors/peeks read groups, not literals).
-CHECKPOINT: local A (identity) + local B (4.8-C) + local C (health gates
-  evaluate a real round through the declared map).
+CAPABILITY: a task DECLARES its own anchor-selection and health-peek file
+  sets on the bound Dataset Profile, and "every file" DERIVES from the
+  profile's topology. Two separate declarations, never one group map.
+AUTHORITY IT OWNS: the two declarations and their validation; the tier-1
+  authority of the blocking peeks; the campaign validator's trigger
+  source; the recording checks' tier-3 value; the anchors consumer.
+PRODUCTION CONSUMER: sample_set_builder's anchors strategy reads
+  anchor_selection_files; the three BLOCKING health checks resolve
+  health_peek_files through the config marker; core/campaign_artifacts.py
+  reads the same declaration; the three RECORDING checks derive
+  range(num_files).
+TIDMAD PARITY SURFACE: anchors identity (GOLDEN sha16 byte-identical);
+  the blocking peek resolves to [3,10,17]; the recording fallbacks
+  resolve to set(range(20)); both pinned health-config shas and the
+  Step-00 HC-1 golden byte-identical; gate verdicts unchanged.
+CONTRAST AXIS: 4.8-C file-set semantics only, as TWO ATOMIC SUBCASES —
+  C-anchor varies only the anchor declaration (peeks asserted unchanged),
+  C-health varies only the peek declaration (anchors and the recording
+  gates asserted unchanged). Cardinality varies too, not just membership.
+CHECKPOINT: local A (identity) + local B (4.8-C) + local C (a REAL
+  evaluate_gate round, the real campaign decision, and the real selection
+  path — no direct resolver calls).
 FINALIZER DUTIES (governance, §6.2): assembled Checkpoint C
   reconciliation; the ONE Step-level Gate 2; the single local full unit
   suite at the assembled head; Checkpoint E; Step-02 closeout.
@@ -816,7 +886,7 @@ concerns**, with topology refined into two atomic sub-rungs. Only the
 | **4.8-A1 — file count / index space only** | **YES** | 02a | `num_files` ≠ 20, the two-family structure UNCHANGED. Isolates count from family shape, so a failure names one cause |
 | **4.8-A2 — file-family topology only** | **YES** | 02a | family structure changes; count and geometry held at the A1-established baseline. May build on A1's proven baseline (the "later rung may build on a proven earlier rung" rule) |
 | **4.8-B — sample geometry only** | **YES** | 02a | `psd_segment_length` / decomposition geometry ≠ 10,000,000, other axes fixed. Proves the affected consumers read the profile-owned legality and geometry rather than the 10M literal. Uses the EXISTING `DatasetConfig` authority — no new geometry abstraction |
-| **4.8-C — group semantics only** | **YES** | 02c | TIDMAD shape, a DIFFERENT declared group map. The only rung that can prove anchors/peeks read a declaration rather than a literal |
+| **4.8-C — task-owned FILE-SET semantics only** | **YES** | 02c | TIDMAD shape, DIFFERENT declared file sets. **AS SHIPPED**: two ATOMIC subcases — C-anchor varies only the anchor declaration, C-health only the peek declaration, each asserting the OTHER consumer unchanged; cardinality varies too, not just membership. The only rung that can prove anchors/peeks read a declaration rather than a literal |
 | **4.8-D — channel identity only** | **YES** | 02a | TIDMAD shape, channels renamed. Proves the loaders read the channel declaration rather than `channel0001`/`channel0002` (§1.6) |
 
 **Atomicity is binding.** No rung changes more than its named axis. In
@@ -867,6 +937,31 @@ local full suite if its own detailed design argues its blast radius
 makes narrower evidence insufficient — 02a, which migrates ~13
 production modules, is the plausible case. The parent does not mandate
 it; the child justifies it or does without.
+
+**AS EXECUTED (2026-08-13) — the cadence held.** No child ran a local
+full suite for its own Checkpoint D; each closed on targeted → affected
+package → focused mutation evidence plus exact-head CI. The single
+terminal local full unit suite ran once, at the assembled 02c executable
+head, followed by the one Gate 2, static checks and exact-head CI —
+exactly the ladder above.
+
+Two operational lessons the execution added, recorded because both cost
+real time and both are invisible until they bite:
+
+- **A suite run against a MOVING tree is not evidence.** 02c's first
+  Checkpoint-D run reported three config-sha failures — with three
+  DIFFERENT actual shas, the signature of a file being edited mid-run
+  rather than a regression. It was classified INVALID / DISCARDED, not
+  PASS and not FAIL, and Checkpoint D was closed by the later clean-tree
+  terminal suite instead.
+- **A linked worktree inherits no gitignored files**, and that includes
+  `.venv` and `agent_generated/`. Missing them produced 52 spurious
+  failures in the shell-runner tests and, separately, made a Gate-2
+  attempt silently execute `master`'s code — because `run_chain.sh`
+  invokes the runner as a SCRIPT, so `sys.path[0]` is the script's
+  directory and the editable-install finder wins over the cwd. Any chain
+  launched from a worktree must pin `PYTHONPATH` and assert provenance
+  before it starts.
 
 Blocking rule unchanged: no child proceeds to its contrast rungs before
 its parity checkpoint passes, and **later evidence never excuses a
@@ -991,7 +1086,7 @@ by justifying its blast radius in its own design.
 | SampleSet JSON round-trip boundary | 02b | key-coercion divergence between producer and consumer; today every consumer re-ints differently with no shared pin |
 | Group declaration equivalence | 02c | a declared map that does not reproduce `[0,10,19]` / `[3,10,17]` / `range(20)` |
 | Contrast rungs A1 / A2 / B / D | 02a | the abstraction does not actually vary with the declaration — topology (count, family), geometry (`psd_segment_length` ≠ 10M) and channel identity |
-| Contrast rung C | 02c | anchors/peeks read a literal rather than the declared group map |
+| Contrast rung C | 02c | anchors/peeks read a literal rather than their OWN declaration (two separate declarations, never one map) |
 | Topology contrast through selection | 02b | selection keeps TIDMAD's 20×200 shape under a contrast topology |
 
 ### 11.2 Retirement candidates — recorded, NOT pre-approved
