@@ -921,7 +921,7 @@ child's to take.
 | B3 → **Checkpoint A PASS** | landed `09442a6c` | §13.7 |
 | B4 → **Checkpoint B PASS** | landed `e2d058ef` | §13.8 |
 | **Checkpoint C PASS** | landed `6f14dcdb` | §13.10 |
-| B5 → Checkpoint D | in progress | |
+| B5 → **Checkpoint D PASS** | landed `8c910cf8` + `9e6dd4e7` | §13.13 |
 
 ### 13.3 CP0 — BASELINE COMPLETE — **PASS**
 
@@ -1414,3 +1414,73 @@ Validation:
   is precisely "the real tuner path follows the explicit profile"
   demonstrated by breaking it.
 ```
+
+---
+
+### 13.13 Checkpoint D — regression / static / exact-head CI — **PASS**
+
+**Local regression** (affected package per §8 — the selection +
+sandbox-executor + tuner tests, explicitly *not* most of `tests/unit/`):
+
+```text
+tests/unit/execute_tools/  tests/unit/core/
+tests/unit/agent/tune_ml_hyperparam_agent/
+  -> 4192 passed, 3 skipped, rc=0, 325.28s
+```
+
+Verdict read from the log file, never a wrapper exit status.
+
+**No local full unit suite was run.** §8 plans none, and the blast radius
+is three production files — one of which (`core/sandbox_executor.py`) is
+comment-only. CI runs the full suite and did so on the exact head.
+
+**Static:** `ruff check` and `ruff format --check` clean repo-wide (830
+files).
+
+**Exact-head CI — verified on the code head:**
+
+| | |
+|---|---|
+| PR | **#203** |
+| run | `31673670764` |
+| `headSha` | `9e6dd4e707510cb826b4c81fb3c9bbfcaab7ca77` |
+| PR `headRefOid` | `9e6dd4e707510cb826b4c81fb3c9bbfcaab7ca77` |
+| local `HEAD` | `9e6dd4e707510cb826b4c81fb3c9bbfcaab7ca77` |
+| conclusion | **success** (13m29s) |
+
+Three-way identity confirmed; every SHA read from `git rev-parse` or the
+GitHub API, never hand-extended from a short form.
+
+**The first attempt failed and is preserved, not overwritten.** Run
+`31672711999` on `8c910cf8`: 8638 passed, 23 skipped, **5 errors** — the
+portability defect in §13.11a. It is recorded because a PR whose history
+shows only the green run hides the fact that the local evidence was
+insufficient.
+
+This closing docs commit takes its own CI pass; that verification is
+reported to the operator rather than embedded here, since a commit cannot
+contain its own SHA.
+
+---
+
+## 14. Final status
+
+**PR 02b — IMPLEMENTATION COMPLETE / READY FOR OPERATOR REVIEW.
+NOT MERGED.**
+
+Ladder: **CP0 → CP-B1 → Checkpoint A → Checkpoint B → Checkpoint C →
+Checkpoint D — all PASS.** Eleven mutations attempted across the five
+evidence rungs; **eleven caught, none survived.**
+
+Carried forward for the parent to route:
+
+1. **§13.9** — a contrast topology is misread as a partial DataScope
+   (`validate_runtime_config` binds the TIDMAD singleton as a default
+   argument; the HealthGate validator reads the ambient profile).
+   Proposed owner **02c or Step-06**.
+2. **§13.1** — `validate_sample_set` remains TIDMAD-bounded, so 02b's
+   capability holds for `num_files <= 20`. No worse than before 02b.
+   Proposed owner **02c**.
+
+Gate 1 not required (§7). **Gate 2 NOT RUN — Step-level, owned by
+finalizer 02c.**
