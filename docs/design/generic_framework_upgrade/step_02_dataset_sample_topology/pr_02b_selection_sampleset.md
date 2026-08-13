@@ -880,13 +880,38 @@ Bounded resolution path, in order:
 3. otherwise record the residual here with its owner rather than
    widening 02b.
 
+**RESOLVED at B4 planning — step 1 taken.** The contrast profile varies
+`num_files` DOWNWARD (20 → a smaller population). Reasoning:
+
+- §6.4 specifies `num_files != 20`, not `> 20`, so the downward direction
+  satisfies the frozen axis exactly;
+- selection under it produces file indices strictly inside TIDMAD's
+  `[0, 20)`, so `validate_sample_set`'s bound is never consulted as a
+  *limit* and the contrast reaches the subprocess config unimpeded —
+  the rung is NOT blocked, so the OD-02a-1 precedent's trigger condition
+  is not met and generalizing it here would be exactly the unsourced
+  widening §D forbids;
+- the rung's question ("does the production selection path consume the
+  explicit profile?") is answered identically in either direction: a
+  consumer still assuming 20 files reds it either way.
+
+**Residual, stated rather than silently absorbed.** After 02b,
+`validate_sample_set` remains TIDMAD-bounded, so 02b's capability holds
+for `num_files <= 20`. A profile declaring MORE files than TIDMAD would
+select legally and then be rejected at the boundary. This is **not** a
+regression — the validator is exactly as TIDMAD-bound as before 02b — but
+it is the next honest step in the same migration. **Proposed owner: 02c**,
+which already owns the boundary's other TIDMAD literal (`ANCHOR_FILES`)
+and is the Step finalizer; the decision is the parent's to make, not this
+child's to take.
+
 ### 13.2 Commit ladder — live status
 
 | Rung | Status | Evidence |
 |---|---|---|
 | docs reconciliation | landed `73ca1fdd` | this section + §12 + parent §Status |
 | B1 → **CP0 PASS** | landed `8d317715` | §13.3 |
-| B2 → CP-B1 | not started | |
+| B2 → **CP-B1 PASS** | landed `7cc8c21d` | §13.5 |
 | B3 → Checkpoint A | not started | |
 | B4 → Checkpoint B | not started | |
 | Checkpoint C | not started | |
@@ -991,3 +1016,72 @@ latent branch's own output.
 >
 > **Implementation consequence:** the tautological assertion was replaced
 > before commit, not carried into the PR. M4 now has a test that reds.
+
+### 13.5 CP-B1 — SELECTION PARITY + EXPLICIT RESOLUTION — **PASS**
+
+Commit `7cc8c21d`.
+
+**Parity.** The five sha16 digests and `GOLDEN_FIRST_FILE_SEGS` are
+byte-identical, asserted by running
+`tests/unit/execute_tools/test_sample_set_builder.py` **unmodified** — 82
+passed across selection + digests + B1 + 02a-C2 + formal-sample-set.
+
+**Explicit resolution.** `build_sample_set()` takes
+`profile: DatasetProfile | None = None`; the tuner resolves the run's
+profile ONCE and supplies it to both construction sites.
+
+**Production callers deliberately left on Regime-A** (§6.2 edge table —
+"a caller has no natural profile to pass"): `scripts/run_comparison.py:381,388`
+and `agent/utils/proposer_preflight.py:78`. Audit basis: neither has any
+profile in scope; `run_comparison.py` contains zero `profile` references.
+`profile=None` keeps their behaviour bit-identical.
+
+**Resolve-once is load-bearing, not cosmetic.** The pre-B2 function
+called `resolve_dataset_profile()` at THREE independent points (`:67`
+scope, `:95` trial segments, `:117` normal-mode segments). Resolving once
+is what makes train and eval provably select against the same topology; a
+per-site resolve could not survive a rebind between the two calls.
+
+**Mutation evidence — three mutations, three CAUGHT.**
+
+| # | Mutation | Site | Observed |
+|---|---|---|---|
+| M5 | train tuner site drops `profile=` | tuner `:4418` | **CAUGHT** — `KeyError: 'profile'`, run degrades to `partial` |
+| M6 | eval tuner site drops `profile=` | tuner `:4427` | **CAUGHT** — same signature at the eval site |
+| M7 | builder ignores the supplied profile | `sample_set_builder.py:85` | **CAUGHT** — 11 failed, `_AmbientConsulted` raised |
+
+M7 is the sharpest: with ambient resolution made to RAISE, a decorative
+parameter cannot hide. M5/M6 prove the *production* sites supply it —
+a `None`-defaulted parameter is invisible to any caller that never passes
+it, so builder-level evidence alone would not have established the claim.
+
+### 13.6 Process finding — mutation hygiene (self-inflicted, recorded)
+
+> **What happened.** The first CP-B1 battery was run against
+> **uncommitted** B2 production work. Its `git checkout -- <file>`
+> restore step therefore reverted the file to HEAD, silently deleting the
+> B2 implementation mid-battery.
+>
+> **Consequences, classified honestly:** M6 and M7 had already executed
+> against real B2 code and are VALID evidence. M5 was never validly run —
+> by the time it started, the tuner had been reverted, so its target line
+> no longer contained `profile=run_profile,`.
+>
+> **What saved it.** The harness verifies the exact target line *before*
+> mutating and aborts on mismatch. M5 reported `INVALID (wrong target
+> site)` rather than mutating an unrelated line and reporting a
+> meaningless SURVIVED/CAUGHT. Target verification is what turned a
+> silent corruption into a loud one.
+>
+> **Corrected procedure — the B1 order, applied without exception:**
+> ```text
+> commit the production change
+>   -> run the mutation battery against the committed state
+>   -> git checkout restores exactly what was committed
+> ```
+> B1 followed this and was unaffected. B2 did not, and paid for it. The
+> battery was re-run in full after committing `7cc8c21d`; the CP-B1 table
+> above reports only that clean run.
+>
+> **Cost:** one wasted battery (~5 min) and a re-application of two
+> production edits. No evidence was accepted from the corrupted run.

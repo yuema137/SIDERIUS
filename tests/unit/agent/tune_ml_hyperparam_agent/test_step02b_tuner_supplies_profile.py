@@ -106,7 +106,9 @@ class TestTunerSuppliesResolvedProfile:
     def test_both_sites_supply_a_profile_in_both_modes(self, tmp_path):
         calls, ambient, output = _run_tuner(tmp_path, max_rounds=2)
 
-        assert output.status == "completed"
+        # Ordered most-diagnostic first. A dropped `profile=` also degrades the
+        # run's status, so asserting status first would report "partial !=
+        # completed" and say nothing about the actual defect.
         assert len(calls) >= 2, f"expected at least the train/eval pair, got {len(calls)}"
 
         missing = [i for i, kw in enumerate(calls) if kw.get("profile") is None]
@@ -119,6 +121,8 @@ class TestTunerSuppliesResolvedProfile:
         # independently of the run's status so a swallowed exception upstream
         # cannot make this look green.
         ambient.assert_not_called()
+
+        assert output.status == "completed"
 
     def test_the_supplied_profile_is_the_resolved_run_profile(self, tmp_path):
         """It must be the run's profile, not a freshly invented one.
