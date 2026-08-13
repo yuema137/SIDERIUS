@@ -205,6 +205,139 @@ following exactly this pattern is the bounded, precedented mechanism.
 
 ---
 
+## 3.5 Implementation-time source audit (C1, 2026-08-14, at `bbe91f91`)
+
+Everything here was read from source during C1. It corrects or extends §3,
+which was written at `c7f4a212`. **No frozen invariant changes.**
+
+### D1 — the concentration point is THREE classes, not one
+
+```text
+Previous assumption (§3.1):
+  ONE method — "TIDMADEpochDataset._pull_events_from_sample_set
+  (train_engine_sandbox.py:135-201)" — reads topology, geometry, channel
+  and encoding together, and that is why the four facets cannot be split.
+
+Audit evidence:
+  The method belongs to TIDMADDataset, not TIDMADEpochDataset. The module
+  defines THREE Dataset classes, each independently reading all four
+  facets:
+
+    TIDMADDataset             :48-207   train_events, size=:86,
+                                        _pull_events_from_sample_set
+                                        :135-207, filename :160,
+                                        PSD :156/:178-179, channels
+                                        :167-172, encoding :95/:181-182/:196
+    TIDMADSingleFileDataset   :210-253  PSD :227/:234-235, channels
+                                        :231-232, encoding :237/:240/:251-252
+    TIDMADEpochDataset        :256-352  filename :302, PSD :290/:322-323,
+                                        channels :319-320, encoding
+                                        :325/:328/:350-351, warn-skip :303-305
+
+Corrected understanding:
+  The §2 argument is STRENGTHENED, not weakened — splitting the facets
+  would now mean touching three classes in each of four PRs. But the
+  visited-sequence and step-count surfaces belong specifically to
+  TIDMADDataset: TIDMADEpochDataset has self.inputs and NO train_events.
+
+Implementation consequence:
+  C3 migrates three classes in one commit, not one method. C1's
+  sequence/step-count pins target TIDMADDataset; its channel pins cover
+  BOTH production classes, so C3 cannot migrate one and leave the other
+  addressing the raw literal.
+
+Validation consequence:
+  The channel-identity pin is written twice, once per production loader.
+```
+
+### D2 — `TIDMADSingleFileDataset` is DEAD CODE
+
+`grep -rn "TIDMADSingleFileDataset" --include="*.py" .` returns **exactly
+one** hit: the class statement itself. No production caller, no test, no
+script.
+
+**Disposition deferred to C3, recorded now.** Migrating it would create a
+consumer-less migration; leaving it means a hardcoded-geometry consumer
+survives Stage B (rungs B and D cannot reach it, because nothing
+constructs it). Deleting it is cleanup this PR did not authorise. The C3
+entry must pick one and say why — silently leaving it unexamined is the
+failure mode.
+
+### D3 — production reachability of the other two loaders
+
+| Class | Production constructor |
+|---|---|
+| `TIDMADEpochDataset` | `train_engine_sandbox.py:837` (`run_experiment_streaming`, the main epoch path) and `agent/skills/evaluate_time_skill/wrapper.py:359` |
+| `TIDMADDataset` | `train_engine_sandbox.py:1277` (legacy single-file mode) and `execute_tools/probe_data.py:29` (runtime-control probe batch) |
+
+### D4 — the ordering row of §4 is ALREADY largely pinned
+
+```text
+Previous assumption (§4):
+  "Ordering semantics ... MISSING -> C1" — the whole row needs capture.
+
+Audit evidence:
+  tests/unit/execute_tools/test_ordering_engine.py already pins shuffle
+  ENABLEMENT and the exact DataLoader kwargs through a spy on the REAL
+  engine (test_default_shuffle_path_is_unchanged), the deterministic
+  sampler branch, order_strategy resolution, file_order permutation
+  validation, and step-count equality across strategies.
+
+Corrected understanding:
+  The genuine gap is narrower: nothing asserts the VISITED SEQUENCE
+  itself — the ordered (filename, row_idx) list produced from real data.
+
+Implementation consequence:
+  C1 captures the visited sequence, the step count, and file visit
+  ordering, and does NOT restate the five already-pinned surfaces.
+  Re-asserting them would be decoration under the binding test-economy
+  rule.
+
+Validation consequence:
+  C3's "ordering semantics unchanged" evidence is the C1 sequence pin
+  PLUS the existing test_ordering_engine.py suite, run unmodified.
+```
+
+### D5 — raw-validation-filename inventory is wider than §3.3
+
+Full production inventory of the RAW validation name (denoised/deliverable
+names deliberately excluded — they are the Deliverable Contract's):
+
+| Site | Construction | 02a disposition |
+|---|---|---|
+| `scoring_utils.py:389` (`score_segments`) | `f"...{file_index:04d}.h5"` | C4 — named in the frozen scope |
+| `scoring_utils.py:444` (`_collect_raw_pairs`) | `f"...{file_index:04d}.h5"` | C4 — named in the frozen scope |
+| `inference_single.py:583` | `f"...{file_index:04d}.h5"` | C4 (roadmap §4.2 names it) |
+| `inference_single.py:782` | `str(...).zfill(4)` — **a second construction** | C4 |
+| `denoising_score_single.py:139` | `f"...{idx_str}.h5"` | C4 |
+| `scripts/compute_raw_baseline.py:318` | `f"...{idx:04d}.h5"` | C5 — IN per §8 |
+| `execute_tools/build_anchor_map.py:52` | `f"...{file_index:04d}.h5"` | **NOT named by the frozen design** — decide at C4 |
+| `ml_hyperparameter_tune_agent.py:5157` | `f"...{i:04d}.h5"` | **NOT named by the frozen design** — decide at C4 |
+
+The `:04d` / `zfill(4)` divergence agrees only for non-negative ints; C1
+pins the equivalence across the whole index space so C4 cannot silently
+unify two subtly different names.
+
+### D6 — two more topology literals outside §3.3
+
+`execute_tools/probe_data.py:22` and
+`core/runtime_control/gpu_measurement_data.py:117` both glob
+`"abra_training_*.h5"` directly. These are topology consumers the frozen
+§3.3 list does not enumerate. Recorded; disposition at C3 (probe_data is
+reached from the runtime-control probe path).
+
+### D7 — the raw/denoised boundary also runs through `get_one_sec_psd`
+
+`scoring_utils.py:147` builds `channel_key = f"channel{ch:04d}"` from an
+int argument, and `:158`/`:161` read attrs from a hardcoded
+`"channel0001"`. Callers pass `ch=2` for the RAW truth channel (02a-owned
+channel identity) and `ch=1` for the DENOISED file (Deliverable
+Contract). **One function, both sides of the §1 boundary** — the same
+hazard §1 flags for the filename, and C4 must route only the `ch=2` raw
+side.
+
+---
+
 ## 4. Compatibility contract (strongest observable criterion per surface)
 
 | Surface | Criterion | Baseline |
@@ -287,6 +420,40 @@ assembled 02a executable head
 C7  docs + ledger closeout
   └─ CHECKPOINT D — regression / static / exact-head CI
 ```
+
+### 5a.1 Checkpoint log (LIVE)
+
+| Rung | State | Evidence |
+|---|---|---|
+| **CP0 — BASELINES COMPLETE** | **PASS** (2026-08-14, `bbe91f91` + C1) | see below |
+| CP-A1 | not reached | — |
+| CP-A2 | not reached | — |
+| CP-A3 | not reached | — |
+| Checkpoint A | not reached | — |
+| Checkpoint B | not reached | — |
+| Checkpoint C | not reached | — |
+| Checkpoint D | not reached | — |
+
+**CP0 PASS — the two conditions, answered.**
+
+*"Every MISSING row in §4 has a pin."*
+
+| §4 MISSING row | Pin |
+|---|---|
+| Validation filename | `TestRawValidationFilename` (4 tests) — captured from the real scorer workers |
+| Encoding | `TestEncodingDeclaration` (2 tests) |
+| Channel identity | `TestChannelIdentity` (3 tests, both production loaders) |
+| Visited sequence | `test_train_events_is_the_exact_ordered_sequence` |
+| Step count | `test_step_count_derives_from_the_sequence` |
+| Ordering semantics | already pinned by `test_ordering_engine.py` (D4); C1 adds the visited-sequence gap, ascending file order and warn-and-skip |
+
+*"Each pin is shown to fail when the behaviour it pins is perturbed."*
+Four mutations, one per §5g failure class, all KILLED (§6.1.9). The
+fourth class (IPC fail-closed) has no target until C3 and is recorded
+there rather than claimed here.
+
+**Zero production diff** — the C1 commit touches exactly one file, under
+`tests/`.
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
@@ -441,26 +608,43 @@ placement implementation-time); possibly a shared fixture helper.
 Unchanged: ALL production code — this commit has zero production diff.
 Depends on: nothing.
 
-**3. Implementation plan.**
-- [ ] Pin the validation filename: the string `scoring_utils.py:389,444`
+**3. Implementation plan.** — **COMPLETE.** All pins live in
+`tests/unit/execute_tools/test_step02a_c1_baselines.py` (13 tests).
+
+- [x] Pin the validation filename: the string `scoring_utils.py:389,444`
       and `inference_single.py` build today == the pattern render.
-- [ ] Pin encoding: load a synthetic file and assert the exact tensors
+      → `TestRawValidationFilename`. Captured from the REAL workers
+      (`_collect_raw_pairs`, `score_segments`) by spying on
+      `get_one_sec_psd`, so it is a production-path capture, not a
+      restatement of the literal. Plus the `:04d` vs `zfill(4)`
+      equivalence across the whole index space (D5).
+- [x] Pin encoding: load a synthetic file and assert the exact tensors
       after `astype`/`+128`, including the `minlength=256` bincount.
-- [ ] Pin channel identity: assert input comes from `channel0001` and
+      → `TestEncodingDeclaration` (served-tensor dtype/offset and the
+      256-bin `class_count` histogram over the `torch.ones(256)` prior).
+- [x] Pin channel identity: assert input comes from `channel0001` and
       target from `channel0002`, and that swapping them is detectable.
-- [ ] Pin the **visited sequence**: `train_events` as an exact ordered
+      → `TestChannelIdentity`, written for **both** production loaders
+      (D1), with an explicit distinguishability test proving the fixture
+      can see a swap.
+- [x] Pin the **visited sequence**: `train_events` as an exact ordered
       `(filename, row_idx)` list for a fixed sample_set.
-- [ ] Pin the **step count**: `len(train_events)` and steps/epoch for a
-      fixed batch size.
-- [ ] Pin the **default shuffle path** per §5d — shuffle ENABLEMENT and
-      the same seed/generator/kwargs reaching the DataLoader,
-      `order_strategy` resolution, `file_order` permutation validation,
-      and the deterministic `sampler=epoch_indices` branch's emitted
-      order. **Do NOT pin the exact emitted shuffled order** under
-      `shuffle=True`: source audit shows no generator/seed is passed, so
-      pinning it would create a new guarantee (§5d).
-- [ ] Provide mutation/reachability evidence per §5g **failure class**,
-      not one mutation per test.
+      → `test_train_events_is_the_exact_ordered_sequence` — the exact
+      6-element list, hardcoded; non-contiguous PSD indices so a loader
+      ignoring `psd_idx` is caught.
+- [x] Pin the **step count**: `len(train_events)` and steps/epoch for a
+      fixed batch size. → `test_step_count_derives_from_the_sequence`,
+      hardcoded to 6 (asserting `size == len(train_events)` would compare
+      the code under test to itself and pass for any value).
+- [x] Pin the **default shuffle path** per §5d.
+      → **Already pinned; deliberately NOT restated** (D4). The five
+      surfaces are covered by `test_ordering_engine.py`, which spies the
+      REAL engine's DataLoader kwargs. C1 closes the one genuine gap —
+      the visited sequence — and adds `test_files_are_visited_in_
+      ascending_index_order` plus the warn-and-skip pin. The exact
+      emitted `shuffle=True` order is NOT pinned, per §5d.
+- [x] Provide mutation/reachability evidence per §5g **failure class**,
+      not one mutation per test. → four mutations, all KILLED (§6.1.9).
 
 **4. Validation plan.**
 Unit: the new pins themselves.
@@ -488,15 +672,43 @@ Gate: none.
 | a pin passes for the wrong reason (e.g. empty sequence) | the mutation requirement catches it |
 | synthetic fixture diverges from real HDF5 layout | reuse the existing `synthetic_h5` conftest generator rather than inventing one |
 
-**7. Verification commands and evidence.**
-Intended: targeted `pytest` over the new module(s) plus
-`tests/unit/execute_tools/`. Record counts and wall time here after
-execution. Any test that could not be run is recorded with the reason —
-never claimed as passed.
+**7. Verification commands and evidence.** — EXECUTED 2026-08-14.
+
+```text
+command:  .venv/bin/python -m pytest \
+            tests/unit/execute_tools/test_step02a_c1_baselines.py -q
+result:   13 passed in 2.06s
+
+command:  .venv/bin/python -m pytest tests/unit/execute_tools/ -q
+purpose:  affected package — prove the new module disturbs nothing
+result:   679 passed, 1 skipped in 19.29s   (rc read from pytest itself,
+          not from a pipeline wrapper)
+
+command:  ruff check / ruff format --check on the new module
+result:   clean. RUF012 fired on three class-level dict attributes and was
+          FIXED with ClassVar annotations — never silenced.
+```
 
 **8. Commit boundary.** Test-only, independently reviewable, no
-production diff, no cleanup. Before committing: show diff summary,
-staged file list, test output, deviations.
+production diff, no cleanup.
+
+`git diff --stat` at the C1 commit shows exactly ONE file, under
+`tests/` — the §5 acceptance criterion for this commit.
+
+**9. Mutation dossier (§5g failure classes).** Hygiene per class: exact
+site count asserted == 1, backup, apply, `__pycache__` purged, RED
+required, restore, purge again, GREEN required, `git status` verified
+clean. Harness recorded at `$CLAUDE_JOB_DIR/tmp/mutate.sh`.
+
+| # | Failure class | Mutation | Result |
+|---|---|---|---|
+| M1 | filename authority disconnect | `scoring_utils.py:444` `:04d` → `:03d` | **KILLED** — `test_collect_raw_pairs_builds_the_pattern_render` |
+| M2 | channel authority disconnect | `_pull_events_from_sample_set` reads ch1/ch2 **swapped** | **KILLED** — `test_sample_set_loader_binds_input_to_ch1_and_target_to_ch2` |
+| M3 | encoding authority disconnect | `__getitem__` offset `+128` → `+127` | **KILLED** — `test_served_tensors_are_int16_shifted_by_128` |
+| M4 | ordering / step-count drift | `sorted(sample_set.items())` → `sample_set.items()` | **KILLED** — `test_files_are_visited_in_ascending_index_order` |
+
+The fourth §5g class — **IPC fail-closed** — has no target yet: the
+transport does not exist until C3. It is C3's mutation, recorded there.
 
 ---
 
