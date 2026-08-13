@@ -7,16 +7,29 @@ OD-S1-1..8 all decided (§19).
 
 **STEP 01 STATUS: IN PROGRESS.** Child **PR 01a is MERGED**
 (PR #199, merge commit `39f89f52`, 2026-08-12); child **PR 01b is
-UNBLOCKED and NOT STARTED**. This parent stays the status authority;
-the child designs are the live implementation ledgers.
+IMPLEMENTED and awaiting operator review — NOT MERGED**. This parent
+stays the status authority; the child designs are the live
+implementation ledgers.
+
+**PR 01b progress (2026-08-12).** Three code commits on
+`feat/generic-framework-step-01b-task-description-join`: `a7ffcccf`
+(S1-C, the JOIN), `e67b4651` (S1-C2, fixture 13.4-A), `5dee6c4a`
+(S1-E, budget-literal cleanup). Checkpoints **CP1 / CP2 / CP3 all
+PASS**. Production-boundary ladder all PASS on executable head
+`de8a5b8a`: **Checkpoint C** (production entry, pseudo LLM, 3 s),
+**Gate 1** (real gpt-5.5 across all three proposer stages + dummy-tensor
+check, 15m15s, 197 k tokens), **Gate 2** (bounded trial-only chain,
+2 iterations × 2 real-training rounds, 33m35s, 581 k tokens, chain
+exit 0, every round carrying a `gate_action`, no phantom score
+accepted). Terminal unit suite green (8540 passed / 3 skipped). Full
+evidence in the child ledger §14-§17.
 
 Children (one PR = one doc):
 - [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
   — exact-parity extraction; **MERGED** (PR #199 → `39f89f52`).
 - [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md)
-  — the intentional JOIN; **DESIGN FROZEN / OPERATOR APPROVED FOR
-  IMPLEMENTATION (2026-08-13)**. Implementation has NOT started and
-  must begin in a fresh context (child §Status). Decisions at freeze:
+  — the intentional JOIN; **IMPLEMENTED, READY FOR OPERATOR REVIEW —
+  NOT MERGED** (2026-08-12). Decisions at freeze:
   **OD-S1-9 = option (b)** — the invariant is semantic (the transported
   description authority must become a LIVE CONSUMED prompt channel),
   not the survival of a dictionary key; §8.3 is amended accordingly
@@ -1545,10 +1558,10 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 |---|---|---|---|
 | 0 BASELINE AVAILABLE | **PR 01a** | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed on MASTER (PR #198) and green in this worktree (526 passed, 2.3 s); PB-0's true surface corrected per §8.1 | **MET** |
 | A EXTRACTION PARITY (exact — the OD-S1-8 exception now lives in PR 01b, NOT here) | **PR 01a** | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | design |
-| B GENERIC CONTRAST | **PR 01a** (contract/rank/loss rungs) + **PR 01b** (FX-1 description rung) | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's FX-2/FX-5 prose rungs — one axis per fixture; FX-3/FX-4 DEFERRED with a named owner | design |
-| C LIVE INTEGRATION | **PR 01b** (PRE-MERGE, on its final head) | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4), which runs **PRE-MERGE on PR 01b's final executable head**, never post-merge; the :1597 seam is WIRED — no consumer-less seam survives | design |
-| D REGRESSION | **each child on its own final head** | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | design |
-| E ROADMAP SYNC | **PR 01b** (aggregate) | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | design |
+| B GENERIC CONTRAST | **PR 01a** (contract/rank/loss rungs) + **PR 01b** (FX-1 description rung) | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's FX-2/FX-5 prose rungs — one axis per fixture; FX-3/FX-4 DEFERRED with a named owner | **MET** — PR 01a's rungs merged; PR 01b's FX-1 rung landed as `e67b4651` (CP2 PASS, child §15) |
+| C LIVE INTEGRATION | **PR 01b** (PRE-MERGE, on its final head) | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4), which runs **PRE-MERGE on PR 01b's final executable head**, never post-merge; the dead-key seam is WIRED — no consumer-less seam survives | **MET, pre-merge on `de8a5b8a`** — Checkpoint C exit 0, the dumped proposing-stage prompt carries the shipped description exactly once with zero surviving placeholders. Exceeded by Gate 1 and Gate 2, which additionally proved a real model and a real 2-iteration training chain (child §17.2-§17.4) |
+| D REGRESSION | **each child on its own final head** | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | **PR 01b: local half MET** — 8540 passed / 3 skipped from a clean tree, ruff + format clean, mutation dossier complete (M-1, M-6, MUT-A, MUT-B equivalent, MUT-B′). Exact-head CI is the remaining item |
+| E ROADMAP SYNC | **PR 01b** (aggregate) | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | **IN THIS PR** — this Status section, the folder README row and the node `.md` are updated by S1-F; the roadmap §15.1 6-P row follows the repository's post-merge convention |
 
 
 **Split consequence (operator decision 2026-08-12).** Checkpoint A is

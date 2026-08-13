@@ -668,19 +668,23 @@ class ProposalInput(BaseModel):
     task_description: str = Field(
         default="",
         description="Plain-English description of the research task, sourced from "
-        "``configs/task_config.yaml``. Injected into the ``{TASK_BACKGROUND}`` "
-        "placeholder in the proposer system prompt and into ``template_vars`` "
-        "for the proposal-stage ``.md`` templates. Default empty string is for "
-        "test fixtures only; production callers (workflow) always populate via "
-        "``get_task_description(load_task_config())`` which rejects empty values "
-        "upstream.",
+        "``configs/task_config.yaml``. Rendered into the ``{TASK_BACKGROUND}`` "
+        "block of the LEGACY reasoning system prompt, and (since PR 01b / "
+        "S1-C) into the ``{task_background_block}`` placeholder of ALL THREE "
+        "pipeline stage ``.md`` templates in both exploration modes. Default "
+        "empty string is for test fixtures only; production callers (workflow) "
+        "always populate via ``get_task_description(load_task_config())`` "
+        "which rejects empty values upstream, and an empty or whitespace-only "
+        "value collapses the block to ``''``.",
     )
     forward_contract: ForwardContract = Field(
         default_factory=ForwardContract,
         description="Typed forward-pass contract from ``configs/task_config.yaml``. "
-        "Rendered into the ``{TASK_BACKGROUND}`` placeholder in the proposer "
-        "system prompt and the ``{FORWARD_CONTRACT}`` placeholder in "
-        "``proposing_stage.md``. Default ``ForwardContract()`` (all fields "
+        "Rendered into the ``{TASK_BACKGROUND}`` block of the LEGACY reasoning "
+        "system prompt and into the ``{forward_contract}`` placeholder of "
+        "``proposing_stage.md``. PR 01b deliberately does NOT expand it into "
+        "the comparison or causal stages (invariant F10). Default "
+        "``ForwardContract()`` (all fields "
         "empty) is for test fixtures only; production callers always populate "
         'via ``ForwardContract(**load_task_config()["forward_contract"])``.',
     )

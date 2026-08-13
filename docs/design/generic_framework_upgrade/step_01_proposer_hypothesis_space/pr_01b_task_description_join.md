@@ -1271,13 +1271,44 @@ implementor prompt surface; the detector built here is directly reusable.
 | `ruff check` / `ruff format --check` on touched files | clean |
 | repository-wide grep for other consumers of the removed literals | none outside the guard's own documentation and positive-control assertions |
 
-## 17. Production-boundary ladder — BLOCKED at Checkpoint C, awaiting operator launch approval
+## 17. Production-boundary ladder
 
-**Status: all three code commits are landed and CP1/CP2/CP3 have PASSED.
-The assembled executable head is `5dee6c4a`. Checkpoint C, Gate 1 and
-Gate 2 have NOT run.**
+**Operator approved all three launches (2026-08-12), after an initial
+denial recorded below. Checkpoint C has PASSED.**
 
-### 17.1 What blocked
+### 17.0 Mandatory launch declarations — a frozen-design gap, closed
+
+> **Previous assumption:** the frozen Gate design (§6, §7, §8) specifies
+> the Checkpoint C / Gate 1 / Gate 2 flag sets completely.
+> **Audit evidence:** the first real invocation was refused by the
+> application's own preflight:
+>
+> ```text
+> [run_one_iteration] FORMAL LAUNCH REFUSED: a formal launch must declare
+> --healthgate_mode and --result_authority. There is no default:
+> defaulting to blocking/scientific would let this run claim enforcement
+> and scientific standing that nobody configured.
+> ```
+>
+> Neither flag appears anywhere in §6/§7/§8. They are enforced by
+> `execute_tools/health_checks/launch_policy.py::validate_formal_launch`.
+> **Corrected understanding:** the values are NOT free choices — they are
+> determined by the shipped configuration and by what this PR is
+> honestly claiming. Resolved from source, not guessed:
+>
+> | Flag | Value | Why it is the only honest one |
+> |---|---|---|
+> | `--healthgate_mode` | `blocking` | `_enforcing_gate_ids(None)` over the shipped `configs/health_checks.yaml` returns `{amplitude_collapse_blocking, output_diversity_blocking, output_std_blocking}` — non-empty, so `observe_only` is REFUSED ("gates still invalidate"). `resolve_scientific_gate_ids(None)` returns the same set, so `scientific - enforcing == ∅` and `blocking` is accepted |
+> | `--result_authority` | `diagnostic` | These runs validate the FRAMEWORK, not the science. §8 states PASS is chain completion and bookkeeping, explicitly NOT denoising quality — so this evidence must never enter the scientific aggregate. `blocking + diagnostic` is legal by design ("enforced, deliberately not promoted") |
+>
+> **Implementation consequence:** both flags are added to every launch in
+> this ladder. This is a frozen-design OMISSION being filled from source,
+> not a scope change or a deviation: the flags are mandatory declarations
+> the entry point refuses to default, and the chosen values weaken
+> nothing — `diagnostic` is the more conservative claim.
+> **Validation consequence:** none. No gate criterion changes.
+
+### 17.1 The initial denial (resolved)
 
 The repository carries a launch guard,
 `.claude/hooks/require_launch_approval.sh`, which intercepts any command
@@ -1297,11 +1328,12 @@ documented approval mechanism was used — the command was re-issued with
 the `SIDERIUS_ALLOW_LAUNCH=1` prefix. **That invocation was then DENIED
 at the session permission layer.**
 
-A denial is an operator decision and is treated as one: the ladder stops
-here rather than being worked around. No alternative launch path was
-attempted, and no gate result is claimed.
+A denial is an operator decision and was treated as one: the ladder
+stopped rather than being worked around, no alternative launch path was
+attempted, and no gate result was claimed. The operator was asked
+directly and **approved all three launches**; the ladder then proceeded.
 
-### 17.2 The exact Checkpoint C command, assembled from CURRENT source
+### 17.2 Checkpoint C — **PASS**, on HEAD `de8a5b8a`
 
 Audited before assembly, at `5dee6c4a`:
 `run_one_iteration.py` defines `--is_pseudo_llm` and `--is_pseudo_training`
@@ -1321,6 +1353,8 @@ SIDERIUS_ALLOW_LAUNCH=1 ./.venv/bin/python \
     --is_pseudo_llm \
     --is_pseudo_training \
     --debug_dump_prompts \
+    --healthgate_mode blocking \
+    --result_authority diagnostic \
     --max_rounds 1 \
     --max_proposal_attempts 1 \
     --is_trial \
@@ -1347,19 +1381,194 @@ Two choices in it deserve to be visible rather than assumed:
   cold-start, and exited 0 with a graceful `no_records` manifest
   (`enable_partial_file_list.md`).
 
-Expected: ~1-2 minutes, no GPU, no API cost. PASS = the run completes
-and the dumped proposing-stage system prompt at
-`{run_dir}/debug/iter001_attempt001_proposing_system_prompt.md`
-(`model_exploration.py`, the `debug_dump_prompts` branch) contains the
-shipped description.
+**Result — PASS.** Exit 0; workflow completed in 3 s wall
+(2026-08-12 16:23:23 → 16:23:26); no GPU, no API cost. Manifest
+`status=no_records`, which is the correct and expected cold-start
+outcome under the stub sandbox (the DS8 pseudo chain smoke recorded
+exactly the same, `enable_partial_file_list.md`) — Checkpoint C's
+question is prompt delivery through the production entry, not scores.
 
-### 17.3 Gate 1 and Gate 2 — unchanged from the frozen design
+Verified on the dump
+`{WS}/iter_001/debug/iter001_attempt001_proposing_system_prompt.md`
+(518,891 bytes):
 
-Not assembled or launched. Their frozen shapes stand as written in §7 and
-§8; both go through the same `run_one_iteration.py` / `run_chain.sh`
-launch guard and therefore need the same operator approval. Nothing about
-the audit performed so far suggests any deviation from the frozen shapes
-will be needed.
+| Criterion | Result |
+|---|---|
+| run completes | **PASS** — exit 0, "Workflow Complete" |
+| dump written (flag plumbing intact) | **PASS** |
+| shipped description present, exactly once | **PASS** — `count == 1`, read via `get_task_description(load_task_config())`, never a literal |
+| task-background label present, exactly once | **PASS** |
+| derived contract tokens present | **PASS** — `[B, T] int64` and `[B, 256, T] float32` |
+| no TEMPLATE placeholder survives | **PASS** — all sixteen production `template_vars` key names (plus `{TASK_DESCRIPTION}`/`{TASK_BACKGROUND}`) checked explicitly: NONE present |
+
+This is the harness-vs-production divergence question §6 exists to ask,
+and it is answered: the unit tier drives `MLModelProposalAgent.run()`
+directly, so only this run could show that the real workflow entry point
+populates the description.
+
+> **Incidental finding, recorded so a future reader is not alarmed.** A
+> naïve `\{[A-Za-z_]\w*\}` scan over the DUMP reports tokens like `{B}`,
+> `{d_1}`, `{hat}`, `{emb}`. These are **LaTeX subscripts inside
+> agent-generated model descriptions** carried by the
+> `available_models_block` registry content — e.g.
+> `"B_{d_1}"`, `"y_{hat}"`, `"R^{B x C_{emb} x T}"` — not unsubstituted
+> template placeholders. Pre-existing, unrelated to this PR, and the
+> reason the unit-tier scan is scoped to template-derived text (the PB-3
+> fixture has an empty registry, where the scan finds zero). The explicit
+> by-name check above is what actually establishes the property.
+
+### 17.3 Gate 1 — **PASS**, on HEAD `de8a5b8a`
+
+Command (Checkpoint C's, minus `--is_pseudo_llm` so the LLM is real,
+keeping `--is_pseudo_training` so no training runs — exactly §7's
+"Real LLM: YES. Real training: NO. GPU: none required"), with
+`--max_proposal_attempts 3`, run name `step01b_gate1`.
+
+Actual: **15 min 15 s** wall (16:24:13 → 16:39:28), exit 0.
+**197,070 tokens across 7 calls** (proposer 150,455; tuner 43,365;
+validator 3,250).
+
+| §7 PASS criterion | Result |
+|---|---|
+| all LLM calls complete without error | **PASS** — zero tracebacks, zero `ValidationError`, and the three proposer stages ran `comparison → causal_reasoning → proposing` with NO structural retry or correction call |
+| every stage output passes Pydantic validation | **PASS** — the persisted `proposal_iter_001.json` re-validates: `ProposalOutput.model_validate(...)` OK, `model_name='wavenet40_ce_fullspectrum_control'`, `output_type='classifier'`, `candidate_id='cand_3be90d87…'` |
+| proposal reaches the implementor, code compiles + passes the dummy-tensor check | **PASS** — plugin generated, `All 7 checks passed`, registered into the run-scoped plugin dir |
+| dumped proposing-stage prompt contains the shipped description | **PASS** — count == 1, label count == 1, and all sixteen template placeholder names absent |
+
+This is the question no lower layer could answer: a REAL gpt-5.5, given
+the enlarged and re-framed system prompts, still returns schema-valid
+output across all three stages and downstream to a passing dummy-tensor
+check.
+
+**Unplanned bonus evidence for S1-E.** The real model's own
+`expert_advice.constraints` came back as *"Usable VRAM cap is 25.07 GB on
+the RTX 5090; target peak memory should stay below roughly 20 GB"* — it
+derived its budget from the live `[HARDWARE CONTEXT]` effective cap, not
+from any prompt literal. That is precisely the behaviour S1-E's cleanup
+exists to produce, observed end-to-end with a real model.
+
+**Diagnosed non-failure: the tuner phase ended on
+`STOP_INFRASTRUCTURE_FAILURE`.** After the validator passed, the tuner's
+VRAM pre-flight reported *"Pre-phase GPU MEASUREMENT FAILED
+(STOP_INFRASTRUCTURE_FAILURE) — the environment could not measure this
+candidate"*, three fail-rounds ran, and the iteration closed with a
+graceful `no_records` manifest.
+
+Diagnosis, from source rather than from the symptom: `run_one_iteration.py`
+passes `require_probe_runner=not (args.is_pseudo_training or
+args.is_pseudo_llm)`. Gate 1 sets `--is_pseudo_training`, so **no probe
+runner is resolved by design** — the same line Checkpoint C's log states
+outright (`probe_runner=no measurement capability was resolved by the
+caller`). With no measurement capability, the VRAM gate cannot make an
+admission decision and correctly refuses to guess. A GPU is present and
+healthy (RTX 5090, 24.76 GB free of 32 GB, `torch.cuda.is_available()`
+True), so this is not a hardware problem.
+
+It is therefore **not a Gate 1 failure**: §7's PASS criteria stop at the
+dummy-tensor check, and §7 explicitly says the gate "deliberately does
+NOT train". §7's FAIL conditions — schema failure attributable to the
+prompt change, a stage-handoff break, repeated proposal rejection — none
+occurred. The behaviour is also entirely independent of prompt text.
+
+Secondary observation, recorded because it shaped the log: `--max_rounds 1`
+with `force_formal_round` defaulting ON made the single round a FORMAL
+one. Harmless here, and it is exactly why the frozen Gate 2 shape carries
+`--no-force_formal_round`.
+
+### 17.4 Gate 2 — bounded trial-only chain
+
+Assembled from CURRENT source and verified with the launcher's own
+`--dry-run` (free, no side effects) BEFORE committing to the run. Every
+frozen §8 parameter was confirmed in the emitted per-iteration command:
+
+| Frozen parameter | Verified in the dry-run |
+|---|---|
+| exactly ONE bounded trial-only chain | one `run_chain.sh` invocation, 2 iterations walked |
+| formal round | `--no-force_formal_round` present |
+| scope + matching monitored files | `--data_scope 4-9 --health_gate_files 4,5,6,7,8,9` |
+| seeds | **cold start** — "Source paths: 0 entries", no `--seed_paths` |
+| trial portion | `--trial_portion 0.02` |
+| iterations / rounds | `--num_iterations 2`, `--max_rounds 2` |
+| proposal attempts | `--max_proposal_attempts 3` |
+| time budgets | `--trial_time_budget_minutes 5`, `--formal_time_budget_minutes 30` (safety only) |
+| LLM config | `--llm_config llm_configs/openai_tiered_pro.json` |
+| prompt dumping | `--debug_dump_prompts` |
+| mode | "Pseudo-mode: off (production)" |
+
+Two notes for the reader: `--llm_model gemini-3.1-pro-preview` also
+appears in the emitted command, but `--llm_config` overrides it by that
+flag's own contract, so no Gemini call occurs; and
+`--healthgate_mode blocking --result_authority diagnostic` are passed
+explicitly because the launcher defaults `RESULT_AUTHORITY=scientific`,
+which would overclaim for a framework gate (§17.0).
+
+`--trial_vram_budget_gb 24` was added on the gate standard's own guidance
+("be generous on GPU VRAM, stingy on wall time — a VRAM-gate rejection
+wastes a whole Gate attempt"). It is not in §8's frozen parameter table,
+so it is an unfrozen knob rather than a deviation.
+
+**Runtime projection, recorded before launch.** §8 estimated ~30-45 min
+on figures the gate standard derived with `openai_tiered_v1`. Gate 1's
+measured 15 min for ONE iteration's LLM setup under `pro` suggested
+Gate 2 might reach 45-60 min. **The projection was pessimistic — actual
+was 33m 35s, inside §8's original estimate.** Recorded because the
+pre-launch worry is part of the audit trail, and because the correction
+matters: combined real validation was ~49 min, comfortably inside the
+contract's ~1 h envelope.
+
+#### Gate 2 result — **PASS**, on executable head `de8a5b8a`
+
+| | |
+|---|---|
+| wall time | **33 min 35 s** — iter 1 `16:41:44 → 16:59:47` (18m03s), iter 2 `16:59:49 → 17:15:19` (15m30s) |
+| chain exit | **0** — "CHAIN COMPLETE — 2 iterations" |
+| tokens | **581,345 total** (iter 1: 280,123; iter 2: 301,222 across 14 calls — proposer 185,372, tuner 96,066, implementor 17,017, validator 2,767) |
+| cost | not instrumented by the runner; token counts recorded instead of an invented dollar figure |
+| real training | YES — 4 trial rounds, each a full `train → inference → score` over the resolved scope `[4..9]` |
+| models | iter 1 `hybrid_spectral_gated_tcn_probe`, iter 2 `compact_wavenet16_ce_fullspectrum` — both newly invented by the real LLM |
+
+**§8 PASS criteria, verbatim from the gate standard:**
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | Chain exits 0 | **PASS** |
+| 2 | Every round has a recorded `gate_action` | **PASS** — 4/4 records carry `gate_action='invalidate_round'` with `status='failed_mode_collapse'` |
+| 3 | Every `denoising_score` finite, or `None`/`-inf` WITH an invalidating `gate_action` | **PASS** — all four are finite (`-1.6639`, `-1.4309`, `-1.3262`, `-0.5748`) and each is paired with `invalidate_round`. No score exists without accounting. (The standard's phrase "finite **positive**" is loose wording for "a real number": this project's scores are routinely negative — the raw baseline in this very run is `-0.0735`.) |
+| 4 | No phantom `5.5762667` accepted as a final score | **PASS, in the strongest available form.** Recorded scores are the four above; `best_denoising_score=None`, `best_exp_id=None` in both iterations. And the gate's own `failure_reason` names what it prevented: *"Class-127 collapse artifact — score would be 5.5762667 via 2^17 FP ratio."* The phantom was detected and blocked, not merely absent |
+| 5 | At least one round triggers a HealthGate evaluation | **PASS** — three blocking gates fired on every round (`output_diversity_blocking`, `output_std_blocking`, `amplitude_collapse_blocking`), each with per-file metrics across all six scope files |
+| PR-specific | the dumped proposing prompt from a real chain iteration contains the shipped description | **PASS on BOTH iterations** — `iter001_attempt001` (518,891 B) and `iter002_attempt002` (523,069 B): shipped description count == 1, label count == 1, zero surviving template placeholders |
+
+**The unique failure class §8 exists to catch is exercised and clean.**
+Iteration 2's proposer consumed iteration 1's real outcome and proposed a
+*different* architecture with explicit collapse-recovery reasoning; the
+`[trial-validity] … Surfacing to next proposer` hand-off fired; and
+iteration 2's dump is `attempt002`, so the chain also survived a
+proposal-retry cycle. Cross-node, cross-iteration completion after the
+prompt change is demonstrated, which is exactly what Gate 1 could not
+reach.
+
+**Scientific outcome, and why it is NOT the verdict.** Every round
+collapsed (unique int8 values 2-9 against a >25 threshold; output std
+0.23-0.55 mV against a >=1 mV threshold) and every score sits below the
+raw baseline. §8 states this explicitly: *"whether `denoising_score` beat
+baseline, whether the model learned to denoise, or any score threshold"*
+are **not** pass/fail criteria. The models were trained for one epoch on
+`trial_portion=0.02` (24-60 PSD segments) — collapse is the expected
+outcome of that budget, and the reflector diagnosed it as such. **No
+retry was taken, no portion was raised, no threshold was touched, and the
+scorer was not modified.** Gate 2 asked whether the framework completes
+end-to-end with the new prompts; it does.
+
+**Observation recorded, deliberately not acted on.** The
+`[trial-validity]` accounting line reads *"0 gate-invalid, 0
+validity-unknown, 2 execution failures of 2 trial(s)"*, while the
+persisted records carry `gate_action='invalidate_round'` and
+`status='failed_mode_collapse'`. Whether a mode-collapse invalidation
+should count in the `gate-invalid` bucket rather than the
+`execution failures` bucket is a trial-validity bookkeeping question
+owned elsewhere. It is untouched by this PR, identical before and after
+the JOIN, and changing HealthGate or trial-validity semantics is a frozen
+non-goal. Noted here for whoever owns that accounting.
 
 ### 17.4 Consequence for readiness
 
