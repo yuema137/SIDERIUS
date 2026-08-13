@@ -1297,7 +1297,27 @@ class TidmadSandbox:
                 str(self.file_index),
             ]
 
-            # Validate and write data scope SampleSet to JSON
+            # SampleSet boundary contract — this is ONE of exactly TWO
+            # production serialization sites (the other is in
+            # ``execute_inference``). Both obey the same shape:
+            #
+            #     validate_sample_set -> compact json.dump -> --sample_set_json
+            #
+            # Keys are int on this side and str on the subprocess side, because
+            # that is what JSON is; value lists cross unchanged; the live
+            # consumer (``TIDMADEpochDataset``) re-ints NUMERICALLY. An invalid
+            # SampleSet is rejected here, before any launch primitive is called.
+            #
+            # The two sites differ ONLY in how that rejection surfaces — this
+            # one is converted by the method's outer handler, the eval one
+            # returns a structured error dict for ScopeViolationError. That
+            # difference is pre-existing and deliberate; do not "tidy" it.
+            #
+            # The emitted BYTES are part of the contract: adding ``indent=`` or
+            # ``sort_keys=`` here would change every config the subprocess
+            # reads. Pinned by tests/unit/execute_tools/
+            # test_step02b_b1_sampleset_roundtrip.py and
+            # test_step02b_b3_boundary_byte_parity.py.
             if sample_set is not None:
                 sample_set = validate_sample_set(sample_set, scope=self.data_scope)
                 ss_path = os.path.abspath(
@@ -1622,6 +1642,14 @@ class TidmadSandbox:
         # here, before the subprocess try-block — no file I/O has occurred.
         # Result keys mirror this method's error-dict shape (timing fields
         # included).
+        #
+        # SampleSet boundary contract — the SECOND of exactly two production
+        # serialization sites; the contract is stated in full at the first
+        # (``execute_training``). This site's only intentional difference is
+        # the structured error dict below: a plain ValueError still
+        # propagates, as it does there. The emitted bytes must stay
+        # byte-identical to the training site's — asserted by
+        # tests/unit/execute_tools/test_step02b_b3_boundary_byte_parity.py.
         if sample_set is not None:
             try:
                 sample_set = validate_sample_set(sample_set, scope=self.data_scope)

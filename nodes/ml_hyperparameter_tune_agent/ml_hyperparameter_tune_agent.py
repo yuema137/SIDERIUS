@@ -74,7 +74,7 @@ from core.scientific_authority import ScientificAuthority
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.dataset_config import DataScope, ScopeViolationError
+from execute_tools.dataset_config import DataScope, ScopeViolationError, resolve_dataset_profile
 from execute_tools.health_checks.candidate_eligibility import (
     classify_candidate_health,
     formal_validity_of,
@@ -4400,6 +4400,14 @@ class HyperparamTuningAgent:
 
                     # Build TWO independent SampleSets — training and validation
                     if trial_config.mode in ("trial", "formal"):
+                        # Step-02b: the run's profile is resolved ONCE here and
+                        # supplied EXPLICITLY to both construction sites, rather
+                        # than each one resolving it ambiently inside the
+                        # builder. Two consequences: a run bound to a non-default
+                        # topology can no longer silently select against the
+                        # ambient one, and train and eval provably select against
+                        # the same topology.
+                        run_profile = resolve_dataset_profile()
                         train_sample_set = build_sample_set(
                             is_trial=True,
                             trial_strategy=trial_config.trial_strategy,
@@ -4407,6 +4415,7 @@ class HyperparamTuningAgent:
                             target_files=trial_config.target_files or None,
                             seed=trial_config.train_sampling_seed,
                             scope=agent_input.data_scope,
+                            profile=run_profile,
                         )
                         eval_sample_set = build_sample_set(
                             is_trial=True,
@@ -4415,6 +4424,7 @@ class HyperparamTuningAgent:
                             target_files=trial_config.target_files or None,
                             seed=trial_config.eval_sampling_seed,
                             scope=agent_input.data_scope,
+                            profile=run_profile,
                         )
                         print(
                             f"  {trial_config.mode.capitalize()} mode: "
