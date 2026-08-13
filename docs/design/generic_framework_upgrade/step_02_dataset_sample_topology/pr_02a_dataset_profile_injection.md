@@ -840,6 +840,58 @@ Classification:
 path. `segmentation_size` carries `ge=1000`
 (`models_format_sandbox.py:22`), which sets the floor.
 
+---
+
+### 5a.2 Terminal validation — full unit suite (2026-08-14, `7e15c0e7`)
+
+**Run, and why.** Parent §9.1 makes the local full suite an escape hatch a
+child must justify in writing. 02a qualifies on the parent's own terms —
+it names 02a as "the plausible case": ~13 production modules migrated, a
+public schema's validation MECHANISM changed, and three subprocess entry
+points touched. The blast radius cannot honestly be bounded by targeted
+tests. Run from a CLEAN tree, per the binding rule.
+
+```text
+pytest tests/unit -q
+  1 failed, 8624 passed, 3 skipped, 502.15s (0:08:22)
+```
+
+**The harness reported "exit code 0". The log said "1 failed".** Third
+occurrence in this PR; the verdict came from the log every time.
+
+**The one failure is a worktree-LOCATION artifact, not a defect.**
+
+```text
+FAILED tests/unit/tools/claude_hooks/test_context_state.py
+       ::TestTemplateLookup
+       ::test_template_resolves_beside_the_module_not_under_dot_claude
+  assert ".claude" not in path.parts
+
+Diagnosis:
+  the test forbids the canonical template resolving under a gitignored
+  .claude/ — a real guard (mutation M-C8: a fresh checkout would get the
+  guard without its template and every compaction would block).
+  This PR's dedicated worktree lives AT
+  .claude/worktrees/pr02a-impl, so ".claude" appears in the absolute
+  path for reasons that have nothing to do with where the template sits.
+  The template IS beside its module, in tools/claude_hooks/templates/.
+
+Proof it is locational, not a regression:
+  - the same test class passes 4/4 from the normally-located main
+    checkout;
+  - this PR touches tools/claude_hooks ZERO times
+    (`git diff --name-only cfc83b1e..HEAD | grep -c tools/claude_hooks`
+     -> 0).
+
+Disposition:
+  NOT fixed and NOT weakened. The guard is correct for any normal
+  checkout, which is what CI uses. Recorded instead, with the operational
+  consequence: a future PR worktree should be created OUTSIDE .claude/ to
+  avoid re-triggering it. Exact-head CI is the authority for this row.
+```
+
+Excluding that artifact: **8624 passed, 3 skipped, 0 real failures.**
+
 ## 5c. Regime-A vs fail-closed — FROZEN (was left to implementation)
 
 Revision 3 left "legacy caller without a profile: fail closed or
