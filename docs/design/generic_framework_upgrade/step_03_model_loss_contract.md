@@ -1306,9 +1306,10 @@ oracle exists. Audited at `f865038f`:
 
 ### 24.4 Implementation checklist (semantic milestones — commit count NOT pre-authorized, §17)
 
-- [ ] **M0 — Checkpoint 0.** Capture A2, A3, A6, A8 per §24.3, before any
-      production change. A6 must be capable of failing on the F-1
-      divergence. → **CHECKPOINT 0**
+- [x] **M0 — Checkpoint 0 — PASS.** A2, A3, A6, A8 all captured before
+      any production change; zero production diff; every new oracle
+      mutation-proven. Evidence §24.6, dossier §24.7.
+      Commits `9ddcc63a` (A6) and the A2/A3/A8 module commit.
 - [ ] **M1 — Phase A: normalized contract.** One structured input tensor
       + one structured output tensor: rank, ordered axes, semantic axis
       roles, model-required dtype, fixed/symbolic/dynamic dimensions.
@@ -1440,10 +1441,89 @@ exactly this.
 unifies, the concrete dtype reaching a model.* Nothing else in the suite
 catches it.
 
-#### Baselines still outstanding at Checkpoint 0
+#### A2 / A3 / A8 mutations
 
-**A2**, **A3**, **A8** are NOT yet captured (§24.3 has their scope and
-their existing partial oracles). Checkpoint 0 is therefore **NOT** PASS.
+| # | Mutation | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| **M-A2-1** | a re-key treats `custom` as a classification family member (`CLASSIFICATION_LOSSES` += `"custom"`) | the `regressor × custom` cell flips ACCEPT→REJECT | **2 failed** — `test_every_matrix_cell[regressor-custom]` **and** the frozenset partition pin | behaviour-changing, **caught by the cell itself**, not only by the frozenset pin |
+| **M-A2-2** | a re-key generalises `classifier` to `!= "regressor"` | some accept flips to reject | **1 failed** — and it is `test_an_output_type_outside_the_alphabet_is_currently_TOLERATED`, the ONLY test that catches it | behaviour-changing, **caught** |
+| **M-A3-1** | load-time tier becomes STRICT (`return None` instead of defaulting) | lenient tier + divergence red | **2 failed**, incl. the divergence claim | behaviour-changing, **caught** |
+| **M-A3-2** | lookup tier becomes LENIENT (`return "classifier"` instead of raising) | strict tier + divergence red | **2 failed**, incl. the divergence claim | behaviour-changing, **caught** |
+| **M-A8-1** | `PLUGIN_OUTPUT_TYPE` becomes REQUIRED (`module.X` not `getattr(..., default)`) | prior plugins stop loading | **A8 stayed GREEN**; only A3's absent-declaration test red | **SURVIVED at A8** — see below |
+| **M-A8-2** | the loader requires a NEW attribute prior plugins cannot have (`PLUGIN_IO_CONTRACT`) | every on-disk plugin stops loading | **8 failed**, incl. `test_every_on_disk_plugin_still_loads_and_declares_a_valid_contract` | behaviour-changing, **caught** |
+
+**M-A2-2 is the most informative row.** Under that mutant, `hybrid` is
+still protected by the unconditional early `return` at `:422`, so every
+`hybrid` cell survives and only the out-of-alphabet case flips. The
+tolerance test — the one nearly not written, since "unknown values are
+out of the declared universe" — is the sole oracle for that re-key
+shape. Recorded so nobody deletes it as redundant.
+
+**M-A8-1's survival is a finding, not a gap.** A8 stayed green because
+**all 85 on-disk plugins already declare `PLUGIN_OUTPUT_TYPE`**, so
+making it required genuinely does not break this population. The
+mutation was therefore not behaviour-changing *for A8's claim*, and was
+replaced by **M-A8-2**, which is. Recorded rather than quietly swapped:
+a mutation that survives because the codebase made it equivalent is
+different from one that survives because the oracle is weak.
+
+#### A2 / A3 / A8 — **CAPTURED**
+
+```text
+A2   tests/unit/ml_models/test_step03_a2_loss_compatibility_matrix.py
+     22 passed / 0.10 s
+A3   tests/unit/ml_models/test_step03_a3_a8_plugin_compatibility.py
+A8   (same module — 10 passed / 1.19 s, ZERO skips, so the on-disk
+      population really was exercised)
+environment  CPU only; no GPU, no LLM, no real dataset
+production   ZERO diff across all three
+ruff check + ruff format --check clean on both modules
+```
+
+**A2 — the full 15-cell matrix**, hardcoded from source
+(`models_format_sandbox.py:374-437`), never computed from the frozensets
+the function itself reads. 11 accept, 4 reject; the only rejections are
+`classifier × smooth_l1` and `regressor × {ce, focal, focal_cw}`.
+`hybrid` (all five) and `custom` (all three) were asserted **nowhere**
+before this module.
+
+Also pinned, as behaviour rather than endorsement: an `output_type`
+**outside** the declared alphabet is currently **TOLERATED** — neither
+guard branch matches, so the function returns without raising. §8a's
+re-key would most naturally start failing closed there. That would be a
+changed verdict, i.e. a §21 STOP, not a free improvement. **If that test
+reds during the re-key, stop and decide — do not update the
+expectation.**
+
+**A3 — the two tolerance tiers, and their divergence.** Load-time
+(`plugin_loader.py:81-88`) warns and defaults to `classifier`;
+lookup-time (`:192-214`) raises `UnknownOutputContractError`. The strict
+tier already had oracles; the **lenient** tier had none, and **nothing
+asserted that the two differ** — which is the assertion §5 A3 actually
+asks for, since §8b's projection is a natural place to harmonise them in
+either direction.
+
+**A8 — 85 on-disk plugins**, all loading through the production loader
+and all declaring a contract in `{classifier, regressor, hybrid}`.
+
+*Workspace boundary, declared not assumed.* `agent_generated/models/*`
+is **gitignored** (only `.gitkeep` tracked), so a fresh clone and CI hold
+zero plugins while a developer checkout holds the accumulated
+population. §5 A8 accepts either evidence, so the module inspects the
+workspace and **skips with an explicit reason** when empty rather than
+passing vacuously. This run had 85 and zero skips.
+
+*Finding.* **All 85 declare `PLUGIN_OUTPUT_TYPE`** — so §5's Regime-A
+inventory item *"on-disk plugins with no `PLUGIN_OUTPUT_TYPE`"* is an
+**empty class in this workspace**. The legacy tolerance path is therefore
+exercised only by A3's synthetic fixture, which is exactly why that
+fixture is not decoration.
+
+#### **CHECKPOINT 0 — PASS**
+
+A2, A3, A6 and A8 all captured before any production change. Every
+module has zero production diff; every genuinely new oracle is
+mutation-proven (§24.7).
 
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
