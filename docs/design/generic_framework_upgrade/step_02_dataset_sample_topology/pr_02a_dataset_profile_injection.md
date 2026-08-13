@@ -730,9 +730,60 @@ Unchanged: subprocess entries (C3/C4); `data_shape_class` string;
 selection semantics; group literals (02c); prompt bytes.
 Depends on: C1.
 
+**0. Operator decision OD-02a-1 (2026-08-14) — import-time consumers.**
+
+```text
+Previous assumption (§6.2 acceptance):
+  "Zero bare-constant imports remain in the eight modules" — i.e. all
+  eight §3.3 consumers can be migrated to injection the same way.
+
+Audit evidence:
+  The eight split into two kinds. SIX read the constants INSIDE
+  functions and inject cleanly:
+    workload_resolvers.py:44/:112/:139   evaluate_time_skill:353/:763
+    inference_skill/estimator.py:207     scoring_helpers.py:204/:266-267/:315-316
+    health_checks/config.py:333          spectral_peak_ratio.py:56
+  TWO consume them at IMPORT time and cannot be injected at all without
+  a structural change:
+    agent/schemas/score_table.py:43/:145/:167-168 — NUM_FILES baked into
+      Pydantic Field(le=...), min_length and max_length, evaluated when
+      the class body runs;
+    nodes/scoring_reference.py:26 — _FINE_INDICES = tuple(range(NUM_FILES))
+      at module scope.
+  §6.2's failure table says "move it to C3/C4", but C3/C4 do not help:
+  the problem is import time, not process boundary.
+  Prompt-byte risk checked and EXCLUDED: neither schema is ever passed
+  through model_json_schema(); the LLM sees ScoreComparisonTable's
+  rendered_markdown, not these field descriptions.
+
+Operator decision:
+  RUNTIME VALIDATOR (full injection). Drop the static NUM_FILES-derived
+  bounds and enforce the identical rule in a validator resolved against
+  the profile. Semantics are unchanged under TIDMAD — only the
+  enforcement mechanism moves.
+
+Implementation consequence:
+  This is a deliberate, operator-authorised public-schema MECHANISM
+  change on a schema imported by agent/schemas/hyperparam_tuning.py:26,
+  agent/schemas/proposal.py:23 and nodes/agent_data_stream.py:31. The
+  CONTRACT ("a file index lies inside the declared topology"; "one row
+  per file") is preserved exactly; the ValidationError shape changes
+  from a constraint violation to a validator error.
+
+Validation consequence:
+  Rung A1 (file count != 20) can now flow THROUGH score_table, so no
+  module has to be declared out of A1's blast radius. C2 must pin: the
+  rejection still fires for an out-of-range index, the row-count rule
+  still fires, and both messages remain diagnostic. Records and JSON
+  serialization must be unchanged — pin the round-trip.
+```
+
 **3. Implementation plan.**
 - [ ] Decide the profile shape and record why (parent §13a leaves it
-      open).
+      open). Constrained by OD-02a-1: the two import-time consumers need
+      a RESOLUTION accessor, not only a parameter — designed so it is not
+      a mutable global (First Principles: no duplicate mutable state) and
+      so C3's explicit-path fail-closed rule (§5c) can layer on top.
 - [ ] Implement the FROZEN class-default disposition (§5c): the TIDMAD
       filename-pattern class defaults are **KEPT as documented Regime-A
       adapter semantics** and must be described as a compatibility
