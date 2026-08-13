@@ -5,11 +5,11 @@
 **PARENT DESIGN — FROZEN / OPERATOR APPROVED (2026-08-12).**
 OD-S1-1..8 all decided (§19).
 
-**STEP 01 STATUS: IN PROGRESS.** Child **PR 01a is MERGED**
-(PR #199, merge commit `39f89f52`, 2026-08-12); child **PR 01b is
-IMPLEMENTED and awaiting operator review — NOT MERGED**. This parent
-stays the status authority; the child designs are the live
-implementation ledgers.
+**STEP 01 STATUS: COMPLETE.** Both children are MERGED — **PR 01a**
+(PR #199, merge commit `39f89f52`, 2026-08-12) and **PR 01b**
+(PR #201, merge commit `fe05f5f7`, 2026-08-13). This parent stays the
+status authority; the child designs are the completed implementation
+ledgers.
 
 **PR 01b progress (2026-08-12).** Three code commits on
 `feat/generic-framework-step-01b-task-description-join`: `a7ffcccf`
@@ -28,8 +28,8 @@ Children (one PR = one doc):
 - [`pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md)
   — exact-parity extraction; **MERGED** (PR #199 → `39f89f52`).
 - [`pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md)
-  — the intentional JOIN; **IMPLEMENTED, READY FOR OPERATOR REVIEW —
-  NOT MERGED** (2026-08-12). Decisions at freeze:
+  — the intentional JOIN; **COMPLETE — MERGED** (PR #201 →
+  `fe05f5f7`, 2026-08-13). Decisions at freeze:
   **OD-S1-9 = option (b)** — the invariant is semantic (the transported
   description authority must become a LIVE CONSUMED prompt channel),
   not the survival of a dictionary key; §8.3 is amended accordingly
@@ -68,13 +68,16 @@ compatibility exception; no PR-01b scope leakage.
 **Aggregate Step-level implication.** The declaration→prompt seam now
 exists and has a first production consumer, so a non-TIDMAD contract
 renders correctly in the Step-01-owned derived blocks. What Step 01
-still owes: the task-description JOIN and its FX-1 contrast (PR 01b),
-and Checkpoint C chain evidence (PR 01b). FX-3/FX-4 remain DEFERRED
-prerequisites for the contract-owning step (§6A.5), unchanged by this
-merge. Checkpoint A is closed by PR 01a; Checkpoint C is NOT.
-**STATUS: READY FOR OPERATOR REVIEW — NOT MERGED.** Checkpoint A not
-yet closed. The child doc is the live ledger and holds all evidence,
-mutations and findings — this Status is only the pointer.
+still owed at the time of PR 01a's merge: the task-description JOIN and
+its FX-1 contrast, and Checkpoint C chain evidence — **all three
+delivered by PR 01b (#201 → `fe05f5f7`, 2026-08-13)**. FX-3/FX-4 remain
+DEFERRED prerequisites for the contract-owning step (§6A.5), now also
+carried on the overall roadmap as deferred decision **D13** so the
+obligation survives Step 01's closure.
+**STATUS (PR 01a): COMPLETE — MERGED (PR #199 → `39f89f52`).**
+Checkpoint A closed by PR 01a; Checkpoint C closed by PR 01b. The child
+docs are the completed ledgers and hold all evidence, mutations and
+findings — this Status is only the pointer.
 
 Two implementation questions the earlier draft left open are now
 FROZEN from source in PR 01a's design: the standalone node CLI loads
@@ -1557,11 +1560,11 @@ commits re-run PB-3/PB-4 twice with byte-identical verdicts.
 | Checkpoint | Owner (child PR) | Instantiation | Status |
 |---|---|---|---|
 | 0 BASELINE AVAILABLE | **PR 01a** | PB-0/PB-3/PB-4, WF-3, CFG-1/2/3a/3b landed on MASTER (PR #198) and green in this worktree (526 passed, 2.3 s); PB-0's true surface corrected per §8.1 | **MET** |
-| A EXTRACTION PARITY (exact — the OD-S1-8 exception now lives in PR 01b, NOT here) | **PR 01a** | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | design |
+| A EXTRACTION PARITY (exact — the OD-S1-8 exception now lives in PR 01b, NOT here) | **PR 01a** | §8: every extraction commit leaves all named goldens byte-identical; the three regeneration events are declared in advance (§13 R1/R2/R3) and no other golden moves; boundary kwargs (labels/components) unchanged | **MET** — closed by PR 01a (#199) with ZERO golden diff |
 | B GENERIC CONTRAST | **PR 01a** (contract/rank/loss rungs) + **PR 01b** (FX-1 description rung) | §9: the roadmap rungs 13.4-A + 13.4-B (landed as same-axis B-i/B-ii) plus the operator's FX-2/FX-5 prose rungs — one axis per fixture; FX-3/FX-4 DEFERRED with a named owner | **MET** — PR 01a's rungs merged; PR 01b's FX-1 rung landed as `e67b4651` (CP2 PASS, child §15) |
 | C LIVE INTEGRATION | **PR 01b** (PRE-MERGE, on its final head) | §10: real production pipeline path in-PR (unit + pseudo workflow tier) + the bounded pseudo chain iteration (OD-S1-4), which runs **PRE-MERGE on PR 01b's final executable head**, never post-merge; the dead-key seam is WIRED — no consumer-less seam survives | **MET, pre-merge on `de8a5b8a`** — Checkpoint C exit 0, the dumped proposing-stage prompt carries the shipped description exactly once with zero surviving placeholders. Exceeded by Gate 1 and Gate 2, which additionally proved a real model and a real 2-iteration training chain (child §17.2-§17.4) |
-| D REGRESSION | **each child on its own final head** | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | **PR 01b: local half MET** — 8540 passed / 3 skipped from a clean tree, ruff + format clean, mutation dossier complete (M-1, M-6, MUT-A, MUT-B equivalent, MUT-B′). Exact-head CI is the remaining item |
-| E ROADMAP SYNC | **PR 01b** (aggregate) | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | **IN THIS PR** — this Status section, the folder README row and the node `.md` are updated by S1-F; the roadmap §15.1 6-P row follows the repository's post-merge convention |
+| D REGRESSION | **each child on its own final head** | §12 pack 5 at the final head from a clean tree + §15 battery dossier + CI green on the exact head | **MET for both children** — PR 01b: 8540 passed / 3 skipped from a clean tree at executable head `6b259b93`, ruff + format clean, mutation dossier complete (M-1, M-6, MUT-A, MUT-B equivalent, MUT-B′), and exact-head CI green on `9d3d7d6f` incl. strict pyright |
+| E ROADMAP SYNC | **PR 01b** (aggregate) | roadmap §15.1 row 6-P updated in the same PR or an immediately-merged docs follow-up BEFORE the step-02 PR opens; folder README row + this doc's Status updated | **MET** — the roadmap's §0 rule-8 dead-seam example, §6.1/§6.3 inventory, §13.4 fixture row, §14 ledger row and §15.1 6-P row are all synchronized, plus new deferred decision **D13** carrying FX-3/FX-4 forward to the contract owner; folder README, this Status and the node `.md` updated. Completed BEFORE any step-02 work opens |
 
 
 **Split consequence (operator decision 2026-08-12).** Checkpoint A is

@@ -2,7 +2,12 @@
 
 ## Status
 
-**IMPLEMENTED — READY FOR OPERATOR REVIEW (2026-08-12). NOT MERGED.**
+**COMPLETE — MERGED (PR #201, merge commit `fe05f5f7`, 2026-08-13).**
+
+Operator review was positive; no production change and no additional
+Gate were requested. Merged after the exact-head merge gate held:
+local HEAD == PR `headRefOid` == successful CI `headSha` ==
+`9d3d7d6f`, working tree clean, `mergeState: CLEAN`.
 
 Implementation complete on
 `feat/generic-framework-step-01b-task-description-join`. Final
@@ -1709,5 +1714,5 @@ later contributor:
 | **pyright — local** | **UNAVAILABLE.** Node v10.19.0 cannot bootstrap it. Never claimed as green |
 | **pyright — CI** | **AUTHORITATIVE.** "Type check — pyright (strict, blocking)" passed in CI |
 | Merge gate | `local HEAD == PR headRefOid == successful CI headSha`, clean working tree, PR mergeable — verified in the merge-gate report |
-| Context state | **CLOSED / AWAITING OPERATOR ACTION** |
-| Merge | **NOT MERGED. Operator-owned.** |
+| Context state | **CLOSED** — merged; post-merge parent/roadmap sync done |
+| Merge | **MERGED** — PR #201, merge commit `fe05f5f7`, 2026-08-13, operator-approved |
