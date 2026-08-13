@@ -721,6 +721,56 @@ open decision revision 3 left in C2.
 
 Exact API shape remains implementation-time.
 
+---
+
+## C5 — legality de-duplication (implementation record, 2026-08-14)
+
+**A performance defect the de-duplication removed, unplanned.**
+
+```text
+Previous assumption (§1.3):
+  the tuner "restates the rule inline" — a correctness/drift concern only.
+
+Audit evidence (ml_hyperparameter_tune_agent.py:1103):
+  it restated the rule AND re-derived the legal list itself:
+    sorted(d for d in range(100, psd + 1) if psd % d == 0 and d <= 100_000)
+  Under TIDMAD that is a 10,000,000-iteration loop, on the ERROR path.
+  valid_segmentation_sizes() does the same job by sqrt enumeration.
+
+Corrected understanding:
+  de-duplicating is also a real fix, not only tidying.
+
+Implementation consequence:
+  the inline derivation is replaced by the authority call. The function
+  already RECEIVED dataset_config, so no injection was needed.
+
+Validation consequence:
+  the two lists are asserted equal (36 entries), so the diagnostic — which
+  prints the legal values — is byte-identical.
+```
+
+**Prompt-byte parity held; the flip condition did not fire.** The
+time-skill's hardcoded `"10,000,000"` is now `f"{psd_len:,}"`, which
+renders the identical string under TIDMAD. Both directions are pinned:
+byte-identity under TIDMAD, and the message FOLLOWING a contrast
+declaration — byte-identity alone would also hold if the value were still
+hardcoded.
+
+`agent/prompts.py:746` and `agent/schemas/proposal.py:1127` already read
+the authority and are deliberately **untouched**; a test asserts they stay
+that way, so "de-duplicate" cannot drift into "rewrite the sites that were
+already correct".
+
+**§8 closed**: `scripts/compute_raw_baseline.py` and
+`nodes/scoring_reference.py` now derive the file count from one authority,
+so the generator and the node that LOADS its artifacts cannot disagree.
+
+**Two of C5's own guards initially failed by matching prose.** The
+anti-regression checks matched the migration's own comments and docstrings,
+which quote the removed expressions to explain what changed. Both now
+exclude comment lines — a guard that cannot tell code from prose about
+code is not a guard.
+
 ## 5d. Ordering — pin the real invariant, do NOT invent a stronger one
 
 **Source audit (2026-08-13).** `train_engine_sandbox.py:864-866` builds

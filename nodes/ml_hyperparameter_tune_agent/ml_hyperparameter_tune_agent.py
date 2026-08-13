@@ -1099,9 +1099,16 @@ def _validate_data_config(
     psd = dataset_config.psd_segment_length
     segs_per_file = dataset_config.segments_per_file
 
-    # 1. PSD segment must divide evenly into ML segments
+    # 1. PSD segment must divide evenly into ML segments.
+    #
+    # The rule and its legal-value enumeration both come from the dataset
+    # authority. This used to restate the rule inline and re-derive the list
+    # with ``range(100, psd + 1)`` — a 10,000,000-iteration loop on the error
+    # path under TIDMAD, and a second place the rule could drift from
+    # ``valid_segmentation_sizes()``. Same result set (divisors in
+    # [100, 100_000]), so the diagnostic is byte-identical.
     if psd % segmentation_size != 0:
-        valid = sorted([d for d in range(100, psd + 1) if psd % d == 0 and d <= 100_000])
+        valid = dataset_config.valid_segmentation_sizes()
         raise ValueError(
             f"psd_segment_length ({psd}) must be divisible by "
             f"segmentation_size ({segmentation_size}). "

@@ -86,8 +86,12 @@ def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
         )
     if seg_size < 10_000 and batch_size == 1:
         return "Raise batch_size (amortises per-step cost without changing model capacity)."
+    # Derived from the declared decomposition length, not hardcoded. Under
+    # TIDMAD ``f"{10_000_000:,}"`` renders "10,000,000", so this advisory
+    # string is byte-identical to the literal it replaces.
+    psd_len = resolve_dataset_profile().dataset.psd_segment_length
     return (
-        "Raise segmentation_size to the next valid divisor of 10,000,000 "
+        f"Raise segmentation_size to the next valid divisor of {psd_len:,} "
         "so fewer steps cover the same data."
     )
 
