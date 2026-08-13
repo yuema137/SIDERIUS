@@ -537,10 +537,19 @@ worktree does not inherit `.venv` or gitignored machine files. Both
 `.venv` and `tidmad_data_config.yaml` had to be supplied. A green run in
 a fresh worktree means nothing until those exist.
 
-A full clean broad re-run was launched after the fix
-(`$CLAUDE_JOB_DIR/tmp/c2_broad3.log`); its result is recorded below when
-it lands. The composition is already known — the same 6820 passing tests
-plus the 29 now-passing `scripts` tests.
+**Clean broad re-run after the fix — CP-A1's confirming artifact:**
+
+```text
+pytest tests/unit/{agent,core,workflows,scripts} -q
+  6821 passed, 2 skipped, 331.63s (0:05:31)
+  zero FAILED, zero ERROR   (verdict read from the log, not an exit code)
+```
+
+6820 + 1 is exactly the arithmetic the diagnosis predicted: the same
+6820 that already passed, plus the single test the missing `.venv` had
+been failing. Nothing else moved, which is the positive evidence that the
+failure was environmental and that C2 changed no behaviour outside its
+own surface.
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
