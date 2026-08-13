@@ -791,59 +791,119 @@ class TestThirdValidationOutcomesUnchanged:
         )
         assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
 
-    def test_candidate_configs_and_hashes_are_unchanged(self):
-        """Candidate configs are byte-stable, and the ONE change since the
-        original capture is proven additive.
+    def test_candidate_configs_are_the_intended_ones(self):
+        """The three baseline-scale candidates are unchanged, asserted by VALUE.
 
-        Step 03 M6 added ``BaseConfig.num_classes`` so the class alphabet
-        derives from the Model-I/O contract instead of a builtin literal.
-        That grows every normalized model config by one key and therefore
-        moves these digests.
+        **Replaces an opaque sha256 pin (Step 03, test-disposition audit).**
 
-        Rather than swap in three new opaque hashes — which would assert
-        nothing about WHAT changed — this pins both sides:
+        ```text
+        Original intent
+          Freeze the normalized candidate configs so a silent edit to
+          CANDIDATES or to a model schema is caught.
 
-        * ``PRE_M6`` are the ORIGINAL digests, unchanged from the first
-          capture. Stripping ``num_classes`` must still reproduce them, which
-          is what proves no pre-existing key or value moved.
-        * ``CURRENT`` are the digests with the new field present.
+        Production behavior it protects
+          The validation set spans the range the V19 campaign could not
+          explore — an official-scale 323M FCNet, a 10-20M convolutional
+          candidate, a medium Transformer. A candidate quietly shrinking
+          would make the tool pass where it used to fail, which is the
+          defect the script's own docstring warns about.
 
-        If a future change alters an existing value, the ``PRE_M6`` half
-        reds — and that is the failure this test exists for. A bare
-        hash-swap could not tell the two cases apart.
+        Why the digest itself is not the invariant
+          `config_identity` (scripts/vram_preflight_validation.py:141) is
+          real — it is emitted into each result record at :194 — but nothing
+          outside a single run compares its value. It is a report label, not
+          a cache key, a resume key, or a cross-run compatibility boundary.
+          Pinning its hex froze an incidental JSON serialization: when Step
+          03 added the DERIVED `num_classes` field, the pin failed while
+          nothing it was protecting had changed.
+
+        Disposition: REWRITE
+          Assert the semantic values instead. Strictly more informative — a
+          hash failure says only "something moved", these say WHICH field
+          and to what. The digest's genuine property (deterministic, and it
+          distinguishes the candidates) is asserted below without freezing
+          its value.
+
+        Why evidence is not weakened
+          Every failure the hash could catch — a changed scale parameter, a
+          dropped candidate, an altered model_type — reds here too, and
+          names itself.
+        ```
         """
-        import hashlib
-        import json as _json
+        from scripts.vram_preflight_validation import (
+            CANDIDATES,
+            config_identity,
+            validate_config,
+        )
 
-        from scripts.vram_preflight_validation import CANDIDATES, validate_config
-
-        PRE_M6 = {
-            "fcnet@323M-official": "ad0e07aa864a6492",
-            "wavenet@17M": "958440417b837b89",
-            "transformer@medium": "80581a7d24d2f100",
+        expected = {
+            "fcnet@323M-official": {
+                "model_type": "fcnet",
+                "latent_dims": [4000, 400, 40],
+                "segmentation_size": 40000,
+                "batch_size": 1,
+                "dropout": 0.0,
+            },
+            "wavenet@17M": {
+                "model_type": "wavenet",
+                "input_channels": 16,
+                "residual_channels": 128,
+                "gate_channels": 256,
+                "skip_channels": 128,
+                "kernel_size": 24,
+                "num_blocks": 20,
+                "segmentation_size": 16000,
+                "batch_size": 4,
+            },
+            "transformer@medium": {
+                "model_type": "transformer",
+                "embedding_dim": 128,
+                "nhead": 8,
+                "num_layers": 4,
+                "dim_feedforward": 512,
+                "dropout": 0.1,
+                "pe_factor": 1.0,
+                "segmentation_size": 8000,
+                "batch_size": 2,
+            },
         }
-        CURRENT = {
-            "fcnet@323M-official": "8b255f3763ef76c4",
-            "wavenet@17M": "141773e2b3e5300e",
-            "transformer@medium": "76b783ab94129b30",
-        }
-
-        def _digest(payload: dict) -> str:
-            return hashlib.sha256(
-                _json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-            ).hexdigest()
+        assert {entry["label"] for entry in CANDIDATES} == set(expected)
 
         for entry in CANDIDATES:
             label = entry["label"]
             normalized, error = validate_config(entry)
-            assert error is None
-            assert _digest(normalized).startswith(CURRENT[label]), label
+            assert error is None, label
 
-            # The attribution: the ONLY difference from the original capture
-            # is the added key.
-            assert "num_classes" in normalized, label
-            without_new_field = {k: v for k, v in normalized.items() if k != "num_classes"}
-            assert _digest(without_new_field).startswith(PRE_M6[label]), (
-                f"{label}: a pre-existing config key or value changed — the "
-                "Step-03 delta is supposed to be purely additive"
-            )
+            for key, value in expected[label].items():
+                assert normalized[key] == value, f"{label}.{key}"
+
+            # The Step-03 derived field: present, and carrying the class
+            # alphabet rather than an independently authored number.
+            assert normalized["num_classes"] == 256, label
+
+            # No key beyond the declared semantics plus the derived one.
+            assert set(normalized) == set(expected[label]) | {"num_classes"}, label
+
+    def test_config_identity_distinguishes_the_candidates(self):
+        """The property the emitted `config_identity` report field needs.
+
+        Deterministic and collision-free across the set — which is what
+        makes a result record attributable — WITHOUT freezing the hex, which
+        is only a serialization detail.
+        """
+        from scripts.vram_preflight_validation import (
+            CANDIDATES,
+            config_identity,
+            validate_config,
+        )
+
+        identities = {}
+        for entry in CANDIDATES:
+            normalized, error = validate_config(entry)
+            assert error is None
+            identity = config_identity(normalized)
+            assert identity.startswith("sha256:")
+            assert config_identity(normalized) == identity, "not deterministic"
+            identities[entry["label"]] = identity
+
+        assert len(set(identities.values())) == len(identities), identities

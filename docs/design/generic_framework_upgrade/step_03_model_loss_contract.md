@@ -1973,6 +1973,78 @@ the output semantic must NOT move the input dtype admissibility. The
 correlation A6 shows in the current builtin roster (classifier ↔ integer
 input) is a fact about that roster, not a framework law.
 
+#### Evidence-economy correction (operator, 2026-08-13) — binding for the rest of Step 03
+
+The Checkpoint-A run above was **broader than intended**. The checkpoint
+model is:
+
+```text
+Checkpoint A  = EXTRACTION PARITY
+Checkpoint B  = ATOMIC GENERIC CONTRAST
+Checkpoint C  = LIVE PRODUCTION INTEGRATION
+Checkpoint D  = TARGETED REGRESSION / MUTATION / STATIC
+exact-head CI = BROAD REGRESSION
+```
+
+Checkpoint A is **not** a general regression suite. Before every further
+test launch, state (1) which checkpoint property it proves, (2) the
+failure class it uniquely catches, (3) why a narrower set is
+insufficient. No concrete answer to (2) or (3) ⇒ narrow the command.
+
+**The lesson from the one real finding that broad run produced:** *the
+candidate-config serialization surface needed an explicit parity oracle
+in Checkpoint A.* It now has one, and it is used directly rather than
+rediscovered by sweeping.
+
+#### Test-disposition audit — `test_candidate_configs_and_hashes_are_unchanged`
+
+```text
+Original test intent
+  Freeze the normalized VRAM-preflight candidate configs by sha256 so a
+  silent edit to CANDIDATES or a model schema is caught.
+
+Production behavior it protects
+  The validation set spans the range the V19 campaign could not explore —
+  a 323M FCNet, a 10-20M convolutional candidate, a medium Transformer. A
+  candidate quietly shrinking would make the tool pass where it used to
+  fail, which the script's own docstring names as the defect.
+
+Unique failure class
+  A changed scale parameter, a dropped candidate, an altered model_type.
+
+Is the DIGEST itself operationally meaningful?  Traced to source.
+  `config_identity` (scripts/vram_preflight_validation.py:141) is NOT dead
+  — it is emitted into every result record at :194. But it is a REPORT
+  LABEL: nothing outside a single run compares its value. No cache key, no
+  resume key, no cross-run compatibility boundary reads it. Pinning the hex
+  froze an incidental JSON serialization, which is why Step 03 adding the
+  DERIVED `num_classes` field failed the pin while nothing it protected
+  had changed.
+
+Higher-level replacement
+  None needed — the same failure class is expressible directly.
+
+Disposition: REWRITE
+  `test_candidate_configs_are_the_intended_ones` asserts the semantic
+  values explicitly, plus that the only key beyond them is the derived
+  `num_classes`. `test_config_identity_distinguishes_the_candidates`
+  keeps the digest's genuine property — deterministic and collision-free
+  across the set, which is what makes a result record attributable —
+  without freezing its value.
+
+Why evidence is NOT weakened
+  Every failure the hash could catch reds here too, and NAMES ITSELF. A
+  hash failure says only "something moved"; these say which field and to
+  what. The rewrite is strictly more informative, and it is justified
+  independently of whether the current implementation passes: the pin was
+  freezing a serialization, not a semantic.
+```
+
+*Supersedes the interim reconciliation recorded above* (which strengthened
+the pin to assert the pre-M6 digest was recoverable). That was the right
+move while the digest's status was unknown; tracing its consumers showed
+the pin should not exist at all.
+
 ### 24.7 Mutation dossier
 
 | # | Mutation | Expected | Observed | Verdict |
