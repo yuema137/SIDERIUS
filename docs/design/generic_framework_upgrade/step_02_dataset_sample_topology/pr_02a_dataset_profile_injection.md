@@ -430,7 +430,7 @@ C7  docs + ledger closeout
 | **CP-A2 — training subprocess consumes the profile** | **PASS** (2026-08-14, `c3cfa9c4` + `d92f2e1f`) | see below |
 | **CP-A3 — all three data paths agree on ONE profile** | **PASS** (2026-08-14) | see below |
 | **CHECKPOINT A — extraction parity complete** | **PASS** (2026-08-14, `7cf82570`) | see below |
-| Checkpoint B | not reached | — |
+| **CHECKPOINT B — generic contrast complete** | **PASS** (2026-08-14, `87d1649e`) | see below |
 | Checkpoint C | not reached | — |
 | Checkpoint D | not reached | — |
 
@@ -655,6 +655,33 @@ mutations, all ultimately KILLED, one after strengthening the guard:
 | M9 | filename authority (inference re-inline) | **SURVIVED → guard strengthened → KILLED** |
 | M10 | filename authority (scoring entry re-inline) | KILLED |
 | M11 | legality authority (inline derivation restored) | KILLED |
+
+---
+
+**CHECKPOINT B PASS — four rungs, each single-axis, each demonstrated strong.**
+
+| Rung | Axis varied | Proves | Strength mutation |
+|---|---|---|---|
+| **A1** | `num_files` only | index space + the score-table row rule follow the count | the rung exists only because OD-02a-1 removed the import-time bound; before it, this topology was unrepresentable |
+| **A2** | family patterns (on A1's baseline) | a SINGLE-family dataset resolves both roles; nothing assumes two parallel families | M14 scorer re-hardcodes the family → **KILLED** |
+| **B** | `psd_segment_length` only | the legality rule returns the divisors of 2048, NOT the frozen 36-entry list | M12 loader re-assumes 10,000,000 → **KILLED** |
+| **D** | channel identity only | loaders read the declaration; the fixture has NO `channel0001`/`channel0002` group at all | M13 loader re-hardcodes `channel0001` → **KILLED** |
+
+**Atomicity is machine-checked.** `_assert_atomic` diffs each rung's
+`model_dump()` against TIDMAD's and requires the changed keys to be exactly
+the declared axis — it also catches a rung that silently adds or drops a
+declaration field. Parent §8 makes atomicity binding and forbids A1/A2 from
+touching geometry, encoding or channels; a prose promise would not survive
+a careless edit.
+
+**Why rung B mattered most.** §8 promoted it from deferred to REQUIRED on
+exactly the gap it now closes: Step 00 froze the 36-divisor list under
+TIDMAD's 10,000,000, which proves the helper still behaves and proves
+NOTHING about whether consumers stop assuming 10M when the profile says
+otherwise. Under `psd_segment_length=2048` the legal set becomes
+`[128, 256, 512, 1024, 2048]`.
+
+**Zero production diff** — C6's commit touches one file, under `tests/`.
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
