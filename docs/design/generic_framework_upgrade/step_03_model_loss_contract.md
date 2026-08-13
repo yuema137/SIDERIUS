@@ -2,9 +2,30 @@
 
 ## 0. Status and verified prerequisites
 
-**STEP 03 DESIGN — READY FOR OPERATOR FREEZE (revision 2, 2026-08-13).**
+**STEP 03 DESIGN — FROZEN.**
+**OPERATOR APPROVED FOR IMPLEMENTATION.**
 
-Design only. No implementation, no branch, no Gate has been run.
+| Freeze fact | Value |
+|---|---|
+| Frozen revision | **Revision 2** |
+| Frozen semantic basis | `a490e99e` |
+| Operator freeze date | **2026-08-13** |
+| Implementation base | **this freeze commit**, stacked on `a490e99e` |
+| Implementation branch | `feat/generic-framework-step-03-model-loss-contract` |
+
+The freeze commit is **docs-only**: it changes status surfaces only and
+leaves every revision-2 semantic section below byte-unchanged. At the
+time of the freeze no production source, no test and no Gate has been
+touched, and the implementation checklist / live ledger (§24) is not yet
+written.
+
+**Operator deviation, recorded at freeze:** implementation runs in the
+PRIMARY checkout `/home/yuema137/SIDERIUS` on the branch named above —
+**no separate implementation worktree**. This is an explicit
+operator-approved departure from the Implementation Working Rules'
+isolation default (the recommended branch was already checked out in the
+primary working directory, so a second worktree on it is impossible).
+It changes no semantic contract.
 
 ### 0.1 Verified base (mechanical, not conversational)
 
@@ -830,7 +851,20 @@ an operator call.
 
 ## 23. Status
 
-**STEP 03 DESIGN — READY FOR OPERATOR FREEZE (revision 2).**
+**STEP 03 DESIGN — FROZEN (revision 2; operator freeze 2026-08-13).**
+**OPERATOR APPROVED FOR IMPLEMENTATION.**
 
-Not frozen. No implementation authorized. No Implementation Working
-Rules contract exists. No Gate has been run. Step 04 is not begun.
+Implementation has **not yet begun** at the time of this freeze commit:
+no production source, no test and no Gate has been touched, and the
+implementation checklist / live ledger is not yet written. Step 04 is
+not begun.
+
+Frozen semantic basis `a490e99e`; implementation base is this freeze
+commit. The Implementation Working Rules contract for Step 03 exists as
+of this freeze. §0 carries the freeze facts and the operator-approved
+primary-checkout deviation.
+
+*Historical:* before this commit both §0 and this section read
+*"READY FOR OPERATOR FREEZE (revision 2) — not frozen, no
+implementation authorized"*. All revision-1 and revision-2 discussion
+above is preserved unchanged.
