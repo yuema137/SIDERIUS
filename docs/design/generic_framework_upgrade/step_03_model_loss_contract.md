@@ -2529,6 +2529,61 @@ Consequence for this ledger
   blockers, or requested approvals — none of them were.
 ```
 
+#### GATE 2 — plan, recorded BEFORE launch
+
+Gate standard re-read at this head immediately before launch, and the
+flag surface re-audited against the REAL parser
+(`sdsc_submission_scripts/_chain_common.sh` case arms, NOT `run_chain.sh`
+— an audit against the wrapper reports every flag missing, because the
+wrapper delegates parsing). All 18 flags present.
+
+```text
+head        76d9a455fd9a1c9a7bbe15fc557cf51c5d319699
+workspace   /home/klz/Data/SIDEREIS_DATA/step03_gate2_1786664926
+command     bash sdsc_submission_scripts/run_chain.sh \
+                --mode lilab \
+                --workspace /home/klz/Data/SIDEREIS_DATA/step03_gate2_1786664926 \
+                --run_name step03_gate2 \
+                --num_iterations 2 \
+                --max_rounds 2 \
+                --max_proposal_attempts 3 \
+                --max_epochs 1 \
+                --trial_portion 0.02 \
+                --train_portion 0.02 \
+                --eval_portion 0.02 \
+                --trial_time_budget_minutes 5 \
+                --no-force_formal_round \
+                --formal_time_budget_minutes 30 \
+                --llm_config llm_configs/openai_tiered_v1.json
+```
+
+**Deviations from the standard's canonical block, each justified:**
+
+| Deviation | Reason |
+|---|---|
+| `--seed_paths` OMITTED | the standard's own cold-start rule (operator, 2026-07-27): every new real-training gate run is cold-start. The canonical block keeps the seeds only for historical readability |
+| no `--data_scope` / `--health_gate_files` | full scope, so the paired partial-scope requirement does not apply |
+| `openai_tiered_v1.json`, not Step-02's `openai_tiered_pro.json` | the standard names `openai_tiered_v1.json` **mandatory**; the contract forbids inheriting Step-02's command from precedent |
+| workspace under `/home/klz/Data`, not `/tmp` | 408 G free on `/` vs 1.4 T on the data volume; the standard's `tee` warning is about exhausting the root filesystem, and `tee` is not used |
+
+**The exact question this Gate answers.** Does a real chain — real LLM,
+real training, real inference/scoring — complete with a non-null finite
+`denoising_score` while the model-boundary **dtype** and **cardinality**
+are resolved from the normalized contract rather than a model name or a
+builtin literal? That is Step-03's failure class (b): a silently wrong
+dtype or class count in real training, invisible to every prompt-level
+and schema-level test.
+
+```text
+projected wall time   30-60 min  (standard's estimate; within the ~1 h
+                                  autonomous ceiling)
+projected cost        ~$1.50-2.50 (gpt-5.4 dominant)
+GPU                   RTX 5090, 32.6 GB total, 11.2 GB in use -> ~21 GB free
+disk                  408 G free on /, 1.4 T on /home/klz/Data
+prerequisites         llm_configs/openai_tiered_v1.json present;
+                      /home/klz/Data/TIDMAD present; API key in .env
+```
+
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
 **Approved with two corrections, and PROMOTED into the frozen design as
