@@ -153,8 +153,10 @@ fixed/symbolic/dynamic dimensions — including the **shared symbolic
 dimensions and axis roles** through which input and output alignment is
 expressed); preset **resolution** into it; the consistency boundary
 (FX-3/FX-4 + shared Dataset-Profile facts); the canonical output
-semantic authority; loss legality as a **derivation**; contract-keyed
-**model-boundary dtype routing** and cardinality derivation.
+semantic authority; loss legality as a **derivation**; the
+**model-boundary dtype ADMISSIBILITY requirement** and the
+execution-side resolution of a concrete dtype satisfying it (§4a.1 A-1);
+and cardinality derivation.
 
 **Step 03 does NOT own a general cross-tensor relationship semantic**
 (§4e) — that is deferred, for the same consumer-less-seam reason as
@@ -226,6 +228,136 @@ contradiction. Frozen observable semantics:
 consumers require. Precedent to follow, not invent:
 `LOSS_TARGET_DTYPE_REGISTRY` already does exactly this for *target*
 dtype, on the adjacent line (audit row 12).
+
+> **§4a is AMENDED by §4a.1 (operator-approved 2026-08-13).** The text
+> above survives unchanged as the dataset-vs-model distinction, which
+> A-1 does not touch. What A-1 corrects is the implicit assumption in
+> the phrase *"the exact same model-boundary dtype"* — that one input
+> tensor maps to one concrete dtype. Read §4a.1 before implementing any
+> dtype behaviour.
+
+### 4a.1 AMENDMENT A-1 — dtype REQUIREMENT vs concrete representation
+
+**Status: OPERATOR-APPROVED, 2026-08-13.** Raised as finding F-1
+(§24.2), evidenced by baseline A6 (§24.6), approved with corrections.
+This is the only frozen-semantics amendment in Step 03.
+
+```text
+Previous frozen assumption
+  One Model-I/O input tensor maps to ONE concrete torch dtype, and
+  Phase B lifts that single concrete dtype out of the model-NAME branch.
+
+A6 evidence (§24.6 — executed, at the model call, per builtin)
+                   epoch training   streaming training   inference
+  embedding arm    int32            int32                int64
+  fcnet            float32          float32              float32
+
+  Every embedding-arm builtin executes under BOTH int32 and int64 with
+  the identical (1, 256, T) result. configs/task_config.yaml declares
+  int64 — true of inference, false of both training paths.
+
+Verdict
+  The previous assumption is REFUTED. There is no single shipped
+  concrete model-boundary dtype to lift.
+```
+
+**Corrected semantic contract.** The amendment freezes SEMANTICS, not an
+implementation API.
+
+| Authority | Owns |
+|---|---|
+| **Model-I/O contract** | the model input's **dtype REQUIREMENT / admissibility constraint** — which concrete representations the model boundary will accept |
+| **Execution** | **selection of the concrete dtype** that actually reaches `model.forward`, subject to (a) what the Dataset path provides, (b) adaptations the framework actually supports, and (c) the model's dtype requirement |
+
+```text
+available concrete representations
+      ∩
+model-admissible representations
+      ->  one valid concrete model-boundary dtype
+      ->  empty intersection => TYPED FAIL-CLOSED
+```
+
+The Model-I/O contract does **NOT** own `training_dtype`,
+`inference_dtype`, `boundary_dtype_map`, or any other boundary-specific
+concrete dtype. **Adding one is a STOP** (§21).
+
+**Site dtype is compatibility behaviour, not model semantics.** The
+shipped concrete choices — int32 in the training engine, int64 in
+inference — are observable compatibility behaviour. They may live as
+implementation-local site preferences or equivalent; they must never
+become contract fields, and a site preference must never be mistaken for
+a model requirement.
+
+**Resolution is not "legacy site dtype or fail."** That would elevate a
+legacy site preference into a semantic constraint. The rule is:
+
+```text
+if the site's preferred concrete dtype is admissible      -> use it
+                                       (TIDMAD: A6 stays green, exactly)
+else if another concrete dtype is BOTH supported by the current
+     adaptation path AND admissible to the model           -> use that
+else                                                       -> typed failure
+```
+
+The exact deterministic selection mechanism is **implementation-time**
+and must be derived from current source (§17 — no API is frozen here).
+
+**Contract expressiveness > currently validated runtime support**
+(operator refinement, 2026-08-13). The admissibility requirement is an
+**extensible normalized dtype admissibility declaration**. It is
+explicitly **NOT** bounded to today's concrete `{int32, int64, float32}`
+set, and `INTEGER_INDEX` / `REAL_VALUED` are **NOT** frozen as the
+public contract vocabulary — they were a source-grounded sketch in the
+proposal, and are not promoted here.
+
+Three distinct layers, which must not be collapsed:
+
+| Layer | Owns |
+|---|---|
+| **Model-I/O contract** | an *extensible* normalized dtype admissibility requirement for the input tensor |
+| **Runtime / execution capability** | the concrete dtypes the current data→model adaptation path can actually materialize and support |
+| **Resolution** | `model-admissible ∩ runtime-supported → deterministic concrete dtype`; empty ⇒ typed fail-closed |
+
+**What Step-03 execution evidence may claim.** Only the cases today's
+production consumers actually require — **`int32`, `int64`, `float32`**.
+No other concrete dtype may be claimed executable without evidence.
+
+**What the schema must not preclude.** Representing a legitimate model
+requirement over `float16`, `bfloat16`, `float64`, `bool`,
+`complex64` / `complex128` or another backend-supported dtype must not
+need a **schema redesign** later. Execution support for those stays
+**capability-gated** and is added when a real consumer exists. Audit the
+schema and resolver against this before any Phase-B production edit
+(§24.9 Q13-Q14).
+
+**Not widened into quantization / mixed-precision policy.** Those may
+need dedicated execution semantics later. The contract must be
+extensible enough not to block them, while claiming no support for them
+now.
+
+Deliberately **not** frozen: enum or vocabulary names, the field name
+`dtype_requirement`, the helper name `resolve_model_input_dtype`, and the
+schema nesting (§17). What IS frozen is the observable capability: **the
+contract can express the input dtype admissibility today's consumers
+require, and is extensible to requirements it does not yet support.**
+
+**Dtype requirement is INDEPENDENT of output semantics.** It must not be
+inferred from `output_type`, classifier/regressor/`hybrid`, model name,
+rank, modality or preset label. A6's apparent correlation
+(classifier ↔ integer input, `hybrid` ↔ `fcnet` float input) is a fact
+about the **current builtin roster**, not a generic contract: a generic
+classifier may eventually require real-valued input, and the Step-03
+contract must not make that structurally impossible. **Stage-B keeps
+dtype as an independent semantic axis.**
+
+**Consequences.**
+
+| Dimension | Consequence |
+|---|---|
+| Compatibility | the TIDMAD concrete matrix above remains **exact**; A6 passes **unmodified** |
+| Genericity | no model-name branch; no boundary dimension in the model contract; site preference is not semantic authority |
+| Validation | **3-B** proves a supported admissible case; **3-B-neg** proves an empty/unsupported intersection fails closed |
+| Precedent | `LOSS_TARGET_DTYPE_REGISTRY` remains the *target*-side precedent to mirror — it is **not** merged into the input contract |
 
 ### 4b. Cardinality — DERIVE / CROSS-VALIDATE, never redeclare
 
@@ -306,7 +438,7 @@ report it — do not silently add the field.**
 |---|---|---|---|---|
 | tensor rank, ordered axes, **axis semantic roles** | — | **MISSING** | — | **DECLARE** — roles are what replace rank-specific branching |
 | fixed / symbolic / dynamic dimensions | prose only | **MISSING as data** | renderers | **DECLARE** |
-| model-boundary dtype | inside a prose string | **MISSING as data** | **6 name-branch sites** | **DECLARE** + Phase B routes from it (§4a) |
+| model-boundary dtype **requirement** | inside a prose string | **MISSING as data** | **3 input-dtype name-branch sites** (F-2) | **DECLARE the requirement** (§4a.1 A-1); Phase B resolves a concrete dtype satisfying it. The concrete site dtype is NOT a contract field |
 | batch/sample semantics | `B` by convention | **MISSING** | — | **DECLARE** as an axis role |
 | shared symbolic dimension / axis-role alignment between input and output | prose only | **MISSING as data** | renderers | **DECLARE** — as ordinary axis/dimension semantics, not a relation surface (§4e) |
 | general cross-tensor relationship declarations / relation DSL | — | missing | **none** | **DEFER** (§4e) |
@@ -333,7 +465,7 @@ the field that was set (§16).
 | A3 | plugin load tolerance tiers | **both tiers pinned as distinct behaviours**: load-time missing/invalid `PLUGIN_OUTPUT_TYPE` → silent `classifier` default; lookup-time `get_output_type` on an unregistered model → fails closed. Their divergence is **pre-existing and not Step 03's to unify** | **capture first** |
 | A4 | builtin model forwards | byte-identical outputs, every builtin | **YES** — Step-00 |
 | A5 | registry contents | identical under the TIDMAD profile (contents pinned; loading mechanics are Step 11's) | **YES** — Step-00 |
-| A6 | **model-boundary dtype** | the exact same tensor dtype reaches each builtin, `fcnet` included — observed **at the model call**, not at the branch condition, and `fcnet` asserted distinctly from the non-`fcnet` arm | **MISSING — capture first** |
+| A6 | **model-boundary dtype** | **AMENDED by A-1 (§4a.1).** The exact CONCRETE dtype of A6's matrix reaches each builtin at each boundary — embedding arm int32 / int32 / int64, `fcnet` float32 / float32 / float32 — observed **at the model call**, not at the branch condition, with `fcnet` asserted distinctly from the embedding arm and each boundary asserted separately. The pre-A-1 wording *"the exact same tensor dtype reaches each builtin"* presumed one concrete dtype; A6 refuted it | **CAPTURED** — §24.6 |
 | A7 | Step-00 numeric baselines | unchanged | **YES** |
 | A8 | prior on-disk generated plugins | still loadable and registering, or a declared and accepted workspace boundary | **MISSING — capture first** |
 
@@ -394,8 +526,10 @@ PHASE A — semantic authority (changes no executed tensor)
   semantic authority · loss-legality re-keying · exact TIDMAD rendering
 
 PHASE B — production execution consumption (changes no rendered prompt)
-  contract-keyed model-boundary dtype routing (kills the 6 name
-  branches) · cardinality derivation (kills the 27 builtin literals) ·
+  model-boundary dtype RESOLVED against the declared admissibility
+  requirement, not a model name (§4a.1 A-1) — kills the 3 input-dtype
+  name branches; the 3 constructor name branches are audited and out of
+  scope (F-2) · cardinality derivation (kills the 27 builtin literals) ·
   builtin catalogue / runtime consumption · the real training and
   inference boundary
 
@@ -405,10 +539,12 @@ CURRENT PRODUCTION CONSUMERS:
     proposer stages; the shape prose in agent/schemas/{proposal,
     implementor,validator}.py; models_format_sandbox's compatibility
     authority and its two callers.
-  Phase B — execute_tools/train_engine_sandbox.py (:614,:660,:817,:1029),
-    execute_tools/inference_single.py (:213,:410), ml_models/
-    models_sandbox.py builtins, and the class-weight histogram
-    (train_engine_sandbox.py:80,126,196).
+  Phase B — the 3 INPUT-DTYPE sites train_engine_sandbox.py (:660,
+    :1029) and inference_single.py (:216), plus ml_models/
+    models_sandbox.py builtins. CORRECTED at kickoff (§24.2): the
+    constructor branches (:614, :817, inference_single:410) are a
+    different failure class and are NOT migrated (F-2); the class-weight
+    histogram was ALREADY migrated by Step 02a (F-3).
 STAGE-A PARITY: §5 A1-A8.
 STAGE-B CONTRAST: §11 ladder, incl. BINDING FX-3 and FX-4.
 LIVE CHECKPOINT C: §12.
@@ -543,8 +679,8 @@ another familiar modality proves nothing.
 | Rung | Varies ONLY | Held fixed | What failure exposes a fake abstraction | Phase |
 |---|---|---|---|---|
 | **3-A** axis structure | rank + ordered axes (roles preserved) | dtype, cardinality, output semantics, dataset | any consumer branching on rank | A |
-| **3-B** model-boundary dtype | the dtype the model REQUIRES | axes, cardinality, output semantics, **dataset dtype unchanged** | dtype still resolved from a model name; or a valid adaptation misreported as a contradiction | A → proven in B |
-| **3-B-neg** unsupported adaptation | an adaptation source does not support | everything else | silent coercion instead of a typed failure | A |
+| **3-B** model-boundary dtype | the dtype REQUIREMENT the model declares (§4a.1) | axes, cardinality, output semantics, **dataset dtype unchanged**, concrete site preferences unchanged | dtype still resolved from a model name; a valid adaptation misreported as a contradiction; or the requirement inferred from output semantics rather than declared independently | A → proven in B |
+| **3-B-neg** unsupported adaptation | a requirement no supported concrete representation satisfies — the empty intersection of §4a.1 | everything else | silent coercion instead of a typed failure; or the site's preferred dtype being treated as the only candidate, so a supported admissible alternative is never reached | A |
 | **3-C** cardinality | class count only | axes, dtype, output semantics | `256` surviving in any resolved path | B |
 | **3-D** canonical output semantic | classifier ↔ regressor | axes, dtype, cardinality | loss legality still keyed on a legacy string | A |
 | **FX-3** preset resolution | preset only, over a fixed explicit contract | everything else | a preset producing a second runtime path | A |
@@ -588,7 +724,7 @@ One PR ⇒ **one PR-level live checkpoint**, which must jointly prove that
 |---|---|---|
 | **(i)** | semantic authority — rendering | a **real production LLM-facing rendering path** consumes the normalized contract in a live chain iteration |
 | **(ii)** | semantic authority — fail-closed | a **real machine-checkable contradictory configuration** is rejected before the relevant LLM/executable boundary, asserted by **LLMBridge call count == 0** — not by exception type alone |
-| **(iii)** | execution | a **real training + inference round** feeds a contract-derived input dtype and cardinality through the **actual subprocess/runtime path** |
+| **(iii)** | execution | a **real training + inference round** feeds a **contract-SATISFYING** input dtype (§4a.1 — resolved against the declared requirement, not lifted from a contract field) and a contract-derived cardinality through the **actual subprocess/runtime path** |
 
 Binding qualifications:
 
@@ -780,8 +916,11 @@ session's nine-commit choreography exists as a scratch artifact; its
 | 3 | Are arbitrary rank/axes genuinely supported without modality branches? | **3-A tests exactly this**; branching on rank/modality is a STOP |
 | 4 | Did multi-tensor sneak back in? | **NO** — §4c forbids containers; not a rung |
 | 4b | Did a consumer-less **relationship DSL** survive? | **NO — corrected before freeze.** The matrix listed `input↔output relationships` as DECLARE with zero live consumers, contradicting §21. Now DEFERRED; alignment rides on shared axis roles + shared symbolic dimensions (§4e) |
-| 5 | Did model dtype duplicate dataset dtype? | **NO** — §4a keeps them distinct |
+| 5 | Did model dtype duplicate dataset dtype? | **NO** — §4a keeps them distinct; §4a.1 keeps the model's REQUIREMENT distinct from execution's concrete selection |
 | 6 | Did we wrongly require model dtype == dataset dtype? | **NO — corrected in rev 2.** This was the live error; 3-B + 3-B-neg encode the fix |
+| **6b** | Did we wrongly assume ONE concrete model-boundary dtype? | **YES, and it is corrected by AMENDMENT A-1 (§4a.1).** A6 refuted the assumption with executed evidence; the contract now owns dtype ADMISSIBILITY and execution owns the concrete representation. The 12-question dtype re-review is §24.9 |
+| **6c** | Did a boundary-specific dtype reach the model contract? | **NO** — `training_dtype` / `inference_dtype` / `boundary_dtype_map` are forbidden fields (§4a.1, §21) |
+| **6d** | Did a legacy site preference become a semantic constraint? | **NO** — §4a.1's resolution rule reaches a supported admissible alternative when the site preference is inadmissible; "site dtype or fail" is explicitly rejected |
 | 7 | Is cardinality still duplicated? | **NO** — derived/cross-validated (§4b); 3-E proves it |
 | 8 | Is `output_type` a second authority? | **Guarded** — §8b makes it a derived projection |
 | 9 | Did `hybrid` become a generic promise? | **NO** — legacy builtin adapter only (§8c) |
@@ -806,6 +945,18 @@ session's nine-commit choreography exists as a scratch artifact; its
   cross-validated;
 - model-boundary dtype is required to **equal** dataset dtype, or a
   general dtype-conversion algebra is invented beyond current consumers;
+- **(A-1)** a boundary-specific concrete dtype — `training_dtype`,
+  `inference_dtype`, `boundary_dtype_map` or equivalent — is added to the
+  Model-I/O contract (§4a.1);
+- **(A-1)** the model's dtype requirement is inferred from `output_type`,
+  model name, rank, modality or preset label instead of declared
+  independently (§4a.1);
+- **(A-1)** a legacy concrete SITE preference is treated as the model's
+  semantic requirement — including a resolver that fails whenever the
+  site's preferred dtype is inadmissible, without considering a supported
+  admissible alternative (§4a.1);
+- **(A-1)** a dtype requirement kind is frozen into the contract with no
+  live consumer;
 - a second loss or output-type authority appears;
 - **any loss accept/reject verdict changes** — that is a policy change,
   not an authority change;
@@ -911,7 +1062,7 @@ implementation discoveries with recorded dispositions.
 
 ---
 
-#### F-1 — the model-boundary input dtype is **not one value today**: training feeds int32, inference feeds int64 — **STOP, operator decision required**
+#### F-1 — the model-boundary input dtype is **not one value today**: training feeds int32, inference feeds int64 — **RESOLVED: Amendment A-1, §4a.1**
 
 ```text
 Previous implementation assumption
@@ -967,7 +1118,14 @@ Why this is MATERIAL, not bounded
   consumer" / no widening). The design nowhere anticipates a
   per-boundary dtype, so no reading of §4a resolves it.
 
-Options (operator decision — NOT self-selected)
+RESOLUTION (operator, 2026-08-13)
+  Baseline A6 (§24.6) confirmed the matrix by execution. The operator
+  approved AMENDMENT A-1 with two corrections; it is now frozen design
+  §4a.1, and its provenance is §24.8. The options below are the
+  proposal as originally offered, kept because the reasoning that
+  narrowed them is the reason A-1 has the shape it does.
+
+Options as offered (superseded by A-1)
   O1  Contract declares ONE model-required input dtype; the two
       boundaries keep their observed dtypes through an explicit,
       source-supported adaptation that is boundary-scoped. Preserves
@@ -1170,10 +1328,14 @@ oracle exists. Audited at `f865038f`:
       `" (per-timestep {num_classes}-class)"` derives from axis ROLES
       (§1 row 7). A1 goldens pass **unmodified**; `prompts.py` planner
       bytes exact (F-4). → Phase-A invariant: **no executed tensor changes**
-- [ ] **M5 — Phase B: contract-keyed input dtype.** The three dtype sites
-      of F-2, following the `get_target_torch_dtype` precedent on the
-      adjacent line (`train_engine_sandbox.py:668`). Supported adaptation
-      succeeds; unsupported fails closed. **Blocked on the F-1 decision.**
+- [ ] **M5 — Phase B: requirement-resolved input dtype (§4a.1 A-1).**
+      The three dtype sites of F-2, following the `get_target_torch_dtype`
+      precedent on the adjacent line (`train_engine_sandbox.py:668`).
+      Resolution is `model-admissible ∩ runtime-supported`, honouring the
+      legacy site preference when it lies in the intersection and
+      reaching a supported admissible alternative when it does not;
+      empty intersection fails closed. **UNBLOCKED** — A-1 approved.
+      Run the §24.9 re-review against the code first.
 - [ ] **M6 — Phase B: cardinality derivation.** The 27 construction
       literals in `ml_models/models_sandbox.py`, derived from /
       cross-validated against `ValueEncoding.num_classes`
@@ -1283,68 +1445,75 @@ catches it.
 **A2**, **A3**, **A8** are NOT yet captured (§24.3 has their scope and
 their existing partial oracles). Checkpoint 0 is therefore **NOT** PASS.
 
-### 24.8 Proposed narrow amendment to §4a — **AWAITING OPERATOR APPROVAL**
+### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
-Written because A6 confirmed F-1. **Not implemented.** No production
-file may change until this is approved.
-
-**The problem, stated from evidence.** §4a assumes one model-boundary
-input dtype per model. A6 proves there are two concrete ones on the
-embedding arm, both legitimate, both shipped.
-
-**The amendment.** The Model-I/O contract's input tensor declares a
-**dtype REQUIREMENT** — the admissible-dtype semantics of the model
-boundary — rather than one concrete cast:
+**Approved with two corrections, and PROMOTED into the frozen design as
+§4a.1.** That section is now the authority; what follows is the
+provenance record of how it got there, kept so a reviewer can see the
+proposal, the corrections and the reasoning rather than only the result.
 
 ```text
-input.dtype_requirement : INTEGER_INDEX  admissible {int32, int64}
-                        | REAL_VALUED    admissible {float32}
+proposed      one dtype REQUIREMENT on the contract; each site keeps its
+              own concrete dtype; resolver validates
+approved      YES — the model owns dtype ADMISSIBILITY, execution owns
+              the concrete representation
+correction 1  resolution must NOT be "site dtype if admissible, else
+              fail". That would elevate a legacy site preference into a
+              semantic constraint. It must reach a supported admissible
+              ALTERNATIVE, and fail only on an empty intersection.
+correction 2  do NOT bound the contract to {int32, int64, float32}, and
+              do NOT freeze INTEGER_INDEX / REAL_VALUED as the public
+              vocabulary. The requirement is an EXTENSIBLE normalized
+              admissibility declaration:
+                contract expressiveness > validated runtime support.
+              Validated today: int32, int64, float32 — nothing else may
+              be claimed executable. Expressible without a schema
+              redesign: float16, bfloat16, float64, bool, complex64/128.
+              Not widened into quantization / mixed-precision policy.
 ```
 
-Both requirement kinds are **source-supported today**, not speculative:
-A6 executes every embedding-arm builtin under both admissible integer
-dtypes with identical results, and `fcnet` under float32.
+The original proposal text is superseded by §4a.1 and is not duplicated
+here.
 
-Each execution site keeps its **own** concrete dtype as a named site
-constant — `int32` in the training engine, `int64` in inference —
-and one shared resolver selects and validates:
+### 24.9 Narrow dtype adversarial re-review — required before Phase B
 
-```text
-resolve_model_input_dtype(requirement, site_dtype) -> torch.dtype
-    REAL_VALUED     -> float32
-    INTEGER_INDEX   -> site_dtype if admissible
-                       else TYPED FAILURE, never a coercion
-```
+Answered against §4a.1 as amended. Q1-Q12 are the operator's list;
+Q13-Q14 come from correction 2. **Re-run mechanically against the code
+before the first Phase-B production edit** — the answers below are the
+DESIGN's position, and only the implementation can confirm them.
 
-so the cast line becomes contract-keyed, exactly mirroring the row-12
-precedent on the adjacent line (`get_target_torch_dtype(loss_cfg)`).
+| # | Question | Design answer |
+|---|---|---|
+| 1 | Does any model-name branch still determine dtype semantics? | **NO by design** — §4a.1 routes on the declared requirement. The 3 input-dtype sites are the migration target; the guardrail must cover them (§24.10) |
+| 2 | Does any `output_type` value determine input dtype semantics? | **NO** — §4a.1 forbids inferring the requirement from output semantics. A6's correlation is a fact about the current roster, not a contract |
+| 3 | Did training / inference become fields in the Model-I/O contract? | **NO** — `training_dtype` / `inference_dtype` / `boundary_dtype_map` are forbidden fields and a §21 stop condition |
+| 4 | Is the concrete TIDMAD A6 matrix preserved? | **YES** — the legacy site dtype is a compatibility preference honoured whenever it lies in the valid intersection. A6 must pass **unmodified** |
+| 5 | Can the contract express today's index-style and float-input requirements without a modality / model-name branch? | **YES** — admissibility is declared per contract, resolved by intersection |
+| 6 | Is a site preference being mistaken for a model requirement? | **NO** — explicitly separated; correction 1 exists precisely to prevent it |
+| 7 | Can a supported non-default concrete dtype be selected when the site's preferred dtype is inadmissible? | **YES, required** — this is correction 1. A resolver that cannot do this is wrong |
+| 8 | Does an unsupported / empty intersection fail closed? | **YES** — typed failure, never coercion. Rung 3-B-neg |
+| 9 | Did we invent a general conversion algebra? | **NO** — only adaptations current production consumers justify (§4a) |
+| 10 | Did we freeze a dtype taxonomy with no live consumer? | **NO** — correction 2 forbids freezing the vocabulary; validated support stays `int32` / `int64` / `float32` |
+| 11 | Is dtype still atomic and independent from cardinality / output semantics? | **YES** — 3-B varies dtype alone; 3-C cardinality alone; 3-D output semantics alone |
+| 12 | Does `LOSS_TARGET_DTYPE_REGISTRY` remain a *precedent* rather than being merged into the input contract? | **YES** — target-side authority, untouched. It is the shape to mirror, not to absorb |
+| **13** | Would representing `float16` / `bfloat16` / `float64` / `bool` / `complex64` / `complex128` require a schema redesign? | **Must be NO.** Expressiveness exceeds validated runtime support; verify against the actual schema before Phase B |
+| **14** | Does the design claim any concrete dtype executable without evidence? | **NO** — only `int32`, `int64`, `float32` are claimed, and A6 executes all three |
 
-**What this preserves, point by point against the operator's constraints:**
+### 24.10 Guardrail coverage (implementation evidence, not a new capability)
 
-| Constraint | How the amendment meets it |
-|---|---|
-| ONE Model-I/O authority | one `dtype_requirement` on the contract; nothing else answers "what may this model be fed" |
-| EXACT TIDMAD concrete boundary dtypes | training stays int32, inference stays int64, `fcnet` stays float32 — A6 passes **unmodified** |
-| no model-name routing | the branch keys on the declared requirement, never on `model_type` |
-| no boundary dimension in the MODEL contract | `int32`/`int64` live at the execution sites, as properties of those sites; the contract never mentions train or inference |
-| typed failure on an unsatisfiable concrete dtype | the resolver's `else` arm — no silent coercion (this is rung **3-B-neg**) |
+`tests/unit/guardrails/test_no_model_name_branches.py` `_SCAN_TARGETS`
+covers `evaluate_vram_skill`, the two estimators and
+`core/inference_defaults.py` — **not** `execute_tools/
+train_engine_sandbox.py` or `execute_tools/inference_single.py`, i.e.
+not the sites Step 03 migrates. Roadmap §15.1's Step-3 A-cell already
+names *"guardrail targets extended"*.
 
-**What it does NOT do.** It does not unify int32 and int64; it does not
-add `training_dtype` / `inference_dtype`; it does not invent a
-dtype-conversion algebra; it does not touch `fcnet`'s constructor branch
-(F-2). The int32/inference-int64 divergence is **recorded as a named,
-greppable site constant** instead of an implicit `.int()` vs `.long()` —
-made visible, deliberately not repaired, since repairing it changes
-executed tensors and is a §21 STOP.
+Treated as **implementation evidence**, not a new design capability. The
+final guardrail must catch reintroduction of model-name-based dtype
+routing on every migrated Step-03 execution surface, using
+semantic / AST / source-pattern coverage in the existing guardrail's
+idiom — **not** a pin on today's line numbers.
 
-**Stage-B consequence.** 3-B varies the declared requirement with the
-dataset dtype held fixed and the concrete site dtypes unchanged;
-3-B-neg supplies a site dtype the requirement does not admit and asserts
-the typed failure.
-
-**Follow-up debt this creates.** The training/inference int32↔int64
-divergence itself remains, now explicit. It is not Step-03's to repair.
-
-### 24.9 Final state
+### 24.11 Final state
 
 *(empty — no PR opened)*
