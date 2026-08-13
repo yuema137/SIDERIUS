@@ -1380,6 +1380,12 @@ oracle exists. Audited at `f865038f`:
       (`:389-392`) assigns this derivation to the model-contract module.
       NOT the class-weight histogram (F-3). → Phase-B invariant:
       **no rendered prompt bytes change**
+
+**PHASE A COMPLETE** (M1-M4). Phase-A invariant held throughout: no
+executed model tensor behaviour changed — `train_engine_sandbox.py` and
+`inference_single.py` are byte-untouched since the freeze. §24.9
+re-reviewed against the code at `4819b44a`: no material NO.
+
 - [ ] **CHECKPOINT A** — §5 A1-A8, incl. the F-4 planner surface
 - [ ] **CHECKPOINT B** — §11 ladder: 3-A, 3-B, 3-B-neg, 3-C, 3-D, FX-3,
       FX-4, 3-E, under §11.1
@@ -1896,6 +1902,33 @@ DESIGN's position, and only the implementation can confirm them.
 | 12 | Does `LOSS_TARGET_DTYPE_REGISTRY` remain a *precedent* rather than being merged into the input contract? | **YES** — target-side authority, untouched. It is the shape to mirror, not to absorb |
 | **13** | Would representing `float16` / `bfloat16` / `float64` / `bool` / `complex64` / `complex128` require a schema redesign? | **Must be NO.** Expressiveness exceeds validated runtime support; verify against the actual schema before Phase B |
 | **14** | Does the design claim any concrete dtype executable without evidence? | **NO** — only `int32`, `int64`, `float32` are claimed, and A6 executes all three |
+
+#### §24.9 RE-RUN AGAINST THE ACTUAL PHASE-A CODE — 2026-08-13, at `4819b44a`
+
+Required before the first Phase-B edit. The §24.9 table records the
+DESIGN's position; this records what the code does.
+
+| # | Question | Verified against code |
+|---|---|---|
+| 1 | dtype keyed by model NAME? | **NO** — no `admissible` reference co-occurs with a model-name literal anywhere in `agent/`, `workflows/`, `ml_models/`, `execute_tools/` |
+| 2 | dtype keyed by `output_type`? | **NO** — no classifier/regressor/hybrid token appears near the dtype declaration |
+| 3 | boundary dtype fields in the contract? | **NO** — `training_dtype` / `inference_dtype` / `boundary_dtype` / `site_dtype` return zero hits |
+| 4 | A6 concrete matrix preserved? | **YES, by construction** — `git diff f865038f..HEAD` over `train_engine_sandbox.py` and `inference_single.py` is **empty**; Phase A touched no execution dtype site |
+| 5 | today's requirements expressible without a modality branch? | **YES** — the shipped YAML declares both tensors' admissibility; the only `len(axes)` is the schema's own `rank` accessor, not a branch |
+| 6 | site preference mistaken for model semantics? | **NO** — "site preference" appears only in docstrings explaining that it is *not* model semantics; no field carries one |
+| 10 / 14 | any dtype claimed executable without evidence? | **NO** — the only `float16` / `bfloat16` / `complex64` mentions in production are the docstring stating they are EXPRESSIBLE-not-supported. Other `float64` hits are pre-existing numpy scoring/health-check code, unrelated to the model contract |
+| 11 | dtype independent of cardinality / output semantics? | **YES** — `DtypeAdmissibility` and `class_cardinality` / `output_semantic` share no field and no derivation |
+| 12 | `LOSS_TARGET_DTYPE_REGISTRY` still a separate precedent? | **YES** — not referenced from `agent/schemas/` at all |
+| 13 | future dtypes need a schema redesign? | **NO** — M1's expressibility tests declare `float16`, `bfloat16`, `float64`, `bool`, `complex64`, `complex128` through the shipped schema unchanged |
+
+**Q7 and Q8 are M5's to satisfy** — "can a supported non-default dtype be
+selected when the site preference is inadmissible" and "does an empty
+intersection fail closed" are properties of resolution code that does not
+exist until Phase B. They are carried as M5's acceptance criteria rather
+than answered here, because answering them now would be answering about
+code that has not been written.
+
+**Verdict: no material NO. Phase B may proceed.**
 
 ### 24.10 Guardrail coverage (implementation evidence, not a new capability)
 
