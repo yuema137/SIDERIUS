@@ -21,7 +21,10 @@ and 7), jointly constituting that step's acceptance entry.
 | 01 | [`step_01_proposer_hypothesis_space.md`](./step_01_proposer_hypothesis_space.md) (parent) | **COMPLETE** — FROZEN (OD-S1-5); both children merged (01a → PR #199, 01b → PR #201) |
 | 01a | [`step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md`](./step_01_proposer_hypothesis_space/pr_01a_contract_derived_prompt_extraction.md) | **COMPLETE — merged (PR #199, 2026-08-12, merge commit `39f89f52`)** |
 | 01b | [`step_01_proposer_hypothesis_space/pr_01b_task_description_join.md`](./step_01_proposer_hypothesis_space/pr_01b_task_description_join.md) | intentional task-description JOIN — **COMPLETE — merged (PR #201, 2026-08-13, merge commit `fe05f5f7`)**. CP1/CP2/CP3, Checkpoint C, Gate 1 and Gate 2 all PASS; terminal suite green; exact-head CI green |
-| 02 | `step_02_dataset_sample_topology.md` | not created |
+| 02 | [`step_02_dataset_sample_topology.md`](./step_02_dataset_sample_topology.md) (parent) | **DESIGN DRAFT — READY FOR OPERATOR REVIEW** (2026-08-13). Decomposed into three child PRs pending operator Q1; not frozen, implementation unauthorized |
+| 02a | [`step_02_dataset_sample_topology/pr_02a_dataset_profile_injection.md`](./step_02_dataset_sample_topology/pr_02a_dataset_profile_injection.md) | Dataset Profile injection (topology · geometry+legality · encoding · channel identity) — DESIGN DRAFT |
+| 02b | [`step_02_dataset_sample_topology/pr_02b_selection_sampleset.md`](./step_02_dataset_sample_topology/pr_02b_selection_sampleset.md) | Selection & SampleSet semantics — DESIGN DRAFT |
+| 02c | [`step_02_dataset_sample_topology/pr_02c_systematic_groups.md`](./step_02_dataset_sample_topology/pr_02c_systematic_groups.md) | Systematic group semantics — DESIGN DRAFT |
 | 03 | `step_03_model_loss_contract.md` | not created |
 | 04 | `step_04_candidate_creation_mechanics.md` | not created |
 | 05a-c | `step_05a_tuner_data_selection.md`, `step_05b_tuner_resource_time.md`, `step_05c_tuner_execution_contracts.md` | not created |

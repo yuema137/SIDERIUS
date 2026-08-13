@@ -1341,7 +1341,7 @@ production consumer that proves the seam); **Deps** = must land before;
 |---|---|---|---|---|---|---|---|---|
 | Golden baseline harness | 0 | Every behavior later extraction PRs claim to preserve has a trustworthy, reviewable baseline BEFORE any production refactoring | n/a (it CREATES the baselines) | n/a | baselines consumed by every later Stage-A checkpoint | — | `step_00_golden_baseline_harness.md` | **COMPLETE — MERGED** (PR #198, e80da078, 2026-08-12; Checkpoints 0/D/E met; closure audit reconciled; zero production diff) |
 | 6-P Proposer hypothesis-space & prompts | 1 | Proposer prompts DERIVE from the declared task profile: task facts + contract PROSE (shapes/classes/task_type/loss legality) render from existing authorities instead of literals; TIDMAD proposals unchanged. Scope limits (3rd review, F2): the dataset-constraints block stays regime-A on the singleton until step 2; contract SEMANTICS stay §5-owned — 6-P only renders the declaration | rendered proposer prompts (all 3 stages incl. commit) EXACT-equal for TIDMAD + same kwargs reach LLMBridge (§2 nondeterministic surface) | 13.4-A (task-description text) + 13.4-B (declared forward contract, PROSE-rendering only) | the PRODUCTION proposer renders from the profile in a real chain iteration; contract-reassertion pins re-targeted to profile-parameterized form IN THIS PR (its design states the semantic change) | 0 (constraints-block slice completes after step 2) | `step_01_proposer_hypothesis_space.md` | **COMPLETE — MERGED** — child PR 01a (contract/loss PROSE rendering, 13.4-B) MERGED as PR #199 (`39f89f52`, 2026-08-12); child PR 01b (task-description JOIN, 13.4-A) MERGED as PR #201 (`fe05f5f7`, 2026-08-13) — final executable head `6b259b93`; CP1/CP2/CP3, Checkpoint C, Gate 1 and Gate 2 all PASS; terminal suite 8540 passed / 3 skipped; exact-head CI green incl. strict pyright. **A-cell exception applies (OD-S1-8): 01b intentionally changed rendered TIDMAD bytes on the three stage SYSTEM prompts (+262 chars each), with declared golden sets R2 (six `pb3_*_system.txt`) and R3 (the new legacy reasoning golden + two `pb3_causal_*`), each change mechanically attributable.** Step 01 is CLOSED; FX-3/FX-4 carried forward as deferred decision D13 |
-| §4 Dataset & sample topology | 2 | All dataset-semantic behavior under §4 OWNERSHIP (topology, geometry, selection, groups, input identity/indexing) resolves from the task's Dataset Profile, and MIGRATED consumers no longer independently restate those semantics. Launcher/orchestration/execution-infrastructure task-binding residue (workflow TIDMAD binding, sandbox data-dir, runtime-control fallbacks, cleanup globs) remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination (freeze reconciliation 1) | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `step_02_dataset_sample_topology.md` | NOT STARTED |
+| §4 Dataset & sample topology | 2 | All dataset-semantic behavior under §4 OWNERSHIP (topology, geometry, selection, groups, input identity/indexing) resolves from the task's Dataset Profile, and MIGRATED consumers no longer independently restate those semantics. Launcher/orchestration/execution-infrastructure task-binding residue (workflow TIDMAD binding, sandbox data-dir, runtime-control fallbacks, cleanup globs) remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination (freeze reconciliation 1) | resolved profile deep-equals the TIDMAD singleton; SampleSet sha16 goldens; filename renders byte-identical | atomic ladder §4.8 (topology / geometry / groups / truth — one axis per rung) | training engine + sample-set builder consume the RESOLVED profile in production | 0 | `step_02_dataset_sample_topology.md` | **DESIGN DRAFT — READY FOR OPERATOR REVIEW** (2026-08-13). Decomposed into 3 child PRs (02a profile injection → 02b selection, 02c groups) pending operator Q1. Gate 1 NOT REQUIRED / Gate 2 REQUIRED once at Step level per §17.0. Rungs 4.8-A, 4.8-C, 4.8-D selected. NOT IMPLEMENTED |
 | §5 Model/loss contract | 3 | A task declares a different model I/O contract (classes, dtype, output forms) and models/losses/probes DERIVE from it; builtins byte-identical under TIDMAD | builtin forwards byte-identical; registry contents identical; guardrail targets extended; PRIOR ON-DISK GENERATED PLUGINS remain loadable or a workspace boundary is declared (§2 records surface) | atomic ladder §5.5 (class count / input contract / output type / custom-loss capability) | executor dtype routing + VRAM-probe recipes consume the contract in production | 0, §4 (encoding declaration) | `step_03_model_loss_contract.md` | NOT STARTED |
 | 6-M Candidate-creation mechanics (+ §13 remainder) | 4 | Generated candidates (plugin/test/description) are produced AND validated against the declared contract with zero task literals; every LLM node's task content comes from the profile | generated plugin byte-identical for a fixed spec; validator verdicts identical; ALL remaining rendered prompts EXACT-equal + same kwargs reach LLMBridge; prior-plugin loadability (§2 records surface) | atomic ladders §6.5 + §13.4 (class count / shape / output type / description text / contract) | production implementor+validator emit/validate a candidate from the profile; all nodes render from it | 1, 2, 3 | `step_04_candidate_creation_mechanics.md` (canonical; may propose a step_04a split) | NOT STARTED |
 | §7b Tuner data selection | 5 | A different topology flows through TrialConfig→SampleSets with tuner code untouched | SampleSet hashes + trial_config JSON deep-equal | dataset-profile axis (reuses 4.8-A through the tuner path) | the production tuner builds its train/eval sets from the resolved profile | 2 | `step_05a_tuner_data_selection.md` | NOT STARTED |
@@ -1420,6 +1420,54 @@ completion-contract matrix's debt list (the dashboard is so
 classified there).
 
 ## 17. Uniform validation checkpoints (Rev 3 — the per-module definition of done)
+
+### 17.0 Gate authority — BINDING (operator rule, 2026-08-13)
+
+**`docs/gates/gate_testing_standard.md` is the ONLY authority for Gate
+semantics. Every step and child design MUST instantiate its Gate
+decision from that document — read at design time, quoted, not recalled
+and not reasoned around.**
+
+Concretely, every design that names a Gate must:
+
+1. **open the gate standard and quote its "Gate assignment by commit
+   type" table row** that matches the change being made, rather than
+   arguing from the change's description;
+2. state the decision for Gate 1 and Gate 2 SEPARATELY — REQUIRED, NOT
+   REQUIRED, or required only for a named child — with the table row as
+   the evidence;
+3. record the flip condition that would change the answer (typically:
+   the change starts altering rendered LLM-facing prompt bytes or a
+   proposal-affecting schema);
+4. re-read the standard and re-audit the current flag parsing from
+   source immediately BEFORE any Gate launch, because command shapes
+   drift.
+
+**The tiers are defined by REAL vs PSEUDO LLM**: Gate 1 = real LLM +
+pseudo training; Gate 2 = real LLM + real training.
+`--is_pseudo_llm` / `--is_pseudo_training` are the repository's
+**dual-mode convenience mechanism** for cheap deterministic runs — they
+are NOT gate tiers. A design MUST NOT invent an intermediate tier (for
+example "pseudo LLM + real training") and present it as a substitute for
+a Gate the assignment table requires. Such a run is legitimate evidence
+— but it is a **Checkpoint C instantiation**, not a Gate, and it never
+discharges a required Gate.
+
+*Why this is a rule and not a preference*: the Step-02 design's first
+draft proposed exactly that substitution, reasoning from the change's
+failure class instead of opening the standard. The table settled the
+question in one line. A tier invented per-step lets any future step
+argue its way out of Gate 2.
+
+**Companion rule — audit before deciding.** The same failure produced a
+second defect in the same draft: a contrast rung was deferred to a later
+step by reasoning about what a concept NAME meant, without opening the
+consumers. Ownership boundaries, rung selection and Gate decisions are
+**source-grounded findings, not inferences from terminology**. When the
+source does not settle it, ASK the operator — do not decide by
+plausibility.
+
+
 
 Every module passes SIX checkpoints — EXCEPT step 0, which CREATES
 the baselines and passes only 0 (trivially), D and E (3rd review F10);
