@@ -1392,7 +1392,7 @@ recorded, not silently resolved by picking a third config.
 | **CHECKPOINT A — Stage-A TIDMAD parity complete** | **PASS** | §24.12 |
 | C4 — 4.8-C atomic contrast | **DONE** | §24.13 |
 | **CHECKPOINT B — generic file-set semantics complete** | **PASS** | §24.14 |
-| PR-02c Checkpoint C | — | |
+| **PR-02c CHECKPOINT C — live consumer evidence** | **PASS** | §24.16 |
 | C5 / PR-02c Checkpoint D | — | |
 | Step-02 aggregate reconciliation | — | |
 | Terminal local full unit suite (ONCE) | — | |
@@ -2058,3 +2058,76 @@ Against §11.4's acceptance criteria:
 **Both declared task-owned semantics now vary through declarations with
 no source-code edit.** That is the capability statement of §1, and it is
 now evidenced rather than intended.
+
+---
+
+### 24.16 PR-02c CHILD CHECKPOINT C — live consumer evidence: **PASS**
+
+`tests/unit/execute_tools/test_step02c_checkpoint_c_live_consumers.py`,
+16 tests, 1.46 s.
+
+§12.1's rule — *"a test that constructs a declaration and calls a
+resolver directly does NOT satisfy this"* — is honoured literally.
+**Nothing in this module calls `_resolve_indices` or `_resolve_files`.**
+Each claim goes through the entry point production uses:
+
+| §12.1 requirement | Production entry point | Evidence |
+|---|---|---|
+| a real HealthGate evaluation resolves monitored files from declaration B | `runner.evaluate_gate(gate_id, ctx, config_path)` — what the tuner calls at a round boundary; loads the SHIPPED YAML, dispatches registry skills | opened set `== {6, 13}` |
+| the files actually opened/evaluated follow it | the checks really open real HDF5 files written for the test; the observable is captured at the path-resolution boundary the skills go through | same assertion — this is the judged population, not a resolver's return value |
+| the campaign validator consumes the same declared semantic | `decide_phase1_reuse` — the entry point whose output is `action`, so the branch is exercised as POLICY | an incomplete declared peek → `action="train"`; the same shape requesting TIDMAD's `[3,10,17]` → `action="reuse"` |
+| the anchors path resolves from declaration A | `build_sample_set(..., trial_strategy="anchors")` | population `== [2,7,11,15,18]` |
+| no old literal survives unnoticed | static sweep over the eight migrated sites, comments stripped | green |
+| HealthGate thresholds and verdict semantics unchanged | `evaluate_gate` with degenerate data | healthy → `passed=True`/`CONTINUE`; degenerate declared files → `passed=False`/`INVALIDATE_ROUND` (the shipped `on_fail`) |
+
+Two assertions carry more than they look:
+
+- **The recording gate opens all twenty** at the real evaluation
+  boundary. This is §8.1's leak guard where it actually matters: had the
+  declaration reached the keyless path, it would open two files — and
+  every one of the recording gate's own tests would still pass, because
+  a two-file population is perfectly self-consistent.
+- **A degenerate file OUTSIDE the declaration does not flip the
+  verdict.** File 3 is TIDMAD's first declared peek file; under a task
+  declaring `[6, 13]` it must be irrelevant. This distinguishes "the
+  declaration decides what is READ" from "the declaration decides what
+  is JUDGED" — only the second is the capability.
+
+Topology is held at TIDMAD and only the declarations vary, per §12.1 —
+a non-TIDMAD topology would import the Step-08/Step-10 residue this PR
+does not own. No real LLM; no scientific-quality result claimed.
+
+#### Two defects found while building it, both in the test, both recorded
+
+```text
+1. IMPORT PROVENANCE — the contract's own hazard, hit live.
+
+   A standalone diagnostic script run as
+   `python /home/yuema137/.claude/jobs/.../diag.py` reported that the
+   campaign branch fired under a contrast profile, and that
+   TIDMAD_PROFILE had no `health_peek_files` attribute at all.
+
+   Cause: for a SCRIPT, `sys.path[0]` is the script's own directory, not
+   the cwd. The editable-install finder then resolved `execute_tools` to
+   /home/yuema137/SIDERIUS — the MAIN CHECKOUT, without this branch's
+   changes. The `python -c` invocations used elsewhere put cwd first and
+   were unaffected, as is pytest via its rootdir.
+
+   Re-run with the worktree explicitly on sys.path, the "finding"
+   evaporated: the only error was a checkpoint hash mismatch.
+
+   Consequence: no production defect. Recorded because a session that
+   trusted that output would have "fixed" a bug that does not exist.
+
+2. AN OVER-DETERMINED VERDICT in the first draft of this module.
+
+   `_record` omitted `checkpoint_sha256`, so `validate_phase1_baseline`
+   reported a hash mismatch and BOTH campaign cases returned "train".
+   The retrain case passed — for the wrong reason: the peek branch had
+   decided nothing. Fixed by stamping the real sha, so the declared-peek
+   branch is the ONLY variable between the two cases.
+
+   This is why the pair is asserted in BOTH directions. A single
+   assertion that "an incomplete peek forces a retrain" is satisfied by
+   any unrelated invalidity.
+```
