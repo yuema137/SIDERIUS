@@ -2,8 +2,25 @@
 
 ## Status
 
-**REVISION 4 — READY FOR OPERATOR FREEZE. IMPLEMENTATION NOT
-AUTHORIZED.**
+**FROZEN / OPERATOR APPROVED (2026-08-13).**
+
+The operator froze this design at revision 4. Everything below —
+scope and ownership, the blocking checkpoint ladder (§5a), the
+Checkpoint-C boundary (§5b), Regime-A semantics (§5c), the ordering
+contract (§5d), the encoding claim (§5e), the derived-artifact-indexing
+disposition (§5f), the mutation economy (§5g), the seven commits (§6)
+and the Gate decision (§7) — may not change without a new operator
+decision.
+
+**IMPLEMENTATION IS NOT YET AUTHORIZED.** Per the established lifecycle,
+implementation begins only after a filled **Implementation Working Rules
+contract** for this child, in a NEW, fresh implementation context with
+its own Context Continuity v2 handoff — never in the design session.
+
+Deliberately left to implementation time (parent §13a): the profile
+object's type and field names, YAML layout, the config-flag name, the
+injection helper decomposition, test-file placement and assertion form,
+and the exact Checkpoint-C command assembled from live source.
 
 Revision 4 applies the operator review of 2026-08-13. **Q02a-1 is
 ANSWERED: all three subprocess boundaries stay in ONE PR** (§3.4). No
