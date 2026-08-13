@@ -431,7 +431,7 @@ C7  docs + ledger closeout
 | **CP-A3 — all three data paths agree on ONE profile** | **PASS** (2026-08-14) | see below |
 | **CHECKPOINT A — extraction parity complete** | **PASS** (2026-08-14, `7cf82570`) | see below |
 | **CHECKPOINT B — generic contrast complete** | **PASS** (2026-08-14, `87d1649e`) | see below |
-| Checkpoint C | not reached | — |
+| **CHECKPOINT C — live production consumption** | **PASS** (2026-08-14, `ce9582f0`) | see §5b below |
 | Checkpoint D | not reached | — |
 
 **CP0 PASS — the two conditions, answered.**
@@ -767,6 +767,78 @@ argv at MODULE level with no `main()`, so it cannot be imported in-process
 — importing it consumes pytest's argv and exits. Its flag is on the
 module-level parser, its surface is guarded from source here, and it is
 exercised for real across a subprocess at Checkpoint C.
+
+---
+
+### 5b.1 Checkpoint C — RESULT (2026-08-14)
+
+**PASS.** `tests/integration/execute_tools/test_step02a_checkpoint_c_profile_boundary.py`
+— **9 passed in 8.98s**, real `subprocess.run`, real HDF5, no stub.
+
+```text
+executable HEAD : ce9582f00222b8ce9a02564ddc44da3f79ccf6c4
+working tree    : clean
+cost            : ~9 s, CPU only. No GPU, no LLM, no API spend.
+```
+
+§5b's required list, each answered:
+
+- [x] **profile serialized by the parent** — the fixture writes the config
+      file; production's writer is `_write_dataset_profile_config`, guarded
+      by mutation M7.
+- [x] **profile loaded inside the child process** — three real entry points,
+      each shown to LOAD the file (a missing path kills each one naming it),
+      not merely to declare the flag.
+- [x] **real data-reading code uses filename, geometry, channel, encoding** —
+      the fixture's files are `cpc_train_000.h5` with channels
+      `cpc_in`/`cpc_truth`. **None of that is discoverable from the TIDMAD
+      singleton.** A deleted transport, an ignored flag or a loader still
+      addressing `channel0001` could not read one sample. It trains and
+      writes results.
+- [x] **training / inference / scoring resolve the same semantics** — all
+      three load the same file and agree.
+- [x] **no silent singleton fallback** — supplied-but-broken fails closed
+      across the real boundary; an OMITTED flag falls back to Regime-A and
+      looks for `abra_training_0000.h5`, which is today's behaviour.
+- [x] **exact executable HEAD recorded** — emitted by the run itself, so the
+      ledger cannot drift from the tree exercised.
+
+**A wrong-clone hazard, caught live — the most valuable thing this
+checkpoint found.**
+
+```text
+Previous assumption:
+  launching the real entry point from the PR worktree exercises the PR.
+
+Evidence (first run):
+  ImportError from /home/yuema137/SIDERIUS/execute_tools/dataset_config.py
+  — the MAIN checkout. A plain `python execute_tools/foo.py` puts the
+  SCRIPT's directory on sys.path[0], not the repo root, so the package
+  import falls through to the venv's editable-install finder, which
+  hardcodes absolute paths into the main checkout.
+
+Corrected understanding:
+  it failed loudly ONLY because the other clone lacks this PR's changes.
+  Had the change been present in both, the run would have PASSED while
+  exercising the wrong tree — exactly CLAUDE.md's motivating failure.
+
+Implementation consequence:
+  PYTHONPATH pins the checkout under test.
+
+Validation consequence:
+  test_the_child_imports_this_checkout asserts the child resolves the
+  package under REPO_ROOT, so a silent recurrence is impossible.
+
+Classification:
+  ENVIRONMENT, not a production defect — in normal deployment the repo IS
+  the checkout the editable install points at. Recorded because any future
+  worktree-based subprocess evidence has the same trap.
+```
+
+**Fixture cost note.** `psd_segment_length` is 4,096 with 2 PSD segments —
+~8 KB per file against TIDMAD's ~2 GB, on an identical production code
+path. `segmentation_size` carries `ge=1000`
+(`models_format_sandbox.py:22`), which sets the floor.
 
 ## 5c. Regime-A vs fail-closed — FROZEN (was left to implementation)
 
