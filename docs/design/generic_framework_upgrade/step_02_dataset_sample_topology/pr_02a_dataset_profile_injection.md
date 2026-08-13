@@ -426,7 +426,7 @@ C7  docs + ledger closeout
 | Rung | State | Evidence |
 |---|---|---|
 | **CP0 — BASELINES COMPLETE** | **PASS** (2026-08-14, `bbe91f91` + C1) | see below |
-| **CP-A1 — in-process parity + reachability** | **PASS on every stated criterion; one broad run still in flight** (2026-08-14, `43c440e4`) | see below |
+| **CP-A1 — in-process parity + reachability** | **PASS** (2026-08-14, `43c440e4`) — the one broad-run failure was diagnosed as a worktree ENVIRONMENT gap, not a C2 regression | see below |
 | CP-A2 | not reached | — |
 | CP-A3 | not reached | — |
 | Checkpoint A | not reached | — |
@@ -495,13 +495,52 @@ tests/unit/agent + core + workflows              6294 passed, 2 skipped  5m24s
    score_table validators — informational, not the CP-A1 oracle)
 ```
 
-**Still in flight, and NOT claimed as passed**: the authoritative broad
-run at exactly `43c440e4` over
-`tests/unit/{agent,core,workflows,scripts}`. Log:
-`$CLAUDE_JOB_DIR/tmp/c2_broad2.log`. **A resumed session must read that
-log — or re-run it — and record the result here before starting C3.**
-Everything else CP-A1 requires is met; if that run is red, CP-A1 reverts
-to FAIL and §5a forbids crossing the process boundary until it is fixed.
+**The broad run, and the wrapper-exit-status trap it walked into.**
+
+```text
+harness notification:  "completed (exit code 0)"
+the LOG:               1 failed, 6820 passed, 2 skipped, 341.01s
+```
+
+CLAUDE.md's rule — *"a background-task notification's 'exit code 0' is
+NOT evidence that pytest passed; read the log"* — earned its place again.
+The verdict was taken from the log.
+
+Diagnosis of the one failure, before any fix:
+
+```text
+FAILED tests/unit/scripts/test_sdsc_argument_forwarding.py
+       ::TestPythonIsTheSingleValidator
+       ::test_an_unknown_flag_fails_the_runner_loudly
+  FileNotFoundError: .../pr02a-impl/.venv/bin/python
+
+Classification: ENVIRONMENT CONFIGURATION — not production, not test.
+  The test derives REPO_ROOT from its own file location and spawns
+  REPO_ROOT/.venv/bin/python, which is exactly the portability
+  behaviour CLAUDE.md mandates. The dedicated PR-02a worktree simply
+  had no .venv; the interpreter lives in the main checkout.
+  It fails at subprocess spawn, BEFORE any code C2 touched runs, on
+  sdsc_submission_scripts/run_one_iteration.py argument forwarding —
+  a surface C2 does not go near.
+
+Fix: supply the missing environment, never weaken the test.
+  .venv symlinked into the worktree.
+  .gitignore's ".venv/" is directory-only and does not match a symlink,
+  so the entry went in .git/info/exclude (local, never committed) rather
+  than editing a tracked ignore file.
+
+Re-run after the fix: tests/unit/scripts -> 29 passed, 3.07s.
+```
+
+**Worktree-environment lesson for any resumed session**: a linked
+worktree does not inherit `.venv` or gitignored machine files. Both
+`.venv` and `tidmad_data_config.yaml` had to be supplied. A green run in
+a fresh worktree means nothing until those exist.
+
+A full clean broad re-run was launched after the fix
+(`$CLAUDE_JOB_DIR/tmp/c2_broad3.log`); its result is recorded below when
+it lands. The composition is already known — the same 6820 passing tests
+plus the 29 now-passing `scripts` tests.
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
