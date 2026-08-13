@@ -2,6 +2,19 @@
 
 ## Status
 
+**IMPLEMENTED — READY FOR OPERATOR REVIEW (2026-08-12). NOT MERGED.**
+
+Implementation complete on
+`feat/generic-framework-step-01b-task-description-join`. Final
+EXECUTABLE head `6b259b93`; commits `a7ffcccf` (S1-C), `e67b4651`
+(S1-C2), `5dee6c4a` (S1-E), `6b259b93` (S1-F). CP1/CP2/CP3, Checkpoint
+C, Gate 1 and Gate 2 all PASS; terminal suite 8540 passed / 3 skipped;
+ruff clean. The live implementation ledger is §14-§17; acceptance is
+§11. The design below is the frozen contract it was implemented
+against, preserved unchanged.
+
+---
+
 **FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-13).**
 
 The operator approved the freeze subject to one documentation-only
@@ -812,24 +825,49 @@ first, then re-run the terminal suite on the NEW final executable head.
 
 Gate evidence must name the **exact executable HEAD** it ran on.
 
-- [ ] 1. JOIN boundary evidence: shipped description in all three stage
-      system prompts, both modes, captured at the LLM boundary.
-- [ ] 2. Declared golden delta ONLY: exactly R2 in S1-C and R3 in S1-E;
+- [x] 1. JOIN boundary evidence: shipped description in all three stage
+      system prompts, both modes, captured at the LLM boundary. →
+      `TestJoinReachesEveryStageSystemPrompt`, asserted per stage over
+      six captures through the real `run()` (§14.3).
+- [x] 2. Declared golden delta ONLY: exactly R2 in S1-C and R3 in S1-E;
       each regenerated golden reconstructible as old + intended change.
-- [ ] 3. FX-1 description-axis isolation proven.
-- [ ] 4. No surviving unsubstituted placeholders on any stage surface.
-- [ ] 5. S1-E capture-first evidence + guard RED→GREEN (or S1-E
-      explicitly dropped, recorded as such).
-- [ ] 6. **Checkpoint C** evidence attached, HEAD named.
-- [ ] 7. **Gate 1 PASS**, HEAD named, artifacts attached.
-- [ ] 8. **Gate 2 PASS**, HEAD named, artifacts attached (or an
-      operator waiver recorded against Q2).
-- [ ] 9. Prompt-delta accounting (§5) filled with measured numbers.
-- [ ] 10. ONE terminal full unit suite + ruff at the final executable
-      head, verdict read from the log.
+      → six R2 goldens, all `attributable=True` (§14.3); three R3
+      goldens, each diff showing only the literal's removal (§16.3).
+- [x] 3. FX-1 description-axis isolation proven. → §15, including the
+      strongest form (block-deleted remainders byte-identical).
+- [x] 4. No surviving unsubstituted placeholders on any stage surface.
+      → unit scan (§14.3), plus an explicit by-name check on the real
+      Checkpoint C, Gate 1 and Gate 2 prompt dumps (§17.2-§17.4).
+- [x] 5. S1-E capture-first evidence + guard RED→GREEN. → captured
+      pre-edit at sha256 `bb8e974b…` with the literal still present;
+      guard `1 failed/9 passed` → `10 passed` (§16.2). S1-E was NOT
+      dropped.
+- [x] 6. **Checkpoint C** evidence attached, HEAD named. → PASS on
+      `de8a5b8a` (§17.2).
+- [x] 7. **Gate 1 PASS**, HEAD named, artifacts attached. → PASS on
+      `de8a5b8a`, 15m15s, 197,070 tokens (§17.3).
+- [x] 8. **Gate 2 PASS**, HEAD named, artifacts attached. → PASS on
+      `de8a5b8a`, 33m35s, 581,345 tokens, all five standard criteria
+      plus the PR-specific one (§17.4). No waiver was needed.
+- [x] 9. Prompt-delta accounting (§5) filled with measured numbers. →
+      +262 chars/stage in production; +86 B per golden.
+- [x] 10. ONE terminal full unit suite + ruff at the final executable
+      head, verdict read from the log. → **8540 passed / 3 skipped /
+      0 failed, 493.25 s** at `6b259b93` from a clean tree; `PYTEST
+      EXIT: 0` captured from pytest itself before `tail`; zero
+      `FAILED`/`ERROR` lines. `ruff check .` and
+      `ruff format --check .` (817 files) clean.
 - [ ] 11. Exact-final-head CI green (CI is the only pyright).
-- [ ] 12. Clean working tree.
+- [x] 12. Clean working tree.
 - [ ] **Not merged.** Stop at READY FOR OPERATOR REVIEW.
+
+**Executable-head note.** `6b259b93` (S1-F) touched
+`agent/schemas/proposal.py` — two `Field` description strings only, no
+behaviour — so it moved the executable head off `de8a5b8a`, and the
+terminal suite was re-run on it per §10.F rather than reusing the
+earlier result. The gates ran on `de8a5b8a`, whose executable content
+differs from `6b259b93` by those docstrings alone. Any commit after
+`6b259b93` in this PR is docs-only.
 
 ## 12. Adversarial design review (revision 2, 2026-08-13)
 
