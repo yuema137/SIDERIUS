@@ -1201,7 +1201,7 @@ authorities.**
 | Validator | Topology source | Result under a 7-file contrast |
 |---|---|---|
 | `validate_runtime_config` (`agent/schemas/hyperparam_tuning.py:2078-2080`) | `dataset: DatasetConfig = TIDMAD` — the **singleton, bound as a DEFAULT ARGUMENT** at import | resolves the scope to `[0..19]` |
-| `validate_health_gate_files_against_scope` (`execute_tools/health_checks/config.py:333-334`) | `resolve_dataset_profile()` — the **ambient profile** | `scope_is_full` computed against `range(7)` |
+| `validate_health_scope` (`execute_tools/health_checks/config.py:333-334`) | `resolve_dataset_profile()` — the **ambient profile** | `scope_is_full` computed against `range(7)` |
 
 The tuner calls `validate_runtime_config(agent_input)` positionally
 (`ml_hyperparameter_tune_agent.py:3636`), so the default always wins and
@@ -1236,7 +1236,15 @@ The residue splits across **two** surfaces with different owners:
 | Surface | Candidate owner | Source evidence |
 |---|---|---|
 | `validate_runtime_config(..., dataset=TIDMAD)` + the tuner's full-scope comparison (`ml_hyperparameter_tune_agent.py:3637`, against `DATASET_CONFIG` = TIDMAD) | **Step 10 — §12 Orchestration binding** | The roadmap's Step-02 row explicitly disclaims this class: *"Launcher/orchestration/execution-infrastructure task-binding residue … remains explicitly owned by its later rows (§12 step 10, §9 step 11) — Step 2 does NOT claim loop-wide constant elimination."* The roadmap's audit A already inventories the **identical construct** as orchestration residue at `workflows/model_exploration.py:104,1817,1856` — `_resolved_scope = _run_scope.resolve(_DATASET_CONFIG)` then `_scope_is_partial = _resolved_scope != list(range(_DATASET_CONFIG.num_files))`. |
-| `validate_health_gate_files_against_scope` (`execute_tools/health_checks/config.py:333-334`) reading `resolve_dataset_profile()` while its caller supplies a TIDMAD-resolved scope | **Step 08 — §8 HealthGates** | §2's non-ownership row maps the list in order: `model I/O · metric · HealthGate · Deliverable Contract · launcher → Steps 03 / 06 / 08 / ledger / 10`. HealthGate is **Step 08**; Step 06 is *metric*. |
+| `validate_health_scope` (`execute_tools/health_checks/config.py:333-334`) reading `resolve_dataset_profile()` while its caller supplies a TIDMAD-resolved scope | **Step 08 — §8 HealthGates** | §2's non-ownership row maps the list in order: `model I/O · metric · HealthGate · Deliverable Contract · launcher → Steps 03 / 06 / 08 / ledger / 10`. HealthGate is **Step 08**; Step 06 is *metric*. |
+
+> **Symbol-name correction (2026-08-13).** Earlier revisions of this
+> section named the HealthGate validator
+> `validate_health_gate_files_against_scope`. **No such symbol exists.**
+> The real function is **`validate_health_scope`**
+> (`execute_tools/health_checks/config.py:319`). The cited body lines
+> `:333-334` were correct and are unchanged — only the name was wrong.
+> Corrected here rather than carried into merged history.
 
 **Explicitly recorded, so no later reader re-derives the wrong answer:**
 
@@ -1527,7 +1535,7 @@ Carried forward for the parent to route:
    non-TIDMAD run at startup.
    - runtime/task-binding + full-scope comparison → candidate **Step 10**
      (orchestration/task-binding);
-   - `validate_health_gate_files_against_scope` → **Step 08** consumer-side;
+   - `validate_health_scope` → **Step 08** consumer-side;
    - exact ownership must be confirmed by those detailed designs from their
      own source audits.
    - **NOT PR 02c. NOT Step 06.** Both were proposed by an earlier revision
