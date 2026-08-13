@@ -6,7 +6,28 @@
 
 ## Status
 
-**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-13).**
+**PR 02c IMPLEMENTATION COMPLETE · STEP-02 AGGREGATE EVIDENCE COMPLETE ·
+READY FOR OPERATOR REVIEW (2026-08-13).**
+
+Design frozen at revision 3 (`0fbe3556`) and implemented against that
+frozen contract. §1-§23 are the **frozen design and remain unchanged**;
+**§24 is the live implementation ledger** and is the authority for what
+actually happened.
+
+| | |
+|---|---|
+| Branch | `feat/generic-framework-step-02c-task-owned-file-sets` |
+| Implementation base | `0fbe3556` (the frozen design commit) |
+| Executable head | `4d1c107e` — the last commit changing executable code |
+| Checkpoints | CP0 · CP-C1 · A · B · child C · D — **all PASS** (§24.4, §24.9, §24.12, §24.15, §24.16, §24.18) |
+| Terminal local full unit suite | **8739 passed / 3 skipped / 0 failed**, run ONCE at `8e95f056` from a clean tree (§24.20) |
+| Step-02 Gate 2 | **PASS** — chain exit 0, 16m17s, `llm_configs/openai_tiered_pro.json`, run ONCE (§24.22) |
+| Step-02 aggregate reconciliation | **PASS** (§24.19) |
+| Checkpoint E | complete (§24.23) |
+
+Deferred by design and NOT claimed by Step 02: Step-08 HealthGate
+consumer-side policy/scope residue, and Step-10 runtime/task-binding
+residue.
 
 The operator froze this design at **revision 3**. Everything below — the
 capability statement (§1), the declared-vs-derived classification (§2),
@@ -43,10 +64,15 @@ revision-2 claims were refuted (§0.2); the final genericity re-review
 (§20a) then produced two corrections (§8.1, §4.3) and one strengthening
 (§11.4).
 
-**IMPLEMENTATION IS NOT AUTHORIZED IN THIS SESSION.** It begins only
-after a filled **Implementation Working Rules contract** for this child,
-in a NEW, fresh context with its own Context Continuity v2 handoff, in an
-isolated worktree **outside `.claude/`** (the 02a/02b process lesson).
+> **Historical (pre-implementation) authorization note, superseded.** At
+> freeze this block read *"IMPLEMENTATION IS NOT AUTHORIZED IN THIS
+> SESSION"* — it begins only after a filled Implementation Working Rules
+> contract, in a fresh context with its own Context Continuity v2
+> handoff, in an isolated worktree outside `.claude/`. **All of that
+> happened**: implementation ran 2026-08-13 under a filled contract, in a
+> fresh context, in the worktree `siderius-worktrees/pr02c-impl`. The
+> sentence is kept as history and is no longer the current status — see
+> the status table above and §24.
 
 **Frozen design HEAD**: the commit that carries this status line. Resolve
 it mechanically from the repository at kickoff
@@ -1314,20 +1340,25 @@ filename is an address.
 
 ---
 
-## 23. Status
+## 23. Status — DESIGN (frozen); see §24 for implementation
 
-**FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION (revision 3,
-2026-08-13).**
+**Design: FROZEN AT REVISION 3 (`0fbe3556`, 2026-08-13) and IMPLEMENTED.**
 
 All six operator decisions are FINAL and applied (§21). The final narrow
 genericity re-review (§20a) produced two corrections — the §8.1 injection
 shape and the §4.3 falsy-hazard reclassification — plus one strengthening
-(§11.4 cardinality). **No remaining operator questions.**
+(§11.4 cardinality). **No remaining operator questions**, and none arose
+during implementation.
 
-Implementation begins only after a filled Implementation Working Rules
-contract, in a fresh context with its own Context Continuity v2 handoff,
-in an isolated worktree outside `.claude/`. See the head-of-file status
-block for what may not be re-litigated.
+This section closes the FROZEN DESIGN. The current state of the work is
+in the head-of-file status table and in **§24, the live implementation
+ledger**:
+
+**PR 02c IMPLEMENTATION COMPLETE · STEP-02 AGGREGATE EVIDENCE COMPLETE ·
+READY FOR OPERATOR REVIEW.** Executable head `4d1c107e`; every checkpoint
+PASS; one terminal full suite (8739 passed / 3 skipped / 0 failed) and
+one Step-level Gate 2 (chain exit 0, `openai_tiered_pro.json`), each run
+exactly once.
 
 **Implementation STARTED 2026-08-13** under a filled Implementation
 Working Rules contract. §1-§23 above are the frozen contract and do not
@@ -2466,6 +2497,29 @@ chain exit: 0
 --data_scope 4-9 --health_gate_files 4,5,6,7,8,9
 --llm_config llm_configs/openai_tiered_pro.json`, **cold start** (no
 `--seed_paths`).
+
+#### OPERATOR DECISION — the 1-iteration Gate 2 is SUFFICIENT (2026-08-13)
+
+Raised at final review as the one open interpretive question, and decided
+by the operator:
+
+> The completed 1-iteration Gate 2 is **SUFFICIENT**. The parent phrase
+> *"across iterations"* is **rationale describing the Gate's end-to-end
+> failure class, NOT an additional frozen requirement that
+> `--num_iterations >= 2`.**
+
+Reasons recorded verbatim:
+
+- the current gate standard explicitly says 2 iterations are recommended
+  and **1 is acceptable** (`gate_testing_standard.md:98`);
+- the Step-02 parent does **not** specify `num_iterations=2` in its Gate
+  shape row;
+- all Step-02-specific failure classes were exercised by the completed
+  real LLM + real training + inference + scoring run;
+- PR 02a/02b/02c do **not** change cross-iteration state propagation.
+
+**No claim is made about cross-iteration behaviour** — one iteration ran,
+and the ledger says so.
 
 **`--num_iterations 1`, recorded as a deliberate choice.** The standard
 calls 2 "recommended" and 1 "acceptable for simpler features". All four
