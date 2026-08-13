@@ -884,10 +884,110 @@ Bounded resolution path, in order:
 
 | Rung | Status | Evidence |
 |---|---|---|
-| docs reconciliation | landed | this section + §12 + parent §Status |
-| B1 → CP0 | not started | |
+| docs reconciliation | landed `73ca1fdd` | this section + §12 + parent §Status |
+| B1 → **CP0 PASS** | landed `8d317715` | §13.3 |
 | B2 → CP-B1 | not started | |
 | B3 → Checkpoint A | not started | |
 | B4 → Checkpoint B | not started | |
 | Checkpoint C | not started | |
 | B5 → Checkpoint D | not started | |
+
+### 13.3 CP0 — BASELINE COMPLETE — **PASS**
+
+Commit `8d317715`, module
+`tests/unit/execute_tools/test_step02b_b1_sampleset_roundtrip.py`.
+
+**Zero production diff** — `git status` after the change showed exactly
+one added path, under `tests/`.
+
+**Mechanism.** The pin drives the REAL executor methods
+(`TidmadSandbox.execute_training` / `.execute_inference`) with all three
+launch primitives patched, following
+`tests/unit/core/test_ordering_propagation.py`. The asserted file is
+therefore the one production wrote, and its path is read out of the real
+argv (`--sample_set_json`) rather than from the filename convention — so
+deleting the flag reds the pin instead of passing on a conventional path.
+
+**§6.1 frozen contract — all five pinned:**
+
+| Contract item | Where |
+|---|---|
+| producer uses integer keys | `TestProducerEmitsIntegerKeys` |
+| JSON boundary emits string keys, BOTH sites | `test_boundary_emits_string_keys[train\|eval]` |
+| value lists unchanged across the round trip | `test_boundary_preserves_value_lists_exactly[train\|eval]` |
+| the LIVE consumer converts keys NUMERICALLY | `TestLiveConsumerReintsNumerically` |
+| `validate_sample_set`'s boundary behaviour | `test_boundary_rejects_an_invalid_sample_set_before_launch[train\|eval]` + the two uncovered negatives |
+
+Why the first item is not redundant with the digests: they hash
+`json.dumps(ss, sort_keys=True)`, and `{0: [1]}` and `{"0": [1]}`
+serialize to identical bytes. The digests are structurally **blind** to
+producer key type.
+
+**LATENT branch — recorded, NOT frozen.** The module docstring carries
+the unreachability evidence; **no test asserts the lexicographic
+ordering**. The contrast fixture uses files 4/9/12 (numeric `4,9,12` vs
+lexicographic `12,4,9`), and the "not lexicographic" assertion is
+**computed from the input**, never hardcoded — so the greppable
+acceptance criterion holds: nothing in the module enshrines that output.
+
+**Mutation evidence — four mutations, four CAUGHT, none survived.**
+Each verified its exact target line before applying, purged `__pycache__`
+before and after, and restored with `git checkout` (harness:
+`mutate.sh`, re-runnable).
+
+| # | Mutation | Site | Expected | Observed |
+|---|---|---|---|---|
+| M1 | live consumer coercion → lexicographic (`, key=int` deleted) | `train_engine_sandbox.py:333` | numeric pin reds | **CAUGHT** — visited `[12, 4, 9]` |
+| M2 | train boundary reverses each segment list | `sandbox_executor.py:1307` | value pin reds | **CAUGHT** — "altered the segment list for file 4" |
+| M3 | train transport hop deleted (`--sample_set_json` not appended) | `sandbox_executor.py:1308` | path lookup reds | **CAUGHT** — 2 failures |
+| M4 | eval validator hop deleted | `sandbox_executor.py:1627` | rejection pin reds | **CAUGHT** — no rejection raised |
+
+M1 is the load-bearing one: it is exactly the drift that would make the
+latent divergence live, and the pin catches it without ever asserting the
+latent branch's own output.
+
+**Post-restore baseline**: tree clean (`git status --porcelain` empty),
+`test_step02b_b1_sampleset_roundtrip.py` + `test_sample_set_builder.py` +
+`test_sandbox_scope.py` → **63 passed in 0.94s**, rc=0 read from the log.
+
+### 13.4 Source discoveries at B1
+
+> **Previous assumption:** both boundary sites reject an invalid
+> SampleSet by propagating `ValueError`, inferred from the absence of a
+> local `try/except` around the train site's `validate_sample_set` call.
+>
+> **Audit evidence:** the first draft of the rejection test failed on
+> the train phase only, printing
+> `!!! [Executor Internal Error] !!!: SampleSet file_index 999 out of
+> range [0, 20).` `execute_training` wraps its whole body in a broad
+> `except Exception` (`sandbox_executor.py:1511-1512`) returning
+> `{"status": "error", "message": str(e)}`. `execute_inference` catches
+> only `ScopeViolationError` (`:1628`), so a plain `ValueError`
+> propagates from there.
+>
+> **Corrected understanding:** the two sites share the invariant that
+> matters — **rejection before any launch primitive is called** — but
+> differ in outward shape. This generalizes the §13.0 note, which had
+> only observed the difference for scope errors.
+>
+> **Implementation consequence:** B3's "rejected consistently at/before
+> the boundary" means *through the same validator, before launch*. It
+> does **not** license unifying the two error shapes; that would be a
+> behaviour change (§9).
+>
+> **Validation consequence:** the rejection test is phase-aware and pins
+> each shape as measured.
+
+> **Previous assumption:** asserting that the written file equals
+> `validate_sample_set(raw)` proves the validator hop runs.
+>
+> **Audit evidence:** the validator returns segment lists untouched
+> (`scoring_utils.py:333`) and only re-keys; `json.dump` stringifies keys
+> either way. The comparison therefore holds whether or not the hop ever
+> executed — confirmed by M4's design, which would have survived it.
+>
+> **Corrected understanding:** rejection is the validator's only
+> observable effect at this boundary.
+>
+> **Implementation consequence:** the tautological assertion was replaced
+> before commit, not carried into the PR. M4 now has a test that reds.
