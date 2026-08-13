@@ -427,7 +427,7 @@ C7  docs + ledger closeout
 |---|---|---|
 | **CP0 — BASELINES COMPLETE** | **PASS** (2026-08-14, `bbe91f91` + C1) | see below |
 | **CP-A1 — in-process parity + reachability** | **PASS** (2026-08-14, `43c440e4`) — the one broad-run failure was diagnosed as a worktree ENVIRONMENT gap, not a C2 regression | see below |
-| CP-A2 | not reached | — |
+| **CP-A2 — training subprocess consumes the profile** | **PASS** (2026-08-14, `c3cfa9c4` + `d92f2e1f`) | see below |
 | CP-A3 | not reached | — |
 | Checkpoint A | not reached | — |
 | Checkpoint B | not reached | — |
@@ -550,6 +550,66 @@ pytest tests/unit/{agent,core,workflows,scripts} -q
 been failing. Nothing else moved, which is the positive evidence that the
 failure was environmental and that C2 changed no behaviour outside its
 own surface.
+
+---
+
+**CP-A2 PASS — and the reason its evidence had to be contrast-based.**
+
+```text
+Previous assumption (§6.3 acceptance):
+  "Mutation: delete the argv flag -> subprocess fails closed (does NOT
+  fall back to TIDMAD)."
+
+Audit evidence:
+  That contradicts §5c, which this design FROZE at revision 4: an ABSENT
+  flag is the Regime-A adapter and must NOT fail. §6.3's own failure
+  table states it correctly; the acceptance line is older wording.
+
+Corrected understanding:
+  Under Regime-A, deleting the transport is INVISIBLE to TIDMAD parity —
+  the fallback returns the same answers, so nothing reds. The hop cannot
+  be guarded by a parity test at all.
+
+Implementation consequence:
+  Every reachability assertion runs a NON-TIDMAD profile through the real
+  loaders. Fail-closed applies to a SUPPLIED-but-broken profile, which is
+  what load_dataset_profile() enforces.
+
+Validation consequence:
+  Three mutations instead of one — fallback-instead-of-raise, child
+  ignores the flag, parent drops the flag. All three KILLED.
+```
+
+| CP-A2 criterion | Evidence |
+|---|---|
+| parent serializes, child loads | `TestConfigFileRoundTrip`, TIDMAD + contrast |
+| real data-reading code consumes topology / geometry / channels / encoding | `TestChildConsumesTheTransportedProfile` — 5 facets, each under a declaration that differs from TIDMAD, incl. RENAMED channels |
+| explicit bad profile fails closed | `TestFailClosedVersusRegimeA` — missing / corrupt / schema-invalid, each naming the path; a parametrized case asserts none ever yields the singleton |
+| omitted flag obeys Regime-A | `test_an_absent_flag_keeps_regime_a` |
+| visited sequence, step count, ordering unchanged | C1 pins + `test_ordering_engine.py`, all green; **assertions byte-identical** |
+| no silent singleton fallback | M5/M6/M7, all KILLED |
+
+**Bounded deviation — four fixtures changed their geometry-override
+mechanism.** §6.3 says the C1 pins stay "green UNMODIFIED". C1, ordering,
+RT2-B and RT2-C all shrank geometry with
+`monkeypatch.setattr(tes, "PSD_SEGMENT_LENGTH", ...)`. C3 removes that
+constant from the authority path, so the patch would silently do nothing.
+All four now bind a profile. **Every assertion in all four is unchanged** —
+the oracle is the assertions, and they are byte-identical; only the
+override moved from patching a global to declaring geometry, which is the
+capability this PR delivers. `test_ordering_engine` additionally reached
+the singleton through `tes.TIDMAD`; ruff's import cleanup surfaced that
+C3 removed the engine's dependency on it entirely.
+
+**Caveat recorded for later rungs**: `model_copy(update=...)` BYPASSES
+Pydantic validation. The C3 offset probe initially built an illegal
+`int8` + `value_offset=0` profile that way and failed inside
+`np.bincount` rather than at construction. Contrast fixtures built with
+`model_copy` are NOT validated — Stage-B rungs must construct through the
+real constructors where legality matters.
+
+**Validation**: `tests/unit/{execute_tools,core,nodes}` 3101 passed,
+3 skipped, 75.59s; new C3 module 16 passed; ruff clean.
 
 ## 5b. Checkpoint C — boundary FROZEN, command NOT frozen
 
