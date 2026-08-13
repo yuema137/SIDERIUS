@@ -1333,6 +1333,48 @@ less than claimed.
 > been claimed PASS on trial-mode-only evidence. A checkpoint that does
 > not assert its own coverage is not evidence of coverage.
 
+### 13.11a CI caught a portability defect the local run could not
+
+> **Symptom.** Exact-head CI on `8c910cf8` (run 31672711999): **8638
+> passed, 23 skipped, 5 errors** — all five errors in the Checkpoint-C
+> module, all the same:
+>
+> ```text
+> FileNotFoundError: Trial mode requires segment_anchors.json at
+>   /path/to/TIDMAD/segment_anchors.json
+> ```
+>
+> **Root cause.** A real `TidmadSandbox` resolves `dirs["data"]` to the
+> **machine's configured TIDMAD data directory**, and the tuner refuses to
+> start a trial-capable run without `segment_anchors.json` there
+> (`ml_hyperparameter_tune_agent.py:3806-3814`). This developer box has
+> the real dataset; CI has no gitignored `tidmad_data_config.yaml` and
+> falls back to the tracked template's placeholder `/path/to/TIDMAD/`.
+>
+> **Classification.** Test scaffolding, not production. Exactly the
+> failure CLAUDE.md's portability rule names: *a green local result that
+> said nothing about the code under test.*
+>
+> **Fix.** The anchor data is redirected into the test's own `tmp_path`,
+> so the run depends on no machine-specific resource. `load_anchor_map`
+> was already patched, so only the file's EXISTENCE was ever load-bearing.
+> No production change, and no broad `os.path.exists` patch — which would
+> have hollowed out this module's real file-existence assertions.
+>
+> **Portability VERIFIED, not assumed.** CLAUDE.md: "local success is not
+> sufficient evidence of portability". The local `tidmad_data_config.yaml`
+> was moved aside to reproduce CI's fallback exactly, the module re-run,
+> and the config restored:
+>
+> ```text
+> UserWarning: tidmad_data_config.yaml not found ...
+>   falling back to template at tidmad_data_config.example.yaml
+> 6 passed, 1 warning in 22.32s     rc=0
+> ```
+>
+> The warning is the proof the run used the placeholder path — the exact
+> condition that failed CI.
+
 ### 13.12 Checklist reconciliation — one bounded deviation
 
 All 31 checklist boxes in §5 and §6 are resolved. One was discharged at a

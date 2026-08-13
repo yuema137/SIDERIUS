@@ -184,8 +184,23 @@ def live_run(tmp_path):
     sandboxes: list = []
     contrast = _contrast_profile()
 
+    # PORTABILITY (CLAUDE.md): a real TidmadSandbox resolves dirs["data"] to
+    # the MACHINE's configured TIDMAD data directory, and the tuner refuses
+    # to start a trial-capable run without `segment_anchors.json` there
+    # (ml_hyperparameter_tune_agent.py:3806-3814). Depending on that made
+    # this module pass on a developer box with the real dataset and fail on
+    # CI with `/path/to/TIDMAD/segment_anchors.json` — a green local result
+    # that said nothing about the code under test. The anchor data is
+    # redirected into this test's own tmp_path so the run depends on no
+    # machine-specific resource. `load_anchor_map` is patched anyway, so
+    # only the file's EXISTENCE is load-bearing here.
+    anchor_dir = tmp_path / "anchor_data"
+    anchor_dir.mkdir()
+    (anchor_dir / "segment_anchors.json").write_text(json.dumps({"anchors": {}, "s_max": 1.0}))
+
     def _factory(**kwargs):
         sandbox = _RealSandboxWithoutScoring(**kwargs)
+        sandbox.dirs = {**sandbox.dirs, "data": str(anchor_dir)}
         sandboxes.append(sandbox)
         return sandbox
 
