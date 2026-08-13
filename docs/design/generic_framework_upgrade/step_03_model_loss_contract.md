@@ -1310,10 +1310,24 @@ oracle exists. Audited at `f865038f`:
       any production change; zero production diff; every new oracle
       mutation-proven. Evidence §24.6, dossier §24.7.
       Commits `9ddcc63a` (A6) and the A2/A3/A8 module commit.
-- [ ] **M1 — Phase A: normalized contract.** One structured input tensor
-      + one structured output tensor: rank, ordered axes, semantic axis
-      roles, model-required dtype, fixed/symbolic/dynamic dimensions.
-      No multi-tensor container (§4c), no relation DSL (§4e).
+- [x] **M1 — Phase A: normalized contract — LANDED (inert seam).**
+      `agent/schemas/model_io_contract.py` — `ModelIOContract` (one input,
+      one output), `TensorContract` (ordered axes + dtype), `TensorAxis`,
+      `AxisRole` (`batch`/`temporal`/`class` — exactly the three roles a
+      consumer reads today), `Dimension` (fixed | symbolic | dynamic,
+      exactly one), `DtypeAdmissibility` (A-1). No multi-tensor
+      container, no relation DSL.
+      **Byte-exact rendering proven**: the normalized TIDMAD contract
+      renders `"[B, T] int64"` and `"[B, 256, T] float32"`, equal to
+      `configs/task_config.yaml` — so M4 can switch the renderer without
+      a golden delta. Cardinality DERIVES from the class axis (256), and
+      absence of a class axis yields `None`, not the legacy `0` sentinel.
+      Tests: `tests/unit/agent/schemas/test_model_io_contract.py`,
+      **33 passed / 0.11 s**.
+      *Seam note*: the schema has no production consumer yet — M4 (render)
+      and M5/M6 (execute) are its consumers, inside this same PR. A
+      consumer-less seam at PR level would be the §21 stop; a
+      seam-then-wire split across commits is the established boundary.
 - [ ] **M2 — Phase A: preset resolution + fail-closed consistency.**
       Authoring form → resolve → ONE normalized contract → consumers.
       No runtime consumer branches on preset label, modality or rank.
@@ -1421,6 +1435,40 @@ identical either way.
 `configs/task_config.yaml:22` declares `"[B, T] int64"`; that is true of
 `process_batch` and false of both training paths. Pinned in the suite,
 not left as prose.
+
+#### M1 — normalized contract schema
+
+```text
+module       agent/schemas/model_io_contract.py (new)
+tests        tests/unit/agent/schemas/test_model_io_contract.py
+result       33 passed / 0.11 s, pytest rc 0
+lint         ruff check + ruff format --check clean
+types        pyright CANNOT RUN LOCALLY — the vendored pyright needs a
+             newer Node than this host provides (`internal/modules/cjs`
+             loader error). CI is the only environment that runs strict
+             pyright, and it is authoritative for this module. Recorded
+             rather than claimed, per CLAUDE.md.
+```
+
+Design decisions taken at M1, from source:
+
+- **`AxisRole` has exactly three members** — `batch`, `temporal`, `class`
+  — because exactly three are read by a production consumer today
+  (rendered shape, the renderer's per-timestep phrasing at
+  `workflows/task_config.py:209`, and cardinality). `role` is **optional**:
+  an axis nothing branches on carries none. That is what keeps arbitrary
+  rank expressible without inventing consumer-less roles (§21).
+- **`DtypeAdmissibility.admissible` is an ordered tuple of dtype names**,
+  not an enum — A-1 correction 2. `admissible[0]` is the canonical
+  representation: it renders into prose and is the deterministic default.
+  That single ordering removes the need for a second "display dtype"
+  field, which would have been duplicate authority.
+- **Cardinality is derived from the class axis**, never declared, so no
+  second configurable class count exists (§4b). No class axis ⇒ `None`.
+- **Alignment rides on shared symbolic names** (§4e). `T` on both sides
+  IS the alignment; the cross-validator only rejects a shared symbol whose
+  two axes claim different roles, because anything stronger would need the
+  relationship DSL §4e defers.
 
 ### 24.7 Mutation dossier
 
