@@ -14,6 +14,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contract
+from agent.schemas.model_io_resolution import resolve_model_io_contract
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
@@ -1293,6 +1294,18 @@ def main():
     model_io = (
         load_model_io_contract(args.model_io_json) if args.model_io_json is not None else None
     )
+
+    # Rung 3-E at the SUBPROCESS boundary. `load_task_config` already
+    # cross-validates the contract's class axis against the dataset's
+    # authority, but the child receives the two as SEPARATE argv files and
+    # cannot assume the parent paired them. Re-checking here costs nothing
+    # and converts a contradiction into a typed refusal instead of an
+    # embedding index error thousands of steps into a forward pass — the
+    # difference Checkpoint C(iii) surfaced.
+    if model_io is not None:
+        resolve_model_io_contract(
+            model_io, dataset_num_classes=dataset_profile.encoding.num_classes
+        )
 
     # RT2-B: create the verification session FIRST so the measured setup
     # window covers config load and everything after — main() entry is the

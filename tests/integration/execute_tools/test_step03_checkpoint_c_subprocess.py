@@ -49,7 +49,7 @@ PYTHON = sys.executable
 PSD_LEN = 4096
 SEG_SIZE = 1024
 N_PSD = 2
-FILE_INDEX = 4
+FILE_INDEX = 0
 
 PROFILE = {
     "dataset": {
@@ -67,7 +67,26 @@ PROFILE = {
         "value_offset": 128,
         "num_classes": 256,
     },
+    # Step 02c made these REQUIRED on DatasetProfile. Both index into this
+    # fixture's 2-file topology, not TIDMAD's 20 — copying TIDMAD's
+    # [0, 10, 19] / [3, 10, 17] would declare files that do not exist here.
+    "anchor_selection_files": [FILE_INDEX],
+    "health_peek_files": [FILE_INDEX],
 }
+
+
+def _profile(num_classes: int = 256) -> dict:
+    """The dataset profile, with its class alphabet parameterized.
+
+    Cardinality lives on BOTH authorities: the dataset declares what the
+    data contains, the contract declares what the model emits, and rung
+    3-E requires them to agree (§4b). A contrast that moved only the
+    contract would be an inconsistency, not a contrast — which is exactly
+    what the first cut of this module did, and what the engine now refuses.
+    """
+    profile = json.loads(json.dumps(PROFILE))
+    profile["encoding"]["num_classes"] = num_classes
+    return profile
 
 
 def _model_io(*, classes: int, admissible: list[str]) -> dict:
@@ -104,11 +123,15 @@ def _write_h5(path: Path, n: int) -> None:
 
 @pytest.fixture
 def workspace(tmp_path):
+    return _workspace(tmp_path, 256)
+
+
+def _workspace(tmp_path, dataset_classes: int):
     data_dir, cfg_dir, sandbox = (tmp_path / n for n in ("data", "configs", "sandbox"))
     for d in (data_dir, cfg_dir, sandbox):
         d.mkdir()
 
-    (cfg_dir / "dataset_profile.json").write_text(json.dumps(PROFILE))
+    (cfg_dir / "dataset_profile.json").write_text(json.dumps(_profile(dataset_classes)))
     dataset = PROFILE["dataset"]
     n_samples = PSD_LEN * N_PSD
     _write_h5(data_dir / dataset["training_file_pattern"].format(file_index=FILE_INDEX), n_samples)
@@ -205,15 +228,37 @@ def _trained_class_count(sandbox: Path) -> int:
 class TestCardinalityCrossesTheSubprocess:
     """§12(iii), cardinality half."""
 
-    def test_the_declared_class_count_reaches_the_constructed_model(self, workspace):
-        """The discriminating case: 16, not TIDMAD's 256.
+    # A 16-class POSITIVE contrast is NOT expressible here, and the reason is
+    # semantic rather than incidental. `ValueEncoding` validates that the
+    # alphabet can hold the storage dtype's shifted range: int8 offset by 128
+    # spans [0, 255], so an int8 dataset's num_classes is necessarily 256 and
+    # numpy has no narrower integer type. The dataset-side class alphabet is
+    # BOUNDED BY ITS STORAGE DTYPE (Step 02's authority), so varying it would
+    # mean changing the encoding — Step-02 territory this PR does not own.
+    #
+    # The derivation contrast at 10 and 64 classes is therefore owned by the
+    # in-process rung 3-C (test_step03_m6_cardinality_derivation.py), which
+    # constructs models directly and is not bound by a real HDF5 fixture.
+    # What THIS module owns is the transport claim, and the case below proves
+    # it: the child could not refuse a contradiction it had not received.
 
-        A subprocess that ignored ``--model_io_json`` — or a builtin still
-        hardcoding 256 — writes a 256-wide output layer and reds here.
+    def test_a_contract_contradicting_the_dataset_fails_CLOSED_in_the_child(self, workspace):
+        """Rung 3-E at the subprocess boundary — found BY this checkpoint.
+
+        The child receives the profile and the contract as two separate
+        argv files and cannot assume the parent paired them.
+
+        Before the cross-check was added here, a contradictory pair built a
+        16-wide model against 256-valued data and died with a torch
+        embedding index error deep inside ``forward`` — a confusing crash
+        where §21 requires a typed refusal. Now it fails closed, naming
+        both numbers, before a single training step runs.
         """
-        result = _train(workspace, _model_io(classes=16, admissible=["int64", "int32"]), "card16")
-        assert result.returncode == 0, result.stderr[-3000:]
-        assert _trained_class_count(workspace["sandbox"]) == 16
+        result = _train(workspace, _model_io(classes=16, admissible=["int64", "int32"]), "mismatch")
+        assert result.returncode != 0
+        combined = result.stdout + result.stderr
+        assert "DatasetContradictionError" in combined, combined[-3000:]
+        assert "16" in combined and "256" in combined
 
     def test_the_shipped_cardinality_still_produces_256(self, workspace):
         """Compatibility half: the same path with TIDMAD's declaration is

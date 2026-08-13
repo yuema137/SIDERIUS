@@ -1417,8 +1417,12 @@ re-reviewed against the code at `4819b44a`: no material NO.
       also machine-checks §11.1 atomicity via a semantic-facet diff (the
       `_diff_paths` precedent) and asserts the ladder is complete with no
       multi-tensor or relation rung.
-- [ ] **CHECKPOINT C** — §12's three boundaries, entered at production
-      entry points; (ii) asserts LLMBridge call count == 0
+- [x] **CHECKPOINT C — PASS.** (i)+(ii) `tests/unit/workflows/
+      test_step03_checkpoint_c_live_boundary.py` **9 passed**;
+      (iii) `tests/integration/execute_tools/
+      test_step03_checkpoint_c_subprocess.py` **7 passed** (real
+      `subprocess.run`, real HDF5). Found and closed a production gap: the
+      3-E cross-check now also runs at the subprocess boundary.
 - [ ] **CHECKPOINT D** — targeted regression + static + mutation (§14)
 - [ ] **GATE 2** — required (§13); gate standard re-read immediately
       before launch. **Gate 1 NOT required** unless an LLM-visible byte
@@ -2093,6 +2097,89 @@ requirement resolved at EXECUTION (§4a.1), and the contract may
 legitimately express a dtype this runtime cannot materialize (A-1
 correction 2). It fails closed where it is consumed — the subprocess
 boundary of C(iii) — and a test states that division explicitly.
+
+#### CHECKPOINT C (iii) — **PASS**, and it found a production gap
+
+```text
+module   tests/integration/execute_tools/test_step03_checkpoint_c_subprocess.py
+result   7 passed — pytest rc 0, 13.8 s
+method   real subprocess.run of execute_tools/train_engine_sandbox.py,
+         real HDF5 on disk, PYTHONPATH pinned to THIS checkout
+         (the 02a portability lesson, asserted by its own test)
+```
+
+```text
+PRODUCTION GAP FOUND BY THIS CHECKPOINT — and closed
+
+Previous implementation assumption
+  Rung 3-E is enforced at `load_task_config`, so a contract that
+  contradicts the dataset cannot reach execution.
+
+Source evidence
+  The training child receives the Dataset Profile and the Model-I/O
+  contract as TWO SEPARATE argv files and cannot assume the parent paired
+  them. Nothing re-checked them. A contradictory pair built a 16-wide
+  model against 256-valued data and died with a torch embedding index
+  error deep inside `forward`.
+
+Corrected implementation understanding
+  Production is safe BY CONSTRUCTION today — the parent derives the
+  contract from an already-validated `load_task_config()` — but "safe by
+  construction" is not "fails closed", and the child is the boundary that
+  actually consumes the pair.
+
+Implementation consequence
+  `train_engine_sandbox.main` re-runs M2's resolver with the profile's
+  `num_classes`. It REUSES the same authority rather than adding a second
+  check, so there is still one rule. A contradiction is now a typed
+  refusal naming both numbers, before a single training step.
+
+Validation consequence
+  Only a real subprocess test could find this: every in-process test
+  passes either way, because in-process callers get the pair from the one
+  validated source.
+```
+
+**Cardinality: what C(iii) can and cannot prove, decided from source.**
+A positive 16-class contrast is NOT expressible over a real HDF5 fixture.
+`ValueEncoding` validates that the alphabet holds the storage dtype's
+shifted range, so an `int8` dataset offset by 128 spans `[0, 255]` and its
+`num_classes` is necessarily **256**; numpy has no narrower integer type.
+The dataset-side alphabet is bounded by its storage dtype — Step-02's
+authority, not this PR's to change.
+
+| Claim | Owner |
+|---|---|
+| cardinality DERIVATION at 10 / 64 classes | in-process rung 3-C (M6) — constructs models directly, unbound by a real dataset |
+| cardinality TRANSPORT across the subprocess | C(iii)'s contradiction case — the child could not refuse a contradiction it had not received |
+
+The negative case is the stronger evidence: a passing 256 run cannot
+distinguish *"the contract crossed"* from *"the literal was already
+right"*, whereas a typed refusal naming both numbers can only happen if
+the contract arrived and was consulted.
+
+**Dtype: proven by the case that must FAIL, for the same reason.** For
+TIDMAD, "the contract's dtype was consulted" and "the site's historical
+dtype was used anyway" both yield int32. A `bfloat16`-only contract
+discriminates: it fails only if the declared admissibility reached the
+child and was intersected with runtime capability THERE. A narrowed
+`int64`-only contract is the positive control — not the training site's
+historical int32 preference, so it exercises §24.9 Q7 across the process
+boundary.
+
+**Three fixture corrections, all the same lesson.** C(i) and C(iii) each
+first varied cardinality on the CONTRACT alone while the dataset still
+declared 256, and were correctly refused; the third was the encoding bound
+above. Cardinality lives on two authorities by design (§4b), and a
+contrast must move both. Each refusal was the system working.
+
+**A PRE-EXISTING failure, recorded and NOT adopted.**
+`tests/integration/execute_tools/test_step02a_checkpoint_c_profile_boundary.py`
+fails one test at HEAD. Verified pre-existing: `git show f865038f:<path>`
+contains **zero** occurrences of `anchor_selection_files`, so it never
+carried the fields Step 02c made required — it was already broken before
+Step 03 began. Not adopted into this PR; recorded as follow-up debt on the
+Step-02 integration surface.
 
 ### 24.7 Mutation dossier
 
