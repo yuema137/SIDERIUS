@@ -912,8 +912,8 @@ child's to take.
 | docs reconciliation | landed `73ca1fdd` | this section + §12 + parent §Status |
 | B1 → **CP0 PASS** | landed `8d317715` | §13.3 |
 | B2 → **CP-B1 PASS** | landed `7cc8c21d` | §13.5 |
-| B3 → Checkpoint A | not started | |
-| B4 → Checkpoint B | not started | |
+| B3 → **Checkpoint A PASS** | landed `09442a6c` | §13.7 |
+| B4 → **Checkpoint B PASS** | landed `e2d058ef` | §13.8 |
 | Checkpoint C | not started | |
 | B5 → Checkpoint D | not started | |
 
@@ -1085,3 +1085,80 @@ it, so builder-level evidence alone would not have established the claim.
 >
 > **Cost:** one wasted battery (~5 min) and a re-application of two
 > production edits. No evidence was accepted from the corrupted run.
+
+### 13.7 Checkpoint A — Stage-A parity closed — **PASS**
+
+Commit `09442a6c`.
+
+**B3 shrank, with the audit that licenses it (§6.3 explicitly allows
+this).** The re-read found both sites are five lines of
+`validate -> path -> dump -> flag`, differing in exactly one respect that
+must NOT be unified (§13.4). A shared helper would have to leave that
+difference outside itself — removing three lines and adding one
+indirection. So the contract is stated **at** the boundary (which is what
+the commit is titled) rather than extracted into a new seam. **No new
+abstraction exists solely to centralize prose.**
+
+Production diff: **comment-only**, 29 insertions in
+`core/sandbox_executor.py`. Emitted JSON is therefore byte-identical for
+TIDMAD inputs by construction, not by assertion.
+
+**The gap B3's test closes.** Every B1 assertion goes through
+`json.load`. A site that grew an `indent=`, a `sort_keys=` or a different
+separator would satisfy all of them while changing what actually crosses
+the process boundary. `test_step02b_b3_boundary_byte_parity.py` asserts
+raw bytes — both *between* the sites and *against* the expected compact
+form — so they can neither drift apart nor drift together.
+
+**Checkpoint A evidence run** — 73 passed in 3.33s, rc=0 from the log:
+`test_step00_dataset_baselines.py` + `test_step00_numeric_baselines.py`
+(the `tc1_*_resolved.json` TrialConfig goldens) + `test_sample_set_builder.py`
+(five digests) + B1's pin **unmodified** + B3's parity.
+
+| Checkpoint-A criterion | Evidence |
+|---|---|
+| round-trip pin green UNMODIFIED | B1 module untouched by `09442a6c`; green in the run above |
+| digests unchanged | `test_sample_set_builder.py` green, unmodified |
+| TrialConfig goldens unchanged | Step-00 baseline modules green |
+
+**Mutations — two, both CAUGHT.**
+
+| # | Mutation | Observed |
+|---|---|---|
+| M8 | eval site diverges (`indent=4`) | **CAUGHT** — byte-parity test reds |
+| M9 | one site reorders keys on write | **CAUGHT** — both the parity test AND the wire-format test red |
+
+M9 mutated a single site, so both assertions fired; the wire-format
+assertion is the one that would still catch a change applied to **both**
+sites together, which parity alone cannot see.
+
+### 13.8 Checkpoint B — the selection path follows a contrast topology — **PASS**
+
+Commit `e2d058ef`. Test-only, zero production diff.
+
+Single axis, **machine-checked**: the rung diffs the contrast profile's
+`model_dump()` against TIDMAD's and requires the differing-path list to be
+exactly `["dataset.num_files"]`. It fails the moment a second axis
+appears, and its message says to STOP and report rather than add one.
+
+Four assertions, each a hop that could independently keep working against
+TIDMAD: file population follows the contrast; the index space does NOT
+move with it; `DataScope.default()` resolves against the SUPPLIED profile;
+and a file that exists under TIDMAD but not under the contrast is
+rejected rather than silently selected. Ambient resolution raises
+throughout, so nothing can pass by falling back.
+
+**Mutation M10 — the rung's justification, measured.** Re-hardcoding
+TIDMAD's count in the scope resolver
+(`dataset_config.py:298`, `list(range(dataset.num_files))` →
+`list(range(20))`) — precisely the "topology-hardcode survival" failure
+class:
+
+| Suite | Result |
+|---|---|
+| the Stage-B rung | **CAUGHT** — 3 failed, 3 passed |
+| the five TIDMAD digests | **BLIND** — 37 passed, rc=0 |
+
+The digests cannot see it, because under TIDMAD `num_files` **is** 20.
+That is the whole argument for Stage B in one measurement: parity
+evidence and genericity evidence are not substitutes.
