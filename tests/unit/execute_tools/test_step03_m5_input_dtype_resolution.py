@@ -206,26 +206,13 @@ class TestQ8FailsClosed:
 class TestNoModelNameBranch:
     """The failure class A6 is structurally blind to."""
 
-    def test_the_data_path_contains_no_input_dtype_name_branch(self):
-        """Source-level, because the behaviour is identical either way —
-        that is precisely why a behavioural oracle cannot catch it.
-
-        The three CONSTRUCTOR branches are expected to remain (finding F-2:
-        a constructor-signature difference no Model-I/O semantic backs), so
-        this asserts the count did not GROW and that no dtype cast sits on
-        one.
-        """
-        for module, expected in ((tes, 2), (inf, 1)):
-            source = inspect.getsource(module)
-            branches = [
-                line
-                for line in source.splitlines()
-                if ('== "fcnet"' in line) and not line.strip().startswith("#")
-            ]
-            assert len(branches) == expected, branches
-            for line in branches:
-                assert "dtype" not in line
-                assert ".int()" not in line and ".long()" not in line and ".float()" not in line
+    # `test_the_data_path_contains_no_input_dtype_name_branch` lived here and
+    # was REMOVED, not lost. It counted the surviving `== "fcnet"` lines and
+    # asserted none carried a dtype cast — brittle (it would red if a future
+    # step legitimately added a constructor branch) and now subsumed by
+    # `tests/unit/guardrails/test_no_model_name_dtype_routing.py`, which
+    # states the same property semantically over the AST and proves it
+    # detects both removed forms. One claim, one owner.
 
     def test_resolution_keys_a_declaration_not_a_branch(self):
         """A model name is a KEY into a declaration — the

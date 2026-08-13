@@ -2115,6 +2115,54 @@ routing on every migrated Step-03 execution surface, using
 semantic / AST / source-pattern coverage in the existing guardrail's
 idiom — **not** a pin on today's line numbers.
 
+**DELIVERED** as `tests/unit/guardrails/test_no_model_name_dtype_routing.py`.
+
+```text
+Previous implementation assumption
+  Extend `_SCAN_TARGETS` in test_no_model_name_branches.py to the two
+  migrated files.
+
+Source evidence
+  That guardrail bans architecture-name TOKENS outright. Pointing it at
+  train_engine_sandbox.py / inference_single.py flags the three
+  CONSTRUCTOR branches finding F-2 deliberately leaves in place. Clearing
+  them would require inventing a consumer-less contract field (§21).
+
+Corrected implementation understanding
+  The token ban is the wrong instrument for this surface. Step 03's actual
+  invariant is narrower and exact: a model NAME must never decide a DTYPE.
+  Stated semantically over the AST — an `if`/`IfExp` comparing a
+  model-name literal whose body performs a dtype operation — with no count
+  and no line number.
+
+Implementation consequence
+  A second, focused guardrail module rather than a row in the existing
+  one. `MIGRATED_SURFACES` is the list a future step extends to declare a
+  surface contract-routed.
+
+Validation consequence
+  Reachability is proven, not assumed: the guard is fed the exact
+  expression form removed from `train_engine_sandbox.py:660` and the exact
+  statement form removed from `inference_single.py:213`, and must flag
+  both. A regression here is behaviourally INVISIBLE — re-hardcoding the
+  branch reproduces A6 exactly — so a structural claim is the only oracle
+  that can see it.
+```
+
+**A defect in the first cut of the guard, caught by its own F-2 case.**
+`.to` was put in the unambiguous-dtype set, so `.to(device)` matched and
+the guard reported `train_engine_sandbox.py:621` — an F-2 constructor
+branch — as a live violation. It is not one. `.to()` is now classified by
+its ARGUMENT: a `dtype=` kwarg or a dtype-valued positional makes it a
+cast, a bare device move does not. Both directions are pinned — the
+constructor branches are NOT flagged, and `.to(torch.int32)` still is.
+
+*Test economy*: M5's `test_the_data_path_contains_no_input_dtype_name_branch`
+counted surviving branch lines and was REMOVED, with a comment in its
+place explaining where the claim went. It was brittle — it would red if a
+later step legitimately added a constructor branch — and this guard now
+states the same property properly. One claim, one owner.
+
 ### 24.11 Final state
 
 *(empty — no PR opened)*
