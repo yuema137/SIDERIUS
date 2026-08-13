@@ -1391,10 +1391,11 @@ recorded, not silently resolved by picking a third config.
 | C3 — campaign trigger + profile-derived all-files | **DONE** | §24.10 |
 | **CHECKPOINT A — Stage-A TIDMAD parity complete** | **PASS** | §24.12 |
 | C4 — 4.8-C atomic contrast | **DONE** | §24.13 |
-| **CHECKPOINT B — generic file-set semantics complete** | **PASS** | §24.14 |
+| **CHECKPOINT B — generic file-set semantics complete** | **PASS** | §24.15 (mutations §24.14) |
 | **PR-02c CHECKPOINT C — live consumer evidence** | **PASS** | §24.16 |
-| C5 / PR-02c Checkpoint D | — | |
-| Step-02 aggregate reconciliation | — | |
+| C5 — child docs + closeout | **DONE** | §24.17 |
+| **PR-02c CHECKPOINT D — child executable complete** | evidence deferred to the terminal suite | §24.18 |
+| Step-02 aggregate reconciliation | **PASS** | §24.19 |
 | Terminal local full unit suite (ONCE) | — | |
 | Step-02 Gate 2 (ONCE) | — | |
 | C6 / Checkpoint E | — | |
@@ -2130,4 +2131,162 @@ does not own. No real LLM; no scientific-quality result claimed.
    This is why the pair is asserted in BOTH directions. A single
    assertion that "an incomplete peek forces a retrain" is satisfied by
    any unrelated invalidity.
+```
+
+---
+
+### 24.17 C5 — child docs, and a refuted premise about "six comments"
+
+```text
+Previous assumption (§11.5, §15):
+  the class-A doc surface is "the SIX class-A comment hits in
+  configs/health_checks.yaml (:35, :45, :60, :71, :82, :92)", all of
+  them comments, all safe to update as documentation.
+
+Audit evidence:
+  only THREE are comments — the trailing `#` on each
+  `peek_file_indices` line (:35, :60, :82), updated in C2 with both
+  pinned config shas verified unchanged.
+
+  The other three (:45, :71, :92) are inside `reason: >` folded
+  scalars. `reason` is a SCHEMA FIELD — `GateConfig.reason: str`
+  (health_checks/config.py:196) — so its text is part of
+  `config.model_dump()`, which is exactly what `legacy_config_body_sha`
+  and `materialize_effective_config` hash.
+
+  Editing them was attempted and the shipped config sha moved from
+  3b5521…655b74 to 698554f0…c330478. Reverted immediately;
+  re-verified back to 3b5521…655b74.
+
+Corrected understanding:
+  three of the six "class-A comments" are CONFIG VALUES pinned by the
+  workspace invariant lock. `test_honest_gate_labels.py:178-190` states
+  the acceptance criterion explicitly: these shas "must not shift, or
+  every workspace invariant lock would break at the boundary".
+
+Implementation consequence:
+  C5 updates the three real comments (done in C2, where the edit
+  belonged) and leaves the three `reason:` scalars UNTOUCHED. Rewriting
+  operator-facing prose is not worth invalidating every existing
+  workspace's health-config lock, and doing so would be a compatibility
+  break disguised as a documentation fix.
+
+Validation consequence:
+  the sha assertion is what caught it, and it caught it in seconds. No
+  test needed to be added; the guard already existed.
+```
+
+**Residual doc debt, recorded and NOT fixed here** (out of the frozen
+scope, §15 class C): the three `reason:` scalars still read *"M9 peek:
+[3, 10, 17]"* as if the triplet were a config literal. It is now TIDMAD's
+declaration, so the sentence is true of TIDMAD and misleading in general.
+Correcting it requires an intentional config-sha rotation, which is a
+change to a compatibility surface and needs its own operator decision —
+it is not a documentation edit. Likewise `docs/design/enable_partial_file_list.md`
+(`:140`, `:181`, `:366`, `:802`) still describes the peek list and the
+`range(20)` fallback as literals; that doc is §15 class C and is not
+02c's to rewrite.
+
+**Explicitly NOT touched**, per §11.5 and §15 Q3: the two node `.md`
+files. They are false for a *different, pre-existing* reason — DS7
+deleted the fields they document — and 02c is not a documentation-cleanup
+vehicle. **CLAUDE.md** was audited and left alone: it says the YAML is the
+source of truth for *"the DEFAULT monitored-file **placement**"*, which
+remains exactly true — the YAML places it, the profile now declares its
+value.
+
+**Node/skill doc-sync rule (CLAUDE.md, 2026-07-28) — audited, no action
+required.** No `nodes/{node}/` module was touched, no CLI argument was
+added, removed or re-defaulted, and no operator-facing flag behaviour
+changed. The rule's trigger ("CLI arguments, default values, and
+behavior explanations") does not fire.
+
+---
+
+### 24.19 STEP-02 AGGREGATE reconciliation (§13.1): **PASS**
+
+Distinct from the child Checkpoint C in §24.16. Per §13.1 this uses the
+**merged child ledgers as evidence authorities** rather than re-running
+their suites.
+
+| Child | Merged state | Confirmed live at this head |
+|---|---|---|
+| **02a** | PR **#202**, merge `47359538` — verified ancestor of `origin/master`; ledger records CHECKPOINT D PASS (2026-08-14), final head `68fd3eaa` | **Dataset Profile is the single, live topology authority.** 02c consumes it from four new places and introduces no second authority: `sample_set_builder` (anchor set), `health_checks/config.CheckRef` (health-peek), the three recording `_resolve_files` (`num_files`), and `campaign_artifacts` (the trigger). `test_step02a_*` suites green **unmodified** except one contrast fixture, diagnosed in §24.9 |
+| **02b** | PR **#203**, merge `c17469ec` == `origin/master`; ledger records CHECKPOINT D PASS, head `6fcbcdd2` | **The explicit tuner → selection hop is intact** — `test_step02b_tuner_supplies_profile.py` green, unmodified, and 02c's anchor consumer reads `resolved_profile`, the object 02b's hop already resolved ONCE at `sample_set_builder.py:85`. **No ambient fallback reappeared**: 02c added no `resolve_dataset_profile()` call inside `build_sample_set`. **SampleSet TIDMAD identity intact** — all five sha16 digests and the first-file sampled-index golden green, modules unmodified; the sampling algorithm, seed derivation and portions are not in the diff |
+| **02c** | this PR | Both declarations live with real production consumers (§24.16); all-file populations derive from topology; every §9 Stage-A surface byte-identical (§24.12) |
+
+**Compatibility of the three, checked as a whole rather than
+child-by-child:**
+
+- **One topology authority.** `grep` finds no `all_files` field and no
+  second `num_files`; `test_all_files_is_not_a_declared_field` asserts it
+  mechanically over every profile field name.
+- **The two 02c declarations did not disturb 02b's contract.** 02b's B4
+  topology rung (`test_step02b_b4_topology_contrast.py`) computes its
+  atomicity baseline from `TIDMAD_PROFILE.model_dump()`; the two new
+  fields appear identically on both sides of that comparison, so the rung
+  still resolves to exactly `["dataset.num_files"]` and is green
+  unmodified.
+- **02a's anti-smuggling invariant is strengthened, not weakened.** The
+  new fields are REQUIRED with no default, and
+  `test_a_profile_is_constructible_for_a_wholly_different_dataset` now
+  supplies file sets legal for *its* `num_files=3` — the same invariant,
+  applied to two more fields.
+
+**Assembled Step-02 executable HEAD: `4d1c107e`** — the child
+Checkpoint C commit, and the last commit on this branch that changes
+executable code. C5 and C6 are docs-only; per §13.2 a docs-only closeout
+does not re-trigger the terminal evidence.
+
+---
+
+### 24.18 PR-02c CHECKPOINT D — child executable complete
+
+**Executable HEAD: `4d1c107e`.**
+
+#### A discarded run, and the process error that produced it
+
+```text
+What happened:
+  a child-regression run over tests/unit/execute_tools/ +
+  tests/unit/core/ + tests/unit/agent/tune_ml_hyperparam_agent/
+  finished 3 failed, 4262 passed, 3 skipped in 1509 s. All three
+  failures were config-sha assertions:
+    test_honest_gate_labels::test_the_audited_config_shas_are_unchanged
+    test_scientific_role_consistency::test_the_blocking_config_historical_sha_also_resolves
+    test_step00_health_config_baseline::test_resolved_shipped_config_deep_equal
+
+Diagnosis BEFORE any fix:
+  the three reported THREE DIFFERENT actual shas — 6bce0c92…,
+  bd854f58…, and neither equal to the 698554f0… measured during the
+  §24.17 experiment. A real regression produces ONE wrong sha.
+
+  Cause: `configs/health_checks.yaml` was edited (and reverted) WHILE
+  that suite was in flight, so different tests read different transient
+  states of the file. My process error, not a code defect.
+
+Verification on the clean, reverted tree:
+  the three modules re-run -> 33 passed, 3.61 s, and
+  `legacy_config_body_sha` returns 3b5521…655b74 exactly.
+
+Consequence:
+  THE RUN IS DISCARDED. A suite executed against a mutating working
+  tree is not evidence of anything, and reporting its 4262 passes
+  while explaining away its 3 failures would be exactly the kind of
+  selective reading this ledger exists to prevent.
+
+  Checkpoint D therefore takes its evidence from the ONE terminal full
+  unit suite (§13.2) run from a CLEAN tree at the executable head. That
+  suite is a strict superset of this scope, so nothing is lost — and
+  §13.2's prerequisites are already satisfied and recorded: directly
+  affected tests (§24.4), true affected packages (§24.9, §24.12),
+  focused mutations (§24.5, §24.8, §24.11, §24.14) and child
+  Checkpoint C (§24.16).
+
+Standing lesson, added to this PR's record:
+  never edit a file the running suite reads. The project's existing
+  rule is "the full suite's result is meaningless from a dirty tree";
+  this is the same rule for a tree that goes dirty MID-RUN, which is
+  harder to notice because the tree is clean again by the time the
+  result is read.
 ```
