@@ -12,10 +12,32 @@ disposition (§5f), the mutation economy (§5g), the seven commits (§6)
 and the Gate decision (§7) — may not change without a new operator
 decision.
 
-**IMPLEMENTATION IS NOT YET AUTHORIZED.** Per the established lifecycle,
-implementation begins only after a filled **Implementation Working Rules
-contract** for this child, in a NEW, fresh implementation context with
-its own Context Continuity v2 handoff — never in the design session.
+**IMPLEMENTATION AUTHORIZED AND IN PROGRESS (2026-08-14).** The
+lifecycle precondition is met: a filled **Implementation Working Rules
+contract** for this child was issued, and implementation runs in a NEW,
+fresh context with its own Context Continuity v2 handoff — not in the
+design session. **From this point this document is the LIVE PR-02a
+implementation ledger**, updated continuously rather than at closeout.
+
+Kickoff facts, resolved mechanically from the repository (never from
+conversational memory):
+
+| Fact | Value |
+|---|---|
+| Frozen design HEAD | `cfc83b1e11f4accbe15f8daecdd8bd37846e91d7` — the commit that froze this document |
+| Implementation base | `a546aff02d1f96b463d689e20bc9856202ca8111` (`cfc83b1e` + the parent's LIVING-document docs commit) |
+| Implementation branch | `feat/generic-framework-step-02a-dataset-profile-injection` |
+| Parent state | **LIVE / not frozen, by operator decision** — see the parent's Status and its authority rule |
+| Gate plan | Gate 1 NOT planned (§7); Gate 2 NOT run by this child (02c owns it) |
+
+**Parent-vs-child authority (operator decision, 2026-08-14).** The
+Step-02 parent is a LIVE governance document and is **not** required to
+be frozen for this child to proceed; only *this* child design had to
+freeze. Implementation discoveries may flow back into the parent and
+into the still-unfrozen 02b/02c designs, but they **may not silently
+rewrite this frozen contract's scope or acceptance criteria** while 02a
+is in progress — a material conflict requires an explicit operator
+decision. The full rule lives in the parent's Status section.
 
 Deliberately left to implementation time (parent §13a): the profile
 object's type and field names, YAML layout, the config-flag name, the

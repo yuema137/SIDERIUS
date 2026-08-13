@@ -3,7 +3,9 @@
 ## Status
 
 **LIVING PARENT — DELIBERATELY NOT FROZEN (operator decision,
-2026-08-13). IMPLEMENTATION NOT AUTHORIZED.**
+2026-08-13). PR 02a IMPLEMENTATION AUTHORIZED AND IN PROGRESS
+(branch `feat/generic-framework-step-02a-dataset-profile-injection`);
+02b and 02c NOT AUTHORIZED.**
 
 > **Do not "fix" this by freezing it.** The operator decided this parent
 > stays a LIVING document until Step-02 closeout, because it is the
@@ -25,6 +27,36 @@
 > its implementation surfaces, and the detailed 02b/02c plans, which are
 > deliberately NOT elaborated yet), and again at Checkpoint E when 02c
 > closes the Step.
+
+### Authority rule between this parent and a frozen child (FROZEN — operator decision, 2026-08-14)
+
+```text
+overall roadmap
+  └── Step 02 parent        <- LIVE throughout Step 02
+       ├── PR 02a design    <- FROZEN -> implementation -> merge
+       ├── PR 02b design    <- may be revised after 02a findings; frozen later
+       └── PR 02c design    <- may be revised after 02a/02b findings; frozen later
+```
+
+| Document | Authority |
+|---|---|
+| **PR-02a child design** | the **frozen implementation contract** for 02a — authoritative for its scope, invariants, checkpoints and validation |
+| **Step-02 parent (this doc)** | the **live** Step-level governance / integration document — authoritative for ownership, the child DAG, cross-child obligations and aggregate Step acceptance |
+
+Implementation discoveries MAY update this parent, and through it may
+refine 02b/02c design, Step-level aggregation, later checkpoints and
+convergence findings. They may **NOT** silently rewrite PR-02a's frozen
+scope or acceptance criteria while 02a is in progress. **A material
+conflict with the frozen 02a contract requires an explicit operator
+decision.**
+
+A child PR may begin when — and only when — **its own** design is
+frozen, this parent exists and is internally consistent, and the
+repository base is verified. This parent's freeze state is **not** a
+precondition, and a session must never require it to be frozen. This is
+the roadmap's module-by-module philosophy (§0 rule 1) applied to
+documents: **freeze the locally executable contract; never freeze a
+design that has not yet earned implementation evidence.**
 
 Revision 2 content (below) is the operator-reviewed governance the
 children implement against; it changes only by a new operator decision,
@@ -914,6 +946,8 @@ candidate rather than added here.
 - [ ] FX-3/FX-4 restated in the Step-03 design before Step 02 closes
 - [ ] Roadmap §15.1, §14, folder README and this parent synchronized
 
-**NOT MERGED / NOT IMPLEMENTED.** Implementation is unauthorized until
-this design is frozen and a child receives its own Implementation
-Working Rules contract.
+**NOT MERGED.** A child's implementation is authorized when **that
+child's own** design is frozen and it receives its own Implementation
+Working Rules contract — **never** by this parent being frozen, which it
+deliberately is not (see Status). Current state: **02a AUTHORIZED and in
+progress**; 02b and 02c unauthorized.
