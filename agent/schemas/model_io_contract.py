@@ -38,6 +38,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ml_models.models_format_sandbox import OutputSemantic, legacy_output_type_for
+
 
 class AxisRole(StrEnum):
     """The semantic role an axis plays, where a consumer actually reads it.
@@ -295,6 +297,39 @@ class ModelIOContract(BaseModel):
                     "symbol declares the SAME extent, so the roles must agree"
                 )
         return self
+
+    @property
+    def output_semantic(self) -> OutputSemantic:
+        """The canonical output semantic — **§8b's single authority**.
+
+        DERIVED from the output tensor's axis roles, never declared, so
+        normalized tensor semantics and output semantics cannot disagree:
+        an output carrying a class-alphabet axis is categorical, and one
+        that does not is continuous.
+
+        The enum itself lives in ``ml_models.models_format_sandbox`` beside
+        the loss frozensets it keys, because §8a re-keys that existing
+        authority rather than creating a second one, and because ``agent``
+        imports ``ml_models`` and not the reverse.
+
+        Note there is no ``hybrid`` here and there never will be: §8c keeps
+        ``hybrid`` a legacy builtin adapter value, and inventing tensor
+        semantics for it is forbidden.
+        """
+        if self.output.axis_with_role(AxisRole.CLASS) is not None:
+            return OutputSemantic.CATEGORICAL
+        return OutputSemantic.CONTINUOUS
+
+    @property
+    def legacy_output_type(self) -> str:
+        """The legacy ``output_type`` word, as a **derived projection** (§8b).
+
+        A compatibility view for consumers that still speak the old
+        alphabet. One-way: nothing writes back through it, and it is never
+        the answer to *"what output semantics does this model have"* —
+        :attr:`output_semantic` is.
+        """
+        return legacy_output_type_for(self.output_semantic)
 
     @property
     def class_cardinality(self) -> int | None:

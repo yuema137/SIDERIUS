@@ -1339,10 +1339,19 @@ oracle exists. Audited at `f865038f`:
       Rungs FX-3, FX-4 and 3-E all landed.
       Tests: `tests/unit/agent/schemas/test_model_io_resolution.py`,
       **17 passed / 0.21 s**. Four mutations, each isolating its class.
-- [ ] **M3 — Phase A: canonical output semantics + loss re-key.**
-      `output_type` becomes a derived projection (§8b); `hybrid` stays a
-      legacy adapter (§8c); `validate_output_loss_compatibility` re-keyed,
-      **every verdict unchanged** (A2 is the oracle).
+- [x] **M3 — Phase A: output semantics + loss re-key — LANDED.**
+      `OutputSemantic` (`categorical` / `continuous`) in
+      `ml_models/models_format_sandbox.py`, beside the frozensets it keys;
+      `validate_semantic_loss_compatibility` is now THE rule and
+      `validate_output_loss_compatibility` a thin legacy adapter over it —
+      one implementation, two entry points. `ModelIOContract.output_semantic`
+      DERIVES from the class-role axis; `.legacy_output_type` is the §8b
+      one-way projection. `hybrid` adapts to `None` (§8c) and keeps
+      accepting every loss.
+      **Every verdict unchanged** — A2's 15 cells plus both pre-existing
+      oracles: **40 passed**. Affected packages
+      (`tests/unit/{ml_models,agent/schemas,core}`): **2979 passed / 2
+      skipped**. M3's own module **24 passed**. Four mutations.
 - [ ] **M4 — Phase A: derived rendering, exact bytes.**
       `workflows/task_config.render_forward_contract` (:171-214) and the
       shape prose in `agent/schemas/{proposal,implementor,validator}.py`
@@ -1540,6 +1549,46 @@ surface to own), not an NLP validator Step 03 refuses to build. No new
 contradiction — §9 already records the narrowing, and M2 implements the
 machine-checkable channels only.
 
+#### M3 — canonical output semantics + loss-authority re-key
+
+```text
+modules  ml_models/models_format_sandbox.py   (OutputSemantic, projection,
+                                               re-keyed rule)
+         agent/schemas/model_io_contract.py   (derived properties)
+tests    tests/unit/ml_models/test_step03_m3_output_semantic_authority.py
+result   24 passed (module) / 40 passed (verdict oracles) /
+         2979 passed + 2 skipped (affected packages), pytest rc 0
+lint     ruff check + ruff format --check clean
+```
+
+**Placement decided by layering, not preference.** `OutputSemantic` is a
+tensor semantic and conceptually belongs with the contract, but
+`agent/` imports `ml_models/` and **not** the reverse, so defining it in
+`agent/schemas/` would invert the dependency the moment the loss
+authority consumed it. It therefore lives in `models_format_sandbox.py`
+beside the frozensets it keys — which is also what §8a asks for: RE-KEY
+the existing authority, do not create a second one.
+`models_format_sandbox.py` is torch-free (only `typing` + `pydantic`),
+so the schema layer takes on no heavy import.
+
+**The re-key, concretely.** `validate_semantic_loss_compatibility(semantic,
+loss_type, *, model_type)` is the rule, keyed on `OutputSemantic`.
+`validate_output_loss_compatibility(output_type, ...)` keeps its exact
+signature and projects the legacy string onto the semantic, then
+delegates. `output_semantic_from_legacy` returns `None` for BOTH
+`"hybrid"` and any unrecognised string — deliberately collapsing two
+cases, because that is what preserves the shipped verdicts:
+
+- `hybrid` is a legacy builtin adapter (§8c), not a tensor semantic, and
+  its shipped behaviour is that every loss is legal;
+- an unrecognised value matches neither guard today, so it raises
+  nothing. Tightening that would change an accept/reject verdict — a §21
+  STOP — and A2's tolerance test is the tripwire that would demand the
+  operator call.
+
+Error-message bytes are unchanged, including their hardcoded `[B, 256, T]`
+(F-5): the re-key must not touch them, and A2 pins their content.
+
 ### 24.7 Mutation dossier
 
 | # | Mutation | Expected | Observed | Verdict |
@@ -1685,6 +1734,30 @@ Validation consequence
   it is the only thing that detected this, and a dossier written without
   it would have recorded four confident, wrong attributions.
 ```
+
+#### M3 mutations
+
+| # | Mutation | Expected | Observed | Verdict |
+|---|---|---|---|---|
+| **M-M3-1** | `hybrid` acquires tensor semantics (`None` → `CATEGORICAL`) | the `hybrid` row and the tolerance rule red | **6 failed** — §8c tests, both tolerance tests, and A2's `hybrid × smooth_l1` cell | behaviour-changing, **caught** |
+| **M-M3-2** | the §8b projection is inverted | verdicts flip wholesale | **11 failed** — the entire `regressor` row plus the diagnostic pin | behaviour-changing, **caught** |
+| **M-M3-3** | the output semantic stops being DERIVED (always categorical) | the derivation class reds | **4 failed** — derivation, projection-from-contract and the contract-drives-legality test. **A2 untouched**, correctly: A2 does not go through the contract | behaviour-changing, **caught** |
+| **M-M3-4** | the legacy entry point REIMPLEMENTS the rule instead of delegating | the duplicate-authority class reds | **1 failed** — `test_the_legacy_entry_point_delegates_rather_than_reimplementing`, and **A2 stayed fully green (45 passed)** | behaviour-preserving but authority-duplicating, **caught by its sole oracle** |
+
+Baseline re-run **46 passed** from the restored tree.
+
+**M-M3-4 is the row that justifies the module.** The duplicated rule
+agrees with the delegated one on all 15 cells, so every verdict oracle —
+A2 included — stays green while a second copy of the loss rule is live.
+That is exactly how `LossConfig.check_compatibility` became a
+contradictory second authority before V21 PR A deleted it. Only a
+structural assertion catches it, which is why §8a's *"re-key, do not
+re-declare"* needed a test that reads the delegation rather than the
+verdicts.
+
+Hygiene: all four ran with the modified production files **staged**, so
+`git checkout --` restored from the index rather than reverting the M3
+work itself — the generalisation of the §24.7 finding recorded at M2.
 
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
