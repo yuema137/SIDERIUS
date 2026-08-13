@@ -2045,6 +2045,55 @@ the pin to assert the pre-M6 digest was recoverable). That was the right
 move while the digest's status was unknown; tracing its consumers showed
 the pin should not exist at all.
 
+#### CHECKPOINT C — boundaries (i) and (ii)
+
+```text
+module   tests/unit/workflows/test_step03_checkpoint_c_live_boundary.py
+result   9 passed — pytest rc 0
+scope    entered ONLY through production entry points; no resolver is
+         called directly (§12's binding qualification)
+```
+
+**C(i)** — the contract reaches the real LLM-facing renderer. Proven by
+VARYING the declaration and observing the bytes follow: a renderer still
+emitting a literal produces identical output for both. The variation is
+carried all the way into `_render_commit_system_prompt`
+(`ml_model_proposal_agent.py:1347`), which is what the production proposer
+hands the model.
+
+**C(ii)** — a real contradiction is rejected before the boundary, asserted
+by **LLMBridge call count == 0** on a `BoundaryRecorderBridge` constructed
+BEFORE the attempt, not by exception type alone. A consistent config is
+also shown to reach the renderer, without which a load that rejected
+everything would satisfy the zero-call assertion and prove nothing.
+
+```text
+TWO TEST DEFECTS found and fixed while writing this checkpoint
+
+1. The first cut asserted the whole rendered CONTRACT BLOCK appears in the
+   proposer system prompt. It does not. Reading
+   `_render_commit_system_prompt` shows it substitutes INDIVIDUAL fields —
+   `fc.input_shape`, `fc.output_shape`, `fc.output_description` — into
+   `PROPOSAL_COMMIT_PROMPT`. After M4 the first two are DERIVED, so the
+   claim holds; the assertion was wrong, not the code. Corrected to assert
+   the derived shapes.
+
+2. A cardinality contrast varied the contract's class axis alone and was
+   correctly REFUSED at load by rung 3-E, because the bound Dataset
+   Profile still declared 256. That is the system working — and it is
+   C(ii)'s subject. Corrected by binding a profile whose
+   `ValueEncoding.num_classes` matches, so the contrast varies the
+   cardinality on BOTH authorities rather than bypassing the check.
+```
+
+**A boundary deliberately NOT enforced at load, recorded so it is not read
+as a gap.** An unsupported input dtype (e.g. `bfloat16`-only) is *not*
+rejected by `load_task_config`. Dtype admissibility is a model-boundary
+requirement resolved at EXECUTION (§4a.1), and the contract may
+legitimately express a dtype this runtime cannot materialize (A-1
+correction 2). It fails closed where it is consumed — the subprocess
+boundary of C(iii) — and a test states that division explicitly.
+
 ### 24.7 Mutation dossier
 
 | # | Mutation | Expected | Observed | Verdict |
