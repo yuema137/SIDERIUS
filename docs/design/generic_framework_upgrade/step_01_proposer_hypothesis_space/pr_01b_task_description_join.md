@@ -1622,36 +1622,92 @@ owned elsewhere. It is untouched by this PR, identical before and after
 the JOIN, and changing HealthGate or trial-validity semantics is a frozen
 non-goal. Noted here for whoever owns that accounting.
 
-### 17.4 Consequence for readiness
+### 17.5 Readiness — CURRENT state
 
-PR 01b **cannot** reach READY FOR OPERATOR REVIEW until Checkpoint C,
-Gate 1 and Gate 2 have run and passed on the final executable head. §11
-acceptance items 6, 7 and 8 are open. This is recorded as a blocked
-dependency, not a waiver — no gate is being skipped or excused.
+**Checkpoint C PASS · Gate 1 PASS · Gate 2 PASS.
+PR 01b is READY FOR OPERATOR REVIEW.** §11 acceptance items 6, 7 and 8
+are CLOSED. No gate was skipped, excused or waived.
 
-### 17.5 Terminal validation run early, deliberately
+> **Superseded — PRE-LAUNCH / PRE-APPROVAL state, preserved as history.**
+> Before the operator granted launch approval, this section read:
+> *"PR 01b **cannot** reach READY FOR OPERATOR REVIEW until Checkpoint C,
+> Gate 1 and Gate 2 have run and passed on the final executable head.
+> §11 acceptance items 6, 7 and 8 are open. This is recorded as a
+> blocked dependency, not a waiver."* That was accurate while the ladder
+> was blocked (§17.1). It is **false as of 2026-08-12**, when all three
+> ran and passed on executable head `de8a5b8a`. Kept only so the blocked
+> interval remains auditable; it is NOT a current statement.
 
-The gate ladder is blocked, but the terminal unit suite does not depend
-on it, and running it now hands the operator complete non-gated evidence
-with their launch decision. It was run from a CLEAN tree at the assembled
-executable head `5dee6c4a`.
+### 17.6 Terminal validation — the FINAL executable head is `6b259b93`
+
+**Unambiguous current statement.** The final executable head is
+**`6b259b93`**, NOT `5dee6c4a`. S1-F (`6b259b93`) edited two `Field`
+description strings in `agent/schemas/proposal.py` — documentation only,
+no behaviour — and that is still an executable file, so §10.F's standing
+obligation applied and the terminal suite was **re-run on `6b259b93`**
+rather than the earlier result being reused.
 
 ```text
-pytest tests/unit/ -m "not real_run"
-  8540 passed, 3 skipped, 404 warnings in 498.92s (0:08:18)
+pytest tests/unit/ -m "not real_run"      # at 6b259b93, clean tree
+  8540 passed, 3 skipped, 404 warnings in 493.25s (0:08:13)
   PYTEST EXIT: 0        <- pytest's OWN status, captured before `tail`
   grep -cE "^(FAILED|ERROR)" over the log: 0
-  log: <scratchpad>/full_unit_suite.log
+  log: <scratchpad>/full_suite_final.log
 ```
 
 `ruff check .` — All checks passed. `ruff format --check .` — 817 files
 already formatted.
 
 **pyright: NOT run locally.** The box has Node v10.19.0, which cannot
-bootstrap pyright. Recorded as unavailable, never as green; blocking CI
-is the only pyright for this PR.
+bootstrap pyright. Recorded as unavailable, never as green; **blocking
+CI is the authoritative and only pyright for this PR**, and it passed
+(§11 item 11).
 
-Standing obligation (§10.F): if any gate forces an executable fix, the
-targeted evidence is re-run first and then this suite is re-run on the
-NEW final executable head. `5dee6c4a` is the final executable head only
-if the gates require no change.
+Every commit after `6b259b93` in this PR is **docs-only**, proven
+mechanically rather than asserted: `git diff <prev> <head> -- ':!docs'
+':!*.md'` is empty at each step.
+
+> **Superseded — earlier terminal run, preserved as history.** The same
+> suite was first run at `5dee6c4a` (8540 passed, 3 skipped, 498.92 s,
+> `PYTEST EXIT: 0`, log `<scratchpad>/full_unit_suite.log`) while the
+> gate ladder was blocked, so the operator would have complete non-gated
+> evidence alongside the launch decision. That section closed with
+> *"`5dee6c4a` is the final executable head only if the gates require no
+> change."* The gates required no change — but **S1-F's docstring edit
+> did**, so the head legitimately moved to `6b259b93`. The `5dee6c4a`
+> run is historical evidence, not the terminal result.
+
+## 18. Operator-reviewed judgements — ACCEPTED, do not revisit
+
+Implementation review 2026-08-12: **positive. No production change and
+no additional Gate requested.** These four judgements are accepted as
+reviewed and are not to be reopened, re-litigated or "improved" by a
+later contributor:
+
+| # | Judgement | Accepted status |
+|---|---|---|
+| J1 | **Mandatory launch declarations.** `--healthgate_mode blocking` and `--result_authority diagnostic` were added to every launch in the ladder. | **ACCEPTED** as the source-grounded completion of a frozen-design OMISSION (§17.0), not a scope change and not a deviation. `blocking` is the only mode the shipped `configs/health_checks.yaml` permits; `diagnostic` is the conservative, honest authority for a framework gate. |
+| J2 | **Gate 2's poor scientific / model scores.** All four rounds collapsed; every score sits below the raw baseline. | **NOT A FAILURE.** §8 states model quality is explicitly not a pass/fail criterion. Requires **no** retry, **no** larger portion, **no** threshold change and **no** scorer change. The frozen scorer stays byte-identical. Anyone tempted to "fix" this outcome is misreading the gate. |
+| J3 | **The `lru_cache` mutation (MUT-B).** It survived. | **CORRECTLY CLASSIFIED as an EQUIVALENT MUTANT** — the renderer is a pure function and the cache key IS its argument, so memoisation cannot change any observable value. It is an invalid mutation, not a test gap. **MUT-B′** (serve the first block forever) is the meaningful behaviour-changing replacement, and it reddened four 13.4-A tests while every golden stayed green (§15.2). |
+| J4 | **The stale implementor budget literal** at `nodes/ml_model_implementor/ml_model_implementor.py:363` (`"GPU budget: <10 GB VRAM, <100M parameters…"`). | **EXPLICIT FOLLOW-UP, OUT OF SCOPE for PR 01b** (§16.4). Deliberately untouched. The detector built in S1-E is directly reusable by whoever next owns the implementor prompt surface. |
+
+## 19. Final status ledger — PR 01b
+
+| Field | Value |
+|---|---|
+| PR | **[#201](https://github.com/Galileo-Sandbox/SIDERIUS/pull/201)**, base `master` |
+| Branch | `feat/generic-framework-step-01b-task-description-join` |
+| **Final EXECUTABLE head** | **`6b259b93`** — every later commit is docs-only, proven with `git diff … -- ':!docs' ':!*.md'` returning empty |
+| **Final PR head** | the docs-only tip of this branch. A commit cannot contain its own SHA, so the exact value is recorded in the PR-scoped handoff and in the merge-gate report, and is independently verifiable via `gh pr view 201 --json headRefOid`. Preceding docs-only tip: `a01615d6` |
+| Implementation commits | `a7ffcccf` (S1-C) · `e67b4651` (S1-C2) · `5dee6c4a` (S1-E) · `6b259b93` (S1-F) |
+| CP1 / CP2 / CP3 | **PASS / PASS / PASS** (§14.3, §15.2, §16.2) |
+| **Checkpoint C** | **PASS** on `de8a5b8a` — production entry, pseudo LLM + pseudo training, 3 s, exit 0 (§17.2) |
+| **Gate 1** | **PASS** on `de8a5b8a` — real gpt-5.5 across all three proposer stages + dummy-tensor check, 15m15s, 197,070 tokens (§17.3) |
+| **Gate 2** | **PASS** on `de8a5b8a` — bounded trial-only chain, 2 iterations × 2 real-training rounds, 33m35s, 581,345 tokens, chain exit 0, all five standard criteria + the PR-specific dump criterion (§17.4) |
+| Terminal unit suite | **8540 passed / 3 skipped / 0 failed**, 493.25 s, at `6b259b93` from a clean tree; `PYTEST EXIT: 0` read from pytest itself; zero `FAILED`/`ERROR` lines |
+| ruff / format | `ruff check .` clean; `ruff format --check .` — 817 files already formatted |
+| **pyright — local** | **UNAVAILABLE.** Node v10.19.0 cannot bootstrap it. Never claimed as green |
+| **pyright — CI** | **AUTHORITATIVE.** "Type check — pyright (strict, blocking)" passed in CI |
+| Merge gate | `local HEAD == PR headRefOid == successful CI headSha`, clean working tree, PR mergeable — verified in the merge-gate report |
+| Context state | **CLOSED / AWAITING OPERATOR ACTION** |
+| Merge | **NOT MERGED. Operator-owned.** |
