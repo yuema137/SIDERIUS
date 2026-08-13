@@ -1406,9 +1406,17 @@ executed model tensor behaviour changed — `train_engine_sandbox.py` and
 `inference_single.py` are byte-untouched since the freeze. §24.9
 re-reviewed against the code at `4819b44a`: no material NO.
 
-- [ ] **CHECKPOINT A** — §5 A1-A8, incl. the F-4 planner surface
-- [ ] **CHECKPOINT B** — §11 ladder: 3-A, 3-B, 3-B-neg, 3-C, 3-D, FX-3,
-      FX-4, 3-E, under §11.1
+- [x] **CHECKPOINT A — PASS.** `tests/unit/{agent,workflows,ml_models,execute_tools,core,guardrails}`
+      at the clean committed head `0634bb56`: **7616 passed / 3 skipped /
+      0 failed**, pytest rc 0, 416 s. Covers A1 (all `pb3_*` goldens
+      UNMODIFIED) through A8, plus the F-4 planner prompt. A6 passes
+      **unmodified** against the fully migrated execution path.
+- [x] **CHECKPOINT B — PASS.** All eight rungs, **229 passed** across
+      their owning modules. 3-A and 3-D landed in
+      `tests/unit/agent/schemas/test_step03_checkpoint_b_ladder.py`, which
+      also machine-checks §11.1 atomicity via a semantic-facet diff (the
+      `_diff_paths` precedent) and asserts the ladder is complete with no
+      multi-tensor or relation rung.
 - [ ] **CHECKPOINT C** — §12's three boundaries, entered at production
       entry points; (ii) asserts LLMBridge call count == 0
 - [ ] **CHECKPOINT D** — targeted regression + static + mutation (§14)
@@ -1886,6 +1894,84 @@ Disposition
   nothing about WHAT changed; this version reds specifically when a
   pre-existing value moves, which is the failure the pin exists for.
 ```
+
+#### CHECKPOINT A — **PASS**
+
+```text
+head     0634bb56 (clean tree)
+command  pytest tests/unit/{agent,workflows,ml_models,execute_tools,core,guardrails}
+result   7616 passed / 3 skipped / 0 failed — pytest rc 0, 416.01 s
+```
+
+| Row | Surface | Evidence |
+|---|---|---|
+| A1 | rendered prompts + contract block | every `pb3_*` golden passes **UNMODIFIED**; `cfg2_forward_contract_block.txt` untouched |
+| A2 | loss verdicts | the 15-cell matrix, unchanged through the M3 re-key |
+| A3 | plugin tolerance tiers | both tiers and their divergence |
+| A4 | builtin forwards | Step-00 numeric baselines |
+| A5 | registry contents | Step-00 |
+| A6 | model-boundary dtype | passes **unmodified** against the fully migrated path; `git diff` over the module is empty |
+| A7 | Step-00 numerics | unchanged |
+| A8 | prior on-disk plugins | 85 load and register |
+| F-4 | planner prompt (`agent/prompts.py:1037`) | bytes exact — Step-07a's surface, held not migrated |
+
+#### CHECKPOINT B — **PASS**
+
+```text
+command  pytest over the eight rungs' owning modules
+result   229 passed — pytest rc 0
+```
+
+| Rung | Owner | Varies |
+|---|---|---|
+| **3-A** | `test_step03_checkpoint_b_ladder.py` | rank / ordered axes, roles preserved |
+| **3-B** | `test_step03_m5_input_dtype_resolution.py` | declared dtype requirement |
+| **3-B-neg** | same | a requirement no supported dtype satisfies |
+| **3-C** | `test_step03_m6_cardinality_derivation.py` | class count |
+| **3-D** | `test_step03_checkpoint_b_ladder.py` | canonical output semantic |
+| **FX-3** | `test_model_io_resolution.py` | preset resolution |
+| **FX-4** | same | preset-vs-contract mismatch |
+| **3-E** | same | contract cardinality vs `ValueEncoding.num_classes` |
+
+**§11.1 atomicity is machine-checked, not asserted.** A semantic-facet
+diff (`_varied_facets`) reports exactly which of eight independent facets
+a contrast moves. Deliberately not a `model_dump()` diff: a raw dump
+conflates facets — moving the class axis changes `axes` AND
+`class_cardinality` AND `output_semantic` at once — so it could never show
+that a rung varies one THING.
+
+```text
+RECONCILIATION with §11's phrasing of 3-D — recorded, not glossed
+
+Frozen text
+  §11 lists 3-D as varying "classifier <-> regressor" while holding
+  "axes, dtype, cardinality" fixed.
+
+Source evidence
+  §8b made the output semantic DERIVED from the output tensor, so a
+  contract cannot change its semantic without changing whether it carries
+  a class axis; cardinality then becomes `None` (not applicable) rather
+  than a different number.
+
+Corrected understanding
+  §11's phrasing presumed output semantics were a separate DECLARATION.
+  Under the derived design the rung still varies ONE semantic axis — does
+  the output carry a class alphabet — and the class axis is that
+  semantic's REPRESENTATION, with cardinality following it to `None` by
+  §4b's deliberate asymmetry.
+
+Why this is NOT the §11.1 STOP
+  §11.1 stops on "a rung that needs TWO axes to be meaningful". 3-D needs
+  one. The facet diff proves it: the entire INPUT side is untouched, and
+  every facet that moves is the class axis or something derived from it.
+  The test states that assertion explicitly rather than leaving the
+  reader to infer it.
+```
+
+3-D also pins the §4a.1 independence claim from the other side: flipping
+the output semantic must NOT move the input dtype admissibility. The
+correlation A6 shows in the current builtin roster (classifier ↔ integer
+input) is a fact about that roster, not a framework law.
 
 ### 24.7 Mutation dossier
 
