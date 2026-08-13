@@ -1388,8 +1388,8 @@ recorded, not silently resolved by picking a third config.
 | **CP0 — BASELINE COMPLETE** | **PASS** | §24.4 |
 | C2 — declarations + anchor / blocking-peek consumers | **DONE** | §24.7 |
 | **CP-C1 — DECLARATIONS LIVE + TIDMAD PARITY** | **PASS** | §24.9 |
-| C3 — campaign trigger + profile-derived all-files | not started | |
-| Checkpoint A | — | |
+| C3 — campaign trigger + profile-derived all-files | **DONE** | §24.10 |
+| **CHECKPOINT A — Stage-A TIDMAD parity complete** | **PASS** | §24.12 |
 | C4 — 4.8-C atomic contrast | not started | |
 | Checkpoint B | — | |
 | PR-02c Checkpoint C | — | |
@@ -1876,3 +1876,120 @@ Broader consequence, recorded for C4:
   `DatasetProfile` — production either uses the shipped `TIDMAD_PROFILE`
   or validates on load.
 ```
+
+---
+
+### 24.10 C3 — the campaign trigger and the topology-derived all-files tier
+
+Two literals removed. They are separate commits' worth of thinking even
+though the diff is small, because they are **different classifications**:
+one is a policy TRIGGER whose authority moves, the other is DERIVED
+topology that should never have been a constant.
+
+**Campaign trigger** (`core/campaign_artifacts.py`). The hardcoded
+`[3, 10, 17]` becomes the bound task's declared health-peek set, resolved
+**once per call** into a local before the gate loop. The import is local
+to the function, mirroring the existing convention in
+`validate_phase1_baseline` and guaranteeing call-time resolution — a
+module-level default would freeze a topology at import (02b §13.9).
+
+**The comparison operator is untouched**: still `requested == declared`,
+exact and ordered. §6.1's trap is that `set()` or `sorted()` would newly
+ENFORCE reordered lists that skip today. C1's D1-c pins that for TIDMAD's
+order and `test_a_reordered_declared_set_still_skips` pins it against a
+contrast declaration; mutation M-C3-3 reds **both**, which is the shape
+that distinguishes "the comparison is exact" from "TIDMAD happens to be
+special-cased".
+
+**All-files tier** (`pearson_dispersion.py`, `per_file_output_std.py`,
+`spectral_peak_ratio.py`). `_DEFAULT_FILE_RANGE: range = range(20)` is
+**deleted** from all three; tier 3 becomes
+`list(range(resolve_dataset_profile().dataset.num_files))`, evaluated
+inside `_resolve_files`. Nothing else about the resolver moves: tier
+ORDER is unchanged, tier 1 still `sorted({int(i) …})`, tier 2 still
+`sorted(keys)`, tier 4 still `[]`, and the blocking resolver's
+`[min(paths)]` / `[0]` is not touched at all. **Only the tier-3 VALUE
+moved**, exactly as §4.2 scopes it.
+
+`spectral_peak_ratio.py` already resolved the profile for
+`sampling_frequency` (`:56`), so its population now comes from the same
+object it was already reading — no new resolution seam. The other two
+gained the import.
+
+**No declared `all_files` field exists**, and
+`test_all_files_is_not_a_declared_field` asserts that mechanically across
+every field name on the profile, so the §12.2 stop condition is guarded
+rather than merely intended.
+
+**Tests added.** Both exist because, under TIDMAD, the migrated code and
+the literal it replaced produce identical answers — the same blind spot
+that let M-C2-1 survive:
+
+- `tests/unit/core/test_step02c_campaign_declared_trigger.py` — under a
+  task declaring `[2, 8, 14, 18]`, that set triggers enforcement **and**
+  TIDMAD's `[3, 10, 17]` stops triggering it. The second half matters on
+  its own: an implementation enforcing on *"declared OR [3,10,17]"* would
+  satisfy the first half alone.
+- `tests/unit/execute_tools/health_checks/test_step02c_derived_all_files.py`
+  — the fallback population tracks `num_files` in **both** directions
+  (7 and 32). `7` alone would still pass against a hidden `min(20, n)`;
+  `32` alone would still pass against a `max`. Together they pin
+  derivation.
+
+The TIDMAD compatibility oracle (`test_health_scope.py:246-251`,
+`set(range(20))`) is **reused unmodified and deliberately not
+duplicated** — R4 upheld.
+
+### 24.11 C3 mutation dossier
+
+| # | Failure class (§19) | Mutation | Observed |
+|---|---|---|---|
+| M-C3-1 | 3 — campaign validator retains literal `[3,10,17]` | `declared_health_peek = resolve_dataset_profile().health_peek_files` → `= [3, 10, 17]` | **CAUGHT** — `2 failed, 26 passed`; both halves of the authority claim red |
+| M-C3-2 | 4 — all-files retains the fixed-20 assumption | `pearson_dispersion.py`: derived range → `range(20)` | **CAUGHT** — `2 failed, 299 passed`; both directions (`fewer`, `more`) red, and only this module's ids |
+| M-C3-3 | campaign POLICY change (§6.1) | `requested == declared` → `sorted(requested) == sorted(declared)` | **CAUGHT** — `2 failed`: the C1 TIDMAD pin **and** the C3 contrast pin. Exactly the pair that separates "exact comparison" from "TIDMAD special-cased" |
+
+No survivors. M-C3-2 was run on one of the three byte-identical
+resolvers: the question is whether the derived population is real, and
+one mutant answers it — three would be one mutant per test (§19).
+
+### 24.12 CHECKPOINT A — Stage-A TIDMAD parity complete: **PASS**
+
+Per-surface against §9, never as one "health behaviour unchanged"
+assertion:
+
+| §9 | Surface | Evidence at this head |
+|---|---|---|
+| A1 | anchor selection identity | `GOLDEN["anchors"] = e025a270e0b1acc1` byte-identical; `test_sample_set_builder.py` assertions unmodified |
+| A2 | anchor population | resolves exactly `[0,10,19]` |
+| A3 | anchors strategy identity + partial-scope rejection | unchanged — `build_sample_set`'s strategy branch, seed derivation and scope guard are untouched |
+| B1 | blocking peek resolution | resolves exactly `[3,10,17]`; **HC-1 golden deep-equal** and **both pinned config shas** (`3b5521…655b74`, `d133a12d…5ef58d`) byte-identical, modules unmodified |
+| B2 | blocking tier-2/tier-3 | `[min(paths)]` / `[0]` — `_multi_file_peek.py` not in the diff at all |
+| C1 | recording full-file population | `set(range(20))` under TIDMAD — `test_health_scope.py:246-251` unmodified |
+| C2 | recording tier-1 beats tier-2 | the C1-captured pin, green across C2 and C3 |
+| D1 | campaign exact-list matrix | C1's full matrix green **unmodified** across the trigger migration |
+| E1 | `apply_monitored_files` override | unchanged; `apply_monitored_files` not in the diff |
+| E2 | `validate_health_scope` | unchanged; not in the diff |
+| F1 | thresholds / verdicts / `gate_role` / `on_fail` | unchanged — no threshold or action value appears in the diff |
+| G1 | `segment_anchors.json` | untouched; `build_anchor_map.py` not in the diff |
+| G2 | SampleSet digests / algorithm / seeds / portions | unchanged — the only edit inside `build_sample_set` is where the anchors branch OBTAINS its list |
+| G3 | DataScope + runtime override precedence | unchanged |
+
+```text
+Validation:
+  command:  .venv/bin/python -m pytest tests/unit/execute_tools/ \
+                tests/unit/core/ tests/unit/agent/tune_ml_hyperparam_agent/ -q
+  purpose:  every Stage-A surface in the §9 table, at the C3 head
+  result:   4236 passed, 3 skipped, 0 failed — 388.34 s (0:06:28)
+            (pytest rc=0, read from the log; the wall time reflects an
+            unrelated 211%/133%-CPU workload sharing this host, not
+            suite cost)
+  focused:  329 passed — campaign + health_checks + the two new C3
+            modules, 1.89 s
+  static:   ruff check .          -> All checks passed
+            ruff format --check . -> 833 files already formatted
+  pyright:  unavailable locally (Node v10.19.0 < 14) — exact-head CI
+```
+
+The scope is the honest affected set — selection, health checks, core
+and the tuner node — and it is **not** the full local suite. That single
+terminal run is reserved for the assembled Step-02 head (§13.2).
