@@ -2,7 +2,7 @@
 
 ## Status
 
-**DESIGN DRAFT — pending the parent's operator freeze. NOT FROZEN.
+**REVISION 2 — pending the parent's operator freeze. NOT FROZEN.
 IMPLEMENTATION NOT AUTHORIZED.**
 
 Parent (governance, ownership, DAG, aggregate acceptance):
@@ -50,6 +50,32 @@ Its risk class is its own: a changed filename or `data_shape_class`
 string invalidates measurement-store keys. That deserves its own review
 and rollback boundary.
 
+## 2a. Internal blocking milestones (why this is ONE PR, not four)
+
+Topology, geometry, encoding and channel identity are four FACETS of one
+capability — "the core data path reads its semantics from the Dataset
+Profile". They share a single injection seam and migrate the same
+consumers in the same files. Splitting them would touch
+`train_engine_sandbox`, `inference_single` and the scoring path three
+more times, each landing a profile field whose siblings are still
+hardcoded.
+
+They are therefore **internal BLOCKING semantic milestones**, each
+separately validated before the next begins:
+
+```text
+M1  profile / topology resolution      -> parity + A1/A2
+M2  geometry + legality                -> parity + B
+M3  encoding declaration reachability  -> parity + >=1 production load path reads it
+M4  channel identity                   -> parity + D
+M5  production consumption             -> training + inference + scoring
+```
+
+**Re-opening clause.** If this child's own source audit shows any
+milestone cannot be reviewed or rolled back coherently inside one PR,
+**STOP and re-open the parent's decomposition decision** rather than
+forcing the frozen plan.
+
 ## 3. Implementation plan (behaviour, not code shape)
 
 Commit boundaries are indicative; the implementer chooses the exact
@@ -69,8 +95,10 @@ decomposition (parent §13a).
    `psd % segmentation_size` check and the time-skill's hardcoded
    "10,000,000" prose (parent §1.3). Semantic commit, not a PR.
 5. Correct the stale comment surface if any is found alongside.
-6. Contrast rungs 4.8-A and 4.8-D as **two separate single-axis
-   fixtures**.
+6. Contrast rungs as **four separate single-axis fixtures**: 4.8-A1
+   (file count), 4.8-A2 (family topology, may build on A1's baseline),
+   4.8-B (sample geometry ≠ 10,000,000), 4.8-D (channel identity). None
+   may vary a second axis.
 
 **Open child-level decision (parent §13b A5).** `DatasetConfig` today
 carries TIDMAD filename patterns as CLASS defaults. This PR must decide
@@ -97,9 +125,9 @@ silently as "generic defaults".
 |---|---|
 | 0 | the three missing baselines captured BEFORE any extraction |
 | A | every §4 criterion byte-identical under TIDMAD |
-| B | 4.8-A and 4.8-D pass, each varying exactly one axis |
+| B | **A1, A2, B and D** pass, each varying exactly one axis. **B is REQUIRED** — the 36-divisor pin proves TIDMAD parity only, never that consumers stop assuming `psd_segment_length = 10,000,000` (parent §8) |
 | C | training engine, inference AND the scoring path consume the resolved profile in production; **at least one production load path reads the ENCODING declaration** (parent §13b A4 — not closable otherwise) |
-| D | affected package tests + mutation dossier + ONE terminal full suite at the final executable head + exact-head CI |
+| D | targeted → affected package → focused integration/mutation → **exact-head CI**. **No local full suite is required by the parent** (parent §9.1). This child MAY run one and must then justify it in writing: it migrates ~13 production modules, which is the plausible blast-radius case |
 
 **Mutations** (each must red, then be restored): delete the injection
 hop so a consumer falls back to the module constant; swap the resolved
@@ -120,6 +148,19 @@ Per the parent §10 and roadmap §17.0, instantiated from
 - **Gate 2 — not run by this child.** It runs ONCE at the Step level on
   the assembled head (parent §10.2).
 - **Checkpoint C** is this child's production-boundary evidence.
+
+## 6a. `scripts/` disposition (parent §3.1)
+
+`scripts/compute_raw_baseline.py` **is in scope**: it regenerates the
+per-file reference artifacts that `nodes/scoring_reference.py` loads,
+and that node builds `_FINE_INDICES = tuple(range(NUM_FILES))`. If the
+node migrates to the profile and its generator does not, the two
+silently disagree about how many files exist.
+
+`scripts/score_tidmad_official_wavenet.py` and
+`scripts/score_tidmad_official_banded.py` are **OUT** — audited as
+having zero production-graph imports and no launcher reference:
+legacy/peripheral compatibility residue.
 
 ## 7. Stop conditions
 

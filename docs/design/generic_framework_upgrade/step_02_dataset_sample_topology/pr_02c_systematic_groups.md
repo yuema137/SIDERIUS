@@ -2,13 +2,31 @@
 
 ## Status
 
-**DESIGN DRAFT — pending the parent's operator freeze. NOT FROZEN.
+**REVISION 2 — pending the parent's operator freeze. NOT FROZEN.
 IMPLEMENTATION NOT AUTHORIZED.**
 
 Parent: [`../step_02_dataset_sample_topology.md`](../step_02_dataset_sample_topology.md).
 
-Position in the DAG: **after 02a** (the declaration lives on the
-profile). **Independent of 02b** — either order.
+Position in the DAG: **after 02a** semantically (the declaration lives
+on the profile). It does not technically depend on 02b — but the
+governance order is FROZEN as `02a → 02b → 02c` because **02c is the
+Step-02 FINALIZER** (parent §6.2).
+
+## 0. Finalizer duties (in addition to this child's own scope)
+
+Once all three executable capabilities are present, 02c owns:
+
+- assembled Step-02 **Checkpoint C** reconciliation;
+- the ONE Step-level **Gate 2** — real LLM + real training, trial-only
+  smoke, `--llm_config llm_configs/openai_tiered_pro.json`;
+- the single **local full unit suite** at the assembled head;
+- **Checkpoint E** — §15.1 row, §14 ledger rows, folder README, parent
+  status;
+- Step-02 closeout.
+
+This is governance, not a technical dependency. It exists so aggregate
+evidence has a named owner instead of falling to whichever child merges
+last.
 
 ## 1. Scope
 
@@ -57,7 +75,7 @@ no owner: a *validator* branches on an exact list value.
 | A | every §3 criterion identical under TIDMAD |
 | B | **4.8-C group semantics only** — TIDMAD shape, a DIFFERENT declared group map; anchors and peeks follow the declaration |
 | C | health gates evaluate a real round through the declared map, and the campaign validator runs on a real record |
-| D | affected package (health + core) + mutation dossier + terminal suite + exact-head CI |
+| D | targeted → affected package (health + core) → focused integration/mutation → **exact-head CI**; then, as FINALIZER, the ONE local full unit suite at the assembled Step-02 head |
 
 **Mutations**: change the declared map and confirm anchors AND peeks
 both follow (a literal left behind reds only one); revert
@@ -68,10 +86,13 @@ equivalence pin reds.
 
 - **Gate 1 — NOT REQUIRED** (roadmap §17.0; assignment table: config /
   loader-renderer → Unit only).
-- **Gate 2 — not run by this child**; once at Step level. Note the
-  Step-level Gate 2 is the run where a wrong group map would surface as
-  health gates judging the wrong files, so this child's correctness is
-  materially confirmed there.
+- **Gate 2 — RUN BY THIS CHILD as FINALIZER**, once, on the assembled
+  Step-02 head. Fitting: Gate 2 exercises HealthGates, and this is the
+  child that changes which files those gates judge. Its Step-02 PASS
+  criteria are the parent §10.2 table's, including the precise
+  SampleSet criterion (compare against the deterministic reference
+  resolution for Gate 2's ACTUAL inputs — never a digest captured under
+  different arguments).
 
 ## 6. Convergence note
 

@@ -2,8 +2,17 @@
 
 ## Status
 
-**DESIGN DRAFT — READY FOR OPERATOR REVIEW (2026-08-13).
-NOT FROZEN. IMPLEMENTATION NOT AUTHORIZED.**
+**REVISION 2 — READY FOR OPERATOR FREEZE (2026-08-13).
+IMPLEMENTATION NOT AUTHORIZED.**
+
+Revision 2 applies the operator review of 2026-08-13. The three-child
+decomposition is APPROVED IN PRINCIPLE; no fourth behavioural child is
+added. Corrections applied: **02c designated Step FINALIZER**;
+**4.8-B promoted to REQUIRED** (the deferral was a logical gap — see
+§8); **4.8-A split into atomic A1/A2**; the Gate-2 SampleSet criterion
+made precise; the per-child local-full-suite requirement removed as an
+Evidence-Economy violation; `scripts/` ownership decided by measured
+reachability; and the §13/§17.0 documentation contradiction reconciled.
 
 Design branch base: `master` at `2e716dd2` (Step 01 closed — PR #199
 `39f89f52`, PR #200 `adbc835d`, PR #201 `fe05f5f7`, all ancestors;
@@ -256,8 +265,27 @@ explicitly deferred rather than falsely claimed clean.
 | Resolved SampleSets | runtime state, not config |
 | `data_shape_class` VALUE | Step 02 supplies the geometry it is derived FROM; the key mechanism is runtime-control's (§14) |
 | Launcher / sandbox residue | Steps 10 / 11 |
+| `scripts/` constant consumers | **decided by measured reachability, not by directory** — see §3.1 |
 
 ---
+
+### 3.1 `scripts/` ownership — decided by reachability, audited individually
+
+Default: OUT of Step 02. But "it lives under `scripts/`" is not a
+reason — reachability is. Each of the three bare-constant consumers was
+audited against the production graph (`workflows/`, `nodes/`, `core/`,
+`execute_tools/`, `agent/`) and the chain launchers:
+
+| Script | Reachability evidence | Classification | Step-02 disposition |
+|---|---|---|---|
+| `scripts/score_tidmad_official_wavenet.py` | zero imports from the production graph; not referenced by `sdsc_submission_scripts/` or any chain launcher | **legacy / peripheral compatibility residue** | **OUT.** Step 02 does not clear it |
+| `scripts/score_tidmad_official_banded.py` | same — zero production imports, no launcher reference | **legacy / peripheral compatibility residue** | **OUT** |
+| `scripts/compute_raw_baseline.py` | **reachable from production**: `nodes/scoring_reference.py:34` names it in the operator-facing regeneration hint for the reference artifacts that node LOADS, and `execute_tools/scoring_helpers.py:62` documents a parity relationship with its `_per_file_log_score` | **supported auxiliary PRODUCER** of a production-consumed artifact | **IN scope for 02a.** `nodes/scoring_reference.py` builds `_FINE_INDICES = tuple(range(NUM_FILES))` to index per-file reference artifacts; if the node migrates to the profile and its generator does not, the two silently disagree about how many files exist |
+
+The rule this establishes, for later steps to reuse: **a script is
+Step-02's if production reads what it writes or production points
+operators at it; otherwise it is compatibility residue.** Do not assign
+`scripts/` to Steps 10/11 wholesale.
 
 ## 4. FX-3 / FX-4 disposition — ROUTED TO STEP 03, with evidence
 
@@ -343,17 +371,37 @@ split is not one-PR-per-concept.
 ### 6.2 The three children
 
 ```text
-        02a  Dataset Profile injection
-        (topology · geometry+legality · encoding declaration)
-                    |
-        +-----------+-----------+
-        |                       |
-   02b Selection            02c Systematic
-   & SampleSet              groups
+   SEMANTIC dependency          GOVERNANCE / merge order
+   -------------------          ------------------------
+        02a                            02a
+         |                              |
+    +----+----+                        02b
+    |         |                         |
+   02b       02c                       02c  <- Step FINALIZER
 ```
 
-DAG: `02a → 02b`, `02a → 02c`; **02b and 02c are independent of each
-other** and may land in either order.
+**Semantic dependency**: 02b and 02c each require only 02a. They do not
+depend on each other.
+
+**Governance order is FROZEN as `02a → 02b → 02c`** even so, because
+aggregate evidence must have a named owner. 02c is the **Step
+FINALIZER** and owns, once all three executable capabilities are
+present:
+
+- assembled Step-02 Checkpoint C reconciliation;
+- the ONE Step-level Gate 2;
+- the single local full unit suite at the assembled head;
+- Checkpoint E — §15.1 row, §14 ledger rows, folder README, this parent;
+- Step-02 closeout.
+
+This is a governance designation, NOT a claim that 02c technically needs
+02b. The alternative — "whichever child merges last does it" — leaves
+aggregate evidence dynamically owned and therefore owned by nobody. A
+fourth closeout-only PR was considered and rejected as ceremony.
+
+Putting Gate 2 in 02c is also natural on the merits: Gate 2 exercises
+HealthGates, and 02c is the child that changes which files those gates
+judge.
 
 ---
 
@@ -377,12 +425,12 @@ TIDMAD PARITY SURFACE: profile deep-equality; the 36-entry legality
   encoding-produces-identical-tensors (new pin); channel resolution
   producing byte-identical input/target tensors; rendered proposer and
   planner prompt bytes.
-CONTRAST AXIS: 4.8-A topology only (3 files, single family, TIDMAD
-  geometry otherwise unchanged) AND 4.8-D channel identity only
-  (TIDMAD shape, channels renamed) — two SEPARATE single-axis fixtures,
-  never combined.
-CHECKPOINT: local A (parity) + local B (4.8-A) + local C (engines read
-  the resolved profile in production).
+CONTRAST AXIS: FOUR separate single-axis fixtures, never combined —
+  4.8-A1 (file count), 4.8-A2 (family topology), 4.8-B (sample
+  geometry), 4.8-D (channel identity).
+CHECKPOINT: local A (parity) + local B (A1, A2, B, D) + local C
+  (engines/inference/scoring read the resolved profile in production,
+  including at least one load path reading the ENCODING declaration).
 DEPENDS ON: nothing beyond merged Step 01.
 CAN MERGE AND BE USEFUL ALONE?: YES. After 02a the data path is
   profile-driven end to end; selection and groups still hardcode, which
@@ -392,6 +440,19 @@ WHY A PR AND NOT A SEMANTIC COMMIT: it converts ~13 production modules
   own irreversible risk class — a changed filename or shape-class string
   invalidates measurement-store keys. That needs its own review and
   rollback boundary.
+WHY NOT SPLIT FURTHER (encoding / channel identity as a 4th PR):
+  topology, geometry, encoding and channel identity are not four
+  capabilities — they are four facets of ONE capability, "the core data
+  path reads its semantics from the Dataset Profile". They share a
+  single injection seam and migrate the same consumers in the same
+  files; splitting them would mean touching train_engine_sandbox,
+  inference_single and the scoring path three more times, each time
+  landing a profile field whose siblings are still hardcoded. They are
+  therefore internal BLOCKING semantic milestones of 02a, not child PRs
+  (§6.3). **Re-opening clause**: if 02a's own source audit shows any one
+  of them cannot be reviewed or rolled back coherently inside the PR,
+  STOP and re-open this decomposition decision rather than forcing the
+  frozen parent plan.
 ```
 
 **CHILD 02b — Selection & SampleSet semantics**
@@ -407,10 +468,13 @@ PRODUCTION CONSUMER: sample_set_builder + the tuner's formal/trial
   sample-set construction, in the same PR.
 TIDMAD PARITY SURFACE: the five sha16 digests + first-five segment
   indices, byte-identical; the JSON round-trip pin it captures first.
-CONTRAST AXIS: 4.8-A re-used THROUGH the selection path (a different
-  topology must yield a correctly shaped SampleSet). No new axis.
-CHECKPOINT: local A (digests) + local C (tuner builds a real run's
-  sample set from the profile).
+CONTRAST AXIS: the ESTABLISHED topology contrast (A1/A2) re-used
+  THROUGH the selection path. No new axis.
+CHECKPOINT: local A (digests) + **local B = topology contrast
+  propagated through the SampleSet selection path** (a contrast topology
+  must yield a correctly shaped SampleSet — this IS 02b's Stage-B proof,
+  not a formality) + local C (tuner builds a real run's sample set from
+  the profile).
 DEPENDS ON: 02a (needs a profile to inject).
 CAN MERGE AND BE USEFUL ALONE?: YES, given 02a.
 WHY A PR AND NOT A SEMANTIC COMMIT: its failure class is unique and
@@ -438,6 +502,9 @@ CONTRAST AXIS: 4.8-C group semantics only (TIDMAD shape, DIFFERENT
   declared group map — proves anchors/peeks read groups, not literals).
 CHECKPOINT: local A (identity) + local B (4.8-C) + local C (health gates
   evaluate a real round through the declared map).
+FINALIZER DUTIES (governance, §6.2): assembled Checkpoint C
+  reconciliation; the ONE Step-level Gate 2; the single local full unit
+  suite at the assembled head; Checkpoint E; Step-02 closeout.
 DEPENDS ON: 02a (declaration lives on the profile). INDEPENDENT of 02b.
 CAN MERGE AND BE USEFUL ALONE?: YES.
 WHY A PR AND NOT A SEMANTIC COMMIT: different consumers (health +
@@ -475,40 +542,89 @@ real.
 
 ---
 
-## 8. Atomic contrast ladder — MINIMUM subset
+## 8. Atomic contrast ladder — REQUIRED set
 
-§4.8 offers four candidate rungs. This design selects **three**, and
-justifies the single omission. (The first draft selected two; the §1.6
-audit re-selected 4.8-D.)
+§4.8 offers four candidate rungs. Revision 2 requires **all four
+concerns**, with topology refined into two atomic sub-rungs. Only the
+"minimum subset" framing of revision 1 is withdrawn.
 
-| Rung | Selected? | Owner | Justification |
+> **Previous assumption (revision 1):** 4.8-B (sample geometry) could be
+> deferred, because `valid_segmentation_sizes()` already exists as a
+> single authority and Step 00 froze its exact 36-divisor output.
+> **Operator finding (2026-08-13) — a real logical gap:** those two
+> facts prove only that *under TIDMAD's `psd_segment_length =
+> 10,000,000` the helper still behaves as before*. They prove **nothing**
+> about whether consumers stop assuming 10,000,000 when the profile says
+> otherwise. The audit itself found two consumers that do assume it —
+> the tuner's inline `psd % segmentation_size` check and the time-skill's
+> hardcoded "next valid divisor of 10,000,000" prose (§1.3).
+> **Corrected understanding:** Step 02's final effect explicitly claims
+> that *"a different decomposition length changes behaviour through the
+> profile alone"*. A claim of that form REQUIRES a contrast proof.
+> Asserting geometry genericity while only ever testing 10M is exactly
+> the gap the atomic ladder exists to close.
+> **Consequence:** **4.8-B is REQUIRED**, owned by 02a.
+
+| Rung | Required? | Owner | What it varies / proves |
 |---|---|---|---|
-| **4.8-A topology only** (3 files, single family, TIDMAD geometry) | **YES** | 02a (declaration + data path); re-used by 02b through the selection path | The headline abstraction claim. Without it, "profile-driven" is unproven |
-| **4.8-C group semantics only** (TIDMAD shape, different declared group map) | **YES** | 02c | The ONLY rung that can prove anchors/peeks read a declaration rather than a literal — exactly the `campaign_artifacts.py:57` defect class |
-| 4.8-B sample geometry only (non-10M decomposition length) | **NO — deferred** | — | The legality authority already exists and is already pinned by an exact 36-divisor list; a geometry contrast would re-prove a helper that Step 00 already froze. Reconsider only if 02a's audit finds a consumer that derives geometry independently |
-| **4.8-D channel identity only** (TIDMAD shape, channels RENAMED — e.g. truth at a different in-file path) | **YES — re-selected after audit** | 02a | §1.6: `channel0001`/`channel0002` are hardcoded at ~15 production sites with no declaration. Only a rename contrast can prove the loaders read a declaration rather than the literal. **Scoped to channel IDENTITY**; truth ABSENCE (an unsupervised dataset with no clean channel) stays with Steps 03/06 because it changes what the model must output and what can be scored |
+| **4.8-A1 — file count / index space only** | **YES** | 02a | `num_files` ≠ 20, the two-family structure UNCHANGED. Isolates count from family shape, so a failure names one cause |
+| **4.8-A2 — file-family topology only** | **YES** | 02a | family structure changes; count and geometry held at the A1-established baseline. May build on A1's proven baseline (the "later rung may build on a proven earlier rung" rule) |
+| **4.8-B — sample geometry only** | **YES** | 02a | `psd_segment_length` / decomposition geometry ≠ 10,000,000, other axes fixed. Proves the affected consumers read the profile-owned legality and geometry rather than the 10M literal. Uses the EXISTING `DatasetConfig` authority — no new geometry abstraction |
+| **4.8-C — group semantics only** | **YES** | 02c | TIDMAD shape, a DIFFERENT declared group map. The only rung that can prove anchors/peeks read a declaration rather than a literal |
+| **4.8-D — channel identity only** | **YES** | 02a | TIDMAD shape, channels renamed. Proves the loaders read the channel declaration rather than `channel0001`/`channel0002` (§1.6) |
 
-Each selected rung varies exactly ONE axis against the TIDMAD baseline.
-No fixture changes topology AND geometry AND groups together.
+**Atomicity is binding.** No rung changes more than its named axis. In
+particular neither A1 nor A2 may touch geometry, encoding, channel
+identity or groups. Exact fixture values are implementation-time.
 
----
+**02b owns no new axis** — it re-uses the ESTABLISHED topology contrast
+**through the SampleSet selection path**, which is its local
+Checkpoint-B evidence (§9). Re-using a proven axis through a second
+consumer is Stage-B proof, not a new rung.
+
+Nothing is deferred from this ladder.
 
 ## 9. Checkpoint model (§17)
 
-| CP | Step-level definition | Advanced by |
+| CP | Step-level definition | Owner / closing evidence |
 |---|---|---|
-| **0 BASELINE AVAILABLE** | Profile deep-equality, legality list, filenames, `data_shape_class`, the five SampleSet digests and anchors identity are pinned BEFORE any extraction | **Already largely MET by Step 00.** Gaps (§5): validation-name-vs-inlined-literal, encoding-tensor pin, SampleSet JSON round-trip, group literal-vs-declaration. Each captured by its owning child first |
-| **A EXTRACTION PARITY** | Every §5 criterion holds byte-identically under TIDMAD | 02a (profile/geometry/encoding), 02b (digests), 02c (group identity) |
-| **B GENERIC CONTRAST** | 4.8-A and 4.8-C pass, each single-axis | 02a (4.8-A), 02c (4.8-C); 02b re-uses 4.8-A |
-| **C LIVE INTEGRATION** | The RESOLVED profile is consumed in production by the training engine, inference, the scoring path, the sample-set builder and the health checks — not by tests only | 02a (engines/inference/scoring), 02b (builder+tuner), 02c (health+campaign) |
-| **D REGRESSION** | Full unit suite at each child's final executable head from a clean tree + mutation dossier + exact-head CI | each child |
-| **E ROADMAP SYNC** | §15.1 row, §14 ledger rows, folder README, this parent's status | final child, before Step 03 opens |
+| **0 BASELINE AVAILABLE** | the behaviour being extracted is pinned BEFORE extraction | **Largely MET by Step 00** (profile deep-equality, legality list, filenames, `data_shape_class`, five SampleSet digests, anchors identity). Gaps (§5) are captured FIRST by their owning child: 02a — validation-name, encoding-tensor, channel-resolution; 02b — SampleSet JSON round-trip, packing; 02c — the three group-equivalence pins |
+| **A EXTRACTION PARITY** | every §5 criterion holds byte-identically under TIDMAD | 02a (profile/geometry/encoding/channel), 02b (five digests), 02c (group identity) |
+| **B GENERIC CONTRAST** | the REQUIRED rungs land, each varying exactly one axis: **A1, A2, B, C, D** | 02a owns **A1, A2, B, D**; 02c owns **C**; 02b's local B is the established topology contrast propagated through the SampleSet selection path |
+| **C LIVE INTEGRATION** | the RESOLVED profile is consumed in production, not by tests only | 02a — training engine, inference AND the scoring path, with ≥1 load path reading the ENCODING declaration; 02b — tuner sample-set construction; 02c — health gates + campaign validator. **02c reconciles the assembled Step-level Checkpoint C** |
+| **D REGRESSION** | see the cadence below | each child locally + **exact-head CI on every child**; the single local full suite is the FINALIZER's |
+| **E ROADMAP SYNC** | §15.1 row, §14 ledger rows, folder README, this parent | **02c (finalizer)**, before Step 03 opens |
 
-Blocking rule: no child proceeds to its contrast rung before its parity
-checkpoint passes, and **later evidence never excuses a failed earlier
-invariant**.
+### 9.1 Checkpoint-D cadence — Evidence Economy is binding
 
----
+Revision 1 required a local full unit suite at every child's final head.
+That was an Evidence-Economy violation: three ~10-minute 8k-test runs
+buying compatibility evidence that **CI already provides on every PR**.
+Corrected:
+
+```text
+per child:
+  targeted tests
+    -> affected package tests
+    -> focused integration / mutation
+    -> exact-head CI                      <- broad compatibility, every child
+
+assembled final Step-02 executable head (02c):
+  ONE local full unit suite
+    -> Gate 2
+    -> static (ruff / format)
+    -> exact-head CI
+```
+
+**Escape hatch, per child, justified in writing**: a child MAY run a
+local full suite if its own detailed design argues its blast radius
+makes narrower evidence insufficient — 02a, which migrates ~13
+production modules, is the plausible case. The parent does not mandate
+it; the child justifies it or does without.
+
+Blocking rule unchanged: no child proceeds to its contrast rungs before
+its parity checkpoint passes, and **later evidence never excuses a
+failed earlier invariant**.
 
 ## 10. Gate ladder — instantiated from the standard's assignment table
 
@@ -569,17 +685,19 @@ exercises exactly that path.
 | Unique failure class over Checkpoint C | Checkpoint C proves the profile REACHES production with a stub bridge; Gate 2 proves the real multi-round training/inference/scoring loop still consumes it correctly on real files across iterations — wrong filename resolving to the WRONG file, truncated/over-read tensors from a wrong segment count, shifted class indices from a wrong encoding declaration, or a SampleSet that scores a different sample population |
 | Boundary | production entry → real workflow → real LLM → real training → real inference → real scoring |
 | Real LLM / real training | **YES / YES** — per the standard's definition of the tier |
-| Shape | the standard's **trial-only smoke**: `--no-force_formal_round` (Step 02 touches no formal-admission logic), partial scope with matching `--health_gate_files`, cold start (no `--seed_paths`), `--trial_portion 0.02`, `--trial_time_budget_minutes 5`, `--formal_time_budget_minutes` as a safety net, `--llm_config` per standing operator policy |
+| Shape | the standard's **trial-only smoke**: `--no-force_formal_round` (Step 02 touches no formal-admission logic), partial scope with matching `--health_gate_files`, cold start (no `--seed_paths`), `--trial_portion 0.02`, `--trial_time_budget_minutes 5`, `--formal_time_budget_minutes` as a safety net, and **`--llm_config llm_configs/openai_tiered_pro.json`** under standing production-validation policy (never `openai_tiered_v1`, never a substituted config) |
 | Budget | ~30-45 min, ~$1-1.5 (Step-01 precedent measured 33m35s) |
-| PASS | the standard's HealthGate-framework criteria verbatim (chain exits 0; every round records a `gate_action`; every `denoising_score` finite or accounted; no phantom `5.5762667`; ≥1 HealthGate evaluation) **plus two Step-02 criteria**: the resolved profile recorded in the run artifacts deep-equals TIDMAD, and the produced SampleSet matches the pinned identities |
-| NOT pass/fail | denoising quality, beating a baseline, any score threshold |
+| PASS | the standard's HealthGate-framework criteria verbatim (chain exits 0; every round records a `gate_action`; every `denoising_score` finite or accounted; no phantom `5.5762667`; ≥1 HealthGate evaluation) **plus two Step-02 criteria**: (1) the resolved profile recorded in the run artifacts deep-equals TIDMAD; (2) **for Gate 2's ACTUAL inputs** — its profile, scope, seed, portion and strategy — the production-generated SampleSet equals the deterministic reference resolution computed for that same input tuple. A pinned Step-00 digest is compared ONLY when its input tuple matches exactly. **Never compare a hash across different arguments**: Gate 2 runs a partial scope at `trial_portion=0.02`, which need not correspond to any of the five existing digests (captured at `seed=42, portion=0.05`) |
+| NOT pass/fail | denoising quality, beating a baseline, any score threshold. **No new scientific-quality threshold is introduced by Step 02** |
 | FAIL/STOP | any file resolved by a different name; any SampleSet digest drift; any encoding shift; chain incompletion traceable to profile resolution |
 | Artifacts | chain log, per-round records, resolved-profile artifact, exact executable HEAD |
 | Position | after Checkpoint C, on the assembled Step-02 head — ONE chain, once |
 
-**Assigned to the Step, not to each child.** Running it three times
-would triple cost for the same failure class. Children 02a/02b/02c close
-their own Checkpoints A/B/C/D; Gate 2 runs once on the assembled head.
+**Owned by the FINALIZER, 02c (§6.2).** Running it three times would
+triple cost for the same failure class. Children 02a and 02b close their
+own Checkpoints A/B/C/D; 02c closes its own AND runs the one Step-level
+Gate 2 on the assembled head. Ownership is named, never "whoever merges
+last".
 
 ### 10.3 Checkpoint C instantiation — pseudo-LLM production-entry run
 
@@ -605,14 +723,17 @@ the data-reading half must be real.
 
 Binding: test by RISK and UNIQUE EVIDENCE VALUE, not by code surface.
 
-Inner loop per child: directly affected tests → affected package
+Per child: directly affected tests → affected package
 (`tests/unit/execute_tools/`, plus the tuner/health package for 02b/02c)
-→ focused mutation → local checkpoints → Checkpoint C → Gate 2 ONCE on
-the assembled head → **ONE** terminal full unit suite at the final
-executable head → static → exact-head CI.
+→ focused integration / mutation → **exact-head CI**. CI is the broad
+compatibility gate on every PR, so compatibility evidence is never lost.
+
+At the assembled final head, owned by the finalizer 02c: **ONE** local
+full unit suite → Gate 2 → static → exact-head CI.
 
 The >8k suite is a terminal compatibility gate, never an inner-loop
-default.
+default and never a per-child ritual (§9.1). A child may add one only
+by justifying its blast radius in its own design.
 
 ### 11.1 New test families — each with its unique failure class
 
@@ -623,7 +744,9 @@ default.
 | Injection reachability | 02a | a consumer keeps importing the module constant while a profile argument sits unused — the "beautiful profile consumed only by tests" failure |
 | SampleSet JSON round-trip boundary | 02b | key-coercion divergence between producer and consumer; today every consumer re-ints differently with no shared pin |
 | Group declaration equivalence | 02c | a declared map that does not reproduce `[0,10,19]` / `[3,10,17]` / `range(20)` |
-| 4.8-A / 4.8-C contrast rungs | 02a / 02c | the abstraction does not actually vary with the declaration |
+| Contrast rungs A1 / A2 / B / D | 02a | the abstraction does not actually vary with the declaration — topology (count, family), geometry (`psd_segment_length` ≠ 10M) and channel identity |
+| Contrast rung C | 02c | anchors/peeks read a literal rather than the declared group map |
+| Topology contrast through selection | 02b | selection keeps TIDMAD's 20×200 shape under a contrast topology |
 
 ### 11.2 Retirement candidates — recorded, NOT pre-approved
 
@@ -658,7 +781,17 @@ the replacement preserves each.
 
 ## 13. Corrections this design proposes to the overall roadmap
 
-Recorded here; the roadmap is edited at Checkpoint E, not now.
+Recorded here; ordinary Step-02 status and correction sync waits until
+**Checkpoint E**, owned by the finalizer 02c.
+
+**Explicit exception, operator-approved 2026-08-13.** Two CROSS-CUTTING
+governance rules were added to the overall roadmap at DESIGN time rather
+than at Checkpoint E — §17.0's gate-authority rule and its companion
+source-grounded-ownership rule. They are not Step-02 status; they govern
+every future step's design, so deferring them to this Step's closeout
+would let the next design repeat the mistake that produced them. The
+operator approved both amendments explicitly. Everything else in this
+section still waits for Checkpoint E.
 
 1. **§4.7's "a NEW pin, none exists"** is stale — Step 00 landed the
    profile pin. Checkpoint 0 is largely MET.
@@ -707,24 +840,45 @@ correction is folded in above.
 | **A-NEW** | Did we DEFER a rung on an unaudited assumption? | **YES — the most serious finding.** The first draft deferred 4.8-D to Steps 03/06 by reasoning about what "truth availability" means, without opening the loaders. The source shows the truth channel is addressed by a hardcoded in-file path at ~15 production sites — a dataset fact, not a model fact | 4.8-D re-selected in its channel-identity form; channel identity added to 02a's ownership; §1.6 records the correction. **Process consequence: every ownership and every rung decision in this document must cite source, not reasoning about a concept name** |
 | A3, A6, A7, A8, A10, A11, A13-A16, A18 | portions/seed leakage · refactor-only child · unlanded-sibling dependency · Stage A/B bundling · hash invalidation · launcher claims · gate necessity · gate cost · duplicate tests · FX routing | no confirmed finding | §3 excludes runtime state; §6.3 rejects the refactor-only candidates; the DAG is acyclic with 02b ∥ 02c; §7 states the staging rule; `data_shape_class` and the five digests are pinned; Steps 10/11 residue explicitly deferred; §10 is table-grounded; Gate 2 runs once at Step level; §11.2 defaults to KEEP; FX-3/FX-4 routed to Step 03 + D13 |
 
-## 14. Remaining operator decisions
+## 13c. Adversarial RE-review (revision 2, narrow — 7 questions)
 
-| # | Question | Recommendation |
+Scoped exactly as the operator directed. No new repository audit.
+
+| # | Question | Verdict |
 |---|---|---|
-| **Q1** | Accept the THREE-child split (02a → 02b, 02a → 02c)? | **Accept.** Three distinct capabilities, consumers, oracles and failure classes; two candidates rejected to avoid one-PR-per-concept |
-| **Q2** | Accept **Gate 1 NOT REQUIRED / Gate 2 REQUIRED once at the Step level**, with the pseudo-LLM production-entry run serving as Checkpoint C rather than as a gate? | **Accept.** Both follow the standard's assignment table directly: Step 02's commit types are "config/YAML/schema-only" and "new loader/renderer" (Unit only), and "Checkpoint (end of feature) → Gate 2". Gate 1 flips to REQUIRED for any child that changes prompt bytes. An earlier draft of this design proposed a reduced "pseudo LLM + real training" tier instead of Gate 2; that was withdrawn — the pseudo flags are the dual-mode convenience mechanism, not a gate tier |
-| **Q3** | Accept rungs 4.8-A, 4.8-C and 4.8-D (channel identity), deferring only 4.8-B? | **Accept.** 4.8-D was deferred in the first draft on an unaudited assumption; the source shows channel identity is an undeclared dataset fact at ~15 sites, so the rung is required. 4.8-B stays deferred because the legality authority already exists and Step 00 froze its exact 36-divisor output |
-| **Q4** | Confirm FX-3/FX-4 → Step 03 (not Step 02)? | **Accept** — `ForwardContract` has no dataset concepts; building a preset resolver here would create a second authority |
-| **Q5** | May 02a change the `scripts/` bare-constant consumers, or are they §12/§9 residue? | Operator call. Recommendation: leave them; they are launcher-adjacent and Step 10/11-owned |
+| 1 | Is 02a still a coherent single PR after gaining rung B? | **YES.** A1/A2, B and D all exercise the SAME injection seam through the SAME migrated consumers; B adds a fixture, not a second migration. The §6.2 note now states why encoding and channel identity are internal milestones, and a **re-opening clause** commits the child to STOP and re-open the decomposition if its own audit shows one cannot be reviewed or rolled back coherently inside the PR |
+| 2 | Is each contrast truly one-axis? | **YES, and this improved.** Revision 1's 4.8-A conflated file count with family cardinality; it is now A1 (count) and A2 (family), with A2 permitted to build on A1's proven baseline. B, C and D were already single-axis. Atomicity is stated as binding, with the explicit prohibition on touching geometry/encoding/channel/groups inside A1 or A2 |
+| 3 | Does any final-effect claim lack a contrast proof? | **NO — this was the revision's most important fix.** §2 claims topology, geometry, encoding, channel identity and groups all resolve from the profile. Mapping: topology → A1/A2; geometry → **B (was missing)**; groups → C; channel identity → D. Encoding remains proved by a *parity* pin plus the Checkpoint-C reachability condition rather than a contrast rung — recorded as the one deliberate asymmetry, justified because a wrong encoding declaration is caught byte-exactly by the tensor pin, and an encoding contrast would require a fixture dataset in a different dtype, which is Step-03 territory |
+| 4 | Does Gate 2 have unique evidence over Checkpoint C? | **YES.** Checkpoint C proves the profile REACHES production with a stub bridge. Gate 2 proves the real multi-round training → inference → scoring loop consumes it correctly on real files. The §10.2 table names four failure modes reachable only there |
+| 5 | Is aggregate Gate/E ownership unambiguous? | **YES, now.** Revision 1 left it to "whichever child merges last". 02c is named FINALIZER, governance order is frozen `02a → 02b → 02c`, and its duties are enumerated in both §6.2 and its child design |
+| 6 | Does the test cadence violate Evidence Economy? | **It did; fixed.** Revision 1 required a local full suite per child — three ~10-minute runs duplicating what CI already does per PR. §9.1 now runs targeted → package → integration/mutation → exact-head CI per child, ONE local full suite at the assembled head, with a written-justification escape hatch |
+| 7 | Did Step-03 / Deliverable / Step-10/11 ownership leak back in? | **NO.** Deliverable: §1.7 A1's raw-vs-denoised boundary inside `scoring_utils.py` stands, and 02a lists a denoised filename in the diff as a STOP. Step 03: FX-3/FX-4 routed out; truth ABSENCE explicitly excluded while channel IDENTITY is kept; encoding DERIVATION stays Step 03's. Steps 10/11: `scripts/` is now classified by measured reachability (§3.1) rather than assigned wholesale — which moved ONE script INTO 02a on evidence, and that is a correction, not a leak |
 
----
+**Residual risk accepted and named**: the encoding declaration has a
+parity pin and a reachability condition but no contrast rung (row 3
+above). If the operator wants symmetry, the rung would be an
+encoding-only fixture in a different dtype — but that fixture's
+consumer semantics belong to Step 03, so it is recorded as a Step-03
+candidate rather than added here.
+
+## 14. Operator decisions — RECORDED (2026-08-13)
+
+| # | Question | Decision |
+|---|---|---|
+| **Q1** | Three-child split? | **ACCEPTED, with 02c designated FINALIZER.** No fourth behavioural child. 02a stays one PR with internal blocking milestones |
+| **Q2** | Gate ladder? | **ACCEPTED.** Gate 1 NOT REQUIRED by default (flip condition: any child changing LLM-facing prompt bytes or proposal-affecting schema takes Gate 1 per the standard). Gate 2 REQUIRED ONCE at Step level, `--llm_config llm_configs/openai_tiered_pro.json`. Checkpoint C is pseudo-LLM production-entry evidence, never presented as a Gate. No invented intermediate tier |
+| **Q3** | Contrast rungs? | **REVISED.** Required set is **A1 / A2 (topology, atomic) + B (geometry) + C (groups) + D (channel identity)**. 4.8-B's deferral was a logical gap and is withdrawn (§8) |
+| **Q4** | FX-3 / FX-4 → Step 03? | **ACCEPTED.** Step 02 keeps only the interface obligation: its geometry/encoding declaration must be resolvable and inspectable so Step 03 can cross-validate a preset against it |
+| **Q5** | `scripts/` ownership? | **DECIDED BY REACHABILITY** (§3.1). The two `score_tidmad_official_*` scripts are legacy/peripheral — OUT. `compute_raw_baseline.py` is a supported auxiliary producer of a production-consumed artifact — IN scope for 02a |
+
+**No operator question remains open.** The design is ready to freeze.
 
 ## 15. Definition of Done (Step level)
 
-- [ ] 02a, 02b, 02c merged in DAG order
+- [ ] 02a, 02b, 02c merged in the frozen governance order `02a → 02b → 02c`, with 02c closing the Step as FINALIZER
 - [ ] §2 final effect observably true
 - [ ] Checkpoints 0/A/B/C/D/E closed at Step level
-- [ ] Rungs 4.8-A and 4.8-C green, each single-axis
+- [ ] Rungs **A1, A2, B, C, D** green, each varying exactly one axis
 - [ ] Checkpoint C PASS, then **Gate 2 PASS** (real LLM + real training,
       trial-only smoke) — once, on the assembled head
 - [ ] Every §5 criterion holds byte-identically under TIDMAD

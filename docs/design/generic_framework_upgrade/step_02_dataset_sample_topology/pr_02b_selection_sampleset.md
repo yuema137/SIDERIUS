@@ -2,13 +2,16 @@
 
 ## Status
 
-**DESIGN DRAFT — pending the parent's operator freeze. NOT FROZEN.
+**REVISION 2 — pending the parent's operator freeze. NOT FROZEN.
 IMPLEMENTATION NOT AUTHORIZED.**
 
 Parent: [`../step_02_dataset_sample_topology.md`](../step_02_dataset_sample_topology.md).
 
 Position in the DAG: **after 02a** (needs a resolved profile to inject).
-**Independent of 02c** — either order.
+Semantically independent of 02c, but the governance order is FROZEN as
+`02a → 02b → 02c` so that aggregate Step evidence has a named owner —
+02c is the Step FINALIZER (parent §6.2). This child therefore merges
+SECOND and runs no Step-level Gate.
 
 ## 1. Scope
 
@@ -58,9 +61,9 @@ historical experiment identity.
 |---|---|
 | 0 | the JSON round-trip and packing pins captured BEFORE the change |
 | A | the five digests byte-identical |
-| B | re-uses 4.8-A THROUGH the selection path — a contrast topology yields a correctly shaped SampleSet. **No new axis** |
+| B | **local Checkpoint B = the ESTABLISHED topology contrast (A1/A2) propagated THROUGH the SampleSet selection path** — a contrast topology must yield a correctly shaped SampleSet. No new axis, but this IS this child's Stage-B proof and is blocking, not a formality |
 | C | the tuner builds a real run's trial and formal sample sets from the injected profile |
-| D | affected package + mutation dossier + terminal suite + exact-head CI |
+| D | targeted → affected package → focused integration/mutation → **exact-head CI**. No local full suite required (parent §9.1) |
 
 **Mutations**: revert one consumer to the module constant and confirm a
 digest reds; feed a contrast topology and confirm the shape follows the
@@ -71,7 +74,7 @@ profile rather than staying 20×200.
 - **Gate 1 — NOT REQUIRED** (roadmap §17.0; assignment table: "New
   loader/renderer (pure Python)" → Unit only). Flip condition: rendered
   prompt bytes change.
-- **Gate 2 — not run by this child**; once at Step level.
+- **Gate 2 — not run by this child**; once at Step level, owned by the FINALIZER 02c (parent §6.2).
 
 ## 6. Stop conditions
 
