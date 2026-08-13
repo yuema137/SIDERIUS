@@ -197,7 +197,7 @@ class _RecordingCtx:
     attempt shows up as an I/O failure inside the check (tolerated) —
     what we assert is the REQUESTED index set."""
 
-    def __init__(self, tmp_path):
+    def __init__(self, tmp_path, denoised_paths: dict[int, str] | None = None):
         self.requested: set[int] = set()
 
         def _denoised(i: int) -> str:
@@ -212,6 +212,7 @@ class _RecordingCtx:
             model_name="m",
             run_name="r",
             round_index=1,
+            denoised_paths=denoised_paths or {},
             denoised_filename_fn=_denoised,
             target_path_fn=_target,
         )
@@ -261,3 +262,39 @@ class TestAttemptedOpenSets:
         )
         result = check.run(ctx, {})
         assert result.metrics["n_files_attempted"] == 2
+
+    # -- Step 02c C1 / §9 row C2 -------------------------------------------
+    #
+    # Tier ORDER, captured before PR 02c changes the tier-3 VALUE from the
+    # hardcoded ``range(20)`` to the profile-derived index space. The
+    # existing tests above cover tier-1-over-tier-3 (via
+    # ``denoised_filename_fn``) and tier-2-over-tier-3 for ONE module.
+    # Nothing pinned tier-1-over-tier-2 for any module, so a migration that
+    # accidentally demoted the configured list below ``ctx.denoised_paths``
+    # would have gone unnoticed on all three.
+
+    @pytest.mark.parametrize(
+        "check",
+        [PearsonDispersionCheck(), SpectralPeakRatioCheck(), PerFileOutputStdCheck()],
+        ids=lambda c: c.name,
+    )
+    def test_recording_checks_prefer_configured_list_over_denoised_paths(self, check, tmp_path):
+        """Priority order (1) beats (2): the configured monitored list wins
+        even when ``ctx.denoised_paths`` is populated with a DIFFERENT set.
+
+        The two candidate populations are deliberately disjoint — ``{4,7,9}``
+        configured against ``{5,8}`` present — so the requested set names
+        which tier actually won. Under the correct order every requested
+        index resolves through ``denoised_filename_fn`` (none of ``4,7,9``
+        is in ``denoised_paths``) and the recorded set is exactly the
+        configured list.
+        """
+        populated = {5: str(tmp_path / "d5.h5"), 8: str(tmp_path / "d8.h5")}
+        assert not set(populated) & set(MONITORED), "the two tiers must stay disjoint"
+        rec = _RecordingCtx(tmp_path, denoised_paths=populated)
+        check.run(rec.ctx, {"peek_file_indices": MONITORED})
+        assert rec.requested == set(MONITORED), (
+            f"{check.name} resolved {sorted(rec.requested)} — the configured "
+            f"peek_file_indices {MONITORED} must outrank ctx.denoised_paths "
+            f"{sorted(populated)}"
+        )

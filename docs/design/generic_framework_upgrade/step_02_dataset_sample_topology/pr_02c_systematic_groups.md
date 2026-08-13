@@ -561,27 +561,43 @@ Unchanged: **ALL production code — zero production diff.**
 Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Re-read `campaign_artifacts.py:35-66` and the existing test module
-      before writing.
-- [ ] Pin D1-a: `files_requested == [3,10,17]` (ints) with **complete**
-      `per_file` → **no** error.
-- [ ] Pin D1-b: same, with a **missing** per-file entry → exactly
-      `gate {id}: missing per-file entries [...]`, and `valid=False`.
-- [ ] Pin D1-c: **reordered** `[10,3,17]` → **skips**; assert the
-      per-file error is ABSENT. (This is the anti-normalization guard.)
-- [ ] Pin D1-d: custom non-triplet list → **skips**.
-- [ ] Pin D1-e: full-file list → **skips**.
-- [ ] Pin D1-f: empty / absent `files_requested` → **skips**.
-- [ ] Pin the `per_file` **str-key dependency** (`str(index) not in
-      per_file`, `:59`) so a producer key-type change is caught.
-- [ ] Pin C2: config `peek_file_indices` beats a populated
+- [x] Re-read `campaign_artifacts.py:35-66` and the existing test module
+      before writing. — done; the audit is recorded in §24.2.
+- [x] Pin D1-a: `files_requested == [3,10,17]` (ints) with **complete**
+      `per_file` → **no** error. —
+      `TestDefaultHealthPeekCompletenessIsEnforced::test_complete_per_file_produces_no_error`
+- [x] Pin D1-b: same, with a **missing** per-file entry → exactly
+      `gate {id}: missing per-file entries [...]`, and `valid=False`. —
+      `::test_missing_per_file_entry_is_reported_exactly` (exact message)
+      plus `::test_incomplete_per_file_forces_retrain`, which carries the
+      case through `decide_phase1_reuse` to `action == "train"` and
+      `valid=False` — the POLICY consequence, not just the string.
+- [x] Pin D1-c: **reordered** `[10,3,17]` → **skips**; assert the
+      per-file error is ABSENT. (This is the anti-normalization guard.) —
+      `TestNonDefaultRequestedListIsNeverEnforced::test_no_per_file_enforcement[reordered_default]`
+- [x] Pin D1-d: custom non-triplet list → **skips**. — ids
+      `custom_operator_list` and `out_of_range_member`.
+- [x] Pin D1-e: full-file list → **skips**. — id `all_files_population`.
+- [x] Pin D1-f: empty / absent `files_requested` → **skips**. — ids
+      `explicitly_empty`, `key_absent`, `aggregation_absent` (the last
+      covers `aggregation` missing entirely, distinct from present-but-empty).
+- [x] Pin the `per_file` **str-key dependency** (`str(index) not in
+      per_file`, `:59`) so a producer key-type change is caught. —
+      `::test_per_file_lookup_is_str_keyed`.
+- [x] Pin C2: config `peek_file_indices` beats a populated
       `ctx.denoised_paths`, for **all three** recording checks (today only
-      `PerFileOutputStd` has any tier-2 test).
-- [ ] Record in the ledger that blocking and recording resolvers differ
-      (§4.2) and that this is PRE-EXISTING, not 02c's to unify.
-- [ ] **Do NOT** pin the float-element branch (§14 Q2 — latent
+      `PerFileOutputStd` has any tier-2 test). —
+      `TestAttemptedOpenSets::test_recording_checks_prefer_configured_list_over_denoised_paths`,
+      parametrized over all three; the two candidate populations are
+      deliberately **disjoint** (`{4,7,9}` configured vs `{5,8}` present)
+      so the recorded set names which tier won.
+- [x] Record in the ledger that blocking and recording resolvers differ
+      (§4.2) and that this is PRE-EXISTING, not 02c's to unify. — §24.2,
+      verified line-by-line at this HEAD.
+- [x] **Do NOT** pin the float-element branch (§14 Q2 — latent
       unreachable; pinning it would repeat the mistake 02b's §6.1 rule
-      exists to prevent).
+      exists to prevent). — not pinned. The C1 re-audit **confirmed** the
+      classification: no shipped path produces float elements (§24.2).
 
 **4. Validation plan.**
 Unit: the new pins.
@@ -1312,3 +1328,278 @@ Implementation begins only after a filled Implementation Working Rules
 contract, in a fresh context with its own Context Continuity v2 handoff,
 in an isolated worktree outside `.claude/`. See the head-of-file status
 block for what may not be re-litigated.
+
+**Implementation STARTED 2026-08-13** under a filled Implementation
+Working Rules contract. §1-§23 above are the frozen contract and do not
+change; everything the implementation discovers, decides, runs and
+proves is recorded in **§24, the LIVE implementation ledger**.
+
+---
+
+## 24. Implementation ledger (LIVE)
+
+> Everything below this line is written **during** implementation. §1-§23
+> are frozen. Where an audit refutes a frozen premise the refutation is
+> recorded here in the `Previous assumption / evidence / corrected
+> understanding` form — the frozen text is never rewritten to pretend the
+> premise was always right.
+
+### 24.0 Kickoff facts — resolved mechanically, never from memory
+
+| Fact | Value | How resolved |
+|---|---|---|
+| Frozen design HEAD | `0fbe3556989be29354e45cc2ae0c12413fe05e9a` | `git log -1 --format=%H -- <this file>` |
+| PR 02a | **MERGED** — PR #202, merge `473595386598e732f52a573486d2012c1f0daf2d` | `git merge-base --is-ancestor … origin/master` → YES |
+| PR 02b | **MERGED** — PR #203, merge `c17469ec1077c54d727b55ef3c743adc45301d58` | `== origin/master`; matches the authorization SHA exactly |
+| `origin/master` | `c17469ec` | `git rev-parse origin/master` |
+| Implementation base | `0fbe3556` | see the note below |
+| Implementation branch | `feat/generic-framework-step-02c-task-owned-file-sets` | created at kickoff |
+| Worktree | `/home/yuema137/siderius-worktrees/pr02c-impl` | outside `.claude/`, not shared with the design session |
+| Interpreter | `/home/yuema137/SIDERIUS/.venv/bin/python` (3.12.13) | |
+
+**Why the base is `0fbe3556` and not `origin/master`.** The frozen PR-02c
+design is doc-only and lives on `docs/step02c-revision3` — three commits
+on top of `origin/master`, never merged and with no open PR. The
+authorization requires a base "containing the frozen PR-02c design", so
+the implementation branch is cut from that tip. `origin/master`
+(`c17469ec`) is its direct ancestor, so every merged prerequisite is
+present. The three doc commits ride in this PR.
+
+**Environment note carried forward from 02a/02b.** A linked worktree
+inherits **no** gitignored files. `tidmad_data_config.yaml`,
+`dashboard_config.yaml` and `.env` (Gate-2 credentials) were copied in by
+hand. Import provenance was verified before any test ran: from this
+worktree `import core` resolves to
+`/home/yuema137/siderius-worktrees/pr02c-impl/core/__init__.py`, i.e. cwd
+outranks the editable-install finder that points at the main checkout.
+
+**Gate-config governance, recorded explicitly (§16 / parent §10.2).**
+Step-02 Gate 2 uses **`llm_configs/openai_tiered_pro.json`**. This is the
+operator's standing production-validation policy and it **overrides** the
+stale `openai_tiered_v1.json` wording at
+`docs/gates/gate_testing_standard.md:97` for this Step. The conflict is
+recorded, not silently resolved by picking a third config.
+
+### 24.1 Progress
+
+| Stage | State | Evidence |
+|---|---|---|
+| C1 — capture the two missing baselines | **DONE** | §24.3 |
+| **CP0 — BASELINE COMPLETE** | **PASS** | §24.4 |
+| C2 — declarations + anchor / blocking-peek consumers | not started | |
+| CP-C1 | — | |
+| C3 — campaign trigger + profile-derived all-files | not started | |
+| Checkpoint A | — | |
+| C4 — 4.8-C atomic contrast | not started | |
+| Checkpoint B | — | |
+| PR-02c Checkpoint C | — | |
+| C5 / PR-02c Checkpoint D | — | |
+| Step-02 aggregate reconciliation | — | |
+| Terminal local full unit suite (ONCE) | — | |
+| Step-02 Gate 2 (ONCE) | — | |
+| C6 / Checkpoint E | — | |
+| Exact-final-head CI | — | |
+
+### 24.2 C1 source re-audit — every frozen claim re-verified at `0fbe3556`
+
+Re-audited **before** writing any test, as §11.1 requires. **No frozen
+claim was refuted.** The census below is the implementation-time record.
+
+**Anchor selection (A).**
+
+| Fact | Evidence at this HEAD |
+|---|---|
+| production literal | `execute_tools/sample_set_builder.py:29` `ANCHOR_FILES = [0, 10, 19]` — **exactly one** |
+| production reader | `:105` `files = list(ANCHOR_FILES)` — **exactly one** |
+| partial-scope guard | `:96-103` raises for `anchors`/`target` when the scope is not full |
+| profile already threaded | `:85` `resolved_profile = profile if profile is not None else resolve_dataset_profile()` — 02b's explicit hop is live and is where declaration A will be read from |
+| uncoupled test duplicate | `tests/unit/agent/tune_ml_hyperparam_agent/test_formal_sample_set.py:212` `assert set(sample_set.keys()) == {0, 10, 19}` — hardcoded, will NOT follow a declaration change. C2 must update it |
+| oracle | `GOLDEN["anchors"] = "e025a270e0b1acc1"` at `tests/unit/execute_tools/test_sample_set_builder.py:245` (seed=42, portion=0.05) |
+
+**Health peek (B).**
+
+| Fact | Evidence at this HEAD |
+|---|---|
+| YAML sites | `configs/health_checks.yaml` `:35`, `:60`, `:82` — **exactly three**, and all three gates carry `gate_role: blocking` (`:27`, `:52`, `:74`) |
+| keyless gates | `:104`, `:125`, `:142` — all three `gate_role: observational`, **no `peek_file_indices` key at all**. §8.1's injection trap is real and mechanically confirmed |
+| class-A comments | `:35, :45, :60, :71, :82, :92` — six, exactly as §15 counted |
+| second consumer | `core/campaign_artifacts.py:57` `if requested == [3, 10, 17]:` — the hardcoded **copy** |
+| record producer | `execute_tools/health_checks/evaluation.py:202` copies `peek_file_indices` **verbatim**; the `:208` fallback arm int-normalizes. Producer asymmetry confirmed (§14 Q2's named owner) |
+
+**Resolver tiers (§4.2) — re-verified line by line, and they genuinely differ.**
+
+| Tier | BLOCKING `_multi_file_peek._resolve_indices:113-131` | RECORDING `_resolve_files` |
+|---|---|---|
+| 1 configured | dedupe **preserving input order** | `sorted({int(i) for i in configured})` |
+| 2 `denoised_paths` | `[min(ctx.denoised_paths.keys())]` — **ONE** file | `sorted(ctx.denoised_paths.keys())` — **all** |
+| 3 fallback | `[0]` | `list(_DEFAULT_FILE_RANGE)`, guarded by `denoised_filename_fn is not None` |
+| 4 | — | `[]` |
+
+The three recording bodies are **byte-identical** to one another:
+`pearson_dispersion.py:151-167`, `per_file_output_std.py:110-120`,
+`spectral_peak_ratio.py:145-155`. `_DEFAULT_FILE_RANGE: range = range(20)`
+at `pearson_dispersion.py:34` (its own comment reads `# TIDMAD NUM_FILES`),
+`per_file_output_std.py:30`, `spectral_peak_ratio.py:39`.
+
+**This divergence is PRE-EXISTING and is NOT 02c's to unify** (§4.2, §7 —
+Step-08 policy). C1 pins it as it stands.
+
+**Coverage findings — the two "missing" rows are genuinely missing, and
+the two "EXISTS" rows genuinely exist.**
+
+| §9 row | Verdict | Evidence |
+|---|---|---|
+| D1 campaign matrix | **MISSING, confirmed** | all 12 pre-existing tests in `tests/unit/core/test_campaign_artifacts.py` build `"aggregation": {"files_requested": []}` (`:36`). The if-branch had **zero** coverage. Read all 12 to confirm — not inferred from a grep |
+| C2 recording tier-1 > tier-2 | **MISSING, confirmed** | `test_health_scope.py:253` covers tier-2 > tier-3 for `PerFileOutputStd` **only**; `:232` passes a configured list against a ctx with `denoised_filename_fn` and no `denoised_paths`, i.e. tier-1 > tier-**3**. No module pinned tier-1 > tier-2 |
+| C1 recording full-file fallback | **EXISTS — reused, not duplicated** | `test_health_scope.py:246-251` asserts `rec.requested == set(range(20))`. R4 upheld |
+| E1 `apply_monitored_files` | **EXISTS** | `test_health_scope.py:70-77` |
+| A1/A2 anchors | **EXISTS** | `GOLDEN["anchors"]`; `TestAnchorsStrategy::test_only_anchor_files` |
+
+**§14 Q2 float-element residue — classification RE-CONFIRMED, not pinned.**
+
+The re-audit chased every producer of `files_requested` to its int
+guarantee: `CheckRef.config: dict[str, Any]` (`health_checks/config.py:57`,
+untyped so Pydantic never coerces) → but every shipped path upstream is
+int-only. `health_gate_files: list[int] | None`
+(`agent/schemas/hyperparam_tuning.py:1798`); CLI parsing exclusively
+through `DataScope.from_cli` (`dataset_config.py:239-282`), which builds
+indices with `int(token)` / `int(lo_str)` and raises on anything else;
+`apply_monitored_files` normalizes with `int(i)` (`config.py:310`); and
+the shipped `configs/health_checks.yaml` spells the triplet as ints.
+**Verdict: latent, production-unreachable — unchanged.** Not fixed, not
+pinned, no STOP. Consistent with 02b §6.1 and with §4.3's falsy-`[]`
+hazard, which is likewise recorded only.
+
+**Shape inputs discovered for C2** (decision deferred to C2, recorded now
+so it is not re-derived):
+
+- `DatasetProfile` (`dataset_config.py:438-468`) is `frozen=True` and
+  composes `dataset` / `channels` / `encoding`; `TIDMAD_PROFILE` at `:478`.
+- The subsystem **already has** a call-time derivation seam for exactly
+  the C-classification: `health_checks/config.py:333`
+  `num_files = resolve_dataset_profile().dataset.num_files` inside
+  `validate_health_scope`. C3 should follow that pattern rather than
+  invent one, and must resolve at **call time** (02b §13.9's
+  default-argument lesson).
+- **Watch — atomicity baselines read the profile dump.**
+  `tests/unit/execute_tools/test_step02a_c6_contrast_rungs.py:59` and
+  `tests/unit/execute_tools/test_step02b_b4_topology_contrast.py:56` both
+  flatten `TIDMAD_PROFILE.model_dump()` as a mechanical
+  "nothing-else-changed" baseline. Adding profile fields changes that
+  dump; both must be re-read before the field shape is chosen.
+- **Watch — external profile JSON.** `load_dataset_profile` (`:518`)
+  validates operator-supplied profile files. New **required** fields
+  would break existing ones.
+
+### 24.3 C1 — the two captured baselines (test-only, ZERO production diff)
+
+`tests/unit/core/test_campaign_artifacts.py` (+179):
+`TestDefaultHealthPeekCompletenessIsEnforced` (5 tests) and
+`TestNonDefaultRequestedListIsNeverEnforced` (7 parametrized ids).
+
+`tests/unit/execute_tools/health_checks/test_health_scope.py` (+38/-1):
+`TestAttemptedOpenSets::test_recording_checks_prefer_configured_list_over_denoised_paths`,
+parametrized over the three recording checks. `_RecordingCtx` gained an
+optional `denoised_paths` argument defaulting to `{}` — behaviour for
+every existing caller is unchanged.
+
+Two design points worth naming, because a weaker test would have looked
+equally green:
+
+1. **Every skip case asserts the per-file error is ABSENT**, with a
+   deliberately EMPTY `per_file`. Asserting `valid` instead would pass
+   even if the branch started firing, since a record can be invalid for
+   unrelated reasons. This is what makes D1-c a real anti-normalization
+   guard.
+2. **The C2 pin's two candidate populations are disjoint** — `{4,7,9}`
+   configured against `{5,8}` present in `ctx.denoised_paths`. The
+   recorded request set therefore *names* which tier won instead of merely
+   being consistent with the right one.
+
+Beyond the frozen plan, two extra pins were added (bounded deviation,
+§24.6): the `aggregation`-absent case (distinct from present-but-empty —
+`(result.get("aggregation") or {})` handles them on different code paths)
+and `test_incomplete_per_file_forces_retrain`, which carries an enforced
+failure through `decide_phase1_reuse` to prove the branch is POLICY and
+not presentation.
+
+**Deliberately NOT captured**: the `range(20)` recording fallback (R4 —
+`test_health_scope.py:246-251` already owns it) and the §14 Q2 float
+branch.
+
+### 24.4 CP0 — BASELINE COMPLETE: **PASS**
+
+```text
+Validation:
+  command:      .venv/bin/python -m pytest tests/unit/core/test_campaign_artifacts.py \
+                    tests/unit/execute_tools/health_checks/ -q
+  purpose:      every behaviour whose AUTHORITY C2/C3 will change has a
+                pre-change oracle
+  environment:  worktree pr02c-impl @ 0fbe3556, python 3.12.13, CPU only
+  result:       318 passed, 0 failed, 0 skipped — 14.63 s (pytest rc=0,
+                read from the log, not a wrapper exit status)
+  production diff: ZERO — `git diff --name-only` returns only tests/
+  static:       ruff check clean; ruff format --check "2 files already
+                formatted"
+```
+
+Acceptance against §11.1's criteria:
+
+- [x] `git diff --stat` shows zero files outside `tests/`.
+- [x] The campaign if-branch is executed by **≥2** tests — five enter it
+      (four in the enforced class plus the retrain-policy test); today it
+      was zero.
+- [x] Each skip class asserts **ABSENCE** of the per-file error.
+- [x] Recording tier-1-over-tier-2 asserted for **all three** modules.
+- [x] Each pin fails when its behaviour is perturbed — dossier §24.5.
+- [x] **No duplicate** of any §9 EXISTS row; `range(20)` was not re-pinned.
+
+### 24.5 C1 mutation dossier — 4 mutations, 4 distinct failure classes
+
+Method (per the project's mutation-hygiene rule): exactly one textual
+substitution per run, asserted to occur **exactly once** in the target
+file before it is applied; `__pycache__` cleared before and after; the
+file restored and byte-compared afterwards.
+
+| # | Failure class (§19) | Mutation | Expected | Observed |
+|---|---|---|---|---|
+| M-C1-1 | 3 — campaign trigger **normalizes** | `campaign_artifacts.py:57` `requested == [3,10,17]` → `sorted(requested) == sorted([3,10,17])` | only the reordered case reds | **CAUGHT** — `1 failed, 23 passed`; the single failure is `test_no_per_file_enforcement[reordered_default]`. Exactly the anti-normalization guard, and nothing else moved |
+| M-C1-2 | 3 — enforcement silently dropped | same line → `if False and …` | the enforced class reds | **CAUGHT** — `4 failed, 20 passed`, including `test_incomplete_per_file_forces_retrain` flipping `train` → `reuse`, i.e. the POLICY consequence is pinned, not just a string |
+| M-C1-3 | 5 — recording fallback **tier order** changed | `spectral_peak_ratio.py` `_resolve_files`: `denoised_paths` moved above `configured` | only `spectral_peak_ratio`'s id reds | **CAUGHT** — `1 failed, 27 passed`; `…[spectral_peak_ratio]` resolved `[]`. The per-module parametrization discriminates, and the pre-existing `test_monitored_files_bound_the_attempted_set[spectral_peak_ratio]` stayed **green** — which is precisely why this pin was missing |
+| M-C1-4 | producer/consumer key type | `campaign_artifacts.py:59` `str(index) not in per_file` → `index not in per_file` | the str-key pin reds | **CAUGHT** — `3 failed, 21 passed` |
+
+No mutation survived. M-C1-3 was run on **one** module rather than three:
+the question it answers is "does the parametrized pin discriminate per
+module", and one mutant answers it — three would be one mutant per test,
+which §19 forbids.
+
+### 24.6 Deviations from the frozen plan
+
+```text
+Deviation:  C1 adds two pins beyond §11.1's enumerated list — the
+            `aggregation`-absent case and a policy-consequence test
+            through `decide_phase1_reuse`.
+Reason:     §11.1's own validation plan asks for "`aggregation` absent vs
+            present-but-empty", and §6 states the branch is "POLICY, not
+            presentation". Neither was expressible in the enumerated
+            D1-a..f list.
+Source:     `campaign_artifacts.py:56` `(result.get("aggregation") or {})`
+            — absent and present-but-empty reach the `or {}` on different
+            paths; `:80` `decide_phase1_reuse` → `ValidationReport(valid=
+            not errors)` → `action="train"`.
+Impact:     test-only; classification BOUNDED.
+Validation: both are killed by M-C1-2.
+```
+
+```text
+Deviation:  `_RecordingCtx` in test_health_scope.py gained an optional
+            `denoised_paths` parameter.
+Reason:     the C2 pin needs a ctx with BOTH a populated `denoised_paths`
+            and recording path fns; duplicating the helper would have been
+            worse.
+Impact:     default `None` -> `{}` reproduces the previous constructor
+            exactly; all pre-existing tests unaffected (318 green).
+Classification: BOUNDED.
+```
+
+No material deviation. No stop condition reached.
