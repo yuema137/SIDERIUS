@@ -1352,13 +1352,19 @@ oracle exists. Audited at `f865038f`:
       oracles: **40 passed**. Affected packages
       (`tests/unit/{ml_models,agent/schemas,core}`): **2979 passed / 2
       skipped**. M3's own module **24 passed**. Four mutations.
-- [ ] **M4 — Phase A: derived rendering, exact bytes.**
-      `workflows/task_config.render_forward_contract` (:171-214) and the
-      shape prose in `agent/schemas/{proposal,implementor,validator}.py`
-      derive from the normalized contract. `:209`'s
-      `" (per-timestep {num_classes}-class)"` derives from axis ROLES
-      (§1 row 7). A1 goldens pass **unmodified**; `prompts.py` planner
-      bytes exact (F-4). → Phase-A invariant: **no executed tensor changes**
+- [x] **M4 — Phase A: derived rendering, exact bytes — LANDED.**
+      `ForwardContract` gains `model_io` (the normalized contract) and
+      `preset`. When `model_io` is present it is THE authority:
+      `input_shape`, `output_shape` and `num_classes` are DERIVED, and a
+      contradicting authored prose value is a typed failure rather than a
+      silent overwrite. When absent, Regime A is byte-for-byte unchanged.
+      `renders_per_timestep_class_clause()` derives §1 row 7's clause from
+      axis ROLES (class **and** temporal) instead of cardinality
+      truthiness. `configs/task_config.yaml` migrated to author `model_io:`
+      and dropped the duplicated prose — **rendered output proven
+      byte-identical** against `HEAD:configs/task_config.yaml`.
+      `load_task_config` now resolves at the production entry point, so
+      M1 and M2 have live consumers.
 - [ ] **M5 — Phase B: requirement-resolved input dtype (§4a.1 A-1).**
       The three dtype sites of F-2, following the `get_target_torch_dtype`
       precedent on the adjacent line (`train_engine_sandbox.py:668`).
@@ -1588,6 +1594,84 @@ cases, because that is what preserves the shipped verdicts:
 
 Error-message bytes are unchanged, including their hardcoded `[B, 256, T]`
 (F-5): the re-key must not touch them, and A2 pins their content.
+
+#### M4 — derived rendering + the live resolution boundary
+
+```text
+modules  agent/schemas/task_config.py   (`model_io`, `preset`, derivation)
+         workflows/task_config.py       (role-derived clause; resolution
+                                         wired at the loader; resolved dump)
+         configs/task_config.yaml       (migrated to author `model_io`)
+tests    tests/unit/workflows/test_step03_m4_derived_rendering.py
+lint     ruff check + ruff format --check clean
+```
+
+**Byte-identity, proven mechanically.** The migrated YAML was rendered and
+compared against the pre-migration file read out of `HEAD` in the same
+process: **identical**. The LLM-visible golden
+`cfg2_forward_contract_block.txt` passes **UNMODIFIED**, which is the §21
+invariant. Regime A re-ran at the same count as its pre-M4 baseline
+(829 passed).
+
+```text
+FINDING — a production defect M4 introduced, caught by two Step-00 baselines
+
+Previous implementation assumption
+  Migrating `configs/task_config.yaml` to author `model_io` is
+  self-contained: the prose is derived onto the validated
+  `ForwardContract`, so consumers see the same values.
+
+Source evidence
+  `load_task_config` returned `dict(raw)` — the RAW YAML mapping. Once the
+  YAML stopped authoring `input_shape` / `output_shape` / `num_classes`,
+  `cfg["forward_contract"]["num_classes"]` simply VANISHED, because the
+  derivation lives on the validated object and was thrown away. Two
+  baselines caught it:
+    tests/unit/workflows/test_task_config.py
+      ::TestCommittedConfigLoads::test_repo_task_config_loads
+    tests/unit/workflows/test_step00_task_config_baselines.py
+      ::TestCFG1ResolvedTaskConfig::test_resolved_shipped_config_deep_equal
+
+Corrected implementation understanding
+  The loader must return the RESOLVED contract. It validated a contract
+  with derived fields and then handed back something less resolved than
+  what it had just validated — a real defect, not a baseline needing
+  relaxation.
+
+Implementation consequence
+  `config["forward_contract"] = contract.model_dump(mode="json")`.
+  `mode="json"` is load-bearing: a plain dump leaks tuples and `StrEnum`s
+  into a mapping callers serialize, and the JSON golden compared
+  `tuple != list` on the first attempt.
+
+Validation consequence
+  A regression test now pins that the derived fields survive the loader
+  (`test_the_loader_returns_the_resolved_contract_not_the_raw_block`).
+  One of M4's OWN tests was also wrong — it asserted the derived keys were
+  absent from the LOADED config, when the claim it meant to make is about
+  what the YAML AUTHORS. It now reads the YAML file directly.
+```
+
+**Declared baseline delta — CFG-1, non-LLM-visible.** After the fix, the
+Step-00 CFG-1 golden still differed, and the difference was measured
+rather than assumed:
+
+```text
+ADDED   : model_io, preset
+REMOVED : (none)
+CHANGED : (none — every pre-existing key holds a byte-identical value)
+task_description : identical
+```
+
+`input_shape`, `output_shape` and `num_classes` are unchanged in value and
+are now DERIVED rather than authored. This is the authoring-surface change
+Step 03 exists to make, it is **not** an LLM-visible surface, and the
+rendered-block golden passes unmodified. The golden was re-captured by
+hand per the Step-00 policy the helper states — *"capture in an explicit
+test-only commit; tests never write goldens"* — with the attribution above
+recorded in its `_captured_at` note. Following the Step-01 OD-S1-8
+precedent: a declared golden delta, mechanically attributable, never a
+silent regeneration.
 
 ### 24.7 Mutation dossier
 

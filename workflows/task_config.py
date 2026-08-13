@@ -31,6 +31,7 @@ from typing import Any
 
 import yaml
 
+from agent.schemas.model_io_resolution import resolve_model_io_contract
 from agent.schemas.task_config import ForwardContract
 
 # Repo-relative default path. Resolved at call time (not import time) so a
@@ -54,6 +55,24 @@ _MISSING_FILE_REMEDIATION = (
     "  If you are setting up a new task, copy and edit:\n"
     "      cp configs/task_config.example.yaml {path}"
 )
+
+
+def _dataset_num_classes() -> int | None:
+    """The bound Dataset Profile's class count, for the 3-E cross-check.
+
+    Read at call time from the Step-02 authority
+    (``ValueEncoding.num_classes``), never restated here — §4b keeps the
+    dataset side as the single cardinality authority and Step 03 only
+    derives from or cross-validates against it.
+
+    Returns ``None`` if no profile can be resolved, so a caller in an
+    environment without one is not blocked; the cross-check simply does not
+    run. It must NEVER fall back to a literal, which would silently
+    reintroduce TIDMAD's 256 as a default (§21).
+    """
+    from execute_tools.dataset_config import resolve_dataset_profile
+
+    return resolve_dataset_profile().encoding.num_classes
 
 
 def _clear_cache_for_tests() -> None:
@@ -139,10 +158,36 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
     # Pydantic raises ValidationError on missing required key or extra key.
     # Round-trip validation only — we keep the dict shape in the returned
     # config so downstream callers can rebuild ForwardContract themselves.
-    ForwardContract(**fc_raw)
+    contract = ForwardContract(**fc_raw)
+
+    # Step 03 M2 — resolve the normalized declaration HERE, at the production
+    # entry point every agent path funnels through, and at CALL time rather
+    # than import time (§16). A preset or a dataset contradiction therefore
+    # fails before any consumer sees the config — which is the "before any
+    # LLM request is constructed" property Step-01 §6A.5 deferred as D13.
+    #
+    # Only reached when a task declares `model_io`. A legacy prose-only
+    # contract (Regime A) resolves nothing and behaves exactly as before.
+    if contract.model_io is not None:
+        resolve_model_io_contract(
+            contract.model_io,
+            preset=contract.preset,
+            dataset_num_classes=_dataset_num_classes(),
+        )
 
     config = dict(raw)
     config["task_description"] = task_description
+    # Return the RESOLVED contract, not the raw YAML block. When `model_io`
+    # is declared the prose fields are derived during validation, so handing
+    # back the raw mapping would give every caller something LESS resolved
+    # than what was validated here — `cfg["forward_contract"]["num_classes"]`
+    # would simply vanish for a migrated task. Round-trips: the dump revalidates
+    # through `ForwardContract(**...)`, and the derivation is idempotent
+    # because the dumped values already equal the derived ones.
+    # `mode="json"` so the returned mapping is JSON-native — a caller
+    # serializing the config must not meet a tuple or a StrEnum, and the
+    # round-trip back through `ForwardContract(**...)` coerces them back.
+    config["forward_contract"] = contract.model_dump(mode="json")
     _CACHE[resolved] = config
     return config
 
@@ -204,9 +249,19 @@ def render_forward_contract(fc: ForwardContract) -> str:
     if fc.task_note:
         lines += ["", fc.task_note.strip()]
     if fc.task_type:
+        # Step 03 §1 row 7: the class clause asserts a TEMPORAL axis, so it is
+        # licensed by axis ROLES rather than by a cardinality being truthy.
+        # `renders_per_timestep_class_clause` derives that from the normalized
+        # contract when one is declared and preserves the legacy truthiness
+        # test when one is not. Under TIDMAD both paths agree, so these bytes
+        # are unchanged.
         descriptor = (
             f"Task type: {fc.task_type}"
-            + (f" (per-timestep {fc.num_classes}-class)" if fc.num_classes else "")
+            + (
+                f" (per-timestep {fc.num_classes}-class)"
+                if fc.renders_per_timestep_class_clause()
+                else ""
+            )
             + "."
         )
         lines += ["", descriptor]
