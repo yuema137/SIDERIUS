@@ -1429,9 +1429,9 @@ re-reviewed against the code at `4819b44a`: no material NO.
       `tests/unit/{execute_tools,core,guardrails}` **3352 passed / 3
       skipped / 0 failed**; ruff check + ruff format clean; pyright
       unavailable locally, CI authoritative.
-- [ ] **GATE 2** — required (§13); gate standard re-read immediately
-      before launch. **Gate 1 NOT required** unless an LLM-visible byte
-      changes, which is itself a STOP
+- [x] **GATE 2 — PASS** (pro config, 2026-08-13). All five standard
+      criteria verified mechanically. **Gate 1 correctly NOT REQUIRED** —
+      no LLM-visible byte changed.
 - [ ] **CLOSEOUT** — ledger synchronized, PR opened, exact-final-head CI
       green, `local HEAD == PR headRefOid == CI headSha`, tree clean
 
@@ -2890,6 +2890,57 @@ by planner choice.
 Only item 7 is actioned in this PR, because repository truth could not be
 left contradicting the operator's config decision. Items 1-6 and 8 are
 **deferred**.
+
+#### GATE 2 — **PASS** (final, `openai_tiered_pro.json`)
+
+```text
+head        4fa694f4f9f12b89fb8ebccb90e83f89602e78f7
+workspace   /home/klz/Data/SIDEREIS_DATA/step03_gate2pro_1786668999
+command     run_chain.sh --mode lilab --num_iterations 1 --max_rounds 1
+              --max_proposal_attempts 3 --max_epochs 1
+              --trial_portion 0.01 --train_portion 0.01 --eval_portion 0.02
+              --trial_time_budget_minutes 5 --no-force_formal_round
+              --formal_time_budget_minutes 30
+              --llm_config llm_configs/openai_tiered_pro.json
+cold-start  CONFIRMED — "Seed paths : 0 files"
+mode        TRIAL, verified from the RESOLVED sample set: 20 files x 10
+            segments = 200 = 0.5% of the 40,000 full scope (NOT inferred
+            from --no-force_formal_round, which is not force-trial)
+candidate   bidir_gated_tcn_uncertainty_hf_v1 — real LLM-generated,
+            accepted first attempt, zero codegen retries
+training    3,125 steps @ batch 4, 16m26s, Epoch 0 avg loss 5.709348
+wall time   ~55 min end to end
+```
+
+**All five standard pass criteria, verified from artifacts on disk:**
+
+| # | Criterion | Result |
+|---|---|---|
+| 1 | chain exits 0 | `CHAIN COMPLETE — 1 iterations`, manifest written, zero errors |
+| 2 | every round records a `gate_action` | 3 x `invalidate_round` |
+| 3 | `denoising_score` finite positive **or** null with a gate_action | **0.5647259697548246** — finite, non-null (and a gate_action is recorded regardless) |
+| 4 | no phantom `5.5762667` as a **final accepted** score | `best_denoising_score = None`; the value occurs ONLY inside a diagnostic string — *"Class-127 collapse artifact — score would be 5.5762667 via 2^17 FP ratio"*. Caught and invalidated, which the criterion explicitly permits |
+| 5 | at least one HealthGate evaluation fires | output-diversity, output-std and amplitude-collapse all fired |
+
+**Step-03's own property, proven in the real chain.** The contract crossed
+the real subprocess boundary — `configs/iter_001/model_io_bidir_gated_tcn_
+uncertainty_hf_v1_iter_001_001.json` was written by the parent and passed
+as `--model_io_json` — and real training, real inference and real scoring
+all completed through the migrated dtype and cardinality path, producing a
+finite score.
+
+**Model quality was BAD, and that is not what this Gate measures.** The
+round was invalidated as `failed_mode_collapse` after one epoch on 0.5% of
+the data with an exotic uncertainty-weighted CE + HF-spectral loss. The
+standard states its criteria "test the HealthGate infrastructure only, not
+model denoising quality", and a collapse *caught and invalidated* is the
+HealthGate system working. Judged against Step-03's failure class —
+a silently wrong dtype or class count in real training — the Gate is a
+clean PASS: nothing silently wrong reached the model, and the health
+gates that exist to catch degenerate output did catch it.
+
+**Attempts 1-4 (v1 config) remain DIAGNOSTIC evidence only** and do not
+contribute to this PASS.
 
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
