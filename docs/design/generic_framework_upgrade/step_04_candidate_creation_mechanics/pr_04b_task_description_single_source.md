@@ -106,12 +106,27 @@ does not exist yet. 04b does not invent one.
 
 ## 1. Capability / final effect
 
-> The task description has exactly **one** source. The lit-review node
-> and the **static builtin model-description task content** read that
-> source instead of a byte-duplicated copy, so changing the task means
-> editing one file.
+> There is **ONE canonical runtime declaration** of `task_description`
+> — the §13 task profile (`configs/task_config.yaml`) — and the
+> **production lit-review node consumes that declaration** instead of
+> maintaining a byte-duplicated copy in `configs/lit_review_config.yaml`.
 
-Today it means editing two, and nothing detects divergence.
+Today the lit-review node reads its own copy, and nothing detects
+divergence between the two.
+
+**Deliberately NOT claimed** (the boundary of this PR, frozen):
+
+- **not** "all task-specific prose in the repository is single-sourced";
+- **not** that static builtin model descriptions are migrated — the
+  `punet` / `gated_fno` SQUID/axion prose in
+  `ml_models/{model_type}/description.md` stays **DEFERRED** (§0.4);
+- **not** that changing the task *globally* now requires editing one
+  file. It requires editing one file for the **runtime** declaration
+  every LLM node renders; the deferred static prose is a separate,
+  still-duplicated surface.
+
+The honest scope is one authority for one runtime value, with one
+consumer migrated onto it.
 
 ## 2. Source evidence
 
@@ -197,16 +212,47 @@ lit-review half. Residue assertions stay **scoped to the
 description-derived block** (parent §6) — a whole-prompt absence
 assertion is unsatisfiable and would be a test-design error.
 
-## 7. Checkpoint C — live integration
+## 7. Checkpoint C — deterministic production-path integration
 
-In a real chain iteration, the production lit-review node renders from
-the single source. Provable from the run's prompt/token artifacts.
+**No real LLM call is required.** Gate 1 and Gate 2 are both NOT REQUIRED
+(§10), and requiring a paid chain iteration merely to observe a
+byte-neutral single-source refactor would buy no evidence a deterministic
+capture cannot give.
+
+Checkpoint C is discharged by driving the **real production path** to a
+capture boundary:
+
+```text
+canonical §13 task config
+  -> real production `_build_lit_review_input`
+  -> real lit-review rendering / RecordingLLMBridge capture boundary
+  -> captured task-description block
+```
+
+Every hop is production code; only the LLM boundary is a recorder.
+
+**The proof uses a distinguishable alternate task-description fixture**:
+point the canonical §13 source at a sentinel description and assert the
+captured block carries *that* text. Asserting the shipped TIDMAD text
+would pass even if the lit-review YAML were still authoritative, since
+the two are byte-identical today — the whole defect this PR removes.
+
+Under TIDMAD, all `pb9_*` rendered bytes remain **exact** (§5).
+
+**Flip**: only if implementation unexpectedly moves an LLM-visible byte
+or changes `LLMBridge` invocation semantics does the Gate standard's
+Gate-1 trigger apply, at which point Checkpoint C is re-planned with it.
 
 ## 8. Failure classes
 
-1. Divergence returns silently — two sources drift again with nothing
-   detecting it.
-2. The fallback constant masks a missing profile value.
+1. Divergence returns silently — a second declaration reappears and
+   nothing detects it.
+2. **A fallback is re-introduced, or the canonical fail-closed is
+   swallowed.** The old `SIDERIUS_TASK` constant no longer exists (§0.1),
+   so the live risk is not that constant but the *shape* of it: adding an
+   implicit default, an `or "…"`, or a `try/except` around
+   `load_task_config`'s empty-rejection would mask a missing canonical
+   task description and quietly restore silent-degradation behaviour.
 3. A rendered lit-review byte changes (would break `pb9_*` parity).
 4. Format doctrine accidentally reclassified as task content.
 
@@ -225,8 +271,15 @@ the highest-value test here — it names a defect nothing else catches.
 
 | Gate | Decision |
 |---|---|
-| **Gate 1** | **NOT REQUIRED** — config single-sourcing with byte-identical rendered output ("Config files, YAML, schema-only → Unit only"). **Flip**: if any rendered lit-review byte changes, Gate 1 becomes REQUIRED |
-| **Gate 2** | **NOT REQUIRED** — no execution-path change. **Flip**: if the collapse touches any node's execution path |
+| **Gate 1** | **NOT REQUIRED** — TIDMAD rendered lit-review bytes and `LLMBridge` invocation semantics both remain **exact**. **Flip**: if either changes, Gate 1 becomes REQUIRED |
+| **Gate 2** | **NOT REQUIRED** — the PR changes only the **authority/source** of an already-existing `task_description` value feeding lit-review prompt construction. It does not alter model execution, training, inference, scoring, resource/runtime semantics, or any downstream executable contract. **Flip**: if scope expands into those surfaces |
+
+**Note on the Gate-2 rationale.** An earlier revision said *"no
+execution-path change"*, which was inaccurate: 04b **does** change a
+production input-construction call site
+(`_build_lit_review_input`). The correct reason Gate 2 is not required is
+narrower and stated above — what changes is where an existing value comes
+from, not what the system then executes with it.
 
 ## 11. Validation budget
 
@@ -237,8 +290,17 @@ measures.
 
 ## 12. Rollback boundary
 
-Two config files, the lit-review resolution path, their tests.
-Independent of 04a.
+| Surface | Change |
+|---|---|
+| `configs/lit_review_config.yaml` | the `task_description:` declaration is removed; its stale comment block corrected |
+| `workflows/model_exploration.py` | `_build_lit_review_input` reads the canonical source |
+| directly affected tests / docs | guard + upgraded pins |
+
+**`configs/task_config.yaml` is NOT modified** — it is the unchanged
+authority this PR migrates a consumer *onto*. Exactly **one** config file
+changes, not two.
+
+Reverting restores the duplicate and nothing else. Independent of 04a.
 
 ## 13. Stop conditions
 
@@ -342,7 +404,12 @@ question ("did any rendered byte move?") harder to review in isolation.
       `LiteratureReviewInput.task_description` equals the **task-profile**
       text and does **not** contain the sentinel. (Asserting only "it is
       non-empty" would pass while the YAML was still authoritative.)
-- [ ] `grep -rn "task_description" configs/lit_review_config.yaml` is empty.
+- [ ] **Parsed** `configs/lit_review_config.yaml` has **no top-level
+      `task_description` key**. Asserted by loading the YAML and checking
+      the mapping — *not* by grepping the text, which would also fire on
+      the comment block that legitimately explains where the value now
+      comes from (and would contradict C2's rule that prose may mention
+      the concept).
 - [ ] No other production reader of the lit-review YAML key remains.
 
 **6. Failure and edge cases.**
@@ -398,7 +465,9 @@ lands as an explicit, reviewable decision about what must never regress.
 - [ ] Re-read the YAML comment block and rewrite it to state the real
       behaviour: the description comes from `configs/task_config.yaml`.
 - [ ] Add a guard test that fails when a second `task_description`
-      declaration appears in any tracked config.
+      **declaration** appears in any tracked config. It must **parse** each
+      YAML under `configs/` and inspect top-level keys — never scan raw
+      text, since comments and prose may legitimately mention the concept.
 - [ ] Re-read `test_agent_card_task_config.py` and upgrade it to the single
       source rather than deleting it.
 - [ ] Search for and rewrite any pin that asserts the lit-review YAML owns
@@ -421,8 +490,13 @@ lands as an explicit, reviewable decision about what must never regress.
       tree re-verified green.
 - [ ] The guard passes with `configs/task_config.yaml` present and
       unmodified (exactly one legitimate source is not an error).
-- [ ] `grep -rn "SIDERIUS_TASK" configs/ docs/` returns nothing describing
-      it as live behaviour.
+- [ ] **No CURRENT LIVE surface describes `SIDERIUS_TASK` as an active
+      fallback.** Scoped to live behaviour surfaces: the lit-review config
+      comments, current node/runtime documentation, and executable source.
+      A repository-wide grep is **not** the acceptance property —
+      historical design and audit records (including §0.1 of this very
+      document) deliberately preserve the removed mechanism, and rewriting
+      them would destroy the audit trail.
 - [ ] `pb9_*` unchanged by this commit (`git diff` on the goldens dir is
       empty).
 - [ ] `test_agent_card_task_config.py` asserts the single source and still
@@ -430,8 +504,9 @@ lands as an explicit, reviewable decision about what must never regress.
 
 **6. Failure and edge cases.**
 - Guard written as a whole-file substring scan → would fire on ordinary
-  prose mentioning the phrase. It must key on a **declaration** (a YAML
-  key at top level), not on the words appearing anywhere.
+  prose mentioning the phrase, including the corrected comment this same
+  commit writes. It must parse the YAML and key on a **top-level
+  declaration**, never on the words appearing anywhere.
 - Guard scans a directory that legitimately contains task text (e.g. a
   design doc) → scope it to `configs/`.
 - Someone deletes the guard along with the duplicate in a future PR → the

@@ -162,7 +162,7 @@ Of the fifteen hardcoded prose families in roadmap §13.1, Step 04 owns
 | implementor prompts (incl. loss generation) | **04a** |
 | validator prompt + probe literal | **04a** |
 | duplicate byte-equal task description in `lit_review_config.yaml` | **04b** |
-| static builtin model-description task content (`ml_models/{model_type}/description.md`) | **04b** |
+| static builtin model-description task content (`ml_models/{model_type}/description.md`) | **DEFERRED / RECORD** — was assigned to 04b; 04b's revision-2 source audit found **no live task-block consumer**, so migrating it now would create a consumer-less seam (§20.4) |
 | PROPOSAL_COMMIT_PROMPT, personas, proposer family | CLOSED — Step 01 |
 | planner roster / collapse advice / data-volume anchors / CH1-CH2, `REFLECTOR_PROMPT` | **Step 07a** |
 | interpretation prediction grammar | **Step 09** |
@@ -286,7 +286,7 @@ and alone it delivers no capability a user can observe.
 | PR | Capability | Depends on |
 |---|---|---|
 | **04a** `pr_04a_contract_derived_candidate_mechanics.md` | Candidate creation and validation derive every model-contract fact from the normalized Step-03 contract; a declared-regressor custom loss can pass | Steps 01/02/03 |
-| **04b** `pr_04b_task_description_single_source.md` | The task description has exactly ONE source; the lit-review node and the static builtin model-description task content read it instead of a byte-duplicated copy | §13 task-profile authority |
+| **04b** `pr_04b_task_description_single_source.md` | **ONE canonical runtime declaration** of `task_description` (the §13 task profile), consumed by the **production lit-review node** instead of a byte-duplicated copy in `lit_review_config.yaml`. The static builtin model-description task prose is **NOT** part of 04b (§20.4) | §13 task-profile authority |
 
 **Order**: independent — neither requires the other. Recommended
 sequence **04a → 04b**, because 04a carries the convergence-ledger
@@ -450,7 +450,7 @@ Gate 1 is required regardless, by the loss-generation row (§14).
 | PR | Required live evidence |
 |---|---|
 | **04a** | In a real chain iteration, the production implementor generates a candidate whose contract comments/self-check derive from the resolved contract, and the production validator probes it with a contract-derived tensor — proven from run artifacts, not unit mocks |
-| **04b** | In a real chain iteration, the production lit-review node renders from the single task-description source |
+| **04b** | **Deterministic production-path integration — no real chain required.** Canonical §13 task config → real `_build_lit_review_input` → real lit-review rendering / recording bridge → captured task-description block, proven with a distinguishable alternate description. Both Gates are NOT REQUIRED for 04b, so a paid iteration would add no evidence a deterministic capture cannot give (04b §7) |
 
 Neither child may use the other's run as its only live proof.
 
@@ -608,7 +608,9 @@ threshold-met finding; D2's remaining half is recorded closed (§11).
 | **04b** | **NOT FROZEN / NOT AUTHORIZED / NOT STARTED** | its design document is still a draft awaiting review |
 
 **Do not mark Step 04 COMPLETE.** The completion contract above requires
-*both* children. The `04a → 04b` sequencing recommended in §7.3 is preserved:
+*both* children — and **only** those. The deferred static builtin
+model-description task prose (§20.4) is explicitly **not** a completion
+criterion. The `04a → 04b` sequencing recommended in §7.3 is preserved:
 04a landed first because it carries the higher-risk surface and the §14
 convergence evidence.
 
@@ -626,6 +628,40 @@ interfaces and authorities it leaves behind for exactly this purpose.
 | `generic_framework_upgrade/README.md` index | **OPEN** — same one-line mirror |
 | §14 convergence row records the threshold-met finding | **OPEN** — 04a supplies the §6 consumer evidence (first single consumer holding both `ForwardContract` and `ModelIOContract`); still **RECORD ONLY**, no merge of the two authorities (OD-S4-4) |
 | D2's remaining half recorded closed (§11) | satisfied by §11 — carried to Step-level closeout |
+
+### 20.4 Static builtin model-description task prose — DEFERRED / RECORD
+
+**Scope correction, recorded before 04b freezes.** Earlier revisions of this
+parent (§2.7, §7.3) assigned the checked-in
+`ml_models/{model_type}/description.md` task prose to 04b. 04b's revision-2
+source audit found that assignment cannot be honoured as scoped:
+
+| Finding | Evidence |
+|---|---|
+| `ml_models/model_descriptions.py` is a **whole-file loader** — it reads the markdown and returns its text | it has no task-block seam |
+| **No live consumer** would render task-profile content into that surface | nothing calls for one |
+| Creating one in 04b would be a **consumer-less seam** | roadmap §0 rule 8 forbids it |
+
+Two of the six builtin descriptions (`punet`, `gated_fno`) do carry
+SQUID/axion task prose. That remains true and remains duplication. It is
+**recorded, not fixed**.
+
+**Revisit trigger — the only one:**
+
+> a real production consumer exists that can render task-profile content
+> into the builtin model-description surface.
+
+Until then, do not re-assign this to a PR and do not build the seam
+speculatively.
+
+**Effect on Step-04 completion: NOT REQUIRED.** §20's completion contract is
+*"both children merged"* plus their checkpoint/Gate/CI evidence. This
+deferred item is **not** a child, **not** part of 04a (which owns the
+implementor-*generated* description artifact — a different file and
+producer, §2.3.1), and **not** part of 04b as re-scoped. Step 04 may
+therefore complete with this surface still duplicated. Nothing in §20 should
+be read as requiring it, and the §2.7 / §7.3 rows above have been corrected
+so they no longer imply otherwise.
 
 ### 20.3 Carried-forward finding from 04a's Gates (not a Step-04 deliverable)
 
@@ -646,7 +682,7 @@ All four decisions are resolved. **Remaining operator questions: NONE.**
 | ID | Decision | Disposition |
 |---|---|---|
 | **OD-S4-1** | Implementor capacity-literal byte change (§12) | **APPROVED.** Derive the stale `<10 GB` / `<100M` prose from the live Hardware Context. The affected `pb5_*` golden set may change **only** by mechanically attributable deltas caused by that authority correction. This is the **only** intentional LLM-visible golden delta in Step 04 |
-| **OD-S4-2** | TWO PRs, `04a → 04b` (§7) | **APPROVED.** Independence re-verified after the description-surface clarification (§2.3.1): 04a owns the implementor-*generated* candidate description artifact, 04b owns the *static builtin* model-description task content. Different files, different producers, no shared production surface |
+| **OD-S4-2** | TWO PRs, `04a → 04b` (§7) | **APPROVED.** Independence re-verified twice: at design time via §2.3.1 (04a owns the implementor-*generated* candidate description artifact — different file, different producer), and again against MERGED 04a source in 04b revision 2. **Correction**: the static builtin model-description task content is no longer claimed by 04b — it is DEFERRED (§20.4). The two-PR split does not depend on it |
 | **OD-S4-3** | Prior-plugin compatibility (§18) | **APPROVED — PRESERVE LOADABILITY.** No workspace boundary. Corpus re-audited mechanically: 89/89 declare `PLUGIN_OUTPUT_TYPE`, 0 legacy-fallback, 0 malformed. The fallback stays supported and is protected by a synthetic fixture |
 | **OD-S4-4** | Convergence disposition (§17) | **APPROVED — RECORD ONLY.** No convergence abstraction is implemented in Step 04 |
 
