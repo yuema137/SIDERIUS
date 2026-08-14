@@ -6,17 +6,20 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — REVISION 2. Not frozen. Implementation NOT authorized.** |
+| Status | **DRAFT — REVISION 3, READY FOR OPERATOR FREEZE. Not frozen. Implementation NOT authorized.** |
 | Design base | **re-anchored to `82a548f8`** (master after 05a merged as `cfb3b1c7`). Revision 1 was written against `13b08550`; every source citation below has been re-verified and moved where it moved (§0.3) |
 | Depends on | **Step 02** (Dataset Profile) · **Step 03** (`ModelIOContract`) · **Step 04a** (`model_io_probe_skill`, the shared probe-realization authority) |
 | Blocks | nothing — see §7 |
 | Roadmap row | §15.1 `§7d Tuner resource/time planning` |
-| Decomposition | **ONE PR**, nine semantic commits C0-C8 (§16). No child design doc |
-| Operator decisions carried into rev 2 | **OD-05b-1** probe scope = *parameterize the 04a realizer additively* (§0.2 option A) · **OD-05b-2** re-anchor all citations to current master |
+| Decomposition | **ONE PR**, two internal capability phases (P = C1-C4, D = C5), nine semantic commits C0-C8 (§16). Re-tested at revision 3 — see §0.4. No child design doc |
+| Operator decisions | **OD-05b-1** probe scope = additive parameterization of the 04a realizer (§0.2) · **OD-05b-2** re-anchor citations to current master (§0.3) · **OD-05b-3** ONE PR, two internal phases (§0.4) · **OD-05b-4** output-form authority inherited from Step 04a (§0.5) · **OD-05b-5** semantic run-bound contract transport, route chosen at C4 · **OD-05b-6** Stage-B = one rung, two subcases (§8) · **OD-05b-7** calibration preservation audit, not a pin campaign (C6) |
 
 > **Revision 2 exists because revision 1's central claim did not survive
-> source audit.** §0.2 records what was checked, what was found, and what the
-> operator decided. Read it before §1.
+> source audit** (§0.2). **Revision 3 corrects four authority errors revision 2
+> introduced** — output-form ownership (§0.5), contract acquisition (C4),
+> Stage-B coverage (§8), and calibration evidence scope (C6) — and removes
+> design wording that would have paused an authorized implementation session
+> (§11, §16.1, §16.2). Read §0.2-§0.5 before §1.
 
 ---
 
@@ -132,18 +135,36 @@ Corrected understanding:
 ```text
 model_io_probe_skill.py   (Step-04a owned; change is ADDITIVE + DEFAULTED)
     realize_shape(tensor, *, batch=None, symbolic=None)
-        batch    or PROBE_BATCH            # omitted -> byte-identical
-        symbolic or PROBE_SYMBOLIC_EXTENT  # to every existing caller
+
+        omitted / None   -> the existing Step-04a recipe default
+                            (PROBE_BATCH / PROBE_SYMBOLIC_EXTENT)
+        positive int     -> the supplied runtime extent
+        zero or negative -> typed failure in the module's existing idiom
 
 evaluate_vram_skill/wrapper.py
     _build_probe_tensors(..., model_io_contract=None)
-        contract present -> realize_shape(declared_output_tensor(...),
+        contract present -> realize_shape(declared_output_tensor(contract,
+                                              <candidate declared form>),
                                 batch=batch_size, symbolic=seg_size)
         contract absent  -> today's [B, 256, T]      (unchanged)
 
-transport: tuner -> run_production_preflight -> IsolatedProbeSpec
-           -> spec.json -> preflight_worker_main -> run_skill
+transport: an explicit run-bound contract reaches BOTH the in-process
+           wrapper and the isolated pre-flight child (§0.4, C3, C4)
 ```
+
+**`None`-sensitivity is part of the contract, not an implementation detail.**
+The override must be written against `None`, never against falsiness:
+`PROBE_BATCH if batch is None else batch`. A `batch or PROBE_BATCH` idiom
+would let `0` silently resolve to the legacy default and produce a capacity
+number for a tensor nobody asked for — the exact silent-fallback shape this
+design forbids everywhere else. Zero and negative extents fail closed; the
+concrete exception type follows the module's existing idiom and is chosen at
+implementation time, not frozen here.
+
+**Output FORM is not this PR's to decide.** Step 04a already settled it, and
+`declared_output_tensor`'s docstring states the rule verbatim: *"the
+DECLARATION selects the form, and the CONTRACT supplies every fact inside
+it."* The VRAM probe inherits that rule unchanged — see §0.5.
 
 Rejected alternatives, recorded so the choice is auditable:
 
@@ -188,6 +209,92 @@ Revision 1 cited `13b08550`. Every site has been re-verified at `82a548f8`:
 Implementation must still re-enumerate (the 05a precedent: line numbers drift,
 capabilities do not). These anchors are reading aids, not contracts.
 
+### 0.4 Decomposition — re-tested at revision 2, still ONE PR
+
+Revision 2 enlarged 05b's scope (an additive change to a Step-04a module plus
+an IPC transport), so the one-PR decision was **re-tested rather than
+inherited**. It holds.
+
+05b has two internal capability **phases**, not two PRs:
+
+| Phase | Chain | Commits |
+|---|---|---|
+| **Phase P** — probe realization | `ModelIOContract` → concrete capacity probe → live VRAM gate | C1-C4 |
+| **Phase D** — workload topology | run-bound `DatasetProfile` → workload/time derivation | C5 |
+
+They stay one PR because they jointly establish **one** Step-05b capability:
+
+> every task-shaped term used by resource/time planning derives from the
+> authority that already owns it, while calibration and runtime values remain
+> unchanged.
+
+| Dimension | Shared by P and D |
+|---|---|
+| completion criterion | the Step-05b capability above |
+| compatibility surface | one TIDMAD forecast / admission parity oracle |
+| consumer family | resource & time planning |
+| production evidence | one Checkpoint-C family through the real gate |
+| configuration contract | one config/replay invariant (§20) |
+
+**Why a split would ship an incoherent state.** Landing Phase P alone leaves a
+planner that is generic along the Model-I/O axis and ambient along the dataset
+axis; landing Phase D alone gives the mirror image. Either half is a resource
+planner that derives one task dimension correctly and silently prices the
+other against whatever singleton happens to be resolved — which is precisely
+the half-migrated architecture Step 02b and Step 05a exist to eliminate.
+
+That the two phases are separately revertible is a **rollback** property
+(§13), not a decomposition argument. Internal checkpoints and phases carry the
+ordering; child PRs are not used.
+
+### 0.5 Output-form authority — inherited from Step 04a, not re-decided here
+
+An earlier draft of this design made *"the contract's canonical output
+semantic disagrees with `get_output_type(model_type)`"* an unconditional STOP.
+**That was wrong, and it contradicted a landed decision.**
+
+```text
+Audit evidence (agent/skills/model_io_probe_skill.py:142-211,
+`declared_output_tensor` docstring, verbatim):
+
+  "the DECLARATION selects the form, and the CONTRACT supplies every fact
+   inside it."
+
+  "A candidate may legitimately declare `regressor` under a categorical task
+   contract; three plugins in the live corpus do exactly that, and they pass
+   today. Deriving the form from the task contract instead would start
+   rejecting them, which is a verdict change under TIDMAD and therefore a
+   Stage-A parity break."
+```
+
+So the rule 05b **inherits, unchanged**:
+
+```text
+candidate/plugin declaration  (get_output_type(model_type), or its current
+                               canonical equivalent)
+    -> selects the output FORM: classifier / regressor / legacy-hybrid
+
+ModelIOContract
+    -> supplies the facts INSIDE that form: axes, axis order, fixed extents,
+       class cardinality, dtype requirements
+```
+
+The VRAM probe realizes through `declared_output_tensor` + `realize_shape`
+rather than building a second resolution table. A categorical task contract
+with a `regressor` candidate is a **supported compatibility surface**, not a
+conflict.
+
+**Fail closed only when:**
+
+- the selected candidate form needs a contract fact the contract does not
+  carry (04a's own case: a `classifier` form under a continuous contract with
+  no class axis → `ProbeConstructionError`);
+- the form/contract combination is not representable;
+- `ProbeConstructionError` — or the current typed equivalent — is raised;
+- an explicit contract is **lost or malformed in transport**.
+
+A canonical-semantic difference alone is **never** a stop condition.
+
 ## 1. Observable final capability
 
 > The tuner's **resource and time forecasts derive their task-shaped terms**
@@ -225,9 +332,14 @@ authority can serve both validation-probe extents and capacity-probe extents
 > of from a `[B, 256, T]` literal.
 
 When no contract is supplied the gate builds exactly the tensor it builds
-today. That is not a hedge: it is the Regime-A property every Step-02/03/04
-seam has kept, and it is what makes the change provable by byte-equality
-rather than by argument.
+today. That is not a hedge: it is the **legacy no-contract compatibility
+path** every Step-02/03/04 seam has kept, and it is what makes the change
+provable by byte-equality rather than by argument.
+
+*(Terminology: this design says **legacy no-contract path** and
+**explicit-contract path**. Roadmap "Regime A / Regime B" is reserved for the
+Step-12 task-composition binding model, and the presence or absence of a
+`model_io` declaration must not be made to stand in for that distinction.)*
 
 **Deliberately NOT claimed:**
 
@@ -312,29 +424,56 @@ Depends on Steps 02, 03, 04a — all merged. **Independent of 05a**: it
 consumes `SampleSet` *values*, whose shape 05a is required to leave
 byte-identical. **Independent of 05c.** Order is preference, not blocking.
 
-## 8. Stage-B atomic contrast
+## 8. Stage-B — ONE rung, two atomic subcases
 
-**One axis: a single task-derived workload term, with calibration,
-hardware and policy held fixed.**
+**Rung `05b-B` — task-shaped resource/time terms derive from their owners.**
+One capability, proven by two subcases because 05b migrates **two independent
+authority families** (§0.4). A class-cardinality contrast alone cannot
+discharge 05b: it would pass with Phase D still entirely ambient.
 
-Concretely: a contrast contract whose class extent differs from 256 must move
-the derived probe shape and the forecast term that depends on it — while
-`2.7`, the intensity cap, the batch table and the hardware context stay
-byte-identical. Reds when a `256` survives in a live estimator.
+| Subcase | Varies ONLY | Held fixed | Proves |
+|---|---|---|---|
+| **B1 — Model-I/O probe realization** | the contract-owned class cardinality (or the equivalent Model-I/O fact) | `DatasetProfile`, calibration, hardware, policy, and the candidate's batch/segment extents except where they are themselves the observed probe | the **live** VRAM probe shape and the dependent forecast/admission terms follow the contract; **no local `[B, 256, T]` realization remains** |
+| **B2 — dataset / decomposition topology** | the PSD/decomposition-relevant `DatasetProfile` fact | `ModelIOContract`, calibration, hardware, policy | the **live** workload/time resolution follows the **run-bound** profile; ambient fallback does not determine step counts or output-byte terms |
+
+Why two and not one: the two halves fail independently and in opposite
+directions. A single contrast that moved both facts at once would still pass
+if either half were migrated and the other happened to agree — the
+partial-derivation false green.
+
+**B1 and B2 are atomic SUBCASES of one PR-level capability. They are not
+separate rungs and not separate PRs.**
 
 Do **not** build a contrast that varies topology *and* class count *and*
 calibration at once.
 
-## 9. Checkpoint C — live integration
+## 9. Checkpoint C — live integration, minimum scenario set
 
-A **real production VRAM/time gate prices and admits a real attempt** using
-derived terms — the actual gate, not a helper. Under TIDMAD the decision and
-breakdown are unchanged; under the contrast contract the derived terms move
-and the calibration values do not.
+**Frozen property**: Checkpoint C uses the **minimum deterministic
+production-path scenario set** that exercises **both** 05b task-shaped
+authority families through real resource/time control flow. A helper-only test
+cannot discharge it.
 
-Deterministic where the probe can be stubbed at its measurement boundary. If
-the live probe cannot be exercised without a GPU, that is a **Gate-2 trigger
-question** (§11), not a reason to weaken Checkpoint C into a helper test.
+Expected source-grounded shape:
+
+| Scenario | Path | Proves |
+|---|---|---|
+| **C-P** | the real production VRAM pre-flight / admission path | it consumes the explicit run-bound contract and realizes the **actual candidate** probe |
+| **C-D** | the real production workload/time path | it consumes the bound `DatasetProfile` |
+
+If one production scenario proves both families, **use one and record why**.
+If two paths are required by the production control flow, **the two scenarios
+still constitute ONE Checkpoint C** — not two checkpoints and not two PRs.
+
+Measurement may be deterministically controlled **at its existing boundary**,
+provided the real production pricing/admission logic and the actual probe
+realization are still exercised. Stubbing the measurement is legitimate;
+stubbing the decision is not.
+
+Under TIDMAD the decision and breakdown are unchanged; under each contrast the
+derived terms move and the calibration values do not.
+
+This evidence is what settles §11's semantic Gate-2 condition.
 
 ## 10. Failure classes
 
@@ -374,13 +513,26 @@ projection within the normal autonomous validation budget — belongs to the
 Implementation Working Rules and current Gate policy, **not** to this design
 and **not** to the operator's design review.
 
-**Binding for this PR: a real-training Gate is never launched autonomously.**
-If C7 resolves the condition to REQUIRED, the Gate is listed as its own
-item — separate from the deterministic validation of every other commit —
-with its bounded command, expected wall time and cost projection written down
-**before** it runs, and it waits for explicit operator approval. No commit
-above depends on a Gate result to be considered complete; C0-C6 and C8 are
-fully deterministic.
+**What this design owns, and what it does not.** Frozen here: Gate 2's
+semantic condition, the evidence Checkpoint C must produce, and the flip
+condition. **Not** frozen here: launch permission, autonomous validation
+budget, and timeout/cost ceilings — those belong to the filled Implementation
+Working Rules and the current Gate standard.
+
+```text
+If C7 resolves Gate 2 to REQUIRED:
+  run it under the CURRENT gate_testing_standard.md and the filled
+  Implementation Working Rules.
+
+  projected run inside the authorized bounded budget
+      -> the implementation agent continues autonomously
+
+  projected run materially exceeds that budget
+      -> STOP with a cost/runtime projection
+```
+
+C0-C6 and C8 are fully deterministic; no commit depends on a Gate result to
+be considered complete.
 
 ## 12. Validation budget
 
@@ -446,17 +598,23 @@ realizer; reverting C5 restores the ambient fallbacks. Nothing else.
 
 Added in revision 2, from the C1-C5 audit:
 
-- **A declared contract and `get_output_type(model_type)` disagree about the
-  output semantic** (C2 §6) → STOP. Which of the two owns the answer is a
-  real authority question, and silently preferring either would make the
-  probe describe a different model than the one being admitted.
+- **The selected candidate form needs a contract fact the contract does not
+  carry**, the form/contract combination is not representable, or
+  `ProbeConstructionError` (or its current typed equivalent) is raised → fail
+  closed. *A canonical-semantic difference alone is NOT a stop condition —
+  see §0.5.*
+- **An explicit contract is lost or malformed in transport** → fail closed;
+  never fall back to the literal shape.
+- **Source cannot establish one safe explicit run-bound contract acquisition
+  path** (C4 §6) → MATERIAL STOP; do not substitute an ambient re-read.
 - **`realize_shape` would need per-axis extents** rather than one `symbolic`
   value (C1 §6) → STOP. That is a shape language, not a parameterization, and
   it belongs to whoever owns the contract schema.
 - **A live profile consumer cannot be reached without changing a public
   signature 05b does not own** (C5 §6) → STOP.
-- **`load_task_config()` would become newly fatal on a pre-flight path that
-  never read it** (C4 §6) → STOP and reconsider the acquisition point.
+- **The chosen contract-acquisition point would make an unrelated failure
+  newly fatal on a pre-flight path that never read that source** (C4 §6) →
+  STOP and reconsider the point; do not substitute an ambient re-read.
 
 ## 16. Commit plan — per-commit checklists
 
@@ -591,9 +749,9 @@ to confuse the evidence.
   documented `(1, 256, 64)` output / `(1, 64)` input, unchanged.
 - *Unit*: `realize_shape(t, batch=B, symbolic=T)` returns `(B, 256, T)` — the
   `fixed` class axis unmoved.
-- *Negative*: a `fixed` axis is **not** overridden by `symbolic=`; a
-  non-positive `batch`/`symbolic` is rejected or documented as unchecked —
-  decide from the module's existing idiom, do not invent a new error class.
+- *Negative*: a `fixed` axis is **not** overridden by `symbolic=`; **zero and
+  negative extents raise** in the module's existing idiom rather than falling
+  back. Do not invent a new error class — reuse the module's typed one.
 - *Backward-compat*: `build_model_input`, `expected_output_shape` and both
   node consumers produce byte-identical shapes.
 - *Gate*: **none**.
@@ -606,9 +764,17 @@ to confuse the evidence.
       still `256` in the returned tuple, and rank and axis order are those of
       the contract, not of any assumption in this module.
 - [ ] The four probe constants are unchanged, asserted by value.
+- [ ] **`None`-sensitivity, asserted explicitly**: `batch=None` /
+      `symbolic=None` resolve to the existing Step-04a recipe defaults; a
+      supplied **positive** extent is used verbatim; **zero or a negative
+      extent fails** in the module's existing typed-error idiom and **never
+      silently falls back**. A `0` that resolved to `PROBE_BATCH` would price
+      a tensor nobody asked for.
 - [ ] Zero production call sites changed by this commit.
 - [ ] A mutation that makes the new parameter override a `fixed` axis is
       **RED**.
+- [ ] A mutation rewriting the override as `batch or PROBE_BATCH` is **RED**
+      — caught by the zero case above.
 
 **6. Failure and edge cases.**
 - A contract with a batch-role axis that is *also* `fixed` → `fixed` wins;
@@ -655,9 +821,12 @@ default is invisible to every caller that never passes it.
       (`:483-520`) — note it is `**kwargs`, so the addition is additive.
 - [ ] Add the optional parameter and thread it from `run_skill` to the
       `:588` call site.
-- [ ] With a contract: derive the target shape via `declared_output_tensor`
-      + the C1-parameterized `realize_shape(..., batch=batch_size,
-      symbolic=seg_size)`.
+- [ ] With a contract: resolve the candidate's declared **form** exactly as
+      validation does today (`get_output_type(model_type)`, or its current
+      canonical equivalent), then derive the target shape via
+      `declared_output_tensor(contract, form)` + the C1-parameterized
+      `realize_shape(..., batch=batch_size, symbolic=seg_size)`. **Do not add
+      a second form-resolution table** (§0.5).
 - [ ] Without a contract: take exactly today's path, including the
       `get_output_type` branch and the `[B, 256, T]` literal.
 - [ ] Decide and record where **dtype** comes from when a contract is
@@ -682,20 +851,33 @@ default is invisible to every caller that never passes it.
 - [ ] With `model_io_contract=None`, the returned `(input, target)` shapes
       and dtypes are **equal** to the C0 baseline for every branch.
 - [ ] With the shipped TIDMAD contract supplied, the target shape equals the
-      no-contract shape **exactly** — this is the whole Regime-A claim, and
-      it is an equality assertion, not a narrative.
+      no-contract shape **exactly** — this is the whole legacy-compatibility
+      claim, and it is an equality assertion, not a narrative.
 - [ ] With a contrast contract, the class axis moves and `batch_size` /
       `seg_size` are honoured at their real values (not `1` / `64`).
 - [ ] Target **dtype** still comes from the loss in both paths.
+- [ ] **Form/fact authority matches Step 04a**: for each declared form
+      (`classifier`, `regressor`, legacy) the VRAM path's realized output
+      tensor is **equal** to what `declared_output_tensor` +
+      `realize_shape` produce for the same contract and form — asserted
+      against the 04a authority, not against a locally restated table.
+- [ ] A `regressor` candidate under a categorical contract is **accepted**
+      and probed at the class-axis-dropped shape.
+- [ ] A `classifier` candidate under a contract carrying no class axis raises
+      `ProbeConstructionError` (04a's own fail-closed case), and the VRAM
+      path surfaces it rather than falling back to the literal.
 - [ ] No production caller passes a contract yet — asserted by inspection and
       recorded, so C4's evidence cannot be confused with C2's.
 
 **6. Failure and edge cases.**
 - Contract declares a `regressor` output → target is `[B, T]`; must agree
   with today's `get_output_type` branch under TIDMAD.
-- Contract and `model_type` disagree about the output semantic → **STOP**
-  and record; do not silently prefer one. That is a genuine authority
-  question, not an implementation detail.
+- The contract's canonical output semantic differs from the candidate's
+  declared form — e.g. a `regressor` candidate under a categorical task
+  contract → **SUPPORTED, not a conflict.** Step 04a preserves exactly this
+  case (three live plugins rely on it), and `declared_output_tensor` already
+  returns the continuous form with the class axis dropped. Rejecting it would
+  be a TIDMAD verdict change and a Stage-A parity break (§0.5).
 - Contract present but unrealizable (`ProbeConstructionError`) → propagate as
   the module's existing `ValueError` idiom; never fall back to the literal.
 
@@ -766,7 +948,7 @@ still inert until C4 supplies a contract.
 - Contract too large / non-JSON-native after dump → must fail at the parent
   with a clear diagnostic, not produce a truncated child spec.
 - Worker launched by older tooling with a stale spec → absent field is legal
-  and means Regime A.
+  and selects the legacy no-contract path.
 - Propagation failure (child cannot rebuild the contract) → **fail the
   pre-flight loudly**; do not fall back to the literal shape, because a
   silently-wrong probe reports a capacity number for a different model.
@@ -780,77 +962,113 @@ supplies a contract. No tuner change.
 
 ---
 
-### C4 — the tuner supplies the contract (first live consumer)
+### C4 — a run-bound contract reaches the resource path (first live consumer)
 
 **1. Goal.** Make the live resource gate the third production consumer of the
-probe authority. **This is the first commit that can change a real run's
-behaviour**, and only for a task that declares `model_io` — which is why it
-is isolated.
+probe authority, fed by **one explicit run-bound `ModelIOContract`**. **This
+is the first commit that can change a real run's behaviour**, and only for a
+task that declares `model_io` — which is why it is isolated.
 
 **2. Scope.**
-- The tuner's pre-flight call path — `_run_time_preflight`'s VRAM sibling and
-  `run_production_preflight`'s caller in
+- The tuner's pre-flight call path — `run_production_preflight`'s caller in
   `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`
   (`run_production_preflight` imported at `:54`).
-- Contract acquisition: `workflows/task_config.load_task_config()` →
-  `ForwardContract(**cfg["forward_contract"]).model_io` — the resolved
-  production entry point (`workflows/task_config.py:172`), which is `None`
-  for a legacy prose-only task.
-- **Non-goals**: no new field on `HyperparamTuningInput`; no new CLI
-  argument; no change to admission thresholds, retry or refusal semantics;
-  no ambient contract lookup inside the skill.
+- Whatever minimum explicit transport the current caller chain supports
+  (chosen in step 1 below, not pre-frozen here).
+- **Non-goals**: no new **user-authored or persisted** configuration; no new
+  YAML/config hierarchy; no new required CLI argument; no change to admission
+  thresholds, retry or refusal semantics; no ambient contract lookup inside
+  any resource consumer.
 - Depends on: C3.
 
 **3. Implementation plan.**
-- [ ] Re-read the tuner's VRAM pre-flight call site and confirm the exact
-      acquisition point (tuner vs. adapter) from the call chain — **do not
-      assume**; record the choice and why.
-- [ ] Obtain the contract through the canonical accessor, once per run, at a
-      point that adds **no branch** to `run()` (CLAUDE.md: `run()` sits on
-      pyright's strict complexity ceiling).
-- [ ] Pass it through `run_production_preflight`.
-- [ ] Confirm a task with no `model_io` yields `None` and today's behaviour.
+
+**The frozen property is semantic, not an engineering route:**
+
+```text
+- the resource path receives ONE explicit run-bound ModelIOContract
+  semantic value;
+- no VRAM/resource consumer independently re-reads an ambient or default
+  task configuration as its own authority;
+- the SAME run binding reaches the in-process wrapper and the isolated
+  pre-flight worker.
+```
+
+- [ ] Re-read **only** the caller chain needed to choose the minimum
+      transport, and record the choice with its source evidence. Preferred
+      order:
+      1. **reuse an already-resolved contract** in the workflow/run context;
+      2. if the tuner protocol lacks one, an **optional typed runtime input
+         field** — when that is the smallest explicit transport;
+      3. reuse an existing run-input/sidecar boundary where one already
+         exists.
+- [ ] Bind it once per run, at a point that adds **no branch** to `run()`
+      (CLAUDE.md: `run()` sits on pyright's strict complexity ceiling).
+- [ ] Pass it through `run_production_preflight` to both the in-process and
+      child paths.
+- [ ] Confirm a task with no `model_io`, and a legacy caller that supplies
+      nothing, both yield `None` and today's behaviour.
 - [ ] Update the tuner node doc and `evaluate_vram_skill.md`.
 
+> **`load_task_config()` inside the tuner is permitted only if source proves
+> it is already the canonical run-bound input for that node and cannot
+> diverge from the actual run binding.** It is otherwise a *second ambient
+> acquisition* — it may happen to read the same file, but "happens to agree"
+> is precisely the defect shape Step 02a/02b/05a removed. An **optional typed
+> runtime protocol field is not a redesign of the configuration
+> architecture** (§20), and the invariant protecting model/loss/train config
+> must not be stretched into forbidding one.
+
 **4. Validation plan.**
-- *Unit*: with a `model_io`-declaring task config, the contract reaches
-  `run_skill`; with a legacy config, `None` does.
+- *Unit*: with a contract bound for the run, it reaches `run_skill`; with a
+  legacy caller, `None` does.
 - *Integration/pseudo*: a real tuner pre-flight path — not a helper — carries
-  the contract end to end.
-- *Negative*: a task config whose `model_io` fails resolution must fail at
-  the existing `resolve_model_io_contract` boundary, before any probe runs;
-  05b must not add a second resolution point.
+  the same binding to **both** the in-process wrapper and the child worker.
+- *Negative*: a malformed/unresolvable contract fails at the existing
+  resolution boundary before any probe runs; 05b adds no second resolution
+  point.
 - *Backward-compat*: under TIDMAD the **resolved batch size, the forecast
-  breakdown and the admission/refusal decision are identical** to C0.
+  breakdown and the admission/refusal decision are identical** to C0; old
+  serialized configs and legacy callers keep working.
 - *Gate*: see §11 — the condition is decided at C7, not here.
 
 **5. Acceptance criteria.**
 - [ ] Under TIDMAD, admission decision, resolved batch size and forecast
       breakdown are **equal** to the C0 baseline — a single unit of drift in
       any breakdown term is failure class 3 and a **STOP**, not a tolerance.
-- [ ] A legacy prose-only task config still runs the gate with `None`.
-- [ ] The contract is acquired **once per run**, and no 05b consumer performs
-      its own ambient contract lookup — asserted semantically, not by a call
-      count.
+- [ ] A task with no `model_io`, and a legacy caller supplying nothing, both
+      still run the gate on the legacy no-contract path.
+- [ ] **One run binding**: the contract observed by the in-process wrapper and
+      the one observed in the child are the same semantic value — asserted
+      semantically, never by a call count.
+- [ ] **No resource consumer performs its own ambient task-config
+      resolution** — a transport mutation that makes one re-read a default
+      task config is **RED**.
 - [ ] `run()` gains no new branch (verified by reading the diff, since the
       complexity ceiling is not observable from tests).
-- [ ] No new schema field, CLI argument or persisted configuration.
+- [ ] No new user-authored config, no new config hierarchy, no new required
+      CLI argument; old serialized configs load without migration.
+- [ ] This commit makes **Stage-B B1** provable end to end: a contrast
+      contract bound for the run moves the live probe shape.
 
 **6. Failure and edge cases.**
-- `load_task_config()` raises for an unrelated reason at pre-flight time →
-  must not be newly fatal on a path that previously did not read task config;
-  if it would be, **STOP** and reconsider the acquisition point.
-- Contract present but the candidate is a plugin whose declared output
-  disagrees → the C2 stop condition applies.
+- The chosen acquisition point would make an unrelated failure newly fatal on
+  a pre-flight path that never read task config → **STOP** and reconsider the
+  point.
+- **Source cannot establish any safe explicit acquisition path** → **MATERIAL
+  STOP**; do not fall back to an ambient re-read.
+- A candidate whose declared form differs from the contract's canonical
+  semantic → **supported**, per §0.5; not a failure here.
 - Resume of a run started before this commit → nothing persisted changes, so
   resume is unaffected; assert it rather than assume it.
 
 **7. Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/agent/evaluate_vram_skill -q`
-- [ ] Record counts, wall time, and the TIDMAD equality results.
+- [ ] Record counts, wall time, the chosen transport with its source
+      evidence, and the TIDMAD equality results.
 
 **8. Commit boundary.** Production wiring only. No probe-logic change, no
-transport change, no unrelated cleanup.
+transport-mechanism change, no unrelated cleanup.
 
 ---
 
@@ -912,8 +1130,9 @@ because it is the Step-02b defect shape, not a Model-I/O concern.
       file/sample sequence*, the resolved seeds and the **total step count**
       are unchanged. 05b touches the step-count producer, so proving the
       configuration value unchanged would be proving the wrong thing.
-- [ ] Under a contrast profile, the derived step counts move and no
-      calibration constant does.
+- [ ] **Stage-B B2 passes**: under a contrast profile varying only the
+      PSD/decomposition fact, the derived step counts and output-byte terms
+      move and no calibration constant does.
 - [ ] An ambient-regression mutation (restore `profile or
       resolve_dataset_profile()` at a migrated site) is **RED**.
 - [ ] `grep "profile or resolve_dataset_profile()"` over the live resource
@@ -943,28 +1162,42 @@ independently revertible. No Model-I/O work, no calibration change.
 
 ---
 
-### C6 — calibration pins and the §3 seg-fallback audit record
+### C6 — calibration-preservation audit and the §3 seg-fallback record
 
-**1. Goal.** Make "calibration was not migrated" a *checked* property rather
-than a promise, and discharge the §14 ledger's audit obligation. Separate
-commit because it is the anti-scope evidence: it exists to fail if a later
-edit reclassifies an empirical constant as task configuration.
+**1. Goal.** Establish that **calibration values and their ownership did not
+change**, and discharge the §14 ledger's seg-fallback audit obligation.
+Separate commit because it is the anti-scope evidence: it exists to fail if a
+later edit reclassifies an empirical constant as task configuration.
 
 **2. Scope.**
-- New pins in the relevant existing test modules.
+- A written preservation audit recorded in §18.
+- **At most a small number** of genuinely missing semantic pins (criteria
+  below).
 - §3 of this document + the §14 roadmap row (docs).
 - **Non-goals**: no production change of any kind; no constant is moved,
-  renamed or re-owned.
+  renamed or re-owned; **no repo-wide pin campaign**.
 - Depends on: C5.
 
 **3. Implementation plan.**
-- [ ] Pin `_INFERENCE_VS_TRAINING_RATIO == 2.7`
-      (`inference_skill/estimator.py:79`).
-- [ ] Pin `_MAX_BATCH_TIMESTEPS == 800_000` (`compute_intensity.py:40`).
-- [ ] Pin `SEG_SIZE_BOUNDS == (2500, 40_000)` (`trigger_policy.py:34`).
-- [ ] Pin `_ROLE_DEFAULT_RSS_GB` incl. the **60 GiB inference cap** CLAUDE.md
-      names as a subsystem invariant (`core/sandbox_executor.py:121`).
-- [ ] Pin the batch candidate table.
+
+**Evidence order — use the cheapest sufficient layer, and stop there.** A new
+literal pin is the *last* resort, not the default.
+
+```text
+1. an EXISTING semantic oracle already protects the value      -> cite it
+2. TIDMAD forecast/admission deep equality would move if the
+   value moved                                                 -> cite it
+3. static touched-file diff proves the owner/value is untouched -> cite it
+4. none of the above, AND this PR touches or could accidentally
+   re-own the value                                            -> add ONE pin
+```
+
+- [ ] For each calibration/runtime value in §2 — `_INFERENCE_VS_TRAINING_RATIO`
+      (2.7), `_MAX_BATCH_TIMESTEPS` (800k), `SEG_SIZE_BOUNDS`,
+      `_ROLE_DEFAULT_RSS_GB` (incl. the 60 GiB inference cap CLAUDE.md pins),
+      the batch candidate table — record which layer above covers it.
+- [ ] Add a pin **only** where layer 4 applies, and say why layers 1-3 do
+      not.
 - [ ] Record the three `core/runtime_control` seg fallbacks
       (`gpu_measurement_identity.py:214`,
       `gpu_measurement_worker_main.py:254`, `probe_production.py:220`) as
@@ -972,31 +1205,44 @@ edit reclassifies an empirical constant as task configuration.
 - [ ] Update the §14 row to record *no single semantic behind "40000"* and
       retire its speculative "`§7d` resolver" owner.
 
+**Explicitly NOT required**: a literal pin and a mutation for every untouched
+constant. Most of these live in modules 05b does not modify; asserting that an
+untouched constant still equals itself is the "test what a declaration already
+enforces" pattern CLAUDE.md forbids, and it would bury the few pins that
+matter.
+
 **4. Validation plan.**
-- *Unit*: each pin asserts a **hardcoded** expected value.
-- *Negative*: none — a pin's negative case is the mutation below.
+- *Unit*: each **added** pin asserts a hardcoded expected value.
+- *Negative*: covered by the mutation below, not by a separate case.
 - *Backward-compat*: n/a (no behaviour change).
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Every pin compares against a literal written in the test, never against
-      the module attribute it guards (that would compare the code to itself).
-- [ ] Changing any pinned constant makes exactly the intended pin **RED**.
+- [ ] Every §2 calibration/runtime value is accounted for by **one named
+      evidence layer**, cited by file:line or test name.
+- [ ] Any pin added compares against a literal written in the test, never
+      against the module attribute it guards.
+- [ ] Every pin added is justified by layer 4 — the justification is written
+      down, and a pin that duplicates an existing oracle is **removed, not
+      kept "for safety"**.
 - [ ] The §14 row no longer names a `§7d` resolver.
 - [ ] Zero production files modified by this commit.
 
 **6. Failure and edge cases.**
-- A pinned constant is already asserted elsewhere → **do not duplicate**;
-  cite the existing pin instead. Test economy is binding (CLAUDE.md).
+- A constant is already asserted elsewhere → cite the existing pin; do not
+  duplicate.
 - A constant turns out to have a live *derivation* rather than a literal →
   record it; pinning a derived value would freeze the derivation by accident.
+- A value has no oracle **and** 05b cannot touch it → it is out of scope;
+  record it rather than inventing coverage for another PR's surface.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/skills tests/unit/core -k "calibration or intensity or trigger" -q`
-      *(confirm selectors at implementation time)*
-- [ ] Record counts, wall time, and each pin's mutation result.
+- [ ] The targeted test selector for whatever pins were actually added
+      (confirm at implementation time; there may be very few).
+- [ ] Record counts, wall time, the evidence-layer table, and the mutation
+      result for each added pin.
 
-**8. Commit boundary.** Evidence and documentation only.
+**8. Commit boundary.** Audit record, minimal pins, and documentation only.
 
 ---
 
@@ -1015,17 +1261,23 @@ independently.
 - Depends on: C4, C5, C6.
 
 **3. Implementation plan.**
-- [ ] Build the **single-axis** Stage-B contrast (§8): a contract whose class
-      extent differs from 256, with topology, calibration, hardware and
-      policy held fixed.
-- [ ] Prove the derived probe shape and the dependent forecast term move,
-      while `2.7`, the intensity cap, the batch table and the hardware
-      context stay byte-identical.
-- [ ] Build the Checkpoint-C scenario: the **real** production VRAM/time gate
-      prices and admits a real attempt using derived terms.
+- [ ] Build **B1** (§8): vary only the contract-owned class cardinality;
+      hold `DatasetProfile`, calibration, hardware and policy fixed. Prove
+      the live VRAM probe shape and dependent forecast/admission terms follow
+      the contract, and that no local `[B, 256, T]` realization remains.
+- [ ] Build **B2** (§8): vary only the PSD/decomposition-relevant
+      `DatasetProfile` fact; hold `ModelIOContract`, calibration, hardware and
+      policy fixed. Prove the live workload/time path follows the run-bound
+      profile.
+- [ ] Prove across both that `2.7`, the intensity cap, the batch table and
+      the hardware context stay byte-identical.
+- [ ] Build the **minimum** Checkpoint-C scenario set (§9): C-P and C-D, or
+      one scenario if it provably reaches both families — record which and
+      why.
 - [ ] Run the family mutations and record each observed result:
-      probe-shape ambient regression; profile ambient regression;
-      calibration-drift; contract-transport drop.
+      probe-shape ambient regression; **profile ambient regression**;
+      **contract-transport drop**; **ambient task-config re-read**;
+      calibration drift.
 - [ ] **Decide the Gate-2 condition** (§11) and record the evidence:
       deterministic production-path evidence fully exercises the live
       admission decision → NOT REQUIRED; otherwise REQUIRED.
@@ -1037,19 +1289,23 @@ independently.
   contract/profile binding.
 - *Backward-compat*: TIDMAD parity unchanged by this commit (it adds no
   production change).
-- *Gate*: **Gate 2 only if §11's condition resolves to REQUIRED — and it is
-  listed here separately and must NOT be launched without operator
-  approval.** Gate 1 remains NOT REQUIRED unless a resource literal reaches a
-  prompt.
+- *Gate*: **Gate 2 only if §11's condition resolves to REQUIRED**, run under
+  the current Gate standard and the filled Implementation Working Rules —
+  autonomously when the projected run is inside the authorized bounded
+  budget, otherwise STOP with a projection (§11). Gate 1 remains NOT REQUIRED
+  unless a resource literal reaches a rendered prompt.
 
 **5. Acceptance criteria.**
+- [ ] **B1 and B2 both PASS**, each against its own baseline, each moving
+      exactly one authority's fact.
 - [ ] Reintroducing ambient behaviour reds for **each** family — probe shape,
-      profile, transport — with each mutation's site count asserted as
-      exactly 1 before it is applied.
+      profile, transport, ambient task-config re-read — with each mutation's
+      site count asserted as exactly 1 before it is applied.
 - [ ] Every mutation is restored from clean source and the tree re-verified
       green.
-- [ ] Checkpoint C crosses the real production gate; a helper-only
-      substitution is explicitly rejected in the record.
+- [ ] Checkpoint C crosses the real production gate for **both** authority
+      families (one scenario or two, per §9); a helper-only substitution is
+      explicitly rejected in the record.
 - [ ] The Gate-2 branch is recorded with the **source evidence** that settled
       it, not a preference.
 - [ ] No production file is modified by this commit.
@@ -1117,13 +1373,34 @@ Depends on: C7.
 
 ### 16.1 Commit-boundary discipline (binding for every commit above)
 
-Before each commit, **stop and show**: the exact `git diff --stat`, the staged
-file list, the tests run with counts and wall time, and any deviation from
-this plan. A commit that cannot be described that way is not ready.
+Before each semantic commit, **record in the live ledger (§18)**: the exact
+`git diff --stat`, the staged file list, the tests run with counts and wall
+time, and any deviation from this plan. A commit whose evidence cannot be
+written down that way is not ready.
+
+**This is internal evidence discipline, not an operator pause.** The agent
+records and continues.
 
 Never mark a checklist item `[x]` before the evidence exists. An unperformed
 exact command is recorded as **DEVIATED** or **SUPERSEDED** with what was
 actually run — the 05a precedent (its §18 reconciliation).
+
+### 16.2 Checkpoints are NOT operator pause points
+
+**C0-C8 and Checkpoints 0/A/B/C/D are semantic evidence milestones inside ONE
+autonomous PR implementation.** They are not separate PRs, not approval
+boundaries, not context boundaries, and not reasons to stop.
+
+After implementation authorization, ordinary findings follow:
+
+```text
+inspect -> classify -> record in the live ledger -> fix -> validate -> continue
+```
+
+Do not return progress merely because a commit landed, a checkpoint passed, a
+mutation found something, the PR opened, or CI started. Only a **MATERIAL
+STOP** (§15) — or a projected validation exceeding the authorized budget —
+returns early. The operator does not approve movement between checkpoints.
 
 ## 17. Definition of Done — the authoritative checkpoint table
 
@@ -1147,17 +1424,25 @@ it, this table wins.
 - [ ] a representative historical TIDMAD configuration loads **without
       migration** and resolves to the same effective semantics
 
-### CHECKPOINT B — generic consumption
-- [ ] single-axis contrast: class extent moves the derived probe shape
-- [ ] calibration, hardware and policy provably fixed across that contrast
+### CHECKPOINT B — generic consumption (ONE rung, TWO atomic subcases)
+- [ ] **B1** Model-I/O probe realization: class cardinality moves the live
+      probe shape and dependent forecast/admission terms
+- [ ] **B2** dataset/decomposition topology: the PSD fact moves the live
+      workload/time terms via the **run-bound** profile
+- [ ] each subcase varies exactly ONE authority's fact against its own
+      baseline
+- [ ] calibration, hardware and policy provably fixed across both
 - [ ] family mutations red appropriately (probe shape · profile · transport ·
-      calibration drift)
-- [ ] no ambient profile fallback and no ambient contract lookup remains in a
-      live resource consumer
+      ambient task-config re-read · calibration drift)
+- [ ] no ambient profile fallback and no ambient task-config re-resolution
+      remains in a live resource consumer
 
 ### CHECKPOINT C — production path
-- [ ] the real production VRAM/time gate prices and admits a real attempt
-      using derived terms
+- [ ] the minimum deterministic production-path scenario set reaches **both**
+      authority families through real resource/time control flow
+- [ ] the real production gate prices and admits a real attempt using derived
+      terms; measurement may be controlled at its existing boundary, the
+      decision may not
 - [ ] no helper-only substitution
 - [ ] §11's Gate-2 condition decided from recorded source evidence
 
@@ -1199,6 +1484,16 @@ decided:
 | **OD-05b-1** — how the resource gate consumes the probe authority, given that `realize_shape` realizes at validation extents and no contract reaches the gate | **Option A**: additively parameterize `realize_shape` and plumb an optional contract (§0.2). Options B and C recorded as rejected, with reasons |
 | **OD-05b-2** — whether to re-anchor rev-1's `13b08550` citations | **Yes**: §0.3 is the corrected table; the original blocks are preserved as chronology |
 
+Revision 3 added five more, all decided:
+
+| Decision | Resolution |
+|---|---|
+| **OD-05b-3** — decomposition, re-tested after the scope grew | **ONE PR**, two internal phases P and D (§0.4). Not child PRs |
+| **OD-05b-4** — output-form authority when contract and candidate differ | **Inherit Step 04a unchanged** (§0.5): the declaration selects the form, the contract supplies the facts. A canonical-semantic difference is a supported compatibility surface, never a stop condition |
+| **OD-05b-5** — how the contract reaches the resource path | Freeze the **semantic** property (one explicit run-bound value, no ambient re-read, same binding parent and child); the transport is chosen at C4 from current source. An optional typed runtime field is permitted (§20) |
+| **OD-05b-6** — Stage-B coverage | **ONE rung, TWO atomic subcases** B1/B2 (§8), because 05b migrates two independent authority families |
+| **OD-05b-7** — calibration evidence | **Preservation audit with a cheapest-sufficient evidence ladder** (C6); no repo-wide pin campaign |
+
 Everything else is resolved from source: the classification table (§2) by the
 constants' documented derivations, the seg-fallback disposition (§3) by the
 sites' differing meanings, and the Gate disposition (§11) by a semantic
@@ -1221,7 +1516,25 @@ Explicitly forbidden without a MATERIAL STOP and design review:
 - a `dataset_profile` copy inside train config;
 - a `model_io` copy inside resource config;
 - a new persisted workload-term config;
-- any new user-facing configuration hierarchy for resource terms.
+- any new **user-authored or persisted** configuration hierarchy for resource
+  terms.
+
+**What this invariant does NOT forbid.** An **optional typed runtime
+transport** — a node-input field, a function parameter, or a field on a
+transient IPC spec — is the *implementation* of "runtime typed/function
+transport" above, not a breach of it. The distinction is authorship and
+persistence:
+
+| Shape | Verdict |
+|---|---|
+| a new user-authored YAML block / CLI argument / persisted config key | **forbidden** |
+| a new **required** field on an existing user-facing config | **forbidden** |
+| an **optional** typed runtime field on a node protocol, defaulting to `None` and preserving legacy callers | **allowed** — it is transport |
+| a field on the transient `IsolatedProbeSpec` IPC document (no manifest, no reader beyond its worker) | **allowed** — it is transport |
+
+C4 chooses the minimum explicit transport from current source. Stretching this
+invariant to forbid a typed node input would leave only *ambient re-reads* as
+the available mechanism — which is the defect the invariant exists to prevent.
 
 Frozen compatibility:
 
