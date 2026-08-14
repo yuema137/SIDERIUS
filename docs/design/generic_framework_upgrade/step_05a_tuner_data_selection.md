@@ -7,8 +7,9 @@ The Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **FINAL PR-LEVEL DESIGN — READY FOR OPERATOR FREEZE. Not frozen. Implementation NOT authorized.** |
+| Status | **FROZEN — operator-approved 2026-08-14.** Design content frozen at **`425bfac9`** (the freeze-readiness corrections commit). **Implementation is a SEPARATE authorization and has NOT begun.** |
 | Design base | `13b08550` — master after Step 04 Checkpoint E (04a `6458dd95`, 04b `096f2dbb`) |
+| Implementation base | **`425bfac9`** — master at freeze (the design landed on master by fast-forward before the marker) |
 | Decomposition | **ONE PR** — operator decision 2026-08-14 (§2.1). No `pr_05a_*` child doc |
 | Depends on | **Step 02** (Dataset Profile) only |
 | Blocks | nothing — see §7 |
