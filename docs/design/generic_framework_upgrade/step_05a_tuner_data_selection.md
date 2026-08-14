@@ -7,11 +7,15 @@ The Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. Not frozen. Implementation NOT authorized.** |
+| Status | **FINAL PR-LEVEL DESIGN — READY FOR OPERATOR FREEZE. Not frozen. Implementation NOT authorized.** |
 | Design base | `13b08550` — master after Step 04 Checkpoint E (04a `6458dd95`, 04b `096f2dbb`) |
+| Decomposition | **ONE PR** — operator decision 2026-08-14 (§2.1). No `pr_05a_*` child doc |
 | Depends on | **Step 02** (Dataset Profile) only |
 | Blocks | nothing — see §7 |
 | Roadmap row | §15.1 `§7b Tuner data selection` |
+| This document is | the detailed PR design → the frozen semantic contract after approval → the live implementation ledger (§19) |
+| Frozen on approval | §1 capability · §2 residue census (as design evidence) · §2.1 one-PR decomposition · §6 + §6.1 compatibility · §8 the single rung and its three subcases · §9 Checkpoint-C property · §12 Gate disposition · §16 stop conditions · §17 Definition of Done |
+| NOT frozen | exact Git commit count · helper structure · source line numbers · test-file decomposition · exact mutation implementation · resolver call counts |
 
 ---
 
@@ -98,6 +102,33 @@ agent_input.is_trial` (`:3719`) is an operator CLI flag. The path is
 **live legacy, not dead** — it must be migrated or explicitly recorded, not
 deleted as unreachable.
 
+### 2.1 Decomposition decision — 05a is ONE PR (operator decision, 2026-08-14)
+
+**05a is not split**, and specifically not into child PRs for legality,
+startup/full-scope, partial-scope, legacy `single_file` accounting, or profile
+threading. There is **no `pr_05a_*` child document**; this file is the
+detailed PR design, the frozen semantic contract after approval, and later the
+live implementation ledger.
+
+The five residue sites share **everything a split would need to separate**:
+
+| Dimension | Shared value |
+|---|---|
+| semantic authority | the one run-bound `DatasetProfile` |
+| consumer family | tuner validation / scope / accounting |
+| compatibility family | TIDMAD `TrialConfig` / `SampleSet` / validation / accounting parity |
+| generic capability | no tuner dataset semantic is read from ambient TIDMAD state |
+| rollback boundary | the tuner module + directly affected tests |
+
+**No residue group delivers an independently useful capability.** A partial
+merge would ship an incoherent state — selection using the run profile while
+validation and accounting still use TIDMAD — which is precisely the
+half-migrated architecture this PR exists to eliminate.
+
+That the startup sites (`:2731`, `:3657`) and the loop sites (`:1090`,
+`:4465`, `:4470`) live in different regions of a large function is **not** a
+decomposition argument; it is an implementation-ordering detail (§17 M2/M3).
+
 ## 3. Authority map
 
 | Value | Disposition | Why |
@@ -177,24 +208,89 @@ transport. Neither reads the five sites above.
 `05a → 05b → 05c` is a **preferred implementation order** (lowest risk
 first), **not** a dependency. Any order is semantically legal.
 
-## 8. Stage-B atomic contrast
+## 8. Stage-B — ONE rung, three atomic subcases
 
-**One axis: the resolved dataset topology, through the tuner's validation
-and accounting path.**
+**Rung `05a-B` — run-bound `DatasetProfile` consumption.** One capability,
+proven by three subcases so that a single large alternate profile cannot hide
+a partially-derived site. **The subcases are not separate PRs and not separate
+rungs.**
 
-Reds when the tuner validates or accounts against TIDMAD while the run is
-bound to a contrast profile — i.e. when any of the five reads survives.
+| Subcase | Varies ONLY | Held fixed | Proves |
+|---|---|---|---|
+| **B1 — legality** | the profile fact governing segmentation legality (`psd_segment_length`) | `num_files`, `segments_per_file`, strategy/policy, ordering, all other task semantics | `_validate_data_config` follows the bound profile |
+| **B2 — scope** | `num_files` | legality-relevant topology, `segments_per_file`, strategy/policy, ordering | **both** full-scope stamping/validation **and** partial-scope determination follow the bound profile |
+| **B3 — accounting** | `segments_per_file` | `num_files`, legality-relevant topology, strategy/policy, ordering | driving the **live legacy `single_file` path**, train and eval segment counts follow the bound profile |
 
-Reuses Step 02's existing contrast profile fixture. This PR must prove
-**consumption**, not re-prove the Dataset Profile abstraction: asserting a
-contrast profile is constructible is Step 02's test, not this one.
+Why three and not one: a profile that changed all three facts at once would
+still pass if *any two* sites were migrated and the third happened to agree —
+the classic partial-derivation false green. Each subcase is asserted against
+its own baseline.
 
-## 9. Checkpoint C — live integration
+Reuse Step-02 fixture machinery where it exists. This PR proves the **tuner
+consumes** the profile; asserting that a contrast profile is constructible is
+Step 02's test, not this one.
 
-The **real production tuner path** (not a helper) must validate, scope and
-account for an attempt under a bound contrast profile, with the resulting
-`TrialConfig` / segment counts / partial-scope determination following the
-**bound** profile. Deterministic — no LLM, no training, no GPU.
+**Ordering / `shuffle` acceptance criteria are deliberately NOT applied.**
+The general PR-design standard asks for validation of the visited
+sample/file sequence and of default-`shuffle` seed behavior. Those criteria
+belong to an ordering-semantics change; 05a's frozen scope **excludes**
+strategy, portion, seed and ordering changes (§1, §3, §5), and ordering
+already resolves through `ordering.py` (V19 PR 2), not through dataset
+semantics. Applying them literally would broaden 05a past its own contract
+and manufacture work its capability does not need.
+
+What 05a *does* inherit from that standard is the underlying intent —
+**assert observable identity, not a configuration value.** Checkpoint A
+therefore pins the resulting `SampleSet` identities and the serialized
+`TrialConfig`, which is the selection-observable this PR could plausibly
+disturb. If implementation finds that any 05a change can move a visited
+sequence, that is a **scope contradiction and a MATERIAL STOP** (§16), not a
+new test to add.
+
+### 8.1 Mutation / adversarial evidence — by semantic family
+
+Required evidence is **family-level**, not one mutation per physical line.
+Minimum: reintroducing ambient behavior must red for each of
+
+```text
+legality            (psd_segment_length)
+scope               (num_files)
+accounting          (segments_per_file)
+```
+
+plus the **transport failure** that no per-site mutation catches: *one
+consumer independently re-resolves the ambient profile / TIDMAD singleton
+instead of consuming the run-bound value.*
+
+Exact mutation implementation is **not frozen**. Three family-level mutations
+plus the transport mutation are sufficient if each yields unique evidence;
+five separate campaigns are not required. Observed failures are recorded in
+the ledger at implementation time.
+
+## 9. Checkpoint C — live integration, minimum scenario set
+
+**Frozen property**: Checkpoint C uses the **minimum deterministic
+production-path scenario set** necessary to prove all 05a semantic families
+through **real tuner control flow**. A helper-only test cannot discharge it.
+
+One tuner invocation is **not** required to exercise mutually exclusive
+branches — `trial`/`formal` and `single_file` are selected by disjoint
+control flow (`:4294-4298`), so demanding a single invocation would be a
+test-design error, not rigor.
+
+Expected source-grounded shape:
+
+| Scenario | Path | Proves |
+|---|---|---|
+| **C1 — normal / trial** | bound contrast profile → real tuner startup + validation + scope path | legality and full/partial-scope behavior follow the bound profile |
+| **C2 — live legacy `single_file`** | operator-visible non-trial path → real tuner accounting path | train/eval segment counts follow the bound profile |
+
+If current source lets one scenario reach every family, implementation may use
+one. If two are required by mutually exclusive control flow, **the two
+scenarios still constitute ONE Checkpoint C** — not two checkpoints and not
+two PRs.
+
+Deterministic throughout: **no LLM, no training, no GPU, no Gate.**
 
 ## 10. Failure classes
 
@@ -242,7 +338,7 @@ account for an attempt under a bound contrast profile, with the resulting
 ## 13. Validation budget
 
 Checkpoint 0 captures (2) → focused unit tests on the five sites → the
-single-resolution guard (§10.2) with a mutation → Checkpoint C → ruff/pyright
+run-binding guard (§10.2) with a mutation → Checkpoint C → ruff/pyright
 → exact-head CI. **No local full suite. No Gate. No real LLM/GPU.**
 
 ## 14. Rollback boundary
@@ -272,19 +368,437 @@ the closer candidate (§15 of that design).
 - Threading the run-scoped profile to startup requires re-ordering run phases
   → STOP (phase order is frozen; roadmap §7a/CLAUDE.md).
 
-## 17. Implementation milestones (semantic — commit count NOT frozen)
+## 17. Definition of Done — the authoritative checkpoint table
 
-1. Checkpoint 0: capture the two missing baselines.
-2. Thread one run-scoped profile to the startup region (`:2731`, `:3657`).
-3. Thread it to the legality and accounting sites (`:1090`, `:4465`, `:4470`);
-   drop the `DATASET_CONFIG` import.
-4. Single-resolution guard + Stage-B rung + Checkpoint C.
+**This table governs.** Where any lower-level milestone or checklist wording
+in §18 diverges from it, this table wins.
 
-## 18. Implementation ledger
+### CHECKPOINT 0 — pre-edit baselines
+- [ ] `_validate_data_config` accept/reject + **exact diagnostic text** baseline captured
+- [ ] live legacy `single_file` train/eval segment-count baseline captured
+- [ ] both captured **BEFORE** any production edit
+- [ ] no duplication of existing Step-02 `DatasetProfile` / `SampleSet` baselines
+
+### CHECKPOINT A — TIDMAD / replay parity
+- [ ] `TrialConfig` serialized form **deep-equal**
+- [ ] train `SampleSet` identity unchanged
+- [ ] eval `SampleSet` identity unchanged
+- [ ] validation verdict **and** diagnostic text exact
+- [ ] full/partial scope invariants unchanged
+- [ ] legacy `single_file` segment counts unchanged
+- [ ] a representative historical serialized TIDMAD configuration loads **without migration** and resolves to the same effective model/loss/train/tuner semantics
+- [ ] `DatasetProfile` / `TrialConfig` / model / loss / train schemas unchanged
+
+### CHECKPOINT B — generic consumption
+- [ ] B1 legality PASS
+- [ ] B2 scope PASS
+- [ ] B3 accounting PASS
+- [ ] each subcase atomic against its own baseline
+- [ ] family-level mutation/adversarial evidence reds appropriately (§8.1)
+- [ ] no ambient TIDMAD read or independent profile resolution remains in any 05a consumer
+
+### CHECKPOINT C — production path
+- [ ] real tuner control flow consumes the bound profile
+- [ ] minimum deterministic scenario set reaches every required semantic family
+- [ ] no helper-only substitution
+
+### CHECKPOINT D — regression / static
+- [ ] directly affected deterministic tests
+- [ ] focused tuner integration
+- [ ] mutations
+- [ ] `ruff check` + `ruff format --check`
+- [ ] required static/type checks
+- [ ] exact-final-head CI green
+- [ ] no local full suite by default
+
+### GATES
+- [ ] **Gate 1 NOT REQUIRED** — re-verified; flips only if an unexpected LLM-visible surface changes
+- [ ] **Gate 2 NOT REQUIRED** — re-verified; flips only if scope unexpectedly expands into a real execution/resource/admission surface that cannot be proven deterministically
+
+### READY FOR OPERATOR REVIEW
+- [ ] Checkpoints 0/A/B/C/D complete
+- [ ] Gate disposition re-verified
+- [ ] PR opened/updated
+- [ ] exact-final-head CI green
+- [ ] local HEAD == PR `headRefOid` == successful CI `headSha`
+- [ ] working tree clean
+
+### 17.1 Checkpoints are NOT operator pause points
+
+Checkpoints 0/A/B/C/D are **semantic evidence milestones inside ONE
+autonomous PR implementation**. They are **not** separate PRs, **not**
+approval boundaries, **not** context boundaries, and **not** reasons to stop.
+
+After implementation authorization the agent proceeds autonomously:
+
+```text
+inspect -> test -> discover source truth -> record findings/deviations in the
+live ledger -> fix ordinary defects -> validate -> continue to the next
+checkpoint
+```
+
+Only a **MATERIAL STOP** condition (§16) may return early. The operator does
+not approve movement between checkpoints.
+
+### 17.2 Implementation-time source re-enumeration
+
+The five-site census (§2) is frozen **as design evidence at base
+`13b08550`**. At implementation kickoff, re-enumerate every tuner read of
+`DATASET_CONFIG`, the TIDMAD `DatasetConfig` singleton, and every ambient
+`resolve_dataset_profile()` call relevant to 05a.
+
+A newly discovered site **MAY be incorporated into 05a** — recorded as a
+bounded source finding, not a scope change — when it shares *all four* of:
+the same `DatasetProfile` authority, the same validation/scope/accounting
+capability, the same rollback boundary, and the same compatibility contract.
+**Do not stop merely because a sixth equivalent residue site is found.**
+
+A site that instead owns resource semantics, policy, execution, measurement or
+metric lifecycle is **recorded and deferred to its owner**. If ownership is
+genuinely ambiguous *and* changes 05a's semantic scope → **MATERIAL STOP**.
+
+## 18. Commit plan — per-commit checklists
+
+**Semantic sequence is frozen; exact Git commit count is NOT.** Also not
+frozen: helper structure, source line numbers, test-file decomposition.
+Implementation may merge or split engineering commits provided the semantic
+sequence, the §17 Definition of Done, the Stage-B subcases, the Checkpoint-C
+property and the Gate disposition are unchanged.
+
+Line references below are **reading aids captured at `13b08550`**, not
+contracts. Re-read the touched source immediately before each commit.
+
+`[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
+
+---
+
+### M0 — pre-edit baseline capture
+
+**1. Goal.** Capture the two compatibility surfaces that no existing oracle
+covers, *before* any production edit, so Checkpoint A can prove the migration
+moved nothing. Separate commit because a baseline captured after an edit
+proves nothing about that edit.
+
+**2. Scope.**
+- New/extended tests under `tests/unit/agent/tune_ml_hyperparam_agent/`.
+- **Non-goals**: no production file changes at all; no duplication of Step-02
+  `DatasetProfile`/`SampleSet` baselines; no new fixtures for facts Step 02
+  already pins.
+- Depends on: nothing.
+
+**3. Implementation plan.**
+- [ ] Re-read `_validate_data_config` in full and enumerate every branch that
+      can raise, with its exact message text.
+- [ ] Capture accept/reject verdict **and** exact diagnostic string for each
+      branch under the shipped TIDMAD profile.
+- [ ] Re-read the legacy `single_file` accounting block and confirm how the
+      path is reached from `agent_input.is_trial`.
+- [ ] Capture live legacy `single_file` train/eval segment counts.
+- [ ] Confirm by inspection that neither capture restates a Step-02 baseline.
+
+**4. Validation plan.**
+- Unit: the two new baselines pass on unmodified production code.
+- Integration/pseudo: none required at M0.
+- Negative: at least one **rejecting** legality case is captured, not only the
+  accepting one — a baseline of the happy path alone cannot detect a
+  migration that silently stops rejecting.
+- Backward-compat / default-parity: this commit *is* the parity instrument.
+- Gate: **none**.
+
+**5. Acceptance criteria.**
+- [ ] Both baselines pass against production code that is **byte-unchanged**
+      (`git status` shows no production file modified in this commit).
+- [ ] The legality baseline pins **exact diagnostic text**, not just the
+      exception type.
+- [ ] At least one accepting and one rejecting legality case are pinned.
+- [ ] The accounting baseline is produced through the **live** `single_file`
+      path, not by calling the accounting expression directly.
+
+**6. Failure and edge cases.**
+- The `single_file` path cannot be reached deterministically in a unit test →
+  record the reachability route found; if it genuinely requires the tuner
+  loop, that capture belongs in the Checkpoint-C scenario harness instead, and
+  the design is updated to say so.
+- A diagnostic embeds a machine-specific path → normalize deliberately and
+  record the normalization; never pin an absolute path.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q`
+- [ ] Record: test count, wall time, and explicit confirmation that zero
+      production files were modified.
+
+**8. Commit boundary.** Tests only. Independently reviewable as "what we
+promise not to change". No production edit, no cleanup, no follow-up work.
+
+---
+
+### M1 — establish the run-bound profile at run scope
+
+**1. Goal.** Create the single run-bound `DatasetProfile` value that every
+later commit consumes, **without changing phase order** and without changing
+any behavior. Separate commit because it is the one structural change; if a
+later behavioral commit regresses, this boundary is independently reviewable.
+
+**2. Scope.**
+- `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` — the
+  earliest existing run-scope point that already runs before both the startup
+  consumers (`≈:2731`, `≈:3657`) and the loop consumers.
+- **Non-goals**: no consumer migrated yet; **run-phase order unchanged**; the
+  existing Step-02b resolution at `≈:4430` keeps producing the same value;
+  no new config field; no `TrialConfig` change.
+- Depends on: M0 (baselines must exist first).
+
+**3. Implementation plan.**
+- [ ] Re-read the tuner's run-scope prologue and identify the earliest point
+      that precedes **both** consumer regions without moving any phase.
+- [ ] Establish the run-bound profile value there.
+- [ ] Confirm the loop-scope binding at `≈:4430` resolves to the **same**
+      semantic value rather than an independent ambient resolution.
+- [ ] Confirm no phase, no ordering, and no side effect moved.
+
+**4. Validation plan.**
+- Unit: M0 baselines still pass unchanged.
+- Integration/pseudo: focused tuner wiring tests still pass.
+- Negative: none specific to M1.
+- Backward-compat: `TrialConfig` serialization and both `SampleSet`
+  identities deep-equal (Checkpoint A subset).
+- Gate: **none**.
+
+**5. Acceptance criteria.**
+- [ ] Zero behavior change: every M0 baseline and every existing tuner test
+      passes without modification.
+- [ ] The startup region and the loop region observe the **same** profile
+      value — asserted semantically (same binding), **not** by pinning a
+      resolver call count (§10.2).
+- [ ] Run-phase order is provably unchanged.
+- [ ] No consumer has been migrated yet — `DATASET_CONFIG` still has five
+      readers.
+
+**6. Failure and edge cases.**
+- The earliest safe point precedes profile availability → **STOP** rather
+  than moving a phase (§16).
+- Binding at run scope changes when the profile is first resolved relative to
+  a validation that could fail → record and verify the failure ordering is
+  preserved; a run that used to fail before resolution must still do so.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q`
+- [ ] Record counts, wall time, and confirmation that no test needed editing.
+
+**8. Commit boundary.** One structural addition, zero behavior change,
+independently revertible. No consumer migration bundled in.
+
+---
+
+### M2 — migrate the startup scope consumers
+
+**1. Goal.** Make full-scope stamping/validation and partial-scope detection
+read the run-bound profile. Separate from M3 because these two sites run at
+**startup**, before the round loop, and their failure mode (wrong run
+invariants stamped) differs from the loop sites'.
+
+**2. Scope.**
+- `ml_hyperparameter_tune_agent.py` `≈:2731` (`full_scope=list(range(...))`)
+  and `≈:3657` (`scope_is_partial`).
+- **Non-goals**: legality and accounting untouched; no DataScope semantic
+  change; the run-invariants lock format unchanged.
+- Depends on: M1.
+
+**3. Implementation plan.**
+- [ ] Re-read both sites and the `validate_stamped_invariants` /
+      `validate_runtime_config` contracts they feed.
+- [ ] Replace both `DATASET_CONFIG.num_files` reads with the run-bound value.
+- [ ] Confirm the run-invariants lock content is unchanged under TIDMAD.
+
+**4. Validation plan.**
+- Unit: existing scope/invariant tests pass unchanged.
+- Integration: run-invariants lock parity under TIDMAD.
+- Negative: a partial scope is still detected as partial; a full scope still
+  as full.
+- Backward-compat: an existing workspace lock still validates — **no
+  migration**.
+- Gate: **none**.
+
+**5. Acceptance criteria.**
+- [ ] Stage-B **B2** passes: under a contrast `num_files`, both full-scope
+      stamping and partial-scope determination follow the bound profile.
+- [ ] Under TIDMAD the stamped invariants are **byte-identical** to M0/M1.
+- [ ] A pre-existing run-invariants lock validates without migration.
+- [ ] `DATASET_CONFIG` now has exactly three readers.
+
+**6. Failure and edge cases.**
+- Scope mismatch between the bound profile and a resumed run's stamped lock →
+  must **fail closed** with the existing diagnostic; this PR must not soften
+  the mismatch into a warning.
+- A scope declared against a larger `num_files` than the bound profile has →
+  the existing out-of-range rejection must still fire.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/execute_tools -q`
+- [ ] Record counts, wall time, B2 result, and lock-parity evidence.
+
+**8. Commit boundary.** Two sites, one failure family, independently
+revertible. No legality or accounting change bundled in.
+
+---
+
+### M3 — migrate legality + legacy accounting; remove the import
+
+**1. Goal.** Complete the capability: legality validation and legacy
+`single_file` accounting read the run-bound profile, and the module-level
+TIDMAD singleton import is gone. Separate from M2 because these are loop-scope
+consumers with different failure families, and because the import removal is
+only legal once the last reader is migrated.
+
+**2. Scope.**
+- `ml_hyperparameter_tune_agent.py` `≈:1090` (`_validate_data_config` default
+  arg), `≈:4465`, `≈:4470` (legacy accounting), and the `≈:76` import.
+- **Non-goals**: the divisibility **rule** is unchanged — it already delegates
+  to `valid_segmentation_sizes()`; the legacy branch is **migrated, not
+  deleted**; no strategy/portion/seed/ordering change.
+- Depends on: M1, M2.
+
+**3. Implementation plan.**
+- [ ] Re-read `_validate_data_config` and decide how the profile reaches it
+      without a new authority — prefer threading the resolved object over a
+      module default.
+- [ ] Migrate the legality site.
+- [ ] Migrate both legacy accounting sites, preserving the branch.
+- [ ] Remove the `DATASET_CONFIG` import and confirm zero readers remain.
+
+**4. Validation plan.**
+- Unit: M0 legality and accounting baselines pass **unchanged**.
+- Integration: focused tuner integration.
+- Negative: the rejecting legality case still rejects with the **same**
+  diagnostic; whitespace/None-shaped inputs behave as before.
+- Backward-compat: legacy `single_file` remains reachable and behaves
+  identically under TIDMAD.
+- Gate: **none**.
+
+**5. Acceptance criteria.**
+- [ ] Stage-B **B1** passes: legality follows the bound profile.
+- [ ] Stage-B **B3** passes: through the **live** legacy path, both segment
+      counts follow the bound profile.
+- [ ] M0 baselines pass **byte-identically** under TIDMAD — same verdicts,
+      same diagnostic text, same counts.
+- [ ] `grep DATASET_CONFIG` over the tuner returns **zero** hits.
+- [ ] The legacy `single_file` branch still exists and is still reachable.
+
+**6. Failure and edge cases.**
+- Threading into `_validate_data_config` tempts a `TrialConfig` field for the
+  dataset fact → **forbidden** (§3); that would be a second authority.
+- The legacy branch has no bound profile in some call path → **STOP**; do not
+  reintroduce an ambient default as a fallback.
+- Removing the import breaks an unrelated module-level reference → re-enumerate
+  (§17.2) rather than leaving a partial migration.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/execute_tools -q`
+- [ ] Record counts, wall time, B1/B3 results, and the zero-hit grep output.
+
+**8. Commit boundary.** Completes the capability; independently revertible
+back to M2. No guard/contrast infrastructure bundled in.
+
+---
+
+### M4 — run-binding guard, Stage-B subcases, Checkpoint C
+
+**1. Goal.** Prove the capability holds and cannot silently regress. Separate
+from M1-M3 so a reviewer reads the behavior change and the "what must never
+regress" decision independently.
+
+**2. Scope.**
+- New/extended tests: the B1/B2/B3 subcases, the run-binding guard, and the
+  Checkpoint-C scenario set.
+- **Non-goals**: no production behavior change in this commit.
+- Depends on: M3.
+
+**3. Implementation plan.**
+- [ ] Add the run-binding guard (§10.2): one run-bound value, no ambient
+      independent resolution, startup and loop agreeing — asserted
+      semantically.
+- [ ] Add B1/B2/B3 as subcases of one rung, each against its own baseline.
+- [ ] Build the minimum Checkpoint-C scenario set (C1, and C2 if control flow
+      requires it).
+- [ ] Run the family-level mutations (§8.1) and record each observed failure.
+
+**4. Validation plan.**
+- Unit: guard + three subcases.
+- Integration: Checkpoint-C scenarios through real tuner control flow.
+- Negative: the guard must **not** fire on the legitimate single run binding.
+- Backward-compat: `pb*`-style prompt goldens and `TrialConfig`/`SampleSet`
+  parity unchanged by this commit (it adds no production change).
+- Gate: **none**.
+
+**5. Acceptance criteria.**
+- [ ] Reintroducing ambient behavior reds for **each** of legality, scope and
+      accounting — three recorded mutations.
+- [ ] The **transport** mutation (a consumer re-resolving ambiently) reds.
+- [ ] Every mutation is restored and the tree re-verified green.
+- [ ] Checkpoint C runs through real tuner control flow, not a helper.
+- [ ] No production file is modified by this commit.
+
+**6. Failure and edge cases.**
+- A mutation **survives** → inspect the test architecture before adding an
+  assertion; record the classification (real gap / equivalent / unreachable /
+  wrong fixture).
+- The mutation target is matched at more than one site → assert the site count
+  before mutating; a wrong-site mutation proves nothing (the Step-04b
+  precedent).
+- C1 alone reaches every family → use one scenario and record why C2 is
+  unnecessary.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/execute_tools -q`
+- [ ] Record counts, wall time, each mutation's expected vs observed result,
+      and the restored-green re-run.
+
+**8. Commit boundary.** Evidence only. Reviewable as "what must never
+regress". No production change, no unrelated cleanup.
+
+---
+
+### M5 — terminal regression, CI, ledger closeout
+
+**1. Goal.** Establish the terminal evidence and leave the PR reviewable.
+
+**2. Scope.** Design-doc ledger (§19), directly affected docs, CI iteration.
+**Non-goals**: no new capability; no scope expansion.
+Depends on: M4.
+
+**3. Implementation plan.**
+- [ ] Synchronize §19 (implementation ledger) with actual findings, deviations and evidence.
+- [ ] Run Checkpoint D from a **clean tree**.
+- [ ] Open/update the PR; drive exact-final-head CI green.
+- [ ] Verify local HEAD == PR `headRefOid` == successful CI `headSha`.
+
+**4. Validation plan.**
+- Checkpoint D as defined in §17. Exact-head CI is the broad regression
+  authority. **No local full suite by default.** No Gate.
+
+**5. Acceptance criteria.**
+- [ ] Checkpoint D fully green, verdict read from the **log file**, not a
+      wrapper's exit status.
+- [ ] The three identities match, each read rather than reconstructed.
+- [ ] Working tree clean; ledger records every deviation.
+
+**6. Failure and edge cases.**
+- Full-suite/preflight guard reds on a dirty tree → commit the checkpoint
+  first; never relax the guard.
+- CI fails on an environment-only check → diagnose and fix autonomously; it is
+  not a stop condition.
+
+**7. Verification commands and evidence.**
+- [ ] Checkpoint-D command set, with counts and wall time recorded.
+- [ ] CI run id and exact `headSha`.
+
+**8. Commit boundary.** Documentation and CI-driven fixes only.
+
+## 19. Implementation ledger
 
 *(empty — populated at implementation kickoff)*
 
-## 19. Remaining operator decisions
+## 20. Remaining operator decisions
 
 **None.** The only judgement call — whether the live legacy `single_file`
 accounting is migrated or recorded — is resolved from source in §2
