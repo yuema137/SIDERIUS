@@ -13,6 +13,8 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contract
+from agent.schemas.model_io_resolution import resolve_model_io_contract
 from core.runtime_control.provenance import capture_storage_provenance
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.workload import ResolvedPhaseWorkload
@@ -21,6 +23,11 @@ from execute_tools.dataset_config import (
     DatasetProfile,
     load_dataset_profile,
     resolve_dataset_profile,
+)
+from execute_tools.model_input_dtype import (
+    TRAINING_SITE_DTYPE,
+    apply_contract_cardinality,
+    resolve_input_dtype,
 )
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
@@ -602,6 +609,7 @@ def run_experiment(
     data_loader: DataLoader,
     sandbox_dirs: dict,
     exp_id: str,
+    model_io: ModelIOContract | None = None,
 ):
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
 
@@ -654,10 +662,15 @@ def run_experiment(
             target_seq = target_batch.to(device)
 
             # --- Type conversion based on LOSS and MODEL requirements ---
-            # 1. Input: Based on Architecture
-            # The forward contract is [B, T] int64 for all embedding-based models.
-            # Only fcnet (AE) uses float input for regression.
-            input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
+            # 1. Input: resolved from the model's declared dtype ADMISSIBILITY
+            # intersected with what the runtime supports (Step 03 §4a.1). This
+            # line used to branch on `model_cfg.model_type == "fcnet"`; it now
+            # mirrors the target-side routing on the line below it.
+            input_seq = input_seq.to(
+                resolve_input_dtype(
+                    model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
+                )
+            )
 
             # 2. Target: Based on Loss Type
             # I13 — single source of truth for target dtype routing. Built-in
@@ -734,6 +747,7 @@ def run_experiment_streaming(
     order_strategy: str = "shuffle",
     file_order: list[int] | None = None,
     profile: DatasetProfile | None = None,
+    model_io: ModelIOContract | None = None,
 ):
     """
     Multi-file training: rebuild the epoch dataset each epoch, then train on it.
@@ -1026,7 +1040,11 @@ def run_experiment_streaming(
             input_seq = input_batch.to(device)
             target_seq = target_batch.to(device)
 
-            input_seq = input_seq.float() if model_cfg.model_type == "fcnet" else input_seq.int()
+            input_seq = input_seq.to(
+                resolve_input_dtype(
+                    model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
+                )
+            )
 
             # I13 — see comment at the first occurrence above. Same
             # single-source-of-truth dispatch via get_target_torch_dtype.
@@ -1163,6 +1181,19 @@ def main():
     parser.add_argument("--train_cfg", type=str, required=True)
     parser.add_argument("--loss_cfg", type=str, required=True)
     parser.add_argument(
+        "--model_io_json",
+        type=str,
+        default=None,
+        help=(
+            "Path to a resolved Model-I/O contract JSON (axes, roles, "
+            "dimensions, input dtype admissibility). OMITTED means the "
+            "Regime-A compatibility adapter: each model's own declaration, "
+            "else the site's historical dtype — exactly as before this flag "
+            "existed. SUPPLIED but broken fails closed; it never falls back "
+            "to a fabricated contract."
+        ),
+    )
+    parser.add_argument(
         "--dataset_profile_json",
         type=str,
         default=None,
@@ -1259,6 +1290,23 @@ def main():
     else:
         dataset_profile = resolve_dataset_profile()
 
+    # Model-I/O contract — same transport, same two-case rule (Step 03 §4a.1).
+    model_io = (
+        load_model_io_contract(args.model_io_json) if args.model_io_json is not None else None
+    )
+
+    # Rung 3-E at the SUBPROCESS boundary. `load_task_config` already
+    # cross-validates the contract's class axis against the dataset's
+    # authority, but the child receives the two as SEPARATE argv files and
+    # cannot assume the parent paired them. Re-checking here costs nothing
+    # and converts a contradiction into a typed refusal instead of an
+    # embedding index error thousands of steps into a forward pass — the
+    # difference Checkpoint C(iii) surfaced.
+    if model_io is not None:
+        resolve_model_io_contract(
+            model_io, dataset_num_classes=dataset_profile.encoding.num_classes
+        )
+
     # RT2-B: create the verification session FIRST so the measured setup
     # window covers config load and everything after — main() entry is the
     # earliest in-subprocess point (§2.2; process import cost is the
@@ -1301,7 +1349,10 @@ def main():
     if config_class is None:
         raise ValueError(f"Unknown model_type in config: {model_type}")
 
-    model_cfg = config_class(**m_data)
+    # Step 03 M6 — the class alphabet is DERIVED from the resolved contract,
+    # never from a builtin literal. A config declaring a contradicting
+    # count fails closed rather than winning (§4b).
+    model_cfg = config_class(**apply_contract_cardinality(m_data, model_io))
     train_cfg = TrainConfig(**t_data)
     loss_cfg = LossConfig(**l_data)
 
@@ -1338,6 +1389,7 @@ def main():
             order_strategy=args.order_strategy,
             file_order=file_order,
             profile=dataset_profile,
+            model_io=model_io,
         )
         if results is None:
             # Runtime verification rejected the attempt: the structured
@@ -1355,7 +1407,9 @@ def main():
             profile=dataset_profile,
         )
         loader = DataLoader(dataset, batch_size=train_cfg.batch_size, shuffle=True, drop_last=True)
-        results = run_experiment(model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id)
+        results = run_experiment(
+            model_cfg, train_cfg, loss_cfg, loader, sandbox_dirs, args.exp_id, model_io
+        )
 
     # Save final JSON
     final_res_dir = os.path.join(sandbox_dirs["results"], args.run_name)

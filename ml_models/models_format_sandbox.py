@@ -1,6 +1,9 @@
+from __future__ import annotations
+
+from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # ==========================================
 # 1. Base Model Configuration
@@ -21,6 +24,19 @@ class BaseConfig(BaseModel):
     model_type: str
     segmentation_size: int = Field(default=40000, ge=1000, description="Input time series length")
     batch_size: int = Field(default=1, ge=1)
+    num_classes: int = Field(
+        default=256,
+        gt=0,
+        description="Size of the output class alphabet, used to build "
+        "embedding tables and output heads. **DERIVED, not authored** — Step "
+        "03 injects it from the resolved Model-I/O contract, whose own class "
+        "cardinality is cross-validated against the Dataset Profile's "
+        "ValueEncoding.num_classes. The 256 default is the Regime-A "
+        "compatibility value for a caller that predates the contract, in the "
+        "same sense that an absent --dataset_profile_json resolves the "
+        "shipped profile; a resolved path never reaches it. Setting it to "
+        "contradict the contract fails closed rather than winning.",
+    )
 
 
 # ==========================================
@@ -48,7 +64,7 @@ class PUNetConfig(BaseConfig):
         return v
 
     @model_validator(mode="after")
-    def check_dimension_reduction(self) -> "PUNetConfig":
+    def check_dimension_reduction(self) -> PUNetConfig:
         """
         Physical/Architecture Constraint:
         Ensures segmentation_size is large enough to sustain the chosen depth.
@@ -112,7 +128,7 @@ class TransformerConfig(BaseConfig):
     pe_factor: float = Field(default=1.0, ge=0.0, le=10.0)
 
     @model_validator(mode="after")
-    def check_memory_risk(self) -> "TransformerConfig":
+    def check_memory_risk(self) -> TransformerConfig:
         if self.segmentation_size > 25000:
             # We could raise a warning here if we had a logger,
             # for now, we just keep it as a known risk.
@@ -371,6 +387,172 @@ CLASSIFICATION_LOSSES: frozenset[str] = frozenset({"ce", "focal", "focal_cw"})
 REGRESSION_LOSSES: frozenset[str] = frozenset({"smooth_l1"})
 
 
+class DtypeAdmissibility(BaseModel):
+    """Which concrete dtypes the model boundary will accept — **A-1**.
+
+    This is the amendment's core correction (§4a.1). The contract owns an
+    *admissibility requirement*, **not** a concrete cast, because baseline
+    A6 proved there is no single shipped concrete dtype to own: the
+    embedding-arm builtins are fed int32 in training and int64 in
+    inference, and both are correct.
+
+    ```text
+    model-admissible  ∩  runtime-supported  ->  deterministic concrete dtype
+                                            ->  empty = typed fail-closed
+    ```
+
+    **Extensible by construction.** ``admissible`` is an ordered tuple of
+    normalized dtype names, not a closed enum, so representing a model
+    that requires ``float16``, ``bfloat16``, ``float64``, ``bool`` or
+    ``complex64`` needs no schema redesign. Execution support for those
+    stays capability-gated: expressing a requirement is not a claim that
+    the adaptation path can materialize it. Today only ``int32``,
+    ``int64`` and ``float32`` are *validated* as executable (A6).
+
+    **Order is meaning.** ``admissible[0]`` is the contract's CANONICAL
+    representation: it is what renders into LLM-facing prose, and it is
+    the deterministic tie-break when no execution site expresses a
+    preference. A site's own preferred dtype still wins whenever it is
+    admissible — that is what keeps TIDMAD's concrete matrix exact — but
+    a site preference is compatibility behaviour, never model semantics
+    (§4a.1), so it lives at the site and never in this model.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    admissible: tuple[str, ...] = Field(
+        min_length=1,
+        description="Ordered normalized dtype names the model boundary "
+        "accepts. admissible[0] is the canonical representation used for "
+        "rendering and as the deterministic default.",
+    )
+
+    @model_validator(mode="after")
+    def _no_duplicates(self) -> DtypeAdmissibility:
+        """A repeated dtype makes 'the canonical one' ambiguous to a reader
+        and hides an authoring mistake behind a set-like intersection."""
+        if len(set(self.admissible)) != len(self.admissible):
+            raise ValueError(f"duplicate dtype in admissible={self.admissible!r}")
+        return self
+
+    @property
+    def canonical(self) -> str:
+        """The representation shown to an LLM and used as the default."""
+        return self.admissible[0]
+
+    def admits(self, dtype_name: str) -> bool:
+        return dtype_name in self.admissible
+
+
+class OutputSemantic(StrEnum):
+    """The canonical output semantic — Step 03 §8b.
+
+    **The single authority answering "what output semantics does this model
+    have".** Loss legality is a function of THIS, not of the legacy string
+    ``"classifier"``; ``output_type`` becomes a derived projection.
+
+    It lives here, beside the frozensets it keys, because §8a is explicit
+    that Step 03 RE-KEYS the existing loss authority rather than creating a
+    second one. It lives in ``ml_models`` rather than ``agent/schemas``
+    because ``agent`` imports ``ml_models`` and not the reverse; putting it
+    in the schema layer would invert the dependency.
+
+    Two members, because the normalized output tensor supports exactly two
+    distinctions today: an output carrying a class-alphabet axis, and one
+    that does not (§4b). ``hybrid`` is deliberately absent — see
+    :func:`output_semantic_from_legacy`.
+    """
+
+    CATEGORICAL = "categorical"
+    CONTINUOUS = "continuous"
+
+
+#: The §8b projection: canonical semantic -> the legacy ``output_type`` word.
+#:
+#: One-way by design. ``hybrid`` is never PRODUCED by the projection because
+#: it is not a tensor semantic (§8c) — it is a legacy adapter value for
+#: builtin ``fcnet``, which chooses its own forward shape from ``loss_type``
+#: at construction time. Inventing tensor semantics for it is forbidden.
+_LEGACY_OUTPUT_TYPE: dict[OutputSemantic, str] = {
+    OutputSemantic.CATEGORICAL: "classifier",
+    OutputSemantic.CONTINUOUS: "regressor",
+}
+
+
+def legacy_output_type_for(semantic: OutputSemantic) -> str:
+    """Project the canonical semantic onto the legacy ``output_type`` word.
+
+    The compatibility view of §8b — a derived projection, never a second
+    authority. Nothing may write back through it.
+    """
+    return _LEGACY_OUTPUT_TYPE[semantic]
+
+
+def output_semantic_from_legacy(output_type: str) -> OutputSemantic | None:
+    """Adapt a legacy ``output_type`` string to the canonical semantic.
+
+    Returns ``None`` for a value that carries **no** canonical output
+    semantic. Two distinct cases share that answer, deliberately:
+
+    * ``"hybrid"`` — a legacy builtin adapter value (§8c), not a tensor
+      semantic. Its shipped behaviour is that every loss is legal, and that
+      behaviour is preserved exactly.
+    * any unrecognised string — the shipped rule matches neither guard
+      branch and therefore raises nothing. That tolerance is **current
+      behaviour, pinned by baseline A2**, not an endorsement: tightening it
+      would change an accept/reject verdict, which §21 makes a STOP.
+
+    Collapsing them here is what keeps the re-key verdict-preserving. If a
+    future step wants to fail closed on an unrecognised value, that is a
+    policy decision requiring an operator call, and A2's tolerance test is
+    the tripwire that will demand it.
+    """
+    for semantic, legacy in _LEGACY_OUTPUT_TYPE.items():
+        if output_type == legacy:
+            return semantic
+    return None
+
+
+def validate_semantic_loss_compatibility(
+    semantic: OutputSemantic | None,
+    loss_type: str,
+    *,
+    model_type: str,
+) -> None:
+    """**THE** loss-availability rule, keyed on the canonical semantic (§8a).
+
+    This is the re-keyed body of :func:`validate_output_loss_compatibility`;
+    that function is now a thin legacy adapter over it. There is exactly one
+    implementation of the rule, and both entry points reach it.
+
+    ``semantic is None`` means "no canonical output semantic" — legacy
+    ``hybrid`` or an unrecognised value — and every loss is permitted, which
+    is precisely the shipped behaviour.
+
+    Args:
+        semantic: the canonical output semantic, or ``None``.
+        loss_type: a ``LossConfig.loss_type`` value.
+        model_type: used only to build a readable error message.
+
+    Raises:
+        ValueError: if the pair is incompatible.
+    """
+    if semantic is None:
+        return
+
+    if loss_type in REGRESSION_LOSSES and semantic is OutputSemantic.CATEGORICAL:
+        raise ValueError(
+            f"Incompatible: '{model_type}' is a classifier (output [B, 256, T]) "
+            f"— use 'ce' or 'focal', not 'smooth_l1'."
+        )
+
+    if loss_type in CLASSIFICATION_LOSSES and semantic is OutputSemantic.CONTINUOUS:
+        raise ValueError(
+            f"Incompatible: '{model_type}' is a regressor (output [B, T]) "
+            f"— use 'smooth_l1', not '{loss_type}'."
+        )
+
+
 def validate_output_loss_compatibility(
     output_type: str,
     loss_type: str,
@@ -419,20 +601,17 @@ def validate_output_loss_compatibility(
     Raises:
         ValueError: if the pair is incompatible.
     """
-    if output_type == "hybrid":
-        return
-
-    if loss_type in REGRESSION_LOSSES and output_type == "classifier":
-        raise ValueError(
-            f"Incompatible: '{model_type}' is a classifier (output [B, 256, T]) "
-            f"— use 'ce' or 'focal', not 'smooth_l1'."
-        )
-
-    if loss_type in CLASSIFICATION_LOSSES and output_type == "regressor":
-        raise ValueError(
-            f"Incompatible: '{model_type}' is a regressor (output [B, T]) "
-            f"— use 'smooth_l1', not '{loss_type}'."
-        )
+    # Step 03 §8a — RE-KEYED, not re-declared. The rule itself now lives in
+    # `validate_semantic_loss_compatibility`, keyed on the canonical output
+    # semantic; this entry point projects the legacy string onto that
+    # semantic and delegates. There is one implementation, so the two entry
+    # points cannot drift. Every verdict is unchanged — baseline A2 pins all
+    # 15 cells, and a changed cell is a §21 STOP.
+    validate_semantic_loss_compatibility(
+        output_semantic_from_legacy(output_type),
+        loss_type,
+        model_type=model_type,
+    )
 
 
 # ==========================================
@@ -491,7 +670,7 @@ class LossConfig(BaseModel):
     # non-``smooth_l1`` loss type.
 
     @model_validator(mode="after")
-    def enforce_custom_loss_name(self) -> "LossConfig":
+    def enforce_custom_loss_name(self) -> LossConfig:
         """Custom mode requires ``loss_name``; non-custom modes forbid it.
 
         This pair of checks prevents two silent-failure modes:
@@ -517,7 +696,7 @@ class LossConfig(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def enforce_parameter_consistency(self) -> "LossConfig":
+    def enforce_parameter_consistency(self) -> LossConfig:
         """
         Ensures that only relevant parameters are active for the selected loss_type.
         This prevents the Agent from 'hallucinating' cross-parameter optimizations.
@@ -590,7 +769,7 @@ class ExperimentConfig(BaseModel):
     loss_config: LossConfig
 
     @model_validator(mode="after")
-    def validate_architecture_loss_match(self) -> "ExperimentConfig":
+    def validate_architecture_loss_match(self) -> ExperimentConfig:
         """
         Enforce the physical constraint: loss type must match model output type.
 

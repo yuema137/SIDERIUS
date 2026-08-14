@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from ml_models.models_format_sandbox import (
     AEConfig,
+    DtypeAdmissibility,
     GatedFNOConfig,
     PUNetConfig,
     RNNSeq2SeqConfig,
@@ -223,7 +224,7 @@ class PositionalUNet(nn.Module):
         self.kernel_size = config.kernel_size
         self.padding = int((self.kernel_size - 1) / 2)
 
-        adc_channel = 256
+        adc_channel = config.num_classes
         emb_dim = config.embedding_dim
 
         # 1. Input layers
@@ -352,7 +353,7 @@ class AE(nn.Module):
         self.decoder_base = nn.Sequential(*decoder_modules)
 
         if self.loss_type != "smooth_l1":
-            self.outc = nn.Conv1d(1, 256, kernel_size=1)
+            self.outc = nn.Conv1d(1, config.num_classes, kernel_size=1)
 
     def forward(self, x):
         x_float = x.float()
@@ -376,7 +377,7 @@ class TransformerModel(nn.Module):
         self.emb_dim = config.embedding_dim
 
         # Use 256 for ADC classes
-        self.embedding = nn.Embedding(256, self.emb_dim, scale_grad_by_freq=True)
+        self.embedding = nn.Embedding(config.num_classes, self.emb_dim, scale_grad_by_freq=True)
 
         # Positional encoding: note that your PositionalEncoding class
         # expects [Batch, Channel, Time]
@@ -399,7 +400,7 @@ class TransformerModel(nn.Module):
         )
 
         # Final projection to 256 ADC channels
-        self.linear = nn.Linear(self.emb_dim, 256)
+        self.linear = nn.Linear(self.emb_dim, config.num_classes)
 
     def forward(self, x):
         # x: [Batch, Time] -> Long for Embedding
@@ -475,7 +476,7 @@ class SimpleWaveNet(nn.Module):
 
     def __init__(self, config: WaveNetConfig):
         super().__init__()
-        self.embedding = nn.Embedding(256, config.input_channels)
+        self.embedding = nn.Embedding(config.num_classes, config.input_channels)
         self.input_conv = nn.Conv1d(config.input_channels, config.residual_channels, 1)
         self.blocks = nn.ModuleList(
             [
@@ -490,7 +491,7 @@ class SimpleWaveNet(nn.Module):
             ]
         )
         self.output_conv1 = nn.Conv1d(config.skip_channels, config.skip_channels, 1)
-        self.output_conv2 = nn.Conv1d(config.skip_channels, 256, 1)
+        self.output_conv2 = nn.Conv1d(config.skip_channels, config.num_classes, 1)
 
     def forward(self, x):
         x = self.embedding(x.long())  # [B, T, input_channels]
@@ -520,9 +521,9 @@ class SimpleWaveNet(nn.Module):
 class Seq2SeqEncoder(nn.Module):
     """LSTM encoder that processes the full input sequence."""
 
-    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
+    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout, num_classes=256):
         super().__init__()
-        self.embedding = nn.Embedding(256, embedding_dim)
+        self.embedding = nn.Embedding(num_classes, embedding_dim)
         self.lstm = nn.LSTM(
             input_size=embedding_dim,
             hidden_size=hidden_dim,
@@ -542,9 +543,9 @@ class Seq2SeqEncoder(nn.Module):
 class Seq2SeqDecoder(nn.Module):
     """LSTM decoder with teacher-forcing support."""
 
-    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout):
+    def __init__(self, embedding_dim, hidden_dim, num_layers, dropout, num_classes=256):
         super().__init__()
-        self.embedding = nn.Embedding(256, embedding_dim)
+        self.embedding = nn.Embedding(num_classes, embedding_dim)
         self.lstm = nn.LSTM(
             input_size=embedding_dim,
             hidden_size=hidden_dim,
@@ -553,7 +554,7 @@ class Seq2SeqDecoder(nn.Module):
             batch_first=True,
             bidirectional=False,
         )
-        self.output_proj = nn.Linear(hidden_dim, 256)
+        self.output_proj = nn.Linear(hidden_dim, num_classes)
         self.dropout = nn.Dropout(dropout)
 
     def forward_sequence(self, x, hidden, cell):
@@ -572,10 +573,18 @@ class RNNSeq2Seq(nn.Module):
     def __init__(self, config: RNNSeq2SeqConfig):
         super().__init__()
         self.encoder = Seq2SeqEncoder(
-            config.embedding_dim, config.hidden_dim, config.num_layers, config.dropout
+            config.embedding_dim,
+            config.hidden_dim,
+            config.num_layers,
+            config.dropout,
+            config.num_classes,
         )
         self.decoder = Seq2SeqDecoder(
-            config.embedding_dim, config.hidden_dim, config.num_layers, config.dropout
+            config.embedding_dim,
+            config.hidden_dim,
+            config.num_layers,
+            config.dropout,
+            config.num_classes,
         )
 
     def forward(self, x):
@@ -628,7 +637,7 @@ class GatedFNO(nn.Module):
         self.num_bins = self.seg_size // 2 + 1
 
         # Initial Embedding: [B, T] (0-255) -> [B, T, Width]
-        self.embedding = nn.Embedding(256, self.width)
+        self.embedding = nn.Embedding(config.num_classes, self.width)
 
         # Gate Expansion: num_gates -> num_bins
         self.num_gates = config.num_gates
@@ -674,7 +683,7 @@ class GatedFNO(nn.Module):
 
         # Output projection to 256 logits
         self.projection = nn.Sequential(
-            nn.Conv1d(self.width, 128, 1), nn.GELU(), nn.Conv1d(128, 256, 1)
+            nn.Conv1d(self.width, 128, 1), nn.GELU(), nn.Conv1d(128, config.num_classes, 1)
         )
 
     def forward(self, x):
@@ -740,6 +749,35 @@ BUILTIN_OUTPUT_TYPES = {
     "wavenet": "classifier",
     "rnn": "classifier",
     "gated_fno": "classifier",
+}
+
+#: Model-boundary INPUT dtype admissibility, where a builtin's requirement
+#: differs from the task's declared Model-I/O contract — Step 03 §4a.1 (A-1).
+#:
+#: A DECLARATION registry keyed by model type, exactly like
+#: ``BUILTIN_OUTPUT_TYPES`` above and ``LOSS_TARGET_DTYPE_REGISTRY`` on the
+#: target side (audit row 12). That is categorically different from the
+#: ``if model_type == "fcnet":`` branch it replaces in the training and
+#: inference data paths: a declaration is data a model owns about itself,
+#: whereas the branch was execution logic reasoning about a name.
+#:
+#: **Only ``fcnet`` appears, and its absence elsewhere is the point.** Every
+#: other builtin accepts the task contract's declared admissibility, so it
+#: declares nothing and resolution falls through to the task contract. A
+#: model appears here only when it genuinely differs — which keeps this from
+#: becoming a second, parallel place to look up every model's dtype.
+#:
+#: ``fcnet`` is the legacy autoencoder arm (``hybrid``, §8c): production has
+#: always fed it float32. Declaring ``float32`` ALONE is deliberate — baseline
+#: A6 shows fcnet would also *run* under int32/int64 via its embedding path,
+#: so a permissive declaration would let a training site's int32 preference
+#: win and silently change the tensor fcnet is fed. Declaring exactly what
+#: production feeds it is what keeps the A6 matrix exact, and it makes fcnet
+#: the live production case for §24.9 Q7: a site preference that is NOT
+#: admissible, resolved to a supported admissible alternative instead of
+#: failing.
+BUILTIN_INPUT_DTYPES: dict[str, DtypeAdmissibility] = {
+    "fcnet": DtypeAdmissibility(admissible=("float32",)),
 }
 
 # Extend MODEL_REGISTRY with any agent-generated plugin models.

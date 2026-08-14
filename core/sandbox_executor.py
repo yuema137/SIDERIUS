@@ -1186,6 +1186,30 @@ class TidmadSandbox:
         except Exception as e:
             raise ValueError(f"Experiment Configuration Rejected: {e!s}") from e
 
+    def _write_model_io_config(self, exp_id: str) -> str | None:
+        """Materialize the resolved Model-I/O contract for a subprocess.
+
+        The parent half of the Step-03 transport, using the SAME
+        config-file + argv-flag mechanism as ``--dataset_profile_json`` and
+        ``--model_cfg``. No new IPC is introduced — §16 routes IPC to Step 11,
+        and the 02a C3 lesson is to follow the existing pattern exactly.
+
+        Returns ``None`` when the shipped task declares no ``model_io``, i.e.
+        a legacy prose-only contract. The caller then omits the flag entirely,
+        which is the Regime-A adapter — deliberately different from supplying
+        a broken path, which fails closed in the child.
+        """
+        from agent.schemas.task_config import ForwardContract
+        from workflows.task_config import load_task_config
+
+        contract = ForwardContract(**load_task_config()["forward_contract"]).model_io
+        if contract is None:
+            return None
+        path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_io_{exp_id}.json"))
+        with open(path, "w") as handle:
+            json.dump(contract.model_dump(mode="json"), handle)
+        return path
+
     def _write_dataset_profile_config(self, exp_id: str) -> str:
         """Materialize the resolved Dataset Profile for a subprocess.
 
@@ -1275,6 +1299,12 @@ class TidmadSandbox:
                     json.dump(v, f)
 
             dp_path = self._write_dataset_profile_config(exp_id)
+            # Step 03 — the Model-I/O contract crosses the SAME boundary.
+            # `None` (a task with no `model_io`) omits the flag entirely,
+            # which is the child's Regime-A adapter; it is never passed as an
+            # empty string, because "flag present but broken" fails closed
+            # there and must not be triggered by an absent declaration.
+            mio_path = self._write_model_io_config(exp_id)
 
             cmd = [
                 sys.executable,
@@ -1303,6 +1333,9 @@ class TidmadSandbox:
             #
             #     validate_sample_set -> compact json.dump -> --sample_set_json
             #
+            if mio_path is not None:
+                cmd += ["--model_io_json", mio_path]
+
             # Keys are int on this side and str on the subprocess side, because
             # that is what JSON is; value lists cross unchanged; the live
             # consumer (``TIDMADEpochDataset``) re-ints NUMERICALLY. An invalid
@@ -1637,6 +1670,13 @@ class TidmadSandbox:
             "--file_index",
             str(self.file_index),
         ]
+
+        # Step 03 — same transport, same omit-vs-broken distinction as
+        # training. Scoring is deliberately NOT given the contract: it feeds
+        # no model, so a dtype requirement has no consumer there.
+        inference_mio_path = self._write_model_io_config(exp_id)
+        if inference_mio_path is not None:
+            cmd += ["--model_io_json", inference_mio_path]
 
         # Validate and write eval SampleSet to JSON. The scope check happens
         # here, before the subprocess try-block — no file I/O has occurred.

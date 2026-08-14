@@ -18,11 +18,35 @@ task_description: |
 # system prompts. Must describe the exact PyTorch tensor shapes and types
 # expected by the training engine and validator.
 forward_contract:
-  input_shape: "[B, T] int64"
+  # Step 03 — the normalized Model-I/O contract is THE authority.
+  # `input_shape`, `output_shape` and `num_classes` are DERIVED from it and
+  # are deliberately no longer authored here: declaring both would be the
+  # duplicate authority the Step-03 design forbids. The rendered prompt text
+  # is byte-identical — "[B, T] int64" and "[B, 256, T] float32" are what
+  # this block renders back to.
+  #
+  # `preset` is authoring convenience only. It is read once, during
+  # resolution, and never reaches a runtime consumer.
+  preset: sequence
+  model_io:
+    input:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {role: temporal, dimension: {symbolic: "T"}}
+      # The model boundary ADMITS both concrete integer widths — baseline A6
+      # executed every embedding-arm builtin under each. int64 is listed
+      # first because it is the canonical form shown to the model; the
+      # concrete cast at each execution site is chosen by resolution, not
+      # declared here.
+      dtype: {admissible: ["int64", "int32"]}
+    output:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {role: class, dimension: {fixed: 256}}
+        - {role: temporal, dimension: {symbolic: "T"}}
+      dtype: {admissible: ["float32"]}
   input_description: "raw signal, integer class indices 0-255"
-  output_shape: "[B, 256, T] float32"
   output_description: "per-timestep logits over 256 denoising classes"
-  num_classes: 256
   embedding_note: >
     Input values are integer class indices — use nn.Embedding(num_classes,
     embed_dim) to convert [B, T] int64 → [B, T, embed_dim], then transpose
