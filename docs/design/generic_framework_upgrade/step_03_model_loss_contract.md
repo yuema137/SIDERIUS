@@ -1432,8 +1432,9 @@ re-reviewed against the code at `4819b44a`: no material NO.
 - [x] **GATE 2 — PASS** (pro config, 2026-08-13). All five standard
       criteria verified mechanically. **Gate 1 correctly NOT REQUIRED** —
       no LLM-visible byte changed.
-- [ ] **CLOSEOUT** — ledger synchronized, PR opened, exact-final-head CI
-      green, `local HEAD == PR headRefOid == CI headSha`, tree clean
+- [x] **CLOSEOUT** — ledger synchronized; PR opened; exact-final-head CI
+      driven green; `local HEAD == PR headRefOid == CI headSha` verified;
+      tree clean. See §24.11.
 
 ### 24.5 Gate disposition, resolved mechanically at kickoff
 
@@ -3088,4 +3089,21 @@ states the same property properly. One claim, one owner.
 
 ### 24.11 Final state
 
-*(empty — no PR opened)*
+**STEP 03 — READY FOR OPERATOR REVIEW. DO NOT MERGE.**
+
+| | |
+|---|---|
+| Branch | `feat/generic-framework-step-03-model-loss-contract` |
+| Base | `origin/master` `136214b9` |
+| Frozen design / implementation base | `f865038f` |
+| Checkpoint 0 | **PASS** — A2 / A3 / A6 / A8 captured before any production change |
+| Checkpoint A | **PASS** — 7616 passed / 3 skipped; every `pb3_*` golden UNMODIFIED |
+| Checkpoint B | **PASS** — all 8 rungs; §11.1 atomicity machine-checked |
+| Checkpoint C | **PASS** — (i) live rendering, (ii) LLMBridge call count 0, (iii) real subprocess |
+| Checkpoint D | **PASS** — 7 mutation classes, disposition audit, 3352 passed, static clean |
+| Gate 1 | **NOT REQUIRED** — no LLM-visible byte changed |
+| Gate 2 | **PASS** — pro config, all five criteria verified from artifacts |
+| Amendment A-1 | operator-approved; frozen as §4a.1 |
+| Merge | **NOT PERFORMED** — awaiting explicit operator approval |
+
+Checkpoint E is NOT performed here; it follows an operator-approved merge.
