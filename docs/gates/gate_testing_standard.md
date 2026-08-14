@@ -123,6 +123,31 @@ bash sdsc_submission_scripts/run_chain.sh \
 No `--seed_paths`: every real-training gate run is cold-start (see
 "Partial-scope rules" below).
 
+#### The dataset directory is resolved automatically — do not hardcode it
+
+The canonical command deliberately does **not** pass `--data_dir`. The
+launcher resolves the physical dataset directory at launch, from the
+machine-local `tidmad_data_config.yaml` (`execute_tools.data_paths`), and
+**validates it before any LLM or training work begins**. A machine-specific
+absolute path must never appear in this standard, in the chain scripts or in
+tests — only in that per-machine (gitignored) config.
+
+```text
+--data_dir <path>          operator override, highest precedence
+omitted (the default)      tidmad_data_config.yaml answers
+neither resolvable         LAUNCH REFUSED, exit 2, before any spend
+```
+
+Pass `--data_dir` only to point a run at a *different* copy of the data.
+
+**Why this is stated here.** During Step-04a's Gate validation a run reached
+the tuner with `data_dir=None`, and the pre-phase GPU measurement failed
+closed — *after* a real LLM had generated, validated and registered a
+candidate. The launcher performs the resolution now, so that failure mode
+costs nothing instead of ~10 minutes of paid work. If a Gate refuses at
+launch with `LAUNCH REFUSED: ... dataset directory ...`, fix the machine
+config or pass `--data_dir`; do not work around it by editing this file.
+
 **Important**: do NOT use `tee` to capture chain stdout. The Claude Code
 harness capture file is sufficient and can be read on demand. `tee` writes
 a duplicate log to `/tmp` that accumulates over the run and can exhaust

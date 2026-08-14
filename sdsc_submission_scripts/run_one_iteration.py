@@ -52,6 +52,7 @@ from core.run_invariants import (
     RunInvariantsViolation,
     build_run_invariants,
 )
+from execute_tools.data_paths import DatasetDirectoryUnavailable, resolve_dataset_dir
 from execute_tools.dataset_config import TIDMAD, DataScope
 from execute_tools.health_checks.launch_policy import (
     FormalLaunchPolicyError,
@@ -1247,8 +1248,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--data_dir",
         type=str,
         default=None,
-        help="TIDMAD data directory for evaluate_time_skill's real-dataset warmup. "
-        "None falls back to the static formula.",
+        help="Physical dataset directory for this run — an OPERATOR OVERRIDE. "
+        "Omit it and the machine-local tidmad_data_config.yaml "
+        "(execute_tools.data_paths.TIDMAD_DATA_DIR) answers instead. Either "
+        "way the value is resolved and validated at launch, before any LLM "
+        "or training work, and the resolved path is what reaches the "
+        "real-dataset warmup AND the pre-phase GPU measurement.",
     )
     parser.add_argument(
         "--gpu_admission_measurement_source",
@@ -1652,6 +1657,29 @@ def main():
             file=sys.stderr,
         )
         sys.exit(3)
+
+    # --- Dataset-directory resolution preflight -------------------------
+    # Resolve WHERE the data physically lives ONCE, here, before anything
+    # expensive. `--data_dir` is the operator override; otherwise the
+    # machine-local `tidmad_data_config.yaml` answers, which is the
+    # precedence `probe_production.py` already documents as F-1a and the
+    # chain-shell portability test already assumes ("the Python config
+    # layer resolves the data directory").
+    #
+    # Before this existed nothing on the launch path performed that
+    # resolution, so a chain launched without `--data_dir` carried
+    # `data_dir=None` all the way into the tuner's pre-phase GPU
+    # measurement, which fails closed — AFTER a real LLM had generated and
+    # validated a candidate. Resolving here converts that into a refusal
+    # that costs nothing.
+    #
+    # Deliberately AFTER the halt/brake checks above: a halted chain must
+    # still be able to exit without needing readable data.
+    try:
+        args.data_dir = resolve_dataset_dir(args.data_dir, purpose="this chain iteration")
+    except DatasetDirectoryUnavailable as exc:
+        print(f"[run_one_iteration] LAUNCH REFUSED: {exc}", file=sys.stderr)
+        sys.exit(2)
 
     # --- Pseudo-mode factory resolution (Stage 3 / Commit 4.5) ---
     # ``--is_pseudo_llm`` / ``--is_pseudo_training`` request stub

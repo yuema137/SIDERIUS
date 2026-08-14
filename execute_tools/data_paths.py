@@ -60,6 +60,82 @@ TIDMAD_DATA_DIR: str = _config["tidmad_data_dir"]
 SIDERIUS_DATA_DIR: str = _config["siderius_data_dir"]
 
 
+class DatasetDirectoryUnavailable(RuntimeError):
+    """The physical dataset directory could not be resolved for a real run.
+
+    Raised by :func:`resolve_dataset_dir` at the LAUNCH boundary so a run
+    that cannot read its data fails before it spends anything — not after a
+    real LLM has generated and validated a candidate.
+    """
+
+
+def resolve_dataset_dir(explicit: str | None = None, *, purpose: str = "this run") -> str:
+    """Resolve the physical dataset directory for a run. **FAILS CLOSED.**
+
+    This is the single resolution point for *where the data physically
+    lives*, as distinct from what the dataset semantically IS (that is the
+    Dataset Profile's job — a host path is deliberately NOT task semantics).
+
+    Precedence, which is the one already declared in-tree rather than a new
+    policy:
+
+    1. an explicit operator override (``--data_dir``);
+    2. otherwise ``TIDMAD_DATA_DIR``, i.e. this module's machine-local
+       ``tidmad_data_config.yaml``.
+
+    That ordering is what ``core/runtime_control/probe_production.py``
+    documents as **F-1a** (*"the dataset path resolves through the single
+    source of truth … when no explicit ``data_dir`` is supplied — never a
+    second convention"*), and what
+    ``tests/unit/sdsc_submission_scripts/test_chain_data_dir_portability.py``
+    already asserts about the chain shell: with no ``--data_dir`` the
+    rendered invocation omits the flag *"so the Python config layer resolves
+    the data directory"*. Before this function existed, nothing on the
+    launch path performed that resolution, so the value travelled to the
+    tuner as ``None``.
+
+    No machine-specific path is tracked anywhere: the location comes from a
+    gitignored per-machine config (or an explicit override), never from
+    source, defaults or tests.
+
+    Args:
+        explicit: the operator's ``--data_dir``, or ``None``.
+        purpose: named in the error message so an operator knows which
+            launch refused.
+
+    Returns:
+        An existing directory path.
+
+    Raises:
+        DatasetDirectoryUnavailable: nothing resolvable, or the resolved
+            path is not a directory. Never returns a path that does not
+            exist, and never substitutes a different one.
+    """
+    source = "--data_dir" if explicit else "tidmad_data_config.yaml (TIDMAD_DATA_DIR)"
+    candidate = explicit or TIDMAD_DATA_DIR
+
+    if not candidate:
+        raise DatasetDirectoryUnavailable(
+            f"no dataset directory could be resolved for {purpose}. Consulted: "
+            f"{source}. Supply --data_dir <path>, or set `tidmad_data_dir` in "
+            f"{_CONFIG_PATH}."
+        )
+    if not os.path.isdir(candidate):
+        detail = ""
+        if _active_config_path == _EXAMPLE_CONFIG_PATH and not explicit:
+            detail = (
+                f" NOTE: {_CONFIG_PATH} does not exist, so the tracked TEMPLATE "
+                f"{_EXAMPLE_CONFIG_PATH} supplied this placeholder value. Copy the "
+                "template and set the real path for this machine."
+            )
+        raise DatasetDirectoryUnavailable(
+            f"the dataset directory resolved for {purpose} is not a readable "
+            f"directory: {candidate!r} (source: {source}).{detail} Supply "
+            "--data_dir <path> to override."
+        )
+    return candidate
+
+
 # ── V20 PR C1 / C-C3b: the task-owned measurement capability ────────────────
 
 

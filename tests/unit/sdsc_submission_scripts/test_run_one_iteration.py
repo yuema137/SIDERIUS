@@ -357,6 +357,12 @@ class _StubResult:
         self.resolved_bypass_formal_threshold = resolved_bypass_formal_threshold
 
 
+#: An existing directory for the wiring harness's dataset preflight. The
+#: repository root always exists and is never read as data by these tests —
+#: `run_workflow` is mocked out, so nothing opens a file under it.
+_WIRING_DATA_DIR = pathlib.Path(__file__).resolve().parents[3]
+
+
 def _run_main(argv):
     """Invoke runner.main() under SystemExit catch + return the captured args.
 
@@ -385,6 +391,15 @@ def _run_main(argv):
                 iter_n = int(argv[argv.index(flag) + 1])
                 break
         argv = ["--run_name", f"iter_{iter_n:03d}", *argv]
+    # Dataset-directory preflight: `main()` now resolves and VALIDATES the
+    # physical data directory before any expensive work, so a wiring test
+    # must name one that exists. Synthesised here for the same reason as the
+    # declarations above — these tests target the argparse + wiring layer,
+    # not the dataset preflight, and CI has no dataset. The preflight's own
+    # behaviour (resolution, precedence, refusal) is tested directly in
+    # test_gate_data_dir_resolution.py, which does NOT use this helper.
+    if "--data_dir" not in argv:
+        argv = [*argv, "--data_dir", str(_WIRING_DATA_DIR)]
     with patch.object(sys, "argv", ["run_one_iteration.py", *argv]):
         try:
             runner.main()
