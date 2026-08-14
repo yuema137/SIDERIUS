@@ -2842,6 +2842,55 @@ with real LLM + real generated candidate + real training + real inference
 + real scoring + a finite non-null `denoising_score`, exercising the
 migrated dtype/cardinality path. No earlier attempt counts toward it.
 
+#### DEFERRED — Gate-efficiency audit (post-merge, before Step 04)
+
+**Not acted on in this PR.** Operator sequencing: finish Step 03, merge,
+then redesign the Gate contract, then begin Step 04. Recorded here only so
+the findings this session paid for are not lost.
+
+Governing principle for that audit: **Gate 2 is functional verification,
+not a miniature scientific campaign.** Real LLM + real training stays —
+that is what distinguishes it from cheap pseudo evidence — but the
+temporal depth should shrink to the minimum that proves the function.
+
+```text
+proposed DEFAULT shape        1 real LLM chain
+                              -> 1 valid generated candidate
+                              -> 1 iteration
+                              -> 1 TRIAL round
+                              -> hard-bounded real training
+                              -> real inference -> real scoring
+                              -> finite result
+target                        ~10-20 min, from today's 30-60+
+escalation is OPT-IN, by failure class:
+  ordinary execution/config PR   1 iteration x 1 trial round
+  multi-round tuner policy PR    >= 2 rounds
+  cross-iteration / resume PR    >= 2 iterations
+  formal-promotion PR            formal permitted
+```
+
+Findings from this session that the audit should absorb:
+
+| # | Finding | Why it matters |
+|---|---|---|
+| 1 | `--trial_time_budget_minutes` is a **forecast-based admission gate**, not a hard runtime bound | the standard's 30-60 min estimate assumes a forecast that did not hold; one round ran 33 m 53 s under a "5 minute" budget |
+| 2 | `--trial_portion` has a **schema floor of 0.01** | portion cannot be shrunk arbitrarily to bound a Gate |
+| 3 | the **planner overrides portion** (chose 0.05 where the CLI said 0.01) | CLI portion is not the effective portion |
+| 4 | **`--no-force_formal_round` ≠ force-trial** | it stops the HARNESS forcing formal; the planner may still ELECT formal, and did — resolving to 250,000 steps |
+| 5 | a max-step cap set **below** the planner's normal solution skips the whole Gate | attempt 3: both rounds SKIPPED, no training at all |
+| 6 | a weak LLM config makes the Gate measure **proposer/planner stochastic quality** rather than the PR under test | invented list-valued `dilation_cycle`; `batch_size 1` plans |
+| 7 | therefore all real-LLM Gates use `openai_tiered_pro.json` | already reconciled into the standard in this PR |
+| 8 | Gate PASS should be judged against the **failure class under test**, not tuner optimization quality | a 1-epoch 0.5%-scope score is a plumbing signal, not a scientific one |
+
+What the audit should replace forecast-based sizing with: **hard** bounds —
+max optimizer steps, wall-clock ceiling, trial-only mode, max rounds, max
+iterations — so a smoke test cannot become a 25,000- or 250,000-step run
+by planner choice.
+
+Only item 7 is actioned in this PR, because repository truth could not be
+left contradicting the operator's config decision. Items 1-6 and 8 are
+**deferred**.
+
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
 **Approved with two corrections, and PROMOTED into the frozen design as
