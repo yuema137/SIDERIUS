@@ -6,7 +6,7 @@ Parent: [`../step_04_candidate_creation_mechanics.md`](../step_04_candidate_crea
 |---|---|
 | Design base | **`e7e1cae5`** — current master, i.e. POST-04a (04a merged as `6458dd95`). Re-scoped from that state; the pre-04a draft's base `e802b810` is superseded |
 | Depends on | the **§13 task-profile authority**. **Independent of 04a** — re-verified against merged 04a source (§0.2) |
-| Status | **FROZEN — operator-approved 2026-08-14.** Revision 2, re-scoped post-04a. Design frozen at `4282112a` (the pre-freeze acceptance-corrections commit). **Implementation is a separate authorization and has NOT begun.** |
+| Status | **IMPLEMENTED — PR [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) open, READY FOR OPERATOR REVIEW, NOT merged.** Design frozen at `4282112a` (revision 2, re-scoped post-04a); implemented from freeze marker `aa84f24d` in `4c35adfe` + `37806eed`. Implementation ledger: §14. |
 | Revision 2 changes | two premises of revision 1 were falsified by source audit (§0.1); scope shrank; per-commit checklists added (§15) |
 | Frozen contract | §1 capability (and its explicit NOT-claimed boundary) · §5 Stage-A `pb9_*` exact parity · §6 the single 13.4-A rung · §7 deterministic production-path Checkpoint C · §10 Gate disposition and flip conditions · §12 rollback boundary · §0.4 the static-description deferral |
 | NOT frozen | exact Git commit count, helper structure, source line numbers, test-file decomposition (§15) |
@@ -328,7 +328,323 @@ golden, no plugin corpus, no convergence surface here).
 
 ## 14. Implementation ledger
 
-*(empty — populated at implementation kickoff)*
+**Implementation authorized 2026-08-14.** Branch
+`feat/generic-framework-step-04b-task-description-single-source`, cut from the
+freeze marker `aa84f24d` (= `origin/master` at kickoff, verified; frozen design
+content `4282112a` present in ancestry; tree clean).
+
+### 14.1 Pre-edit source confirmation
+
+Every premise the frozen design rests on was re-verified at `aa84f24d` before
+any edit. All held:
+
+| Premise (design §) | Verified at | Result |
+|---|---|---|
+| `configs/task_config.yaml` declares the canonical description | `:10` | CONFIRMED |
+| `configs/lit_review_config.yaml` declares a duplicate | `:48` | CONFIRMED, byte-identical |
+| `_build_lit_review_input` reads the duplicate | `model_exploration.py:613` | CONFIRMED |
+| the canonical accessor exists and is imported in that module | `:116` | CONFIRMED |
+| a sibling production consumer already uses it | `:2112` (interpreter) | CONFIRMED — and three more: `:2297` proposer, `:2397` implementor, `:2668` tuner |
+| no `SIDERIUS_TASK` constant exists (§0.1) | `grep` | CONFIRMED — two textual mentions only, both descriptive |
+| `load_task_config` rejects empty upstream (§0.3) | `task_config.py:139-145` | CONFIRMED |
+
+Pre-edit baseline: `tests/unit/agent/ml_literature_review tests/unit/workflows`
+— **327 passed**, 22.28 s, exit 0.
+
+### 14.2 Deviation D-04b-1 — a second reader the design did not anticipate
+
+```text
+Previous assumption (§15 C1 step 5):
+  the grep for other readers of the lit-review YAML's task_description
+  would come back empty.
+
+Audit evidence:
+  scripts/checkpoint_s_runner.py reads it TWICE — at :118, inside a
+  `_build_input` helper whose own docstring says it "Mirrors
+  workflows.model_exploration._build_lit_review_input but inlined here so
+  the script has no workflow dependency", and at :296 in a startup summary
+  print.
+
+Corrected understanding:
+  Deleting the YAML key without touching this script would have left the
+  mirror silently passing "" as the task anchor to real DeepSeek calls —
+  precisely the silent-degradation shape of failure class 2 (§8).
+
+Implementation consequence:
+  The mirror follows production onto the SAME canonical accessor. This
+  introduces no new authority, no fallback and no precedence rule — it is
+  the identical `get_task_description(load_task_config())` call the design
+  already prescribes. Scope impact is one tracked script, within §12's
+  "directly affected" surface.
+
+Validation consequence:
+  Covered by the C2 declaration guard (which forbids the key returning) and
+  by ruff/pyright over the edited script. The script itself is not
+  executable in CI — it needs an operator-specific seed path and real
+  DeepSeek + S2 quota — so no test runs it; this is recorded as the reason,
+  not hidden.
+```
+
+### 14.3 Deviation D-04b-2 — `test_agent_card_task_config.py` needs no upgrade
+
+```text
+Previous assumption (§9):
+  test_agent_card_task_config.py is UPGRADED to the single source.
+
+Audit evidence:
+  Read in full (103 lines). Every test in it asserts properties of the
+  static `_AGENT_CARD` object in nodes/ml_literature_review — that T4c
+  stripped SQUID/denoising wording from `role`/`expertise_domain`/
+  `limitations`, that AgentCard max_length constraints still hold, and that
+  the card round-trips through Pydantic. It never loads either YAML, never
+  calls the accessor, and never asserts where a description comes from.
+
+Corrected understanding:
+  The §9 verdict was assigned from the file's NAME. Its body has no
+  coupling to the duplicate, so there is nothing in it to upgrade: it is
+  already source-neutral and it still names a defect only it can catch
+  (task prose creeping back into the static agent card).
+
+Implementation consequence:
+  Verdict corrected to KEEP UNCHANGED. Upgrading it would have meant
+  inventing an assertion for it to carry.
+```
+
+### 14.4 C1 — collapse the duplicate — COMPLETE
+
+**Production change** (`workflows/model_exploration.py`,
+`_build_lit_review_input`): the 10-line YAML read + empty-value `print`
+warning is replaced by `task_description = get_task_description(load_task_config())`.
+`config` is no longer consulted for this key at all, so a stale operator copy
+is structurally ignored rather than deprioritized. The warning is deleted, not
+reimplemented — §0.3's upstream rejection makes the state it announced
+unreachable, and re-catching it would be the swallowed fail-closed of failure
+class 2.
+
+**Config change** (`configs/lit_review_config.yaml`): the `task_description:`
+block is deleted. Its comment header is rewritten to state the real behaviour
+(this is C2's prose obligation, landed here because deleting the declaration
+and leaving a comment describing the deleted `SIDERIUS_TASK` fallback beside
+it would ship an actively misleading file for one commit).
+
+**Stage-A parity — PASS.** All 10 `pb9_*` goldens re-render EXACT;
+`git status` on the goldens directory is empty. Not regenerated. `LLMBridge`
+kwargs and invocation semantics untouched — no call site changed.
+
+**The three tests that failed on collapse were all pins defending the
+duplicate**, diagnosed before any edit (test-side, not production defects):
+
+| Test | Diagnosis | Disposition |
+|---|---|---|
+| `..._lit_review_wiring.py::test_warns_on_empty_task_description` | asserts the deleted warning fires | REWRITE |
+| `..._lit_review_wiring.py::test_no_warning_when_task_description_set` | fed `"whale song"` via the YAML and asserted it arrived | REWRITE |
+| `test_step00_task_config_baselines.py::test_cfg3a_task_description_duplicate_byte_equal` | `KeyError` — it *required* the duplicate to exist | REWRITE |
+
+The second failure is worth recording as evidence rather than noise: it
+demonstrated acceptance criterion 3 in the act of failing — a sentinel placed
+in the lit-review config was ignored and the canonical text returned instead.
+
+Rewrites, each stating the defect it catches:
+`test_lit_review_yaml_is_no_longer_a_task_description_authority` (sentinel
+ignored), `test_task_description_needs_no_key_in_the_lit_review_yaml` (key
+optional, not merely ignored), `test_cfg3a_lit_review_declares_no_task_description`
+(parsed top-level keys, never a text scan) and
+`test_cfg3a_task_config_remains_the_one_declaration` (exactly one source, not
+zero).
+
+**Deviation D-04b-3 (choreography, not semantics)**: §15 assigned the pin
+rewrites to C2. They landed in C1 because they measure C1's own changed
+function, and deferring them would have made C1 a knowingly red commit —
+which CLAUDE.md's clean-tree rule and the PR3-L2 preflight guard both forbid.
+Frozen semantics, parity criterion, the 13.4-A rung, Checkpoint C and Gate
+disposition are all unchanged; only which commit carries the rewrite moved.
+§15's "exact Git commit count is NOT frozen" covers this.
+
+**C1 verification** — `tests/unit/agent/ml_literature_review tests/unit/workflows`:
+**328 passed**, 21.26 s, exit 0 (read from the log file, not a pipeline exit
+status). Goldens directory clean. Blast radius —
+`tests/integration/workflows/test_lit_review_wiring_dual_mode.py`,
+`tests/unit/sdsc_submission_scripts/test_run_one_iteration.py`,
+`tests/unit/scripts`: **602 passed**, 1 failed —
+`test_pr3_l2p_preflight.py::test_preflight_all_invariants`, whose
+`no_production_file_modified` check named exactly the three files being
+edited. That is the guard working as CLAUDE.md documents; resolved by
+committing the checkpoint, never by relaxing it.
+
+Committed as `4c35adfe`.
+
+### 14.5 C2 — guard, rung, Checkpoint C, stale prose — COMPLETE
+
+New module `tests/unit/workflows/test_step04b_task_description_single_source.py`
+(9 tests) carries all three evidence obligations.
+
+**The declaration guard** parses every `configs/**/*.yaml|yml` and asserts the
+set of files declaring a top-level `task_description` is exactly
+`{task_config.yaml}`. It reasons over the parsed mapping, never the file text —
+`test_the_guard_reads_declarations_not_prose` is the explicit control: it
+asserts the lit-review YAML's raw text *does* contain the phrase (the comment
+04b itself wrote) while its parsed mapping declares nothing, so a substring
+scan would have red on this commit's own documentation.
+
+```text
+Deviation D-04b-4 — the guard found a third declaring file on first run.
+
+Audit evidence:
+  configs/task_config.example.yaml also declares task_description. Grep for
+  every reference: `workflows/task_config.py:56` and `:152` only, both
+  remediation strings telling an operator which file to copy. Its own header
+  states "the workflow uses configs/task_config.yaml at runtime, never this
+  example file".
+
+Corrected understanding:
+  It is the copy-me TEMPLATE for the canonical file. It MUST declare the key
+  — a template omitting the required field would be broken — and it is not a
+  second authority because nothing loads it.
+
+Implementation consequence:
+  `*.example.yaml` is excluded, narrowly and with the reasoning recorded in
+  the helper's docstring. `test_the_example_template_is_not_counted_but_does
+  _declare_the_key` pins the exclusion so it cannot silently widen into a
+  blanket suffix skip that would hide a real second authority.
+```
+
+**Rung 13.4-A (lit-review half)** varies ONLY the canonical description. The
+fixture is built by parsing the shipped `task_config.yaml` and substituting
+one key, and the atomicity is **machine-checked**, not asserted in prose:
+`test_the_fixture_varies_only_the_description` deletes `task_description` from
+both mappings and requires the remainders to be deep-equal. Three cases: the
+input follows the canonical text; a stale sentinel in the lit-review config is
+not consulted; and the shipped-pairing case runs the real builder against the
+YAML parsed from disk, not a synthetic dict.
+
+**Checkpoint C** — discharged deterministically, no real LLM call:
+
+```text
+canonical §13 task config (tmp, alternate description)
+  -> real production _build_lit_review_input
+  -> real MLLiteratureReviewAgent.run()
+  -> real search-decision + synthesis renders
+  -> BoundaryRecorderBridge capture at the LLM request boundary
+```
+
+Every hop is production code; only the boundary is a recorder, whose OpenAI
+clients raise on attribute access, so no network call is possible. `run()`
+performs the node's own threading (`_task_description = inp.task_description`,
+then three render call sites), which is why this is not redundant with the
+rung: a regression dropping the field between the input and the renderer
+passes 13.4-A and fails here. The recorder is asserted to have fired.
+
+Residue is **block-scoped** per §6: `_task_blocks()` extracts the bodies of the
+three markdown sections the placeholder renders under (`The task the research
+agent is working on` / `The task the proposer is working on` / `Downstream
+task context`) and the `"SQUID" not in block` assertion applies only there —
+the surrounding lit-review doctrine legitimately discusses denoising and 1-D
+signals, so a whole-prompt absence assertion would be unsatisfiable.
+
+**Mutation evidence.** Caches cleared and site counts asserted before each
+mutation; both restored via `git checkout --` and re-verified green.
+
+| # | Mutation | Sites | Expected | Observed |
+|---|---|---|---|---|
+| 1 | reintroduce `task_description:` into `configs/lit_review_config.yaml` | asserted 1 | guard reds | **3 failed** — the new guard, its prose control, and the rewritten CFG-3a; restored → 15 passed |
+| 2 | revert `_build_lit_review_input` to read the YAML | asserted 1 | rung + Checkpoint C red | **6 failed** — both 13.4-A tests, both Checkpoint-C tests, both rewritten wiring tests; restored → green |
+
+Mutation 2's first attempt aborted on its own precondition: the naive pattern
+matched **2** sites because `tune_input.task_description = get_task_description(...)`
+at `:2674` contains the target string as a substring. Re-targeted on the exact
+indented form. Recording this because a mutation applied to the wrong site
+would have "proved" reachability for a call site the tests never exercise.
+
+**Stale live prose** (§11 obligation). `SIDERIUS_TASK` now appears in **no**
+executable source and **no** live config or runtime documentation — verified
+by `grep -rn` across `*.py|*.yaml|*.yml|*.sh|*.json`, which returns nothing.
+The surviving mentions are all in `docs/design/` historical and audit records,
+including §0.1 of this document; per §15 C2 acceptance those are deliberately
+preserved and a repository-wide text ban is explicitly NOT the property.
+
+Two further stale live claims were found and corrected — both described the
+warning C1 deleted:
+
+| Surface | Stale claim | Correction |
+|---|---|---|
+| `nodes/ml_literature_review/ml_literature_review.py:315-319` | "the workflow warns at YAML-load time"; "operator should fill the YAML's `task_description:` key" | states the canonical source and its fail-closed loader; notes an empty value now implies a non-production caller |
+| `nodes/ml_literature_review/ml_literature_review.md` (2 rows) | "The workflow emits a warning at YAML-load time"; default `""` (workflow warns) | records the single source and that the production path cannot produce an empty value |
+
+The node doc's pre-existing claim that the value is "Sourced from
+`configs/task_config.yaml` by the workflow" was **aspirational and wrong**
+before this PR — the workflow read the lit-review YAML. 04b makes the
+documentation true.
+
+**Test disposition correction.** §9 assigned `test_agent_card_task_config.py`
+an UPGRADE. Read in full, it has no coupling to the duplicate (§14.3) —
+verdict corrected to KEEP UNCHANGED, and it is unmodified.
+
+**C2 verification** — `tests/unit/agent/ml_literature_review tests/unit/workflows`:
+**337 passed**, 21.71 s, exit 0. `pb9_*` goldens byte-identical (`git status`
+on the goldens directory empty) — C2 moved zero rendered bytes, as required.
+`ruff check` and `ruff format --check` clean over
+`nodes/ml_literature_review/`, `tests/unit/workflows/`, `workflows/`.
+
+Committed as `37806eed`.
+
+### 14.6 Checkpoint D — targeted regression and static
+
+Run from a **clean tree** at the final executable head, per CLAUDE.md's
+clean-tree rule (the earlier `no_production_file_modified` red is what makes
+this ordering non-optional).
+
+```text
+Validation:
+  command: .venv/bin/python -m pytest \
+             tests/unit/agent/ml_literature_review tests/unit/workflows \
+             tests/unit/scripts tests/unit/sdsc_submission_scripts \
+             tests/integration/workflows/test_lit_review_wiring_dual_mode.py -q
+  purpose: directly affected deterministic tests + lit-review/workflow
+           integration + the PR3-L2 preflight invariants
+  runtime: 146.71 s
+  result:  1429 passed, exit 0 (read from the log file, not a wrapper's
+           exit status)
+```
+
+`tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`,
+which red during C1 development on the dirty tree, passes here — confirming
+the failure was the guard observing work-in-progress, not a defect.
+
+**Static.** `ruff check .` → *All checks passed*. `ruff format --check .` →
+*869 files already formatted*. Both repository-wide, matching CI's invocation.
+
+```text
+Limitation — pyright was NOT run locally.
+
+  .venv/bin/pyright exits 1 before analysing anything:
+    SyntaxError: Unexpected token =
+    at .venv/.../pyright/dist/dist/vendor.js
+
+  Cause: this machine's Node is v10.19.0; pyright's bundled JS requires a
+  modern runtime. This is exactly the case CLAUDE.md's "Environment
+  assumptions" section names.
+
+  Consequence: no local strict-type claim is made for this PR. CI's
+  "Type check — pyright (strict, blocking)" step is the authority, and its
+  result on the exact final head is recorded in §14.7.
+```
+
+**No local full repository suite** was run — §11's validation budget plans
+none by default, and no unique evidence gap appeared that targeted tests plus
+exact-head CI cannot cover. Exact-final-head CI is the broad regression
+authority.
+
+### 14.7 Closeout
+
+| Item | Value |
+|---|---|
+| PR | [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) |
+| Branch | `feat/generic-framework-step-04b-task-description-single-source` |
+| Base | `aa84f24d` |
+| Semantic commits | `4c35adfe` (C1 collapse) · `37806eed` (C2 guard/rung/Checkpoint C) |
+| Gate 1 | **NOT REQUIRED** — no flip condition triggered; rendered bytes and invocation semantics exact |
+| Gate 2 | **NOT REQUIRED** — authority/source change only; no execution-surface expansion |
+| Static builtin model descriptions | **DEFERRED**, intentionally not implemented (§0.4) |
 
 ---
 
@@ -376,14 +692,14 @@ question ("did any rendered byte move?") harder to review in isolation.
 - Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Re-read `_build_lit_review_input` in full and confirm `:116`'s import
+- [x] Re-read `_build_lit_review_input` in full and confirm `:116`'s import
       and the `:2112` precedent are still exactly as audited.
-- [ ] Replace the YAML read with `get_task_description(load_task_config())`.
-- [ ] Delete the now-unreachable empty-value `print` warning
+- [x] Replace the YAML read with `get_task_description(load_task_config())`.
+- [x] Delete the now-unreachable empty-value `print` warning
       (`:614-622`), because `load_task_config` already rejects empty
       (§0.3) — a warning for a state that cannot occur is dead code.
-- [ ] Delete `task_description:` from `configs/lit_review_config.yaml`.
-- [ ] Confirm no other reader of `lit_review_config["task_description"]`
+- [x] Delete `task_description:` from `configs/lit_review_config.yaml`.
+- [x] Confirm no other reader of `lit_review_config["task_description"]`
       exists (`grep`), including tests and scripts.
 
 **4. Validation plan.**
@@ -399,20 +715,20 @@ question ("did any rendered byte move?") harder to review in isolation.
 - Gate: **none** (§10).
 
 **5. Acceptance criteria.**
-- [ ] All 10 `pb9_*` goldens byte-identical — zero diff, not "close".
-- [ ] `configs/lit_review_config.yaml` contains no `task_description:` key.
-- [ ] With a synthetic lit-review config whose `task_description` is set to
+- [x] All 10 `pb9_*` goldens byte-identical — zero diff, not "close".
+- [x] `configs/lit_review_config.yaml` contains no `task_description:` key.
+- [x] With a synthetic lit-review config whose `task_description` is set to
       a DISTINGUISHABLE sentinel string, the built
       `LiteratureReviewInput.task_description` equals the **task-profile**
       text and does **not** contain the sentinel. (Asserting only "it is
       non-empty" would pass while the YAML was still authoritative.)
-- [ ] **Parsed** `configs/lit_review_config.yaml` has **no top-level
+- [x] **Parsed** `configs/lit_review_config.yaml` has **no top-level
       `task_description` key**. Asserted by loading the YAML and checking
       the mapping — *not* by grepping the text, which would also fire on
       the comment block that legitimately explains where the value now
       comes from (and would contradict C2's rule that prose may mention
       the concept).
-- [ ] No other production reader of the lit-review YAML key remains.
+- [x] No other production reader of the lit-review YAML key remains.
 
 **6. Failure and edge cases.**
 - Lit-review YAML still carries the key (operator's stale local copy) →
@@ -428,8 +744,8 @@ question ("did any rendered byte move?") harder to review in isolation.
   a golden to regenerate (§5).
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/ml_literature_review tests/unit/workflows -q`
-- [ ] Record: test count, wall time, and explicit confirmation that the 10
+- [x] `.venv/bin/python -m pytest tests/unit/agent/ml_literature_review tests/unit/workflows -q`
+- [x] Record: test count, wall time, and explicit confirmation that the 10
       `pb9_*` goldens were unmodified (`git status` on the goldens dir).
 
 **8. Commit boundary.**
@@ -464,15 +780,15 @@ lands as an explicit, reviewable decision about what must never regress.
   meaningless).
 
 **3. Implementation plan.**
-- [ ] Re-read the YAML comment block and rewrite it to state the real
+- [x] Re-read the YAML comment block and rewrite it to state the real
       behaviour: the description comes from `configs/task_config.yaml`.
-- [ ] Add a guard test that fails when a second `task_description`
+- [x] Add a guard test that fails when a second `task_description`
       **declaration** appears in any tracked config. It must **parse** each
       YAML under `configs/` and inspect top-level keys — never scan raw
       text, since comments and prose may legitimately mention the concept.
-- [ ] Re-read `test_agent_card_task_config.py` and upgrade it to the single
+- [x] Re-read `test_agent_card_task_config.py` and upgrade it to the single
       source rather than deleting it.
-- [ ] Search for and rewrite any pin that asserts the lit-review YAML owns
+- [x] Search for and rewrite any pin that asserts the lit-review YAML owns
       a description.
 
 **4. Validation plan.**
@@ -487,21 +803,21 @@ lands as an explicit, reviewable decision about what must never regress.
 - Gate: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Reintroducing `task_description:` into `configs/lit_review_config.yaml`
+- [x] Reintroducing `task_description:` into `configs/lit_review_config.yaml`
       makes the guard fail — demonstrated by mutation, with the restored
       tree re-verified green.
-- [ ] The guard passes with `configs/task_config.yaml` present and
+- [x] The guard passes with `configs/task_config.yaml` present and
       unmodified (exactly one legitimate source is not an error).
-- [ ] **No CURRENT LIVE surface describes `SIDERIUS_TASK` as an active
+- [x] **No CURRENT LIVE surface describes `SIDERIUS_TASK` as an active
       fallback.** Scoped to live behaviour surfaces: the lit-review config
       comments, current node/runtime documentation, and executable source.
       A repository-wide grep is **not** the acceptance property —
       historical design and audit records (including §0.1 of this very
       document) deliberately preserve the removed mechanism, and rewriting
       them would destroy the audit trail.
-- [ ] `pb9_*` unchanged by this commit (`git diff` on the goldens dir is
+- [x] `pb9_*` unchanged by this commit (`git diff` on the goldens dir is
       empty).
-- [ ] `test_agent_card_task_config.py` asserts the single source and still
+- [x] `test_agent_card_task_config.py` asserts the single source and still
       names a defect only it can catch.
 
 **6. Failure and edge cases.**
@@ -516,8 +832,8 @@ lands as an explicit, reviewable decision about what must never regress.
   is a visible decision.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/ml_literature_review tests/unit/workflows -q`
-- [ ] Record counts, wall time, and the mutation result (expected failure,
+- [x] `.venv/bin/python -m pytest tests/unit/agent/ml_literature_review tests/unit/workflows -q`
+- [x] Record counts, wall time, and the mutation result (expected failure,
       observed failure, restored green).
 
 **8. Commit boundary.**

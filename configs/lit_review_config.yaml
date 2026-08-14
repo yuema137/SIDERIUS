@@ -34,22 +34,26 @@
 enabled: false
 
 # ---------------------------------------------------------------------------
-# Task description — what research task this lit-review run is supporting.
-# Injected into all three lit-review LLM calls (paper-extract,
-# search-decision, synthesis) via the {TASK_DESCRIPTION} placeholder.
-# Drives the search LLM's query anchor words (e.g. "1D", "broadband",
-# "SQUID") and the synthesis LLM's relevance framing.
+# Task description — NOT declared here.
 #
-# Strongly recommended — an empty value falls back to the SIDERIUS_TASK
-# default constant defined in agent/prompt_templates/literature_review/
-# __init__.py. The workflow prints a Warning at YAML-load time when
-# this field is empty so operators see the fallback is happening.
+# Step 04b (2026-08-14) collapsed the duplicate. The research task this
+# lit-review run supports is declared exactly once, in
+# `configs/task_config.yaml`, and `_build_lit_review_input`
+# (workflows/model_exploration.py) resolves it from there via
+# `get_task_description(load_task_config())` — the same accessor the
+# proposer, implementor, interpreter and tuner already use.
+#
+# It still reaches all three lit-review LLM calls (paper-extract,
+# search-decision, synthesis) through the {TASK_DESCRIPTION} placeholder,
+# and still drives the search LLM's query anchor words and the synthesis
+# LLM's relevance framing. Only the DECLARATION moved.
+#
+# To change the task, edit `configs/task_config.yaml`. Re-adding a
+# `task_description:` key to THIS file does nothing — the workflow does
+# not read it — and a regression guard fails if one reappears. A missing
+# or empty canonical description is rejected by the task-config loader at
+# load time; there is no fallback constant and no default.
 # ---------------------------------------------------------------------------
-task_description: |
-  full-spectrum 1-D time-series denoising of SQUID dark-matter
-  detector data: map a noisy [B, T] integer signal to a clean
-  [B, 256, T] reconstruction, trained across the whole frequency
-  spectrum at once (not split into per-band models).
 
 # ---------------------------------------------------------------------------
 # Root papers — curated foundational papers always resolved at agent start.

@@ -9,7 +9,7 @@
 | Design base | `e802b810` (master at design time; Step 03 merged as `e1181f61`, PR #205) |
 | Depends on | Step 01 (MERGED, PR #199/#201), Step 02 (MERGED, PR #202/#203/#204), Step 03 (MERGED, PR #205) |
 | Decomposition | **TWO PRs** — `04a` then `04b` (independent; see §8) |
-| Status | **Step 04 = IN PROGRESS.** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = DESIGN FROZEN** (revision 2, frozen at `4282112a`, 2026-08-14) — **implementation NOT authorized, NOT started**. **Step 04 must NOT be marked COMPLETE until 04b merges** (§20). |
+| Status | **Step 04 = IN PROGRESS.** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = IMPLEMENTED, PR [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) OPEN and awaiting operator review** (design frozen `4282112a`; commits `4c35adfe` + `37806eed`; child §14) — **NOT merged**. **Step 04 must NOT be marked COMPLETE until 04b merges** (§20). |
 | Freeze posture | This parent stays a **LIVE governance document**, deliberately not frozen, following the Step-02 multi-PR precedent: it must still absorb 04b's design and both children's status. The frozen contracts live in the children |
 
 This parent owns Step-level scope, the authority map, the decomposition
@@ -605,7 +605,7 @@ threshold-met finding; D2's remaining half is recorded closed (§11).
 | Child | State | Evidence |
 |---|---|---|
 | **04a** | **COMPLETE — MERGED** | PR #207, squash `6458dd95`, final head `d019f94b`; Checkpoints 0/A/B/C/D, Gate 1 PASS, Gate 2 PASS, exact-head CI green — all in the child's §17.11 |
-| **04b** | **DESIGN FROZEN — implementation NOT authorized, NOT started** | frozen at `4282112a` (2026-08-14) after the revision-2 re-scope from post-04a master and the pre-freeze acceptance corrections |
+| **04b** | **IMPLEMENTED — PR #209 OPEN, awaiting operator review; NOT merged** | design frozen at `4282112a`, implemented from `aa84f24d` in `4c35adfe` + `37806eed`. Stage-A `pb9_*` exact, rung 13.4-A, duplicate-source guard + two mutations, deterministic Checkpoint C, Gates 1 and 2 both NOT REQUIRED — all in the child's §14 |
 
 **Do not mark Step 04 COMPLETE.** The completion contract above requires
 *both* children — and **only** those. The deferred static builtin

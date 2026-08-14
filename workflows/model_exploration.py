@@ -585,9 +585,18 @@ def _build_lit_review_input(
     Design Decision 3 (2026-06-11) requires every operator-visible knob to be
     present in the YAML — operator visibility, not minimal config.
 
+    ``task_description`` is the ONE exception: since Step 04b it is resolved
+    from the canonical task profile (``configs/task_config.yaml``) and is
+    never read from ``config``. See
+    ``docs/design/generic_framework_upgrade/step_04_candidate_creation_mechanics/
+    pr_04b_task_description_single_source.md``.
+
     Args:
         config: Parsed YAML dict from ``configs/lit_review_config.yaml`` (or
             the operator-supplied path via ``--ml_lit_review_config``).
+            Supplies the lit-review module's own knobs only — root papers,
+            search, verbosity, synthesis, confidence rubric. A
+            ``task_description`` key here is stale and is ignored.
         interp_output: This iteration's ``InterpretationOutput``; populates
             ``experiment_history``.
         llm_kwargs: 4-field LLM routing flatten from
@@ -603,23 +612,20 @@ def _build_lit_review_input(
     # the lit-review schema types (which form a long import chain).
     from agent.schemas.literature_review import LiteratureReviewInput
 
-    # Fix 6 (Commit 6.5b-5) + Commit F: read task_description from YAML and
-    # warn when empty. Post-Commit-F: there is no SIDERIUS_TASK fallback —
-    # an empty value flows through as "" to the {TASK_DESCRIPTION} prompt
-    # placeholder, leaving the prompt section bare (no task-domain anchor
-    # for the LLM). Workflow uses print() for warnings (no logger in this
-    # module — convention matches existing call sites e.g. line 136's
-    # "Warning: failed to load vocab seed").
-    task_description = str(config.get("task_description", "") or "").strip()
-    if not task_description:
-        print(
-            "Warning: lit_review config has no `task_description` — "
-            "lit-review LLM calls will receive no task-domain anchor and "
-            "may produce off-domain queries. Strongly recommended: set "
-            "`task_description:` in configs/lit_review_config.yaml to "
-            "specialize the agent's search/synthesis behavior for your "
-            "problem."
-        )
+    # Step 04b — SINGLE SOURCE. The task description is resolved from the
+    # canonical §13 task profile (configs/task_config.yaml), NOT from the
+    # lit-review YAML, which no longer declares one. `config` is deliberately
+    # not consulted for this key: a stale operator copy that still carries
+    # `task_description:` must be IGNORED, never merged or preferred, or the
+    # duplicate authority this PR removed would return invisibly.
+    #
+    # Same accessor and same call shape as the sibling production consumers
+    # (interpreter / proposer / implementor / tuner in this module). Its
+    # fail-closed semantics are upstream and deliberate: `load_task_config`
+    # already rejects a missing or empty task description, which is why the
+    # pre-04b empty-value warning here is gone rather than reimplemented —
+    # it guarded a state the canonical loader cannot produce.
+    task_description = get_task_description(load_task_config())
 
     return LiteratureReviewInput.model_validate(
         {

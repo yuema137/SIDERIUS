@@ -59,6 +59,7 @@ from nodes.ml_literature_review import (  # noqa: E402
     MLLiteratureReviewAgent,
     _parse_dimension,
 )
+from workflows.task_config import get_task_description, load_task_config  # noqa: E402
 
 # Canonical seed (operator-owned data, read-only)
 SEED_PATH = Path(
@@ -106,6 +107,11 @@ def _build_input(
 
     Mirrors ``workflows.model_exploration._build_lit_review_input`` but
     inlined here so the script has no workflow dependency.
+
+    Step 04b: the mirror follows production onto the canonical task profile.
+    ``cfg`` no longer supplies ``task_description`` — the lit-review YAML
+    stopped declaring one, so reading it here would have silently sent an
+    empty task anchor to the LLM.
     """
     return LiteratureReviewInput.model_validate(
         {
@@ -115,7 +121,7 @@ def _build_input(
             "synthesis_config": cfg.get("synthesis", {}),
             "confidence_rubric": cfg.get("confidence_rubric", {}),
             "findings_verbosity": cfg.get("findings_verbosity", 1),
-            "task_description": str(cfg.get("task_description", "") or "").strip(),
+            "task_description": get_task_description(load_task_config()),
             "storage": StorageConfig(
                 backend="local",
                 local=LocalStorageConfig(workspace=str(workspace), run_name=run_name),
@@ -293,8 +299,10 @@ def main():
 
     print(f"\nLoading YAML config from {YAML_PATH.relative_to(SIDERIUS_ROOT)}")
     cfg = _load_yaml()
-    task = str(cfg.get("task_description", "") or "").strip()
-    print(f"  task_description: {task[:80]!r}{'...' if len(task) > 80 else ''}")
+    task = get_task_description(load_task_config())
+    print(
+        f"  task_description (from configs/task_config.yaml): {task[:80]!r}{'...' if len(task) > 80 else ''}"
+    )
     print(f"  dynamic_search.max_rounds = {cfg['dynamic_search']['max_rounds']}")
     print(f"  dynamic_search.escalation_allowed = {cfg['dynamic_search']['escalation_allowed']}")
 

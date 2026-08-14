@@ -79,21 +79,40 @@ class TestCFG2RenderedTaskStrings:
 
 
 class TestCFG3LitReviewConfig:
-    def test_cfg3a_task_description_duplicate_byte_equal(self):
-        """CFG-3a (Type 1, MIGRATION PARITY — NOT FINAL FRAMEWORK
-        CONTRACT): ``configs/lit_review_config.yaml`` duplicates
-        ``configs/task_config.yaml``'s ``task_description`` on a SEPARATE
-        load path (``workflows/model_exploration.py``) that never touches
-        ``task_config.py``. The duplication is registered debt (collapses
-        at roadmap step 04); this pin exists to catch SILENT DRIFT between
-        the two copies during migration, not to bless the duplicate."""
-        a = yaml.safe_load(TASK_CONFIG_YAML.read_text(encoding="utf-8"))
+    def test_cfg3a_lit_review_declares_no_task_description(self):
+        """CFG-3a, REWRITTEN at Step 04b — the duplicate is gone.
+
+        This pin used to assert the two declarations stayed byte-identical
+        ("catch SILENT DRIFT ... until step 04 collapses the duplication").
+        Step 04b performed that collapse, so the drift it guarded is now
+        structurally impossible and the old assertion would have *required*
+        the duplicate to exist. Rewritten around the invariant that replaced
+        it rather than deleted, per the same reasoning that motivated it:
+        the lit-review config must not regain its own authority.
+
+        The check is on the PARSED mapping's top-level keys, never on the
+        file text — the file legitimately explains in prose where the
+        description now comes from, and a substring scan would fire on that
+        comment.
+        """
         b = yaml.safe_load(LIT_REVIEW_YAML.read_text(encoding="utf-8"))
-        assert a["task_description"] == b["task_description"], (
-            "task_description drifted between configs/task_config.yaml and "
-            "configs/lit_review_config.yaml — the two copies must stay "
-            "byte-identical until step 04 collapses the duplication"
+        assert "task_description" not in b, (
+            "configs/lit_review_config.yaml declares a top-level "
+            "`task_description` again — Step 04b made "
+            "configs/task_config.yaml the single source and "
+            "_build_lit_review_input no longer reads this key, so a "
+            "declaration here is a silent second authority that would drift "
+            "unnoticed. Delete it; edit configs/task_config.yaml instead."
         )
+
+    def test_cfg3a_task_config_remains_the_one_declaration(self):
+        """The other half: exactly one legitimate source, not zero.
+
+        A guard that only forbids declarations would pass on a repository
+        that had lost the canonical one too.
+        """
+        a = yaml.safe_load(TASK_CONFIG_YAML.read_text(encoding="utf-8"))
+        assert str(a.get("task_description") or "").strip() != ""
 
     def test_cfg3b_task_semantic_fields_deep_equal(self):
         """CFG-3b (Type 2): the lit-review config's own task-semantic

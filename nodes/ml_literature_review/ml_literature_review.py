@@ -314,9 +314,12 @@ class MLLiteratureReviewAgent:
             self.search_bridge = self.bridge
         # Fix 6 (6.5b-5) + Commit F: the task description threaded into all
         # three render call sites (compression / search-decision / synthesis).
-        # When the input field is empty (the workflow warns at YAML-load time),
-        # the empty string flows through to the {TASK_DESCRIPTION} placeholder
-        # — operator should fill the YAML's task_description: key.
+        # Step 04b: the production workflow sources this from the canonical
+        # task profile (configs/task_config.yaml), whose loader rejects a
+        # missing or empty description — so an empty value here means a
+        # non-production caller built the input by hand. It still flows
+        # through to the {TASK_DESCRIPTION} placeholder as "" rather than
+        # being defaulted; there is no fallback constant.
         self._task_description = inp.task_description
         cache_dir = Path(self._root_cache_dir)
 
