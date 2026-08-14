@@ -2,8 +2,22 @@
 
 ## 0. Status and verified prerequisites
 
-**STEP 03 DESIGN — FROZEN.**
-**OPERATOR APPROVED FOR IMPLEMENTATION.**
+**STEP 03 — COMPLETE / MERGED. CHECKPOINT E — COMPLETE.**
+
+| Fact | Value |
+|---|---|
+| PR | **#205** |
+| Final PR head | `a8234b0c` |
+| Merge SHA | `e1181f61` (`e1181f6160f05a5026306e4120b21dd909800210`) |
+| Merged | 2026-08-14 |
+| Exact-head CI | run `31762007150`, **success** on `a8234b0c` |
+
+*Historical (preserved, not rewritten):* this document was frozen as
+**STEP 03 DESIGN — FROZEN / OPERATOR APPROVED FOR IMPLEMENTATION** at
+revision 2 on 2026-08-13 (`f865038f`, semantic basis `a490e99e`), and
+**AMENDMENT A-1** (§4a.1) was approved DURING implementation after
+baseline A6 refuted a frozen assumption. A-1 was not known at freeze
+time, and the chronology below is deliberately left intact.
 
 | Freeze fact | Value |
 |---|---|
@@ -1002,10 +1016,42 @@ an operator call.
 
 ## 23. Status
 
-**STEP 03 DESIGN — FROZEN (revision 2; operator freeze 2026-08-13).**
-**OPERATOR APPROVED FOR IMPLEMENTATION.**
+**STEP 03 — COMPLETE / MERGED** (PR #205, merge `e1181f61`,
+2026-08-14). **CHECKPOINT E — COMPLETE.**
 
-Implementation has **not yet begun** at the time of this freeze commit:
+**What Step 03 delivered.** ONE normalized Model-I/O semantic authority:
+one structured input tensor and one structured output tensor, with
+ordered axes, semantic axis roles, dimension semantics and dtype
+**admissibility** semantics; preset resolution INTO that contract with
+preset-vs-explicit fail-closed validation (FX-3 / FX-4, closing D13);
+canonical output semantics with legacy `output_type` surviving only as a
+compatibility projection; the existing loss-legality authority **re-keyed
+rather than duplicated**, every verdict unchanged; cardinality derived
+from and cross-validated against `DatasetProfile.ValueEncoding`;
+production contract-derived input-dtype routing and cardinality
+consumption; and **no model-name-based dtype branch** on any migrated
+surface. Deliberately NOT delivered: multi-tensor abstraction, a general
+cross-tensor relationship DSL. `hybrid` remains legacy builtin
+compatibility only; `task_type` remains outside Step-03 ownership.
+
+**AMENDMENT A-1, recorded accurately.** The frozen design assumed one
+input tensor implied one concrete dtype everywhere. Baseline A6 refuted
+it from execution:
+
+```text
+embedding-style builtins   epoch training  int32
+                           streaming       int32
+                           inference       int64
+fcnet                      all three       float32
+```
+
+Corrected semantics: **Model-I/O owns dtype admissibility; execution owns
+selection of a currently supported concrete representation.** An empty
+`admissible ∩ runtime-supported` set is a typed fail-closed. Execution-site
+compatibility preferences were NOT converted into Model-I/O semantics.
+
+*Historical:* at the freeze commit this section read "implementation has
+not yet begun", which was true then:
 no production source, no test and no Gate has been touched, and the
 implementation checklist / live ledger is not yet written. Step 04 is
 not begun.
