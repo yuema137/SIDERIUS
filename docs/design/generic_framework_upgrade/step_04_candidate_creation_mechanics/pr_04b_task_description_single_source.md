@@ -4,9 +4,103 @@ Parent: [`../step_04_candidate_creation_mechanics.md`](../step_04_candidate_crea
 
 | Field | Value |
 |---|---|
-| Design base | `e802b810` |
-| Depends on | the **§13 task-profile authority**. **Independent of 04a** |
-| Status | **DESIGN — awaiting operator review. NOT frozen.** |
+| Design base | **`e7e1cae5`** — current master, i.e. POST-04a (04a merged as `6458dd95`). Re-scoped from that state; the pre-04a draft's base `e802b810` is superseded |
+| Depends on | the **§13 task-profile authority**. **Independent of 04a** — re-verified against merged 04a source (§0.2) |
+| Status | **DESIGN — revision 2 (re-scoped post-04a). Awaiting operator review. NOT frozen. Implementation NOT authorized.** |
+| Revision 2 changes | two premises of revision 1 were falsified by source audit (§0.1); scope shrank; per-commit checklists added (§15) |
+
+---
+
+## 0. Revision-2 source audit (post-04a master `e7e1cae5`)
+
+Revision 1 was written against `e802b810`. Re-auditing at current master
+falsified **two** of its premises and shrank the scope. Both are recorded
+rather than silently rewritten.
+
+### 0.1 Falsified premises
+
+```text
+Previous assumption (rev 1 §2):
+  "lit_review_config.yaml:44-47 documents a further fallback to a default
+   constant in agent/prompt_templates/literature_review/__init__.py …
+   So one task fact currently has up to THREE sources."
+
+Audit evidence:
+  workflows/model_exploration.py:607 states verbatim:
+    "Post-Commit-F: there is no SIDERIUS_TASK fallback — an empty value
+     flows through as '' to the {TASK_DESCRIPTION} prompt placeholder."
+  `grep -rn "SIDERIUS_TASK" --include=*.py .` returns exactly that one
+  comment. The constant does not exist.
+
+Corrected understanding:
+  There are TWO sources, not three. The fallback was already removed.
+
+Implementation consequence:
+  Rev 1 scope item 2 ("resolve the fallback-constant precedence") is
+  DELETED — there is nothing to resolve. What survives is far smaller: the
+  YAML's own comment block still DESCRIBES the removed fallback, so the
+  config lies about its own behaviour. That is a comment fix, not a
+  precedence design.
+```
+
+```text
+Previous assumption (rev 1):
+  collapsing the duplicate needs a new resolution path for lit review.
+
+Audit evidence:
+  workflows/model_exploration.py:2112 ALREADY does exactly this for the
+  interpreter:
+      task_description=get_task_description(load_task_config())
+  (T4b, docs/design/enable_global_task_config.md § Commit T4).
+  `_build_lit_review_input` at :613 instead reads
+      config.get("task_description", "")
+  from the lit-review YAML.
+
+Corrected understanding:
+  The single-source accessor already exists, is already imported in this
+  very module (:116), and is already used by a sibling consumer. The
+  collapse is switching ONE call site onto an established mechanism.
+
+Implementation consequence:
+  No new prompt-assembly layer, no new helper, no new schema field.
+```
+
+### 0.2 Independence from 04a — re-verified against merged source
+
+04a changed `ImplementorOutput` / `ValidatorInput` (a `model_io_contract`
+field), added `agent/skills/model_io_probe_skill.py`, added
+`HardwareContext.effective_cap_gb`, and put placeholders in the implementor
+and validator prompt templates (04a ledger §17.11.2).
+
+**None of those surfaces is touched by 04b**, whose entire footprint is the
+lit-review input construction plus two config files. `ml_models/model_descriptions.py`
+remains owned by neither PR. Independence therefore still holds on merged
+evidence, not on the pre-04a assumption.
+
+### 0.3 The empty-value failure class is already closed upstream
+
+`workflows/task_config.load_task_config` *"already strips and rejects
+empty"* (`workflows/task_config.py`, `get_task_description` docstring), so a
+lit review sourced from it cannot silently render a bare
+`{TASK_DESCRIPTION}`. The rev-1 warning path at
+`model_exploration.py:614-622` becomes unreachable for the canonical loader
+and is replaced by that upstream rejection — a strictly stronger guarantee
+than a printed warning.
+
+### 0.4 Static builtin model-description task prose — AUDIT SAYS DEFER
+
+Rev 1 made this conditional on *"a live consumer exists in this PR"*.
+Audited: `ml_models/model_descriptions.py` is a whole-file loader — it reads
+`ml_models/{model_type}/description.md` and returns its text. There is **no
+task-block seam** in it and no consumer that would render one, so creating
+one in 04b would be a consumer-less seam (roadmap §0 rule 8).
+
+**Disposition: DEFERRED, with the finding recorded.** Two of the six builtin
+descriptions (`punet`, `gated_fno`) do contain SQUID/axion task prose; that
+remains true and remains duplication, but fixing it needs a consumer that
+does not exist yet. 04b does not invent one.
+
+**Consequence: 04b is now a TWO-commit PR** (§15), not three.
 
 ---
 
@@ -32,20 +126,26 @@ detector data: map a noisy [B, T] integer signal to a clean
 spectrum at once (not split into per-band models).
 ```
 
-`lit_review_config.yaml:44-47` documents a further fallback to a default
-constant in `agent/prompt_templates/literature_review/__init__.py`, with
-a load-time warning. So one task fact currently has **up to three**
-sources. Roadmap §13.1 names this precisely: *"duplicate byte-equal task
-description in lit_review_config.yaml (TWO files to edit one task) +
-stale SIDERIUS_TASK fallback prose"*.
+`lit_review_config.yaml:44-47` still *documents* a fallback to a
+`SIDERIUS_TASK` constant — **but that constant no longer exists** (§0.1).
+So there are **TWO** sources, plus a config comment describing a mechanism
+that was already deleted. Roadmap §13.1's phrasing (*"duplicate byte-equal
+task description … + stale SIDERIUS_TASK fallback prose"*) is now half
+historical: the duplicate is real, the fallback prose survives only as a
+stale comment.
 
 ## 3. Scope
 
 1. Collapse the duplicate: `lit_review_config.yaml` stops declaring
-   `task_description` and resolves it from the single task profile.
-2. Resolve the fallback-constant precedence explicitly and fail
-   visibly rather than silently rendering stale prose.
-3. **Static builtin model-description task content** — the checked-in
+   `task_description`; `_build_lit_review_input` resolves it from the
+   single task profile via the **already-used** accessor
+   `get_task_description(load_task_config())` (§0.1).
+2. ~~Resolve the fallback-constant precedence~~ — **DELETED in revision 2**;
+   the fallback does not exist (§0.1). What remains is deleting the stale
+   YAML comment that still describes it.
+3. ~~**Static builtin model-description task content**~~ — **DEFERRED in
+   revision 2** (§0.4): no live consumer for a task-block seam. Context
+   retained below for the deferral record. The checked-in
    `ml_models/{model_type}/description.md` files. Enumerated at design
    time: **6 files** (`wavenet`, `punet`, `rnn`, `transformer`,
    `fcnet`, `gated_fno`), of which **2 carry SQUID/axion task prose**
@@ -165,3 +265,200 @@ golden, no plugin corpus, no convergence surface here).
 ## 14. Implementation ledger
 
 *(empty — populated at implementation kickoff)*
+
+---
+
+## 15. Commit plan — per-commit checklists
+
+**Two commits.** Revision 1 implied three; §0.4 deferred the builtin
+model-description seam for want of a live consumer, and §0.1 deleted the
+fallback-precedence work.
+
+`[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
+
+**What is frozen once this design is approved**: the capability (§1), the
+Stage-A parity criterion (§5), the 13.4-A rung (§6), Gate disposition (§10)
+and the stop conditions (§13). **What is NOT frozen**: exact commit count,
+helper structure, source line numbers and test-file decomposition — line
+references here are reading aids captured at `e7e1cae5`, not contracts.
+Re-read the touched source immediately before implementing each commit.
+
+---
+
+### C1 — Collapse the duplicate onto the single task profile
+
+**1. Goal.**
+Make `configs/task_config.yaml` the ONLY declaration of the task
+description. Today `configs/lit_review_config.yaml` declares a
+byte-identical second copy and `_build_lit_review_input` reads it, so
+changing the task means editing two files and nothing detects divergence.
+
+*Why this commit and not another*: it is the whole user-visible capability.
+C2 is documentation-and-guard work that is only meaningful once the
+collapse has actually happened, and mixing them would make the parity
+question ("did any rendered byte move?") harder to review in isolation.
+
+**2. Scope.**
+- `workflows/model_exploration.py` — `_build_lit_review_input` (≈`:606-637`):
+  stop reading `config.get("task_description")`; use
+  `get_task_description(load_task_config())`, already imported at `:116`
+  and already used by the interpreter at `:2112`.
+- `configs/lit_review_config.yaml` — delete the `task_description:` block.
+- **Non-goals**: no change to `LiteratureReviewInput`'s schema field; no
+  change to the three lit-review prompt templates or their
+  `{TASK_DESCRIPTION}` placeholder; no change to search/synthesis/extract
+  behaviour, the paper corpus, or format doctrine; nothing in 04a's
+  surfaces; `ml_models/model_descriptions.py` untouched.
+- Depends on: nothing.
+
+**3. Implementation plan.**
+- [ ] Re-read `_build_lit_review_input` in full and confirm `:116`'s import
+      and the `:2112` precedent are still exactly as audited.
+- [ ] Replace the YAML read with `get_task_description(load_task_config())`.
+- [ ] Delete the now-unreachable empty-value `print` warning
+      (`:614-622`), because `load_task_config` already rejects empty
+      (§0.3) — a warning for a state that cannot occur is dead code.
+- [ ] Delete `task_description:` from `configs/lit_review_config.yaml`.
+- [ ] Confirm no other reader of `lit_review_config["task_description"]`
+      exists (`grep`), including tests and scripts.
+
+**4. Validation plan.**
+- Unit: `_build_lit_review_input` returns the task-profile description
+  even when a stale `task_description` is still present in a synthetic
+  lit-review config dict — i.e. the YAML key is genuinely no longer
+  consulted.
+- Integration: the `pb9_*` goldens (10) re-render EXACT.
+- Negative: a lit-review config with **no** `task_description` key still
+  builds a valid input (proves the key is optional now, not required).
+- Backward-compat / default parity: `pb9_*` byte equality IS the parity
+  oracle; no new golden is needed.
+- Gate: **none** (§10).
+
+**5. Acceptance criteria.**
+- [ ] All 10 `pb9_*` goldens byte-identical — zero diff, not "close".
+- [ ] `configs/lit_review_config.yaml` contains no `task_description:` key.
+- [ ] With a synthetic lit-review config whose `task_description` is set to
+      a DISTINGUISHABLE sentinel string, the built
+      `LiteratureReviewInput.task_description` equals the **task-profile**
+      text and does **not** contain the sentinel. (Asserting only "it is
+      non-empty" would pass while the YAML was still authoritative.)
+- [ ] `grep -rn "task_description" configs/lit_review_config.yaml` is empty.
+- [ ] No other production reader of the lit-review YAML key remains.
+
+**6. Failure and edge cases.**
+- Lit-review YAML still carries the key (operator's stale local copy) →
+  it must be **ignored**, not merged or preferred. Silent preference would
+  restore the duplicate invisibly.
+- `load_task_config` raises on an empty/missing task description → that is
+  the desired fail-closed and must propagate, not be caught and warned.
+- A caller that builds a lit-review input without going through
+  `load_task_config` (test fixtures) → `get_task_description` returns `""`
+  for a synthetic dict by documented design; such callers are test-only and
+  must not be "fixed" by reintroducing a fallback.
+- Any `pb9_*` byte moving → **stop**; that is a defect in the collapse, not
+  a golden to regenerate (§5).
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/ml_literature_review tests/unit/workflows -q`
+- [ ] Record: test count, wall time, and explicit confirmation that the 10
+      `pb9_*` goldens were unmodified (`git status` on the goldens dir).
+
+**8. Commit boundary.**
+One behaviour change plus its config deletion. Independently revertible —
+reverting restores the duplicate and nothing else. No documentation
+rewrite, no guard test, no deferred work.
+
+---
+
+### C2 — Guard the single source and delete the stale fallback prose
+
+**1. Goal.**
+Prevent the duplicate from silently returning, and stop
+`configs/lit_review_config.yaml` documenting a `SIDERIUS_TASK` fallback
+that no longer exists (§0.1).
+
+*Why separate from C1*: C1 is a behaviour change measured by byte parity;
+this is a regression guard plus comment hygiene. Keeping them apart means a
+reviewer reading C1's diff sees only "did rendering change?", and the guard
+lands as an explicit, reviewable decision about what must never regress.
+
+**2. Scope.**
+- `configs/lit_review_config.yaml` — the comment block at ≈`:40-47`
+  describing the removed fallback.
+- New/extended test asserting exactly one `task_description` source.
+- `tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
+  — **UPGRADE** to the single source (§9).
+- Any pin asserting the lit-review YAML carries its own description —
+  **REWRITE**; those pins defend the duplicate (§9).
+- **Non-goals**: no production behaviour change; no template change.
+- Depends on: **C1** (guarding a collapse that has not happened is
+  meaningless).
+
+**3. Implementation plan.**
+- [ ] Re-read the YAML comment block and rewrite it to state the real
+      behaviour: the description comes from `configs/task_config.yaml`.
+- [ ] Add a guard test that fails when a second `task_description`
+      declaration appears in any tracked config.
+- [ ] Re-read `test_agent_card_task_config.py` and upgrade it to the single
+      source rather than deleting it.
+- [ ] Search for and rewrite any pin that asserts the lit-review YAML owns
+      a description.
+
+**4. Validation plan.**
+- Unit: the guard reds when a `task_description:` key is reintroduced into
+  `configs/lit_review_config.yaml` (prove by temporary mutation, cache
+  cleared, mutation count asserted `== 1`).
+- Integration: `pb9_*` still exact (C2 must move zero bytes).
+- Negative: the guard must NOT fire on `configs/task_config.yaml` itself —
+  that is the legitimate single source, and a guard that forbids it would
+  be trivially wrong.
+- Backward-compat: none needed; no production path changes.
+- Gate: **none**.
+
+**5. Acceptance criteria.**
+- [ ] Reintroducing `task_description:` into `configs/lit_review_config.yaml`
+      makes the guard fail — demonstrated by mutation, with the restored
+      tree re-verified green.
+- [ ] The guard passes with `configs/task_config.yaml` present and
+      unmodified (exactly one legitimate source is not an error).
+- [ ] `grep -rn "SIDERIUS_TASK" configs/ docs/` returns nothing describing
+      it as live behaviour.
+- [ ] `pb9_*` unchanged by this commit (`git diff` on the goldens dir is
+      empty).
+- [ ] `test_agent_card_task_config.py` asserts the single source and still
+      names a defect only it can catch.
+
+**6. Failure and edge cases.**
+- Guard written as a whole-file substring scan → would fire on ordinary
+  prose mentioning the phrase. It must key on a **declaration** (a YAML
+  key at top level), not on the words appearing anywhere.
+- Guard scans a directory that legitimately contains task text (e.g. a
+  design doc) → scope it to `configs/`.
+- Someone deletes the guard along with the duplicate in a future PR → the
+  guard's own docstring must state the defect it catches, so deleting it
+  is a visible decision.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/ml_literature_review tests/unit/workflows -q`
+- [ ] Record counts, wall time, and the mutation result (expected failure,
+      observed failure, restored green).
+
+**8. Commit boundary.**
+Guard + documentation only. Contains no production behaviour change, no
+deferred work, and no unrelated cleanup. Reviewable as "what must never
+regress".
+
+---
+
+### Deferred to a future PR (NOT in 04b)
+
+| Item | Why deferred | Evidence |
+|---|---|---|
+| Static builtin `ml_models/{model_type}/description.md` task prose (`punet`, `gated_fno`) | no live consumer for a task-block seam; adding one would be a consumer-less seam | §0.4 |
+
+### Explicitly NOT re-opened
+
+04a's merged surfaces (`model_io_contract` transport, the probe-recipe
+skill, `HardwareContext.effective_cap_gb`, the implementor/validator prompt
+placeholders) are out of scope; touching them would break the independence
+this split rests on (§13, parent §2.3.1).
