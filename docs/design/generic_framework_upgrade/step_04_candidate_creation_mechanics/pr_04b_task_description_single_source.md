@@ -6,7 +6,7 @@ Parent: [`../step_04_candidate_creation_mechanics.md`](../step_04_candidate_crea
 |---|---|
 | Design base | **`e7e1cae5`** — current master, i.e. POST-04a (04a merged as `6458dd95`). Re-scoped from that state; the pre-04a draft's base `e802b810` is superseded |
 | Depends on | the **§13 task-profile authority**. **Independent of 04a** — re-verified against merged 04a source (§0.2) |
-| Status | **IMPLEMENTED — PR [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) open, READY FOR OPERATOR REVIEW, NOT merged.** Design frozen at `4282112a` (revision 2, re-scoped post-04a); implemented from freeze marker `aa84f24d` in `4c35adfe` + `37806eed`. Implementation ledger: §14. |
+| Status | **PR 04B — COMPLETE / MERGED. CONTEXT CLOSED. CHECKPOINT E COMPLETE.** PR [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) squash-merged as **`096f2dbb`** (2026-08-14). Design frozen at `4282112a` (revision 2, re-scoped post-04a); implemented from freeze marker `aa84f24d`; final PR head `fb044f55`; exact-head CI run 31780338493 success. Ledger §14; closeout §14.8. |
 | Revision 2 changes | two premises of revision 1 were falsified by source audit (§0.1); scope shrank; per-commit checklists added (§15) |
 | Frozen contract | §1 capability (and its explicit NOT-claimed boundary) · §5 Stage-A `pb9_*` exact parity · §6 the single 13.4-A rung · §7 deterministic production-path Checkpoint C · §10 Gate disposition and flip conditions · §12 rollback boundary · §0.4 the static-description deferral |
 | NOT frozen | exact Git commit count, helper structure, source line numbers, test-file decomposition (§15) |
@@ -263,11 +263,15 @@ the highest-value test here — it names a defect nothing else catches.
 
 ## 9. Test disposition
 
-| Test | Verdict |
-|---|---|
-| `test_agent_card_task_config.py` | **UPGRADE** to the single source |
-| `test_step00_prompt_goldens.py` (pb9) | **KEEP** — the parity oracle |
-| pins asserting `lit_review_config.yaml` carries its own description | **REWRITE** — they defend the duplicate |
+Design-time verdicts, with the **as-landed** column added at Checkpoint E.
+One verdict was assigned from a filename and corrected after the file body
+was read (§14.3); the row is reconciled rather than quietly rewritten.
+
+| Test | Design-time verdict | As landed |
+|---|---|---|
+| `test_agent_card_task_config.py` | ~~**UPGRADE** to the single source~~ | **KEEP UNCHANGED** — it tests the static `AgentCard` and never reads either task-description YAML nor the canonical accessor, so there was nothing in it to upgrade. Not modified by this PR (§14.3) |
+| `test_step00_prompt_goldens.py` (pb9) | **KEEP** — the parity oracle | **KEEP** — unchanged; all 10 goldens byte-identical |
+| pins asserting `lit_review_config.yaml` carries its own description | **REWRITE** — they defend the duplicate | **REWRITTEN** — `test_cfg3a_task_description_duplicate_byte_equal` → `test_cfg3a_lit_review_declares_no_task_description` + `test_cfg3a_task_config_remains_the_one_declaration`; the two `_lit_review_wiring.py` warning/YAML-value pins → sentinel-ignored and key-optional tests |
 
 ## 10. Gates
 
@@ -292,11 +296,17 @@ measures.
 
 ## 12. Rollback boundary
 
+The **as-landed** footprint. One surface was added during implementation:
+the audit found a second real reader the design had assumed away (§14.2), so
+`scripts/checkpoint_s_runner.py` is part of the rollback boundary.
+
 | Surface | Change |
 |---|---|
 | `configs/lit_review_config.yaml` | the `task_description:` declaration is removed; its stale comment block corrected |
-| `workflows/model_exploration.py` | `_build_lit_review_input` reads the canonical source |
-| directly affected tests / docs | guard + upgraded pins |
+| `workflows/model_exploration.py` | `_build_lit_review_input` reads the canonical source; the unreachable empty-value warning deleted |
+| `scripts/checkpoint_s_runner.py` | its inlined mirror of the builder read the same deleted key twice; migrated to the same canonical accessor (§14.2) |
+| `nodes/ml_literature_review/ml_literature_review.py` / `.md` | stale prose describing the deleted warning corrected |
+| directly affected tests | rewritten duplicate-defending pins + the new single-source module |
 
 **`configs/task_config.yaml` is NOT modified** — it is the unchanged
 authority this PR migrates a consumer *onto*. Exactly **one** config file
@@ -646,6 +656,68 @@ authority.
 | Gate 2 | **NOT REQUIRED** — authority/source change only; no execution-surface expansion |
 | Static builtin model descriptions | **DEFERRED**, intentionally not implemented (§0.4) |
 
+### 14.8 CHECKPOINT E — merged and governance-synced
+
+**PR 04B — COMPLETE / MERGED. CONTEXT CLOSED.**
+
+| Item | Value |
+|---|---|
+| PR | [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) — **MERGED** |
+| Frozen semantic design | `4282112a` |
+| Implementation base / freeze marker | `aa84f24d` |
+| Final PR head | `fb044f55` |
+| **Merge SHA** | **`096f2dbba3091aa7442fb4a31d918409ffb69ad6`** (squash) |
+| Merge date | 2026-08-14 17:25:28 UTC |
+| Exact-head CI | run [31780338493](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/31780338493) — **success** on `fb044f55`, including strict blocking pyright |
+
+Pre-merge the identity triple was verified by reading each value, never
+reconstructing one: local HEAD == PR `headRefOid` == successful CI `headSha`
+== `fb044f55`, with `mergeStateStatus: CLEAN`. After the squash, the merge
+commit's tree is **byte-identical** to `fb044f55`'s tree
+(`695c93b5…`) — what landed is exactly what was reviewed.
+
+#### Landed capability
+
+- `configs/task_config.yaml` is the **one canonical runtime declaration** of
+  `task_description`.
+- Production `_build_lit_review_input` resolves it through
+  `get_task_description(load_task_config())`.
+- `configs/lit_review_config.yaml` no longer declares `task_description`.
+- A stale `task_description` in a lit-review config is **structurally
+  ignored** — the builder does not consult that key at all, rather than
+  assigning it lower precedence.
+- The upstream canonical empty/missing-value failure remains **fail-closed**;
+  the unreachable warning was deleted, not softened.
+- **No** resolver, schema field, fallback constant or precedence mechanism
+  was added.
+- `scripts/checkpoint_s_runner.py` was found to be a **second real reader**
+  and migrated to the same canonical accessor (§14.2).
+- Current live config/runtime documentation no longer describes
+  `SIDERIUS_TASK` as an active fallback; historical design/audit mentions are
+  intentionally preserved.
+
+#### Final acceptance evidence
+
+| Stage | Result |
+|---|---|
+| **Stage A** | **PASS** — all 10 `pb9_*` goldens byte-identical; none regenerated; `LLMBridge` invocation semantics unchanged |
+| **Stage B (13.4-A, lit-review half)** | **PASS** — only the canonical task-description text varies; fixture atomicity machine-checked; stale lit-review-config sentinel ignored |
+| **Checkpoint C** | **PASS** — canonical task config → real `_build_lit_review_input` → real `MLLiteratureReviewAgent.run()` → real search-decision/synthesis rendering → `BoundaryRecorderBridge` capture. No real LLM/API call needed |
+| **Mutations** | **PASS** — (1) reintroducing the duplicate declaration reds the guard; (2) reverting the builder to the YAML source reds the rung, Checkpoint-C and wiring tests |
+| **Checkpoint D** | **PASS** — 1429 focused tests passed; `ruff check` and `ruff format --check` passed; local pyright unavailable (Node v10.19.0); **strict blocking pyright passed in exact-head CI**; no local full suite run — exact-head CI is the broad regression evidence |
+| **Gate 1** | **NOT REQUIRED** — no flip condition occurred |
+| **Gate 2** | **NOT REQUIRED** — no execution-surface expansion occurred |
+
+#### Static builtin model descriptions
+
+**DEFERRED — intentionally not implemented, and NOT required for Step-04
+completion.** `punet` and `gated_fno` still carry task-specific prose in
+`ml_models/{model_type}/description.md`. There is no live task-block consumer,
+so building a seam now would violate the consumer-less-seam rule. **Revisit
+trigger**: a real production consumer capable of rendering task-profile
+content into builtin descriptions. This is recorded debt, not an unfinished
+04b acceptance item.
+
 ---
 
 ## 15. Commit plan — per-commit checklists
@@ -699,8 +771,15 @@ question ("did any rendered byte move?") harder to review in isolation.
       (`:614-622`), because `load_task_config` already rejects empty
       (§0.3) — a warning for a state that cannot occur is dead code.
 - [x] Delete `task_description:` from `configs/lit_review_config.yaml`.
-- [x] Confirm no other reader of `lit_review_config["task_description"]`
-      exists (`grep`), including tests and scripts.
+- [x] ~~Confirm no other reader of `lit_review_config["task_description"]`
+      exists (`grep`), including tests and scripts.~~ **The premise was
+      false.** Rewritten as landed: enumerate every reader of the key;
+      the `grep` found `scripts/checkpoint_s_runner.py`, whose inlined
+      mirror of `_build_lit_review_input` read it at `:118` and printed it
+      at `:296`; migrate that mirror to the same canonical accessor; then
+      confirm **no production reader of the deleted YAML key remains**
+      (re-verified after the migration). See §14.2 — left unmigrated it
+      would have sent an empty task anchor to real DeepSeek calls.
 
 **4. Validation plan.**
 - Unit: `_build_lit_review_input` returns the task-profile description
@@ -771,8 +850,11 @@ lands as an explicit, reviewable decision about what must never regress.
 - `configs/lit_review_config.yaml` — the comment block at ≈`:40-47`
   describing the removed fallback.
 - New/extended test asserting exactly one `task_description` source.
-- `tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
-  — **UPGRADE** to the single source (§9).
+- ~~`tests/unit/agent/ml_literature_review/test_agent_card_task_config.py`
+  — **UPGRADE** to the single source (§9).~~ **As landed: KEEP UNCHANGED,
+  not in scope.** Reading the body showed it asserts only static
+  `AgentCard` properties and touches neither YAML nor the accessor (§14.3).
+  The file is unmodified by this PR.
 - Any pin asserting the lit-review YAML carries its own description —
   **REWRITE**; those pins defend the duplicate (§9).
 - **Non-goals**: no production behaviour change; no template change.
@@ -786,8 +868,11 @@ lands as an explicit, reviewable decision about what must never regress.
       **declaration** appears in any tracked config. It must **parse** each
       YAML under `configs/` and inspect top-level keys — never scan raw
       text, since comments and prose may legitimately mention the concept.
-- [x] Re-read `test_agent_card_task_config.py` and upgrade it to the single
-      source rather than deleting it.
+- [x] Re-read `test_agent_card_task_config.py`. ~~and upgrade it to the
+      single source rather than deleting it.~~ **As landed**: the re-read
+      showed nothing to upgrade — it asserts static `AgentCard` properties
+      only. Kept unchanged and not modified (§14.3). Neither upgraded nor
+      deleted.
 - [x] Search for and rewrite any pin that asserts the lit-review YAML owns
       a description.
 
@@ -817,8 +902,13 @@ lands as an explicit, reviewable decision about what must never regress.
       them would destroy the audit trail.
 - [x] `pb9_*` unchanged by this commit (`git diff` on the goldens dir is
       empty).
-- [x] `test_agent_card_task_config.py` asserts the single source and still
-      names a defect only it can catch.
+- [x] ~~`test_agent_card_task_config.py` asserts the single source and still
+      names a defect only it can catch.~~ **Superseded**: the criterion
+      presupposed the UPGRADE verdict that §14.3 falsified. As landed, the
+      file is unchanged and still names the defect only it can catch —
+      task-specific prose creeping back into the static agent card. The
+      single-source property is asserted by the new module and the
+      rewritten CFG-3a pins instead.
 
 **6. Failure and edge cases.**
 - Guard written as a whole-file substring scan → would fire on ordinary

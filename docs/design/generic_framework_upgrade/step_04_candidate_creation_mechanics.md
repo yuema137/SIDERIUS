@@ -9,7 +9,7 @@
 | Design base | `e802b810` (master at design time; Step 03 merged as `e1181f61`, PR #205) |
 | Depends on | Step 01 (MERGED, PR #199/#201), Step 02 (MERGED, PR #202/#203/#204), Step 03 (MERGED, PR #205) |
 | Decomposition | **TWO PRs** — `04a` then `04b` (independent; see §8) |
-| Status | **Step 04 = IN PROGRESS.** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = IMPLEMENTED, PR [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209) OPEN and awaiting operator review** (design frozen `4282112a`; commits `4c35adfe` + `37806eed`; child §14) — **NOT merged**. **Step 04 must NOT be marked COMPLETE until 04b merges** (§20). |
+| Status | **Step 04 = COMPLETE — MERGED. CHECKPOINT E COMPLETE (2026-08-14).** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = COMPLETE — MERGED** (PR [#209](https://github.com/Galileo-Sandbox/SIDERIUS/pull/209), squash `096f2dbb`, final head `fb044f55`; child §14.8). Static builtin model-description task prose remains **DEFERRED** and is **not** a completion criterion (§20.4). |
 | Freeze posture | This parent stays a **LIVE governance document**, deliberately not frozen, following the Step-02 multi-PR precedent: it must still absorb 04b's design and both children's status. The frozen contracts live in the children |
 
 This parent owns Step-level scope, the authority map, the decomposition
@@ -600,19 +600,50 @@ assembled head; exact-head CI green; the roadmap §15.1 row and the
 `README.md` index are synchronized; the §14 convergence row records the
 threshold-met finding; D2's remaining half is recorded closed (§11).
 
-### 20.1 Progress — **Step 04 is IN PROGRESS, not complete**
+### 20.1 Progress — **Step 04 is COMPLETE — MERGED**
 
 | Child | State | Evidence |
 |---|---|---|
 | **04a** | **COMPLETE — MERGED** | PR #207, squash `6458dd95`, final head `d019f94b`; Checkpoints 0/A/B/C/D, Gate 1 PASS, Gate 2 PASS, exact-head CI green — all in the child's §17.11 |
-| **04b** | **IMPLEMENTED — PR #209 OPEN, awaiting operator review; NOT merged** | design frozen at `4282112a`, implemented from `aa84f24d` in `4c35adfe` + `37806eed`. Stage-A `pb9_*` exact, rung 13.4-A, duplicate-source guard + two mutations, deterministic Checkpoint C, Gates 1 and 2 both NOT REQUIRED — all in the child's §14 |
+| **04b** | **COMPLETE — MERGED** | PR #209, squash **`096f2dbb`**, final head `fb044f55`; design frozen `4282112a`, implemented from `aa84f24d`. Stage-A `pb9_*` exact, rung 13.4-A, duplicate-source guard + two mutations, deterministic Checkpoint C, Gates 1 and 2 both NOT REQUIRED, exact-head CI run 31780338493 green incl. strict pyright — all in the child's §14 / §14.8 |
 
-**Do not mark Step 04 COMPLETE.** The completion contract above requires
-*both* children — and **only** those. The deferred static builtin
+**Checkpoint E verified 2026-08-14.** The completion contract above requires
+*both* children — and **only** those. Both are merged with their checkpoint,
+Gate and exact-head-CI evidence recorded. The deferred static builtin
 model-description task prose (§20.4) is explicitly **not** a completion
-criterion. The `04a → 04b` sequencing recommended in §7.3 is preserved:
+criterion. The `04a → 04b` sequencing recommended in §7.3 was preserved:
 04a landed first because it carries the higher-risk surface and the §14
 convergence evidence.
+
+**Step-04 final effect — what the two children delivered together.**
+
+*PR 04a:*
+
+- contract-derived candidate generation and validation;
+- normalized `ModelIOContract` transport to the validator;
+- shared probe-realization authority;
+- contract-derived implementor/validator probes and prompt mechanics;
+- a declared-regressor custom-loss candidate accepted by the validator;
+- prior-plugin loadability preserved.
+
+*PR 04b:*
+
+- one canonical runtime `task_description` declaration;
+- the production lit-review node consumes the §13 task-profile authority;
+- the duplicate lit-review YAML declaration removed;
+- exact `pb9_*` parity;
+- deterministic production-path integration;
+- a duplicate-source regression guard.
+
+Together: **candidate creation/validation consumes the normalized Model-I/O
+authority, and the lit-review task description consumes the single §13
+authority.**
+
+**Explicit boundary preserved.** Static builtin model-description task prose
+remains **DEFERRED** (§20.4). This deferral is **not** a missing Step-04 child
+capability, it does **not** block Step-04 completion, and it is revisited only
+when a real task-block consumer exists. Do not create a consumer now, and do
+not reopen 04a or 04b implementation.
 
 **04b was re-scoped from post-04a master** (revision 2, frozen `4282112a`),
 not resumed from its pre-04a draft. 04a changed the seams 04b would build on
@@ -622,13 +653,13 @@ child's §17.11.2 lists the interfaces and authorities it leaves behind, which
 that re-scope consumed. Independence was re-verified against merged 04a
 source (04b §0.2).
 
-### 20.2 Step-level obligations still OPEN
+### 20.2 Step-level obligations — ALL CLOSED at Checkpoint E
 
 | Obligation | State |
 |---|---|
-| roadmap §15.1 row synchronized | **OPEN** — must read *Step 04 IN PROGRESS; 04a merged, 04b pending* |
-| `generic_framework_upgrade/README.md` index | **OPEN** — same one-line mirror |
-| §14 convergence row records the threshold-met finding | **OPEN** — 04a supplies the §6 consumer evidence (first single consumer holding both `ForwardContract` and `ModelIOContract`); still **RECORD ONLY**, no merge of the two authorities (OD-S4-4) |
+| roadmap §15.1 row synchronized | **CLOSED** — reads *Step 04 COMPLETE — MERGED*, with both children's PR/merge SHAs and the landed authorities |
+| `generic_framework_upgrade/README.md` index | **CLOSED** — one-line mirror updated for Step 04 and both children |
+| §14 convergence row records the threshold-met finding | **CLOSED** — the ≥2-design/consumer threshold is marked **satisfied**; disposition remains **RECORD ONLY**, no merge of the two authorities (OD-S4-4). Evidence for a recorded disposition, not authorization to build an abstraction |
 | D2's remaining half recorded closed (§11) | satisfied by §11 — carried to Step-level closeout |
 
 ### 20.4 Static builtin model-description task prose — DEFERRED / RECORD
