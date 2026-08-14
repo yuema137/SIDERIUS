@@ -2584,6 +2584,78 @@ prerequisites         llm_configs/openai_tiered_v1.json present;
                       /home/klz/Data/TIDMAD present; API key in .env
 ```
 
+#### GATE 2 — attempt 1: STOPPED at the budget ceiling (not a Step-03 failure)
+
+```text
+launched   HEAD 8fac7f35, clean tree, cold-start (Seed paths: 0 files)
+stopped    at 60 min by the pre-declared ceiling; process group killed
+            cleanly, GPU released, no orphans
+reached    iteration 1, round 1 COMPLETE — a real LLM-generated plugin
+            trained end-to-end and saved a checkpoint
+```
+
+**What it proved before stopping.** The chain generated
+`wavenet24_fullspectrum_ce_coldstart` with a real LLM, registered it,
+and TRAINED it to completion through the migrated path —
+`Epoch 0 | Avg Loss: 4.164929` (chance is ln 256 ≈ 5.55) with a
+checkpoint and results JSON written. So contract-resolved dtype and
+cardinality carried a real training round on a real generated model.
+That is genuine Step-03 evidence, and it is why the stop is a BUDGET
+event rather than a failure.
+
+```text
+ROOT CAUSE of the overrun — a Gate-shape defect, not a Step-03 defect
+
+Observation
+  ONE trial round's single epoch ran 33 m 53 s:
+      Epoch 0: 100%|##########| 25000/25000 [33:53<00:00, 12.29it/s]
+  despite `--trial_time_budget_minutes 5`.
+
+Source evidence
+  `trial_time_budget_minutes` is a FORECAST-BASED ADMISSION gate in the
+  tuner (`ml_hyperparameter_tune_agent.py:3721`, "evaluate_time_skill
+  will not gate trial-mode rounds" when unset). It decides whether an
+  attempt is ADMITTED from a predicted cost; it is not a wall-clock kill
+  of a running epoch. When the forecast underestimates, the epoch runs to
+  completion regardless.
+
+  The planner chose `batch_size 1` with a 24-block / 3-stack WaveNet at
+  `segmentation_size 16000`, so `--trial_portion 0.02` resolved to 25,000
+  optimizer steps at ~12 it/s.
+
+Corrected understanding
+  The standard's "~30-60 min" estimate assumes the forecast binds. On
+  this host, with this planner-chosen shape, it does not. The bound that
+  actually holds is `--max_steps_per_attempt`, documented in source as
+  "a harness-owned hard bound" that REJECTS an attempt whose resolved
+  steps exceed it (`:2813-2819`).
+
+Disposition
+  Ordinary in-scope Gate-shape fix, not a frozen-contract issue. Re-run
+  with a step cap and a smaller portion. NOTHING about Step 03 changes.
+```
+
+#### GATE 2 — attempt 2 plan (recorded before launch)
+
+```text
+--num_iterations 1        (standard: "One iteration is acceptable for
+                           simpler features"). Step-03's Gate question is
+                           whether dtype + cardinality resolve from the
+                           contract through REAL training and inference —
+                           one iteration with 2 rounds exercises that
+                           fully. The second iteration exercises the
+                           interpretation->propose loop, which Step 03
+                           does not touch.
+--max_rounds 2            still exercises multi-round tuner reasoning
+--trial_portion 0.002     ~2,500 steps at batch 1 (~3.5 min/round)
+--train_portion 0.002
+--max_steps_per_attempt 6000   the HARD bound the time budget is not;
+                           set well above the expected 2,500 so a normal
+                           plan is admitted first try, low enough to catch
+                           a runaway like attempt 1's 25,000
+projected                 ~25-35 min, inside the authorized ceiling
+```
+
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
 **Approved with two corrections, and PROMOTED into the frozen design as
