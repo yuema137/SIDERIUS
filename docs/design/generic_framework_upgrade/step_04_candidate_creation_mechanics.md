@@ -9,7 +9,7 @@
 | Design base | `e802b810` (master at design time; Step 03 merged as `e1181f61`, PR #205) |
 | Depends on | Step 01 (MERGED, PR #199/#201), Step 02 (MERGED, PR #202/#203/#204), Step 03 (MERGED, PR #205) |
 | Decomposition | **TWO PRs** — `04a` then `04b` (independent; see §8) |
-| Status | **Step-level decisions APPROVED (OD-S4-1…4, §21).** Child **04a IMPLEMENTED — PR #207, awaiting operator review** (frozen at `c3d29e73`, implemented from `3e9728c8`; live ledger in the child's §17). Child 04b remains DESIGN — awaiting review, **not started**. |
+| Status | **Step 04 = IN PROGRESS.** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = NOT FROZEN / NOT AUTHORIZED / NOT STARTED**. **Step 04 must NOT be marked COMPLETE until 04b merges** (§20). |
 | Freeze posture | This parent stays a **LIVE governance document**, deliberately not frozen, following the Step-02 multi-PR precedent: it must still absorb 04b's design and both children's status. The frozen contracts live in the children |
 
 This parent owns Step-level scope, the authority map, the decomposition
@@ -599,6 +599,43 @@ Checkpoints 0/A/B/C/D pass for each; required Gates pass at the
 assembled head; exact-head CI green; the roadmap §15.1 row and the
 `README.md` index are synchronized; the §14 convergence row records the
 threshold-met finding; D2's remaining half is recorded closed (§11).
+
+### 20.1 Progress — **Step 04 is IN PROGRESS, not complete**
+
+| Child | State | Evidence |
+|---|---|---|
+| **04a** | **COMPLETE — MERGED** | PR #207, squash `6458dd95`, final head `d019f94b`; Checkpoints 0/A/B/C/D, Gate 1 PASS, Gate 2 PASS, exact-head CI green — all in the child's §17.11 |
+| **04b** | **NOT FROZEN / NOT AUTHORIZED / NOT STARTED** | its design document is still a draft awaiting review |
+
+**Do not mark Step 04 COMPLETE.** The completion contract above requires
+*both* children. The `04a → 04b` sequencing recommended in §7.3 is preserved:
+04a landed first because it carries the higher-risk surface and the §14
+convergence evidence.
+
+**04b must be re-scoped from post-04a master**, not resumed from its pre-04a
+draft. 04a changed the seams 04b would build on — a new transport field on
+two schemas, a shared probe-recipe skill, two prompt templates gaining
+placeholders, and a shared capacity rule — and the child's §17.11.2 lists the
+interfaces and authorities it leaves behind for exactly this purpose.
+
+### 20.2 Step-level obligations still OPEN
+
+| Obligation | State |
+|---|---|
+| roadmap §15.1 row synchronized | **OPEN** — must read *Step 04 IN PROGRESS; 04a merged, 04b pending* |
+| `generic_framework_upgrade/README.md` index | **OPEN** — same one-line mirror |
+| §14 convergence row records the threshold-met finding | **OPEN** — 04a supplies the §6 consumer evidence (first single consumer holding both `ForwardContract` and `ModelIOContract`); still **RECORD ONLY**, no merge of the two authorities (OD-S4-4) |
+| D2's remaining half recorded closed (§11) | satisfied by §11 — carried to Step-level closeout |
+
+### 20.3 Carried-forward finding from 04a's Gates (not a Step-04 deliverable)
+
+Gate 1 surfaced a **pre-existing** defect: `--data_dir` is optional
+(`_chain_common.sh:92`) while the tuner's pre-phase GPU measurement fails
+closed without it, so the Gate standard's canonical Gate-2 command cannot
+reach a measured admission. 04a correctly did **not** fix it (out of frozen
+scope) and supplied the flag explicitly. Recommended as a small
+docs/harness correction **after 04a, before 04b**. Details in the child's
+§17.9.6.
 
 ---
 

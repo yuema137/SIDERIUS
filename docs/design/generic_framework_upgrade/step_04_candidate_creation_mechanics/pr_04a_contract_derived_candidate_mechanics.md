@@ -7,7 +7,7 @@ Parent: [`../step_04_candidate_creation_mechanics.md`](../step_04_candidate_crea
 | Design base | `e802b810` |
 | Depends on | Step 01 (#199/#201), Step 02 (#202/#203/#204), Step 03 (#205) |
 | Blocks | nothing — 04b is independent |
-| Status | **FROZEN — operator-approved 2026-08-13.** Design frozen at `c3d29e73` (the acceptance-level corrections commit). Implementation is a separate authorization and has NOT begun |
+| Status | **COMPLETE — MERGED 2026-08-14.** PR [#207](https://github.com/Galileo-Sandbox/SIDERIUS/pull/207), squash-merged as `6458dd95`. Design was frozen at `c3d29e73`; implemented from `3e9728c8`; final executable head `d019f94b`. Live ledger: §17. Context CLOSED |
 | Frozen contract | §1 capability · §5 Stage-A parity · §6 ladder (6.5-A / 6.5-C / 6.5-D) · §7 PR-level definition of done (AUTHORITATIVE) · §11 Gates (1 and 2 REQUIRED) · §15.1 caller-path semantics |
 | NOT frozen | exact Git commit count, helper structure, source line numbers, test-command decomposition (§16) |
 
@@ -245,20 +245,20 @@ different names.
 - [x] focused integration (§17.9.8)
 - [x] independent mutation classes — 8, one survivor found and closed
 - [x] required static / lint clean; **pyright is CI-only** in this environment (§17.9.2)
-- [ ] **exact-final-head CI** — the broad regression authority (§17.9.9)
+- [x] **exact-final-head CI** — run `31774858601` on `d019f94b`, all four steps success (§17.11)
 - [x] **no local full suite by default** (§11) — honoured
 
 ### GATES
 - [x] **Gate 1 — REQUIRED** — PASS (§17.9.4)
 - [x] **Gate 2 — REQUIRED** — PASS (§17.9.7)
 
-### READY FOR OPERATOR REVIEW
-- [ ] Checkpoints 0 / A / B / C / D complete
-- [ ] required Gates complete
-- [ ] PR open / updated
-- [ ] exact-final-head CI green
-- [ ] local HEAD == PR `headRefOid` == successful CI `headSha`
-- [ ] working tree clean
+### READY FOR OPERATOR REVIEW — **ALL MET; MERGED**
+- [x] Checkpoints 0 / A / B / C / D complete
+- [x] required Gates complete — Gate 1 PASS, Gate 2 PASS
+- [x] PR open / updated — #207
+- [x] exact-final-head CI green — run `31774858601` on `d019f94b`: ruff, ruff-format, **pyright strict**, pytest all success
+- [x] local HEAD == PR `headRefOid` == successful CI `headSha` == `d019f94b` (verified mechanically)
+- [x] working tree clean
 
 ---
 
@@ -812,7 +812,7 @@ no production change had landed on the design branch.
 | C5 — custom-loss probe recipe | **DONE** (§17.6) |
 | C6 — prompt / capacity authority | **DONE** (§17.7) |
 | C7 — Stage-B rungs | **DONE** (§17.8) |
-| C8 — Checkpoint C, docs, closeout | **IN PROGRESS** (§17.9) |
+| C8 — Checkpoint C, docs, closeout | **DONE** (§17.9, §17.11) |
 
 ### 17.2 C1 — Checkpoint 0: the three missing Stage-A baselines
 
@@ -1933,3 +1933,91 @@ shows the last commit touching production is `8ed92886` (C6); every commit
 after it is tests, docs or ledger, except `efde2b9d`, which changes only a
 **docstring** inside `nodes/ml_model_implementor/` (a device name removed for
 the Principle-5 guardrail — no behaviour). Neither Gate needs re-running.
+
+---
+
+## 17.11 CHECKPOINT E — PR 04a CLOSED
+
+| Field | Value |
+|---|---|
+| PR | [#207](https://github.com/Galileo-Sandbox/SIDERIUS/pull/207) |
+| Frozen design | `c3d29e73` |
+| Implementation base | `3e9728c8` |
+| Production ancestor | `e802b810` |
+| **Final executable head** | **`d019f94b`** |
+| **Merge SHA** | **`6458dd95`** (squash) |
+| Exact-head CI | run `31774858601` on `d019f94b` — **success**: ruff · ruff-format · **pyright strict** · pytest |
+| Gate 1 | **PASS** (§17.9.4) |
+| Gate 2 | **PASS** (§17.9.7) |
+| Checkpoint 0 / A / B / C / D | **all complete** (§17.2, §17.10, §17.8, §17.9.5, §17.9.8) |
+| Context state | **CLOSED** |
+
+### 17.11.1 What landed
+
+The frozen capability, verified end to end on the live chain:
+
+```text
+explicit normalized ModelIOContract
+  -> production implementor uses it for every contract-owned Model-I/O fact
+  -> generated candidate/artifacts agree with it
+  -> production validator receives the SAME declaration via the protocol
+  -> probe derives contract-owned facts from it
+  -> candidate validated against that declaration
+```
+
+plus the capability that was previously impossible: a declared-regressor
+custom loss is generated and **ACCEPTED** at the validator.
+
+FU-A-1 discharged — `grep -rn "_PROBE_NUM_CLASSES"` returns nothing.
+
+### 17.11.2 Interfaces and authorities this PR leaves behind
+
+Consumers of 04a's seams — including PR 04b, which should be re-scoped from
+post-04a master rather than from its pre-04a draft:
+
+| Surface | State after 04a |
+|---|---|
+| `ImplementorOutput.model_io_contract` | NEW — the normalized contract, echoed from `forward_contract.model_io` at **both** construction sites |
+| `ValidatorInput.model_io_contract` | NEW — mapped verbatim by `local_all_fields`; never re-resolved |
+| `agent/skills/model_io_probe_skill.py` | NEW — the Step-04 probe-recipe authority, consumed by BOTH nodes |
+| `HardwareContext.effective_cap_gb()` | NEW — one capacity rule, quoted by proposer and implementor alike |
+| `ImplementorInput.hardware_context` / `.vram_budget_gb` | NEW — mirrors `ProposalInput`; wired at the same workflow site |
+| `IMPLEMENTOR_REASONING_PROMPT` | now carries `{CAPACITY_BUDGET}`; `{TASK_BACKGROUND}` unchanged |
+| `VALIDATOR_REVIEW_SYSTEM_PROMPT` | now carries `{CLASSIFIER_SHAPE}` / `{REGRESSOR_SHAPE}`, filled by `_build_review_system_prompt(contract)` |
+| `_render_output_contract`, `_assemble_test`, `_smoke_test_plugin`, `_dummy_tensor_validate_loss` | all take an optional contract; `None` = legacy path, byte-identical |
+
+**Authority left standing**: Step-03 `ModelIOContract` is the sole normalized
+Model-I/O authority and the sole answer to *what this TASK declares*; a
+model's own `PLUGIN_OUTPUT_TYPE` remains the sole answer to *which form THIS
+MODEL emits*, under Step-03's own documented precedence (§17.4.2a). No second
+Model-I/O contract, no second `LossContract`, no capacity config.
+
+### 17.11.3 Findings worth carrying forward
+
+1. **A survived mutation exposed a production reachability gap** (§17.4.4):
+   every validator test called the helper directly, so severing `run()`'s
+   contract forwarding left the directory green. Closed by a real-`run()`
+   reachability test plus its negative twin. *Lesson: a helper can be perfect
+   and never reached.*
+2. **Three existing pins fired and all three were edited, none relaxed** —
+   the PR-E key-set pin (twice), `TestDeferredScope` (whose last deferred
+   hardcode this PR discharges, REWRITTEN to assert the replacement property),
+   and a test that formatted `TEST_TEMPLATE` directly (UPGRADED to render
+   through `_assemble_test`).
+3. **CI caught a device literal this PR itself introduced** (§17.9.10) — into
+   the docstring narrating the removal of device literals. Removed rather than
+   annotated. *Lesson: targeted suites cannot know what an unrelated guardrail
+   scans; exact-head CI is the broad authority, as §12 says.*
+4. **`--data_dir` is optional but the pre-phase GPU measurement fails closed
+   without it** (§17.9.6) — a pre-existing defect that makes the Gate
+   standard's canonical Gate-2 command fail. Deliberately NOT fixed here.
+   **Operator follow-up, recommended before 04b.**
+
+### 17.11.4 Deliberately NOT done
+
+- PR 04b — untouched and not started.
+- `ForwardContract` / `ModelIOContract` convergence — **record only** per
+  OD-S4-4. 04a is the first PR in which a single consumer holds both, which is
+  the §14 evidence the ledger wanted; it does not authorize a merge of them.
+- Any check that a candidate's chosen output form is *scientifically*
+  appropriate for the task — admission/composition, owned by Step 12.
