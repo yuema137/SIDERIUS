@@ -2767,6 +2767,81 @@ projected                 ~50 min; 60-min ceiling unchanged, and a
                           runaway step count is watched for directly
 ```
 
+#### GATE LLM CONFIG — operator policy correction and governance reconciliation
+
+```text
+Previous:
+  real-LLM Gate config = openai_tiered_v1.json
+
+Operator decision:
+  real-LLM Gate config = openai_tiered_pro.json
+
+Date:
+  2026-08-13
+
+Reason:
+  Gate validation should exercise the production-capable model tier;
+  repeated v1 runs were dominated by proposer/planner quality failures
+  unrelated to the Step under test.
+```
+
+Applies to **Gate 1 and Gate 2** and to any future real-LLM gate, until an
+explicit operator decision changes it.
+
+**Repository truth reconciled.** Leaving the authority mandating v1 while
+execution used pro would have been the contradiction:
+
+```text
+repository Gate authority : v1
+actual Gate execution     : pro     <- must not persist
+```
+
+`docs/gates/gate_testing_standard.md` named v1 in **five** places; the
+first correction caught only one. All five are now reconciled:
+
+| Site | Was | Now |
+|---|---|---|
+| new policy block (top) | — | the provenance record above |
+| Gate 1 setup | v1 (gpt-5.4 / -mini) | pro (gpt-5.5 every role) |
+| Gate 2 canonical command | v1 | pro |
+| Gate 2 constraints table | v1 **mandatory** | pro **mandatory**, with the evidence |
+| deep-gate comparison table | v1 / v1 | pro / pro |
+| troubleshooting check | "check v1 is set" | "check pro is set, not the superseded v1" |
+
+Remaining `openai_tiered_v1` mentions are the provenance `Previous:`
+value, the evidence explaining its supersession, and a "not the
+superseded" warning — **no mandate survives**.
+
+**Scope held deliberately narrow.** Only the real-LLM config changed.
+Gate tier definitions, assignment-by-commit-type rules, pseudo-vs-real
+definitions and every runtime bound are untouched. The Gate-efficiency
+audit this session's evidence argues for — iteration/round counts, a hard
+wall-clock or max-step bound, per-PR temporal depth — is **DEFERRED until
+after Step 03** and recorded as follow-up, not acted on here.
+
+#### GATE 2 — the v1 attempts are DIAGNOSTIC evidence, not Gate evidence
+
+Attempts 1-4 ran under `openai_tiered_v1.json` and are **reclassified**:
+
+> **diagnostic / Gate-sizing evidence only. They do NOT discharge
+> Gate 2.**
+
+Their findings are kept — they are real and were expensive to obtain:
+
+| Finding | Value |
+|---|---|
+| a real LLM-generated plugin trained end-to-end through the migrated path (`Epoch 0 avg loss 4.16` vs chance 5.55) | first evidence the Step-03 execution path carries a real generated model |
+| `--trial_time_budget_minutes` is a FORECAST-based admission gate, not a wall-clock bound | explains every overrun; the standard's 30-60 min estimate assumes the forecast binds |
+| `--trial_portion` has a hard schema floor of 0.01 | portion alone cannot bound this Gate |
+| `--no-force_formal_round` stops the harness FORCING formal; the planner may still ELECT it (250,000 steps) | a real gap in how "trial-only smoke" is enforced |
+| `min_formal_batch_size` caught the V18 launch-overhead pathology | the guard works |
+| `num_classes` appears ZERO times in the codegen failure path | M6 explicitly cleared as a cause |
+
+**The final Step-03 Gate-2 PASS must come from ONE clean pro-config run**
+with real LLM + real generated candidate + real training + real inference
++ real scoring + a finite non-null `denoising_score`, exercising the
+migrated dtype/cardinality path. No earlier attempt counts toward it.
+
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
 **Approved with two corrections, and PROMOTED into the frozen design as

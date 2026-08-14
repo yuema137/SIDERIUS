@@ -6,6 +6,37 @@
 
 ---
 
+## Real-LLM Gate config — BINDING POLICY
+
+```text
+Previous:
+  real-LLM Gate config = openai_tiered_v1.json
+
+Operator decision:
+  real-LLM Gate config = openai_tiered_pro.json
+
+Date:
+  2026-08-13
+
+Reason:
+  Gate validation should exercise the production-capable model tier;
+  repeated v1 runs were dominated by proposer/planner quality failures
+  unrelated to the Step under test.
+```
+
+**Applies to Gate 1 and Gate 2**, and to any future real-LLM gate, until
+an explicit operator decision changes it. `certify_minimal.json` remains
+unusable for real-LLM gates for the reason already documented below.
+
+This policy changes ONLY which LLM config a real-LLM gate uses. Gate tier
+definitions, the assignment-by-commit-type rules, pseudo-vs-real
+definitions and every runtime bound are unchanged. A separate
+Gate-efficiency audit (iteration/round counts, hard wall-clock and
+max-step bounds, per-PR temporal depth) is DEFERRED and is not part of
+this correction.
+
+---
+
 ## Gate definitions
 
 Every SIDERIUS feature commit plan uses one or more of these gates before
@@ -30,8 +61,8 @@ dummy-tensor check). Does NOT require real training.
 schema (implementor, proposer, validator, interpreter).
 
 **Setup**:
-- Real LLM: `llm_configs/openai_tiered_v1.json` (gpt-5.4 for
-  proposer/implementor/interpreter; gpt-5.4-mini for validator)
+- Real LLM: `llm_configs/openai_tiered_pro.json` (gpt-5.5 across every
+  role) — see the real-LLM Gate config policy above
 - Pseudo training: dummy-tensor check only — no GPU, no real training loop
 - Estimated wall time: ~2-5 min
 - Estimated cost: ~$0.05-0.20
@@ -75,7 +106,7 @@ bash sdsc_submission_scripts/run_chain.sh \
     --trial_time_budget_minutes 5 \
     --no-force_formal_round \
     --formal_time_budget_minutes 30 \
-    --llm_config llm_configs/openai_tiered_v1.json \
+    --llm_config llm_configs/openai_tiered_pro.json \
     --seed_paths \
         /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
         /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
@@ -223,7 +254,7 @@ omit `--seed_paths`.
 | `--runtime_watchdog` | on (passive validation) | on |
 | Guardrails | defaults (150k / batch≥4) | defaults |
 | force_formal_round | **default ON** (deviation from the trial-only smoke — required when the feature under test must exercise real formal admission; use `--no-force_formal_round` for features that don't) | default ON |
-| `--llm_config` | `openai_tiered_v1.json` | `openai_tiered_v1.json` |
+| `--llm_config` | `openai_tiered_pro.json` | `openai_tiered_pro.json` |
 
 Notes:
 
@@ -243,7 +274,8 @@ Notes:
 
 **Failure handling**:
 - If all proposals fail validation → LLM quality issue, not a feature bug.
-  Check that `--llm_config openai_tiered_v1.json` is set (not certify_minimal).
+  Check that `--llm_config openai_tiered_pro.json` is set (not
+  certify_minimal, and not the superseded `openai_tiered_v1.json`).
 - If SIGSEGV / OOM during inference → retry once; if repeats, investigate
   VRAM budget. Check `--trial_vram_budget_gb` setting.
 - If disk fills → `--trial_portion 0.02` + `--trial_time_budget_minutes 5`
