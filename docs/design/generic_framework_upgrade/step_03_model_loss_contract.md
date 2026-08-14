@@ -2656,6 +2656,36 @@ Disposition
 projected                 ~25-35 min, inside the authorized ceiling
 ```
 
+#### GATE 2 — attempt 2: REJECTED at argv validation (seconds, no cost)
+
+```text
+run_one_iteration.py: error: argument --trial_portion: expected a float
+in [0.01, 1.0], got 0.002. The 0.01 floor matches the Pydantic schema
+(ProposalInput.trial_portion / HyperparamTuningInput.{trial,eval}_portion
+ge=0.01); below that, sample_set_builder collapses to one segment per
+file, which is too noisy for trial-mode signal.
+```
+
+**Finding: `trial_portion` cannot be reduced below 0.01.** The planned
+0.002 was invalid, so *portion alone cannot bound this Gate* — the
+standard's 0.02 is only 2× the floor, and at `batch_size 1` even the
+floor resolves to ~12,500 steps. The bound has to come from
+`--max_steps_per_attempt`, which is exactly what it is documented to be.
+
+Cost: none. Rejected by argparse before any model, LLM call or GPU work.
+
+#### GATE 2 — attempt 3 (running)
+
+```text
+workspace  /home/klz/Data/SIDEREIS_DATA/step03_gate2c_1786668591
+delta      --trial_portion 0.01 / --train_portion 0.01   (the schema floor)
+           --max_steps_per_attempt 3000                  (the hard bound)
+mechanism  a plan resolving to more than 3,000 steps is REJECTED and the
+           planner must re-plan with a larger batch size — the harness
+           bound doing the work the forecast gate could not
+projected  ~25 min; ceiling unchanged
+```
+
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
 **Approved with two corrections, and PROMOTED into the frozen design as
