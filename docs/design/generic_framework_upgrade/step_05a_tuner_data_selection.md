@@ -147,12 +147,25 @@ Consumes **Step 02's `DatasetProfile`**, already resolved at `:4430`.
 First production consumer is the **tuner's own validation/scope/accounting
 path** — a consumer that exists today and is exercised by every run.
 
-The design's one real structural question: `run_profile` is currently
-resolved *inside* the round loop (`:4430`), while `:2731` and `:3657` run at
-**startup**, before the loop. Implementation must resolve the profile once at
-run scope and thread it to both regions — **not** call
-`resolve_dataset_profile()` a second time, which would reintroduce the exact
-ambient-resolution defect Step 02b removed.
+The design's one real structural question: `run_profile` is currently bound
+*inside* the round loop (`:4430`), while `:2731` and `:3657` run at
+**startup**, before the loop. The frozen contract for resolving that is
+**semantic**:
+
+```text
+- implementation establishes or reuses ONE run-bound DatasetProfile
+  semantic value;
+- startup consumers and loop consumers use that SAME run binding;
+- no 05a consumer performs an independent ambient
+  resolve_dataset_profile() / TIDMAD-singleton resolution.
+```
+
+The **number of internal resolver invocations is NOT the frozen contract.**
+An implementation that memoizes, re-enters, or re-derives the same bound
+value is conforming; one that lets any consumer reach an *independently
+resolved* value is not — that is the ambient-resolution defect Step 02b
+removed. An exact call-count assertion remains available as an optional
+implementation-time test technique (§10.2, §8.1), never as the contract.
 
 ## 5. Scope / non-goals
 
@@ -487,14 +500,25 @@ proves nothing about that edit.
 - Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Re-read `_validate_data_config` in full and enumerate every branch that
-      can raise, with its exact message text.
-- [ ] Capture accept/reject verdict **and** exact diagnostic string for each
-      branch under the shipped TIDMAD profile.
+- [ ] Re-read `_validate_data_config` in full and identify which raising
+      branches are **`DatasetProfile`-dependent** — i.e. whose verdict or
+      diagnostic can change when the profile object changes.
+- [ ] Capture the **minimum representative** legality baseline: at least one
+      accepting case, one rejecting case, and the **exact diagnostic text**
+      of the rejecting case.
+- [ ] If inspection identifies **multiple genuinely distinct
+      profile-dependent failure classes**, capture one case per distinct
+      class — and only those.
 - [ ] Re-read the legacy `single_file` accounting block and confirm how the
       path is reached from `agent_input.is_trial`.
-- [ ] Capture live legacy `single_file` train/eval segment counts.
+- [ ] Capture live legacy `single_file` train/eval segment counts (a
+      **separate** baseline, preserved independently of the legality one).
 - [ ] Confirm by inspection that neither capture restates a Step-02 baseline.
+
+**Explicitly NOT required**: baselining every branch of
+`_validate_data_config` merely because it exists. A branch whose behavior
+cannot move when the profile object changes is not evidence for this PR — it
+is decoration, and CLAUDE.md's test-economy rule forbids it.
 
 **4. Validation plan.**
 - Unit: the two new baselines pass on unmodified production code.
@@ -508,9 +532,13 @@ proves nothing about that edit.
 **5. Acceptance criteria.**
 - [ ] Both baselines pass against production code that is **byte-unchanged**
       (`git status` shows no production file modified in this commit).
-- [ ] The legality baseline pins **exact diagnostic text**, not just the
+- [ ] The rejecting legality case pins **exact diagnostic text**, not just the
       exception type.
-- [ ] At least one accepting and one rejecting legality case are pinned.
+- [ ] At least one accepting and one rejecting legality case are pinned, and
+      every **distinct profile-dependent failure class** found by inspection
+      has one case.
+- [ ] No baseline covers a validation branch that cannot move when the
+      `DatasetProfile` object changes.
 - [ ] The accounting baseline is produced through the **live** `single_file`
       path, not by calling the accounting expression directly.
 
@@ -624,7 +652,13 @@ invariants stamped) differs from the loop sites'.
       stamping and partial-scope determination follow the bound profile.
 - [ ] Under TIDMAD the stamped invariants are **byte-identical** to M0/M1.
 - [ ] A pre-existing run-invariants lock validates without migration.
-- [ ] `DATASET_CONFIG` now has exactly three readers.
+- [ ] **No startup/scope consumer reads ambient TIDMAD state** — asserted
+      semantically, not by an exact reader count. Any ambient reads still
+      present are confined to the 05a semantic families not yet migrated at
+      this point (legality, legacy accounting), per the implementation-time
+      census (§17.2). An exact intermediate count is deliberately **not**
+      pinned: §17.2 permits absorbing a newly found equivalent site, which
+      would make any such number wrong for a legitimate reason.
 
 **6. Failure and edge cases.**
 - Scope mismatch between the bound profile and a resumed run's stamped lock →
@@ -681,7 +715,14 @@ only legal once the last reader is migrated.
       counts follow the bound profile.
 - [ ] M0 baselines pass **byte-identically** under TIDMAD — same verdicts,
       same diagnostic text, same counts.
-- [ ] `grep DATASET_CONFIG` over the tuner returns **zero** hits.
+- [ ] **Terminal semantic property** — no 05a consumer either (a) reads the
+      TIDMAD `DatasetConfig` singleton directly, **or** (b) independently
+      resolves an ambient `DatasetProfile`.
+- [ ] A zero-hit `grep DATASET_CONFIG` over the tuner is recorded as
+      **supporting mechanical evidence only**. It is not the property: a
+      renamed alias, a re-export, or an `import execute_tools.dataset_config`
+      module-attribute access would leave the grep clean while the defect
+      survives, so the guard must assert the semantic property above.
 - [ ] The legacy `single_file` branch still exists and is still reachable.
 
 **6. Failure and edge cases.**
