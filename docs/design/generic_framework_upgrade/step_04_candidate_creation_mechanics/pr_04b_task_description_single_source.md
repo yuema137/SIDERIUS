@@ -6,8 +6,10 @@ Parent: [`../step_04_candidate_creation_mechanics.md`](../step_04_candidate_crea
 |---|---|
 | Design base | **`e7e1cae5`** — current master, i.e. POST-04a (04a merged as `6458dd95`). Re-scoped from that state; the pre-04a draft's base `e802b810` is superseded |
 | Depends on | the **§13 task-profile authority**. **Independent of 04a** — re-verified against merged 04a source (§0.2) |
-| Status | **DESIGN — revision 2 (re-scoped post-04a). Awaiting operator review. NOT frozen. Implementation NOT authorized.** |
+| Status | **FROZEN — operator-approved 2026-08-14.** Revision 2, re-scoped post-04a. Design frozen at `4282112a` (the pre-freeze acceptance-corrections commit). **Implementation is a separate authorization and has NOT begun.** |
 | Revision 2 changes | two premises of revision 1 were falsified by source audit (§0.1); scope shrank; per-commit checklists added (§15) |
+| Frozen contract | §1 capability (and its explicit NOT-claimed boundary) · §5 Stage-A `pb9_*` exact parity · §6 the single 13.4-A rung · §7 deterministic production-path Checkpoint C · §10 Gate disposition and flip conditions · §12 rollback boundary · §0.4 the static-description deferral |
+| NOT frozen | exact Git commit count, helper structure, source line numbers, test-file decomposition (§15) |
 
 ---
 

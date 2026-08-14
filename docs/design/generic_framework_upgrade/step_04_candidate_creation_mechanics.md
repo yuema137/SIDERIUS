@@ -9,7 +9,7 @@
 | Design base | `e802b810` (master at design time; Step 03 merged as `e1181f61`, PR #205) |
 | Depends on | Step 01 (MERGED, PR #199/#201), Step 02 (MERGED, PR #202/#203/#204), Step 03 (MERGED, PR #205) |
 | Decomposition | **TWO PRs** — `04a` then `04b` (independent; see §8) |
-| Status | **Step 04 = IN PROGRESS.** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = NOT FROZEN / NOT AUTHORIZED / NOT STARTED**. **Step 04 must NOT be marked COMPLETE until 04b merges** (§20). |
+| Status | **Step 04 = IN PROGRESS.** Child **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`; child §17.11). Child **04b = DESIGN FROZEN** (revision 2, frozen at `4282112a`, 2026-08-14) — **implementation NOT authorized, NOT started**. **Step 04 must NOT be marked COMPLETE until 04b merges** (§20). |
 | Freeze posture | This parent stays a **LIVE governance document**, deliberately not frozen, following the Step-02 multi-PR precedent: it must still absorb 04b's design and both children's status. The frozen contracts live in the children |
 
 This parent owns Step-level scope, the authority map, the decomposition
@@ -605,7 +605,7 @@ threshold-met finding; D2's remaining half is recorded closed (§11).
 | Child | State | Evidence |
 |---|---|---|
 | **04a** | **COMPLETE — MERGED** | PR #207, squash `6458dd95`, final head `d019f94b`; Checkpoints 0/A/B/C/D, Gate 1 PASS, Gate 2 PASS, exact-head CI green — all in the child's §17.11 |
-| **04b** | **NOT FROZEN / NOT AUTHORIZED / NOT STARTED** | its design document is still a draft awaiting review |
+| **04b** | **DESIGN FROZEN — implementation NOT authorized, NOT started** | frozen at `4282112a` (2026-08-14) after the revision-2 re-scope from post-04a master and the pre-freeze acceptance corrections |
 
 **Do not mark Step 04 COMPLETE.** The completion contract above requires
 *both* children — and **only** those. The deferred static builtin
@@ -614,11 +614,13 @@ criterion. The `04a → 04b` sequencing recommended in §7.3 is preserved:
 04a landed first because it carries the higher-risk surface and the §14
 convergence evidence.
 
-**04b must be re-scoped from post-04a master**, not resumed from its pre-04a
-draft. 04a changed the seams 04b would build on — a new transport field on
-two schemas, a shared probe-recipe skill, two prompt templates gaining
-placeholders, and a shared capacity rule — and the child's §17.11.2 lists the
-interfaces and authorities it leaves behind for exactly this purpose.
+**04b was re-scoped from post-04a master** (revision 2, frozen `4282112a`),
+not resumed from its pre-04a draft. 04a changed the seams 04b would build on
+— a new transport field on two schemas, a shared probe-recipe skill, two
+prompt templates gaining placeholders, and a shared capacity rule — and the
+child's §17.11.2 lists the interfaces and authorities it leaves behind, which
+that re-scope consumed. Independence was re-verified against merged 04a
+source (04b §0.2).
 
 ### 20.2 Step-level obligations still OPEN
 
