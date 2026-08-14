@@ -1105,6 +1105,36 @@ def build_parser() -> argparse.ArgumentParser:
         "ordinary campaigns.",
     )
     parser.add_argument(
+        "--validation_max_train_samples",
+        type=int,
+        default=None,
+        help="VALIDATION POSTURE ONLY. Absolute ceiling on the ML segments "
+        "one training epoch may contain — the Gate workload envelope. "
+        "--validation_max_portion bounds the FRACTION; this bounds the "
+        "AMOUNT, which the fraction cannot: samples per PSD segment are "
+        "psd_segment_length // seg_size and seg_size is the planner's, so "
+        "1%% of the scope resolved to 12,500 optimizer steps during "
+        "Step 03. Applied where the epoch is BUILT, so fewer segments are "
+        "read and fewer steps exist before any run — and it CLAMPS rather "
+        "than rejects, unlike --max_steps_per_attempt, whose refusal "
+        "skipped every round of a Gate attempt. Omit for ordinary "
+        "campaigns.",
+    )
+    parser.add_argument(
+        "--validation_max_phase_seconds",
+        type=float,
+        default=None,
+        help="VALIDATION POSTURE ONLY. Emergency wall-clock fuse for one "
+        "execution phase, enforced by the existing runtime watchdog and "
+        "never by admission (so it cannot skip the attempt). Requires "
+        "--runtime_watchdog. NOT a sizing mechanism: normal Gate cost comes "
+        "from --validation_max_train_samples and the data scope, which are "
+        "enforced BEFORE launch. Set it well above the expected duration — "
+        "a run killed at the deadline yields no evidence at all. The "
+        "watchdog floor still applies: the effective ceiling is "
+        "max(this, --runtime_watchdog_floor_seconds).",
+    )
+    parser.add_argument(
         "--validation_fixed_candidate_plan",
         type=str,
         default=None,
@@ -1695,10 +1725,19 @@ def main():
     print(f"  Start iteration  : {args.start_iteration}")
     print(f"  Run name         : {run_name}")
     print(f"  Iter directory   : {iter_dir}")
-    print(f"  LLM (planner)    : gemini / {args.llm_model}")
-    eff_reflect_provider = reflect_provider or "gemini"
-    eff_reflect_model_id = reflect_model_id or args.llm_model
-    print(f"  LLM (reflector)  : {eff_reflect_provider} / {eff_reflect_model_id}")
+    # Report what will actually run. `--llm_config` supersedes
+    # `--llm_model` (deprecated) below, so printing the latter announced
+    # `gemini / gemini-3.1-pro-preview` on a run whose every role was
+    # openai/gpt-5.5 from `openai_tiered_pro.json`. A Gate whose binding
+    # policy IS the LLM tier cannot have its banner name a different one:
+    # the operator reads this line to confirm the policy was honoured.
+    if args.llm_config:
+        print(f"  LLM config       : {args.llm_config} (supersedes --llm_model)")
+    else:
+        print(f"  LLM (planner)    : gemini / {args.llm_model}")
+        eff_reflect_provider = reflect_provider or "gemini"
+        eff_reflect_model_id = reflect_model_id or args.llm_model
+        print(f"  LLM (reflector)  : {eff_reflect_provider} / {eff_reflect_model_id}")
     print(f"  Seed source paths: {len(args.seed_paths)} entries")
     for p in args.seed_paths:
         print(f"    - {p}")
@@ -1900,6 +1939,8 @@ def main():
             cleanup_denoised=args.cleanup_denoised,
             max_epochs=args.max_epochs,
             validation_max_portion=args.validation_max_portion,
+            validation_max_train_samples=args.validation_max_train_samples,
+            validation_max_phase_seconds=args.validation_max_phase_seconds,
             skip_formal_min_delta=args.skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
             # Time/VRAM budget gates

@@ -33,6 +33,15 @@ V18_TRIAL_FACTOR = 3.0
 V19_WATCHDOG_FACTOR = 3.5
 V18_FLOOR_S = 120.0
 
+#: Validation-posture fields `_build_runtime_policy` reads. These stubs
+#: hand-list what the helper happens to read, so every new field it reads
+#: breaks all three at once — which is how CI went red on 2026-08-14.
+#: `None` is the production value for both.
+_VALIDATION_POSTURE_OFF = {
+    "validation_max_train_samples": None,
+    "validation_max_phase_seconds": None,
+}
+
 
 def _patch_sidecar(monkeypatch, predicted_seconds: float) -> str:
     """Make the deadline provider see one predicted component (the sidecar
@@ -196,6 +205,7 @@ class TestCompatibilityAndWiring:
             runtime_watchdog_enabled=True,
             runtime_watchdog_safety_factor=V19_WATCHDOG_FACTOR,
             runtime_watchdog_floor_seconds=V18_FLOOR_S,
+            **_VALIDATION_POSTURE_OFF,
         )
         d = _build_runtime_policy(
             agent_input, is_trial=False, chosen_time_budget=120.0, base_dir="/tmp/x"
@@ -224,6 +234,7 @@ class TestCompatibilityAndWiring:
             runtime_watchdog_enabled=True,
             runtime_watchdog_safety_factor=None,
             runtime_watchdog_floor_seconds=V18_FLOOR_S,
+            **_VALIDATION_POSTURE_OFF,
         )
         d = _build_runtime_policy(
             agent_input, is_trial=False, chosen_time_budget=120.0, base_dir="/t"
@@ -391,6 +402,7 @@ class TestWorkflowKwargParity:
             runtime_watchdog_enabled=True,
             runtime_watchdog_safety_factor=V19_WATCHDOG_FACTOR,
             runtime_watchdog_floor_seconds=V18_FLOOR_S,
+            **_VALIDATION_POSTURE_OFF,
         )
         for is_trial, budget in ((False, 120.0), (True, 5.0)):
             d = _build_runtime_policy(

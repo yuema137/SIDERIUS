@@ -53,6 +53,7 @@ import tempfile
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 # Region markers. The hooks may rewrite ONLY the generated block.
 FIRST_PRINCIPLES_BEGIN = "<!-- FIRST_PRINCIPLES_BEGIN -->"
@@ -74,6 +75,12 @@ TEMPLATE_BASENAME = "before_end_memory.template.md"
 #: Emergency auto-compact evidence. Local runtime state, never tracked.
 RESCUE_RELDIR = ".claude/context_rescue"
 RESCUE_BASENAME = "latest_auto_compact.md"
+
+#: Where the Stop guard records the repository state at its last block.
+#: Local runtime state, never tracked, and under ``.claude/`` so writing it
+#: cannot perturb the working-tree fingerprint it stores.
+STOP_LEDGER_RELDIR = ".claude/continuity"
+STOP_LEDGER_BASENAME = "last_stop_block.json"
 
 #: Headings the semantic handoff must contain. Absence means the operator
 #: (or the agent) has not actually written a handoff, only a stub.
@@ -112,6 +119,15 @@ FIELD_CONTEXT_STATE = "CONTEXT STATE"
 FIELD_BINDING_DOCS = "RELATED / BINDING DOCS"
 FIELD_BASE = "IMPLEMENTATION BASE"
 FIELD_BRANCH = "IMPLEMENTATION BRANCH"
+
+#: Whether the work is waiting on the OPERATOR rather than on the agent.
+#: The one field the Stop guard needs and no other field can supply:
+#: ``CONTEXT STATE`` says whether the PR is open, ``Exact Next Actions``
+#: says whether steps remain, and neither distinguishes "the agent should
+#: run those steps" from "the operator must answer first". Optional, so a
+#: handoff written before this field existed still parses; absence is read
+#: as "not waiting on the operator", never as a blocking condition.
+FIELD_OPERATOR_INPUT = "Operator input required"
 
 REQUIRED_FIELDS: tuple[str, ...] = (
     FIELD_HEAD,
@@ -563,6 +579,11 @@ def rescue_path(root: Path) -> Path:
     return root / RESCUE_RELDIR / RESCUE_BASENAME
 
 
+def stop_ledger_path(root: Path) -> Path:
+    """Where the Stop guard records the state it last blocked at."""
+    return root / STOP_LEDGER_RELDIR / STOP_LEDGER_BASENAME
+
+
 def initialize_handoff(
     *,
     project: str,
@@ -728,3 +749,167 @@ def validate(root: Path, text: str) -> list[str]:
         )
 
     return problems
+
+
+# --------------------------------------------------------------------------
+# Stop continuation
+# --------------------------------------------------------------------------
+
+#: How a section says it has nothing in it. Compared against the FIRST
+#: non-empty line only, after markdown emphasis is stripped, so
+#: ``**NONE — this context is closed.**`` is recognised while a section
+#: whose fourth paragraph happens to contain the word "none" is not.
+NONE_MARKERS: tuple[str, ...] = ("none", "n/a", "nothing", "todo", "tbd")
+
+#: Deterministic classifiers for :func:`decide_stop`. Emitted verbatim so a
+#: log, a test and an operator report all name the same condition.
+STOP_NO_STATE = "no_continuity_state"
+STOP_UNREADABLE = "continuity_state_unreadable"
+STOP_OTHER_PR = "handoff_belongs_to_another_pr"
+STOP_CLOSED = "context_closed"
+STOP_NO_NEXT_ACTIONS = "no_next_actions_recorded"
+STOP_OPERATOR_INPUT = "operator_input_required"
+STOP_NO_PROGRESS = "no_progress_since_last_block"
+CONTINUE_WORK_INCOMPLETE = "active_work_incomplete"
+
+CONTINUATION_REASON = (
+    "Active work is incomplete and no operator decision is required. "
+    "Continue with the recorded next actions."
+)
+
+
+@dataclass(frozen=True)
+class StopDecision:
+    """Whether the agent may end its turn, and the recorded reason why.
+
+    ``allow`` is the answer; ``code`` is the machine-comparable condition
+    that produced it; ``reason`` is the sentence a human (or the model)
+    reads. Nothing here is a summary of the work — the guard reports state
+    and never authors semantics.
+    """
+
+    allow: bool
+    code: str
+    reason: str
+
+
+def _declares_none(body: str) -> bool:
+    """Whether a section's first line declares it empty."""
+    for line in body.splitlines():
+        stripped = line.strip().strip("*_`#-> ").lower()
+        if not stripped:
+            continue
+        return any(stripped.startswith(marker) for marker in NONE_MARKERS)
+    return True  # no non-empty line at all
+
+
+def decide_stop(
+    text: str | None,
+    *,
+    branch: str,
+    head: str,
+    fingerprint: str,
+    last_block: dict[str, Any] | None = None,
+) -> StopDecision:
+    """Whether ending the turn here is legitimate. Pure — no I/O, no git.
+
+    The failure this exists to catch is narrow and was observed repeatedly:
+    an ACTIVE PR, an incomplete checkpoint, explicit next actions, no
+    question outstanding — and the turn ends at an ordinary milestone with
+    "Next: Checkpoint C…", so the operator has to type "continue".
+
+    The rule reads recorded state and nothing else:
+
+    ```text
+    ACTIVE + next actions remain + operator not waited on   -> BLOCK
+    anything else, anything ambiguous, anything unreadable  -> ALLOW
+    ```
+
+    **Allow is the fail-safe direction, and every uncertain case takes
+    it.** A guard that blocked on a state it could not interpret would
+    trap the session; a guard that allows one stop too many costs one
+    "continue". Those are not symmetric, so the tie always breaks toward
+    allowing.
+
+    ``last_block`` is the guard's own record of the repository state at
+    its previous block. Blocking again without progress is what turns a
+    Stop guard into a loop, so identical ``head`` AND ``fingerprint``
+    means: the previous continuation produced no committed or uncommitted
+    change, and this stop is allowed. Claude Code's own consecutive-block
+    cap (8, ``CLAUDE_CODE_STOP_HOOK_BLOCK_CAP``) is a second, independent
+    backstop — this rule is not relying on it.
+
+    Args:
+        text: the full handoff file, or None when there is none.
+        branch: the branch the checkout is on right now.
+        head: current HEAD sha.
+        fingerprint: current working-tree fingerprint.
+        last_block: parsed stop ledger, or None if never blocked.
+
+    Returns:
+        StopDecision: ``allow=False`` blocks the turn from ending.
+    """
+    if not text or not text.strip():
+        return StopDecision(True, STOP_NO_STATE, "No continuity handoff is recorded.")
+
+    try:
+        handoff = semantic_handoff(text)
+    except ContinuityError as exc:
+        return StopDecision(
+            True, STOP_UNREADABLE, f"The continuity handoff cannot be parsed: {exc}"
+        )
+
+    state = context_state(handoff)
+    if state is None:
+        return StopDecision(
+            True,
+            STOP_UNREADABLE,
+            f"'{FIELD_CONTEXT_STATE}' is missing or unrecognisable.",
+        )
+    if state != STATE_ACTIVE:
+        return StopDecision(
+            True, STOP_CLOSED, f"The recorded context state is {state}, not {STATE_ACTIVE}."
+        )
+
+    # THE lifecycle guard, same rule the compaction guard applies: a
+    # handoff naming another branch is a different PR's context, and its
+    # next actions are not this checkout's work.
+    recorded_branch = read_field(handoff, FIELD_BRANCH)
+    if (
+        recorded_branch
+        and not is_placeholder(recorded_branch)
+        and branch != "(detached)"
+        and recorded_branch.strip() != branch
+    ):
+        return StopDecision(
+            True,
+            STOP_OTHER_PR,
+            f"The handoff names branch {recorded_branch.strip()!r} but the checkout is on "
+            f"{branch!r}.",
+        )
+
+    operator_input = (read_field(handoff, FIELD_OPERATOR_INPUT) or "").strip().lower().strip("`*.")
+    if operator_input in {"yes", "true"}:
+        return StopDecision(
+            True,
+            STOP_OPERATOR_INPUT,
+            f"'{FIELD_OPERATOR_INPUT}' is {operator_input!r} — the work is waiting on the "
+            f"operator.",
+        )
+
+    next_actions = section_body(handoff, "## Exact Next Actions")
+    if _declares_none(next_actions) or is_placeholder(next_actions.strip()):
+        return StopDecision(True, STOP_NO_NEXT_ACTIONS, "No actionable next steps are recorded.")
+
+    if (
+        last_block
+        and last_block.get("head") == head
+        and last_block.get("fingerprint") == fingerprint
+    ):
+        return StopDecision(
+            True,
+            STOP_NO_PROGRESS,
+            "The previous continuation produced no repository change; not blocking again.",
+        )
+
+    return StopDecision(False, CONTINUE_WORK_INCOMPLETE, CONTINUATION_REASON)

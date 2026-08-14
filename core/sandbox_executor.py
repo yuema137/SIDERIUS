@@ -433,6 +433,13 @@ def _watchdog_deadline_provider(
         candidates: list[tuple[float, str]] = []
         if policy.operator_budget_seconds is not None:
             candidates.append((policy.operator_budget_seconds, "operator_budget"))
+        # VALIDATION POSTURE, None in every production campaign. A third
+        # candidate rather than a replacement, so it can only ever TIGHTEN
+        # the deadline. It is the only hard wall clock available on a
+        # trial round, where operator_budget_seconds is None by design and
+        # every remaining candidate is forecast-derived.
+        if policy.watchdog.max_phase_seconds is not None:
+            candidates.append((policy.watchdog.max_phase_seconds, "validation_max_phase"))
         block = _read_runtime_observation_sidecar(rv_sidecar_path)
         if block:
             components = (block.get("components") or {}).values()

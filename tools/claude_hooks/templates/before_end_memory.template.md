@@ -251,6 +251,10 @@ Design document synchronized: no
 Design sync reference: TODO
 Safe to compact: no
 
+Turn-continuity field — the Stop guard parses this one:
+
+Operator input required: no
+
 ## PR Identity
 
 PROJECT / PR: TODO

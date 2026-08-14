@@ -58,6 +58,7 @@ def resolve_training_workload(
     batch_size: int,
     train_portion: float | None,
     epochs: int,
+    max_samples: int | None = None,
 ) -> ResolvedPhaseWorkload:
     """Optimizer-step workload, mirroring the trainer exactly (RT1).
 
@@ -67,6 +68,11 @@ def resolve_training_workload(
     product. Per epoch: ``(n_psd_kept × ml_per_psd) // batch_size``
     (``drop_last=True`` floor). ``n_keep`` is deterministic, so every
     epoch has the same step count.
+
+    ``max_samples`` mirrors ``TIDMADEpochDataset``'s validation-posture
+    ceiling: the epoch is cut to that many ML segments. It is what lets a
+    Gate compute the EXACT executed step count before launching anything,
+    which is the difference between sizing a run and killing one.
     """
     if batch_size <= 0:
         raise ValueError(f"batch_size must be positive; got {batch_size!r}.")
@@ -85,6 +91,8 @@ def resolve_training_workload(
         n_psd_kept += n_keep
 
     samples_per_epoch = n_psd_kept * ml_per_psd
+    if max_samples is not None:
+        samples_per_epoch = min(samples_per_epoch, max_samples)
     steps_per_epoch = samples_per_epoch // batch_size
     total_steps = steps_per_epoch * epochs
 
@@ -103,6 +111,7 @@ def resolve_training_workload(
             "seg_size": seg_size,
             "batch_size": batch_size,
             "train_portion": train_portion,
+            "max_samples": max_samples,
         },
     )
 

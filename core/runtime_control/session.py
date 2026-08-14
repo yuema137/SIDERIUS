@@ -112,6 +112,33 @@ class WatchdogConfig(BaseModel):
             "to read RuntimeControlPolicy.safety_factor."
         ),
     )
+    max_phase_seconds: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Absolute wall-clock ceiling for ONE subprocess phase, as a "
+            "third deadline candidate beside the operator budget and the "
+            "verified estimate — the deadline is still the minimum of "
+            "whatever candidates exist, floored by floor_seconds.\n\n"
+            "WATCHDOG-ONLY, exactly like safety_factor above: admission "
+            "never reads it. That separation is the point. Routing a "
+            "validation ceiling through operator_budget_seconds would "
+            "make admission compare a forecast against it and REJECT the "
+            "attempt before training — the failure that already wasted a "
+            "Gate attempt when max_steps_per_attempt was set below the "
+            "planner's normal solution and every round was skipped. A "
+            "runaway safety net must never become an admission gate.\n\n"
+            "It is a SAFETY stop, never the sizing mechanism: a Gate is "
+            "made cheap by bounding its data workload, and this only "
+            "catches the pathological case where a small workload is "
+            "still slow (big model, batch_size 1). None (the default, and "
+            "every production campaign) leaves the deadline exactly as it "
+            "was.\n\n"
+            "floor_seconds still applies last, so the effective ceiling is "
+            "max(max_phase_seconds, floor_seconds) — set both when the "
+            "intended ceiling is below the 60 s default floor."
+        ),
+    )
 
 
 class RuntimeControlPolicy(BaseModel):
@@ -184,6 +211,27 @@ class RuntimeControlPolicy(BaseModel):
     watchdog: WatchdogConfig = Field(
         default_factory=WatchdogConfig,
         description="Runtime-watchdog policy (RT4, §4). Disabled by default.",
+    )
+    validation_max_train_samples: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "VALIDATION POSTURE ONLY. Absolute ceiling on the ML segments "
+            "one training epoch may contain, applied where the epoch is "
+            "BUILT — so fewer segments are read and fewer optimizer steps "
+            "exist, before any of them run.\n\n"
+            "It is the Gate's workload envelope, and it exists because no "
+            "fraction can be one: what ``train_portion`` is a fraction of "
+            "depends on ``psd_segment_length // seg_size``, and seg_size "
+            "is the planner's. 1 % of the scope became 12,500 optimizer "
+            "steps during Step 03.\n\n"
+            "Clamps, never rejects — the distinction that makes it usable. "
+            "``max_steps_per_attempt`` refuses an oversized plan, so a Gate "
+            "set below the planner's normal solution skipped every round "
+            "and no training ran at all. This one shrinks the work and "
+            "lets the real path execute. None (the default, and every "
+            "production campaign) leaves training untouched."
+        ),
     )
 
 

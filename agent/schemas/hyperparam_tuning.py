@@ -1720,8 +1720,73 @@ class HyperparamTuningInput(BaseModel):
             "A maximum, never a replacement: it can only reduce a planned "
             "portion, never raise one, so it cannot make a run larger. "
             "``None`` (the default) leaves ordinary campaigns completely "
-            "unchanged. Formal-mode portions are unaffected — they already "
-            "come from operator input rather than the plan."
+            "unchanged.\n\n"
+            "It governs FORMAL rounds too, and that is deliberate. "
+            "``_resolve_sample_set_cfg`` funnels trial, formal and "
+            "single-file mode into these same three values, and the clamp "
+            "runs after it — after the planner, after ``plan_overrides``, "
+            "after the formal-round override chain, and immediately before "
+            "``TrialConfig`` and ``build_sample_set``. That is what makes "
+            "it a workload ENVELOPE rather than a trial-mode default: a "
+            "Gate does not have to control which mode the planner elects, "
+            "only how much real work that election may execute. (Formal's "
+            "``formal_eval_portion`` default of 1.0 is exactly the value "
+            "this must be able to reduce.)"
+        ),
+    )
+    validation_max_train_samples: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "VALIDATION POSTURE ONLY. Absolute ceiling on the ML segments "
+            "one training epoch may contain — the Gate's workload "
+            "envelope, and the mechanism that makes a functional Gate "
+            "cheap.\n\n"
+            "``validation_max_portion`` bounds the FRACTION; this bounds "
+            "the AMOUNT. Both are needed because the fraction's base is "
+            "not harness-owned: samples per PSD segment are "
+            "``psd_segment_length // seg_size`` and seg_size is the "
+            "planner's model config, so 1 % of the scope resolved to "
+            "12,500 optimizer steps during Step 03.\n\n"
+            "Applied where the epoch is BUILT, so fewer segments are read "
+            "and fewer steps exist before any of them run — the bound is "
+            "spent before expensive work starts, never by killing a run "
+            "that already cost 25 minutes. It CLAMPS rather than rejects, "
+            "unlike ``max_steps_per_attempt``, whose refusal skipped every "
+            "round of a Gate attempt and produced no training at all.\n\n"
+            "Because it is exact, the resolved step count is computable "
+            "before launch: ``min(planned_samples, ceiling) // batch_size "
+            "× epochs``. ``None`` (the default) leaves every campaign "
+            "unchanged. Never use it on a scientific run."
+        ),
+    )
+    validation_max_phase_seconds: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "VALIDATION POSTURE ONLY. Absolute wall-clock ceiling for one "
+            "execution phase, enforced by the EXISTING runtime watchdog "
+            "(RT4 §4: own process group, SIGTERM, grace, SIGKILL) as an "
+            "extra deadline candidate — never as an admission input, so "
+            "it cannot cause the attempt to be skipped.\n\n"
+            "**A fuse, not a sizing mechanism.** The workload envelope — "
+            "``validation_max_train_samples`` with ``data_scope``, "
+            "``validation_max_portion`` and ``max_epochs`` — is what makes "
+            "a Gate cheap, and it is enforced before launch. This only "
+            "catches what no pre-launch bound can predict: a hung step, a "
+            "CUDA stall, a deadlocked subprocess. Reaching it should be "
+            "read as a runtime abnormality, never as normal Gate sizing — "
+            "a run killed at the deadline yields no evidence and wastes "
+            "the whole attempt, which is exactly why it is set well above "
+            "the expected duration.\n\n"
+            "``trial_time_budget_minutes`` does NOT serve this purpose — "
+            "it is forecast-based admission, and a round once ran 33m53s "
+            "under a 5-minute budget.\n\n"
+            "Requires ``runtime_watchdog_enabled``: the watchdog is the "
+            "only thing that enforces it, so accepting one without the "
+            "other would record a hard bound that does nothing. Note the "
+            "watchdog floor still applies — the effective ceiling is "
+            "max(this, runtime_watchdog_floor_seconds)."
         ),
     )
     plan_overrides: dict[str, Any] = Field(
@@ -1864,6 +1929,23 @@ class HyperparamTuningInput(BaseModel):
                 "health_gate_files must be non-empty when provided — to "
                 "monitor nothing, set health_gate_enabled=False (or use an "
                 "observe/disabled gate config), never an empty file list."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_validation_wall_clock(self):
+        """A hard bound nothing enforces is worse than no bound.
+
+        ``validation_max_phase_seconds`` is a watchdog deadline candidate
+        and the watchdog is disabled by default, so accepting the ceiling
+        with the watchdog off would let a Gate command record a wall-clock
+        limit, run past it, and still report the run as bounded.
+        """
+        if self.validation_max_phase_seconds is not None and not self.runtime_watchdog_enabled:
+            raise ValueError(
+                "validation_max_phase_seconds requires runtime_watchdog_enabled=True: "
+                "the watchdog is what enforces the deadline, so without it the "
+                "ceiling would be recorded and never applied."
             )
         return self
 

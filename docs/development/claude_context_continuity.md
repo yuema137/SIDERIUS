@@ -46,6 +46,8 @@ new PR authorized
 - **Resume** points the session at the PR that is actually active, read
   from the handoff at run time.
 - The resumed agent is told to audit repository truth before editing.
+- **Stop** refuses to end the turn while the handoff records work that is
+  active, incomplete and not waiting on you.
 
 ### What you do NOT get
 
@@ -109,7 +111,25 @@ tracked scripts in it:
 ```
 
 Repeat the `SessionStart` block for the `resume`, `compact` and `clear`
-matchers.
+matchers, and register the Stop guard alongside them:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.venv/bin/python ${CLAUDE_PROJECT_DIR}/tools/claude_hooks/stop_continuation_guard.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
 
 `--mode` duplicates what the matcher already routes. That is deliberate:
 it keeps the scripts runnable — and testable — without Claude Code, and
@@ -193,6 +213,68 @@ Two properties of the fingerprint are worth knowing:
 - **Edits under `tools/claude_hooks/` DO change it**, because that is
   ordinary tracked source. Only `before_end_memory.md` and `.claude/` are
   excluded, and only so the system cannot invalidate its own bookkeeping.
+
+---
+
+## The Stop guard: not stopping at an ordinary milestone
+
+The failure it removes, observed repeatedly through Step 03: an ACTIVE
+PR, an incomplete checkpoint, explicit next actions, nothing outstanding
+from the operator — and the turn ends anyway with *"Next: Checkpoint
+C…"*, so the operator has to type **continue**. Autonomous execution
+that pauses at every milestone is not autonomous execution.
+
+The guard reads recorded state and nothing else:
+
+```text
+CONTEXT STATE: ACTIVE
++ this checkout is on the handoff's IMPLEMENTATION BRANCH
++ '## Exact Next Actions' lists something
++ 'Operator input required' is not yes
+    -> BLOCK, quoting those next actions verbatim
+
+anything else                                   -> ALLOW
+```
+
+It never authors semantics. The blocking message is one fixed sentence
+plus the agent's own recorded next actions; deciding what to do next is
+still the agent's job, from the handoff and the design document.
+
+### Handing control back
+
+Three ways, all of them recorded state rather than prose:
+
+| Situation | What to write |
+|---|---|
+| PR reached its stop condition | `CONTEXT STATE: CLOSED / AWAITING OPERATOR ACTION` |
+| Genuine mid-PR operator decision | `Operator input required: yes` |
+| Nothing left to do | `## Exact Next Actions` → `NONE` |
+
+`Operator input required` is the only one that releases control without
+closing the context. Set it *before* asking the question, and back to
+`no` once the answer lands — a stale `yes` silently disables the guard.
+
+### Why it cannot deadlock
+
+Three independent backstops, in order of who owns them:
+
+1. **Allow is the fail-safe direction.** Missing, malformed, truncated,
+   uninterpretable or another PR's handoff — every one of them allows
+   the stop. The guard blocks only on a state it fully understood.
+2. **A block requires progress.** Each block records the HEAD and
+   working-tree fingerprint it happened at, in
+   `.claude/continuity/last_stop_block.json` (gitignored). An identical
+   state next time means the previous continuation changed nothing, and
+   the stop is allowed. A continuation that does no work can therefore
+   never loop.
+3. **Claude Code's own cap.** Consecutive Stop blocks are capped at 8
+   (`CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`), independently of anything here.
+
+Claude Code's guidance is to return success whenever `stop_hook_active`
+is true, which would limit the guard to one block per session. Backstop
+2 is strictly stronger — it permits further blocks only after real
+repository change — so the guard uses that instead, with the built-in
+cap underneath it.
 
 ---
 

@@ -139,6 +139,24 @@ proposer pre-flight) continue to do.
 | `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
 | `data_dir` | `str \| None` | No | `None` | Filesystem path to the TIDMAD data directory. Forwarded to `evaluate_time_skill` so the real-dataset warmup can read 1 PSD from disk. |
 
+**The time budgets above are forecast/admission inputs, not runtime
+limits.** They gate whether a round is admitted, using an estimate; the
+epoch that is admitted then runs to completion. A round once ran 33m53s
+under a 5-minute budget. For an actual bound, see the validation-posture
+fields below.
+
+### Validation posture (Gate harness only — `None`/off in every campaign)
+
+These exist so a Gate can bound how much real work a normal plan
+executes, without distorting what the planner is allowed to decide. See
+`docs/gates/gate_testing_standard.md`.
+
+| Field | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `validation_max_portion` | `float \| None` | No | `None` | Hard ceiling on the RESOLVED `trial_portion` / `train_portion` / `eval_portion`, applied as `min(planned, ceiling)` after the planner, after `plan_overrides` and after the formal-round override chain. Governs formal rounds too — that is what stops `formal_eval_portion`'s 1.0 default pulling full scope into a smoke test. |
+| `validation_max_train_samples` | `int \| None` (`>= 1`) | No | `None` | Absolute ceiling on the ML segments one training epoch may contain, applied where the epoch is BUILT (`TIDMADEpochDataset`), so fewer segments are read and fewer optimizer steps exist before any run. Needed beside the portion because a fraction's base is not harness-owned: samples per PSD segment are `psd_segment_length // seg_size`, and `seg_size` is the planner's model config. CLAMPS, never rejects — unlike `max_steps_per_attempt`, whose refusal skipped every round of a Gate attempt. `resolve_training_workload(..., max_samples=)` mirrors it exactly, so the executed step count is knowable before launch. |
+| `validation_max_phase_seconds` | `float \| None` | No | `None` | Emergency wall-clock fuse for one execution phase, enforced by the RT4 watchdog as an extra deadline candidate — never by admission, so it cannot skip the attempt. Requires `runtime_watchdog_enabled` (refused otherwise). Not a sizing mechanism: a run killed at the deadline yields no evidence. Effective ceiling is `max(this, runtime_watchdog_floor_seconds)`. |
+
 ### Workflow-populated fields
 
 | Field | Type | Required | Default | Description |

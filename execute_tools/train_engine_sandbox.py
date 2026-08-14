@@ -308,6 +308,7 @@ class TIDMADEpochDataset(Dataset):
         train_portion: float | None = None,
         rng: "random.Random | None" = None,
         profile: DatasetProfile | None = None,
+        max_samples: int | None = None,
     ):
         """
         Args:
@@ -317,6 +318,24 @@ class TIDMADEpochDataset(Dataset):
             train_portion:  Fraction of each file's segments to use. When None
                             or 1.0, all segments in the scope are loaded.
             rng:            Random instance for reproducible subsampling.
+            max_samples:    VALIDATION POSTURE ONLY. Absolute ceiling on the ML
+                            segments this epoch may contain. ``None`` (every
+                            production campaign) loads the full selection.
+
+        **Why an absolute ceiling exists beside ``train_portion``.** A
+        fraction cannot bound the epoch, because what it is a fraction OF
+        is not harness-owned: ``ml_segs_per_psd`` is
+        ``psd_segment_length // seg_size`` and ``seg_size`` comes from the
+        planner's model config, so 1 % of the scope at ``seg_size=1000``
+        is ten times the samples it is at ``seg_size=10000``. During
+        Step 03 a 1 %-portion plan resolved to 12,500 optimizer steps.
+
+        Enforced by reading LESS, not by stopping later: files stop being
+        opened once the budget is met, and the concatenated arrays are cut
+        to exactly ``max_samples``. Both the HDF5 reads and the optimizer
+        steps shrink, so the epoch is small rather than merely truncated —
+        the whole point of bounding before execution instead of killing
+        during it.
         """
         if rng is None:
             rng = random.Random()
@@ -336,8 +355,15 @@ class TIDMADEpochDataset(Dataset):
         # contributes no rows at all.
         self.file_row_ranges: dict[int, tuple[int, int]] = {}
         rows_so_far = 0
+        #: PSD segments actually READ from disk. The envelope's claim is
+        #: that it avoids work rather than discarding it, and the row
+        #: count alone cannot show that — the post-hoc cut leaves the same
+        #: length whether one PSD segment was read or a hundred were.
+        self.psd_segments_read = 0
 
         for file_key in sorted(sample_set.keys(), key=int):
+            if max_samples is not None and rows_so_far >= max_samples:
+                break
             file_index = int(file_key)
             file_path = os.path.join(data_dir, dataset.training_file_name(file_index))
             if not os.path.exists(file_path):
@@ -354,6 +380,13 @@ class TIDMADEpochDataset(Dataset):
                 segments = rng.sample(scope_segments, n_keep)
             else:
                 segments = scope_segments
+
+            if max_samples is not None:
+                # Stop READING once the budget is met. Ceiling division, so
+                # the last PSD needed to reach the cap is still read and the
+                # exact cut happens on the concatenated rows below.
+                needed = max_samples - rows_so_far
+                segments = segments[: -(-needed // ml_segs_per_psd)]
 
             with h5py.File(file_path, "r") as f:
                 ch1 = _h5_dataset(f, "timeseries", channels.input_channel, "timeseries")
@@ -372,6 +405,7 @@ class TIDMADEpochDataset(Dataset):
                         )
                     )
 
+            self.psd_segments_read += len(segments)
             file_rows = len(segments) * ml_segs_per_psd
             if file_rows:
                 self.file_row_ranges[file_index] = (rows_so_far, rows_so_far + file_rows)
@@ -389,6 +423,19 @@ class TIDMADEpochDataset(Dataset):
             if all_ch2
             else np.empty((0, seg_size), dtype=enc.storage_dtype)
         )
+
+        if max_samples is not None and len(self.inputs) > max_samples:
+            self.inputs = self.inputs[:max_samples]
+            self.targets = self.targets[:max_samples]
+            # Sequential ordering addresses rows through these ranges, so a
+            # range extending past the cut would index rows that no longer
+            # exist. Clip the straddling file and drop any that start beyond
+            # the cut (a file loop can only ever leave one of each).
+            self.file_row_ranges = {
+                idx: (start, min(end, max_samples))
+                for idx, (start, end) in self.file_row_ranges.items()
+                if start < max_samples
+            }
 
     def __len__(self):
         return len(self.inputs)
@@ -857,6 +904,17 @@ def run_experiment_streaming(
     stability_log = _stability_log()
     stability_stopped = False
 
+    # VALIDATION POSTURE, None in every production campaign. The Gate's
+    # workload envelope, applied where the epoch is BUILT: the dataset
+    # reads fewer segments and the loader yields fewer batches, so the
+    # bound is spent before expensive work starts rather than enforced by
+    # killing a run that already cost 25 minutes. A mid-run stop produces
+    # no evidence and wastes the whole attempt; this produces a small,
+    # complete, real training execution.
+    max_train_samples = (
+        runtime_session.policy.validation_max_train_samples if runtime_session is not None else None
+    )
+
     history = []
     t_train_start: float | None = None
     verifier = None
@@ -902,7 +960,14 @@ def run_experiment_streaming(
             train_portion=train_portion,
             rng=epoch_rng,
             profile=profile,
+            max_samples=max_train_samples,
         )
+        if max_train_samples is not None:
+            print(
+                f"[validation_envelope] epoch {ep}: {len(dataset)} ML segments "
+                f"(ceiling {max_train_samples})",
+                flush=True,
+            )
         if order_strategy == "sequential":
             # Independent RNG stream, seeded from the same epoch seed: the
             # dataset above consumes a variable number of draws depending on

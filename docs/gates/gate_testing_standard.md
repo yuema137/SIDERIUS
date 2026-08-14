@@ -78,88 +78,134 @@ schema (implementor, proposer, validator, interpreter).
 
 ### Gate 2 — Real LLM + real training (smoke test)
 
-**Purpose**: verify end-to-end plumbing with production LLMs and real
-training. Binary signal: does the chain complete with a non-null finite
-`denoising_score`?
+**Purpose**: verify that the REAL path executes end to end — real LLM,
+real candidate, real training, real inference, real scoring, a finite
+result. It is functional validation, **not** a miniature scientific
+campaign, and not an assessment of model quality.
 
 **When to use**: at Checkpoint commits (end of a feature's commit plan)
 before merging to master.
 
-**Canonical command** (full-scope, seeded — kept for historical
-reference; **new work should follow the cold-start rule in the
-"Partial-scope rules" section below** and omit `--seed_paths`; new
-partial-scope work additionally requires `--data_scope` +
-`--health_gate_files`):
+#### The governing principle
+
+```text
+the Gate harness owns    the amount of REAL WORK a resolved plan may execute
+it does NOT own          tuner policy, trial-vs-formal mode, optimization strategy
+```
+
+The planner plans normally and may elect trial or formal; the Gate bounds
+what that election is allowed to cost. Everything below follows from that
+split — including why there is no force-trial flag.
+
+#### Canonical command (cold-start, bounded)
 
 ```bash
 bash sdsc_submission_scripts/run_chain.sh \
     --mode lilab \
-    --workspace /tmp/checkpoint_$(date +%s) \
-    --run_name checkpoint_smoke \
-    --num_iterations 2 \
-    --max_rounds 2 \
+    --workspace /tmp/gate2_$(date +%s) \
+    --run_name gate2_smoke \
+    --num_iterations 1 \
+    --max_rounds 1 \
     --max_proposal_attempts 3 \
     --max_epochs 1 \
-    --trial_portion 0.02 \
-    --train_portion 0.02 \
-    --eval_portion 0.02 \
-    --trial_time_budget_minutes 5 \
+    --data_scope 4-9 \
+    --health_gate_files 4,5,6,7,8,9 \
+    --validation_max_portion 0.01 \
+    --validation_max_train_samples 2000 \
+    --validation_max_phase_seconds 900 \
+    --runtime_watchdog \
     --no-force_formal_round \
-    --formal_time_budget_minutes 30 \
-    --llm_config llm_configs/openai_tiered_pro.json \
-    --seed_paths \
-        /home/klz/Data/SIDEREIS_DATA/wavenet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json \
-        /home/klz/Data/SIDEREIS_DATA/punet/small_sample_trial_v0/agent/run_output_small_sample_trial_v0_agent.json
+    --trial_vram_budget_gb 24 \
+    --formal_vram_budget_gb 24 \
+    --llm_config llm_configs/openai_tiered_pro.json
 ```
+
+No `--seed_paths`: every real-training gate run is cold-start (see
+"Partial-scope rules" below).
 
 **Important**: do NOT use `tee` to capture chain stdout. The Claude Code
 harness capture file is sufficient and can be read on demand. `tee` writes
 a duplicate log to `/tmp` that accumulates over the run and can exhaust
 the tmpfs filesystem.
 
-**Critical parameter constraints** (lesson learned from Checkpoint T, 2026-06-18):
+#### What each bound actually does
 
-| Parameter | Value | Why |
+| Parameter | Role | Why it is what it is |
 |---|---|---|
-| `--trial_time_budget_minutes 5` | **mandatory** | Engages the time-risk gate. Without it, training runs without a time ceiling and Gate 2 can take 60-90+ min and fill disk. Validated to work in prior Checkpoint S runs. |
-| `--no-force_formal_round` | **mandatory** | Disables the default behavior of forcing the last round to be a full formal training run. Without this flag, the last round uses the full dataset regardless of `--trial_portion`, causing 2+ hour runtimes (observed in Gate 3 iter_002 round 2: 2h 02m on 2026-06-22). All rounds should stay in trial mode for smoke tests. |
-| `--formal_time_budget_minutes 30` | safety net | Safety net in case `--no-force_formal_round` is accidentally omitted or a future config silently re-enables formal forcing. Only active when a formal round actually runs. |
-| `--trial_portion 0.02` | **mandatory** | Keeps each training epoch under 5 min on lilab GPU (~20K segments). At 0.05 a single attempt can generate 76 GB of intermediate files. |
-| `--llm_config openai_tiered_pro.json` | **mandatory** (operator, 2026-08-13) | gpt-4o-mini (`certify_minimal.json`) cannot reliably generate proposals that pass the validator — a Gate 2 run will complete but produce no `denoising_score`. **`openai_tiered_v1.json` is no longer sufficient either** and was replaced by this row: it puts `propose.comparison`, `validate` and `tune.reflector` on mini/nano tiers, and during Step 03 it produced a proposer that invented a list-valued `dilation_cycle` against the tuner's scalar-only config contract (3 codegen attempts burned) and a planner that repeatedly chose `batch_size 1` with `portion 0.05`, resolving to 25,000-250,000 optimizer steps the step guardrail had to reject. Both are proposer/planner **judgment** failures, which burn Gate wall-time without exercising the plumbing the Gate exists to test. Use `openai_tiered_pro.json` (gpt-5.5 across every role) for **all** Gate runs. |
-| `--num_iterations 2` | recommended | Two iterations exercise the full chain including the interpretation→propose→implement loop. One iteration is acceptable for simpler features. |
-| `--max_rounds 2` | recommended | Two rounds exercise the tuner planner's multi-round reasoning. |
-| `--max_proposal_attempts 3` | recommended | Gives the implementor two self-correction chances. |
+| `--validation_max_train_samples 2000` | **the Gate's primary sizing mechanism** | Absolute ceiling on the ML segments one training epoch may contain, applied where the epoch is BUILT — fewer segments are read and fewer optimizer steps exist before any of them run. It CLAMPS; it never rejects. With batch_size 1 (the worst the planner can choose) this is ≤ 2,000 steps. |
+| `--validation_max_portion 0.01` | fractional envelope, both modes | Clamps the RESOLVED `trial/train/eval` portions after the planner, after `plan_overrides` and after the formal-round override chain. It governs formal too — that is what stops `formal_eval_portion`'s default of 1.0 pulling the whole scope into a smoke test. |
+| `--max_epochs 1` | epoch ceiling | Clamps the planner's epochs. Multiplies with the sample ceiling to bound total steps. |
+| `--data_scope 4-9` + `--health_gate_files 4,5,6,7,8,9` | file-count envelope | DS8-mandatory pairing (see below). Bounds inference and scoring, which are per-file. |
+| `--validation_max_phase_seconds 900` + `--runtime_watchdog` | **emergency fuse only** | Absolute wall-clock ceiling per phase, enforced by the RT4 watchdog as an extra deadline candidate — never as an admission input, so it cannot skip the attempt. A normal Gate never reaches it. If it fires, classify that as runtime/harness abnormality, not as successful sizing: a run killed at the deadline yields no evidence and wastes the whole attempt. Requires the watchdog (the schema refuses the ceiling without it). The watchdog floor still applies — effective ceiling is `max(this, --runtime_watchdog_floor_seconds)`. |
+| `--llm_config openai_tiered_pro.json` | **mandatory** (operator, 2026-08-13) | gpt-4o-mini (`certify_minimal.json`) cannot reliably produce proposals that pass the validator. **`openai_tiered_v1.json` is no longer sufficient either**: it puts `propose.comparison`, `validate` and `tune.reflector` on mini/nano tiers, and during Step 03 produced a proposer that invented a list-valued `dilation_cycle` against the tuner's scalar-only config contract (3 codegen attempts burned) and a planner that repeatedly chose `batch_size 1` with `portion 0.05`. Those are proposer/planner **judgment** failures: they burn Gate wall-time without exercising the plumbing the Gate exists to test. |
+| `--num_iterations 1`, `--max_rounds 1` | minimum temporal depth | See "Temporal depth" below. |
+| `--no-force_formal_round` | optional | Leaves the round mode to the planner. Safe to omit: the envelope binds formal exactly as it binds trial. It is **not** a force-trial flag — it only stops the HARNESS forcing the last round formal. |
 
-**Estimated wall time**: ~30-60 min (all rounds in trial mode with
-`--no-force_formal_round`). Per-iter breakdown: ~15 min LLM setup
-(interp + 3-stage proposer + implementor + validator) + 2 × ~8 min trial
-rounds (5 min training cap + overhead) = ~30 min per iter × 2 iters.
-Variance comes from gpt-5.4 latency spikes and any proposal/implementor
-repair attempts.
+#### What is NOT a bound
 
-**Estimated cost**: ~$1.50-2.50 (gpt-5.4 dominant role).
+Three mechanisms look like limits and are not. Each cost a Gate attempt
+during Step 03:
 
-**Pass criteria — HealthGate framework correctness**
+| Mechanism | What it really is | Failure it caused |
+|---|---|---|
+| `--trial_time_budget_minutes` | forecast-based **admission** input | one round ran **33m53s** under a "5 minute" budget — a bad forecast admits the attempt and the epoch then runs to completion |
+| `--trial_portion` | a fraction, floored at 0.01 in schema, and **overridable by the planner** | the CLI said 0.01, the planner chose 0.05; and 1 % of the scope still resolved to 12,500 steps, because samples-per-PSD is `psd_segment_length // seg_size` and `seg_size` is the planner's model config |
+| `--max_steps_per_attempt` | a **rejection** guard | set below the planner's normal solution, every round was SKIPPED — zero training, zero score, and the Gate proved nothing. Keep it at a level that catches pathological states; never use it as the sizing mechanism |
 
-These criteria test the HealthGate infrastructure only, not model denoising quality.
+`--no-force_formal_round` belongs in the same family: it prevents the
+harness forcing formal, not the planner electing it. During Step 03 the
+planner elected formal anyway and resolved to 250,000 optimizer steps.
+
+#### Temporal depth is failure-class driven
+
+Default: **1 iteration × 1 round**, planner-controlled mode. Deeper only
+when the change under test needs it:
+
+| What the PR changes | Depth |
+|---|---|
+| ordinary execution / config / contract change | 1 iteration × 1 round |
+| multi-round tuner policy | ≥ 2 rounds |
+| cross-iteration behaviour or resume | ≥ 2 iterations |
+| trial→formal promotion semantics | exercise promotion explicitly |
+
+This governs HOW a required Gate runs. It does not let a PR reason its
+way out of a Gate the assignment table requires.
+
+**Estimated wall time**: ~10-20 min, dominated by LLM latency (interp +
+3-stage proposer + implementor + validator), with bounded training,
+inference and scoring behind it. The pre-2026-08-13 shape was ~30-60+ min
+and could exceed two hours when a formal round pulled full scope.
+
+**Estimated cost**: ~$1-2 (gpt-5.5 dominant role).
+
+#### PASS criteria — functional, not scientific
+
+The real path must have executed:
 
 1. Chain exits 0
-2. Every round has a recorded `gate_action` in `final_record`
+2. A real candidate was generated, validated and registered
+3. **Real training actually executed** (not pseudo, not skipped)
+4. Real inference actually executed
+5. Real scoring actually executed and produced a **finite, non-null** result
+6. Every round has a recorded `gate_action` in `final_record`
    (any value: PASS, INVALIDATE_ROUND, ABORT_CHAIN)
-3. Every `denoising_score` is either:
-   a. A finite positive number, OR
-   b. `None` / `-inf` WITH a corresponding `gate_action` of
-      `INVALIDATE_ROUND` or `ABORT_CHAIN` in that round's record
-   (A `None` score with no `gate_action` recorded is a framework bug)
-4. No phantom `5.5762667` appears as a final accepted score
-   (phantom scores caught and invalidated by HealthGate are acceptable)
-5. At least one round triggers a HealthGate evaluation
-   (confirms gate firing logic is reachable)
+7. A `None` / `-inf` score is acceptable ONLY with a corresponding
+   `gate_action` of `INVALIDATE_ROUND` or `ABORT_CHAIN` in that round's
+   record — a `None` score with no `gate_action` is a framework bug
+8. No phantom `5.5762667` appears as a final accepted score
+9. When the PR migrates a specific boundary, evidence that the boundary
+   was exercised
 
-The following are explicitly NOT pass/fail criteria for Gate 2:
-- Whether denoising_score > baseline
-- Whether the model learned to denoise
-- Whether score is above any threshold
+Explicitly **NOT** pass/fail criteria:
+
+- `denoising_score` > baseline, or above any threshold
+- loss convergence, or incumbent improvement
+- whether the model learned to denoise
+- scientific model quality of a one-epoch, 1 %-scope, sample-capped model
+
+A model may be collapsed or scientifically worthless while the functional
+Gate correctly proves the real path executed. Only a PR that changes
+those semantics may require them.
 
 **Needs user approval**: yes (real LLM + real training cost and time).
 
@@ -207,13 +253,27 @@ partial `--data_scope` (anything narrower than the full 20 files),
    seeded state matters — operator-approved on a case-by-case
    basis only.
 
-### Gate 2 parameter plans (Lite / Regular)
+### Gate 2 parameter plans (Lite / Regular) — OPT-IN deeper shapes
+
+**These are not the default.** The canonical bounded command above is.
+Reach for a plan here only when the PR's failure class needs the extra
+depth — a forced formal round (Lite) or a multi-iteration LLM loop
+(Regular) — per "Temporal depth is failure-class driven".
+
+Both plans carry the Gate envelope: add
+`--validation_max_portion`, `--validation_max_train_samples` and the
+`--validation_max_phase_seconds` + `--runtime_watchdog` fuse from the
+canonical command. The envelope is what makes Lite's forced formal round
+safe; without it, `formal_eval_portion`'s default of 1.0 and a
+planner-chosen batch size are exactly how the 2h 02m round of
+2026-06-22 happened.
 
 Added 2026-07-23 from the runtime-control Gate 2 audit (design doc
 §12, commit `cb1b6b0`). Two vetted combinations. Guiding policy:
 **be generous on GPU VRAM, stingy on wall time** — a VRAM-gate
-rejection wastes a whole Gate attempt, while time is controlled by
-portions and budgets.
+rejection wastes a whole Gate attempt. VRAM feasibility stays with the
+production preflight and batch resolver; the Gate envelope sizes how
+much work runs, not whether a step fits in memory.
 
 **Both plans below assume the DS8 partial-scope rules above** — the
 tables show only the deltas from those rules. Partial-scope plan

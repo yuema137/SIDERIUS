@@ -85,7 +85,12 @@ class TestKillTree:
 class TestDeadlineFormula:
     def _policy(self, **kw) -> RuntimeControlPolicy:
         return RuntimeControlPolicy(
-            watchdog=WatchdogConfig(enabled=True, floor_seconds=kw.pop("floor", 0.0)), **kw
+            watchdog=WatchdogConfig(
+                enabled=True,
+                floor_seconds=kw.pop("floor", 0.0),
+                max_phase_seconds=kw.pop("watchdog_max_phase_seconds", None),
+            ),
+            **kw,
         )
 
     def test_operator_budget_only(self, tmp_path):
@@ -113,6 +118,34 @@ class TestDeadlineFormula:
         assert source == "verified_components"
         # setup prediction ≈ its tiny actual; × safety 2.0, well below budget
         assert deadline < 10_000.0
+
+    def test_validation_fuse_arms_a_deadline_where_a_trial_round_has_none(self, tmp_path):
+        """A trial round ships ``operator_budget_seconds=None``, so before
+        any component verifies there is nothing to enforce at all.
+
+        The Gate fuse is the only non-forecast candidate on that path.
+        Fails when it stops reaching the provider — and the symptom would
+        be a Gate that believes it has a hard ceiling and has none.
+        """
+        policy = self._policy(watchdog_max_phase_seconds=900.0)
+        provider = _watchdog_deadline_provider(policy, str(tmp_path / "absent.json"))
+
+        assert provider() == (900.0, "validation_max_phase")
+
+    def test_validation_fuse_only_ever_tightens(self, tmp_path):
+        """A candidate, never a replacement.
+
+        Fails when the fuse is made authoritative and starts RAISING a
+        deadline that the operator budget or a verified estimate had
+        already set lower — turning a safety net into a licence to run
+        longer.
+        """
+        policy = self._policy(operator_budget_seconds=100.0, watchdog_max_phase_seconds=5_000.0)
+
+        assert _watchdog_deadline_provider(policy, str(tmp_path / "absent.json"))() == (
+            100.0,
+            "operator_budget",
+        )
 
     def test_floor_prevents_degenerate_deadlines(self, tmp_path):
         sidecar = str(tmp_path / "rv.json")

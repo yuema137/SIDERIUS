@@ -2832,6 +2832,7 @@ def _resolve_guardrail_steps(
     train_cfg: dict,
     train_portion: float | None,
     model_type: str = "",
+    max_samples: int | None = None,
 ) -> int | None:
     """Resolved step count for the §5 guardrails. Best-effort: a
     resolver failure returns None (the guardrail is defense-in-depth —
@@ -2888,6 +2889,7 @@ def _resolve_guardrail_steps(
             batch_size=int(train_cfg.get("batch_size", 1)),
             train_portion=train_portion,
             epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
+            max_samples=max_samples,
         ).unit_count
     except Exception as exc:
         print(f"[guardrails] step resolution failed (non-fatal): {exc}")
@@ -3038,6 +3040,10 @@ def _build_runtime_policy(
         "operator_budget_seconds": (
             chosen_time_budget * 60.0 if (not is_trial and chosen_time_budget is not None) else None
         ),
+        # VALIDATION POSTURE, None in every campaign. The Gate workload
+        # envelope: the trainer builds a smaller epoch, so the bound is
+        # spent before execution rather than enforced by killing a run.
+        "validation_max_train_samples": agent_input.validation_max_train_samples,
         "observation_store_root": os.path.join(base_dir, "runtime_observations"),
         "safety_factor": effective_safety,
         "trial_safety_factor": agent_input.runtime_trial_safety_factor,
@@ -3050,6 +3056,14 @@ def _build_runtime_policy(
             # safety_factor above (V18 behavior). Admission never reads
             # this field.
             "safety_factor": agent_input.runtime_watchdog_safety_factor,
+            # VALIDATION POSTURE, None in every campaign. Deliberately on
+            # the watchdog rather than in operator_budget_seconds: the
+            # budget is an ADMISSION input, and a small one would reject
+            # the attempt before training instead of bounding it — the
+            # Gate would then prove nothing at all. Note the trial branch
+            # above ships operator_budget_seconds=None, so on a trial
+            # round this is the only non-forecast deadline candidate.
+            "max_phase_seconds": agent_input.validation_max_phase_seconds,
         },
     }
 
@@ -3074,12 +3088,18 @@ def _check_and_record_guardrail_skip(
     """Run the §5 guardrails; on violation save the planner-visible
     record and return True (the attempt loop `continue`s). Single call
     site keeps run() under the analyzer's complexity ceiling."""
+    # The EXECUTED step count, not the planned one. Under a validation
+    # envelope the trainer builds a smaller epoch, so judging the planner's
+    # unclamped figure would skip an attempt whose real workload is already
+    # inside the bound — the Step-03 failure where a low
+    # `max_steps_per_attempt` skipped every round and no training ran.
     n_steps = _resolve_guardrail_steps(
         train_sample_set,
         model_config,
         plan.train_cfg,
         trial_config.train_portion,
         model_type=model_type,
+        max_samples=agent_input.validation_max_train_samples,
     )
     violations = _evaluate_step_guardrails(
         n_steps=n_steps,

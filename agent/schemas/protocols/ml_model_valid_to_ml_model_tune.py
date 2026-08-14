@@ -70,9 +70,16 @@ def local_validated_model(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
-    # VALIDATION POSTURE ONLY (FU-D-12) — hard ceiling on resolved trial
-    # portions. `None` leaves ordinary campaigns unchanged.
+    # VALIDATION POSTURE ONLY (FU-D-12) — hard ceiling on the resolved
+    # portions, for EVERY round mode. `None` leaves ordinary campaigns
+    # unchanged.
     validation_max_portion: float | None = None,
+    # VALIDATION POSTURE ONLY — the Gate workload envelope and its
+    # emergency wall-clock fuse. Both `None` in every campaign; see the
+    # HyperparamTuningInput field docstrings and
+    # docs/gates/gate_testing_standard.md.
+    validation_max_train_samples: int | None = None,
+    validation_max_phase_seconds: float | None = None,
     # Tuner delta-gates (added in commit 8f1cf52). Defaults match the
     # HyperparamTuningInput schema defaults so omitting them at the
     # CLI surface reproduces pre-v16 behaviour.
@@ -293,6 +300,8 @@ def local_validated_model(
         cleanup_denoised=cleanup_denoised,
         max_epochs=max_epochs,
         validation_max_portion=validation_max_portion,
+        validation_max_train_samples=validation_max_train_samples,
+        validation_max_phase_seconds=validation_max_phase_seconds,
         skip_formal_min_delta=skip_formal_min_delta,
         bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
         current_run_best_formal_score=current_run_best_formal_score,

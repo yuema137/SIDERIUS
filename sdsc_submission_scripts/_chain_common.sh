@@ -352,6 +352,8 @@ parse_chain_args() {
         # VALIDATION POSTURE ONLY (V20 FU-D-11) — bypasses the proposer.
         --validation_fixed_candidate_plan) VALIDATION_FIXED_CANDIDATE_PLAN="$2"; shift 2 ;;
         --validation_max_portion)          VALIDATION_MAX_PORTION="$2"; shift 2 ;;
+        --validation_max_train_samples)    VALIDATION_MAX_TRAIN_SAMPLES="$2"; shift 2 ;;
+        --validation_max_phase_seconds)    VALIDATION_MAX_PHASE_SECONDS="$2"; shift 2 ;;
         # §3.2 — Trial / formal strategy + formal-scope (13.C-bis)
         --trial_strategy)            TRIAL_STRATEGY="$2"; shift 2 ;;
         --formal_strategy)           FORMAL_STRATEGY="$2"; shift 2 ;;
@@ -465,6 +467,12 @@ build_app_args() {
     fi
     if [[ -n "${VALIDATION_MAX_PORTION:-}" ]]; then
         APP_ARGS+=(--validation_max_portion "$VALIDATION_MAX_PORTION")
+    fi
+    if [[ -n "${VALIDATION_MAX_TRAIN_SAMPLES:-}" ]]; then
+        APP_ARGS+=(--validation_max_train_samples "$VALIDATION_MAX_TRAIN_SAMPLES")
+    fi
+    if [[ -n "${VALIDATION_MAX_PHASE_SECONDS:-}" ]]; then
+        APP_ARGS+=(--validation_max_phase_seconds "$VALIDATION_MAX_PHASE_SECONDS")
     fi
     if [ "$DEBUG_DUMP_PROMPTS" -eq 1 ]; then
         APP_ARGS+=(--debug_dump_prompts)
