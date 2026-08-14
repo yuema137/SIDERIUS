@@ -6,7 +6,8 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — REVISION 3, READY FOR OPERATOR FREEZE. Not frozen. Implementation NOT authorized.** |
+| Status | **PR 05B DESIGN — FROZEN. OPERATOR-APPROVED DESIGN** (2026-08-14). Semantic design content frozen at **`ce88012450b312fff6cee65ebfc7dff3220f4e68`** (revision 3). **Implementation is a SEPARATE authorization and has NOT begun.** |
+| Frozen design content | **`ce880124`** — verified from Git at freeze time, not from a working copy. A stale external copy showing revision 2 exists; **repository truth at `ce880124` is authoritative** |
 | Design base | **re-anchored to `82a548f8`** (master after 05a merged as `cfb3b1c7`). Revision 1 was written against `13b08550`; every source citation below has been re-verified and moved where it moved (§0.3) |
 | Depends on | **Step 02** (Dataset Profile) · **Step 03** (`ModelIOContract`) · **Step 04a** (`model_io_probe_skill`, the shared probe-realization authority) |
 | Blocks | nothing — see §7 |
@@ -20,6 +21,32 @@ Step-level completion contract lives in roadmap **§15.1a**.
 > Stage-B coverage (§8), and calibration evidence scope (C6) — and removes
 > design wording that would have paused an authorized implementation session
 > (§11, §16.1, §16.2). Read §0.2-§0.5 before §1.
+
+### Freeze record
+
+| Field | Value |
+|---|---|
+| Frozen semantic design content SHA | **`ce88012450b312fff6cee65ebfc7dff3220f4e68`** |
+| Design base | **`82a548f8`** |
+| Freeze date | **2026-08-14** |
+| Decomposition | **ONE PR** |
+| Internal capability phases | **Phase P** — `ModelIOContract` / probe realization / VRAM path (C1-C4) · **Phase D** — `DatasetProfile` / workload-time derivation (C5) |
+| Remaining operator decisions | **NONE** (OD-05b-1 … OD-05b-7, §19) |
+
+**Design freeze does NOT begin implementation.** Implementation authorization
+is supplied separately, in a fresh implementation context with its own filled
+Implementation Working Rules contract.
+
+**What the freeze covers.** The semantic contract: §0.4 decomposition · §0.5
+output-form authority · §1 capability · §2 classification · §8's one rung and
+its two atomic subcases · §9's Checkpoint-C property · §11's Gate disposition
+and its semantic condition · §15 stop conditions · §17 Definition of Done ·
+§20 configuration-architecture preservation.
+
+**What remains unfrozen engineering detail**, subject to that contract: exact
+Git commit count · helper structure · source line numbers · test-file
+decomposition · exact mutation implementation · **the exact transport
+mechanics chosen at C4** · resolver/realizer call counts.
 
 ---
 
