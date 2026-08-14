@@ -7,9 +7,9 @@ The Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **FROZEN — operator-approved 2026-08-14.** Design content frozen at **`425bfac9`** (the freeze-readiness corrections commit). **Implementation is a SEPARATE authorization and has NOT begun.** |
+| Status | **IN IMPLEMENTATION — authorized 2026-08-14.** Design content frozen at **`425bfac9`**; freeze marker `1cb0119c`. Live ledger from §19. |
 | Design base | `13b08550` — master after Step 04 Checkpoint E (04a `6458dd95`, 04b `096f2dbb`) |
-| Implementation base | **`1cb0119c`** — the freeze-marker commit, which is master HEAD at freeze. It contains both the frozen content (`425bfac9`) and this marker, so an implementation branch cut from it carries its own authority |
+| Implementation base | **`2da399eb`** — operator-selected; `1cb0119c` plus the docs-only commit recording the base, and `origin/master` at kickoff. See §19's base reconciliation |
 | Decomposition | **ONE PR** — operator decision 2026-08-14 (§2.1). No `pr_05a_*` child doc |
 | Depends on | **Step 02** (Dataset Profile) only |
 | Blocks | nothing — see §7 |
@@ -388,51 +388,52 @@ the closer candidate (§15 of that design).
 in §18 diverges from it, this table wins.
 
 ### CHECKPOINT 0 — pre-edit baselines
-- [ ] `_validate_data_config` accept/reject + **exact diagnostic text** baseline captured
-- [ ] live legacy `single_file` train/eval segment-count baseline captured
-- [ ] both captured **BEFORE** any production edit
-- [ ] no duplication of existing Step-02 `DatasetProfile` / `SampleSet` baselines
+- [x] `_validate_data_config` accept/reject + **exact diagnostic text** baseline captured — §19.2
+- [x] live legacy `single_file` train/eval segment-count baseline captured — §19.2, counts 200/200 off the persisted record
+- [x] both captured **BEFORE** any production edit — `git status --porcelain` showed only the new untracked test file
+- [x] no duplication of existing Step-02 `DatasetProfile` / `SampleSet` baselines — §19.2
 
 ### CHECKPOINT A — TIDMAD / replay parity
-- [ ] `TrialConfig` serialized form **deep-equal**
-- [ ] train `SampleSet` identity unchanged
-- [ ] eval `SampleSet` identity unchanged
-- [ ] validation verdict **and** diagnostic text exact
-- [ ] full/partial scope invariants unchanged
-- [ ] legacy `single_file` segment counts unchanged
-- [ ] a representative historical serialized TIDMAD configuration loads **without migration** and resolves to the same effective model/loss/train/tuner semantics
-- [ ] `DatasetProfile` / `TrialConfig` / model / loss / train schemas unchanged
+- [x] `TrialConfig` serialized form **deep-equal** — existing TC1b golden oracle, green
+- [x] train `SampleSet` identity unchanged — existing oracles green
+- [x] eval `SampleSet` identity unchanged — existing oracles green
+- [x] validation verdict **and** diagnostic text exact — Checkpoint-0 baseline, byte-identical
+- [x] full/partial scope invariants unchanged — run-invariants + DataScope suites green
+- [x] legacy `single_file` segment counts unchanged — 200/200
+- [x] a representative historical serialized TIDMAD configuration loads **without migration** and resolves to the same effective model/loss/train/tuner semantics — §19.6, 17 passed
+- [x] `DatasetProfile` / `TrialConfig` / model / loss / train schemas unchanged — proved statically from the diff (§19.6)
 
 ### CHECKPOINT B — generic consumption
-- [ ] B1 legality PASS
-- [ ] B2 scope PASS
-- [ ] B3 accounting PASS
-- [ ] each subcase atomic against its own baseline
-- [ ] family-level mutation/adversarial evidence reds appropriately (§8.1)
-- [ ] no ambient TIDMAD read or independent profile resolution remains in any 05a consumer
+- [x] B1 legality PASS — §19.7
+- [x] B2 scope PASS — §19.7
+- [x] B3 accounting PASS — §19.7
+- [x] each subcase atomic against its own baseline — atomicity itself asserted, not only stated
+- [x] family-level mutation/adversarial evidence reds appropriately (§8.1) — 5 mutations, all RED, none survived
+- [x] no ambient TIDMAD read or independent profile resolution remains in any 05a consumer — transport guard + zero-hit grep
 
 ### CHECKPOINT C — production path
-- [ ] real tuner control flow consumes the bound profile
-- [ ] minimum deterministic scenario set reaches every required semantic family
-- [ ] no helper-only substitution
+- [x] real tuner control flow consumes the bound profile — every test drives `run()`
+- [x] minimum deterministic scenario set reaches every required semantic family — C1 + C2, one checkpoint
+- [x] no helper-only substitution — nothing calls the migrated helpers directly
 
 ### CHECKPOINT D — regression / static
-- [ ] directly affected deterministic tests
-- [ ] focused tuner integration
-- [ ] mutations
-- [ ] `ruff check` + `ruff format --check`
-- [ ] required static/type checks
+- [x] directly affected deterministic tests — 36 passed
+- [x] focused tuner integration — 1978 passed, 1 skipped, from a clean tree
+- [x] mutations — 5 applied, all RED, none survived
+- [x] `ruff check` + `ruff format --check` — clean repo-wide
+- [x] required static/type checks — local pyright NOT RUNNABLE (Node v10.19.0); CI strict pyright is the authority (§19.8)
 - [ ] exact-final-head CI green
-- [ ] no local full suite by default
+- [x] no local full suite by default — not run
 
 ### GATES
-- [ ] **Gate 1 NOT REQUIRED** — re-verified; flips only if an unexpected LLM-visible surface changes
-- [ ] **Gate 2 NOT REQUIRED** — re-verified; flips only if scope unexpectedly expands into a real execution/resource/admission surface that cannot be proven deterministically
+- [x] **Gate 1 NOT REQUIRED** — re-verified at the final head; no rendered prompt byte and no `LLMBridge` kwarg is in the diff
+- [x] **Gate 2 NOT REQUIRED** — re-verified at the final head; no execution/resource/admission semantics change, every surface deterministic
 
 ### READY FOR OPERATOR REVIEW
-- [ ] Checkpoints 0/A/B/C/D complete
-- [ ] Gate disposition re-verified
-- [ ] PR opened/updated
+- [x] Checkpoints 0/A/B/C/D complete
+- [x] Gate disposition re-verified
+- [x] PR opened — #210
+- [x] node doc synchronized as the last pre-merge step (CLAUDE.md) — `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`, every documented parameter quoted against the merged source
 - [ ] exact-final-head CI green
 - [ ] local HEAD == PR `headRefOid` == successful CI `headSha`
 - [ ] working tree clean
@@ -838,7 +839,420 @@ Depends on: M4.
 
 ## 19. Implementation ledger
 
-*(empty — populated at implementation kickoff)*
+**Implementation authorized 2026-08-14.** Branch
+`feat/generic-framework-step-05a-tuner-data-selection`, cut from
+**`2da399eb`** — the operator-selected implementation base, which is master
+HEAD and `origin/master` at kickoff.
+
+> **Base reconciliation.** §0's table names `1cb0119c` (the freeze marker) as
+> the implementation base. The operator's implementation contract instead
+> selects `2da399eb`, which is `1cb0119c` plus one docs-only commit (that
+> commit is precisely the one recording the base). `origin/master ==
+> 2da399eb` at kickoff, so there is no divergence to reconcile.
+> `git diff --stat 13b08550..2da399eb` touches only five files, all under
+> `docs/design/` — **no production surface moved between the design census
+> base and the implementation base.**
+
+### 19.1 Implementation-time source re-enumeration (§17.2)
+
+Method: `grep -n "DATASET_CONFIG\|resolve_dataset_profile\|TIDMAD"` over the
+tuner, then a full dataset-fact sweep
+(`num_files|segments_per_file|psd_segment_length|SEGMENT_LENGTH|
+SEGMENTS_PER_FILE|NUM_FILES|sampling_frequency|*_file_pattern`) over the same
+module, then a caller audit of every helper the tuner reaches for
+validation/scope/accounting.
+
+**The frozen five-site census is exact — same sites, same line numbers.** The
+tuner source has not moved since `13b08550`.
+
+| # | Site | Family | Frozen census? |
+|---|---|---|---|
+| 1 | `ml_hyperparameter_tune_agent.py:76` import | (the alias itself) | yes |
+| 2 | `:1090` `_validate_data_config(dataset_config=DATASET_CONFIG)` | legality (B1) | yes |
+| 3 | `:2731` `full_scope=list(range(DATASET_CONFIG.num_files))` | scope (B2) | yes |
+| 4 | `:3657` `scope_is_partial` | scope (B2) | yes |
+| 5 | `:4465` legacy `single_file` train accounting | accounting (B3) | yes |
+| 6 | `:4470` legacy `single_file` eval accounting | accounting (B3) | yes |
+| **7** | **`agent/schemas/hyperparam_tuning.py:2162` — `validate_runtime_config(dataset: DatasetConfig = TIDMAD)`, consumed by the tuner at `:3656`** | **scope (B2)** | **NO — INCORPORATED** |
+
+#### Finding 1 — a sixth residue site, incorporated under §17.2
+
+```text
+Previous assumption (§2):
+  the residue is five module-level DATASET_CONFIG reads inside the tuner.
+
+Audit evidence:
+  `agent/schemas/hyperparam_tuning.py:2160-2226` — validate_runtime_config
+  binds the TIDMAD singleton as a DEFAULT ARGUMENT and resolves the run's
+  DataScope against it (`:2186 agent_input.data_scope.resolve(dataset)`,
+  `:2201 is_partial = resolved != list(range(dataset.num_files))`).
+  The tuner calls it at `:3656` with no dataset argument. A caller audit
+  shows the tuner is its ONLY production caller (`workflows/
+  model_exploration.py:1826` and `sdsc_submission_scripts/
+  run_one_iteration.py:1598` mention it in prose only).
+
+  This is not a newly noticed defect: Step 02b RECORDED AND ROUTED it.
+  `tests/unit/agent/tune_ml_hyperparam_agent/
+  test_step02b_checkpoint_c_live_integration.py:76-82` says verbatim —
+  "validate_runtime_config resolves the DataScope against the TIDMAD
+  singleton bound as a DEFAULT ARGUMENT ... a real genericity gap in the
+  DataScope/HealthGate startup path — explicitly NOT 02b's to fix".
+
+Corrected understanding:
+  Site 4 (`:3657`) and site 7 compute the SAME predicate from the SAME
+  fact. Migrating `:3657` alone would make them DISAGREE under a contrast
+  topology — validate_runtime_config would early-return believing the scope
+  full (skipping every partial-scope legality check) while the tuner printed
+  and stamped it as partial. Excluding site 7 does not keep 05a smaller; it
+  manufactures a NEW incoherence of exactly the kind §2.1 says a partial
+  merge would ship.
+
+§17.2 four-part test:
+  same DatasetProfile authority      — yes, it needs profile.dataset
+  same validation/scope capability   — yes, B2 scope, identical predicate
+  same compatibility contract        — yes, TIDMAD scope-invariant parity
+  same rollback boundary             — yes, the tuner is the sole production
+                                       caller; reverting the tuner call site
+                                       restores the previous behaviour
+
+Implementation consequence:
+  the tuner passes `dataset=` explicitly from the run-bound profile (M2).
+  The `= TIDMAD` default STAYS on the function — it is the Regime-A
+  compatibility adapter for non-tuner callers, exactly like
+  `resolve_dataset_profile()`'s documented TIDMAD fallback. Making the
+  parameter required would rewrite ~20 unrelated test call sites for no
+  capability gain, which is scope creep, not rigour.
+
+Validation consequence:
+  B2 must assert on BOTH predicates agreeing under a contrast num_files —
+  not just on the tuner's own `scope_is_partial`.
+```
+
+#### Finding 2 — one deferred site, different lifecycle
+
+`execute_tools/health_checks/config.py:383` — `validate_health_scope` calls
+`resolve_dataset_profile()` ambiently for `num_files`. Reached transitively
+from the tuner via `build_run_invariants` → `materialize_effective_config`.
+
+**Deferred to the HealthGate subsystem** (`docs/design/
+pluggable_health_checks.md`), per §17.2's "policy / measurement lifecycle"
+clause. Two reasons it is safe to defer rather than a MATERIAL STOP:
+
+1. it is an **ambient `ContextVar` read**, not a hard singleton binding, so
+   it already follows whatever profile is bound for the run — it can never
+   disagree with the run binding the way site 7 can;
+2. 05a's terminal property is about **tuner** consumers; this site belongs to
+   the HealthGate config lifecycle, which owns its own scope contract.
+
+Recorded so its owner can close it; 05a's semantics do not change either way.
+
+#### Finding 3 — two of `_validate_data_config`'s three guards are unreachable
+
+`:1120-1134`, branches 2 and 3, both compute `max(1, round(...))` and then
+test `< 1`. `max(1, x)` is never below 1, so **neither guard can fire for any
+input**. They read `segments_per_file`, so they *look* profile-dependent, but
+no profile can move their outcome.
+
+Consequence for Checkpoint 0: the legality baseline covers **one** failure
+class (divisibility), not three. Baselining a dead guard would pin nothing —
+CLAUDE.md's test-economy rule forbids it.
+
+**Not fixed here.** Removing or correcting a legality guard is a behavioural
+change to a rule Step 02 owns (§3), and 05a changes only *which object* is
+asked. Recorded as follow-up debt.
+
+### 19.2 CHECKPOINT 0 — pre-edit baselines — **COMPLETE**
+
+File: `tests/unit/agent/tune_ml_hyperparam_agent/
+test_step05a_checkpoint0_baselines.py` (new, tests only).
+
+| # | Baseline | Captured |
+|---|---|---|
+| 1 | legality — illegal `segmentation_size` rejected | **exact** full diagnostic string, hardcoded (not re-derived from `valid_segmentation_sizes()`) |
+| 2 | legality — legal `segmentation_size` accepted | verdict |
+| 3 | live legacy `single_file` train + eval segment counts | `200` / `200`, read off the **persisted record**, with the route confirmed from the persisted `trial_config_*.json` `mode` field |
+
+Reachability of baseline 3 is the **live** operator path, not the arithmetic
+expression: `FAKE_PLAN_RESPONSE` carries no `is_trial` key and the input sets
+`is_trial=False`, so `:4293-4298` selects `mode="single_file"` on its own. No
+patch touches that branch.
+
+```text
+Validation:
+  command:    .venv/bin/python -m pytest \
+                tests/unit/agent/tune_ml_hyperparam_agent/\
+                test_step05a_checkpoint0_baselines.py -q
+  purpose:    capture the two §6 surfaces with no existing oracle
+  runtime:    3.42 s
+  result:     3 passed
+  production: `git status --porcelain` shows ONLY the new untracked test
+              file — zero production files modified
+```
+
+**Deviation (bounded) — how the legality baseline calls the helper.**
+The M0 checklist says the baseline must reflect what production does today,
+which is the *default-argument* call. Written that way the baseline would
+stop compiling the moment M3 removes that default, so it could not serve as
+a before/after oracle. It therefore passes `dataset_config=TIDMAD`
+explicitly and pins *"under TIDMAD's topology, this verdict and this exact
+text"* — an invariant that is byte-identical before and after the migration.
+The separate, stronger claim *"production actually supplies the run-bound
+object"* is owned by the run-binding guard and Checkpoint C — the same split
+Step 02b used (`test_step02b_tuner_supplies_profile.py`'s docstring: "a
+parameter with a `None` default is invisible to every caller that never
+passes it").
+
+### 19.3 M1 — the run-bound profile — **COMPLETE**
+
+`ml_hyperparameter_tune_agent.py:3664` — `run_profile =
+resolve_dataset_profile()`, placed immediately after the `storage.local`
+extraction and immediately **before** the DS5 DataScope startup validation,
+which is the first startup consumer. That point precedes both consumer
+regions.
+
+The loop-scope resolution formerly at `:4430` is **removed**; the two
+`build_sample_set` calls now consume the run-scoped binding. Step 02b's
+guarantee is unweakened — both sites still receive an explicit profile, still
+the same object — and is now additionally shared with the validation, scope
+and accounting consumers.
+
+**Failure ordering is provably unchanged.** `resolve_dataset_profile()` reads
+a `ContextVar` and falls back to `TIDMAD_PROFILE` when nothing is bound
+(`dataset_config.py:596-613`); it has no failure mode of its own, so no run
+that used to fail before profile resolution can now fail after it. No phase
+moved, and **no branch was added to `run()`** — a single assignment, which
+matters because `run()` sits on pyright's strict-mode complexity ceiling
+(CLAUDE.md).
+
+Resolver **call count is deliberately not asserted** (§4, §10.2). What M1
+establishes is the semantic binding.
+
+```text
+Validation:
+  command:  .venv/bin/python -m pytest \
+              tests/unit/agent/tune_ml_hyperparam_agent -q
+  purpose:  zero-behaviour-change proof for the structural commit
+  runtime:  230.65 s
+  result:   1046 passed  (verdict read from the log file, not a wrapper exit)
+  note:     no existing test required editing; the Checkpoint-0 baselines
+            pass unchanged.
+```
+
+### 19.4 M2 — startup scope consumers — **COMPLETE**
+
+| Site | Before | After |
+|---|---|---|
+| `:2731` → now `_validate_history_and_lock` | `full_scope=list(range(DATASET_CONFIG.num_files))` | `full_scope=list(range(dataset.num_files))`, `dataset` a **required keyword-only** parameter supplied from `run_profile.dataset` at the call site |
+| `:3657` → `:3708` | `scope_is_partial = ... != list(range(DATASET_CONFIG.num_files))` | `... != list(range(run_profile.dataset.num_files))` |
+| **`validate_runtime_config`** (site 7) | tuner called it with no `dataset`, so it used the `= TIDMAD` default | tuner passes `run_profile.dataset` explicitly |
+
+`_validate_history_and_lock`'s `dataset` is **required, not defaulted** — a
+default would silently restore the ambient read the commit removes.
+`validate_runtime_config` keeps its `= TIDMAD` default as the documented
+Regime-A adapter for callers that predate the transport (§19.1 Finding 1);
+its docstring now records that the tuner supplies the run-bound value and why
+it mattered.
+
+Unchanged, and verified by the untouched existing tests: DataScope semantics,
+strategy, portions, seeds, ordering, the run-invariants lock **format**, and
+the mismatch policy (still fails closed — B2's out-of-range case asserts it).
+
+```text
+Validation:
+  command:  pytest test_step05a_checkpoint0_baselines.py test_data_scope_input.py
+              test_ordering_schema_wiring.py test_step02b_tuner_supplies_profile.py
+              tests/unit/core -q
+  runtime:  73.82 s
+  result:   2445 passed, 2 skipped
+```
+
+### 19.5 M3 — legality, legacy accounting, import removal — **COMPLETE**
+
+| Site | Change |
+|---|---|
+| `_validate_data_config` | `dataset_config` is now a **required** parameter — the `= DATASET_CONFIG` default is gone. The tuner passes `run_profile.dataset`. The RULE is untouched; it still delegates to `valid_segmentation_sizes()`. |
+| legacy `single_file` train count | `run_profile.dataset.segments_per_file` |
+| legacy `single_file` eval count | `run_profile.dataset.segments_per_file` |
+| `:76` import | **removed** |
+
+The legacy branch is **migrated, not deleted**: it is still selected by
+`is_trial=False` alone, and B3's TIDMAD control asserts its counts are still
+200/200.
+
+**Terminal semantic property.** `grep DATASET_CONFIG` over the tuner returns
+zero — recorded as *supporting mechanical evidence only*, exactly as §17 M3
+requires. The property that actually carries the weight is asserted by the
+transport guard (§19.6): under a resolver that returns the bound profile once
+and TIDMAD thereafter, every 05a consumer still produces bound-profile
+behaviour. A renamed alias or a module-attribute access would leave the grep
+clean and would still red that guard.
+
+Exactly one `resolve_dataset_profile()` call site remains in the tuner — the
+run-scope binding at `:3694`. That is the establishment point, not a
+consumer's independent resolution.
+
+```text
+Validation:
+  command:  pytest tests/unit/agent tests/unit/execute_tools tests/unit/core
+              tests/unit/workflows -q
+  purpose:  broad regression across every subsystem the seven sites touch
+  runtime:  411.43 s
+  result:   7415 passed, 3 skipped   (verdict read from the log file)
+  also:     ruff check + ruff format --check clean on both touched modules
+            (one I001 import-order error was fixed, not suppressed)
+```
+
+### 19.6 CHECKPOINT A — TIDMAD / replay parity — **COMPLETE**
+
+| Surface | Oracle | Result |
+|---|---|---|
+| `TrialConfig` serialized form deep-equal | **existing** — `test_step00_record_baselines.py::TestTC1bOnDiskTrialConfigArtifact`, golden-backed | green in the 7415-test run |
+| train / eval `SampleSet` identity | **existing** — `test_formal_sample_set.py`, `test_step02b_*` | green |
+| validation verdict + exact diagnostic | Checkpoint-0 baseline | green, **byte-identical** |
+| full / partial scope invariants | **existing** — run-invariants + DataScope suites | green |
+| legacy `single_file` counts | Checkpoint-0 baseline + B3's TIDMAD control | 200 / 200, unchanged |
+| historical config loads **without migration** | **NEW** — `test_step05a_checkpoint_a_replay.py` | 17 passed |
+| `DatasetProfile` / `TrialConfig` / model / loss / train schemas | static: the diff touches no schema module | see below |
+
+**The one genuinely missing oracle was the READING direction.** TC1b compares
+a *fresh* run's artifacts against a golden, which proves the form this code
+PRODUCES has not moved — it does not prove a document written by an older
+build still LOADS. A change that made a field required would keep TC1b green
+(fresh runs supply it) while breaking every stored config. The new module
+closes exactly that gap, using two genuinely historical committed artifacts:
+the Step-00 `tc1b_on_disk_trial_configs.json` golden (3 configs) and
+`ml_models/legacy_baseline_configs.json` (6 paper-spec model/loss/train
+configs). Each is validated and dumped back **deep-equal**. Both corpora are
+size-asserted so a parametrized suite over an empty list cannot pass
+vacuously.
+
+**Schemas unchanged — proved statically, not by a test.** The PR's diff
+touches three files: the tuner, `agent/schemas/hyperparam_tuning.py`
+(a docstring only — `git diff` shows no field, validator or default changed),
+and the design doc. `execute_tools/dataset_config.py` is **not in the diff at
+all**, so `DatasetProfile`'s schema is untouched by construction. That is
+stronger evidence than a field-list test, and CLAUDE.md forbids pytesting
+what a static fact already establishes.
+
+CLI / argv unchanged: no `argparse` line is in the diff.
+
+### 19.7 CHECKPOINT B + CHECKPOINT C — **COMPLETE**
+
+`tests/unit/agent/tune_ml_hyperparam_agent/test_step05a_run_bound_profile.py`
+— 16 tests. Every one drives the real `HyperparamTuningAgent.run()`; nothing
+calls `_validate_data_config`, `validate_runtime_config` or the accounting
+expression directly, so Checkpoint C's no-helper-substitution property holds
+for the whole module and Stage-B is proven *through* it rather than beside it.
+
+**Checkpoint C scenario set — two scenarios, ONE checkpoint.** `trial`/
+`formal` and `single_file` are selected by disjoint control flow, so no single
+invocation reaches both; §9 anticipates this exactly.
+
+| Scenario | Route | Families reached |
+|---|---|---|
+| **C1** | contrast trial run | B1 legality, B2 scope |
+| **C2** | contrast `single_file` run | B3 accounting |
+
+**Stage-B subcases — each moves exactly ONE fact.** Atomicity is *asserted*,
+not merely stated in prose: `test_each_subcase_moves_exactly_one_fact` fails
+if a future edit quietly widened a fixture, which is the only thing that would
+notice §8's partial-derivation protection evaporating.
+
+| Subcase | Varies | Observable |
+|---|---|---|
+| **B1** | `psd_segment_length` 10,000,000 → 1,500,000 | a segmentation size legal under TIDMAD is rejected, with the **bound topology's** exact diagnostic; TIDMAD control still accepts it |
+| **B2** | `num_files` 20 → 7 | stamped `resolved_data_scope == range(7)`; a scope of files 0-6 is classified **full**, not partial (both predicates asserted — the verdict *and* the `[DATASCOPE] Partial scope active` line); a genuinely partial scope is still detected; an unstamped legacy record is judged against the bound `full_scope`; an out-of-range index is still rejected |
+| **B3** | `segments_per_file` 200 → 57 | live legacy `single_file` train/eval counts are 57/57; TIDMAD control still 200/200 |
+
+**Bounded deviation — the B2 full-vs-partial observable.** The first draft
+used "partial scope + HealthGates enabled requires explicit
+`--health_gate_files`" as the verdict. Every contrast-topology run with gates
+enabled failed earlier and for an unrelated reason: the shipped
+`configs/health_checks.yaml` declares monitored files as TIDMAD indices
+`[3, 10, 17]`, which `validate_health_scope` rejects as out of a 7-file scope.
+That is §19.1 Finding 2's deferred HealthGate/YAML gap, so gates are disabled
+in the harness *with the reason recorded in the source* — the same remediation
+Step 02b's Checkpoint C used — and the observable switched to
+`formal_strategy="anchors"`, which a partial scope forbids and a full scope
+never reaches.
+
+#### Mutation / adversarial evidence (§8.1)
+
+Method (CLAUDE.md mutation hygiene): assert the target matches **exactly
+once** before writing, clear every `__pycache__`, run, restore from committed
+source, re-verify green. The first run **aborted two mutations on the
+site-count guard** — a line-based counter miscounted multi-line targets. That
+is the guard doing its job; the counter was fixed to count substrings and both
+were re-run.
+
+| # | Family | Mutation | Expected | Observed |
+|---|---|---|---|---|
+| 1 | legality | legality site reads the ambient TIDMAD singleton | RED | **RED** — `B1 rejected_under_bound_topology`, `legality_survives_poisoned` |
+| 2 | scope | both scope predicates read the ambient singleton | RED | **RED** — 5 tests incl. out-of-range and the transport guard |
+| 3 | scope | only `_validate_history_and_lock`'s `full_scope` reads the singleton | RED | **RED** — `unstamped_legacy_record` |
+| 4 | accounting | both legacy counts read the ambient singleton | RED | **RED** — `B3 counts_follow_bound_profile`, `accounting_survives_poisoned` |
+| 5 | **transport** | one consumer calls `resolve_dataset_profile()` itself — reads *a* profile, just not the run's | RED | **RED** — `accounting_survives_poisoned` |
+
+Mutation 3 is not redundant with 2: it is the only one that isolates the
+stamped-history site, which mutation 2 does not touch.
+
+Mutation 5 is the failure class no per-site mutation can catch. The guard
+poisons ambient re-resolution — the first resolution returns the bound
+profile, every later one returns TIDMAD — so a consumer resolving on its own
+authority silently switches topology mid-run while still "reading a profile".
+It is deliberately **not** a call-count assertion (§4, §10.2).
+
+No mutation survived. Tree restored (`git status` clean on the tuner) and
+re-verified: **16 passed**.
+
+```text
+Validation:
+  command:  pytest test_step05a_run_bound_profile.py
+              test_step05a_checkpoint_a_replay.py
+              test_step05a_checkpoint0_baselines.py -q
+  runtime:  33.63 s
+  result:   36 passed
+```
+
+### 19.8 CHECKPOINT D — regression / static / CI
+
+| Check | Result |
+|---|---|
+| directly affected deterministic tests | 05a modules — **36 passed**, 33.63 s |
+| focused tuner integration | `tests/unit/agent/tune_ml_hyperparam_agent` + `tests/unit/execute_tools`, from a **clean tree** — **1978 passed, 1 skipped**, 288.90 s |
+| broad subsystem regression (at M3) | `tests/unit/{agent,execute_tools,core,workflows}` — **7415 passed, 3 skipped**, 411.43 s |
+| mutation evidence | 5 mutations, all RED, none survived; restored tree re-verified **16 passed** |
+| `ruff check .` | **clean** repo-wide |
+| `ruff format --check .` | **clean** repo-wide |
+| strict pyright | **NOT RUNNABLE LOCALLY — see below** |
+| local full suite | **not run**, per §13 / §17 |
+| exact-final-head CI | run `31835207229` on `2b65a6bc` |
+
+**Local pyright limitation, recorded rather than papered over.** This host's
+Node is **v10.19.0**; pyright's bundled runtime fails to parse its own vendor
+bundle (`SyntaxError: Unexpected token =`). Per CLAUDE.md's environment-
+assumptions rule, **no local type claim is made** — CI's strict pyright step
+is the authority, and it is a blocking step in `.github/workflows/ci.yml`.
+
+Every verdict above was read from the **log file**, never from a wrapper's
+exit status.
+
+### 19.9 PR
+
+| | |
+|---|---|
+| PR | **#210** |
+| branch | `feat/generic-framework-step-05a-tuner-data-selection` |
+| base | `2da399eb` |
+| implementation commits | `a2060fba` (M0/CP0) · `ad05ed95` (M1) · `885ab4d7` (M2+M3) · `2b65a6bc` (M4/CP A+B+C) · `4e4773a9` (CP D ledger) · `ab68fe36` (node-doc sync) |
+| final head + its CI run | recorded in the **PR #210 body** and the context handoff, not here — a commit cannot contain its own SHA, so naming it in this file would either be stale or force an infinite regress of ledger commits |
+| CI already green on | `4e4773a9`, run `31835304729`, **including strict pyright**. Every later commit is documentation only (`git diff --stat` over them touches no `.py`) |
+
+**Gate disposition re-verified at the final head.** Gate 1 **NOT REQUIRED** —
+no rendered prompt byte and no `LLMBridge` kwarg is in the diff. Gate 2 **NOT
+REQUIRED** — no execution, training, inference, scoring, resource or admission
+semantics change; every migrated surface is deterministic. Neither was run. No
+real LLM, training, inference or GPU was used at any point.
 
 ## 20. Remaining operator decisions
 

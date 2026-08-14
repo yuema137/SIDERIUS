@@ -73,8 +73,12 @@ from core.sandbox_executor import TidmadSandbox
 from core.scientific_authority import ScientificAuthority
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import TIDMAD_DATA_DIR
-from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.dataset_config import DataScope, ScopeViolationError, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DataScope,
+    DatasetConfig,
+    ScopeViolationError,
+    resolve_dataset_profile,
+)
 from execute_tools.health_checks.candidate_eligibility import (
     classify_candidate_health,
     formal_validity_of,
@@ -1087,11 +1091,26 @@ def _build_denoised_filename(
 def _validate_data_config(
     trial_config: TrialConfig,
     segmentation_size: int,
-    dataset_config=DATASET_CONFIG,
+    dataset_config: DatasetConfig,
 ) -> None:
     """
     Validate integer relationships between dataset, PSD segments, ML segments,
     and sampling portions. Called in the agent loop where all configs converge.
+
+    Args:
+        trial_config: The round's validated trial configuration.
+        segmentation_size: The planned ML segmentation size to check.
+        dataset_config: The run-bound topology to validate AGAINST. Step 05a
+            made this required. It used to default to the module-level TIDMAD
+            singleton, so a run bound to another topology had its segmentation
+            legality decided by TIDMAD's ``psd_segment_length`` — rejecting
+            sizes that were legal for the bound task, and accepting sizes that
+            were not. A default would silently restore exactly that, so there
+            is none: every caller states which topology it means.
+
+            The RULE is unchanged and still belongs to Step 02 — the legal
+            values come from ``dataset_config.valid_segmentation_sizes()``.
+            05a changes only which object is asked.
 
     Raises:
         ValueError: If any constraint is violated.
@@ -2713,6 +2732,8 @@ def _validate_history_and_lock(
     run_invariants: RunInvariants,
     existing_history: list[dict[str, Any]],
     lock_was_present: bool,
+    *,
+    dataset: DatasetConfig,
 ) -> None:
     """DS6b — ingress validation + deferred lock creation.
 
@@ -2721,6 +2742,15 @@ def _validate_history_and_lock(
     no stamps — DS5b — and are skipped), so a legacy workspace is never
     silently locked. A lock-present workspace was already validated at
     startup; its records were produced under that lock.
+
+    Args:
+        dataset: The run's dataset topology, from the run-bound
+            ``DatasetProfile``. Step 05a: an unstamped legacy record is
+            assumed to have been produced under the FULL scope, and "full"
+            is only meaningful relative to *this run's* file count — reading
+            it from the ambient TIDMAD singleton would validate a bound
+            task's history against TIDMAD's twenty files. Required, not
+            defaulted: a default here would silently restore that.
     """
     if not lock_was_present:
         for rec in existing_history:
@@ -2728,7 +2758,7 @@ def _validate_history_and_lock(
                 validate_stamped_invariants(
                     rec,
                     run_invariants,
-                    full_scope=list(range(DATASET_CONFIG.num_files)),
+                    full_scope=list(range(dataset.num_files)),
                     source=f"workspace summary record {rec.get('exp_id') or '(no exp_id)'}",
                 )
     ensure_run_invariants(workspace, run_invariants)
@@ -3648,13 +3678,34 @@ class HyperparamTuningAgent:
         workspace = storage_local.workspace
         run_name = storage_local.run_name
 
+        # --- The run's ONE dataset profile (Step 05a) ---
+        # Resolved once, here, at the earliest point that precedes BOTH the
+        # startup consumers (scope stamping / partial-scope detection) and
+        # the loop consumers (legality, sample-set construction, legacy
+        # accounting). Every one of them receives this value as an argument;
+        # none resolves ambiently on its own authority, which is the defect
+        # Step 02b removed from sample-set construction and 05a removes from
+        # the rest of the tuner.
+        #
+        # Placement cannot move failure ordering: `resolve_dataset_profile`
+        # reads a ContextVar and falls back to the shipped TIDMAD profile, so
+        # it has no failure mode of its own and no phase moved to accommodate
+        # it.
+        run_profile = resolve_dataset_profile()
+
         # --- DataScope + HealthGate startup validation (DS5) ---
         # Dataset-resolved checks (schema validators cover only internal
         # consistency), then health-config materialization — all BEFORE any
         # LLM call, sandbox construction, or file I/O. See
         # docs/design/enable_partial_file_list.md.
-        resolved_data_scope = validate_runtime_config(agent_input)
-        scope_is_partial = resolved_data_scope != list(range(DATASET_CONFIG.num_files))
+        # Step 05a: BOTH the scope resolution and the partial-scope predicate
+        # read the run-bound topology. They compute the same comparison from
+        # the same fact, so supplying the profile to only one of them would
+        # let `validate_runtime_config` early-return believing the scope full
+        # — skipping every partial-scope legality check — while this line
+        # classified and stamped the run as partial.
+        resolved_data_scope = validate_runtime_config(agent_input, run_profile.dataset)
+        scope_is_partial = resolved_data_scope != list(range(run_profile.dataset.num_files))
         health_checks_config_source = agent_input.health_checks_config
         # DS6b — build_run_invariants is the ONE shared path (tuner +
         # workflow) that materializes/hashes the effective config and then
@@ -4011,7 +4062,13 @@ class HyperparamTuningAgent:
             )
         # DS6b — ingress validation + deferred lock creation, still before
         # any LLM call (the first plan call happens in the round loop below).
-        _validate_history_and_lock(workspace, run_invariants, existing_history, _lock_was_present)
+        _validate_history_and_lock(
+            workspace,
+            run_invariants,
+            existing_history,
+            _lock_was_present,
+            dataset=run_profile.dataset,
+        )
         consecutive_fails = 0
         # D-C6: set at the skip gate itself, so the feedback can state
         # WHY formal did not run rather than inferring it from the
@@ -4415,19 +4472,26 @@ class HyperparamTuningAgent:
 
                     # Validate integer relationships between dataset, PSD, ML segments
                     _validate_data_config(
-                        trial_config, plan.model_cfg.get("segmentation_size", 10000)
+                        trial_config,
+                        plan.model_cfg.get("segmentation_size", 10000),
+                        run_profile.dataset,
                     )
 
                     # Build TWO independent SampleSets — training and validation
                     if trial_config.mode in ("trial", "formal"):
-                        # Step-02b: the run's profile is resolved ONCE here and
-                        # supplied EXPLICITLY to both construction sites, rather
-                        # than each one resolving it ambiently inside the
-                        # builder. Two consequences: a run bound to a non-default
-                        # topology can no longer silently select against the
-                        # ambient one, and train and eval provably select against
-                        # the same topology.
-                        run_profile = resolve_dataset_profile()
+                        # Step-02b: the run's profile is supplied EXPLICITLY to
+                        # both construction sites, rather than each one resolving
+                        # it ambiently inside the builder. Two consequences: a run
+                        # bound to a non-default topology can no longer silently
+                        # select against the ambient one, and train and eval
+                        # provably select against the same topology.
+                        #
+                        # Step-05a: `run_profile` is now the RUN-scoped binding
+                        # established at run() entry, not a second resolution
+                        # taken here. The tuner's validation, scope and
+                        # accounting consumers read that same value, so a round
+                        # can no longer select against one topology while being
+                        # validated and accounted against another.
                         train_sample_set = build_sample_set(
                             is_trial=True,
                             trial_strategy=trial_config.trial_strategy,
@@ -4462,12 +4526,18 @@ class HyperparamTuningAgent:
                     if train_sample_set:
                         train_psd_segments = sum(len(v) for v in train_sample_set.values())
                     else:
-                        train_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
+                        # Legacy single-file: the whole file is used, so the
+                        # count IS the run topology's segments-per-file.
+                        # Step-05a reads it from the run-bound profile — under
+                        # TIDMAD this is byte-identical, and under a bound task
+                        # the record no longer reports TIDMAD's 200 segments
+                        # for a file that does not have 200.
+                        train_psd_segments = run_profile.dataset.segments_per_file
 
                     if eval_sample_set:
                         eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
                     else:
-                        eval_psd_segments = DATASET_CONFIG.segments_per_file  # legacy single-file
+                        eval_psd_segments = run_profile.dataset.segments_per_file  # legacy
 
                     # When force_model is set, override the LLM's model_type choice.
                     if model_type_setting != "auto":

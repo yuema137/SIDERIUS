@@ -2172,6 +2172,22 @@ def validate_runtime_config(
     subsequent health-config materialization (``materialize_effective_config``
     + ``validate_health_scope``) performs the monitored-file subset check.
 
+    Args:
+        agent_input: The validated tuner input.
+        dataset: The topology the DataScope resolves against. **Step 05a: the
+            tuner — the only production caller — supplies its run-bound
+            ``DatasetProfile.dataset`` explicitly.** The ``TIDMAD`` default is
+            the Regime-A compatibility adapter for callers that predate the
+            profile transport, exactly like ``resolve_dataset_profile()``'s own
+            fallback; it is not this function's authority.
+
+            Why it mattered: the tuner separately computes ``scope_is_partial``
+            from the same fact. While this argument defaulted to the singleton,
+            a run bound to a smaller topology could have its scope early-return
+            here as "full" — skipping every partial-scope legality check below
+            — while the tuner classified and stamped the same run as partial.
+            Recorded by Step 02b, closed by Step 05a.
+
     Returns:
         The resolved scope (sorted list of allowed file indices).
 

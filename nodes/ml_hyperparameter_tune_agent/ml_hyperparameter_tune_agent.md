@@ -748,3 +748,37 @@ a second place the rule could drift from the authority. It now calls
 derivations produce the identical 36-entry list, so the error message —
 which prints the legal values — is byte-identical. Pinned by
 `tests/unit/execute_tools/test_step02a_c5_legality_dedup.py`.
+
+### Which profile the tuner asks (PR 05a, 2026-08)
+
+02a fixed *the rule*; 05a fixes *the object the rule is applied to*.
+
+`run()` resolves the run's `DatasetProfile` **once**, at the start, and
+passes it explicitly to every consumer that needs a dataset fact:
+
+| Consumer | Dataset fact | Receives |
+|---|---|---|
+| `_validate_data_config` | `psd_segment_length` (legality) | `dataset_config` — **required**, no default |
+| `validate_runtime_config` | `num_files` (DataScope resolution) | `dataset` — passed by the tuner |
+| `scope_is_partial` | `num_files` | the run-bound profile |
+| `_validate_history_and_lock` | `num_files` (legacy `full_scope`) | `dataset` — **required**, keyword-only |
+| legacy `single_file` accounting | `segments_per_file` | the run-bound profile |
+| `build_sample_set` (train + eval) | whole profile | unchanged since 02b |
+
+The module-level `from execute_tools.dataset_config import TIDMAD as
+DATASET_CONFIG` import is **gone**; the tuner has no ambient dataset
+authority left. The two required-parameter choices are deliberate — a
+default would silently restore the ambient read.
+
+**No CLI argument, default value, schema field or operator-visible
+behaviour changed under TIDMAD.** Under TIDMAD every migrated site produces
+exactly the value it produced before, including the legacy `single_file`
+segment counts (200/200) and the byte-identical legality diagnostic. What
+changed is what happens under a *bound non-TIDMAD topology*: the tuner can
+no longer validate, scope or account an attempt against TIDMAD's numbers
+while selecting against the run's own.
+
+Pinned by `tests/unit/agent/tune_ml_hyperparam_agent/
+test_step05a_{checkpoint0_baselines,run_bound_profile,checkpoint_a_replay}.py`.
+Design: `docs/design/generic_framework_upgrade/
+step_05a_tuner_data_selection.md`.
