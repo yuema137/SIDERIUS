@@ -2686,6 +2686,87 @@ mechanism  a plan resolving to more than 3,000 steps is REJECTED and the
 projected  ~25 min; ceiling unchanged
 ```
 
+#### GATE 2 — attempts 3 & 4, and a BINDING operator decision on the LLM config
+
+**Attempt 3** (`--max_steps_per_attempt 3000`): both rounds SKIPPED.
+
+```text
+[Guardrails §5] SKIPPED: resolved optimizer steps 12500 exceed max_steps_per_attempt 3000
+[Guardrails §5] SKIPPED: resolved optimizer steps 250000 exceed max_steps_per_attempt 3000;
+                formal batch_size 1 below min_formal_batch_size 4 (V18 incident shape)
+```
+
+The cap was set BELOW anything the planner would produce, so rejection was
+the only possible outcome. Two incidental findings: round 2 chose **formal**
+despite `--no-force_formal_round` (that flag stops the harness FORCING a
+formal round; the planner may still elect one), and `min_formal_batch_size`
+caught exactly the launch-overhead pathology it exists for.
+
+**Attempt 4** (`--max_steps_per_attempt 15000`): the implementor failed
+after 3 attempts.
+
+```text
+Wavenet12HfSpectralColdstartConfig
+  dilation_cycle
+    Input should be a valid integer, input_value=[1, 2, 4, 8, 16, 32]
+  then: "Non-scalar config fields: {'dilation_cycle': 'list'}"
+```
+
+**Checked specifically against M6:** `num_classes` appears **ZERO** times
+in the entire failure path and never in the proposer's `model_config`. The
+new `BaseConfig.num_classes` is not implicated — a plugin config rejecting
+an unexpected field was the plausible regression, and it did not happen.
+
+The chain then SELF-CORRECTED: it discarded the candidate, and the next
+planner round explicitly reasoned *"avoids the known schema pitfall by not
+introducing unsupported dilation_cycle fields at all"* and switched to
+`batch_size 8`. The feedback loop works.
+
+```text
+BINDING OPERATOR DECISION (2026-08-13) — ALL Gate tests use
+llm_configs/openai_tiered_pro.json
+
+Previous implementation assumption
+  The gate standard's constraints table marks
+  `--llm_config openai_tiered_v1.json` **mandatory**, and the Step-03
+  contract forbids inheriting Step-02's command from precedent. So v1 was
+  chosen over the `openai_tiered_pro.json` Step 02c had used.
+
+Evidence
+  v1 is weaker at EVERY role and puts three judgment roles on mini/nano:
+      propose.comparison  gpt-5.4-mini   vs  gpt-5.5
+      validate            gpt-5.4-mini   vs  gpt-5.5
+      tune.reflector      gpt-5.4-nano   vs  gpt-5.5
+  Both Gate failures above are proposer/planner JUDGMENT failures — an
+  invented list-valued hyperparameter, and step plans 2-80x over any
+  workable bound — not plumbing failures. They burn Gate wall-time
+  without exercising what the Gate exists to test.
+
+Corrected understanding
+  The standard's config line is a stale FLOOR, not a ceiling. Following
+  it "over precedent" was the wrong reading: Step 02 had already
+  established pro as the working configuration on this host.
+
+Consequence
+  All Gate runs use `openai_tiered_pro.json`. The gate standard's row is
+  CORRECTED in this PR, with the evidence, so the next step is not misled
+  by the same stale mandate.
+```
+
+#### GATE 2 — attempt 5 (running): pro config
+
+```text
+--llm_config llm_configs/openai_tiered_pro.json   (gpt-5.5 every role)
+--num_iterations 1 --max_rounds 1
+--trial_portion 0.01 --train_portion 0.01 --eval_portion 0.02
+--max_steps_per_attempt   OMITTED — it fought the planner rather than
+                          bounding it; attempt 1 proved a trial round
+                          completes in ~34 min, and a stronger planner
+                          should choose a saner batch size unprompted
+projected                 ~50 min; 60-min ceiling unchanged, and a
+                          runaway step count is watched for directly
+```
+
 ### 24.8 Amendment A-1 — **OPERATOR-APPROVED 2026-08-13**
 
 **Approved with two corrections, and PROMOTED into the frozen design as
