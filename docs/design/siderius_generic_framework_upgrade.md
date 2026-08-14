@@ -1508,6 +1508,50 @@ consumers. Ownership boundaries, rung selection and Gate decisions are
 source does not settle it, ASK the operator — do not decide by
 plausibility.
 
+#### 17.0.1 Gate 2 is bounded by executed WORK (2026-08-14, PR #206)
+
+The authority in §17.0 is unchanged — the gate standard is still the only
+one, and Gate tiers are still REAL vs PSEUDO. What changed is what a
+Gate-2 run costs and what its PASS means. Steps read
+`docs/gates/gate_testing_standard.md` for the command; the governance
+consequences are these:
+
+**The Gate harness owns the WORKLOAD, not the tuner's decisions.** The
+planner plans normally and may elect trial or formal; the Gate bounds how
+much real work that election may execute. A step must NOT force a round
+mode to make its Gate cheap — the envelope binds both modes, which is why
+no force-trial mechanism exists.
+
+**Default temporal depth is 1 iteration × 1 round.** Deeper is opt-in by
+the failure class the step actually changes: ≥2 rounds for multi-round
+tuner policy, ≥2 iterations for cross-iteration or resume behaviour,
+formal promotion only when promotion itself is under test. This governs
+HOW a required Gate runs; it does NOT relax §17.0's assignment rules, and
+no step may reason its way out of a Gate the table requires.
+
+**Gate-2 PASS is functional.** Real training, real inference, real
+scoring, a finite non-null result, plus proof that a migrated boundary
+was exercised when the step migrated one. Convergence, score improvement,
+incumbent improvement and model quality are NOT default PASS conditions —
+a one-epoch, sample-capped model is a plumbing signal. Only a step that
+changes those semantics may require them.
+
+**Three mechanisms are NOT bounds**, and a design that cites one as its
+runtime guarantee is wrong: `trial_time_budget_minutes` is forecast-based
+admission (a round ran 33m53s under a "5 minute" budget); `trial_portion`
+is a fraction whose base is planner-controlled (1 % of scope resolved to
+12,500 optimizer steps); `max_steps_per_attempt` REJECTS rather than
+bounds (set low, every round was SKIPPED and no training ran).
+
+**A normal Gate bound must be enforceable BEFORE expensive training
+starts.** Mid-run termination is a last-resort safety fuse, never the
+sizing mechanism — a run killed at a deadline yields no evidence and
+wastes the whole attempt.
+
+Effect on this roadmap: Step-02's Gate 2 took 16m17s and Step-03's
+attempts ran 30-60+ minutes with two aborted before any training. Later
+steps instantiate the bounded shape instead.
+
 
 
 Every module passes SIX checkpoints — EXCEPT step 0, which CREATES
