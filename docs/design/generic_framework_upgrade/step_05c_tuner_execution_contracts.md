@@ -53,9 +53,28 @@ the §14 row needs:
 | **READER** — health peeks | HealthGate peek paths | **Step 08 — NOT touched** |
 
 Seven production sites are 05c's; the scorer and peek readers are not.
-Diagnostic `scripts/*` copies (≈10) are **recorded, not migrated** — they are
-operator tooling, not the production contract, and migrating them would
-inflate this PR's blast radius without adding capability.
+
+### 0.1 `scripts/*` census — classified by reproducibility role
+
+`scripts/*` are **not** excluded merely for being "tooling". Each
+deliverable-literal script is classified by whether it participates in
+reproducing, resuming or replaying a run:
+
+| Script | Role | Disposition |
+|---|---|---|
+| `finalize_recovered_diagnostic_round.py` | **canonical reconstruction** — rebuilds a round's artifacts | **MIGRATE** to the DeliverableSpec |
+| `pregate_runtime_control_validation.py:214` | **production-adjacent** — pre-Gate validation globs live artifacts | **MIGRATE** |
+| `v18_wave_summary.py:55,121` | **production-adjacent** — audits a workspace's artifact set against scope | **MIGRATE** |
+| `fcnet_health_metrics_scan.py`, `fcnet_full_file_scan.py`, `fcnet_diversity_pearson_scan.py`, `investigate_pearson_feasibility.py`, `official_paper_health_scan.py` | **diagnostic-only** — one-off analyses over historical outputs, several already parameterized (`official_paper_health_scan.py:96` takes the template as a CLI default) | **RECORD, leave literal** — migrating adds no capability, and they must keep reading *historical* artifacts written before this PR |
+
+Rationale for the split: a script that **reconstructs or validates a run**
+must agree with the producer, or a renamed deliverable silently breaks
+recovery. A script that **analyses historical files** must keep matching the
+names those files already have — migrating it would be actively wrong.
+
+**Finding surfaced, not silently absorbed**: the three migrated scripts add
+~3 sites to 05c but no new responsibility (same contract, same authority,
+same rollback). They do **not** justify a fourth PR.
 
 ## 1. Observable final capability
 
@@ -120,8 +139,126 @@ Step 06's design confirms or counter-proposes final ownership.
 rung belongs to whichever design wins final ownership — exactly as the §14
 row already specifies.
 
-**This remains an operator decision to confirm** (§13), because it binds
+**Ownership timing — one coherent rule** (replacing the earlier inconsistent
+wording that said both "Step 06 confirms" and "the row completes at step 11"):
+
+```text
+Step 05c : producer-side PROVISIONAL extraction. Ownership stays OPEN.
+Step 06  : the NEXT MANDATORY ownership review, now holding producer AND
+           scorer/scoreability evidence. It MUST either
+             (a) CONFIRM final ownership, or
+             (b) record exactly which consumer evidence is still missing
+                 and keep the row OPEN.
+Steps 08/11 : may add later consumer evidence. Neither is predetermined as
+           the final decision point.
+```
+
+Step 05 therefore does **not** promise that Step 06 will settle ownership —
+only that Step 06 must decide-or-say-why. And it does not nominate Step 11
+as the owner merely because later consumers exist there.
+
+**This remains an operator decision to confirm** (§16), because it binds
 Step 06's design surface.
+
+### 3.1 What the provisional contract IS — frozen representation
+
+The design must not leave "a new provisional contract module" ambiguous.
+Classified against current source:
+
+| Question | Answer |
+|---|---|
+| **USER-AUTHORED?** | **NO** |
+| **PERSISTED?** | **NO** — not written as its own artifact |
+| **SERIALIZED?** | **NO** new serialization format; it rides transports that already exist (§3.2) |
+| **RUNTIME-ONLY?** | **YES** — an internal typed `DeliverableSpec` constructed at run scope |
+| **REQUIRED FOR LEGACY RUNS?** | **NO** — legacy runs construct the identical TIDMAD spec from values they already carry |
+| **DEFAULT / ADAPTER?** | the TIDMAD instance is the derived default; no declaration is needed to obtain it |
+| **OWNER?** | provisionally 05c, ownership OPEN (§3) |
+
+**No new YAML. No new top-level config file. No new task-config block. No new
+train-config block.** A typed runtime value is not a configuration
+architecture, and "DeliverableContract" being a useful concept name does not
+authorize a user-facing format.
+
+Its fields are **derived**, not declared: the naming template and layout come
+from the existing TIDMAD compatibility values (today's inlined literals,
+extracted verbatim); dtype and offset come from `DatasetProfile.encoding`,
+which is already declared by Step 02 and already transported (§3.2).
+
+If implementation finds a deliverable semantic that genuinely cannot be
+derived this way, that is a **MATERIAL STOP** and a design review — not
+permission to widen the config system (§13).
+
+### 3.2 Subprocess transport — frozen, and it requires NO new argv
+
+Mechanically traced parent → subprocess at `13b08550`:
+
+```text
+sandbox_executor._write_dataset_profile_config(exp_id)
+    writes  configs/dataset_profile_{exp_id}.json = resolve_dataset_profile().model_dump()
+    passes  --dataset_profile_json   at :1325 (training), :1661 (inference), :1908 (scoring)
+
+inference_single.py:337-341
+    dataset_profile = load_dataset_profile(args.dataset_profile_json)   # fails closed
+    profile_channels = dataset_profile.channels
+```
+
+The parent's own docstring (`:1220-1238`) states the rule this PR follows:
+*"One declaration, one file, three consumers … through the same config-file +
+argv-flag mechanism already used for `--model_cfg` and friends."* Step 03
+added `--model_io_json` by the same pattern, explicitly noting *"No new IPC is
+introduced — §16 routes IPC to Step 11."*
+
+**Consequences, and they are the reason argv parity is honest here:**
+
+1. The **full `DatasetProfile` — including `ValueEncoding` — already crosses
+   to all three subprocesses** and is already loaded at `:337`. The encoding
+   derivation (`+128`/`int8`) therefore needs **no new argument**: the
+   authority is already present and merely unconsulted.
+2. The **`ModelIOContract` already crosses** (`--model_io_json`, omitted for a
+   legacy prose-only contract — the existing Regime-A adapter), so the decode
+   rule is available without new transport.
+3. The deliverable **name** is composed from `denoising_model`, `run_name`,
+   `exp_id` and `file_index` — all already argv items.
+
+**Frozen acceptance**: one semantic source; **no ambient second resolution**
+in the child (the subprocess must not call `resolve_dataset_profile()` when it
+was given a profile path); no duplicate deliverable literals; and
+**`--dataset_profile_json` / `--model_io_json` are NOT re-plumbed** — Step 05c
+consumes the Step-02/Step-03 transports rather than adding a third.
+
+Therefore §4's *"argv byte-identical"* is a genuine criterion, not an
+aspiration. **If implementation nevertheless proves a new argument is
+unavoidable, the Stage-A criterion must be honestly downgraded to
+"argv identical except one additive, documented flag, with old-run behavior
+stated" — it must not be claimed as byte-identical.** Adding an argument when
+the existing transport already carries the authority is equally a defect.
+
+### 3.3 Legacy run / config replay acceptance — MANDATORY before freeze
+
+For a representative pre-Step-05 TIDMAD run, all of the following must load
+**without migration** and resolve identically under 05c:
+
+| Surface | Required property |
+|---|---|
+| existing **model config** JSON | loads unchanged; same effective model semantics |
+| existing **loss config** JSON | loads unchanged; same effective loss semantics |
+| existing **train config** | loads unchanged; same required defaults |
+| existing **TrialConfig** / tuner config | loads unchanged; deep-equal |
+| persisted execution input (`dataset_profile_{exp_id}.json`, `model_io_{exp_id}.json`) | loads unchanged |
+| launch semantics | same argv (§3.2) |
+| deliverable name / layout / dtype / attrs under TIDMAD | identical |
+
+**No new mandatory field may make a stored run unreadable.** The legacy
+adapter property is explicitly testable and must be tested:
+
+```text
+old stored config  ->  the SAME TIDMAD DeliverableSpec
+```
+
+Proven by **deterministic config/launch resolution** — a full real training
+run is not required for the replay property (Gate 2 exists for the execution
+property, §9, which is a different question).
 
 ## 4. Stage-A compatibility surfaces
 
@@ -216,9 +353,12 @@ tests. **Not** the scorer, **not** HealthGate peeks, **not** `scripts/*`.
 ## 12. Convergence-ledger implications
 
 - **Deliverable Contract** — 05c supplies the producer-side census (§0) and
-  the provisional extraction. Row stays **OPEN**, owner **still TBD**,
-  scheduled to complete at step 11 as its staged consumers land. Record
-  05c's recommendation (§3) and its reasoning.
+  the provisional runtime extraction (§3.1). Row stays **OPEN**, owner
+  **still TBD**. Per §3's timing rule, **Step 06 is the next mandatory
+  ownership review** and must confirm-or-say-why; steps 08/11 may add
+  consumer evidence but are **not** predetermined decision points. The
+  row's earlier "completes at step 11" phrasing should be corrected to
+  match.
 - **Value encoding (+128/int8/256)** — the row is already SETTLED (§4
   declares, §5 derives). 05c is a **consumer** of that settlement; it adds no
   authority and creates no shared config.
@@ -252,7 +392,31 @@ tests. **Not** the scorer, **not** HealthGate peeks, **not** `scripts/*`.
 
 ## 16. Remaining operator decisions
 
-1. **Deliverable Contract ownership (§3)** — recommendation is (C)
-   provisional-here / confirmed-at-Step-06. This binds Step 06's design
-   surface and should be confirmed rather than assumed.
-2. **Gate 2 scope** — confirm the bounded single-attempt shape before launch.
+1. **Deliverable Contract provisional ownership and its timing rule (§3)** —
+   the recommendation is: provisional extraction here, ownership OPEN, Step 06
+   as the next mandatory confirm-or-say-why review. This binds Step 06's
+   design surface, so it should be confirmed rather than assumed.
+
+That is the only one. Gate-2 *scope* is **not** an operator design decision:
+Gate 2 is REQUIRED (§9), its shape is "the minimum bounded real attempt" under
+the current Gate standard, and its cost/runtime limits belong to the
+Implementation Working Rules, not to this design.
+
+## 17. Configuration-architecture preservation (Step-05 cross-cutting invariant)
+
+Binding for this PR (roadmap §15.1a):
+
+- **model config remains model config; loss config remains loss config; train
+  config remains train config.** They are not replaced by an
+  "ExecutionConfig" or "TaskExecutionContract", and a new task/dataset keeps
+  using these established categories wherever their semantics apply.
+- `DatasetProfile` and `ModelIOContract` are **consumed, never copied** into
+  train/model/loss/tuner config.
+- No existing required key is renamed or restructured.
+- Deliverable semantics stay a **distinct concept** — they are genuinely not
+  the input dataset contract, the Model-I/O contract, or metric scoreability
+  — but conceptual distinctness does **not** authorize a user-facing config
+  format (§3.1).
+- Any genuinely unavoidable new declaration must be **additive**, must
+  preserve legacy interpretation and loading, and must state its adapter
+  boundary. Discovering one is a **MATERIAL STOP**, not silent widening.

@@ -1427,6 +1427,55 @@ Step 02 ──┬──> 05a
 blocking order. 05b consumes `SampleSet` *values* whose shape 05a must leave
 byte-identical, so it does not depend on 05a's change.
 
+**Step-05 CROSS-CUTTING FROZEN INVARIANT — preserve the existing
+configuration architecture** (operator decision, 2026-08-14). The framework's
+established configuration surfaces — model config, loss config, train config,
+`TrialConfig`/tuner config, the task profile, and the existing launch /
+serialized run configuration — are **valuable and are not redesigned in the
+name of genericity**. A new dataset or task keeps using the SAME categories.
+
+Genericization proceeds, in order of preference, by: **deriving** values from
+already-declared authorities; **threading** already-resolved values to
+consumers; and only then **minimally widening** an existing declaration when a
+genuinely new semantic cannot otherwise be represented.
+
+No Step-05 PR may: replace the model/loss/train config architecture with a new
+generic configuration system; rename or restructure existing required keys
+because a new representation looks cleaner; copy `DatasetProfile` or
+`ModelIOContract` into train/model/tuner config; or require historical runs
+and configs to be migrated when an additive route exists.
+
+The principle is strong but not absolute. A new field or contract is allowed
+only where source proves the semantic is real, has a live consumer, cannot be
+expressed by an existing authority, and is materially better than mis-owning
+it elsewhere. Then it must be **additive**, preserve legacy interpretation and
+loading, and state its adapter boundary explicitly. **Discovering such a need
+is a MATERIAL STOP and a design review — never silent widening.**
+
+A **typed runtime value is not a configuration architecture**: 05c's
+provisional `DeliverableSpec` is runtime-only, non-persisted, non-user-authored
+and derived (05c §3.1), which is why it does not breach this invariant.
+
+**Step-05 configuration / replay compatibility matrix.**
+
+| Surface | 05a | 05b | 05c | Required compatibility |
+|---|---|---|---|---|
+| `DatasetProfile` | consume only | consume only | consume only | no redesign |
+| `ModelIOContract` | n/a | consume only | consume only | no duplicate authority |
+| model config | unchanged | unchanged | unchanged | legacy loads, no migration |
+| loss config | unchanged | unchanged | unchanged | legacy loads, no migration |
+| train config | unchanged | unchanged | shape preserved; additive only if genuinely unavoidable (MATERIAL STOP) | legacy loads |
+| `TrialConfig` / tuner config | serialized parity, deep-equal | unchanged | unchanged | no migration |
+| CLI / argv | unchanged | unchanged unless the current resource boundary already differs — recorded | **byte-identical** — the `DatasetProfile` and `ModelIOContract` transports already cross to all three subprocesses (05c §3.2), so no new argument is needed; if one proves unavoidable the criterion is honestly downgraded, not claimed | recorded either way |
+| deliverable naming/layout/dtype/attrs | n/a | n/a | identical under TIDMAD | provisional spec, ownership OPEN |
+| historical run replay | preserved | preserved | **explicitly proven** (05c §3.3) | no mandatory migration |
+
+Every PR carries the same Stage-A property: *a representative historical
+TIDMAD serialized configuration loads under the post-PR code **without
+migration** and resolves to the same effective model/loss/train/tuner
+semantics.* Deterministic config/launch resolution is sufficient evidence —
+a full scientific rerun is **not** required for this property.
+
 **Step-05 final observable effect.** The tuner selects attempt data from the
 run-resolved dataset declaration, prices attempts from task terms derived
 from that declaration and the Model-I/O contract while calibration and
@@ -1459,8 +1508,12 @@ below recorded.
 - *SampleSet type / JSON coercion* — 05b is the closest "one consumer
   design", but the typed cross-module wrapper stays unbuilt.
 - *Deliverable Contract* — 05c supplies the producer-side census and a
-  provisional extraction; ownership remains TBD and the row completes at
-  step 11.
+  provisional **runtime-only** extraction (05c §3.1); ownership remains
+  **OPEN**. Timing rule: **Step 06 is the next MANDATORY ownership review**
+  and must either confirm final ownership or record exactly which consumer
+  evidence is still missing; steps 08/11 may add evidence but are **not**
+  predetermined decision points. While ownership is provisional, 05c does
+  **not** claim arbitrary or non-HDF5 deliverables.
 
 Debt column (tracked here, not repeated per row): §8 fresh-workspace
 sha-lock boundary; §12 campaign_artifacts.py (M2 blocker); §10

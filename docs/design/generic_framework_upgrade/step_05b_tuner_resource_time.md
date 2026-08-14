@@ -74,10 +74,26 @@ Implementation consequence:
 
 > The tuner's **resource and time forecasts derive their task-shaped terms**
 > — class/logit extent, decomposition (PSD) unit, and probe tensor shapes —
-> from the run-resolved `DatasetProfile` and the `ModelIOContract`, through
-> the **existing** Step-04a probe authority. **Calibration and runtime
-> values keep their current owners and current values**, and remain
-> separately identifiable as calibration rather than task configuration.
+> from the authorities that already own them, instead of from literals
+> inlined in the estimators. **Calibration and runtime values keep their
+> current owners and current values**, and remain separately identifiable as
+> calibration rather than task configuration.
+
+**The authority split is precise, and no single authority is a general
+"resource semantics" owner:**
+
+| Fact | Authority |
+|---|---|
+| model/probe tensor **realization** | Step-04a `model_io_probe_skill` — a probe-realization **consumer seam**, nothing more |
+| Model-I/O facts (class extent, output shape, decode rule) | **Step-03 `ModelIOContract`** |
+| PSD / decomposition topology | **Step-02 `DatasetProfile`** |
+| resource **calibration** (ratios, caps, batch table, overheads) | the existing calibration/runtime authority — unchanged |
+| hardware capacity and operator budgets | the existing runtime **Hardware Context** / operator authority — unchanged |
+
+It is wrong to say resource terms derive "through `model_io_probe_skill`":
+the skill *realizes probe tensors* from a contract. The contract facts come
+from Step 03, the topology from Step 02, and the calibration and hardware
+facts from neither.
 
 **Deliberately NOT claimed:**
 
@@ -203,11 +219,25 @@ question** (§11), not a reason to weaken Checkpoint C into a helper test.
 | Gate | Decision | Rationale / flip |
 |---|---|---|
 | **Gate 1** | **NOT REQUIRED** | no LLM-visible surface. **Flip**: if a resource literal reaches a prompt (cf. OD-S4-1's implementor capacity prose) |
-| **Gate 2** | **REQUIRED — bounded**, unless Checkpoint C can exercise the live probe deterministically | The changed surface **decides whether real attempts run**. Failure class 3 is not observable from a stubbed probe alone: a derived-term error shifts a real admission. Read `docs/gates/gate_testing_standard.md` at implementation time and size the smallest case that prices one real attempt on real hardware. **Flip to NOT REQUIRED** only if the design proves the live gate's decision is fully determined by deterministically-observable inputs |
+| **Gate 2** | **CONDITIONAL — semantic rule below** | The changed surface **decides whether real attempts run**, and failure class 3 is not observable from a stubbed probe alone |
 
-This is the one Step-05 PR whose Gate disposition is genuinely
-**conditional**, and the condition is resolved by implementation-time
-evidence, not by preference.
+**The condition is semantic:**
+
+```text
+Checkpoint C must prove the LIVE production admission/pricing decision.
+
+  deterministic production-path evidence fully exercises that decision
+      -> Gate 2 NOT REQUIRED
+
+  otherwise
+      -> Gate 2 REQUIRED, under the CURRENT gate_testing_standard.md
+```
+
+Which branch holds is settled by implementation-time source evidence, not by
+preference. Gate **launch choreography** — exact timing, exact bounded
+command, and cost projection within the normal autonomous validation budget —
+belongs to the Implementation Working Rules and current Gate policy, **not**
+to this design and **not** to the operator's design review.
 
 ## 12. Validation budget
 
@@ -259,7 +289,46 @@ condition holds** → exact-head CI. No local full suite. No real LLM.
 
 ## 18. Remaining operator decisions
 
-1. **Gate 2 disposition (§11)** — conditional. If implementation shows the
-   live probe cannot be exercised deterministically, a bounded Gate 2 is
-   required; the operator should be told the projected cost before it runs.
-   Everything else here is resolved from source.
+**NONE.** Every question here is resolved from source: the classification
+table (§2) by the constants' documented derivations, the seg-fallback
+disposition (§3) by the sites' differing meanings, and the Gate disposition
+(§11) by a semantic condition that implementation evidence settles.
+
+## 19. Configuration-architecture preservation (Step-05 cross-cutting invariant)
+
+Binding for this PR (roadmap §15.1a). **Ambient → injected derivation does
+NOT mean copying authorities into persisted configuration.** The required
+architecture is:
+
+```text
+already-resolved DatasetProfile / ModelIOContract
+    -> runtime typed/function transport
+    -> resource consumer
+```
+
+Explicitly forbidden without a MATERIAL STOP and design review:
+
+- a `dataset_profile` copy inside train config;
+- a `model_io` copy inside resource config;
+- a new persisted workload-term config;
+- any new user-facing configuration hierarchy for resource terms.
+
+Frozen compatibility:
+
+| Surface | 05b effect |
+|---|---|
+| model config | **unchanged — legacy loads** |
+| loss config | **unchanged — legacy loads** |
+| train config | **unchanged — legacy loads** |
+| `TrialConfig` / tuner config | **unchanged** |
+| calibration constants | **values unchanged**, ownership unchanged |
+| CLI / argv | **unchanged**, unless the current resource boundary already differs — recorded if so |
+| historical run replay | **preserved — no migration required** |
+
+Stage-A property: *a representative historical TIDMAD serialized
+configuration loads under post-05b code without migration and resolves to the
+same effective model/loss/train/tuner semantics*, provable by deterministic
+config resolution.
+
+If implementation proves a new field is genuinely unavoidable, that is a
+**MATERIAL STOP**, not permission to widen the config system.

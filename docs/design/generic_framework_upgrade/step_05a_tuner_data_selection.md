@@ -146,6 +146,27 @@ semantics; `TrialConfig` field set; anchors; DataScope semantics; anything in
 Checkpoint 0 adds only the two missing captures. It must **not** duplicate
 Step-02's Dataset Profile baselines.
 
+### 6.1 Configuration / replay compatibility — no change at all
+
+Per the Step-05 cross-cutting invariant (roadmap §15.1a):
+
+| Surface | 05a effect |
+|---|---|
+| `DatasetProfile` schema | **unchanged** — consumed only |
+| `TrialConfig` schema / required keys / defaults | **unchanged** |
+| model / loss / train config | **unchanged** — not touched |
+| serialization + loading | **unchanged** |
+| CLI / argv | **unchanged** |
+| replay of a stored run | **preserved — no migration** |
+
+Stage-A property: *a representative historical TIDMAD serialized
+configuration loads under post-05a code **without migration** and resolves to
+the same effective model/loss/train/tuner semantics.* Provable by
+deterministic config resolution — no rerun required.
+
+05a creates **no new config field and no new authority**; it changes only
+which already-resolved object five sites read.
+
 ## 7. Dependencies
 
 Depends on **Step 02 only**. **Independent of 05b and 05c**: 05b consumes
@@ -179,10 +200,24 @@ account for an attempt under a bound contrast profile, with the resulting
 
 1. A site keeps reading the singleton → silent TIDMAD legality under another
    topology (the defect this PR closes).
-2. **Ambient re-resolution** — a site calls `resolve_dataset_profile()`
-   itself instead of receiving the run-scoped object. Passes a naive test
-   while restoring the Step-02b defect. *The guard must assert the tuner
-   resolves the profile exactly once per run.*
+2. **Ambient re-resolution** — a site calls `resolve_dataset_profile()` or
+   reads the `TIDMAD` singleton itself instead of receiving the run-scoped
+   object. Passes a naive test while restoring the Step-02b defect.
+
+   **The frozen property is semantic, not a call count:**
+
+   ```text
+   - every 05a consumer USES ONE run-bound DatasetProfile semantic value;
+   - no 05a consumer performs an independent ambient resolution
+     (resolve_dataset_profile() or the TIDMAD singleton);
+   - startup consumers and loop consumers agree on the SAME run binding.
+   ```
+
+   An exact resolver-invocation count is **not** the contract. Implementation
+   may use a call-count assertion if it turns out to be the strongest
+   reachability mutation, but it is a test technique, not the invariant —
+   freezing the count would pin choreography and forbid a legitimate
+   memoized or re-entrant implementation.
 3. The legacy `single_file` accounting is "fixed" by deleting the branch →
    silent behavior change on a live operator path.
 4. A dataset fact is copied into `TrialConfig` as a new field → a second
