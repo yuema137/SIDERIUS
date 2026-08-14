@@ -546,12 +546,16 @@ def _render_hardware_context_block(
         return ""
 
     usable = ctx.usable_cap_gb
+    # Step 04a: the NUMBER comes from the shared `effective_cap_gb` rule so
+    # the implementor's capacity prose cannot quote a different one. Only the
+    # regime LABEL is rendered here, because only this block names it.
+    effective = ctx.effective_cap_gb(vram_budget_gb)
     if vram_budget_gb is None:
-        regime, effective = "PHYSICAL", usable
+        regime = "PHYSICAL"
     elif vram_budget_gb <= usable:
-        regime, effective = "BUDGET", vram_budget_gb
+        regime = "BUDGET"
     else:
-        regime, effective = "PHYSICAL VETO", usable
+        regime = "PHYSICAL VETO"
 
     lines = [
         "[HARDWARE CONTEXT]",

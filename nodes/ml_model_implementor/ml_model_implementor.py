@@ -31,10 +31,20 @@ from datetime import UTC, datetime
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
+from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent.skills.model_io_probe_skill import (
+    ProbeConstructionError,
+    build_loss_probe_pair,
+    build_model_input,
+    declared_output_tensor,
+    expected_output_shape,
+    input_index_extent,
+)
 from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+from core.hardware_context import HardwareContext
 from workflows.task_config import render_forward_contract
 
 # ---------------------------------------------------------------------------
@@ -79,13 +89,32 @@ def _check_config_field_consistency(code: dict) -> list[str]:
     return sorted(referenced - declared)
 
 
-def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
+#: Legacy self-check geometry, used ONLY when no normalized contract is
+#: supplied (§15.1 row 1). With a contract these are derived and never read.
+_LEGACY_SELF_CHECK_CLASSES: int = 256
+_LEGACY_SELF_CHECK_TIME_STEPS: int = 64
+
+
+def _smoke_test_plugin(
+    plugin_src: str,
+    model_name: str,
+    model_io_contract: ModelIOContract | None = None,
+) -> str | None:
     """
     Dynamically load *plugin_src*, instantiate the model with default config,
-    and run a dummy forward pass ``[1, 64] int64 → expected [1, 256, 64] float32``.
+    and run a dummy forward pass against the contract the plugin DECLARES.
+
+    Step 04a: with a normalized Model-I/O contract the probe input and the
+    expected output shape are DERIVED from it, through the same recipe module
+    the validator uses — so the implementor's self-check and the validator's
+    probe cannot disagree about the same candidate. Without one the shipped
+    geometry ``[1, 64] int64 → [1, 256, 64]`` is reproduced exactly
+    (§15.1 row 1).
 
     Returns ``None`` on success, or a human-readable error string on failure.
-    The function never raises — all errors are caught and described.
+    The function never raises — all errors are caught and described, including
+    a contract that cannot be realized (§15.1 row 3), which surfaces through
+    the same string channel so the existing repair loop can act on it.
     """
     import torch  # deferred so module-level import stays lightweight
 
@@ -115,19 +144,29 @@ def _smoke_test_plugin(plugin_src: str, model_name: str) -> str | None:
         model = mod.PLUGIN_MODEL_CLASS(config)
         model.eval()
 
-        # Forward pass
-        T = 64
-        x = torch.randint(0, 256, (1, T))
-        with torch.no_grad():
-            out = model(x)
-
         # Shape check — against the plugin's DECLARED contract (V21 PR A3).
         # A regressor must not be judged against the classifier shape; that
         # would reject a correct model in the implementor's own self-check,
         # before the validator ever sees it.
         declared = getattr(mod, "PLUGIN_OUTPUT_TYPE", "classifier")
-        expected = (1, 256, T) if declared == "classifier" else (1, T)
-        if out.shape != expected:
+
+        # Forward pass. Step 04a: derived when a contract is supplied, the
+        # shipped geometry otherwise.
+        if model_io_contract is None:
+            T = _LEGACY_SELF_CHECK_TIME_STEPS
+            x = torch.randint(0, _LEGACY_SELF_CHECK_CLASSES, (1, T))
+            expected = (1, _LEGACY_SELF_CHECK_CLASSES, T) if declared == "classifier" else (1, T)
+        else:
+            try:
+                expected = expected_output_shape(model_io_contract, declared)
+                x = build_model_input(model_io_contract)
+            except ProbeConstructionError as exc:
+                return f"Self-check could not be constructed from the task contract: {exc}"
+
+        with torch.no_grad():
+            out = model(x)
+
+        if tuple(out.shape) != tuple(expected):
             return (
                 f"Forward pass shape mismatch for PLUGIN_OUTPUT_TYPE={declared!r}: "
                 f"expected {expected}, got {tuple(out.shape)}"
@@ -271,12 +310,12 @@ PLUGIN_MODEL_CLASS = {ModelClass}
 PLUGIN_OUTPUT_TYPE = "{output_type}"  # {output_type_comment}
 """
 
-#: Per-contract comment text rendered into the generated plugin (V21 PR A3).
-#: Keyed by ``ImplementorInput.output_type``. Both entries must stay in step
-#: with the shapes ``ml_code_validator_agent`` derives from the same
-#: declaration, or a generated plugin would document one contract and be
-#: validated against another.
-_OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
+#: Legacy per-contract comment text, used ONLY when no normalized Model-I/O
+#: contract is supplied — design §15.1 row 1. With a contract these strings
+#: are DERIVED (see ``_render_output_contract``); the shapes here are the
+#: shipped TIDMAD rendering, kept so a prose-only caller emits byte-identical
+#: plugins.
+_LEGACY_OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
     "classifier": (
         "input [B, T] int64 → output [B, 256, T] float32",
         "[B, 256, T] → 256-class classification",
@@ -287,23 +326,51 @@ _OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
     ),
 }
 
+#: Phrase describing what the continuous form of an output means. It is not a
+#: contract fact — the contract says the shape, this says what the shape is
+#: FOR — so it stays a Step-04 template string.
+_CONTINUOUS_OUTPUT_PHRASE = "continuous waveform regression"
 
-def _render_output_contract(output_type: str) -> tuple[str, str]:
+
+def _render_output_contract(
+    output_type: str,
+    model_io_contract: ModelIOContract | None = None,
+) -> tuple[str, str]:
     """Return (forward-contract comment, PLUGIN_OUTPUT_TYPE comment).
 
+    Step 04a: with a normalized contract, both strings are RENDERED from the
+    declaration through the same ``declared_output_tensor`` rule the validator
+    probes with, so a generated plugin cannot document one contract and be
+    validated against another. Without one, the legacy strings are returned
+    verbatim (§15.1 row 1).
+
     Raises:
-        ValueError: on an unrecognised contract. Failing here is deliberate —
-            emitting a plugin whose declaration we cannot describe would push
-            the defect downstream into the validator, where its origin is far
-            less obvious.
+        ValueError: on an unrecognised ``output_type``. Failing here is
+            deliberate — emitting a plugin whose declaration we cannot
+            describe would push the defect downstream into the validator,
+            where its origin is far less obvious.
+        ProbeConstructionError: an explicit contract cannot supply a semantic
+            the declared form requires (§15.1 row 3) — e.g. a classifier
+            candidate under a task that declares no class alphabet.
     """
-    try:
-        return _OUTPUT_CONTRACT_COMMENTS[output_type]
-    except KeyError:
+    if output_type not in _LEGACY_OUTPUT_CONTRACT_COMMENTS:
         raise ValueError(
             f"Unknown output_type {output_type!r}; expected one of "
-            f"{sorted(_OUTPUT_CONTRACT_COMMENTS)}"
-        ) from None
+            f"{sorted(_LEGACY_OUTPUT_CONTRACT_COMMENTS)}"
+        )
+
+    if model_io_contract is None:
+        return _LEGACY_OUTPUT_CONTRACT_COMMENTS[output_type]
+
+    emitted = declared_output_tensor(model_io_contract, output_type)
+    forward_comment = f"input {model_io_contract.input.render()} → output {emitted.render()}"
+    if output_type == "classifier":
+        # `declared_output_tensor` already refused a classifier form with no
+        # cardinality, so this is never None here.
+        purpose = f"{model_io_contract.class_cardinality}-class classification"
+    else:
+        purpose = _CONTINUOUS_OUTPUT_PHRASE
+    return forward_comment, f"{emitted.render_shape()} → {purpose}"
 
 
 TEST_TEMPLATE = """\
@@ -320,13 +387,14 @@ def test_forward_shape():
     config = PLUGIN_CONFIG_CLASS()
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
-    x = torch.randint(0, 256, (2, config.segmentation_size))
+    x = torch.randint(0, {index_extent}, (2, config.segmentation_size))
     with torch.no_grad():
         out = model(x)
     # Expected shape follows the plugin's DECLARED contract, so a regressor
-    # is not judged against the classifier shape (V21 PR A3).
+    # is not judged against the classifier shape (V21 PR A3). The class count
+    # is rendered from the task's Model-I/O contract (Step 04a), not fixed.
     expected = (
-        (2, 256, config.segmentation_size)
+        (2, {num_classes}, config.segmentation_size)
         if PLUGIN_OUTPUT_TYPE == "classifier"
         else (2, config.segmentation_size)
     )
@@ -337,7 +405,7 @@ def test_forward_no_nan():
     config = PLUGIN_CONFIG_CLASS()
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
-    x = torch.randint(0, 256, (1, config.segmentation_size))
+    x = torch.randint(0, {index_extent}, (1, config.segmentation_size))
     with torch.no_grad():
         out = model(x)
     assert not torch.isnan(out).any(), "Forward pass produced NaN values"
@@ -360,7 +428,7 @@ You are a senior PyTorch engineer specialising in deep learning for signal denoi
 Your task: given a mathematical description of a new neural architecture and its
 baseline configuration, plan the PyTorch implementation in detail before writing code.
 
-{TASK_BACKGROUND}- GPU budget: <10 GB VRAM, <100M parameters for initial exploration.
+{TASK_BACKGROUND}{CAPACITY_BUDGET}
 
 ## Allowed imports — STRICT ALLOW-LIST
 
@@ -782,16 +850,25 @@ def _assemble_loss_plugin(loss_name: str, description: str, code: dict) -> str:
     )
 
 
-def _dummy_tensor_validate_loss(plugin_src: str, loss_name: str) -> str | None:
+def _dummy_tensor_validate_loss(
+    plugin_src: str,
+    loss_name: str,
+    model_io_contract: ModelIOContract | None = None,
+) -> str | None:
     """Run the L2-equivalent dummy-tensor check on an assembled loss-plugin source.
 
     Procedure:
       1. Write the source to a tmp file (so ``importlib`` can load it).
       2. Import the module and look up the 3 required PLUGIN_LOSS_* attrs.
       3. Construct ``PLUGIN_LOSS_CONFIG_CLASS()`` with its declared defaults.
-      4. Instantiate ``PLUGIN_LOSS_CLASS(cfg)`` and run forward with:
-         - ``inputs``  = ``torch.randn(2, 256, 100, requires_grad=True)``
-         - ``targets`` = ``torch.randint(0, 256, (2, 100), dtype=torch.int64)``
+      4. Instantiate ``PLUGIN_LOSS_CLASS(cfg)`` and run forward with a
+         ``(inputs, targets)`` pair built for the task's DECLARED OUTPUT
+         SEMANTIC (Step 04a, design §4) — categorical gets
+         ``[B, C, T]`` float inputs and ``[B, T]`` int64 targets in
+         ``[0, C)``; continuous gets ``[B, T]`` float on both sides. Before
+         this the pair was classifier-shaped unconditionally, so a
+         declared-regressor custom loss could never pass: it was rejected
+         for a shape accident rather than for anything about the loss.
       5. Assert ``loss.dim() == 0`` and ``math.isfinite(loss.item())``.
       6. **Run ``loss.backward()``** and assert ``inputs.grad is not None``
          and ``torch.isfinite(inputs.grad).all()``. ``requires_grad=True`` on
@@ -802,9 +879,16 @@ def _dummy_tensor_validate_loss(plugin_src: str, loss_name: str) -> str | None:
          of bug, and it also surfaces NaN/Inf gradient instabilities the
          scalar finite check cannot.
 
+    Note this decides only how to BUILD the probe. Whether a loss is legal
+    for an output semantic is answered by the existing Step-03 authority and
+    is deliberately not duplicated here (design §4: never a second
+    ``LossContract``).
+
     Args:
         plugin_src: The assembled loss-plugin source code.
         loss_name: The ``PLUGIN_LOSS_TYPE`` key, used only for error messages.
+        model_io_contract: the task's normalized Model-I/O declaration, or
+            ``None`` for the legacy path, which builds today's tensors.
 
     Returns:
         ``None`` if all checks pass; otherwise a human-readable error string
@@ -854,17 +938,20 @@ def _dummy_tensor_validate_loss(plugin_src: str, loss_name: str) -> str | None:
         except Exception as e:
             return f"PLUGIN_LOSS_CLASS(config) failed to construct: {type(e).__name__}: {e}."
 
-        # Dummy tensors mirror L2's test_custom_plugin_forward_pass_runs.
+        # Dummy tensors mirror L2's test_custom_plugin_forward_pass_runs,
+        # now shaped for the task's declared output semantic (Step 04a).
         torch.manual_seed(0)
-        inputs = torch.randn(2, 256, 100, requires_grad=True)
-        targets = torch.randint(0, 256, (2, 100), dtype=torch.int64)
+        try:
+            inputs, targets, pair_description = build_loss_probe_pair(model_io_contract)
+        except ProbeConstructionError as e:
+            return f"Loss probe could not be constructed from the task contract: {e}"
         try:
             loss = loss_fn(inputs, targets)
         except Exception as e:
             return (
                 f"forward(inputs, targets) raised on dummy tensors: "
                 f"{type(e).__name__}: {e}. The forward must accept "
-                f"inputs=[2, 256, 100] float32 and targets=[2, 100] int64."
+                f"{pair_description}."
             )
 
         if not isinstance(loss, torch.Tensor):
@@ -954,9 +1041,61 @@ def _render_task_background(task_description: str, fc: ForwardContract) -> str:
     return "\n".join(parts)
 
 
+#: The capacity bullet rendered when no live hardware manifest is available —
+#: a CPU-only host, or a legacy caller that never supplied one. It states the
+#: constraint without a magnitude, because the only honest alternative to a
+#: live number is no number: a literal here would be exactly the stale
+#: ceiling OD-S4-1 exists to remove.
+_CAPACITY_BUDGET_WITHOUT_HARDWARE = (
+    "- GPU budget: size the initial architecture conservatively. The VRAM "
+    "engine rejects any configuration whose predicted peak exceeds this "
+    "run's effective cap, and a rejection consumes a tuner attempt with no "
+    "scored round."
+)
+
+
+def _render_capacity_budget(
+    hardware_context: HardwareContext | None,
+    vram_budget_gb: float | None,
+) -> str:
+    """Render the ``{CAPACITY_BUDGET}`` bullet from the LIVE hardware manifest.
+
+    **OD-S4-1.** The shipped bullet read
+    ``- GPU budget: <10 GB VRAM, <100M parameters for initial exploration.``
+    That ceiling was stale: the proposer has rendered the LIVE cap for the
+    same machine since Step 01, and on the development host that cap is more
+    than twice the hardcoded figure — so the implementor was being told to
+    build for a machine far smaller than the one it runs on, while the
+    parameter ceiling had no authority behind it at all.
+
+    (No device name or measured capacity appears here on purpose. This module
+    is inside the ``nodes/`` tree the Principle-5 guardrail scans, and a device
+    literal in a docstring about removing device literals is precisely what
+    that guardrail exists to stop.)
+
+    The number comes from ``HardwareContext.effective_cap_gb``, the same rule
+    the proposer's ``[HARDWARE CONTEXT]`` block quotes. No task-config field
+    is introduced: machine capacity is a property of the machine.
+
+    Degrades to :data:`_CAPACITY_BUDGET_WITHOUT_HARDWARE` — a defined,
+    tested, magnitude-free string — when no manifest is available. It never
+    crashes mid-prompt and never falls back to a literal.
+    """
+    if hardware_context is None or not hardware_context.device_available:
+        return _CAPACITY_BUDGET_WITHOUT_HARDWARE
+    cap = hardware_context.effective_cap_gb(vram_budget_gb)
+    return (
+        f"- GPU budget: this run's effective VRAM cap is {cap:.2f} GB on "
+        f"{hardware_context.device_name}. Size the initial architecture to "
+        f"stay comfortably below it — the VRAM engine rejects any "
+        f"configuration whose predicted peak exceeds the cap, and a rejection "
+        f"consumes a tuner attempt with no scored round."
+    )
+
+
 def _build_reasoning_system_prompt(inp: ImplementorInput) -> str:
-    """Substitute the ``{TASK_BACKGROUND}`` placeholder in
-    ``IMPLEMENTOR_REASONING_PROMPT`` from ``inp``.
+    """Substitute the ``{TASK_BACKGROUND}`` and ``{CAPACITY_BUDGET}``
+    placeholders in ``IMPLEMENTOR_REASONING_PROMPT`` from ``inp``.
 
     Production callers always have ``inp.task_description`` non-empty and
     ``inp.forward_contract`` fully populated (workflow injects from
@@ -966,6 +1105,9 @@ def _build_reasoning_system_prompt(inp: ImplementorInput) -> str:
     return IMPLEMENTOR_REASONING_PROMPT.replace(
         "{TASK_BACKGROUND}",
         _render_task_background(inp.task_description, inp.forward_contract),
+    ).replace(
+        "{CAPACITY_BUDGET}",
+        _render_capacity_budget(inp.hardware_context, inp.vram_budget_gb),
     )
 
 
@@ -1267,7 +1409,9 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     # V21 PR A3: the emitted contract follows the proposal's declared
     # output_type. It is NEVER inferred from the loss family — that would
     # re-couple the two design dimensions this PR separates.
-    forward_contract_comment, output_type_comment = _render_output_contract(inp.output_type)
+    forward_contract_comment, output_type_comment = _render_output_contract(
+        inp.output_type, inp.forward_contract.model_io
+    )
 
     return PLUGIN_TEMPLATE.format(
         model_name=inp.model_name,
@@ -1285,8 +1429,29 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     )
 
 
-def _assemble_test(model_name: str) -> str:
-    return TEST_TEMPLATE.format(model_name=model_name)
+def _assemble_test(model_name: str, model_io_contract: ModelIOContract | None = None) -> str:
+    """Render the candidate's own test file.
+
+    Step 04a: the class count and the index range the generated test uses are
+    rendered from the task's Model-I/O contract instead of being fixed at 256.
+    Without a contract the shipped text is reproduced exactly (§15.1 row 1).
+
+    ``index_extent`` and ``num_classes`` differ only for a task that declares
+    no class alphabet: there the classifier branch of the generated test is
+    unreachable, because ``_render_output_contract`` has already refused to
+    assemble a classifier plugin under such a contract.
+    """
+    if model_io_contract is None:
+        num_classes = _LEGACY_SELF_CHECK_CLASSES
+        index_extent = _LEGACY_SELF_CHECK_CLASSES
+    else:
+        index_extent = input_index_extent(model_io_contract)
+        num_classes = model_io_contract.class_cardinality or index_extent
+    return TEST_TEMPLATE.format(
+        model_name=model_name,
+        num_classes=num_classes,
+        index_extent=index_extent,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1374,7 +1539,7 @@ class MLModelImplementor:
             )
 
         # Check 3: smoke test (instantiate + forward pass with defaults)
-        smoke_error = _smoke_test_plugin(plugin_src, inp.model_name)
+        smoke_error = _smoke_test_plugin(plugin_src, inp.model_name, inp.forward_contract.model_io)
         if smoke_error:
             return f"Smoke test failed: {smoke_error}"
 
@@ -1480,7 +1645,7 @@ class MLModelImplementor:
         # ---- 3. Validate → repair loop ----------------------------------
         max_retries = inp.max_retries
         plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
-        error = _dummy_tensor_validate_loss(plugin_src, loss_name)
+        error = _dummy_tensor_validate_loss(plugin_src, loss_name, inp.forward_contract.model_io)
         attempt = 0
         error_history: list[tuple[int, str]] = []
         while error is not None and attempt < max_retries:
@@ -1494,7 +1659,9 @@ class MLModelImplementor:
                 label="implementor.loss.repair",
             )
             plugin_src = _assemble_loss_plugin(loss_name, spec.description, code)
-            error = _dummy_tensor_validate_loss(plugin_src, loss_name)
+            error = _dummy_tensor_validate_loss(
+                plugin_src, loss_name, inp.forward_contract.model_io
+            )
 
         if error is not None:
             raise ValueError(
@@ -1666,6 +1833,11 @@ class MLModelImplementor:
                 config_fields={},
                 model_description=inp.model_description or "",
                 mathematical_definition=inp.mathematical_definition or "",
+                # Step 04a: a reused plugin is still validated against THIS
+                # run's declaration, so the echo is not optional on Branch B.
+                # Omitting it here would silently drop the validator back to
+                # the legacy path for every reuse iteration.
+                model_io_contract=inp.forward_contract.model_io,
                 loss_provenance=loss_provenance,
             )
 
@@ -1727,7 +1899,7 @@ class MLModelImplementor:
             print(f"   ✅ Self-correction succeeded on attempt {attempt + 1}.")
 
         plugin_src = _assemble_plugin(inp, code)
-        test_src = _assemble_test(inp.model_name)
+        test_src = _assemble_test(inp.model_name, inp.forward_contract.model_io)
 
         # --- Write plugin file ---
         os.makedirs(inp.plugin_dir, exist_ok=True)
@@ -1782,7 +1954,7 @@ class MLModelImplementor:
         # V21 PR A3/A4: the documented contract follows the declared output_type.
         # A regressor's description.md claiming [B, 256, T] would mislead the
         # validator's LLM reviewer, which reads this file as the model spec.
-        _fc_comment, _ = _render_output_contract(inp.output_type)
+        _fc_comment, _ = _render_output_contract(inp.output_type, inp.forward_contract.model_io)
         description_md = (
             f"# {_class_name(inp.model_name)}\n\n"
             f"## Overview\n\n{inp.model_description}\n\n"
@@ -1816,6 +1988,11 @@ class MLModelImplementor:
             config_fields=config_fields,
             model_description=inp.model_description,
             mathematical_definition=inp.mathematical_definition,
+            # Step 04a: the declaration this candidate was generated against,
+            # echoed so the validator probes the SAME semantic rather than a
+            # second read of the task config. `None` on the legacy
+            # prose-only path, which the validator preserves unchanged.
+            model_io_contract=inp.forward_contract.model_io,
             loss_provenance=loss_provenance,
             capability_metadata=capability_metadata,
         )

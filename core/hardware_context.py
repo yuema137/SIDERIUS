@@ -159,6 +159,30 @@ class HardwareContext(BaseModel):
     def usable_cap_gb(self) -> float:
         return self.usable_cap_bytes / (1024**3)
 
+    def effective_cap_gb(self, vram_budget_gb: float | None) -> float:
+        """The ceiling an architecture must actually fit under, in GB.
+
+        The three regimes the proposer's ``[HARDWARE CONTEXT]`` block names
+        collapse to one expression, because in each of them the binding
+        ceiling is whichever of the two is smaller:
+
+        =================================  ==============================
+        regime                             effective cap
+        =================================  ==============================
+        PHYSICAL (no operator budget)      ``usable_cap_gb``
+        BUDGET (budget <= usable)          ``vram_budget_gb``
+        PHYSICAL VETO (budget > usable)    ``usable_cap_gb``
+        =================================  ==============================
+
+        Extracted (Step 04a) so the implementor's capacity prose and the
+        proposer's block cannot disagree about the number they quote. Two
+        copies of this rule would be two authorities, and the divergence
+        would be invisible: both render plausible GB values.
+        """
+        if vram_budget_gb is None:
+            return self.usable_cap_gb
+        return min(vram_budget_gb, self.usable_cap_gb)
+
 
 def _probe_driver_version(errors: list[str]) -> str | None:
     """NVIDIA driver version via a bounded ``nvidia-smi`` call (O1a).

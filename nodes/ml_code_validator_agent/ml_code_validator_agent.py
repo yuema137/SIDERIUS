@@ -16,7 +16,10 @@ Deterministic:
 
 In-process (no subprocess):
   6. Instantiation: PLUGIN_CONFIG_CLASS() and PLUGIN_MODEL_CLASS(config) succeed;
-     forward pass on a small dummy input [1, 64] produces shape [1, 256, 64].
+     a dummy forward pass produces the shape the candidate's declared contract
+     requires. Since Step 04a that shape is DERIVED from the task's normalized
+     Model-I/O contract when one is supplied — it is not a fixed [1, 256, 64].
+     Without a contract the legacy geometry is used unchanged.
   7. Gradient flow: loss.backward() succeeds; all trainable parameters have
      non-None gradients.
 
@@ -46,9 +49,16 @@ import torch
 
 from agent.llm_bridge import LLMBridge
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
+from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from agent.skills.forbidden_pattern_skill import check_file as _check_forbidden_patterns
+from agent.skills.model_io_probe_skill import (
+    ProbeConstructionError,
+    build_model_input,
+    declared_output_tensor,
+    expected_output_shape,
+)
 
 # ---------------------------------------------------------------------------
 # LLM prompts
@@ -70,8 +80,8 @@ mathematical fidelity to the spec.
     - Broken gradient path (detached tensors, non-differentiable ops where needed)
     - Missing operations that prevent the model from running at all
     - Wrong output shape for the contract the plugin DECLARES in
-      PLUGIN_OUTPUT_TYPE: "classifier" must emit [B, 256, T],
-      "regressor" must emit [B, T]. Judge against the declared contract,
+      PLUGIN_OUTPUT_TYPE: "classifier" must emit {CLASSIFIER_SHAPE},
+      "regressor" must emit {REGRESSOR_SHAPE}. Judge against the declared contract,
       not against classification by default.
   Implementation details that differ from the spec but still produce a valid,
   trainable model do NOT set passed=false. A model that is "structurally close
@@ -112,6 +122,46 @@ Output a JSON object with exactly these fields:
 - implementation_issues: list only bugs that cause crashes or wrong output shape.
 - passed: true if the model will run and train. false only for crash/broken-gradient bugs.
 - Output only the JSON object — no preamble, no markdown fences."""
+
+
+#: The shapes the shipped prompt named, used when no normalized contract is
+#: supplied (design §15.1 row 1). A prose-only caller therefore sends the
+#: byte-identical prompt it always has — which is what keeps ``pb6_*`` exact.
+_LEGACY_PROMPT_SHAPES: dict[str, str] = {
+    "classifier": "[B, 256, T]",
+    "regressor": "[B, T]",
+}
+
+
+def _build_review_system_prompt(model_io_contract: ModelIOContract | None) -> str:
+    """Render the reviewer's system prompt from the task's declaration.
+
+    Step 04a: the two shape tokens the reviewer judges against are RENDERED
+    from the normalized contract rather than restated. A prompt that names
+    ``[B, 256, T]`` for a task declaring sixteen classes does not merely read
+    oddly — it instructs the reviewer to reject every correct candidate, and
+    no shape check anywhere else in the pipeline would catch it, because the
+    defect lives in prose (design §9 failure class 6).
+
+    Both forms come from the same ``declared_output_tensor`` rule the probe
+    uses, so the prompt cannot describe a contract the probe would refuse.
+    A contract that cannot express the classifier form degrades to naming
+    only what it can: there is nothing to say about a class alphabet a task
+    never declared.
+    """
+    shapes = dict(_LEGACY_PROMPT_SHAPES)
+    if model_io_contract is not None:
+        for form in ("classifier", "regressor"):
+            try:
+                shapes[form] = declared_output_tensor(model_io_contract, form).render_shape()
+            except ProbeConstructionError:
+                # A continuous task has no classifier form to describe. Say so
+                # rather than inventing an alphabet — the probe fails closed on
+                # exactly this case, and the prompt must not promise otherwise.
+                shapes[form] = "(not declared by this task)"
+    return VALIDATOR_REVIEW_SYSTEM_PROMPT.replace(
+        "{CLASSIFIER_SHAPE}", shapes["classifier"]
+    ).replace("{REGRESSOR_SHAPE}", shapes["regressor"])
 
 
 def _build_review_prompt(
@@ -322,19 +372,20 @@ _LEGAL_OUTPUT_TYPES: tuple[str, ...] = ("classifier", "regressor")
 #: relying on this default is a producer defect, not a convenience.
 _DEFAULT_OUTPUT_TYPE: str = "classifier"
 
-#: Class count used by the in-process shape probe.
-#: FOLLOW-UP (FU-A-1): ``configs/task_config.yaml`` already declares
-#: ``num_classes: 256``, but it is consumed only for prompt rendering
-#: (``workflows/task_config.py:209``). This agent holds no task config and its
-#: caller passes only a file path, so threading it here would mean a NEW
-#: transport rather than reusing one existing typed boundary. Per the A2
-#: conditional rule in the PR A design doc, the literal is retained and the
-#: genericization deferred.
-_PROBE_NUM_CLASSES: int = 256
+#: Legacy probe geometry, used ONLY when no normalized contract is supplied.
+#: This is design §15.1 row 1 — a caller that predates the Model-I/O contract
+#: keeps today's behaviour exactly, and absence alone is never an error.
+#:
+#: FU-A-1 is DISCHARGED (Step 04a): the class count is no longer restated
+#: here. When a contract IS supplied it is the authority, and these values
+#: are not consulted at all.
+_LEGACY_CLASSIFIER_PROBE_CLASSES: int = 256
+_LEGACY_PROBE_TIME_STEPS: int = 64
 
 
 def _check_instantiation_and_gradient(
     model_file_path: str,
+    model_io_contract: ModelIOContract | None = None,
 ) -> tuple[bool, bool, bool, str | None, int | None, int | None]:
     """
     Load plugin, instantiate config + model, run a dummy forward + backward pass,
@@ -353,9 +404,7 @@ def _check_instantiation_and_gradient(
     pass or output contract still records how large the implementation was —
     those are exactly the candidates the funnel must not lose.
       - instantiation_ok: config instantiated, model instantiated, forward pass
-                          produced the shape required by its DECLARED contract
-                          ([1, 256, 64] for ``classifier``, [1, 64] for
-                          ``regressor``).
+                          produced the shape required by its DECLARED contract.
       - gradient_ok:      backward pass succeeded and all trainable parameters
                           received non-None gradients.
       - output_type_ok:   the declaration is legal and the actual output matches
@@ -366,6 +415,26 @@ def _check_instantiation_and_gradient(
     third — is the (output contract, loss) PAIR legal — belongs to the shared
     rule in ``ml_models.models_format_sandbox`` and is deliberately not
     duplicated here.
+
+    Step 04a — where the probe's shape comes from:
+
+    * ``model_io_contract`` supplied: the probe input and the expected output
+      shape are DERIVED from it through ``agent.skills.model_io_probe_skill``.
+      Class cardinality, rank, axis order and input dtype are contract-owned;
+      the batch extent and the realization of a symbolic axis are Step-04
+      recipes. A contract that cannot supply a semantic the candidate's own
+      declared form requires fails CLOSED here rather than being guessed
+      (§15.1 row 3).
+    * ``model_io_contract is None``: the legacy prose-only path (§15.1 row 1).
+      The probe reproduces its pre-Step-04a geometry exactly —
+      ``[1, 256, 64]`` for ``classifier``, ``[1, 64]`` for ``regressor`` —
+      and absence alone is never an error.
+
+    Args:
+        model_file_path: absolute path to the plugin to probe.
+        model_io_contract: the normalized Step-03 declaration this candidate
+            was generated against, mapped in by the impl->valid protocol, or
+            ``None`` on the legacy path.
     """
     spec = importlib.util.spec_from_file_location("_validator_plugin_inst", model_file_path)
     if spec is None or spec.loader is None:
@@ -428,14 +497,38 @@ def _check_instantiation_and_gradient(
             realized_trainable,
         )
 
-    expected_shape: tuple[int, ...] = (
-        (1, _PROBE_NUM_CLASSES, 64) if declared_type == "classifier" else (1, 64)
-    )
+    # Step 04a: the probe geometry. With a contract the facts are derived;
+    # without one the legacy geometry is reproduced verbatim (§15.1 row 1).
+    # A contract that cannot express what the candidate's declared form needs
+    # is a verdict, not a crash — it is reported through the same error
+    # channel as every other rejection, so an operator sees WHY the candidate
+    # could not be probed.
+    if model_io_contract is None:
+        expected_shape: tuple[int, ...] = (
+            (1, _LEGACY_CLASSIFIER_PROBE_CLASSES, _LEGACY_PROBE_TIME_STEPS)
+            if declared_type == "classifier"
+            else (1, _LEGACY_PROBE_TIME_STEPS)
+        )
+        probe_input = torch.randint(
+            0, _LEGACY_CLASSIFIER_PROBE_CLASSES, (1, _LEGACY_PROBE_TIME_STEPS)
+        )
+    else:
+        try:
+            expected_shape = expected_output_shape(model_io_contract, declared_type)
+            probe_input = build_model_input(model_io_contract)
+        except ProbeConstructionError as e:
+            return (
+                False,
+                False,
+                False,
+                f"Probe construction failed: {e}",
+                realized_total,
+                realized_trainable,
+            )
 
     # Forward pass with small dummy input
     try:
-        x = torch.randint(0, _PROBE_NUM_CLASSES, (1, 64))
-        out = model(x)
+        out = model(probe_input)
     except Exception as e:
         return False, False, False, f"Forward pass failed: {e}", realized_total, realized_trainable
 
@@ -544,7 +637,14 @@ class MLCodeValidatorAgent:
                 inst_err,
                 realized_total_parameter_count,
                 realized_trainable_parameter_count,
-            ) = _check_instantiation_and_gradient(inp.model_file_path)
+            ) = _check_instantiation_and_gradient(
+                inp.model_file_path,
+                # Step 04a: the declaration the implementor generated this
+                # candidate against, carried here by the impl->valid protocol.
+                # `None` = legacy prose-only caller, which keeps the shipped
+                # probe geometry.
+                model_io_contract=inp.model_io_contract,
+            )
         else:
             inst_ok, grad_ok, otype_ok, inst_err = (
                 False,
@@ -717,7 +817,7 @@ class MLCodeValidatorAgent:
             inp, plugin_src, test_output=test_output, inst_err=inst_err
         )
         raw = self.bridge.generate(
-            VALIDATOR_REVIEW_SYSTEM_PROMPT,
+            _build_review_system_prompt(inp.model_io_contract),
             user_prompt,
             label="validator.code_review",
         )

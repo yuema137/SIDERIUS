@@ -14,10 +14,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent_generated._registry import CapabilityMetadata
+from core.hardware_context import HardwareContext
 
 # Fields the implementor is NEVER allowed to adjust. These are owned by the
 # proposer (dataset-level, global, knowable at proposal time). A violation
@@ -225,6 +227,29 @@ class ImplementorInput(BaseModel):
         "production callers always populate via "
         '``ForwardContract(**load_task_config()["forward_contract"])``.',
     )
+    # --- Step 04a (OD-S4-1) — capacity awareness ---
+    # Mirrors ``ProposalInput.hardware_context`` / ``vram_budget_gb`` exactly,
+    # including their Optional-by-default shape, so the implementor's capacity
+    # prose derives from the SAME live manifest the proposer already quotes
+    # instead of a stale literal. No task-config field is introduced: machine
+    # capacity is a property of the machine, not of the task.
+    hardware_context: HardwareContext | None = Field(
+        default=None,
+        description="Live hardware manifest from ``core.hardware_context``, "
+        "populated by the workflow via ``get_or_create``. ``None`` for "
+        "CPU-only hosts, test fixtures and standalone invocations that bypass "
+        "the workflow; the capacity bullet then renders its defined "
+        "magnitude-free form rather than a stale ceiling.",
+    )
+    vram_budget_gb: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Active operator-defined VRAM ceiling (GB) for this "
+        "iteration, threaded from the workflow exactly as for the proposer. "
+        "Combined with ``hardware_context`` through "
+        "``HardwareContext.effective_cap_gb``, which is the single rule both "
+        "nodes quote — so their prompts cannot name different caps.",
+    )
     plugin_dir: str = Field(
         default="agent_generated/models",
         description="Directory where the model plugin file will be written. "
@@ -370,6 +395,19 @@ class ImplementorOutput(BaseModel):
         "``run_name``, the absolute path to the plugin file, and whether the "
         "dummy-tensor forward pass validated. See "
         "``docs/design/enable_loss_inventory.md`` § Commit L3.",
+    )
+    model_io_contract: ModelIOContract | None = Field(
+        default=None,
+        description="The normalized Model-I/O contract this candidate was "
+        "generated against — Step 03's semantic authority, echoed verbatim "
+        "from ``ImplementorInput.forward_contract.model_io`` (Step 04a). It "
+        "is carried on the OUTPUT rather than re-read downstream so the "
+        "validator probes the candidate against the declaration the "
+        "implementor ACTUALLY used, not against a second read of the task "
+        "config that may have moved. ``None`` = the legacy prose-only "
+        "compatibility path, where no normalized contract was supplied; "
+        "consumers must preserve their pre-Step-04a behaviour for it and "
+        "must NOT treat absence as an error.",
     )
     capability_metadata: CapabilityMetadata | None = Field(
         default=None,

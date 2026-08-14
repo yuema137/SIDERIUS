@@ -286,6 +286,54 @@ class TestOutputCorrectness:
         output = agent_with_mocks.run(inp)
         assert output.mathematical_definition == inp.mathematical_definition
 
+    def test_step04a_emits_the_contract_it_generated_against(self, agent_with_mocks, inp):
+        """The PRODUCER end of the Step-04a Model-I/O transport.
+
+        ``test_step04a_model_io_transport.py`` proves the protocol carries
+        the contract; nothing there proves the implementor ever PUTS one on
+        its output. That is the V21 PR-E lesson written down in
+        ``test_output_contract_end_to_end.py``: a transport contract must
+        start at the real producer, not at the first typed object.
+
+        Fails when: the ``model_io_contract=`` argument is dropped from the
+        ``ImplementorOutput(...)`` construction — after which the validator
+        silently falls back to the legacy path for every candidate.
+
+        Unlike the probe tests, this one uses the shipped TIDMAD declaration
+        rather than a 16-class one, and that is not an oversight: the echo has
+        no fallback to be confused with. ``model_io_contract`` defaults to
+        ``None``, never to a fabricated contract, so "equal to what the input
+        declared" and "silently dropped" are already distinguishable. Forcing
+        a 16-class contract here would instead make the fixture model's
+        256-class head fail its own self-check, testing C4 rather than the
+        echo.
+        """
+        from tests.helpers.step04a_fixtures import forward_contract, tidmad_model_io
+
+        declared = tidmad_model_io()
+        inp.forward_contract = forward_contract(declared)
+
+        output = agent_with_mocks.run(inp)
+
+        assert output.model_io_contract == declared
+        assert output.model_io_contract is not None
+        assert output.model_io_contract.class_cardinality == 256
+
+    def test_step04a_legacy_prose_only_input_emits_no_contract(self, agent_with_mocks, inp):
+        """§15.1 row 1: a caller with no normalized contract stays legacy.
+
+        Fails when: the implementor invents a contract for a caller that
+        declared none — which would bind every legacy caller to TIDMAD
+        semantics it never asked for.
+        """
+        from tests.helpers.step04a_fixtures import forward_contract
+
+        inp.forward_contract = forward_contract(None)
+        assert inp.forward_contract.model_io is None
+
+        output = agent_with_mocks.run(inp)
+        assert output.model_io_contract is None
+
 
 # ---------------------------------------------------------------------------
 # TestDescriptionFile

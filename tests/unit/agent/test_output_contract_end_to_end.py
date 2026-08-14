@@ -184,7 +184,7 @@ def test_generated_test_file_matches_the_declared_contract(tmp_path, output_type
     import sys
 
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
-    from nodes.ml_model_implementor.ml_model_implementor import TEST_TEMPLATE
+    from nodes.ml_model_implementor.ml_model_implementor import _assemble_test
 
     model_name = f"gen_test_{output_type}"
     storage = StorageConfig(
@@ -203,7 +203,13 @@ def test_generated_test_file_matches_the_declared_contract(tmp_path, output_type
         },
     )
     (tmp_path / f"{model_name}.py").write_text(plugin_src)
-    (tmp_path / f"test_{model_name}.py").write_text(TEST_TEMPLATE.format(model_name=model_name))
+    # Step 04a: render through the PRODUCTION assembler, not the raw template.
+    # `_assemble_test` is what the implementor actually calls, and it is where
+    # the contract-derived class count is applied — formatting the template
+    # directly would test a string this node never emits.
+    (tmp_path / f"test_{model_name}.py").write_text(
+        _assemble_test(model_name, impl_input.forward_contract.model_io)
+    )
 
     result = subprocess.run(
         [sys.executable, "-m", "pytest", f"test_{model_name}.py", "-q"],

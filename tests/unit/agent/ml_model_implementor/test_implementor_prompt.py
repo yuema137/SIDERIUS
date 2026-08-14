@@ -269,31 +269,48 @@ class TestDeferredScope:
     # reviewer reads that file as the model spec. Coverage moved to
     # ``TestOutputContractRendering.test_description_documents_declared_contract``.
     #
-    # The remaining phrase is still deferred to
-    # ``enable_global_task_config.md`` § Commit T2 and is untouched by PR A.
-    @pytest.mark.parametrize(
-        "deferred_phrase",
-        [
-            # Lines 80, 115, 120 — runtime dummy-tensor self-check
-            "[1, 64] int64 → expected [1, 256, 64] float32",
-        ],
-    )
-    def test_deferred_hardcodes_still_present(self, deferred_phrase):
-        """Failing this means a deferred Category B/C/D hardcode was
-        accidentally touched without updating the design doc + the
-        existing test_implementor_agent.py::TestDescriptionFile suite."""
-        from pathlib import Path
+    # **Step 04a (2026-08-13) — the LAST deferred phrase is now DISCHARGED.**
+    #
+    # The self-check docstring's "[1, 64] int64 → expected [1, 256, 64]
+    # float32" was the final entry in this list. Step 04a is the PR its
+    # deferral was waiting for: ``_smoke_test_plugin`` now derives its probe
+    # input and expected shape from the task's normalized Model-I/O contract,
+    # so a docstring stating a fixed geometry would document a behaviour the
+    # function no longer has. Guarding its presence would guard a defect —
+    # exactly the reason A3 and A4 removed their entries above.
+    #
+    # Design: step_04_candidate_creation_mechanics/
+    #         pr_04a_contract_derived_candidate_mechanics.md §16 C4.
+    #
+    # REWRITTEN, not deleted. The class now asserts the property that
+    # REPLACED the deferral, so the surface is still guarded: the self-check
+    # must not restate a class count outside the legacy fallback.
 
-        impl_path = (
-            Path(__file__).resolve().parents[4]
-            / "nodes/ml_model_implementor/ml_model_implementor.py"
+    def test_the_self_check_no_longer_restates_a_class_count(self):
+        """The discharge, asserted rather than assumed.
+
+        Fails when: someone reintroduces a bare class-count literal into the
+        self-check path. The two ``_LEGACY_SELF_CHECK_*`` constants are the
+        sanctioned exception — they implement design §15.1 row 1, where a
+        caller supplying no contract must keep the shipped geometry — so the
+        assertion is scoped to the function body, not the module.
+        """
+        import inspect
+
+        from nodes.ml_model_implementor.ml_model_implementor import _smoke_test_plugin
+
+        body = inspect.getsource(_smoke_test_plugin)
+        assert "expected [1, 256, 64]" not in body, (
+            "the self-check docstring still promises a fixed geometry it no longer implements"
         )
-        source = impl_path.read_text(encoding="utf-8")
-        assert deferred_phrase in source, (
-            f"Deferred hardcode {deferred_phrase!r} was removed; either fold it "
-            f"into T2's scope properly or revert. See "
-            f"docs/design/enable_global_task_config.md § Commit T2."
+        assert "0, 256," not in body, (
+            "a bare 256 reappeared in the self-check probe; the class extent "
+            "must come from the contract, and the legacy path must go through "
+            "_LEGACY_SELF_CHECK_CLASSES"
         )
+        # And the derivation is genuinely wired, not merely absent:
+        assert "build_model_input" in body
+        assert "expected_output_shape" in body
 
 
 # ---------------------------------------------------------------------------

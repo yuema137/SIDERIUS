@@ -14,6 +14,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
+from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.proposal import InheritedComponent
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
@@ -98,6 +99,20 @@ class ValidatorInput(BaseModel):
         default=None,
         description="Optional human-provided guidance (highest priority — overrides expert_advice). "
         "When present, injected into the LLM prompt as high-priority context.",
+    )
+    model_io_contract: ModelIOContract | None = Field(
+        default=None,
+        description="The normalized Model-I/O contract the candidate was "
+        "generated against — Step 03's semantic authority, mapped verbatim "
+        "from ``ImplementorOutput.model_io_contract`` by the impl->valid "
+        "protocol (Step 04a). When present it is authoritative for every "
+        "semantic it declares: the in-process shape probe derives its class "
+        "extent, expected rank and axis roles from it rather than restating "
+        "them. ``None`` = the legacy prose-only compatibility path, where "
+        "the probe reproduces its pre-Step-04a behaviour exactly; absence "
+        "alone is never an error. What IS an error is an explicit contract "
+        "that omits a semantic its own declared form requires — that fails "
+        "closed rather than guessing.",
     )
     inherited_components: list[InheritedComponent] = Field(
         default_factory=list,

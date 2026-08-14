@@ -39,9 +39,12 @@ def local_all_fields(
       - config_fields         : dict of field names -> default values
       - model_description     : plain-English description from the proposal
       - mathematical_definition: spec from the proposal
+      - model_io_contract      : the normalized Step-03 Model-I/O contract the
+                                 candidate was generated against, or None on
+                                 the legacy prose-only path (Step 04a)
 
     Populates in ml-model-valid (ValidatorInput):
-      - all seven fields above
+      - all eight fields above
       - storage, llm_provider, llm_model_id: passed from the orchestrator
     """
     return ValidatorInput(
@@ -56,6 +59,11 @@ def local_all_fields(
         config_fields=output.config_fields,
         model_description=output.model_description,
         mathematical_definition=output.mathematical_definition,
+        # Step 04a: the semantic declaration travels the SAME hop as the
+        # artifact it describes. Mapped verbatim — never re-resolved here and
+        # never defaulted, so a contract that existed upstream cannot be
+        # replaced by a plausible-looking substitute on the way down.
+        model_io_contract=output.model_io_contract,
         llm_provider=llm_provider,
         llm_model_id=llm_model_id,
         storage=storage,

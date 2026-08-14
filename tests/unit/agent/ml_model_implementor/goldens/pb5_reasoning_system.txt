@@ -10,7 +10,7 @@ The model must satisfy this forward contract (non-negotiable):
     output: [B, 256, T] float32  — per-timestep logits over 256 denoising classes
 
 Task type: classification (per-timestep 256-class).
-- GPU budget: <10 GB VRAM, <100M parameters for initial exploration.
+- GPU budget: size the initial architecture conservatively. The VRAM engine rejects any configuration whose predicted peak exceeds this run's effective cap, and a rejection consumes a tuner attempt with no scored round.
 
 ## Allowed imports — STRICT ALLOW-LIST
 

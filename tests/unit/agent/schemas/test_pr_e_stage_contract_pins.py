@@ -22,6 +22,16 @@ proposal-chain schemas PR E owns hops through are pinned exactly.
 
 Design doc: ``docs/design/v21_priorities/pr_e_proposal_scale_funnel.md``
 Commit E1.
+
+**Step 04a (2026-08-13)** added ``model_io_contract`` to
+``ImplementorOutput`` and ``ValidatorInput`` — the normalized Model-I/O
+transport — and ``hardware_context`` / ``vram_budget_gb`` to
+``ImplementorInput``, the OD-S4-1 capacity authority (mirroring the fields
+``ProposalInput`` already carries). The pins below were edited in the SAME commit as the field, which
+is the discipline this module exists to enforce: the guard fired, and the
+expectation was updated deliberately rather than the guard relaxed. See
+``docs/design/generic_framework_upgrade/step_04_candidate_creation_mechanics/
+pr_04a_contract_derived_candidate_mechanics.md`` §16 C2.
 """
 
 from __future__ import annotations
@@ -58,6 +68,8 @@ PROPOSAL_OUTPUT_KEYS = {
 
 IMPLEMENTOR_INPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
+    "hardware_context",  # Step 04a / OD-S4-1 — deliberate, this pin forced it
+    "vram_budget_gb",  # Step 04a / OD-S4-1 — deliberate, this pin forced it
     "model_name",
     "output_type",
     "model_description",
@@ -79,6 +91,7 @@ IMPLEMENTOR_INPUT_KEYS = {
 
 IMPLEMENTOR_OUTPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
+    "model_io_contract",  # Step 04a — deliberate addition, this pin forced it
     "baseline_config_adjustments",
     "capability_metadata",
     "config_fields",
@@ -93,6 +106,7 @@ IMPLEMENTOR_OUTPUT_KEYS = {
 
 VALIDATOR_INPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
+    "model_io_contract",  # Step 04a — deliberate addition, this pin forced it
     "config_fields",
     "description_file_path",
     "expert_advice",

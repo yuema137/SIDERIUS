@@ -1,0 +1,41 @@
+import torch
+import pytest
+import sys
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "models"))
+from s04a_baseline_classifier import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS, PLUGIN_OUTPUT_TYPE
+
+
+def test_forward_shape():
+    config = PLUGIN_CONFIG_CLASS()
+    model = PLUGIN_MODEL_CLASS(config)
+    model.eval()
+    x = torch.randint(0, 256, (2, config.segmentation_size))
+    with torch.no_grad():
+        out = model(x)
+    # Expected shape follows the plugin's DECLARED contract, so a regressor
+    # is not judged against the classifier shape (V21 PR A3). The class count
+    # is rendered from the task's Model-I/O contract (Step 04a), not fixed.
+    expected = (
+        (2, 256, config.segmentation_size)
+        if PLUGIN_OUTPUT_TYPE == "classifier"
+        else (2, config.segmentation_size)
+    )
+    assert out.shape == expected, f"Expected {expected}, got {out.shape}"
+
+
+def test_forward_no_nan():
+    config = PLUGIN_CONFIG_CLASS()
+    model = PLUGIN_MODEL_CLASS(config)
+    model.eval()
+    x = torch.randint(0, 256, (1, config.segmentation_size))
+    with torch.no_grad():
+        out = model(x)
+    assert not torch.isnan(out).any(), "Forward pass produced NaN values"
+
+
+def test_config_instantiation():
+    config = PLUGIN_CONFIG_CLASS()
+    assert config.segmentation_size > 0
+    assert config.batch_size >= 1

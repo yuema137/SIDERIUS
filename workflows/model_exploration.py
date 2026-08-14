@@ -2396,6 +2396,11 @@ def run_workflow(
                     _task_cfg = load_task_config()
                     impl_input.task_description = get_task_description(_task_cfg)
                     impl_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
+                    # Step 04a (OD-S4-1): the same live manifest and budget
+                    # the proposer receives, so the implementor's capacity
+                    # prose quotes this machine instead of a stale literal.
+                    impl_input.hardware_context = hardware_ctx
+                    impl_input.vram_budget_gb = active_vram_budget_gb
                     if human_advice_implement is not None:
                         impl_input.human_advice = human_advice_implement
                     if ref_code:

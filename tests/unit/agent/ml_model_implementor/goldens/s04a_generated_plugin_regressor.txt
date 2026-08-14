@@ -1,0 +1,34 @@
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from pydantic import BaseModel, Field, model_validator
+from typing import Self
+
+
+PLUGIN_MODEL_TYPE = "s04a_baseline_regressor"
+
+
+class S04aBaselineRegressorConfig(BaseModel):
+    model_type: str = Field(default="s04a_baseline_regressor", description="Plugin model type key.")
+    segmentation_size: int = Field(default=4000, ge=1)
+    batch_size: int = Field(default=2, ge=1)
+    channels: int = Field(default=16, ge=1)
+
+
+PLUGIN_CONFIG_CLASS = S04aBaselineRegressorConfig
+
+
+class S04aBaselineRegressor(nn.Module):
+    def __init__(self, config: "S04aBaselineRegressorConfig"):
+        super().__init__()
+        self.emb = nn.Embedding(256, config.channels)
+        self.head = nn.Conv1d(config.channels, 1, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # forward contract: input [B, T] int64 → output [B, T] float32
+        out = self.emb(x).permute(0, 2, 1)
+        return self.head(out).squeeze(1)
+
+
+PLUGIN_MODEL_CLASS = S04aBaselineRegressor
+PLUGIN_OUTPUT_TYPE = "regressor"  # [B, T] → continuous waveform regression

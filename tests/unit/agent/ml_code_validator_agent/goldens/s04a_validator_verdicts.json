@@ -1,0 +1,47 @@
+[
+  {
+    "case": "classifier_ok",
+    "instantiation_ok": true,
+    "gradient_ok": true,
+    "output_type_ok": true,
+    "error": null,
+    "realized_total_parameter_count": 4352,
+    "realized_trainable_parameter_count": 4352
+  },
+  {
+    "case": "regressor_ok",
+    "instantiation_ok": true,
+    "gradient_ok": true,
+    "output_type_ok": true,
+    "error": null,
+    "realized_total_parameter_count": 2057,
+    "realized_trainable_parameter_count": 2057
+  },
+  {
+    "case": "legacy_no_declaration",
+    "instantiation_ok": true,
+    "gradient_ok": true,
+    "output_type_ok": true,
+    "error": null,
+    "realized_total_parameter_count": 4352,
+    "realized_trainable_parameter_count": 4352
+  },
+  {
+    "case": "illegal_declaration",
+    "instantiation_ok": false,
+    "gradient_ok": false,
+    "output_type_ok": false,
+    "error": "PLUGIN_OUTPUT_TYPE='regression' is not a legal output contract (expected one of: classifier, regressor)",
+    "realized_total_parameter_count": 4352,
+    "realized_trainable_parameter_count": 4352
+  },
+  {
+    "case": "declaration_shape_mismatch",
+    "instantiation_ok": false,
+    "gradient_ok": false,
+    "output_type_ok": false,
+    "error": "Forward output shape (1, 64) does not match expected (1, 256, 64)",
+    "realized_total_parameter_count": 2057,
+    "realized_trainable_parameter_count": 2057
+  }
+]
