@@ -4,23 +4,26 @@
 |---|---|
 | Parent | `../step_07_tuner_policy_and_training_diagnostics.md` (revision 2, FROZEN 2026-08-15) §8.2 — the 07a acceptance contract; §3 authority map; §18 OD-S7-1/-3/-4; §20 WHAT/HOW line |
 | Roadmap | §20.2 (four concepts, OD-20-3/-4/-5), §22.1–§22.8 (R1–R4, cadence, History ≠ Diagnosis, information-flow governance), §22.9a (frozen track semantics), §22.12 row 07; §15.1 step-7 row (`§7a`) |
-| Design base | `838e9cd6` (master; PR0 MERGED `79403b44`) — every source line below was re-read at this head |
+| Design base | `838e9cd6` (master; PR0 MERGED `79403b44`) — every source line below was re-read at this head; revision 2 adds the loss-module audit at `066d6b45` (`ml_models/loss_models_sandbox.py:135-216, 218-278, 321-345`, `models_format_sandbox.py:637-651`) |
 | Depends on | PR0 MERGED (example packs exist); Steps 02/05a/05c/06 MERGED (profile transport, run-bound SampleSets, argv oracle, metric handle + planner filter) |
 | Decomposition | ONE PR, four commits **C1 → C2 → C3 → C4** (§15) — trainer · transport + test infra · tuner boundary + record + hiding · rungs + packs + Checkpoint E |
 | Gates | Gate 1 **NOT REQUIRED** (every rendered byte and kwarg key set exact — a hard criterion, §10) · Gate 2 **REQUIRED, bounded** (real training behaviour changes; launched ONLY with operator approval after C4, §10) |
-| Status | **DRAFT — FOR OPERATOR REVIEW** (revision 1, 2026-08-15). Not frozen; no implementation; §14 ledger empty; §16 lists the decisions the operator is asked to confirm |
+| Status | **DRAFT — revision 2 (2026-08-15): targeted revision after the operator's review of revision 1 (verdict: APPROVE WITH TARGETED REVISION — NOT YET FREEZE). Two validation blockers + three genericity/robustness corrections + the diagnosis math applied (§0.5); §16 records the operator's dispositions of Q-07a-1..7. Awaiting freeze; no implementation; §14 ledger empty** |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
 **What this child freezes (HOW) once the operator approves it**: the trainer
-validation pass and its RNG isolation (§3.2), the R2/R3 comparability
+validation pass and its STATE isolation (§3.2), the R2/R3 comparability
 representation (§3.3), the transport IPC (`--eval_sample_set_json`, §3.4),
 the `TrainingHistory` payload and the typed trainer→tuner results contract
 (§3.5), the `TrainingDiagnosis` fields and rules (§3.6), the hiding mechanism
 at both renders (§3.7), the record attachment (§3.8), the runtime-control
 accounting rule (§3.9), the test-infra shape (§3.10), the example-pack
 projection (§3.11), the rungs (§6), the Gate plan (§10) and the stop
-conditions (§13). **What stays the parent's**: the semantic requirements
+conditions (§13); revision 2 adds the **expected-validation contract**
+(§3.4a), the **validation-scope materialization contract** (§3.4b), the
+**R2/R3 comparability precondition and its audit** (§3.3), **state
+isolation** (§3.2) and the objective provenance fields (§3.5). **What stays the parent's**: the semantic requirements
 (§8.2 items 1–7) — this child instantiates them and does not reinterpret
 them. **NOT frozen**: exact test-file decomposition, helper names, source
 line numbers (reading aids at `838e9cd6`; re-read before each commit).
@@ -83,6 +86,25 @@ reaches the trainer (typed / fail-closed; no second split); `final_loss`
 stays last-epoch train loss (OD-S7-3); Stub/pseudo upgraded (OD-S7-4);
 Seam 5 written BEFORE code; example packs advanced honestly.
 
+### 0.5 Operator review of revision 1 (2026-08-15) — corrections applied in this revision
+
+Verdict: **APPROVE WITH TARGETED REVISION — NOT YET FREEZE.** Decomposition
+and the four commits stand; the validation main path (train SampleSet →
+training family; eval SampleSet → validation family; same criterion under
+`eval()` / `no_grad` / `shuffle=False`; RNG isolation; two-arm oracle;
+Gate 2 at the final head) is accepted.
+
+| # | Class | Correction | Where |
+|---|---|---|---|
+| 1 | **BLOCKER** | **Fully-supported validation must not silently degrade to `absent`.** `absent` is a valid compatibility state ONLY when validation was not expected (legacy single-file caller). When the tuner supplied an `eval_sample_set` and the history carries no R3, that is a CONTRACT FAILURE → `error_training`, never a success record with `validation_state="absent"`. Decided at the tuner boundary (`expected_validation = eval_sample_set is not None`); mutation "drop the transport while expected → RED / `error_training`" | §3.4a, §3.5, §8, C2/C3 tests |
+| 2 | **BLOCKER** | **A declared validation scope that resolves to zero or PARTIAL samples is a validation EXECUTION failure, not `nan` evidence.** `NaN` is reserved for numerical evidence (divergence / non-finite criterion). The materialized validation identity MUST equal the requested `eval_sample_set` (`N_evaluated == N_requested`, per file); the training path keeps its legacy skip semantics; the validation contract does not inherit silent shrink. Negative test: 5 requested, 4 materialize → no R3, structured training failure | §3.4b, §3.2, §8, C1 tests |
+| 3 | SHOULD FIX | **R2/R3 comparability needs the objective-side precondition stated and source-audited**: the contract holds for objectives whose returned batch scalar is mean-normalized / sample-mean-compatible under the framework's batching (not for `sum`-reduced or batch-coupled objectives). Audited: built-ins under `reduction="mean"` satisfy it; `reduction="sum"` and custom plugin losses cannot be proven → `comparability="not_established"` recorded (never assumed); the reduction identity is not claimed for all future objectives | §3.3, §3.5, §3.6, §13 |
+| 4 | SHOULD FIX | **State isolation, not only RNG isolation**: transactional `model.eval()` with `try/finally: model.train(was_training)`; the criterion is an `nn.Module` — freeze "validation MUST NOT mutate model, optimizer or training-objective state", audit the criterion classes, restore/verify; NumPy global RNG added to the isolation census; acceptance = state-neutral (model state_dict, optimizer state, objective module state, Python / NumPy / torch CPU+CUDA RNG identical before/after) | §3.2, C1 tests |
+| 5 | SHOULD FIX | **`objective_id = loss_cfg.loss_type` is a family label, not a computation identity** (`focal(γ=1)` ≠ `focal(γ=4)`). Renamed `objective_kind` + a deterministic `objective_fingerprint` of the RESOLVED objective config; no new `TrainingObjective` class | §3.5 |
+| 6 | SHOULD FIX | Trend deadband has a zero-reference pathology → symmetric scale-free relative change `r = |b−a| / max(|a|,|b|)` (0 when both 0); `observations` lists and `validation_seconds` must have `len == epochs_completed`, seconds non-negative | §3.6, §3.5 |
+| 7 | disposition | Gate 2 placement confirmed (after C4 at the final executable head; 07c owes its own Gate 2; 07b Gate 1). **Q-07a-4 APPROVED: `--max_epochs 2`** — an upper bound only; PASS does NOT require two points | §10 |
+| 8 | disposition | Q-07a-1 APPROVED (validation time excluded from the optimizer-step prior; the un-priced validation phase is recorded as **07c / runtime-control debt**); Q-07a-2, -3, -5, -7 APPROVED; **Q-07a-6 APPROVED WITH CORRECTION** (legacy absence OK; expected absence NOT OK — item 1) | §16 |
+
 ---
 
 ## 1. Capability / final effect
@@ -101,9 +123,11 @@ Seam 5 written BEFORE code; example packs advanced honestly.
 
 The precise invariants:
 
-1. **Trajectory parity.** With fixed seeds the train-loss trajectory is
-   bit-identical with and without the validation pass (structural RNG
-   isolation + the two-arm oracle).
+1. **Trajectory and STATE parity.** With fixed seeds the train-loss
+   trajectory is bit-identical with and without the validation pass, and
+   the pass leaves model, optimizer, objective-module state and every RNG
+   (Python / NumPy / torch CPU+CUDA) exactly as it found them (structural
+   isolation + the two-arm oracle + the state census).
 2. **Legacy floor byte-identical.** `final_loss`, `loss_history`,
    `model_params` — values and presence — unchanged in the results JSON, in
    `train_results`, at the reflect merge and on the record.
@@ -122,6 +146,12 @@ The precise invariants:
    optimizer steps nor included in the training ACTUAL; bounded by the eval
    set.
 8. **`run()` gains sequencing calls only** (CLAUDE.md responsibility rule).
+9. **Expected validation ≠ optional validation.** When the tuner supplied an
+   eval SampleSet, a history without R3 is a contract failure
+   (`error_training`); `absent` is legal only when no validation was expected.
+10. **Declared validation scope ≠ whatever subset existed on disk.** The
+    materialized validation identity equals the requested eval SampleSet or
+    the attempt fails closed — never a shrunk R3.
 
 ---
 
@@ -171,32 +201,61 @@ docs (README index rows, this ledger, parent §0/§8.2 status, roadmap §15.1/§
 
 Streaming mode only, after each training epoch, at the point where the
 training dataset/loader have been released (`:1169-1170`) and the
-mid-epoch admission rejection has been handled (`:1172-1176`):
+mid-epoch admission rejection has been handled (`:1172-1176`).
+**The pass is a transactional observation: it must leave every piece of
+observable training state exactly as it found it.**
 
 ```text
-model.eval()
-with torch.no_grad(), torch.random.fork_rng(devices=<the training device if CUDA else []>):
-    (snapshot/restore Python `random` global state around the block as well)
-    val_dataset = TIDMADEpochDataset(data_dir, eval_sample_set, seg_size,
-                                     train_portion=None,        # NO subsampling → no rng draw
-                                     rng=None, profile=profile, file_family="validation")
-    val_loader  = DataLoader(val_dataset, batch_size=train_cfg.batch_size, shuffle=False, drop_last=False)
-    for input_batch, target_batch in val_loader:
-        <same dtype routing as training: resolve_input_dtype(...); get_target_torch_dtype(loss_cfg)>
-        loss = criterion(model(input_seq), target_seq)
-        accumulate loss.item() × batch_sample_count
-    R3[ep] = Σ(loss_i × n_i) / Σ n_i
+PRE-FLIGHT (once, before epoch 0, before any optimizer step — §3.4b):
+    every requested VALIDATION-family file exists AND every requested segment index is within it
+    → otherwise ValidationScopeError (fail closed; no training time spent)
+
+PER EPOCH:
+was_training = model.training
+snapshot: py_state = random.getstate(); np_state = np.random.get_state();
+          criterion_state = deepcopy(criterion.state_dict())
+try:
+    model.eval()
+    with torch.no_grad(), torch.random.fork_rng(devices=<[device.index] if CUDA else []>):
+        val_dataset = TIDMADEpochDataset(data_dir, eval_sample_set, seg_size,
+                                         train_portion=None,        # NO subsampling → no rng draw
+                                         rng=None, profile=profile, file_family="validation")
+        materialized rows == requested rows, per file (§3.4b) else ValidationScopeError
+        val_loader  = DataLoader(val_dataset, batch_size=train_cfg.batch_size, shuffle=False, drop_last=False)
+        for input_batch, target_batch in val_loader:
+            <same dtype routing as training: resolve_input_dtype(...); get_target_torch_dtype(loss_cfg)>
+            loss = criterion(model(input_seq), target_seq)
+            accumulate loss.item() × batch_sample_count
+        R3[ep] = Σ(loss_i × n_i) / Σ n_i           (Σ n_i > 0 guaranteed by the materialization contract)
+finally:
+    model.train(was_training)                     # never rely on the next epoch to restore mode
+    random.setstate(py_state); np.random.set_state(np_state)
+    if criterion.state_dict() != criterion_state → ObjectiveStateMutationError (fail closed: the objective
+        module mutated itself under validation — a plugin violating the contract; never restored silently)
 del val_dataset, val_loader; gc.collect()
-model.train() is re-entered by the next epoch's existing `model.train()` (:948)
 ```
 
-- **RNG isolation is structural**: `eval()` (no dropout, no BatchNorm
-  running-stat update), `no_grad`, `shuffle=False` (SequentialSampler draws
-  nothing), `train_portion=None` (no `rng.sample`), and `fork_rng` +
-  Python-`random` snapshot restore ANY state a model's forward might touch.
-  The two-arm oracle (§6, Checkpoint A) proves the trajectory bit-identical;
-  the delete-the-hop mutation removes the fork and uses a fixture model whose
-  forward consumes torch RNG → oracle RED.
+- **State neutrality is structural**: `eval()` (no dropout, no BatchNorm
+  running-stat update) + `no_grad` (no grads, no optimizer effect) +
+  `shuffle=False` (SequentialSampler draws nothing) + `train_portion=None`
+  (no `rng.sample`) + `fork_rng` (torch CPU/CUDA RNG) + Python-`random` and
+  NumPy global-state restore + transactional mode restore + criterion
+  state check. **Frozen rule: validation MUST NOT mutate model state,
+  optimizer state or training-objective state.** Audit at `066d6b45`: the
+  built-in criteria are stateless in `forward` — `FocalLoss1D` /
+  `FocalLoss1DCW` hold immutable attributes (+ a `class_weights` buffer read
+  only), `nn.CrossEntropyLoss` / `nn.SmoothL1Loss` are stateless
+  (`loss_models_sandbox.py:135-216, 337-341`); custom plugin losses are
+  arbitrary `nn.Module`s (`:218-278`; contract `PLUGIN_LOSS_CLASS /
+  _CONFIG_CLASS / _TARGET_DTYPE / _TYPE` only) → the runtime state check
+  above is what makes the rule executable for them.
+- The two-arm oracle (§6, Checkpoint A) proves the trajectory bit-identical
+  AND the state census equal (model `state_dict`, optimizer `state_dict`,
+  criterion `state_dict`, `random.getstate()`, `np.random.get_state()`,
+  `torch.get_rng_state()` / CUDA state) before vs after each pass; the
+  delete-the-hop mutation removes the fork with a fixture model whose
+  forward consumes torch RNG → oracle RED; a fixture criterion that
+  increments a buffer in `forward` → `ObjectiveStateMutationError`.
 - **Transient, not resident**: the validation dataset is rebuilt each epoch
   AFTER the training dataset is released, so peak resident memory is
   `max(train_epoch, validation)` not their sum (formal `train_portion=0.1`
@@ -209,22 +268,55 @@ model.train() is re-entered by the next epoch's existing `model.train()` (:948)
 - **Cadence** = per epoch (v1, roadmap §22.3); a 1-epoch run yields a
   1-point R3 — legitimate.
 - **Bounded** by the tuner's already-bounded eval SampleSet
-  (`eval_portion`, `validation_max_portion` envelope, DataScope).
+  (`eval_portion`, `validation_max_portion` envelope, DataScope) — and by
+  §3.4b never smaller than requested.
 
-### 3.3 R2 / R3 comparability (FROZEN on approval)
+### 3.3 R2 / R3 comparability — statistic, PRECONDITION and audit (FROZEN on approval)
 
 Audit (§0.1): R2 = `np.mean(batch_losses)` over `drop_last=True` equal
-batches = the sample-weighted mean of the per-batch criterion values, which
-for a `reduction="mean"` criterion is the mean over all training samples of
-the epoch. **R2 is not changed.** R3 = the sample-weighted mean of the
-per-batch criterion values over the ENTIRE validation set (`drop_last=False`,
-weights = batch sample counts) — the same statistic, exact under an unequal
-last batch. Both carry the identity
-`reduction = "sample_weighted_mean_of_batch_criterion"` in the payload so the
-comparability claim is machine-visible. The comparability test (§6) uses a
-validation set whose size is not a multiple of `batch_size` and checks R3
-against an independent per-sample reference AND that the unweighted
-mean-of-batch-means (the mutation) is REJECTED.
+batches — the **sample-count-weighted mean of the criterion's batch
+scalar** (equal weights). **R2 is not changed.** R3 = the SAME estimator
+over the ENTIRE validation set (`drop_last=False`, weights = batch sample
+counts): `Σ n_i·L_i / Σ n_i`. Both carry the identity
+`epoch_statistic = "sample_count_weighted_mean_of_batch_criterion"`.
+
+**Precondition P (frozen, stated honestly — the operator's correction 3).**
+The two statistics are comparable AS THE SAME OBJECTIVE ONLY when the
+criterion's batch scalar is mean-normalized over the batch's samples /
+elements — i.e. `L(B) = (1/|B|)·Σ_{i∈B} ℓ_i` so that
+`Σ_b |B_b|·L(B_b) / Σ_b |B_b| = Σ_i ℓ_i / N`. A `sum`-reduced objective
+(`L(B) = Σ ℓ_i`) or a batch-coupled objective (`L(B) ≠ (1/|B|)Σ ℓ_i`,
+e.g. contrastive) does NOT satisfy P; for those R2 and R3 are still the
+same estimator formula but they are NOT claimed to be the same objective
+statistic. 07a invents no `TrainingObjective` abstraction; it RECORDS
+whether P is established:
+
+| Objective (run-resolved) | Batch scalar under the framework's batching | P |
+|---|---|---|
+| `focal` (`FocalLoss1D`, `reduction="mean"`) | element-wise focal term summed over the class axis, then `.mean()` over B×T (`:147-168`); fixed T per sample → per-sample-mean-decomposable | **established** |
+| `focal_cw` (`FocalLoss1DCW`, `reduction="mean"`) | same shape; class weights are per-element multipliers (NO normalization by weight sum) then `.mean()` (`:191-216`) | **established** |
+| `ce` (`nn.CrossEntropyLoss(weight=None, reduction="mean")`) — the streaming path ALWAYS passes `class_weights=None` (`train_engine_sandbox.py:884`) | element mean | **established** (streaming); legacy single-file may pass `weight` → weight-normalized mean, but legacy has no R3 anyway |
+| `smooth_l1` (`nn.SmoothL1Loss(reduction="mean")`) | element mean | **established** |
+| any built-in with `LossConfig.reduction="sum"` (`models_format_sandbox.py:646` allows it) | batch SUM — not mean-normalized | **not_established** (`reason="reduction=sum"`) |
+| `custom` plugin loss (`_load_custom_loss` `:218-278`; the plugin contract declares no reduction / normalization) | unknown | **not_established** (`reason="custom_objective_undeclared"`) — follow-up: the plugin loss contract may later declare mean-normalization (owner: Step 12 / loss-plugin contract), then this row flips by declaration, never by assumption |
+
+The trainer computes R3 with the same formula in EVERY case (the estimator
+is well-defined) and stamps `comparability` on the payload
+(`"established"` iff `reduction=="mean"` AND the objective is in the
+audited built-in set at that head; otherwise `"not_established"` with the
+reason). The diagnosis's CROSS-curve fields (train–validation gap) are
+`None` when comparability is not established (§3.6); within-curve facts
+(best epoch, trends, degradation) remain valid. **Stop condition (parent):**
+if the audited built-in mean-reduced set could NOT be proven decomposable
+from source, R2/R3 could not be made comparable without changing R2 →
+STOP. (It is proven above; sum/custom are LABELLED, which is the honest
+generic path.)
+
+The comparability test (§6) uses a validation set whose size is not a
+multiple of `batch_size` and checks R3 against an independent per-sample
+reference AND that the unweighted mean-of-batch-means (the mutation) is
+REJECTED; a `reduction="sum"` fixture and a custom-loss fixture must yield
+`comparability="not_established"` with the right reason.
 
 ### 3.4 Transport (FROZEN on approval — instantiates OD-S7-1)
 
@@ -253,35 +345,95 @@ tuner active_params["eval_sample_set"]  (exists, :4751)
 - StubSandbox / RecordingSandbox accept `eval_sample_set` for signature
   parity (V19-PR2 / RT2-B precedent) and validate scope like the executor.
 
+### 3.4a Expected validation ≠ optional validation (FROZEN — operator blocker 1)
+
+```text
+LEGACY / validation NOT expected      (no eval SampleSet: legacy single-file caller, a caller predating the flag)
+    validation absent  → valid compatibility state: history.validation_objective = None,
+                         diagnosis.validation_state = "absent"  ("not fully supported", recorded)
+
+FULLY-SUPPORTED / validation EXPECTED (the tuner built an eval SampleSet for this attempt)
+    validation absent  → CONTRACT FAILURE: TrainingResultsContractError at the tuner boundary
+                         → the attempt is recorded through the EXISTING training-failure path
+                           (`error_training`) — NEVER a success record with validation_state="absent"
+```
+
+The judgement is made where the expectation is known — the tuner:
+`interpret_training_results(raw, expected_validation=(eval_sample_set is
+not None))`. This closes the wrapper/executor-drop class of defect (the
+exact bug that motivated OD-S7-1) permanently: a re-dropped eval set can
+no longer produce a quiet success. The trainer stays backward-compatible
+(flag absent → no pass). Acceptance + mutation: drop the eval transport
+while the tuner expected validation → RED / `error_training` (C2/C3).
+
+### 3.4b Declared validation scope must materialize EXACTLY (FROZEN — operator blocker 2)
+
+`R3 = Σ n_i·L_i / Σ n_i` does not exist when `Σ n_i = 0`, and a scope that
+quietly lost a file has CHANGED the validation identity. Therefore, for the
+validation pass (NOT for the training path, which keeps its legacy
+skip-a-missing-file semantics `:369-371`):
+
+```text
+requested = the eval SampleSet: {file_index: [psd_segments]}
+pre-flight (before epoch 0, before any optimizer step):
+    for each requested file: the VALIDATION-family file exists AND every requested
+    segment index < the file's segment count → else ValidationScopeError (fail closed, cheap)
+per epoch:
+    materialized rows == Σ_files len(segments) × ml_segs_per_psd, per file (file_row_ranges)
+    → else ValidationScopeError (defense in depth: the disk changed mid-run)
+```
+
+`ValidationScopeError` is a trainer failure (non-zero exit → the executor's
+existing subprocess-error path → `error_training` at the tuner). NO R3 is
+emitted, `NaN` is never used for a missing scope — `NaN` stays reserved for
+numerical evidence (divergence, a non-finite criterion). Negative test:
+5 requested validation segments, 4 materialize (one file missing / one
+index out of range) → no results JSON, structured failure; also `Σ n_i = 0`.
+`TrainingHistory.validation_samples` records the materialized count and the
+schema validator requires it to equal the requested count carried in the
+payload (`validation_requested_samples`).
+
 ### 3.5 `TrainingHistory` and the typed trainer→tuner contract (FROZEN on approval)
 
 `execute_tools/training_history.py`:
 
 ```text
 TrainingHistory (frozen, extra="forbid")
-  cadence:               Literal["per_epoch"] = "per_epoch"
-  objective_id:          str            # the run-resolved training objective identity = loss_cfg.loss_type
-                                        # (provenance of WHICH computation R2/R3 are; NOT task config)
-  reduction:             Literal["sample_weighted_mean_of_batch_criterion"]
-  epochs_planned:        int  (train_cfg.epochs)
-  epochs_completed:      int  (= len(train_objective))
-  train_objective:       list[float]        # R2 — the SAME floats as loss_history
-  validation_objective:  list[float] | None # R3 — None when no validation scope (legacy / flag absent)
-  validation_samples:    int | None         # ML segments evaluated per epoch (constant across epochs)
-  validation_seconds:    list[float] | None # per-epoch wall time of the pass (evidence for the RT follow-up, §3.9)
-  observations:          dict[str, list[float]] = {}   # optional checkpointed observations slot (v1 empty)
+  cadence:                Literal["per_epoch"] = "per_epoch"
+  objective_kind:         str        # the run-resolved objective FAMILY = loss_cfg.loss_type (a label — NOT an identity)
+  objective_fingerprint:  str        # sha256 of the canonical JSON dump of the RESOLVED LossConfig
+                                     # (loss_type, loss_name, alpha, gamma, beta, reduction, use_class_weights …) —
+                                     # the computation identity: focal(γ=1) ≠ focal(γ=4); no new class introduced
+  objective_reduction:    Literal["mean", "sum"]      # LossConfig.reduction as resolved
+  epoch_statistic:        Literal["sample_count_weighted_mean_of_batch_criterion"]   # R2 and R3 formula
+  comparability:          Literal["established", "not_established"]                  # §3.3 precondition P
+  comparability_reason:   str | None                  # "reduction=sum" | "custom_objective_undeclared" | None
+  epochs_planned:         int  (train_cfg.epochs)
+  epochs_completed:       int  (= len(train_objective))
+  train_objective:        list[float]        # R2 — the SAME floats as loss_history
+  validation_objective:   list[float] | None # R3 — None ONLY when no validation scope was given (§3.4a)
+  validation_requested_samples: int | None   # ML segments requested by the eval SampleSet
+  validation_samples:     int | None         # ML segments materialized (== requested, §3.4b)
+  validation_seconds:     list[float] | None # per-epoch wall time of the pass (≥ 0; len == epochs_completed)
+  observations:           dict[str, list[float]] = {}   # optional checkpointed observations (v1 empty);
+                                                        # each list len == epochs_completed
   validators: len(validation_objective) == len(train_objective) when present; epochs_completed <= epochs_planned;
-              values may be non-finite (a diverged run is EVIDENCE, not a schema error) but the list lengths must agree
+              validation_samples == validation_requested_samples when present, and > 0;
+              every observations[*] and validation_seconds has len == epochs_completed; seconds >= 0;
+              values may be non-finite (a diverged run is EVIDENCE, not a schema error) but lengths must agree
 
 TrainingResults (the typed trainer→tuner contract; the ONE validation site = the tuner boundary)
   legacy_payload:  dict   — {k: raw[k] for k in ("final_loss","loss_history","model_params") if k in raw}
                             (presence AND values exactly as today; feeds the reflect merge and the record)
   history:         TrainingHistory | None   — None when the producer emitted no `training_history` key
   history_state:   Literal["present","absent"]
-  interpret_training_results(raw: dict) -> TrainingResults
-      raises TrainingResultsContractError (a ValueError) when `training_history` IS present but schema-invalid,
-      or when history.train_objective != raw["loss_history"], or final_loss != train_objective[-1]
-      (a producer violating its own contract is a bug → fail closed, never silently downgraded)
+  interpret_training_results(raw: dict, *, expected_validation: bool) -> TrainingResults
+      raises TrainingResultsContractError (a ValueError) when:
+        • `training_history` IS present but schema-invalid;
+        • history.train_objective != raw["loss_history"], or final_loss != train_objective[-1];
+        • expected_validation and (history is None or history.validation_objective is None)   ← §3.4a
+      (a producer violating its own contract, or an expected R3 that did not arrive, is a bug → fail closed,
+       never silently downgraded)
 ```
 
 The trainer's summary becomes `{final_loss, loss_history, model_params,
@@ -302,15 +454,23 @@ TrainingDiagnosis (frozen, extra="forbid")
   train_first, train_last, train_min: float | None;  train_min_epoch: int | None   (0-based, the trainer's epoch numbering)
   validation_first, validation_last, validation_min: float | None;  best_validation_epoch: int | None (argmin R3)
   final_vs_best_validation_degradation: float | None       (validation_last − validation_min ≥ 0)
-  final_vs_best_validation_degradation_rel: float | None   (÷ |validation_min| when non-zero)
-  train_validation_gap_final: float | None                 (validation_last − train_last, signed)
-  train_validation_gap_final_rel: float | None             (÷ |train_last| when non-zero)
+  final_vs_best_validation_degradation_rel: float | None   (r(validation_min, validation_last), below)
+  train_validation_gap_final: float | None                 (validation_last − train_last, signed) — None unless
+                                                           history.comparability == "established" (§3.3)
+  train_validation_gap_final_rel: float | None             (symmetric relative change, below) — same gating
+  comparability: Literal["established","not_established"]  (copied from the history, so a consumer of the
+                                                           diagnosis alone knows why the gap is None)
   train_trend, validation_trend: Literal["decreasing","increasing","flat","single_point"] | None
-      trend = sign(last − first) with an EXPLICIT scale-free deadband: |last − first| ≤ FLAT_REL_TOL × |first|
-      → "flat"; FLAT_REL_TOL is a named module constant of the boundary (default 1e-2), recorded on the
-      diagnosis as `flat_rel_tol` so a consumer can re-derive; a 1-point history → "single_point"
-  validation_degraded_after_best: bool | None   (degradation_rel > FLAT_REL_TOL) — the calibration-free
-                                                shape fact behind "overfitting evidence"; NOT labelled overfitting
+      trend = sign(last − first) with an EXPLICIT scale-free SYMMETRIC deadband:
+          r(a, b) = 0                       if |a| = |b| = 0
+                  = |b − a| / max(|a|, |b|) otherwise           (scale-invariant; no zero-reference pathology)
+          r(first, last) ≤ FLAT_REL_TOL → "flat"; else the sign decides; a 1-point history → "single_point"
+      FLAT_REL_TOL is a named module constant of the boundary (default 1e-2), recorded on the diagnosis as
+      `flat_rel_tol` so a consumer can re-derive; the raw endpoints are on the diagnosis too
+  final_vs_best_validation_degradation_rel and train_validation_gap_final_rel use the SAME r(·,·)
+  validation_degraded_after_best: bool | None   (r(validation_min, validation_last) > FLAT_REL_TOL AND
+                                                validation_last > validation_min) — the calibration-free shape
+                                                fact behind "overfitting evidence"; NOT labelled overfitting
   flat_rel_tol: float
 ```
 
@@ -368,9 +528,10 @@ scripts see the same value. Failure / skip records carry `None` for both.
 - The validation pass is NOT modelled by admission / prediction / the
   watchdog deadline in this PR (parent §2.1 accepts this: it is bounded by
   the eval set). `validation_seconds` is persisted in the payload as the
-  evidence for the follow-up "runtime model gains a validation term"
-  (owner: the runtime-control design / 07c — recorded in §14 as debt, not
-  fixed here). Operator confirmation requested (§16 Q-07a-1).
+  evidence for the follow-up "runtime model gains a validation term" —
+  **recorded as 07c / runtime-control debt** (operator disposition of
+  Q-07a-1: APPROVED; the un-priced validation phase is explicitly a debt
+  entry in §14 and in the parent §14 convergence ledger at Checkpoint E).
 - Admission, verification, timeout, signal, watchdog kill, stability stop,
   sidecar shapes: UNTOUCHED (existing RT2/RT4/C2 tests green = the evidence).
 
@@ -465,9 +626,9 @@ precedent; no consumer-less seam is created (frozen Q2 split).
 - **B-07a-1 diagnosis-structure axis (L1, atomic)** — the SAME
   `derive_training_diagnosis` over three `TrainingHistory` fixtures carrying
   the EXACT frozen semantics: TIDMAD (run-resolved objective; representative
-  atomic fixture `objective_id="focal"`), Pets (`objective_id="ce"`, CE
+  atomic fixture `objective_kind="focal"`), Pets (`objective_kind="ce"`, CE
   train/validation + `observations={"validation_accuracy": [...]}`), DAVIS
-  (`objective_id="mae"`, MAE train/validation + `observations=
+  (`objective_kind="mae"`, MAE train/validation + `observations=
   {"validation_psnr": [...]}`) → the expected verdict shapes (best epoch,
   degradation, gap, trends) pinned as literals; only the history / objective
   identity varies (atomicity machine-checked by diffing the fixtures'
@@ -498,7 +659,11 @@ the Gate's bounds; either requires operator approval (real training).
 |---|---|
 | validation pass perturbs the training trajectory | two-arm oracle RED → STOP (parent stop: cannot be made RNG-neutral) |
 | `--eval_sample_set_json` supplied but unreadable / wrong shape / violates DataScope | trainer `ValueError` (fail closed) / executor `ScopeViolationError` path — never a silent fallback |
-| flag absent (legacy / caller predating it) | R3 absent, `validation_state="absent"`, diagnosis `state="ok"` — recorded, never silent |
+| flag absent AND validation NOT expected (legacy / caller predating it) | R3 absent, `validation_state="absent"`, diagnosis `state="ok"` — recorded, never silent |
+| validation EXPECTED (tuner built an eval SampleSet) but the history carries no R3 (transport dropped, producer regressed) | `TrainingResultsContractError` at the tuner boundary → `error_training` record — NEVER a success record (§3.4a) |
+| declared validation scope materializes to zero or PARTIAL samples (missing validation file / index out of range / rows ≠ requested) | `ValidationScopeError` in the trainer (pre-flight before epoch 0; per-epoch defense) → subprocess error → `error_training`; NO R3, never `nan` (§3.4b) |
+| the objective module mutates its own state under validation (custom loss) | `ObjectiveStateMutationError` → `error_training` (§3.2) |
+| `reduction="sum"` or a custom objective | R3 computed by the same estimator; `comparability="not_established"` + reason; cross-curve diagnosis fields `None` — recorded, never assumed comparable (§3.3) |
 | producer emits `training_history` that violates the contract (schema, R2 ≠ `loss_history`, `final_loss` ≠ last R2) | `TrainingResultsContractError` at the tuner boundary → the attempt is recorded through the EXISTING training-failure record path (`error_training`); never downgraded to "absent" |
 | history shorter than planned (stability stop / early exit) | `truncated=True`; diagnosis over the completed prefix |
 | non-finite R2/R3 value | `state="invalid"`, raw values persisted |
@@ -543,8 +708,13 @@ Existing pins the parent lists (`test_delta_gates`, selection pins) are
   `validation_state="present"`. **Proposed bounded deviation for operator
   decision at launch (Q-07a-4)**: `--max_epochs 2` instead of `1`, so R2/R3
   carry two points and `best_validation_epoch` / trends are non-degenerate;
-  cost ≈ one more ~2 000-sample epoch. **NOT launched during design; NOT
-  launched during implementation without explicit operator approval.**
+  cost ≈ one more ~2 000-sample epoch. **Operator disposition (2026-08-15):
+  APPROVED — `--max_epochs 2` is an upper bound only; the planner may still
+  elect 1 epoch and a 1-point R2/R3 is a legitimate functional PASS.**
+  Sequence: 07a Gate 2 (this) · 07b Gate 1 · 07c its own bounded Gate 2
+  (measurement / data-feeding changes real execution). **NOT launched during
+  design; NOT launched during implementation without explicit operator
+  approval at launch.**
 - Corpus breadth (§22.13): TIDMAD executable; Pets/DAVIS contribute B-07a-1
   (L1) with the reason recorded (D14 not landed).
 
@@ -568,7 +738,7 @@ freezes and lands after).
 
 Parent §8.2 stops: the pass cannot be made RNG-neutral; the existing
 sample-set machinery cannot express the validation set without a new SPLIT
-concept; R2/R3 cannot be made comparable without changing R2; reflector /
+concept; R2/R3 cannot be made comparable without changing R2 (§3.3: the built-in mean-reduced set is proven; `sum` / custom are LABELLED not_established, which is not a stop); reflector /
 planner bytes cannot be held exact; any change to retry / round / timeout /
 signal semantics; > ~1 h wall or material cost per attempt. Child stops: a
 production file outside §3.1 must change; `run()` needs a new branch; a
@@ -654,7 +824,16 @@ rule says so.
 - [ ] Implement the trainer changes (§3.2, §3.3, §3.4 child side, §3.9);
       keep the pass in ONE helper (`_validation_pass(...)` returning
       `(r3_value, n_samples, seconds)`) — the streaming loop gains a
-      sequencing call, not a block.
+      sequencing call, not a block; the pass is transactional (§3.2:
+      `try/finally` mode restore, Python/NumPy RNG restore, `fork_rng`,
+      criterion state check); the §3.4b pre-flight runs once before
+      epoch 0 and the per-epoch materialization equality inside the pass;
+      `ValidationScopeError` / `ObjectiveStateMutationError` are typed
+      trainer errors (non-zero exit).
+- [ ] Compute `objective_fingerprint` (sha256 of the canonical JSON dump of
+      the resolved `LossConfig`), `objective_reduction`, `comparability` +
+      reason from the §3.3 audited set (a module-level frozenset of the
+      built-in kinds proven mean-normalized; custom → not_established).
 - [ ] Tests (each named for its defect): (a) two-arm trajectory oracle
       (`eval_sample_set=None` vs a distinct validation set) → `loss_history`
       lists equal element-wise (`==` on floats) AND the model state dicts
@@ -677,16 +856,38 @@ rule says so.
       order: the validation dataset is constructed only after the training
       dataset of that epoch is deleted (instrumented constructor + `del`
       order via a recording subclass); (i) `interpret_training_results`:
-      present / absent / malformed / mismatched cases; (j) `TrainingHistory`
-      validators (length agreement; non-finite allowed).
+      present / absent / malformed / mismatched cases AND the
+      `expected_validation` axis (expected + R3 missing → RED, §3.4a;
+      not expected + missing → `absent`); (j) `TrainingHistory` validators
+      (length agreement incl. `observations[*]` and `validation_seconds`;
+      seconds ≥ 0; `validation_samples == validation_requested_samples > 0`;
+      non-finite values allowed); (k) **state census**: model `state_dict`,
+      optimizer `state_dict`, criterion `state_dict`, `random.getstate()`,
+      `np.random.get_state()`, torch CPU (and CUDA when available) RNG state
+      identical before/after each pass; a fixture criterion whose `forward`
+      increments a buffer → `ObjectiveStateMutationError`; a fixture model
+      that leaves `eval()` mode raised inside the pass → the `finally`
+      restores `training=True` (mode restore under exception); (l)
+      **materialization contract**: eval SampleSet requesting 5 validation
+      segments with one file missing (4 materialize) → `ValidationScopeError`
+      BEFORE epoch 0 (no optimizer step ran, no results JSON); an index
+      beyond the file's segments → same; `Σ n_i = 0` → same; the TRAINING
+      path with the same missing file still skips (legacy semantics
+      unchanged — asserted side by side); (m) **comparability stamping**:
+      `reduction="sum"` fixture → `comparability="not_established"`,
+      `reason="reduction=sum"`; a custom-loss fixture → `"custom_objective_undeclared"`;
+      each built-in mean-reduced kind → `"established"`; (n)
+      `objective_fingerprint` differs between `focal(γ=1)` and `focal(γ=4)`
+      and is stable across processes.
 
 **4. Validation plan.**
 - Unit: the families above (`tests/unit/execute_tools/test_step07a_c1_*`).
 - Pseudo/integration: RT2-B/RT2-D/RT4/C2 existing suites green (unchanged
   semantics).
-- Negative: (b), (e), (i) above; a validation set that violates the profile
-  (`file_index ≥ num_files`) → the dataset skips/refuses exactly as the
-  training path does today (no new behaviour).
+- Negative: (b), (e), (i), (k), (l), (m) above; a validation set that
+  violates the profile (`file_index ≥ num_files`) → `ValidationScopeError`
+  at pre-flight (the validation contract is strict; the training path's
+  legacy behaviour is unchanged and asserted side by side).
 - Backward-compat: (d), (f); every existing trainer test green.
 - Gates: none at C1 (real training changes are Gate-2'd once, after C4).
 
@@ -698,18 +899,29 @@ rule says so.
   the results JSON has exactly one additional top-level key
   `training_history` that validates through `TrainingHistory`.
 - R3 on the unequal-last-batch fixture equals the per-sample reference and
-  differs from mean-of-batch-means.
+  differs from mean-of-batch-means; `comparability` is stamped exactly per
+  the §3.3 table (established for the four built-in mean-reduced kinds;
+  not_established with the right reason for `sum` and custom).
+- The state census (k) is equal before/after every pass; the objective
+  state mutation and mode-restore-under-exception cases behave as §3.2.
+- Zero / partial validation materialization fails closed BEFORE epoch 0
+  with no results JSON; NO `nan` R3 is ever produced for a missing scope.
 - Trainer argv accepts `--eval_sample_set_json` (child side); flag absent →
   behaviour identical to today except the additive key.
 - Training ACTUAL excludes validation seconds; `unit_count` unchanged.
 - ruff + pyright (CI) clean; Seam 5 present in the contract doc.
 
 **6. Failure and edge cases.**
-- Eval SampleSet with a file missing on disk → the dataset skips it exactly
-  as training does (`:369-371`); with NO rows at all → R3 for that epoch is
-  `nan` (evidence) and `validation_samples=0` — recorded, not raised (a
-  scope that resolves to zero rows is a data-side fact, not a trainer bug).
-- Non-finite training loss → R2/R3 carry the value; no exception.
+- Eval SampleSet with a validation file missing on disk, an index out of
+  range, or ZERO rows → `ValidationScopeError` at pre-flight (before any
+  optimizer step) — a validation execution failure, never a shrunk or `nan`
+  R3 (§3.4b). The TRAINING path keeps its legacy skip (`:369-371`).
+- Non-finite training / validation loss (divergence, non-finite criterion)
+  → R2/R3 carry the value; no exception — `NaN` is numerical evidence only.
+- The disk changes mid-run (a validation file disappears after pre-flight)
+  → the per-epoch materialization equality raises `ValidationScopeError`.
+- A custom criterion mutating its state under validation →
+  `ObjectiveStateMutationError` (fail closed).
 - Stability stop / mid-epoch rejection: validation runs after a COMPLETED
   epoch only; a rejected attempt returns `None` before any pass.
 - `epochs=1`: one R3 point.
@@ -758,7 +970,12 @@ consumer" concern on the pseudo side (OD-S7-4).
   B-07a-2 (real trainer through `execute_training` un-mocked on CPU with a
   synthetic 3-file contrast profile: R2 + R3 present, R3 evaluated over the
   validation family — asserted via the file names opened / the recorded
-  `validation_samples`).
+  `validation_samples`); **expected-validation reachability (§3.4a,
+  half 1)**: through `RecordingSandbox`/`StubSandbox`, a run whose eval
+  set is dropped between wrapper and executor yields a training result
+  WITHOUT R3 — the C2 test asserts the executor received `None` (RED if the
+  wrapper forwards) and the C3 test asserts the tuner then records
+  `error_training` (the two halves of the delete-the-hop mutation).
 - Non-goals: no tuner change; no record change; no golden other than the
   argv pins; the byte form of the sample-set JSON unchanged.
 - Dependencies: C1.
@@ -816,7 +1033,9 @@ failure classes (LLM-visible bytes, record shape) are distinct from C1/C2's
 - `agent/schemas/hyperparam_tuning.py`: `ExperimentRecord` + two fields +
   validator (§3.8).
 - `ml_hyperparameter_tune_agent.py`: at `:5619` `results =
-  interpret_training_results(train_status.get("results", {}))`;
+  interpret_training_results(train_status.get("results", {}),
+  expected_validation=eval_sample_set is not None)` (§3.4a — the tuner is
+  where the expectation is known);
   `train_results = results.legacy_payload`; `diagnosis =
   derive_training_diagnosis(results.history)`; the record dict gains
   `"training_history": ..., "training_diagnosis": ...` beside the three
@@ -841,7 +1060,14 @@ failure classes (LLM-visible bytes, record shape) are distinct from C1/C2's
   delete-the-hop reachability: a tuner run through `RecordingSandbox` whose
   saved record LACKS `training_diagnosis` when the derivation call is
   monkeypatched away → RED; contract-error routing → an `error_training`
-  record.
+  record; **expected-validation mutation (§3.4a, half 2)**: a canned
+  training result WITHOUT `validation_objective` on an attempt that built an
+  `eval_sample_set` → `error_training` record, NEVER a success record with
+  `validation_state="absent"`; the same result on a legacy attempt (no eval
+  set) → success record with `validation_state="absent"`; diagnosis
+  cross-curve fields `None` when `comparability="not_established"`; the
+  symmetric relative change: `r(0,0)=0`, `r(0,x)=1`, `r(a,b)=r(b,a)`, the
+  deadband boundary on both sides of `FLAT_REL_TOL`.
 - Non-goals: no policy reads the diagnosis; no rendering; no change to the
   same-loss rank; `HyperparamTuningOutput` untouched.
 - Dependencies: C1, C2.
@@ -863,7 +1089,8 @@ failure classes (LLM-visible bytes, record shape) are distinct from C1/C2's
 **5. Acceptance criteria.**
 - PB-1 (3), PB-2 (2), WF-1, WF-2 golden files byte-identical to their pre-07a sha256s (recorded in §14).
 - The reflect call's `actual_results` key set == the WF-2 golden on a run whose train results carry `training_history`.
-- Every success record in a pseudo run carries `training_history` (R2 + R3 lists) and `training_diagnosis` with `state="ok"`; failure/skip records carry `None`.
+- Every success record in a pseudo run carries `training_history` (R2 + R3 lists) and `training_diagnosis` with `state="ok"`, `validation_state="present"`; failure/skip records carry `None`.
+- An attempt that expected validation but received none is an `error_training` record (mutation RED); a legacy attempt records `validation_state="absent"` on a success record.
 - Each diagnosis rule has a RED mutation recorded; determinism pin green.
 - `run()`'s pyright complexity unchanged (no new branch — CI pyright green; a local AST branch count recorded in §14).
 
@@ -959,17 +1186,24 @@ Step 06 semantics (metric ≠ loss; the planner filter mechanism is extended, no
 
 ---
 
-## 16. Decisions the operator is asked to confirm at review (design ambiguity flagged, not silently chosen)
+## 16. Operator decisions — DISPOSED at the revision-1 review (2026-08-15)
 
-| ID | Question | Recommendation (source-grounded) |
-|---|---|---|
-| **Q-07a-1** | Runtime accounting: exclude validation seconds from the training ACTUAL (unit-time priors stay per optimizer step) but do NOT model the validation pass in admission / watchdog in this PR; persist `validation_seconds` as evidence for a later RT term | **Yes** — parent §2.1 accepts "bounded by the eval set"; modelling it needs an RT schema change (out of 07a scope) |
-| **Q-07a-2** | Diagnosis vocabulary v1 = raw facts + explicit-tolerance trends + `validation_degraded_after_best`; NO overfitting / plateau / converged / underfitting labels | **Yes** — parent §8.2 item 3 / review finding 12 |
-| **Q-07a-3** | Validation dataset transient per epoch (rebuilt after the training dataset is released) rather than resident | **Yes** — peak memory `max` not sum; I/O cost accepted and recorded |
-| **Q-07a-4** | Gate 2 with `--max_epochs 2` (a bounded deviation from the canonical `1`) so R2/R3 have two points | Decide at launch; either is acceptable functionally |
-| **Q-07a-5** | L1 fixture histories + expected diagnoses under `examples/<pack>/expected/` (JSON) consumed by rung B-07a-1 | **Yes** — roadmap §22.23.7 ("the same fixture is what the tests consume"); PR0 pins hold |
-| **Q-07a-6** | Fail-closed = a producer that emits a schema-invalid `training_history` turns the attempt into an `error_training` record; ABSENT payload = honest `absent` state | **Yes** — parent "typed / validated / fail-closed"; absence is legacy tolerance |
-| **Q-07a-7** | Flag position: immediately after the `--sample_set_json` pair (sibling), upgrading the streaming argv pins in the same commit | **Yes** — the sibling reading of the parent's recommendation; the legacy golden is untouched either way |
+| ID | Question | Recommendation (rev 1) | **Operator disposition** |
+|---|---|---|---|
+| **Q-07a-1** | Runtime accounting: exclude validation seconds from the training ACTUAL (unit-time priors stay per optimizer step) but do NOT model the validation pass in admission / watchdog in this PR; persist `validation_seconds` as evidence | Yes — parent §2.1 accepts "bounded by the eval set" | **APPROVED**; the un-priced validation phase is recorded as **07c / runtime-control debt** (§3.9, §14 at Checkpoint E) |
+| **Q-07a-2** | Diagnosis vocabulary v1 = raw facts + explicit-tolerance trends + `validation_degraded_after_best`; NO overfitting / plateau / converged / underfitting labels | Yes | **APPROVED** (deadband made symmetric / scale-free — §0.5 item 6) |
+| **Q-07a-3** | Validation dataset transient per epoch rather than resident | Yes | **APPROVED** |
+| **Q-07a-4** | Gate 2 with `--max_epochs 2` | decide at launch | **APPROVED** — an upper bound only; PASS does not require two points (§10) |
+| **Q-07a-5** | L1 fixture histories + expected diagnoses under `examples/<pack>/expected/` (JSON) consumed by rung B-07a-1 | Yes | **APPROVED** |
+| **Q-07a-6** | Fail-closed = schema-invalid `training_history` → `error_training`; ABSENT payload = honest `absent` | Yes | **APPROVED WITH CORRECTION**: absence is honest ONLY when validation was not expected; an EXPECTED R3 that is missing is a contract failure → `error_training` (§3.4a) |
+| **Q-07a-7** | Flag position: immediately after the `--sample_set_json` pair | Yes | **APPROVED** |
+
+Three further corrections were required WITHOUT new operator decisions and
+are applied in this revision: (1) declared validation scope → zero / partial
+materialization = fail closed (§3.4b); (2) the objective reduction /
+comparability precondition is source-grounded and stamped, never assumed
+(§3.3); (3) validation restores the complete observable training state
+immediately (§3.2). Remaining for the operator: **freeze of revision 2**.
 
 ## 17. Adversarial self-review (this child)
 
@@ -985,4 +1219,9 @@ Step 06 semantics (metric ≠ loss; the planner filter mechanism is extended, no
 | 8 | An `expected/` fixture nobody consumes would be a consumer-less file (§22.23.3) | the rung loads it from the pack — §3.11 / C4 |
 | 9 | REC goldens regenerated in a later commit would break Step-00 §17 rule 3 | regenerated in C3, the commit that adds the fields |
 | 10 | The tuner's `run()` must not gain branching | three sequencing calls; contract errors routed through an EXISTING failure path; branch count recorded |
-| 11 | Zero-row validation scope → division by zero | `nan` + `validation_samples=0`, recorded — §15 C1 §6 |
+| 11 (rev 1) | Zero-row validation scope → division by zero | rev 1 recorded `nan`; **superseded by the operator's blocker 2**: zero / partial materialization is a validation execution failure (§3.4b) |
+| 12 (operator) | Expected validation could silently degrade to `absent` through a re-dropped transport | `expected_validation` at the tuner boundary → `error_training` (§3.4a) |
+| 13 (operator) | "Same criterion object" ≠ mathematically comparable epoch statistic for `sum`-reduced / batch-coupled objectives | precondition P + built-in audit + `comparability` stamp (§3.3) |
+| 14 (operator) | Mode restore relied on the next epoch; criterion statefulness and NumPy RNG were outside the isolation census | transactional pass, criterion state check, NumPy restore, state census in tests (§3.2) |
+| 15 (operator) | `objective_id = loss_type` over-claimed identity | `objective_kind` + `objective_fingerprint` (§3.5) |
+| 16 (operator) | Relative deadband had a zero-reference pathology; observation lists could be ragged | symmetric `r(a,b)`; length validators (§3.6, §3.5) |
