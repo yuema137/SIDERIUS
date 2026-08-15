@@ -150,7 +150,7 @@ sweep (§9).
 | Sample-shape legality / dataset facts | **Step 02** (PR #202/#204) | resolved Dataset Profile crosses the subprocess boundary |
 | Normalized contract, dtype admissibility, cardinality, output semantics, loss re-keying | **Step 03** (PR #205) | `agent/schemas/model_io_contract.py`; Step-03 §10 boundary table |
 | `declared output_type` flowing end-to-end, name-blind compat, fail-closed `get_output_type` | pre-existing | preserve as Stage-A precedents (roadmap §6.1) |
-| `agent/prompts.py:1037` `[B, 256, T]` | **Step 07a** — NOT Step 04 | Step-03 §24.2 F-4 routes it explicitly |
+| `agent/prompts.py:1037` `[B, 256, T]` (now `:1064`) | **Step 07 — 07b under the Rev-5.3 Q2 lettering** ("07a" here predates the split) — NOT Step 04 | Step-03 §24.2 F-4 routes it explicitly |
 
 ### 2.7 §13 remainder — what Step 04 actually owns
 
@@ -164,7 +164,7 @@ Of the fifteen hardcoded prose families in roadmap §13.1, Step 04 owns
 | duplicate byte-equal task description in `lit_review_config.yaml` | **04b** |
 | static builtin model-description task content (`ml_models/{model_type}/description.md`) | **DEFERRED / RECORD** — was assigned to 04b; 04b's revision-2 source audit found **no live task-block consumer**, so migrating it now would create a consumer-less seam (§20.4) |
 | PROPOSAL_COMMIT_PROMPT, personas, proposer family | CLOSED — Step 01 |
-| planner roster / collapse advice / data-volume anchors / CH1-CH2, `REFLECTOR_PROMPT` | **Step 07a** |
+| planner roster / collapse advice / data-volume anchors / CH1-CH2, `REFLECTOR_PROMPT` | **Step 07 — 07b under the Rev-5.3 Q2 lettering** (historical "07a" = pre-split naming) |
 | interpretation prediction grammar | **Step 09** |
 | SQUID worked examples in lit-review *formats*, full-spectrum doctrine | **04b** only where they are task **content**; format doctrine stays module-owned |
 

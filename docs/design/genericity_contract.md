@@ -157,7 +157,7 @@ Regime A (`derive_tidmad_metric`) and both production scoring routes go
 through the handle. Contract test evidence: the strict direction-only rung
 (C6a) and the broader different-metric rung (C6b) in
 `tests/unit/execute_tools/test_step06_c6_stage_b_direction_rung.py`. Not yet
-generic (owned later): direction-sensitive policy consumers (Step 07a / D1),
+generic (owned later): direction-sensitive policy consumers (Step 07b under the Q2 lettering / D1),
 task-level metric declaration (Step 12), the lexical loss-id rule (temporary
 debt — roadmap §20.8). Design: `docs/design/generic_framework_upgrade/step_06_metric_interface.md`.
 The hard constraint below still holds.
