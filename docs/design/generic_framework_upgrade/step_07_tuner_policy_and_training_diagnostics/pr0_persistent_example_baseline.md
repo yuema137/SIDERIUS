@@ -4,15 +4,15 @@
 |---|---|
 | Parent | `../step_07_tuner_policy_and_training_diagnostics.md` (revision 2 — APPROVED FOR FREEZE by the operator 2026-08-15) §8.1 — PR0 has **no semantic child letter** (Q2) |
 | Roadmap | §22.23 (persistent example packs), §22.23.6 (PR0), §22.9a (frozen Track B/C specifications), §22.11a, §22.12 row 07; §15.1 step-7 rows |
-| Design base | `d432cf05` (master). Rev 5.3 **Q4 FROZEN** and the parent **approved for freeze** (operator, 2026-08-15); **this child is implementable only after its own freeze mark** |
+| Design base | `d432cf05` (master). Rev 5.3 **Q4 FROZEN**, parent **FROZEN** and this child **FROZEN** (operator, 2026-08-15) — implementation may begin under a fresh Implementation Working Rules contract |
 | Depends on | Steps 00–06 MERGED. No code dependency on 07a/07b/07c |
 | Decomposition | ONE PR, four commits **C1 → C2 → C3 → C4** (§15) |
 | Gates | Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED (§10) — no production code, no LLM-visible byte, no execution change |
-| Status | **REVISION 2 — READY FOR OPERATOR FREEZE.** Operator review of revision 1 (2026-08-15): direction approved; six targeted corrections applied (§0.5). Nothing implemented; no fetch performed |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15** (revision 2; the six review corrections of §0.5 applied; one non-semantic correction at freeze: C4 validation plan `(a)–(g)`). Implementation NOT started; no fetch performed; §14 ledger empty |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
-**What is frozen once this design is approved**: the capability (§1), the
+**What is frozen (operator approval 2026-08-15)**: the capability (§1), the
 per-pack content classes, the "projection, never authority" rule and the
 read-only-snapshot UX invariant (§3), the manifest derivation rules
 (§3.2/§3.3 — DAVIS sequence-level only), the maturity-scoped nature of every
@@ -778,7 +778,7 @@ only meaningful once all exist; the docs sync is Checkpoint E.
       rc=$?; tail -20 /tmp/pr0_full.log`); exact-head CI green (id recorded
       in the PR body — no trailing docs-only push).
 
-**4. Validation plan.** unit (a)–(f) + their negatives; full suite once;
+**4. Validation plan.** unit (a)–(g) + their negatives; full suite once;
 CI once. Gates: none.
 
 **5. Acceptance criteria.**
