@@ -9,7 +9,7 @@
 | Design base | `03225ac9` (master; Rev 5.3 — **Q4 FROZEN by the operator 2026-08-15**, the same round that approved this parent for freeze). Revision 2 (2026-08-15) also re-synchronized the roadmap §7a/§15.1/§16/§20.2 anchors + Gate wording + child names, `genericity_contract.md` Seam 4 and the Step-04 parent's historical "07a" rows |
 | Depends on | Steps 00–06 all **MERGED** (06 = PR #213, `02f382eb`); Rev 5 §22 (Q1/Q2/Q3 RESOLVED; Q4 pending) |
 | Decomposition | **FOUR PRs — `PR0` → `07a` → `07b` → `07c`** (Q2, operator-resolved in Rev 5.3; re-verified from source in §7 below — the split is real, not inherited) |
-| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2): the Step-level contract (§1, §3–§8, §10–§13, §16–§18, §20) is FROZEN; the document stays LIVE only for status / ledger absorption per the freeze posture below.** Operator review: decomposition, Step-level scope, examples strategy and Gate plan APPROVED; targeted revisions applied (§20 records what this parent freezes vs leaves to children; §18 records the operator's OD dispositions). Child **PR0 detailed design FROZEN — operator approved 2026-08-15** (`step_07_tuner_policy_and_training_diagnostics/pr0_persistent_example_baseline.md`); **PR0 IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` + docs sync), READY FOR OPERATOR REVIEW / awaiting merge (PR number, final head and CI id in the PR body; merge SHA by the post-merge finalizer)** — child §14 is the ledger; 07a/07b/07c child docs not yet written. Sequence: parent freeze → PR0 freeze/implement → 07a design … |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2): the Step-level contract (§1, §3–§8, §10–§13, §16–§18, §20) is FROZEN; the document stays LIVE only for status / ledger absorption per the freeze posture below.** Operator review: decomposition, Step-level scope, examples strategy and Gate plan APPROVED; targeted revisions applied (§20 records what this parent freezes vs leaves to children; §18 records the operator's OD dispositions). Child **PR0 detailed design FROZEN — operator approved 2026-08-15** (`step_07_tuner_policy_and_training_diagnostics/pr0_persistent_example_baseline.md`); **PR0 IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` + docs sync), **MERGED — PR #214, squash `79403b44`, 2026-08-15; exact-head CI 31911929243 SUCCESS)** — PR0 COMPLETE; child §14 is the ledger. **NEXT: 07a design** (`pr_07a_training_history_diagnosis.md`, not yet written; fresh Implementation Working Rules contract) → 07b → 07c. Sequence: parent freeze → PR0 freeze/implement/merge ✔ → 07a design … |
 | Freeze posture | This parent is a **LIVE governance document** (Step-02/04 multi-PR precedent): it owns Step-level scope, authority map, decomposition, per-PR acceptance contract and the completion contract; each child owns its implementation-ready design and later its ledger. Frozen contracts live in the children |
 
 This document deliberately stops short of per-commit checklists and
@@ -297,8 +297,8 @@ section fixes WHAT must be true, per Checkpoint, and the evidence class.
 ### 8.1 PR0 — Persistent Example Baseline (preflight)
 
 **Status (2026-08-15): C1–C4 LANDED on branch `step07-pr0-persistent-example-baseline`
-(`248a227c` · `c78a148b` · `57031cd1` · `f9398056` + docs sync) — READY FOR
-OPERATOR REVIEW; evidence in the child's §14; not merged. Delivered exactly
+(`248a227c` · `c78a148b` · `57031cd1` · `f9398056` + docs sync `fd16de42`) —
+**MERGED: PR #214, squash `79403b44` (2026-08-15)**; evidence in the child's §14. Delivered exactly
 this contract: three roots with README / PROVENANCE / STATUS; TIDMAD
 read-only resolved snapshots verified equal to production by test; Pets
 identity manifests 2 946 / 734 / 3 669 (frozen rule) + `ModelIOContract`,

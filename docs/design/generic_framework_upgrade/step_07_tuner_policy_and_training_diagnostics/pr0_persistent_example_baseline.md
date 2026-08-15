@@ -8,7 +8,7 @@
 | Depends on | Steps 00–06 MERGED. No code dependency on 07a/07b/07c |
 | Decomposition | ONE PR, four commits **C1 → C2 → C3 → C4** (§15) |
 | Gates | Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED (§10) — no production code, no LLM-visible byte, no execution change |
-| Status | **FROZEN — OPERATOR APPROVED 2026-08-15** (revision 2; the six review corrections of §0.5 applied; one non-semantic correction at freeze: C4 validation plan `(a)–(g)`). **IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` from base `d572445a` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` = final executable head, + this docs-sync commit = final PR head); READY FOR OPERATOR REVIEW — NOT MERGED (PR number / CI id in the PR body and handoff; MERGED status + merge SHA by the post-merge finalizer).** §14 is the implementation ledger (§14.0 re-audit, §14.1–§14.4 per-commit evidence, §14.5 acceptance summary) |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15** (revision 2; the six review corrections of §0.5 applied; one non-semantic correction at freeze: C4 validation plan `(a)–(g)`). **IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` from base `d572445a` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` = final executable head, + this docs-sync commit = final PR head); **MERGED — PR #214, squash `79403b44` (2026-08-15T23:00:09Z; `git diff fd16de42 79403b44` empty), exact-head CI 31911929243 SUCCESS on `fd16de42`; operator-approved merge with the three bounded deviations accepted (§14.0/§14.1). PR0 COMPLETE / CLOSED; next = 07a design (fresh Implementation Working Rules contract).** §14 is the implementation ledger (§14.0 re-audit, §14.1–§14.4 per-commit evidence, §14.5 acceptance summary) |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
@@ -654,9 +654,13 @@ C3 committed: `57031cd1`.
       + §22.12 row 07 "PR0 landed (examples at honest maturity)". Merge SHA
       / MERGED status are the post-merge finalizer's (Step-06 precedent) —
       the rows say "landed on branch, awaiting merge" until then.
-- [ ] Push · PR · exact-head CI green (recorded in the PR body + handoff;
-      no trailing docs-only push per the operator rule) → READY FOR
-      OPERATOR REVIEW.
+- [x] Push · PR #214 · exact-head CI **31911929243 SUCCESS** on final PR HEAD
+      `fd16de42` (recorded in the PR body + handoff; no trailing docs-only
+      push) → READY FOR OPERATOR REVIEW (2026-08-15) → operator review:
+      APPROVED, deviations 1–3 accepted → **squash-merged `79403b44`**
+      (2026-08-15T23:00:09Z; squash parity `git diff fd16de42 79403b44` empty).
+      Post-merge finalizer (this docs-only commit on master): status mirrors
+      → MERGED; no production / example / test semantics touched.
 
 Validation (C4):
   targeted: `.venv/bin/python -m pytest tests/unit/examples -q` → **61 passed

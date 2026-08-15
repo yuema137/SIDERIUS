@@ -599,8 +599,16 @@ TIDMAD's `network.py:FocalLoss1D`.
   · 07c measurement. **Rev 5.3 FROZEN (Q4, operator 2026-08-15)**; Step-07
   parent (`step_07_tuner_policy_and_training_diagnostics.md`, rev 2)
   FROZEN and its PR0 detailed design FROZEN (operator, 2026-08-15);
-  PR0 implementation not yet started (fresh Implementation Working Rules
-  contract required).
+  **PR0 COMPLETE — MERGED (PR #214, squash `79403b44`, 2026-08-15)**:
+  `examples/{tidmad,oxford_iiit_pet,davis_future_prediction}/` at honest
+  maturity (TIDMAD read-only resolved snapshots; Pets 2 946 / 734 / 3 669
+  and DAVIS 60 / 15 / 15 identity manifests; L0/L1 `ModelIOContract` /
+  `MetricSpec` declarations), `tools/example_packs/` (tooling only, never
+  imported by production), `tests/unit/examples/` (61 tests incl. the
+  maturity-pinned governance guards — no `.py` under `examples/` until D14;
+  no top-level `task_description`/`forward_contract` YAML under `examples/`
+  until Step 12). Next = 07a design (fresh Implementation Working Rules
+  contract required); 07a NOT started.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
