@@ -252,6 +252,21 @@ Binding method:
    only ensure their resolution path can DISTINGUISH "unbound legacy
    caller" from "bound task" when step 12 arrives.
 
+10. **Genericity is validated CONTINUOUSLY and PROGRESSIVELY, never by a
+    single end-to-end demonstration after the refactor (Rev 4, §21).**
+    Two tracks run in parallel from the first migrated module onward:
+    Stage A — TIDMAD parity, the hard compatibility constraint — and
+    Stage B — a growing CONTRAST SUITE that exercises each newly generic
+    abstraction with at least one non-TIDMAD consumer *as soon as that
+    abstraction exists*. The image and spatiotemporal composed contrast
+    tasks are the first two Stage-B *tracks*, not the final task set, and
+    they begin supplying evidence when the relevant seam lands — not at
+    Step 12. Step 12 / Milestone 1 is the first COMPLETE COMPOSITION
+    checkpoint, not the first genericity checkpoint. Data topology and
+    prediction objective are ORTHOGONAL coverage dimensions. Validation
+    itself must become generic (§21.6). New task families are added on
+    EVIDENCE of a missing semantic dimension, never for variety.
+
 ### 0.A Relationship to prior genericization commitments
 
 This roadmap SUPERSEDES-BY-ABSORPTION the two 2026-07-28 artifacts and
@@ -1717,7 +1732,12 @@ TIDMAD-profile-bound at M2.
 
 ## 16. Framework-level acceptance criteria (Rev 2 — two milestones)
 
-**MILESTONE 1 — CORE GENERICIZATION.** Reached when, simultaneously:
+**MILESTONE 1 — CORE GENERICIZATION.** *(Rev 4, §21: Milestone 1 is the
+first COMPLETE-COMPOSITION checkpoint — the point at which the contrast
+tracks are REQUIRED to compose into whole end-to-end tasks. It is NOT the
+first point at which genericity is tested; the tracks supply Stage-B
+evidence progressively from the step at which each seam lands.)*
+Reached when, simultaneously:
 1. A materially different composed contrast task (accumulated atomic
    fixtures: different topology, encoding, output form, metric) runs
    the intended generic scientific path end-to-end from configs +
@@ -1901,6 +1921,13 @@ CHECKPOINT B — GENERIC CONTRAST
   in the matrix B cell at completion) is landed — each rung varying
   exactly one axis. §16 criterion 5 requires exactly these declared
   rungs; the two definitions are one (3rd review F8).
+  Rev 4 (§21): the B cell answers "what NON-TIDMAD evidence proves this
+  abstraction is generic?" at one of three grades — an ATOMIC rung, a
+  PROGRESSIVELY-COMPOSED contrast-track rung (the image/spatiotemporal
+  track exercising this seam plus the seams already landed), or the
+  END-TO-END Milestone-1 run. A step attaches the cheapest grade that
+  its landed abstraction can honestly support; it never runs a full
+  contrast workflow the framework cannot yet compose.
 CHECKPOINT C — LIVE INTEGRATION
   the matrix row's named REAL production consumer uses the new
   contract; no consumer-less seam survives the PR.
@@ -2111,9 +2138,19 @@ real scientific task (D8). No fourth category is introduced.
 small composed contrast tasks — an **image** task (e.g. `[C,H,W]`) and a
 **spatiotemporal** task (e.g. `[C,T,H,W]`) — chosen to cover two genuinely
 different data topologies. Each must run `data → sample → model → train →
-inference → deliverable → metric` end-to-end. They are framework-validation
-artifacts; building them ADVANCES D8's precondition. Datasets: classic, small,
-fast, freely reproducible, easy to validate — **selection is not made here**.
+inference → deliverable → metric` end-to-end **by Milestone 1**. They are
+framework-validation artifacts; building them ADVANCES D8's precondition.
+Datasets: classic, small, fast, freely reproducible, easy to validate —
+**selection is not made here**.
+
+**They are the first two contrast TRACKS, not the final task set (Rev 4,
+§21).** Each track begins as small fixtures that exercise whichever seams
+already exist and WIDENS as capabilities become generic; it does not wait
+for Step 12 to start supplying evidence, and it is not asked to exercise
+parts of the framework that do not yet exist. Data topology (what these two
+vary) and prediction objective (regression vs classification) are
+orthogonal coverage dimensions — see §21.4; the two tracks alone do NOT
+establish genericity across both.
 Form: small canonical task packages consumed by tests (the §0.8
 seam-with-first-consumer pattern), not production task configurations before
 Step 12's regime-B binding exists. §0 rule 8 applies: no package without a
@@ -2207,5 +2244,251 @@ Step 08  HealthGates on declared inputs (unchanged). Consumes the DELIVERABLE /
          the data loader "in passing".
 Step 09  Interpreter consumes TrainingDiagnosis (OD-20-5) + Step-06 metric payload
 D14 ──▶  data-path reader/layout owner (Step-11 extension OR small milestone)
-Step 12  composition + regime B; the TWO composed contrast tasks; Milestone 1
+Step 12  composition + regime B; the two contrast tracks COMPOSE into complete
+         end-to-end tasks; Milestone 1 (first COMPLETE-COMPOSITION checkpoint —
+         the tracks have been supplying Stage-B evidence since their seams landed)
 ```
+
+## 21. Genericity validation strategy — progressive contrast tracks (Rev 4, 2026-08-15)
+
+**Status: governance and architecture. Principles, coverage dimensions,
+timing, milestone expectations and criteria for adding tracks. Exact
+fixtures, schemas, loaders, metric structures and transport mechanisms
+remain with the detailed designs (§13 of the operator brief; §0 rule 8).**
+This section makes explicit a relationship the document already contained
+in pieces (§0 rules 5/7, §17 Checkpoint B, §16 Milestone 1, D8, §20.3) and
+states one policy the pieces left underspecified: **when the non-TIDMAD
+tracks start, and how they grow.**
+
+### 21.1 The single story
+
+```text
+TIDMAD parity  (Stage A — hard compatibility constraint, every step)
+      +
+progressive contrast validation  (Stage B — from the first migrated seam)
+      +
+expanding task-family coverage  (evidence-driven, two orthogonal dimensions)
+      +
+generic validation  (the validation machinery itself is a Stage-B subject)
+      +
+eventual complete composition  (Step 12 / Milestone 1)
+      =
+evidence that the framework is genuinely generic
+```
+
+**Core principle (rule 10):** genericity is established incrementally
+through live consumers and contrast-track validation, not by a final
+end-to-end demonstration performed only after the refactor is complete. If
+the implementation stayed TIDMAD-shaped through Steps 02-11 and discovered
+that at Step 12, the process would have failed — the tracks exist to make
+that impossible.
+
+### 21.2 Stage A and Stage B — what each answers
+
+| | Stage A | Stage B |
+|---|---|---|
+| question | *Did we preserve the behaviour of the existing TIDMAD system?* | *Did the new abstraction actually work for a meaningfully different task configuration?* |
+| artifact | parity goldens, deep-equal resolution, byte-identical formula values | the **contrast suite** — atomic fixtures → contrast tracks → composed tasks |
+| role | regression constraint | the mechanism by which the refactor is shown to have generalized beyond TIDMAD — **not** a secondary regression suite |
+
+Stage B's progression, as the refactor advances:
+
+```text
+atomic contrast fixtures            (one axis per fixture — §0 rule 7, §4.8, §5.5, §8.4 …)
+        ↓
+image / spatiotemporal TRACKS       (each track exercises the seams that exist so far)
+        ↓
+progressively larger composed tasks (tracks acquire train → validate → infer → deliver → score …)
+        ↓
+additional task families            (only when a missing semantic dimension is exposed — §21.4)
+        ↓
+Milestone-1 end-to-end generic workflow  (Step 12: first COMPLETE-COMPOSITION checkpoint)
+```
+
+### 21.3 When the tracks start, and how they widen (POLICY)
+
+1. **Before a relevant abstraction seam exists**, Stage-A/TIDMAD parity is
+   the primary regression constraint; there is nothing generic to contrast.
+2. **As soon as a generic abstraction lands and a meaningful contrast
+   dimension can exercise it**, the corresponding fixture/track becomes a
+   live validation target — at the step that landed the seam. This is
+   already the rule §0 rule 8 states for consumers ("no consumer-less
+   seam"); rule 10 applies it to *non-TIDMAD* consumers.
+3. **The image and spatiotemporal tracks therefore begin at the first step
+   whose seam they can exercise, not at Step 12.** In the current state
+   (post-Step-05) that means: `DatasetProfile` topology/geometry/encoding
+   (Step 02), `ModelIOContract` rank/axes (Step 03), candidate-creation
+   contract derivation (Step 04a), tuner selection/pricing (05a/05b),
+   `DeliverableSpec` naming/representation (05c) are all seams a
+   non-TIDMAD fixture can already exercise; the metric handle (06),
+   `TrainingHistory` (07), health declarations (08) join as they land.
+   **What the tracks cannot yet exercise — and must not be forced to — is
+   the executable dataset→tensor data path (D14, §20.5).** Until D14 has an
+   owner and lands, an image/spatiotemporal track is necessarily
+   *declaration-and-contract-level*; it becomes *train/infer-level* only
+   when D14 does. That is the honest scope, and it is what makes D14 a
+   scheduling question rather than a footnote.
+4. **Progressive widening**: a track starts small, acquires each capability
+   as that capability becomes generic, is never asked to exercise a part of
+   the framework that does not yet exist — but once a capability is
+   *claimed* generic, at least one non-TIDMAD consumer exercises it. By
+   Milestone 1 both tracks cover the full workflow.
+5. **Step 12 / Milestone 1 is where these capabilities are REQUIRED to
+   compose into complete end-to-end tasks** (composition mechanism, regime-B
+   fail-closed binding, §16 criterion 1). It is not the first genericity
+   checkpoint.
+
+### 21.4 Two orthogonal coverage dimensions, and the conceptual matrix
+
+**Data topology / input structure** and **learning / evaluation objective**
+are independent. Image regression and image classification share input
+topology while differing in output contract, target representation, loss,
+metric, direction, validation behaviour, and possibly health checks and
+interpretation. Likewise for spatiotemporal. **The two initial tracks vary
+topology; they do not by themselves establish genericity across objective.**
+
+```text
+CONCEPTUAL VALIDATION COVERAGE MATRIX  (coverage opportunities — NOT a checklist to fill)
+
+                              input / data topology
+                    temporal      image      spatiotemporal   (tabular · graph · … evidence-driven)
+objective  ─────────────────────────────────────────────────────────────────────────────
+regression          ·             ?             ?
+classification      TIDMAD*       ?             ?
+other structured    ·             ·             ·
+
+*  TIDMAD occupies ONE legacy cell: 1-D temporal input, per-timestep 256-class
+   output decoded by argmax (classifier), scored by a task-specific frozen metric.
+?  the first two new topology tracks; their objective placement is chosen by
+   the detailed designs and may deliberately differ from TIDMAD's.
+·  a coverage opportunity, added only when needed to expose a missing abstraction.
+```
+
+Rules for the matrix: TIDMAD occupies one legacy cell; image and
+spatiotemporal provide the first new topology tracks; cells are coverage
+opportunities, not mandatory benchmark tasks; **atomic fixtures may isolate a
+single dimension** (an objective contrast on TIDMAD's topology, or a topology
+contrast at fixed objective) before any composed task exists; additional
+composed tasks are added only when implementation/testing shows the existing
+tracks do not exercise a distinction adequately; **the final suite covers the
+semantic dimensions that matter, not the maximum number of tasks.** Four
+complete composed tasks are NOT required by this section.
+
+**Extensibility principle**: the contrast suite is extensible and
+evidence-driven; a new task family is justified by a missing semantic
+dimension, never by arbitrary variety. The list of potential dimensions
+(sequential · image · spatiotemporal · tabular/feature-vector · graph ·
+scalar regression · discrete classification · multi-class/multi-label ·
+dense prediction · sequence prediction · other structured output) is an
+anticipation, **not** a commitment.
+
+### 21.5 Contrast-track lifecycle (conceptual, not literal implementation steps)
+
+```text
+1. candidate semantic dimension identified      (source audit / test failure)
+2. minimal atomic fixture created               (one axis)
+3. first live consumer established              (§0 rule 8)
+4. fixture expanded as the abstraction grows    (progressive widening)
+5. included in a composed contrast task         (tracks compose)
+6. included in end-to-end Milestone validation  (Step 12 / M1)
+7. retained as a regression fixture thereafter  (it never retires)
+```
+
+Validation artifacts grow with the framework; they are not created once at
+the end.
+
+### 21.6 Validation itself must become generic (REQUIREMENT; mechanism DEFERRED)
+
+"Validation" must not come to mean *running TIDMAD-specific validation logic
+on a different task*. The framework must eventually support a task-dependent
+validation protocol derived from the task's declared semantics: generic,
+task-aware, dynamically resolved, profile/contract-driven where appropriate,
+compatible with different topologies and objectives, and extensible without
+TIDMAD-specific branches. **The framework must not hard-code a single
+validation split, validation data representation, validation output shape or
+validation metric merely because those are correct for TIDMAD.**
+
+Depending on the task, validation may need to know: what an input sample and
+a target are; how samples are grouped; whether validation is per-file,
+per-example or per-sequence; regression vs classification; expected output
+shape; the appropriate metric; whether an explicit validation set exists;
+how results aggregate. **These are generic framework concerns.** Their exact
+schema, ownership and mechanism are NOT decided here — they belong to the
+detailed designs that own each half (§21.7) and, for the data-side
+representation, to D14.
+
+### 21.7 Two validations, not one — the boundary restated
+
+Preserved from §20.2, and to be preserved by every later design:
+
+```text
+training-process validation / diagnostics   TrainingHistory · TrainingDiagnosis   → Step 07
+   train loss · validation loss · convergence · plateau · overfitting …
+scientific deliverable evaluation            EvaluationMetric · scoreability     → Step 06
+   task-defined metric · references/baselines · final artifact quality
+result health / pathology                    HealthGate                          → Step 08
+```
+
+The generic validation infrastructure must support both training-process
+validation and deliverable evaluation without conflating their semantics.
+
+### 21.8 The refactor is an empirical discovery process (feedback loop)
+
+The final generic abstraction boundary cannot be determined by static
+architectural reasoning alone. Therefore: source audits identify candidate
+abstractions → detailed designs define intended contracts → atomic fixtures
+test individual axes → contrast tracks and composed tasks test interactions
+→ TIDMAD parity preserves compatibility → **additional task families are
+introduced when tests expose missing dimensions** → failures feed back into
+the roadmap/design rather than being patched with task-specific branches.
+
+**The generic validation architecture is itself validated by the contrast
+suite.** If TIDMAD works but image classification needs a special-case
+validation implementation, the abstraction is incomplete. If image regression
+works but classification needs a separate hard-coded path, a generic
+prediction-objective abstraction is missing. Such a finding is a design
+input, never a reason for a branch.
+
+### 21.9 Target end state (behavioural, not structural)
+
+At the end of the upgrade, a scientific ML task is representable by
+**declaring its task semantics and contracts**, not by editing
+TIDMAD-specific execution logic. One workflow architecture executes: the
+original TIDMAD task with historical behaviour preserved; image-based tasks;
+spatiotemporal tasks; regression and classification variants where the
+relevant abstractions are supported; and future task families added through
+the same generic interfaces. The workflow derives — from the appropriate
+task-level authorities — data/sample semantics, model I/O expectations,
+training and validation behaviour, resource/time estimates, candidate
+constraints, deliverable representation, scoreability, evaluation metrics,
+health checks, interpretation inputs and orchestration bindings.
+
+**The point is not that every possible task works.** The point is that
+adding a genuinely new task family requires declaring its semantics through
+the existing generic abstractions and, when necessary, **extending an
+abstraction once** — rather than adding another TIDMAD-specific branch. That
+is the meaning of "generic framework".
+
+### 21.10 What counts as a FAILURE of genericity (anti-goals)
+
+The framework is insufficiently generic if adding a contrast task requires
+any of: hard-coded TIDMAD branches; duplicated task-specific constants across
+modules; separate validation implementations per data topology where the
+semantics could be represented generically; metric-selection logic for
+regression vs classification outside the metric abstraction; manual edits to
+unrelated workflow modules per new task; a new top-level configuration
+hierarchy per task family; bypassing the generic contracts to make a test
+pass; or **weakening Stage-A parity to accommodate the generic task**. These
+complement §0 rule 8 (no consumer-less seam), §2 (compatibility) and the
+single-authority principle.
+
+### 21.11 What this section does NOT change
+
+Step ordering (§15) is unchanged — the current dependency graph permits the
+policy without reordering. Step 12 remains composition + regime B + Milestone
+1. The two composed contrast tasks remain the current planned artifacts. Step
+06/07/08/09 ownership, D14's OPEN status, historical reproducibility, and the
+no-new-config-hierarchy rule are unchanged. **No implementation commitment is
+created for Steps 06-11 by this section**: each detailed design still chooses
+the cheapest Stage-B grade (§17 Checkpoint B) its landed abstraction can
+honestly support.
