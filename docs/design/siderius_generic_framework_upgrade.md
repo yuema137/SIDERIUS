@@ -16,8 +16,8 @@ persistent tracks are now SELECTED — Track B Oxford-IIIT Pet 37-way RGB
 classification, Track C DAVIS 2017 RGB 8→4 future-frame prediction (§22.9a)
 — D14 is a dedicated milestone after Step 07 (§22.11a); Rev 5.3 added the
 persistent example-pack governance (§22.23) and resolved Q2 (Step 07 = PR0 ·
-07a · 07b · 07c). NOT YET FROZEN: only the freeze mark (Q4) remains; binding
-on the freeze mark.** No
+07a · 07b · 07c). **READY FOR OPERATOR FREEZE** — only the operator's freeze
+mark (Q4) remains; binding on that mark.** No
 implementation is authorized by this document alone.** Each module named here receives its own detailed design
 document (operator-reviewed) before any code changes. This document
 decides direction, module ownership, compatibility surfaces, and
@@ -2735,8 +2735,12 @@ composed tasks after Step 07 — §22.11a), then **Q1 and Q3 RESOLVED
 (2026-08-15)**: Track B = Oxford-IIIT Pet, Track C = DAVIS 2017 (§22.9a);
 D14 = dedicated milestone after Step 07 (§22.11a); then **Rev 5.3** (stale
 D14/R3 wording aligned; §22.23 persistent example packs; identity vs
-execution manifests; **Q2 RESOLVED**: PR0 · 07a · 07b · 07c). NOT YET FROZEN
-— only Q4 (the freeze mark) remains. Every
+execution manifests; **Q2 RESOLVED**: PR0 · 07a · 07b · 07c; source-grounded
+§22.23.0, separability, data/workspace lifecycle, UX target, later-Step
+example obligations, reviewable acceptance criteria; adversarial self-review
+performed — findings corrected in place or recorded as detailed-design
+follow-ups). **READY FOR OPERATOR FREEZE — Q4 is the operator's mark, not
+self-declared.** Every
 MUST / REQUIRED below becomes BINDING on the operator's freeze mark (§17.0
 provenance rule); until then it is the proposed Rev-5 text.** This section is the authoritative top-level guidance for Step 07
 onward. It encodes the operator's post-Step-06 conclusions (§20.8, now folded
@@ -3084,8 +3088,9 @@ Track B — Image / classification
   canonical TRAINING scope:    breed-stratified deterministic 80 % of the official trainval list
   canonical VALIDATION scope:  the disjoint 20 % of the official trainval list
   canonical FINAL-EVAL scope:  the official test list only
-                      the exact image-id manifests (IDENTITY level: image id · class id · scope) are
-                      committed and SHA-256 pinned at Step-07 PR0 (§22.23.5); the manifest is the
+                      the exact image-id manifests (IDENTITY level: image id · class id · scope,
+                      derived from the official annotation lists) are committed and SHA-256 pinned at
+                      Step-07 PR0 (§22.23.5); the manifest is the
                       authority, the seed is provenance only; the three scopes are disjoint; runtime
                       resampling is forbidden
   training objective (R1):     categorical cross entropy
@@ -3127,10 +3132,11 @@ Track C — Spatiotemporal / regression
                       SEQUENCE-disjoint (never frame-level random splits: temporal leakage);
                       clip windows (sequence_name, start_frame) chosen deterministically and evenly
                       per sequence — indicative caps: ≤8 windows/train sequence (≈480 clips),
-                      ≤4/validation sequence (≈60), ≤4/final-eval sequence (≈60); the IDENTITY-level
-                      manifests (sequence_name · scope · (sequence_name, start_frame) clip identity)
-                      are committed and SHA-256 pinned at Step-07 PR0, the EXECUTION-level ones
-                      (decode/resize/window materialization/tensor hashes) at D14 (§22.23.5); the
+                      ≤4/validation sequence (≈60), ≤4/final-eval sequence (≈60); the sequence-level
+                      IDENTITY manifest (sequence_name · scope) is committed and SHA-256 pinned at
+                      Step-07 PR0; clip identities (sequence_name, start_frame) at PR0 only if the frame
+                      listing is obtainable without committing frames, else at D14; EXECUTION-level
+                      manifests (decode/resize/window materialization/tensor hashes) at D14 (§22.23.5); the
                       raw dataset stays the real 833 MB, the persistent run is a few hundred real clips
   training objective (R1):     MAE / L1 over the predicted future tensor (subgradient-compatible)
   validation objective (R3):   mean validation MAE per epoch — same computation, no backprop
@@ -3168,6 +3174,10 @@ preprocessing declaration, `ModelIOContract` tensor rank / structured output, th
 training and inference engines, `DeliverableSpec`, and the metric input/output
 path — assigning ownership by the DECLARE / DERIVE / KEEP-RUNTIME /
 KEEP-POLICY-OWNED discipline, never merely because the tasks expose a gap.
+**D14's acceptance stays narrow**: make the two frozen tasks executable at
+L2/L3 with the MINIMUM contract changes its audit proves necessary — it is not
+pre-authorized to rewrite every contract, and each extension it does make
+carries its own Stage-A parity, atomic contrast and live consumer under §17.
 
 ### 22.10 Progressive genericity validation maturity ladder (BINDING on freeze)
 
@@ -3287,12 +3297,12 @@ genericity claim the Step may make.
 | **07 — Tuner planning & policy incl. training diagnostics** (§7a + §20.2; Q2 RESOLVED: PR0 · 07a · 07b · 07c) — *PR0 + 07a training-diagnostics half* (examples: PR0 roots + identity manifests + status; 07a projects history semantics into all three packs — §22.23) | §7a / Step-07 detailed design(s) | R2 train history persisted per epoch; **R3 validation-objective history REQUIRED unconditionally for a fully supported task (Rev 5.1)** — TIDMAD's validation scope comes from the existing run-bound SampleSet split, no new `--val_*` IPC unless source proves otherwise (OD-20-3); TrainingHistory + deterministic TrainingDiagnosis; optional checkpointed observations; distinct from EvaluationMetric; structured, persisted for later transport; NOT prompt-dumped (§22.6) | L1 with the EXACT frozen Track-B semantics (Pets: CE objective, CE validation curve, accuracy↑ golden, validation-accuracy diagnostic; §22.9a) — never an anonymous "some classifier"; L2 `training → TrainingHistory` if the trainer seam is generic; post-D14 the real Pets path MUST exercise history/diagnosis (Step-07 fixtures kept, real variants added) | L1 with the EXACT frozen Track-C semantics (DAVIS: MAE objective/curve, MSE↓ golden, PSNR diagnostic); post-D14 real | training dynamics are first-class typed evidence; validation loss exists; the eval-vs-training boundary is executable on both sides |
 | **07b — policy half** (direction-sensitive incumbent / threshold / skip / bypass; tuner planner/reflector rendering for the CURRENT decision; examples extended §22.23) | §7a / Step-07 policy design | incumbent selection consumes the golden metric's declared direction and identity through the Step-06 handle (never TIDMAD `max`/`>`); the reflector's hardcoded "HIGHER … is GOOD" and every planner/reflector direction assumption migrate HERE (Rev 5.1 — the reflector is the tuner's); secondary metrics are evidence rendered where relevant, never the objective; policy distinguishes training diagnosis · final primary metric · HealthGate validity; planner/reflector prompts EXACT-equal for TIDMAD except the explicitly owned diagnosis/direction rendering — **Gate 1 REQUIRED** (§20.2 OD-20-6) | L1: lower-is-better AND classification/regression-relevant policy cases as supported (the C6a instance is the ready-made lower-direction fixture) | same | direction-sensitive policy is metric-generic; the D1 CORE consumers inside the tuner (§16 D1 table) migrate here |
 | **07c — measurement / verification** (§7e) | `step_07c_tuner_measurement.md` | identity/comparability keys byte-stable | L0/L1 measurement data-feeding from a contrast profile | same | unchanged from §15.1 |
-| **08 — HealthGates** | §8 · `step_08_health_check_task_profile.md` | TIDMAD verdicts identical; sha-pin mechanism untouched | checks are applicable-by-declaration; int8/amplitude checks INAPPLICABLE honestly on non-int8 / non-sequence artifacts; generic checks still fire; NOT forced onto image tasks because TIDMAD uses them; NOT conflated with scoreability, training diagnosis or the evaluation metric — L1 applicable/inapplicable fixtures, L2 where a real deliverable exists | same, incl. spatiotemporal artifact geometry | health validity is task-declared; the scalar-only / no-per-sample-evidence case is expressed honestly (D18) |
-| **09 — Interpretation / result-agent-facing consumption** | §11 · `step_09_interpretation_task_blocks.md` | 3 interpreter goldens EXACT-equal + owned additions | defines HOW compact structured information reaches the ResultInterpretationAgent and, through it, the cross-iteration summary and next Proposer: TrainingDiagnosis, golden metric (identity/direction), secondary metrics, HealthGate evidence, failure information, cross-iteration findings — via explicit renderers, NEVER indiscriminate raw-record dumping (§22.6 item 5); metric-parameterized grammar and sign-band; L1 metric-identity/direction rendering fixtures incl. lower-is-better and classification/regression phrasing | same | the interpreter and proposer consume owned, compact, typed evidence; the D1 interpreter sign-band / `best_*` consumers migrate here (tuner planner/reflector consumers are Step 07's) |
-| **10 — Orchestration binding** | §12 · `step_10_…` | k9/l_fail choreographies unmodified; resume field-stable | L0/L1: a second bound task initializes the loop; workflow/resume best-score comparisons consume the metric handle (D1 CORE consumers outside the tuner) | same | launcher-owned task binding, metric-generic chain comparisons |
+| **08 — HealthGates** | §8 · `step_08_health_check_task_profile.md` | TIDMAD verdicts identical; sha-pin mechanism untouched | checks are applicable-by-declaration; int8/amplitude checks INAPPLICABLE honestly on non-int8 / non-sequence artifacts; generic checks still fire; NOT forced onto image tasks because TIDMAD uses them; NOT conflated with scoreability, training diagnosis or the evaluation metric — L1 applicable/inapplicable fixtures, L2 where a real deliverable exists | same, incl. spatiotemporal artifact geometry | health validity is task-declared; the scalar-only / no-per-sample-evidence case is expressed honestly (D18); examples expose real applicable/inapplicable health behaviour (§22.23.12) |
+| **09 — Interpretation / result-agent-facing consumption** | §11 · `step_09_interpretation_task_blocks.md` | 3 interpreter goldens EXACT-equal + owned additions | defines HOW compact structured information reaches the ResultInterpretationAgent and, through it, the cross-iteration summary and next Proposer: TrainingDiagnosis, golden metric (identity/direction), secondary metrics, HealthGate evidence, failure information, cross-iteration findings — via explicit renderers, NEVER indiscriminate raw-record dumping (§22.6 item 5); metric-parameterized grammar and sign-band; L1 metric-identity/direction rendering fixtures incl. lower-is-better and classification/regression phrasing | same | the interpreter and proposer consume owned, compact, typed evidence; the D1 interpreter sign-band / `best_*` consumers migrate here (tuner planner/reflector consumers are Step 07's); examples demonstrate the real structured evidence (§22.23.12) |
+| **10 — Orchestration binding** | §12 · `step_10_…` | k9/l_fail choreographies unmodified; resume field-stable | L0/L1: a second bound task initializes the loop; workflow/resume best-score comparisons consume the metric handle (D1 CORE consumers outside the tuner) | same | launcher-owned task binding, metric-generic chain comparisons; a user increasingly binds/selects a real example without core edits (§22.23.12) |
 | **D14 — executable contrast-task / data-path milestone** (RESOLVED: dedicated milestone immediately after Step 07, before Step 08 — §22.11a) | dedicated D14 design | TIDMAD loader/layout byte-stable | **the milestone that makes B executable**: real Pets JPEG → declared preprocessing → `[3,144,144]` (L2), then L3 integrated training/inference/evaluation; already-landed Step-07 fixtures EXTENDED | real DAVIS sequences → window reader → `[3,8,128,224] → [3,4,128,224]` (L2), then L3 | the reader / preprocessing / layout abstraction is task-declared; the audit decides which contracts (profile, sample identity, ModelIOContract rank/structured output, engines, DeliverableSpec, metric path) must extend |
-| **11 — Execution infrastructure** | §9 · `step_11_…` | argv/IPC/sentinels byte-identical | contrast tasks spawn with zero infra edits (L2/L3 as available) | same | spawn/IPC/limits task-free |
-| **12 — Task composition + regime B (Milestone 1)** | `step_12_…` | regime-A callers byte-unchanged | **first point at which B MUST demonstrate full declared composition and end-to-end execution (L3, then L4 as the agent workflow is generic)** — task-level metric declaration (Step-06 deferral), objective/history declaration, health config, binding fail-closed | same for C | the three tracks compose; after this Step they are the mandatory regression suite (§22.14) |
+| **11 — Execution infrastructure** | §9 · `step_11_…` | argv/IPC/sentinels byte-identical | contrast tasks spawn with zero infra edits (L2/L3 as available) | same | spawn/IPC/limits task-free; the three examples run without task-specific infra branches |
+| **12 — Task composition + regime B (Milestone 1)** | `step_12_…` | regime-A callers byte-unchanged | **first point at which B MUST demonstrate full declared composition and end-to-end execution (L3, then L4 as the agent workflow is generic)** — task-level metric declaration (Step-06 deferral), objective/history declaration, health config, binding fail-closed | same for C | the three tracks compose; the packs become complete task packs bound through the composition mechanism — first full-L4 example milestone (§22.23.12); after this Step they are the mandatory regression suite (§22.14) |
 | post-M1 (D1 peripheral, later families) | per §16 M2 | — | regression | regression | new families only on evidence (§21.4) |
 
 ### 22.13 Gate 1 / Gate 2 multi-track governance (RULE — corpus breadth, not applicability)
@@ -3453,6 +3463,51 @@ persistent track
     └── examples/<task>/      (example pack — shows users how to run SIDERIUS)
 ```
 
+**Three purposes at once**: USER LEARNING (a newcomer inspects a concrete
+task and sees how SIDERIUS is used) · GENERICITY EVIDENCE (the same persistent
+tasks that prove the framework is not TIDMAD-specific) · REGRESSION ASSETS (as
+a track becomes executable the example IS part of the bounded regression
+surface). Rejected anti-pattern: *a hidden private test fixture proves one
+thing while `examples/` contains a different, stale or hand-written workflow.*
+The goal is `the example the user sees == the example the framework executes
+== the persistent task the regression suite validates`, at the highest
+maturity currently supported.
+
+#### 22.23.0 Source facts this governance is grounded on (audit 2026-08-15)
+
+- No `examples/` directory exists. `setuptools` packages are an explicit
+  include list (`agent*, nodes*, core*, execute_tools*, ml_models*, tools*,
+  scripts*, workflows*, dashboard*`) — an `examples/` tree is therefore NOT a
+  Python package the framework could import, which is the separability
+  property §22.23.9 wants.
+- Task authority today is single-task: `configs/task_config.yaml`
+  (`task_description` + `forward_contract`, Step 03/04 own it); health policy
+  is `configs/health_checks.yaml`; the frozen TIDMAD reference artifacts live in
+  `reference_data/`. Per-run declarations already cross the subprocess boundary
+  as instances of the owning schemas — `--dataset_profile_json`,
+  `--model_io_json` (Steps 02/03) — and the tuner binds them at run scope
+  (05a/05b/05c/06). These are the mechanisms an example pack can INSTANTIATE
+  without becoming a second authority; multi-task BINDING of a whole pack is
+  Step 12's.
+- Local data: the gitignored, machine-local `tidmad_data_config.yaml`
+  (`tidmad_data_dir`, `siderius_data_dir`, read by
+  `execute_tools/data_paths.py`) is the existing "where is the data on this
+  machine" authority; the launcher validates the data dir before any spend
+  (`run_one_iteration.py`, gate standard). Its keys are TIDMAD-named — whether
+  D14 generalizes THIS mechanism or adds keys to it is D14's source-audited
+  decision; a new global cache hierarchy is not invented here.
+- Workspace: `--workspace` (default `./siderius_workspace`, gitignored) is the
+  run/artifact area (`configs/<run>/`, `records/`, `cached_models/`,
+  `plugins/<run>/`, `losses/<run>/`, `run_output_*.json`, token usage).
+  Generated artifacts belong there today and stay there.
+- Plugins: production loads model plugins from `agent_generated/models/`
+  (contents gitignored) or the `SIDERIUS_PLUGIN_DIRS` env / per-run plugin dir
+  (`docs/run_scoped_plugins.md`); losses likewise. An example-shipped plugin
+  therefore has an existing consumer path only through those mechanisms.
+- Skills: discovered by a fixed-path scan of `agent/skills/*/skill_config.json`
+  (`agent/tools_schema.py`) — example-local skills have NO consumer until that
+  discovery seam is generic (§22.23.3 skill rule).
+
 #### 22.23.1 Projection rule (RULE)
 
 `examples/<task>/` is the **user-facing PROJECTION of the framework's current
@@ -3461,7 +3516,21 @@ contracts and configs (DatasetProfile, ModelIOContract, DeliverableSpec,
 EvaluationMetric, health config, task description …) remain the ONLY
 authorities; an example pack CONSUMES them (`module-owned contracts/configs →
 example pack consumes them → runnable user example`). It never carries a
-hand-written parallel copy that could drift.
+hand-written parallel copy that could drift. Rejected: *production says
+`num_classes = 37`; `examples/…/metadata.yaml` independently says 37; both are
+treated as authorities.* Documentation may EXPLAIN a value (citing the owning
+path); executable semantics have one owner. **Acceptance criterion:** changing
+an example-facing description never silently changes runtime semantics unless
+the owning contract/config is changed. How a pack references/instantiates the
+authorities is NOT frozen here (candidates from §22.23.0: instances of the
+owning schemas consumed through the existing transports; a per-task binding at
+Step 12). **What a pack MAY own is task-INSTANCE data** — which samples (the
+identity manifests), provenance, checksums, the pack's own instance values —
+exactly as `configs/task_config.yaml` owns TIDMAD's task text today; **what it
+may NEVER own is a semantic RULE** — how a scope, a metric, a contract or a
+health check is interpreted. The §22.9a task specifications are the FROZEN
+SPEC; at runtime their single owner is the pack's execution-level declaration
+consumed by the framework (D14), never a second copy in prose.
 
 #### 22.23.2 The three roots (FIXED)
 
@@ -3490,7 +3559,9 @@ The mature semantic shape (categories, not frozen filenames):
 examples/<task>/
     README.md          task description / objective · which framework contracts this pack demonstrates
     PROVENANCE.md      data source, licence, checksums, acquisition instructions
-    STATUS.md          current maturity level (L0-L4) and the exact unsupported seams
+    STATUS.md          current maturity level (L0-L4) and the exact unsupported seams — a per-pack
+                       honesty note that MIRRORS §15.1/§22.12; the roadmap stays the ONE status
+                       authority (§19 duplicate-meter rule)
     data/              README + acquisition/prepare command + PINNED small manifests/checksums —
                        raw data NEVER in git; local cache location documented
     configs/           the ACTUAL production-consumed configs (no parallel copies)
@@ -3525,9 +3596,14 @@ corpus).
 #### 22.23.5 Two kinds of manifest (RULE)
 
 ```text
-IDENTITY-level manifests  (task DEFINITION — frozen at Step-07 PR0)
-    Pets:   image id · class id · scope ∈ {train, validation, final}
-    DAVIS:  sequence_name · scope · clip identity (sequence_name, start_frame)
+IDENTITY-level manifests  (task DEFINITION — frozen at Step-07 PR0 where derivable from official
+                           METADATA alone; otherwise D14)
+    Pets:   image id · class id · scope ∈ {train, validation, final}  — derivable from the official
+            annotation lists (~19 MB metadata artifact, not the images)
+    DAVIS:  sequence_name · scope  — derivable from the official train/val sequence lists;
+            clip identity (sequence_name, start_frame) needs per-sequence frame counts, i.e. the
+            frame archive → fixed at PR0 only if the listing is obtainable without committing
+            frames, otherwise at D14 (PR0's design decides; never fabricated)
 EXECUTION-level manifests (executable preprocessing — frozen at D14)
     Pets:   decoder · resize algorithm/interpolation · crop rule · tensor dtype/layout · tensor hashes
     DAVIS:  frame decode · resize/interpolation · window materialization · tensor layout · sample hashes
@@ -3548,6 +3624,15 @@ the three examples at their CURRENT honest maturity — `README` / `PROVENANCE`
 / forward contract) WITHOUT a second authority; Pets/DAVIS L1 fixtures where a
 seam already exists; NO real new data path, NO downloads into git, NO
 TrainingHistory implementation. PR0 has no semantic child letter (Q2).
+**Representability is recorded per contract, honestly**: the source audit
+expects the rank-agnostic `ModelIOContract` and the Step-06 `MetricSpec`
+(accuracy/higher, MSE/lower as scalar-only instances) to be declarable for Pets
+and DAVIS today, while `DatasetProfile` (1-D segment geometry, two channel
+groups) and `DeliverableSpec` (per-file HDF5) are TIDMAD-shaped and likely NOT
+— PR0 then names those as D14 seams in STATUS rather than bending their
+semantics to fit an image or video task. Bounded METADATA fetches (Pets
+annotation lists ~19 MB; a DAVIS archive listing derived locally) are allowed
+to build identity manifests; nothing large is committed.
 
 #### 22.23.7 Examples are executable regression assets (RULE)
 
@@ -3556,7 +3641,15 @@ documentation snippets: at maturity, tests (e.g. `tests/examples/`, location
 per repository convention) verify that the example config resolves, the plugin
 loads, the dataset manifests validate, the bounded run executes, the metric
 evaluates and the expected artifact structure exists — the SAME thing the
-user runs is the thing CI / Gates validate. Never "tests use private fixture
+user runs is the thing CI / Gates validate. Expected categories by maturity
+(filenames not frozen): **L0/L1** example references resolve · declared task
+identity valid · no duplicate semantic authority (machine-checkable where a
+machine-readable projection exists; prose cites the owning path) ·
+task-specific values match the selected persistent task; **L2** dataset
+preparation/reader contract validates · manifest validates · plugin/config
+loads through real production consumers; **L3** bounded
+train/validation/inference/evaluation run works; **L4** bounded full-agent
+workflow works. Never "tests use private fixture
 A while the README tells users to run unrelated example B".
 
 #### 22.23.8 Definition of Done extension (BINDING on freeze)
@@ -3573,3 +3666,77 @@ here?* and *how does a user use it now?* At the end of Step 12 the repository
 holds three complete packs — a scientific denoising task, a real RGB
 classification task and a real RGB spatiotemporal regression task — that are
 tutorials, regression suite and genericity evidence at once.
+
+#### 22.23.9 Separability (RULE)
+
+Separable = independently understandable / bindable / runnable — NOT
+duplicated framework code. Required properties: core/framework production
+code never depends on `examples/`; no example imports semantic state from
+another (Pets does not depend on TIDMAD files, DAVIS not on Pets); removing
+one example directory breaks neither the framework nor the other examples;
+examples introduce NO `if tidmad / if pets / if davis` branches in generic
+code — they are task INSTANCES, never task identities embedded in core logic;
+shared mechanisms live in the framework, never in an `examples/common/`
+dumping ground unless ≥2 landed examples prove a reusable concept and the
+normal §14 convergence rules justify it. **Acceptance test concept (mature
+examples):** one example can be selected and run in a fresh workspace without
+files from either of the other two. The exact CLI is not designed here (Step
+10/12 own the binding interface).
+
+#### 22.23.10 Data and workspace lifecycle (RULE)
+
+Raw datasets are NEVER committed: not the Pets JPEG archive/images, not DAVIS
+frames/archives, not TIDMAD raw HDF5. `examples/` holds only lightweight
+assets — documentation, provenance metadata, checksums, manifests, small
+deterministic fixtures where justified, configs, plugins, skills, tiny expected
+metadata/goldens. Actual data is acquired/prepared into the machine-local data
+area / run workspace already provided by the framework (§22.23.0), by an
+explicit user or bounded example-preparation action; D14 source-audits the
+physical location and lifecycle and does not invent a new global cache.
+Acceptance requirements: (1) cloning downloads/includes NO full dataset;
+(2) acquisition is explicit; (3) prepared data lives outside tracked content;
+(4) a clean workspace is recreatable from provenance + source identity +
+checksum + manifest + deterministic preparation rules; (5) local dataset paths
+are never hardcoded in production code (CLAUDE.md portability rule); (6)
+deleting an example never deletes user data outside it unless an explicit
+workspace-cleanup command owns that; (7) generated run artifacts belong to the
+workspace/run directory, never to the tracked example tree. The exact
+directory is not frozen here.
+
+#### 22.23.11 User-experience target (L3/L4)
+
+A user should be able to: browse ONE example directory; understand the task,
+its data and provenance, what the model sees, the training objective, the
+validation history produced, the golden metric, the optional
+metrics/diagnostics; prepare/download data into a workspace without touching
+framework source; run a bounded example through the NORMAL SIDERIUS
+interfaces; inspect outputs in the workspace; tell apart user-editable
+declarations, plugins, skills and generated artifacts; switch to another
+example without editing core code. Ideal: `clone → inspect examples/ → choose
+a task → prepare its external data → run it through the normal framework`.
+The precise command is not invented before Steps 10/12 establish the real
+binding/launcher interface; a maturity-specific interface a user is taught
+before then MUST be labelled as such.
+
+#### 22.23.12 Later-Step example obligations (propagated into §22.12)
+
+| Step | Example obligation |
+|---|---|
+| 08 HealthGate | after D14 all three packs expose their REAL applicable health behaviour: which TIDMAD-specific checks are inapplicable, which generic checks apply, task-specific health config when designed |
+| 09 Interpretation | packs demonstrate the real structured evidence consumed — TrainingDiagnosis, golden metric, secondary metrics, HealthGate evidence, failures, cross-iteration findings |
+| 10 Orchestration | a user can increasingly bind/select a real example through the normal workflow without core edits |
+| 11 Execution infra | the three examples run without task-specific infrastructure branches |
+| 12 Composition / regime B | the packs become complete task packs bound through the composition mechanism — the first full-L4 example milestone, NOT the first time Pets/DAVIS run |
+| post-M1 | the three mature packs are the canonical minimal multi-task regression suite |
+
+#### 22.23.13 Objectively reviewable acceptance criteria for this governance
+
+A three identities (TIDMAD · Oxford-IIIT Pet · DAVIS future-frame) · B same
+tasks across Steps · C real-modality coverage preserved (Pets: real RGB,
+variable raw geometry, 37-way; DAVIS: real RGB video, temporal window,
+structured continuous prediction) · D no raw data in the repo · E separability
+(§22.23.9) · F no second authority (§22.23.1) · G honest maturity (no pack
+claims what has not landed; STATUS names the unsupported seams) · H user
+experience (§22.23.11) · I regression alignment (user example == regression
+task) · J cumulative evolution (capability is added, prior valid evidence
+kept).
