@@ -11,10 +11,12 @@ and one golden metric, information-flow governance, maturity ladder,
 per-Step support matrix, multi-track Gate corpus rule; propagated into §0
 rule 11, §7a/§8/§11/§12, §15.1, §16, §17.0.2, §18, §21) is DRAFTED;
 operator review 2026-08-15 accepted the architecture and required four
-clarifications, applied as Rev 5.1 (§22 status). NOT YET FROZEN: the final
-Rev-5 freeze follows the dataset selection audit / operator selection of the
-image and spatiotemporal tasks (§22.21 sequence); binding on the freeze
-mark.** No
+clarifications (Rev 5.1); Rev 5.2 fixed the implementation timeline; the
+persistent tracks are now SELECTED — Track B Oxford-IIIT Pet 37-way RGB
+classification, Track C DAVIS 2017 RGB 8→4 future-frame prediction (§22.9a)
+— and D14 is a dedicated milestone after Step 07 (§22.11a). NOT YET FROZEN:
+Q2 (Step-7 child lettering) and the freeze mark itself (Q4) remain; binding
+on the freeze mark.** No
 implementation is authorized by this document alone.** Each module named here receives its own detailed design
 document (operator-reviewed) before any code changes. This document
 decides direction, module ownership, compatibility surfaces, and
@@ -1842,8 +1844,9 @@ TIDMAD-profile-bound at M2.
 
 **MILESTONE 1 — CORE GENERICIZATION.** *(Rev 5, §22: the "materially different
 composed contrast task" of criterion 1 is the two PERSISTENT tracks — the FIXED
-image/classification and spatiotemporal/regression tasks of §22.9 — each
-reaching L3/L4 (§22.10); their datasets are operator decision §22.21-Q1; from
+image/classification and spatiotemporal/regression tasks of §22.9 — Oxford-IIIT
+Pet and DAVIS 2017 (§22.9a, RESOLVED 2026-08-15) — each reaching L3/L4
+(§22.10); from
 this milestone on the three tracks are the mandatory regression suite,
 §22.14.)* *(Rev 4, §21: Milestone 1 is the
 first COMPLETE-COMPOSITION checkpoint — the point at which the contrast
@@ -2100,7 +2103,7 @@ campaign per module.
 | D16 | **Lexical loss-id restriction** in `execute_tools/evaluation_metric.py` (Step 06): ids whose tokens include `loss`/`losses` are refused — rejects legitimate future evaluation metrics such as `log_loss`, passes `mse` used as a training objective | temporary implementation restriction, NOT the generic boundary (Rev 5 §22.1: role is typed binding, not naming); remove/narrow when a task-level metric declaration first needs it — Step 12 (or Step 07 if it touches the module first). Not a Step-06 reopener |
 | D17 | **Mandatory-scalar runtime enforcement**: `MetricResult.scalar: float \| None` lets a generic `EvaluationMetric` subclass return `None` (TIDMAD cannot); frozen semantics are scoreable ⇒ scalar / not-scoreable ⇒ `NotScoreableResult` | implementation-quality debt; owner = the first design adding a second production metric instance (Step 12; earlier if convenient) |
 | D18 | **Scalar-only metric → `file_vector=[]` bridge** into `HealthCheckContext` / the record | safe compatibility bridge today; how "no per-sample evidence" is expressed is Step 08 (with Step 12) |
-| D19 | **Persistent contrast dataset selection** (Tracks B/C, §22.9a) | OPERATOR DECISION — **BLOCKS the Step-07 detailed-design freeze** (Rev 5.1, §22.21-Q1); the three canonical scopes and Gate subsets are part of the decision |
+| D19 | **Persistent contrast dataset selection** (Tracks B/C, §22.9a) | **RESOLVED 2026-08-15**: Oxford-IIIT Pet (37-way RGB classification) / DAVIS 2017 (RGB 8→4 future-frame prediction); manifests, nested subsets and interpolation rules are built and pinned by the D14 design — until then no data is downloaded, generated or committed |
 | D12 | Task-composition root's physical representation (file layout/schema; when legacy-adapter defaulting is retired per §2 regime split) | by §0 rule 9: after several module configs exist; the composition design also fixes the binding switch from regime A to regime B |
 
 ## 19. Detailed-design documents this roadmap requires
@@ -2565,8 +2568,9 @@ other structured    ·             ·             ·
 
 *  TIDMAD occupies ONE legacy cell: 1-D temporal input, per-timestep 256-class
    output decoded by argmax (classifier), scored by a task-specific frozen metric.
-B/C  the two PERSISTENT tracks with their Rev-5 objective assignment (§22.9):
-   Image → classification, Spatiotemporal → regression; datasets = §22.9a.
+B/C  the two PERSISTENT tracks (§22.9a, RESOLVED 2026-08-15): B = Oxford-IIIT Pet 37-way
+   RGB breed classification [3,144,144]; C = DAVIS 2017 RGB 8→4 future-frame prediction
+   [3,8,128,224] → [3,4,128,224].
 ·  a coverage opportunity, added only when needed to expose a missing abstraction.
 ```
 
@@ -2720,8 +2724,10 @@ subsets in the selection form; D14 timing left visually unresolved), then
 **Rev 5.2** (operator, 2026-08-15: implementation timeline — tasks selected
 and frozen NOW, implemented progressively from Step 07; D14 as a dedicated
 milestone between Step 07 and Step 08; cumulative test corpus; no ad-hoc
-composed tasks after Step 07 — §22.11a). NOT YET FROZEN — final freeze
-follows the dataset selection (§22.21 sequence). Every
+composed tasks after Step 07 — §22.11a), then **Q1 and Q3 RESOLVED
+(2026-08-15)**: Track B = Oxford-IIIT Pet, Track C = DAVIS 2017 (§22.9a);
+D14 = dedicated milestone after Step 07 (§22.11a). NOT YET FROZEN — Q2
+(Step-7 child lettering) and Q4 (the freeze mark) remain. Every
 MUST / REQUIRED below becomes BINDING on the operator's freeze mark (§17.0
 provenance rule); until then it is the proposed Rev-5 text.** This section is the authoritative top-level guidance for Step 07
 onward. It encodes the operator's post-Step-06 conclusions (§20.8, now folded
@@ -3021,62 +3027,133 @@ manually; obvious tensor topology; simple primary metric and training
 objective; cheap Gate-1 / Gate-2 subsets; able to expose SIDERIUS's hidden
 assumptions.
 
-#### 22.9a Persistent contrast dataset selection — **OPERATOR DECISION REQUIRED (UNRESOLVED)**
+#### 22.9a Persistent contrast dataset selection — **OPERATOR DECISION Q1: RESOLVED (2026-08-15)**
 
-No dataset for Track B or Track C has been selected in any authoritative
-source at the time of this revision (repository search: no MNIST / CIFAR /
-Moving-MNIST / other candidate appears in any design or config). **This
-revision does NOT select them.** **The decision BLOCKS the Step-07
-detailed-design freeze (Rev 5.1)** — from Step 07 onward every persistent-
-track obligation in §22.12, at ANY maturity level, refers to the SAME two
-selected tasks; the point of selecting now is that Steps 07→12 validate the
-same tasks progressively rather than arbitrary stand-ins replaced later.
-Distinguish:
-
-```text
-ATOMIC fixture (L1)          may be synthetic — it isolates one axis, it is not a track
-PERSISTENT Track B / C       MUST refer to the fixed selected task at every level (L0 declaration
-                             onward); a synthetic stand-in is never "Track B" or "Track C"
-```
-
-Until the decision is recorded here, tracks B and C exist only as coverage
-assignments (topology × objective) and no Step may claim Track-B/C evidence.
-
-Required decision fields, per track (to be recorded here on resolution):
+**Selection procedure and provenance.** A selection audit (this session; primary
+sources fetched, artifacts HEAD-checked live and credential-free) compared
+image candidates (MNIST, Fashion-MNIST, KMNIST, UCI optdigits, CIFAR-10,
+EuroSAT, Oxford-IIIT Pet) and spatiotemporal candidates (Moving-MNIST fixed
+test set / deterministic generation, synthetic PDE fields, TaxiBJ, PDEBench 2D
+SWE, SEVIR, DAVIS 2017). A first draft selected **Fashion-MNIST + deterministic
+Moving-MNIST** (cheapest, cleanest licences); the operator then tightened the
+selection standard — *data volume may be small, but data modality and task
+semantics must not be artificially simplified*: real RGB / multi-channel,
+real-world data with a real raw layout, a real ML task, raw download ≤ ~1 GB,
+still Gate-affordable, jointly covering classification + regression, and able
+to hit SIDERIUS's TIDMAD-shaped assumptions — and **superseded** that draft:
 
 ```text
-Track B — Image / classification            Track C — Spatiotemporal / regression
-  dataset:                                    dataset:
-  source / licence:                           source / licence:
-  fixed deterministic subset:                 fixed deterministic subset:
-  task:                                       task:
-  input topology:  [C, H, W]                  input topology:  [C, T, H, W] (or equivalent)
-  target:          class label(s)             target:          continuous field / value(s)
-  canonical TRAINING split / scope:           canonical TRAINING split / scope:
-  canonical VALIDATION split / scope:         canonical VALIDATION split / scope:      (R3 — REQUIRED)
-  canonical FINAL-EVALUATION split / scope:   canonical FINAL-EVALUATION split / scope:
-  training objective:                         training objective:
-  validation objective (REQUIRED, same comp.): validation objective (REQUIRED, same comp.):
-  golden metric + direction:                  golden metric + direction:
-  optional checkpointed diagnostics:          optional checkpointed diagnostics:
-  optional terminal metrics:                  optional terminal metrics:
-  Gate-1 bounded fixture / subset:            Gate-1 bounded fixture / subset:
-  Gate-2 bounded executable subset:           Gate-2 bounded executable subset:
-  full persistent-task subset:                full persistent-task subset:
-  expected runtime class:                     expected runtime class:
-  why diagnostically useful:                  why diagnostically useful:
+SUPERSEDED candidate plan (2026-08-15): Track B = Fashion-MNIST · Track C = deterministic Moving-MNIST
+Reason: insufficient modality realism for PERSISTENT composed tracks — single-channel fixed
+        small images and synthetic grey video under-stress multi-channel real-world input,
+        variable raw geometry and real spatiotemporal data-path assumptions.
+Retained role: both remain legitimate cheap ATOMIC / unit fixtures (Moving-MNIST-style
+        generation is a good temporal-seam isolation fixture); neither is a persistent track.
 ```
 
-The three scopes are part of the semantic contract (§22.16): the validation
-loss at Step 07 and the final score at Step 09 must be computed on the
-declared scopes, never on samples chosen ad hoc per Step. The three subsets
-need not differ, but each MUST be recorded explicitly.
+**OPERATOR-SELECTED (FIXED; immutability policy §22.9 applies from now):**
 
-*Non-binding note for the selection audit (candidates, NOT choices):* the
-criteria above are typically met by classic tiny image-classification sets and
-by small synthetic or classic spatiotemporal fields; the audit should score
-candidates against every criterion, prefer licence-clean and credential-free
-sources, and record the rejected alternatives.
+```text
+Track B — Image / classification
+  dataset:            Oxford-IIIT Pet  (Parkhi, Vedaldi, Zisserman, Jawahar 2012)
+  source / licence:   official VGG distribution https://www.robots.ox.ac.uk/~vgg/data/pets/ —
+                      images.tar.gz (~792 MB) + annotations.tar.gz (~19 MB), direct download, no
+                      credential (HEAD-checked 2026-08-15); dataset page states
+                      "Creative Commons Attribution-ShareAlike 4.0 International License",
+                      copyright with the original image owners; official trainval/test lists ship
+                      in annotations/. Use the official source, not Kaggle/HF mirrors, as provenance
+  task:               37-way pet-BREED classification from real RGB JPEG images (~200 images/class,
+                      ~7,400 images); ROI / trimap annotations are NOT inputs (possible future tasks)
+  input topology:     raw RGB JPEG, VARIABLE H/W, aspect, scale, lighting → deterministic
+                      preprocessing: decode RGB (exactly 3 channels) → aspect-preserving resize,
+                      shorter side 160 px → center crop 144×144 → float32 [3,144,144] = pixel/255.0;
+                      NO augmentation (interpolation rule frozen by the D14 design, e.g. bilinear —
+                      never a loader-library default)
+  target:             integer class id 0…36 (scalar categorical)
+  canonical TRAINING scope:    breed-stratified deterministic 80 % of the official trainval list
+  canonical VALIDATION scope:  the disjoint 20 % of the official trainval list
+  canonical FINAL-EVAL scope:  the official test list only
+                      the exact image-id manifests are committed and SHA-256 pinned when first
+                      built (the manifest is the authority; the seed is provenance only); the three
+                      scopes are disjoint; runtime resampling is forbidden
+  training objective (R1):     categorical cross entropy
+  validation objective (R3):   mean validation cross entropy per epoch — same computation, no backprop
+  training history (R2):       mean training cross entropy per epoch
+  golden metric (R4):          37-class accuracy on the final-eval scope · direction HIGHER · terminal
+  optional checkpointed:       validation accuracy (v1; validation macro-F1 optional later)
+  optional terminal:           macro-F1 (higher) · **`log_loss` (lower) — the identity is INTENTIONAL**:
+                               a legitimate terminal metric whose name contains "loss" (Rev 5 §22.1);
+                               it forces D16 to be resolved before this declaration crosses the
+                               production metric-declaration path (Step 12; not fixed here)
+  Gate-1 bounded / Gate-2 bounded / persistent subsets: NESTED selections of the same manifests,
+                      sized by the D14 design under §17.0.1 bounds (a Gate whose seam does not
+                      execute data does not train artificially)
+  expected runtime:   small CNN, CPU/single-GPU minutes at bounded subsets
+  why:                real RGB, C=3, VARIABLE raw geometry → a real normalization seam
+                      (resize/crop) that fixed-shape sets (CIFAR/EuroSAT) never exercise;
+                      37 classes; scalar categorical target and a deliverable structurally unlike
+                      TIDMAD's per-file HDF5 time series; training objective ≠ golden computation
+
+Track C — Spatiotemporal / regression
+  dataset:            DAVIS 2017 (Pont-Tuset et al. 2017), TrainVal 480p
+  source / licence:   official https://davischallenge.org/davis2017/code.html →
+                      DAVIS-2017-trainval-480p.zip (~833 MB, data.vision.ee.ethz.ch), direct
+                      download, no credential (HEAD-checked 2026-08-15); the official davis-2017
+                      tooling README states "DAVIS is released under the BSD License"; the challenge
+                      download page itself states no licence — the D14 design re-confirms the exact
+                      dataset licence text before any artifact is committed. 60 official training +
+                      30 official validation sequences (DAVIS 2017)
+  task:               SIDERIUS-defined REAL-RGB FUTURE-FRAME PREDICTION (not DAVIS's official
+                      segmentation benchmark): 8 context frames → next 4 frames, stride 1
+  input topology:     float32 [C,T,H,W] = [3,8,128,224], values in [0,1] — deterministic decode →
+                      fixed resize/crop to 128×224 (rule frozen by D14, e.g. bilinear), NO
+                      augmentation / flip / random crop
+  target:             float32 [C,T,H,W] = [3,4,128,224] — dense multi-channel continuous tensor
+  canonical TRAINING scope:    the 60 official train sequences
+  canonical VALIDATION scope:  15 of the 30 official validation sequences (by sequence identity)
+  canonical FINAL-EVAL scope:  the other 15 official validation sequences
+                      SEQUENCE-disjoint (never frame-level random splits: temporal leakage);
+                      clip windows (sequence_name, start_frame) chosen deterministically and evenly
+                      per sequence — indicative caps: ≤8 windows/train sequence (≈480 clips),
+                      ≤4/validation sequence (≈60), ≤4/final-eval sequence (≈60); exact manifests
+                      committed and SHA-256 pinned; the raw dataset stays the real 833 MB, the
+                      persistent run is a few hundred real clips
+  training objective (R1):     MAE / L1 over the predicted future tensor (subgradient-compatible)
+  validation objective (R3):   mean validation MAE per epoch — same computation, no backprop
+  training history (R2):       mean training MAE per epoch
+  golden metric (R4):          MSE over ALL predicted pixels × channels × future frames of the
+                               final-eval clips · direction LOWER · terminal — aggregation FROZEN as the
+                               global mean over clips × C × T × H × W (never an unequal mean-of-means)
+  optional checkpointed:       validation PSNR (data_range = 1.0)
+  optional terminal:           PSNR (higher, data_range = 1.0) · MAE (lower) — the SAME MAE computation
+                               therefore appears as training objective, validation observation and
+                               terminal secondary metric: three lifecycle roles of one computation
+  Gate-1 / Gate-2 / persistent subsets: NESTED prefixes of the same clip manifests, sized by D14
+  expected runtime:   small conv/recurrent predictor, bounded clips: minutes
+  why:                real video (camera + object motion, deformation, occlusion, texture), C=3 in
+                      AND out, temporal + spatial rank, DIFFERENT input/target T, dense continuous
+                      structured output — a deliverable and output contract nothing in TIDMAD's
+                      [B,256,T] / [B,T] world resembles; training objective ≠ golden computation
+```
+
+**Coverage this pair establishes** (§21.4 matrix cells now: image × classification =
+Pets; spatiotemporal × regression = DAVIS): real-world · RGB · multi-channel ·
+variable raw geometry · spatial vs spatiotemporal · classification vs regression ·
+scalar vs structured target · golden higher (accuracy) vs lower (MSE) · training
+objective ≠ golden computation on both · required validation curves (CE / MAE) ·
+opposite-direction optional evidence (`log_loss` ↓, PSNR ↑) · final artifacts
+structurally unlike TIDMAD.
+
+**Consequence for D14 (Q3, resolved below).** D14 is NOT "add two DataLoaders":
+Pets forces JPEG decode, variable H/W, C=3, resize/crop declaration, 37-class
+scalar target; DAVIS forces frame-sequence reading, temporal-window construction,
+different input/target extents, `[3,8,128,224] → [3,4,128,224]`. The D14 design
+MUST source-audit whether executable B/C also require extending
+`DatasetProfile` / reader semantics, sample identity and addressing,
+preprocessing declaration, `ModelIOContract` tensor rank / structured output, the
+training and inference engines, `DeliverableSpec`, and the metric input/output
+path — assigning ownership by the DECLARE / DERIVE / KEEP-RUNTIME /
+KEEP-POLICY-OWNED discipline, never merely because the tasks expose a gap.
 
 ### 22.10 Progressive genericity validation maturity ladder (BINDING on freeze)
 
@@ -3136,13 +3213,13 @@ NOW          select + freeze Track B / Track C; fill §22.9a; final Rev-5 freeze
              (no production code for B/C)
 STEP 07      TrainingHistory / TrainingDiagnosis / metric-direction policy
              TIDMAD: real production path.  B/C: L1 — atomic fixtures use the EXACT frozen
-             task semantics (objective, validation objective, golden metric + direction,
-             diagnosis shape); no pretence of image files → loader → model → training
+             Pets / DAVIS task semantics (CE→accuracy↑ / MAE→MSE↓, validation curves, diagnosis
+             shape); no pretence of image files → loader → model → training
 D14          DEDICATED EXECUTABLE-DATA-PATH MILESTONE — placed between Step 07 and Step 08
-             (operator preference 2026-08-15; Q3 to be confirmed at the Rev-5 freeze once the two
-             datasets' real disk→sample→tensor differences are visible)
-             B/C: real dataset → task-declared reader → sample → tensor → model → training →
-             TrainingHistory → inference → deliverable → EvaluationMetric  (L2, then L3)
+             (Q3 RESOLVED 2026-08-15)
+             Track B: real Pets JPEGs → reader → [3,144,144]; Track C: real DAVIS frames → window
+             reader → [3,8,128,224] → [3,4,128,224]; then real training → TrainingHistory →
+             inference → deliverable → EvaluationMetric  (L2, then L3)
              and the ALREADY-LANDED Step-07 fixtures are UPGRADED (not replaced) with real
              component / integrated variants
 STEP 08      HealthGate — A/B/C on REAL applicable artifacts: TIDMAD-specific gates INAPPLICABLE
@@ -3185,13 +3262,13 @@ genericity claim the Step may make.
 | Step | Owner / design | TIDMAD (Track A) | Image (Track B) | Spatiotemporal (Track C) | New genericity claim |
 |---|---|---|---|---|---|
 | **06 — Metric interface** (COMPLETE, PR #213) | §10 · `step_06_metric_interface.md` | full: two-route parity, scoreability before arithmetic, frozen values byte-identical (Stage A) | **not reopened.** Historical: no persistent task existed; the STRICT direction-only atomic rung (C6a) + broader different-metric rung (C6b) are valid L1 evidence for the metric handle | same | metric identity/direction/aggregation/scoreability are declared instances; scoring runs through the handle. Persistent B/C declarations begin AFTER this revision, when their declaration seam exists |
-| **07 — Tuner planning & policy incl. training diagnostics** (§7a + §20.2; child decomposition §22.21-Q2) — *training-diagnostics half* | §7a / Step-07 detailed design(s) | R2 train history persisted per epoch; **R3 validation-objective history REQUIRED when a validation set exists** (existing SampleSet split, no new `--val_*` IPC unless source proves otherwise — OD-20-3); TrainingHistory + deterministic TrainingDiagnosis; optional checkpointed observations; distinct from EvaluationMetric; structured, persisted for later transport; NOT prompt-dumped (§22.6) | L1: a contrast objective/history fixture (different objective computation, different diagnosis shape); L2 `training → TrainingHistory` if the trainer seam is generic; as soon as B reaches the training seam (post-D14) it MUST exercise history/diagnosis | same as B | training dynamics are first-class typed evidence; validation loss exists; the eval-vs-training boundary is executable on both sides |
+| **07 — Tuner planning & policy incl. training diagnostics** (§7a + §20.2; child decomposition §22.21-Q2) — *training-diagnostics half* | §7a / Step-07 detailed design(s) | R2 train history persisted per epoch; **R3 validation-objective history REQUIRED when a validation set exists** (existing SampleSet split, no new `--val_*` IPC unless source proves otherwise — OD-20-3); TrainingHistory + deterministic TrainingDiagnosis; optional checkpointed observations; distinct from EvaluationMetric; structured, persisted for later transport; NOT prompt-dumped (§22.6) | L1 with the EXACT frozen Track-B semantics (Pets: CE objective, CE validation curve, accuracy↑ golden, validation-accuracy diagnostic; §22.9a) — never an anonymous "some classifier"; L2 `training → TrainingHistory` if the trainer seam is generic; post-D14 the real Pets path MUST exercise history/diagnosis (Step-07 fixtures kept, real variants added) | L1 with the EXACT frozen Track-C semantics (DAVIS: MAE objective/curve, MSE↓ golden, PSNR diagnostic); post-D14 real | training dynamics are first-class typed evidence; validation loss exists; the eval-vs-training boundary is executable on both sides |
 | **07 — policy half** (direction-sensitive incumbent / threshold / skip / bypass; tuner planner/reflector rendering for the CURRENT decision) | §7a / Step-07 policy design | incumbent selection consumes the golden metric's declared direction and identity through the Step-06 handle (never TIDMAD `max`/`>`); the reflector's hardcoded "HIGHER … is GOOD" and every planner/reflector direction assumption migrate HERE (Rev 5.1 — the reflector is the tuner's); secondary metrics are evidence rendered where relevant, never the objective; policy distinguishes training diagnosis · final primary metric · HealthGate validity; planner/reflector prompts EXACT-equal for TIDMAD except the explicitly owned diagnosis/direction rendering — **Gate 1 REQUIRED** (§20.2 OD-20-6) | L1: lower-is-better AND classification/regression-relevant policy cases as supported (the C6a instance is the ready-made lower-direction fixture) | same | direction-sensitive policy is metric-generic; the D1 CORE consumers inside the tuner (§16 D1 table) migrate here |
 | **07 — measurement / verification** (§7e) | `step_07b…` (lettering: §22.21-Q2) | identity/comparability keys byte-stable | L0/L1 measurement data-feeding from a contrast profile | same | unchanged from §15.1 |
 | **08 — HealthGates** | §8 · `step_08_health_check_task_profile.md` | TIDMAD verdicts identical; sha-pin mechanism untouched | checks are applicable-by-declaration; int8/amplitude checks INAPPLICABLE honestly on non-int8 / non-sequence artifacts; generic checks still fire; NOT forced onto image tasks because TIDMAD uses them; NOT conflated with scoreability, training diagnosis or the evaluation metric — L1 applicable/inapplicable fixtures, L2 where a real deliverable exists | same, incl. spatiotemporal artifact geometry | health validity is task-declared; the scalar-only / no-per-sample-evidence case is expressed honestly (D18) |
 | **09 — Interpretation / result-agent-facing consumption** | §11 · `step_09_interpretation_task_blocks.md` | 3 interpreter goldens EXACT-equal + owned additions | defines HOW compact structured information reaches the ResultInterpretationAgent and, through it, the cross-iteration summary and next Proposer: TrainingDiagnosis, golden metric (identity/direction), secondary metrics, HealthGate evidence, failure information, cross-iteration findings — via explicit renderers, NEVER indiscriminate raw-record dumping (§22.6 item 5); metric-parameterized grammar and sign-band; L1 metric-identity/direction rendering fixtures incl. lower-is-better and classification/regression phrasing | same | the interpreter and proposer consume owned, compact, typed evidence; the D1 interpreter sign-band / `best_*` consumers migrate here (tuner planner/reflector consumers are Step 07's) |
 | **10 — Orchestration binding** | §12 · `step_10_…` | k9/l_fail choreographies unmodified; resume field-stable | L0/L1: a second bound task initializes the loop; workflow/resume best-score comparisons consume the metric handle (D1 CORE consumers outside the tuner) | same | launcher-owned task binding, metric-generic chain comparisons |
-| **D14 — executable data path** (owner AND timing: operator preference = dedicated milestone immediately after Step 07, before Step 08 — §22.11a; Q3 confirmed at the Rev-5 freeze; row placement here is NOT the final ordering claim) | TBD | TIDMAD loader/layout byte-stable | **the milestone that makes B executable**: L2 `dataset → loader → tensor` and `deliverable` layout for `[C,H,W]`, then L3 integrated execution | L2/L3 for `[C,T,H,W]` | the reader/layout abstraction is task-declared |
+| **D14 — executable contrast-task / data-path milestone** (RESOLVED: dedicated milestone immediately after Step 07, before Step 08 — §22.11a) | dedicated D14 design | TIDMAD loader/layout byte-stable | **the milestone that makes B executable**: real Pets JPEG → declared preprocessing → `[3,144,144]` (L2), then L3 integrated training/inference/evaluation; already-landed Step-07 fixtures EXTENDED | real DAVIS sequences → window reader → `[3,8,128,224] → [3,4,128,224]` (L2), then L3 | the reader / preprocessing / layout abstraction is task-declared; the audit decides which contracts (profile, sample identity, ModelIOContract rank/structured output, engines, DeliverableSpec, metric path) must extend |
 | **11 — Execution infrastructure** | §9 · `step_11_…` | argv/IPC/sentinels byte-identical | contrast tasks spawn with zero infra edits (L2/L3 as available) | same | spawn/IPC/limits task-free |
 | **12 — Task composition + regime B (Milestone 1)** | `step_12_…` | regime-A callers byte-unchanged | **first point at which B MUST demonstrate full declared composition and end-to-end execution (L3, then L4 as the agent workflow is generic)** — task-level metric declaration (Step-06 deferral), objective/history declaration, health config, binding fail-closed | same for C | the three tracks compose; after this Step they are the mandatory regression suite (§22.14) |
 | post-M1 (D1 peripheral, later families) | per §16 M2 | — | regression | regression | new families only on evidence (§21.4) |
@@ -3318,9 +3395,9 @@ Spatiotemporal / regr. ┘                                             │
 
 | # | Decision | Why it cannot be decided here |
 |---|---|---|
-| Q1 | **Persistent dataset selection for Tracks B and C** (§22.9a) — datasets, three canonical scopes, objectives, golden metrics, Gate subsets | no authoritative selection exists; **BLOCKS the Step-07 detailed-design freeze** (Rev 5.1); the selection audit is the next work item |
+| Q1 | **Persistent dataset selection for Tracks B and C** | **RESOLVED 2026-08-15**: Track B = Oxford-IIIT Pet 37-way RGB breed classification; Track C = DAVIS 2017 RGB 8→4 future-frame prediction (§22.9a; Fashion-MNIST / Moving-MNIST superseded). Manifests, subsets and interpolation rules are built and pinned by the D14 design — no data is downloaded or generated by this revision |
 | Q2 | **Step-7 child decomposition / lettering.** The roadmap's Step 7 (§7a) owns tuner policy AND (since §20.2) TrainingHistory/Diagnosis, with §7e measurement as a sibling; the design files are named `step_07a_tuner_policy.md` / `step_07b_tuner_measurement.md` (neither exists yet). Rev 5 needs the training-diagnostics half and the policy half to be separately acceptable (different Gate dispositions: Gate 1 REQUIRED for the policy/prompt half). Proposed, NOT decided: 07a = training history/diagnostics, 07b = direction-sensitive policy on the metric handle, 07c = measurement/verification. Step NUMBER and §7a ownership are unchanged either way | child lettering is a decomposition choice reserved to the operator (Step 04/05 precedent) |
-| Q3 | **D14 owner and timing** (§20.5 (a) extend Step 11 §9 vs (b) small milestone between Steps 07 and 12) | **operator preference recorded 2026-08-15 (Rev 5.2, §22.11a): (b), placed immediately after Step 07 and before Step 08**; confirmed at the Rev-5 freeze once the selected datasets' data-path differences are visible |
+| Q3 | **D14 owner and timing** | **RESOLVED 2026-08-15**: D14 is a DEDICATED executable-contrast-task / data-path milestone AFTER Step 07 and BEFORE Step 08 (§22.11a); NOT folded into Step 11. Its detailed design source-audits the real blockers (§22.9a consequence) before claiming scope |
 | Q4 | **Freeze of Rev 5 itself** — this section and the §0/§15.1/§16/§17/§18 propagations become BINDING on the operator's freeze mark | §17.0 provenance rule |
 
 **Frozen sequence to the Rev-5 freeze (operator, 2026-08-15):**
@@ -3329,6 +3406,7 @@ Rev 5.1 (this text)  →  dataset selection audit (real datasets: licence, size,
 download/generation, runtime, tensor shapes, three scopes, Gate subsets)  →  operator selects
 Track B / Track C  →  §22.9a filled  →  Q3 confirmed (D14 = dedicated milestone after Step 07, §22.11a)
 →  Q2 Step-7 child decomposition  →  FINAL Rev-5 freeze  →  only then Step 07 detailed design
+STATUS 2026-08-15: Q1 RESOLVED (Pets / DAVIS) · Q3 RESOLVED · Q2 and Q4 remain (see rows).
 ```
 
 ### 22.22 What this revision does NOT change

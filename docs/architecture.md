@@ -883,8 +883,11 @@ genericity-contract doc exists):
    corpus covering every executable track; secondary metrics are first-class
    downstream evidence but never the incumbent objective; agent-facing
    rendering is owned by consumer (Step 07 tuner planner/reflector, Step 09
-   interpreter/proposer). Datasets for the two contrast tracks are an OPEN
-   operator decision that BLOCKS the Step-07 design (roadmap §22.9a).
+   interpreter/proposer). The two contrast tracks are SELECTED (2026-08-15):
+   Track B = Oxford-IIIT Pet 37-way RGB breed classification ([3,144,144],
+   CE → accuracy↑), Track C = DAVIS 2017 RGB 8→4 future-frame prediction
+   ([3,8,128,224] → [3,4,128,224], MAE → MSE↓); D14 (executable data path)
+   is a dedicated milestone right after Step 07 (roadmap §22.9a, §22.11a).
 
 ---
 

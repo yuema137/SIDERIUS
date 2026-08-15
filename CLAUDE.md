@@ -591,10 +591,11 @@ TIDMAD's `network.py:FocalLoss1D`.
   (Step 06 metric interface: PR #213, `02f382eb`). Roadmap
   `docs/design/siderius_generic_framework_upgrade.md` §15.1 is the status
   authority; its §22 (Rev 5.1, architecture accepted, NOT yet frozen) is the
-  top-level guidance for Step 07 onward. Next is NOT Step 07's design:
-  dataset selection audit → operator selects the image / spatiotemporal
-  tracks (§22.9a) → D14 owner → Step-7 child decomposition → final Rev-5
-  freeze → then Step 07.
+  top-level guidance for Step 07 onward. Persistent tracks SELECTED:
+  Track B = Oxford-IIIT Pet 37-way RGB classification, Track C = DAVIS 2017
+  RGB 8→4 future-frame prediction (§22.9a); D14 = dedicated milestone after
+  Step 07. Remaining before Step 07 design: Step-7 child decomposition (Q2)
+  and the Rev-5 freeze mark.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
