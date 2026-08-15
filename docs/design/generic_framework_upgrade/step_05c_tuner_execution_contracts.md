@@ -11,7 +11,7 @@ Step-level completion contract lives in roadmap **§15.1a**.
 | Merge | **`03e00944`** (squash) · PR **#212** · final head `894531777c41d24561107c3b567d70d94e2dfabf` · exact-head CI **31861633497** SUCCESS · merged 2026-08-15T04:38:20Z |
 | Design base | **re-anchored to `226d4e9f`** (master after 05a `cfb3b1c7` and 05b `5ce205d3` merged). Revision 1 was written against `13b08550`; §0.2 is the corrected anchor table and lists six citations that did not survive audit |
 | Decomposition | **ONE PR**, internal semantic checkpoints **C0–C9** (§14) |
-| Deliverable ownership | producer-side **provisional** extraction; final ownership **OPEN**; **Step 06** is the next mandatory confirm-or-say-why review (§3) |
+| Deliverable ownership | producer-side **provisional** extraction; final ownership was **OPEN** at 05c — **RESOLVED at Step 06 (2026-08-15, PR #213): CONFIRMED as a SPLIT** — `DeliverableSpec` keeps exclusive producer-side representation, the metric's `ScoreabilityContract` owns evaluation-side acceptance and REFERENCES the spec (roadmap §14 / §20.4; step_06 §20.10) |
 | Depends on | **Step 02** (Dataset Profile: channels, `ValueEncoding`) · **Step 03** (`ModelIOContract` decode rule) |
 | Roadmap row | §15.1 `§7c Tuner execution contracts` |
 | Risk | **Highest of the three** — it changes real execution behavior |
@@ -287,7 +287,7 @@ This PR touches exactly one of the four, and must not conflate them:
 | **Input Dataset Contract** — what exists to read | Step 02 | **consumes** (channels, encoding) |
 | **Model I/O Contract** — in-memory tensors | Step 03 | **consumes** (decode rule, already contract-keyed at `inference_single:262-273`) |
 | **Deliverable Contract** — what an attempt persists | **§3 below** | **produces / proposes** |
-| **Metric Scoreability Contract** — what makes a deliverable scoreable | Step 06 | **untouched** |
+| **Metric Scoreability Contract** — what makes a deliverable scoreable | Step 06 | **untouched** by 05c — landed at Step 06 as `TidmadScoreabilityContract` (`execute_tools/evaluation_metric.py`), reading channel group + dtype FROM this spec |
 
 That TIDMAD happens to use int8 HDF5 for both its input and its deliverable
 is a **coincidence of one task**, not evidence the contracts are one.

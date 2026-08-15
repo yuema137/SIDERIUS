@@ -25,7 +25,7 @@ The dataset filename template is Seam 1 in the contract:
 |---|---|---|
 | `DECOUPLED` | `execute_tools/train_engine_sandbox.py` — 4 sites (`TIDMADDataset._pull_events_from_sample_set`, `TIDMADEpochDataset.__init__`, the RT2 storage-provenance path list, the legacy single-file `main()` branch) | V19 PR 2 commit A. Now `TIDMAD.training_file_name(...)`. Guarded by `test_dataset_contract.py::test_training_engine_has_no_inlined_training_filename_literal`. |
 | `REMAINING` | `execute_tools/build_anchor_map.py:52` | `f"abra_validation_{file_index:04d}.h5"` — validation side; no `validation_file_name` helper exists yet (adding one before a consumer would be dead code). |
-| `REMAINING` | `execute_tools/denoising_score_single.py:139,141,144` | Raw + denoised validation filenames. |
+| `PARTLY DECOUPLED` | `execute_tools/denoising_score_single.py` | **Step 06 C3**: the two DENOISED name constructions now resolve through `DeliverableSpec.naming` (`unqualified_name` / `name`); the RAW validation name comes from the profile (Step 02a). No `abra_validation_denoised` literal is executed in the scorer CLI any more. |
 | `PARTLY DECOUPLED` | `execute_tools/array2h5.py:25` | **Step 05c**: the two channel-group names are now DERIVED from `DatasetProfile.channels` through the provisional `DeliverableSpec` — the file contains no `channel0001`/`channel0002` literal. What REMAINS is TIDMAD vocabulary in the public function NAME `create_abra_file`; renaming it requires updating call sites and is not 05c's scope. The five instrument attrs, `N`, the split mechanics and the `indexed` suffix rule are deliberately left literal (OD-05c-2). |
 | `PARTLY DECOUPLED` | `scripts/` — the `abra_*` literals | **Step 05c** migrated the run-reconstructing half onto the deliverable contract: `run_comparison.py` (×3), `finalize_recovered_diagnostic_round.py`, `pregate_runtime_control_validation.py`, `v18_wave_summary.py` (glob **and** its private file-index regex). The rest are `REMAINING` **on purpose**, not by omission: `score_tidmad_official_*.py` and the five diagnostic scans read HISTORICAL artifacts and must keep matching names those files already carry, so migrating them would be actively wrong (OD-05c-3). `compute_raw_baseline.py` reads raw inputs, which is the dataset-filename family above, not this one. |
 
@@ -52,9 +52,13 @@ Two boundaries stay open on purpose:
   completeness and scoreability are exercised only by the scorer and the peek
   readers. **Step 06 is the next mandatory ownership review** and must either
   confirm final ownership or record what consumer evidence is still missing.
+  *(→ RESOLVED at Step 06, 2026-08-15: CONFIRMED as a split — `DeliverableSpec`
+  keeps producer-side representation; the metric's `ScoreabilityContract`
+  (`execute_tools/evaluation_metric.py`) owns evaluation-side acceptance and
+  reads channel group + dtype from the spec.)*
 
-The scorer's own literals (`denoising_score_single.py`) therefore stay
-`REMAINING` and are explicitly outside 05c.
+The scorer's own literals (`denoising_score_single.py`) therefore stayed
+`REMAINING` at 05c and were migrated by Step 06 (row above).
 
 ---
 
@@ -62,7 +66,15 @@ The scorer's own literals (`denoising_score_single.py`) therefore stay
 
 Seam 4 in the contract. **The TIDMAD score formula is a FROZEN exception** —
 it stays byte-identical for paper comparability; new metrics plug in beside
-it.
+it. **Step 06 (2026-08-15) landed the seam**: metric identity, direction and
+aggregation are DECLARED ONCE in `execute_tools/evaluation_metric.py`
+(`TIDMAD_METRIC_ID`, `derive_tidmad_metric_spec`; `per_file_best` imports the
+id), scoreability is an executable contract evaluated before arithmetic on both
+scoring routes, and the record carries `metric_result` / `metric_refusal`. The
+formula rows below are unchanged by design. Still coupled (D1 / Step 07a / 09):
+the direction-sensitive CONSUMERS — tuner incumbent selection, workflow/resume
+comparisons, `per_file_best._row_beats`, dashboard ordering, interpreter
+`best_*` comparisons, the reflector's "HIGHER … is GOOD" prompt line.
 
 | Status | Site | Note |
 |---|---|---|
@@ -131,6 +143,8 @@ not by this table.
 ---
 
 ## Ledger changelog
+
+- **2026-08-15 — Step 06 (PR #213, `02f382eb`)**: Seam 4 landed (metric identity/direction/aggregation declared once; executable scoreability); scorer-CLI denoised names → `DeliverableSpec.naming`; Deliverable-Contract ownership RESOLVED as representation/acceptance split. Direction consumers remain (D1/07a/09).
 
 - **2026-07-28** — seeded (V19 PR 2 commit A). Training filename template
   decoupled; everything else recorded as remaining/partial/frozen.

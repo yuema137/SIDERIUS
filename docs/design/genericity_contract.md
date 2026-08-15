@@ -148,7 +148,19 @@ travelling as one pluggable unit rather than as literals spread across nodes.
 
 ## Seam 4 — Metric
 
-**Status: PLACEHOLDER**, with one hard constraint already fixed.
+**Status: DEFINED and LANDED — Step 06 (PR #213, merged `02f382eb`, 2026-08-15).**
+`execute_tools/evaluation_metric.py`: `MetricSpec` (id · direction · aggregation
+· transform · references · EXECUTABLE `ScoreabilityContract`), the
+`EvaluationMetric` handle (scoreability BEFORE arithmetic), `MetricResult` /
+`NotScoreableResult`; the frozen TIDMAD scorer is instance #1 derived under
+Regime A (`derive_tidmad_metric`) and both production scoring routes go
+through the handle. Contract test evidence: the strict direction-only rung
+(C6a) and the broader different-metric rung (C6b) in
+`tests/unit/execute_tools/test_step06_c6_stage_b_direction_rung.py`. Not yet
+generic (owned later): direction-sensitive policy consumers (Step 07a / D1),
+task-level metric declaration (Step 12), the lexical loss-id rule (temporary
+debt — roadmap §20.8). Design: `docs/design/generic_framework_upgrade/step_06_metric_interface.md`.
+The hard constraint below still holds.
 
 **Frozen exception (baseline §1.3 guardrail 4)**: the TIDMAD score formula is
 frozen and stays byte-identical, because published-paper comparability depends
@@ -156,9 +168,11 @@ on it. Metric pluggability means new metrics plug in **beside** it; it is
 never rewritten. This applies to the `log_{5.27}` convention, the global
 `s_max` ruler, and the grand-mean aggregation.
 
-To be defined by the first PR that adds a second metric. Expected scope: a
-metric interface (name, per-file vector, scalar aggregate, comparability
-rules) that the frozen TIDMAD metric implements as one instance.
+*(Historical expectation, superseded by Step 06: "to be defined by the first PR
+that adds a second metric — name, per-file vector, scalar aggregate,
+comparability rules". The landed interface makes the per-sample vector OPTIONAL
+— a scalar-only metric is a first-class instance — and adds the executable
+scoreability contract.)*
 
 **Do not invent this seam ad hoc** — update this section first.
 

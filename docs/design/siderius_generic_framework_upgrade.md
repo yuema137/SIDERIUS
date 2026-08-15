@@ -9,11 +9,15 @@ implementation is authorized by this document alone.** Each module named here re
 document (operator-reviewed) before any code changes. This document
 decides direction, module ownership, compatibility surfaces, and
 migration order — never exact schemas or field names.
-**Next work item (2026-08-15): Step 06 — Metric Interface.** Its design
-draft (`docs/design/generic_framework_upgrade/step_06_metric_interface.md`)
-is FROZEN and operator-approved for implementation (2026-08-15), NOT IMPLEMENTED. Steps 00-05 are
-COMPLETE (§15.1). *(Historical: at creation this line pointed at the Step-0
-Golden Baseline Harness detailed design.)*
+**Status (2026-08-15): Steps 00-06 COMPLETE (§15.1). Step 06 — Metric
+Interface — MERGED (PR #213, squash `02f382eb`; ledger in
+`generic_framework_upgrade/step_06_metric_interface.md` §20).** **Next work
+item is NOT Step 07's design**: the operator froze the sequence *dataset/task
+selection audit → overall roadmap revision (Rev 5) + freeze → Step 07 detailed
+design*, because Step 06 produced conclusions that change the Definition of
+Done for Steps 07-12 (§20.8). *(Historical: at creation this line pointed at
+the Step-0 Golden Baseline Harness detailed design; before Step 06 it pointed
+at the Step-06 design.)*
 
 Created 2026-08-10 from an 11-area parallel source audit at master
 `c636c624` (post-V21: all seven V21 PRs merged; V21 ledger CLOSED).
@@ -1116,6 +1120,53 @@ A scalar lower-is-better metric on stub outputs, entering records and
 incumbent selection through the metric handle.
 #### 10.6 Follow-up
 `docs/design/generic_framework_upgrade/step_06_metric_interface.md`.
+#### 10.7 Outcome — Step 06 MERGED (PR #213, `02f382eb`, 2026-08-15)
+What landed (source: `execute_tools/evaluation_metric.py`, `core/sandbox_executor.py`,
+`nodes/…/ml_hyperparameter_tune_agent.py`, `execute_tools/denoising_score_single.py`,
+`agent/schemas/hyperparam_tuning.py`, `agent/prompts.py`; ledger step_06 §20):
+- the generic runtime interface — `MetricSpec` (id · direction · aggregation id ·
+  transform · references · scoreability), the abstract EXECUTABLE
+  `ScoreabilityContract` (`check({input_identity: path}) -> ScoreabilityVerdict`,
+  structured failures, declared PER metric instance — no universal
+  completeness/channel/shape schema), the `EvaluationMetric` handle whose
+  `evaluate()` runs scoreability FIRST then the instance's arithmetic,
+  `MetricResult` / `NotScoreableResult`, `NotScoreableError` for exception-based
+  seams;
+- instance #1 derived under Regime A (`derive_tidmad_metric`): identity
+  `tidmad_denoising_score` (declared ONCE; `per_file_best` imports it), direction
+  `higher`, aggregation = the frozen `score_vector` (referenced, never rewritten;
+  `scoring_utils.py` has no diff), `TidmadScoreabilityContract` requiring exactly
+  what the live scorer reads of the DELIVERABLE (file-level completeness, the
+  input channel, `voltage_range_mV` / `sampling_frequency`, storage dtype — the
+  target channel comes from the RAW file and is deliberately NOT required);
+- both scoring routes THROUGH the handle: tuner `run_metric` at run scope →
+  `TidmadSandbox.evaluate_metric` (DataScope validation → contract →
+  `score_vector`; refusal → `NotScoreableError` → `error_scoring` record with
+  `failure_type=not_scoreable` + `metric_refusal`); scoring subprocess
+  reconstructs spec + metric from `--dataset_profile_json` (no new argv), names via
+  `DeliverableSpec.naming` (the two literals 05c left), structured refusal on exit 1;
+- additive record payload `ExperimentRecord.metric_result` / `metric_refusal`
+  (validated to agree with `denoising_score` on success records; the
+  `failed_mode_collapse` penalty is the documented exception) — PERSISTED for
+  Steps 07a/09 and **filtered from the planner's verbatim history**
+  (`agent/prompts.py::_PLANNER_HIDDEN_RECORD_KEYS`): persistence never implies LLM
+  visibility (the corrective-round lesson, §20.8);
+- evidence: C0 two-route oracle (real child; both routes exact-equal), frozen pins
+  untouched, historical replay, C6a strict direction-only rung + C6b broader
+  different-metric rung, 8/8 mutations killed, Checkpoint C real train→infer→scoring
+  child; Gate 1 PASS (corrective), Gate 2 NOT REQUIRED.
+What §10.1 listed and is NOW closed: metric identity/direction/aggregation
+declared once (for the reached consumers); scoreability exists and executes before
+arithmetic. What §10.1 listed and REMAINS (D1 / Step 07a / Step 09, asserted as a
+not-reached census in `test_step06_c5_boundary_and_structure.py`): the tuner's
+incumbent/best selection `max(… denoising_score)`, `workflows/model_exploration.py`
+best-formal `>`, `core/resume.py:438`, `per_file_best._row_beats`, dashboard
+`local_json.py` sort / `base.py` docstring, the Interpreter's `best_*` comparisons,
+`agent/prompts.py:245` ("HIGHER … is GOOD"). Follow-up debt from the operator's
+adversarial review (step_06 §20.11): the lexical `loss` id ban is TEMPORARY
+(§20.8 principle 1), the mandatory scalar is enforced by construction not by the
+type system, a scalar-only metric's `file_vector=[]` bridge into HealthGate context
+is a Step-08 debt, the schema→`data_paths` import chain.
 
 ## 11. Module: Interpretation & Cross-Iteration Knowledge
 
@@ -1266,8 +1317,8 @@ evidence.
 | Model I/O contract / ForwardContract | §5, §6, §7c, §7d, §13 | prompt-rendered dict; probe recipes; estimator terms; decode rule | **THRESHOLD MET — disposition: RECORD ONLY (no convergence implemented).** §5 side settled by Step 03 (PR #205, merge `e1181f61`); §6 side settled by Step 04a (PR #207, merge `6458dd95`) | §5 | **RECORD ONLY** | **The ≥2-design evidence threshold is now satisfied.** Step 03 supplied the normalized Model-I/O authority; **PR 04a supplied the first candidate-creation consumers that simultaneously carry and use the normalized contract AND the existing prose-facing representation** — the implementor holds `forward_contract` (prose, rendered into prompts) and `forward_contract.model_io` (normalized, consumed by derivation) in one scope, and the validator now receives the normalized declaration through the protocol. That is the first live single-consumer evidence this row was waiting for. **Disposition remains RECORD ONLY (OD-S4-4).** Do NOT merge `ForwardContract` and `ModelIOContract`, create a shared wrapper, move prose into the normalized model, move normalized semantics into the prose object, or implement any convergence abstraction. **Why:** they model the same broad concept at two altitudes but have distinct lifecycles, representations and consumer roles — one is rendered to text for an LLM, the other is consumed by executable derivation — and collapsing them today would force prose into the normalized model or normalization into prompt rendering, with **no current live benefit**. Revisit only when a later real consumer supplies new evidence. **Step 04b (PR #209, merge `096f2dbb`) closes the §13 task-profile side of this row on the same terms**: the lit-review node became the last production consumer to migrate onto the single task-profile authority, so `task_description` now has exactly one runtime declaration. That is *additional evidence for the recorded disposition, not authorization to build an abstraction* — do NOT fold the task profile and the Model-I/O contract into a mega task config, and do NOT move prose lifecycle into `ModelIOContract`. The two remain distinct authorities with distinct consumers **Step 05b (PR #211, merge `5ce205d3`) adds a THIRD production consumer**: the live VRAM/resource gate now realizes its probe target through the Step-04a probe-realization authority, joining the implementor and the validator. That is additional evidence for the recorded semantic-vs-prose split, **not** authorization to converge: **disposition remains RECORD ONLY**. Do NOT merge `ForwardContract` and `ModelIOContract`, do NOT create a shared wrapper or a mega contract. 05b in fact *depends* on the split staying — it consumes the normalized contract for tensor facts while the prose object continues to be rendered into prompts, in the same run, with neither substituting for the other. One further boundary was found and recorded: `hybrid` is a legacy adapter value carrying **no** canonical tensor semantic, so the normalized contract deliberately does not govern it |
 | SampleSet type + JSON key coercion | §4, §7b, §7c, §10, estimators | dict[int→list[int]] with per-consumer re-int | YES (mechanical) | §4 | **NO — and now deliberately not, with the threshold MET.** Step 02 landed the explicit production consumption path (the tuner supplies the run-bound profile to selection) and PINNED the round-trip/key-coercion contract, but deliberately created **no typed cross-module wrapper** — that would be the premature abstraction §0 rule 8 forbids | ≥2 completed designs (§4 + one consumer module). *(Superseded chronology: at 05a's merge this column read "one consumer design still outstanding — PR 05a does NOT supply it", because 05a is a validation/scope/accounting migration that leaves `SampleSet` transport and serialization byte-identical by acceptance criterion, and it named 05b as the closest candidate.)* **THRESHOLD NOW MET — PR 05b (merge `5ce205d3`) supplies the missing consumer design.** The live workload resolvers read `SampleSet` values directly and each performs the row's own `str(file_key)` per-consumer coercion (`workload_resolvers.py:91`, `:151-152`, `:193`), against the declared `Mapping[str, …] | Mapping[int, …]` union at `:38`. That is the second completed design the criterion asked for. **Disposition nevertheless stays RECORD FIRST / RECORD ONLY**: 05b left `SampleSet` transport and serialization byte-identical and added no typed wrapper, no transport rewrite and no JSON-key normalization migration. **Threshold met ≠ abstraction justified** — the same rule applied to the sample-shape-legality row. A wrapper still needs a design that shows a live consumer benefiting, which 05b does not, because it needed only to pass the values through unchanged |
 | Systematic groups (bands) → **task-owned file sets** | §4, §8, §11, scripts | **REFUTED as one concept (Step 02c).** Three different semantics: the anchor triplet and the peek triplet are TASK-OWNED DECLARATIONS with no derivation rule; `range(20)` was never a group at all, only "every file", and now DERIVES from `profile.dataset.num_files`. Band tables in §11/scripts remain unexamined | **NO — and deliberately not merged.** 02c ships them as TWO separate profile fields, `anchor_selection_files` and `health_peek_files`, each with its own consumers, its own Stage-B subcase, and a test asserting the other is unchanged | §4 declares; §8 retains consumer-side ownership | **NO** | 02c migrated the CURRENT consumers only. A shared abstraction still needs the §8 design's own verdict — two declarations inside one PR do not meet the ≥2-completed-designs bar |
-| DELIVERABLE CONTRACT (naming/layout/dtype/attrs/completeness) | §7c (producer), §10 (scoreability reader), §8 (peek reader), §9 (cleanup), scripts | ≥6 inlined template copies; no owner today | YES (one contract) | **UNKNOWN** (Rev 2): §7c and §10 are the candidates. Second-pass refinement (F6): at step 5, §7c may extract the TIDMAD deliverable instance PROVISIONALLY (regime-A adapter) and propose ownership in its design; FINAL ownership is confirmed by the owning design, which also lands the non-HDF5 deliverable rung as part of ITS fixture ladder. §4 keeps only input-identity indexing | NO | the §7c or §10 detailed design + the non-HDF5 deliverable rung (owned by whichever design wins ownership) |
-| Metric identity (name/direction/aggregation) | §7a, §10, §11, §12, dashboard | schema field names + implicit max() | YES (single metric today) | §10 | NO | §10 design + stub second metric |
+| DELIVERABLE CONTRACT (naming/layout/dtype/attrs/completeness) | §7c (producer), §10 (scoreability reader), §8 (peek reader), §9 (cleanup), scripts | ≥6 inlined template copies; no owner today | YES (one contract) | **RESOLVED at Step 06 (2026-08-15) as a SPLIT, operator-confirmed (OD-20-7 / step_06 §16-Q1):** `DeliverableSpec` (§7c / 05c) owns producer-side REPRESENTATION — naming, cleanup identity, channel-group identity, layout/serialization, storage dtype+offset; the metric's `ScoreabilityContract` (§10 / 06) owns evaluation-side ACCEPTANCE — required channel, attrs, dtype, completeness — and REFERENCES the spec (channel group and dtype are read from it, never restated). Exercised: a real producer's artifact satisfies the acceptance contract (step_06 Checkpoint C). Still open, by design: the non-HDF5 deliverable rung (D14 / Step 12 composition) and the executable data path (D14). Historical (Rev 2): UNKNOWN: §7c and §10 are the candidates. Second-pass refinement (F6): at step 5, §7c may extract the TIDMAD deliverable instance PROVISIONALLY (regime-A adapter) and propose ownership in its design; FINAL ownership is confirmed by the owning design, which also lands the non-HDF5 deliverable rung as part of ITS fixture ladder. §4 keeps only input-identity indexing | NO | the §7c or §10 detailed design + the non-HDF5 deliverable rung (owned by whichever design wins ownership) |
+| Metric identity (name/direction/aggregation) | §7a, §10, §11, §12, dashboard | schema field names + implicit max() | YES (single metric today) | §10 | **YES — Step 06 (2026-08-15)**: `MetricSpec` in `execute_tools/evaluation_metric.py`, `tidmad_denoising_score` declared once, direction/aggregation explicit; record payload `metric_result` | landed: §10 design + C6a direction-only rung + C6b different-metric rung; direction CONSUMERS other than the live scoring route (§7a incumbent selection, §11 interpreter, §12 workflow/resume, dashboard) remain literal — D1 / Step 07a / 09 |
 | Sample-shape legality (divisibility) | §4, §6, §7b | 3 enforcement layers | YES | §4 (Step 02) | **NO — RECORD ONLY, threshold now MET.** PR 05a (merged `cfb3b1c7`) supplies the completed tuner-CONSUMER evidence, so the ≥2-completed-designs bar is satisfied (§4 + §7b). The audit's finding is that no wrapper is warranted: Step 02 already owns the rule via `DatasetProfile` / `valid_segmentation_sizes()`, and the only defect was *which object was asked* — 05a fixed that by supplying the run-bound profile, changing no rule. **Threshold met ≠ abstraction justified**; no shared legality wrapper is introduced | satisfied — disposition settled as RECORD ONLY |
 | Seg-size fallback defaults (40000/1000) | §7d, §7e, §9, §6 | bare .get defaults post-B1-resolver | **REFUTED as one concept (Step 05b §3).** Three unrelated semantics share a number because TIDMAD's usable segmentation happens to sit there: a **planned-identity default** (`gpu_measurement_identity.py`, `gpu_measurement_worker_main.py`, `probe_production.py` — a stand-in so a measurement identity can be keyed when the plan omits the field), a **calibration trigger bound** (`SEG_SIZE_BOUNDS`'s upper limit, i.e. when warm-up is required), and **campaign fixture data** (`campaign.py`) | **NONE — the speculative "§7d resolver" owner is RETIRED.** The measurement-identity defaults are §7e / Step-07 owned; the trigger bound stays calibration; the fixture roster stays test data | **NO — and deliberately not.** Merging defaults whose numbers merely coincide is the failure §0 warns about | **satisfied — audit delivered by Step 05b §3 and closed at its C6.** No resolver is introduced **CLOSED at Step-05b Checkpoint E (merge `5ce205d3`): audit delivered, no resolver introduced, `core/runtime_control` measurement defaults remain Step-07 owned** |
 | Value encoding (+128/int8/256) | §4, §5, §7c, §7e, §8 | **§4 DECLARES it** (`DatasetProfile.encoding`, Step 02a) and **§5 DERIVES from it** (Step 03: builtin class counts come from the contract's class axis, itself cross-validated against `ValueEncoding.num_classes`; a contradiction fails closed at load AND at the subprocess boundary) | YES | **§4 declares, §5 derives — SETTLED** | **NO — and deliberately not** | Both prerequisites are now complete, and the authority split is exactly the roadmap's rule: the Dataset Profile owns the data-side encoding fact, Model-I/O derives/cross-validates the model-side semantics. That is the settled disposition; **no shared config is created**, because two authorities with a derivation edge is the correct shape, not a merge candidate |
@@ -1433,7 +1484,7 @@ production consumer that proves the seam); **Deps** = must land before;
 | §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | NOT STARTED |
 | §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `step_11_execution_infrastructure.md` | NOT STARTED |
 | Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `step_12_task_composition_binding.md` | NOT STARTED (D12 governs) |
-| Deliverable Contract (owner TBD) | 5→? (STAGED — 3rd review F6; **end point no longer predetermined**) | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction preserves **exact logical artifact equality** (05c §4.1) | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11). **Corrected by the frozen 05c design (§3 timing rule, §12): the row does NOT automatically complete at step 11.** Step 05c is a producer-side PROVISIONAL extraction leaving ownership OPEN; **Step 06 is the next MANDATORY ownership review** and must either CONFIRM final ownership or record exactly which consumer evidence is still missing; steps 08/11 may add later evidence but are **not** predetermined decision points | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | 05c PROPOSES (provisional, MERGED `03e00944`); Step 06 confirms-or-says-why | **05c MERGED — the provisional producer-side extraction has LANDED; the row stays OPEN.** `execute_tools/deliverable_spec.py` now owns naming, cleanup matching, channel-group identity and the persisted storage representation across every migrated producer, reader, cleanup and reconstruction site. It does **not** own completeness, scoreability, instrument attrs or cleanup policy, and 05c claims **no** non-HDF5 deliverable format. **Step 06 is the next MANDATORY ownership review and must confirm-or-say-why** |
+| Deliverable Contract (**ownership RESOLVED at Step 06 — split**, see §14) | 5→6 for ownership (RESOLVED); non-HDF5 rung → D14 / Step 12 | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction preserves **exact logical artifact equality** (05c §4.1) | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11). **Corrected by the frozen 05c design (§3 timing rule, §12): the row does NOT automatically complete at step 11.** Step 05c is a producer-side PROVISIONAL extraction leaving ownership OPEN; **Step 06 is the next MANDATORY ownership review** and must either CONFIRM final ownership or record exactly which consumer evidence is still missing; steps 08/11 may add later evidence but are **not** predetermined decision points | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | 05c PROPOSES (provisional, MERGED `03e00944`); Step 06 confirms-or-says-why | **05c MERGED — the provisional producer-side extraction has LANDED; the row stays OPEN.** `execute_tools/deliverable_spec.py` now owns naming, cleanup matching, channel-group identity and the persisted storage representation across every migrated producer, reader, cleanup and reconstruction site. It does **not** own completeness, scoreability, instrument attrs or cleanup policy, and 05c claims **no** non-HDF5 deliverable format. **Step 06 is the next MANDATORY ownership review and must confirm-or-say-why** |
 
 ### 15.1a Step-05 completion contract (the Step-level acceptance surface)
 
@@ -1590,6 +1641,8 @@ input-decode check on the source file but which reads the deliverable the
 attempt just wrote.
 
 - **Ownership of the Deliverable Contract remains PROVISIONAL and OPEN.**
+  *(→ RESOLVED at Step 06, 2026-08-15: CONFIRMED as the representation /
+  acceptance SPLIT — §14 row, §20.4.)*
   05c holds producer-side evidence only. **Step 06 is the next MANDATORY
   ownership review** and must either confirm final ownership or record
   exactly which consumer evidence is still missing. Merging 05c settles
@@ -1720,7 +1773,7 @@ below recorded.
   Recorded as evidence, not as a new convergence concept.
 - *Deliverable Contract* — 05c supplies the producer-side census and a
   provisional **runtime-only** extraction (05c §3.1); ownership remains
-  **OPEN**. Timing rule: **Step 06 is the next MANDATORY ownership review**
+  **OPEN**. Timing rule: **Step 06 is the next MANDATORY ownership review** *(→ RESOLVED at Step 06, 2026-08-15: CONFIRMED as the representation / acceptance split — §14, §20.4.)*
   and must either confirm final ownership or record exactly which consumer
   evidence is still missing; steps 08/11 may add evidence but are **not**
   predetermined decision points. While ownership is provisional, 05c does
@@ -2129,6 +2182,17 @@ memory store; rendering diagnosis into `previous_failures` strings as the
 *primary* channel (it is a rendered-string list, not structured); making the
 Interpreter recompute the diagnosis.
 
+**Step-06 outcome for this boundary (2026-08-15).** Delivered by exclusion and
+executable: metric types carry no loss field (`extra="forbid"`), loss-shaped
+identities are refused, `loss_history` cannot populate `MetricResult`;
+`ExperimentRecord.loss_history / final_loss` untouched. **Temporary debt** (operator
+review): the refusal is LEXICAL (token `loss`), which rejects legitimate future
+evaluation metrics such as `log_loss` and lets a training objective named `mse`
+through — the real boundary is lifecycle/typed structure, not the name; the Rev-5
+overall revision encodes computation × lifecycle role × cadence as orthogonal
+(§20.8) and the ban is then narrowed or dropped (Step 07 / 12, before the
+image-classification track needs `log_loss`).
+
 **Layer 4 / aggregation — DEFERRED (D15).** v1 preserves
 candidate/iteration-level evidence. Model-family aggregation has no existing
 precedent (`model_knowledge_cache` is a summarisation cache, not evidence).
@@ -2180,6 +2244,16 @@ final-evaluation side has a real stake in the deliverable's interior, not
 only its name. **OD-20-7 (DECIDED as an obligation)**: Step 06 must CONFIRM
 scorer/final-evaluation-side ownership or explicitly DEFER with a reason;
 the Step-06 draft records a PROVISIONAL recommendation to confirm.
+
+**RESOLVED — CONFIRMED (Step 06 freeze §16-Q1, exercised in implementation,
+merged `02f382eb`).** `DeliverableSpec` (05c) keeps EXCLUSIVE producer-side
+representation; `TidmadScoreabilityContract` (06) declares the evaluation-side
+acceptance — file-level completeness, the input channel dataset, the two
+instrument attrs the scorer reads, the declared storage dtype — READING channel
+group and dtype from the spec. Consequence for 05c's attrs debt: the two attrs
+are now DECLARED as evaluation-side requirements; how they are written stays in
+`create_abra_file` (a producer-side question, recorded not decided). Checkpoint C
+showed the real producer's artifact satisfies the contract.
 
 **The concept split this review must use (sharpened 2026-08-15 so two
 things never "own the deliverable interior" at once):**
@@ -2241,7 +2315,8 @@ top-level configuration hierarchy for diagnostics, metrics or deliverables.
 
 ```text
 Step 06  Metric interface + eval/diagnostics BOUNDARY + Deliverable-Contract review
-   │
+   │       ✔ MERGED 2026-08-15 (PR #213, 02f382eb) — see §10.7; the Rev-5 overall
+   │         revision (§20.8) is required BEFORE Step 07's detailed design
 Step 07  07a: tuner policy on the metric handle + TrainingHistory/Diagnosis (Gate 1 REQ)
    │     07b: measurement/verification (unchanged)
 Step 08  HealthGates on declared inputs (unchanged). Consumes the DELIVERABLE /
@@ -2254,6 +2329,52 @@ Step 12  composition + regime B; the two contrast tracks COMPOSE into complete
          end-to-end tasks; Milestone 1 (first COMPLETE-COMPOSITION checkpoint —
          the tracks have been supplying Stage-B evidence since their seams landed)
 ```
+
+### 20.8 Post-Step-06 conclusions and the pending Rev-5 overall revision (operator, 2026-08-15)
+
+**Status: DECIDED as direction; to be ENCODED and FROZEN by the Rev-5 overall
+revision before Step 07's detailed design.** Recorded here so the conclusions do
+not live only in review conversation. Sequence frozen by the operator:
+*Step 06 merge → mechanical finalizer → dataset/task selection audit → Rev-5
+overall revision + freeze → Step 07 detailed design.* The revision is not doc
+cleanup: it defines what evidence lets us claim genericity advanced from Step 07
+on.
+
+1. **Computation × lifecycle role × cadence are orthogonal.** "MSE" is a
+   computation that may serve as TrainingObjective, ValidationObservation or
+   EvaluationMetric; a name never decides loss-vs-metric; the training objective's
+   only extra mathematical requirement is gradient/autograd compatibility for the
+   current training path. Step 06's lexical `loss` ban is TEMPORARY DEBT (§20.2).
+2. **Mandatory per task**: exactly one Training Objective; checkpointed
+   training-objective history; checkpointed validation-objective history; exactly
+   one Primary / Golden Evaluation Metric — H = {e, L_train(e), L_val(e)}_{e=1..E}
+   versus the terminal M_golden(f_θE(X_eval), Y_eval); never mixed.
+3. **Optional**: checkpointed diagnostics (e.g. validation accuracy) and terminal
+   secondary metrics (ECE, F1, AUROC …) — not dead logging: they enter the
+   reasoning loop through an owned semantic layer.
+4. **Dynamic / terminal is CADENCE, not a semantic class**: `role ∈ {training_objective,
+   training_diagnostic, evaluation_metric, …} × cadence ∈ {per_epoch, terminal}` (v1);
+   no `StaticMetric` / `DynamicMetric` ontology.
+5. **Raw history ≠ agent-facing knowledge**: TrainingHistory (raw) →
+   TrainingDiagnosis (deterministic) → current tuner policy; persisted structured
+   knowledge → Interpreter → cross-iteration summary → next Proposer. Every
+   agent-facing surface has an explicit owner and rendering seam; **persisting an
+   object never means the generic JSON dump shows it to an LLM** — the exact defect
+   Step 06's corrective round removed (planner history filter).
+6. **Primary vs secondary**: the golden metric drives incumbent/best selection;
+   secondary metrics are evidence for reasoning and must not silently become a
+   hidden multi-objective policy.
+7. **Three PERSISTENT validation tracks**: TIDMAD (legacy sequence, scientific
+   control), Image (image topology, classification preferred), Spatiotemporal
+   (spatial+temporal, regression preferred). Datasets are chosen once, after the
+   selection audit, and then fixed across Steps 06→12; each track deepens as
+   capabilities become generic (§21).
+8. **Gate governance**: `gate_testing_standard` still decides IF a Gate is required
+   by change type; WHEN a Gate 1/2 is required, its corpus must cover every
+   persistent track that has reached executable maturity at the affected seam;
+   an immature track contributes its highest honest evidence, never a fake
+   end-to-end claim. After Step 12 the three tracks are the mandatory regression
+   suite.
 
 ## 21. Genericity validation strategy — progressive contrast tracks (Rev 4, 2026-08-15)
 

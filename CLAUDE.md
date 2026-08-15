@@ -587,6 +587,13 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **Generic Framework Upgrade (2026-08-15)**: Steps 00-06 COMPLETE and merged
+  (Step 06 metric interface: PR #213, `02f382eb`). Roadmap
+  `docs/design/siderius_generic_framework_upgrade.md` §15.1 is the status
+  authority; its §20.8 records the operator's post-Step-06 conclusions. Next
+  is NOT Step 07's design: dataset/task selection audit → Rev-5 overall
+  revision + freeze → then Step 07.
+
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
   `docs/design/runtime_estimation_and_watchdog.md` (§0 tracker; §12
