@@ -6,13 +6,13 @@ obligations this step inherits beyond §10).
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 1 (2026-08-15). Implementation is NOT authorized by this document. |
+| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 2 (2026-08-15, operator review of revision 1): scalar-mandatory / per-sample-evidence-optional metric semantics (§4); scoreability made an EXECUTABLE behaviour and a DoD item (§4, §12); `DeliverableSpec` vs `ScoreabilityContract` ownership sharpened (§4); the Step-06 runtime-interface vs Step-12 task-declaration split made explicit (§5, §16-Q2); Q3 now blocks freeze on semantics. Implementation is NOT authorized by this document. |
 | Design base | master `75525dc9` (Step 05 COMPLETE: 05a `cfb3b1c7`, 05b `5ce205d3`, 05c `03e00944`; finalizer `75525dc9`) |
 | Depends on | Step 02 (`DatasetProfile`) · Step 03 (`ModelIOContract`) · Step 05c (`DeliverableSpec`, provisional) · roadmap §10, §14, §16, §20 |
 | Owns | the **EvaluationMetric** interface; the **evaluation-vs-training-diagnostics boundary** (by exclusion); the **Deliverable-Contract confirm-or-say-why review** |
 | Does NOT own | `TrainingHistory` / `TrainingDiagnosis` (Step 07, §20.2) · incumbent/threshold/skip-bypass policy (Step 07a) · HealthGate semantics (Step 08) · Interpreter consumption (Step 09) · the executable data path (D14, §20.5) · the two composed contrast tasks (Step 12 / M1, §20.3) |
 | Risk | Medium-high: it touches the frozen scientific formula's *call path* (never its arithmetic) and the record payload every downstream reader keys on |
-| Remaining operator decisions | **§16 — six, listed.** None blocks review; two block freeze |
+| Remaining operator decisions | **§16 — six, listed.** None blocks review; **three block freeze** (Q1 ownership, Q2 declaration form, Q3 scoreability semantics) |
 
 ---
 
@@ -21,8 +21,10 @@ obligations this step inherits beyond §10).
 **Observable final capability (PROVISIONAL wording, to be frozen):**
 
 > A task declares ONE primary evaluation metric — named, with explicit
-> direction and aggregation, optional reference baselines, and a scoreability
-> contract on the persisted deliverable — and PRODUCTION SCORING invokes it
+> direction and aggregation, a mandatory scalar result, optional
+> structured/per-sample evidence, optional reference baselines, and an
+> EXECUTABLE scoreability contract on the persisted deliverable that is
+> evaluated BEFORE metric arithmetic — and PRODUCTION SCORING invokes it
 > through that interface. The frozen TIDMAD scorer is instance #1,
 > byte-identical in every value it produces. Optional secondary metrics are
 > expressible. The metric's identity, direction and value are machine-readable
@@ -31,9 +33,10 @@ obligations this step inherits beyond §10).
 > generic surfacing mechanism to Step 07.
 
 **Explicitly claimed**: metric identity · direction · aggregation semantics ·
-reference/baseline slot · scoreability contract · one production consumer
-(scoring) through the handle · record-facing payload · the TIDMAD instance
-byte-identical.
+mandatory scalar result · optional structured/per-sample evidence ·
+reference/baseline slot · an EXECUTABLE scoreability contract · one production
+consumer (scoring) through the handle · record-facing payload · the TIDMAD
+instance byte-identical.
 
 **Explicitly NOT claimed** (each has an owner): incumbent selection,
 best-score comparison, direction-sensitive thresholds, skip/bypass — Step 07a
@@ -123,11 +126,19 @@ is Step-07 territory.
 **What an EvaluationMetric IS (PROVISIONAL definition, to freeze):**
 
 > A named, directional evaluation of the **persisted scientific deliverable**
-> of one attempt: it produces a per-sample vector and a scalar aggregate,
-> declares whether higher or lower is better, declares how per-sample values
-> aggregate to the scalar, may carry reference baselines against which the
-> scalar is interpreted, and states what the deliverable must satisfy to be
-> scoreable at all.
+> of one attempt: it produces a **primary scalar result** (mandatory) and
+> MAY produce structured / per-sample evidence when the metric naturally
+> decomposes that way (optional); declares whether higher or lower is
+> better; declares how any per-sample evidence aggregates to the scalar; may
+> carry reference baselines against which the scalar is interpreted; and
+> declares an EXECUTABLE scoreability contract stating what the deliverable
+> must satisfy before the metric is computed at all.
+>
+> A metric with only a scalar (e.g. `accuracy = 0.93`, a global statistic)
+> is a first-class instance. TIDMAD's `scalar + length-20 file_vector` is
+> instance #1, not the template. *(Revision 2: revision 1 made the
+> per-sample vector part of the definition, which would have over-fitted
+> the interface to TIDMAD's shape.)*
 
 **What it is NOT**: a training observation (no deliverable, no baseline, no
 task-independent direction — roadmap §20.2); a health verdict (Step 08); a
@@ -140,25 +151,39 @@ field names:**
 |---|---|---|
 | identity | `tidmad_denoising_score` (`per_file_best.py:360`) | stable id; the record key set extends around it |
 | direction | higher-is-better | `higher \| lower` — explicit, never inferred |
-| per-sample vector | length-20 `file_vector` (dense; `None` for out-of-scope files) | per-input-identity values indexed as §4.3 says ("INDEXED by input identity") |
+| structured / per-sample evidence (**optional**) | length-20 `file_vector` (dense; `None` for out-of-scope files) | when the metric decomposes per input identity, values indexed as roadmap §4.3 says ("INDEXED by input identity"); absent for scalar-only metrics |
 | aggregation | anchor-normalised linear grand-mean → `log_5.27` | declared aggregation semantics; the TIDMAD one is the frozen instance's own function |
 | references | raw baseline (`ScoreComparisonTable` raw row), anchor map, `baseline` exp_id | optional named references the interpretation layer may compare against |
-| scoreability | (none today) | a **fresh** contract on the deliverable (§1.1 last row): what layout/dtype/completeness the metric needs — the natural home for the §1.2 finding |
+| scoreability (**mandatory component; executable**) | (none today — a wrong artifact simply crashes the worker) | a **fresh** ACCEPTANCE contract on the deliverable, evaluated BEFORE metric arithmetic: required channels · required attrs · required dtype/range · required completeness. Failure yields a **structured not-scoreable result**, never an incidental scorer exception. `_is_complete_trial_output` stays a crash-resume REUSE guard and is NOT the mechanism |
 | transform | `score_transform: "log"`, `log_base` | already emitted by `per_file_best`; carried, not re-declared |
 
 **Deliverable-Contract ownership — the confirm-or-say-why (OD-20-7).**
 PROVISIONAL RECOMMENDATION: **CONFIRM final-evaluation-side ownership of the
-Deliverable Contract's *semantic identity*** — because (§1.2) the scorer reads
-attrs and addresses channels inside the artifact, so scoreability cannot be
-defined without owning what the artifact contains. Concretely: 05c's
-producer-side `DeliverableSpec` (naming · cleanup · channel identity ·
-storage representation) is **retained as the producer adapter**, and Step 06
-declares the **scoreability contract** over it — the interior facts scoring
-requires (channel addressing, storage dtype/offset, the two attrs it reads,
-completeness of the sample set). Instrument attrs 05c left literal move from
-"unowned debt" to "scoreability-owned facts". **Not confirmed here** — the
-operator confirms at freeze (§16-Q1). If deferred, the reason must name the
-consumer evidence still missing.
+deliverable's *semantic identity for scoring* and of the ACCEPTANCE
+contract** — because (§1.2) the scorer reads attrs and addresses channels
+inside the artifact. The split is exact, and it is what stops two things
+owning the interior at once (roadmap §20.4):
+
+```text
+DeliverableSpec  (05c, RETAINED, producer-side)   "how the artifact IS represented"
+    naming · cleanup identity · channel-group names · storage layout/serialization ·
+    storage dtype + offset
+
+Metric ScoreabilityContract  (Step 06, evaluation-side)   "what THIS metric REQUIRES"
+    required channels · required attrs · required dtype/range · required completeness
+
+Metric  REFERENCES DeliverableSpec  +  DECLARES ScoreabilityContract
+```
+
+Under this split the two attrs the scorer reads (`voltage_range_mV`,
+`sampling_frequency`) become **required attrs of the TIDMAD metric's
+acceptance contract**; how they are *written* stays with the producer
+(05c left them literal in `create_abra_file`; whether the writer should
+derive them from a declaration is a producer-side question that this
+confirmation makes answerable but does not answer). Neither contract
+absorbs the other's half. **Not confirmed here** — the operator confirms at
+freeze (§16-Q1). If deferred, the reason must name the consumer evidence
+still missing.
 
 ## 5. Metric schema / representation (PROVISIONAL)
 
@@ -180,11 +205,22 @@ MetricResult (per attempt, on the record — ADDITIVE beside denoising_score/fil
 
 Constraints: `MetricSpec` is a **typed runtime value** in the 05c
 `DeliverableSpec` mould — not user-authored YAML, not a new top-level config
-file; the TIDMAD instance is derived with **no declaration** (regime A). If a
-declared form is needed for the composed contrast tasks, it is an **additive
-block inside the existing task configuration** (`configs/task_config.yaml`
-already hosts `forward_contract`), never a new hierarchy — and its physical
-placement is D4/D12 territory, decided when ≥3 module configs exist.
+file; the TIDMAD instance is derived with **no declaration** (regime A).
+
+**Step 06 vs Step 12, stated so implementers do not edit `task_config.yaml`
+here (DECIDED, roadmap §20.3):**
+
+```text
+Step 06   the generic metric RUNTIME INTERFACE + the TIDMAD DERIVED instance
+Step 12   task-level metric DECLARATION / BINDING for the composed contrast tasks
+```
+
+When a declared form is needed (Step 12), it is an **additive block inside
+the existing task configuration** (`configs/task_config.yaml` already hosts
+`forward_contract`), never a new hierarchy — and its physical placement is
+D4/D12 territory. `ScoreabilityContract` is part of `MetricSpec` and is
+**executable**: `validate(deliverable) -> ok | structured failure`, invoked by
+the handle before arithmetic on both scoring routes.
 **Existing fields are untouched**: `denoising_score`, `file_vector`,
 `score_table` keep their names and semantics; `MetricResult` sits beside
 them so historical records validate unchanged.
@@ -286,8 +322,9 @@ to LLMs; that stays.
 | Stage A | frozen-formula pins, offline scalar baseline, `real_run` legacy parity, historical record/output validation | existing + one replay test |
 | Stage B (atomic, one axis) | **metric-direction axis**: a lower-is-better scalar metric on stub outputs enters the record through the handle with `direction="lower"` and TIDMAD's identity/direction unchanged (roadmap §10.5) | new |
 | Boundary negative | a loss-shaped "metric" is rejected; `loss_history` cannot populate `MetricResult` | new (§7) |
+| Scoreability negative | a deliverable missing a required channel / attr / with the wrong dtype / incomplete sample set yields a STRUCTURED not-scoreable result BEFORE `score_vector` runs, on both routes; the reuse guard is untouched | new (revision 2) |
 | Structural guard | no owned scoring consumer executes a hardcoded direction where the handle is available; the TIDMAD `metric_id` literal is declared once (05c "declared exactly once" pattern) | new |
-| Mutations (per semantic family, count not frozen) | identity swap · direction flip · aggregation substitution · scoreability bypass · route divergence (in-process vs subprocess) | new; site count asserted 1, restored from clean, baseline re-verified — 05c hygiene |
+| Mutations (per semantic family, count not frozen) | identity swap · direction flip · aggregation substitution · **scoreability bypass (validate skipped → arithmetic reached on an invalid artifact)** · route divergence (in-process vs subprocess) | new; site count asserted 1, restored from clean, baseline re-verified — 05c hygiene |
 | Checkpoint C | a **real** `execute_scoring` subprocess scores a real small deliverable through the handle; result equals the in-process route; helper-only is insufficient (05c §6 discipline) | new (reuse the 05c Checkpoint-C harness) |
 
 Deliberately NOT tested here: incumbent selection under a lower-is-better
@@ -303,7 +340,10 @@ metric (Step 07a), Interpreter rendering (Step 09), dashboards (D1).
 - [ ] historical records/outputs validate unchanged; regime A resolves TIDMAD deep-equal
 - [ ] `denoising_score`/`file_vector`/`score_table` names and semantics unchanged
 - [ ] the metric types carry no loss field, and the negative test reds if one is added
-- [ ] Deliverable-Contract ownership is CONFIRMED or DEFERRED-with-reason in the ledger (OD-20-7)
+- [ ] **the metric's scoreability contract is EXECUTABLE and is evaluated BEFORE metric arithmetic on both scoring routes; an invalid deliverable produces a structured not-scoreable result rather than an incidental scorer exception** (revision 2)
+- [ ] `_is_complete_trial_output` is unchanged and is NOT the scoreability mechanism (roadmap :1052-1058)
+- [ ] a scalar-only metric instance (no per-sample evidence) is constructible and enters the record through the handle (revision 2)
+- [ ] Deliverable-Contract ownership is CONFIRMED or DEFERRED-with-reason in the ledger (OD-20-7), under the `DeliverableSpec` (representation) / `ScoreabilityContract` (acceptance) split
 - [ ] no new top-level config hierarchy; model/loss/train/tuner/profile configs untouched
 - [ ] no new independent state store; no new argv (or an honestly downgraded Stage-A claim)
 - [ ] the enumerated list of direction consumers this step does NOT reach is recorded (D1)
@@ -349,8 +389,8 @@ count, module placement, field names.
 | # | Question | Blocks freeze? | Recommendation |
 |---|---|---|---|
 | Q1 | **Confirm** final-evaluation-side ownership of the Deliverable Contract's semantic identity (§4), or **defer** with the missing consumer evidence named? | **YES** | Confirm — the scorer reads the deliverable's interior (§1.2) |
-| Q2 | Metric declaration form for non-TIDMAD tasks: derived-only in Step 06 (regime A) with the declared additive block deferred to Step 12, or an additive block in `task_config.yaml` now? | **YES** | derived-only now; declared block lands with the first composed contrast task (Step 12), consistent with §0 rule 8 |
-| Q3 | Scoreability contract shape: which interior facts (channel addressing, dtype/offset, the two attrs, completeness) does it *own* vs. *reference from* `DeliverableSpec`? | no (design detail) | own scoreability; reference producer facts |
+| Q2 | Metric declaration form for non-TIDMAD tasks: derived-only in Step 06 (regime A) with the declared additive block deferred to Step 12, or an additive block in `task_config.yaml` now? | **YES** | derived-only now; declared block lands with the first composed contrast task (Step 12), consistent with §0 rule 8. *(Roadmap §20.3 records the 06-runtime-interface / 12-declaration split as DECIDED; what remains for freeze is confirming no `task_config.yaml` edit in Step 06.)* |
+| Q3 | Scoreability contract **semantics**: the acceptance predicate's scope (required channels · required attrs · required dtype/range · required completeness), that it is EXECUTABLE before arithmetic, that failure is a structured result, and that the reuse guard is not the mechanism. | **YES — on semantics.** Exact field names remain implementation detail. *(Revision 2: revision 1 marked this non-blocking; the operator review correctly noted that unfrozen scoreability semantics leave implementation free to "just score and hope it doesn't crash".)* | freeze the semantics as stated in §4/§5; leave field names to the implementation ledger |
 | Q4 | Any TIDMAD *secondary* metric instance in Step 06? | no | none — no consumer |
 | Q5 | Gate 2 REQUIRED-bounded vs NOT REQUIRED given Checkpoint C | no | REQUIRED-bounded |
 | Q6 | Which direction consumers does Step 06 *reach*? Recommendation: the tuner's live scoring route + record payload only; workflow `:2740`, resume `:438`, `per_file_best._row_beats`, dashboard remain enumerated D1 debt | no | as recommended |
@@ -372,7 +412,8 @@ count, module placement, field names.
 
 Step 06 is DONE when: the ONE PR is merged with Checkpoints 0/A/B/C(/D) and
 its Gate disposition satisfied at the exact head; every §12 criterion is
-`[x]` with recorded evidence; the Deliverable-Contract review verdict is
+`[x]` with recorded evidence — **including that scoreability is an executed
+behaviour on both routes, not a documented intention**; the Deliverable-Contract review verdict is
 recorded (confirm, or defer-with-reason); the D1 not-reached consumer list is
 enumerated; roadmap §15.1 row and README mirror synchronized post-merge; and
 Step 07a can bind the metric handle for policy without touching scoring.

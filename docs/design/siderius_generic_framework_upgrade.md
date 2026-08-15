@@ -6,9 +6,11 @@ alone.** Each module named here receives its own detailed design
 document (operator-reviewed) before any code changes. This document
 decides direction, module ownership, compatibility surfaces, and
 migration order — never exact schemas or field names.
-**Next work item: the Step-0 Golden Baseline Harness DETAILED DESIGN**
-(`docs/design/generic_framework_upgrade/step_00_golden_baseline_harness.md`) — the
-design only; Step-0 implementation follows its own operator review.
+**Next work item (2026-08-15): Step 06 — Metric Interface.** Its design
+draft (`docs/design/generic_framework_upgrade/step_06_metric_interface.md`)
+is READY FOR OPERATOR REVIEW, NOT FROZEN, NOT IMPLEMENTED. Steps 00-05 are
+COMPLETE (§15.1). *(Historical: at creation this line pointed at the Step-0
+Golden Baseline Harness detailed design.)*
 
 Created 2026-08-10 from an 11-area parallel source audit at master
 `c636c624` (post-V21: all seven V21 PRs merged; V21 ledger CLOSED).
@@ -92,6 +94,21 @@ the ledger's own ≥2-designs bar and §6.6 carried a stale entry (all
 reconciled); six numbering/cross-reference defects fixed (§0.A rename,
 step-12 addition, single-progress-meter rule, D8/§16 pointer,
 step-0 status wording, dangling §E.3d.1 reference).
+
+**Revision 4 (2026-08-15, post-Step-05 addendum — operator decisions):**
+adds **§20**, the semantic authority for work identified after Steps 01-05
+completed: the four-concept separation TrainingHistory / TrainingDiagnosis /
+EvaluationMetric / HealthGate and the operator decisions OD-20-2..7 (two
+composed contrast tasks for Milestone 1; validation transport reuses the
+run-bound SampleSet split; train loss REQUIRED, validation loss
+REQUIRED-when-available; Step 07 produces the diagnosis, Step 09 consumes;
+Gate 1 REQUIRED for 07a; Deliverable-Contract confirm-or-say-why at Step 06);
+the **data-path ownership gap** recorded OPEN as D14 (§20.5) after source
+showed §9 is not its natural owner; the sharpened split between the
+producer-side `DeliverableSpec` and the evaluation-side `ScoreabilityContract`
+(§20.4); status cells for §15.1 rows §10/§7a and §18 D8/D14/D15; and this
+header's next-work-item line corrected. **No §0-§19 semantic content is
+rewritten**; §20 supersedes only where it says so.
 
 **Adversarial review record (2026-08-10):** a fresh reviewer agent
 attacked the first draft against the §0 rules with source re-opened per
@@ -2102,6 +2119,12 @@ seam-with-first-consumer pattern), not production task configurations before
 Step 12's regime-B binding exists. §0 rule 8 applies: no package without a
 live consumer.
 
+**Metric declaration split (DECIDED)**: Step 06 establishes the generic metric
+*runtime interface* plus the TIDMAD *derived* instance (regime A, no
+declaration needed); **Step 12** establishes task-level metric
+*declaration/binding* for the composed contrast tasks. Step 06 does NOT
+require editing `configs/task_config.yaml`.
+
 ### 20.4 Deliverable-Contract ownership — Step 06 confirms or says why
 
 Inherited from 05c (Checkpoint E): ownership PROVISIONAL and OPEN; Step 06 is
@@ -2115,7 +2138,32 @@ only its name. **OD-20-7 (DECIDED as an obligation)**: Step 06 must CONFIRM
 scorer/final-evaluation-side ownership or explicitly DEFER with a reason;
 the Step-06 draft records a PROVISIONAL recommendation to confirm.
 
-### 20.5 The data-path gap and its ownership (OPEN — D14)
+**The concept split this review must use (sharpened 2026-08-15 so two
+things never "own the deliverable interior" at once):**
+
+```text
+DeliverableSpec           producer-side REPRESENTATION contract
+  (05c, retained)         "how the artifact IS represented"
+                          naming · cleanup identity · channel-group names ·
+                          storage layout / serialization · storage dtype+offset
+
+Metric ScoreabilityContract   evaluation-side ACCEPTANCE contract
+  (Step 06)                   "what THIS metric REQUIRES of that artifact"
+                              required channels · required attrs ·
+                              required dtype/range · required completeness
+
+Metric  REFERENCES DeliverableSpec  +  DECLARES ScoreabilityContract
+```
+
+§14's "one owner for naming/layout/dtype/attrs/completeness" resolves under
+this split as: representation facts stay producer-side in `DeliverableSpec`;
+acceptance facts (including which attrs a metric reads and what completeness
+it needs) are evaluation-side, declared by the metric. Neither owns the
+other's half. Confirming "final-evaluation-side ownership" at Step 06 means
+confirming ownership of the **acceptance** contract and of the deliverable's
+*semantic identity for scoring* — not absorbing the producer representation.
+
+### 20.5 The executable dataset→tensor data path and its ownership (OPEN — D14)
 
 ```text
 DECLARED (owned, complete)        EXECUTABLE (unowned)
@@ -2153,7 +2201,10 @@ Step 06  Metric interface + eval/diagnostics BOUNDARY + Deliverable-Contract rev
    │
 Step 07  07a: tuner policy on the metric handle + TrainingHistory/Diagnosis (Gate 1 REQ)
    │     07b: measurement/verification (unchanged)
-Step 08  HealthGates on declared inputs (unchanged; consumes 06's reader seam)
+Step 08  HealthGates on declared inputs (unchanged). Consumes the DELIVERABLE /
+         SCOREABILITY reader seam Step 06 establishes — NOT the executable
+         dataset→tensor data path owned by D14. Step 08 must not genericize
+         the data loader "in passing".
 Step 09  Interpreter consumes TrainingDiagnosis (OD-20-5) + Step-06 metric payload
 D14 ──▶  data-path reader/layout owner (Step-11 extension OR small milestone)
 Step 12  composition + regime B; the TWO composed contrast tasks; Milestone 1
