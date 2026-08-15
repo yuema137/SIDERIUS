@@ -14,8 +14,9 @@ operator review 2026-08-15 accepted the architecture and required four
 clarifications (Rev 5.1); Rev 5.2 fixed the implementation timeline; the
 persistent tracks are now SELECTED — Track B Oxford-IIIT Pet 37-way RGB
 classification, Track C DAVIS 2017 RGB 8→4 future-frame prediction (§22.9a)
-— and D14 is a dedicated milestone after Step 07 (§22.11a). NOT YET FROZEN:
-Q2 (Step-7 child lettering) and the freeze mark itself (Q4) remain; binding
+— D14 is a dedicated milestone after Step 07 (§22.11a); Rev 5.3 added the
+persistent example-pack governance (§22.23) and resolved Q2 (Step 07 = PR0 ·
+07a · 07b · 07c). NOT YET FROZEN: only the freeze mark (Q4) remains; binding
 on the freeze mark.** No
 implementation is authorized by this document alone.** Each module named here receives its own detailed design
 document (operator-reviewed) before any code changes. This document
@@ -887,7 +888,8 @@ override-chain resolution deep-equal; record fields unchanged.
 direction/threshold logic flows from the metric handle.
 **Rev 5 (§22.12, Step 7)**: this module carries TWO halves with distinct
 acceptance — the training-diagnostics half (R2 train-objective history,
-R3 validation-objective history REQUIRED when a validation set exists,
+R3 validation-objective history REQUIRED unconditionally for a fully supported
+task (Rev 5.1 — a validation scope is part of the contract),
 `TrainingHistory` → deterministic `TrainingDiagnosis`, structured and never
 prompt-dumped — §22.2/§22.4/§22.6) and the policy half (incumbent /
 threshold / skip / bypass consume the golden metric's declared direction via
@@ -1531,8 +1533,8 @@ production consumer that proves the seam); **Deps** = must land before;
 | §7d Tuner resource/time planning | 5 | Forecast task-terms (class count, decomposition unit, probe shapes) derive from profiles; calibration values unchanged and separately owned | forecasts byte-identical under TIDMAD (deep-equal breakdowns, PR-G pattern); policy identities unchanged | profile-term axis: a contrast profile changes derived terms while calibration stays fixed | production VRAM/time gates price a real attempt from derived terms | 2, 3 | `step_05b_tuner_resource_time.md` | **COMPLETE — MERGED 2026-08-15.** PR **#211**, final head `649efda0`, exact-head CI `31852637888` PASS, merge **`5ce205d3`** (squash). Content frozen at `ce880124`, freeze marker/implementation base `aa7e2131`. **ONE PR**, two internal capability phases: **P** (`ModelIOContract` → probe realization → live VRAM path) and **D** (run-bound `DatasetProfile` → workload/time derivation). Checkpoints 0/A/B/C/D PASS; 12 mutations across 5 families RED; Gates 1/2 **NOT REQUIRED**, neither launched. **Re-scoped across revisions**: the PSD-unit term already derived from the profile (ambiently — tightened to injection here); the `40000` seg fallbacks are mostly §7e/**step 7** sites. Revision 2 found Step 04a's realizer only realizes at *validation-probe* extents and that no contract reached the VRAM child, making the probe half an **additive seam extension**; revision 3 restored Step-04a's form/fact authority and split Stage-B into **B1**/**B2**. **Implementation-time corrections**: the frozen design's preferred contract transport was unavailable (production launches the tuner as an argv-only subprocess), so the run binding uses ONE shared canonical task-config helper also consumed by `SandboxExecutor` — making the single-authority property structural; and `hybrid` proved not to be a canonical tensor semantic, so its legacy target is deliberately preserved. Landed capability: canonical contract-governed probe realization, run-bound contract across the pre-flight IPC, run-bound profile through the live workload/time path, calibration ownership and values unchanged, replay migration-free |
 | §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | **exact ordered argv-list equality after documented normalization** (05c §4.2) + file-IPC deep-equal; **exact logical artifact equality** (05c §4.1 — deliberately NOT raw HDF5 binary equality); sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `step_05c_tuner_execution_contracts.md` | **COMPLETE — MERGED 2026-08-15.** PR **#212**, final head `89453177`, exact-head CI `31861633497` PASS, merge **`03e00944`** (squash; tree byte-identical to the reviewed head). Content frozen at `fe73f982`, freeze marker / implementation base `4785a639`. **ONE PR**, internal checkpoints **C0–C9**. **Gate 1 NOT REQUIRED; Gate 2 PASS** (one bounded attempt, no retry: 6 real deliverables written through the migrated producer, read by the untouched scorer, removed by the migrated cleanup, 0 remaining). Checkpoints 0/A/B/C/D PASS; **7 semantic mutation families, 7 killed, 0 survivors**; Checkpoint C crossed REAL train+inference subprocesses. **Implementation-time corrections** (05c §15.1, §15.7): the design's "out_dir- vs base-relative" producer distinction does not exist — the real difference is the fix-mode NAME SHAPE; §3.2a's field table wrongly listed the output decode selector as a spec field, superseded by §2.2's per-literal audit; and a **missed same-authority site**, `_is_complete_trial_output`, which §2.2 had classified as input decode but which reads the deliverable the attempt just wrote. Landed capability: the deliverable template is DECLARED EXACTLY ONCE, the persisted representation and channel identity derive from `DatasetProfile`, and the spec never crosses a process boundary (§3.2a Option A — the child reconstructs it from the already-crossing profile). No new argv, no config, no schema field, no migration for stored runs; no TIDMAD sample value moved. Deliverable-Contract ownership stays **PROVISIONAL, final ownership OPEN — Step 06 is the next mandatory confirm-or-say-why review**. *(Parity-criterion column corrected at freeze: revision 3 replaced "byte-identical artifacts" with §4.1 logical equality and defined the argv criterion at §4.2.)* |
 | §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; PRODUCTION SCORING invokes it through the interface; the record-facing metric payload/identity the interface needs is available. Incumbent/comparison/threshold/skip-bypass consumption is NOT claimed here — that is §7a's step-7 final effect (freeze reconciliation 2) | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `step_06_metric_interface.md` | **COMPLETE — MERGED** (PR #213, squash `02f382eb`, final head `45b0ff7c`, 2026-08-15; design `step_06_metric_interface.md` §20 is the ledger). Final effect delivered: metrics are named instances (`MetricSpec`: id · direction · aggregation · references · executable scoreability), the frozen TIDMAD scorer is instance #1 byte-identical (`scoring_utils.py` no diff), PRODUCTION SCORING (tuner live route + scoring subprocess) invokes it THROUGH the handle with scoreability BEFORE arithmetic, and the record-facing payload (`metric_result` / `metric_refusal`) is machine-readable and persisted — filtered from planner history because agent-facing rendering is Step 07a/09. Q1 CONFIRMED (05c retains producer representation; 06 owns evaluation-side acceptance). A: C0 two-route oracle + frozen pins + historical replay; B: strict direction-only rung (C6a) + broader different-metric rung (C6b); C: real train→infer→scoring child through the handle. Gate 1 PASS (corrective round after operator review), Gate 2 NOT REQUIRED. Not reached (asserted D1/07a list): tuner incumbent selection, workflow/resume/per_file_best/dashboard direction literals. Post-Step-05 obligations closed: (a) eval-vs-training-diagnostics boundary executable (loss-shaped ids refused, no loss field); (b) Deliverable-Contract review CONFIRMED. Follow-up debt in §20.11 |
-| §7a Tuner planning & policy | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `step_07a_tuner_policy.md` | NOT STARTED. **Post-Step-05 addendum §20.2 (operator decisions 2026-08-15) ADDS to this step's scope**: the trainer emits a `TrainingHistory` (train loss REQUIRED; validation loss REQUIRED-WHEN-A-VALIDATION-SET-EXISTS), the tuner OWNS and derives a deterministic `TrainingDiagnosis`, and both ride the EXISTING record/transport (no second state store). Validation data comes from the existing run-bound SampleSet split — **no new `--val_*` IPC unless source proves the existing boundary insufficient**. Because the reflector prompt will change, **Gate 1 becomes REQUIRED for 07a**. **Rev 5 (§22.12)**: two separately acceptable halves — training diagnostics (R2/R3 histories, History→Diagnosis, structured, not prompt-dumped) and direction-sensitive policy on the golden metric (secondary metrics evidence-only); Tracks B/C at L1 (contrast objective/history fixture; lower-direction + classification/regression policy cases) and L2 where the trainer seam is generic; child lettering = operator decision §22.21-Q2 |
-| §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07b_tuner_measurement.md` | NOT STARTED. Rev 5: lettering per §22.21-Q2; B/C at L0/L1 (measurement data-feeding from a contrast profile) |
+| §7a Tuner planning & policy (+ §20.2 training diagnostics) | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | **Q2 RESOLVED (Rev 5.3)**: `step_07_pr0_persistent_example_baseline.md` (preflight, no semantic letter) · `step_07a_training_history_diagnosis.md` · `step_07b_tuner_policy.md` | NOT STARTED. **Post-Step-05 addendum §20.2 (operator decisions 2026-08-15) ADDS to this step's scope**: the trainer emits a `TrainingHistory` (train loss REQUIRED; validation loss REQUIRED-WHEN-A-VALIDATION-SET-EXISTS — **tightened by Rev 5.1: REQUIRED unconditionally for a fully supported task, a validation scope being part of the contract**), the tuner OWNS and derives a deterministic `TrainingDiagnosis`, and both ride the EXISTING record/transport (no second state store). Validation data comes from the existing run-bound SampleSet split — **no new `--val_*` IPC unless source proves the existing boundary insufficient**. Because the reflector prompt will change, **Gate 1 becomes REQUIRED for 07a**. **Rev 5 (§22.12)**: two separately acceptable halves — training diagnostics (R2/R3 histories, History→Diagnosis, structured, not prompt-dumped) and direction-sensitive policy on the golden metric (secondary metrics evidence-only); Tracks B/C at L1 (contrast objective/history fixture; lower-direction + classification/regression policy cases) and L2 where the trainer seam is generic; child lettering = operator decision §22.21-Q2 |
+| §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07c_tuner_measurement.md` (Q2 RESOLVED — Rev 5.3) | NOT STARTED. B/C at L0/L1 (measurement data-feeding from a contrast profile) |
 | §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `step_08_health_check_task_profile.md` | NOT STARTED. **Rev 5 (§22.12)**: applicable/inapplicable-by-declaration verified on Tracks B/C (L1; L2 where a real deliverable exists); orthogonal to scoreability / diagnosis / metric (§22.8); D18 owner |
 | §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `step_09_interpretation_task_blocks.md` | NOT STARTED. **Rev 5 (§22.12)**: owns agent-facing rendering of diagnosis / golden metric / secondary metrics / health / failures / cross-iteration findings via explicit renderers (§22.6); D1 ResultInterpretationAgent direction consumers migrate here (tuner planner/reflector ones are Step 07's — Rev 5.1); B/C L1 rendering fixtures |
 | §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | NOT STARTED. **Rev 5 (§22.12)**: workflow/resume D1 comparisons via the handle; a second bound task (B or C) at honest maturity |
@@ -2098,12 +2100,12 @@ campaign per module.
 | D10 | Dead seams disposition (tune→interp protocol; validation_file_pattern gains consumers in §4/§10 or is dropped) | per owning module's design |
 | D11 | CLAUDE.md task-agnostic claim + seam-authority pointer update | with the first landed module PR |
 | D13 | **Flexible-input rungs FX-3 (preset resolution) and FX-4 (preset-vs-explicit mismatch, fail-closed BEFORE the LLM boundary)** — deferred BY step 1, which could not land them: no preset mechanism exists in-tree, and step 1 cannot fail closed on a conflict it has no way to represent. Step 1 landed FX-1/FX-2/FX-5 as PROSE contrasts only, which prove template rank-agnosticism at the PROMPT layer and claim nothing about structured arbitrary-tensor support. **Owner: the contract owner (step 2 §4 / step 3 §5) MUST land both rungs with its structured contract** — see `step_01_proposer_hypothesis_space.md` §6A.5, §9.4 | **RESOLVED / CLOSED by Step 03** (PR #205, merge `e1181f61`). Both rungs landed with the structured contract: FX-3 preset resolution and FX-4 preset-vs-explicit mismatch, the latter failing closed BEFORE the LLM boundary with LLMBridge call count asserted at 0. A preset is authoring convenience only and does not survive resolution. Canonical evidence: `step_03_model_loss_contract.md` §4a.1 / §24, `tests/unit/agent/schemas/test_model_io_resolution.py`. **Note the narrowing**: Step-01 §6A.5 also named description↔contract consistency as part of the FX-4 obligation; Step-03 §9 explicitly WITHDREW that — it is prose duplication owned by the Step-01 layer, not an NLP validation problem |
-| D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owns the reader.** OPEN — see §20.5 for the two candidates | operator direction 2026-08-15: prefer absorption into an existing step, no new step unless source proves necessary; source audit finds §9 is NOT the natural owner, so the choice is between (a) a Step-11 scope extension and (b) a small dedicated milestone. Decide at Step-11 design kickoff or earlier if Step-12/M1 needs it. **D14 is a PRECONDITION of Milestone 1: §16 criterion 1 cannot be considered satisfiable until D14 has an owner and its abstraction has landed** — running the two contrast tasks through a TIDMAD-shaped loader would not be a generic end-to-end run (§21.3 item 3, §16 note) |
+| D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owns the reader.** OPEN — see §20.5 for the two candidates | operator direction 2026-08-15: prefer absorption into an existing step, no new step unless source proves necessary; source audit finds §9 is NOT the natural owner, so the choice is between (a) a Step-11 scope extension and (b) a small dedicated milestone. Decide at Step-11 design kickoff or earlier if Step-12/M1 needs it. **D14 is a PRECONDITION of Milestone 1: §16 criterion 1 cannot be considered satisfiable until D14 has an owner and its abstraction has landed** — running the two contrast tasks through a TIDMAD-shaped loader would not be a generic end-to-end run (§21.3 item 3, §16 note) **RESOLVED 2026-08-15 (Rev 5, Q3): a dedicated executable-contrast-task / data-path milestone immediately after Step 07 and before Step 08 (§22.11a); NOT a Step-11 extension** |
 | D15 | **Model-family aggregation of training diagnoses** ("CNNs always overfit") | not before candidate/iteration-level evidence exists (§20.2 layer 4); the existing cross-iteration state has NO model-family aggregation precedent except `model_knowledge_cache` (a summarisation cache, not evidence) |
 | D16 | **Lexical loss-id restriction** in `execute_tools/evaluation_metric.py` (Step 06): ids whose tokens include `loss`/`losses` are refused — rejects legitimate future evaluation metrics such as `log_loss`, passes `mse` used as a training objective | temporary implementation restriction, NOT the generic boundary (Rev 5 §22.1: role is typed binding, not naming); remove/narrow when a task-level metric declaration first needs it — Step 12 (or Step 07 if it touches the module first). Not a Step-06 reopener |
 | D17 | **Mandatory-scalar runtime enforcement**: `MetricResult.scalar: float \| None` lets a generic `EvaluationMetric` subclass return `None` (TIDMAD cannot); frozen semantics are scoreable ⇒ scalar / not-scoreable ⇒ `NotScoreableResult` | implementation-quality debt; owner = the first design adding a second production metric instance (Step 12; earlier if convenient) |
 | D18 | **Scalar-only metric → `file_vector=[]` bridge** into `HealthCheckContext` / the record | safe compatibility bridge today; how "no per-sample evidence" is expressed is Step 08 (with Step 12) |
-| D19 | **Persistent contrast dataset selection** (Tracks B/C, §22.9a) | **RESOLVED 2026-08-15**: Oxford-IIIT Pet (37-way RGB classification) / DAVIS 2017 (RGB 8→4 future-frame prediction); manifests, nested subsets and interpolation rules are built and pinned by the D14 design — until then no data is downloaded, generated or committed |
+| D19 | **Persistent contrast dataset selection** (Tracks B/C, §22.9a) | **RESOLVED 2026-08-15**: Oxford-IIIT Pet (37-way RGB classification) / DAVIS 2017 (RGB 8→4 future-frame prediction); IDENTITY-level scope manifests at Step-07 PR0, EXECUTION-level manifests / nested subsets / interpolation rules at D14 (§22.23.5) — raw data is never committed |
 | D12 | Task-composition root's physical representation (file layout/schema; when legacy-adapter defaulting is retired per §2 regime split) | by §0 rule 9: after several module configs exist; the composition design also fixes the binding switch from regime A to regime B |
 
 ## 19. Detailed-design documents this roadmap requires
@@ -2113,7 +2115,9 @@ convention (2026-08-11): `step_<two-digit>_<roadmap-step-name>.md`, one
 CANONICAL step-level document per §15 step (subordinate `step_NNa_*`
 names allowed where a step genuinely comprises multiple submodule
 designs — steps 5 and 7 use them, jointly constituting that step's
-acceptance entry; step 4's canonical doc covers 6-M plus the §13
+acceptance entry; step 7 (Rev 5.3, Q2): `step_07_pr0_persistent_example_baseline.md`
+(preflight, no letter), `step_07a_training_history_diagnosis.md`,
+`step_07b_tuner_policy.md`, `step_07c_tuner_measurement.md`; step 4's canonical doc covers 6-M plus the §13
 remainder and may propose a `step_04a` split in its own design). This
 supersedes the earlier `generic_framework/pr_*` names. The §15.1 table in THIS document
 is the ONE status authority — the folder README is an index (links +
@@ -2355,7 +2359,7 @@ other's half. Confirming "final-evaluation-side ownership" at Step 06 means
 confirming ownership of the **acceptance** contract and of the deliverable's
 *semantic identity for scoring* — not absorbing the producer representation.
 
-### 20.5 The executable dataset→tensor data path and its ownership (OPEN — D14)
+### 20.5 The executable dataset→tensor data path and its ownership (D14 — RESOLVED as a dedicated milestone, Rev 5 §22.11a; historical text below)
 
 ```text
 DECLARED (owned, complete)        EXECUTABLE (unowned)
@@ -2372,7 +2376,10 @@ Every literal in the executable half is now *profile-driven by value* (Steps
 complete. **§9 is not the natural owner**: its files are
 `core/sandbox_executor.py`, subprocess env, hardware, invariants, resume
 (:979-981) and its target says §4 supplies "only input-identity indexing"
-(:996-997). Two candidates, decision deferred to D14: **(a)** extend Step 11
+(:996-997). Two candidates were open here; **RESOLVED 2026-08-15 (Q3): (b) — a
+dedicated executable-contrast-task / data-path milestone immediately after
+Step 07 and before Step 08 (§22.11a), owned by its own detailed design.**
+Historical text: **(a)** extend Step 11
 §9's scope to "execution infrastructure INCLUDING the sample-reader /
 output-layout seam"; **(b)** a small dedicated milestone between Steps 07 and
 12. Step 12 / M1 *proves* genericity with the two tasks (§20.3); it does not
@@ -2399,7 +2406,7 @@ Step 08  HealthGates on declared inputs (unchanged). Consumes the DELIVERABLE /
          dataset→tensor data path owned by D14. Step 08 must not genericize
          the data loader "in passing".
 Step 09  Interpreter consumes TrainingDiagnosis (OD-20-5) + Step-06 metric payload
-D14 ──▶  data-path reader/layout owner (Step-11 extension OR small milestone)
+D14 ──▶  data-path reader/layout owner — RESOLVED: dedicated milestone after Step 07 (§22.11a)
 Step 12  composition + regime B; the two contrast tracks COMPOSE into complete
          end-to-end tasks; Milestone 1 (first COMPLETE-COMPOSITION checkpoint —
          the tracks have been supplying Stage-B evidence since their seams landed)
@@ -2706,7 +2713,7 @@ single-authority principle.
 Step ordering (§15) is unchanged — the current dependency graph permits the
 policy without reordering. Step 12 remains composition + regime B + Milestone
 1. The two composed contrast tasks remain the current planned artifacts. Step
-06/07/08/09 ownership, D14's OPEN status, historical reproducibility, and the
+06/07/08/09 ownership, D14's status (OPEN at Rev 4; RESOLVED at Rev 5 as a dedicated milestone after Step 07, §22.11a), historical reproducibility, and the
 no-new-config-hierarchy rule are unchanged. **No implementation commitment is
 created for Steps 06-11 by this section**: each detailed design still chooses
 the cheapest Stage-B grade (§17 Checkpoint B) its landed abstraction can
@@ -2726,8 +2733,10 @@ and frozen NOW, implemented progressively from Step 07; D14 as a dedicated
 milestone between Step 07 and Step 08; cumulative test corpus; no ad-hoc
 composed tasks after Step 07 — §22.11a), then **Q1 and Q3 RESOLVED
 (2026-08-15)**: Track B = Oxford-IIIT Pet, Track C = DAVIS 2017 (§22.9a);
-D14 = dedicated milestone after Step 07 (§22.11a). NOT YET FROZEN — Q2
-(Step-7 child lettering) and Q4 (the freeze mark) remain. Every
+D14 = dedicated milestone after Step 07 (§22.11a); then **Rev 5.3** (stale
+D14/R3 wording aligned; §22.23 persistent example packs; identity vs
+execution manifests; **Q2 RESOLVED**: PR0 · 07a · 07b · 07c). NOT YET FROZEN
+— only Q4 (the freeze mark) remains. Every
 MUST / REQUIRED below becomes BINDING on the operator's freeze mark (§17.0
 provenance rule); until then it is the proposed Rev-5 text.** This section is the authoritative top-level guidance for Step 07
 onward. It encodes the operator's post-Step-06 conclusions (§20.8, now folded
@@ -3075,9 +3084,10 @@ Track B — Image / classification
   canonical TRAINING scope:    breed-stratified deterministic 80 % of the official trainval list
   canonical VALIDATION scope:  the disjoint 20 % of the official trainval list
   canonical FINAL-EVAL scope:  the official test list only
-                      the exact image-id manifests are committed and SHA-256 pinned when first
-                      built (the manifest is the authority; the seed is provenance only); the three
-                      scopes are disjoint; runtime resampling is forbidden
+                      the exact image-id manifests (IDENTITY level: image id · class id · scope) are
+                      committed and SHA-256 pinned at Step-07 PR0 (§22.23.5); the manifest is the
+                      authority, the seed is provenance only; the three scopes are disjoint; runtime
+                      resampling is forbidden
   training objective (R1):     categorical cross entropy
   validation objective (R3):   mean validation cross entropy per epoch — same computation, no backprop
   training history (R2):       mean training cross entropy per epoch
@@ -3117,9 +3127,11 @@ Track C — Spatiotemporal / regression
                       SEQUENCE-disjoint (never frame-level random splits: temporal leakage);
                       clip windows (sequence_name, start_frame) chosen deterministically and evenly
                       per sequence — indicative caps: ≤8 windows/train sequence (≈480 clips),
-                      ≤4/validation sequence (≈60), ≤4/final-eval sequence (≈60); exact manifests
-                      committed and SHA-256 pinned; the raw dataset stays the real 833 MB, the
-                      persistent run is a few hundred real clips
+                      ≤4/validation sequence (≈60), ≤4/final-eval sequence (≈60); the IDENTITY-level
+                      manifests (sequence_name · scope · (sequence_name, start_frame) clip identity)
+                      are committed and SHA-256 pinned at Step-07 PR0, the EXECUTION-level ones
+                      (decode/resize/window materialization/tensor hashes) at D14 (§22.23.5); the
+                      raw dataset stays the real 833 MB, the persistent run is a few hundred real clips
   training objective (R1):     MAE / L1 over the predicted future tensor (subgradient-compatible)
   validation objective (R3):   mean validation MAE per epoch — same computation, no backprop
   training history (R2):       mean training MAE per epoch
@@ -3186,8 +3198,9 @@ track rung / end-to-end run) made explicit; the same names are used in §22.12.
 
 ### 22.11 Progressive rule before full composition, and the D14 blocker
 
-Until the executable data path (D14, §20.5) has an owner and lands, tracks B
-and C cannot honestly reach L2 for `dataset → loader → tensor` or L3; they
+Until the executable data path (D14 — the dedicated milestone after Step 07,
+§22.11a) lands, tracks B and C cannot honestly reach L2 for `dataset → loader
+→ tensor` or L3; they
 reach L0/L1 at every seam that exists (profile, model I/O, candidate
 creation, deliverable spec, metric handle, and — as they land —
 TrainingHistory/Diagnosis, health declarations, interpretation blocks) and L2
@@ -3213,15 +3226,22 @@ time. Their support then deepens as each refactor seam lands:
 ```text
 NOW          select + freeze Track B / Track C; fill §22.9a; final Rev-5 freeze
              (no production code for B/C)
-STEP 07      TrainingHistory / TrainingDiagnosis / metric-direction policy
+STEP 07      PR0 — Persistent Example Baseline (preflight, §22.23.6): examples/ roots for the three
+             tracks, task/provenance/status, IDENTITY-level scope manifests, projection of the
+             contracts that already exist; NO new data path, NO raw data in git
+             07a — TrainingHistory / TrainingDiagnosis (R2/R3);  07b — metric-direction policy +
+             current-tuner rendering (Gate 1);  07c — measurement / verification
              TIDMAD: real production path.  B/C: L1 — atomic fixtures use the EXACT frozen
              Pets / DAVIS task semantics (CE→accuracy↑ / MAE→MSE↓, validation curves, diagnosis
-             shape); no pretence of image files → loader → model → training
+             shape); no pretence of image files → loader → model → training; examples extended
 D14          DEDICATED EXECUTABLE-DATA-PATH MILESTONE — placed between Step 07 and Step 08
              (Q3 RESOLVED 2026-08-15)
              Track B: real Pets JPEGs → reader → [3,144,144]; Track C: real DAVIS frames → window
-             reader → [3,8,128,224] → [3,4,128,224]; then real training → TrainingHistory →
-             inference → deliverable → EvaluationMetric  (L2, then L3)
+             reader → [3,8,128,224] → [3,4,128,224]; EXECUTION-level manifests / transforms /
+             tensor hashes (§22.23.5); one simple reference plugin per contrast example (known-good
+             executable baseline, architecture chosen by the D14 design); then real training →
+             TrainingHistory → inference → deliverable → EvaluationMetric  (L2, then L3);
+             examples + tests upgraded L1 → L2/L3
              and the ALREADY-LANDED Step-07 fixtures are UPGRADED (not replaced) with real
              component / integrated variants
 STEP 08      HealthGate — A/B/C on REAL applicable artifacts: TIDMAD-specific gates INAPPLICABLE
@@ -3264,9 +3284,9 @@ genericity claim the Step may make.
 | Step | Owner / design | TIDMAD (Track A) | Image (Track B) | Spatiotemporal (Track C) | New genericity claim |
 |---|---|---|---|---|---|
 | **06 — Metric interface** (COMPLETE, PR #213) | §10 · `step_06_metric_interface.md` | full: two-route parity, scoreability before arithmetic, frozen values byte-identical (Stage A) | **not reopened.** Historical: no persistent task existed; the STRICT direction-only atomic rung (C6a) + broader different-metric rung (C6b) are valid L1 evidence for the metric handle | same | metric identity/direction/aggregation/scoreability are declared instances; scoring runs through the handle. Persistent B/C declarations begin AFTER this revision, when their declaration seam exists |
-| **07 — Tuner planning & policy incl. training diagnostics** (§7a + §20.2; child decomposition §22.21-Q2) — *training-diagnostics half* | §7a / Step-07 detailed design(s) | R2 train history persisted per epoch; **R3 validation-objective history REQUIRED when a validation set exists** (existing SampleSet split, no new `--val_*` IPC unless source proves otherwise — OD-20-3); TrainingHistory + deterministic TrainingDiagnosis; optional checkpointed observations; distinct from EvaluationMetric; structured, persisted for later transport; NOT prompt-dumped (§22.6) | L1 with the EXACT frozen Track-B semantics (Pets: CE objective, CE validation curve, accuracy↑ golden, validation-accuracy diagnostic; §22.9a) — never an anonymous "some classifier"; L2 `training → TrainingHistory` if the trainer seam is generic; post-D14 the real Pets path MUST exercise history/diagnosis (Step-07 fixtures kept, real variants added) | L1 with the EXACT frozen Track-C semantics (DAVIS: MAE objective/curve, MSE↓ golden, PSNR diagnostic); post-D14 real | training dynamics are first-class typed evidence; validation loss exists; the eval-vs-training boundary is executable on both sides |
-| **07 — policy half** (direction-sensitive incumbent / threshold / skip / bypass; tuner planner/reflector rendering for the CURRENT decision) | §7a / Step-07 policy design | incumbent selection consumes the golden metric's declared direction and identity through the Step-06 handle (never TIDMAD `max`/`>`); the reflector's hardcoded "HIGHER … is GOOD" and every planner/reflector direction assumption migrate HERE (Rev 5.1 — the reflector is the tuner's); secondary metrics are evidence rendered where relevant, never the objective; policy distinguishes training diagnosis · final primary metric · HealthGate validity; planner/reflector prompts EXACT-equal for TIDMAD except the explicitly owned diagnosis/direction rendering — **Gate 1 REQUIRED** (§20.2 OD-20-6) | L1: lower-is-better AND classification/regression-relevant policy cases as supported (the C6a instance is the ready-made lower-direction fixture) | same | direction-sensitive policy is metric-generic; the D1 CORE consumers inside the tuner (§16 D1 table) migrate here |
-| **07 — measurement / verification** (§7e) | `step_07b…` (lettering: §22.21-Q2) | identity/comparability keys byte-stable | L0/L1 measurement data-feeding from a contrast profile | same | unchanged from §15.1 |
+| **07 — Tuner planning & policy incl. training diagnostics** (§7a + §20.2; Q2 RESOLVED: PR0 · 07a · 07b · 07c) — *PR0 + 07a training-diagnostics half* (examples: PR0 roots + identity manifests + status; 07a projects history semantics into all three packs — §22.23) | §7a / Step-07 detailed design(s) | R2 train history persisted per epoch; **R3 validation-objective history REQUIRED unconditionally for a fully supported task (Rev 5.1)** — TIDMAD's validation scope comes from the existing run-bound SampleSet split, no new `--val_*` IPC unless source proves otherwise (OD-20-3); TrainingHistory + deterministic TrainingDiagnosis; optional checkpointed observations; distinct from EvaluationMetric; structured, persisted for later transport; NOT prompt-dumped (§22.6) | L1 with the EXACT frozen Track-B semantics (Pets: CE objective, CE validation curve, accuracy↑ golden, validation-accuracy diagnostic; §22.9a) — never an anonymous "some classifier"; L2 `training → TrainingHistory` if the trainer seam is generic; post-D14 the real Pets path MUST exercise history/diagnosis (Step-07 fixtures kept, real variants added) | L1 with the EXACT frozen Track-C semantics (DAVIS: MAE objective/curve, MSE↓ golden, PSNR diagnostic); post-D14 real | training dynamics are first-class typed evidence; validation loss exists; the eval-vs-training boundary is executable on both sides |
+| **07b — policy half** (direction-sensitive incumbent / threshold / skip / bypass; tuner planner/reflector rendering for the CURRENT decision; examples extended §22.23) | §7a / Step-07 policy design | incumbent selection consumes the golden metric's declared direction and identity through the Step-06 handle (never TIDMAD `max`/`>`); the reflector's hardcoded "HIGHER … is GOOD" and every planner/reflector direction assumption migrate HERE (Rev 5.1 — the reflector is the tuner's); secondary metrics are evidence rendered where relevant, never the objective; policy distinguishes training diagnosis · final primary metric · HealthGate validity; planner/reflector prompts EXACT-equal for TIDMAD except the explicitly owned diagnosis/direction rendering — **Gate 1 REQUIRED** (§20.2 OD-20-6) | L1: lower-is-better AND classification/regression-relevant policy cases as supported (the C6a instance is the ready-made lower-direction fixture) | same | direction-sensitive policy is metric-generic; the D1 CORE consumers inside the tuner (§16 D1 table) migrate here |
+| **07c — measurement / verification** (§7e) | `step_07c_tuner_measurement.md` | identity/comparability keys byte-stable | L0/L1 measurement data-feeding from a contrast profile | same | unchanged from §15.1 |
 | **08 — HealthGates** | §8 · `step_08_health_check_task_profile.md` | TIDMAD verdicts identical; sha-pin mechanism untouched | checks are applicable-by-declaration; int8/amplitude checks INAPPLICABLE honestly on non-int8 / non-sequence artifacts; generic checks still fire; NOT forced onto image tasks because TIDMAD uses them; NOT conflated with scoreability, training diagnosis or the evaluation metric — L1 applicable/inapplicable fixtures, L2 where a real deliverable exists | same, incl. spatiotemporal artifact geometry | health validity is task-declared; the scalar-only / no-per-sample-evidence case is expressed honestly (D18) |
 | **09 — Interpretation / result-agent-facing consumption** | §11 · `step_09_interpretation_task_blocks.md` | 3 interpreter goldens EXACT-equal + owned additions | defines HOW compact structured information reaches the ResultInterpretationAgent and, through it, the cross-iteration summary and next Proposer: TrainingDiagnosis, golden metric (identity/direction), secondary metrics, HealthGate evidence, failure information, cross-iteration findings — via explicit renderers, NEVER indiscriminate raw-record dumping (§22.6 item 5); metric-parameterized grammar and sign-band; L1 metric-identity/direction rendering fixtures incl. lower-is-better and classification/regression phrasing | same | the interpreter and proposer consume owned, compact, typed evidence; the D1 interpreter sign-band / `best_*` consumers migrate here (tuner planner/reflector consumers are Step 07's) |
 | **10 — Orchestration binding** | §12 · `step_10_…` | k9/l_fail choreographies unmodified; resume field-stable | L0/L1: a second bound task initializes the loop; workflow/resume best-score comparisons consume the metric handle (D1 CORE consumers outside the tuner) | same | launcher-owned task binding, metric-generic chain comparisons |
@@ -3354,7 +3374,7 @@ never hidden; (8) the same persistent tasks continue across Steps.
 | **D17 mandatory-scalar enforcement** — `MetricResult.scalar: float \| None`; a generic `EvaluationMetric` subclass can return `scalar=None` without a runtime refusal (TIDMAD cannot) | enforced by construction, not by the type system; frozen semantics say scoreable ⇒ scalar, not-scoreable ⇒ `NotScoreableResult` | the first design that adds a second production metric instance (Step 12; earlier if convenient) |
 | **D18 scalar-only metric → legacy `file_vector=[]`** — the tuner bridges a missing per-sample vector to an empty list for `HealthCheckContext` / the record | safe compatibility bridge today (no built-in check reads it; the context's own default is `[]`); how HealthGate / policy / score tables express "no per-sample evidence" is undecided | Step 08 (HealthGate) with Step 12 (task composition) |
 | **D1 direction consumers** — tuner incumbent selection, tuner planner/reflector prompt assumptions ("HIGHER … is GOOD"), workflow/resume comparisons, `per_file_best._row_beats`, dashboard ordering, interpreter `best_*` comparisons and sign-band | still literal higher-is-better; asserted census in `test_step06_c5_boundary_and_structure.py` (extend it with the interpreter/prompt/resume:551 sites) | **by consumer (Rev 5.1)**: tuner planner/reflector + incumbent selection → Step 07 policy half; ResultInterpretationAgent sign-band / `best_*` → Step 09; workflow/resume → Step 10; `per_file_best` / dashboard peripheral → later / M2 |
-| **D14 generic data path** — B/C executable support blocked at honest maturity | scheduling decision (§20.5) | operator: Step-11 extension vs small milestone (§22.21-Q3) |
+| **D14 generic data path** — B/C executable support blocked at honest maturity | RESOLVED (Q3): dedicated executable-contrast-task milestone AFTER Step 07, BEFORE Step 08 | the D14 detailed design (§22.11a, §22.9a consequence) |
 | schema→`data_paths` import chain (`hyperparam_tuning` → `evaluation_metric` → `scoring_helpers` → `nodes.scoring_reference` → `data_paths`) | import-hygiene debt | the design that next touches `scoring_helpers` |
 
 ### 22.19 Step-06 historical truth (preserved)
@@ -3385,20 +3405,20 @@ one frozen legacy control (TIDMAD)
   reasoning — without losing frozen TIDMAD behaviour or hiding task-specific assumptions.
 
 TIDMAD ───────────────┐
-Image / classification ┼─▶ Step 06 → 07 (diagnostics · policy · measurement) → 08 → 09 → 10 → … → 11 → 12 → regression suite
-Spatiotemporal / regr. ┘                                             │
-                                                                     └── D14 executable-data-path milestone
-                                                                         owner / timing = OPEN (§22.21-Q3): a Step-11
-                                                                         extension OR a small milestone between 07 and 12;
-                                                                         MUST land before B/C require L2/L3 and before Step 12
+Image / classification ┼─▶ Step 06 → 07 (PR0 · 07a · 07b · 07c) → D14 → 08 → 09 → 10 → 11 → 12 → regression suite
+Spatiotemporal / regr. ┘                                       │
+                                                                     └── D14 executable-data-path milestone — RESOLVED:
+                                                                         dedicated milestone AFTER Step 07, BEFORE Step 08
+                                                                         (§22.11a); its detailed design audits the real
+                                                                         contract extensions (§22.9a consequence)
 ```
 
 ### 22.21 Open operator decisions created or surfaced by Rev 5
 
 | # | Decision | Why it cannot be decided here |
 |---|---|---|
-| Q1 | **Persistent dataset selection for Tracks B and C** | **RESOLVED 2026-08-15**: Track B = Oxford-IIIT Pet 37-way RGB breed classification; Track C = DAVIS 2017 RGB 8→4 future-frame prediction (§22.9a; Fashion-MNIST / Moving-MNIST superseded). Manifests, subsets and interpolation rules are built and pinned by the D14 design — no data is downloaded or generated by this revision |
-| Q2 | **Step-7 child decomposition / lettering.** The roadmap's Step 7 (§7a) owns tuner policy AND (since §20.2) TrainingHistory/Diagnosis, with §7e measurement as a sibling; the design files are named `step_07a_tuner_policy.md` / `step_07b_tuner_measurement.md` (neither exists yet). Rev 5 needs the training-diagnostics half and the policy half to be separately acceptable (different Gate dispositions: Gate 1 REQUIRED for the policy/prompt half). Proposed, NOT decided: 07a = training history/diagnostics, 07b = direction-sensitive policy on the metric handle, 07c = measurement/verification. Step NUMBER and §7a ownership are unchanged either way | child lettering is a decomposition choice reserved to the operator (Step 04/05 precedent) |
+| Q1 | **Persistent dataset selection for Tracks B and C** | **RESOLVED 2026-08-15**: Track B = Oxford-IIIT Pet 37-way RGB breed classification; Track C = DAVIS 2017 RGB 8→4 future-frame prediction (§22.9a; Fashion-MNIST / Moving-MNIST superseded). IDENTITY-level manifests are frozen at Step-07 PR0; EXECUTION-level manifests, nested subsets and interpolation rules by the D14 design (§22.23.5) — no data is downloaded or generated by this revision |
+| Q2 | **Step-7 child decomposition / lettering.** | **RESOLVED 2026-08-15 (Rev 5.3)**: Step 07 = **PR0 — Persistent Example Baseline** (preflight; no semantic letter; §22.23.6) · **07a — Training History & Diagnosis** (R2, R3, `TrainingHistory`, `TrainingDiagnosis`, optional checkpointed observations) · **07b — Metric-Direction Policy & Current-Tuner Rendering** (incumbent / best comparison / threshold / skip-bypass, planner/reflector direction semantics, diagnosis consumption by the current tuner, secondary metrics as evidence; **Gate 1 REQUIRED** here) · **07c — Measurement / Verification** (§7e). Design docs: `step_07_pr0_persistent_example_baseline.md`, `step_07a_training_history_diagnosis.md`, `step_07b_tuner_policy.md`, `step_07c_tuner_measurement.md`. Step NUMBER and §7a/§7e ownership unchanged |
 | Q3 | **D14 owner and timing** | **RESOLVED 2026-08-15**: D14 is a DEDICATED executable-contrast-task / data-path milestone AFTER Step 07 and BEFORE Step 08 (§22.11a); NOT folded into Step 11. Its detailed design source-audits the real blockers (§22.9a consequence) before claiming scope |
 | Q4 | **Freeze of Rev 5 itself** — this section and the §0/§15.1/§16/§17/§18 propagations become BINDING on the operator's freeze mark | §17.0 provenance rule |
 
@@ -3408,14 +3428,148 @@ Rev 5.1 (this text)  →  dataset selection audit (real datasets: licence, size,
 download/generation, runtime, tensor shapes, three scopes, Gate subsets)  →  operator selects
 Track B / Track C  →  §22.9a filled  →  Q3 confirmed (D14 = dedicated milestone after Step 07, §22.11a)
 →  Q2 Step-7 child decomposition  →  FINAL Rev-5 freeze  →  only then Step 07 detailed design
-STATUS 2026-08-15: Q1 RESOLVED (Pets / DAVIS) · Q3 RESOLVED · Q2 and Q4 remain (see rows).
+STATUS 2026-08-15: Q1 RESOLVED (Pets / DAVIS) · Q3 RESOLVED (D14 after Step 07) · Q2 RESOLVED (PR0 · 07a · 07b · 07c) · **Q4 — the freeze mark — is the only open item**: Rev 5.3 → operator review → Q4 FROZEN → Step 07 detailed design (PR0 first).
 ```
 
 ### 22.22 What this revision does NOT change
 
 Step numbering and module ownership (§15.1); Step 06's frozen semantics and
 its merged implementation; the frozen TIDMAD formula; the no-new-config-
-hierarchy rule (§20.6); §17.0 Gate authority (applicability); D14's OPEN
-status; the Milestone-1 definition (§16 criterion 1 is now stated in terms of
+hierarchy rule (§20.6); §17.0 Gate authority (applicability); the Milestone-1 definition (§16 criterion 1 is now stated in terms of
 the two persistent tracks). No production code, test, prompt, config or schema
 is changed by this revision.
+
+### 22.23 Persistent example packs — the user-facing projection of the tracks (Rev 5.3, operator 2026-08-15)
+
+The persistent tracks must not live only in tests. Each is ALSO a
+user-facing example that grows with the framework — one Step at a time, never
+built at Step 12 in one go — so that the same three tasks are simultaneously
+regression evidence for developers and the demonstration of how SIDERIUS is
+used:
+
+```text
+persistent track
+    ├── regression evidence   (tests — proves genericity to developers)
+    └── examples/<task>/      (example pack — shows users how to run SIDERIUS)
+```
+
+#### 22.23.1 Projection rule (RULE)
+
+`examples/<task>/` is the **user-facing PROJECTION of the framework's current
+capability, never a second semantic authority**. Production, module-owned
+contracts and configs (DatasetProfile, ModelIOContract, DeliverableSpec,
+EvaluationMetric, health config, task description …) remain the ONLY
+authorities; an example pack CONSUMES them (`module-owned contracts/configs →
+example pack consumes them → runnable user example`). It never carries a
+hand-written parallel copy that could drift.
+
+#### 22.23.2 The three roots (FIXED)
+
+```text
+examples/
+    tidmad/                     Track A — the existing scientific control, projected as a clean example
+    oxford_iiit_pet/            Track B — 37-way RGB breed classification (§22.9a)
+    davis_future_prediction/    Track C — RGB 8→4 future-frame regression (§22.9a)
+```
+
+Directory IDENTITY is fixed now (final names subject to a one-time
+repository-convention source audit at PR0); CONTENT grows only as its owning
+seam lands. **TIDMAD is projected too**: the end state is three instances of
+one task-pack usage model, not "TIDMAD = hidden legacy system, the others =
+examples" — otherwise the framework still reads TIDMAD-centred.
+
+#### 22.23.3 No consumer-less files (RULE)
+
+Do NOT create the full future layout up front (`dataset.yaml`, `model.yaml`,
+`metric.yaml`, `skills/`, `plugins/` …) while the framework cannot yet read
+half of it — that is a fake future API. **An artifact enters an example pack
+only when the production framework already consumes that kind of artifact.**
+The mature semantic shape (categories, not frozen filenames):
+
+```text
+examples/<task>/
+    README.md          task description / objective · which framework contracts this pack demonstrates
+    PROVENANCE.md      data source, licence, checksums, acquisition instructions
+    STATUS.md          current maturity level (L0-L4) and the exact unsupported seams
+    data/              README + acquisition/prepare command + PINNED small manifests/checksums —
+                       raw data NEVER in git; local cache location documented
+    configs/           the ACTUAL production-consumed configs (no parallel copies)
+    plugins/           representative model (and, where the mechanism exists, loss/training) plugins
+    skills/            applicable skills — only once the generic skill surface can serve the task
+    expected/          expected output structure; deterministic fixture or known metric range
+    launch / run instructions · minimal bounded run · full example run
+```
+
+Plugins: a Pets/DAVIS plugin that can only pass schema validation but not
+train is an L1 FIXTURE, labelled so — not a "runnable example plugin"; from
+D14 each contrast example carries one simple reference plugin (known-good
+executable baseline; architecture chosen by the D14 design). Skills join only
+when the generic skill interface genuinely serves the task.
+
+#### 22.23.4 Example maturity follows track maturity (RULE)
+
+```text
+Track maturity (§22.10)      Example-pack maturity
+L0  contract              →  README + provenance + task semantics
+L1  atomic seam           →  example-specific declared values / test fixtures; NO fake executable path
+L2  executable component  →  real data acquisition · real manifests · real production config ·
+                             real plugin / loader where owned
+L3  integrated execution  →  train + validation + inference + deliverable + metric; minimal runnable example
+L4  full agent workflow   →  complete task binding · skills · health · interpretation · launcher;
+                             full user-facing example
+```
+
+Tests and examples therefore always grow together (§22.11a cumulative
+corpus).
+
+#### 22.23.5 Two kinds of manifest (RULE)
+
+```text
+IDENTITY-level manifests  (task DEFINITION — frozen at Step-07 PR0)
+    Pets:   image id · class id · scope ∈ {train, validation, final}
+    DAVIS:  sequence_name · scope · clip identity (sequence_name, start_frame)
+EXECUTION-level manifests (executable preprocessing — frozen at D14)
+    Pets:   decoder · resize algorithm/interpolation · crop rule · tensor dtype/layout · tensor hashes
+    DAVIS:  frame decode · resize/interpolation · window materialization · tensor layout · sample hashes
+```
+
+Fixing the identity level at PR0 guarantees every later Step validates the
+SAME samples; the execution level waits for the seam that executes it. Raw
+data (≈1.6 GB across the two tracks) is never committed — only small
+manifests, checksums and metadata.
+
+#### 22.23.6 Step-07 PR0 — Persistent Example Baseline (preflight)
+
+A Step-00-style preflight PR, before any Step-07 semantic change: establish
+the three examples at their CURRENT honest maturity — `README` / `PROVENANCE`
+/ `STATUS` for each root; identity-level scope manifests for Pets and DAVIS
+(§22.23.5); for TIDMAD a user-readable projection of what already exists
+(profile, ModelIOContract, DeliverableSpec, EvaluationMetric, task description
+/ forward contract) WITHOUT a second authority; Pets/DAVIS L1 fixtures where a
+seam already exists; NO real new data path, NO downloads into git, NO
+TrainingHistory implementation. PR0 has no semantic child letter (Q2).
+
+#### 22.23.7 Examples are executable regression assets (RULE)
+
+User-facing persistent examples are validated by tests, not left as
+documentation snippets: at maturity, tests (e.g. `tests/examples/`, location
+per repository convention) verify that the example config resolves, the plugin
+loads, the dataset manifests validate, the bounded run executes, the metric
+evaluates and the expected artifact structure exists — the SAME thing the
+user runs is the thing CI / Gates validate. Never "tests use private fixture
+A while the README tells users to run unrelated example B".
+
+#### 22.23.8 Definition of Done extension (BINDING on freeze)
+
+> A generic-framework Step is not complete merely when production code and
+> private tests are updated. If the Step exposes a user-facing capability
+> applicable to a persistent task, the corresponding persistent example pack
+> MUST be advanced to the same honest maturity level — including
+> `examples/tidmad/` — or the Step's design must state why that capability is
+> not yet projectable into the example.
+
+Every Step thereby answers two questions at once: *is the framework generic
+here?* and *how does a user use it now?* At the end of Step 12 the repository
+holds three complete packs — a scientific denoising task, a real RGB
+classification task and a real RGB spatiotemporal regression task — that are
+tutorials, regression suite and genericity evidence at once.

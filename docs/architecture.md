@@ -888,6 +888,10 @@ genericity-contract doc exists):
    CE → accuracy↑), Track C = DAVIS 2017 RGB 8→4 future-frame prediction
    ([3,8,128,224] → [3,4,128,224], MAE → MSE↓); D14 (executable data path)
    is a dedicated milestone right after Step 07 (roadmap §22.9a, §22.11a).
+   Each track is also a user-facing PERSISTENT EXAMPLE PACK
+   (`examples/tidmad/`, `examples/oxford_iiit_pet/`,
+   `examples/davis_future_prediction/`) that grows with track maturity and
+   consumes — never duplicates — the module-owned contracts (roadmap §22.23).
 
 ---
 

@@ -594,8 +594,10 @@ TIDMAD's `network.py:FocalLoss1D`.
   top-level guidance for Step 07 onward. Persistent tracks SELECTED:
   Track B = Oxford-IIIT Pet 37-way RGB classification, Track C = DAVIS 2017
   RGB 8→4 future-frame prediction (§22.9a); D14 = dedicated milestone after
-  Step 07. Remaining before Step 07 design: Step-7 child decomposition (Q2)
-  and the Rev-5 freeze mark.
+  Step 07; Step 07 = PR0 (persistent example baseline: `examples/`
+  roots + identity manifests) · 07a history/diagnosis · 07b policy (Gate 1)
+  · 07c measurement. Remaining before Step 07 design: the Rev-5 freeze
+  mark (Q4).
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
