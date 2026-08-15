@@ -9,7 +9,7 @@
 | Design base | `03225ac9` (master; Rev 5.3 — **Q4 FROZEN by the operator 2026-08-15**, the same round that approved this parent for freeze). Revision 2 (2026-08-15) also re-synchronized the roadmap §7a/§15.1/§16/§20.2 anchors + Gate wording + child names, `genericity_contract.md` Seam 4 and the Step-04 parent's historical "07a" rows |
 | Depends on | Steps 00–06 all **MERGED** (06 = PR #213, `02f382eb`); Rev 5 §22 (Q1/Q2/Q3 RESOLVED; Q4 pending) |
 | Decomposition | **FOUR PRs — `PR0` → `07a` → `07b` → `07c`** (Q2, operator-resolved in Rev 5.3; re-verified from source in §7 below — the split is real, not inherited) |
-| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2): the Step-level contract (§1, §3–§8, §10–§13, §16–§18, §20) is FROZEN; the document stays LIVE only for status / ledger absorption per the freeze posture below.** Operator review: decomposition, Step-level scope, examples strategy and Gate plan APPROVED; targeted revisions applied (§20 records what this parent freezes vs leaves to children; §18 records the operator's OD dispositions). Child **PR0 detailed design FROZEN — operator approved 2026-08-15** (`step_07_tuner_policy_and_training_diagnostics/pr0_persistent_example_baseline.md`); **PR0 IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` + docs sync), **MERGED — PR #214, squash `79403b44`, 2026-08-15; exact-head CI 31911929243 SUCCESS)** — PR0 COMPLETE; child §14 is the ledger. **NEXT: 07a design** (`pr_07a_training_history_diagnosis.md`, not yet written; fresh Implementation Working Rules contract) → 07b → 07c. Sequence: parent freeze → PR0 freeze/implement/merge ✔ → 07a design … |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2): the Step-level contract (§1, §3–§8, §10–§13, §16–§18, §20) is FROZEN; the document stays LIVE only for status / ledger absorption per the freeze posture below.** Operator review: decomposition, Step-level scope, examples strategy and Gate plan APPROVED; targeted revisions applied (§20 records what this parent freezes vs leaves to children; §18 records the operator's OD dispositions). Child **PR0 detailed design FROZEN — operator approved 2026-08-15** (`step_07_tuner_policy_and_training_diagnostics/pr0_persistent_example_baseline.md`); **PR0 IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` + docs sync), **MERGED — PR #214, squash `79403b44`, 2026-08-15; exact-head CI 31911929243 SUCCESS)** — PR0 COMPLETE; child §14 is the ledger. **NEXT: 07a** — child design `step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md` **DRAFTED 2026-08-15 (revision 1) — FOR OPERATOR REVIEW / not frozen; implementation only after freeze + a fresh Implementation Working Rules contract** → 07b → 07c. Sequence: parent freeze → PR0 freeze/implement/merge ✔ → 07a design … |
 | Freeze posture | This parent is a **LIVE governance document** (Step-02/04 multi-PR precedent): it owns Step-level scope, authority map, decomposition, per-PR acceptance contract and the completion contract; each child owns its implementation-ready design and later its ledger. Frozen contracts live in the children |
 
 This document deliberately stops short of per-commit checklists and
@@ -217,7 +217,7 @@ Step-00 goldens: **PB-1** planner (3 files) + **PB-2** reflector (2 files) in `t
 
 ## 4. Approved scope (per child, brief — details in §8)
 
-- **PR0** — three example roots with README / PROVENANCE / STATUS; identity-level manifests (Pets image-id·class·scope from the official annotation lists; DAVIS sequence·scope, clip identity only if the listing is obtainable without committing frames); TIDMAD read-only projection of the existing authorities, verified equal to production; Pets/DAVIS L0/L1 declarations through the real schemas where representable, honest STATUS for the rest; `tests/unit/examples/` acceptance tests. **No production code.**
+- **PR0** — three example roots with README / PROVENANCE / STATUS; identity-level manifests (Pets image-id·class·scope from the official annotation lists; DAVIS sequence·scope, clip identity only if the listing is obtainable without committing frames); TIDMAD read-only projection of the existing authorities, verified equal to production; Pets/DAVIS L0/L1 declarations through the real schemas where representable, honest STATUS for the rest; `tests/unit/examples/` acceptance tests. **No production code.** *[LANDED — PR #214 `79403b44`: DAVIS at SEQUENCE level only, clip identity → D14 (operator decision at the PR0 design review); the delivered contract is the child's §14.5.]*
 - **07a** — R3 validation pass in the trainer over the EXISTING run-bound eval sample set (same resolved objective, comparable reduction); typed `TrainingHistory` (R2 + R3 + optional checkpointed observations) carried by the existing results → record transport; deterministic, compact `TrainingDiagnosis` in the tuner through an extracted boundary; both persisted, both hidden from planner/reflector renders; Seam 5 in the genericity contract; StubSandbox/pseudo history upgraded; example packs project the history semantics.
 - **07b** — ORDERING consumers (winner / better-worse / rank / best-of / disabled sentinel / skip-bypass orientation) share the one direction authority; every SCALE-SENSITIVE rule (delta, thresholds, 5 % band, penalty policy) is classified per rule and made honest (generic, declared, derived, or fail-closed) — never assumed generic; planner/reflector task content rendered from ALREADY-LANDED authorities with byte parity; explicitly owned direction + diagnosis rendering deltas; `AttemptTransition`/`AttemptDecision` wired or removed; Gate 1.
 - **07c** — profile-derived probe batch builder (one loader), profile-derived dtype in the worker, capability-routed dataset checks in bootstrap/probe_production; identity keys/hashes/store keys byte-stable; Gate 2 bounded.
@@ -749,7 +749,7 @@ profile + contract.
 | training-trajectory oracle (validation pass RNG-neutral) | **MISSING — CAPTURE BEFORE PRODUCTION EDIT** (07a) |
 | selection replay corpus + pins | **MISSING — CAPTURE** (07b) |
 | reflector-boundary hidden-key test | **MISSING — CAPTURE** (07a) |
-| projection-equality tests for `examples/tidmad/` | **MISSING — CAPTURE** (PR0; they are PR0's baseline) |
+| projection-equality tests for `examples/tidmad/` | **CAPTURED — PR0 merged (`tests/unit/examples/test_tidmad_projection.py`, PR #214)** |
 | `_PROBE`-style value pins on `max`/`-inf` semantics | **OBSOLETE IMPLEMENTATION PIN — REWRITE** direction-parameterized (07b) |
 
 ## 11. Gate disposition — quoted from `docs/gates/gate_testing_standard.md` (read at `03225ac9`)
@@ -764,7 +764,7 @@ profile + contract.
 
 | PR | Gate 1 | Gate 2 | Evidence row / flip |
 |---|---|---|---|
-| PR0 | NOT REQUIRED | NOT REQUIRED | docs/manifests/tests only; flip: any production code or LLM byte |
+| PR0 | NOT REQUIRED | NOT REQUIRED | docs/manifests/tests only; flip: any production code or LLM byte — **✔ merged with no Gate run (flip never reached)** |
 | 07a | NOT REQUIRED (bytes exact) | **REQUIRED, bounded** | "Checkpoint (end of feature)"; real training behaviour changes; flip G1: any rendered byte / kwarg key |
 | 07b | **REQUIRED, ≥ 2 rounds** | NOT REQUIRED | "New LLM-facing system prompt" + OD-20-6; flip G2: any execution-launch change |
 | 07c | NOT REQUIRED | **REQUIRED, bounded** | "Checkpoint (end of feature)" + roadmap §17 (§7e changes real execution) |
@@ -863,6 +863,8 @@ child is about to be frozen.
 
 ## 17. Completion / Checkpoint E
 
+**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a — NEXT (design) · 07b · 07c.**
+
 Step 07 is COMPLETE when PR0, 07a, 07b, 07c are merged with Checkpoints
 0/A/B/C/D each, the required Gates PASSED at the assembled heads (07a G2,
 07b G1, 07c G2), exact-head CI green per PR, the §15.1 rows (7a + 7e), the
@@ -888,7 +890,7 @@ the SEMANTIC requirement and leaves the representation to the child.
 | **OD-S7-6** | `AttemptTransition` / `AttemptDecision` wire-or-remove | **DEFERRED to the 07b child** (decided from source; retry/round parity is the acceptance either way) |
 | **OD-S7-7** | D16 untouched by Step 07; PR0 documents Pets `log_loss` as a declared optional terminal metric BLOCKED by D16 | **APPROVED** |
 | **OD-S7-8** | Child-doc layout: Step-04 subdirectory layout | **APPROVED** (roadmap names synced) |
-| **OD-S7-9** | DAVIS clip identity at PR0 | **FROZEN AS "metadata-only derivation if feasible, otherwise D14"**; the fetch method (e.g. bounded archive listing) is the PR0 child's |
+| **OD-S7-9** | DAVIS clip identity at PR0 | **FROZEN AS "metadata-only derivation if feasible, otherwise D14"**; the fetch method (e.g. bounded archive listing) is the PR0 child's. *Superseded at the PR0 design review (operator, 2026-08-15): clip identity → D14 IN FULL; PR0 froze sequence-level identity only (child §3.3 / §13.1) — delivered so in PR #214* |
 
 ## 19. Adversarial self-review (this parent)
 
