@@ -1,8 +1,11 @@
 # SIDERIUS Generic Framework Upgrade — overall architecture & roadmap
 
-**Status: FROZEN — operator approved (2026-08-11). O1 proposer-first
-sequencing CONFIRMED. No implementation is authorized by this document
-alone.** Each module named here receives its own detailed design
+**Status: Revisions 1-3 FROZEN — operator approved (2026-08-11); O1
+proposer-first sequencing CONFIRMED. Revision 4 (2026-08-15: §0 rule 10,
+§20, §21 and their status cells) is READY FOR OPERATOR FREEZE — its seven
+operator decisions OD-20-2..7 were taken on 2026-08-15, and the Rev-4
+governance text as a whole awaits the operator's freeze mark. No
+implementation is authorized by this document alone.** Each module named here receives its own detailed design
 document (operator-reviewed) before any code changes. This document
 decides direction, module ownership, compatibility surfaces, and
 migration order — never exact schemas or field names.
@@ -1736,7 +1739,10 @@ TIDMAD-profile-bound at M2.
 first COMPLETE-COMPOSITION checkpoint — the point at which the contrast
 tracks are REQUIRED to compose into whole end-to-end tasks. It is NOT the
 first point at which genericity is tested; the tracks supply Stage-B
-evidence progressively from the step at which each seam lands.)*
+evidence progressively from the step at which each seam lands. **D14 — the
+executable dataset→tensor data path — is a PRECONDITION of criterion 1:
+until it has an owner and has landed, criterion 1 is not satisfiable, and
+"run the two tasks through the TIDMAD-shaped loader" does not satisfy it.**)*
 Reached when, simultaneously:
 1. A materially different composed contrast task (accumulated atomic
    fixtures: different topology, encoding, output form, metric) runs
@@ -1968,7 +1974,7 @@ campaign per module.
 | D10 | Dead seams disposition (tune→interp protocol; validation_file_pattern gains consumers in §4/§10 or is dropped) | per owning module's design |
 | D11 | CLAUDE.md task-agnostic claim + seam-authority pointer update | with the first landed module PR |
 | D13 | **Flexible-input rungs FX-3 (preset resolution) and FX-4 (preset-vs-explicit mismatch, fail-closed BEFORE the LLM boundary)** — deferred BY step 1, which could not land them: no preset mechanism exists in-tree, and step 1 cannot fail closed on a conflict it has no way to represent. Step 1 landed FX-1/FX-2/FX-5 as PROSE contrasts only, which prove template rank-agnosticism at the PROMPT layer and claim nothing about structured arbitrary-tensor support. **Owner: the contract owner (step 2 §4 / step 3 §5) MUST land both rungs with its structured contract** — see `step_01_proposer_hypothesis_space.md` §6A.5, §9.4 | **RESOLVED / CLOSED by Step 03** (PR #205, merge `e1181f61`). Both rungs landed with the structured contract: FX-3 preset resolution and FX-4 preset-vs-explicit mismatch, the latter failing closed BEFORE the LLM boundary with LLMBridge call count asserted at 0. A preset is authoring convenience only and does not survive resolution. Canonical evidence: `step_03_model_loss_contract.md` §4a.1 / §24, `tests/unit/agent/schemas/test_model_io_resolution.py`. **Note the narrowing**: Step-01 §6A.5 also named description↔contract consistency as part of the FX-4 obligation; Step-03 §9 explicitly WITHDREW that — it is prose duplication owned by the Step-01 layer, not an NLP validation problem |
-| D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owns the reader.** OPEN — see §20.5 for the two candidates | operator direction 2026-08-15: prefer absorption into an existing step, no new step unless source proves necessary; source audit finds §9 is NOT the natural owner, so the choice is between (a) a Step-11 scope extension and (b) a small dedicated milestone. Decide at Step-11 design kickoff or earlier if Step-12/M1 needs it |
+| D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owns the reader.** OPEN — see §20.5 for the two candidates | operator direction 2026-08-15: prefer absorption into an existing step, no new step unless source proves necessary; source audit finds §9 is NOT the natural owner, so the choice is between (a) a Step-11 scope extension and (b) a small dedicated milestone. Decide at Step-11 design kickoff or earlier if Step-12/M1 needs it. **D14 is a PRECONDITION of Milestone 1: §16 criterion 1 cannot be considered satisfiable until D14 has an owner and its abstraction has landed** — running the two contrast tasks through a TIDMAD-shaped loader would not be a generic end-to-end run (§21.3 item 3, §16 note) |
 | D15 | **Model-family aggregation of training diagnoses** ("CNNs always overfit") | not before candidate/iteration-level evidence exists (§20.2 layer 4); the existing cross-iteration state has NO model-family aggregation precedent except `model_knowledge_cache` (a summarisation cache, not evidence) |
 | D12 | Task-composition root's physical representation (file layout/schema; when legacy-adapter defaulting is retired per §2 regime split) | by §0 rule 9: after several module configs exist; the composition design also fixes the binding switch from regime A to regime B |
 
@@ -2396,6 +2402,15 @@ anticipation, **not** a commitment.
 
 Validation artifacts grow with the framework; they are not created once at
 the end.
+
+**Retention obligation (Stage B is cumulative).** Once a contrast track has
+exercised a landed abstraction, every subsequent refactor must preserve that
+track's previously established evidence — the track may not silently regress
+to TIDMAD-only — unless the owning detailed design explicitly changes the
+abstraction's contract and re-lands the rung against the new contract. This
+is the Stage-B counterpart of Stage-A parity: progressive widening is
+stateful, and evidence already established becomes a regression constraint
+for every later step.
 
 ### 21.6 Validation itself must become generic (REQUIREMENT; mechanism DEFERRED)
 

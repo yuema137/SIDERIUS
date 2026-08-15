@@ -2,7 +2,7 @@
 
 Canonical folder for ALL step-level detailed designs under the FROZEN
 overall roadmap (`docs/design/siderius_generic_framework_upgrade.md` —
-operator approved 2026-08-11; O1 proposer-first confirmed).
+Revisions 1-3 operator approved 2026-08-11, O1 proposer-first confirmed; Revision 4 — §0 rule 10, §20, §21 — is READY FOR OPERATOR FREEZE as of 2026-08-15).
 
 **This README is an INDEX plus a one-line mirror of the overall
 roadmap's status. It is NEVER an independent progress tracker — the
