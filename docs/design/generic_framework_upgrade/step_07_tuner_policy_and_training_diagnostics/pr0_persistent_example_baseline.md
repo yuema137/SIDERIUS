@@ -8,7 +8,7 @@
 | Depends on | Steps 00–06 MERGED. No code dependency on 07a/07b/07c |
 | Decomposition | ONE PR, four commits **C1 → C2 → C3 → C4** (§15) |
 | Gates | Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED (§10) — no production code, no LLM-visible byte, no execution change |
-| Status | **FROZEN — OPERATOR APPROVED 2026-08-15** (revision 2; the six review corrections of §0.5 applied; one non-semantic correction at freeze: C4 validation plan `(a)–(g)`). Implementation NOT started; no fetch performed; §14 ledger empty |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15** (revision 2; the six review corrections of §0.5 applied; one non-semantic correction at freeze: C4 validation plan `(a)–(g)`). **IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` from base `d572445a` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` = final executable head, + this docs-sync commit = final PR head); READY FOR OPERATOR REVIEW — NOT MERGED (PR number / CI id in the PR body and handoff; MERGED status + merge SHA by the post-merge finalizer).** §14 is the implementation ledger (§14.0 re-audit, §14.1–§14.4 per-commit evidence, §14.5 acceptance summary) |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
@@ -405,8 +405,293 @@ identity → D14 in full.
 
 ## 14. Implementation ledger
 
-*(empty until implementation; each commit's evidence lands here — counts,
-wall time, deviations, tests that could not run and why.)*
+Implementation session opened 2026-08-15 under the operator's Implementation
+Working Rules contract (interactive "stop and show before commit" cadence
+OVERRIDDEN by the operator: evidence is recorded here before each autonomous
+commit). Branch `step07-pr0-persistent-example-baseline` from base
+`d572445a` (== `origin/master`, clean). Handoff initialised with
+`tools/claude_hooks/init_pr_handoff.py`.
+
+### 14.0 Pre-implementation re-audit at `d572445a` (source == frozen design)
+
+- Accessors / serializers exactly as §0.2 (`resolve_dataset_profile`
+  `dataset_config.py:596`; `run_bound_model_io_contract` `task_config.py:196`;
+  `derive_tidmad_deliverable_spec` `deliverable_spec.py:332`;
+  `derive_tidmad_metric_spec` `evaluation_metric.py:549`; sandbox dumps
+  `sandbox_executor.py:1214-1266`). `DatasetProfile.model_dump()` ==
+  `model_dump(mode="json")` (verified equal); `ModelIOContract` round-trips
+  through `ModelIOContract(**dump)`.
+- `load_task_config`'s default path is CWD-relative (`task_config.py:41`) →
+  the generator and the tests pass an explicit checkout-root path.
+- **Finding (bounded, affects C2/C3 tests — not C1):** `MetricSpec(**dump)`
+  does NOT reconstruct from plain JSON — `scoreability` is typed as the
+  abstract `ScoreabilityContract` base (`evaluation_metric.py:383`), so a
+  dict validates as the base (`extra="forbid"` → rejects the concrete
+  fields; the abstract class cannot be instantiated). No production path
+  deserializes a `MetricSpec` from JSON (Step 06: the subprocess re-derives
+  from `--dataset_profile_json`). Consequence: the C2/C3 "declaration
+  validity" tests reconstruct the instance by supplying the concrete
+  contract selected by `contract_id` (`PresenceScoreabilityContract`), and
+  additionally rebuild the declaration from the §22.9a literals and
+  deep-compare the JSON. No schema is bent; the pack's declared JSON is
+  still the `model_dump(mode="json")` of a real `MetricSpec`.
+- pyright cannot run on this host (Node v10.19.0 — the vendored pyright
+  wrapper fails to load); pyright is CI-only for this PR (CLAUDE.md
+  "Environment assumptions"). ruff check + ruff format run locally.
+
+### 14.1 C1 — TIDMAD projection pack (evidence before commit)
+
+- [x] Re-read the five authorities + dump forms (14.0).
+- [x] `tools/example_packs/__init__.py` (tooling docstring: not a runtime
+      component; OD-PR0-1), `_common.py` (repo root from `__file__`, stable
+      JSON writer, SHA-256 helpers for C2/C3), `projection.py`
+      (`project_tidmad(root)`, `project_identity`, `render_resolved_banner`,
+      `write_pack`, `__main__`; reads ONLY the production accessors; the
+      writer is the only I/O).
+- [x] Generated `examples/tidmad/resolved/{dataset_profile,model_io_contract,
+      deliverable_spec,metric_spec,identity}.json` + generated
+      `resolved/README.md` banner (DO NOT EDIT · generated from · runtime does
+      not read · regenerate command).
+- [x] `examples/tidmad/{README,PROVENANCE,STATUS}.md`, `data/README.md`.
+      PROVENANCE cites the paper (arXiv 2406.04378) and the official
+      repository (github.com/jessicafry/TIDMAD; CC BY 4.0 per its README,
+      verified 2026-08-15) — no PDF, no machine path.
+- [x] Tests `tests/unit/examples/test_tidmad_projection.py` (a)–(d) with
+      the two negatives, and `test_pack_governance.py` created now with guard
+      (b) "no `.py` under `examples/`" + its negative (C4 extends this file;
+      the guard is not duplicated in C1's file — one defect, one test).
+
+**Deviation (bounded) — `.gitignore` line 11 `tidmad/` → `/tidmad/`.**
+  Reason: the unanchored `tidmad/` (initial-commit "Virtual Environments"
+  rule) also ignored `examples/tidmad/` — `git status` never showed the pack
+  and a mirror of the checkout lacked it. Source evidence:
+  `git check-ignore -v examples/tidmad/README.md` → `.gitignore:11:tidmad/`;
+  no other `tidmad/` directory exists in the tree, no tracked path contains
+  `/tidmad/`. Impact: none on production; the parent §8.1 leaves
+  "`.gitignore` additions" to this child, so §5's file list is extended by
+  exactly this one line (§0.1's audit had recorded only the absence of
+  `*.json`/`*.csv` rules). Validation: the C4 three-root guard asserts the
+  roots are TRACKED in the git index (not merely present on disk), which
+  is the test that would have caught this class of defect.
+
+Validation (C1):
+  command: `.venv/bin/python -m pytest tests/unit/examples -q` → **17 passed
+    in 0.10 s, rc=0** (log: scratchpad `pr0_c1.log`).
+  portability: the tracked + untracked tree copied to a different absolute
+    path (scratchpad `portable/`) → 17 passed (1 warning: the
+    `tidmad_data_config.yaml` → `.example.yaml` fallback of
+    `execute_tools/data_paths.py`, reached through the import chain of the
+    profile accessor's neighbours; a warning, not a failure — C1 §6 asks to
+    record which).
+  static: `ruff check tools/example_packs tests/unit/examples` clean;
+    `ruff format --check` clean (after one format pass); pyright: CI-only
+    (14.0).
+  negatives: mutated metric snapshot → deep-compare raises (test);
+    banner without "does not read" → pin fails (test); `.py` in tmp mirror →
+    guard finds it (test).
+  Gates: none (as frozen).
+
+C1 committed: `248a227c`.
+
+### 14.2 C2 — Oxford-IIIT Pet pack (evidence before commit)
+
+- [x] Bounded fetch (2026-08-15T21:57:55Z UTC, scratchpad only, NOT
+      committed): `https://www.robots.ox.ac.uk/~vgg/data/pets/data/annotations.tar.gz`
+      (301 → `https://thor.robots.ox.ac.uk/pets/annotations.tar.gz`), 19 173 078
+      bytes, SHA-256 `52425fb6de5c424942b7626b428656fcbd798db970a937df61750c0f1d358e91`
+      — **fetched twice, identical bytes** (C2 §6 reproducibility). Extracted
+      only `annotations/{list,trainval,test}.txt` + `README` (SHA-256 of the
+      three lists in PROVENANCE). Counts: trainval **3 680**, test **3 669**,
+      list 7 349 entries; trainval ∩ test = ∅; class ids consistent with
+      `list.txt`; 37 classes in each list; per-class trainval 93–100 (rule
+      precondition ≥ 5 holds by a wide margin). Dataset page re-verified to
+      state CC BY-SA 4.0; the archive README's "research purposes only /
+      respect original websites' terms" note is recorded alongside.
+- [x] Re-read `model_io_contract.py` (`Dimension` fixed/symbolic, roles
+      optional, `output_semantic` derived) + `evaluation_metric.py:215-243,
+      355-387`: float32 admissibility is `DtypeAdmissibility(admissible=("float32",))`.
+- [x] `tools/example_packs/declarations.py` (schema-instance builders +
+      `metric_spec_from_declared`: concrete `ScoreabilityContract` chosen by
+      its declared default `contract_id` among the schema's own subclasses —
+      the 14.0 finding; no registry restated) and
+      `tools/example_packs/oxford_iiit_pet.py` (`parse_official_list`,
+      `split_trainval` = the pure §3.2 rule, `derive_manifests`,
+      `render/parse_manifest_csv`, `declare_model_io_contract`,
+      `declare_metric_specs`, `declare_contracts`, `write_pack`, `__main__
+      --annotations-dir`).
+- [x] Manifest format decision (design left open): **CSV**, header
+      `image_id,class_index,official_class_id,scope`, rows sorted by
+      `(class_index, image_id)` (byte-deterministic regeneration); `final`
+      = the official test list as a set, written in the same sort order.
+      Result: train **2 946** · validation **734** (= 3 680) · final **3 669**.
+      SHA-256 pins: train `b58e8791…46ea`, validation `6dfda127…7b16e`,
+      final `f72580dc…7d070` (full values in `SHA256SUMS`, PROVENANCE and
+      the test literals).
+- [x] Declarations: `declared/model_io_contract.json`
+      (`[B, 3, 144, 144] float32 → [B, 37] float32`; class axis fixed 37 →
+      CATEGORICAL, `class_cardinality == 37`); `declared/metric_accuracy.json`
+      (id `accuracy`, higher, aggregation
+      `fraction_correct_over_final_eval_images`, `PresenceScoreabilityContract`);
+      `declared/metric_macro_f1.json` (id `macro_f1`, higher, aggregation
+      `unweighted_mean_of_per_class_f1_over_37_classes`). The aggregation
+      identity strings are pack-owned instance values (§22.23.1) naming the
+      §22.9a rule; no `log_loss` file — D16 refusal pinned by test.
+- [x] `examples/oxford_iiit_pet/{README,PROVENANCE,STATUS}.md`,
+      `data/README.md` (acquisition = explicit user action; D14 decides the
+      machine-local location; nothing fetched by the framework).
+- [x] Tests `tests/unit/examples/test_oxford_iiit_pet_pack.py`: SHA-256 pin
+      (literal + `SHA256SUMS`) per manifest; official counts as literals;
+      identity rule checks (uniqueness / disjointness / 37-class coverage /
+      index consistency) + three negatives (duplicate id, overlap, missing
+      class); **the tracked train/validation split re-derived by the frozen
+      rule over the union of the two tracked manifests** (identity carried by
+      the rule, no fetch needed); the rule on a synthetic list (positions,
+      a class with < 5 ids, `final` verbatim); declared JSON deep-equals a
+      fresh `declare_contracts()`; `ModelIOContract` renders / derives as
+      frozen; both metrics reconstruct via `metric_spec_from_declared` with
+      `direction == higher`; D16 pin (`MetricSpec(id="log_loss")` raises
+      `names a training loss`; no `metric_log_loss.json`); STATUS seam pins;
+      PROVENANCE source URL + archive SHA + licence phrase; no image /
+      archive / extracted-annotation bytes under the pack.
+
+Validation (C2):
+  command: `.venv/bin/python -m pytest tests/unit/examples -q` → **35 passed
+    in 0.14 s, rc=0** (17 C1 + 18 C2; log: scratchpad `pr0_c2.log`).
+  static: `ruff check` clean, `ruff format --check` clean (tools/example_packs
+    + tests/unit/examples); pyright CI-only (14.0).
+  Deviations: NONE beyond the 14.0 reconstruction mechanism (bounded,
+    recorded). Gates: none.
+
+C2 committed: `c78a148b`.
+
+### 14.3 C3 — DAVIS future-prediction pack (evidence before commit)
+
+- [x] Official METADATA source located and used — NO archive body: the
+      challenge's published tooling `github.com/davisvideochallenge/davis-2017`
+      ships `data/db_info.yaml` (its only list file; the repo tree was
+      enumerated via the GitHub API — no `ImageSets/*.txt` outside the
+      archive). Fetched 2026-08-15T22:04:49Z from the pinned commit
+      `97d08bf8b6201abf15509a67a985db3745a75ccd` (2017-06-07) — identical
+      bytes at `master`; 12 688 bytes; SHA-256
+      `b14a9c264d04ffc6f99a92985fe024a388a7ee08e115f65e4005b72527420c4b`.
+      Content used: `name` + `set` for `set ∈ {train, val}` ONLY → **60 / 30**
+      (design C3 §6: counts match; STOP not triggered); `test-dev` (30) and
+      `num_frames` (clip-level) deliberately NOT consumed. The archive URL
+      cited in `data/README.md` was HEAD-checked only (200, 832 766 765 B).
+      Paper citation (arXiv 1704.00675) verified.
+- [x] Re-read the model-I/O schema: differing fixed T extents (8 vs 4) are
+      plain fixed dims; only `B` is shared → `_shared_symbols_are_consistent`
+      passes; no class axis → CONTINUOUS, `class_cardinality is None`.
+- [x] `tools/example_packs/davis_future_prediction.py` (`parse_db_info`,
+      `parse_sequence_list`, `split_official_val` = the pure §3.3 rule,
+      `derive_sequence_manifest` (refuses duplicate / cross-listed names —
+      reports, never repairs), CSV render/parse, `declare_model_io_contract`,
+      `declare_metric_specs`, `declare_contracts`, `write_pack`, `__main__
+      --db-info | --lists`).
+- [x] Manifest: `data/manifests/sequences.csv` (`sequence_name,scope`;
+      rows by scope order then name) — **90 rows: 60 train / 15 validation /
+      15 final**; SHA-256 `56ddf30f…56b2` in `SHA256SUMS`, PROVENANCE and the
+      test literal. **No clip manifest** (asserted by test).
+- [x] Declarations: `declared/model_io_contract.json`
+      (`[B, 3, 8, 128, 224] float32 → [B, 3, 4, 128, 224] float32`);
+      `metric_mse.json` (lower; aggregation
+      `global_mean_squared_error_over_clips_x_C_x_T_x_H_x_W` — the frozen
+      global mean); `metric_psnr.json` (higher; SAME aggregation, transform
+      `psnr_db`, `transform_params={"data_range": 1.0}` — decomposed exactly
+      as TIDMAD's own spec decomposes linear grand mean + `log` transform);
+      `metric_mae.json` (lower). All construct (none loss-shaped).
+- [x] `examples/davis_future_prediction/{README,PROVENANCE,STATUS}.md`,
+      `data/README.md`; PROVENANCE carries the §22.9a licence / provenance
+      wording VERBATIM (BSD statement · CC BY 4.0 annotations · RGB frames
+      not masks · no single licence claimed · D14 MUST verify and pin the
+      TrainVal-480p terms); STATUS records "clip identity → D14".
+- [x] Tests `tests/unit/examples/test_davis_future_prediction_pack.py`
+      (16 tests): SHA pin; 60/15/15 + disjointness; the tracked val/final
+      split re-derived by the rule over its own union; the rule on a
+      synthetic list; inconsistent official lists refused; negatives (overlap,
+      a sequence outside the official 90); `parse_db_info` ignores
+      `test-dev` / frame counts; no clip manifest / frame bytes; declared JSON
+      deep-equals fresh; contract renders + CONTINUOUS / `None`; three
+      metrics with frozen directions; MSE aggregation is the frozen global
+      mean and PSNR carries `data_range == 1.0`; STATUS seams incl. "clip
+      identity"; PROVENANCE licence sentences + source hash.
+
+Validation (C3):
+  command: `.venv/bin/python -m pytest tests/unit/examples -q` → **51 passed
+    in 0.15 s, rc=0** (17 + 18 + 16; log: scratchpad `pr0_c3.log`).
+  static: `ruff check` / `ruff format --check` clean; pyright CI-only (14.0).
+  Deviations: NONE. Gates: none.
+
+C3 committed: `57031cd1`.
+
+### 14.4 C4 — cross-pack governance guards + docs / governance sync (Checkpoint E, pre-merge half)
+
+- [x] `tests/unit/examples/test_pack_governance.py` — guards (a)–(g), each a
+      pure function of a root so its `tmp_path` negative proves it fires:
+      (a) [MATURITY PIN, owner Step 12] no YAML under `examples/` with a
+      TOP-LEVEL `task_description` / `forward_contract` key (+ negative:
+      top-level key flagged; prose and nested key not);
+      (b) [MATURITY PIN, owner D14] no `.py` under `examples/` — on disk AND
+      in the git index (+ negative);
+      (c) [PERMANENT] AST scan of `core/ agent/ nodes/ execute_tools/
+      workflows/ ml_models/ dashboard/ scripts/ sdsc_submission_scripts/`:
+      no `import examples…`, `from tools.example_packs…`, `from tools import
+      example_packs` (+ negative with three importer forms flagged, prose
+      not);
+      (d) [PERMANENT] README / PROVENANCE / STATUS present per pack; STATUS
+      names an `L0`–`L4` level; TIDMAD also "production-backed resolved
+      projection";
+      (e) [PERMANENT] every README cites the roadmap document + §22.9/§22.23;
+      (f) [PERMANENT] the three persistent roots exist AND are tracked (`git
+      ls-files`) — presence, never exclusivity (a tmp mirror with an EXTRA
+      root passes; a missing root fails);
+      (g) [PERMANENT] every `resolved/` under any pack carries the read-only
+      banner (+ negative: missing banner / banner without pins flagged).
+- [x] `git ls-files examples | grep '\.py$'` empty (asserted by (b)).
+- [x] Docs sync (this commit): this header + §14; parent §0 status + §8.1
+      "landed" note; `generic_framework_upgrade/README.md` row 07/PR0;
+      `docs/README.md` row for this child; roadmap §15.1 step-7 row (`§7a`)
+      + §22.12 row 07 "PR0 landed (examples at honest maturity)". Merge SHA
+      / MERGED status are the post-merge finalizer's (Step-06 precedent) —
+      the rows say "landed on branch, awaiting merge" until then.
+- [ ] Push · PR · exact-head CI green (recorded in the PR body + handoff;
+      no trailing docs-only push per the operator rule) → READY FOR
+      OPERATOR REVIEW.
+
+Validation (C4):
+  targeted: `.venv/bin/python -m pytest tests/unit/examples -q` → **61 passed
+    in 0.53 s, rc=0** (17 + 18 + 16 + 10; log: scratchpad `pr0_c4.log`).
+  static (repo-wide, as CI): `ruff check .` clean (rc=0); `ruff format
+    --check .` clean (915 files, rc=0); pyright: CI-only on this host (14.0).
+  C4 guards commit: `f9398056` = **final executable HEAD** (the docs-sync
+    commit that follows changes no executable file).
+  FULL suite (ONCE, clean tree, final executable HEAD `f9398056`):
+    `.venv/bin/python -m pytest tests/unit -m "not real_run" -q` →
+    **9482 passed, 3 skipped, 0 failed in 585.03 s (0:09:45), rc=0** — verdict
+    read from the log file (`pr0_full.log`), pytest's own status captured.
+  Gates: none (as frozen; no production code path, no LLM-visible byte, no
+    execution change — the flip conditions of §10 were not reached).
+
+### 14.5 Stage-A parity / acceptance summary (§5, §22.23.13)
+
+- `git diff --stat d572445a..f9398056` touches ONLY `examples/`,
+  `tools/example_packs/`, `tests/unit/examples/`, `docs/…` and the one
+  `.gitignore` line (14.1). No file under `core/ agent/ nodes/
+  execute_tools/ workflows/ configs/ ml_models/ scripts/
+  sdsc_submission_scripts/ dashboard/`; no golden touched.
+- Projection equality: five TIDMAD snapshots deep-equal a fresh
+  `project_tidmad()` (test); banner generated.
+- Declaration evidence (§6): Pets `[B, 3, 144, 144] float32 → [B, 37]
+  float32` categorical / 37; DAVIS `[B, 3, 8, 128, 224] float32 → [B, 3, 4,
+  128, 224] float32` continuous / `None`; metrics construct with the frozen
+  directions; `log_loss` refusal pinned.
+- Manifests: Pets 2 946 / 734 / 3 669 (∪ = 3 680), 37 classes in every
+  scope, disjoint, rule re-derived over the tracked union; DAVIS 90 = 60 /
+  15 / 15, disjoint, rule re-derived; SHA-256 pins asserted from literals.
+- No raw image / frame / archive / extracted-annotation bytes tracked (tests
+  + `git ls-files`); no DAVIS archive body read (HEAD only).
+- Separability guarded (c); three roots tracked (f); honest STATUS (d/e);
+  read-only snapshots (g).
 
 ---
 

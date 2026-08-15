@@ -8,7 +8,9 @@ __pycache__/
 
 # Virtual Environments
 .venv/
-tidmad/
+# Root-level legacy env dir only. Anchored (Step-07 PR0): the unanchored form
+# also ignored the tracked example pack `examples/tidmad/`.
+/tidmad/
 venv/
 env/
 *.env

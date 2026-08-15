@@ -1,0 +1,23 @@
+{
+  "aggregation": "tidmad_anchor_normalised_linear_grand_mean",
+  "direction": "higher",
+  "id": "tidmad_denoising_score",
+  "references": [
+    "anchor_map",
+    "raw_baseline",
+    "ground_truth"
+  ],
+  "scoreability": {
+    "contract_id": "tidmad_denoised_h5",
+    "input_channel_group": "channel0001",
+    "required_attrs": [
+      "voltage_range_mV",
+      "sampling_frequency"
+    ],
+    "required_storage_dtype": "int8"
+  },
+  "transform": "log",
+  "transform_params": {
+    "log_base": 5.27
+  }
+}

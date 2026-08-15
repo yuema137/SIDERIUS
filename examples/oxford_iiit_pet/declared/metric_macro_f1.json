@@ -1,0 +1,11 @@
+{
+  "aggregation": "unweighted_mean_of_per_class_f1_over_37_classes",
+  "direction": "higher",
+  "id": "macro_f1",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

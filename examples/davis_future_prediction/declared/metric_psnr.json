@@ -1,0 +1,13 @@
+{
+  "aggregation": "global_mean_squared_error_over_clips_x_C_x_T_x_H_x_W",
+  "direction": "higher",
+  "id": "psnr",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": "psnr_db",
+  "transform_params": {
+    "data_range": 1.0
+  }
+}

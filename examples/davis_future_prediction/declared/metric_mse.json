@@ -1,0 +1,11 @@
+{
+  "aggregation": "global_mean_squared_error_over_clips_x_C_x_T_x_H_x_W",
+  "direction": "lower",
+  "id": "mse",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

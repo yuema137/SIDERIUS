@@ -1,0 +1,30 @@
+{
+  "anchor_selection_files": [
+    0,
+    10,
+    19
+  ],
+  "channels": {
+    "input_channel": "channel0001",
+    "target_channel": "channel0002"
+  },
+  "dataset": {
+    "num_files": 20,
+    "psd_segment_length": 10000000,
+    "sampling_frequency": 10000000.0,
+    "segments_per_file": 200,
+    "training_file_pattern": "abra_training_{file_index:04d}.h5",
+    "validation_file_pattern": "abra_validation_{file_index:04d}.h5"
+  },
+  "encoding": {
+    "compute_dtype": "int16",
+    "num_classes": 256,
+    "storage_dtype": "int8",
+    "value_offset": 128
+  },
+  "health_peek_files": [
+    3,
+    10,
+    17
+  ]
+}
