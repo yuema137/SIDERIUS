@@ -6,7 +6,7 @@ obligations this step inherits beyond §10).
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 2 (2026-08-15, operator review of revision 1): scalar-mandatory / per-sample-evidence-optional metric semantics (§4); scoreability made an EXECUTABLE behaviour and a DoD item (§4, §12); `DeliverableSpec` vs `ScoreabilityContract` ownership sharpened (§4); the Step-06 runtime-interface vs Step-12 task-declaration split made explicit (§5, §16-Q2); Q3 now blocks freeze on semantics. Implementation is NOT authorized by this document. |
+| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 3 (2026-08-15, operator review of revision 2): Q1 ownership wording sharpened to the 05c-representation / 06-acceptance split (§4, §16); scoreability's SEMANTIC SCOPE bounded — execution semantics frozen, no universal completeness/channel/shape schema (§4, §16-Q3); **Gate 2 re-dispositioned to NOT REQUIRED on the standard's own assignment table and roadmap §17's metric-handle rule, quoted** (§13); the two-route parity re-positioned as a compatibility obligation, not a generic-metric requirement (§1.1, §11); Checkpoint-0 oracle wording generalized (§11). Revision 2 (operator review of revision 1): scalar-mandatory / per-sample-evidence-optional metric semantics (§4); scoreability made an EXECUTABLE behaviour and a DoD item (§4, §12); `DeliverableSpec` vs `ScoreabilityContract` ownership sharpened (§4); the Step-06 runtime-interface vs Step-12 task-declaration split made explicit (§5, §16-Q2); Q3 now blocks freeze on semantics. Implementation is NOT authorized by this document. |
 | Design base | master `75525dc9` (Step 05 COMPLETE: 05a `cfb3b1c7`, 05b `5ce205d3`, 05c `03e00944`; finalizer `75525dc9`) |
 | Depends on | Step 02 (`DatasetProfile`) · Step 03 (`ModelIOContract`) · Step 05c (`DeliverableSpec`, provisional) · roadmap §10, §14, §16, §20 |
 | Owns | the **EvaluationMetric** interface; the **evaluation-vs-training-diagnostics boundary** (by exclusion); the **Deliverable-Contract confirm-or-say-why review** |
@@ -53,7 +53,7 @@ path — D14; renaming `denoising_score` — D1, **not authorized**.
 | Fact | Evidence |
 |---|---|
 | The formula: PSD → peak → SNR → per-segment anchor-normalised → linear grand-mean → `log_5.27` | `execute_tools/scoring_utils.py:104-264` (`get_one_sec_psd`, `get_snr`), `:490-610` (`score_vector`); `scoring_helpers.py:36` `_LOG_BASE = 5.27` |
-| **Two live entry points.** (i) In-process: the tuner calls `sandbox.score_vector(...)` directly (`ml_hyperparameter_tune_agent.py:5321-5326` → `TidmadSandbox.score_vector` `sandbox_executor.py:1858-1897` → `scoring_utils.score_vector`). (ii) Subprocess: `TidmadSandbox.execute_scoring` spawns `denoising_score_single.py` (`sandbox_executor.py:1899-1971`) — used by `scripts/run_comparison.py:241` and `agent/skills/denoising_score_skill/wrapper.py:12`, **not by the tuner's live round path** | the tuner's scoring is in-process; §7c's "isolated argv contract" note (roadmap :843-844) describes route (ii) |
+| **Two live entry points.** (i) In-process: the tuner calls `sandbox.score_vector(...)` directly (`ml_hyperparameter_tune_agent.py:5321-5326` → `TidmadSandbox.score_vector` `sandbox_executor.py:1858-1897` → `scoring_utils.score_vector`). (ii) Subprocess: `TidmadSandbox.execute_scoring` spawns `denoising_score_single.py` (`sandbox_executor.py:1899-1971`) — used by `scripts/run_comparison.py:241` and `agent/skills/denoising_score_skill/wrapper.py:12`, **not by the tuner's live round path** | the tuner's scoring is in-process; §7c's "isolated argv contract" note (roadmap :843-844) describes route (ii). **Positioning (revision 3): the two-route equality is a COMPATIBILITY / route-parity obligation for the two existing TIDMAD entry points — not a requirement that every future metric expose two scoring routes.** Step 06's genericity target is `metric handle → production scoring`; the second route is legacy/helper infrastructure that must keep agreeing |
 | Return shape | `score_vector -> tuple[file_vector, scalar]` (2-tuple, "pure scoring" per CLAUDE.md invariant); `denoising_score_single.py:220-227` merges `denoising_score` + `file_vector` into `--output_json` |
 | Record payload | `ExperimentRecord.denoising_score / file_vector / score_table` (`hyperparam_tuning.py:381-399`); tuner writes them `:5780-5786`; `ScoreComparisonTable` built at `:5538` |
 | Direction is implicit and repeated | `max(...)` / `>` at tuner `:5608-5613`, `:5701`; workflow `model_exploration.py:2740`; `core/resume.py:438`; `per_file_best._row_beats` :478-480; dashboard `local_json.py:245`, `base.py:119` — roadmap :1029-1040 |
@@ -158,11 +158,14 @@ field names:**
 | transform | `score_transform: "log"`, `log_base` | already emitted by `per_file_best`; carried, not re-declared |
 
 **Deliverable-Contract ownership — the confirm-or-say-why (OD-20-7).**
-PROVISIONAL RECOMMENDATION: **CONFIRM final-evaluation-side ownership of the
-deliverable's *semantic identity for scoring* and of the ACCEPTANCE
-contract** — because (§1.2) the scorer reads attrs and addresses channels
-inside the artifact. The split is exact, and it is what stops two things
-owning the interior at once (roadmap §20.4):
+PROVISIONAL RECOMMENDATION (wording sharpened at revision 3 so it cannot be
+read as "the metric owns deliverable semantics"): **CONFIRM that Step 06
+owns the evaluation-side ACCEPTANCE contract and the deliverable facts
+required for scoreability, while Step 05c retains EXCLUSIVE ownership of
+producer-side representation semantics.** The metric may *reference*
+`DeliverableSpec`; it never redefines it. The evidence is §1.2 (the scorer
+reads attrs and addresses channels inside the artifact). The split is exact,
+and it is what stops two things owning the interior at once (roadmap §20.4):
 
 ```text
 DeliverableSpec  (05c, RETAINED, producer-side)   "how the artifact IS represented"
@@ -221,6 +224,21 @@ the existing task configuration** (`configs/task_config.yaml` already hosts
 D4/D12 territory. `ScoreabilityContract` is part of `MetricSpec` and is
 **executable**: `validate(deliverable) -> ok | structured failure`, invoked by
 the handle before arithmetic on both scoring routes.
+
+**Semantic scope of scoreability — bounded (revision 3, §16-Q3).** Step 06
+freezes the EXECUTION semantics of the contract — validate before
+arithmetic; structured failure on rejection; the reuse guard is not the
+mechanism — and **does NOT impose a universal, task-independent schema for
+"completeness", "required channels" or "required shape"**. Those
+requirements are declared **per metric instance**, against the
+producer-side `DeliverableSpec`. "Completeness" for TIDMAD means every
+in-scope file has a per-file output; for a dense-prediction task it may
+mean output geometry matches target geometry; for a global scalar
+regression it may mean one value exists. A generic `required_num_files /
+required_channels / required_shape` schema would be the TIDMAD shape
+re-declared as the universal one — exactly the anti-goal roadmap §21.10
+names. Any future shared vocabulary here is evidence-driven (§21.4/§21.8),
+not designed in Step 06.
 **Existing fields are untouched**: `denoising_score`, `file_vector`,
 `score_table` keep their names and semantics; `MetricResult` sits beside
 them so historical records validate unchanged.
@@ -318,7 +336,7 @@ to LLMs; that stays.
 
 | Rung | What | Existing or new |
 |---|---|---|
-| Checkpoint 0 | capture the **two-route parity oracle** — the exact `(file_vector, scalar)` for a fixed synthetic deliverable via BOTH `sandbox.score_vector` and the `execute_scoring` spawn, plus the `per_file_best` key set | new (the routes have never been pinned as equal to each other) |
+| Checkpoint 0 | capture the **two-route parity oracle** — the exact **existing TIDMAD scoring result and its key/output shape** (today: scalar + `file_vector`) for a fixed synthetic deliverable via BOTH `sandbox.score_vector` and the `execute_scoring` spawn, plus the `per_file_best` key set. Worded as the *existing TIDMAD result*, not as `(file_vector, scalar)`, so a future scalar-only metric is not bound by this oracle's shape (revision 3) | new (the routes have never been pinned as equal to each other) — a **compatibility** capture, not a generic-metric requirement |
 | Stage A | frozen-formula pins, offline scalar baseline, `real_run` legacy parity, historical record/output validation | existing + one replay test |
 | Stage B (atomic, one axis) | **metric-direction axis**: a lower-is-better scalar metric on stub outputs enters the record through the handle with `direction="lower"` and TIDMAD's identity/direction unchanged (roadmap §10.5). *Under roadmap §21.4 this is an ATOMIC fixture on the **learning-objective** coverage dimension at TIDMAD's topology — the cheapest Stage-B grade Step 06's abstraction can honestly support (§17 Checkpoint B, Rev 4); no image/spatiotemporal track is required of Step 06.* | new |
 | Boundary negative | a loss-shaped "metric" is rejected; `loss_history` cannot populate `MetricResult` | new (§7) |
@@ -348,12 +366,55 @@ metric (Step 07a), Interpreter rendering (Step 09), dashboards (D1).
 - [ ] no new independent state store; no new argv (or an honestly downgraded Stage-A claim)
 - [ ] the enumerated list of direction consumers this step does NOT reach is recorded (D1)
 
-## 13. Gate disposition (PROVISIONAL, from the current standard)
+## 13. Gate disposition — SOURCE-GROUNDED (revision 3)
 
-| Gate | Disposition | Reason |
+Roadmap §17.0 is binding: a design that names a Gate must **open
+`docs/gates/gate_testing_standard.md`, quote its "Gate assignment by commit
+type" row, and decide from that** — never from a sense that a change "feels
+important". Revision 2 violated this: it recommended Gate 2 REQUIRED because
+"the tuner's live scoring route changes call path", which is not a criterion
+the standard or §17 recognizes. Corrected here from the two authorities,
+quoted.
+
+**The standard's assignment table** (`docs/gates/gate_testing_standard.md`,
+"Gate assignment by commit type", read at design time 2026-08-15):
+
+```text
+| Config files, YAML, schema-only          | Unit only                     |
+| New loader/renderer (pure Python)        | Unit only                     |
+| Prompt placeholder substitution          | Unit only + optional Gate 1   |
+| New LLM-facing system prompt             | Gate 1                        |
+| New agent node or workflow wiring        | Gate 1                        |
+| Checkpoint (end of feature)              | Gate 2                        |
+| Loss function generation (L4)            | Gate 1 (dummy-tensor) + Gate 2 at Checkpoint L |
+```
+
+**Roadmap §17, the sentence that names this exact case** (quoted):
+
+> "Bounded real Gates: conceptually REQUIRED … for modules that change real
+> execution behavior — §7c, §7e, §9, and §8's blocking-verdict changes; **NOT
+> required for prompt/config/metric-handle extractions whose parity is fully
+> deterministic.**"
+
+Step 06 **is** the metric-handle extraction. Its Stage-A parity is fully
+deterministic (byte-identical formula values; the two-route oracle; historical
+record validation), and its live-integration evidence is Checkpoint C through
+the **real** `execute_scoring` subprocess. There is no LLM-visible change and
+no execution-surface expansion (the arithmetic, the deliverable and the
+subprocess contract are untouched; only the call path is routed through the
+handle). The closest landed precedent, Step 04b, disposed Gate 2 NOT REQUIRED
+on the same "authority/source change, no execution-surface expansion" ground.
+
+| Gate | Disposition | Ground (quoted above) |
 |---|---|---|
-| Gate 1 | **NOT REQUIRED** | Step 06 changes no prompt and no `LLMBridge` kwarg (§8). Flip: if any prompt byte changes |
-| Gate 2 | **REQUIRED — bounded** (recommendation; §16-Q5) | the tuner's live scoring route changes call path; a real attempt that trains, infers, writes, **scores through the handle** and cleans is the only evidence that failure class "wrong scalar on the real path" cannot survive. Bounded exactly as 05c's C8 (one attempt, pro config, ~10 min). Counter-argument, recorded: if Checkpoint C's real-subprocess scoring plus the two-route oracle are judged sufficient, Gate 2 could be re-dispositioned to NOT REQUIRED — the operator decides at freeze |
+| Gate 1 | **NOT REQUIRED** | no new LLM-facing prompt, no new agent node/wiring, no placeholder change (§8). **Flip**: any prompt byte or `LLMBridge` kwarg change |
+| Gate 2 | **NOT REQUIRED** | roadmap §17: metric-handle extraction with fully deterministic parity; the standard's only Gate-2 rows are "Checkpoint (end of feature)" and L4, neither of which describes Step 06's change. **Flip**: if implementation finds the handle must change scorer arithmetic, deliverable bytes, or the subprocess argv contract — any of which would make parity non-deterministic and re-open this row |
+
+**What replaces the Gate as evidence**: Checkpoint C (real subprocess), the
+two-route oracle, the scoreability-negative rung and the mutation families
+(§11). The operator may still elect a bounded Gate 2 at freeze (§16-Q5); this
+section records that the standard does **not** require it, so electing one is
+a discretionary cost, not a compliance need.
 
 ## 14. Rollback boundary
 
@@ -388,11 +449,11 @@ count, module placement, field names.
 
 | # | Question | Blocks freeze? | Recommendation |
 |---|---|---|---|
-| Q1 | **Confirm** final-evaluation-side ownership of the Deliverable Contract's semantic identity (§4), or **defer** with the missing consumer evidence named? | **YES** | Confirm — the scorer reads the deliverable's interior (§1.2) |
+| Q1 | **Confirm** that Step 06 owns the evaluation-side ACCEPTANCE contract and the deliverable facts required for scoreability, while Step 05c retains EXCLUSIVE ownership of producer-side representation semantics (§4) — or **defer** with the missing consumer evidence named? | **YES** | Confirm — the scorer reads the deliverable's interior (§1.2); the metric references `DeliverableSpec`, never redefines it |
 | Q2 | Metric declaration form for non-TIDMAD tasks: derived-only in Step 06 (regime A) with the declared additive block deferred to Step 12, or an additive block in `task_config.yaml` now? | **YES** | derived-only now; declared block lands with the first composed contrast task (Step 12), consistent with §0 rule 8. *(Roadmap §20.3 records the 06-runtime-interface / 12-declaration split as DECIDED; what remains for freeze is confirming no `task_config.yaml` edit in Step 06.)* |
-| Q3 | Scoreability contract **semantics**: the acceptance predicate's scope (required channels · required attrs · required dtype/range · required completeness), that it is EXECUTABLE before arithmetic, that failure is a structured result, and that the reuse guard is not the mechanism. | **YES — on semantics.** Exact field names remain implementation detail. *(Revision 2: revision 1 marked this non-blocking; the operator review correctly noted that unfrozen scoreability semantics leave implementation free to "just score and hope it doesn't crash".)* | freeze the semantics as stated in §4/§5; leave field names to the implementation ledger |
+| Q3 | Scoreability contract **semantics**: EXECUTION semantics frozen (executable before arithmetic; structured failure; reuse guard not the mechanism) — **and its SCOPE bounded: NO universal task-independent schema for completeness / channels / shape; requirements are per-metric-instance, declared against `DeliverableSpec`** (§5, revision 3). | **YES — on semantics and scope.** Exact field names remain implementation detail. | freeze the execution semantics and the scope bound as stated in §5; leave field names to the implementation ledger |
 | Q4 | Any TIDMAD *secondary* metric instance in Step 06? | no | none — no consumer |
-| Q5 | Gate 2 REQUIRED-bounded vs NOT REQUIRED given Checkpoint C | no | REQUIRED-bounded |
+| Q5 | Gate 2: the standard and roadmap §17 say NOT REQUIRED (§13, quoted). Does the operator nonetheless ELECT a bounded Gate 2 as discretionary evidence? | no | **NOT REQUIRED per the authorities**; electing one is the operator's discretionary call, not a compliance need |
 | Q6 | Which direction consumers does Step 06 *reach*? Recommendation: the tuner's live scoring route + record payload only; workflow `:2740`, resume `:438`, `per_file_best._row_beats`, dashboard remain enumerated D1 debt | no | as recommended |
 
 ## 17. Implementation notes / source map (reading aids, not contracts)
