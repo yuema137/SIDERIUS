@@ -6,11 +6,84 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. Not frozen. Implementation NOT authorized.** Revision 3 (2026-08-15): active census repaired, transport-vs-reconstruction decided (§3.2a), spec scope narrowed to the facts actually migrated (§1), encoding literals classified individually (§2.2), artifact equality defined (§4.1). **Remaining operator decisions: NONE.** |
+| Status | **PR 05C DESIGN — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION.** Frozen 2026-08-15 (UTC) at revision 3: active census repaired, transport-vs-reconstruction decided (§3.2a), spec scope narrowed to the facts actually migrated (§1), encoding literals classified individually (§2.2), artifact equality defined (§4.1). **Remaining operator decisions: NONE.** Implementation NOT started — see §0.0 |
+| Frozen semantic content | **`fe73f982ffa4b86aca1eb3e28d18ddacf3af5d32`** — the operator-approved design object |
 | Design base | **re-anchored to `226d4e9f`** (master after 05a `cfb3b1c7` and 05b `5ce205d3` merged). Revision 1 was written against `13b08550`; §0.2 is the corrected anchor table and lists six citations that did not survive audit |
+| Decomposition | **ONE PR**, internal semantic checkpoints **C0–C9** (§14) |
+| Deliverable ownership | producer-side **provisional** extraction; final ownership **OPEN**; **Step 06** is the next mandatory confirm-or-say-why review (§3) |
 | Depends on | **Step 02** (Dataset Profile: channels, `ValueEncoding`) · **Step 03** (`ModelIOContract` decode rule) |
 | Roadmap row | §15.1 `§7c Tuner execution contracts` |
 | Risk | **Highest of the three** — it changes real execution behavior |
+
+---
+
+## 0.0 Freeze record
+
+| | |
+|---|---|
+| Status | **PR 05C DESIGN — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION.** |
+| Frozen semantic design content SHA | `fe73f982ffa4b86aca1eb3e28d18ddacf3af5d32` |
+| Design base | `226d4e9f` |
+| Freeze date | **2026-08-15 (UTC)** |
+| Decomposition | **ONE PR** |
+| Internal semantic checkpoints | **C0–C9** (§14; also Checkpoints 0/A/B/C/D) |
+| Deliverable ownership | producer-side **provisional** extraction; final ownership **OPEN**; **Step 06** is the next mandatory confirm-or-say-why ownership review |
+| Remaining operator decisions | **NONE** (§16) |
+| Implementation state | **NOT STARTED** — §15 ledger empty |
+
+**The freeze does not itself begin implementation.** Implementation
+authorization is a separate operator act and will be supplied in a fresh
+session together with the filled Implementation Working Rules. Freezing the
+design authorizes nothing to be built, tested or gated today.
+
+**What this freeze does NOT fix.** These are implementation latitude and may
+be decided at implementation time without a further operator decision:
+
+- the exact **Git commit count** (§14 freezes the semantic sequence, not the
+  number of commits);
+- exact **helper / module placement**;
+- exact **source line numbers** — every citation in this document is a reading
+  aid captured at `226d4e9f`, not a contract (§14);
+- exact **test-file decomposition**;
+- exact **mutation implementation** — §14/C7 requires evidence per semantic
+  failure family, deliberately **not** a frozen per-line mutation count.
+
+**What this freeze DOES fix — binding on implementation:**
+
+- the **process-boundary mechanism and its semantic behavior**: §3.2a
+  **Option A, deterministic reconstruction**. The `DeliverableSpec` does not
+  cross the process boundary; parent and child call one shared pure derivation
+  over authorities that already cross (`--dataset_profile_json`,
+  `--model_io_json`), which are **consumed, not re-plumbed**. No new argv, no
+  serialization, no ambient module-global spec. Option B (a transient optional
+  field on the existing per-`exp_id` profile JSON) is the recorded destination
+  **only** via a MATERIAL DESIGN STOP;
+- the **logical-artifact parity definition**: §4.1 **exact logical artifact
+  equality**, explicitly not raw HDF5 binary equality; and §4.2 **exact ordered
+  argv-list equality after explicitly documented normalization** of genuinely
+  ephemeral values only;
+- the **Stage-B claim**: §5's renamed-spec rung is supplied **in-process at the
+  owned seams**. 05c must **NOT** claim the renamed template crosses the real
+  subprocess;
+- the **Checkpoint-C property**: a real production spawn in which the child
+  **reconstructs the shipped default spec**; helper-only is insufficient. §6
+  keeps Checkpoint C and Gate 2 semantically distinct;
+- the **Gate disposition**: Gate 1 **NOT REQUIRED**; Gate 2 **REQUIRED and
+  bounded**, its launch scope governed by the later filled Implementation
+  Working Rules and the current Gate standard, not by a further operator
+  design decision;
+- the **ownership boundaries**: the spec owns only the producer-side facts
+  §1/§3 explicitly migrate. Instrument attrs, sampling-frequency metadata,
+  chunking, split mechanics, invalid-filename policy, completeness and
+  scoreability stay outside it; input decode, model-output decode and
+  persisted-output encoding remain separate authorities (§2.1, §2.2);
+- **no user-authored `DeliverableSpec` config, no new top-level YAML or config
+  hierarchy** (§3.1, §17);
+- **historical / config replay requires no migration** (§3.3);
+- scorer semantics, HealthGate semantics, cleanup policy and metric
+  scoreability remain **out of scope** (§1, §11, §13).
+
+**No checkpoint or commit inside this PR is an operator pause point** (§14.2).
 
 ---
 
@@ -326,8 +399,12 @@ Step 05 therefore does **not** promise that Step 06 will settle ownership —
 only that Step 06 must decide-or-say-why. And it does not nominate Step 11
 as the owner merely because later consumers exist there.
 
-**This remains an operator decision to confirm** (§16), because it binds
-Step 06's design surface.
+**CONFIRMED BY THE OPERATOR (2026-08-15) and CLOSED** (§16). It binds Step
+06's design surface, which is why it required an explicit decision rather
+than an implementation choice. *(Status correction at freeze: this sentence
+still read "remains an operator decision to confirm" while §16 already
+recorded it as confirmed and closed. No semantic change — §16 was and remains
+the decision register.)*
 
 ### 3.1 What the provisional contract IS — frozen representation
 
