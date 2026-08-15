@@ -2,21 +2,23 @@
 
 | Field | Value |
 |---|---|
-| Parent | `../step_07_tuner_policy_and_training_diagnostics.md` (revision 2, `d432cf05`) §8.1 — PR0 has **no semantic child letter** (Q2) |
+| Parent | `../step_07_tuner_policy_and_training_diagnostics.md` (revision 2 — APPROVED FOR FREEZE by the operator 2026-08-15) §8.1 — PR0 has **no semantic child letter** (Q2) |
 | Roadmap | §22.23 (persistent example packs), §22.23.6 (PR0), §22.9a (frozen Track B/C specifications), §22.11a, §22.12 row 07; §15.1 step-7 rows |
-| Design base | `d432cf05` (master). Rev 5.3 READY FOR OPERATOR FREEZE — Q4 and the parent freeze are the operator's marks; **this child is implementable only after both** |
+| Design base | `d432cf05` (master). Rev 5.3 **Q4 FROZEN** and the parent **approved for freeze** (operator, 2026-08-15); **this child is implementable only after its own freeze mark** |
 | Depends on | Steps 00–06 MERGED. No code dependency on 07a/07b/07c |
 | Decomposition | ONE PR, four commits **C1 → C2 → C3 → C4** (§15) |
 | Gates | Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED (§10) — no production code, no LLM-visible byte, no execution change |
-| Status | **DRAFT — awaiting operator review / freeze.** Nothing implemented; no fetch performed |
+| Status | **REVISION 2 — READY FOR OPERATOR FREEZE.** Operator review of revision 1 (2026-08-15): direction approved; six targeted corrections applied (§0.5). Nothing implemented; no fetch performed |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
 **What is frozen once this design is approved**: the capability (§1), the
-per-pack content classes and the "projection, never authority" rule (§3),
-the manifest derivation rules (§3.2/§3.3), the Stage-A criterion (§5), the
-declaration evidence (§6), Checkpoint C (§7), the failure classes (§8), the
-Gate disposition (§10), the stop conditions (§13). **What is NOT frozen**:
+per-pack content classes, the "projection, never authority" rule and the
+read-only-snapshot UX invariant (§3), the manifest derivation rules
+(§3.2/§3.3 — DAVIS sequence-level only), the maturity-scoped nature of every
+PR0-only guard (§3.5), the Stage-A criterion (§5), the declaration evidence
+(§6), the validation-consumer statement (§4/§7), the failure classes (§8),
+the Gate disposition (§10), the stop conditions (§13). **What is NOT frozen**:
 exact file names inside a pack beyond the categories the roadmap names,
 helper structure, test-file decomposition, source line numbers (reading
 aids captured at `d432cf05`). Re-read the touched source immediately before
@@ -75,12 +77,23 @@ through the REAL schemas; the four non-representable rows are named as D14
 | Track | Metadata artifact | Use | Provenance to record |
 |---|---|---|---|
 | Pets | `annotations.tar.gz` (~19 MB, official VGG page; contains `annotations/list.txt`, `trainval.txt`, `test.txt` — image id · class id (1–37) · species · breed id) | derive image-id · class · scope manifests | URL, fetch date, SHA-256 of the archive, line counts of the three lists |
-| DAVIS | official 2017 sequence lists (`ImageSets/2017/train.txt` = 60, `val.txt` = 30) — obtainable from an official metadata source (the challenge tooling repository or a bounded read of the trainval archive's member listing); per-sequence FRAME COUNTS only from a bounded listing of the archive | sequence · scope manifest (always); clip identity ONLY if frame counts are obtainable without downloading frames (parent OD-S7-9) | source URL, fetch date, SHA-256 of the list bytes; for a bounded archive listing: the archive URL, its `Content-Length`, the byte ranges read |
+| DAVIS | official 2017 sequence lists (`ImageSets/2017/train.txt` = 60, `val.txt` = 30) — from an official METADATA source (the challenge's published tooling / list files); PR0 reads NO archive body | sequence · scope manifest ONLY (clip identity → D14 in full, operator 2026-08-15) | source URL, fetch date, SHA-256 of the list bytes |
 
 No image, frame or archive body is downloaded into the repository or the
 workspace by this PR; the ~19 MB Pets annotation archive is fetched to a
 temporary location, consumed by the generator, and NOT committed (only its
 SHA-256 and the derived manifests are).
+
+### 0.5 Operator review of revision 1 (2026-08-15) — corrections applied in this revision
+
+| # | Correction | Where |
+|---|---|---|
+| 1 | Every PR0-only guard is **maturity-scoped** with a named relaxation owner — never a permanent repository rule; the three roots MUST exist, they are not the only examples SIDERIUS may ever contain | §3.5, C4 |
+| 2 | Generated TIDMAD JSON = **read-only RESOLVED snapshot**, visibly identified (`resolved/`, DO-NOT-EDIT banner, "runtime does not read this file"); a migration rule so later real task bindings never coexist ambiguously with PR0 snapshots | §3.1, §3.6, C1 |
+| 3 | DAVIS PR0 freezes **sequence-level identity only**; task semantics 8→4 / stride 1 fixed; ALL clip `(sequence, start_frame)` identity → D14; archive-listing machinery removed | §3.3, C3 (roadmap §22.9a / §22.23.5 annotated) |
+| 4 | "First production consumer" replaced: PR0 creates **no production seam and no runtime consumer**; CI projection/declaration tests are the validation consumer; production authorities are the SOURCE — the consumer-less-seam rule is not implicated | §4, §7 |
+| 5 | SHA-256 is an **integrity / provenance pin**, not by itself an immutability proof (canonical identity = frozen rule + official provenance + review + source hash) | §3.2, §3.3, §6, §8 |
+| 6 | `tools/example_packs/` APPROVED as PR0 generation / projection **tooling**; later runtime / data-path designs (D14, Step 12) are NOT required to reuse it (OD-PR0-1) | §3.1, §13.1 |
 
 ---
 
@@ -108,8 +121,14 @@ The precise invariants:
    declarations) are owned by the pack (§22.23.1) — they interpret no rule.
 3. **Honest maturity.** STATUS claims nothing that has not landed; the
    non-representable contracts are named as seams, not hidden.
-4. **Nothing large, nothing executable.** No raw data, no loader, no plugin,
-   no launcher, no production `.py` under `examples/`.
+4. **Nothing large, nothing executable — at PR0.** No raw data, no loader,
+   no plugin, no launcher, no production `.py` under `examples/` (a PR0
+   maturity pin, §3.5 — not a permanent rule).
+5. **Snapshots are visibly read-only.** Generated projections are labelled
+   resolved snapshots; nothing suggests editing them changes runtime.
+6. **Tooling is tooling.** `tools/example_packs/` generates and projects;
+   it is not a dataset loader, not a composition system, and no later design
+   is obliged to reuse it.
 
 ---
 
@@ -139,24 +158,29 @@ examples/
     PROVENANCE.md        TIDMAD data source (paper, official distribution), local data-root mechanism
                          (tidmad_data_config.yaml — reference, no path), reference_data/ pointers
     STATUS.md            maturity: production-backed for the projected contracts; what is NOT projected
-    contracts/           GENERATED projections (JSON): dataset_profile · model_io_contract ·
-                         deliverable_spec · metric_spec · identity (file indices + file families
-                         derived from the profile) — each regenerated + deep-compared by test
+    resolved/            GENERATED, READ-ONLY resolved snapshots (JSON) with a DO-NOT-EDIT banner
+                         file: dataset_profile · model_io_contract · deliverable_spec · metric_spec ·
+                         identity (file indices + file families derived from the profile) — each
+                         regenerated + deep-compared by test; runtime never reads them (§3.6)
     data/README.md       how the data root is configured today (reference to the config mechanism)
   oxford_iiit_pet/
     README.md · PROVENANCE.md · STATUS.md
     data/manifests/      identity manifests (train / validation / final) + SHA256SUMS
     data/README.md       acquisition instructions (official URLs; nothing fetched by the framework)
-    contracts/           DECLARED L0/L1 instances (JSON): model_io_contract · metric specs
+    declared/            the pack's OWN L0/L1 declarations (JSON): model_io_contract · metric specs
                          (accuracy, macro_f1) — validated through the real schemas by test;
-                         log_loss documented as D16-blocked (NOT declared through the schema)
+                         log_loss documented as D16-blocked (NOT declared through the schema).
+                         Distinct from tidmad/resolved/: these are instance declarations the pack
+                         owns (§22.23.1), not snapshots of a production authority
   davis_future_prediction/
     README.md · PROVENANCE.md · STATUS.md
-    data/manifests/      sequence-level identity manifest (+ clip manifest ONLY if OD-S7-9 allows)
+    data/manifests/      sequence-level identity manifest ONLY (clip identity → D14)
     data/README.md
-    contracts/           model_io_contract · metric specs (mse, psnr, mae)
-tools/example_packs/     the generator (projection + manifest derivation + declaration writers);
-                         pyright/ruff-checked; core NEVER imports it; the tests import it
+    declared/            model_io_contract · metric specs (mse, psnr, mae)
+tools/example_packs/     PR0 generation / projection TOOLING (projection + manifest derivation +
+                         declaration writers); pyright/ruff-checked; core NEVER imports it; the
+                         tests import it; NOT a runtime component — D14 / Step 12 are free to
+                         ignore it (OD-PR0-1)
 tests/unit/examples/     acceptance tests (§4–§8)
 docs/…                   this doc's ledger, README index rows, docs/README.md row, roadmap
                          §15.1 / §22.12 status sync at Checkpoint E
@@ -176,7 +200,12 @@ docs/…                   this doc's ledger, README index rows, docs/README.md 
   · official_class_id · scope`. Scopes are pairwise disjoint; every trainval
   image appears exactly once in `train ∪ validation`.
 - SHA-256 of each manifest file is pinned in `SHA256SUMS` and asserted by
-  test; regeneration is an explicit operator act with provenance.
+  test as an **integrity / provenance pin** (it detects corruption and names
+  the exact bytes reviewed; it does NOT by itself prove immutability — a
+  manifest and its pin can change together). What makes the identity
+  canonical is the frozen rule above + the official source's recorded SHA-256
+  + review of any regeneration commit. Regeneration is an explicit operator
+  act with provenance.
 
 ### 3.3 DAVIS identity-manifest derivation rule (FROZEN)
 
@@ -185,14 +214,15 @@ docs/…                   this doc's ledger, README index rows, docs/README.md 
 - `validation` / `final` = the 30 official val sequences sorted by name;
   position `i` (0-based) goes to `validation` iff `i % 2 == 0`, else
   `final` (15 / 15). Sequence-disjoint by construction.
-- Manifest row: `sequence_name · scope`. SHA-256 pinned.
-- Clip identity `(sequence_name, start_frame)`, stride 1, window 8 + 4:
-  ONLY if per-sequence frame counts are obtainable by a bounded metadata
-  listing (OD-S7-9): windows chosen evenly per sequence under the §22.9a
-  indicative caps (≤ 8 / train sequence, ≤ 4 / validation, ≤ 4 / final);
-  the exact even-spacing rule is written into PROVENANCE when applied.
-  Otherwise STATUS records "clip identity → D14" and no clip manifest is
-  written. Never fabricated.
+- Manifest row: `sequence_name · scope`. SHA-256 pinned (integrity /
+  provenance pin, as §3.2).
+- **Task semantics fixed** (8 context → 4 future frames, stride 1, §22.9a).
+  **Clip identity `(sequence_name, start_frame)` — ALL of it — is D14's**
+  (operator decision at the PR0 design review 2026-08-15, superseding the
+  "if feasible" branch of OD-S7-9): which windows materialize, how frame
+  counts map to sample windows and how Gate subsets nest belong with the
+  executable data path. PR0 writes NO clip manifest and NO archive-listing
+  machinery; STATUS records "clip identity → D14".
 
 ### 3.4 Non-goals (must remain unchanged)
 
@@ -206,18 +236,74 @@ docs/…                   this doc's ledger, README index rows, docs/README.md 
 - No resolution of D16 / D17 / D18; no `DatasetProfile` / `DeliverableSpec`
   extension (D14).
 - No `examples/common/`.
+- No DAVIS clip manifest, no archive-listing / HTTP-range machinery.
 
 ---
 
-## 4. First production consumer
+### 3.5 PR0-only guards are MATURITY PINS, not permanent repository rules (FROZEN)
 
-The real production loaders / derivers ARE the consumers: the projection
-tests call `resolve_dataset_profile()`, `run_bound_model_io_contract()`,
+The end state (§22.23.3/§22.23.11) has packs with `plugins/`, `configs/`,
+`skills/` and — under Step 12's composition mechanism — a real bound
+task-instance declaration. Every guard PR0 adds therefore carries a
+retirement / relaxation owner and says so in its docstring:
+
+```text
+guard                                    valid through        relaxation owner
+the three persistent roots MUST exist    permanent            —  (they are the mandatory
+  (tidmad · oxford_iiit_pet ·                                     regression examples; ADDITIONAL
+   davis_future_prediction)                                       roots are permitted later under
+                                                                  normal example-pack governance —
+                                                                  the guard asserts presence, NEVER
+                                                                  "these are the only examples")
+no .py under examples/                   PR0 / Step 07        D14 (first example-local plugin /
+                                                              prepare tooling), re-scoped there
+no top-level task_description /          before Step 12       Step 12 (task composition owns
+  forward_contract YAML under examples/                       where a bound task declaration lives)
+each pack has README/PROVENANCE/STATUS   permanent            —
+STATUS names a maturity level            permanent            —
+production packages never import         permanent            — (§22.23.9 separability)
+  examples / tools.example_packs
+```
+
+A guard's docstring names its owner; relaxing it is that owner's explicit
+act, recorded in that design — never a silent deletion, never a permanent
+prohibition of what the roadmap intends.
+
+### 3.6 Read-only resolved snapshots — UX invariant and migration rule (FROZEN)
+
+- Generated projection artifacts MUST be visibly identified as read-only
+  resolved snapshots, not authoring inputs: directory `resolved/`, a
+  `README` / banner file in it stating `DO NOT EDIT · generated from
+  <authority path> by tools/example_packs · the runtime does not read this
+  file · regenerate with <command>`, and the same statement in the pack
+  README and STATUS.
+- Migration expectation (binding on the later owner): when Step 12 (or D14
+  for the data-path facts) introduces a real user-editable task binding for
+  a pack, the PR0 snapshot MUST NOT coexist with it as a second
+  authoritative-looking config. The owner either replaces the snapshot with
+  the real declaration, keeps it clearly under `resolved/` as a derived
+  view, or keeps only the generation test. Cumulative evidence ≠ keeping
+  every scaffold.
+
+---
+
+## 4. Consumers — PR0 introduces NO production consumer and NO production seam
+
+Precisely: production authorities are the SOURCE of the TIDMAD projection;
+the projection generator derives a tracked snapshot from them; **CI is the
+validation consumer** (the projection tests regenerate from
+`resolve_dataset_profile()`, `run_bound_model_io_contract()`,
 `derive_tidmad_deliverable_spec()`, `derive_tidmad_metric_spec()`,
-`load_task_config()` and deep-compare against the tracked projections; the
-contrast declarations are validated by constructing the real
-`ModelIOContract` / `MetricSpec`. No new seam is created, so none can be
-consumer-less.
+`load_task_config()` and deep-compare; the declaration tests construct the
+real `ModelIOContract` / `MetricSpec`). No production code consumes the
+packs, and no new runtime abstraction is created — therefore the
+consumer-less-seam rule (§0 rule 8) is not implicated.
+
+```text
+production authorities  →  projection generator  →  tracked snapshot
+                                                          ↑
+                                                CI equality / validity tests
+```
 
 ## 5. Stage-A parity (Checkpoint 0 / A)
 
@@ -238,13 +324,17 @@ consumer-less.
   RAISES today (the test asserts the refusal, so the day D16 is narrowed the
   pack's documentation is forced to change).
 - Manifests validate: counts, disjointness, class coverage (37 classes each
-  present in train and validation), sequence counts (60 / 15 / 15), pins.
+  present in train and validation), sequence counts (60 / 15 / 15), SHA-256
+  integrity pins (§3.2 — integrity / provenance, not immutability).
 
-## 7. Checkpoint C — deterministic production-path integration
+## 7. Checkpoint C — deterministic validation, no live consumer to prove
 
-No chain. The projection tests exercise the production accessors end to end
-(`load_task_config` → `run_bound_model_io_contract`; `resolve_dataset_profile`
-→ `derive_tidmad_deliverable_spec` → `derive_tidmad_metric_spec`).
+No chain and no runtime consumer exists to integrate (§4). Checkpoint C is
+satisfied by the CI validation consumer: the projection tests exercise the
+production accessors as SOURCE end to end (`load_task_config` →
+`run_bound_model_io_contract`; `resolve_dataset_profile` →
+`derive_tidmad_deliverable_spec` → `derive_tidmad_metric_spec`) and the
+declaration tests construct the real schemas.
 
 ## 8. Failure classes (design-time; each has a test or a stop rule)
 
@@ -253,9 +343,9 @@ No chain. The projection tests exercise the production accessors end to end
 | projection file drifts from the production authority | test FAILS (deep-compare); resolution is regeneration in the SAME commit as the intentional authority change, with provenance — never a silent update |
 | a YAML under `examples/` declares a top-level `task_description` / `forward_contract` (parallel copy) | guard test FAILS |
 | production package imports `examples` or `tools.example_packs` | guard test FAILS (separability §22.23.9) |
-| manifest SHA-256 mismatch / duplicate ids / non-disjoint scopes / class count ≠ 37 / missing class in a scope / sequence counts ≠ 60-15-15 | test FAILS |
+| manifest SHA-256 mismatch (corruption) / duplicate ids / non-disjoint scopes / class count ≠ 37 / missing class in a scope / sequence counts ≠ 60-15-15 | test FAILS (the rule tests + review, not the pin alone, guard identity) |
 | official metadata source unavailable at implementation time | STOP the commit that needs it (C2 / C3); never fabricate; record in the ledger |
-| DAVIS frame counts not obtainable without frames | clip manifest NOT written; STATUS records D14 (rule §3.3) |
+| DAVIS clip identity | not a PR0 concern — D14 in full (§3.3); STATUS says so |
 | a schema must be bent to declare Pets/DAVIS | STOP; STATUS records "not representable" (§0.3 already predicts none for the two declarable contracts) |
 | `log_loss` declared through the schema | impossible today (D16); the test asserts the refusal |
 | any production file appears in the diff | STOP; the PR is docs + packs + tests only |
@@ -301,11 +391,15 @@ operator's freeze marks (Q4 + parent + this child) not present.
 
 OD-S7-5 (tests under `tests/unit/examples/`, no `.py` under `examples/`) ·
 OD-S7-7 (D16 untouched; `log_loss` documented as blocked) · OD-S7-8 (Step-04
-layout) · OD-S7-9 (metadata-only if feasible, else D14). **New for this
-child**: OD-PR0-1 — the pack generator lives under `tools/example_packs/`
-(pyright/ruff/packaged; core never imports it) — recommended, needs the
-operator's nod at freeze; OD-PR0-2 — the Pets 80/20 and DAVIS 15/15 rules of
-§3.2/§3.3 (deterministic, RNG-free) — needs the operator's nod at freeze.
+layout) · OD-S7-9 (metadata-only if feasible, else D14). **Disposed by the
+operator (2026-08-15)**: **OD-PR0-1 APPROVED** — `tools/example_packs/` is
+acceptable for PR0 generation / projection tooling; **D14 / Step 12 MUST NOT
+be forced to reuse it as runtime infrastructure** (PR0 generator ≠ generic
+dataset loader ≠ task composition system; any logic that genuinely belongs
+in the framework migrates by convergence / source evidence). **OD-PR0-2
+APPROVED** — the Pets breed-stratified RNG-free 80/20 rule and the DAVIS
+15/15 sequence rule (§3.2/§3.3). **OD-S7-9 superseded for PR0**: clip
+identity → D14 in full.
 
 ---
 
@@ -329,7 +423,7 @@ code) and any deviation from this design.
 
 ---
 
-### C1 — `examples/tidmad/`: projection pack, generator, projection tests
+### C1 — `examples/tidmad/`: read-only resolved-snapshot pack, generator, projection tests
 
 **1. Goal.**
 Establish the first example root as a READ-ONLY projection of what
@@ -353,7 +447,9 @@ touches no metadata source, so it can land even if a fetch is unavailable.
   rendered from the profile's patterns); a `write_pack(root)` writer; a
   `__main__` entry to regenerate. Reads ONLY production accessors (§0.2).
 - NEW `examples/tidmad/README.md`, `PROVENANCE.md`, `STATUS.md`,
-  `data/README.md`, `contracts/*.json` (generated).
+  `data/README.md`, `resolved/*.json` (generated) + `resolved/README.md`
+  (the DO-NOT-EDIT banner: generated from <authority>, by which command,
+  the runtime does not read these files — §3.6).
 - NEW `tests/unit/examples/__init__.py`,
   `tests/unit/examples/test_tidmad_projection.py`.
 - Non-goals: no change to any accessor; no copy of `configs/task_config.yaml`
@@ -371,9 +467,12 @@ touches no metadata source, so it can land even if a fetch is unavailable.
 - [ ] Implement `tools/example_packs/projection.py` (`project_tidmad`,
       `write_pack`, `__main__`); no import from `examples`; no I/O except the
       writer.
-- [ ] Generate `examples/tidmad/contracts/*.json` with the writer (tracked).
+- [ ] Generate `examples/tidmad/resolved/*.json` with the writer (tracked)
+      and the `resolved/README.md` banner (generated too, so it cannot drift).
 - [ ] Write README (task, objective, contracts demonstrated, OWNING PATHS for
-      task description / forward contract / health config / data root),
+      task description / forward contract / health config / data root; an
+      explicit "`resolved/` is a read-only snapshot — to change the task edit
+      the owning path, not these files" statement),
       PROVENANCE (paper + official distribution URL, `reference_data/`
       pointers, `tidmad_data_config` mechanism — no machine path),
       STATUS (production-backed projection; NOT projected: launcher, plugins,
@@ -383,21 +482,26 @@ touches no metadata source, so it can land even if a fetch is unavailable.
       `project_tidmad()`; (b) the metric projection's `id ==
       TIDMAD_METRIC_ID` and `direction == "higher"` pinned as literals;
       (c) README cites the owning paths (string presence of
-      `configs/task_config.yaml`, `configs/health_checks.yaml`); (d) no
-      `.py` under `examples/`.
+      `configs/task_config.yaml`, `configs/health_checks.yaml`); (d) the
+      `resolved/` banner and the README/STATUS carry the read-only statement
+      (string pins: "DO NOT EDIT", "does not read"); (e) no `.py` under
+      `examples/` — docstring: PR0 maturity pin, relaxation owner D14 (§3.5).
 
 **4. Validation plan.**
 - Unit: `tests/unit/examples/test_tidmad_projection.py` (a–d above).
 - Pseudo/integration: none needed (the accessors are the production path).
 - Negative: mutate one tracked JSON value in a tmp copy → (a) fails; a
-  `.py` dropped under a tmp `examples/` mirror → (d) fails (tests operate on
+  `.py` dropped under a tmp `examples/` mirror → (e) fails; a banner
+  without the read-only statement → (d) fails (tests operate on
   the checkout root derived from `__file__`, CLAUDE.md portability).
 - Backward-compat: existing goldens/tests untouched (Checkpoint D).
 - Gates: none.
 
 **5. Acceptance criteria.**
-- `examples/tidmad/contracts/{dataset_profile,model_io_contract,deliverable_spec,metric_spec,identity}.json`
-  exist and each `json.loads(file) == project_tidmad()[key]` in the test.
+- `examples/tidmad/resolved/{dataset_profile,model_io_contract,deliverable_spec,metric_spec,identity}.json`
+  exist and each `json.loads(file) == project_tidmad()[key]` in the test;
+  `resolved/README.md` states DO NOT EDIT / generated-from / runtime does
+  not read.
 - `metric_spec.json["id"] == "tidmad_denoising_score"`, `["direction"] == "higher"`;
   `model_io_contract.json` renders `[B, T] int64 → [B, 256, T] float32`
   semantics (assert `class` axis fixed 256 in the projected JSON).
@@ -425,7 +529,9 @@ touches no metadata source, so it can land even if a fetch is unavailable.
 
 **8. Commit boundary.**
 - Independently reviewable: yes (one pack + its generator + its tests).
-- No unrelated cleanup; no contrast-pack content.
+- No unrelated cleanup; no contrast-pack content; the generator is
+  documented as tooling (module docstring: not a runtime component; D14 /
+  Step 12 not obliged to reuse it).
 - Stop and show diff summary / staged files / test log before committing.
 
 ---
@@ -449,8 +555,10 @@ isolating it keeps C1 fetch-free and C3's DAVIS listing question separate.
   a `__main__` that takes the local path of the extracted annotation lists.
 - NEW `examples/oxford_iiit_pet/{README,PROVENANCE,STATUS}.md`,
   `data/README.md`, `data/manifests/{train,validation,final}.csv` (or JSON —
-  decide at implementation, record), `data/manifests/SHA256SUMS`,
-  `contracts/{model_io_contract,metric_accuracy,metric_macro_f1}.json`.
+  decide at implementation, record), `data/manifests/SHA256SUMS`
+  (integrity / provenance pin — §3.2),
+  `declared/{model_io_contract,metric_accuracy,metric_macro_f1}.json`
+  (the pack's OWN declarations, distinct from `tidmad/resolved/`).
 - NEW `tests/unit/examples/test_oxford_iiit_pet_pack.py`.
 - Non-goals: no images; no `DatasetProfile` / `DeliverableSpec` /
   preprocessing declaration (D14); no `log_loss` through the schema; no
@@ -497,10 +605,11 @@ isolating it keeps C1 fetch-free and C3's DAVIS listing question separate.
 
 **5. Acceptance criteria.**
 - Three manifest files + `SHA256SUMS`; the test recomputes each SHA-256 and
-  matches the pinned value; scopes pairwise disjoint; every trainval image id
+  matches the pinned value (integrity); the RULE test + review carry
+  identity; scopes pairwise disjoint; every trainval image id
   appears exactly once in `train ∪ validation`; `final` equals the official
   test list; class indices are `0..36`.
-- `contracts/model_io_contract.json` constructs into a `ModelIOContract`
+- `declared/model_io_contract.json` constructs into a `ModelIOContract`
   whose derived `output_semantic` is CATEGORICAL and `class_cardinality` is
   37; the two metric JSONs construct into `MetricSpec` with `direction ==
   "higher"`.
@@ -533,44 +642,40 @@ isolating it keeps C1 fetch-free and C3's DAVIS listing question separate.
 
 ---
 
-### C3 — `examples/davis_future_prediction/`: sequence identity (+ clip identity if obtainable), declarations, STATUS
+### C3 — `examples/davis_future_prediction/`: sequence-level identity, declarations, STATUS
 
 **1. Goal.**
-Fix Track C's sequence-level IDENTITY (train 60 / validation 15 / final 15
-by the §3.3 rule) from the official lists, SHA-256 pinned; fix CLIP identity
-only if per-sequence frame counts are obtainable by a bounded metadata
-listing (OD-S7-9), else record "clip identity → D14"; declare the
-`ModelIOContract` and the metric specs (mse ↓ golden; psnr ↑, mae ↓
-optional) through the real schemas; record the DAVIS licence / provenance
-wording exactly as frozen in §22.9a.
-*Why this commit and not another*: it carries the one open metadata
-question of PR0 (frame counts) and must not block the Pets pack.
+Fix Track C's SEQUENCE-LEVEL identity (train 60 / validation 15 / final 15
+by the §3.3 rule) from the official lists, SHA-256 pinned; keep the task
+semantics fixed (8 → 4, stride 1); record "clip identity → D14" in STATUS;
+declare the `ModelIOContract` and the metric specs (mse ↓ golden; psnr ↑,
+mae ↓ optional) through the real schemas; record the DAVIS licence /
+provenance wording exactly as frozen in §22.9a.
+*Why this commit and not another*: a second, independent metadata source
+(the DAVIS lists) — kept apart from the Pets fetch so either can stop
+without blocking the other.
 
 **2. Scope.**
 - NEW `tools/example_packs/davis_future_prediction.py` —
-  `derive_sequence_manifest(train_list, val_list)`, optional
-  `derive_clip_manifest(frame_counts)` (rule §3.3, only when counts exist),
+  `derive_sequence_manifest(train_list, val_list)` (rule §3.3),
   `declare_contracts()`, `write_pack(...)`.
 - NEW `examples/davis_future_prediction/{README,PROVENANCE,STATUS}.md`,
-  `data/README.md`, `data/manifests/sequences.{csv|json}` (+ `clips.*` iff
-  counts obtained), `data/manifests/SHA256SUMS`,
-  `contracts/{model_io_contract,metric_mse,metric_psnr,metric_mae}.json`.
+  `data/README.md`, `data/manifests/sequences.{csv|json}`,
+  `data/manifests/SHA256SUMS`,
+  `declared/{model_io_contract,metric_mse,metric_psnr,metric_mae}.json`.
 - NEW `tests/unit/examples/test_davis_future_prediction_pack.py`.
-- Non-goals: no frames, no archive body, no window materialization /
-  resize / decode rule (D14 execution-level manifests); no `DatasetProfile` /
-  `DeliverableSpec`.
+- Non-goals: no frames, no archive body, NO clip manifest, no
+  archive-listing / HTTP-range machinery, no window materialization /
+  resize / decode rule (D14); no `DatasetProfile` / `DeliverableSpec`.
 - Dependencies: C1.
 
 **3. Implementation plan.**
-- [ ] Obtain the official 2017 sequence lists from an official metadata
-      source (record URL, date, SHA-256 of the list bytes). If the only
-      source is the trainval archive: perform a BOUNDED listing (record the
-      archive URL, `Content-Length`, exact byte ranges read); if that is not
-      possible → STOP C3's clip half; the sequence half proceeds only if the
-      lists themselves were obtained.
-- [ ] If frame counts were obtained: implement `derive_clip_manifest`
-      (even spacing under the caps; rule written into PROVENANCE) — else
-      skip and write STATUS "clip identity → D14".
+- [ ] Obtain the official 2017 sequence lists (`train.txt` 60 / `val.txt`
+      30) from an official METADATA source (the challenge's published
+      tooling / list files) — record URL, date, SHA-256 of the list bytes.
+      If no official metadata source exists apart from the archive body →
+      STOP C3 and report (D14 will hold the archive anyway; PR0 never reads
+      an archive body).
 - [ ] Re-read the model-I/O schema before writing the `[B,3,8,128,224] →
       [B,3,4,128,224] float32` declaration (differing fixed T extents; no
       shared symbol other than `B`).
@@ -582,40 +687,34 @@ question of PR0 (frame counts) and must not block the Pets pack.
       repository states BSD; challenge-created annotations CC BY 4.0; this
       task consumes RGB frames, not masks; no single licence claimed for
       every artifact; D14 MUST pin the terms of the downloaded TrainVal-480p
-      artifact) / STATUS (L0/L1 declared; D14 seams; clip-identity status).
-- [ ] Tests: sequence manifest (60/15/15; disjoint; pinned SHA-256; the
-      §3.3 rule reproduces the split from an in-test synthetic list); clip
-      manifest tests ONLY if it exists (windows within `[0, frames-12]`,
-      stride-1 semantics, per-sequence caps, sequence ∈ manifest);
-      declaration validity (`output_semantic == CONTINUOUS`,
+      artifact) / STATUS (L0/L1 declared; D14 seams incl. "clip identity →
+      D14").
+- [ ] Tests: sequence manifest (60/15/15; disjoint; SHA-256 integrity pin;
+      the §3.3 rule reproduces the split from an in-test synthetic list);
+      STATUS contains "clip identity" and "D14"; declaration validity (`output_semantic == CONTINUOUS`,
       `class_cardinality is None`, `mse.direction == "lower"`,
       `psnr.direction == "higher"`, `mae.direction == "lower"`; none
       loss-shaped — assert construction succeeds); PROVENANCE contains the
       frozen licence sentences (string pins); no `.py` under the pack.
 
 **4. Validation plan.** as C2, adapted; negative: overlapping sequence
-scopes → fails; a clip whose window exceeds the frame count → fails; a
-sequence not in the official 90 → fails.
+scopes → fails; a sequence not in the official 90 → fails; a clip manifest
+present under the pack → fails (PR0 must not carry one).
 
 **5. Acceptance criteria.**
 - `sequences` manifest: exactly 90 rows, 60 `train` / 15 `validation` / 15
   `final`, pairwise disjoint, SHA-256 pinned and re-verified by test.
-- If present, `clips` manifest rows are `(sequence_name, start_frame)` with
-  `start_frame + 12 ≤ frame_count`, caps respected, every sequence in the
-  sequence manifest; else STATUS contains "clip identity" and "D14".
+- No clip manifest exists; STATUS contains "clip identity" and "D14".
 - Contract JSON constructs; `output_semantic == CONTINUOUS`; three metric
   JSONs construct with the pinned directions.
 - PROVENANCE contains the four frozen licence sentences.
 - No production file in the diff.
 
 **6. Failure and edge cases.**
-- Lists unavailable → STOP (never derive the split from memory or papers).
-- Frame counts unavailable → sequence-only manifest; STATUS D14 (not a stop).
-- A sequence name in the lists that the archive listing does not contain (or
-  vice-versa) → STOP and report (identity mismatch); do not "fix" the list.
-- Caps produce 0 windows for a very short sequence → the rule yields ≥ 1
-  window when `frames ≥ 12`, else the sequence carries 0 clips and STATUS
-  notes it (report the count; expected rare).
+- Lists unavailable from an official metadata source → STOP (never derive
+  the split from memory, papers or a mirror).
+- Counts ≠ 60 / 30 in the obtained lists → STOP and report (identity
+  mismatch with §22.9a); do not "fix" the list.
 
 **7. Verification commands and evidence.** as C2.
 
@@ -628,23 +727,36 @@ committing.
 
 **1. Goal.**
 Make the acceptance criteria of §22.23.13 machine-checkable across the three
-packs (no second authority · separability · no `.py` · honest STATUS
-mirrors) and synchronize the governance surfaces so the next PR (07a) starts
-from an accurate index.
+packs (no second authority · separability · honest STATUS mirrors · the PR0
+maturity pins) — **each PR0-only guard maturity-scoped with a named
+relaxation owner (§3.5), never a permanent prohibition** — and synchronize
+the governance surfaces so the next PR (07a) starts from an accurate index.
 *Why this commit and not another*: the guards span all three packs and are
 only meaningful once all exist; the docs sync is Checkpoint E.
 
 **2. Scope.**
-- NEW `tests/unit/examples/test_pack_governance.py`: (a) no YAML under
-  `examples/` declares a top-level `task_description` / `forward_contract`;
-  (b) no `.py` anywhere under `examples/`; (c) no module under `core/`,
-  `agent/`, `nodes/`, `execute_tools/`, `workflows/`, `ml_models/`,
-  `dashboard/`, `scripts/`, `sdsc_submission_scripts/` imports `examples`
-  or `tools.example_packs` (AST/regex over `rglob("*.py")`, checkout-root
-  derived from `__file__`); (d) each pack has README / PROVENANCE / STATUS
-  and STATUS names a maturity level `L0`–`L4` (TIDMAD: "production-backed
-  projection"); (e) each pack's README cites its owning paths / roadmap
-  section; (f) `examples/` roots are exactly the three fixed names.
+- NEW `tests/unit/examples/test_pack_governance.py` — each guard's docstring
+  states its validity window and relaxation owner per §3.5:
+  (a) **[maturity pin — owner Step 12]** no YAML under `examples/` declares
+  a top-level `task_description` / `forward_contract` (a hand-written
+  parallel copy before task composition owns binding);
+  (b) **[maturity pin — owner D14]** no `.py` anywhere under `examples/`
+  (until an owner introduces example-local plugins / prepare tooling);
+  (c) **[permanent]** no module under `core/`, `agent/`, `nodes/`,
+  `execute_tools/`, `workflows/`, `ml_models/`, `dashboard/`, `scripts/`,
+  `sdsc_submission_scripts/` imports `examples` or `tools.example_packs`
+  (AST/regex over `rglob("*.py")`, checkout-root derived from `__file__`);
+  (d) **[permanent]** each pack has README / PROVENANCE / STATUS and STATUS
+  names a maturity level `L0`–`L4` (TIDMAD: "production-backed resolved
+  projection");
+  (e) **[permanent]** each pack's README cites its owning paths / roadmap
+  section;
+  (f) **[permanent]** the three persistent roots `tidmad`,
+  `oxford_iiit_pet`, `davis_future_prediction` EXIST — the guard asserts
+  presence and NEVER that they are the only roots (additional examples are
+  permitted later under normal pack governance);
+  (g) **[permanent]** `examples/tidmad/resolved/` carries the read-only
+  banner (§3.6).
 - Docs: this child's §14 ledger + header status; parent §0 status +
   §8.1 → "C1–C4 landed"; `generic_framework_upgrade/README.md` row 07 /
   PR0; `docs/README.md` row for this child; roadmap §15.1 step-7 rows and
@@ -653,8 +765,9 @@ only meaningful once all exist; the docs sync is Checkpoint E.
 - Dependencies: C1–C3.
 
 **3. Implementation plan.**
-- [ ] Implement `test_pack_governance.py` (a)–(f); each test docstring names
-      the defect only it catches.
+- [ ] Implement `test_pack_governance.py` (a)–(g); each test docstring names
+      the defect only it catches AND (for a/b) its validity window +
+      relaxation owner.
 - [ ] Negative self-checks in the same file using `tmp_path` mirrors
       (a parallel `task_description:` YAML; a `.py`; a fake importer) to
       prove each guard fires.
@@ -669,7 +782,10 @@ only meaningful once all exist; the docs sync is Checkpoint E.
 CI once. Gates: none.
 
 **5. Acceptance criteria.**
-- All six guards green on the checkout and each fires on its tmp negative.
+- All seven guards green on the checkout and each fires on its tmp
+  negative; guards (a)/(b) carry the maturity-pin docstring; guard (f)
+  passes with an EXTRA root present in a tmp mirror (proves it asserts
+  presence, not exclusivity).
 - `git ls-files examples | grep '\.py$'` empty.
 - Full-suite log shows 0 failed; CI run id recorded.
 - Roadmap / README / docs index rows read "PR0 landed" with the merge SHA
@@ -681,6 +797,9 @@ CI once. Gates: none.
   root layout it expects).
 - A future pack file legitimately containing the string `task_description`
   in prose (README) → guard (a) inspects YAML top-level KEYS only.
+- A later owner (D14 / Step 12) legitimately introducing a plugin or a bound
+  task declaration → relaxes guard (b)/(a) in ITS design by explicit act;
+  the docstring tells that owner where the pin came from.
 
 **7. Verification commands and evidence.** as above; recorded in §14.
 
@@ -690,9 +809,11 @@ CI once. Gates: none.
 
 ### Deferred to later PRs (NOT in PR0)
 
-- Execution-level manifests, preprocessing / decode / window rules, tensor
-  hashes, Gate-subset sizing, reference plugins, data acquisition into a
-  workspace — **D14**.
+- DAVIS clip identity `(sequence, start_frame)`, execution-level manifests,
+  preprocessing / decode / window rules, tensor hashes, Gate-subset sizing,
+  reference plugins, data acquisition into a workspace — **D14**.
+- Relaxing the PR0 maturity pins (`.py` under `examples/`; a bound task
+  declaration inside a pack) — **D14 / Step 12** by explicit act (§3.5).
 - History / diagnosis semantics in the packs — **07a**; direction / policy /
   rendering — **07b**.
 - Health applicability — **Step 08**; interpreter evidence — **Step 09**;

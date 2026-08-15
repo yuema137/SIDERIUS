@@ -596,8 +596,10 @@ TIDMAD's `network.py:FocalLoss1D`.
   RGB 8→4 future-frame prediction (§22.9a); D14 = dedicated milestone after
   Step 07; Step 07 = PR0 (persistent example baseline: `examples/`
   roots + identity manifests) · 07a history/diagnosis · 07b policy (Gate 1)
-  · 07c measurement. Rev 5.3 is READY FOR OPERATOR FREEZE; only the
-  operator's freeze mark (Q4) precedes the Step-07 PR0 design.
+  · 07c measurement. **Rev 5.3 FROZEN (Q4, operator 2026-08-15)**; Step-07
+  parent (`step_07_tuner_policy_and_training_diagnostics.md`, rev 2)
+  approved for freeze the same day; PR0 detailed design in revision before
+  its freeze; nothing implemented yet.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
