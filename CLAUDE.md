@@ -598,8 +598,9 @@ TIDMAD's `network.py:FocalLoss1D`.
   roots + identity manifests) · 07a history/diagnosis · 07b policy (Gate 1)
   · 07c measurement. **Rev 5.3 FROZEN (Q4, operator 2026-08-15)**; Step-07
   parent (`step_07_tuner_policy_and_training_diagnostics.md`, rev 2)
-  approved for freeze the same day; PR0 detailed design in revision before
-  its freeze; nothing implemented yet.
+  FROZEN and its PR0 detailed design FROZEN (operator, 2026-08-15);
+  PR0 implementation not yet started (fresh Implementation Working Rules
+  contract required).
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
