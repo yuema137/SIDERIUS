@@ -2100,7 +2100,7 @@ campaign per module.
 | D10 | Dead seams disposition (tune→interp protocol; validation_file_pattern gains consumers in §4/§10 or is dropped) | per owning module's design |
 | D11 | CLAUDE.md task-agnostic claim + seam-authority pointer update | with the first landed module PR |
 | D13 | **Flexible-input rungs FX-3 (preset resolution) and FX-4 (preset-vs-explicit mismatch, fail-closed BEFORE the LLM boundary)** — deferred BY step 1, which could not land them: no preset mechanism exists in-tree, and step 1 cannot fail closed on a conflict it has no way to represent. Step 1 landed FX-1/FX-2/FX-5 as PROSE contrasts only, which prove template rank-agnosticism at the PROMPT layer and claim nothing about structured arbitrary-tensor support. **Owner: the contract owner (step 2 §4 / step 3 §5) MUST land both rungs with its structured contract** — see `step_01_proposer_hypothesis_space.md` §6A.5, §9.4 | **RESOLVED / CLOSED by Step 03** (PR #205, merge `e1181f61`). Both rungs landed with the structured contract: FX-3 preset resolution and FX-4 preset-vs-explicit mismatch, the latter failing closed BEFORE the LLM boundary with LLMBridge call count asserted at 0. A preset is authoring convenience only and does not survive resolution. Canonical evidence: `step_03_model_loss_contract.md` §4a.1 / §24, `tests/unit/agent/schemas/test_model_io_resolution.py`. **Note the narrowing**: Step-01 §6A.5 also named description↔contract consistency as part of the FX-4 obligation; Step-03 §9 explicitly WITHDREW that — it is prose duplication owned by the Step-01 layer, not an NLP validation problem |
-| D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owns the reader.** OPEN — see §20.5 for the two candidates | operator direction 2026-08-15: prefer absorption into an existing step, no new step unless source proves necessary; source audit finds §9 is NOT the natural owner, so the choice is between (a) a Step-11 scope extension and (b) a small dedicated milestone. Decide at Step-11 design kickoff or earlier if Step-12/M1 needs it. **D14 is a PRECONDITION of Milestone 1: §16 criterion 1 cannot be considered satisfiable until D14 has an owner and its abstraction has landed** — running the two contrast tasks through a TIDMAD-shaped loader would not be a generic end-to-end run (§21.3 item 3, §16 note) **RESOLVED 2026-08-15 (Rev 5, Q3): a dedicated executable-contrast-task / data-path milestone immediately after Step 07 and before Step 08 (§22.11a); NOT a Step-11 extension** |
+| D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owned the reader** at Rev 4; §20.5 recorded the two candidates (historical). **RESOLVED (Rev 5.2, Q3)** — dedicated milestone after Step 07 | historical direction 2026-08-15 (superseded by Q3): prefer absorption into an existing step, no new step unless source proves necessary; source audit found §9 NOT the natural owner, so the choice was between (a) a Step-11 scope extension and (b) a small dedicated milestone. **D14 is a PRECONDITION of Milestone 1: §16 criterion 1 cannot be considered satisfiable until D14 has an owner and its abstraction has landed** — running the two contrast tasks through a TIDMAD-shaped loader would not be a generic end-to-end run (§21.3 item 3, §16 note) **RESOLVED 2026-08-15 (Rev 5, Q3): a dedicated executable-contrast-task / data-path milestone immediately after Step 07 and before Step 08 (§22.11a); NOT a Step-11 extension** |
 | D15 | **Model-family aggregation of training diagnoses** ("CNNs always overfit") | not before candidate/iteration-level evidence exists (§20.2 layer 4); the existing cross-iteration state has NO model-family aggregation precedent except `model_knowledge_cache` (a summarisation cache, not evidence) |
 | D16 | **Lexical loss-id restriction** in `execute_tools/evaluation_metric.py` (Step 06): ids whose tokens include `loss`/`losses` are refused — rejects legitimate future evaluation metrics such as `log_loss`, passes `mse` used as a training objective | temporary implementation restriction, NOT the generic boundary (Rev 5 §22.1: role is typed binding, not naming); remove/narrow when a task-level metric declaration first needs it — Step 12 (or Step 07 if it touches the module first). Not a Step-06 reopener |
 | D17 | **Mandatory-scalar runtime enforcement**: `MetricResult.scalar: float \| None` lets a generic `EvaluationMetric` subclass return `None` (TIDMAD cannot); frozen semantics are scoreable ⇒ scalar / not-scoreable ⇒ `NotScoreableResult` | implementation-quality debt; owner = the first design adding a second production metric instance (Step 12; earlier if convenient) |
@@ -3115,11 +3115,16 @@ Track C — Spatiotemporal / regression
   dataset:            DAVIS 2017 (Pont-Tuset et al. 2017), TrainVal 480p
   source / licence:   official https://davischallenge.org/davis2017/code.html →
                       DAVIS-2017-trainval-480p.zip (~833 MB, data.vision.ee.ethz.ch), direct
-                      download, no credential (HEAD-checked 2026-08-15); the official davis-2017
-                      tooling README states "DAVIS is released under the BSD License"; the challenge
-                      download page itself states no licence — the D14 design re-confirms the exact
-                      dataset licence text before any artifact is committed. 60 official training +
-                      30 official validation sequences (DAVIS 2017)
+                      download, no credential (HEAD-checked 2026-08-15). Licence / provenance: the
+                      official DAVIS repository (fperazzi/davis README) states "DAVIS is released
+                      under the BSD License"; the challenge-created annotations carry separate
+                      CC BY 4.0 terms (2017 challenge rules); the challenge download page itself
+                      states no licence. This SIDERIUS task consumes RGB FRAMES, not segmentation
+                      annotation masks — no single licence is claimed for every DAVIS artifact.
+                      D14 MUST verify and pin the exact terms applicable to the downloaded
+                      TrainVal-480p artifact before the example's executable provenance is
+                      considered complete. 60 official training + 30 official validation
+                      sequences (DAVIS 2017)
   task:               SIDERIUS-defined REAL-RGB FUTURE-FRAME PREDICTION (not DAVIS's official
                       segmentation benchmark): 8 context frames → next 4 frames, stride 1
   input topology:     float32 [C,T,H,W] = [3,8,128,224], values in [0,1] — deterministic decode →
@@ -3221,9 +3226,10 @@ applicable Stage-A evidence at every Step; B and C MUST provide the highest
 HONEST level; NEVER fake an end-to-end track; NEVER use schema-only evidence
 where an executable seam exists; NEVER require an executable track before the
 owning data-path refactor exists. D14 therefore LIMITS early B/C maturity
-without invalidating the persistent-track strategy — and it is what makes D14
-a scheduling decision (§20.5 candidates (a)/(b)) that the operator must take
-before Step 12.
+without invalidating the persistent-track strategy; its scheduling has been
+RESOLVED by Q3 (Rev 5.2) as the dedicated milestone immediately after Step 07
+and before Step 08 (§22.11a; §18 D14 row) — the §20.5 candidates (a)/(b) are
+historical.
 
 ### 22.11a Implementation timeline for the persistent tracks (Rev 5.2 — operator, 2026-08-15)
 
@@ -3511,12 +3517,19 @@ maturity currently supported.
 #### 22.23.1 Projection rule (RULE)
 
 `examples/<task>/` is the **user-facing PROJECTION of the framework's current
-capability, never a second semantic authority**. Production, module-owned
-contracts and configs (DatasetProfile, ModelIOContract, DeliverableSpec,
-EvaluationMetric, health config, task description …) remain the ONLY
-authorities; an example pack CONSUMES them (`module-owned contracts/configs →
-example pack consumes them → runnable user example`). It never carries a
-hand-written parallel copy that could drift. Rejected: *production says
+capability, never a second semantic authority**. Two kinds of authority are
+distinguished: **module-owned contracts / schemas (DatasetProfile,
+ModelIOContract, DeliverableSpec, EvaluationMetric, health-check config schema,
+task-description schema …) are the SOLE authorities for SEMANTIC RULES and
+interpretation** — what a scope, a metric, a contract or a health check
+MEANS; **a bound task-instance declaration MAY be the sole authority for that
+task's CONCRETE INSTANCE VALUES** (a mature example pack therefore CAN own the
+authoritative instance config of its task — it just cannot redefine what
+`DatasetProfile` means); **prose / docs are NEVER a second executable
+authority**. The flow is `contract/schema defines meaning → task-instance
+declaration supplies concrete values → runtime resolved instance`; an example
+pack CONSUMES the contracts and never carries a hand-written parallel copy of
+either kind that could drift. Rejected: *production says
 `num_classes = 37`; `examples/…/metadata.yaml` independently says 37; both are
 treated as authorities.* Documentation may EXPLAIN a value (citing the owning
 path); executable semantics have one owner. **Acceptance criterion:** changing
