@@ -2826,7 +2826,9 @@ H = { (e, L_train(e), L_val(e), optional checkpointed observations…) }_{e=1..E
 M_golden( f_{θ_E}(X_eval), Y_eval )       — plus optional terminal metrics
 ```
 
-**Optional quantities (§22.2a).** Two categories, both PERSISTED
+#### 22.2a Optional quantities
+
+Two categories, both PERSISTED
 STRUCTURALLY when declared and available to the appropriate downstream layer
 — *optional does NOT mean dead logging*:
 - **optional checkpointed observations / diagnostics** (validation accuracy per
