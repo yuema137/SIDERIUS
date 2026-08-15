@@ -590,9 +590,11 @@ TIDMAD's `network.py:FocalLoss1D`.
 - **Generic Framework Upgrade (2026-08-15)**: Steps 00-06 COMPLETE and merged
   (Step 06 metric interface: PR #213, `02f382eb`). Roadmap
   `docs/design/siderius_generic_framework_upgrade.md` §15.1 is the status
-  authority; its §20.8 records the operator's post-Step-06 conclusions. Next
-  is NOT Step 07's design: dataset/task selection audit → Rev-5 overall
-  revision + freeze → then Step 07.
+  authority; its §22 (Rev 5.1, architecture accepted, NOT yet frozen) is the
+  top-level guidance for Step 07 onward. Next is NOT Step 07's design:
+  dataset selection audit → operator selects the image / spatiotemporal
+  tracks (§22.9a) → D14 owner → Step-7 child decomposition → final Rev-5
+  freeze → then Step 07.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per
