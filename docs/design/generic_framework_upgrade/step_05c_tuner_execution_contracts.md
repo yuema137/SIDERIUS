@@ -6,8 +6,9 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **PR 05C DESIGN — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION.** Frozen 2026-08-15 (UTC) at revision 3: active census repaired, transport-vs-reconstruction decided (§3.2a), spec scope narrowed to the facts actually migrated (§1), encoding literals classified individually (§2.2), artifact equality defined (§4.1). **Remaining operator decisions: NONE.** Implementation NOT started — see §0.0 |
+| Status | **COMPLETE — MERGED.** PR **#212**, final head `89453177`, exact-head CI `31861633497` PASS, merge **`03e00944`** (squash), 2026-08-15. Design was frozen at `fe73f982`; **§15 is the implementation ledger and §15.13 its Checkpoint E.** Gate 1 NOT REQUIRED; **Gate 2 PASS** (one bounded attempt, no retry). Deliverable-Contract ownership remains **PROVISIONAL and OPEN** — Step 06 is the next mandatory confirm-or-say-why review |
 | Frozen semantic content | **`fe73f982ffa4b86aca1eb3e28d18ddacf3af5d32`** — the operator-approved design object |
+| Merge | **`03e00944`** (squash) · PR **#212** · final head `894531777c41d24561107c3b567d70d94e2dfabf` · exact-head CI **31861633497** SUCCESS · merged 2026-08-15T04:38:20Z |
 | Design base | **re-anchored to `226d4e9f`** (master after 05a `cfb3b1c7` and 05b `5ce205d3` merged). Revision 1 was written against `13b08550`; §0.2 is the corrected anchor table and lists six citations that did not survive audit |
 | Decomposition | **ONE PR**, internal semantic checkpoints **C0–C9** (§14) |
 | Deliverable ownership | producer-side **provisional** extraction; final ownership **OPEN**; **Step 06** is the next mandatory confirm-or-say-why review (§3) |
@@ -21,7 +22,7 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | | |
 |---|---|
-| Status | **PR 05C DESIGN — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION.** |
+| Status | **COMPLETE — MERGED** (`03e00944`). This section is retained as the FREEZE record; the outcome is §15.13. |
 | Frozen semantic design content SHA | `fe73f982ffa4b86aca1eb3e28d18ddacf3af5d32` |
 | Design base | `226d4e9f` |
 | Freeze date | **2026-08-15 (UTC)** |
@@ -29,12 +30,13 @@ Step-level completion contract lives in roadmap **§15.1a**.
 | Internal semantic checkpoints | **C0–C9** (§14; also Checkpoints 0/A/B/C/D) |
 | Deliverable ownership | producer-side **provisional** extraction; final ownership **OPEN**; **Step 06** is the next mandatory confirm-or-say-why ownership review |
 | Remaining operator decisions | **NONE** (§16) |
-| Implementation state | **NOT STARTED** — §15 ledger empty |
+| Implementation state | **COMPLETE** — C0-C9 all landed; §15 is the live ledger |
 
-**The freeze does not itself begin implementation.** Implementation
-authorization is a separate operator act and will be supplied in a fresh
-session together with the filled Implementation Working Rules. Freezing the
-design authorizes nothing to be built, tested or gated today.
+**The freeze did not itself begin implementation.** Implementation was
+authorized separately, in a fresh session with filled Implementation Working
+Rules, and has since completed and merged (`03e00944`). This paragraph is kept
+as the freeze-time statement rather than rewritten, so the sequence
+freeze → separate authorization → implementation stays legible.
 
 **What this freeze does NOT fix.** These are implementation latitude and may
 be decided at implementation time without a further operator decision:
@@ -2706,6 +2708,69 @@ made inside this PR.
 
 **Strict pyright is green** on this tree — recorded here because §15.3
 deferred the type claim to CI, and CI has now supplied it.
+
+**Commit** `89453177` — `docs(step05c): C9 — terminal validation and the
+CI-timeout diagnosis`.
+
+### 15.13 Checkpoint E — merged, and what closed with it
+
+| | |
+|---|---|
+| PR | **#212** |
+| Final PR head | `894531777c41d24561107c3b567d70d94e2dfabf` |
+| Exact-head CI | run **31861633497** — SUCCESS, strict pyright included |
+| Merge | **`03e009440a6fadac50aca5850f00aa422f2bff4c`** (squash) |
+| Merged at | 2026-08-15T04:38:20Z |
+| Squash parity | `git diff 89453177 03e00944` → **empty**; the merged tree is byte-identical to the reviewed head |
+| Frozen content | `fe73f982` · design base `226d4e9f` · implementation base = freeze marker `4785a639` |
+
+**Landed capability.** Every CONTRACT-OWNED deliverable fact used by the
+migrated production producers, path readers, cleanup readers and canonical
+reconstruction tooling resolves through ONE provisional runtime
+`DeliverableSpec`. The TIDMAD deliverable template is **declared exactly once**
+and consumed everywhere; the persisted storage representation and the
+channel-group identity derive from `DatasetProfile` rather than being
+re-stated beside it. The spec never crosses a process boundary — parent and
+child call one shared derivation over the profile that already crosses.
+
+**Evidence at merge**: Checkpoint 0 (pre-edit oracles) · Checkpoint A (TIDMAD
+parity) · Stage-B rung + structural guard · **7 semantic mutation families, 7
+killed, 0 survivors** · Checkpoint C across real train + inference subprocesses
+· **Gate 2 PASS** in one bounded attempt (6 real deliverables written, read by
+the untouched scorer, removed by the migrated cleanup, 0 remaining) · 5,099
+targeted unit cases + exact-head CI with strict pyright.
+
+**Three frozen-design corrections** were found and recorded rather than
+silently absorbed (§15.1, §15.7): C3's non-existent out_dir/base-relative
+distinction; §3.2a's field-table row that contradicted §2.2 on the decode
+selector; and **the missed same-authority site** `_is_complete_trial_output`,
+which §2.2 had classified as input decode but which reads the deliverable the
+attempt just wrote.
+
+**One repository-wide change rode along, deliberately isolated**: `3e0ef70c`
+raised the CI job timeout 15 → 25 minutes. Master was already at the ceiling
+(13 m 38 s of a 15-minute cap; two master push runs cancelled at it before
+this branch existed) and this PR's 88 tests add ~0.4 s. A resource ceiling,
+not a correctness guard.
+
+**What did NOT close, and who owns it next:**
+
+| Deferred | Owner |
+|---|---|
+| **Final Deliverable-Contract ownership** — 05c is a producer-side PROVISIONAL extraction | **Step 06 — next MANDATORY confirm-or-say-why review** |
+| scorer literals (`denoising_score_single.py`) | Step 06 |
+| HealthGate peek semantics | Step 08 |
+| cleanup **policy** (only name resolution moved) | Step 11 |
+| non-HDF5 / arbitrary deliverable formats — **not claimed** | whichever design wins final ownership |
+| instrument attrs, the `sampling_frequency` duplication, `N`/split mechanics, the silent `return None` on a non-`.h5` name | recorded as debt for the final owner |
+| `_write_dataset_profile_config` resolving the AMBIENT profile | pre-existing 05a residue, deliberately not widened here |
+
+**Step-05 aggregate.** With 05a (`cfb3b1c7`), 05b (`5ce205d3`) and 05c
+(`03e00944`) merged, all three submodules of Step 05 have landed and the
+Step-level acceptance entry (roadmap §15.1a) is satisfied. That
+synchronization is a **Step-level** act, not a 05c one, and was performed
+after this merge — never before it, because the aggregate acceptance state did
+not exist until 05c landed.
 
 ## 16. Remaining operator decisions
 

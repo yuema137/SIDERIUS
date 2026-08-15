@@ -1389,7 +1389,7 @@ production consumer that proves the seam); **Deps** = must land before;
 | 6-M Candidate-creation mechanics (+ §13 remainder) | 4 | Generated candidates (plugin/test/description) are produced AND validated against the declared contract with zero task literals; every LLM node's task content comes from the profile | generated plugin byte-identical for a fixed spec; validator verdicts identical; ALL remaining rendered prompts EXACT-equal + same kwargs reach LLMBridge; prior-plugin loadability (§2 records surface) | atomic ladders §6.5 + §13.4 (class count / shape / output type / description text / contract) | production implementor+validator emit/validate a candidate from the profile; all nodes render from it | 1, 2, 3 | `step_04_candidate_creation_mechanics.md` (parent, LIVE governance) + `step_04_candidate_creation_mechanics/pr_04a_*.md`, `.../pr_04b_*.md` | **COMPLETE — MERGED** — TWO PRs, `04a → 04b`. **04a = COMPLETE — MERGED** (PR #207, squash `6458dd95`, final head `d019f94b`, post-merge doc sync `0901574c`, 2026-08-14): candidate generation AND validation consume the normalized Step-03 `ModelIOContract` for every contract-owned fact; the validator receives that declaration through the production `ImplementorOutput → protocol → ValidatorInput` path rather than re-resolving it; implementor and validator share ONE probe-realization authority; a valid declared-regressor custom loss now crosses the production-equivalent implementor → protocol → validator boundary and is ACCEPTED (previously impossible); prior-plugin loadability preserved (91/91 register); OD-S4-1's single attributed implementor-prompt delta landed (one line in one `pb5_*` golden, `pb6_*`/`pb9_*` byte-identical). Gate 1 PASS · Gate 2 PASS · Checkpoints 0/A/B/C/D PASS · exact-head CI PASS (incl. strict pyright). **04b = COMPLETE — MERGED** (PR #209, squash `096f2dbb`, final head `fb044f55`, 2026-08-14): `configs/task_config.yaml` is now the ONE canonical runtime declaration of `task_description`, and the production lit-review builder (`_build_lit_review_input`) resolves it via `get_task_description(load_task_config())` — the same accessor the proposer, implementor, interpreter and tuner already use. `configs/lit_review_config.yaml` no longer declares the key, and a stale value there is STRUCTURALLY IGNORED (the builder never reads it) rather than merely deprioritized; the canonical loader's empty/missing rejection stays fail-closed; NO resolver, schema field, fallback constant or precedence mechanism was added. A second real reader (`scripts/checkpoint_s_runner.py`) was found during audit and migrated to the same accessor. Guarded by a YAML-declaration regression test that reasons over parsed top-level keys (not text). Gates 1 and 2 NOT REQUIRED · Stage-A `pb9_*` byte-exact (no golden regenerated) · rung 13.4-A · deterministic Checkpoint C · exact-head CI run 31780338493 PASS (incl. strict pyright). **Step 04 = COMPLETE — MERGED.** Static builtin model-description prose (`punet`, `gated_fno`) remains DEFERRED by the consumer-less-seam rule (parent §20.4) and is **not** a completion blocker.<br><br>**What Step 04 leaves for later steps to build on:** (1) candidate creation/validation consume the normalized Step-03 `ModelIOContract` as the single contract authority, with ONE shared probe-realization authority across implementor and validator; (2) every LLM node's task framing resolves from the §13 task profile through one accessor — a new node needs no new task-description plumbing, and a new task is declared in `configs/task_config.yaml` alone; (3) `ForwardContract` (prose, prompt-rendered) and `ModelIOContract` (normalized, execution-derived) remain deliberately SEPARATE authorities — §14 records the threshold met and the disposition RECORD ONLY, so later designs must not collapse them or introduce a mega task config |
 | §7b Tuner data selection | 5 | A different topology flows through TrialConfig→SampleSets with tuner code untouched | SampleSet hashes + trial_config JSON deep-equal | dataset-profile axis (reuses 4.8-A through the tuner path) | the production tuner builds its train/eval sets from the resolved profile | 2 | `step_05a_tuner_data_selection.md` | **COMPLETE — MERGED 2026-08-14.** PR **#210**, final head `5ae37180`, exact-head CI `31837316212` PASS, merge **`cfb3b1c7`** (squash). Content frozen at `425bfac9`, freeze marker `1cb0119c`, implementation base `2da399eb`. **ONE PR** (operator decision; no `pr_05a_*` child doc). Checkpoints 0/A/B/C/D PASS; 5 mutations RED; Gates 1/2 NOT REQUIRED, neither run. **Scope materially shrank at design time**: Step 02b already resolved the run profile once and injected it into BOTH `build_sample_set` sites, and Step 02c moved the anchor file-set into the profile — leaving five ambient `TIDMAD` singleton reads on the tuner's validation/scope/accounting path (design §2). **Implementation-time audit found a sixth** residue — `validate_runtime_config(dataset = TIDMAD)`, a defaulted callee parameter — incorporated under §17.2 because it computes the same partial-scope predicate as the tuner. Landed capability: no tuner dataset semantic is read from ambient TIDMAD state; schemas, serialization, CLI and historical replay unchanged |
 | §7d Tuner resource/time planning | 5 | Forecast task-terms (class count, decomposition unit, probe shapes) derive from profiles; calibration values unchanged and separately owned | forecasts byte-identical under TIDMAD (deep-equal breakdowns, PR-G pattern); policy identities unchanged | profile-term axis: a contrast profile changes derived terms while calibration stays fixed | production VRAM/time gates price a real attempt from derived terms | 2, 3 | `step_05b_tuner_resource_time.md` | **COMPLETE — MERGED 2026-08-15.** PR **#211**, final head `649efda0`, exact-head CI `31852637888` PASS, merge **`5ce205d3`** (squash). Content frozen at `ce880124`, freeze marker/implementation base `aa7e2131`. **ONE PR**, two internal capability phases: **P** (`ModelIOContract` → probe realization → live VRAM path) and **D** (run-bound `DatasetProfile` → workload/time derivation). Checkpoints 0/A/B/C/D PASS; 12 mutations across 5 families RED; Gates 1/2 **NOT REQUIRED**, neither launched. **Re-scoped across revisions**: the PSD-unit term already derived from the profile (ambiently — tightened to injection here); the `40000` seg fallbacks are mostly §7e/**step 7** sites. Revision 2 found Step 04a's realizer only realizes at *validation-probe* extents and that no contract reached the VRAM child, making the probe half an **additive seam extension**; revision 3 restored Step-04a's form/fact authority and split Stage-B into **B1**/**B2**. **Implementation-time corrections**: the frozen design's preferred contract transport was unavailable (production launches the tuner as an argv-only subprocess), so the run binding uses ONE shared canonical task-config helper also consumed by `SandboxExecutor` — making the single-authority property structural; and `hybrid` proved not to be a canonical tensor semantic, so its legacy target is deliberately preserved. Landed capability: canonical contract-governed probe realization, run-bound contract across the pre-flight IPC, run-bound profile through the live workload/time path, calibration ownership and values unchanged, replay migration-free |
-| §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | **exact ordered argv-list equality after documented normalization** (05c §4.2) + file-IPC deep-equal; **exact logical artifact equality** (05c §4.1 — deliberately NOT raw HDF5 binary equality); sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `step_05c_tuner_execution_contracts.md` | **DESIGN FROZEN — IMPLEMENTATION NOT STARTED** (frozen 2026-08-15; content `fe73f982`, base `226d4e9f`, **ONE PR**, checkpoints **C0–C9**, remaining operator decisions **NONE**). Channel identity is already derived (Step 02); the value ENCODING (`+128`/`int8`) and the deliverable template are still inlined at **seven production sites** (design §0 census). Deliverable-Contract ownership: **provisional here, final ownership OPEN — Step 06 is the next mandatory confirm-or-say-why review** (05c §3). **Gate 1 NOT REQUIRED; Gate 2 REQUIRED (bounded)**. *(Parity-criterion column corrected at freeze: revision 3 replaced "byte-identical artifacts" with §4.1 logical equality and defined the argv criterion at §4.2.)* |
+| §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | **exact ordered argv-list equality after documented normalization** (05c §4.2) + file-IPC deep-equal; **exact logical artifact equality** (05c §4.1 — deliberately NOT raw HDF5 binary equality); sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `step_05c_tuner_execution_contracts.md` | **COMPLETE — MERGED 2026-08-15.** PR **#212**, final head `89453177`, exact-head CI `31861633497` PASS, merge **`03e00944`** (squash; tree byte-identical to the reviewed head). Content frozen at `fe73f982`, freeze marker / implementation base `4785a639`. **ONE PR**, internal checkpoints **C0–C9**. **Gate 1 NOT REQUIRED; Gate 2 PASS** (one bounded attempt, no retry: 6 real deliverables written through the migrated producer, read by the untouched scorer, removed by the migrated cleanup, 0 remaining). Checkpoints 0/A/B/C/D PASS; **7 semantic mutation families, 7 killed, 0 survivors**; Checkpoint C crossed REAL train+inference subprocesses. **Implementation-time corrections** (05c §15.1, §15.7): the design's "out_dir- vs base-relative" producer distinction does not exist — the real difference is the fix-mode NAME SHAPE; §3.2a's field table wrongly listed the output decode selector as a spec field, superseded by §2.2's per-literal audit; and a **missed same-authority site**, `_is_complete_trial_output`, which §2.2 had classified as input decode but which reads the deliverable the attempt just wrote. Landed capability: the deliverable template is DECLARED EXACTLY ONCE, the persisted representation and channel identity derive from `DatasetProfile`, and the spec never crosses a process boundary (§3.2a Option A — the child reconstructs it from the already-crossing profile). No new argv, no config, no schema field, no migration for stored runs; no TIDMAD sample value moved. Deliverable-Contract ownership stays **PROVISIONAL, final ownership OPEN — Step 06 is the next mandatory confirm-or-say-why review**. *(Parity-criterion column corrected at freeze: revision 3 replaced "byte-identical artifacts" with §4.1 logical equality and defined the argv criterion at §4.2.)* |
 | §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; PRODUCTION SCORING invokes it through the interface; the record-facing metric payload/identity the interface needs is available. Incumbent/comparison/threshold/skip-bypass consumption is NOT claimed here — that is §7a's step-7 final effect (freeze reconciliation 2) | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `step_06_metric_interface.md` | NOT STARTED |
 | §7a Tuner planning & policy | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `step_07a_tuner_policy.md` | NOT STARTED |
 | §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07b_tuner_measurement.md` | NOT STARTED |
@@ -1398,7 +1398,7 @@ production consumer that proves the seam); **Deps** = must land before;
 | §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | NOT STARTED |
 | §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `step_11_execution_infrastructure.md` | NOT STARTED |
 | Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `step_12_task_composition_binding.md` | NOT STARTED (D12 governs) |
-| Deliverable Contract (owner TBD) | 5→? (STAGED — 3rd review F6; **end point no longer predetermined**) | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction preserves **exact logical artifact equality** (05c §4.1) | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11). **Corrected by the frozen 05c design (§3 timing rule, §12): the row does NOT automatically complete at step 11.** Step 05c is a producer-side PROVISIONAL extraction leaving ownership OPEN; **Step 06 is the next MANDATORY ownership review** and must either CONFIRM final ownership or record exactly which consumer evidence is still missing; steps 08/11 may add later evidence but are **not** predetermined decision points | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | 05c PROPOSES (provisional, frozen `fe73f982`); Step 06 confirms-or-says-why | **05c DESIGN FROZEN — NOT IMPLEMENTED** (ledger empty) |
+| Deliverable Contract (owner TBD) | 5→? (STAGED — 3rd review F6; **end point no longer predetermined**) | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction preserves **exact logical artifact equality** (05c §4.1) | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11). **Corrected by the frozen 05c design (§3 timing rule, §12): the row does NOT automatically complete at step 11.** Step 05c is a producer-side PROVISIONAL extraction leaving ownership OPEN; **Step 06 is the next MANDATORY ownership review** and must either CONFIRM final ownership or record exactly which consumer evidence is still missing; steps 08/11 may add later evidence but are **not** predetermined decision points | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | 05c PROPOSES (provisional, MERGED `03e00944`); Step 06 confirms-or-says-why | **05c MERGED — the provisional producer-side extraction has LANDED; the row stays OPEN.** `execute_tools/deliverable_spec.py` now owns naming, cleanup matching, channel-group identity and the persisted storage representation across every migrated producer, reader, cleanup and reconstruction site. It does **not** own completeness, scoreability, instrument attrs or cleanup policy, and 05c claims **no** non-HDF5 deliverable format. **Step 06 is the next MANDATORY ownership review and must confirm-or-say-why** |
 
 ### 15.1a Step-05 completion contract (the Step-level acceptance surface)
 
@@ -1416,9 +1416,25 @@ the standing test for splitting:
 |---|---|---|---|---|---|
 | **05a** data selection | Dataset Profile | wrong data selected / wrongly validated | tuner selection + validation | NOT REQUIRED | **COMPLETE — MERGED** |
 | **05b** resource & time | Dataset Profile + Model-I/O contract + 04a probe skill | wrong price → wrong admission | live VRAM/time gate | **NOT REQUIRED** (resolved from Checkpoint-C evidence) | **COMPLETE — MERGED** |
-| **05c** execution contracts | Dataset Profile (encoding) + Model-I/O decode rule | wrong bytes written / orphaned artifacts | training + inference spawns, cleanup | **REQUIRED (bounded)** | **DESIGN FROZEN** — **IMPLEMENTATION NOT STARTED** |
+| **05c** execution contracts | Dataset Profile (encoding) + Model-I/O decode rule | wrong bytes written / orphaned artifacts | training + inference spawns, cleanup | **REQUIRED (bounded)** — **PASS** | **COMPLETE — MERGED** |
 
-**Step 05 overall: IN PROGRESS.** **Two of three** submodules have landed (05a, 05b). **05c's design is FROZEN; 05c is NOT implemented.**
+**Step 05 overall: COMPLETE.** **All three** submodules have landed — 05a
+(`cfb3b1c7`), 05b (`5ce205d3`) and 05c (`03e00944`). Per §19 the three
+`step_05*` submodule designs jointly constitute Step 05's acceptance entry,
+and this subsection is that entry; with the third merged, the Step-level
+acceptance surface is satisfied.
+
+**What Step 05 leaves for later steps to build on:** (1) the tuner reads no
+dataset semantic from ambient TIDMAD state — selection, validation, scope and
+accounting all consume the run-bound `DatasetProfile` (05a); (2) the live
+VRAM/time gate prices a real attempt from contract-derived terms through ONE
+shared probe-realization authority, with calibration ownership and values
+unchanged (05b); (3) the artifact an attempt PERSISTS has an owner — one
+provisional `DeliverableSpec` behind which naming, cleanup matching,
+channel-group identity and the storage representation resolve, declared once
+and reconstructed rather than transported across the process boundary (05c).
+**Scoring is still NOT generic** — only its launch plumbing is, and the
+scorer's own TIDMAD literals legitimately remain until Step 06.
 
 **05a — COMPLETE / MERGED (2026-08-14).**
 
@@ -1489,25 +1505,65 @@ launch. No run that previously completed real training/inference now fails; a
 degenerate all-pre-flight-refused run with an unreadable task config may now
 fail instead of writing all-skipped records.
 
-**05c — DESIGN FROZEN / IMPLEMENTATION NOT STARTED (2026-08-15).**
+**05c — COMPLETE / MERGED (2026-08-15).**
 
 | | |
 |---|---|
-| status | **PR 05C DESIGN — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION.** |
-| frozen semantic content | `fe73f982ffa4b86aca1eb3e28d18ddacf3af5d32` |
-| design base | `226d4e9f` |
+| PR | **#212** |
+| final PR head | `894531777c41d24561107c3b567d70d94e2dfabf` |
+| exact-head CI | run **31861633497** — SUCCESS (strict pyright included) |
+| merge | **`03e009440a6fadac50aca5850f00aa422f2bff4c`** (squash) |
+| squash parity | `git diff 89453177 03e00944` → empty |
+| frozen semantic content | `fe73f982` · design base `226d4e9f` · freeze marker / implementation base `4785a639` |
 | decomposition | **ONE PR**, internal semantic checkpoints **C0–C9** |
-| deliverable ownership | producer-side **provisional**; final ownership **OPEN**; **Step 06** is the next mandatory confirm-or-say-why review |
-| Gates | Gate 1 **NOT REQUIRED**; Gate 2 **REQUIRED — bounded** |
-| remaining operator decisions | **NONE** |
-| design / freeze record | `step_05c_tuner_execution_contracts.md` §0.0 |
+| Gates | Gate 1 **NOT REQUIRED**; Gate 2 **REQUIRED — PASS** (one bounded attempt, no retry) |
+| design / ledger | `step_05c_tuner_execution_contracts.md` §15 (ledger), §15.13 (Checkpoint E), §0.0 (freeze record, retained) |
 
-- **05b** is **COMPLETE / MERGED** (2026-08-15) — see the entry above.
-- **The freeze does not begin implementation.** 05c has landed no code, no
-  tests and no Gate. A **fresh implementation authorization** in a new
-  session, with filled Implementation Working Rules, is still required.
-  Merging 05b authorized nothing about 05c, and freezing 05c's design
-  authorizes nothing to be built today.
+**Landed capability.** The artifact an attempt PERSISTS now has an owner. One
+provisional runtime `DeliverableSpec` (`execute_tools/deliverable_spec.py`)
+holds deliverable naming, cleanup/name matching, channel-group identity and
+the persisted storage representation; the TIDMAD template is **declared
+exactly once** and consumed by every migrated producer, path reader, cleanup
+reader and canonical reconstruction consumer. The storage representation and
+channel identity **derive** from `DatasetProfile` instead of being re-stated
+beside it, so the `128` on the input-decode side and the `128` on the
+output-encode side now agree by derivation rather than by two literals that
+happen to match.
+
+**Process boundary — §3.2a Option A.** The spec never crosses. Parent and
+child each call one shared derivation over the `DatasetProfile` that already
+crosses via `--dataset_profile_json`, which is **consumed, not re-plumbed**:
+no new argv, no serialization, no ambient module-global spec. Consequently
+05c does **not** claim a renamed template crosses the real subprocess — that
+contrast is the in-process Stage-B rung.
+
+**Evidence.** Checkpoint 0 captured the missing oracles *before* any
+production edit (`create_abra_file`'s first behavioural test). Checkpoints
+0/A/B/C/D PASS; **7 semantic mutation families, 7 killed, 0 survivors**;
+Checkpoint C crossed REAL train + inference subprocesses; **Gate 2 PASS** —
+6 real deliverables written through the migrated producer, read by the
+untouched scorer, removed by the migrated cleanup, 0 remaining. **No TIDMAD
+sample value moved**, and historical replay needs no migration.
+
+**Implementation-time corrections** (05c §15.1, §15.7), recorded rather than
+silently absorbed: the design's "out_dir- vs base-relative" producer
+distinction does not exist — the real difference is the fix-mode NAME SHAPE;
+§3.2a's field table wrongly listed the output decode selector as a spec
+field, superseded by §2.2's per-literal audit; and a **missed same-authority
+site**, `_is_complete_trial_output`, which §2.2 had classified as an
+input-decode check on the source file but which reads the deliverable the
+attempt just wrote.
+
+- **Ownership of the Deliverable Contract remains PROVISIONAL and OPEN.**
+  05c holds producer-side evidence only. **Step 06 is the next MANDATORY
+  ownership review** and must either confirm final ownership or record
+  exactly which consumer evidence is still missing. Merging 05c settles
+  nothing about that row.
+- Scorer literals stay with Step 06; HealthGate peek semantics with Step 08;
+  cleanup **policy** with Step 11 (only name resolution moved).
+- One repository-wide CI change rode along in its own commit (`3e0ef70c`,
+  job timeout 15 → 25 min). Master was already at the ceiling before the
+  branch existed; it is a resource ceiling, not a correctness guard.
 
 **Dependency DAG.** All three depend only on merged Steps 02/03/04:
 
