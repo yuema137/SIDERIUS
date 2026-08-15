@@ -2716,8 +2716,12 @@ clarifications before final freeze" — applied as **Rev 5.1** (R3
 unconditional for fully supported tasks; Step 07 / Step 09 consumer-specific
 ownership; secondary metrics enter the downstream loop as evidence; dataset
 selection BLOCKS the Step-07 design freeze; train/val/final scopes + Gate
-subsets in the selection form; D14 timing left visually unresolved). NOT YET
-FROZEN — final freeze follows the dataset selection (§22.21 sequence). Every
+subsets in the selection form; D14 timing left visually unresolved), then
+**Rev 5.2** (operator, 2026-08-15: implementation timeline — tasks selected
+and frozen NOW, implemented progressively from Step 07; D14 as a dedicated
+milestone between Step 07 and Step 08; cumulative test corpus; no ad-hoc
+composed tasks after Step 07 — §22.11a). NOT YET FROZEN — final freeze
+follows the dataset selection (§22.21 sequence). Every
 MUST / REQUIRED below becomes BINDING on the operator's freeze mark (§17.0
 provenance rule); until then it is the proposed Rev-5 text.** This section is the authoritative top-level guidance for Step 07
 onward. It encodes the operator's post-Step-06 conclusions (§20.8, now folded
@@ -3119,6 +3123,58 @@ without invalidating the persistent-track strategy — and it is what makes D14
 a scheduling decision (§20.5 candidates (a)/(b)) that the operator must take
 before Step 12.
 
+### 22.11a Implementation timeline for the persistent tracks (Rev 5.2 — operator, 2026-08-15)
+
+**Selection and freeze happen NOW; implementation is progressive.** The two
+tasks are selected and their full specification (§22.9a form) frozen BEFORE
+Step 07's design; from that moment they are the canonical persistent tracks.
+No production loader, adapter or task-specific branch is written at selection
+time. Their support then deepens as each refactor seam lands:
+
+```text
+NOW          select + freeze Track B / Track C; fill §22.9a; final Rev-5 freeze
+             (no production code for B/C)
+STEP 07      TrainingHistory / TrainingDiagnosis / metric-direction policy
+             TIDMAD: real production path.  B/C: L1 — atomic fixtures use the EXACT frozen
+             task semantics (objective, validation objective, golden metric + direction,
+             diagnosis shape); no pretence of image files → loader → model → training
+D14          DEDICATED EXECUTABLE-DATA-PATH MILESTONE — placed between Step 07 and Step 08
+             (operator preference 2026-08-15; Q3 to be confirmed at the Rev-5 freeze once the two
+             datasets' real disk→sample→tensor differences are visible)
+             B/C: real dataset → task-declared reader → sample → tensor → model → training →
+             TrainingHistory → inference → deliverable → EvaluationMetric  (L2, then L3)
+             and the ALREADY-LANDED Step-07 fixtures are UPGRADED (not replaced) with real
+             component / integrated variants
+STEP 08      HealthGate — A/B/C on REAL applicable artifacts: TIDMAD-specific gates INAPPLICABLE
+             on the image/spatiotemporal deliverables, generic gates RUN (L2)
+STEP 09      Interpretation / explicit agent rendering — real TrainingDiagnosis + golden metric +
+             secondary metrics + HealthGate evidence from all three tracks, not synthetic JSON
+STEP 10      workflow / resume binding (a second bound task initializes the loop)
+STEP 11      execution-infrastructure genericity (spawns with zero infra edits)
+STEP 12      task composition / regime B — binds the already-executable generic modules through
+             one composition root; A/B/C reach L4 (Milestone 1)
+POST-M1      three-track mandatory regression suite (§22.14)
+```
+
+Why D14 early: deferring it to Step 11 would leave B/C at synthetic L1
+through Steps 07–10 and defeat the progressive design; §22.11 already names
+D14 as the L1→L2/L3 blocker, so it is resolved early rather than late. Step
+12's role is therefore NOT "first time image/spatiotemporal run" but "bind
+the separately-executable generic modules through the composition root".
+
+**Cumulative corpus (RULE).** When a later Step (D14 in particular) makes a
+track executable at a seam that already has L1 evidence, the L1 fixture is
+KEPT and a real-component / integrated variant is ADDED — the corpus
+accumulates `atomic fixture + real component fixture + integrated task
+fixture + (later) full-agent fixture`; nothing is deleted to make room for
+the next level.
+
+**No ad-hoc composed tasks after Step 07 (RULE).** Atomic fixtures may be
+synthetic (direction-only, class-count-only, tensor-rank-only …). Any test,
+fixture or Gate corpus item that CLAIMS "Image Track" or "Spatiotemporal
+Track" MUST use the selected canonical task; no Step may invent a composed
+task unrelated to the persistent tracks to test its abstraction.
+
 ### 22.12 Per-Step support matrix (Step 06 onward — current roadmap numbering)
 
 Step numbers and module owners are those of §15.1; nothing is renumbered.
@@ -3135,7 +3191,7 @@ genericity claim the Step may make.
 | **08 — HealthGates** | §8 · `step_08_health_check_task_profile.md` | TIDMAD verdicts identical; sha-pin mechanism untouched | checks are applicable-by-declaration; int8/amplitude checks INAPPLICABLE honestly on non-int8 / non-sequence artifacts; generic checks still fire; NOT forced onto image tasks because TIDMAD uses them; NOT conflated with scoreability, training diagnosis or the evaluation metric — L1 applicable/inapplicable fixtures, L2 where a real deliverable exists | same, incl. spatiotemporal artifact geometry | health validity is task-declared; the scalar-only / no-per-sample-evidence case is expressed honestly (D18) |
 | **09 — Interpretation / result-agent-facing consumption** | §11 · `step_09_interpretation_task_blocks.md` | 3 interpreter goldens EXACT-equal + owned additions | defines HOW compact structured information reaches the ResultInterpretationAgent and, through it, the cross-iteration summary and next Proposer: TrainingDiagnosis, golden metric (identity/direction), secondary metrics, HealthGate evidence, failure information, cross-iteration findings — via explicit renderers, NEVER indiscriminate raw-record dumping (§22.6 item 5); metric-parameterized grammar and sign-band; L1 metric-identity/direction rendering fixtures incl. lower-is-better and classification/regression phrasing | same | the interpreter and proposer consume owned, compact, typed evidence; the D1 interpreter sign-band / `best_*` consumers migrate here (tuner planner/reflector consumers are Step 07's) |
 | **10 — Orchestration binding** | §12 · `step_10_…` | k9/l_fail choreographies unmodified; resume field-stable | L0/L1: a second bound task initializes the loop; workflow/resume best-score comparisons consume the metric handle (D1 CORE consumers outside the tuner) | same | launcher-owned task binding, metric-generic chain comparisons |
-| **D14 — executable data path** (owner AND timing OPEN — §20.5 (a) Step-11 §9 extension OR (b) a small milestone between Steps 07 and 12; operator decision Q3, best taken once the two datasets' real disk→sample→tensor differences are visible; row placement here is NOT an ordering claim) | TBD | TIDMAD loader/layout byte-stable | **the milestone that makes B executable**: L2 `dataset → loader → tensor` and `deliverable` layout for `[C,H,W]`, then L3 integrated execution | L2/L3 for `[C,T,H,W]` | the reader/layout abstraction is task-declared |
+| **D14 — executable data path** (owner AND timing: operator preference = dedicated milestone immediately after Step 07, before Step 08 — §22.11a; Q3 confirmed at the Rev-5 freeze; row placement here is NOT the final ordering claim) | TBD | TIDMAD loader/layout byte-stable | **the milestone that makes B executable**: L2 `dataset → loader → tensor` and `deliverable` layout for `[C,H,W]`, then L3 integrated execution | L2/L3 for `[C,T,H,W]` | the reader/layout abstraction is task-declared |
 | **11 — Execution infrastructure** | §9 · `step_11_…` | argv/IPC/sentinels byte-identical | contrast tasks spawn with zero infra edits (L2/L3 as available) | same | spawn/IPC/limits task-free |
 | **12 — Task composition + regime B (Milestone 1)** | `step_12_…` | regime-A callers byte-unchanged | **first point at which B MUST demonstrate full declared composition and end-to-end execution (L3, then L4 as the agent workflow is generic)** — task-level metric declaration (Step-06 deferral), objective/history declaration, health config, binding fail-closed | same for C | the three tracks compose; after this Step they are the mandatory regression suite (§22.14) |
 | post-M1 (D1 peripheral, later families) | per §16 M2 | — | regression | regression | new families only on evidence (§21.4) |
@@ -3264,16 +3320,15 @@ Spatiotemporal / regr. ┘                                             │
 |---|---|---|
 | Q1 | **Persistent dataset selection for Tracks B and C** (§22.9a) — datasets, three canonical scopes, objectives, golden metrics, Gate subsets | no authoritative selection exists; **BLOCKS the Step-07 detailed-design freeze** (Rev 5.1); the selection audit is the next work item |
 | Q2 | **Step-7 child decomposition / lettering.** The roadmap's Step 7 (§7a) owns tuner policy AND (since §20.2) TrainingHistory/Diagnosis, with §7e measurement as a sibling; the design files are named `step_07a_tuner_policy.md` / `step_07b_tuner_measurement.md` (neither exists yet). Rev 5 needs the training-diagnostics half and the policy half to be separately acceptable (different Gate dispositions: Gate 1 REQUIRED for the policy/prompt half). Proposed, NOT decided: 07a = training history/diagnostics, 07b = direction-sensitive policy on the metric handle, 07c = measurement/verification. Step NUMBER and §7a ownership are unchanged either way | child lettering is a decomposition choice reserved to the operator (Step 04/05 precedent) |
-| Q3 | **D14 owner and timing** (§20.5 (a) extend Step 11 §9 vs (b) small milestone between Steps 07 and 12) | scheduling decision that gates when B/C can reach L2/L3 |
+| Q3 | **D14 owner and timing** (§20.5 (a) extend Step 11 §9 vs (b) small milestone between Steps 07 and 12) | **operator preference recorded 2026-08-15 (Rev 5.2, §22.11a): (b), placed immediately after Step 07 and before Step 08**; confirmed at the Rev-5 freeze once the selected datasets' data-path differences are visible |
 | Q4 | **Freeze of Rev 5 itself** — this section and the §0/§15.1/§16/§17/§18 propagations become BINDING on the operator's freeze mark | §17.0 provenance rule |
 
 **Frozen sequence to the Rev-5 freeze (operator, 2026-08-15):**
 ```text
 Rev 5.1 (this text)  →  dataset selection audit (real datasets: licence, size, format,
 download/generation, runtime, tensor shapes, three scopes, Gate subsets)  →  operator selects
-Track B / Track C  →  §22.9a filled  →  Q3 D14 owner/timing decided in the light of the two
-datasets' disk→sample→tensor differences  →  Q2 Step-7 child decomposition  →  FINAL Rev-5 freeze
-→  only then Step 07 detailed design
+Track B / Track C  →  §22.9a filled  →  Q3 confirmed (D14 = dedicated milestone after Step 07, §22.11a)
+→  Q2 Step-7 child decomposition  →  FINAL Rev-5 freeze  →  only then Step 07 detailed design
 ```
 
 ### 22.22 What this revision does NOT change
