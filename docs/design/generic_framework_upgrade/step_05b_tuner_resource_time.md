@@ -6,7 +6,7 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **IMPLEMENTED — PR #211 OPEN, READY FOR OPERATOR REVIEW. NOT MERGED.** Semantic design content frozen at **`ce88012450b312fff6cee65ebfc7dff3220f4e68`** (revision 3); implemented from the freeze marker **`aa7e2131`** on branch `feat/generic-framework-step-05b-tuner-resource-time`. All nine semantic milestones C0-C8 complete; Checkpoints 0/A/B/C/D complete; Gate 1 and Gate 2 both **NOT REQUIRED**, each decided from recorded evidence (§18.2h). Live ledger: §18. |
+| Status | **PR 05B — COMPLETE / MERGED. CONTEXT CLOSED. CHECKPOINT E COMPLETE** (2026-08-15). Merged as **`5ce205d37e76b5ee6ff7e25dec94bd1435811ac8`** (PR **#211**, squash). Frozen semantic design **`ce88012450b312fff6cee65ebfc7dff3220f4e68`**; implemented from freeze marker **`aa7e2131`**; final PR head **`649efda0653eaad98a66fcf90a8441dd2a5dedd0`**; terminal exact-head CI **run 31852637888 — success** (strict pyright 0 errors). All nine semantic milestones C0-C8 and Checkpoints 0/A/B/C/D complete. Gate 1 and Gate 2 both **NOT REQUIRED**, each decided from recorded evidence (§18.2h); **no Gate was launched**. Live ledger: §18. **Step 05 remains IN PROGRESS — 05c is not implemented.** |
 | Frozen design content | **`ce880124`** — verified from Git at freeze time, not from a working copy. A stale external copy showing revision 2 exists; **repository truth at `ce880124` is authoritative** |
 | Design base | **re-anchored to `82a548f8`** (master after 05a merged as `cfb3b1c7`). Revision 1 was written against `13b08550`; every source citation below has been re-verified and moved where it moved (§0.3) |
 | Depends on | **Step 02** (Dataset Profile) · **Step 03** (`ModelIOContract`) · **Step 04a** (`model_io_probe_skill`, the shared probe-realization authority) |
@@ -460,8 +460,25 @@ discharge 05b: it would pass with Phase D still entirely ambient.
 
 | Subcase | Varies ONLY | Held fixed | Proves |
 |---|---|---|---|
-| **B1 — Model-I/O probe realization** | the contract-owned class cardinality (or the equivalent Model-I/O fact) | `DatasetProfile`, calibration, hardware, policy, and the candidate's batch/segment extents except where they are themselves the observed probe | the **live** VRAM probe shape and the dependent forecast/admission terms follow the contract; **no local `[B, 256, T]` realization remains** |
+| **B1 — Model-I/O probe realization** | the contract-owned class cardinality (or the equivalent Model-I/O fact) | `DatasetProfile`, calibration, hardware, policy, and the candidate's batch/segment extents except where they are themselves the observed probe | the **live** VRAM probe shape and the dependent forecast/admission terms follow the contract; **no local `[B, C, T]` realization remains for a declaration carrying a canonical tensor semantic** — see the scope note below |
 | **B2 — dataset / decomposition topology** | the PSD/decomposition-relevant `DatasetProfile` fact | `ModelIOContract`, calibration, hardware, policy | the **live** workload/time resolution follows the **run-bound** profile; ambient fallback does not determine step counts or output-byte terms |
+
+> **SCOPE NOTE (corrected at Checkpoint E, from implementation-time source
+> evidence).** The B1 claim is about declarations carrying a **canonical
+> tensor semantic** — `classifier` and `regressor`. It is **not** a claim
+> that every `[B, 256, T]` construction disappeared.
+>
+> `hybrid` is a legacy builtin adapter value, not a tensor semantic:
+> `models_format_sandbox.py` states that outright and forbids inventing one
+> for it, and source agrees — `fcnet` returns `[B, T]` under `smooth_l1` and
+> `[B, C, T]` otherwise, so its emitted shape is chosen by the **loss**, a
+> fact no Model-I/O contract owns. Forcing it through
+> `declared_output_tensor` would return the continuous form and break TIDMAD
+> parity. Its shipped target is therefore **deliberately preserved**, and the
+> legacy literal remains on that adapter path.
+>
+> **PR 05b does not claim generic authoring of arbitrary `hybrid` semantics.**
+> That residue is owned by Step 03 / legacy compatibility (§18.5).
 
 Why two and not one: the two halves fail independently and in opposite
 directions. A single contrast that moved both facts at once would still pass
@@ -578,8 +595,18 @@ C8  terminal regression + CI
 ```
 
 **No local full suite. No real LLM.** Gate 2 only if §11's condition resolves
-to REQUIRED at C7, bounded, and **never launched without operator
-approval**.
+to REQUIRED at C7.
+
+> **CURRENT governance (corrected at Checkpoint E).** If Gate 2 is REQUIRED,
+> launch permission and the autonomous budget come from the **filled
+> Implementation Working Rules and the current Gate standard** — not from a
+> pause inside this design. *(An earlier revision of this line read "never
+> launched without operator approval"; that predates Revision 3, which moved
+> launch choreography out of the design. Kept here as a correction rather
+> than a silent edit.)*
+>
+> **This implementation resolved Gate 2 to NOT REQUIRED (§18.2h), so no Gate
+> was launched.**
 
 ## 13. Rollback boundary
 
@@ -593,6 +620,20 @@ and the pre-flight IPC path:
 | the tuner's VRAM pre-flight call site | C4 |
 | `agent/skills/evaluate_time_skill/`, `agent/skills/inference_skill/estimator.py`, `agent/skills/training_skill/estimator.py`, `execute_tools/workload_resolvers.py`, `execute_tools/inference_single.py` | C5 |
 | directly affected tests + node/skill docs | C0, C6-C8 |
+
+**ACTUAL footprint at merge — two files beyond the plan (DEV-1, bounded):**
+
+| Surface | Commit | Why |
+|---|---|---|
+| `workflows/task_config.py` | C4 | the ONE run-bound-contract acquisition point |
+| `core/sandbox_executor.py` | C4 | `_write_model_io_config` delegates to that same helper, behaviour-identical |
+
+Without those two, the tuner's pre-flight and the training/inference children
+would compute the contract at two sites, and "they agree" would rest on the
+loader's memoization rather than on there being one acquisition point.
+`agent/utils/proposer_preflight.py` was also touched — one line, at a
+test-only entry point, so the estimators' now-required argument is supplied
+rather than left broken (§18.2f).
 
 Reverting C1-C4 restores the `[B, 256, T]` literal and the unparameterized
 realizer; reverting C5 restores the ambient fallbacks. Nothing else.
@@ -1283,7 +1324,9 @@ independently.
 - [x] Build **B1** (§8): vary only the contract-owned class cardinality;
       hold `DatasetProfile`, calibration, hardware and policy fixed. Prove
       the live VRAM probe shape and dependent forecast/admission terms follow
-      the contract, and that no local `[B, 256, T]` realization remains.
+      the contract, and that no local `[B, C, T]` realization remains **for a
+      declaration carrying a canonical tensor semantic** (the `hybrid` legacy
+      adapter is out of that scope — §8 scope note).
 - [x] Build **B2** (§8): vary only the PSD/decomposition-relevant
       `DatasetProfile` fact; hold `ModelIOContract`, calibration, hardware and
       policy fixed. Prove the live workload/time path follows the run-bound
@@ -1436,7 +1479,11 @@ it, this table wins.
 - [x] admission/refusal decisions and identities identical
 - [x] resolved batch size per candidate identical
 - [x] probe tensor shapes/dtypes identical with no contract supplied
-- [x] calibration constants unchanged, asserted by pin
+- [x] calibration values unchanged — established by the **cheapest-sufficient
+      ladder**, not by a pin campaign (§18.2g): existing semantic oracles
+      protect the 800k intensity cap, the batch candidate table and the RSS
+      caps; static touched-file diff protects `SEG_SIZE_BOUNDS`; **exactly
+      one** new pin (value + reachability) was added, for the `2.7` ratio
 - [x] step counts and the default-path visited sequence unchanged
 - [x] model / loss / train / `TrialConfig` schemas unchanged; CLI unchanged
 - [x] a representative historical TIDMAD configuration loads **without
@@ -1444,7 +1491,9 @@ it, this table wins.
 
 ### CHECKPOINT B — generic consumption (ONE rung, TWO atomic subcases)
 - [x] **B1** Model-I/O probe realization: class cardinality moves the live
-      probe shape and dependent forecast/admission terms
+      probe shape and dependent forecast/admission terms, for declarations
+      carrying a canonical tensor semantic (`hybrid` legacy adapter
+      deliberately preserved — §8 scope note)
 - [x] **B2** dataset/decomposition topology: the PSD fact moves the live
       workload/time terms via the **run-bound** profile
 - [x] each subcase varies exactly ONE authority's fact against its own
@@ -1484,7 +1533,7 @@ it, this table wins.
       shown load-bearing, nothing 05b changes is device-dependent, and
       failure class 3 cannot fire. No Gate was launched
 
-### READY FOR OPERATOR REVIEW
+### READY FOR OPERATOR REVIEW — **SATISFIED, REVIEWED, AND MERGED (§18.5)**
 - [x] Checkpoints 0/A/B/C/D complete
 - [x] Gate disposition re-verified at the final head
 - [x] node/skill docs synchronized as the last pre-merge step
@@ -2339,10 +2388,24 @@ resolves this host's Node and dies with `SyntaxError: Unexpected token =`;
 local type-check claim is made anywhere in this PR; the authority is CI's
 blocking strict pyright.
 
-**Exact-final-head CI**
+**CI — implementation chronology, then the terminal authority**
+
+An earlier run validated the code head `d4a54141` before the ledger/doc
+closeout commits landed. It is kept as chronology; **it is not the terminal
+authority.**
 
 ```text
+TERMINAL AUTHORITY
 PR:        #211
+run:       31852637888
+headSha:   649efda0653eaad98a66fcf90a8441dd2a5dedd0   <- final PR head
+conclusion: success
+
+  ruff check / ruff format          pass
+  pyright (strict, BLOCKING)        0 errors, 4 warnings (pre-existing)
+  pytest (unit, no integration)     9228 passed, 26 skipped in 679.53s
+
+CHRONOLOGY (superseded)
 run:       31851753764
 headSha:   d4a5414198235c1b57d62e72df43da0a68c4e4fb
 conclusion: success
@@ -2453,6 +2516,161 @@ the memoization cache rather than on there being one acquisition point.
 additive and revert with C4. *Validation*: the delegation is covered by the
 existing `--model_io_json` transport tests plus a C4 case asserting the
 tuner and the sandbox writer resolve the same contract value.
+
+## 18.5 CHECKPOINT E — merge closeout
+
+| Field | Value |
+|---|---|
+| PR | **#211** |
+| Frozen semantic design | `ce88012450b312fff6cee65ebfc7dff3220f4e68` |
+| Freeze marker / implementation base | `aa7e2131aee17d0049b3b67837f2c8b6a139d4e0` |
+| Final PR head | `649efda0653eaad98a66fcf90a8441dd2a5dedd0` |
+| **Exact merge SHA** | **`5ce205d37e76b5ee6ff7e25dec94bd1435811ac8`** (squash) |
+| Merged at | **2026-08-15T00:59:15Z** |
+| `origin/master` after merge | `5ce205d37e76b5ee6ff7e25dec94bd1435811ac8` |
+| Terminal exact-head CI | **run 31852637888 — success** on the final PR head |
+| Merge integrity | `git diff 649efda0 5ce205d3` **empty** — the squashed tree is byte-identical to the reviewed head |
+| 05a merge | `cfb3b1c7` verified still present in master history |
+
+**Chronology preserved, not rewritten.** Revision-1 assumption → Revision-2
+source audit (§0.2) → Revision-3 authority corrections (§0.5) → operator
+freeze (`aa7e2131`) → implementation-time findings (§18.1-§18.3) → merge. The
+frozen design is NOT edited to look as though the implementation-time
+findings were known at freeze; each correction is recorded where it was made,
+with the assumption it replaced.
+
+### 18.5.1 Final landed capability
+
+**Phase P — Model-I/O / VRAM path**
+
+- Step-04a `realize_shape` supports additive, `None`-sensitive runtime batch
+  and symbolic extents.
+- Omitted extents retain **exact** legacy realization.
+- Non-positive supplied extents **fail closed** and never silently default.
+- **Fixed declared extents retain precedence** over both.
+- Canonical `classifier` / `regressor` candidates are realized through the
+  Step-04a form/fact authority: the **declaration selects the form**, the
+  **`ModelIOContract` supplies the facts** inside it.
+- The VRAM path no longer independently realizes canonical `[B, C, T]`
+  targets. *(The legacy `hybrid` adapter is out of that scope by design —
+  §8 scope note.)*
+- `ModelIOContract` crosses the transient pre-flight IPC **by value** through
+  `IsolatedProbeSpec`.
+- parent → spec → worker → `run_skill` transport is **mutation-proven**
+  (M10, M11, M12).
+- Tuner startup establishes the run-bound contract through the canonical
+  task-config acquisition already used by the training/inference children.
+- **The same shared helper** is used by the tuner and `SandboxExecutor`, so
+  their contract interpretation cannot diverge structurally.
+- **No** user-authored resource config, required persisted field, or required
+  CLI argument was added.
+
+**Phase D — DatasetProfile / workload-time path**
+
+- Every production-live resource/time consumer receives the run-bound
+  `DatasetProfile` explicitly.
+- `profile or resolve_dataset_profile()` is **absent** from the live
+  resource/time path.
+- Required profile parameters replace dead optional fallbacks wherever every
+  production caller can supply the value.
+- Test-only and dead estimators were **not** genericized merely because they
+  contain literals.
+- TIDMAD step counts, output-byte terms, resolved batch, admission identity,
+  visited sequence and seeds remain **exact**.
+
+**Calibration / runtime**
+
+- Calibration ownership **unchanged**.
+- The empirical `2.7` ratio, the `800_000` intensity cap, the batch candidate
+  table, the RSS limits and `SEG_SIZE_BOUNDS` retain their existing values.
+- **No** calibration value was migrated into task config.
+- The `40_000` occurrences remain **separate semantics**; no artificial shared
+  resolver was created.
+
+### 18.5.2 Accepted implementation-time findings
+
+Recorded as bounded source corrections — **not** unresolved acceptance gaps.
+
+**A. Run-bound contract acquisition.** The frozen design preferred an
+already-resolved parent contract; current production launches the tuner as an
+**argv-only subprocess**. Final route:
+
+```text
+tuner process
+  -> one shared canonical contract helper  (run_bound_model_io_contract)
+  -> pre-flight contract transport
+```
+
+and the same helper is consumed by `SandboxExecutor` when materializing the
+training/inference child contract. Evidence: no parent-held resolved contract
+reaches the tuner; an optional `HyperparamTuningInput` field would remain
+`None` on the real production chain; the chosen route uses the
+already-established task-config authority; `load_task_config` is memoized by
+absolute path; and **one shared helper makes the single-authority property
+structural** rather than a coincidence of that memoization.
+
+**B. `hybrid`.** Not a third canonical tensor semantic — a legacy adapter
+whose emitted shape depends on `loss_type`. Step 03 explicitly forbids
+inventing canonical tensor semantics for it, and forcing it through
+`declared_output_tensor` would break TIDMAD parity. Its existing target
+behaviour is therefore **intentionally preserved**, and **generic authoring of
+arbitrary hybrid semantics is NOT claimed by PR 05b**.
+
+**C. Estimator liveness.** `estimate_proposal_time` is **not
+production-live**: its apparent non-test caller is reachable only through an
+estimator API with no production `.estimate()` caller. It was **not**
+genericized. `resolve_scoring_workload` remains **test-only**;
+`resolve_formal_workloads` remains **dead**. Signature-coherence edits do
+**not** turn either into a claimed production consumer.
+
+**D. Checkpoint-C time path — bounded composition.** The real
+`HyperparamTuningAgent.run()` supplies and captures the production time-gate
+arguments; the real `evaluate_time_skill.run_skill` consumes those captured
+values. Nesting the actual invocation inside the harness would incorrectly
+enter real HDF5 warm-up, because the harness patches `os.path.exists` → True.
+**Both halves are production entry points**, mutations prove the tuner
+argument and the downstream consumption are load-bearing, and the test
+asserts the run completed so an unrelated abort cannot falsely "catch" a
+mutation.
+
+**E. Failure ordering — one intentional fail-closed delta.** Binding the
+contract at tuner startup makes an unreadable task config fail **there**
+rather than at the first training launch. Stated accurately: **no run that
+previously completed real training/inference successfully now fails**; a
+degenerate all-pre-flight-refused run with an unreadable task config may now
+fail instead of writing all-skipped records. This is the fail-closed
+direction required once the pre-flight consumes the contract, and **no
+compatibility claim in this document hides it**.
+
+### 18.5.3 Final evidence
+
+| Checkpoint | Verdict |
+|---|---|
+| **0** | **PASS** — target dtype baselines for every relevant branch; unknown-output refusal captured; live/dead estimator census; all captured **before** any production change |
+| **A** | **PASS** — TIDMAD forecast breakdowns deep-equal; admission/refusal identity exact; resolved batch exact; no-contract tensor shapes/dtypes exact; shipped explicit contract reproduces legacy TIDMAD behaviour; workloads, output bytes, visited sequence and seeds exact; historical configuration/spec payloads load without migration; model/loss/train/`TrialConfig`/CLI compatibility preserved |
+| **B** | **PASS** — B1 probe realization follows the contract; B2 workload/time follows the run-bound profile; fixture atomicity machine-checked (one differing leaf each); calibration, hardware and policy fixed across both |
+| **C** | **PASS** — C-P: real spawned pre-flight worker, real JSON IPC, real contract reconstruction, real probe realization, real forward/backward, real pricing, real admission. C-D: production tuner binding + real time-skill workload resolution. **No helper-only claim**; load-bearing mutations close both chains |
+| **mutations** | **PASS** — twelve mutations, five semantic families, all RED, all restored, tree re-verified green |
+| **D** | **PASS** — 9,254 local unit tests passed / 3 skipped; 5 Checkpoint-C integration tests passed; `ruff check` passed; `ruff format --check` passed; **local pyright unavailable (host Node v10.19.0) and no local pyright success is claimed**; final CI strict pyright passed; final exact-head CI run 31852637888 passed |
+
+**Gates — Gate 1 NOT REQUIRED, Gate 2 NOT REQUIRED. No Gate was launched.**
+Gate 2's four evidence reasons (§18.2h): the decision itself is real and
+unstubbed; it is shown **load-bearing** by the contract-dropped contrast;
+nothing 05b changes is device-dependent; and failure class 3 cannot fire
+because the shipped contract reproduces the legacy tensor by equality.
+
+### 18.5.4 Deferred findings and their owners
+
+| Finding | Owner | Note |
+|---|---|---|
+| legacy `hybrid` tensor semantics | **Step 03 / legacy compatibility** | not generic authoring; **not** a PR-05c issue merely because it affects an artifact shape |
+| `estimate_proposal_time` | recorded debt | **not production-live**; no genericization performed |
+| `resolve_scoring_workload` (test-only), `resolve_formal_workloads` (dead) | recorded debt | retained as debt, **not** claimed as live generic consumers |
+| ambient `DatasetProfile` at `train_engine_sandbox.py:93,:344,:868` and `scoring_utils.py:602` | **Step 02 / 05a data-and-execution surfaces**, per the source audit | **not** automatically routed to 05c |
+| `core/runtime_control` segmentation defaults | **Step 07** | measurement identity, out of 05b's scope throughout |
+
+None of these were fixed in the governance sync, and none is assigned to PR
+05c without source evidence.
 
 ## 19. Remaining operator decisions
 
