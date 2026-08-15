@@ -2,9 +2,9 @@
 
 Canonical folder for ALL step-level detailed designs under the FROZEN
 overall roadmap (`docs/design/siderius_generic_framework_upgrade.md` —
-Revisions 1-3 operator approved 2026-08-11, O1 proposer-first confirmed; Revision 4 — §0 rule 10, §20, §21 — is READY FOR OPERATOR FREEZE as of 2026-08-15).
+Revisions 1-3 operator approved 2026-08-11, O1 proposer-first confirmed; Revision 4 — §0 rule 10, §20, §21 — READY FOR OPERATOR FREEZE as of 2026-08-15; **Revision 5 — §22 persistent contrast tracks, lifecycle semantics (computation × role × cadence), required train/validation histories + one golden metric, information-flow governance, maturity ladder, per-Step support matrix, multi-track Gate corpus — DRAFTED 2026-08-15, READY FOR OPERATOR FREEZE**; its open decisions (dataset selection for the image/spatiotemporal tracks, Step-7 child lettering, D14 owner) are roadmap §22.21).
 
-**Sequence after Step 06 (operator, 2026-08-15):** dataset/task selection audit → Rev-5 overall roadmap revision + freeze (roadmap §20.8) → Step 07 detailed design. No Step-07 design begins before that freeze.
+**Sequence after Step 06 (operator, 2026-08-15):** Rev-5 overall roadmap revision (roadmap §22 — DRAFTED, awaiting freeze) → dataset/task selection audit (§22.9a / §22.21-Q1) → Step 07 detailed design(s). No Step-07 design begins before the Rev-5 freeze; no Step whose acceptance depends on the concrete image/spatiotemporal tasks begins before the dataset decision.
 
 **This README is an INDEX plus a one-line mirror of the overall
 roadmap's status. It is NEVER an independent progress tracker — the

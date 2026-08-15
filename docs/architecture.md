@@ -872,6 +872,16 @@ genericity-contract doc exists):
    role the old stance waited for.
 4. The frozen TIDMAD metric instance (score formula, paper comparability) stays
    byte-identical; metric pluggability means new metrics plug in beside it.
+5. **Rev 5 (2026-08-15, roadmap §22, awaiting operator freeze)**: computation ×
+   lifecycle role × cadence are orthogonal (a name never makes a computation a
+   loss or a metric); every fully supported task requires one training
+   objective, per-epoch train- and validation-objective histories, and one
+   golden evaluation metric; persistence never implies prompt visibility;
+   genericity is validated against three PERSISTENT tracks — TIDMAD (control),
+   a fixed image/classification task and a fixed spatiotemporal/regression
+   task — each at the highest honest maturity level, with a required Gate's
+   corpus covering every executable track. Datasets for the two contrast
+   tracks are an OPEN operator decision (roadmap §22.9a).
 
 ---
 

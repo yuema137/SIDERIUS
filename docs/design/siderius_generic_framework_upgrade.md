@@ -4,7 +4,14 @@
 proposer-first sequencing CONFIRMED. Revision 4 (2026-08-15: §0 rule 10,
 §20, §21 and their status cells) is READY FOR OPERATOR FREEZE — its seven
 operator decisions OD-20-2..7 were taken on 2026-08-15, and the Rev-4
-governance text as a whole awaits the operator's freeze mark. No
+governance text as a whole awaits the operator's freeze mark. **Revision 5
+(2026-08-15, after Step 06 merged: §22 — persistent contrast tracks,
+computation × lifecycle-role × cadence, required train/validation histories
+and one golden metric, information-flow governance, maturity ladder,
+per-Step support matrix, multi-track Gate corpus rule; propagated into §0
+rule 11, §7a/§8/§11/§12, §15.1, §16, §17.0.2, §18, §21) is DRAFTED and READY
+FOR OPERATOR FREEZE — binding on the freeze mark; its open decisions are
+§22.21.** No
 implementation is authorized by this document alone.** Each module named here receives its own detailed design
 document (operator-reviewed) before any code changes. This document
 decides direction, module ownership, compatibility surfaces, and
@@ -273,6 +280,20 @@ Binding method:
     prediction objective are ORTHOGONAL coverage dimensions. Validation
     itself must become generic (§21.6). New task families are added on
     EVIDENCE of a missing semantic dimension, never for variety.
+11. **Computation, lifecycle role and evaluation cadence are orthogonal;
+    persistence never implies prompt visibility (Rev 5, §22).** A
+    mathematical computation is bound into a role — training objective,
+    training observation/diagnostic, evaluation metric (primary or
+    secondary) — and evaluated at a cadence (checkpointed or terminal);
+    its name decides nothing. Every fully supported task REQUIRES one
+    training objective, per-epoch train- and validation-objective
+    histories, and one golden evaluation metric; optional quantities are
+    structured evidence, never silent policy. Every agent-facing surface
+    has an explicit owner and renderer. Genericity is validated against
+    THREE PERSISTENT tracks — TIDMAD (control), a FIXED image/classification
+    task and a FIXED spatiotemporal/regression task — each at the highest
+    honest maturity level (§22.10) the affected seam supports; a required
+    Gate's corpus covers every executable track at that seam (§22.13).
 
 ### 0.A Relationship to prior genericization commitments
 
@@ -859,6 +880,14 @@ REMOVE them, never leave the third state.
 override-chain resolution deep-equal; record fields unchanged.
 **Fixture**: a lower-is-better scalar metric on the stub task — proves
 direction/threshold logic flows from the metric handle.
+**Rev 5 (§22.12, Step 7)**: this module carries TWO halves with distinct
+acceptance — the training-diagnostics half (R2 train-objective history,
+R3 validation-objective history REQUIRED when a validation set exists,
+`TrainingHistory` → deterministic `TrainingDiagnosis`, structured and never
+prompt-dumped — §22.2/§22.4/§22.6) and the policy half (incumbent /
+threshold / skip / bypass consume the golden metric's declared direction via
+the Step-06 handle; secondary metrics stay evidence — §22.7; Gate 1
+REQUIRED per §20.2 OD-20-6). Child lettering is operator decision §22.21-Q2.
 
 ### 7b. Data selection & sample-set construction
 P5,P7-P9: strategy resolution, TrialConfig, seeds/ordering, SampleSet
@@ -1007,6 +1036,13 @@ states this migration note explicitly.
   checks inapplicable-by-declaration (no other axis varied).
 - 8.4-C generic-check firing only: a dispersion check fires on the same
   declared-float output that 8.4-B established.
+#### 8.4a Rev-5 obligations (§22.12, Step 8)
+Checks are applicable-by-declaration; TIDMAD's int8/amplitude family is
+INAPPLICABLE honestly on non-int8 / non-sequence artifacts and is never
+forced onto the image or spatiotemporal tracks; HealthGate stays orthogonal
+to scoreability, training diagnosis and the evaluation metric (§22.8); how
+"no per-sample evidence" (scalar-only metrics, D18) is expressed is this
+step's, with Step 12.
 #### 8.5 Follow-up
 `docs/design/generic_framework_upgrade/step_08_health_check_task_profile.md`
 (absorbs the stale collapse_detection_framework_generic.md intent —
@@ -1188,6 +1224,13 @@ prediction grammar parameterized by the §10 metric handle.
 Fixtures (atomic, second pass F4): 11-A metric identity only (stub
 metric handle, table stays per-file); 11-B table indexing only (TIDMAD
 metric, per-sample rows instead of per-file).
+**Rev 5 (§22.12, Step 9)**: this module defines HOW compact structured
+information reaches agents — `TrainingDiagnosis`, the golden metric with
+identity/direction, secondary metrics, HealthGate evidence, structured
+failure information, cross-iteration findings — through explicit renderers,
+never indiscriminate raw-record dumping (§22.6); the D1 interpreter
+sign-band / `best_*` comparisons and the reflector's hardcoded "HIGHER … is
+GOOD" line migrate to the metric handle here.
 Follow-up: `docs/design/generic_framework_upgrade/step_09_interpretation_task_blocks.md`.
 
 ## 12. Module: Orchestration & Chain
@@ -1211,6 +1254,9 @@ or profiled. The caller-resolves-capability pattern
 launcher owns task binding, the workflow stays generic.
 Compatibility: iteration choreography byte-stable (k9/l_fail canned
 choreographies keep passing unmodified); resume inventory field-stable.
+**Rev 5 (§22.12, Step 10)**: workflow / resume best-score comparisons (D1
+CORE consumers outside the tuner) consume the metric handle's direction; a
+second bound task (Track B or C at its honest maturity) initializes the loop.
 Follow-up: `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding.md`.
 
 ## 13. Module: Task Profile & Prompt Assembly (incl. lit review)
@@ -1477,13 +1523,13 @@ production consumer that proves the seam); **Deps** = must land before;
 | §7d Tuner resource/time planning | 5 | Forecast task-terms (class count, decomposition unit, probe shapes) derive from profiles; calibration values unchanged and separately owned | forecasts byte-identical under TIDMAD (deep-equal breakdowns, PR-G pattern); policy identities unchanged | profile-term axis: a contrast profile changes derived terms while calibration stays fixed | production VRAM/time gates price a real attempt from derived terms | 2, 3 | `step_05b_tuner_resource_time.md` | **COMPLETE — MERGED 2026-08-15.** PR **#211**, final head `649efda0`, exact-head CI `31852637888` PASS, merge **`5ce205d3`** (squash). Content frozen at `ce880124`, freeze marker/implementation base `aa7e2131`. **ONE PR**, two internal capability phases: **P** (`ModelIOContract` → probe realization → live VRAM path) and **D** (run-bound `DatasetProfile` → workload/time derivation). Checkpoints 0/A/B/C/D PASS; 12 mutations across 5 families RED; Gates 1/2 **NOT REQUIRED**, neither launched. **Re-scoped across revisions**: the PSD-unit term already derived from the profile (ambiently — tightened to injection here); the `40000` seg fallbacks are mostly §7e/**step 7** sites. Revision 2 found Step 04a's realizer only realizes at *validation-probe* extents and that no contract reached the VRAM child, making the probe half an **additive seam extension**; revision 3 restored Step-04a's form/fact authority and split Stage-B into **B1**/**B2**. **Implementation-time corrections**: the frozen design's preferred contract transport was unavailable (production launches the tuner as an argv-only subprocess), so the run binding uses ONE shared canonical task-config helper also consumed by `SandboxExecutor` — making the single-authority property structural; and `hybrid` proved not to be a canonical tensor semantic, so its legacy target is deliberately preserved. Landed capability: canonical contract-governed probe realization, run-bound contract across the pre-flight IPC, run-bound profile through the live workload/time path, calibration ownership and values unchanged, replay migration-free |
 | §7c Tuner execution contracts | 5 | Engines write/clean deliverables via the (provisional) contract; launch mechanics carry zero task literals; scorer launch untouched (TIDMAD-bound until step 6) | **exact ordered argv-list equality after documented normalization** (05c §4.2) + file-IPC deep-equal; **exact logical artifact equality** (05c §4.1 — deliberately NOT raw HDF5 binary equality); sentinels untouched | deliverable-transport axis (single-axis fixture, §7c) | production training/inference spawns run through the contract | 2, 3 | `step_05c_tuner_execution_contracts.md` | **COMPLETE — MERGED 2026-08-15.** PR **#212**, final head `89453177`, exact-head CI `31861633497` PASS, merge **`03e00944`** (squash; tree byte-identical to the reviewed head). Content frozen at `fe73f982`, freeze marker / implementation base `4785a639`. **ONE PR**, internal checkpoints **C0–C9**. **Gate 1 NOT REQUIRED; Gate 2 PASS** (one bounded attempt, no retry: 6 real deliverables written through the migrated producer, read by the untouched scorer, removed by the migrated cleanup, 0 remaining). Checkpoints 0/A/B/C/D PASS; **7 semantic mutation families, 7 killed, 0 survivors**; Checkpoint C crossed REAL train+inference subprocesses. **Implementation-time corrections** (05c §15.1, §15.7): the design's "out_dir- vs base-relative" producer distinction does not exist — the real difference is the fix-mode NAME SHAPE; §3.2a's field table wrongly listed the output decode selector as a spec field, superseded by §2.2's per-literal audit; and a **missed same-authority site**, `_is_complete_trial_output`, which §2.2 had classified as input decode but which reads the deliverable the attempt just wrote. Landed capability: the deliverable template is DECLARED EXACTLY ONCE, the persisted representation and channel identity derive from `DatasetProfile`, and the spec never crosses a process boundary (§3.2a Option A — the child reconstructs it from the already-crossing profile). No new argv, no config, no schema field, no migration for stored runs; no TIDMAD sample value moved. Deliverable-Contract ownership stays **PROVISIONAL, final ownership OPEN — Step 06 is the next mandatory confirm-or-say-why review**. *(Parity-criterion column corrected at freeze: revision 3 replaced "byte-identical artifacts" with §4.1 logical equality and defined the argv criterion at §4.2.)* |
 | §10 Metric interface | 6 | Metrics are named instances (name, direction, aggregation, references, scoreability); the frozen TIDMAD metric is instance #1 byte-identical; PRODUCTION SCORING invokes it through the interface; the record-facing metric payload/identity the interface needs is available. Incumbent/comparison/threshold/skip-bypass consumption is NOT claimed here — that is §7a's step-7 final effect (freeze reconciliation 2) | frozen-formula pins + offline scalar baseline + legacy parity (real_run); per_file_best metric_id key-set pin | metric-identity axis: a lower-is-better scalar metric on stub outputs through the handle | PRODUCTION SCORING invokes the frozen TIDMAD instance THROUGH the interface (a step-6-available consumer; incumbent-selection consumption is §7a's C at step 7 — 3rd review F5) | 5 (7-family); Deliverable Contract PROVISIONAL extraction (step 5, via §7c) | `step_06_metric_interface.md` | **COMPLETE — MERGED** (PR #213, squash `02f382eb`, final head `45b0ff7c`, 2026-08-15; design `step_06_metric_interface.md` §20 is the ledger). Final effect delivered: metrics are named instances (`MetricSpec`: id · direction · aggregation · references · executable scoreability), the frozen TIDMAD scorer is instance #1 byte-identical (`scoring_utils.py` no diff), PRODUCTION SCORING (tuner live route + scoring subprocess) invokes it THROUGH the handle with scoreability BEFORE arithmetic, and the record-facing payload (`metric_result` / `metric_refusal`) is machine-readable and persisted — filtered from planner history because agent-facing rendering is Step 07a/09. Q1 CONFIRMED (05c retains producer representation; 06 owns evaluation-side acceptance). A: C0 two-route oracle + frozen pins + historical replay; B: strict direction-only rung (C6a) + broader different-metric rung (C6b); C: real train→infer→scoring child through the handle. Gate 1 PASS (corrective round after operator review), Gate 2 NOT REQUIRED. Not reached (asserted D1/07a list): tuner incumbent selection, workflow/resume/per_file_best/dashboard direction literals. Post-Step-05 obligations closed: (a) eval-vs-training-diagnostics boundary executable (loss-shaped ids refused, no loss field); (b) Deliverable-Contract review CONFIRMED. Follow-up debt in §20.11 |
-| §7a Tuner planning & policy | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `step_07a_tuner_policy.md` | NOT STARTED. **Post-Step-05 addendum §20.2 (operator decisions 2026-08-15) ADDS to this step's scope**: the trainer emits a `TrainingHistory` (train loss REQUIRED; validation loss REQUIRED-WHEN-A-VALIDATION-SET-EXISTS), the tuner OWNS and derives a deterministic `TrainingDiagnosis`, and both ride the EXISTING record/transport (no second state store). Validation data comes from the existing run-bound SampleSet split — **no new `--val_*` IPC unless source proves the existing boundary insufficient**. Because the reflector prompt will change, **Gate 1 becomes REQUIRED for 07a** |
-| §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07b_tuner_measurement.md` | NOT STARTED |
-| §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `step_08_health_check_task_profile.md` | NOT STARTED |
-| §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `step_09_interpretation_task_blocks.md` | NOT STARTED |
-| §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | NOT STARTED |
-| §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `step_11_execution_infrastructure.md` | NOT STARTED |
-| Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `step_12_task_composition_binding.md` | NOT STARTED (D12 governs) |
+| §7a Tuner planning & policy | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | `step_07a_tuner_policy.md` | NOT STARTED. **Post-Step-05 addendum §20.2 (operator decisions 2026-08-15) ADDS to this step's scope**: the trainer emits a `TrainingHistory` (train loss REQUIRED; validation loss REQUIRED-WHEN-A-VALIDATION-SET-EXISTS), the tuner OWNS and derives a deterministic `TrainingDiagnosis`, and both ride the EXISTING record/transport (no second state store). Validation data comes from the existing run-bound SampleSet split — **no new `--val_*` IPC unless source proves the existing boundary insufficient**. Because the reflector prompt will change, **Gate 1 becomes REQUIRED for 07a**. **Rev 5 (§22.12)**: two separately acceptable halves — training diagnostics (R2/R3 histories, History→Diagnosis, structured, not prompt-dumped) and direction-sensitive policy on the golden metric (secondary metrics evidence-only); Tracks B/C at L1 (contrast objective/history fixture; lower-direction + classification/regression policy cases) and L2 where the trainer seam is generic; child lettering = operator decision §22.21-Q2 |
+| §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07b_tuner_measurement.md` | NOT STARTED. Rev 5: lettering per §22.21-Q2; B/C at L0/L1 (measurement data-feeding from a contrast profile) |
+| §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `step_08_health_check_task_profile.md` | NOT STARTED. **Rev 5 (§22.12)**: applicable/inapplicable-by-declaration verified on Tracks B/C (L1; L2 where a real deliverable exists); orthogonal to scoreability / diagnosis / metric (§22.8); D18 owner |
+| §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `step_09_interpretation_task_blocks.md` | NOT STARTED. **Rev 5 (§22.12)**: owns agent-facing rendering of diagnosis / golden metric / secondary metrics / health / failures / cross-iteration findings via explicit renderers (§22.6); D1 interpreter + reflector-prompt direction consumers migrate here; B/C L1 rendering fixtures |
+| §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | NOT STARTED. **Rev 5 (§22.12)**: workflow/resume D1 comparisons via the handle; a second bound task (B or C) at honest maturity |
+| §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `step_11_execution_infrastructure.md` | NOT STARTED. Rev 5: contrast tasks spawn with zero infra edits (L2/L3 as D14 allows); D14 owner decision §22.21-Q3 |
+| Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `step_12_task_composition_binding.md` | NOT STARTED (D12 governs). **Rev 5 (§22.12, §22.14)**: first point at which Tracks B and C MUST demonstrate full declared composition + end-to-end execution (L3→L4); task-level metric / objective / history / health declarations; after this Step the three tracks are the mandatory regression suite; PREREQUISITE: dataset selection §22.21-Q1 |
 | Deliverable Contract (**ownership RESOLVED at Step 06 — split**, see §14) | 5→6 for ownership (RESOLVED); non-HDF5 rung → D14 / Step 12 | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction preserves **exact logical artifact equality** (05c §4.1) | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11). **Corrected by the frozen 05c design (§3 timing rule, §12): the row does NOT automatically complete at step 11.** Step 05c is a producer-side PROVISIONAL extraction leaving ownership OPEN; **Step 06 is the next MANDATORY ownership review** and must either CONFIRM final ownership or record exactly which consumer evidence is still missing; steps 08/11 may add later evidence but are **not** predetermined decision points | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | 05c PROPOSES (provisional, MERGED `03e00944`); Step 06 confirms-or-says-why | **05c MERGED — the provisional producer-side extraction has LANDED; the row stays OPEN.** `execute_tools/deliverable_spec.py` now owns naming, cleanup matching, channel-group identity and the persisted storage representation across every migrated producer, reader, cleanup and reconstruction site. It does **not** own completeness, scoreability, instrument attrs or cleanup policy, and 05c claims **no** non-HDF5 deliverable format. **Step 06 is the next MANDATORY ownership review and must confirm-or-say-why** |
 
 ### 15.1a Step-05 completion contract (the Step-level acceptance surface)
@@ -1788,7 +1834,12 @@ TIDMAD-profile-bound at M2.
 
 ## 16. Framework-level acceptance criteria (Rev 2 — two milestones)
 
-**MILESTONE 1 — CORE GENERICIZATION.** *(Rev 4, §21: Milestone 1 is the
+**MILESTONE 1 — CORE GENERICIZATION.** *(Rev 5, §22: the "materially different
+composed contrast task" of criterion 1 is the two PERSISTENT tracks — the FIXED
+image/classification and spatiotemporal/regression tasks of §22.9 — each
+reaching L3/L4 (§22.10); their datasets are operator decision §22.21-Q1; from
+this milestone on the three tracks are the mandatory regression suite,
+§22.14.)* *(Rev 4, §21: Milestone 1 is the
 first COMPLETE-COMPOSITION checkpoint — the point at which the contrast
 tracks are REQUIRED to compose into whole end-to-end tasks. It is NOT the
 first point at which genericity is tested; the tracks supply Stage-B
@@ -1915,6 +1966,17 @@ consumers. Ownership boundaries, rung selection and Gate decisions are
 source does not settle it, ASK the operator — do not decide by
 plausibility.
 
+#### 17.0.2 Multi-track Gate CORPUS (Rev 5 — binding on the Rev-5 freeze)
+
+Gate applicability is unchanged and stays with the gate standard and §17.0.
+When a Gate IS required, its corpus MUST cover every persistent validation
+track (§22.9) that has reached executable maturity (L2+, §22.10) at the
+affected seam — TIDMAD always, plus Image and Spatiotemporal when executable
+there; a not-yet-executable track contributes its highest honest lower-level
+evidence and the design records why full Gate execution is unavailable
+(§22.13). After Milestone 1 all three tracks run whenever a Gate is required
+(§22.14). This never turns a unit-only change into a Gate.
+
 #### 17.0.1 Gate 2 is bounded by executed WORK (2026-08-14, PR #206)
 
 The authority in §17.0 is unchanged — the gate standard is still the only
@@ -2029,6 +2091,10 @@ campaign per module.
 | D13 | **Flexible-input rungs FX-3 (preset resolution) and FX-4 (preset-vs-explicit mismatch, fail-closed BEFORE the LLM boundary)** — deferred BY step 1, which could not land them: no preset mechanism exists in-tree, and step 1 cannot fail closed on a conflict it has no way to represent. Step 1 landed FX-1/FX-2/FX-5 as PROSE contrasts only, which prove template rank-agnosticism at the PROMPT layer and claim nothing about structured arbitrary-tensor support. **Owner: the contract owner (step 2 §4 / step 3 §5) MUST land both rungs with its structured contract** — see `step_01_proposer_hypothesis_space.md` §6A.5, §9.4 | **RESOLVED / CLOSED by Step 03** (PR #205, merge `e1181f61`). Both rungs landed with the structured contract: FX-3 preset resolution and FX-4 preset-vs-explicit mismatch, the latter failing closed BEFORE the LLM boundary with LLMBridge call count asserted at 0. A preset is authoring convenience only and does not survive resolution. Canonical evidence: `step_03_model_loss_contract.md` §4a.1 / §24, `tests/unit/agent/schemas/test_model_io_resolution.py`. **Note the narrowing**: Step-01 §6A.5 also named description↔contract consistency as part of the FX-4 obligation; Step-03 §9 explicitly WITHDREW that — it is prose duplication owned by the Step-01 layer, not an NLP validation problem |
 | D14 | **Data-path ownership** — the EXECUTABLE half of "storage → sample → input tensor" (`train_engine_sandbox.py::TIDMADEpochDataset`, `inference_single.py`'s per-file slice/reshape, `array2h5.py`'s storage layout). §4.3 owns the DECLARATIVE half (geometry + legality) and is complete; §9 is process infrastructure and explicitly says §4 supplies "only input-identity indexing" (:996-997). **No section owns the reader.** OPEN — see §20.5 for the two candidates | operator direction 2026-08-15: prefer absorption into an existing step, no new step unless source proves necessary; source audit finds §9 is NOT the natural owner, so the choice is between (a) a Step-11 scope extension and (b) a small dedicated milestone. Decide at Step-11 design kickoff or earlier if Step-12/M1 needs it. **D14 is a PRECONDITION of Milestone 1: §16 criterion 1 cannot be considered satisfiable until D14 has an owner and its abstraction has landed** — running the two contrast tasks through a TIDMAD-shaped loader would not be a generic end-to-end run (§21.3 item 3, §16 note) |
 | D15 | **Model-family aggregation of training diagnoses** ("CNNs always overfit") | not before candidate/iteration-level evidence exists (§20.2 layer 4); the existing cross-iteration state has NO model-family aggregation precedent except `model_knowledge_cache` (a summarisation cache, not evidence) |
+| D16 | **Lexical loss-id restriction** in `execute_tools/evaluation_metric.py` (Step 06): ids whose tokens include `loss`/`losses` are refused — rejects legitimate future evaluation metrics such as `log_loss`, passes `mse` used as a training objective | temporary implementation restriction, NOT the generic boundary (Rev 5 §22.1: role is typed binding, not naming); remove/narrow when a task-level metric declaration first needs it — Step 12 (or Step 07 if it touches the module first). Not a Step-06 reopener |
+| D17 | **Mandatory-scalar runtime enforcement**: `MetricResult.scalar: float \| None` lets a generic `EvaluationMetric` subclass return `None` (TIDMAD cannot); frozen semantics are scoreable ⇒ scalar / not-scoreable ⇒ `NotScoreableResult` | implementation-quality debt; owner = the first design adding a second production metric instance (Step 12; earlier if convenient) |
+| D18 | **Scalar-only metric → `file_vector=[]` bridge** into `HealthCheckContext` / the record | safe compatibility bridge today; how "no per-sample evidence" is expressed is Step 08 (with Step 12) |
+| D19 | **Persistent contrast dataset selection** (Tracks B/C, §22.9a) | OPERATOR DECISION — prerequisite before the first Step whose acceptance depends on the concrete tasks and before Step 12 (§22.21-Q1) |
 | D12 | Task-composition root's physical representation (file layout/schema; when legacy-adapter defaulting is retired per §2 regime split) | by §0 rule 9: after several module configs exist; the composition design also fixes the binding switch from regime A to regime B |
 
 ## 19. Detailed-design documents this roadmap requires
@@ -2332,8 +2398,8 @@ Step 12  composition + regime B; the two contrast tracks COMPOSE into complete
 
 ### 20.8 Post-Step-06 conclusions and the pending Rev-5 overall revision (operator, 2026-08-15)
 
-**Status: DECIDED as direction; to be ENCODED and FROZEN by the Rev-5 overall
-revision before Step 07's detailed design.** Recorded here so the conclusions do
+**Status: DECIDED as direction — ENCODED by Rev 5 (§22, drafted 2026-08-15,
+READY FOR OPERATOR FREEZE); §22 supersedes this list as the binding form.** Recorded here so the conclusions do
 not live only in review conversation. Sequence frozen by the operator:
 *Step 06 merge → mechanical finalizer → dataset/task selection audit → Rev-5
 overall revision + freeze → Step 07 detailed design.* The revision is not doc
@@ -2377,6 +2443,13 @@ on.
    suite.
 
 ## 21. Genericity validation strategy — progressive contrast tracks (Rev 4, 2026-08-15)
+
+*(Rev 5, §22, builds on this section: the two tracks become FIXED persistent
+tasks with assigned objectives (image → classification, spatiotemporal →
+regression), the Stage-B grades become the L0–L4 maturity ladder, a per-Step
+support matrix and a multi-track Gate-corpus rule are added, and the
+lifecycle semantics behind "validation must become generic" (§21.6/§21.7)
+are frozen. Where the two sections differ in precision, §22 governs.)*
 
 **Status: governance and architecture. Principles, coverage dimensions,
 timing, milestone expectations and criteria for adding tracks. Exact
@@ -2480,14 +2553,14 @@ CONCEPTUAL VALIDATION COVERAGE MATRIX  (coverage opportunities — NOT a checkli
                               input / data topology
                     temporal      image      spatiotemporal   (tabular · graph · … evidence-driven)
 objective  ─────────────────────────────────────────────────────────────────────────────
-regression          ·             ?             ?
-classification      TIDMAD*       ?             ?
+regression          ·             ·             C (Rev 5)
+classification      TIDMAD*       B (Rev 5)     ·
 other structured    ·             ·             ·
 
 *  TIDMAD occupies ONE legacy cell: 1-D temporal input, per-timestep 256-class
    output decoded by argmax (classifier), scored by a task-specific frozen metric.
-?  the first two new topology tracks; their objective placement is chosen by
-   the detailed designs and may deliberately differ from TIDMAD's.
+B/C  the two PERSISTENT tracks with their Rev-5 objective assignment (§22.9):
+   Image → classification, Spatiotemporal → regression; datasets = §22.9a.
 ·  a coverage opportunity, added only when needed to expose a missing abstraction.
 ```
 
@@ -2628,3 +2701,509 @@ no-new-config-hierarchy rule are unchanged. **No implementation commitment is
 created for Steps 06-11 by this section**: each detailed design still chooses
 the cheapest Stage-B grade (§17 Checkpoint B) its landed abstraction can
 honestly support.
+
+## 22. Revision 5 — Persistent contrast tracks, lifecycle semantics, and progressive multi-task validation (2026-08-15)
+
+**Status: DRAFTED 2026-08-15 after Step 06 merged (PR #213) — READY FOR
+OPERATOR FREEZE. Every MUST / REQUIRED below becomes BINDING on the
+operator's freeze mark (§17.0 provenance rule); until then it is the proposed
+Rev-5 text.** This section is the authoritative top-level guidance for Step 07
+onward. It encodes the operator's post-Step-06 conclusions (§20.8, now folded
+in here), makes §21's progressive-track idea concrete and persistent, and
+propagates the consequences into §0, §15.1, §16, §17 and §18. It does NOT
+reopen Step 06, does not change Step numbering, and creates no implementation
+commitment by itself — every mechanism named here is designed by the owning
+detailed design (§19).
+
+**Answers this section makes direct** (a future designer must be able to
+answer these from this document alone): the persistent validation tasks
+(§22.9); the topologies and objective families they cover (§22.9); the
+quantities REQUIRED for every task (§22.2); computation vs lifecycle role vs
+cadence (§22.1, §22.3); what is computed during training vs after (§22.3);
+raw history vs deterministic diagnosis vs final evaluation (§22.4, §22.5);
+what may enter tuner / interpreter / proposer loops and what must NOT become
+agent-visible merely because it is persisted (§22.6); how far each task must
+be supported at each Step (§22.10–§22.12); which tracks a required Gate must
+cover (§22.13); when the three tracks become a mandatory end-to-end regression
+suite (§22.14); which Step owns each unresolved seam (§22.12, §22.18).
+
+### 22.1 Computation × lifecycle role × evaluation cadence are three orthogonal concepts (PRINCIPLE)
+
+A **mathematical computation** — MSE, MAE, cross entropy, log loss, accuracy,
+AUROC, F1, calibration error, spectral statistics, the TIDMAD denoising score,
+a gradient norm, any future scientific statistic — is only a computation. It is
+NOT intrinsically a training loss, an evaluation metric or a diagnostic, and
+**its English name never decides its lifecycle role**. The role is determined
+by WHERE and HOW the computation is bound in the workflow; the same computation
+may legitimately be bound in several roles:
+
+```text
+MSE computation
+    ├── training objective          (optimization binding; autograd-compatible)
+    ├── validation observation      (checkpointed on validation data; no backprop)
+    └── final evaluation metric     (terminal binding on the persisted deliverable)
+```
+
+```text
+Mathematical computation
+         │
+         ├───────────────────────────────────────────────┐
+         ▼                                               ▼
+  LIFECYCLE ROLE (how it is bound)               EVALUATION CADENCE (when)
+         │                                               │
+  ┌──────┼──────────────┐                     ┌──────────┴──────────┐
+  ▼      ▼              ▼                     ▼                     ▼
+training  training      evaluation      checkpointed            terminal
+objective diagnostic    metric          (during training,       (after the chosen
+  │       observation   (primary /       per_epoch in v1)        checkpoint exists)
+  ▼          │           secondary)
+optimizer    ▼              │
+      TrainingHistory ──▶ TrainingDiagnosis      golden + secondary metrics
+```
+
+**Consequences.** (a) The distinction between `TrainingObjective`,
+`TrainingDiagnostic`/observation and `EvaluationMetric` is a distinction of
+BINDING and typed structure, not of vocabulary. (b) A quantity containing the
+token "loss" (`log_loss`, `perceptual_loss`) may be a legitimate evaluation
+metric; a quantity named `mse` may be a training objective. **This principle
+supersedes, as long-term architecture, any reading that a name containing
+"loss" must not be an evaluation metric.** Step 06's lexical loss-id refusal
+in `execute_tools/evaluation_metric.py` remains as explicitly tracked
+implementation debt (D16, §22.18) — Step 06 is not reopened for it. (c) No new
+class hierarchy is invented here; the semantic contract binds the detailed
+designs that next touch these roles (Step 07 for objectives/histories, Step 12
+for task-level declarations).
+
+**Training objective (v1).** Every learnable task has exactly ONE training
+objective unless a frozen detailed design explicitly establishes
+multi-objective training (none does). It is a computation bound to the
+optimization lifecycle. For SIDERIUS's gradient-based training path it MUST
+be autograd-compatible with respect to the model outputs / parameters the
+optimizer needs — subgradient-compatible objectives (L1, SmoothL1) are valid;
+"smooth everywhere" is NOT required. An evaluation metric has NO
+differentiability requirement; a training diagnostic has NO optimization role.
+
+### 22.2 Required quantities for every fully supported learnable task (REQUIRED)
+
+Every task the framework calls fully supported MUST eventually provide all
+four; each is a distinct lifecycle observation even when two share a
+computation:
+
+| # | Quantity | Binding | Cadence (v1) | Notes |
+|---|---|---|---|---|
+| R1 | **Training objective** | optimization | every optimizer step, aggregated per epoch | exactly one (v1); autograd-compatible |
+| R2 | **Training-objective history** `L_train(e)` | training observation | per epoch (checkpointed) | persisted structurally; the trainer already emits a per-epoch mean train loss (§20.2) |
+| R3 | **Validation-objective history** `L_val(e)` | training observation on VALIDATION data | per epoch (checkpointed) | the SAME objective computation evaluated on validation data during training, **no backprop**; REQUIRED whenever a validation set exists (OD-20-4); **final-only inference is insufficient** for diagnosing overfitting / underfitting / convergence / divergence / plateau / best-validation-epoch / train-val gap. **NOT YET SUPPORTED** in source (no validation objective exists in the trainer — §20.2 audit) — Step 07 owns it |
+| R4 | **Primary / golden evaluation metric** `M_golden(f_θE(X_eval), Y_eval)` | terminal evaluation of the persisted deliverable | terminal | exactly one per task; explicit identity, direction, aggregation, mandatory scalar, Step-06 scoreability semantics; the eventual target of direction-sensitive incumbent/policy logic (Step 7 policy half); NO differentiability requirement |
+
+Conceptually the two families never mix:
+
+```text
+H = { (e, L_train(e), L_val(e), optional checkpointed observations…) }_{e=1..E}
+M_golden( f_{θ_E}(X_eval), Y_eval )       — plus optional terminal metrics
+```
+
+**Optional quantities (§22.2a).** Two categories, both PERSISTED
+STRUCTURALLY when declared and available to the appropriate downstream layer
+— *optional does NOT mean dead logging*:
+- **optional checkpointed observations / diagnostics** (validation accuracy per
+  epoch, gradient norm, learning-rate history, further validation statistics,
+  domain-specific training diagnostics) — they join `TrainingHistory` or a
+  clearly related structured training-observation mechanism (Step 07);
+- **optional terminal metrics** (secondary accuracy, AUROC, F1, calibration
+  error, secondary scientific metrics) — evaluated on the final deliverable in
+  the evaluation lifecycle (Step 06's secondary-metric slot; task-level
+  declaration at Step 12).
+Neither may silently alter incumbent selection (§22.7).
+
+**Worked example — an image-classification task** (illustration, not a
+declaration; datasets are §22.9's operator decision):
+
+```text
+training objective        cross entropy    role = training objective        cadence = per epoch / optimization
+validation objective      cross entropy    role = training observation      cadence = per epoch, no backprop
+optional validation metric accuracy        role = training-diagnostic obs.  cadence = per epoch
+golden metric             accuracy (or another selected primary)  role = primary evaluation   cadence = terminal
+optional final metrics    AUROC / ECE / F1 role = secondary evidence          cadence = terminal
+```
+
+`accuracy` at epoch e on validation data and final held-out `accuracy` are the
+SAME computation and DIFFERENT observations: dataset, checkpoint, consumer and
+persistence context differ.
+
+### 22.3 Evaluation cadence — checkpointed vs terminal (v1 minimum)
+
+WHEN a quantity is evaluated is a second axis. It is a **cadence / lifecycle
+mode**, not a class of metric — no `StaticMetric` / `DynamicMetric` ontology
+is created unless source evidence later requires such types.
+
+```text
+CHECKPOINTED / DURING TRAINING   v1: per_epoch          → a history indexed by epoch/checkpoint
+   train objective · validation objective · optional validation accuracy ·
+   optional gradient norm · other training diagnostics
+TERMINAL / POST-TRAINING         after the chosen checkpoint exists
+   primary golden metric · optional secondary final metrics ·
+   scientific metrics that need persisted inference outputs
+```
+
+```text
+training → checkpoint θ_E → final inference → persisted deliverable → terminal evaluation
+```
+
+Golden evaluation MUST NOT be required at every epoch: for scientific tasks
+final scoring may need expensive inference, large persisted artifacts,
+simulation or external scoring (TIDMAD's own scorer is such a case). Cadence
+extensions (`every_n_epochs`, `selected_checkpoints`, `per_step`) are
+evidence-driven and NOT required by this revision.
+
+### 22.4 TrainingHistory ≠ TrainingDiagnosis (preserved, made explicit)
+
+```text
+TrainingHistory   RAW structured observations — "what happened during training?"
+                  H = {(epoch, train_objective, validation_objective, optional checkpointed observations…)}
+                  MUST NOT itself assert overfitting / convergence / instability / plateau / objective mismatch
+TrainingDiagnosis DETERMINISTIC structured interpretation derived from TrainingHistory —
+                  "what can we conclude?" — candidate concepts: converged, overfitting detected,
+                  underfitting evidence, instability, plateau, best validation epoch,
+                  final-vs-best validation degradation, train/validation gap, trend summaries
+```
+
+Ownership stays as §20.2 froze it: producer = trainer (History) and the tuner's
+deterministic layer (Diagnosis), Step 7 (training-diagnostics half); computed
+ONCE, never re-derived by an LLM or the Interpreter. Exact schema field names
+are NOT frozen here — the Step-07 detailed design freezes them; this section
+freezes semantic ownership and required capability.
+
+### 22.5 The major lifecycle products — one table, not one mega-object
+
+| Concept | Question answered | Producer / owner (as frozen) | Typical cadence | Downstream use |
+|---|---|---|---|---|
+| TrainingObjective | what quantity drives optimization? | training subsystem (Step 03/07) | every optimizer step; aggregated per epoch | optimizer |
+| TrainingHistory | what happened during training? | training runtime — Step 7 (§20.2) | checkpointed (per_epoch v1) | diagnosis |
+| TrainingDiagnosis | what does the training behaviour imply? | tuner's deterministic layer — Step 7 (§20.2) | after / through training | tuner policy + later knowledge transport |
+| Primary / golden EvaluationMetric | how good is the final scientific/task result? | Step 06 metric layer (`EvaluationMetric`, scoreability before arithmetic) | terminal | policy (Step 7 policy half) + interpretation (Step 9) |
+| Secondary EvaluationMetric | what additional final evidence is useful? | metric/evaluation layer (Step 06 slot; declared at Step 12) | terminal | interpretation / diagnosis — never silent policy |
+| HealthGate | is the result pathological / scientifically invalid? | Step 8 | after the relevant output/evaluation | validity / policy |
+| Cross-iteration knowledge | what should later iterations learn from this run? | workflow / interpretation transport (Step 9, §12) | iteration boundary | next Proposer |
+
+These are not aliases and MUST NOT collapse into one `MetricObservation`
+(§20.2 already rejected that). A task may have good train/validation
+behaviour, a good golden metric and a bad HealthGate; or an overfitting
+diagnosis, a mediocre golden metric and a healthy artifact — later tuner /
+interpreter logic receives them as SEPARATE typed evidence (§22.8).
+
+### 22.6 Downstream information-flow governance (RULE — persistence ≠ prompt visibility)
+
+**Persisted state MUST NOT automatically become agent-visible state.** The
+Step-06 review demonstrated the failure: an additive structured record field
+reached the planner because a generic serializer dumped whole records into the
+prompt (fixed by an explicit filter, step_06 §20.11). Therefore:
+
+1. Every agent-facing information path MUST have an explicit owner, renderer /
+   summarization seam and test — no LLM receives a field because it happens to
+   be on a persisted record.
+2. Intended progressive flow for training information:
+   ```text
+   training runtime → TrainingHistory → TrainingDiagnosis → current tuner decision
+   TrainingDiagnosis → persisted structured run knowledge → Interpreter
+                     → cross-iteration knowledge / summary → next Proposer
+   ```
+3. The same diagnosis is NOT independently recomputed by several LLM agents;
+   raw long curves stay structured artifacts and are not dumped verbatim into
+   prompts. Agents preferentially receive compact structured diagnosis,
+   explicitly selected metric results, structured HealthGate evidence,
+   structured failure information and curated cross-iteration knowledge.
+4. Transport mechanisms are NOT designed here — Step 7 (diagnostics half) and
+   Step 9 own them (§20.2 transport recommendation stands).
+
+### 22.7 No hidden multi-objective policy (RULE)
+
+Exactly ONE primary / golden metric controls task-quality optimization and
+incumbent policy in v1. Optional terminal metrics are persisted, may inform
+diagnosis / interpretation, may become agent-visible through an explicit later
+renderer, and do NOT silently contribute to the incumbent score. No weighted
+combination (`0.8·primary − 0.2·secondary`) exists without a separately
+designed multi-objective policy. Training objective and golden metric may be
+mathematically different — that is normal.
+
+### 22.8 HealthGate remains orthogonal (restated)
+
+```text
+Training objective   drives optimization
+TrainingHistory      records training observations
+TrainingDiagnosis    interprets training dynamics
+EvaluationMetric     scores the final deliverable (scoreability = acceptance, Step 06)
+HealthGate           determines pathology / validity evidence (Step 8)
+```
+
+Scoreability is not HealthGate; HealthGate is not training diagnosis; a
+metric is not a health verdict (§21.7 unchanged).
+
+### 22.9 Three PERSISTENT validation tracks (the validation corpus)
+
+| Track | Role | Topology | Objective family | Status |
+|---|---|---|---|---|
+| **A — TIDMAD** | original scientific task; frozen scientific-compatibility control; historical-behaviour parity; strongest backward-compatibility evidence | sequence / time-series (1-D temporal, per-timestep 256-class output decoded by argmax, task-specific frozen metric) | legacy classifier-shaped scientific task — occupies ONE legacy cell, NOT counted as evidence for every dimension | mandatory throughout; the Stage-A control at every Step |
+| **B — Image** | non-temporal spatial topology; substantially different dataset→tensor path; categorical output / class-cardinality path; different metric and objective semantics | `[C, H, W]` | **CLASSIFICATION** (assigned) | PERSISTENT COMPOSED CONTRAST TRACK — dataset: OPERATOR DECISION (§22.9a) |
+| **C — Spatiotemporal** | spatial + temporal higher-rank topology; different loader / sample / tensor geometry; continuous output | `[C, T, H, W]` or an equivalent explicit spatiotemporal structure | **REGRESSION** (assigned) | PERSISTENT COMPOSED CONTRAST TRACK — dataset: OPERATOR DECISION (§22.9a) |
+
+Coverage: two orthogonal dimensions — data topology (sequence · image ·
+spatiotemporal) × learning objective (classification · regression), §21.4's
+matrix with the two `?` cells now ASSIGNED (image → classification,
+spatiotemporal → regression). TIDMAD remains the legacy scientific control.
+
+**Task immutability / replacement policy (RULE).** Once the image and
+spatiotemporal tasks are selected they are FIXED across all later Steps: not
+replaced because a Step is difficult, not switched per Step, their semantics
+not modified to make a failing abstraction pass, and no task-specific
+production branch added without explicit architectural justification.
+Replacement requires (1) a documented reason, (2) operator approval, (3)
+preservation of the original coverage dimensions, (4) migration /
+compatibility evidence where historical results matter. Additional tasks may
+be added later on evidence (§21.4); the original tracks remain unless formally
+replaced. This is what lets improvement be attributed to framework
+refactoring rather than fixture-specific special-casing.
+
+**Selection requirements** (diagnostic value and execution simplicity over
+benchmark prestige): small; classic / well understood; freely reproducible;
+stable source; clear licence; no credential; simple preprocessing;
+deterministic tiny subset possible; fast CPU or single-GPU; easy to validate
+manually; obvious tensor topology; simple primary metric and training
+objective; cheap Gate-1 / Gate-2 subsets; able to expose SIDERIUS's hidden
+assumptions.
+
+#### 22.9a Persistent contrast dataset selection — **OPERATOR DECISION REQUIRED (UNRESOLVED)**
+
+No dataset for Track B or Track C has been selected in any authoritative
+source at the time of this revision (repository search: no MNIST / CIFAR /
+Moving-MNIST / other candidate appears in any design or config). **This
+revision does NOT select them.** The decision is a PREREQUISITE for the first
+later Step whose acceptance depends on the concrete tasks (per §22.12: the
+first Step at which a track is asked for Level-2+ evidence, and in any case
+before Step 12), and for full persistent-track validation. Until it is
+resolved, tracks B and C exist only as coverage assignments (topology ×
+objective) and Level-0/1 fixtures may use synthetic stand-ins that state
+their status honestly.
+
+Required decision fields, per track (to be recorded here on resolution):
+
+```text
+Track B — Image / classification            Track C — Spatiotemporal / regression
+  dataset:                                    dataset:
+  source / licence:                           source / licence:
+  fixed deterministic subset:                 fixed deterministic subset:
+  task:                                       task:
+  input topology:  [C, H, W]                  input topology:  [C, T, H, W] (or equivalent)
+  target:          class label(s)             target:          continuous field / value(s)
+  training objective:                         training objective:
+  validation objective (REQUIRED, same comp.): validation objective (REQUIRED, same comp.):
+  golden metric + direction:                  golden metric + direction:
+  optional checkpointed diagnostics:          optional checkpointed diagnostics:
+  optional terminal metrics:                  optional terminal metrics:
+  expected runtime class (Gate-1/2 subsets):  expected runtime class:
+  why diagnostically useful:                  why diagnostically useful:
+```
+
+*Non-binding note for the selection audit (candidates, NOT choices):* the
+criteria above are typically met by classic tiny image-classification sets and
+by small synthetic or classic spatiotemporal fields; the audit should score
+candidates against every criterion, prefer licence-clean and credential-free
+sources, and record the rejected alternatives.
+
+### 22.10 Progressive genericity validation maturity ladder (BINDING on freeze)
+
+Each track is validated at the HIGHEST MATURITY LEVEL the framework currently
+supports at the affected seam — never forced through a seam that does not
+exist, never allowed to stop below the level the seam already permits.
+
+```text
+L0  DECLARATION / CONTRACT   the task is honestly representable by the existing declarations
+                              (DatasetProfile facts, ModelIOContract, forward contract, DeliverableSpec,
+                              EvaluationMetric / scoreability declaration, task description) — NO executable claim
+L1  ATOMIC SEAM               the abstraction the current Step introduced is exercised by a minimal contrast
+                              fixture; when the fixture claims atomicity ONLY the intended semantic dimension
+                              varies (metric direction · tensor rank · class cardinality · scoreability form ·
+                              diagnostic structure · cadence …)
+L2  EXECUTABLE COMPONENT      the task crosses a REAL component boundary (dataset→loader→tensor · model→output ·
+                              deliverable→metric · training→TrainingHistory …); no helper-only evidence when a
+                              real subprocess/component is part of the claim
+L3  INTEGRATED TASK EXECUTION real dataset → sample → tensor → model → training (with train + validation history)
+                              → inference → deliverable → evaluation
+L4  FULL AGENT WORKFLOW       real task declaration → proposal → implementation → validation → tuning
+                              → training diagnostics → inference → evaluation → HealthGate → interpretation
+                              → persisted knowledge
+```
+
+These are the §17 Checkpoint-B grades (atomic rung / progressively-composed
+track rung / end-to-end run) made explicit; the same names are used in §22.12.
+
+### 22.11 Progressive rule before full composition, and the D14 blocker
+
+Until the executable data path (D14, §20.5) has an owner and lands, tracks B
+and C cannot honestly reach L2 for `dataset → loader → tensor` or L3; they
+reach L0/L1 at every seam that exists (profile, model I/O, candidate
+creation, deliverable spec, metric handle, and — as they land —
+TrainingHistory/Diagnosis, health declarations, interpretation blocks) and L2
+where a component does not depend on the data path (e.g. `deliverable →
+metric` on a synthetic artifact, `training → TrainingHistory` on a stub
+trainer if the trainer seam is generic). Rules: TIDMAD MUST keep the strongest
+applicable Stage-A evidence at every Step; B and C MUST provide the highest
+HONEST level; NEVER fake an end-to-end track; NEVER use schema-only evidence
+where an executable seam exists; NEVER require an executable track before the
+owning data-path refactor exists. D14 therefore LIMITS early B/C maturity
+without invalidating the persistent-track strategy — and it is what makes D14
+a scheduling decision (§20.5 candidates (a)/(b)) that the operator must take
+before Step 12.
+
+### 22.12 Per-Step support matrix (Step 06 onward — current roadmap numbering)
+
+Step numbers and module owners are those of §15.1; nothing is renumbered.
+"Obligation" = the maturity level (§22.10) the track MUST reach at that
+Step's affected seam, given what exists at that time; "claim" = the new
+genericity claim the Step may make.
+
+| Step | Owner / design | TIDMAD (Track A) | Image (Track B) | Spatiotemporal (Track C) | New genericity claim |
+|---|---|---|---|---|---|
+| **06 — Metric interface** (COMPLETE, PR #213) | §10 · `step_06_metric_interface.md` | full: two-route parity, scoreability before arithmetic, frozen values byte-identical (Stage A) | **not reopened.** Historical: no persistent task existed; the STRICT direction-only atomic rung (C6a) + broader different-metric rung (C6b) are valid L1 evidence for the metric handle | same | metric identity/direction/aggregation/scoreability are declared instances; scoring runs through the handle. Persistent B/C declarations begin AFTER this revision, when their declaration seam exists |
+| **07 — Tuner planning & policy incl. training diagnostics** (§7a + §20.2; child decomposition §22.21-Q2) — *training-diagnostics half* | §7a / Step-07 detailed design(s) | R2 train history persisted per epoch; **R3 validation-objective history REQUIRED when a validation set exists** (existing SampleSet split, no new `--val_*` IPC unless source proves otherwise — OD-20-3); TrainingHistory + deterministic TrainingDiagnosis; optional checkpointed observations; distinct from EvaluationMetric; structured, persisted for later transport; NOT prompt-dumped (§22.6) | L1: a contrast objective/history fixture (different objective computation, different diagnosis shape); L2 `training → TrainingHistory` if the trainer seam is generic; as soon as B reaches the training seam (post-D14) it MUST exercise history/diagnosis | same as B | training dynamics are first-class typed evidence; validation loss exists; the eval-vs-training boundary is executable on both sides |
+| **07 — policy half** (direction-sensitive incumbent / threshold / skip / bypass) | §7a / Step-07 policy design | incumbent selection consumes the golden metric's declared direction and identity through the Step-06 handle (never TIDMAD `max`/`>`); secondary metrics stay evidence; policy distinguishes training diagnosis · final primary metric · HealthGate validity; planner/reflector prompts EXACT-equal for TIDMAD except the explicitly owned diagnosis rendering — **Gate 1 REQUIRED** (§20.2 OD-20-6) | L1: lower-is-better AND classification/regression-relevant policy cases as supported (the C6a instance is the ready-made lower-direction fixture) | same | direction-sensitive policy is metric-generic; the D1 CORE consumers inside the tuner (§16 D1 table) migrate here |
+| **07 — measurement / verification** (§7e) | `step_07b…` (lettering: §22.21-Q2) | identity/comparability keys byte-stable | L0/L1 measurement data-feeding from a contrast profile | same | unchanged from §15.1 |
+| **08 — HealthGates** | §8 · `step_08_health_check_task_profile.md` | TIDMAD verdicts identical; sha-pin mechanism untouched | checks are applicable-by-declaration; int8/amplitude checks INAPPLICABLE honestly on non-int8 / non-sequence artifacts; generic checks still fire; NOT forced onto image tasks because TIDMAD uses them; NOT conflated with scoreability, training diagnosis or the evaluation metric — L1 applicable/inapplicable fixtures, L2 where a real deliverable exists | same, incl. spatiotemporal artifact geometry | health validity is task-declared; the scalar-only / no-per-sample-evidence case is expressed honestly (D18) |
+| **09 — Interpretation / agent-facing consumption** | §11 · `step_09_interpretation_task_blocks.md` | 3 interpreter goldens EXACT-equal + owned additions | defines HOW compact structured information reaches agents: TrainingDiagnosis, golden metric (identity/direction), secondary metrics, HealthGate evidence, failure information, cross-iteration findings — via explicit renderers, NEVER indiscriminate raw-record dumping (§22.6); metric-parameterized grammar and sign-band; L1 metric-identity/direction rendering fixtures incl. lower-is-better and classification/regression phrasing | same | agents consume owned, compact, typed evidence; the D1 interpreter sign-band consumers migrate here |
+| **10 — Orchestration binding** | §12 · `step_10_…` | k9/l_fail choreographies unmodified; resume field-stable | L0/L1: a second bound task initializes the loop; workflow/resume best-score comparisons consume the metric handle (D1 CORE consumers outside the tuner) | same | launcher-owned task binding, metric-generic chain comparisons |
+| **D14 — executable data path** (owner OPEN: Step 11 §9 extension OR a small milestone between Steps 07 and 12 — §20.5, operator decision Q3) | TBD | TIDMAD loader/layout byte-stable | **the milestone that makes B executable**: L2 `dataset → loader → tensor` and `deliverable` layout for `[C,H,W]`, then L3 integrated execution | L2/L3 for `[C,T,H,W]` | the reader/layout abstraction is task-declared |
+| **11 — Execution infrastructure** | §9 · `step_11_…` | argv/IPC/sentinels byte-identical | contrast tasks spawn with zero infra edits (L2/L3 as available) | same | spawn/IPC/limits task-free |
+| **12 — Task composition + regime B (Milestone 1)** | `step_12_…` | regime-A callers byte-unchanged | **first point at which B MUST demonstrate full declared composition and end-to-end execution (L3, then L4 as the agent workflow is generic)** — task-level metric declaration (Step-06 deferral), objective/history declaration, health config, binding fail-closed | same for C | the three tracks compose; after this Step they are the mandatory regression suite (§22.14) |
+| post-M1 (D1 peripheral, later families) | per §16 M2 | — | regression | regression | new families only on evidence (§21.4) |
+
+### 22.13 Gate 1 / Gate 2 multi-track governance (RULE — corpus breadth, not applicability)
+
+Gate APPLICABILITY is unchanged: `docs/gates/gate_testing_standard.md` and
+§17.0 decide whether a change requires Gate 1 or Gate 2, per change type,
+tiers decided separately, table row quoted. Nothing here makes every PR run
+any Gate. What Rev 5 adds is CORPUS BREADTH:
+
+> When a change REQUIRES Gate 1, the Gate-1 corpus MUST cover every persistent
+> validation track that has reached an executable maturity (L2+) at the
+> affected LLM-facing seam. When a change REQUIRES Gate 2, the Gate-2 corpus
+> MUST cover every persistent track that has reached an executable maturity at
+> the affected real-execution seam.
+
+```text
+Gate required?  ──yes──▶  TIDMAD  +  Image (if executable at that seam)  +  Spatiotemporal (if executable at that seam)
+```
+
+For a track that has NOT reached the required maturity because the seam does
+not exist: run its highest honest lower-level evidence, record explicitly why
+full Gate execution is unavailable, and never fabricate an end-to-end result.
+§17.0.1's bounds (default 1 iteration × 1 round, harness-owned workload,
+functional PASS) apply per track.
+
+### 22.14 Post-composition mandatory regression rule (BINDING on freeze, effective at Milestone 1)
+
+Once Step 12 / Milestone 1 establishes complete support for all three
+persistent tasks: any subsequent generic-framework change affecting a seam
+these tasks exercise MUST preserve all three tracks; if Gate 1 is required it
+runs on all three applicable tracks; if Gate 2 is required it runs on all
+three applicable tracks; ordinary deterministic / unit-only changes still
+follow the gate standard and do not automatically launch Gates. The three
+tasks are then the project's canonical minimal genericity regression suite
+(§21.5 retention obligation, made concrete).
+
+### 22.15 Atomic vs broader vs composed evidence (RULE — the C6 lesson)
+
+```text
+ATOMIC CONTRAST FIXTURE   moves ONE semantic axis whenever it claims atomicity
+                          (direction only · class cardinality only · topology only · cadence only)
+BROADER CONTRAST FIXTURE  may vary several related properties and proves broader capability —
+                          MUST NOT be labelled one-axis atomic evidence
+PERSISTENT COMPOSED TASK  a real task combining topology, objective, model I/O, training, inference,
+                          deliverable, evaluation, diagnostics, HealthGate and agent reasoning —
+                          Tracks B and C; NOT a replacement for atomic tests
+```
+
+Both kinds of evidence are needed; a Step's Checkpoint-B cell names which
+grade each rung is. Step 06's C6a (strict) / C6b (broader) split is the
+worked precedent (step_06 §20.11).
+
+### 22.16 Dataset lifecycle stays explicit (RULE)
+
+"Same computation" never hides dataset lifecycle. For EVERY required quantity a
+detailed design MUST identify: data split / scope; checkpoint; cadence;
+consumer; persistence destination. `accuracy` (or MSE) on training data, on
+validation data during training, and on held-out final evaluation data are
+three observations. This matters most for Tracks B and C, whose validation
+splits do not exist yet.
+
+### 22.17 Definition of genericity progress (BINDING on freeze)
+
+A Step may claim genericity progress only if ALL hold: (1) TIDMAD Stage-A /
+compatibility behaviour is preserved; (2) the new abstraction has an honest
+atomic contrast; (3) each persistent contrast task reaches the highest maturity
+the newly refactored seam enables; (4) no task-specific workaround is
+introduced as generic infrastructure; (5) applicable real component /
+subprocess boundaries are crossed by real evidence; (6) required Gate 1 / 2
+coverage includes all executable persistent tracks at the affected seam;
+(7) unsupported maturity is explicitly attributed to an owned future blocker,
+never hidden; (8) the same persistent tasks continue across Steps.
+
+### 22.18 Implementation debts exposed by these principles (tracked in §18; NOT Step-06 reopeners)
+
+| Debt | Verdict | Owner |
+|---|---|---|
+| **D16 lexical loss-id restriction** — `evaluation_metric.py` refuses ids whose tokens include `loss`/`losses` (rejects `log_loss`, `perceptual_loss`; passes `LossRate`, `mse`) | temporary implementation restriction, NOT the generic boundary (§22.1); the boundary is lifecycle / typed structure | remove or narrow when task-level metric declaration first needs a legitimate `*loss*` metric — Step 12 (or Step 07 if it touches the module first) |
+| **D17 mandatory-scalar enforcement** — `MetricResult.scalar: float \| None`; a generic `EvaluationMetric` subclass can return `scalar=None` without a runtime refusal (TIDMAD cannot) | enforced by construction, not by the type system; frozen semantics say scoreable ⇒ scalar, not-scoreable ⇒ `NotScoreableResult` | the first design that adds a second production metric instance (Step 12; earlier if convenient) |
+| **D18 scalar-only metric → legacy `file_vector=[]`** — the tuner bridges a missing per-sample vector to an empty list for `HealthCheckContext` / the record | safe compatibility bridge today (no built-in check reads it; the context's own default is `[]`); how HealthGate / policy / score tables express "no per-sample evidence" is undecided | Step 08 (HealthGate) with Step 12 (task composition) |
+| **D1 direction consumers** — tuner incumbent selection, workflow/resume comparisons, `per_file_best._row_beats`, dashboard ordering, interpreter `best_*` comparisons and sign-band, reflector "HIGHER … is GOOD" prompt line | still literal higher-is-better; asserted census in `test_step06_c5_boundary_and_structure.py` (extend it with the interpreter/prompt/resume:551 sites) | Step 07 policy half (tuner), Step 09 (interpreter, reflector prompt), Step 10 (workflow/resume), M2 (peripheral) |
+| **D14 generic data path** — B/C executable support blocked at honest maturity | scheduling decision (§20.5) | operator: Step-11 extension vs small milestone (§22.21-Q3) |
+| schema→`data_paths` import chain (`hyperparam_tuning` → `evaluation_metric` → `scoring_helpers` → `nodes.scoring_reference` → `data_paths`) | import-hygiene debt | the design that next touches `scoring_helpers` |
+
+### 22.19 Step-06 historical truth (preserved)
+
+Step 06 established the generic metric runtime interface and the TIDMAD
+instance; its atomic lower-direction evidence (C6a) remains valid; the broader
+persistent-track governance in this section was frozen AFTER Step 06; later
+Steps inherit the persistent tasks progressively; **Step 06 is not
+retroactively incomplete** because D14, task-level declaration and the
+training-path seams were not yet available. Its scope is CLOSED except for the
+mechanical post-merge finalizer (done, master `5f6cf7bb`/`87a32f27`).
+
+### 22.20 The single story (answers §31 of the revision brief)
+
+```text
+one frozen legacy control (TIDMAD)
++ two FIXED persistent contrast tasks (image/classification, spatiotemporal/regression)
++ orthogonal coverage of topology and objective
++ explicit lifecycle semantics (computation × role × cadence)
++ required train + validation histories and one required golden metric
++ optional structured diagnostics / secondary metrics that enter the loop through owned layers
++ progressive maturity across Steps (L0…L4), never faked, D14 named as the blocker
++ explicit agent-facing information ownership (persistence ≠ prompt visibility)
++ multi-track Gate coverage whenever the gate standard requires a Gate
++ three-task end-to-end regression after task composition (Step 12 / M1)
+= how SIDERIUS shows, progressively and reproducibly, that a TIDMAD-shaped framework became generic
+  across topology, objective, training dynamics, final evaluation, scientific validity and agent
+  reasoning — without losing frozen TIDMAD behaviour or hiding task-specific assumptions.
+
+TIDMAD ───────────────┐
+Image / classification ┼─▶ Step 06 → 07 (diagnostics · policy · measurement) → 08 → 09 → 10 → D14 → 11 → 12 → regression suite
+Spatiotemporal / regr. ┘
+```
+
+### 22.21 Open operator decisions created or surfaced by Rev 5
+
+| # | Decision | Why it cannot be decided here |
+|---|---|---|
+| Q1 | **Persistent dataset selection for Tracks B and C** (§22.9a) — the exact datasets, subsets, objectives, golden metrics | no authoritative selection exists; a selection audit is the next work item |
+| Q2 | **Step-7 child decomposition / lettering.** The roadmap's Step 7 (§7a) owns tuner policy AND (since §20.2) TrainingHistory/Diagnosis, with §7e measurement as a sibling; the design files are named `step_07a_tuner_policy.md` / `step_07b_tuner_measurement.md` (neither exists yet). Rev 5 needs the training-diagnostics half and the policy half to be separately acceptable (different Gate dispositions: Gate 1 REQUIRED for the policy/prompt half). Proposed, NOT decided: 07a = training history/diagnostics, 07b = direction-sensitive policy on the metric handle, 07c = measurement/verification. Step NUMBER and §7a ownership are unchanged either way | child lettering is a decomposition choice reserved to the operator (Step 04/05 precedent) |
+| Q3 | **D14 owner and timing** (§20.5 (a) extend Step 11 §9 vs (b) small milestone between Steps 07 and 12) | scheduling decision that gates when B/C can reach L2/L3 |
+| Q4 | **Freeze of Rev 5 itself** — this section and the §0/§15.1/§16/§17/§18 propagations become BINDING on the operator's freeze mark | §17.0 provenance rule |
+
+### 22.22 What this revision does NOT change
+
+Step numbering and module ownership (§15.1); Step 06's frozen semantics and
+its merged implementation; the frozen TIDMAD formula; the no-new-config-
+hierarchy rule (§20.6); §17.0 Gate authority (applicability); D14's OPEN
+status; the Milestone-1 definition (§16 criterion 1 is now stated in terms of
+the two persistent tracks). No production code, test, prompt, config or schema
+is changed by this revision.
