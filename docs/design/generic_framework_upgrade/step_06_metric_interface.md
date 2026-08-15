@@ -1,4 +1,4 @@
-# Step 06 — Metric interface — detailed design (DRAFT)
+# Step 06 — Metric interface — detailed design (FROZEN)
 
 Roadmap §15 step 6, module §10. Roadmap row §15.1 `§10 Metric interface`.
 Post-Step-05 addendum: roadmap **§20** (the semantic authority for the two
@@ -6,7 +6,7 @@ obligations this step inherits beyond §10).
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 4 (2026-08-15): per-commit checklists C0-C8 added (§19) after inspecting each seam — every item `[ ]`, evidence ledger §20 empty; two inspection findings recorded (`NUM_FILES` inside the scorer; the `StubSandbox` pseudo contract). Revision 3 (operator review of revision 2): Q1 ownership wording sharpened to the 05c-representation / 06-acceptance split (§4, §16); scoreability's SEMANTIC SCOPE bounded — execution semantics frozen, no universal completeness/channel/shape schema (§4, §16-Q3); **Gate 2 re-dispositioned to NOT REQUIRED on the standard's own assignment table and roadmap §17's metric-handle rule, quoted** (§13); the two-route parity re-positioned as a compatibility obligation, not a generic-metric requirement (§1.1, §11); Checkpoint-0 oracle wording generalized (§11). Revision 2 (operator review of revision 1): scalar-mandatory / per-sample-evidence-optional metric semantics (§4); scoreability made an EXECUTABLE behaviour and a DoD item (§4, §12); `DeliverableSpec` vs `ScoreabilityContract` ownership sharpened (§4); the Step-06 runtime-interface vs Step-12 task-declaration split made explicit (§5, §16-Q2); Q3 now blocks freeze on semantics. Implementation is NOT authorized by this document. |
+| Status | **STEP 06 DESIGN — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION (2026-08-15). NOT IMPLEMENTED.** Implementation is authorized under a separately filled Implementation Working Rules contract; the design freeze does not itself begin implementation. §16's Q1-Q6 are all resolved (Q1 CONFIRMED · Q2 DECIDED · Q3 FROZEN · Q4-Q6 ACCEPTED). §19 (C0-C8, all `[ ]`) remains the implementation plan and §20 the empty ledger; §18 remains the eventual Definition of Done — **freeze ≠ done**. Revision history: rev 4 per-commit checklists after seam inspection; rev 3 ownership wording, scoreability scope, Gate 2 source-grounded NOT REQUIRED, two-route parity as compatibility; rev 2 scalar-mandatory semantics, executable scoreability, DeliverableSpec/ScoreabilityContract split, 06/12 declaration split; rev 1 initial draft. |
 | Design base | master `75525dc9` (Step 05 COMPLETE: 05a `cfb3b1c7`, 05b `5ce205d3`, 05c `03e00944`; finalizer `75525dc9`) |
 | Depends on | Step 02 (`DatasetProfile`) · Step 03 (`ModelIOContract`) · Step 05c (`DeliverableSpec`, provisional) · roadmap §10, §14, §16, §20 |
 | Owns | the **EvaluationMetric** interface; the **evaluation-vs-training-diagnostics boundary** (by exclusion); the **Deliverable-Contract confirm-or-say-why review** |
@@ -18,7 +18,7 @@ obligations this step inherits beyond §10).
 
 ## 0. Scope / capability
 
-**Observable final capability (PROVISIONAL wording, to be frozen):**
+**Observable final capability (FROZEN):**
 
 > A task declares ONE primary evaluation metric — named, with explicit
 > direction and aggregation, a mandatory scalar result, optional
@@ -123,7 +123,7 @@ is Step-07 territory.
 
 ## 4. Metric semantics
 
-**What an EvaluationMetric IS (PROVISIONAL definition, to freeze):**
+**What an EvaluationMetric IS (FROZEN definition):**
 
 > A named, directional evaluation of the **persisted scientific deliverable**
 > of one attempt: it produces a **primary scalar result** (mandatory) and
@@ -144,8 +144,8 @@ is Step-07 territory.
 task-independent direction — roadmap §20.2); a health verdict (Step 08); a
 policy (Step 07a).
 
-**Semantic components — DECIDED as the component list, PROVISIONAL as to
-field names:**
+**Semantic components — FROZEN as the component list; field names remain
+implementation detail (§19):**
 
 | Component | TIDMAD instance | Generic meaning |
 |---|---|---|
@@ -158,8 +158,8 @@ field names:**
 | transform | `score_transform: "log"`, `log_base` | already emitted by `per_file_best`; carried, not re-declared |
 
 **Deliverable-Contract ownership — the confirm-or-say-why (OD-20-7).**
-PROVISIONAL RECOMMENDATION (wording sharpened at revision 3 so it cannot be
-read as "the metric owns deliverable semantics"): **CONFIRM that Step 06
+**Q1 — CONFIRMED by the operator at freeze (2026-08-15)** (wording sharpened at
+revision 3 so it cannot be read as "the metric owns deliverable semantics"): **Step 06
 owns the evaluation-side ACCEPTANCE contract and the deliverable facts
 required for scoreability, while Step 05c retains EXCLUSIVE ownership of
 producer-side representation semantics.** The metric may *reference*
@@ -186,9 +186,9 @@ derive them from a declaration is a producer-side question that this
 confirmation makes answerable but does not answer). Neither contract
 absorbs the other's half. **Not confirmed here** — the operator confirms at
 freeze (§16-Q1). If deferred, the reason must name the consumer evidence
-still missing.
+still missing. *(Resolved: CONFIRMED — the confirmation stands as written above.)*
 
-## 5. Metric schema / representation (PROVISIONAL)
+## 5. Metric schema / representation (FROZEN as to shape and rules; field names are implementation detail)
 
 Smallest additive shape that carries the §4 components and extends the
 existing precedent — **field names are illustrative, not frozen**:
@@ -249,8 +249,8 @@ them so historical records validate unchanged.
   (Step 07a) will use. Mandatory. TIDMAD's is `tidmad_denoising_score`.
 - **Secondary metrics — optional, zero or more**, recorded but never
   consulted by policy in this step. Whether TIDMAD gets any secondary
-  instance in Step 06 is **§16-Q4** — the default recommendation is *no*
-  (nothing in-tree consumes one; §0 rule 8).
+  instance in Step 06 is **§16-Q4 — DECIDED: none** (nothing in-tree consumes
+  one; §0 rule 8).
 - **Mandatory components** of any metric: id, direction, aggregation.
   **Optional**: references, transform, secondary metrics.
 - **Not a metric, not optional-metric**: train/validation loss — see §7.
@@ -412,9 +412,8 @@ on the same "authority/source change, no execution-surface expansion" ground.
 
 **What replaces the Gate as evidence**: Checkpoint C (real subprocess), the
 two-route oracle, the scoreability-negative rung and the mutation families
-(§11). The operator may still elect a bounded Gate 2 at freeze (§16-Q5); this
-section records that the standard does **not** require it, so electing one is
-a discretionary cost, not a compliance need.
+(§11). **§16-Q5 resolved at freeze: Gate 2 NOT REQUIRED and not elected**; this
+section records that the standard does **not** require it.
 
 ## 14. Rollback boundary
 
@@ -432,7 +431,7 @@ the ownership confirmation moves attrs — then additively).
 `TrainingHistory`), Step 08 (scoreability/reader seam), Step 09 (identity),
 Step 12 (a declared metric for each composed contrast task).
 
-**PR decomposition — ONE PR (recommendation).** The interface, the
+**PR decomposition — ONE PR (DECIDED at freeze).** The interface, the
 scoring-consumer migration, the record payload and the boundary negative
 share one authority (the metric handle), one failure class (a wrong or
 misdirected scalar on the live path), one rollback (remove the handle), one
@@ -445,16 +444,16 @@ negative + structural guard → C6 Stage-B direction axis → C7 mutations +
 Checkpoint C → C8 Gate 2 (if required) → C9 docs/CI. Not frozen: commit
 count, module placement, field names.
 
-## 16. Open decisions / operator decisions (before freeze)
+## 16. Operator decisions — ALL RESOLVED at freeze (2026-08-15)
 
-| # | Question | Blocks freeze? | Recommendation |
+| # | Question | Was freeze-blocking? | RESOLUTION |
 |---|---|---|---|
-| Q1 | **Confirm** that Step 06 owns the evaluation-side ACCEPTANCE contract and the deliverable facts required for scoreability, while Step 05c retains EXCLUSIVE ownership of producer-side representation semantics (§4) — or **defer** with the missing consumer evidence named? | **YES** | Confirm — the scorer reads the deliverable's interior (§1.2); the metric references `DeliverableSpec`, never redefines it |
-| Q2 | Metric declaration form for non-TIDMAD tasks: derived-only in Step 06 (regime A) with the declared additive block deferred to Step 12, or an additive block in `task_config.yaml` now? | **YES** | derived-only now; declared block lands with the first composed contrast task (Step 12), consistent with §0 rule 8. *(Roadmap §20.3 records the 06-runtime-interface / 12-declaration split as DECIDED; what remains for freeze is confirming no `task_config.yaml` edit in Step 06.)* |
-| Q3 | Scoreability contract **semantics**: EXECUTION semantics frozen (executable before arithmetic; structured failure; reuse guard not the mechanism) — **and its SCOPE bounded: NO universal task-independent schema for completeness / channels / shape; requirements are per-metric-instance, declared against `DeliverableSpec`** (§5, revision 3). | **YES — on semantics and scope.** Exact field names remain implementation detail. | freeze the execution semantics and the scope bound as stated in §5; leave field names to the implementation ledger |
-| Q4 | Any TIDMAD *secondary* metric instance in Step 06? | no | none — no consumer |
-| Q5 | Gate 2: the standard and roadmap §17 say NOT REQUIRED (§13, quoted). Does the operator nonetheless ELECT a bounded Gate 2 as discretionary evidence? | no | **NOT REQUIRED per the authorities**; electing one is the operator's discretionary call, not a compliance need |
-| Q6 | Which direction consumers does Step 06 *reach*? Recommendation: the tuner's live scoring route + record payload only; workflow `:2740`, resume `:438`, `per_file_best._row_beats`, dashboard remain enumerated D1 debt | no | as recommended |
+| Q1 | **Confirm** that Step 06 owns the evaluation-side ACCEPTANCE contract and the deliverable facts required for scoreability, while Step 05c retains EXCLUSIVE ownership of producer-side representation semantics (§4) — or **defer** with the missing consumer evidence named? | yes | **CONFIRMED.** Step 06 owns the evaluation-side acceptance/scoreability contract and the deliverable facts required for scoreability; Step 05c retains EXCLUSIVE ownership of producer-side representation semantics; Step 06 references `DeliverableSpec` and does not redefine it |
+| Q2 | Metric declaration form for non-TIDMAD tasks: derived-only in Step 06 (regime A) with the declared additive block deferred to Step 12, or an additive block in `task_config.yaml` now? | yes | **DECIDED.** Step 06 provides the generic runtime metric interface and derives the TIDMAD instance under Regime A. Task-level metric declaration is deferred to Step 12 and MUST use an additive block in the existing task configuration — no new top-level configuration hierarchy. No `task_config.yaml` edit in Step 06 |
+| Q3 | Scoreability contract **semantics**: EXECUTION semantics frozen (executable before arithmetic; structured failure; reuse guard not the mechanism) — **and its SCOPE bounded: NO universal task-independent schema for completeness / channels / shape; requirements are per-metric-instance, declared against `DeliverableSpec`** (§5, revision 3). | yes | **FROZEN.** Scoreability is executable behaviour evaluated BEFORE metric arithmetic; rejected deliverables produce structured not-scoreable results; the contract has NO universal task-independent schema for completeness/channels/shape — requirements are declared per metric instance against `DeliverableSpec`. Field names remain implementation detail |
+| Q4 | Any TIDMAD *secondary* metric instance in Step 06? | no | **ACCEPTED: none** — no consumer |
+| Q5 | Gate 2: the standard and roadmap §17 say NOT REQUIRED (§13, quoted). Does the operator nonetheless ELECT a bounded Gate 2 as discretionary evidence? | no | **ACCEPTED: NOT REQUIRED** under the cited testing standard and roadmap §17 authority; not elected |
+| Q6 | Which direction consumers does Step 06 *reach*? | no | **ACCEPTED:** the tuner's live scoring route + record payload only; workflow `:2740`, resume `:438`, `per_file_best._row_beats`, dashboard remain enumerated D1 debt, out of scope |
 
 ## 17. Implementation notes / source map (reading aids, not contracts)
 
@@ -469,7 +468,7 @@ count, module placement, field names.
 - `execute_tools/inference_single.py::_is_complete_trial_output` :84-126 (the reuse guard NOT to relocate)
 - Harness precedents: `tests/integration/execute_tools/test_step05c_checkpoint_c_deliverable_boundary.py`, `tests/unit/execute_tools/test_step05c_c0_deliverable_baseline.py`
 
-## 18. Definition of Done (for the future freeze — not yet applicable)
+## 18. Definition of Done (the eventual DONE state — NOT yet met; freeze ≠ done)
 
 Step 06 is DONE when: the ONE PR is merged with Checkpoints 0/A/B/C(/D) and
 its Gate disposition satisfied at the exact head; every §12 criterion is
@@ -479,7 +478,7 @@ recorded (confirm, or defer-with-reason); the D1 not-reached consumer list is
 enumerated; roadmap §15.1 row and README mirror synchronized post-merge; and
 Step 07a can bind the metric handle for policy without touching scoring.
 
-**Until then: NOT FROZEN. NOT IMPLEMENTED.**
+**Design status: FROZEN, implementation authorized. Step 06 is NOT DONE until the above holds — freeze ≠ done.**
 
 ---
 
@@ -619,7 +618,7 @@ an EXECUTABLE scoreability contract — with its TIDMAD derived instance and
 
 **2. Scope.**
 - One new module (placement by inspection; `execute_tools/deliverable_spec.py`
-  is the pattern and the natural neighbour). Field names PROVISIONAL (§5).
+  is the pattern and the natural neighbour). Field names are implementation detail (§5).
 - The TIDMAD instance derived with **no declaration** (regime A): identity
   extends `per_file_best`'s `metric_id: "tidmad_denoising_score"` /
   `score_transform` / `log_base` (`per_file_best.py:358-362`); direction
@@ -1045,8 +1044,8 @@ CI iteration. **Non-goals**: no new capability. Depends on: C7.
 
 **3. Implementation plan.**
 - [ ] Synchronize §20 with actual findings, deviations, evidence.
-- [ ] Record the OD-20-7 verdict (confirm / defer-with-reason) as decided by
-      the operator at freeze.
+- [ ] Record the OD-20-7 verdict in the ledger — resolved at freeze as CONFIRMED
+      (§16-Q1).
 - [ ] Update touched docs as the last pre-merge step, quoting each documented
       behaviour against merged source (CLAUDE.md doc-sync rule).
 - [ ] Terminal checks from a **clean tree**: directly affected unit
