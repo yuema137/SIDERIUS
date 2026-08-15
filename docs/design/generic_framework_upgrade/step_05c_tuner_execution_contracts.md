@@ -6,7 +6,7 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. Not frozen. Implementation NOT authorized.** Revision 2 (2026-08-15): re-anchored to current master and given per-commit checklists (§14). |
+| Status | **DRAFT — READY FOR OPERATOR REVIEW. Not frozen. Implementation NOT authorized.** Revision 3 (2026-08-15): active census repaired, transport-vs-reconstruction decided (§3.2a), spec scope narrowed to the facts actually migrated (§1), encoding literals classified individually (§2.2), artifact equality defined (§4.1). **Remaining operator decisions: NONE.** |
 | Design base | **re-anchored to `226d4e9f`** (master after 05a `cfb3b1c7` and 05b `5ce205d3` merged). Revision 1 was written against `13b08550`; §0.2 is the corrected anchor table and lists six citations that did not survive audit |
 | Depends on | **Step 02** (Dataset Profile: channels, `ValueEncoding`) · **Step 03** (`ModelIOContract` decode rule) |
 | Roadmap row | §15.1 `§7c Tuner execution contracts` |
@@ -96,17 +96,41 @@ the §14 row needs:
 | # | Role | Site | Owner after Step 05 |
 |---|---|---|---|
 | 1-3 | **PRODUCER** — name | `execute_tools/inference_single.py:620`, `:897`, `:902` (three separate constructions) | **05c** |
-| **PRODUCER** (layout/dtype/attrs) | `execute_tools/array2h5.py:create_abra_file` | 05c |
-| **READER** — cleanup | `core/sandbox_executor.py:1761`, `:2161` | 05c |
-| **READER** — cleanup | `ml_hyperparameter_tune_agent.py:5438` | 05c |
-| **PATH BUILDER** | `ml_hyperparameter_tune_agent.py:1083` `_denoised_path` | 05c |
+| 4 | **PRODUCER** — writer: channel-group identity + persisted dtype | `create_abra_file` — `execute_tools/array2h5.py:25-75` (groups at `:49`, `:63`) | **05c** |
+| 5 | **READER** — cleanup glob, watchdog partial-artifact | `TidmadSandbox.execute_inference` — `core/sandbox_executor.py:1767` | **05c** |
+| 6 | **READER** — cleanup glob, `--cleanup_denoised` | tuner `run()` — `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:5548` | **05c** |
+| 7 | **PATH BUILDER** | **`_build_denoised_filename`** — `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1053`, template at `:1088` | **05c** |
 | — | **READER** — scorer | `denoising_score_single.py:163`, `:166` (`scoring_utils.py:364` is a docstring only) | **Step 06 — NOT touched** |
 | — | **READER** — health peeks | **no literal** — `ctx.get_denoised_path(i)`, already injected | **nothing to touch** |
 | — | **CONSUMER** — pseudo `score_vector` | `core/sandbox_executor.py:2155` — takes `denoised_filename_fn`; `abra_*` in its docstring only | **nothing to touch** |
 
-**Seven** production sites are 05c's. The scorer is Step 06's. The peek
-readers and the pseudo `score_vector` already receive the name **by
-injection** — they are the precedent 05c generalizes, not work it inherits.
+**The seven-site composition, stated so the total is mechanically auditable:**
+
+```text
+3   producer name constructions   inference_single.py:620, :897, :902
+1   writer                        array2h5.py::create_abra_file
+2   cleanup globs                 sandbox_executor.py:1767
+                                  ml_hyperparameter_tune_agent.py:5548
+1   path builder                  _build_denoised_filename (:1053/:1088)
+--
+7   production sites owned by 05c
+```
+
+**Deliberately NOT counted**, each for a stated reason:
+
+| Not counted | Why |
+|---|---|
+| pseudo `score_vector` (`sandbox_executor.py:2155`) | `abra_*` appears in its **docstring** only; it already takes `denoised_filename_fn` by injection |
+| HealthGate peek paths | **no literal** — `ctx.get_denoised_path(i)` is injected |
+| scorer literals (`denoising_score_single.py:163,166`) | **Step 06** |
+| historical diagnostic scripts | read artifacts already on disk (§0.1) |
+
+The peek readers and the pseudo `score_vector` are the **injection precedent
+05c generalizes**, not work it inherits.
+
+*(Revision-1's table listed `_denoised_path:1083`, `sandbox_executor:1761`/
+`:2161` and `:5438`. Those names and lines are superseded; the corrections are
+recorded in §0.2 and the composition above is the active authority.)*
 
 ### 0.1 `scripts/*` census — classified by reproducibility role
 
@@ -142,11 +166,31 @@ already stated above, applied to files revision 1 had not seen.
 
 ## 1. Observable final capability
 
-> The **engines write, name and clean deliverables through one explicit
-> contract**, and the **value encoding they apply comes from the Dataset
-> Profile's `ValueEncoding` and the `ModelIOContract` decode rule** — not
-> from literals inlined at each site. Launch mechanics (argv, file IPC,
-> sentinels) carry no task literals.
+> **All CONTRACT-OWNED deliverable facts used by the migrated production
+> sites resolve through ONE provisional producer-side `DeliverableSpec`** —
+> name, cleanup matching, channel-group identity, and the persisted storage
+> representation — instead of from literals inlined at each site. The
+> persisted encoding is **derived from** `DatasetProfile.encoding` without
+> making the Dataset Profile the deliverable contract. Launch mechanics
+> (argv, file IPC, sentinels) carry no task literals.
+
+**Deliberately NOT claimed — the honest scope of the provisional spec
+(OD-05c-2). These are producer-side facts 05c leaves exactly where they are:**
+
+| Left literal / unowned | Where |
+|---|---|
+| `sampling_frequency`, `voltage_range_mV`, `input_impedance_ohm`, `input_coupling`, `file_first_sample_index` | `array2h5.py:50-54`, `:64-68` — instrument metadata **no production consumer reads** |
+| chunking constant `N = 2000000000` and the multi-file split | `array2h5.py:26`, `:32-37` |
+| the `indexed` suffix rule | `array2h5.py:39-41` — already implied by the existing call |
+| the silent `return None` on a non-`.h5` name | `array2h5.py:29-31` — recorded as a defect, not fixed |
+| completeness and scoreability | Step 06 |
+
+So 05c must **NOT** claim that the entire HDF5 format is contract-driven,
+that all producer-side attrs are owned, or that every fact
+`create_abra_file` writes moved into the spec. It claims exactly the
+contract-owned facts the seven migrated sites use. **This narrowing does not
+weaken the PR — it stops a provisional producer contract from silently
+becoming an instrument-metadata schema.**
 
 **Deliberately NOT claimed — the binding Step-06 boundary:**
 
@@ -173,6 +217,64 @@ This PR touches exactly one of the four, and must not conflate them:
 That TIDMAD happens to use int8 HDF5 for both its input and its deliverable
 is a **coincidence of one task**, not evidence the contracts are one.
 
+### 2.1 The encoding authority chain — frozen
+
+```text
+input dataset decoding / input-side representation
+    -> DatasetProfile.encoding            (Input Dataset Contract, Step 02)
+
+model-output semantic decoding
+    -> ModelIOContract / the existing output-contract rule (I15)
+
+persisted deliverable storage encoding
+    -> DeliverableSpec                    (05c, provisional)
+
+the TIDMAD DeliverableSpec itself
+    -> DERIVED from DatasetProfile.encoding + existing compatibility facts,
+       WITHOUT making DatasetProfile the deliverable contract
+```
+
+**The rule that makes this more than a diagram**: every persisted-output site
+consumes the **`DeliverableSpec`**. It must not be the case that some
+output-storage sites read the spec while others independently re-read
+`DatasetProfile.encoding` — that would be two authorities agreeing by
+coincidence, which is the defect shape Steps 02b/05a/05b removed elsewhere.
+
+That the TIDMAD offset is `128` on **both** the input-decode and the
+output-encode side is exactly such a coincidence made safe: the spec
+**derives** its offset from `DatasetProfile.encoding`, so the two agree by
+derivation rather than by two literals happening to match.
+
+### 2.2 Per-literal classification — audited individually at `226d4e9f`
+
+Revision 2's C5 said "replace each literal with its derived value" across
+`:216-217`, `:305`, `:318` and the int8 sites. **That would have migrated
+input-decode facts into the DeliverableSpec and broken the separation above.**
+Each token was therefore re-read in context:
+
+| Literal | Site | Class | 05c disposition |
+|---|---|---|---|
+| `np.dtype(np.int8)` ×2 | `inference_single.py:82-83` | **input decode** — dtype check on the SOURCE file's channels | **NOT migrated** |
+| `.astype(np.int16)` ×2 | `:216-217` (`# 1. Base Pre-processing (ADC Offset)`) | **input decode** — compute dtype for the input array | **NOT migrated** |
+| `+ 128` ×2 | `:216-217` | **input decode** — input value offset | **NOT migrated** |
+| `argmax(dim=1)` | `:305` | **model-output decode** — already keyed on `output_type` (I15), inside the `is_regression` branch | **NOT migrated**; the branch stays contract-keyed |
+| `- 128` ×2 | `:318` | **persisted-output encode** — returns to the stored ADC representation for H5 assembly | **DeliverableSpec** |
+| `dtype=np.int8` ×2 | `:690-691`, `:866-867` | **persisted-output encode** — output buffers | **DeliverableSpec** |
+| `.astype(np.int8)` ×4 | `:764-765`, `:911-912` | **persisted-output encode** — casts at the writer boundary | **DeliverableSpec** |
+| `256` ×2 | `:273`, `:303` | **COMMENTS ONLY** — no executed literal | nothing to do |
+
+**Two findings this classification produced:**
+
+1. **`np.int16` and `+128` are input-side, not deliverable-side.** Migrating
+   them would have moved an Input-Dataset-Contract fact into a producer
+   contract. They stay.
+2. **Both `256` occurrences are comments.** A "no `256` literal remains"
+   acceptance criterion would have been vacuous or forced a pointless comment
+   edit — see §8's replacement wording.
+
+Legacy/`hybrid` behaviour is whatever Steps 03 and 05b already preserve; 05c
+neither re-keys nor re-decides it.
+
 ## 3. Deliverable Contract ownership — the material decision
 
 The §14 row leaves ownership open between §7c (first producer-side need) and
@@ -183,9 +285,12 @@ confirmed by Step 06.**
 
 Reasoning from source, not from execution order:
 
-- 05c owns **all four producer-side facts** — naming, layout, dtype, attrs —
-  and every production *writer* and *cleanup* site. That is a genuine
-  ownership claim, and it is why the extraction happens here.
+- 05c owns the producer-side facts its sites actually consume — **naming,
+  cleanup matching, channel-group identity and the persisted storage
+  representation** — across every production *writer* and *cleanup* site.
+  **Corrected at revision 3**: revision 2 said "all four producer-side facts
+  — naming, layout, dtype, attrs". OD-05c-2 leaves the instrument **attrs**
+  literal, so claiming them would overstate the extraction (§1).
 - But **completeness** and **identity/indexing** — what makes a deliverable
   set *scoreable*, and how a file maps to an input identity — are exercised
   only by the scorer and the peek readers, which are Step 06's and Step 08's.
@@ -233,7 +338,7 @@ Classified against current source:
 |---|---|
 | **USER-AUTHORED?** | **NO** |
 | **PERSISTED?** | **NO** — not written as its own artifact |
-| **SERIALIZED?** | **NO** new serialization format; it rides transports that already exist (§3.2) |
+| **SERIALIZED?** | **NO** — and now decided, not assumed: under §3.2a's Option A the spec never crosses a boundary at all. Parent and child **reconstruct** an equal value from authorities that already cross. If Option B were ever adopted this row must flip to *transiently serialized inside an existing internal execution payload* |
 | **RUNTIME-ONLY?** | **YES** — an internal typed `DeliverableSpec` constructed at run scope |
 | **REQUIRED FOR LEGACY RUNS?** | **NO** — legacy runs construct the identical TIDMAD spec from values they already carry |
 | **DEFAULT / ADAPTER?** | the TIDMAD instance is the derived default; no declaration is needed to obtain it |
@@ -280,10 +385,74 @@ introduced — §16 routes IPC to Step 11."*
    derivation (`+128`/`int8`) therefore needs **no new argument**: the
    authority is already present and merely unconsulted.
 2. The **`ModelIOContract` already crosses** (`--model_io_json`, omitted for a
-   legacy prose-only contract — the existing Regime-A adapter), so the decode
-   rule is available without new transport.
+   legacy prose-only contract — the existing **legacy no-contract path**), so
+   the decode rule is available without new transport.
 3. The deliverable **name** is composed from `denoising_model`, `run_name`,
    `exp_id` and `file_index` — all already argv items.
+
+### 3.2a Transport vs reconstruction — **OPTION A, DETERMINISTIC RECONSTRUCTION**
+
+Revision 2 left four claims that were not jointly defined: the spec is not
+serialized; no new argv is added; a renamed spec is supplied through the
+contract; and a real subprocess crosses the contract. Traced against current
+source, they reconcile only one way.
+
+**Decision: the spec does NOT cross the process boundary. Parent and child
+each call ONE shared pure derivation.**
+
+```text
+derive_tidmad_deliverable_spec(
+    dataset_profile,          # already crosses: --dataset_profile_json
+    model_io_contract | None, # already crosses: --model_io_json
+    run/model/file identifiers,
+) -> DeliverableSpec
+```
+
+**Why current source supports this.** Every field OD-05c-2 leaves in the spec
+is already available on both sides:
+
+| Spec field | Parent has it | Child has it |
+|---|---|---|
+| channel identity | `run_profile` (05a, tuner `run()`) | `dataset_profile.channels`, `inference_single.py:341` |
+| persisted storage dtype / value offset | `run_profile.encoding` | `dataset_profile.encoding`, loaded `:337` |
+| output decode selector | `run_model_io` (05b) | `args._model_io`, `:329` |
+| name identifiers | `model_type`, `run_name`, `exp_id`, `file_index`, `base_dir` | the same, all argv |
+
+So the child reconstructs an **equal** spec from authorities that already
+cross. **`--dataset_profile_json` and `--model_io_json` are consumed, not
+re-plumbed**; no third transport is added.
+
+**What this costs, stated plainly.** A **renamed** template is a frozen TIDMAD
+compatibility literal, not a declared fact, so it is **not derivable** — it
+therefore cannot reach the child by reconstruction. Consequences, and §6
+depends on them:
+
+- the real subprocess reconstructs the **shipped default** spec only;
+- a **non-default** spec is injectable only in-process, at the owned seams;
+- **05c must NOT claim that a renamed template crosses the real subprocess.**
+
+**What replaces the loose wording.** Everywhere revision 2 said *"the
+DeliverableSpec crosses the subprocess"*, the honest statement is:
+
+> the subprocess **reconstructs an equal `DeliverableSpec` through the same
+> derivation authority** — one function, two callers, no duplicated literal.
+
+**Option B, considered and rejected.** A minimum transient transport was
+available: `sandbox_executor._write_dataset_profile_config` already writes a
+per-`exp_id` transient JSON that the child loads, and one optional field could
+have ridden it. Rejected because (a) reconstruction already yields an equal
+value for every field 05c actually owns, so the transport would buy only the
+*test* contrast; (b) it would force §3.1's `SERIALIZED? NO` to flip to yes,
+widening what a provisional producer-side extraction persists; and (c) the
+frozen capability is *"one explicit contract"*, which one shared derivation
+satisfies — a renamed template is a contrast device, not a production
+capability. **If implementation finds a production need for a non-default spec
+in the child, that is a MATERIAL DESIGN STOP and a return to Option B — not an
+ad-hoc third mechanism.**
+
+**Forbidden regardless of option:** an ambient module-global "current spec";
+parent and child reproducing the TIDMAD literal at two sites; any third
+implicit mechanism.
 
 **Frozen acceptance**: one semantic source; **no ambient second resolution**
 in the child (the subprocess must not call `resolve_dataset_profile()` when it
@@ -330,12 +499,12 @@ property, §9, which is a different question).
 
 | Surface | Criterion | Oracle status |
 |---|---|---|
-| training argv | **byte-identical** | **PARTIAL — corrected at rev 2.** What exists is token-level (`test_sandbox_executor.py:230,248,259,293` via `_cli_token_after`). A full-argv golden is **MISSING — Checkpoint 0 captures it** |
-| inference argv | **byte-identical** | **PARTIAL — same correction, same capture** |
-| scoring argv plumbing | **byte-identical** | PARTIAL — untouched by design, so the existing token-level coverage suffices |
+| training argv | **exact ordered argv-list equality after documented normalization** | **PARTIAL.** What exists is token-level (`test_sandbox_executor.py:230,248,259,293` via `_cli_token_after`). A full ordered-list golden is **MISSING — Checkpoint 0 captures it** |
+| inference argv | **exact ordered argv-list equality after documented normalization** | **PARTIAL — same correction, same capture** |
+| scoring argv plumbing | unchanged | untouched by design, so existing token-level coverage suffices |
 | file IPC (sidecars, timing JSON, runtime-observation sidecar) | **deep-equal** | partially EXISTING — classify at Checkpoint 0 |
 | sentinel protocol (`_OK_<exp_id>`, silent-crash detection) | **identical sequence** | EXISTING (`sandbox_executor:1498-1519`) |
-| produced deliverable files | **byte-identical** artifacts | **MISSING — Checkpoint 0 must capture** |
+| produced deliverable files | **EXACT LOGICAL ARTIFACT EQUALITY** (§4.1) | **MISSING — Checkpoint 0 must capture** |
 | deliverable filename set | **identical** | **MISSING — Checkpoint 0** |
 | post-cleanup filesystem set | **identical** | **MISSING — Checkpoint 0** |
 
@@ -343,17 +512,70 @@ The three missing captures are the highest-value Checkpoint-0 work in all of
 Step 05: they are the only oracles that can prove a write/cleanup refactor
 moved nothing. **Revision 2 adds a fourth**: the argv rows above claimed an
 EXISTING byte-identical oracle, and re-audit found only token-level
-assertions. "Byte-identical" cannot be claimed against a token-level test, so
-C0 captures the full argv lists too.
+assertions.
+
+### 4.1 What "equal artifact" means — frozen definition
+
+Revision 2 captured **logical** HDF5 content in C0 and then called the
+criterion **byte-identical** in later sections. Those are different claims.
+The frozen criterion is the strongest one that is honestly provable:
+
+> **EXACT LOGICAL ARTIFACT EQUALITY**, over a canonical HDF5 inspection
+> representation covering: relative filename · group paths · dataset names ·
+> dataset dtypes · dataset shapes · **every persisted sample value** · every
+> frozen attr key/value · the produced file set · the post-cleanup file set.
+
+**This is deliberately NOT raw binary file equality.** HDF5 writes carry
+library version, chunk layout and allocation details that are not guaranteed
+byte-reproducible across environments; asserting a raw file hash would make
+the oracle fail for reasons unrelated to this PR. A raw-byte or file-hash
+criterion may be adopted **only** if implementation proves repeated writes are
+physically deterministic across the supported HDF5 environment — and that
+proof must be recorded, not assumed.
+
+**"Every persisted sample value equal" is mandatory and non-negotiable for
+C5**, which is the one commit that can move a written value (failure class 2).
+
+### 4.2 argv parity — the criterion, precisely
+
+Called **exact ordered argv-list equality after explicitly documented
+normalization** — not "byte-identical argv".
+
+- The C0 fixture must use **distinguishable deterministic values** so an
+  ordering or substitution defect is visible.
+- Normalize **only** what is intentionally ephemeral — e.g. a temporary
+  workspace root — and document each normalization at the assertion.
+- **Do not** freeze machine-specific temp directories into the golden.
+- **Do not** weaken the oracle back to token-presence assertions; the whole
+  point is that an inserted, removed or reordered token fails.
 
 ## 5. Stage-B atomic contrast
 
-**One axis: deliverable transport.** Under the TIDMAD profile, with a
-**renamed deliverable template** supplied through the provisional contract,
-the engines and cleanup must resolve names **exclusively** through the
-contract — no inlined template executed in engine or cleanup code.
+**One axis: deliverable naming/transport.** Under the TIDMAD profile, with a
+**renamed deliverable template** supplied as one injected runtime
+`DeliverableSpec`, the owned consumer seams must resolve names **exclusively**
+through it — no inlined template executed in engine, cleanup or reconstruction
+code.
 
-Reds when any of the seven production sites still executes its own literal.
+**Where the renamed spec is supplied — and where it is NOT** (§3.2a, Option A):
+
+```text
+Stage-B rung        the owned seams accept ONE injected runtime spec and
+                    move TOGETHER:
+                      producer · path builder · cleanup · launcher
+                    supplied IN-PROCESS at the seams.
+
+Checkpoint C        the SHIPPED DEFAULT spec, reconstructed by the child
+                    through the real subprocess boundary.
+
+NOT CLAIMED         that the renamed template itself crosses the real
+                    subprocess. Under Option A it cannot: a template is a
+                    frozen compatibility literal, not a derivable fact.
+```
+
+Reds when any owned production site still executes its own literal. Scorer-side
+TIDMAD literals remain explicitly **outside** the rung. 05c claims neither
+arbitrary file formats nor user-authored naming.
 
 Scorer-side literals remain and are explicitly **out of the assertion's
 scope** — a "no `abra_*` anywhere" assertion is unsatisfiable at Step 05 and
@@ -366,6 +588,19 @@ A **real production training and inference spawn** must cross the contract:
 the deliverable is written, named and cleaned through it, with the encoding
 derived. A config- or helper-only test is explicitly **insufficient** here —
 the whole failure class lives in the subprocess boundary.
+
+**Checkpoint C and Gate 2 both exist and prove different things.** Keeping
+them distinct is what stops one from being used to excuse the other:
+
+| | **CHECKPOINT C** | **GATE 2** |
+|---|---|---|
+| nature | deterministic / controlled real subprocess boundary | one current canonical **bounded real attempt** |
+| proves | spec reconstruction; real writer invocation; real naming; real encoding; real cleanup; **exact logical artifact equality** (§4.1) | the full real chain still trains, infers, writes, **scores** and cleans under actual runtime, data and hardware conditions |
+| may use | a deterministic candidate, synthetic/small input, **CPU where source permits** | the current approved pro configuration, real data |
+| may NOT be | helper-only | a matrix, a campaign, or an exploratory sizing attempt |
+
+Checkpoint C is not a cheaper Gate 2, and Gate 2 is not a bigger Checkpoint C:
+one proves the **seam is real**, the other proves the **chain still works**.
 
 ## 7. Failure classes
 
@@ -473,6 +708,23 @@ its silent-`return` defect.
 
 ## 14. Commit plan — per-commit checklists
 
+**05c remains ONE PR (operator decision).** Naming, writer layout, encoding,
+cleanup and reconstruction tooling are **internal phases**, not child PRs,
+because every one of them shares:
+
+| Shared by all phases |
+|---|
+| one provisional `DeliverableSpec` |
+| one persisted-artifact parity surface (§4.1) |
+| one renamed-spec contrast (§5) |
+| one real-spawn Checkpoint C (§6) |
+| one required Gate 2 (§9) |
+| one rollback objective — **producer, readers, cleanup and reconstruction agree on the artifact** |
+
+A naming-only, encoding-only or scripts-only partial merge would leave a
+producer/reader mismatch on disk: files written under one authority and
+searched for under another. That is failure class 1, shipped deliberately.
+
 **Semantic sequence is frozen on approval; exact Git commit count is NOT.**
 Also not frozen: helper structure, source line numbers, test-file
 decomposition, exact mutation implementation. Implementation may merge or
@@ -521,10 +773,11 @@ captured after an edit proves nothing about that edit.
 - [ ] Re-read `create_abra_file` (`array2h5.py:25-75`) and record every
       fact it writes: group names, the 5 attrs per channel, dataset name,
       `chunks=True`, the `indexed` suffix rule, and the `N` split.
-- [ ] Capture a **byte-level artifact golden**: write one small deliverable
-      through the current `create_abra_file` and record the resulting HDF5
-      structure — group paths, dataset names, dtypes, shapes, and every attr
-      key/value — as hardcoded expectations.
+- [ ] Capture the **exact logical artifact golden** (§4.1): write one small
+      deliverable through the current `create_abra_file` and record, as
+      hardcoded expectations, a canonical inspection representation — group
+      paths, dataset names, dtypes, shapes, **every persisted sample value**
+      and every attr key/value.
 - [ ] Capture the **filename set** produced by all three producer
       constructions (`inference_single.py:620`, `:897`, `:902`) for a fixed
       `(model, run_name, exp_id, file_index)` tuple, as hardcoded strings.
@@ -532,9 +785,12 @@ captured after an edit proves nothing about that edit.
       matching and non-matching files, run each cleanup glob
       (`sandbox_executor.py:1767`, tuner `:5548`), record exactly which files
       survive.
-- [ ] Capture a **full-argv golden** for the training and inference spawns —
-      the whole `cmd` list, not individual tokens — since §0.2 found the
-      existing oracles are token-level.
+- [ ] Capture an **ordered argv-list golden** (§4.2) for the training and
+      inference spawns — the whole `cmd` list, not individual tokens. Use
+      distinguishable deterministic fixture values; normalize **only**
+      intentionally ephemeral values (e.g. a temporary workspace root) and
+      document each normalization at the assertion. Do not bake a
+      machine-specific temp directory into the golden.
 - [ ] Classify the file-IPC surfaces §4 marks "partially EXISTING": which of
       the sidecar / timing / runtime-observation writes already have
       deep-equal oracles and which do not.
@@ -553,12 +809,14 @@ captured after an edit proves nothing about that edit.
 - [ ] `git status --porcelain` lists **no production file** in this commit.
 - [ ] Captured values are written as **hardcoded literals**, never re-derived
       by calling the code under test.
-- [ ] The artifact golden asserts group paths, dataset names, dtypes, shapes
-      **and** all 10 attr key/value pairs — not merely "the file opens".
+- [ ] The artifact golden asserts group paths, dataset names, dtypes, shapes,
+      **every persisted sample value** and all 10 attr key/value pairs — not
+      merely "the file opens".
 - [ ] The cleanup capture asserts both the deleted set **and** the surviving
       set.
-- [ ] The argv golden compares the **entire list**, so an inserted, removed
-      or reordered token fails.
+- [ ] The argv golden compares the **entire ordered list** after documented
+      normalization, so an inserted, removed or reordered token fails; and it
+      contains no machine-specific path.
 - [ ] Each capture is traceable to the production site it guards, by
       `file:line`.
 
@@ -606,9 +864,17 @@ explicit that an unused parameter is invisible to every caller.
       (it is what SIDERIUS *produces*, not a property of the input dataset),
       so choosing a runtime spec over a profile field is a reasoned choice
       and not an inconsistency.
-- [ ] Define the spec with the fields the seven sites actually need — naming
-      template, channel identity, storage dtype/offset — each **derived**
-      from existing values, none newly declared.
+- [ ] Define the spec with **exactly** the fields §1 scopes it to: name
+      resolution, cleanup/name matching, channel-group identity, persisted
+      storage dtype, persisted value offset, and any model-output decode
+      selector the producer path genuinely needs. Each is **derived** from
+      existing values; none is newly declared. **The instrument attrs, `N`,
+      the split mechanics and the indexed-suffix policy are NOT fields of
+      this spec** (OD-05c-2).
+- [ ] Implement it as the ONE shared pure derivation §3.2a froze
+      (`derive_tidmad_deliverable_spec(...)`), callable identically by parent
+      and child, so no ambient module-global "current spec" exists and no
+      literal is reproduced at two sites.
 - [ ] Provide the TIDMAD derivation from `DatasetProfile` + the existing
       inlined literals, extracted **verbatim**.
 - [ ] Provide the name-resolution accessor the readers and producers will
@@ -748,10 +1014,11 @@ facts with different oracles.
 **3. Implementation plan.**
 - [ ] Re-read `:600-640` and `:880-915` and record exactly which identifiers
       each construction uses and how they differ.
-- [ ] Confirm the spec is constructible in the child from what already
-      crosses: `dataset_profile` (loaded `:337`), `args._model_io` (`:329`),
-      and the argv identifiers `denoising_model` / `run_name` / `exp_id` /
-      `file_index`.
+- [ ] Confirm the child **reconstructs an equal spec** (§3.2a) from what
+      already crosses: `dataset_profile` (loaded `:337`), `args._model_io`
+      (`:329`), and the argv identifiers `denoising_model` / `run_name` /
+      `exp_id` / `file_index`. The spec itself does **not** cross; parent and
+      child call the same derivation.
 - [ ] Replace all three constructions with spec resolution, preserving the
       `out_dir` vs base distinction.
 - [ ] Confirm **no ambient second resolution** appears in the child (§3.2's
@@ -769,10 +1036,13 @@ facts with different oracles.
 
 **5. Acceptance criteria.**
 - [ ] The produced filename set is **equal** to the C0 capture.
-- [ ] The training and inference argv lists are **equal** to the C0 full-argv
-      goldens — no added, removed or reordered token. If a new argument
-      proves unavoidable, §3.2 requires the Stage-A claim be **downgraded in
-      writing**, not quietly restated.
+- [ ] The training and inference argv lists are **equal** to the C0 ordered
+      goldens after the documented normalization — no added, removed or
+      reordered token. If a new argument proves unavoidable, §3.2 requires
+      the Stage-A claim be **downgraded in writing**, not quietly restated.
+- [ ] Parent and child resolve the **same** spec value — asserted
+      semantically, and asserted to come from **one** derivation rather than
+      two matching literals.
 - [ ] The `out_dir`-relative and base-relative trial paths remain **distinct**
       and each unchanged.
 - [ ] No `abra_` literal is executed in `inference_single.py` for the
@@ -827,9 +1097,9 @@ the file structure**, which is a different risk class from naming.
       `DatasetConfig.sampling_frequency` and is **left literal by OD-05c-2**.
 
 **4. Validation plan.**
-- *Unit*: the written HDF5 structure is **byte-equal** to the C0 artifact
-  golden under TIDMAD — group paths, dataset names, dtypes, shapes, all 10
-  attrs.
+- *Unit*: the written HDF5 structure satisfies **exact logical artifact
+  equality** (§4.1) against the C0 golden under TIDMAD — group paths, dataset
+  names, dtypes, shapes, every sample value, all 10 attrs.
 - *Unit*: under a contrast profile naming different channels, the **group
   names move** and nothing else does.
 - *Negative*: a spec whose channel identity is missing fails loudly rather
@@ -839,9 +1109,9 @@ the file structure**, which is a different risk class from naming.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Under TIDMAD the artifact is **byte-identical** to the C0 golden. A
-      single differing attr, dtype or shape is failure class 2 and a
-      **STOP**, not a tolerance.
+- [ ] Under TIDMAD the artifact satisfies **exact logical artifact equality**
+      against the C0 golden. A single differing attr, dtype, shape or sample
+      value is failure class 2 and a **STOP**, not a tolerance.
 - [ ] Under a contrast channel identity, exactly the two group names change —
       asserted by diffing the written structure against the TIDMAD golden.
 - [ ] The five attrs per channel are **unchanged and still literal**;
@@ -877,28 +1147,35 @@ decode rule. Isolated because it is the **only** commit that can change a
 written byte, and failure class 2 says a byte change is not a refactor — it
 moves every downstream score.
 
-**2. Scope.**
-- `execute_tools/inference_single.py` — `+128` at `:216-217`; `argmax` at
-  `:305`; `-128` at `:318`; `np.int8` buffers/casts at `:690-691`,
-  `:764-765`, `:866-867`, `:911-912`.
-- **Non-goals**: the input-side dtype **check** at `:82-83` belongs to the
-  Input Dataset Contract, not the deliverable — record, do not migrate. No
-  scorer change. No new argv: `ValueEncoding` already crosses inside
-  `--dataset_profile_json` and the contract inside `--model_io_json` (§3.2).
+**2. Scope — the PERSISTED-OUTPUT ENCODE sites only** (§2.2's
+classification, audited individually):
+- `execute_tools/inference_single.py` — `-128` at `:318`; `np.int8` buffers at
+  `:690-691`, `:866-867`; `.astype(np.int8)` casts at `:764-765`, `:911-912`.
+- **Non-goals — these are NOT deliverable facts and must NOT be migrated**:
+  the input dtype check `:82-83`, and `.astype(np.int16) + 128` at `:216-217`
+  (both **input decode**, Input Dataset Contract); `argmax` at `:305`
+  (**model-output decode**, already keyed on `output_type` via I15). The two
+  `256` occurrences (`:273`, `:303`) are **comments**. No scorer change. No
+  new argv (§3.2a).
 - Depends on: C4.
 
 **3. Implementation plan.**
-- [ ] Re-read `:200-320` and record which literal expresses which
-      `ValueEncoding` field: `value_offset` (128), `storage_dtype` (int8),
-      `compute_dtype` (int16), `num_classes` (256).
-- [ ] Re-read the decode-rule block at `:262-318` — decoding is already
-      keyed on the model's output contract (I15), so `argmax` vs pass-through
-      is **already contract-driven**; confirm what remains to derive is the
-      offset and the dtypes, not the branch.
-- [ ] Replace each literal with its derived value, keeping the arithmetic
-      identical.
-- [ ] Confirm the encode/decode pair stays symmetric: `+offset` on read and
-      `-offset` on write must come from the **same** field.
+- [ ] Re-read `:196-320` and re-confirm §2.2's classification against
+      current source **before** touching anything — the classification, not
+      the token, decides what moves.
+- [ ] Route the persisted-output sites through the **`DeliverableSpec`**, not
+      through `DatasetProfile.encoding` directly: every output-storage site
+      must read the SAME authority (§2.1). A mixture — some sites on the
+      spec, others re-reading the profile — is the defect this commit exists
+      to prevent.
+- [ ] Leave the input-decode sites (`:82-83`, `:216-217`) exactly as they
+      are, and record in §15 that they were audited and deliberately kept.
+- [ ] Leave the `argmax` branch keyed on the output contract; do not re-key
+      it on the loss, a model name, or the spec.
+- [ ] Confirm offset symmetry holds **by derivation**: the input side reads
+      `DatasetProfile.encoding`, the output side reads the spec, and the spec
+      derives from the profile — so they agree structurally rather than by
+      two matching literals (§2.1).
 
 **4. Validation plan.**
 - *Unit*: for the TIDMAD encoding, every derived value equals its former
@@ -912,12 +1189,20 @@ moves every downstream score.
 - *Gate*: this is the change Gate 2 exists to confirm (§9).
 
 **5. Acceptance criteria.**
-- [ ] Under TIDMAD the deliverable is **byte-identical** to the C0 artifact
-      golden, including every sample value — not merely the same dtype.
-- [ ] Offset and dtype both resolve from `ValueEncoding`; **no `128`, `int8`
-      or `256` literal remains** on the deliverable encode/decode path.
-- [ ] The `:82-83` input-side dtype check is **unchanged** and recorded as
-      Input-Dataset-Contract scope.
+- [ ] Under TIDMAD the deliverable satisfies **exact logical artifact
+      equality** against the C0 golden, **including every persisted sample
+      value** — mandatory here, not merely the same dtype.
+- [ ] **No persisted-output encoding fact owned by `DeliverableSpec` is
+      independently restated in the migrated producer path.** This replaces
+      revision 2's *"no `128`, `int8` or `256` literal remains"*, which was
+      a token ban: both `256` occurrences are comments, and `128`/`int16`
+      legitimately remain on the **input-decode** path.
+- [ ] A structural guard targets the **classified persisted-output sites**,
+      not every occurrence of those tokens in the module.
+- [ ] The `:82-83` and `:216-217` input-side sites are **unchanged** and
+      recorded as Input-Dataset-Contract scope.
+- [ ] Legacy/`hybrid` behaviour is unchanged — whatever Steps 03 and 05b
+      already preserve.
 - [ ] The decode branch is still keyed on the output contract (I15), not
       re-keyed on the loss or a model name.
 - [ ] Round-trip symmetry is asserted: encode-then-decode returns the
@@ -1016,18 +1301,37 @@ regress" evidence independently.
 - Depends on: C2, C3, C4, C5, C6.
 
 **3. Implementation plan.**
-- [ ] Build the §5 rung: under a **renamed** deliverable template, assert all
-      seven production sites resolve through the spec — one axis, nothing
-      else varied.
+- [ ] Build the §5 rung: with a **renamed** template supplied as ONE injected
+      runtime spec **in-process at the owned seams**, assert producer, path
+      builder, cleanup and launcher move **together** — one axis, nothing
+      else varied. Per §3.2a this rung does **not** claim the renamed
+      template crosses the real subprocess.
 - [ ] Assert the scorer-side literals are **out of scope** explicitly, so no
       future reader mistakes the rung for "no `abra_*` anywhere" (§5).
-- [ ] Run one mutation **per production site**: re-inline that site's literal
-      and confirm the rung reds, naming the site.
+- [ ] Run mutation evidence for **every independently failing semantic
+      family** — the exact count is deliberately NOT frozen:
+
+      ```text
+      producer naming
+      reader / path resolution
+      cleanup glob
+      writer channel / layout
+      persisted value encoding
+      reconstruction / launcher path
+      ```
+
+      Implementation may add finer per-site mutations **where they supply
+      unique evidence**, and should not add them where they do not.
+- [ ] Add a **structural guard**: no owned production surface executes an
+      inlined deliverable-template authority. This is what catches a NEW site
+      added later, which no value-level mutation can — it does not know the
+      site exists.
 - [ ] Build the Checkpoint-C scenario (§6): a real training and inference
-      spawn that writes, names and cleans a deliverable through the contract,
-      with the encoding derived. Record whether the deliverable can be
-      written on CPU; if a GPU is genuinely required, that is the Gate-2
-      trigger, not a licence to weaken Checkpoint C into a helper test.
+      spawn in which the child **reconstructs the shipped default spec** and
+      writes, names and cleans a deliverable through it, with the encoding
+      derived, satisfying **exact logical artifact equality** (§4.1). Use a
+      deterministic candidate and small/synthetic input; CPU is acceptable
+      where source permits. A helper-only substitute is **insufficient**.
 - [ ] Restore every mutation from clean source and re-verify green.
 
 **4. Validation plan.**
@@ -1040,13 +1344,20 @@ regress" evidence independently.
 - *Gate*: **Gate 2 is REQUIRED (§9) and is C8** — not launched here.
 
 **5. Acceptance criteria.**
-- [ ] The rung reds when **any one** of the seven sites re-inlines its
-      literal, and the failure message names that site.
+- [ ] The rung reds for **every semantic family** above, and each failure
+      message names the family (and the site, where the mutation was
+      per-site).
+- [ ] The structural guard reds when any owned surface re-inlines a
+      deliverable-template authority.
 - [ ] Each mutation's site count is asserted as exactly 1 before it is
       applied, and every mutation is restored from clean source with the tree
       re-verified green.
-- [ ] Checkpoint C crosses a **real spawn**; a helper-only substitution is
+- [ ] A **surviving** mutation is classified (real gap / equivalent /
+      unreachable / wrong fixture) **before** the oracle is strengthened.
+- [ ] Checkpoint C crosses a **real spawn**, and the child's reconstructed
+      spec is proven **equal** to the parent's; a helper-only substitution is
       explicitly rejected in the record.
+- [ ] The artifact written by that spawn satisfies §4.1 equality.
 - [ ] The post-cleanup filesystem set after the real spawn equals the C0
       capture's shape.
 - [ ] No production file is modified by this commit.
@@ -1069,7 +1380,7 @@ regress" evidence independently.
 
 ---
 
-### C8 — bounded Gate 2 — **REQUIRES OPERATOR APPROVAL BEFORE LAUNCH**
+### C8 — bounded Gate 2 (REQUIRED)
 
 **1. Goal.** Confirm on real hardware what deterministic testing structurally
 cannot: that a real attempt trains, infers, **writes a real artifact**,
@@ -1094,15 +1405,20 @@ deterministic tests (§9).
 - [ ] Write the Gate-readiness packet **before** launching: the one property
       proved, the exact PASS artifact, the bounded wall-clock/round/epoch
       limits owned by the harness, and the failure-classification scheme.
-- [ ] **STOP and obtain operator approval. Do not launch without it.**
+- [ ] Run it under the **current** `gate_testing_standard.md` and the filled
+      Implementation Working Rules. When the projected cumulative validation
+      is inside the authorized bounded budget, **continue autonomously**;
+      when it materially exceeds that budget, **STOP with a cost/runtime
+      projection**.
 - [ ] After the run: record actual runtime, cost, the exact result, and any
       deviation from the planned execution.
 
 **4. Validation plan.**
-- *Gate*: one bounded real attempt. **Listed separately from every
-  deterministic test above and not launched without operator approval.**
+- *Gate*: one bounded real attempt, **listed separately from every
+  deterministic test above**.
 - All deterministic tests, lint, format and locally available static checks
-  must already be green at the exact head before it is launched.
+  must already be green at the exact head before it is launched, and the
+  executable head must be committed with a clean tree.
 
 **5. Acceptance criteria.**
 - [ ] The run writes a real deliverable whose **name** was resolved through
@@ -1179,15 +1495,36 @@ Depends on: C8 (or C7, if Gate 2 is re-dispositioned by evidence).
 
 Before each semantic commit, **record in the live ledger (§15)**: the exact
 `git diff --stat`, the staged file list, the tests run with counts and wall
-time, and any deviation from this plan. **Stop and show that summary before
-committing.** A commit whose evidence cannot be written down that way is not
-ready.
+time, and any deviation from this plan. A commit whose evidence cannot be
+written down that way is not ready.
+
+**This is internal evidence discipline, not an operator pause.** The agent
+records and continues.
 
 Never mark a checklist item `[x]` before the evidence exists. An unperformed
 exact command is recorded as **DEVIATED** or **SUPERSEDED** with what was
 actually run — the 05a/05b precedent.
 
-### 14.2 Out of scope for these commits
+### 14.2 C0-C9 and Checkpoints 0/A/B/C/D are NOT operator pause points
+
+They are semantic evidence milestones inside ONE autonomous PR
+implementation. They are not child PRs, not approval boundaries and not
+reasons to stop.
+
+After implementation authorization, ordinary findings follow:
+
+```text
+inspect -> classify -> record in the live ledger -> fix -> validate -> continue
+```
+
+Do not return progress merely because a commit landed, a checkpoint passed, a
+mutation found something, the PR opened, or CI started. Only a **MATERIAL
+STOP** (§13) — or a projected validation exceeding the authorized budget —
+returns early. Gate **launch scope** is not an operator design decision: it
+belongs to the filled Implementation Working Rules and the current Gate
+standard.
+
+### 14.3 Out of scope for these commits
 
 Two things are **not** implementation work and require separate evidence and
 operator approval:
@@ -1207,10 +1544,18 @@ validation needed to implement the feature safely is in scope.
 ## 16. Remaining operator decisions
 
 1. **Deliverable Contract provisional ownership and its timing rule (§3)** —
-   the recommendation is: provisional extraction here, ownership OPEN, Step 06
-   as the next mandatory confirm-or-say-why review. This binds Step 06's
-   design surface, so it should be confirmed rather than assumed. **STILL
-   OPEN.**
+   **CONFIRMED BY OPERATOR (2026-08-15). CLOSED.**
+
+   ```text
+   Step 05c    producer-side PROVISIONAL DeliverableSpec extraction;
+               final ownership remains OPEN.
+   Step 06     next MANDATORY ownership review. It must either
+                 CONFIRM final ownership, or
+                 record exactly what consumer evidence is still missing
+                 and keep the row OPEN.
+   Steps 08/11 may add later evidence; NEITHER is predetermined as the
+               final owner.
+   ```
 
 Revision 2 raised two more from the re-audit; **both are now decided:**
 
@@ -1219,7 +1564,12 @@ Revision 2 raised two more from the re-audit; **both are now decided:**
 | **OD-05c-2** — how far the writer migration goes, given that `create_abra_file` hardcodes channel groups **and** 5 instrument attrs, one duplicating `DatasetConfig.sampling_frequency` | **Derive the channel names; leave the attrs literal** (2026-08-15). Channel identity is a declared Step-02 fact the writer contradicts; the attrs are read by **no** production consumer, so deriving them would make 05c own metadata nothing reads. The `sampling_frequency` duplication is recorded as debt for final ownership (§0.3) |
 | **OD-05c-3** — the three scripts revision 1 never censused | **Migrate `run_comparison.py`; leave both `score_tidmad_official_*` scripts literal** (2026-08-15). The launcher reconstructs the producer's path, so a rename would break baseline scoring silently; the official-paper scripts read **historical** artifacts and must keep matching names already on disk (§0.1) |
 
-So one operator decision remains open: **ownership timing (§3)**. Gate-2 *scope* is **not** an operator design decision:
+**Remaining operator decisions: NONE.**
+
+Gate **launch scope** is explicitly not an operator design decision — Gate 2
+is REQUIRED (§9), its shape is "the minimum bounded real attempt" under the
+current Gate standard, and its cost/runtime limits belong to the filled
+Implementation Working Rules. Gate-2 *scope* is **not** an operator design decision:
 Gate 2 is REQUIRED (§9), its shape is "the minimum bounded real attempt" under
 the current Gate standard, and its cost/runtime limits belong to the
 Implementation Working Rules, not to this design.
