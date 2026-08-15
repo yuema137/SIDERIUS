@@ -16,7 +16,21 @@ jobs:
   quality:
     name: Lint + Type + Unit Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Raised 15 -> 25 during Step 05c (2026-08-15). NOT a 05c-specific need:
+    # master's own runs were already at the ceiling, and two master PUSH runs
+    # (31855504278, 31855238181) were cancelled at it before this branch
+    # existed. The last SUCCESSFUL master run (31857482569) measured:
+    #
+    #     install 47s · ruff 1s · pyright strict 2m17s · pytest 10m28s
+    #     ---------------------------------------------------------------
+    #     total 13m38s  ->  1m22s of headroom against a 15-minute cap
+    #
+    # A ~9,300-test suite that grows by a few dozen cases per PR then flips
+    # the job from green to `cancelled` — a result that looks like a failure,
+    # carries no failing test, and tells a reviewer nothing. This is a
+    # resource ceiling, not a correctness guard; raising it changes what CI
+    # tolerates in wall-clock, never what it accepts as passing.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout

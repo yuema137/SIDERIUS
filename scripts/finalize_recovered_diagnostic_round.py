@@ -15,6 +15,7 @@ from agent.schemas.hyperparam_tuning import ExperimentRecord
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
+from execute_tools.deliverable_spec import default_deliverable_naming
 from execute_tools.health_checks.runner import (
     evaluate_gate,
     get_gates_for_position,
@@ -86,12 +87,17 @@ def main() -> None:
     anchor_data = load_anchor_map(os.path.join(TIDMAD_DATA_DIR, "segment_anchors.json"))
 
     def denoised_filename(file_index: int) -> str:
-        file_index = int(file_index)
+        # Step 05c — canonical reconstruction resolves the name through the
+        # same authority the producer wrote it with. A script that rebuilds a
+        # round's artifacts must agree with the producer, or a renamed
+        # deliverable silently breaks recovery.
         return os.path.join(
             agent_dir,
-            (
-                f"abra_validation_denoised_{args.model}_{workflow_run_name}_"
-                f"{args.source_exp_id}_{file_index:04d}.h5"
+            default_deliverable_naming().name(
+                model_type=args.model,
+                run_name=workflow_run_name,
+                exp_id=args.source_exp_id,
+                file_index=int(file_index),
             ),
         )
 

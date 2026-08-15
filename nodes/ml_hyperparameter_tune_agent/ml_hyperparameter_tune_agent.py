@@ -79,6 +79,11 @@ from execute_tools.dataset_config import (
     ScopeViolationError,
     resolve_dataset_profile,
 )
+from execute_tools.deliverable_spec import (
+    DeliverableNaming,
+    default_deliverable_naming,
+    derive_tidmad_deliverable_spec,
+)
 from execute_tools.health_checks.candidate_eligibility import (
     classify_candidate_health,
     formal_validity_of,
@@ -1057,6 +1062,7 @@ def _build_denoised_filename(
     exp_id: str,
     file_index: int,
     base_dir: str,
+    naming: DeliverableNaming | None = None,
 ) -> str:
     """Construct the absolute path to a denoised HDF5 artefact.
 
@@ -1080,12 +1086,24 @@ def _build_denoised_filename(
             safe because ``os.path.join`` discards the base when the
             right-hand side is absolute, so upstream code paths that
             still prepend ``data_dir`` are unaffected.
+        naming: Step 05c — the run's deliverable naming authority. The
+            production caller threads the run's spec; ``None`` resolves the
+            shipped TIDMAD default, which is what every legacy caller and
+            every existing test gets. Optional rather than required
+            precisely so this function's keyword-only contract is unchanged
+            for them.
 
     Returns:
         Absolute path to the denoised HDF5 file, joinable and openable
         by any caller that receives it verbatim.
     """
-    filename = f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{file_index:04d}.h5"
+    resolved = naming if naming is not None else default_deliverable_naming()
+    filename = resolved.name(
+        model_type=model_type,
+        run_name=run_name,
+        exp_id=exp_id,
+        file_index=file_index,
+    )
     return os.path.join(base_dir, filename)
 
 
@@ -3724,6 +3742,20 @@ class HyperparamTuningAgent:
         # direction the fail-closed rule asks for.
         run_model_io = run_bound_model_io_contract()
 
+        # --- The run's ONE Deliverable Contract (Step 05c) ---
+        # Bound here, from the run profile above, for the same reason: every
+        # tuner consumer of a deliverable NAME — the path builder the peek
+        # helpers receive, and the `--cleanup_denoised` glob — must resolve it
+        # from one authority, or a rename moves some sites and not others and
+        # the run writes artifacts nothing can find or clean (failure class 1).
+        #
+        # It is also what the sandbox is given, so the parent's readers and the
+        # child's producers cannot disagree. The spec is NOT serialized and
+        # crosses no process boundary: the subprocess reconstructs an equal
+        # value from `--dataset_profile_json`, which already crosses (§3.2a,
+        # Option A).
+        run_deliverable_spec = derive_tidmad_deliverable_spec(run_profile)
+
         # --- DataScope + HealthGate startup validation (DS5) ---
         # Dataset-resolved checks (schema validators cover only internal
         # consistency), then health-config materialization — all BEFORE any
@@ -3878,6 +3910,7 @@ class HyperparamTuningAgent:
             file_index=file_index,
             data_scope=agent_input.data_scope,
             device_identity=device_identity,
+            deliverable_naming=run_deliverable_spec.naming,
         )
 
         # Seed plugin copy — docs/run_scoped_plugins.md (Phase 3). Validation
@@ -5274,6 +5307,7 @@ class HyperparamTuningAgent:
                                     model_type=model_type,
                                     exp_id=exp_id,
                                     base_dir=sandbox.base_dir,
+                                    naming=run_deliverable_spec.naming,
                                 ):
                                     return _build_denoised_filename(
                                         model_type=model_type,
@@ -5281,6 +5315,7 @@ class HyperparamTuningAgent:
                                         exp_id=exp_id,
                                         file_index=fi,
                                         base_dir=base_dir,
+                                        naming=naming,
                                     )
 
                                 file_vector, final_scalar = sandbox.score_vector(
@@ -5545,7 +5580,7 @@ class HyperparamTuningAgent:
 
                             pattern = os.path.join(
                                 sandbox.base_dir,
-                                f"abra_validation_denoised_*_{exp_id}_*.h5",
+                                run_deliverable_spec.naming.experiment_glob(exp_id=exp_id),
                             )
                             denoised_files = _glob.glob(pattern)
                             if denoised_files:

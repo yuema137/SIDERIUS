@@ -53,6 +53,7 @@ from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 from execute_tools.dataset_config import TIDMAD, DataScope
+from execute_tools.deliverable_spec import default_deliverable_naming
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.schemas import GateAction, HealthCheckContext
@@ -442,7 +443,9 @@ def run_baseline_trial(
     anchor_data = load_anchor_map(anchor_map_path)
 
     def _denoised_fn(fi):
-        return f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{fi:04d}.h5"
+        return default_deliverable_naming().name(
+            model_type=model_type, run_name=run_name, exp_id=exp_id, file_index=fi
+        )
 
     file_vector, final_scalar = score_vector(
         data_dir=baseline_workspace,
@@ -1277,7 +1280,12 @@ def main():
                 expected_outputs = [
                     os.path.join(
                         baseline_workspace,
-                        f"abra_validation_denoised_{model_type}_{baseline_run_name}_{exp_id}_{i:04d}.h5",
+                        default_deliverable_naming().name(
+                            model_type=model_type,
+                            run_name=baseline_run_name,
+                            exp_id=exp_id,
+                            file_index=i,
+                        ),
                     )
                     for i in resolved_data_scope
                 ]
@@ -1383,7 +1391,12 @@ def main():
         expected_outputs = [
             os.path.join(
                 baseline_workspace,
-                f"abra_validation_denoised_{model_type}_{baseline_run_name}_{baseline_exp_id}_{i:04d}.h5",
+                default_deliverable_naming().name(
+                    model_type=model_type,
+                    run_name=baseline_run_name,
+                    exp_id=baseline_exp_id,
+                    file_index=i,
+                ),
             )
             for i in resolved_data_scope
         ]

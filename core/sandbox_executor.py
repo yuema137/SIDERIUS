@@ -42,6 +42,7 @@ from execute_tools.dataset_config import (
     ScopeViolationError,
     resolve_dataset_profile,
 )
+from execute_tools.deliverable_spec import DeliverableNaming, default_deliverable_naming
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
@@ -1043,7 +1044,17 @@ class TidmadSandbox:
         device_identity: Any = None,
         observation_policy: Any = None,
         admission_policy: Any = None,
+        deliverable_naming: DeliverableNaming | None = None,
     ):
+        # Step 05c — the run's deliverable naming authority. The tuner resolves
+        # it ONCE from the run profile and passes it here, so the parent-side
+        # readers (this class's watchdog cleanup) and the tuner's own readers
+        # cannot disagree about what an attempt's artifacts are called. `None`
+        # resolves the shipped TIDMAD default, which is what every caller that
+        # predates 05c gets — identical behaviour, no migration.
+        self.deliverable_naming = (
+            deliverable_naming if deliverable_naming is not None else default_deliverable_naming()
+        )
         # Boundary DataScope invariant: every SampleSet is validated against
         # this scope before any file I/O (train / inference / score_vector).
         # Default = complete dataset (behavior identical to pre-scope code).
@@ -1764,7 +1775,9 @@ class TidmadSandbox:
 
                     pattern = os.path.join(
                         self.base_dir,
-                        f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_*.h5",
+                        self.deliverable_naming.attempt_glob(
+                            model_type=model_type, run_name=run_name, exp_id=exp_id
+                        ),
                     )
                     for partial in _glob.glob(pattern):
                         os.remove(partial)
@@ -2008,7 +2021,13 @@ class StubSandbox(TidmadSandbox):
         run_id: str | None = None,
         data_scope: DataScope | None = None,
         device_identity: Any = None,
+        deliverable_naming: DeliverableNaming | None = None,
     ):
+        # `deliverable_naming` mirrors the parent for exactly the reason given
+        # below for `device_identity`: the tuner resolves the run's naming once
+        # and passes it to whatever sandbox the factory returns, so a stub that
+        # does not accept it makes pseudo mode unusable through the tuner.
+        #
         # `device_identity` mirrors the parent (V20 PR B, #153). The tuner
         # resolves the identity ONCE at the orchestration boundary and passes
         # it to whatever sandbox the factory returns, so a stub that does not
@@ -2025,6 +2044,7 @@ class StubSandbox(TidmadSandbox):
             file_index=file_index,
             data_scope=data_scope,
             device_identity=device_identity,
+            deliverable_naming=deliverable_naming,
         )
         self._run_id: str = run_id or run_name
         self._rng = random.Random(self._run_id)

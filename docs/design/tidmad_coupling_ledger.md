@@ -26,14 +26,35 @@ The dataset filename template is Seam 1 in the contract:
 | `DECOUPLED` | `execute_tools/train_engine_sandbox.py` — 4 sites (`TIDMADDataset._pull_events_from_sample_set`, `TIDMADEpochDataset.__init__`, the RT2 storage-provenance path list, the legacy single-file `main()` branch) | V19 PR 2 commit A. Now `TIDMAD.training_file_name(...)`. Guarded by `test_dataset_contract.py::test_training_engine_has_no_inlined_training_filename_literal`. |
 | `REMAINING` | `execute_tools/build_anchor_map.py:52` | `f"abra_validation_{file_index:04d}.h5"` — validation side; no `validation_file_name` helper exists yet (adding one before a consumer would be dead code). |
 | `REMAINING` | `execute_tools/denoising_score_single.py:139,141,144` | Raw + denoised validation filenames. |
-| `REMAINING` | `execute_tools/array2h5.py:25` | `create_abra_file` — TIDMAD vocabulary in a public function NAME, not just a literal. Rename requires updating call sites. |
-| `REMAINING` | `scripts/` — 47 `abra_*` literals across `run_comparison.py`, `compute_raw_baseline.py`, `score_tidmad_official_*.py`, `fcnet_*.py`, `investigate_pearson_feasibility.py`, `finalize_recovered_diagnostic_round.py` | Operator/analysis scripts. Lower priority than library code; several are deliberately TIDMAD-specific one-off analyses. |
+| `PARTLY DECOUPLED` | `execute_tools/array2h5.py:25` | **Step 05c**: the two channel-group names are now DERIVED from `DatasetProfile.channels` through the provisional `DeliverableSpec` — the file contains no `channel0001`/`channel0002` literal. What REMAINS is TIDMAD vocabulary in the public function NAME `create_abra_file`; renaming it requires updating call sites and is not 05c's scope. The five instrument attrs, `N`, the split mechanics and the `indexed` suffix rule are deliberately left literal (OD-05c-2). |
+| `PARTLY DECOUPLED` | `scripts/` — the `abra_*` literals | **Step 05c** migrated the run-reconstructing half onto the deliverable contract: `run_comparison.py` (×3), `finalize_recovered_diagnostic_round.py`, `pregate_runtime_control_validation.py`, `v18_wave_summary.py` (glob **and** its private file-index regex). The rest are `REMAINING` **on purpose**, not by omission: `score_tidmad_official_*.py` and the five diagnostic scans read HISTORICAL artifacts and must keep matching names those files already carry, so migrating them would be actively wrong (OD-05c-3). `compute_raw_baseline.py` reads raw inputs, which is the dataset-filename family above, not this one. |
 
-**Denoised-output naming** (`abra_validation_denoised_{model}_{run}_{exp}_{i:04d}.h5`,
-e.g. `scripts/run_comparison.py:445`) is a second, distinct template family —
-it names artifacts SIDERIUS produces rather than files it reads. It needs its
-own contract decision (does a generic task even produce per-file denoised
-HDF5?) before it can be decoupled. Flagged, not scheduled.
+**Denoised-output naming** (`abra_validation_denoised_{model}_{run}_{exp}_{i:04d}.h5`)
+is a second, distinct template family — it names artifacts SIDERIUS *produces*
+rather than files it reads.
+
+**Its contract decision has now been made (Step 05c).** It is owned by a
+**provisional, runtime-only `DeliverableSpec`**
+(`execute_tools/deliverable_spec.py`), which holds the naming template, the
+cleanup/match patterns, the file-index inverse, the channel-group identity and
+the persisted storage representation. Every production producer, path reader,
+cleanup reader and canonical reconstruction consumer resolves through it; the
+template is declared exactly once. The child does not receive the spec — it
+reconstructs an equal value from the `DatasetProfile` that already crosses via
+`--dataset_profile_json`.
+
+Two boundaries stay open on purpose:
+
+- the question this row originally raised — *does a generic task even produce
+  per-file denoised HDF5?* — is **not** answered. 05c claims no arbitrary or
+  non-HDF5 deliverable format.
+- **final ownership remains OPEN.** 05c holds only producer-side evidence;
+  completeness and scoreability are exercised only by the scorer and the peek
+  readers. **Step 06 is the next mandatory ownership review** and must either
+  confirm final ownership or record what consumer evidence is still missing.
+
+The scorer's own literals (`denoising_score_single.py`) therefore stay
+`REMAINING` and are explicitly outside 05c.
 
 ---
 

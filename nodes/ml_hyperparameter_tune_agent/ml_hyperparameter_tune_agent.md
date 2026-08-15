@@ -195,7 +195,7 @@ executes, without distorting what the planner is allowed to decide. See
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `storage` | `StorageConfig` | Yes | — | Where this node reads its inputs and writes its outputs. Supports the local filesystem backend; populated by `main()` in CLI mode or by `workflows/model_exploration.py` in workflow mode. |
-| `cleanup_denoised` | `bool` | No | `False` | Delete denoised HDF5 files after scoring each round. Saves disk space (~4 GB per file × 20 files = 80 GB per formal round). Scores have already been computed by the time cleanup runs. |
+| `cleanup_denoised` | `bool` | No | `False` | Delete denoised HDF5 files after scoring each round. Saves disk space (~4 GB per file × 20 files = 80 GB per formal round). Scores have already been computed by the time cleanup runs. **Step 05c**: the glob is no longer an inlined template — it resolves through the run's `DeliverableSpec` (`naming.experiment_glob(exp_id=…)`), the same authority the producer names artifacts with. Cleanup POLICY is unchanged: same trigger, same `finally` placement, same ordering, same log lines. |
 | `progress_bar` | `bool` | No | `False` | Stream live tqdm progress bars from training/inference subprocesses. |
 | `current_run_best_formal_score` | `float \| None` | No | `None` | Chain formal-incumbent reference (from `core/resume.py`). See "Chain formal-incumbent reference" under Key behavioral notes. |
 | `enable_chain_incumbent_formal_gates` | `bool` | No | `False` | Consumption-only switch for the two formal delta gates. See "Chain formal-incumbent reference" under Key behavioral notes. |
@@ -331,7 +331,7 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 - **Per-round trial config**: `{workspace}/trial_config_{run_name}_round{N}.json` — the resolved `TrialConfig` for round N, written before the training subprocess starts. Used by `core.resume.restore_prior_state` for crash-recovery.
 - **Token usage**: `{workspace}/token_usage.jsonl` (when `set_run_context` is called by the workflow) — append-only log of every LLM call's token cost.
 - **Per-run plugin dir**: `{workspace}/plugins/{run_name}/` — copy of `seed_plugin_path` written at run start so the training subprocess can find the plugin via `SIDERIUS_PLUGIN_DIRS`. Only populated when `seed_plugin_path` is set.
-- **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`.
+- **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`. **Step 05c**: their name, the cleanup pattern that matches them, the HDF5 channel-group identity and the persisted storage representation all resolve through one provisional runtime `DeliverableSpec` (`execute_tools/deliverable_spec.py`), bound once per run from the run-scoped `DatasetProfile`. The tuner's path builder (`_build_denoised_filename`, which the HealthGate peeks and the scorer receive verbatim) and the `--cleanup_denoised` glob both consume it, and the sandbox is handed the same value — so parent readers cannot disagree with the child that writes the files. The spec is runtime-only: no config file, no schema field, no CLI flag, and the subprocess RECONSTRUCTS an equal value from the `DatasetProfile` that already crosses via `--dataset_profile_json`.
 
 ## Key behavioral notes
 

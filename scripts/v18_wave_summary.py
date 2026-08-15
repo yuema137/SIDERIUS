@@ -51,8 +51,9 @@ import re
 import sys
 from typing import Any
 
+from execute_tools.deliverable_spec import default_deliverable_naming
+
 _RUN_NAME_RE = re.compile(r"v18_[a-z]+_(\d{2})_(\d{2})$")
-_DENOISED_RE = re.compile(r"abra_validation_denoised_.*_(\d{4})\.h5$")
 
 
 def expected_scope_from_name(name: str) -> list[int] | None:
@@ -116,12 +117,15 @@ def _check_effective_config(workspace: str, scope: list[int], abnormal: list[str
 
 
 def _check_denoised_artifacts(workspace: str, scope: list[int], abnormal: list[str]) -> None:
+    # Step 05c — both the match and the index parse come from the deliverable
+    # naming authority. This auditor previously held its own regex, which was a
+    # second restatement of the producer's template: a renamed deliverable
+    # would have made it recognise nothing and report a clean workspace.
+    naming = default_deliverable_naming()
     scope_set = set(scope)
-    for path in glob.glob(
-        os.path.join(workspace, "**", "abra_validation_denoised_*.h5"), recursive=True
-    ):
-        m = _DENOISED_RE.search(os.path.basename(path))
-        if m and int(m.group(1)) not in scope_set:
+    for path in glob.glob(os.path.join(workspace, "**", naming.any_glob()), recursive=True):
+        file_index = naming.file_index_of(os.path.basename(path))
+        if file_index is not None and file_index not in scope_set:
             abnormal.append(f"OUT-OF-SCOPE denoised artifact on disk: {path}")
 
 

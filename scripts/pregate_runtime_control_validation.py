@@ -45,6 +45,7 @@ from core.runtime_control.observation_store import ObservationStore
 from core.runtime_control.records import RuntimeObservation
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.dataset_config import DataScope
+from execute_tools.deliverable_spec import default_deliverable_naming
 
 WAVENET_SMALL = {
     "model_type": "wavenet",
@@ -211,7 +212,10 @@ def _artifact_state(sandbox: TidmadSandbox, run_name: str, exp_id: str, model_ty
     models = sandbox.dirs["models"]
     denoised = glob.glob(
         os.path.join(
-            sandbox.base_dir, f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_*.h5"
+            sandbox.base_dir,
+            default_deliverable_naming().attempt_glob(
+                model_type=model_type, run_name=run_name, exp_id=exp_id
+            ),
         )
     )
     return {

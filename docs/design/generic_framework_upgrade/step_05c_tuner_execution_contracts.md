@@ -847,31 +847,31 @@ captured after an edit proves nothing about that edit.
 - Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Re-read `create_abra_file` (`array2h5.py:25-75`) and record every
+- [x] Re-read `create_abra_file` (`array2h5.py:25-75`) and record every
       fact it writes: group names, the 5 attrs per channel, dataset name,
       `chunks=True`, the `indexed` suffix rule, and the `N` split.
-- [ ] Capture the **exact logical artifact golden** (§4.1): write one small
+- [x] Capture the **exact logical artifact golden** (§4.1): write one small
       deliverable through the current `create_abra_file` and record, as
       hardcoded expectations, a canonical inspection representation — group
       paths, dataset names, dtypes, shapes, **every persisted sample value**
       and every attr key/value.
-- [ ] Capture the **filename set** produced by all three producer
+- [x] Capture the **filename set** produced by all three producer
       constructions (`inference_single.py:620`, `:897`, `:902`) for a fixed
       `(model, run_name, exp_id, file_index)` tuple, as hardcoded strings.
-- [ ] Capture the **post-cleanup filesystem set**: seed a directory with
+- [x] Capture the **post-cleanup filesystem set**: seed a directory with
       matching and non-matching files, run each cleanup glob
       (`sandbox_executor.py:1767`, tuner `:5548`), record exactly which files
       survive.
-- [ ] Capture an **ordered argv-list golden** (§4.2) for the training and
+- [x] Capture an **ordered argv-list golden** (§4.2) for the training and
       inference spawns — the whole `cmd` list, not individual tokens. Use
       distinguishable deterministic fixture values; normalize **only**
       intentionally ephemeral values (e.g. a temporary workspace root) and
       document each normalization at the assertion. Do not bake a
       machine-specific temp directory into the golden.
-- [ ] Classify the file-IPC surfaces §4 marks "partially EXISTING": which of
+- [x] Classify the file-IPC surfaces §4 marks "partially EXISTING": which of
       the sidecar / timing / runtime-observation writes already have
       deep-equal oracles and which do not.
-- [ ] Record the classification and every captured value in §15.
+- [x] Record the classification and every captured value in §15.
 
 **4. Validation plan.**
 - *Unit*: every new capture passes against unmodified production code.
@@ -883,18 +883,18 @@ captured after an edit proves nothing about that edit.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] `git status --porcelain` lists **no production file** in this commit.
-- [ ] Captured values are written as **hardcoded literals**, never re-derived
+- [x] `git status --porcelain` lists **no production file** in this commit.
+- [x] Captured values are written as **hardcoded literals**, never re-derived
       by calling the code under test.
-- [ ] The artifact golden asserts group paths, dataset names, dtypes, shapes,
+- [x] The artifact golden asserts group paths, dataset names, dtypes, shapes,
       **every persisted sample value** and all 10 attr key/value pairs — not
       merely "the file opens".
-- [ ] The cleanup capture asserts both the deleted set **and** the surviving
+- [x] The cleanup capture asserts both the deleted set **and** the surviving
       set.
-- [ ] The argv golden compares the **entire ordered list** after documented
+- [x] The argv golden compares the **entire ordered list** after documented
       normalization, so an inserted, removed or reordered token fails; and it
       contains no machine-specific path.
-- [ ] Each capture is traceable to the production site it guards, by
+- [x] Each capture is traceable to the production site it guards, by
       `file:line`.
 
 **6. Failure and edge cases.**
@@ -908,9 +908,9 @@ captured after an edit proves nothing about that edit.
   uncaptured rather than pretending coverage.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q`
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q`
       *(narrow to the real modules at implementation time)*
-- [ ] Record: test count, wall time, and explicit confirmation that zero
+- [x] Record: test count, wall time, and explicit confirmation that zero
       production files were modified.
 
 **8. Commit boundary.** Tests and a written census only. Independently
@@ -935,28 +935,28 @@ explicit that an unused parameter is invisible to every caller.
 - Depends on: C0.
 
 **3. Implementation plan.**
-- [ ] Re-read `DatasetConfig.validation_file_name` (`dataset_config.py:142`)
+- [x] Re-read `DatasetConfig.validation_file_name` (`dataset_config.py:142`)
       — the **precedent**: Step 02 solved the *input* filename with one
       declared field plus one accessor. Record why the deliverable differs
       (it is what SIDERIUS *produces*, not a property of the input dataset),
       so choosing a runtime spec over a profile field is a reasoned choice
       and not an inconsistency.
-- [ ] Define the spec with **exactly** the fields §1 scopes it to: name
+- [x] Define the spec with **exactly** the fields §1 scopes it to: name
       resolution, cleanup/name matching, channel-group identity, persisted
       storage dtype, persisted value offset, and any model-output decode
       selector the producer path genuinely needs. Each is **derived** from
       existing values; none is newly declared. **The instrument attrs, `N`,
       the split mechanics and the indexed-suffix policy are NOT fields of
       this spec** (OD-05c-2).
-- [ ] Implement it as the ONE shared pure derivation §3.2a froze
+- [x] Implement it as the ONE shared pure derivation §3.2a froze
       (`derive_tidmad_deliverable_spec(...)`), callable identically by parent
       and child, so no ambient module-global "current spec" exists and no
       literal is reproduced at two sites.
-- [ ] Provide the TIDMAD derivation from `DatasetProfile` + the existing
+- [x] Provide the TIDMAD derivation from `DatasetProfile` + the existing
       inlined literals, extracted **verbatim**.
-- [ ] Provide the name-resolution accessor the readers and producers will
+- [x] Provide the name-resolution accessor the readers and producers will
       call, and the glob-pattern accessor the two cleanup sites need.
-- [ ] Confirm by inspection that no production module imports it yet.
+- [x] Confirm by inspection that no production module imports it yet.
 
 **4. Validation plan.**
 - *Unit*: the TIDMAD instance resolves names **byte-identical** to the C0
@@ -970,15 +970,15 @@ explicit that an unused parameter is invisible to every caller.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Every name the spec resolves is **equal** to the corresponding C0
+- [x] Every name the spec resolves is **equal** to the corresponding C0
       hardcoded literal — asserted against the capture, not re-derived.
-- [ ] The glob accessor's match set is **equal** to C0's deleted set.
-- [ ] The spec is constructible **without** any new configuration input: a
+- [x] The glob accessor's match set is **equal** to C0's deleted set.
+- [x] The spec is constructible **without** any new configuration input: a
       legacy run's existing values suffice (§3.1's "REQUIRED FOR LEGACY
       RUNS? NO").
-- [ ] `grep` proves **zero** production importers — so C2-C6 evidence cannot
+- [x] `grep` proves **zero** production importers — so C2-C6 evidence cannot
       be confused with C1's.
-- [ ] No file under `configs/` changed; no schema gained a field.
+- [x] No file under `configs/` changed; no schema gained a field.
 
 **6. Failure and edge cases.**
 - A needed deliverable semantic turns out not to be derivable from existing
@@ -989,8 +989,8 @@ explicit that an unused parameter is invisible to every caller.
   in C0 and record which is canonical **before** unifying.
 
 **7. Verification commands and evidence.**
-- [ ] The targeted selector for the new module plus the C0 captures.
-- [ ] Record counts, wall time, and the zero-importer confirmation.
+- [x] The targeted selector for the new module plus the C0 captures.
+- [x] Record counts, wall time, and the zero-importer confirmation.
 
 **8. Commit boundary.** One new typed value and its TIDMAD derivation,
 inert, independently revertible. No call-site migration.
@@ -1018,15 +1018,15 @@ files that nothing can find or clean (failure class 1).
 - Depends on: C1.
 
 **3. Implementation plan.**
-- [ ] Re-read all three sites and record how each obtains
+- [x] Re-read all three sites and record how each obtains
       `model_type`, `run_name`, `exp_id`, `base_dir` today.
-- [ ] Thread the run's spec to each; resolve names/globs through it.
-- [ ] Keep `_build_denoised_filename`'s **keyword-only signature and return
+- [x] Thread the run's spec to each; resolve names/globs through it.
+- [x] Keep `_build_denoised_filename`'s **keyword-only signature and return
       type** unchanged — its four existing tests must pass untouched.
-- [ ] Confirm the tuner's `_denoised_fn` closure (`:5272-5285`) still
+- [x] Confirm the tuner's `_denoised_fn` closure (`:5272-5285`) still
       produces the same absolute path, since the peek helpers use its result
       verbatim (`_peek.py:21`).
-- [ ] Confirm the watchdog glob still runs **only** on the kill path.
+- [x] Confirm the watchdog glob still runs **only** on the kill path.
 
 **4. Validation plan.**
 - *Unit*: each migrated site resolves the C0-captured name/glob exactly.
@@ -1040,16 +1040,16 @@ files that nothing can find or clean (failure class 1).
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Post-cleanup filesystem set is **equal** to the C0 capture — both the
+- [x] Post-cleanup filesystem set is **equal** to the C0 capture — both the
       deleted set and the surviving set.
-- [ ] The four existing `_build_denoised_filename` tests pass **with no
+- [x] The four existing `_build_denoised_filename` tests pass **with no
       edit**; if any needs editing, that is a signature change and a
       **STOP**.
-- [ ] Under a renamed spec, **all three** sites move together (the §5
+- [x] Under a renamed spec, **all three** sites move together (the §5
       Stage-B property, observed early here).
-- [ ] Cleanup **policy** is untouched: same trigger conditions, same
+- [x] Cleanup **policy** is untouched: same trigger conditions, same
       ordering, same log lines.
-- [ ] No producer site changed in this commit — asserted and recorded.
+- [x] No producer site changed in this commit — asserted and recorded.
 
 **6. Failure and edge cases.**
 - A cleanup glob is broadened and deletes a file the C0 capture proved must
@@ -1063,8 +1063,8 @@ files that nothing can find or clean (failure class 1).
   process — assert it, do not assume it.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/core -q`
-- [ ] Record counts, wall time, the filesystem-set equality, and confirmation
+- [x] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/core -q`
+- [x] Record counts, wall time, the filesystem-set equality, and confirmation
       that no existing helper test required editing.
 
 **8. Commit boundary.** Three consumer sites, one authority, reversible. No
@@ -1089,16 +1089,16 @@ facts with different oracles.
 - Depends on: C2.
 
 **3. Implementation plan.**
-- [ ] Re-read `:600-640` and `:880-915` and record exactly which identifiers
+- [x] Re-read `:600-640` and `:880-915` and record exactly which identifiers
       each construction uses and how they differ.
-- [ ] Confirm the child **reconstructs an equal spec** (§3.2a) from what
+- [x] Confirm the child **reconstructs an equal spec** (§3.2a) from what
       already crosses: `dataset_profile` (loaded `:337`), `args._model_io`
       (`:329`), and the argv identifiers `denoising_model` / `run_name` /
       `exp_id` / `file_index`. The spec itself does **not** cross; parent and
       child call the same derivation.
-- [ ] Replace all three constructions with spec resolution, preserving the
+- [x] Replace all three constructions with spec resolution, preserving the
       `out_dir` vs base distinction.
-- [ ] Confirm **no ambient second resolution** appears in the child (§3.2's
+- [x] Confirm **no ambient second resolution** appears in the child (§3.2's
       frozen acceptance): the subprocess must not call
       `resolve_dataset_profile()` when given a profile path.
 
@@ -1112,20 +1112,20 @@ facts with different oracles.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] The produced filename set is **equal** to the C0 capture.
-- [ ] The training and inference argv lists are **equal** to the C0 ordered
+- [x] The produced filename set is **equal** to the C0 capture.
+- [x] The training and inference argv lists are **equal** to the C0 ordered
       goldens after the documented normalization — no added, removed or
       reordered token. If a new argument proves unavoidable, §3.2 requires
       the Stage-A claim be **downgraded in writing**, not quietly restated.
-- [ ] Parent and child resolve the **same** spec value — asserted
+- [x] Parent and child resolve the **same** spec value — asserted
       semantically, and asserted to come from **one** derivation rather than
       two matching literals.
-- [ ] The `out_dir`-relative and base-relative trial paths remain **distinct**
+- [x] The `out_dir`-relative and base-relative trial paths remain **distinct**
       and each unchanged.
-- [ ] No `abra_` literal is executed in `inference_single.py` for the
+- [x] No `abra_` literal is executed in `inference_single.py` for the
       deliverable name — the input-file name (`validation_file_name`,
       `:641`) is **not** in scope and must remain.
-- [ ] Zero calls to `resolve_dataset_profile()` added in the child.
+- [x] Zero calls to `resolve_dataset_profile()` added in the child.
 
 **6. Failure and edge cases.**
 - Trial and formal paths disagree about the spec → they must resolve from the
@@ -1136,8 +1136,8 @@ facts with different oracles.
   preserve today's behaviour; do not make it newly fatal.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q`
-- [ ] Record counts, wall time, the filename-set equality and the argv
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q`
+- [x] Record counts, wall time, the filename-set equality and the argv
       equality result.
 
 **8. Commit boundary.** Three constructions in one module. No writer change,
@@ -1162,15 +1162,15 @@ the file structure**, which is a different risk class from naming.
 - Depends on: C3.
 
 **3. Implementation plan.**
-- [ ] Re-read `create_abra_file` in full and confirm the C0 artifact golden
+- [x] Re-read `create_abra_file` in full and confirm the C0 artifact golden
       covers every fact it writes.
-- [ ] Add the spec parameter, defaulted so existing callers are unaffected
+- [x] Add the spec parameter, defaulted so existing callers are unaffected
       until migrated.
-- [ ] Derive the two group names from `DatasetProfile.channels.input_channel`
+- [x] Derive the two group names from `DatasetProfile.channels.input_channel`
       / `.target_channel`; under TIDMAD these resolve to `channel0001` /
       `channel0002`, so the written bytes do not move.
-- [ ] Migrate both call sites.
-- [ ] Record in §15 that `sampling_frequency` here duplicates
+- [x] Migrate both call sites.
+- [x] Record in §15 that `sampling_frequency` here duplicates
       `DatasetConfig.sampling_frequency` and is **left literal by OD-05c-2**.
 
 **4. Validation plan.**
@@ -1186,15 +1186,15 @@ the file structure**, which is a different risk class from naming.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Under TIDMAD the artifact satisfies **exact logical artifact equality**
+- [x] Under TIDMAD the artifact satisfies **exact logical artifact equality**
       against the C0 golden. A single differing attr, dtype, shape or sample
       value is failure class 2 and a **STOP**, not a tolerance.
-- [ ] Under a contrast channel identity, exactly the two group names change —
+- [x] Under a contrast channel identity, exactly the two group names change —
       asserted by diffing the written structure against the TIDMAD golden.
-- [ ] The five attrs per channel are **unchanged and still literal**;
+- [x] The five attrs per channel are **unchanged and still literal**;
       `sampling_frequency` remains `10000000` (OD-05c-2).
-- [ ] `array2h5.py` contains **no** `channel0001`/`channel0002` literal.
-- [ ] `test_inference_single.py:172`'s `del`-before-`create_abra_file`
+- [x] `array2h5.py` contains **no** `channel0001`/`channel0002` literal.
+- [x] `test_inference_single.py:172`'s `del`-before-`create_abra_file`
       ordering test still passes — see §8's amendment; it guards a real
       memory incident and must **not** be deleted as a "call-order pin".
 
@@ -1207,8 +1207,8 @@ the file structure**, which is a different risk class from naming.
   uncaptured; do not refactor what is not covered.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
-- [ ] Record counts, wall time, and the byte-equality result against the C0
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
+- [x] Record counts, wall time, and the byte-equality result against the C0
       artifact golden.
 
 **8. Commit boundary.** One writer, one derived fact. No naming change, no
@@ -1237,19 +1237,19 @@ classification, audited individually):
 - Depends on: C4.
 
 **3. Implementation plan.**
-- [ ] Re-read `:196-320` and re-confirm §2.2's classification against
+- [x] Re-read `:196-320` and re-confirm §2.2's classification against
       current source **before** touching anything — the classification, not
       the token, decides what moves.
-- [ ] Route the persisted-output sites through the **`DeliverableSpec`**, not
+- [x] Route the persisted-output sites through the **`DeliverableSpec`**, not
       through `DatasetProfile.encoding` directly: every output-storage site
       must read the SAME authority (§2.1). A mixture — some sites on the
       spec, others re-reading the profile — is the defect this commit exists
       to prevent.
-- [ ] Leave the input-decode sites (`:82-83`, `:216-217`) exactly as they
+- [x] Leave the input-decode sites (`:82-83`, `:216-217`) exactly as they
       are, and record in §15 that they were audited and deliberately kept.
-- [ ] Leave the `argmax` branch keyed on the output contract; do not re-key
+- [x] Leave the `argmax` branch keyed on the output contract; do not re-key
       it on the loss, a model name, or the spec.
-- [ ] Confirm offset symmetry holds **by derivation**: the input side reads
+- [x] Confirm offset symmetry holds **by derivation**: the input side reads
       `DatasetProfile.encoding`, the output side reads the spec, and the spec
       derives from the profile — so they agree structurally rather than by
       two matching literals (§2.1).
@@ -1266,23 +1266,23 @@ classification, audited individually):
 - *Gate*: this is the change Gate 2 exists to confirm (§9).
 
 **5. Acceptance criteria.**
-- [ ] Under TIDMAD the deliverable satisfies **exact logical artifact
+- [x] Under TIDMAD the deliverable satisfies **exact logical artifact
       equality** against the C0 golden, **including every persisted sample
       value** — mandatory here, not merely the same dtype.
-- [ ] **No persisted-output encoding fact owned by `DeliverableSpec` is
+- [x] **No persisted-output encoding fact owned by `DeliverableSpec` is
       independently restated in the migrated producer path.** This replaces
       revision 2's *"no `128`, `int8` or `256` literal remains"*, which was
       a token ban: both `256` occurrences are comments, and `128`/`int16`
       legitimately remain on the **input-decode** path.
-- [ ] A structural guard targets the **classified persisted-output sites**,
+- [x] A structural guard targets the **classified persisted-output sites**,
       not every occurrence of those tokens in the module.
-- [ ] The `:82-83` and `:216-217` input-side sites are **unchanged** and
+- [x] The `:82-83` and `:216-217` input-side sites are **unchanged** and
       recorded as Input-Dataset-Contract scope.
-- [ ] Legacy/`hybrid` behaviour is unchanged — whatever Steps 03 and 05b
+- [x] Legacy/`hybrid` behaviour is unchanged — whatever Steps 03 and 05b
       already preserve.
-- [ ] The decode branch is still keyed on the output contract (I15), not
+- [x] The decode branch is still keyed on the output contract (I15), not
       re-keyed on the loss or a model name.
-- [ ] Round-trip symmetry is asserted: encode-then-decode returns the
+- [x] Round-trip symmetry is asserted: encode-then-decode returns the
       original values for the TIDMAD encoding.
 
 **6. Failure and edge cases.**
@@ -1296,8 +1296,8 @@ classification, audited individually):
   exactly — capture it in C0 if the golden does not already cover it.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
-- [ ] Record counts, wall time, and the byte-level artifact comparison.
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools -q`
+- [x] Record counts, wall time, and the byte-level artifact comparison.
 
 **8. Commit boundary.** Encoding only, one module. No naming, no layout, no
 scorer.
@@ -1322,12 +1322,12 @@ should be revertible independently.
 - Depends on: C3.
 
 **3. Implementation plan.**
-- [ ] Re-read each of the three `run_comparison.py` sites and record whether
+- [x] Re-read each of the three `run_comparison.py` sites and record whether
       it builds a path to **write**, to **read**, or to **glob**.
-- [ ] Resolve each through the spec, preserving the baseline `run_name` /
+- [x] Resolve each through the spec, preserving the baseline `run_name` /
       `exp_id` values each site already uses.
-- [ ] Migrate the three reconstruction scripts the same way.
-- [ ] Confirm no CLI argument of `run_comparison.py` changed.
+- [x] Migrate the three reconstruction scripts the same way.
+- [x] Confirm no CLI argument of `run_comparison.py` changed.
 
 **4. Validation plan.**
 - *Unit*: each migrated site resolves the C0-captured name.
@@ -1339,13 +1339,13 @@ should be revertible independently.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] All three `run_comparison.py` sites resolve names **equal** to the C0
+- [x] All three `run_comparison.py` sites resolve names **equal** to the C0
       capture.
-- [ ] Under a renamed spec, launcher and producer move **together** —
+- [x] Under a renamed spec, launcher and producer move **together** —
       asserted in one test, not two independent ones.
-- [ ] The two `score_tidmad_official_*` scripts are **unmodified**, and §15
+- [x] The two `score_tidmad_official_*` scripts are **unmodified**, and §15
       records why.
-- [ ] No CLI surface of `run_comparison.py` changed.
+- [x] No CLI surface of `run_comparison.py` changed.
 
 **6. Failure and edge cases.**
 - A script site needs the spec but has no run context → record the
@@ -1356,8 +1356,8 @@ should be revertible independently.
   this rule.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/scripts -q`
-- [ ] Record counts, wall time, and the unmodified status of the two excluded
+- [x] `.venv/bin/python -m pytest tests/unit/scripts -q`
+- [x] Record counts, wall time, and the unmodified status of the two excluded
       scripts.
 
 **8. Commit boundary.** Scripts only. No engine change.
@@ -1378,14 +1378,14 @@ regress" evidence independently.
 - Depends on: C2, C3, C4, C5, C6.
 
 **3. Implementation plan.**
-- [ ] Build the §5 rung: with a **renamed** template supplied as ONE injected
+- [x] Build the §5 rung: with a **renamed** template supplied as ONE injected
       runtime spec **in-process at the owned seams**, assert producer, path
       builder, cleanup and launcher move **together** — one axis, nothing
       else varied. Per §3.2a this rung does **not** claim the renamed
       template crosses the real subprocess.
-- [ ] Assert the scorer-side literals are **out of scope** explicitly, so no
+- [x] Assert the scorer-side literals are **out of scope** explicitly, so no
       future reader mistakes the rung for "no `abra_*` anywhere" (§5).
-- [ ] Run mutation evidence for **every independently failing semantic
+- [x] Run mutation evidence for **every independently failing semantic
       family** — the exact count is deliberately NOT frozen:
 
       ```text
@@ -1399,17 +1399,17 @@ regress" evidence independently.
 
       Implementation may add finer per-site mutations **where they supply
       unique evidence**, and should not add them where they do not.
-- [ ] Add a **structural guard**: no owned production surface executes an
+- [x] Add a **structural guard**: no owned production surface executes an
       inlined deliverable-template authority. This is what catches a NEW site
       added later, which no value-level mutation can — it does not know the
       site exists.
-- [ ] Build the Checkpoint-C scenario (§6): a real training and inference
+- [x] Build the Checkpoint-C scenario (§6): a real training and inference
       spawn in which the child **reconstructs the shipped default spec** and
       writes, names and cleans a deliverable through it, with the encoding
       derived, satisfying **exact logical artifact equality** (§4.1). Use a
       deterministic candidate and small/synthetic input; CPU is acceptable
       where source permits. A helper-only substitute is **insufficient**.
-- [ ] Restore every mutation from clean source and re-verify green.
+- [x] Restore every mutation from clean source and re-verify green.
 
 **4. Validation plan.**
 - *Unit*: the rung and the per-site mutations.
@@ -1421,23 +1421,23 @@ regress" evidence independently.
 - *Gate*: **Gate 2 is REQUIRED (§9) and is C8** — not launched here.
 
 **5. Acceptance criteria.**
-- [ ] The rung reds for **every semantic family** above, and each failure
+- [x] The rung reds for **every semantic family** above, and each failure
       message names the family (and the site, where the mutation was
       per-site).
-- [ ] The structural guard reds when any owned surface re-inlines a
+- [x] The structural guard reds when any owned surface re-inlines a
       deliverable-template authority.
-- [ ] Each mutation's site count is asserted as exactly 1 before it is
+- [x] Each mutation's site count is asserted as exactly 1 before it is
       applied, and every mutation is restored from clean source with the tree
       re-verified green.
-- [ ] A **surviving** mutation is classified (real gap / equivalent /
+- [x] A **surviving** mutation is classified (real gap / equivalent /
       unreachable / wrong fixture) **before** the oracle is strengthened.
-- [ ] Checkpoint C crosses a **real spawn**, and the child's reconstructed
+- [x] Checkpoint C crosses a **real spawn**, and the child's reconstructed
       spec is proven **equal** to the parent's; a helper-only substitution is
       explicitly rejected in the record.
-- [ ] The artifact written by that spawn satisfies §4.1 equality.
-- [ ] The post-cleanup filesystem set after the real spawn equals the C0
+- [x] The artifact written by that spawn satisfies §4.1 equality.
+- [x] The post-cleanup filesystem set after the real spawn equals the C0
       capture's shape.
-- [ ] No production file is modified by this commit.
+- [x] No production file is modified by this commit.
 
 **6. Failure and edge cases.**
 - A mutation **survives** → inspect the test architecture before adding an
@@ -1448,9 +1448,9 @@ regress" evidence independently.
   the test's own tmp dir hide a production cleanup failure.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit tests/integration -q`
+- [x] `.venv/bin/python -m pytest tests/unit tests/integration -q`
       *(narrow at implementation time)*
-- [ ] Record counts, wall time, each mutation's expected vs observed result,
+- [x] Record counts, wall time, each mutation's expected vs observed result,
       and the restored-green re-run.
 
 **8. Commit boundary.** Evidence only. No production change.
@@ -1471,23 +1471,23 @@ deterministic tests (§9).
 - Depends on: C7 green, and a clean tree at the exact head.
 
 **3. Implementation plan.**
-- [ ] Read `docs/gates/gate_testing_standard.md` **at implementation time**
+- [x] Read `docs/gates/gate_testing_standard.md` **at implementation time**
       and follow the then-current standard; do not rely on this document's
       summary of it.
-- [ ] Use the current approved pro LLM configuration
+- [x] Use the current approved pro LLM configuration
       (`llm_configs/openai_tiered_pro.json` per the standing operator
       decision — re-verify it is still current).
-- [ ] Size the **smallest** case that trains, infers, writes, scores and
+- [x] Size the **smallest** case that trains, infers, writes, scores and
       cleans one attempt.
-- [ ] Write the Gate-readiness packet **before** launching: the one property
+- [x] Write the Gate-readiness packet **before** launching: the one property
       proved, the exact PASS artifact, the bounded wall-clock/round/epoch
       limits owned by the harness, and the failure-classification scheme.
-- [ ] Run it under the **current** `gate_testing_standard.md` and the filled
+- [x] Run it under the **current** `gate_testing_standard.md` and the filled
       Implementation Working Rules. When the projected cumulative validation
       is inside the authorized bounded budget, **continue autonomously**;
       when it materially exceeds that budget, **STOP with a cost/runtime
       projection**.
-- [ ] After the run: record actual runtime, cost, the exact result, and any
+- [x] After the run: record actual runtime, cost, the exact result, and any
       deviation from the planned execution.
 
 **4. Validation plan.**
@@ -1498,15 +1498,15 @@ deterministic tests (§9).
   executable head must be committed with a clean tree.
 
 **5. Acceptance criteria.**
-- [ ] The run writes a real deliverable whose **name** was resolved through
+- [x] The run writes a real deliverable whose **name** was resolved through
       the spec and whose **encoding** was derived — both verified from the
       artifact on disk, not from a log line.
-- [ ] The scorer reads that artifact successfully — proving producer and the
+- [x] The scorer reads that artifact successfully — proving producer and the
       untouched Step-06 reader still agree.
-- [ ] Cleanup removes it, and the post-run filesystem set matches
+- [x] Cleanup removes it, and the post-run filesystem set matches
       expectation.
-- [ ] Actual wall time and cost are recorded against the projection.
-- [ ] A failure is classified against the pre-declared scheme, not
+- [x] Actual wall time and cost are recorded against the projection.
+- [x] A failure is classified against the pre-declared scheme, not
       re-interpreted after the fact.
 
 **6. Failure and edge cases.**
@@ -1518,8 +1518,8 @@ deterministic tests (§9).
   a projection before launching.
 
 **7. Verification commands and evidence.**
-- [ ] The exact bounded launch command, recorded before the run.
-- [ ] Record: runtime, cost, artifact paths, PASS/FAIL, and the full log
+- [x] The exact bounded launch command, recorded before the run.
+- [x] Record: runtime, cost, artifact paths, PASS/FAIL, and the full log
       location. Never claim a Gate passed from an exit code alone.
 
 **8. Commit boundary.** Gate evidence and its ledger entry only.
@@ -1535,12 +1535,12 @@ deterministic tests (§9).
 Depends on: C8 (or C7, if Gate 2 is re-dispositioned by evidence).
 
 **3. Implementation plan.**
-- [ ] Synchronize §15 with actual findings, deviations and evidence.
-- [ ] Update the touched docs as the **last** pre-merge step, quoting each
+- [x] Synchronize §15 with actual findings, deviations and evidence.
+- [x] Update the touched docs as the **last** pre-merge step, quoting each
       documented flag/default against merged source (CLAUDE.md doc-sync rule).
-- [ ] Run the terminal checks from a **clean tree**.
-- [ ] Open/update the PR; drive exact-final-head CI green.
-- [ ] Verify local HEAD == PR `headRefOid` == successful CI `headSha`.
+- [x] Run the terminal checks from a **clean tree**.
+- [x] Open/update the PR; drive exact-final-head CI green.
+- [x] Verify local HEAD == PR `headRefOid` == successful CI `headSha`.
 
 **4. Validation plan.**
 - Directly affected tests · focused integration · mutations · `ruff check` ·
@@ -1548,10 +1548,10 @@ Depends on: C8 (or C7, if Gate 2 is re-dispositioned by evidence).
   **No local full suite by default.**
 
 **5. Acceptance criteria.**
-- [ ] Every verdict read from the **log file**, never a wrapper's exit status.
-- [ ] The three identities match, each read rather than reconstructed.
-- [ ] Working tree clean; §15 records every deviation.
-- [ ] If local pyright cannot run (the 05a/05b precedent: host Node too old),
+- [x] Every verdict read from the **log file**, never a wrapper's exit status.
+- [x] The three identities match, each read rather than reconstructed.
+- [x] Working tree clean; §15 records every deviation.
+- [x] If local pyright cannot run (the 05a/05b precedent: host Node too old),
       that limitation is **recorded** and no local type claim is made.
 
 **6. Failure and edge cases.**
@@ -1561,8 +1561,8 @@ Depends on: C8 (or C7, if Gate 2 is re-dispositioned by evidence).
   a stop condition.
 
 **7. Verification commands and evidence.**
-- [ ] The terminal command set, with counts and wall time recorded.
-- [ ] CI run id and exact `headSha`.
+- [x] The terminal command set, with counts and wall time recorded.
+- [x] CI run id and exact `headSha`.
 
 **8. Commit boundary.** Documentation and CI-driven fixes only.
 
@@ -1616,7 +1616,1096 @@ validation needed to implement the feature safely is in scope.
 
 ## 15. Implementation ledger
 
-*(empty — populated at implementation kickoff)*
+**LIVE.** Implementation authorized 2026-08-15 under the filled Implementation
+Working Rules. Branch
+`feat/generic-framework-step-05c-tuner-execution-contracts`, implementation
+base `4785a639` (= the freeze marker; `origin/master` at kickoff).
+
+### 15.0 Kickoff verification
+
+| Check | Result |
+|---|---|
+| `origin/master` | `4785a639c74aa8c5a9053023fee81cc7f992f875` — equals the implementation base |
+| frozen content `fe73f982` in history | YES |
+| freeze marker `4785a639` in history | YES |
+| 05a merge `cfb3b1c7` / 05b merge `5ce205d3` | both present |
+| working tree / untracked | clean / none |
+| orphaned Gate / training / inference processes | none (the GPU processes on this host belong to another user's `/home/wenyu/summer` venv) |
+| production source vs design base `226d4e9f` | **identical** — `git diff --name-only 226d4e9f HEAD` lists only the three docs files of the two docs commits |
+
+Because production source is byte-identical to the design base, every
+`file:line` citation in §0 was re-checked against it directly rather than
+re-derived.
+
+### 15.1 Current-source re-enumeration (before any production edit)
+
+**The seven sites — all confirmed at the frozen line numbers.**
+
+| # | Role | Site | Current literal / fact |
+|---|---|---|---|
+| 1 | PRODUCER name — `sample_set` (multi-file) path | `execute_tools/inference_single.py:620` | `f"abra_validation_denoised_{denoising_model}_{run_name}_{exp_id}_{file_index:04d}.h5"` |
+| 2 | PRODUCER name — `mode == "fix"` | `:897` | `f"abra_validation_denoised_{denoising_model}_{idx_str}.h5"` |
+| 3 | PRODUCER name — single-file non-fix | `:902` | same shape as #1, `idx_str` from `args.file_index` |
+| 4 | WRITER — channel-group identity | `execute_tools/array2h5.py::create_abra_file:25-75`, groups at `:49`, `:63` | `"channel0001"` / `"channel0002"` |
+| 5 | READER — watchdog partial-artifact glob | `core/sandbox_executor.py:1767` | `f"abra_validation_denoised_{model_type}_{run_name}_{exp_id}_*.h5"` |
+| 6 | READER — `--cleanup_denoised` glob | `nodes/…/ml_hyperparameter_tune_agent.py:5548` | `f"abra_validation_denoised_*_{exp_id}_*.h5"` |
+| 7 | PATH BUILDER | `nodes/…/ml_hyperparameter_tune_agent.py:1053`, template `:1088` | same shape as #1 |
+
+**Four census corrections found by re-enumeration.** All are same-authority
+findings incorporated autonomously per the Working Rules; none is a material
+stop.
+
+```text
+Previous assumption (§C3):
+  ":897 and :902 (trial — note these build TWO DIFFERENT paths, out_dir-
+   relative and base-relative; the difference is pre-existing and must be
+   preserved)"
+
+Audit evidence:
+  :544 and :894 both compute `out_dir = args.output_dir or args.data_dir`,
+  and all THREE constructions are `os.path.join(out_dir, …)`.
+  :618-621 sits in the `sample_set is not None` branch (:542);
+  :896-903 sits in the single-file `else` branch.
+
+Corrected understanding:
+  There is no out_dir-vs-base distinction. The real difference is that
+  :897 is the `mode == "fix"` branch and OMITS run_name and exp_id — a
+  genuinely different NAME SHAPE, not a different base directory.
+  :620 and :902 produce the identical string; they differ only in where
+  file_index comes from (sample_set key vs `args.file_index`).
+
+Implementation consequence:
+  The spec must expose TWO name shapes (qualified and fix-mode), not two
+  base-directory conventions. C3 must NOT "unify" :620 and :902 as if they
+  were different — they already agree.
+
+Validation consequence:
+  The C0 filename golden records all three names for one identifier tuple
+  and asserts :620/:902 equality explicitly.
+```
+
+- **`--file_index` default is `6`, not `0`** (`TidmadSandbox.file_index`), and
+  the workspace layout is `<ws>/configs/<run_name>/…` with checkpoints under
+  `<ws>/cached_models/` and `base_dir == <ws>`. The C0 argv goldens were
+  corrected against the real captures rather than the assumed layout.
+- **`--model_io_json` is present** in both the training and inference argv for
+  `fcnet`, appended after `--file_index`. §3.2's transport trace holds; the
+  ordered goldens record the exact position.
+- **`sandbox_executor._write_dataset_profile_config` resolves the AMBIENT
+  profile** (`resolve_dataset_profile()`, `:1247`) — not the tuner's
+  05a-run-bound `run_profile` (`ml_hyperparameter_tune_agent.py:3704`). Both
+  are the TIDMAD singleton today so the values are equal, but this is a
+  pre-existing 05a residue on the *transport* path, recorded here because
+  §3.2a's equality argument rests on parent and child deriving from the same
+  profile. **05c does not widen its scope to fix it**; instead every
+  child-side derivation consumes the profile the child was *given*, and the
+  sandbox derives its own spec from the profile it *transported* — so the two
+  provably agree at the seam 05c owns. Recorded as debt for the final owner
+  (§3) alongside the `sampling_frequency` duplication.
+
+**Encoding-token classification, re-verified individually against current
+source** (§2.2's table, re-read at the implementation base):
+
+| Token | Site | Class | Disposition |
+|---|---|---|---|
+| `np.dtype(np.int8)` ×2 | `:82-83` | input decode | NOT migrated |
+| `.astype(np.int16)` ×2, `+ 128` ×2 | `:216-217` | input decode | NOT migrated |
+| `argmax(dim=1)` | `:305` | model-output decode (I15, keyed on `output_type`) | NOT migrated |
+| `- 128` ×2 | `:318` | **persisted-output encode** | DeliverableSpec |
+| `dtype=np.int8` ×2 | `:690-691`, `:866-867` | **persisted-output encode** | DeliverableSpec |
+| `.astype(np.int8)` ×4 | `:764-765`, `:911-912` | **persisted-output encode** | DeliverableSpec |
+| `256` ×2 | `:273`, `:303` | comments only | nothing to do |
+
+**Script classification** (OD-05c-3, re-verified): `run_comparison.py:445`
+(`_denoised_fn` closure, read/score), `:1280` and `:1386` (`expected_outputs`
+reconstruction) — MIGRATE. `finalize_recovered_diagnostic_round.py:88-96`
+(`denoised_filename` closure), `pregate_runtime_control_validation.py:212-216`
+(glob), `v18_wave_summary.py:55` + `:121-124` — MIGRATE.
+`score_tidmad_official_{banded,wavenet}.py` and the five diagnostic scans —
+**left literal**, they read historical artifacts.
+
+> **New finding — `v18_wave_summary.py` needs the naming INVERSE.** It holds
+> two facts, not one: a broad glob `abra_validation_denoised_*.h5` and a
+> regex `_DENOISED_RE = r"abra_validation_denoised_.*_(\d{4})\.h5$"` that
+> parses the **file index back out of a name**. That regex is a second,
+> independent restatement of the producer template — exactly failure class 1
+> — so migrating it is right, and the spec's naming component must expose an
+> any-deliverable pattern and an index parse alongside name resolution.
+> Recorded rather than silently absorbed: it is one more naming accessor, not
+> a new authority.
+
+**Process-boundary mechanism — §3.2a Option A confirmed implementable.**
+Traced against current source, the consumer split is cleaner than the frozen
+text assumed and makes Option A trivially sound:
+
+```text
+PARENT consumers  (path builder, both cleanup globs, launcher, the three
+                   reconstruction scripts)
+    need NAMING ONLY — no DatasetProfile is required, because the TIDMAD
+    template is a frozen compatibility literal keyed on identifiers.
+
+CHILD consumers   (three producer names, writer channel identity,
+                   persisted encoding)
+    need naming + channels + storage representation, and already load the
+    profile at inference_single.py:337 from --dataset_profile_json.
+```
+
+This also resolves a constraint C2 imposes: `_build_denoised_filename` must
+keep its keyword-only signature so its four existing tests pass **unedited**,
+which is only possible if name resolution does not require a profile. The
+spec is therefore ONE frozen typed value **composed** of a profile-independent
+naming component and a profile-derived representation component — the same
+shape `DatasetProfile` already uses to compose `DatasetConfig` +
+`ChannelIdentity` + `ValueEncoding` ("three declarations, one object").
+Composition is not two authorities: there is one type, one set of literals and
+one derivation.
+
+```text
+Design row superseded:
+  §3.2a's field table lists "output decode selector" as a spec field.
+
+Audit evidence:
+  §2.2 (the later per-literal audit), §1's scope sentence and C5's non-goals
+  all say `argmax` at :305 stays with the Model-I/O contract, keyed on
+  `output_type` via I15.
+
+Corrected understanding:
+  The DeliverableSpec does NOT own the decode selector. Three of the four
+  frozen statements agree; §3.2a's table row is the outlier and is
+  superseded by the more specific per-literal audit.
+
+Implementation consequence:
+  `derive_tidmad_deliverable_spec` does not take a ModelIOContract — an
+  accepted-but-unconsumed parameter would be dead weight and would imply an
+  ownership 05c explicitly disclaims.
+```
+
+### 15.2 C0 — Checkpoint 0 (pre-edit captures)
+
+**Commit boundary honoured: zero production files modified.**
+
+| Capture | Module | What is pinned |
+|---|---|---|
+| EXACT LOGICAL ARTIFACT golden (§4.1) | `tests/unit/execute_tools/test_step05c_c0_deliverable_baseline.py` | `canonical_h5_inspection` + the two-channel golden: 3 group paths, 2 dataset names, `int8` dtypes, `(8,)` shapes, **every persisted sample value**, all **10** attr key/value pairs |
+| single-channel (`array2=None`) shape | same | one group, no `channel0002`, 5 attrs |
+| `indexed=True` suffix rule | same | `indexed.h5` → `indexed_0.h5`; production's `indexed=False` → bare name |
+| invalid-filename defect | same | non-`.h5` returns `None` and writes **nothing** — captured as-is, not fixed (§0.3) |
+| producer/reader name equality | same | `_build_denoised_filename` == the producer golden, exactly |
+| ordered inference argv (no sample_set) | `tests/unit/core/test_step05c_c0_launch_cleanup_baseline.py` | 25-token ordered list |
+| ordered inference argv (trial, sample_set) | same | 31-token ordered list incl. the four conditional tails |
+| ordered training argv | same | 21-token ordered list |
+| tuner cleanup glob sets | same | deleted set **and** surviving set |
+| sandbox watchdog glob sets | same | deleted set **and** surviving set |
+
+**Fixture values.** Artifact samples `[-128, -1, 0, 1, 127, -128, 63, -64]`
+(input) and `[127, 1, 0, -1, -128, 127, -64, 63]` (target) — the int8 extremes
+are deliberate, so a C5 offset or dtype drift wraps here instead of passing on
+mid-range samples. Identifier tuple: `wavenet` / `step05c_run` /
+`wavenet_step05c_run_003` / `7`, giving
+`abra_validation_denoised_wavenet_step05c_run_wavenet_step05c_run_003_0007.h5`
+and the fix-mode `abra_validation_denoised_wavenet_0007.h5`.
+
+**argv normalization — the only two applied, each documented at the
+assertion**: `sys.executable` → `<PYTHON>`, and the pytest `tmp_path`
+workspace root → `<WS>`. No machine-specific temp directory is baked into a
+golden; every flag, identifier and the full order is compared verbatim.
+
+**Cleanup asymmetry recorded.** The two globs are deliberately different
+shapes and the goldens pin both: the tuner's is exp-keyed and
+model/run-agnostic (so another model's artifact under the *same* `exp_id`
+**is** cleaned), the sandbox watchdog's is fully qualified. A C2 migration
+that "tidies" them into one shape would silently stop cleaning real files.
+
+**Deliberately NOT captured**, each for a stated reason:
+
+| Not captured | Why |
+|---|---|
+| the `N = 2000000000` split path | unreachable at test scale — recorded as uncaptured rather than pretending coverage (C0 §6) |
+| the three producer f-strings executed in-process | they are inline inside `inference_single.main()` and cannot be called in isolation; the executable oracle C0 *can* take is producer/reader name equality via `_build_denoised_filename`, and reachability of the producer itself is C7's structural guard + Checkpoint C |
+| file-IPC sidecar deep-equality | classified as already covered — `test_step02b_b3_boundary_byte_parity.py` pins the SampleSet boundary bytes and the sidecar/timing writes are untouched by design; no unique missing evidence to add |
+| sentinel sequence | EXISTING (`sandbox_executor:1498-1519`), untouched by design |
+| scorer-side literals | Step 06 |
+
+**Evidence.**
+
+```text
+.venv/bin/python -m pytest \
+    tests/unit/execute_tools/test_step05c_c0_deliverable_baseline.py \
+    tests/unit/core/test_step05c_c0_launch_cleanup_baseline.py -q
+  -> 10 passed in 1.18s   (rc read from pytest, not a wrapper)
+```
+
+One diagnosed failure during capture, recorded rather than hidden: the first
+run of the three argv goldens failed because the *test's assumed* workspace
+layout (`<ws>/test_run_<run>/configs/…`, `--file_index 0`, no
+`--model_io_json`) did not match production. Diagnosis: **test expectation
+wrong, production correct**. The goldens were re-captured from the real
+`cmd` lists. This is precisely the value of an ordered-list oracle — a
+token-level assertion would have passed against the wrong layout.
+
+**Commit** `77aa9e30` — `test(step05c): C0 — capture the deliverable, argv and
+cleanup baselines`. 3 files (2 new test modules + this ledger), zero
+production files.
+
+### 15.3 C1 — the provisional `DeliverableSpec` (inert)
+
+**Module**: `execute_tools/deliverable_spec.py`, placed beside
+`dataset_config.py` because both parent (`core`, `nodes`, `scripts`) and child
+(`execute_tools`) already import from that package, and because it introduces
+no new top-level package. No `configs/` file changed; no existing schema
+gained a field.
+
+**Structure — ONE spec, two components.** The frozen scope (§1, §3.1) plus the
+C2 constraint that `_build_denoised_filename` keep its signature forces this
+shape, and it is the same composition `DatasetProfile` already uses:
+
+```text
+DeliverableSpec
+  ├── naming : DeliverableNaming     frozen TIDMAD compatibility literals
+  │             prefix, extension, index_width
+  └── storage: DeliverableStorage    DERIVED from DatasetProfile
+                input_channel_group, target_channel_group,
+                storage_dtype, value_offset
+```
+
+**Six accessors, one literal.** Before 05c the deliverable template was
+restated five independent times — the qualified name, the fix-mode name, two
+differently-shaped cleanup globs, and `v18_wave_summary`'s index regex.
+`DeliverableNaming` composes all six from `prefix`/`extension`/`index_width`:
+`name`, `unqualified_name`, `attempt_glob`, `experiment_glob`, `any_glob`,
+`file_index_of`. A rename is one field.
+
+**What the spec deliberately does NOT own**, re-stated at the type: the five
+instrument attrs, `sampling_frequency`, chunking, the `N` split, the `indexed`
+suffix rule, invalid-filename policy, completeness, scoreability, metric
+identity, cleanup policy. `compute_dtype` and `num_classes` are also absent —
+they are input-decode and model-contract facts, and importing them would move
+an Input-Dataset-Contract fact into a producer contract.
+
+**`derive_tidmad_deliverable_spec(dataset_profile)`** is the ONE shared
+derivation §3.2a froze. It takes **no** `ModelIOContract` — see §15.1's
+recorded supersession of §3.2a's field-table row.
+
+**Validation** (`tests/unit/execute_tools/test_step05c_c1_deliverable_spec.py`,
+13 cases). Each names a defect a declaration cannot catch:
+
+| Assertion | Defect it alone catches |
+|---|---|
+| both name shapes equal the C0 goldens | C3 migrates producers onto a spec that writes files nothing can find |
+| both globs equal the C0 deleted sets **and** miss every C0 survivor | a glob "tidied" into the other's shape — stops reclaiming disk, or deletes a concurrent attempt |
+| `file_index_of` inverts `name`; rejects a raw input and a non-`.h5` | the v18 auditor silently reporting a clean workspace after a rename |
+| one renamed `prefix` moves all six accessors, and the TIDMAD name stops parsing | an accessor reading a captured constant instead of the field |
+| degenerate `prefix` (`""`, `"  "`, `" abra "`, `"abra_*_denoised"`) rejected | an empty prefix is a valid `str`; it yields a `_*.h5` cleanup glob whose consumer calls `os.remove` |
+| identical channel groups rejected | `create_abra_file` would write the denoised signal then overwrite it with the injected truth, producing a readable meaningless file |
+| TIDMAD derivation == `channel0001`/`channel0002`/`int8`/`128` (hardcoded) | a profile change silently moving the persisted representation |
+| `model_dump` → `model_validate` round-trip derives an equal spec | the transport's serialization step breaking §3.2a's equality argument; also §3.3's replay property in miniature |
+| a contrast profile moves storage and leaves naming fixed | naming coupled to the profile, which would rename artifacts already on disk |
+| zero production importers | C2-C6 evidence being confused with C1's |
+
+**Three diagnosed failures during C1, all test-side**, recorded rather than
+hidden:
+
+1. `file_index_of` returned `3` for the fix-mode name where the test expected
+   `None`. **Production correct, expectation wrong** — the fix-mode artifact
+   *is* a deliverable and *does* carry an index, and the regex it replaces
+   (`v18_wave_summary.py:55`) matches it for the same reason.
+2. `DatasetProfile(...)` rejected a hand-built contrast: Step 02c added
+   required `anchor_selection_files` / `health_peek_files`. Switched to
+   `model_copy(update=…)`, which is also the more honest contrast — exactly
+   two declarations move.
+3. The zero-importer scan used `git grep`, which searches the **index** and so
+   reported nothing for a still-untracked new module. Replaced with a
+   filesystem scan rooted at `Path(__file__).resolve().parents[3]` — never a
+   hardcoded absolute path, per the portability rule.
+
+**Evidence.**
+
+```text
+.venv/bin/python -m pytest \
+    tests/unit/execute_tools/test_step05c_c1_deliverable_spec.py \
+    tests/unit/execute_tools/test_step05c_c0_deliverable_baseline.py \
+    tests/unit/core/test_step05c_c0_launch_cleanup_baseline.py -q
+  -> 23 passed in 1.22s
+ruff check / ruff format --check : clean
+```
+
+**Local pyright is UNAVAILABLE on this host** — `node --version` is
+`v10.19.0` and the vendored pyright bundle fails to parse under it. This is
+the 05a/05b precedent. **No local type-success claim is made**; exact-head CI
+strict pyright is the authority.
+
+**Commit** `69c2b3cb` — `feat(step05c): C1 — the provisional DeliverableSpec,
+inert`.
+
+### 15.4 C2 — the READERS migrate
+
+**The run's one acquisition point.** `run_deliverable_spec =
+derive_tidmad_deliverable_spec(run_profile)` is bound in the tuner's `run()`
+immediately after `run_model_io` (`ml_hyperparameter_tune_agent.py`, beside the
+05a profile binding and the 05b contract binding). It is used at all three
+tuner-side consumers **and** handed to the sandbox, so parent readers cannot
+disagree with each other or with the child.
+
+| Site | Before | After |
+|---|---|---|
+| `_build_denoised_filename` | inlined f-string at `:1088` | `resolved.name(...)`, with a new optional keyword-only `naming` |
+| tuner `_denoised_fn` closure | passes no naming | passes `run_deliverable_spec.naming` (default-arg locked, as the other closure captures already are) |
+| tuner `--cleanup_denoised` glob | inlined `abra_validation_denoised_*_{exp_id}_*.h5` | `run_deliverable_spec.naming.experiment_glob(exp_id=exp_id)` |
+| `TidmadSandbox` watchdog glob | inlined `…_{model_type}_{run_name}_{exp_id}_*.h5` | `self.deliverable_naming.attempt_glob(...)` |
+
+**One signature decision, made to satisfy a frozen constraint.**
+`_build_denoised_filename` gains `naming: DeliverableNaming | None = None`
+rather than a required parameter, because C2's acceptance requires its four
+existing tests to pass **unedited** — they do, and were not touched. `None`
+resolves the shipped default, which is also what every legacy caller gets.
+
+**`TidmadSandbox.__init__` gains `deliverable_naming: DeliverableNaming |
+None = None`**, forwarded by `StubSandbox` for exactly the reason its own
+docstring already gives for `device_identity` (`sandbox_executor.py:2012-2018`):
+the tuner resolves the value once at the orchestration boundary and passes it
+to whatever sandbox the factory returns, so a stub that does not accept it
+makes pseudo mode unusable through the tuner. Every construction site that
+predates 05c — `run_comparison.py` ×2, `pregate_runtime_control_validation.py`,
+`c2_prephase_validation.py` ×2, `finalize_recovered_diagnostic_round.py`, and
+every test — omits the kwarg and is unaffected.
+
+**Cleanup POLICY untouched**: same trigger conditions, same `finally`
+placement, same ordering, same log lines, same `os.remove` loop. Only the
+pattern's *source* moved.
+
+**Validation** (`tests/unit/core/test_step05c_c2_reader_migration.py`,
+7 cases). The distinction that matters at C2 is **reachability** — C1 already
+proved the accessors reproduce the C0 captures, and a migration test that only
+exercised the spec would pass just as happily if every production site still
+ran its own literal:
+
+| Assertion | Defect it alone catches |
+|---|---|
+| the path builder honours an injected naming **and** defaults to TIDMAD | a new parameter accepted and ignored while the f-string kept running |
+| the **real** watchdog kill path deletes exactly the C0 attempt set and spares every survivor | the migrated glob broadened — data loss on a concurrent attempt |
+| under an injected renamed naming the watchdog deletes the RENAMED files and spares the TIDMAD ones | the site still executing its own literal; the observed result would be the exact inverse |
+| the sandbox default is the shipped naming | an unresolved `None` raising `AttributeError` on the kill path only — a failure that appears solely after something else has gone wrong |
+| no tuner reader executes an inlined template (3 sites, one concept) | a site re-inlining the template, which no value-level assertion can see because it does not know the site exists |
+
+The watchdog tests drive the **actual production branch** (`:1759`, guarded by
+`policy_obj.watchdog.enabled and sample_set is not None`) with
+`_run_observed_subprocess` patched to return a `kill_info`, so production's own
+`os.remove` runs against a seeded workspace.
+
+**Site 3's reachability is structural, and that is stated rather than
+glossed.** The `--cleanup_denoised` block lives inside `run()`'s `finally`,
+which no unit test reaches without standing up a full round; its behavioural
+evidence is Checkpoint C and Gate 2. The structural assertion is not a weaker
+substitute — it catches a *re-inlined* template, which no value-level check
+can.
+
+**Two diagnosed failures, both test-side.** `inspect.getsource` could not be
+used: the package `nodes.ml_hyperparameter_tune_agent` re-binds its own name to
+the module, so `from nodes.ml_hyperparameter_tune_agent import
+ml_hyperparameter_tune_agent` raises `ImportError`. Replaced with a source read
+rooted at `Path(__file__).resolve().parents[3]`. The first structural spans
+were fixed character counts and truncated mid-block; replaced with explicit
+start/end anchors.
+
+**Test disposition — C1's inertness assertion, UPGRADED not deleted.** The
+reader-side regression sweep returned `1 failed, 4410 passed, 3 skipped in
+349.66s`, and the single failure was
+`test_c1_has_zero_production_importers`. That is the assertion working: C2 is
+the commit that gives the spec its first production consumers, so "zero
+importers" became false exactly when it should. Its functional intent —
+*which production sites hold this authority* — is preserved by inverting it
+into `test_only_the_censused_sites_consume_the_deliverable_spec`, which
+asserts in the direction that stays meaningful for the rest of the PR:
+
+- the **migrated** sites still consume the spec → catches a dead seam, a site
+  reverting to its own literal while every spec-level test keeps passing
+  because the spec is still correct;
+- the **excluded** sites never consume it → catches a scope breach. This half
+  never grows: `denoising_score_single.py`, `scoring_utils.py`, both
+  `score_tidmad_official_*` scripts and the five diagnostic scans are the
+  Step-06 boundary and the historical-artifact readers. Migrating a historical
+  reader is not a neutral tidy-up — it would stop matching names that files
+  already on disk carry.
+
+**Evidence.**
+
+```text
+.venv/bin/python -m ruff check core/ nodes/…/ml_hyperparameter_tune_agent.py \
+    execute_tools/deliverable_spec.py tests/unit/core tests/unit/execute_tools
+  -> All checks passed
+
+.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent \
+    tests/unit/core tests/unit/execute_tools -q
+  -> 4410 passed, 3 skipped, 1 failed in 349.66s
+     (the single failure is C1's inertness assertion, resolved above)
+
+.venv/bin/python -m pytest <C0+C1+C2 modules> \
+    tests/unit/agent/tune_ml_hyperparam_agent/test_denoised_filename_helper.py \
+    tests/unit/core/test_sandbox_executor.py -q
+  -> 87 passed in 1.31s
+```
+
+`test_denoised_filename_helper.py` passed **with no edit**, which is C2's
+frozen acceptance criterion for the signature.
+
+**Commit** `05d5f3ab` — `refactor(step05c): C2 — the deliverable-name readers
+resolve through the spec`.
+
+### 15.5 C3 — the PRODUCERS migrate
+
+**The child's reconstruction, in one line.** Immediately after the profile is
+resolved (`inference_single.py:340-342`):
+
+```python
+deliverable_spec = derive_tidmad_deliverable_spec(dataset_profile)
+```
+
+This is §3.2a Option A made concrete: the spec is **not transported**, it is
+reconstructed from the profile that already crossed via
+`--dataset_profile_json`, through the same function the parent calls. One
+function, two callers, no duplicated literal, no third IPC mechanism — and,
+because it consumes the already-resolved `dataset_profile`, no second
+`resolve_dataset_profile()` call.
+
+| Site | Before | After |
+|---|---|---|
+| `:620` (sample_set path) | inlined f-string | `deliverable_spec.naming.name(...)` |
+| `:897` (`mode == "fix"`) | inlined f-string, **no run/exp** | `deliverable_spec.naming.unqualified_name(...)` |
+| `:902` (single-file non-fix) | inlined f-string | `deliverable_spec.naming.name(...)` |
+
+The now-redundant `idx_str = str(args.file_index).zfill(4)` local was removed —
+the index width is the spec's `index_width`, and keeping a hand-rolled `zfill`
+beside it would be a sixth restatement of the fact the spec exists to own.
+
+**argv unchanged.** The three C0 ordered goldens pass untouched. §3.2a's
+"consumed, not re-plumbed" holds: no argument was added, so the Stage-A claim
+needs no downgrade.
+
+**Validation**
+(`tests/unit/execute_tools/test_step05c_c3_producer_migration.py`, 6 cases).
+Evidence is deliberately split, and the split is stated rather than glossed:
+the three constructions live inside `main()`, which loads a checkpoint, builds
+a model and opens HDF5, so they cannot be called in isolation. **Value**
+evidence is C0/C1; **structural** evidence is here, by AST over the real
+module, in the idiom `test_inference_single.py` already uses for this file;
+**behavioural** evidence is Checkpoint C and Gate 2.
+
+| Assertion | Defect it alone catches |
+|---|---|
+| no **executed** `abra_validation_denoised` literal remains anywhere in the module | a site re-inlining the template — invisible to any value check, which does not know the site exists |
+| `validation_file_name(file_index)` still resolves the RAW INPUT | C3 "helpfully" routing the input name through the deliverable spec: inference would read files that do not exist while every deliverable assertion stayed green |
+| exactly `["name", "name", "unqualified_name"]` accessor calls in `main()` | the two name SHAPES collapsed onto one accessor, silently renaming every fix-mode artifact |
+| exactly one `derive_tidmad_deliverable_spec` **and** exactly one `resolve_dataset_profile` | an ambient re-resolution in the child that could disagree with the transported profile — the defect 02b/05a/05b removed elsewhere |
+| the spec derived *the way the child derives it* resolves both C0 names | the derivation ceasing to compose the shipped naming (e.g. keying it off the profile), renaming every artifact |
+
+The literal scan is scoped to **executed** constants rather than to the file,
+because the module legitimately keeps `abra_validation_0000.h5` in the
+memory-incident comment at `:888`. A token ban would be vacuous or force a
+pointless comment edit; §C5's acceptance already replaces token bans with the
+semantic form.
+
+**Evidence.**
+
+```text
+.venv/bin/python -m pytest tests/unit/execute_tools -q
+  -> 932 passed, 1 skipped in 20.62s
+ruff check execute_tools/ tests/unit/execute_tools/  -> All checks passed
+```
+
+`test_inference_single.py` passes **unedited**, including
+`test_canonical_del_block_runs_before_create_abra_file` — the AST guard over
+the measured RSS incident that §8 names as the one call-order test that must
+survive. The three C0 argv goldens are unchanged.
+
+**Commit** `64a275d9` — `refactor(step05c): C3 — the producer name
+constructions resolve through the spec`.
+
+### 15.6 C4 — the WRITER derives its channel identity
+
+**Signature**: `create_abra_file(file_name, array1, array2=None,
+indexed=True, *, storage: DeliverableStorage | None = None)`. Keyword-only, so
+no positional call can drift onto it. Both production call sites
+(`inference_single.py`, trial and single-file) pass
+`deliverable_spec.storage`.
+
+The writer takes **`DeliverableStorage`, not the whole spec** — it receives a
+fully resolved path and has no use for naming. The narrower dependency is the
+honest one.
+
+**The gap this closes.** The READ side already resolved the pair from the
+profile (`inference_single.py:661,664`); the WRITER contradicted it with
+`"channel0001"` / `"channel0002"` at `array2h5.py:49,63`. "Which channel holds
+the truth" was declared in one place and re-decided in another.
+
+**The backward-compat default needed a decision, and it is recorded rather
+than assumed.** C4's frozen acceptance has two clauses that pull against each
+other: *"a caller passing no spec produces the pre-05c file exactly"* and
+*"`array2h5.py` contains no `channel0001`/`channel0002` literal"*. A literal
+fallback satisfies the first and violates the second. The resolution is
+`default_deliverable_storage()` in `deliverable_spec.py`, which derives from
+Step 02's existing `resolve_dataset_profile()` seam — the documented
+Regime-A adapter for consumers an argument cannot reach. Nothing is cached,
+nothing is mutable, and it is consulted **only** when no argument was
+supplied, so it is not the ambient "current spec" §3.2a forbids. It also
+behaves better than a literal would: under a bound profile it resolves *that*
+task's channels, which a hardcoded fallback could not.
+
+**Left literal, deliberately (OD-05c-2)**: the five instrument attrs, the
+`N = 2000000000` split, the multi-file split mechanics, the `indexed` suffix
+rule, and the silent `return None` on a non-`.h5` name.
+`sampling_frequency = 10000000` here duplicates the already-declared
+`DatasetConfig.sampling_frequency` and is recorded as debt for final
+ownership (§3).
+
+**Validation**
+(`tests/unit/execute_tools/test_step05c_c4_writer_channel_identity.py`,
+7 cases):
+
+| Assertion | Defect it alone catches |
+|---|---|
+| **both** call shapes (`storage=None` and derived) reproduce the C0 golden in full — groups, dataset names, dtypes, shapes, every sample value, all 10 attrs | failure class 2: any single moved byte-level fact in the artifact |
+| `array2=None` writes one group, no target attrs | an empty second group appearing for a single-channel task |
+| a contrast identity moves the two group PATHS and **nothing else**, diffed against the TIDMAD inspection | the derivation reaching past identity into dtypes, shapes, values or the frozen attrs — i.e. 05c quietly acquiring instrument metadata |
+| `array2h5.py` holds no `channel0001`/`channel0002` literal | a fallback re-introducing the hardcoded pair, which would make every TIDMAD assertion above pass while the derivation was dead |
+| the attrs, `N` and the suffix rule are still literal in the writer | scope creep — which no behavioural test reports as a failure at all |
+| `default_deliverable_storage() == derive_…(resolve_dataset_profile()).storage` | the default and the production path diverging: the two-authorities defect reappearing as a default |
+| under `bind_dataset_profile(...)` the writer emits the BOUND groups | a hardcoded TIDMAD fallback, which would pass every other test here |
+
+One test-side failure: the contrast test wrote into `tmp_path / "a"` without
+creating it. Fixed in the test.
+
+**Evidence.**
+
+```text
+.venv/bin/python -m pytest tests/unit/execute_tools -q
+  -> 940 passed, 1 skipped in 20.42s
+ruff check execute_tools/ tests/unit/execute_tools/  -> All checks passed
+```
+
+`test_inference_single.py:172`'s `del`-before-`create_abra_file` AST guard
+passes **unedited** despite the signature change, which is C4's explicit
+acceptance criterion — the keyword-only parameter does not move the call's
+position in the loop body.
+
+**Commit** `6d4d0738` — `refactor(step05c): C4 — create_abra_file derives its
+channel-group identity`.
+
+### 15.7 C5 — the persisted-output ENCODING derives from the contract
+
+The only commit that can move a written byte. Migrated exactly the sites
+§2.2 classifies as **persisted-output encode**, and nothing else:
+
+| Site | Before | After |
+|---|---|---|
+| `process_batch` return | `(output_seq - 128)`, `(targetarr - 128)` | `- _persisted_storage(args).value_offset` |
+| output buffers ×2 branches | `np.zeros(..., dtype=np.int8)` | `dtype=_storage_dtype` |
+| writer-boundary casts ×2 sites | `.astype(np.int8)` | `.astype(_storage_dtype)` |
+
+`_storage_dtype` is bound once in `main()` from
+`deliverable_spec.storage.storage_dtype`; the spec itself rides `args` as
+`args._deliverable_spec`, exactly as `_model_io` does at `:328` and for the
+same stated reason — `process_batch` already takes `args`, and a new parameter
+would ripple through every call site. `_persisted_storage(args)` applies the
+same **two-case rule** the other contracts on this boundary use: absent keeps
+the shipped default, present is authoritative. That is what lets
+`test_gpu_milestone_trace`'s direct `process_batch` call — which builds its own
+`SimpleNamespace` — keep passing **unedited**.
+
+**Untouched, and asserted to stay untouched**: `astype(np.int16) + 128` at
+`:216-218` (Input Dataset Contract), and the `argmax` branch keyed on
+`get_output_type` (Model-I/O contract, I15). Both `256` occurrences are
+comments.
+
+> #### Design correction — §2.2 misclassified `_is_complete_trial_output`
+>
+> ```text
+> Previous assumption (§2.2):
+>   "`np.dtype(np.int8)` ×2 | inference_single.py:82-83 | input decode —
+>    dtype check on the SOURCE file's channels | NOT migrated"
+>
+> Audit evidence:
+>   Those two lines live inside `_is_complete_trial_output`, whose only
+>   caller passes `out_name` — the deliverable THIS attempt just wrote
+>   (:680). It also hardcoded "channel0001"/"channel0002" as the groups to
+>   open. It reads the produced artifact, not the source file.
+>
+> Corrected understanding:
+>   It is a persisted-output READER, and it restated BOTH facts the
+>   producer writes: channel identity and storage dtype. The census missed
+>   it entirely.
+>
+> Implementation consequence:
+>   Migrated, with a defaulted `storage` parameter. This is a
+>   SAME-AUTHORITY missed site — same contract, same rollback boundary, no
+>   ownership change, no config, and byte-identical under TIDMAD
+>   (`int8` == `int8`, `channel0001` == `channel0001`) — so the Working
+>   Rules' "incorporate autonomously and record" applies rather than a
+>   material stop.
+>
+> Validation consequence:
+>   The miss mattered. Left inlined, a task whose profile named different
+>   channels would have had `KeyError -> return False` on every completed
+>   output, declaring each one incomplete and silently re-running inference
+>   over data that was already correct. A dedicated test asserts the
+>   contrast identity now validates and that the TIDMAD storage does not
+>   recognise it.
+> ```
+>
+> The neighbouring `--reuse_complete_outputs` help text ("validating both
+> int8 channels") was updated with it, per the doc-sync rule.
+
+**Validation**
+(`tests/unit/execute_tools/test_step05c_c5_persisted_encoding.py`, 14 cases):
+
+| Assertion | Defect it alone catches |
+|---|---|
+| derived offset `== 128` and dtype `== "int8"`, hardcoded | a profile edit silently moving the persisted representation |
+| **full encode→decode round trip is value-exact at the int8 extremes** | the mandatory C5 assertion: an offset off by one wraps `-128` to `127` and moves every downstream score — invisible to any dtype-only check |
+| under a contrast encoding the spec's offset/dtype ARE the profile's | §2.1's rule — two literals that merely agree under TIDMAD, diverging elsewhere |
+| the real `process_batch` returns different values under a contrast offset (`[72,…]` vs `[200,…]`) | `- 128` surviving: the contrast run would return the TIDMAD numbers |
+| `_persisted_storage` defaults when no spec was carried | every legacy direct caller raising |
+| the reuse check validates a contrast artifact and rejects it under TIDMAD storage | the missed-site defect above |
+| a written artifact follows a contrast `storage_dtype` end to end | buffer, cast and file disagreeing — only visible together on the artifact |
+| the input-decode lines are byte-identical in source | migrating an Input-Dataset-Contract fact into a producer contract: the file would still be written correctly, from wrongly decoded input |
+| `argmax` still keyed on `get_output_type` | failure class 3, a Step-03 boundary breach |
+| **no executed `np.int8` attribute remains** (AST) | the semantic form of C5's acceptance, replacing revision 2's vacuous token ban |
+| an unwritable `storage_dtype` (`float32`, `int64`, `""`, garbage) is rejected at construction | a name that does not fail until `np.zeros(dtype=…)` runs — after an attempt's full training and inference cost is spent |
+
+`DeliverableStorage` gained that dtype validator, whose accepted set mirrors
+the widths table `ValueEncoding` already uses so the input-side and
+output-side declarations cannot drift apart about what a storage dtype is.
+
+**Evidence.**
+
+```text
+.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q
+  -> 3362 passed, 3 skipped in 79.93s
+ruff check execute_tools/ tests/unit/  -> All checks passed
+```
+
+**No TIDMAD sample value moved** — the C0 artifact golden and both C4 parity
+cases pass unchanged, which is §13's first stop condition not being hit.
+
+**Commit** `cca435ea` — `refactor(step05c): C5 — the persisted-output encoding
+derives from the contract`.
+
+### 15.8 C6 — the launcher and canonical reconstruction tooling
+
+Migrated per OD-05c-3, with each site's role recorded before editing:
+
+| Site | Role | Now |
+|---|---|---|
+| `run_comparison.py:445` | `_denoised_fn` closure — **reads** the baseline artifact to score it | `naming.name(...)` |
+| `run_comparison.py:1280`, `:1386` | `expected_outputs` — **reconstructs** the baseline path set for reuse | `naming.name(...)` |
+| `finalize_recovered_diagnostic_round.py:88` | canonical reconstruction — rebuilds a round's artifacts | `naming.name(...)` |
+| `pregate_runtime_control_validation.py:214` | pre-Gate validation — **globs** live artifacts | `naming.attempt_glob(...)` |
+| `v18_wave_summary.py:55`, `:121` | workspace audit — glob **and** the index parse | `naming.any_glob()` + `naming.file_index_of(...)` |
+
+**Left literal, deliberately**: `score_tidmad_official_{banded,wavenet}.py`
+and the five diagnostic scans. Their correctness condition is agreement with
+**history**, not with the producer — they read official-paper and diagnostic
+artifacts already on disk, and pointing them at the current contract would be
+actively wrong.
+
+**`v18_wave_summary` lost its private regex.** `_DENOISED_RE =
+r"abra_validation_denoised_.*_(\d{4})\.h5$"` was a second restatement of the
+producer's template *and* the reason the spec exposes `file_index_of`. Its
+failure mode was silent and expensive: under a renamed deliverable the auditor
+would have recognised nothing, found no out-of-scope artifact, and reported a
+clean workspace — passing.
+
+**No CLI surface changed** — `git diff` over `run_comparison.py` touches no
+`add_argument` or `help=` line. Executing `run_comparison.py --help` was
+**blocked by the repository's launch-approval hook**
+(`.claude/hooks/require_launch_approval.sh`), which is the guard working; the
+CLI claim is therefore made from the diff, not from a bypassed run.
+
+**Validation**
+(`tests/unit/scripts/test_step05c_c6_launcher_reconstruction.py`, 15 cases).
+The assertions come in **pairs**, because only the pair states OD-05c-3's
+rule; either half alone reads as an arbitrary inventory:
+
+| Assertion | Defect it alone catches |
+|---|---|
+| all four migrated scripts execute no deliverable template **and** import the naming authority | a renamed deliverable breaking baseline scoring and round recovery with nothing catching it — the launcher simply reports a missing baseline |
+| all seven excluded scripts still carry their literal **and** do not import the spec | a later tidy-up "finishing the migration", which would stop them matching artifacts already on disk |
+| the launcher resolves the exact C0 producer name | launcher and producer agreeing by two f-strings rather than by construction |
+| the auditor flags an out-of-scope artifact and ignores a raw input | the old regex matched any trailing 4-digit index, so `abra_validation_0011.h5` would be reported as a scope violation that never happened |
+| a renamed spec moves launcher and producer **in one test** | two tests each pinning their own site would both pass while the sites drifted apart |
+
+The literal scan uses the **executed-constants** form introduced at C3, with
+docstrings excluded: `v18_wave_summary`'s module docstring legitimately
+documents which files the audit sweeps, and banning the token there would be
+vacuous or force a pointless doc edit.
+
+**Diagnosed failure — the PR3-L2 preflight guard, working.**
+`tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants`
+failed with `no_production_file_modified (['scripts/finalize_recovered_…',
+'scripts/pregate_…', 'scripts/run_comparison.py',
+'scripts/v18_wave_summary.py'])`. That is exactly the behaviour CLAUDE.md
+documents: the check runs `git diff --name-only` and reds when production is
+modified but uncommitted. **The guard was not relaxed** — the checkpoint was
+committed and the suite re-run from a clean tree.
+
+**Commit** `4fd733d6`, then re-verified from a clean tree: `542 passed in
+11.17s`, preflight included.
+
+### 15.9 C7 — Stage-B rung, mutations, Checkpoint C
+
+#### (a) The rung and the structural guard
+
+`tests/unit/execute_tools/test_step05c_c7_stage_b_rung.py`, 15 cases.
+
+**One axis.** A single renamed `DeliverableNaming` is injected in-process and
+every owned seam follows it — the two producer name shapes, the path builder,
+`experiment_glob`, `attempt_glob`, `any_glob` and `file_index_of` — asserted
+in **one** test, because sharing an authority is the property; seven separate
+tests would each pass while the seams drifted apart.
+
+Two negatives keep the rung honest: with the shipped naming the same seams
+still resolve TIDMAD names (so the rung cannot pass because a seam returns the
+renamed value unconditionally or an empty string), and a renamed naming moves
+**no storage fact** (so "one axis" is one axis, not three).
+
+**The structural guard** sweeps all eight owned consumers for an executed
+constant containing the stem, and separately asserts the stem is **declared
+exactly once**, in `deliverable_spec.py`. The declaration file is excluded
+from the consumer sweep for a stated reason: it is the authority, not a
+consumer — and the "declared exactly once" half catches the case the consumer
+sweep cannot, two declarations inside the spec module that a rename would move
+apart.
+
+The rung's scope is asserted, not merely described: `denoising_score_single.py`
+and both `score_tidmad_official_*` scripts **must still contain** the literal.
+A "no `abra_*` anywhere" claim is unsatisfiable at Step 05 and would be a
+test-design error.
+
+**05c does NOT claim the renamed template crosses the real subprocess** — the
+module says so in its own docstring. Under Option A it cannot: a template is a
+frozen compatibility literal, not a derivable fact.
+
+#### (b) Mutation evidence — one per independently failing semantic family
+
+Run from a clean tree with the hygiene the standing rule requires: each
+target's occurrence count asserted **== 1 before** the edit, every
+`__pycache__` cleared before every run, each file restored with `git checkout
+--` from clean source, and the baseline re-verified green afterwards.
+
+| # | Semantic family | Mutation | Selector | Result |
+|---|---|---|---|---|
+| 1 | producer naming | `naming.name(...)` → `naming.unqualified_name(...)` at the sample_set producer | C3 | **RED** |
+| 2 | reader / path resolution | `_build_denoised_filename` ignores its injected `naming` | C2 | **RED** |
+| 3 | cleanup glob | watchdog `attempt_glob` → `experiment_glob` | C2 | **RED** |
+| 4 | writer channel / layout | input group written with `target_channel_group` | C4 | **RED** |
+| 5 | persisted value encoding | derived `value_offset` `+ 1` | C5 | **RED** |
+| 6 | reconstruction / launcher path | `run_comparison` re-inlines its f-string | C6 | **RED** |
+| 7 | process-boundary reconstruction authority | child derives from `resolve_dataset_profile()` instead of the transported profile | C3 | **RED** |
+
+**7 families, 7 killed, 0 survivors.** Baseline green before, and green again
+after every restore. Family 7 is the transport-specific mutation §C7 asks for
+under Option A: it drops the reconstruction's dependence on what actually
+crossed, which is the one way the frozen mechanism can silently stop being the
+mechanism.
+
+The exact count is deliberately not frozen; finer per-site mutations were not
+added because they would supply no unique evidence — each of the seven already
+names a distinct way the contract can break.
+
+#### (c) Checkpoint C — the real subprocess boundary
+
+`tests/integration/execute_tools/test_step05c_checkpoint_c_deliverable_boundary.py`,
+4 cases, **4 passed in 18.29s**, first run, CPU only.
+
+It launches `train_engine_sandbox.py` and then `inference_single.py` with
+`subprocess.run` and inspects the file the child actually wrote — no stub, no
+monkeypatch, no in-process call. Fixture geometry and the `PYTHONPATH` pin are
+reused from `test_step03_checkpoint_c_subprocess.py`, because §3.2a requires
+the EXISTING transport and reusing the proven harness demonstrates that rather
+than asserting it. `psd_segment_length` is 4,096 instead of 10,000,000 and the
+model is a 1-block WaveNet, so the production path is identical and the
+fixture is kilobytes.
+
+The profile keeps TIDMAD's **channel identity and encoding** and shrinks only
+the topology — which is what makes the reconstructed spec the **shipped
+default** one, as §3.2a requires.
+
+| Assertion | What it proves |
+|---|---|
+| the written filename equals `default_deliverable_naming().name(...)` for the argv identifiers | the transport claim itself: the child received no spec and reconstructed the same name the parent resolves |
+| §4.1 inspection — group paths, dataset names, `int8` dtypes, shapes, all 5 attrs per channel | the real writer wrote through the contract |
+| the **injected channel's every sample value** equals the fixture byte for byte | the offset round trip survived the boundary — a drift of one wraps `-128` to `127` here. The denoised channel is model output and is deliberately NOT pinned: that would pin an untrained network's weights, not the contract |
+| both cleanup shapes match exactly the real artifact, and the raw INPUT files survive both | failure class 1 stated positively, against a file a real spawn produced. Cleanup that reclaimed the dataset would be catastrophic and silent |
+| the artifact's shape is `(8192,)` | the child consumed the **transported** profile, not an ambient resolution — the shipped TIDMAD profile would have produced 10,000,000-sample segments. Same file, different question |
+
+The last assertion is the one that makes Checkpoint C more than a smoke test:
+because the fixture deliberately keeps TIDMAD's channel names, the group names
+alone could not distinguish reconstruction-from-transport from
+ambient-resolution. The topology can.
+
+**Checkpoint C is not a cheaper Gate 2.** It proves the seam is real under a
+deterministic candidate; Gate 2 (C8) proves the full chain still trains,
+infers, **scores** and cleans under actual runtime, data and hardware.
+
+**Commit** `74a9c352` — `test(step05c): C7 — Stage-B rung, semantic-family
+mutations, Checkpoint C`.
+
+### 15.10 C8 — Gate-2 readiness packet (written BEFORE launch)
+
+`docs/gates/gate_testing_standard.md` was re-read at implementation time
+(400 lines, canonical 2026-06-19 + the 2026-08-13 LLM-config decision), not
+recalled from this document's summary.
+
+**Authorization.** The standard records *"Needs user approval: yes"* for
+Gate 2. That approval is the **standing one in this PR's filled
+Implementation Working Rules**: Gate 2 is REQUIRED, exactly one canonical
+bounded attempt is planned, real LLM/training/GPU are authorized as part of
+it, and the kickoff states *"Do not stop merely to ask for launch
+permission."* The repository's launch hook
+(`.claude/hooks/require_launch_approval.sh`) is satisfied the way the hook
+itself documents — `SIDERIUS_ALLOW_LAUNCH=1` on that one command, which
+**records** the approval rather than bypassing the guard.
+
+**The one property this Gate proves.** That a real attempt trains, infers,
+**writes a real deliverable through the migrated producer**, has it **read
+by the untouched Step-06 scorer**, and has it **removed by the migrated
+cleanup** — the three failure classes (1, 2, 4) that survive deterministic
+testing because they only appear when a real spawn writes a real artifact and
+cleanup runs against it.
+
+**Exact PASS artifact**: a chain that exits 0 with a finite non-null
+`denoising_score`, a `gate_action` recorded for the round, and — the
+05c-specific evidence the standard's criterion 9 asks for — an
+`abra_validation_denoised_*` artifact whose name matches the spec-resolved
+name, observed **on disk or in the run log**, and absent from the workspace
+after `--cleanup_denoised`.
+
+**Failure-classification scheme, declared in advance:**
+
+| Class | Meaning | Response |
+|---|---|---|
+| **A — in-scope defect** | naming, writer, encoding, cleanup or reconstruction is wrong | repair, record, one minimum re-run |
+| **B — harness/infra** | watchdog deadline fired, GPU contention, API transient | one bounded rerun only, no SHA change |
+| **C — planner/proposer judgment** | candidate rejected, no valid plan | not a 05c failure; record and re-run once |
+| **D — scientific quality** | collapsed or worthless model | **NOT a failure.** The standard is explicit that a one-epoch, 1 %-scope, sample-capped model may be scientifically worthless while the functional Gate correctly passes |
+
+**Command** — the standard's canonical bounded shape, with **one documented
+deviation**:
+
+```bash
+SIDERIUS_ALLOW_LAUNCH=1 bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/gate2_step05c_<ts> \
+    --run_name gate2_step05c \
+    --num_iterations 1 --max_rounds 1 --max_proposal_attempts 3 --max_epochs 1 \
+    --data_scope 4-9 --health_gate_files 4,5,6,7,8,9 \
+    --validation_max_portion 0.01 --validation_max_train_samples 2000 \
+    --validation_max_phase_seconds 900 --runtime_watchdog \
+    --no-force_formal_round \
+    --trial_vram_budget_gb 20 --formal_vram_budget_gb 20 \
+    --llm_config llm_configs/openai_tiered_pro.json
+```
+
+> **Deviation: VRAM budgets 20 GB, not the canonical 24 GB.** This host's
+> RTX 5090 has 32,607 MiB total with **8,789 MiB already held by another
+> user's process**, leaving 23,299 MiB free. A 24 GB budget would price an
+> attempt against memory that is not available. 20 GB leaves headroom while
+> staying well above what a `--validation_max_train_samples 2000`,
+> one-epoch attempt needs. Recorded because the budget is an *admission*
+> input: set too low it would SKIP the round, and a skipped round proves
+> nothing — that outcome is class A, not a pass.
+
+No `--seed_paths`: cold-start, per the DS8 operator rule. `--data_scope 4-9`
+is paired with the exact `--health_gate_files 4,5,6,7,8,9`, as the DS8
+partial-scope rule requires. `--data_dir` is deliberately omitted so the
+launcher resolves it from `tidmad_data_config.yaml`. `--cleanup_denoised` is
+on the resolved argv by default — which is what gives the tuner's cleanup
+glob (site 3) its behavioural evidence.
+
+**Temporal depth**: 1 iteration × 1 round. 05c is an "ordinary execution /
+config / contract change" in the standard's table; it changes no multi-round
+policy, no cross-iteration behaviour and no trial→formal promotion semantics.
+
+**Pre-launch state, all verified at the exact head `74a9c352`:**
+
+```text
+pytest tests/unit/{execute_tools,core,scripts} \
+       tests/unit/agent/tune_ml_hyperparam_agent -q
+  -> 5003 passed, 3 skipped in 377.19s
+ruff check .          -> All checks passed
+ruff format --check . -> 892 files already formatted
+git status --porcelain -> empty (clean tree)
+HEAD                   -> 74a9c352d67ccc782893a3804d6c552110fff324
+pyright                -> CANNOT RUN locally (node v10.19.0); no local claim
+```
+
+**Dry-run first.** `--dry-run` walked the chain and printed the resolved
+`run_one_iteration.py` argv with no side effects, confirming the flag shape,
+the 20 GB budgets, the scope/health-gate pairing and the presence of
+`--cleanup_denoised` before any paid work.
+
+**Projected cost/time**: ~10-20 min wall, ~$1-2, per the standard. Cumulative
+real validation for this PR so far is Checkpoint C's 18.29 s of CPU
+subprocesses, so the ~1 hour authorized envelope is not at risk.
+
+**Commit** `cb9ba336` — `docs(step05c): C8 — Gate-2 readiness packet, written
+before launch`.
+
+### 15.11 C8 — Gate 2 RESULT: **PASS**
+
+One attempt, launched at the exact head `cb9ba336`.
+
+| | |
+|---|---|
+| Workspace | `/tmp/gate2_step05c_1786761870` |
+| Log | `<scratchpad>/gate2.log` (1,019+ lines) |
+| Started / finished | 2026-08-14 19:44:31 → 19:54:17 |
+| Wall time | **9 m 46 s** (projection was 10-20 min) |
+| Tokens | 249,574 across 10 calls (proposer 169,444 · tuner 56,683 · implementor 20,663 · validator 2,784) |
+| Chain exit | **0** — read from the runner's own exit status, recorded next to the workspace path |
+| Candidate | `compact_fullspectrum_dilated_gated_tcn_hf_v1` — real proposal, implemented, validated, registered |
+
+**Verdict is read from the artifacts and the log, never from the exit code.**
+
+#### The standard's PASS criteria, one by one
+
+| # | Criterion | Evidence |
+|---|---|---|
+| 1 | chain exits 0 | `CHAIN_EXIT=0` |
+| 2 | real candidate generated, validated, registered | `compact_fullspectrum_dilated_gated_tcn_hf_v1`; it went on to train |
+| 3 | **real training executed** | attempt 002 `timing.train_time_s = 28.1` |
+| 4 | real inference executed | `timing.inference_time_s = 92.1` |
+| 5 | real scoring, **finite non-null** result | `denoising_score = -1.441449944108886`, `file_vector` length 20 |
+| 6 | `gate_action` recorded for the round | `invalidate_round` on the round's final record |
+| 7 | a `None` score only with a `gate_action` | attempt 001 scored `None` **and never reached scoring** — the watchdog killed training, and the record carries an explicit `failure_reason`. It is an errored attempt, not a silently unscored round; the round's final record (002) has both a finite score and a `gate_action` |
+| 8 | no phantom `5.5762667` accepted | verified programmatically over every record: none. The string appears only inside the HealthGate's own `failure_reason`, which *names* it as the artifact it just refused — the gate working |
+| 9 | **the migrated boundary was exercised** | below |
+
+#### Criterion 9 — the 05c-specific evidence
+
+The whole point of requiring Gate 2 for this PR:
+
+```text
+PRODUCED   6 deliverables, files 0004-0009 (= --data_scope 4-9), each written
+           by create_abra_file through the migrated producer:
+             "HDF5 file '…/abra_validation_denoised_compact_fullspectrum_
+              dilated_gated_tcn_hf_v1_iter_001_…_002_0004.h5' created
+              successfully."   (gate2.log:441-462)
+
+NAMED      default_deliverable_naming().name(model_type=…, run_name="iter_001",
+           exp_id=…_002, file_index=4)  ==  the observed filename   -> True
+
+SCORED     the UNTOUCHED Step-06 scorer read all six; file_vector length 20
+           with real per-file entries for 4-9 and a finite scalar
+
+CLEANED    "Cleaned up 6 denoised files (0.2 GB freed)"  (gate2.log:1019)
+           — the tuner's --cleanup_denoised glob, now resolved through
+           naming.experiment_glob(exp_id=…). Verified against the real name:
+           the glob matches it, and file_index_of() returns 4.
+
+FINAL STATE  find <ws> -name "abra_validation_denoised_*"  ->  0 files
+```
+
+That closes the one gap C2 recorded honestly: the tuner's cleanup site lives
+inside `run()`'s `finally` and had **structural** evidence only. It now has
+behavioural evidence, from a real run, against artifacts a real producer
+wrote. Producer, scorer and cleanup agreed on six real files.
+
+#### The two non-PASS observations, classified against the pre-declared scheme
+
+**Attempt 001 — class B (harness/runtime).** `watchdog killed training after
+69.064s (deadline 68.469s, source=verified_components)`. This is the RT4
+*adaptive* deadline derived from measured components, not the
+`--validation_max_phase_seconds 900` fuse — 900 s was never approached. The
+round recovered on attempt 002 **within the same run**, so no rerun was
+needed and the single-attempt budget stands.
+
+**Attempt 002 — class D (scientific quality), explicitly NOT a Gate failure.**
+The HealthGate invalidated the round: outputs collapsed to 5-6 unique int8
+values per file (threshold > 25) with std ≈ 0.90 mV (threshold ≥ 1.0). The
+standard is unambiguous — *"A model may be collapsed or scientifically
+worthless while the functional Gate correctly proves the real path
+executed"*, and `denoising_score > baseline` and *"whether the model learned
+to denoise"* are listed as explicitly NOT criteria. 05c changes no scoring,
+metric or HealthGate semantics, so class D cannot be its failure.
+
+This outcome is in fact **confirming evidence**: the collapse detector
+reported the exact phantom it exists to catch (*"score would be 5.5762667 via
+2^17 FP ratio"*) and refused it — which required reading six real
+deliverables that the migrated producer had named and written.
+
+**Deviation check.** The 20 GB VRAM budget did **not** cause a skipped round:
+the attempt was admitted, trained, inferred and scored. The readiness packet
+named a skipped round as class A; it did not occur.
+
+**Cumulative real validation for this PR: 9 m 46 s (Gate 2) + 18.29 s
+(Checkpoint C) ≈ 10 minutes**, comfortably inside the authorized ~1 hour.
+**One Gate attempt, as planned. No retry consumed.**
+
+**Commit** `51c36162` — `docs(step05c): C8 — Gate 2 PASS, plus the
+node/coupling doc sync`.
+
+### 15.12 C9 — terminal validation, docs, PR, CI
+
+**Terminal validation, from a CLEAN tree at `51c36162`:**
+
+```text
+pytest tests/unit/{execute_tools,core,scripts,guardrails} \
+       tests/unit/agent/tune_ml_hyperparam_agent -q
+  -> 5099 passed, 3 skipped in 372.94s
+
+pytest tests/integration/execute_tools/
+       test_step05c_checkpoint_c_deliverable_boundary.py -q
+  -> 4 passed in 16.13s        (real train + inference subprocesses)
+
+ruff check .          -> All checks passed
+ruff format --check . -> 892 files already formatted
+```
+
+No local full-suite run: the Working Rules make exact-head CI the broad
+regression authority.
+
+**Docs synchronized as the last pre-merge step**, quoted against merged
+source: the tuner node doc (`cleanup_denoised` row + the denoised-HDF5
+artifact note) and `docs/design/tidmad_coupling_ledger.md`, whose
+"Denoised-output naming … needs its own contract decision … Flagged, not
+scheduled" row this PR is the answer to. Roadmap §15.1 / §15.1a and the
+generic-framework README are **deliberately not touched** — per the 05a/05b
+precedent those are synchronized by the post-merge finalizer, not by the PR.
+
+**PR #212** opened against master.
+
+#### The CI finding — diagnosed, not worked around
+
+The first exact-head run (**31860798765**, head `51c36162`) returned
+**`cancelled`**, not `failed`. Read from the log rather than the conclusion:
+the unit step reached **98 % with every case passing** and was then killed by
+`timeout-minutes: 15`. Lint, format and — the check that could not run
+locally — **strict pyright had already passed**.
+
+The cause is **not** this PR:
+
+| Evidence | Value |
+|---|---|
+| last SUCCESSFUL master run `31857482569` | install 47 s · ruff 1 s · **pyright 2 m 17 s** · **pytest 10 m 28 s** = **13 m 38 s** |
+| headroom against the 15-minute cap | **1 m 22 s** |
+| master runs `31855504278`, `31855238181` (both `push` on master) | already **CANCELLED** at the same cap, before this branch existed |
+| this PR's 88 added unit tests | ~0.4 s of assertion time (`-k step05c`, 6.21 s including full-suite collection) |
+
+Master was sitting on about a minute of margin; 05c consumed the last of it.
+Raising the ceiling to 25 minutes is the correct fix rather than trimming
+tests — trimming would leave master timing out on the next PR that adds a few
+dozen cases, and the symptom is actively misleading: a `cancelled` job that
+looks like a failure while carrying no failing test.
+
+It is a **resource ceiling, not a correctness guard**. Nothing about what CI
+accepts as passing changed, and no test, threshold or check was weakened.
+Landed as its **own commit** (`3e0ef70c`) so it can be reviewed or reverted
+independently of the 05c implementation, and **flagged to the operator** in
+that commit message and in the final report as a repository-wide CI change
+made inside this PR.
+
+**Strict pyright is green** on this tree — recorded here because §15.3
+deferred the type claim to CI, and CI has now supplied it.
 
 ## 16. Remaining operator decisions
 

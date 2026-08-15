@@ -18,6 +18,11 @@ from execute_tools.dataset_config import (
     load_dataset_profile,
     resolve_dataset_profile,
 )
+from execute_tools.deliverable_spec import (
+    DeliverableStorage,
+    default_deliverable_storage,
+    derive_tidmad_deliverable_spec,
+)
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     apply_contract_cardinality,
@@ -48,6 +53,19 @@ def _h5_dataset(f: h5py.File, *path: str) -> h5py.Dataset:
     return cast(h5py.Dataset, node)
 
 
+def _persisted_storage(args: Any) -> DeliverableStorage:
+    """The persisted-output representation in effect for this process.
+
+    Step 05c. Carried on ``args`` for the same reason ``_model_io`` is
+    (``:328``): ``process_batch`` already takes ``args``, and adding a
+    parameter would ripple through every call site. Same two-case rule as the
+    other contracts on this boundary — absent keeps the shipped default, which
+    is what a caller predating 05c gets; present is authoritative.
+    """
+    spec = getattr(args, "_deliverable_spec", None)
+    return spec.storage if spec is not None else default_deliverable_storage()
+
+
 def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
     """Raise ``error_training`` if the trainer-side ``_OK_<exp_id>`` sentinel
     is missing. The orchestrator pattern-matches the ``error_training:``
@@ -63,24 +81,37 @@ def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
         )
 
 
-def _is_complete_trial_output(path: str, expected_samples: int) -> bool:
+def _is_complete_trial_output(
+    path: str, expected_samples: int, storage: DeliverableStorage | None = None
+) -> bool:
     """Return whether an attempt-scoped trial HDF5 is safe to reuse.
 
     A CUDA/host failure can leave earlier files from the same inference
     subprocess fully flushed while later files are absent or incomplete.
-    Reuse is deliberately opt-in and requires both ABRA channels to be
-    readable int8 vectors of the exact expected length.
+    Reuse is deliberately opt-in and requires both channels to be readable
+    vectors of the exact expected length in the persisted storage dtype.
+
+    Step 05c — this is a READER of the deliverable and it restated both facts
+    the producer writes: the two channel-group names and the storage dtype.
+    Left inlined, a task whose profile named different channels would have had
+    every output declared incomplete and silently re-inferred. ``storage``
+    defaults to the shipped representation, so a caller predating 05c is
+    unaffected.
     """
+    resolved = storage if storage is not None else default_deliverable_storage()
     try:
         with h5py.File(path, "r") as handle:
-            channel1 = _h5_dataset(handle, "timeseries", "channel0001", "timeseries")
-            channel2 = _h5_dataset(handle, "timeseries", "channel0002", "timeseries")
+            channel1 = _h5_dataset(handle, "timeseries", resolved.input_channel_group, "timeseries")
+            channel2 = _h5_dataset(
+                handle, "timeseries", resolved.target_channel_group, "timeseries"
+            )
             expected_shape = (expected_samples,)
+            expected_dtype = np.dtype(resolved.storage_dtype)
             if (
                 channel1.shape != expected_shape
                 or channel2.shape != expected_shape
-                or channel1.dtype != np.dtype(np.int8)
-                or channel2.dtype != np.dtype(np.int8)
+                or channel1.dtype != expected_dtype
+                or channel2.dtype != expected_dtype
             ):
                 return False
             # Force reads at both allocation boundaries. Opening metadata alone
@@ -160,7 +191,8 @@ def get_parser():
         action="store_true",
         help=(
             "In trial/sample-set mode, reuse exact attempt-named HDF5 outputs "
-            "only after validating both int8 channels and expected length."
+            "only after validating both channels against the deliverable "
+            "contract's storage dtype and the expected length."
         ),
     )
     parser.add_argument(
@@ -314,8 +346,16 @@ def process_batch(
                 output=output,
             )
 
-    # Return flattened results for H5 assembly
-    return index, (output_seq - 128).flatten(), (targetarr - 128).flatten()
+    # Return flattened results for H5 assembly, back in the PERSISTED
+    # representation. Step 05c: the offset comes from the DeliverableSpec, not
+    # from a literal. That the same `128` appears on the input-decode side at
+    # :217-218 is a coincidence of one task made safe — the spec DERIVES its
+    # offset from `DatasetProfile.encoding`, so the two now agree by
+    # derivation rather than by two literals that happen to match. The input
+    # side above is deliberately NOT migrated: it is an Input Dataset Contract
+    # fact (§2.2).
+    value_offset = _persisted_storage(args).value_offset
+    return index, (output_seq - value_offset).flatten(), (targetarr - value_offset).flatten()
 
 
 def main():
@@ -340,6 +380,23 @@ def main():
     profile_dataset = dataset_profile.dataset
     profile_channels = dataset_profile.channels
     psd_segment_length = profile_dataset.psd_segment_length
+
+    # Step 05c — the child's side of the Deliverable Contract. The spec is NOT
+    # transported: it is RECONSTRUCTED here from the profile that already
+    # crossed via `--dataset_profile_json`, through the same derivation the
+    # parent calls (§3.2a, Option A). One function, two callers, no duplicated
+    # literal and no third IPC mechanism. Note this consumes `dataset_profile`
+    # as resolved above — it adds no second `resolve_dataset_profile()` call.
+    deliverable_spec = derive_tidmad_deliverable_spec(dataset_profile)
+    # Carried on `args` exactly as `_model_io` is, so `process_batch` can read
+    # the persisted-output offset without a new parameter on every call site.
+    args._deliverable_spec = deliverable_spec
+    # The persisted storage dtype, bound once. Every output buffer allocation
+    # and every writer-boundary cast in this module reads THIS name — not
+    # `np.int8` — so the deliverable's storage representation has exactly one
+    # source. The INPUT-side dtype work at :82-101 and :216-218 is a different
+    # contract and is deliberately untouched (§2.2).
+    _storage_dtype = deliverable_spec.storage.storage_dtype
 
     # V20 PR C2, validation only. ``None`` — and therefore completely
     # inert — unless SIDERIUS_C2_INFERENCE_MILESTONE_TRACE names a channel,
@@ -617,15 +674,20 @@ def main():
             file_index = int(file_index_str)
             out_name = os.path.join(
                 out_dir,
-                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{file_index:04d}.h5",
+                deliverable_spec.naming.name(
+                    model_type=args.denoising_model,
+                    run_name=args.run_name,
+                    exp_id=args.exp_id,
+                    file_index=file_index,
+                ),
             )
             expected_samples = len(psd_segment_indices) * psd_segment_length
             if args.reuse_complete_outputs and _is_complete_trial_output(
-                out_name, expected_samples
+                out_name, expected_samples, deliverable_spec.storage
             ):
                 print(
                     f"Reusing verified trial inference output: {out_name} "
-                    f"({expected_samples} int8 samples/channel)"
+                    f"({expected_samples} {_storage_dtype} samples/channel)"
                 )
                 per_file_timings_ms.append(
                     {
@@ -687,8 +749,8 @@ def main():
             target_loader = all_target.reshape(-1, 1, input_size)
 
             dim1 = train_loader.shape[0]
-            denoised = np.zeros((dim1, input_size), dtype=np.int8)
-            injected = np.zeros((dim1, input_size), dtype=np.int8)
+            denoised = np.zeros((dim1, input_size), dtype=_storage_dtype)
+            injected = np.zeros((dim1, input_size), dtype=_storage_dtype)
             bs = args.inference_batch_size
             # F1: input-read window = file open → loop start (h5 slice,
             # concat, reshape, buffer alloc), priced per PSD segment.
@@ -761,9 +823,10 @@ def main():
             t_write = time.perf_counter()
             create_abra_file(
                 out_name,
-                denoised.flatten().astype(np.int8),
-                injected.flatten().astype(np.int8),
+                denoised.flatten().astype(_storage_dtype),
+                injected.flatten().astype(_storage_dtype),
                 indexed=False,
+                storage=deliverable_spec.storage,
             )
             file_write_seconds = time.perf_counter() - t_write
             n_psd_this_file = max(len(psd_segment_indices), 1)
@@ -863,8 +926,8 @@ def main():
             target_loader = alltarget.reshape(-1, 1, input_size)
 
             dim1 = train_loader.shape[0]
-            denoised = np.zeros((dim1, input_size), dtype=np.int8)
-            injected = np.zeros((dim1, input_size), dtype=np.int8)
+            denoised = np.zeros((dim1, input_size), dtype=_storage_dtype)
+            injected = np.zeros((dim1, input_size), dtype=_storage_dtype)
             bs = args.inference_batch_size
 
             for i in tqdm(range(0, dim1, bs), desc=f"Inference ({args.mode})"):
@@ -890,16 +953,27 @@ def main():
         gc.collect()
 
         # 4. Save Output
-        idx_str = str(args.file_index).zfill(4)
         out_dir = args.output_dir if args.output_dir else args.data_dir
         if args.mode == "fix":
+            # The legacy fix-mode name predates run/exp scoping and omits both.
+            # A different NAME SHAPE, not a different directory — preserved
+            # rather than unified, because files carrying it exist on disk.
             out_name = os.path.join(
-                out_dir, f"abra_validation_denoised_{args.denoising_model}_{idx_str}.h5"
+                out_dir,
+                deliverable_spec.naming.unqualified_name(
+                    model_type=args.denoising_model,
+                    file_index=args.file_index,
+                ),
             )
         else:
             out_name = os.path.join(
                 out_dir,
-                f"abra_validation_denoised_{args.denoising_model}_{args.run_name}_{args.exp_id}_{idx_str}.h5",
+                deliverable_spec.naming.name(
+                    model_type=args.denoising_model,
+                    run_name=args.run_name,
+                    exp_id=args.exp_id,
+                    file_index=args.file_index,
+                ),
             )
 
         # Clean up old files before writing new one
@@ -908,9 +982,10 @@ def main():
 
         create_abra_file(
             out_name,
-            denoised.flatten().astype(np.int8),
-            injected.flatten().astype(np.int8),
+            denoised.flatten().astype(_storage_dtype),
+            injected.flatten().astype(_storage_dtype),
             indexed=False,
+            storage=deliverable_spec.storage,
         )
         print(f"Inference complete. Saved to: {out_name}")
 
