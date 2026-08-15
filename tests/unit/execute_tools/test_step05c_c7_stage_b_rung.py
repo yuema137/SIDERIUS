@@ -59,10 +59,13 @@ OWNED_PRODUCTION_FILES = (
     "scripts/v18_wave_summary.py",
 )
 
-# Outside the rung by design: Step 06 owns the scorer, and the historical
-# readers must keep matching artifacts already on disk.
+# Outside the rung by design: the historical readers must keep matching
+# artifacts already on disk. ``execute_tools/denoising_score_single.py`` was
+# listed here "until Step 06" — Step 06 C3 migrated its two literals through
+# ``deliverable_spec.naming`` (guarded by
+# ``tests/unit/execute_tools/test_step06_c3_subprocess_route.py``), so it left
+# this list; the historical scripts stay.
 OUT_OF_RUNG_FILES = (
-    "execute_tools/denoising_score_single.py",
     "scripts/score_tidmad_official_banded.py",
     "scripts/score_tidmad_official_wavenet.py",
 )

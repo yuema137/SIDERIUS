@@ -11,6 +11,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -33,6 +34,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
+from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
@@ -616,6 +618,85 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="Length-20 score vector. None for files not included in the run.",
     )
+
+    # --- Step 06: the metric interface's record-facing payload (ADDITIVE) ---
+    # ``denoising_score`` / ``file_vector`` / ``score_table`` keep their names and
+    # semantics (renaming is D1, not authorized). These two fields sit BESIDE
+    # them so identity, direction and value are machine-readable on every
+    # record for Steps 07a/09; every record written before Step 06 validates
+    # unchanged (optional, default None).
+    metric_result: MetricResult | None = Field(
+        default=None,
+        description=(
+            "Step 06 — the evaluation metric's own result for this attempt, produced "
+            "by the metric handle on the live scoring route: ``metric_id``, ``direction``, "
+            "the metric's scalar (``denoising_score`` under TIDMAD; the storage boundary "
+            "writes a non-finite sentinel as null on both), optional per-sample "
+            "evidence (``file_vector`` under TIDMAD) and the reference kinds consumed. "
+            "None on records written before Step 06 and on attempts that never "
+            "reached scoring. On a ``failed_mode_collapse`` record this is the metric's "
+            "RAW evaluation while ``denoising_score`` carries the HealthGate policy's "
+            "penalty (``_apply_degeneracy_reaction``) — the two agree by construction "
+            "on ``success`` records and are validated to."
+        ),
+    )
+    metric_refusal: NotScoreableResult | None = Field(
+        default=None,
+        description=(
+            "Step 06 — the structured not-scoreable result when the produced "
+            "deliverable failed the metric's scoreability contract BEFORE any scorer "
+            "arithmetic ran (``status='error_scoring'``, ``failure_type='not_scoreable'``): "
+            "which contract, which requirement, which input identity. None otherwise. "
+            "Never set together with ``metric_result``."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _metric_payload_agrees_with_the_score_fields(self) -> ExperimentRecord:
+        """One value, two names — they must agree (design §19 C4).
+
+        On a ``success`` record ``metric_result.scalar`` IS ``denoising_score``
+        and ``metric_result.per_sample`` IS ``file_vector``; a record whose
+        additive payload disagrees with the frozen fields is rejected. Non-finite
+        values compare as equal to their storage-boundary image (``None``) and to
+        each other, because the same record is validated in memory (``-inf``)
+        and again after reload (``null``). Not applied on ``failed_mode_collapse``:
+        there ``denoising_score`` is the gate policy's penalty by design.
+        ``metric_result`` and ``metric_refusal`` are mutually exclusive.
+        """
+        if self.metric_result is not None and self.metric_refusal is not None:
+            raise ValueError(
+                "metric_result and metric_refusal are mutually exclusive: an attempt is "
+                "either scored or refused, never both."
+            )
+        if self.metric_result is None or self.status != "success":
+            return self
+        if not _same_score(self.metric_result.scalar, self.denoising_score):
+            raise ValueError(
+                f"metric_result.scalar={self.metric_result.scalar!r} disagrees with "
+                f"denoising_score={self.denoising_score!r} on a success record; the "
+                f"additive payload must carry the same value the frozen field carries."
+            )
+        if self.metric_result.per_sample is not None and self.file_vector is not None:
+            same_shape = len(self.metric_result.per_sample) == len(self.file_vector)
+            if not same_shape or not all(
+                _same_score(a, b)
+                for a, b in zip(self.metric_result.per_sample, self.file_vector, strict=True)
+            ):
+                raise ValueError(
+                    "metric_result.per_sample disagrees with file_vector on a success "
+                    "record; the additive payload must carry the same values."
+                )
+        return self
+
+
+def _same_score(a: float | None, b: float | None) -> bool:
+    """Equality that treats non-finite values and their storage image alike."""
+    a_finite = a is not None and math.isfinite(a)
+    b_finite = b is not None and math.isfinite(b)
+    if a_finite and b_finite:
+        return a == b
+    return not a_finite and not b_finite
 
 
 # ---------------------------------------------------------------------------

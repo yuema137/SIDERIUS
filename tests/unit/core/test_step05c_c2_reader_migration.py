@@ -232,7 +232,10 @@ def _tuner_source() -> str:
         ),
         (
             "def _denoised_fn(",
-            "file_vector, final_scalar = sandbox.score_vector",
+            # Step 06 C2 moved the live scoring call from `sandbox.score_vector`
+            # to `sandbox.evaluate_metric(run_metric, …)`; the closure this
+            # anchor brackets is unchanged and still the scorer's.
+            "metric_result = sandbox.evaluate_metric(",
             "naming=naming",
         ),
     ],
@@ -281,11 +284,17 @@ MIGRATED_CONSUMERS = (
     "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
 )
 
+# Sites migrated by the OWNER the census deferred to. Step 06 (C3) took the
+# scorer CLI's two deliverable-name literals — which 05c's census listed as
+# "Step 06 — NOT touched" — through the naming authority. Asserted as a
+# consumer so the seam cannot silently die; the frozen arithmetic module
+# below stays forbidden.
+STEP06_CONSUMERS = ("execute_tools/denoising_score_single.py",)
+
 # Sites the census deliberately EXCLUDES. This half never grows: it is the
-# Step-06 boundary and the historical-artifact readers, and it is what turns a
-# progress check into a scope guard.
+# frozen scorer arithmetic and the historical-artifact readers, and it is what
+# turns a progress check into a scope guard.
 FORBIDDEN_CONSUMERS = (
-    "execute_tools/denoising_score_single.py",
     "execute_tools/scoring_utils.py",
     "scripts/score_tidmad_official_banded.py",
     "scripts/score_tidmad_official_wavenet.py",
@@ -312,7 +321,7 @@ def test_only_the_censused_sites_consume_the_deliverable_spec():
     """
     repo_root = Path(__file__).resolve().parents[3]
 
-    for relative in MIGRATED_CONSUMERS:
+    for relative in MIGRATED_CONSUMERS + STEP06_CONSUMERS:
         assert "deliverable_spec" in (repo_root / relative).read_text(), (
             f"{relative} no longer consumes the deliverable spec — the seam is dead"
         )

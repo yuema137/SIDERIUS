@@ -1,7 +1,7 @@
 {
   "_captured_at": {
-    "commit": "e9c9e91e3d53181b5e36429174438e4eca06d2a1",
-    "note": "captured at clean tree (Step-00 0C capture); design \u00a717 rule 4"
+    "commit": "80a96eef410d5dd4a9601fbc7228e87069f28f20",
+    "note": "REGENERATED at Step 06 C4 from the C3 head plus the C4 working tree, in the C4 commit (design \u00a717 rule 3): ExperimentRecord gained the ADDITIVE metric_result / metric_refusal fields; every pre-existing key and value is unchanged. Ledger: docs/design/generic_framework_upgrade/step_06_metric_interface.md \u00a720.6"
   },
   "record_type": "experiment",
   "exp_id": "<present>",
@@ -100,5 +100,7 @@
   "override_file_order": null,
   "resolved_order_strategy": null,
   "resolved_file_order": null,
-  "ordering_resolution_source": null
+  "ordering_resolution_source": null,
+  "metric_result": null,
+  "metric_refusal": null
 }

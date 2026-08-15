@@ -52,6 +52,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _should_bypass_formal_time_budget,
     _should_skip_formal,
 )
+from tests.helpers.scoring_stubs import stub_scoring
 
 BLOCKING_IDS = (
     "output_diversity_blocking",
@@ -724,7 +725,7 @@ def _run_one_formal_round(tmp_path, *, seeded_trial: dict, gates_enabled: bool) 
             json.dumps({"s_max": 1.0, "anchors": {str(i): [1.0] for i in range(20)}})
         )
         mock_sandbox.dirs = {"configs": configs_dir, "data": str(data_dir)}
-        mock_sandbox.score_vector.return_value = ([1.75] * 20, 1.75)
+        stub_scoring(mock_sandbox, [1.75] * 20, 1.75)
 
         HyperparamTuningAgent = __import__(
             "nodes.ml_hyperparameter_tune_agent", fromlist=["HyperparamTuningAgent"]

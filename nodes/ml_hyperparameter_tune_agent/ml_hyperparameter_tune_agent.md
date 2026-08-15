@@ -226,6 +226,8 @@ executes, without distorting what the planner is allowed to decide. See
 | `trial_validity_feedback` | `TrialValidityFeedback \| None` | **V20 PR D (D-C6)** — populated only when the iteration ran trial rounds but produced NO HealthGate-valid winner. Reaches the next proposer via `ProposalInput.recent_trial_validity`. Deliberately SEPARATE from `gate_exhaustion`, which reports BUDGET exhaustion: these trials ran and succeeded and then failed their scientific gates, so `gate_exhaustion`'s triggers never fire for them, and the two call for opposite responses (propose lighter vs propose something that does not collapse). `None` whenever any trial is valid. |
 | `formal_comparison_reference_source` | `str \| None` | **V20 PR D (D-C3)** — provenance of `formal_reference_score`: `restored_valid_formal_incumbent`, `negative_infinity_bootstrap` (no incumbent existed; the reference resolved to `-inf` internally) or `gates_disabled`. Read it WITH the reference: `null` alone is ambiguous across all three. `-inf` is never serialised. |
 | `scientific_authority` (per record) | `dict \| None` | **V20 PR D (D-C2b/D-C4)** — on FORMAL records only, the authority verdict with its three facts beside its conclusions, so it is recomputable and therefore tamper-EVIDENT. Consumers must re-derive via `resolve_record_authority()` rather than trusting the stored conclusions. |
+| `metric_result` (per record) | `MetricResult \| None` | **Step 06 (2026-08)** — the evaluation metric's own result for the attempt, written by the metric handle on the live scoring route: `metric_id` (`tidmad_denoising_score`), `direction` (`higher`), `scalar` (== `denoising_score` on a `success` record — validated), `references_used`; `per_sample` is a POINTER to `file_vector` on the same record (not stored twice). `None` on records written before Step 06, on attempts that never reached scoring, and on the legacy single-file skill route. On a `failed_mode_collapse` record it is the metric's RAW value while `denoising_score` carries the gate policy's penalty. |
+| `metric_refusal` (per record) | `NotScoreableResult \| None` | **Step 06** — the structured not-scoreable result when the produced deliverable failed the metric's scoreability contract BEFORE any scorer arithmetic ran (record `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`): contract id, every violated requirement (`completeness` / `required_channels` / `required_attrs` / `required_dtype`), input identity, detail. Never set together with `metric_result`. |
 | `physical_rejections` | `list[PhysicalRejection]` | One entry per VRAM-gate rejection in this run. Empty list on iterations with no infeasible attempts. |
 | `attempts_per_round` | `int` | Echo of the input value used for this run. |
 | `attempts_per_formal_round` | `int` | Echo of the input value used for this run. |
@@ -332,6 +334,7 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 - **Token usage**: `{workspace}/token_usage.jsonl` (when `set_run_context` is called by the workflow) — append-only log of every LLM call's token cost.
 - **Per-run plugin dir**: `{workspace}/plugins/{run_name}/` — copy of `seed_plugin_path` written at run start so the training subprocess can find the plugin via `SIDERIUS_PLUGIN_DIRS`. Only populated when `seed_plugin_path` is set.
 - **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`. **Step 05c**: their name, the cleanup pattern that matches them, the HDF5 channel-group identity and the persisted storage representation all resolve through one provisional runtime `DeliverableSpec` (`execute_tools/deliverable_spec.py`), bound once per run from the run-scoped `DatasetProfile`. The tuner's path builder (`_build_denoised_filename`, which the HealthGate peeks and the scorer receive verbatim) and the `--cleanup_denoised` glob both consume it, and the sandbox is handed the same value — so parent readers cannot disagree with the child that writes the files. The spec is runtime-only: no config file, no schema field, no CLI flag, and the subprocess RECONSTRUCTS an equal value from the `DatasetProfile` that already crosses via `--dataset_profile_json`.
+- **Evaluation metric** (Step 06, runtime-only): the run's `EvaluationMetric` handle (`execute_tools/evaluation_metric.py`) is DERIVED once at run scope from the run profile + deliverable spec (`derive_tidmad_metric(run_profile, run_deliverable_spec)`), beside `run_profile` / `run_model_io` / `run_deliverable_spec`. No config file, no CLI flag, no new argv; the scoring subprocess reconstructs the same instance from `--dataset_profile_json`. What reaches storage is the additive per-record payload above (`metric_result` / `metric_refusal`).
 
 ## Key behavioral notes
 
@@ -738,7 +741,7 @@ for the full design rationale.
   2b. **Pre-phase GPU measurement** (V20 PR C2, **formal attempts with a real device only**) — a bounded isolated measurement of the exact candidate on the current card, feeding PR B's admission gate. A stop consumes the attempt and starts no GPU work. See *Pre-phase GPU measurement* above.
   3. **Train** — `training_skill` runs as a subprocess via `TidmadSandbox`. Writes the trained model + denoised outputs.
   4. **Infer** — `inference_skill` runs as a subprocess. Writes denoised HDF5s.
-  5. **Score** — `scoring_skill` computes `denoising_score`. Cleanup runs after if `cleanup_denoised=True`.
+  5. **Score** — the frozen TIDMAD scorer runs **through the run's evaluation-metric handle** (Step 06): `sandbox.evaluate_metric(run_metric, …)` validates the DataScope, runs the metric's scoreability contract over the deliverables the scorer would open, and only then calls `scoring_utils.score_vector` (unchanged arithmetic) → `denoising_score` / `file_vector` / `metric_result`. A deliverable the contract refuses never reaches the scorer: it becomes an `error_scoring` record with `failure_type='not_scoreable'` and a structured `metric_refusal`. Cleanup runs after if `cleanup_denoised=True`.
   6. **Reflect** — `bridge.reflect(...)` analyses the round's result and updates memory for the next plan call.
 - **Two LLM sub-calls per round** (planner + reflector). When `reflect_provider` / `reflect_model_id` are set, the two go through separate `LLMBridge` instances — enables splits like "cheap planner + smarter reflector" or "small planner + large reflector" without changing prompts.
 - **Attempt vs round distinction.** A *round* is a slot in the optimization history that produces a final record. An *attempt* is one LLM-plan + downstream-execution attempt. Each round can consume up to `attempts_per_round` (or `attempts_per_formal_round` for the forced-formal round) attempts before being marked failed. Attempts that fail at the pre-flight gate cost LLM tokens but no GPU time; attempts that reach training but fail (OOM, training error) cost both.
@@ -815,3 +818,37 @@ Pinned by `tests/unit/agent/tune_ml_hyperparam_agent/
 test_step05a_{checkpoint0_baselines,run_bound_profile,checkpoint_a_replay}.py`.
 Design: `docs/design/generic_framework_upgrade/
 step_05a_tuner_data_selection.md`.
+
+
+## Evaluation metric handle (Step 06, 2026-08)
+
+Production scoring invokes the frozen TIDMAD scorer **through a generic
+metric interface** — the metric's identity, direction and scoreability
+contract have exactly one source for the whole run.
+
+| Element | Where | What |
+|---|---|---|
+| binding | `run()`, run scope, after `run_deliverable_spec` | `run_metric = derive_tidmad_metric(run_profile, run_deliverable_spec)` — Regime A (no task declares a metric until Step 12); resumed runs re-derive the same value |
+| live route | the anchor-map scoring branch | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — everything downstream (HealthGates, `score_res`, reflector, record) unchanged |
+| order inside the seam | `TidmadSandbox.evaluate_metric` | DataScope `validate_sample_set` (unchanged, first) → `TidmadScoreabilityContract.check({file_index: path})` → `scoring_utils.score_vector(**the same kwargs as before)` |
+| refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt) |
+| record | success record | `metric_result` (identity / direction / scalar / references; `per_sample` = pointer to `file_vector`) |
+| what the LLMs see | planner history dump / reflector `actual_results` | NOTHING new. The reflector's `score_results` is unchanged (the payload never enters it); the planner's history serialization (`agent/prompts.py::_truncate_memory_history`) drops `metric_result` / `metric_refusal` from the verbatim window (`_PLANNER_HIDDEN_RECORD_KEYS`), so planner message bytes are identical to pre-Step-06 for the same run. The payload is persisted for Steps 07a / 09, which own agent-facing rendering. No prompt template changed |
+| legacy 2-tuple seam | `TidmadSandbox.score_vector` | still callable; Regime A resolves TIDMAD through the handle; values identical |
+| pseudo mode | `StubSandbox.evaluate_metric` | synthesises the same 2-tuple stream under the run's real identity/direction |
+
+**Scoreability (TIDMAD instance)** requires of the DELIVERABLE exactly what the
+live scorer reads: file-level completeness (every in-scope file has an HDF5 that
+opens), the input channel dataset (`ch=1` — the target channel is read from the
+RAW file), the `voltage_range_mV` / `sampling_frequency` attrs on the input
+group, and the declared storage dtype (`int8`). Channel group and dtype are
+READ from the run's `DeliverableSpec` (05c keeps producer-side representation;
+Step 06 owns evaluation-side acceptance). `_is_complete_trial_output` stays a
+crash-resume reuse guard, not this mechanism.
+
+**Not reached by Step 06** (asserted list, `tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py`):
+the tuner's incumbent/best selection (`max(... denoising_score)`, `current_score > best_score`)
+and the chain/resume/dashboard consumers still encode higher-is-better literally
+— Step 07a / D1.
+
+Design: `docs/design/generic_framework_upgrade/step_06_metric_interface.md`.

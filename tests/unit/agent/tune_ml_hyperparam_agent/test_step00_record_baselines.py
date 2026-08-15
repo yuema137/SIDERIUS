@@ -51,7 +51,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_54 = [
+EXPERIMENT_RECORD_FIELDS_56 = [
     "record_type",
     "exp_id",
     "status",
@@ -106,6 +106,10 @@ EXPERIMENT_RECORD_FIELDS_54 = [
     "resolved_order_strategy",
     "resolved_file_order",
     "ordering_resolution_source",
+    # Step 06 C4 — ADDITIVE (design step_06 §19 C4 / ledger §20.6): the metric
+    # interface's record-facing payload. 54 → 56; every earlier position unchanged.
+    "metric_result",
+    "metric_refusal",
 ]
 
 
@@ -167,7 +171,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_54
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_56
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

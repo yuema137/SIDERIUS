@@ -43,6 +43,13 @@ from execute_tools.dataset_config import (
     resolve_dataset_profile,
 )
 from execute_tools.deliverable_spec import DeliverableNaming, default_deliverable_naming
+from execute_tools.evaluation_metric import (
+    EvaluationMetric,
+    MetricResult,
+    NotScoreableError,
+    NotScoreableResult,
+    derive_tidmad_metric,
+)
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
@@ -1855,38 +1862,68 @@ class TidmadSandbox:
                 _observer,
             )
 
-    def score_vector(
-        self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn: Callable, **kwargs
-    ) -> tuple:
-        """Anchor-normalised multi-file scoring. Delegates to execute_tools.scoring_utils.score_vector.
+    def evaluate_metric(
+        self,
+        metric: EvaluationMetric,
+        sample_set,
+        anchor_map: dict,
+        s_max: float,
+        denoised_filename_fn: Callable,
+        **kwargs,
+    ) -> MetricResult:
+        """PRODUCTION SCORING, through the metric handle (Step 06 C2).
 
-        Wraps the module-level function so that the agent's scoring path goes
-        through the sandbox — making it injectable in tests just like
-        execute_training / execute_inference / execute_scoring.
+        The tuner's live scoring route. Order is load-bearing and unchanged
+        from the pre-Step-06 route where it existed, extended where it did not:
+
+        1. the SampleSet is validated against the run's DataScope (boundary
+           invariant — rejection before ANY file I/O, exactly as before);
+        2. the metric's SCOREABILITY contract runs over the deliverables the
+           scorer would open (``{file_index: path}``, resolved through
+           ``denoised_filename_fn`` and this sandbox's ``base_dir`` exactly as
+           ``score_vector`` resolves them);
+        3. only then does the handle reach the instance's arithmetic — for
+           TIDMAD, ``execute_tools.scoring_utils.score_vector`` with the same
+           keyword arguments this method has always passed it.
 
         Args:
+            metric:               The run's evaluation metric handle
+                                  (``run_metric`` in the tuner's run scope).
             sample_set:           SampleSet dict (file_index → segment list).
             anchor_map:           The ``"anchors"`` dict from segment_anchors.json.
             s_max:                Global max CH2 SNR from the anchor map.
             denoised_filename_fn: Callable (file_index) → denoised filename.
-            **kwargs:             Forwarded to scoring_utils.score_vector
-                                  (parallel, num_workers, raw_data_dir, …).
+            **kwargs:             Forwarded to the instance's arithmetic
+                                  (for TIDMAD: scoring_utils.score_vector —
+                                  parallel, num_workers, profile, …).
 
         Returns:
-            (file_vector, final_scalar_score)
+            The metric's result: identity, direction, scalar and (for TIDMAD)
+            the per-file vector as ``per_sample``.
 
         Raises:
             ValueError: On an invalid or out-of-scope ``sample_set``
                 (``ScopeViolationError``, a ValueError subclass, for scope
-                violations) — this method's established exception contract,
+                violations) — this seam's established exception contract,
                 unlike the error-dict contract of ``execute_training`` /
-                ``execute_inference``. The invariant is uniform (rejection
-                before any file I/O); only the outward error shape differs.
+                ``execute_inference``.
+            NotScoreableError: The deliverables failed the metric's
+                scoreability contract. Carries the structured
+                ``NotScoreableResult``; no scorer arithmetic ran. Raised
+                rather than returned because the tuner's scoring ``try`` block
+                is the round-outcome path for every scoring-phase failure
+                (V8 Domain 2a) and ``run()`` cannot grow a branch.
         """
-        from execute_tools.scoring_utils import score_vector as _score_vector
-
         sample_set = validate_sample_set(sample_set, scope=self.data_scope)
-        return _score_vector(
+        deliverables = {
+            int(file_index): os.path.join(self.base_dir, denoised_filename_fn(file_index))
+            for file_index in sample_set
+        }
+        # The profile ``score_vector`` would otherwise resolve ambiently,
+        # threaded explicitly (design §19 C2) — the same object, one seam.
+        kwargs.setdefault("profile", resolve_dataset_profile())
+        outcome = metric.evaluate(
+            deliverables,
             data_dir=self.base_dir,
             sample_set=sample_set,
             anchor_map=anchor_map,
@@ -1895,6 +1932,43 @@ class TidmadSandbox:
             raw_data_dir=self.dirs["data"],
             **kwargs,
         )
+        if isinstance(outcome, NotScoreableResult):
+            raise NotScoreableError(outcome)
+        return outcome
+
+    def score_vector(
+        self,
+        sample_set,
+        anchor_map: dict,
+        s_max: float,
+        denoised_filename_fn: Callable,
+        metric: EvaluationMetric | None = None,
+        **kwargs,
+    ) -> tuple:
+        """Anchor-normalised multi-file scoring — the pre-Step-06 2-tuple seam.
+
+        Kept for callers that predate the metric handle: the same arguments,
+        the same ``(file_vector, final_scalar_score)`` return. Since Step 06
+        it is a thin wrapper over :meth:`evaluate_metric`; ``metric=None``
+        (Regime A) resolves the TIDMAD instance from the run's profile, so a
+        legacy caller obtains exactly today's values through the handle.
+
+        Raises:
+            ValueError: as :meth:`evaluate_metric`.
+            NotScoreableError: as :meth:`evaluate_metric` — a deliverable the
+                contract refuses is a structured refusal, not an incidental
+                error from inside the scorer worker.
+        """
+        handle = metric if metric is not None else derive_tidmad_metric(resolve_dataset_profile())
+        result = self.evaluate_metric(
+            handle,
+            sample_set,
+            anchor_map,
+            s_max,
+            denoised_filename_fn,
+            **kwargs,
+        )
+        return result.per_sample, result.scalar
 
     def execute_scoring(
         self, exp_id: str, run_name: str, model_type: str, m_cfg: dict, t_cfg: dict, l_cfg: dict
@@ -2171,6 +2245,37 @@ class StubSandbox(TidmadSandbox):
         results["is_degenerate"] = False
         results["failure_reason"] = None
         return {"status": "success", "results": results}
+
+    def evaluate_metric(
+        self,
+        metric: EvaluationMetric,
+        sample_set,
+        anchor_map: dict,
+        s_max: float,
+        denoised_filename_fn,
+        **kwargs,
+    ) -> MetricResult:
+        """The pseudo-mode mirror of the production metric route (Step 06 C2).
+
+        No deliverable exists under ``--is_pseudo_training``, so no
+        scoreability contract can run and no arithmetic can be reached; this
+        synthesises the same 2-tuple :meth:`score_vector` has always produced
+        and returns it under the run's REAL metric identity/direction — the
+        handle's own declaration, not an invention — so the record payload
+        the tuner writes has the production shape. Values are synthetic
+        exactly as ``denoising_score`` / ``file_vector`` on every pseudo
+        record already are.
+        """
+        file_vector, final_scalar = self.score_vector(
+            sample_set, anchor_map, s_max, denoised_filename_fn, **kwargs
+        )
+        return MetricResult(
+            metric_id=metric.spec.id,
+            direction=metric.spec.direction,
+            scalar=final_scalar,
+            per_sample=file_vector,
+            references_used=(),
+        )
 
     def score_vector(
         self,

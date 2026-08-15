@@ -594,6 +594,85 @@ every denoised name still comes from `denoised_filename_fn`.
 
 ---
 
+## Evaluation Metric Interface (shipped 2026-08, Step 06)
+
+Production scoring invokes the frozen TIDMAD scorer **through a generic
+metric handle** (`execute_tools/evaluation_metric.py`). The interface is
+extracted FROM the TIDMAD instance and extends the `metric_id:
+"tidmad_denoising_score"` precedent `per_file_best` already emitted; the
+frozen formula (`scoring_utils.score_vector`, `_LOG_BASE`, `s_max`,
+anchor normalisation, grand-mean) is referenced, never re-implemented, and
+its 2-tuple return is untouched.
+
+```text
+MetricSpec           id · direction ("higher" | "lower") · aggregation id ·
+                     transform (+params) · references · scoreability
+ScoreabilityContract abstract, EXECUTABLE: check({input_identity: path}) ->
+                     ScoreabilityVerdict (structured failures, never an h5py
+                     traceback). Declared PER METRIC INSTANCE against the
+                     producer-side DeliverableSpec — there is no universal
+                     completeness/channel/shape schema.
+EvaluationMetric     the handle: evaluate(deliverables, **kwargs) runs the
+                     contract FIRST, then the instance's arithmetic ->
+                     MetricResult | NotScoreableResult
+MetricResult         metric_id · direction · scalar (mandatory) · optional
+                     per_sample evidence · references_used
+```
+
+**Instance #1 — TIDMAD** is DERIVED under Regime A with no declaration
+(`derive_tidmad_metric(profile, deliverable_spec)`): identity
+`tidmad_denoising_score`, direction `higher`, aggregation = `score_vector`,
+transform `log` (base 5.27, imported — one contract, four expressions),
+references `anchor_map` / `raw_baseline` / `ground_truth`, and a
+`TidmadScoreabilityContract` requiring exactly what the live scorer reads
+of the deliverable: file-level completeness, the input channel dataset
+(`ch=1`), the `voltage_range_mV` / `sampling_frequency` attrs, the declared
+storage dtype. Task-level metric DECLARATION for other tasks is Step 12
+(an additive block in the existing task configuration — no new hierarchy).
+
+**Ownership split** (design §4, operator-confirmed): `DeliverableSpec`
+(Step 05c) owns producer-side REPRESENTATION — naming, cleanup identity,
+channel-group identity, layout, storage dtype/offset. The metric owns
+evaluation-side ACCEPTANCE — what THIS metric requires of that artifact —
+and REFERENCES the deliverable spec (channel group and dtype are read from
+it). `_is_complete_trial_output` stays a crash-resume REUSE guard; it is
+not the scoreability mechanism.
+
+**Two routes, one handle.** The tuner binds `run_metric` once at run scope
+(beside `run_profile`, `run_model_io`, `run_deliverable_spec`) and scores
+through `TidmadSandbox.evaluate_metric(run_metric, …)` — DataScope
+validation first (unchanged), then scoreability, then `score_vector` with
+its previous keyword arguments; a refused deliverable raises the typed
+`NotScoreableError` (carrying the structured result) into the tuner's
+scoring failure path (`error_scoring`, `failure_type="not_scoreable"`).
+`TidmadSandbox.score_vector` remains as the legacy 2-tuple wrapper. The
+scoring subprocess (`execute_tools/denoising_score_single.py`) RECONSTRUCTS
+the same instance from `--dataset_profile_json` (05c Option A — no new argv),
+names the deliverable through the deliverable spec, evaluates through the
+handle, and on refusal exits 1 with the structured payload on stderr and in
+`--output_json` (`not_scoreable`); the parent's classifier is unchanged.
+The two routes are pinned equal on one deliverable (Checkpoint 0 / C).
+
+**Record payload (additive).** `ExperimentRecord.metric_result`
+(`MetricResult`, `per_sample` stored as a pointer to `file_vector`) and
+`ExperimentRecord.metric_refusal` (`NotScoreableResult`) sit beside the
+untouched `denoising_score` / `file_vector` / `score_table`; historical
+records validate unchanged; on a `success` record the payload is validated
+to agree with the frozen fields (the `failed_mode_collapse` penalty is the
+documented exception).
+
+**Losses are not metrics.** Train/validation loss have no deliverable, no
+reference and no task-independent direction (roadmap §20.2): the metric
+types refuse loss-shaped identities and forbid extra keys; surfacing losses
+is Step 07's `TrainingHistory` / `TrainingDiagnosis`.
+
+**Not reached by Step 06** (enumerated and asserted, D1 / Step 07a debt):
+incumbent/best selection in the tuner, `workflows/model_exploration.py`,
+`core/resume.py`, `per_file_best._row_beats`, dashboard ordering — they
+still encode higher-is-better literally.
+
+---
+
 ## Data Scoping (partial-file runs — shipped 2026-07)
 
 `DataScope` (`execute_tools/dataset_config.py`) restricts a run to a

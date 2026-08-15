@@ -44,6 +44,7 @@ import pytest
 from agent.skills.evaluate_vram_skill.isolated_probe import HardwareSnapshot
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.scoring_stubs import stub_scoring
 from tests.helpers.step04a_fixtures import tidmad_model_io
 
 #: A synthetic GPU. The cap, device name and fingerprint are the parent's
@@ -273,7 +274,7 @@ def _drive_tuner(tmp_path, harness, *, capture: dict):
         sandbox.save_record.side_effect = saved.append
         sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
         sandbox.base_dir = configs_dir
-        sandbox.score_vector.return_value = harness["score_vector"]
+        stub_scoring(sandbox, *harness["score_vector"])
 
         agent_input = harness["make_input"](tmp_path, max_rounds=1, is_trial=True)
         # The time gate is opt-in PER MODE: with no budget the tuner prints

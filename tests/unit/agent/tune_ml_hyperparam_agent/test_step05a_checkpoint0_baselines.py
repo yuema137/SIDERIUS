@@ -56,6 +56,7 @@ from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _validate_data_config,
 )
+from tests.helpers.scoring_stubs import stub_scoring
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_PLAN_RESPONSE,
     FAKE_REFLECT_RESPONSE,
@@ -182,7 +183,7 @@ def _run_single_file_tuner(tmp_path):
         mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
         mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
         mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-        mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
+        stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_RESULT)
 
         agent = HyperparamTuningAgent()
         agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=False))

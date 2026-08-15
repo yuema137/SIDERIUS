@@ -524,6 +524,23 @@ TIDMAD's `network.py:FocalLoss1D`.
   `is_degenerate` / `failure_reason` from a merged score record should use
   `.get(default)` (these keys are no longer produced by score_vector, though
   `StubSandbox` still injects them for pseudo-mode compatibility).
+- **Production scoring goes THROUGH the evaluation-metric handle (Step 06,
+  2026-08)** — `execute_tools/evaluation_metric.py`. The tuner binds
+  `run_metric` once at run scope and calls
+  `TidmadSandbox.evaluate_metric(run_metric, …)`; the scoring subprocess
+  (`denoising_score_single.py`) reconstructs the same TIDMAD instance from
+  `--dataset_profile_json`. Order inside both routes is load-bearing:
+  DataScope validation → the metric's **executable scoreability contract**
+  (`ScoreabilityContract.check`, structured `NotScoreableResult`) →
+  `scoring_utils.score_vector` (arithmetic untouched, still the pure 2-tuple).
+  A refused deliverable is `NotScoreableError` → an `error_scoring` record with
+  `failure_type="not_scoreable"` and `metric_refusal`; never re-inline
+  `score_vector` at a call site, never move the contract after the arithmetic.
+  `TIDMAD_METRIC_ID = "tidmad_denoising_score"` and the direction vocabulary
+  are declared ONCE in the metric module (guarded); `per_file_best` imports
+  the id. Losses are NOT metrics (metric types refuse loss-shaped ids).
+  Records carry the additive `metric_result` / `metric_refusal`; the frozen
+  `denoising_score` / `file_vector` / `score_table` names are unchanged (D1).
 - **`ml_models/legacy_baseline_configs.json` is the paper-spec source of
   truth.** Any edit here must cite the corresponding paper source (train.py
   line, network.py class, or paper section). Do not tune these values away

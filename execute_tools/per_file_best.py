@@ -30,6 +30,7 @@ from core.resume import (
     ReplayIntegrityError,
     classify_committed_record,
 )
+from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
 
 
 def _iter_run_name(iter_idx: int) -> str:
@@ -357,7 +358,9 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
     rows = [candidates[k].as_row() for k in sorted(candidates)]
     return {
         "schema_version": SCHEMA_VERSION,
-        "metric_id": "tidmad_denoising_score",
+        # Step 06 C5 — the identity is DECLARED once, in the metric module; this
+        # artifact was its precedent and now imports it (emitted value unchanged).
+        "metric_id": TIDMAD_METRIC_ID,
         "score_transform": "log",
         "log_base": LOG_BASE,
         "iterations_included": iterations_included,

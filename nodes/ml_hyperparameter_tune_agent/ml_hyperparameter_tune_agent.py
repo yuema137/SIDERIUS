@@ -84,6 +84,11 @@ from execute_tools.deliverable_spec import (
     default_deliverable_naming,
     derive_tidmad_deliverable_spec,
 )
+from execute_tools.evaluation_metric import (
+    EvaluationMetric,
+    NotScoreableError,
+    derive_tidmad_metric,
+)
 from execute_tools.health_checks.candidate_eligibility import (
     classify_candidate_health,
     formal_validity_of,
@@ -2042,6 +2047,101 @@ def _gate_results_to_score_meta(
     return is_degenerate, failure_reason, resolved_action.value
 
 
+def _build_scoring_failure_record(
+    exc: Exception,
+    *,
+    exp_id: str,
+    model_type: str,
+    file_index: int,
+    record_params: dict[str, Any],
+    timing: dict[str, Any],
+    expert_advice_str: str,
+    hypothesis: str,
+    round_index: int,
+    attempt_in_round: int,
+) -> dict[str, Any]:
+    """The ``error_scoring`` record for a scoring-phase failure (V8 Domain 2a).
+
+    Extracted from ``run()``'s scoring ``except`` (Step 06 C2) so that the
+    ONE new scoring outcome — a deliverable REFUSED by the metric's
+    scoreability contract, carried as :class:`NotScoreableError` — can be
+    described honestly without adding a branch to ``run()``, which sits at
+    pyright's complexity ceiling (see the ``PlanOverridesError`` note in the
+    outer handler). Behaviour for every other exception is byte-identical to
+    the inlined dict it replaces.
+
+    Both outcomes share ``status="error_scoring"``: no score was produced and
+    the attempt terminated before any gate evidence (the status's documented
+    meaning, ``health_feedback.PRE_GATE_ERROR_STATUSES``). They differ in what
+    the planner is told: a crash inside the scorer versus a deliverable that
+    never reached the scorer, named requirement by requirement.
+    """
+    if isinstance(exc, NotScoreableError):
+        failures = exc.result.verdict.failures
+        named = "; ".join(
+            f"{f.requirement}"
+            + (f"[file {f.input_identity}]" if f.input_identity is not None else "")
+            + f": {f.detail}"
+            for f in failures
+        )
+        short_named = named[-500:] if len(named) > 500 else named
+        conclusion = (
+            f"Deliverable not scoreable under {exc.result.verdict.contract_id!r} "
+            f"(metric {exc.result.metric_id!r}); scoring did not run: {short_named}"
+        )
+        discovery = (
+            "Training and inference completed but the produced deliverable failed the "
+            f"metric's scoreability contract ({len(failures)} requirement(s) violated). "
+            "No scorer arithmetic was reached."
+        )
+        memory_update = (
+            "Not-scoreable deliverable — the checkpoint trained, but its output does not "
+            "satisfy what the metric requires (missing file, channel, attrs or wrong "
+            "storage dtype). Inspect the inference/output path before retrying this config."
+        )
+        failure_type = "not_scoreable"
+    else:
+        error_msg = f"{type(exc).__name__}: {exc}"
+        short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
+        conclusion = f"Scoring crashed: {short_msg}"
+        discovery = (
+            f"Training and inference completed but scoring raised {type(exc).__name__}: {short_msg}"
+        )
+        memory_update = (
+            "Scoring crash — training succeeded so the "
+            "checkpoint may be reusable. Investigate the "
+            "scoring path (anchor map, sample_set, file "
+            "vector shape) before retrying this config."
+        )
+        failure_type = None
+    record: dict[str, Any] = {
+        "exp_id": exp_id,
+        "status": "error_scoring",
+        "model_type": model_type,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "file_index": file_index,
+        "params": record_params,
+        "denoising_score": None,
+        "timing": timing,
+        "memory": {
+            "expert_advice_followed": expert_advice_str,
+            "hypothesis": hypothesis,
+            "conclusion": conclusion,
+            "discovery": discovery,
+            "memory_update": memory_update,
+            "round_index": round_index,
+            "attempt_in_round": attempt_in_round,
+        },
+    }
+    if failure_type is not None:
+        record["failure_stage"] = "scoring"
+        record["failure_type"] = failure_type
+    if isinstance(exc, NotScoreableError):
+        # Step 06 C4 — the structured refusal, on the record (additive).
+        record["metric_refusal"] = exc.result.model_dump(mode="json")
+    return record
+
+
 def _merge_score_validity_failure(
     denoising_score: float | None,
     *,
@@ -3756,6 +3856,18 @@ class HyperparamTuningAgent:
         # Option A).
         run_deliverable_spec = derive_tidmad_deliverable_spec(run_profile)
 
+        # --- The run's ONE evaluation metric (Step 06) ---
+        # Bound here, once, from the two authorities above: the frozen TIDMAD
+        # instance derived under Regime A (no task declares a metric until
+        # Step 12), with its scoreability contract declared AGAINST the run's
+        # deliverable spec. PRODUCTION SCORING below invokes the scorer
+        # THROUGH this handle (`sandbox.evaluate_metric(run_metric, …)`), so
+        # identity, direction and the acceptance contract have exactly one
+        # source for the whole run — a resumed run re-derives the same value
+        # from the same profile. Not serialized; crosses no process boundary
+        # (the scoring subprocess re-derives it from `--dataset_profile_json`).
+        run_metric: EvaluationMetric = derive_tidmad_metric(run_profile, run_deliverable_spec)
+
         # --- DataScope + HealthGate startup validation (DS5) ---
         # Dataset-resolved checks (schema validators cover only internal
         # consistency), then health-config materialization — all BEFORE any
@@ -5277,6 +5389,7 @@ class HyperparamTuningAgent:
                             scope="tuner",
                         )
                         t0 = time.time()
+                        metric_payload: dict[str, Any] | None = None
                         # V8 hardening Domain 2a — wrap the entire scoring block.
                         # Pre-V8, an exception in score_vector / denoising_score_skill
                         # bubbled past the loop without writing a record, so the
@@ -5318,11 +5431,41 @@ class HyperparamTuningAgent:
                                         naming=naming,
                                     )
 
-                                file_vector, final_scalar = sandbox.score_vector(
+                                # Step 06 — PRODUCTION SCORING through the
+                                # metric handle: scoreability first, then the
+                                # frozen TIDMAD arithmetic. A refused
+                                # deliverable raises NotScoreableError into the
+                                # scoring `except` below, which is the
+                                # round-outcome path for every scoring failure.
+                                metric_result = sandbox.evaluate_metric(
+                                    run_metric,
                                     sample_set=eval_sample_set,
                                     anchor_map=anchor_map_data["anchors"],
                                     s_max=anchor_map_data["s_max"],
                                     denoised_filename_fn=_denoised_fn,
+                                )
+                                # `per_sample` is Optional on the generic result
+                                # (a scalar-only metric carries none); the
+                                # HealthGate context and the record's
+                                # `file_vector` want a list — TIDMAD always
+                                # supplies one, a scalar-only instance an
+                                # empty one.
+                                file_vector, final_scalar = (
+                                    list(metric_result.per_sample or []),
+                                    metric_result.scalar,
+                                )
+                                # Step 06 C4 — the record-facing payload. Kept
+                                # OUT of `score_res["results"]` on purpose: that
+                                # dict is json-dumped verbatim into the reflector
+                                # prompt (agent/prompts.py:1343) and Step 06
+                                # changes no prompt (design §8, §13). The planner's
+                                # history serialization likewise drops it
+                                # (`agent/prompts.py::_PLANNER_HIDDEN_RECORD_KEYS`)
+                                # — persisted for Steps 07a/09, not agent-facing.
+                                # Per-sample evidence is a POINTER — `file_vector`
+                                # on the same record — not a second copy (§5).
+                                metric_payload = metric_result.model_dump(
+                                    mode="json", exclude={"per_sample"}
                                 )
 
                                 # Tuner-side gate evaluation (commit-5b).
@@ -5443,39 +5586,22 @@ class HyperparamTuningAgent:
                                 workspace=workspace,
                                 scope="tuner",
                             )
-                            error_msg = f"{type(e).__name__}: {e}"
-                            short_msg = error_msg[-500:] if len(error_msg) > 500 else error_msg
-                            error_record = {
-                                "exp_id": exp_id,
-                                "status": "error_scoring",
-                                "model_type": model_type,
-                                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                                "file_index": file_index,
-                                "params": record_params,
-                                "denoising_score": None,
-                                "timing": {
+                            error_record = _build_scoring_failure_record(
+                                e,
+                                exp_id=exp_id,
+                                model_type=model_type,
+                                file_index=file_index,
+                                record_params=record_params,
+                                timing={
                                     "train_time_s": train_time,
                                     "inference_time_s": inference_time,
                                     "scoring_time_s": scoring_time,
                                 },
-                                "memory": {
-                                    "expert_advice_followed": expert_advice_str,
-                                    "hypothesis": hypothesis,
-                                    "conclusion": f"Scoring crashed: {short_msg}",
-                                    "discovery": (
-                                        f"Training and inference completed but scoring "
-                                        f"raised {type(e).__name__}: {short_msg}"
-                                    ),
-                                    "memory_update": (
-                                        "Scoring crash — training succeeded so the "
-                                        "checkpoint may be reusable. Investigate the "
-                                        "scoring path (anchor map, sample_set, file "
-                                        "vector shape) before retrying this config."
-                                    ),
-                                },
-                            }
-                            error_record["memory"]["round_index"] = round_index
-                            error_record["memory"]["attempt_in_round"] = attempt_in_round
+                                expert_advice_str=expert_advice_str,
+                                hypothesis=hypothesis,
+                                round_index=round_index,
+                                attempt_in_round=attempt_in_round,
+                            )
                             _emit_record(
                                 sandbox, error_record, candidate_id=agent_input.candidate_id
                             )
@@ -5784,6 +5910,10 @@ class HyperparamTuningAgent:
                         # coerces it back to ScoreComparisonTable below). None
                         # when scoring failed or no scalar was produced.
                         "score_table": score_table.model_dump() if score_table else None,
+                        # Step 06 — the metric's identity/direction/value, machine-
+                        # readable (additive; None where scoring did not go through
+                        # the handle, e.g. a legacy child that predates C3).
+                        "metric_result": metric_payload,
                         # Health-check failure reason from tuner-side gate
                         # evaluation (commit-5b). Written unconditionally when
                         # non-None — trial-round SKIP_ITER also propagates its

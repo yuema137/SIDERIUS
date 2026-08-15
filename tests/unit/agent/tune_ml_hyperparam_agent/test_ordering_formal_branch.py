@@ -34,6 +34,7 @@ from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningIn
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.dataset_config import DataScope
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.scoring_stubs import stub_scoring
 
 from .test_tuning_agent import (
     FAKE_REFLECT_RESPONSE,
@@ -110,7 +111,7 @@ def formal_round(tmp_path):
         _fv = [None] * 20
         for _i in range(4, 10):
             _fv[_i] = 1.75
-        mock_sandbox.score_vector.return_value = (_fv, 1.75)
+        stub_scoring(mock_sandbox, _fv, 1.75)
 
         agent_input = HyperparamTuningInput(
             model_type="punet",

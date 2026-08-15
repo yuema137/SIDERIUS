@@ -99,6 +99,28 @@ class RecordingSandbox:
     # Subprocess-execution methods (mirror TidmadSandbox)
     # ------------------------------------------------------------------
 
+    def evaluate_metric(
+        self, metric, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn, **kwargs
+    ):
+        """Mirror of :meth:`TidmadSandbox.evaluate_metric` (Step 06 C2) — the
+        tuner's LIVE scoring seam. Draws the next predefined ``score_vector``
+        result (same FIFO queue, so fixtures written before Step 06 keep
+        loading) and returns it as a ``MetricResult`` under the run's real
+        metric identity/direction — exactly what ``StubSandbox`` does. The
+        recorded call carries the metric id, so a test can assert WHICH handle
+        the tuner bound."""
+        from execute_tools.evaluation_metric import MetricResult
+
+        self.calls.append(("evaluate_metric", metric.spec.id, metric.spec.direction))
+        result = self._pop("score_vector")
+        return MetricResult(
+            metric_id=metric.spec.id,
+            direction=metric.spec.direction,
+            scalar=result["scalar"],
+            per_sample=result["file_vector"],
+            references_used=(),
+        )
+
     def score_vector(
         self, sample_set, anchor_map: dict, s_max: float, denoised_filename_fn, **kwargs
     ):

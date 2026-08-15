@@ -32,6 +32,7 @@ from core.runtime_control.observation_store import ObservationStore
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.scoring_stubs import stub_scoring
 
 
 def _stub_hardware_context() -> HardwareContext:
@@ -196,7 +197,7 @@ def harness():
         mock_sandbox.dirs = {"configs": workspace}
         mock_sandbox.base_dir = workspace  # store root anchor
         if scoring_ok:
-            mock_sandbox.score_vector.return_value = ([-2.5] * 20, -2.5)
+            stub_scoring(mock_sandbox, [-2.5] * 20, -2.5)
 
         def cleanup():
             ws_cm.__exit__(None, None, None)

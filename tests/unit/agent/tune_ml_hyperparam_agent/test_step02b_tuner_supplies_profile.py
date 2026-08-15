@@ -29,6 +29,7 @@ import pytest
 from execute_tools import sample_set_builder
 from execute_tools.dataset_config import TIDMAD_PROFILE
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.scoring_stubs import stub_scoring
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_PLAN_WITH_TRIAL,
     FAKE_REFLECT_RESPONSE,
@@ -94,7 +95,7 @@ def _run_tuner(tmp_path, max_rounds):
         mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
         mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
         mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-        mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
+        stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_RESULT)
 
         agent = HyperparamTuningAgent()
         output = agent.run(_make_trial_input(tmp_path, max_rounds=max_rounds, is_trial=True))

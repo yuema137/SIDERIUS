@@ -872,6 +872,31 @@ _CONDENSED_MEMORY_KEYS = frozenset(
     }
 )
 
+# Step 06 (operator-directed corrective, 2026-08-15): the metric interface's
+# record-facing payload is PERSISTED on every record so Steps 07a / 09 can
+# consume it, but it is NOT agent-facing yet — those steps own how (and
+# whether) raw metric identity/direction/value, the policy-adjusted
+# `denoising_score`, and later training diagnostics are explained to an
+# LLM. Left in the verbatim window, the planner would see two numbers for a
+# collapsed formal attempt (the raw `metric_result.scalar` beside the
+# penalised `denoising_score`) with no lifecycle explanation. So the planner's
+# history serialization drops exactly these keys; the persisted record is
+# untouched. Removing a key here is a rendering decision that belongs to
+# Step 07a / 09 — do not widen this set casually.
+_PLANNER_HIDDEN_RECORD_KEYS = frozenset({"metric_result", "metric_refusal"})
+
+
+def _planner_visible(rec: dict) -> dict:
+    """``rec`` without the keys the planner must not see.
+
+    Returns ``rec`` ITSELF when it carries none of them (a pre-Step-06 record
+    keeps its identity in the verbatim window, exactly as before) and a
+    shallow copy without them otherwise. Never mutates the input.
+    """
+    if not (_PLANNER_HIDDEN_RECORD_KEYS & rec.keys()):
+        return rec
+    return {k: v for k, v in rec.items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
+
 
 def _truncate_memory_history(
     records: list[dict],
@@ -884,11 +909,13 @@ def _truncate_memory_history(
         full_window: Number of most-recent records to keep verbatim.
 
     Returns:
-        New list (non-destructive). Recent records are unchanged; older
-        records are condensed to identity + score + hypothesis/conclusion.
+        New list (non-destructive). Recent records are unchanged apart from
+        the Step-06 record-only payload keys, which are never rendered
+        (``_PLANNER_HIDDEN_RECORD_KEYS``); older records are condensed to
+        identity + score + hypothesis/conclusion.
     """
     if len(records) <= full_window:
-        return list(records)
+        return [_planner_visible(rec) for rec in records]
 
     cutoff = len(records) - full_window
     condensed: list[dict] = []
@@ -899,7 +926,7 @@ def _truncate_memory_history(
             entry["memory"] = {k: memory[k] for k in _CONDENSED_MEMORY_KEYS if k in memory}
         condensed.append(entry)
 
-    return condensed + list(records[cutoff:])
+    return condensed + [_planner_visible(rec) for rec in records[cutoff:]]
 
 
 def get_planner_user_prompt(

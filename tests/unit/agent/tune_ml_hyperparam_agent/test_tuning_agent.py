@@ -42,6 +42,7 @@ from nodes.ml_hyperparameter_tune_agent import (
     _serialize_expert_advice,
 )
 from nodes.scoring_reference import ReferenceScores
+from tests.helpers.scoring_stubs import stub_scoring
 
 # ---------------------------------------------------------------------------
 # Synthetic reference-scores bundle — patched into every agent fixture so
@@ -669,7 +670,7 @@ class TestDynamicTrialFormal:
             mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
             mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
             mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
+            stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_RESULT)
 
             agent = HyperparamTuningAgent()
             yield agent, mock_brain, mock_sandbox, saved_records
@@ -1006,7 +1007,7 @@ class TestTimeBudgetGate:
             # per anchor file) before scalar reduction; the formal path
             # bypasses this. Mock it to a deterministic 2-tuple so the
             # round completes without the per-file scoring branch crashing.
-            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
+            stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_RESULT)
 
         def dispatch(skill_folder, sandbox, **params):
             skill_calls.append((skill_folder, params))
@@ -1441,7 +1442,7 @@ class TestVramBudgetGate:
             else {"configs": configs_dir}
         )
         if enable_trial_mode:
-            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_RESULT
+            stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_RESULT)
 
         def dispatch(skill_folder, sandbox, **params):
             skill_calls.append((skill_folder, params))
@@ -1784,7 +1785,7 @@ class TestScoreTablePropagation:
             mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
             mock_sandbox.save_record.side_effect = lambda r: saved_records.append(r)
             mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_FULL
+            stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_FULL)
 
             agent = HyperparamTuningAgent()
             yield agent, mock_brain, mock_sandbox, saved_records
@@ -2002,7 +2003,7 @@ class TestScoreTablePropagation:
             mock_sandbox.get_summary.side_effect = lambda: list(seeded)
             mock_sandbox.save_record.side_effect = lambda r: seeded.append(r)
             mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-            mock_sandbox.score_vector.return_value = FAKE_SCORE_VECTOR_FULL
+            stub_scoring(mock_sandbox, *FAKE_SCORE_VECTOR_FULL)
 
             agent = HyperparamTuningAgent()
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))

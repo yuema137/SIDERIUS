@@ -26,6 +26,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
+from tests.helpers.scoring_stubs import stub_scoring
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_PLAN_WITH_TRIAL,
     FAKE_REFLECT_RESPONSE,
@@ -108,7 +109,7 @@ class TestMergeFailFast:
             mock_sandbox.get_summary.side_effect = lambda: list(saved_records)
             mock_sandbox.save_record.side_effect = saved_records.append
             mock_sandbox.dirs = {"configs": configs_dir, "data": configs_dir}
-            mock_sandbox.score_vector.return_value = ([1.0] * 20, 1.5)
+            stub_scoring(mock_sandbox, [1.0] * 20, 1.5)
 
             agent = HyperparamTuningAgent()
             inp = _input(tmp_path, plan_overrides=plan_overrides)
