@@ -6,7 +6,7 @@ obligations this step inherits beyond §10).
 
 | Field | Value |
 |---|---|
-| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 3 (2026-08-15, operator review of revision 2): Q1 ownership wording sharpened to the 05c-representation / 06-acceptance split (§4, §16); scoreability's SEMANTIC SCOPE bounded — execution semantics frozen, no universal completeness/channel/shape schema (§4, §16-Q3); **Gate 2 re-dispositioned to NOT REQUIRED on the standard's own assignment table and roadmap §17's metric-handle rule, quoted** (§13); the two-route parity re-positioned as a compatibility obligation, not a generic-metric requirement (§1.1, §11); Checkpoint-0 oracle wording generalized (§11). Revision 2 (operator review of revision 1): scalar-mandatory / per-sample-evidence-optional metric semantics (§4); scoreability made an EXECUTABLE behaviour and a DoD item (§4, §12); `DeliverableSpec` vs `ScoreabilityContract` ownership sharpened (§4); the Step-06 runtime-interface vs Step-12 task-declaration split made explicit (§5, §16-Q2); Q3 now blocks freeze on semantics. Implementation is NOT authorized by this document. |
+| Status | **DRAFT — READY FOR OPERATOR REVIEW. NOT FROZEN. NOT IMPLEMENTED.** Revision 4 (2026-08-15): per-commit checklists C0-C8 added (§19) after inspecting each seam — every item `[ ]`, evidence ledger §20 empty; two inspection findings recorded (`NUM_FILES` inside the scorer; the `StubSandbox` pseudo contract). Revision 3 (operator review of revision 2): Q1 ownership wording sharpened to the 05c-representation / 06-acceptance split (§4, §16); scoreability's SEMANTIC SCOPE bounded — execution semantics frozen, no universal completeness/channel/shape schema (§4, §16-Q3); **Gate 2 re-dispositioned to NOT REQUIRED on the standard's own assignment table and roadmap §17's metric-handle rule, quoted** (§13); the two-route parity re-positioned as a compatibility obligation, not a generic-metric requirement (§1.1, §11); Checkpoint-0 oracle wording generalized (§11). Revision 2 (operator review of revision 1): scalar-mandatory / per-sample-evidence-optional metric semantics (§4); scoreability made an EXECUTABLE behaviour and a DoD item (§4, §12); `DeliverableSpec` vs `ScoreabilityContract` ownership sharpened (§4); the Step-06 runtime-interface vs Step-12 task-declaration split made explicit (§5, §16-Q2); Q3 now blocks freeze on semantics. Implementation is NOT authorized by this document. |
 | Design base | master `75525dc9` (Step 05 COMPLETE: 05a `cfb3b1c7`, 05b `5ce205d3`, 05c `03e00944`; finalizer `75525dc9`) |
 | Depends on | Step 02 (`DatasetProfile`) · Step 03 (`ModelIOContract`) · Step 05c (`DeliverableSpec`, provisional) · roadmap §10, §14, §16, §20 |
 | Owns | the **EvaluationMetric** interface; the **evaluation-vs-training-diagnostics boundary** (by exclusion); the **Deliverable-Contract confirm-or-say-why review** |
@@ -480,3 +480,628 @@ enumerated; roadmap §15.1 row and README mirror synchronized post-merge; and
 Step 07a can bind the metric handle for policy without touching scoring.
 
 **Until then: NOT FROZEN. NOT IMPLEMENTED.**
+
+---
+
+## 19. Commit plan — per-commit checklists (revision 4)
+
+**Discipline (binding).** Every plan item below was written after inspecting
+the seam it names at `b3c7ac8c`; line numbers are reading aids, not
+contracts — re-read the touched source immediately before each commit. `[ ]`
+= not done; `[x]` = done **and** verified with recorded evidence in the §20
+ledger. Never mark `[x]` before the evidence exists. **Before each commit,
+stop and show: the exact `git diff --stat`, the staged file list, the tests
+run with counts and wall time, and any deviation from this plan** (the 05a/05b/05c
+precedent). Planner exposure and production-default changes are outside these
+commits and require separate evidence and operator approval. Exact commit
+*count* is not frozen: a listed commit may be split at a clean boundary; the
+semantic sequence, the §12 acceptance criteria and the §13 disposition are.
+
+**Two inspection findings that shape the plan** (recorded here so no commit
+"discovers" them):
+
+- `scoring_utils.score_vector` sizes `file_vector` as `[None] * NUM_FILES`
+  (`:583`) with `NUM_FILES` imported from `dataset_config` (`:64`), and
+  bounds-checks `file_index` against it (`:317-318`). That is a
+  TIDMAD-topology fact living inside the scorer. The handle must **not**
+  re-declare it; C2 threads the existing `profile=` parameter (`:500`) the
+  scorer already accepts, and the length stays whatever the frozen instance
+  produces. Making the vector length profile-derived *inside* `score_vector`
+  is scorer arithmetic-adjacent and is a §13 flip candidate — record, do not
+  do, unless parity proves it neutral.
+- `StubSandbox.score_vector` (`sandbox_executor.py:2175+`) returns the same
+  2-tuple with a length-9 `file_vector` for pseudo mode. The pseudo path is a
+  compatibility surface: C2 must keep the stub's contract byte-identical, and
+  the pseudo-mode integration tests are part of Checkpoint D.
+
+**Dependency chain.** `C0 → C1` (oracle, then inert type). `C1 → C2` (the
+live in-process route). `C2 → C3` (the subprocess route must agree with the
+now-migrated live route). `C3 → C4` (record payload assumes both routes emit
+through the handle). `C4 → C5` (guards need the payload types to exist).
+`C5 → C6` (contrast rung needs the guards so it cannot pass by re-inlining).
+`C6 → C7` (mutations + Checkpoint C over the finished seam). `C7 → C8`
+(terminal). Readers-first is not applicable here — there is one producer of
+metric values (the scorer) and its consumers all read the record.
+
+---
+
+### C0 — Checkpoint 0: capture the two-route parity oracle and the metric-identity key set
+
+**1. Goal.** Pin what no oracle pins today: that the two live scoring entry
+points — in-process `TidmadSandbox.score_vector` (`sandbox_executor.py:1858`,
+called by the tuner at `ml_hyperparameter_tune_agent.py:5321`) and the
+`execute_scoring` subprocess (`:1899-1971` → `denoising_score_single.py`) —
+produce the same result for the same deliverable, and what that result's
+shape is. Separate commit because a parity baseline captured after C2 proves
+nothing about C2.
+
+**2. Scope.**
+- New tests under `tests/unit/execute_tools/` and `tests/unit/core/` (settle
+  exact module placement by inspection; the 05c C0 modules are the pattern).
+- Reuse: `tests/unit/execute_tools/test_step05c_c0_deliverable_baseline.py`'s
+  synthetic-deliverable writer (`create_abra_file` through the real writer),
+  and `tests/unit/execute_tools/test_step00_numeric_baselines.py`'s anchor
+  goldens for `s_max`/anchors.
+- **Non-goals**: no production file changes; no re-capture of the frozen
+  formula pins (`test_step00_numeric_baselines.py`, `test_scoring_helpers.py`,
+  `test_phase67_scoring_precision.py` already pin them); no scorer-arithmetic
+  assertion beyond "both routes agree".
+- Depends on: nothing.
+
+**3. Implementation plan.**
+- [ ] Re-read `score_vector` `:490-610` and `denoising_score_single.py:150-227`
+      and record how each route obtains `sample_set`, `anchor_map`, `s_max`,
+      `denoised_filename_fn`, `profile`.
+- [ ] Build one deterministic synthetic deliverable (small, both channels,
+      known sample values) with the real writer, under a small bound profile
+      so the run is seconds — the 05c Checkpoint-C fixture geometry
+      (`psd_segment_length` 4,096) is the precedent.
+- [ ] Capture route (i): `TidmadSandbox.score_vector(...)` on it → record the
+      exact **existing TIDMAD result and its key/output shape** (today a
+      scalar and a `file_vector`) as **hardcoded literals**.
+- [ ] Capture route (ii): drive `execute_scoring` → `denoising_score_single.py`
+      as a **real subprocess** on the same deliverable; record the
+      `--output_json` keys and values as hardcoded literals.
+- [ ] Assert route (i) == route (ii) on scalar and per-file values (exact
+      float equality — same arithmetic, same inputs; if they differ, that is
+      a **finding**, recorded before anything is built).
+- [ ] Capture the `per_file_best` identity key set as it stands
+      (`test_per_file_best.py:719` already pins it — reference, do not
+      duplicate).
+- [ ] Capture the pseudo path: `StubSandbox.score_vector` return shape
+      (2-tuple, length-9 vector) as a hardcoded expectation.
+- [ ] Record every captured value in §20.
+
+**4. Validation plan.**
+- *Unit*: every new capture passes against unmodified production code.
+- *Integration/pseudo*: the route-(ii) capture IS a real subprocess.
+- *Negative*: none at C0 (captures only).
+- *Backward-compat*: this commit **is** the parity instrument.
+- *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] `git status --porcelain` lists **no production file** in this commit.
+- [ ] Captured values are hardcoded literals, never re-derived by calling
+      the code under test.
+- [ ] Route (i) and route (ii) results are asserted **equal to each other**
+      and each equal to its literal.
+- [ ] The oracle is worded as "the existing TIDMAD result and shape", not as
+      `(file_vector, scalar)` (revision 3, §11).
+- [ ] Each capture is traceable to the production site it guards, by
+      `file:line`.
+
+**6. Failure and edge cases.**
+- Routes disagree at C0 → **record as a pre-existing finding**; do not fix
+  in C0; the design's parity claim is then "each route unchanged", not
+  "routes equal", until diagnosed. Surface to the operator.
+- The subprocess route needs `--anchor_map` / real anchor JSON → use the
+  committed anchor goldens; if the fixture cannot satisfy it without real
+  data, record the substitution and move that capture to Checkpoint C.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/<c0 module> tests/unit/core/<c0 module> -q`
+      *(narrow at implementation time)*
+- [ ] Record: test count, wall time, and explicit confirmation that zero
+      production files were modified.
+
+**8. Commit boundary.** Tests and a written census only. Independently
+reviewable as "what we promise not to change". No production edit.
+
+---
+
+### C1 — the metric handle: `MetricSpec` / `ScoreabilityContract` / `MetricResult`, inert, with the TIDMAD instance
+
+**1. Goal.** Introduce the typed runtime value §4/§5 froze — mandatory
+scalar, optional evidence, explicit direction and aggregation, references,
+an EXECUTABLE scoreability contract — with its TIDMAD derived instance and
+**no production consumer**. Separate because "the type is correct" and
+"production uses it" are different claims (05c C1 precedent).
+
+**2. Scope.**
+- One new module (placement by inspection; `execute_tools/deliverable_spec.py`
+  is the pattern and the natural neighbour). Field names PROVISIONAL (§5).
+- The TIDMAD instance derived with **no declaration** (regime A): identity
+  extends `per_file_best`'s `metric_id: "tidmad_denoising_score"` /
+  `score_transform` / `log_base` (`per_file_best.py:358-362`); direction
+  `higher`; aggregation = the frozen instance's own function (referenced,
+  not re-implemented); scoreability = required channels (the two the scorer
+  addresses, `scoring_utils.py:261-264, 396-401`), required attrs
+  (`voltage_range_mV`, `sampling_frequency` — `:160-163`), required storage
+  dtype/offset (referenced from `DeliverableSpec.storage`), required
+  completeness (TIDMAD meaning: every in-scope file has an output).
+- **Non-goals**: no YAML, no `task_config.yaml` edit (Step 12), no schema
+  field on any existing record, no call site, no change to `score_vector`,
+  no loss field of any kind (§7).
+- Depends on: C0.
+
+**3. Implementation plan.**
+- [ ] Re-read `deliverable_spec.py` and mirror its shape: frozen Pydantic
+      models, one derivation function, defaults that yield the TIDMAD
+      instance with no input.
+- [ ] Define `MetricSpec` (id · direction · aggregation id · transform +
+      params · references · scoreability) and `MetricResult` (metric_id ·
+      direction · scalar · optional evidence · references_used) — names
+      provisional.
+- [ ] Define `ScoreabilityContract` with an executable
+      `validate(deliverable_path, ...) -> ok | structured failure` and NO
+      universal completeness/channel/shape schema (§5 scope bound): TIDMAD's
+      predicate is TIDMAD's instance, declared against `DeliverableSpec`.
+- [ ] Provide the TIDMAD derivation (`derive_tidmad_metric_spec(profile,
+      deliverable_spec)` or equivalent) — the aggregation is a *reference*
+      to the frozen `score_vector`, never a re-implementation.
+- [ ] Confirm by scan that no production module imports it (05c's
+      inertness test pattern, later inverted).
+
+**4. Validation plan.**
+- *Unit*: the TIDMAD instance's identity fields equal the `per_file_best`
+  literals; direction is `higher`; scoreability `validate` accepts the C0
+  synthetic deliverable.
+- *Negative*: a loss-shaped metric is rejected (§7 boundary — executable
+  from C1 onward); a `MetricResult` cannot be built from `loss_history`;
+  identical/missing required channels rejected; an unknown direction
+  rejected; scoreability rejects a deliverable missing a required attr /
+  channel / with the wrong dtype / incomplete — with a **structured**
+  failure, not an exception from h5py.
+- *Backward-compat*: no existing schema changed; no config file changed.
+- *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] A **scalar-only** `MetricSpec`/`MetricResult` is constructible
+      (evidence optional — §4).
+- [ ] The TIDMAD instance derives with no declaration and matches the C0
+      identity literals.
+- [ ] `validate` on the C0 deliverable → ok; on each invalid variant → the
+      structured failure names the violated requirement.
+- [ ] Zero production importers (asserted).
+- [ ] No file under `configs/` changed; no existing schema gained a field.
+- [ ] No field on any metric type can hold a loss (negative test reds if one
+      is added).
+
+**6. Failure and edge cases.**
+- A required scoreability fact is not derivable from `DeliverableSpec` +
+  profile → **MATERIAL STOP** (would need a declaration Step 06 does not
+  own).
+- Two scoring routes need different scoreability inputs → they must resolve
+  the **same** predicate; a per-route predicate is two authorities.
+
+**7. Verification commands and evidence.**
+- [ ] targeted selector for the new module + the C0 captures.
+- [ ] Record counts, wall time, the zero-importer confirmation.
+
+**8. Commit boundary.** One new typed value + TIDMAD derivation, inert,
+independently revertible.
+
+---
+
+### C2 — the LIVE route through the handle: `TidmadSandbox.score_vector` + the tuner's run-scope binding
+
+**1. Goal.** Make PRODUCTION SCORING (the tuner's in-process route) invoke
+the frozen instance THROUGH the handle, with scoreability evaluated **before**
+`score_vector` runs. This is the §15.1 row's named live consumer.
+
+**2. Scope.**
+- `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`:
+  bind `run_metric` once at run scope beside `run_profile` / `run_model_io`
+  / `run_deliverable_spec` (`:3704-3740`); the scoring call `:5321-5326`
+  goes through it.
+- `core/sandbox_executor.py::TidmadSandbox.score_vector` (`:1858-1897`):
+  accept the handle (or the spec) and evaluate scoreability before
+  delegating to `scoring_utils.score_vector`; thread the existing
+  `profile=` parameter rather than any new topology fact.
+- `StubSandbox.score_vector` (`:2175+`): signature kept compatible; return
+  contract byte-identical.
+- **Non-goals**: no change to `scoring_utils.score_vector`'s arithmetic or
+  its 2-tuple return; no change to `_LOG_BASE`, `s_max`, anchors; no record
+  change yet (C4); no subprocess route yet (C3); no `NUM_FILES` change
+  (see finding above).
+- Depends on: C1.
+
+**3. Implementation plan.**
+- [ ] Re-read `:5300-5340` (call site + `_denoised_fn`) and `:1858-1897`
+      and record exactly what crosses today.
+- [ ] Bind `run_metric` at run scope from the run profile + run deliverable
+      spec — one acquisition point.
+- [ ] Route the live call through the handle: scoreability `validate` on the
+      deliverable set → on failure, a **structured not-scoreable result**
+      reaches the round-outcome path (record which existing status/failure
+      field carries it — inspect `_decide_round_outcome` `:366-388` before
+      choosing; do not invent a new status if an existing one is honest).
+- [ ] On success, delegate to `scoring_utils.score_vector` unchanged.
+- [ ] Keep `StubSandbox` returning its 2-tuple.
+
+**4. Validation plan.**
+- *Unit*: the C0 route-(i) literal is reproduced exactly through the handle.
+- *Integration/pseudo*: a pseudo-mode round reaches scoring and the
+  `StubSandbox` contract is unchanged (existing pseudo smoke tests).
+- *Negative*: an unscoreable deliverable set yields the structured failure
+  **before** `score_vector` is called (assert `score_vector` not invoked).
+- *Backward-compat*: `TidmadSandbox.score_vector` remains callable by
+  callers that predate the handle (regime A default resolves TIDMAD).
+- *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] The tuner's live scoring call resolves through `run_metric` — asserted
+      by reachability (a renamed/contrast handle changes the observed
+      behaviour), not by inspection alone.
+- [ ] Route (i) result equals the C0 literal exactly.
+- [ ] Scoreability failure short-circuits scoring with a structured result;
+      `score_vector` is not reached.
+- [ ] `StubSandbox.score_vector` return is unchanged (C0 pseudo capture).
+- [ ] `scoring_utils.score_vector` diff is **empty**.
+- [ ] Legacy callers of `TidmadSandbox.score_vector` are unaffected.
+
+**6. Failure and edge cases.**
+- Scoreability needs the deliverable *set* but the tuner only has a
+  filename fn → derive paths from `eval_sample_set` + `_denoised_fn` (both
+  exist at `:5321-5326`); if that is insufficient, **record**, do not add
+  argv.
+- A not-scoreable result on a **formal** round → the round-outcome semantics
+  (Step 07a) are NOT changed here; the failure must land in an existing
+  honest field/status. If none is honest → **STOP** and surface.
+- Resume: a resumed run must bind the same `run_metric` (regime A ensures
+  it); assert, do not assume.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/core -q` *(narrow)*
+- [ ] Record counts, wall time, the route-(i) equality, the short-circuit
+      evidence.
+
+**8. Commit boundary.** One live consumer, one route. No subprocess, no
+record, no scripts.
+
+---
+
+### C3 — the SUBPROCESS route through the handle: `execute_scoring` / `denoising_score_single.py`
+
+**1. Goal.** The second existing entry point reconstructs the same TIDMAD
+instance from what already crosses (`--dataset_profile_json`) and evaluates
+the same scoreability — so the two routes keep agreeing (§1.1 compatibility
+obligation). Separate because it is a real subprocess boundary with its own
+argv contract.
+
+**2. Scope.**
+- `execute_tools/denoising_score_single.py` (`:150-227`): derive the metric
+  spec from the loaded profile (05c §3.2a Option-A pattern — no serialization
+  of the spec, no new argv), validate scoreability, then `score_vector`.
+- `core/sandbox_executor.py::execute_scoring` (`:1899-1971`): unchanged argv;
+  the merged `--output_json` keys unchanged (C4 may add keys additively).
+- Callers `scripts/run_comparison.py:241`, `agent/skills/denoising_score_skill/wrapper.py:12`:
+  unchanged.
+- **Non-goals**: no new argv (or the Stage-A claim is downgraded in
+  writing — 05c precedent); no output-key removal/rename.
+- Depends on: C2.
+
+**3. Implementation plan.**
+- [ ] Re-read `denoising_score_single.py` argv + main flow; confirm the
+      profile is loaded fail-closed (`:151-155`).
+- [ ] Derive the metric spec in the child from `dataset_profile` (+ the
+      derived deliverable spec) — one derivation, two callers.
+- [ ] Validate scoreability before `score_vector`; on failure write a
+      **structured** not-scoreable payload to `--output_json` and exit with a
+      status the parent's existing handler classifies honestly (inspect
+      `:1961-1971`).
+- [ ] Assert no ambient second resolution in the child when a profile path
+      was given (05c C3 precedent).
+
+**4. Validation plan.**
+- *Unit*: argv for `execute_scoring` equals the pre-C3 ordered list (capture
+  in C0 if not already pinned by an existing test — inspect
+  `test_sandbox_executor.py`).
+- *Integration*: a **real** `execute_scoring` subprocess on the C0
+  deliverable reproduces the route-(ii) literal exactly, and equals route (i).
+- *Negative*: an unscoreable deliverable → structured failure in
+  `--output_json`, no scorer traceback.
+- *Backward-compat*: `run_comparison.py` / the skill wrapper call sites are
+  byte-unchanged.
+- *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] `execute_scoring` argv identical (ordered) to the pre-C3 capture.
+- [ ] Route (ii) == route (i) == the C0 literal.
+- [ ] Exactly one `derive_*_metric_spec` call in the child; exactly one
+      `resolve_dataset_profile()` (the pre-existing legacy adapter) — no
+      second.
+- [ ] Structured not-scoreable output on the negative fixture.
+
+**6. Failure and edge cases.**
+- Child cannot derive a required scoreability fact from the transported
+  profile → same MATERIAL STOP as C1 (transport insufficiency; not an argv
+  problem to solve here).
+- Parent's error classifier maps the new structured failure to `"error"` →
+  record; do not invent a new status in this step.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q` *(narrow)*; the real-subprocess test under `tests/integration/execute_tools/`.
+- [ ] Record counts, wall time, the two-route equality.
+
+**8. Commit boundary.** One subprocess route. No record change.
+
+---
+
+### C4 — record-facing payload: additive `MetricResult` on `ExperimentRecord`
+
+**1. Goal.** Make identity, direction and value **machine-readable on every
+record** so Step 07a/09 can consume them — additively, beside
+`denoising_score` / `file_vector` / `score_table`, which are untouched (D1).
+
+**2. Scope.**
+- `agent/schemas/hyperparam_tuning.py::ExperimentRecord` (`:381-399`): one
+  additive optional field family (name provisional), default `None`.
+- Tuner record write `ml_hyperparameter_tune_agent.py:5776-5786`: populate
+  it from the handle result.
+- `HyperparamTuningOutput` (`:2465-2700`): **untouched** — `best_*_denoising_score`
+  fields are D1.
+- **Non-goals**: no rename; no removal; no dashboard change; no
+  `ModelRunSummary` change (Step 09).
+- Depends on: C3.
+
+**3. Implementation plan.**
+- [ ] Re-read `:5768-5800` and the schema; add the optional field(s).
+- [ ] Populate from the C2 handle result on the success path; leave `None`
+      on failure paths (and on the pseudo path unless the stub supplies it —
+      inspect).
+- [ ] Confirm `save_record` / `coerce_nonfinite_to_none` need no change.
+
+**4. Validation plan.**
+- *Unit*: a record built by the live path carries `metric_id ==
+  "tidmad_denoising_score"`, `direction == "higher"`, `scalar ==
+  denoising_score` (equal by construction, asserted).
+- *Backward-compat*: every committed historical `ExperimentRecord`,
+  `HyperparamTuningOutput`, `InterpretationOutput`, `run_output_*.json` under
+  `tests/pseudo_data/` and any committed goldens validates unchanged (the
+  05a "replay from committed artifacts" pattern).
+- *Negative*: a record whose additive field disagrees with
+  `denoising_score` is rejected (one value, two names — they must agree).
+- *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] `denoising_score`, `file_vector`, `score_table` names and semantics
+      unchanged; `git diff` shows only additions to the schema.
+- [ ] Historical artifacts validate unchanged (count recorded).
+- [ ] The additive field is populated on the live path and `None`
+      elsewhere.
+
+**6. Failure and edge cases.**
+- Pseudo path (`StubSandbox`) does not carry identity → `None` is honest;
+  do not fabricate.
+- A record with `denoising_score` but no `MetricResult` (pre-C4 record) is
+  valid — additive optional.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/agent tests/unit/core -q` *(narrow)*.
+- [ ] Record counts, wall time, the historical-artifact count validated.
+
+**8. Commit boundary.** Schema + one write site. Additive only.
+
+---
+
+### C5 — boundary negatives and the structural guard
+
+**1. Goal.** Make the §7 boundary and the "declared once" property
+executable: losses cannot enter the metric types; no owned scoring consumer
+executes a hardcoded direction where the handle is available; the TIDMAD
+`metric_id` literal is declared exactly once.
+
+**2. Scope.** Tests only (+ the C1 negative tests may move here if not
+already landed). **Non-goals**: no production change; no assertion against
+consumers Step 06 does not reach (workflow `:2740`, resume `:438`,
+`per_file_best._row_beats`, dashboards — the D1 list, enumerated in §20).
+Depends on: C4.
+
+**3. Implementation plan.**
+- [ ] Boundary negative: constructing a metric whose identity is a loss, or
+      populating `MetricResult` from `loss_history`, is rejected.
+- [ ] Structural guard over the **owned** consumers (the tuner's live
+      scoring path, `TidmadSandbox.score_vector`, `denoising_score_single.py`,
+      the metric module): no executed hardcoded direction; the
+      `tidmad_denoising_score` literal appears in exactly one executed
+      constant (05c "declared exactly once" pattern, AST over executed
+      constants, docstrings excluded).
+- [ ] Record the **not-reached** direction consumers as an explicit list
+      (D1) — a test that asserts they still contain their literal, so the
+      list cannot silently drift (05c out-of-rung pattern).
+
+**4. Validation plan.** *Unit*: the above. *Negative*: the guards red on a
+re-inlined direction / a second `metric_id` declaration (proved at C7 by
+mutation). *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] Loss-shaped metric rejected; `loss_history` → `MetricResult` rejected.
+- [ ] Owned surfaces: zero executed hardcoded direction; `metric_id` declared
+      once.
+- [ ] The D1 not-reached list is asserted, not merely written.
+
+**6. Failure and edge cases.** A guard finds a direction literal in an
+owned surface that C2/C3 missed → same-authority missed site → migrate in
+this commit and record (05c precedent), unless it is scorer arithmetic
+(then flip candidate — record, stop).
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q` *(narrow)*.
+- [ ] Record counts, wall time.
+
+**8. Commit boundary.** Evidence only.
+
+---
+
+### C6 — Stage-B rung: the metric-direction axis (lower-is-better through the handle)
+
+**1. Goal.** Prove the abstraction supports a materially different metric —
+one axis: direction — on stub outputs, entering the record through the
+handle, with TIDMAD's instance unchanged (roadmap §10.5; a §21.4
+objective-dimension atomic fixture at TIDMAD's topology).
+
+**2. Scope.** Tests only. **Non-goals**: no incumbent selection under the
+contrast metric (Step 07a); no image/spatiotemporal track (§21.3 — Step 06
+attaches the cheapest grade); no `task_config.yaml` declaration (Step 12).
+Depends on: C5.
+
+**3. Implementation plan.**
+- [ ] Construct a scalar-only, `direction="lower"` `MetricSpec` in-process
+      (regime A instance stays TIDMAD; the contrast is injected at the seam,
+      exactly as 05c's renamed naming was).
+- [ ] Drive the live route with it on stub outputs; assert the record's
+      additive payload carries `direction="lower"` and the contrast identity,
+      and that TIDMAD's identity/direction are untouched in the same process.
+- [ ] Negative: the rung does not fire on the shipped instance.
+
+**4. Validation plan.** *Unit*: the rung. *Negative*: shipped instance
+unchanged. *Gate*: none.
+
+**5. Acceptance criteria.**
+- [ ] A scalar-only lower-is-better metric enters the record through the
+      handle with explicit `direction="lower"`.
+- [ ] TIDMAD identity/direction unchanged in the same run.
+- [ ] Nothing else varied (one axis).
+
+**6. Failure and edge cases.** The rung passes only because a seam returns
+the contrast value unconditionally → the negative catches it.
+
+**7. Verification commands and evidence.**
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/core -q` *(narrow)*.
+- [ ] Record counts, wall time.
+
+**8. Commit boundary.** Evidence only.
+
+---
+
+### C7 — mutations per semantic family + Checkpoint C (real subprocess)
+
+**1. Goal.** Prove each semantic family is load-bearing and cross the real
+subprocess boundary with the finished seam.
+
+**2. Scope.** Tests + a scratch mutation runner (05c pattern; not committed
+into the tree unless it already has a home). **Non-goals**: no production
+change. Depends on: C6.
+
+**3. Implementation plan.**
+- [ ] Mutation families (count NOT frozen; add finer ones only where they
+      supply unique evidence): identity swap · direction flip · aggregation
+      substitution · **scoreability bypass** (validate skipped → arithmetic
+      reached on an invalid artifact) · route divergence (in-process vs
+      subprocess) · declared-once (a second `metric_id` literal).
+- [ ] Hygiene: assert each mutation's site count == 1 before applying; clear
+      `__pycache__`; restore from clean source; re-verify green.
+- [ ] Checkpoint C: a **real** `execute_scoring` subprocess scores a real
+      small deliverable through the handle; result equals the in-process
+      route; the scoreability negative also runs through the real subprocess.
+      Helper-only is insufficient (05c §6 discipline; reuse
+      `test_step05c_checkpoint_c_deliverable_boundary.py`'s harness).
+- [ ] Classify any survivor (real gap / equivalent / unreachable / wrong
+      fixture) **before** strengthening an oracle.
+
+**4. Validation plan.** *Unit*: mutations. *Integration*: Checkpoint C. *Gate*:
+NOT REQUIRED (§13) — listed separately, not launched.
+
+**5. Acceptance criteria.**
+- [ ] Every family reds; each failure names the family.
+- [ ] Zero survivors, or each survivor classified and recorded.
+- [ ] Checkpoint C: real subprocess result == in-process == C0 literal; the
+      structured not-scoreable result observed through the real subprocess.
+- [ ] Tree restored green after every mutation.
+
+**6. Failure and edge cases.** A survivor → inspect test architecture first.
+Real subprocess needs anchors → the committed goldens; if real data is
+genuinely required, record and route that assertion to a (discretionary,
+operator-elected) Gate 2 rather than pretending coverage.
+
+**7. Verification commands and evidence.**
+- [ ] mutation runner log; `.venv/bin/python -m pytest tests/integration/execute_tools/<checkpoint c module> -q`.
+- [ ] Record each mutation's expected vs observed, and the restored-green
+      re-run.
+
+**8. Commit boundary.** Evidence only.
+
+---
+
+### C8 — terminal validation, docs, ledger, CI
+
+**1. Goal.** Terminal evidence; leave the PR reviewable; record the
+Deliverable-Contract verdict and the D1 not-reached list.
+
+**2. Scope.** §20 ledger; touched module/node docs (tuner node doc for the
+run-scope binding; `execute_tools` docs if the metric module gets a `.md`);
+CI iteration. **Non-goals**: no new capability. Depends on: C7.
+
+**3. Implementation plan.**
+- [ ] Synchronize §20 with actual findings, deviations, evidence.
+- [ ] Record the OD-20-7 verdict (confirm / defer-with-reason) as decided by
+      the operator at freeze.
+- [ ] Update touched docs as the last pre-merge step, quoting each documented
+      behaviour against merged source (CLAUDE.md doc-sync rule).
+- [ ] Terminal checks from a **clean tree**: directly affected unit
+      subsystems · Checkpoint C · `ruff check` · `ruff format --check` ·
+      exact-head CI (strict pyright is CI's — record the local-node
+      limitation if it recurs).
+- [ ] Open/update ONE PR; drive exact-final-head CI green; verify local HEAD
+      == PR `headRefOid` == successful CI `headSha`.
+
+**4. Validation plan.** As listed. **No local full suite by default.**
+
+**5. Acceptance criteria.**
+- [ ] Every verdict read from the log file, never a wrapper's exit status.
+- [ ] Three-way SHA identity read, not reconstructed.
+- [ ] Working tree clean; §20 records every deviation; the D1 not-reached
+      list is enumerated.
+
+**6. Failure and edge cases.** The PR3-L2 preflight guard reds on a dirty
+tree → commit the checkpoint first; never relax it. CI env-only failures →
+diagnose, fix, not a stop.
+
+**7. Verification commands and evidence.**
+- [ ] the terminal command set with counts and wall time; CI run id and
+      exact `headSha`.
+
+**8. Commit boundary.** Docs and CI-driven fixes only.
+
+### 19.1 Commit-boundary discipline (binding for every commit above)
+
+Before each semantic commit, record in §20: the exact `git diff --stat`, the
+staged file list, the tests run with counts and wall time, and any deviation
+from this plan. **Then stop and show them** before committing. Never mark
+`[x]` before the evidence exists; an unperformed exact command is recorded as
+DEVIATED / SUPERSEDED with what was actually run.
+
+### 19.2 C0-C8 and Checkpoints 0/A/B/C/D are internal milestones
+
+They are semantic evidence milestones inside ONE PR — not child PRs and not
+approval boundaries. Ordinary findings follow: inspect → classify → record →
+fix → validate → continue. Only a MATERIAL STOP returns early: a scoreability
+fact not derivable from existing authorities; a route that cannot agree
+without new argv; a required change to scorer arithmetic, deliverable bytes or
+the subprocess argv contract (each also flips §13); a not-scoreable outcome
+that no existing status can carry honestly; or a `NUM_FILES`-class topology
+fact the handle would have to re-declare.
+
+### 19.3 Out of scope for these commits
+
+Planner exposure (nothing here reaches an LLM prompt), production-default
+changes, task-level metric declaration (Step 12), incumbent/threshold policy
+(Step 07a), Interpreter consumption (Step 09), the empirical comparison
+campaign. Only the validation needed to implement the feature safely is in
+scope.
+
+## 20. Implementation ledger
+
+*(empty — populated at implementation kickoff; the freeze does not begin
+implementation)*
