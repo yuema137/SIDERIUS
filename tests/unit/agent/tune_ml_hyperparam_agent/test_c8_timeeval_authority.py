@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.evaluate_time_skill.wrapper import _gate_decision
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 
 def _shape(*, minutes: float, source: str) -> dict:
@@ -150,6 +151,7 @@ class TestEvidenceChannelFailure:
             loss_config={"loss_type": "ce"},
             sample_set={"0": [0]},
             time_budget_minutes=10.0,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert result["status"] == "error"
         assert "ABORT" in result["message"]

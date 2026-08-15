@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, get_args
+from typing import TYPE_CHECKING, Any, get_args
 
 from agent.skills.evaluate_vram_skill.isolated_probe import (
     HardwareSnapshot,
@@ -46,6 +46,9 @@ from agent.skills.evaluate_vram_skill.isolated_probe import (
     default_worker_memory_limit_bytes,
     run_isolated_preflight,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agent.schemas.model_io_contract import ModelIOContract
 
 __all__ = [
     "OUTCOME_TO_LEGACY",
@@ -220,12 +223,20 @@ def run_production_preflight(
     workspace: str | Path,
     label: str,
     deadline_seconds: float = 900.0,
+    model_io_contract: ModelIOContract | None = None,
 ) -> dict[str, Any]:
     """Run one candidate's pre-flight in a child and return the legacy dict.
 
     ``vram_budget_gb=None`` means *no operator ceiling*, not *unset*: the
     worker then uses the parent's frozen ``usable_cap_gb`` rather than
     rediscovering a cap of its own (D-A4).
+
+    ``model_io_contract`` is the RUN-BOUND normalized Model-I/O declaration
+    (Step 05b), carried by value onto the transient spec so the child probes
+    the same declaration the parent bound. It is supplied by the caller and
+    never resolved here: a resource path that re-read an ambient task
+    configuration could price a run against a declaration the run is not
+    using. ``None`` is the legacy no-contract path.
     """
     snapshot = build_hardware_snapshot(hardware_context)
     workdir = Path(workspace) / "preflight_workers"
@@ -239,6 +250,7 @@ def run_production_preflight(
         result_path=str(workdir / f"{label}.json"),
         worker_memory_limit_bytes=default_worker_memory_limit_bytes(),
         hardware=snapshot,
+        model_io_contract=model_io_contract,
     )
     # No try/except around this call: a worker failure is already a typed
     # PROBE_INFRASTRUCTURE_FAILURE, and catching it to retry in-process is

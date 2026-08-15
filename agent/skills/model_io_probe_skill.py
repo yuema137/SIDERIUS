@@ -98,6 +98,14 @@ class ProbeConstructionError(ValueError):
     contract at all is the legacy path, and absence alone must never raise.
     Collapsing those two cases would turn every legacy caller into a hard
     failure, which is the mistake §15.1 spells out.
+
+    **Step 05b widened the "unusable" case to the caller's side of the
+    realization**, keeping one typed error rather than adding a second: a
+    non-positive supplied extent, or one scalar offered for two independent
+    symbolic alignments, makes the requested instance just as unrealizable as
+    a missing class cardinality does. Both are reachable only when the caller
+    passes an explicit extent; omitting them is still the legacy path and
+    still never raises.
     """
 
 
@@ -106,7 +114,12 @@ class ProbeConstructionError(ValueError):
 # ---------------------------------------------------------------------------
 
 
-def realize_shape(tensor: TensorContract) -> tuple[int, ...]:
+def realize_shape(
+    tensor: TensorContract,
+    *,
+    batch: int | None = None,
+    symbolic: int | None = None,
+) -> tuple[int, ...]:
     """Turn a declared tensor contract into one concrete probe shape.
 
     Rank and axis ORDER come from the contract — ``len(axes)`` is the rank and
@@ -115,28 +128,119 @@ def realize_shape(tensor: TensorContract) -> tuple[int, ...]:
     Per axis, in precedence order:
 
     1. a ``fixed`` extent is a DECLARED fact and is used verbatim;
-    2. a ``batch``-role axis is realized at :data:`PROBE_BATCH`;
-    3. anything else (symbolic or dynamic) is realized at
-       :data:`PROBE_SYMBOLIC_EXTENT`.
+    2. a ``batch``-role axis is realized at ``batch``, defaulting to
+       :data:`PROBE_BATCH`;
+    3. anything else (symbolic or dynamic) is realized at ``symbolic``,
+       defaulting to :data:`PROBE_SYMBOLIC_EXTENT`.
 
     ``fixed`` first is what keeps the two kinds apart: a class alphabet of
     256 is a declared extent that the probe must honour, while ``T`` is a
     name for "as long as the input", which the probe may satisfy at any
-    length.
+    length. **A ``fixed`` extent still wins over both keyword arguments** —
+    they are recipe conveniences, and a declared fact outranks a recipe. That
+    is the one case where the two rules meet, and it is why a caller asking
+    for ``symbolic=T`` on the shipped TIDMAD output still gets ``256`` on the
+    class axis.
 
-    Under the shipped TIDMAD contract this returns ``(1, 256, 64)`` for the
-    output and ``(1, 64)`` for the input — byte-identical to the literals it
-    replaces.
+    **Both arguments are ``None``-sensitive by contract, not by accident**
+    (Step-05b §0.2). The override is written against ``None``, never against
+    falsiness: ``0`` is a caller error, and a ``batch or PROBE_BATCH`` idiom
+    would let it resolve silently to the validation-probe default and realize
+    a tensor nobody asked for. Under a capacity probe that is a memory
+    forecast for the wrong shape.
+
+    ==================  =========================================
+    argument value      extent used
+    ==================  =========================================
+    omitted / ``None``  the existing Step-04 recipe constant
+    positive ``int``    the supplied runtime extent
+    ``0`` or negative   :class:`ProbeConstructionError` — never a fallback
+    ==================  =========================================
+
+    Args:
+        tensor: the declared tensor contract to realize.
+        batch: runtime extent for a ``batch``-role axis. Step-04's two node
+            consumers omit it and get :data:`PROBE_BATCH`; Step-05b's
+            capacity probe supplies the candidate's real batch size.
+        symbolic: runtime extent for every symbolic or dynamic axis. Step-04
+            omits it and gets :data:`PROBE_SYMBOLIC_EXTENT`; Step-05b
+            supplies the candidate's real segmentation size.
+
+    Returns:
+        One concrete shape, in the contract's own axis order.
+
+    Raises:
+        ProbeConstructionError: a supplied extent is not positive, or
+            ``symbolic`` is supplied for a tensor declaring more than one
+            DISTINCT non-batch symbolic name — one scalar cannot say what
+            two independent alignments should each be, and guessing would
+            realize (and price) a shape the contract never declared.
+
+    With both arguments omitted this returns ``(1, 256, 64)`` for the shipped
+    TIDMAD output and ``(1, 64)`` for its input — byte-identical to the
+    literals it replaces, and to every realization before Step 05b.
     """
+    batch_extent = PROBE_BATCH if batch is None else _positive_extent(batch, "batch")
+    symbolic_extent = (
+        PROBE_SYMBOLIC_EXTENT if symbolic is None else _positive_extent(symbolic, "symbolic")
+    )
+    if symbolic is not None:
+        _reject_ambiguous_symbolic_extent(tensor)
+
     extents: list[int] = []
     for axis in tensor.axes:
         if axis.dimension.fixed is not None:
             extents.append(axis.dimension.fixed)
         elif axis.role is AxisRole.BATCH:
-            extents.append(PROBE_BATCH)
+            extents.append(batch_extent)
         else:
-            extents.append(PROBE_SYMBOLIC_EXTENT)
+            extents.append(symbolic_extent)
     return tuple(extents)
+
+
+def _positive_extent(value: int, name: str) -> int:
+    """A caller-supplied extent, or a typed refusal — never a fallback."""
+    if value <= 0:
+        raise ProbeConstructionError(
+            f"realize_shape received {name}={value!r}, which is not a positive "
+            "extent. Refusing to substitute the Step-04 probe default: a probe "
+            "silently realized at a size the caller did not ask for describes a "
+            "different tensor than the one under test."
+        )
+    return value
+
+
+def _reject_ambiguous_symbolic_extent(tensor: TensorContract) -> None:
+    """Refuse one scalar extent for two independent symbolic alignments.
+
+    A symbolic dimension NAMES an alignment (§4e): ``T`` on the input and
+    ``T`` on the output are the same extent. Two DISTINCT non-batch names are
+    therefore two independent questions, and answering both with one number
+    is a guess — the caller would receive a shape the contract never
+    declared, and a capacity forecast priced against it.
+
+    Not representable rather than not implemented: per-axis extents would be
+    a shape language, which belongs to whoever owns the contract schema, not
+    to a Step-04 recipe module (Step-05b §15).
+
+    Reachable only on the explicit-extent path. A caller that omits
+    ``symbolic`` keeps the pre-05b realization for any contract whatsoever.
+    """
+    names = {
+        axis.dimension.symbolic
+        for axis in tensor.axes
+        if axis.dimension.fixed is None
+        and axis.role is not AxisRole.BATCH
+        and axis.dimension.symbolic is not None
+    }
+    if len(names) > 1:
+        raise ProbeConstructionError(
+            f"cannot realize this tensor at one supplied symbolic extent: it "
+            f"declares {len(names)} distinct non-batch symbolic dimensions "
+            f"({', '.join(sorted(names))}). One number cannot say what each "
+            "independent alignment should be, and guessing would realize a "
+            f"shape the contract never declared (declared: {tensor.render_shape()})."
+        )
 
 
 def declared_output_tensor(

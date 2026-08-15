@@ -129,6 +129,39 @@ Two properties follow, and both are pinned by tests:
 callers without a run-bound profile (`scripts/run_comparison.py`, the
 proposer pre-flight) continue to do.
 
+### Resource and time planning (Step-05b)
+
+The same run-binding rule now governs what the pre-flight gates are allowed
+to *price*. Two values are bound ONCE per run, at the top of `run()`, and
+passed explicitly to every consumer:
+
+```python
+run_profile   = resolve_dataset_profile()          # Step 02 — topology
+run_model_io  = run_bound_model_io_contract()      # Step 03 — Model-I/O
+```
+
+| Bound value | Reaches | Why it is passed rather than resolved |
+|---|---|---|
+| `run_profile` | `_run_time_preflight` → `evaluate_time_skill.run_skill` (a **required** kwarg), and the §5 step guardrails | a time gate that re-read an ambient topology prices the run against a dataset it is not using |
+| `run_model_io` | `run_production_preflight` → `IsolatedProbeSpec` → the isolated worker → `evaluate_vram_skill.run_skill` | the capacity probe must realize the target the run will actually train against, not a `[B, 256, T]` literal |
+
+`run_bound_model_io_contract()` (`workflows/task_config.py`) is the **one**
+acquisition point: `SandboxExecutor._write_model_io_config` uses it too, so
+the contract the pre-flight prices against and the contract materialized to
+`--model_io_json` for the training and inference children cannot diverge.
+Resolution (preset + dataset cross-check) already happened inside
+`load_task_config`; nothing here re-resolves.
+
+A task declaring no `model_io` binds `None`, and every consumer takes its
+legacy no-contract path. **No new CLI argument and no new config field** —
+both values are runtime transport, not configuration.
+
+One behavioural consequence, stated because it is a change: binding the
+contract at startup makes an unreadable `configs/task_config.yaml` fatal
+there rather than at the first training launch. No run that would have
+succeeded can now fail — every run that trains already evaluates that same
+expression — and failing before any GPU work is the fail-closed direction.
+
 ### Pre-flight gates (resource budgets)
 
 | Field | Type | Required | Default | Description |

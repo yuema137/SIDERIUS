@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from execute_tools.dataset_config import TIDMAD_PROFILE
+
 
 def test_warmup_skipped_when_data_dir_is_none():
     """_measure_ms_per_step returns (None, ...) when data_dir is None."""
@@ -27,6 +29,7 @@ def test_warmup_skipped_when_data_dir_is_none():
         loss_config={},
         data_dir=None,
         sample_set={"0": list(range(100))},
+        profile=TIDMAD_PROFILE,
     )
     assert ms is None
     assert breakdown["aggregator"] is None
@@ -43,6 +46,7 @@ def test_warmup_skipped_when_data_dir_is_empty_string():
         loss_config={},
         data_dir="",
         sample_set={"0": list(range(100))},
+        profile=TIDMAD_PROFILE,
     )
     assert ms is None
 
@@ -58,6 +62,7 @@ def test_warmup_skipped_when_data_dir_does_not_exist():
         loss_config={},
         data_dir="/nonexistent/path/that/does/not/exist",
         sample_set={"0": list(range(100))},
+        profile=TIDMAD_PROFILE,
     )
     assert ms is None
 
@@ -91,6 +96,7 @@ def test_static_formula_uses_patched_constants():
             sample_set={"0": list(range(100))},
             ms_per_step=None,
             num_params=num_params,
+            dataset_profile=TIDMAD_PROFILE,
         )
 
     bd = result["breakdown"]
@@ -131,6 +137,7 @@ def test_warmup_path_entered_with_valid_data_dir(tmp_path, capsys):
             loss_config={},
             data_dir=str(tmp_path),
             sample_set={"0": list(range(100))},
+            profile=TIDMAD_PROFILE,
         )
 
     out = capsys.readouterr().out

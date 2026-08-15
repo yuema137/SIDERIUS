@@ -45,6 +45,7 @@ import pytest
 # implementation module — the same object _run_time_preflight lives in.
 import nodes.ml_hyperparameter_tune_agent as tuner_mod
 from agent.skills.evaluate_time_skill import wrapper as ts
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 
 class FakeSandbox:
@@ -61,6 +62,9 @@ def _base_kwargs(**overrides) -> dict:
         "loss_config": {"loss_type": "focal"},
         "sample_set": {str(i): list(range(20)) for i in range(20)},
         "train_portion": 1.0,
+        # Step 05b: the run-bound topology is a REQUIRED kwarg — the skill
+        # no longer resolves one of its own.
+        "dataset_profile": TIDMAD_PROFILE,
     }
     kw.update(overrides)
     return kw
@@ -188,6 +192,7 @@ class TestTunerTransport:
             data_dir=None,
             memory_history=[],
             is_trial=True,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert captured["skill"] == "evaluate_time_skill"
         return captured["params"]

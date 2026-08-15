@@ -81,6 +81,34 @@ Invoked through `_run_skill("evaluate_vram_skill", sandbox, ...)`, and in
 production through `run_production_preflight`
 (`preflight_adapter.py`), which routes to the isolated worker.
 
+**Optional keyword arguments** (`run_skill`, `wrapper.py`):
+
+| kwarg | Default | Meaning |
+|---|---|---|
+| `vram_budget_gb` | `None` | operator soft cap. `None` means *no operator ceiling*, never *unset*: the cap then comes from the hardware context's `usable_cap_gb`. An operator budget may only LOWER the 80 % physical ceiling, never raise it. |
+| `hardware_context` | `None` | resolved `HardwareContext`. When absent the wrapper falls back to `core.hardware_context.discover()`, so the cap is physically correct but the on-disk manifest is not consulted. |
+| `model_io_contract` | `None` | the **run-bound** normalized `ModelIOContract` (Step 05b). When supplied, the probe's float target is realized from it through `agent/skills/model_io_probe_skill` at the candidate's real batch and segmentation size, instead of from a `[B, 256, T]` literal. |
+
+`model_io_contract` is always supplied **explicitly by the caller**; this
+skill never resolves one of its own. A resource consumer that re-read an
+ambient task configuration could price a run against a declaration the run
+is not using — the defect the explicit transport exists to prevent.
+
+Three things are deliberately unchanged when a contract is supplied:
+
+- **dtype** still comes from the loss (`PLUGIN_LOSS_TARGET_DTYPE` via
+  `get_target_torch_dtype`). The contract supplies shape only.
+- **the class-index branch**: a long target is `[B, T]` class indices,
+  carrying no contract-owned extent, and returns before any contract is read.
+- **`hybrid`**: a legacy builtin adapter value, not a tensor semantic
+  (Step-03 §8c). `fcnet` picks its emitted shape from `loss_type`, which no
+  Model-I/O contract owns, so its shipped target is preserved.
+
+A contract that cannot be realized — a `classifier` declaration under a
+contract carrying no class axis, or a contract supplied without a
+`model_type` — **fails loudly**. It never falls back to the literal shape:
+a silently-wrong probe reports a capacity number for a different model.
+
 **Key returned fields** (`wrapper.py`):
 
 | Field | Meaning |

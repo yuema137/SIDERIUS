@@ -564,6 +564,11 @@ def main():
                     sample_set,
                     seg_size=input_size,
                     inference_batch_size=args.inference_batch_size,
+                    # Step 05b: the profile this subprocess already loaded at
+                    # its argv boundary, not an ambient re-resolution. The
+                    # clearest instance of the defect — the value was in
+                    # scope and simply was not passed.
+                    profile=dataset_profile,
                 ),
             )
             verifier = runtime_session.start_phase_verification("inference", unit="inference_batch")

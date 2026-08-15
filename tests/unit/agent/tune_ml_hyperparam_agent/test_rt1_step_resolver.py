@@ -17,6 +17,7 @@ from agent.skills.training_skill.estimator import (
     _total_train_steps,
     estimate_wall_time_seconds,
 )
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 PSD_LEN = 10_000_000
 
@@ -49,7 +50,7 @@ class TestStepResolverContract:
                 for portion in (1.0, 0.5, 0.1, None):
                     for epochs in (1, 3):
                         ss = {"4": list(range(20)), "5": list(range(7)), "9": [0]}
-                        est = _total_train_steps(ss, seg, bs, portion, epochs)
+                        est = _total_train_steps(ss, seg, bs, portion, epochs, TIDMAD_PROFILE)
                         actual = self._loader_steps(ss, seg, bs, portion, epochs)
                         assert est == actual, (seg, bs, portion, epochs, est, actual)
 
@@ -58,12 +59,17 @@ class TestStepResolverContract:
         scopes ~10x: 20 files x 1 PSD at portion 0.1 keeps
         max(1, round(0.1)) = 1 PSD per file = 20 PSDs, not 2."""
         ss = {str(i): [0] for i in range(20)}
-        est = _total_train_steps(ss, 10_000, 8, 0.1, 1)
+        est = _total_train_steps(ss, 10_000, 8, 0.1, 1, TIDMAD_PROFILE)
         assert est == (20 * (PSD_LEN // 10_000)) // 8  # all 20 PSDs kept
 
     def test_incident_step_count_exact(self):
         steps = _total_train_steps(
-            INCIDENT_SAMPLE_SET, seg_size=1250, batch_size=2, train_portion=1.0, epochs=1
+            INCIDENT_SAMPLE_SET,
+            seg_size=1250,
+            batch_size=2,
+            train_portion=1.0,
+            epochs=1,
+            profile=TIDMAD_PROFILE,
         )
         assert steps == 480_000
 
@@ -83,7 +89,9 @@ class TestFormalEligibilityContract:
     )
 
     def test_static_prior_is_not_formal_eligible(self):
-        r = estimate_wall_time_seconds(**self.INCIDENT_KW, ms_per_step=None)
+        r = estimate_wall_time_seconds(
+            **self.INCIDENT_KW, ms_per_step=None, dataset_profile=TIDMAD_PROFILE
+        )
         bd = r["breakdown"]
         assert bd["ms_source"] == "static_uncalibrated"
         assert bd["formal_execution_eligible"] is False
@@ -93,7 +101,9 @@ class TestFormalEligibilityContract:
         assert r["seconds"] / 60 < 120
 
     def test_warmup_measurement_is_formal_eligible(self):
-        r = estimate_wall_time_seconds(**self.INCIDENT_KW, ms_per_step=3.5)
+        r = estimate_wall_time_seconds(
+            **self.INCIDENT_KW, ms_per_step=3.5, dataset_profile=TIDMAD_PROFILE
+        )
         bd = r["breakdown"]
         assert bd["ms_source"] == "real_dataset_warmup"
         assert bd["formal_execution_eligible"] is True
@@ -103,5 +113,7 @@ class TestFormalEligibilityContract:
         supplied, the incident config is over the 120-min formal budget —
         the mandatory-warm-up contract catches what the static prior
         cannot."""
-        r = estimate_wall_time_seconds(**self.INCIDENT_KW, ms_per_step=44.3)
+        r = estimate_wall_time_seconds(
+            **self.INCIDENT_KW, ms_per_step=44.3, dataset_profile=TIDMAD_PROFILE
+        )
         assert r["seconds"] / 60 > 120  # 480k x 44.3ms x 1.3 = 461 min

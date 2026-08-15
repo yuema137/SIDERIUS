@@ -1205,11 +1205,17 @@ class TidmadSandbox:
         a legacy prose-only contract. The caller then omits the flag entirely,
         which is the Regime-A adapter — deliberately different from supplying
         a broken path, which fails closed in the child.
-        """
-        from agent.schemas.task_config import ForwardContract
-        from workflows.task_config import load_task_config
 
-        contract = ForwardContract(**load_task_config()["forward_contract"]).model_io
+        Step 05b: the value comes from ``run_bound_model_io_contract`` — the
+        ONE run-binding acquisition point — rather than from an expression
+        restated here. The tuner's resource pre-flight now needs the same
+        contract, and two sites computing it independently would make
+        "training and the pre-flight agree" a coincidence rather than a
+        structural fact.
+        """
+        from workflows.task_config import run_bound_model_io_contract
+
+        contract = run_bound_model_io_contract()
         if contract is None:
             return None
         path = os.path.abspath(os.path.join(self.dirs["configs"], f"model_io_{exp_id}.json"))

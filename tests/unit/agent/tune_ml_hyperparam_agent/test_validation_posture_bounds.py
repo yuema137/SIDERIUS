@@ -32,6 +32,7 @@ from pydantic import ValidationError
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.runtime_control.session import RuntimeControlPolicy
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.workload_resolvers import resolve_training_workload
 from nodes.ml_hyperparameter_tune_agent import (
     _build_runtime_policy,
@@ -130,6 +131,7 @@ def test_a_one_percent_portion_still_resolves_to_a_huge_step_count():
         batch_size=1,  # planner-chosen
         train_portion=0.01,
         epochs=1,
+        profile=TIDMAD_PROFILE,
     )
 
     assert resolved.unit_count > 10_000
@@ -149,6 +151,7 @@ def test_the_absolute_ceiling_bounds_the_step_count_whatever_the_planner_chose()
         train_portion=1.0,  # planner asked for everything
         epochs=1,
         max_samples=1000,
+        profile=TIDMAD_PROFILE,
     )
 
     assert resolved.unit_count == 1000
@@ -164,10 +167,16 @@ def test_the_ceiling_survives_a_full_scope_formal_plan():
     regression this whole design exists to prevent.
     """
     unbounded = resolve_training_workload(
-        FULL_SCOPE, seg_size=1000, batch_size=8, train_portion=1.0, epochs=1
+        FULL_SCOPE, seg_size=1000, batch_size=8, train_portion=1.0, epochs=1, profile=TIDMAD_PROFILE
     )
     bounded = resolve_training_workload(
-        FULL_SCOPE, seg_size=1000, batch_size=8, train_portion=1.0, epochs=1, max_samples=2000
+        FULL_SCOPE,
+        seg_size=1000,
+        batch_size=8,
+        train_portion=1.0,
+        epochs=1,
+        max_samples=2000,
+        profile=TIDMAD_PROFILE,
     )
 
     assert unbounded.unit_count > 100_000
@@ -189,9 +198,10 @@ def test_the_ceiling_is_a_maximum_never_a_target():
         train_portion=1.0,
         epochs=1,
         max_samples=10**9,
+        profile=TIDMAD_PROFILE,
     )
     without = resolve_training_workload(
-        small, seg_size=10000, batch_size=1, train_portion=1.0, epochs=1
+        small, seg_size=10000, batch_size=1, train_portion=1.0, epochs=1, profile=TIDMAD_PROFILE
     )
 
     assert with_ceiling.unit_count == without.unit_count
@@ -212,7 +222,11 @@ def test_the_step_guardrail_judges_the_executed_workload_not_the_planned_one(tmp
     Fails when: the ceiling stops reaching the guardrail resolver.
     """
     planned = _resolve_guardrail_steps(
-        FULL_SCOPE, {"segmentation_size": 1000}, {"batch_size": 1, "epochs": 1}, 1.0
+        FULL_SCOPE,
+        {"segmentation_size": 1000},
+        {"batch_size": 1, "epochs": 1},
+        1.0,
+        dataset_profile=TIDMAD_PROFILE,
     )
     executed = _resolve_guardrail_steps(
         FULL_SCOPE,
@@ -220,6 +234,7 @@ def test_the_step_guardrail_judges_the_executed_workload_not_the_planned_one(tmp
         {"batch_size": 1, "epochs": 1},
         1.0,
         max_samples=1000,
+        dataset_profile=TIDMAD_PROFILE,
     )
 
     assert planned is not None and planned > 100_000

@@ -50,6 +50,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.schemas.model_io_contract import ModelIOContract
 from core.runtime_control.process_group import (
     process_group_alive,
     signal_group,
@@ -179,6 +180,19 @@ class IsolatedProbeSpec(BaseModel):
     #: Absent only for standalone tooling that opts into discovery. In
     #: production its absence is a configuration error, never a fallback.
     hardware: HardwareSnapshot | None = None
+    #: Step 05b — the run's normalized Model-I/O declaration, carried BY
+    #: VALUE so the child probes the same declaration the parent bound.
+    #:
+    #: ``None`` is the legacy no-contract path and reproduces today's
+    #: behaviour exactly; a spec written before this field existed still
+    #: validates, because absence and refusal are deliberately different
+    #: (the same omit-vs-broken rule the ``--model_io_json`` transport uses,
+    #: ``sandbox_executor.py:1309-1314``).
+    #:
+    #: Inline rather than a path: this spec is already a transient JSON IPC
+    #: document with no manifest and no reader beyond its worker, so an
+    #: extra file would add a second lifetime to manage for no gain.
+    model_io_contract: ModelIOContract | None = None
 
     def effective_cap_gb(self) -> float | None:
         """The cap the worker must apply: the LOWER of the operator ceiling

@@ -52,7 +52,7 @@ from core.inference_defaults import (
     inference_batch_for,
     is_inference_batch_registered,
 )
-from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
+from execute_tools.dataset_config import DatasetProfile
 
 _BYTES_F32 = 4
 
@@ -201,11 +201,14 @@ def _total_inference_steps(
     sample_set: dict[str, list[int]],
     seg_size: int,
     inf_batch: int,
-    profile: DatasetProfile | None = None,
+    profile: DatasetProfile,
 ) -> int:
-    """Total forward-only step count to score the whole eval ``sample_set``."""
+    """Total forward-only step count to score the whole eval ``sample_set``.
+
+    Step 05b: ``profile`` is required. The ambient default it replaces let a
+    run bound to one decomposition topology be priced against another.
+    """
     n_psd = sum(len(v) for v in sample_set.values())
-    profile = profile or resolve_dataset_profile()
     ml_per_psd = profile.dataset.psd_segment_length // seg_size
     total_ml = n_psd * ml_per_psd
     return math.ceil(total_ml / max(inf_batch, 1))
@@ -251,6 +254,7 @@ def estimate_wall_time_seconds(
     inference_ms_per_step: float | None = None,
     num_params: int | None = None,
     inference_batch: int | None = None,
+    dataset_profile: DatasetProfile,
 ) -> dict[str, Any]:
     """Estimate inference wall-time in seconds.
 
@@ -274,6 +278,10 @@ def estimate_wall_time_seconds(
             ``inference_batch_uncalibrated``, which keeps its registration
             meaning ("is this model_type in the table"), not "was a batch
             supplied".
+        dataset_profile: the RUN-BOUND Dataset Profile (Step 05b). Required:
+            the decomposition geometry that turns PSD segments into ML
+            segments is a task fact, and resolving it here would price the
+            run against whatever singleton happened to be bound.
 
     Returns:
         ``{"phase": "inference", "seconds": float, "breakdown": {...}}``.
@@ -292,7 +300,7 @@ def estimate_wall_time_seconds(
         model_type, model_config, "segmentation_size", safety_margin=1000
     )
 
-    total_steps = _total_inference_steps(sample_set, seg_size, inf_batch)
+    total_steps = _total_inference_steps(sample_set, seg_size, inf_batch, dataset_profile)
 
     if inference_ms_per_step is not None and inference_ms_per_step > 0:
         ms_per_step = inference_ms_per_step

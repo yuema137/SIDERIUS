@@ -169,6 +169,33 @@ def main(argv: list[str] | None = None) -> int:
     else:
         hardware = None
 
+    # Step 05b — the run's Model-I/O declaration, rebuilt from the parent's
+    # value. Absence is legal and selects the legacy no-contract path; a
+    # PRESENT-but-unrebuildable field is a transport failure and is reported
+    # as one, naming the field. It must never degrade to ``None``: the child
+    # would then silently probe the legacy shape and report a capacity number
+    # for a different tensor than the parent asked about.
+    raw_contract = spec.get("model_io_contract")
+    model_io_contract = None
+    if raw_contract is not None:
+        from agent.schemas.model_io_contract import ModelIOContract
+
+        try:
+            model_io_contract = ModelIOContract(**raw_contract)
+        except Exception as exc:
+            _write(
+                result_path,
+                {
+                    "outcome": "PROBE_INFRASTRUCTURE_FAILURE",
+                    "detail": (
+                        "the pre-flight spec carries a 'model_io_contract' the "
+                        f"worker could not rebuild: {type(exc).__name__}: {exc}"
+                    )[:800],
+                    "phase": "spec_model_io_contract",
+                },
+            )
+            return 0
+
     # ``None`` is "no operator ceiling", not "unset". The effective cap was
     # already resolved by the parent; the worker must not invent one.
     budget = spec.get("vram_budget_gb")
@@ -194,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
             train_config=dict(spec.get("train_config") or {}),
             loss_config=dict(spec.get("loss_config") or {}),
             vram_budget_gb=budget,
+            model_io_contract=model_io_contract,
             # HardwareSnapshot intentionally satisfies the audited
             # read-only HardwareContext surface used by run_skill:
             # usable_cap_bytes, usable_cap_gb, total_memory_bytes,

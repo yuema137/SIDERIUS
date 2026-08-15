@@ -27,6 +27,7 @@ from execute_tools.dataset_config import (
     TIDMAD,
     TIDMAD_PROFILE,
     bind_dataset_profile,
+    resolve_dataset_profile,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -145,7 +146,12 @@ class TestRenderedProseIsUnchanged:
         """
         from agent.skills.evaluate_time_skill.wrapper import _suggest_lever
 
-        message = _suggest_lever(ms_per_step=10.0, seg_size=100_000, batch_size=8)
+        message = _suggest_lever(
+            ms_per_step=10.0,
+            seg_size=100_000,
+            batch_size=8,
+            psd_segment_length=resolve_dataset_profile().dataset.psd_segment_length,
+        )
         assert message == (
             "Raise segmentation_size to the next valid divisor of 10,000,000 "
             "so fewer steps cover the same data."
@@ -157,7 +163,12 @@ class TestRenderedProseIsUnchanged:
         from agent.skills.evaluate_time_skill.wrapper import _suggest_lever
 
         with bind_dataset_profile(_profile_with_psd(2_048_000)):
-            message = _suggest_lever(ms_per_step=10.0, seg_size=100_000, batch_size=8)
+            message = _suggest_lever(
+                ms_per_step=10.0,
+                seg_size=100_000,
+                batch_size=8,
+                psd_segment_length=resolve_dataset_profile().dataset.psd_segment_length,
+            )
         assert "2,048,000" in message
         assert "10,000,000" not in message
 

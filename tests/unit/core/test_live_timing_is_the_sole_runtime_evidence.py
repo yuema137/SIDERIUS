@@ -40,6 +40,7 @@ import pytest
 
 import agent.skills.evaluate_time_skill.wrapper as time_wrapper
 from agent.skills.training_skill import estimator
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 ESTIMATOR_SOURCE = Path(estimator.__file__).read_text()
 ESTIMATOR_TREE = ast.parse(ESTIMATOR_SOURCE)
@@ -59,6 +60,7 @@ def _estimate(ms_per_step: float | None, *, gpu_name: str | None = "NVIDIA GeFor
         train_portion=1.0,
         ms_per_step=ms_per_step,
         gpu_name=gpu_name,
+        dataset_profile=TIDMAD_PROFILE,
     )
 
 

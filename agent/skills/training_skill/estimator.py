@@ -41,9 +41,12 @@ See docs/resource_estimator_implement.md §10.5 + §10.14 Commit 2.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import torch
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from execute_tools.dataset_config import DatasetProfile
 
 # NOTE: `agent.skills.evaluate_time_skill.calibration` is deliberately NOT
 # imported here. This module produces the production runtime estimate, and the
@@ -478,6 +481,7 @@ def _total_train_steps(
     batch_size: int,
     train_portion: float | None,
     epochs: int,
+    profile: DatasetProfile,
 ) -> int:
     """Total fwd+bwd step count across the whole training run.
 
@@ -493,6 +497,7 @@ def _total_train_steps(
     return resolve_training_workload(
         sample_set,
         seg_size=seg_size,
+        profile=profile,
         batch_size=batch_size,
         train_portion=train_portion,
         epochs=epochs,
@@ -543,6 +548,7 @@ def estimate_wall_time_seconds(
     gpu_name: str | None = None,
     num_params: int | None = None,
     loss_type: str = "ce",
+    dataset_profile: DatasetProfile,
 ) -> dict[str, Any]:
     """Estimate training-phase wall-time in seconds.
 
@@ -569,6 +575,11 @@ def estimate_wall_time_seconds(
                        model is instantiated internally via ``_count_params``.
         loss_type:     Only used by the optional internal ``_count_params`` for
                        ``fcnet`` (which takes ``loss_type`` at construction).
+        dataset_profile: the RUN-BOUND Dataset Profile (Step 05b). Required:
+                       the step count depends on the decomposition geometry,
+                       and resolving it here would price the run against
+                       whatever singleton happened to be bound rather than
+                       against the topology this run declared.
 
     Returns:
         ``{"phase": "training", "seconds": float, "breakdown": {...}}``.
@@ -593,7 +604,9 @@ def estimate_wall_time_seconds(
     batch_size = int(train_config.get("batch_size", 1))
     epochs = resolve_train_field(train_config, "epochs", safety_margin=1)
 
-    total_steps = _total_train_steps(sample_set, seg_size, batch_size, train_portion, epochs)
+    total_steps = _total_train_steps(
+        sample_set, seg_size, batch_size, train_portion, epochs, dataset_profile
+    )
 
     if ms_per_step is not None and ms_per_step > 0:
         ms_source = "real_dataset_warmup"

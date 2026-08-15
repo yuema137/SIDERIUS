@@ -27,6 +27,7 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.training_skill.estimator import attention_shape
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 _BUILTINS = ("punet", "fcnet", "transformer", "wavenet", "rnn", "gated_fno")
 
@@ -95,12 +96,42 @@ class TestAttentionPredicate:
             explicit = {"segmentation_size": declared}
             tc = {"batch_size": 1, "epochs": 1}
 
-            absent_t = train_time(mt, {}, tc, sample, ms_per_step=44.3, num_params=10**6)
-            explicit_t = train_time(mt, explicit, tc, sample, ms_per_step=44.3, num_params=10**6)
+            absent_t = train_time(
+                mt,
+                {},
+                tc,
+                sample,
+                ms_per_step=44.3,
+                num_params=10**6,
+                dataset_profile=TIDMAD_PROFILE,
+            )
+            explicit_t = train_time(
+                mt,
+                explicit,
+                tc,
+                sample,
+                ms_per_step=44.3,
+                num_params=10**6,
+                dataset_profile=TIDMAD_PROFILE,
+            )
             assert absent_t["seconds"] == explicit_t["seconds"], mt
 
-            absent_i = inf_time(mt, {}, sample, inference_ms_per_step=1.0, num_params=10**6)
-            explicit_i = inf_time(mt, explicit, sample, inference_ms_per_step=1.0, num_params=10**6)
+            absent_i = inf_time(
+                mt,
+                {},
+                sample,
+                inference_ms_per_step=1.0,
+                num_params=10**6,
+                dataset_profile=TIDMAD_PROFILE,
+            )
+            explicit_i = inf_time(
+                mt,
+                explicit,
+                sample,
+                inference_ms_per_step=1.0,
+                num_params=10**6,
+                dataset_profile=TIDMAD_PROFILE,
+            )
             assert absent_i["seconds"] == explicit_i["seconds"], mt
 
     def test_an_absent_epochs_is_priced_at_what_will_actually_run(self):
@@ -123,7 +154,13 @@ class TestAttentionPredicate:
         assert declared == 10
 
         absent = estimate_wall_time_seconds(
-            "punet", {}, {"batch_size": 1}, sample, ms_per_step=10.0, num_params=10**6
+            "punet",
+            {},
+            {"batch_size": 1},
+            sample,
+            ms_per_step=10.0,
+            num_params=10**6,
+            dataset_profile=TIDMAD_PROFILE,
         )
         explicit = estimate_wall_time_seconds(
             "punet",
@@ -132,11 +169,18 @@ class TestAttentionPredicate:
             sample,
             ms_per_step=10.0,
             num_params=10**6,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert absent["seconds"] == explicit["seconds"]
 
         one = estimate_wall_time_seconds(
-            "punet", {}, {"batch_size": 1, "epochs": 1}, sample, ms_per_step=10.0, num_params=10**6
+            "punet",
+            {},
+            {"batch_size": 1, "epochs": 1},
+            sample,
+            ms_per_step=10.0,
+            num_params=10**6,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert absent["seconds"] == 10 * one["seconds"]
 

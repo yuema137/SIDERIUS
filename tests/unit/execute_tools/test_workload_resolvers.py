@@ -15,6 +15,7 @@ import pytest
 
 from agent.skills.training_skill.estimator import _total_train_steps
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_LEN
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from execute_tools.workload_resolvers import (
     resolve_formal_workloads,
     resolve_inference_workload,
@@ -36,7 +37,12 @@ class TestTrainingResolver:
 
     def test_incident_exact(self):
         w = resolve_training_workload(
-            INCIDENT_SS, seg_size=1250, batch_size=2, train_portion=1.0, epochs=1
+            INCIDENT_SS,
+            profile=TIDMAD_PROFILE,
+            seg_size=1250,
+            batch_size=2,
+            train_portion=1.0,
+            epochs=1,
         )
         assert w.unit == "optimizer_step"
         assert w.unit_count == 480_000
@@ -50,30 +56,50 @@ class TestTrainingResolver:
                 for portion in (1.0, 0.5, 0.1, None):
                     for epochs in (1, 3):
                         w = resolve_training_workload(
-                            ss, seg_size=seg, batch_size=bs, train_portion=portion, epochs=epochs
+                            ss,
+                            profile=TIDMAD_PROFILE,
+                            seg_size=seg,
+                            batch_size=bs,
+                            train_portion=portion,
+                            epochs=epochs,
                         )
                         assert w.unit_count == self._loader_steps(ss, seg, bs, portion, epochs)
 
     def test_estimator_delegates_here(self):
         """RT1's `_total_train_steps` and the colocated resolver are ONE
         authority — identical on the incident case and a floor case."""
-        assert _total_train_steps(INCIDENT_SS, 1250, 2, 1.0, 1) == 480_000
+        assert _total_train_steps(INCIDENT_SS, 1250, 2, 1.0, 1, TIDMAD_PROFILE) == 480_000
         ss = {str(i): [0] for i in range(20)}
         assert (
-            _total_train_steps(ss, 10_000, 8, 0.1, 1)
+            _total_train_steps(ss, 10_000, 8, 0.1, 1, TIDMAD_PROFILE)
             == resolve_training_workload(
-                ss, seg_size=10_000, batch_size=8, train_portion=0.1, epochs=1
+                ss,
+                profile=TIDMAD_PROFILE,
+                seg_size=10_000,
+                batch_size=8,
+                train_portion=0.1,
+                epochs=1,
             ).unit_count
         )
 
     def test_invalid_inputs_raise(self):
         with pytest.raises(ValueError, match="batch_size"):
             resolve_training_workload(
-                INCIDENT_SS, seg_size=1250, batch_size=0, train_portion=1.0, epochs=1
+                INCIDENT_SS,
+                profile=TIDMAD_PROFILE,
+                seg_size=1250,
+                batch_size=0,
+                train_portion=1.0,
+                epochs=1,
             )
         with pytest.raises(ValueError, match="seg_size"):
             resolve_training_workload(
-                INCIDENT_SS, seg_size=0, batch_size=2, train_portion=1.0, epochs=1
+                INCIDENT_SS,
+                profile=TIDMAD_PROFILE,
+                seg_size=0,
+                batch_size=2,
+                train_portion=1.0,
+                epochs=1,
             )
 
 
@@ -88,21 +114,27 @@ class TestInferenceResolver:
         ss = {"4": list(range(3)), "7": [0], "9": list(range(20))}
         for seg in (1250, 10_000, 40_000):
             for bs in (16, 64, 1000):
-                w = resolve_inference_workload(ss, seg_size=seg, inference_batch_size=bs)
+                w = resolve_inference_workload(
+                    ss, profile=TIDMAD_PROFILE, seg_size=seg, inference_batch_size=bs
+                )
                 assert w.unit == "inference_batch"
                 assert w.unit_count == self._engine_batches(ss, seg, bs)
 
     def test_output_write_cost_exposed(self):
         """create_abra_file writes denoised + injected int8 channels,
         n_psd × PSD_LEN bytes each (§2.6: output cost priced separately)."""
-        w = resolve_inference_workload(INCIDENT_SS, seg_size=1250, inference_batch_size=64)
+        w = resolve_inference_workload(
+            INCIDENT_SS, profile=TIDMAD_PROFILE, seg_size=1250, inference_batch_size=64
+        )
         assert w.detail["output_bytes"] == 120 * PSD_LEN * 2
         assert w.detail["output_files"] == 6
         assert w.detail["n_psd"] == 120
 
     def test_partial_batch_counts_as_one(self):
         # 1 PSD at seg 40000 → 250 segments; bs 64 → ceil = 4 batches.
-        w = resolve_inference_workload({"4": [0]}, seg_size=40_000, inference_batch_size=64)
+        w = resolve_inference_workload(
+            {"4": [0]}, profile=TIDMAD_PROFILE, seg_size=40_000, inference_batch_size=64
+        )
         assert w.unit_count == 4
 
 
@@ -125,6 +157,7 @@ class TestFormalWorkloads:
         workloads = resolve_formal_workloads(
             INCIDENT_SS,
             eval_ss,
+            profile=TIDMAD_PROFILE,
             seg_size=1250,
             batch_size=2,
             train_portion=1.0,

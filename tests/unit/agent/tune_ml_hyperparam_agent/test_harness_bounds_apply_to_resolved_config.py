@@ -28,6 +28,7 @@ from typing import ClassVar
 import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 
 class TestResolvedEpochs:
@@ -189,7 +190,12 @@ class TestGuardrailStepsUseTheResolvedWorkload:
     def test_an_absent_epochs_no_longer_undercounts_the_workload(self):
         """10x low meant the bound under-triggered — the bypass direction."""
         absent = tuner._resolve_guardrail_steps(
-            self._SAMPLE, {"segmentation_size": 40000}, {"batch_size": 1}, 1.0, model_type="punet"
+            self._SAMPLE,
+            {"segmentation_size": 40000},
+            {"batch_size": 1},
+            1.0,
+            model_type="punet",
+            dataset_profile=TIDMAD_PROFILE,
         )
         ten = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -197,6 +203,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 10},
             1.0,
             model_type="punet",
+            dataset_profile=TIDMAD_PROFILE,
         )
         one = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -204,6 +211,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert absent == ten
         assert absent == 10 * one
@@ -211,7 +219,12 @@ class TestGuardrailStepsUseTheResolvedWorkload:
     def test_an_absent_segmentation_size_uses_the_declaration(self):
         """40x high meant spurious rejection — wrong in the other direction."""
         absent = tuner._resolve_guardrail_steps(
-            self._SAMPLE, {}, {"batch_size": 1, "epochs": 1}, 1.0, model_type="punet"
+            self._SAMPLE,
+            {},
+            {"batch_size": 1, "epochs": 1},
+            1.0,
+            model_type="punet",
+            dataset_profile=TIDMAD_PROFILE,
         )
         declared = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -219,6 +232,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
+            dataset_profile=TIDMAD_PROFILE,
         )
         old_literal = tuner._resolve_guardrail_steps(
             self._SAMPLE,
@@ -226,6 +240,7 @@ class TestGuardrailStepsUseTheResolvedWorkload:
             {"batch_size": 1, "epochs": 1},
             1.0,
             model_type="punet",
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert absent == declared
         assert absent != old_literal
@@ -234,7 +249,12 @@ class TestGuardrailStepsUseTheResolvedWorkload:
         """Defense-in-depth must not become a new crash site."""
         assert (
             tuner._resolve_guardrail_steps(
-                self._SAMPLE, {}, {"batch_size": 1}, 1.0, model_type="never_registered_xyz"
+                self._SAMPLE,
+                {},
+                {"batch_size": 1},
+                1.0,
+                model_type="never_registered_xyz",
+                dataset_profile=TIDMAD_PROFILE,
             )
             is not None
         )
@@ -257,10 +277,20 @@ class TestGuardrailStepsUseTheResolvedWorkload:
         ):
             assert (
                 tuner._resolve_guardrail_steps(
-                    self._SAMPLE, bad_model, bad_train, 1.0, model_type="punet"
+                    self._SAMPLE,
+                    bad_model,
+                    bad_train,
+                    1.0,
+                    model_type="punet",
+                    dataset_profile=TIDMAD_PROFILE,
                 )
                 is None
             )
 
     def test_a_missing_sample_set_still_returns_None(self):
-        assert tuner._resolve_guardrail_steps(None, {}, {}, 1.0, model_type="punet") is None
+        assert (
+            tuner._resolve_guardrail_steps(
+                None, {}, {}, 1.0, model_type="punet", dataset_profile=TIDMAD_PROFILE
+            )
+            is None
+        )

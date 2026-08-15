@@ -31,6 +31,7 @@ from typing import Any
 
 import yaml
 
+from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from agent.schemas.task_config import ForwardContract
 
@@ -190,6 +191,38 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
     config["forward_contract"] = contract.model_dump(mode="json")
     _CACHE[resolved] = config
     return config
+
+
+def run_bound_model_io_contract(path: str | None = None) -> ModelIOContract | None:
+    """The Model-I/O declaration THIS RUN is bound to, or ``None``.
+
+    **One acquisition point, so "cannot diverge" is structural.** Every
+    subprocess a run launches is already given exactly this value: the
+    sandbox executor materializes it to ``--model_io_json`` for the training
+    child (``core/sandbox_executor.py``) and for the inference child, and
+    both fail closed on a broken file while omitting the flag entirely when
+    the task declares no ``model_io``. Step 05b needs the same value for the
+    resource pre-flight, and two sites computing it independently would rest
+    on "happens to agree" — the defect shape Steps 02a/02b/05a removed
+    elsewhere. So the expression lives here, once, and both callers use it.
+
+    Resolution is NOT repeated here. ``load_task_config`` already runs
+    ``resolve_model_io_contract`` at the single production entry point every
+    agent path funnels through, and memoizes the parsed result per absolute
+    path — so this returns the same validated object every caller in the
+    process sees, not a second reading of the same file.
+
+    Args:
+        path: Optional override for the YAML location, forwarded verbatim to
+            :func:`load_task_config`. Production omits it.
+
+    Returns:
+        The normalized contract, or ``None`` when the task declares no
+        ``model_io``. ``None`` is the legacy prose-only form and is a
+        supported task shape, never an error: consumers take their legacy
+        no-contract path.
+    """
+    return ForwardContract(**load_task_config(path)["forward_contract"]).model_io
 
 
 def get_task_description(config: dict[str, Any]) -> str:

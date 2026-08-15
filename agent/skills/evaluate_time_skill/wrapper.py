@@ -62,7 +62,7 @@ import traceback
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import DatasetProfile
 
 # Phase 6.7 Fix 1 — fast-fail short-circuit for DOA models. If a single
 # forward+backward+optimizer step at step 0 already takes ≥ this many ms,
@@ -77,8 +77,15 @@ _WARMUP_FAST_FAIL_MS: float = 5000.0
 # ── pure helpers (testable without torch) ────────────────────────────────────
 
 
-def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
-    """Pick the dominant lever to recommend based on where time is going."""
+def _suggest_lever(
+    ms_per_step: float, seg_size: int, batch_size: int, psd_segment_length: int
+) -> str:
+    """Pick the dominant lever to recommend based on where time is going.
+
+    Step 05b: ``psd_segment_length`` is supplied by the caller, which holds
+    the run-bound profile. Reading it ambiently here meant the advice a run
+    was given could name a decomposition length the run was not using.
+    """
     if ms_per_step > 50.0:
         return (
             "Reduce model depth/width (num_blocks, hidden_channels, "
@@ -89,9 +96,8 @@ def _suggest_lever(ms_per_step: float, seg_size: int, batch_size: int) -> str:
     # Derived from the declared decomposition length, not hardcoded. Under
     # TIDMAD ``f"{10_000_000:,}"`` renders "10,000,000", so this advisory
     # string is byte-identical to the literal it replaces.
-    psd_len = resolve_dataset_profile().dataset.psd_segment_length
     return (
-        f"Raise segmentation_size to the next valid divisor of {psd_len:,} "
+        f"Raise segmentation_size to the next valid divisor of {psd_segment_length:,} "
         "so fewer steps cover the same data."
     )
 
@@ -274,6 +280,7 @@ def _measure_ms_per_step(
     loss_config: dict,
     data_dir: str,
     sample_set: dict,
+    profile: DatasetProfile,
     n_warmup_batches: int = 3,
     n_timed_batches: int = 7,
 ) -> tuple[float | None, dict]:
@@ -354,7 +361,7 @@ def _measure_ms_per_step(
         if not first_psds:
             return None, empty_breakdown
 
-        ml_per_psd = resolve_dataset_profile().dataset.psd_segment_length // seg_size
+        ml_per_psd = profile.dataset.psd_segment_length // seg_size
         required_segs = (n_warmup_batches + n_timed_batches) * batch_size
         n_psd_needed = max(1, math.ceil(required_segs / max(ml_per_psd, 1)))
         n_psd_needed = min(n_psd_needed, 5, len(first_psds))
@@ -479,6 +486,7 @@ def _store_reuse_decision(
     batch_size: int,
     num_params: int,
     gpu_name: str | None,
+    profile: DatasetProfile,
 ):
     """§3 store-reuse decision for a trial round (RT3). Best-effort:
     any store/lookup problem degrades to warm-up-required — the policy
@@ -515,6 +523,7 @@ def _store_reuse_decision(
         n_steps = resolve_training_workload(
             sample_set,
             seg_size=seg_size,
+            profile=profile,
             batch_size=batch_size,
             train_portion=train_portion,
             # V21 PR B1 — TrainConfig declares 10; the literal 1 made the
@@ -598,7 +607,12 @@ def run_skill(sandbox, **kwargs) -> dict:
     config and gate against the time budget.
 
     Required kwargs: model_type, model_config, train_config, loss_config,
-                     sample_set, time_budget_minutes.
+                     sample_set, time_budget_minutes, dataset_profile
+                     (Step 05b — the RUN-BOUND Dataset Profile; every
+                     decomposition-derived term below is resolved from it,
+                     and this skill never resolves one of its own, because a
+                     time gate that re-read an ambient topology could price a
+                     run against a dataset it is not using).
     Optional kwargs: train_portion (default 1.0), data_dir (enables warmup),
                      inference_batch (V21 PR G — explicit batch to price
                      the inference forecast at, overriding the registry
@@ -641,6 +655,18 @@ def run_skill(sandbox, **kwargs) -> dict:
     train_portion = float(kwargs.get("train_portion", 1.0))
     budget_min = float(kwargs.get("time_budget_minutes", 0.0))
     data_dir = kwargs.get("data_dir")
+    # Step 05b — the run's ONE topology, received rather than resolved. A
+    # missing profile is a wiring defect, not a case to default through:
+    # every step count, output-byte term and advisory string below depends
+    # on it, so a silent ambient substitution would price the whole gate
+    # against a dataset the run never declared.
+    profile = kwargs.get("dataset_profile")
+    if not isinstance(profile, DatasetProfile):
+        raise ValueError(
+            "evaluate_time_skill.run_skill: 'dataset_profile' kwarg is required "
+            f"and must be a DatasetProfile (got {type(profile).__name__}). The "
+            "caller binds the run's topology; this skill does not resolve one."
+        )
 
     # V21 PR B1. These were resolved against literals contradicting the
     # declarations the run itself uses, and `seg_size` in particular is not
@@ -683,6 +709,7 @@ def run_skill(sandbox, **kwargs) -> dict:
                 batch_size=batch_size,
                 num_params=num_params,
                 gpu_name=gpu_name,
+                profile=profile,
             )
 
         # Real-dataset warmup — only with CUDA + data_dir, and only when
@@ -715,6 +742,7 @@ def run_skill(sandbox, **kwargs) -> dict:
                 loss_config=loss_config,
                 data_dir=data_dir,
                 sample_set=sample_set,
+                profile=profile,
             )
 
         training = _training_est.estimate_wall_time_seconds(
@@ -727,6 +755,7 @@ def run_skill(sandbox, **kwargs) -> dict:
             gpu_name=gpu_name,
             num_params=num_params,
             loss_type=loss_type,
+            dataset_profile=profile,
         )
         if store_reused:
             # RT3 provenance correction: the estimator stamps a passed
@@ -764,7 +793,7 @@ def run_skill(sandbox, **kwargs) -> dict:
         # one side only. None → registry default, exactly pre-G1.
         explicit_inference_batch = kwargs.get("inference_batch")
         inf_batch = _inference_est.resolve_forecast_batch(explicit_inference_batch, model_type)
-        _psd_len = resolve_dataset_profile().dataset.psd_segment_length
+        _psd_len = profile.dataset.psd_segment_length
         ml_per_psd = max(_psd_len // max(seg_size, 1), 1)
         if inference_per_psd_seg_ms_hint is not None and inference_per_psd_seg_ms_hint > 0:
             inference_ms = float(inference_per_psd_seg_ms_hint) * inf_batch / ml_per_psd
@@ -783,6 +812,7 @@ def run_skill(sandbox, **kwargs) -> dict:
             inference_ms_per_step=inference_ms,
             num_params=num_params,
             inference_batch=explicit_inference_batch,
+            dataset_profile=profile,
         )
 
         scoring = _scoring_est.estimate_wall_time_seconds(eval_sample_set)
@@ -947,7 +977,13 @@ def run_skill(sandbox, **kwargs) -> dict:
         f"+ score {scoring['seconds']:.1f}s). Dominant phase: {dominant}."
         f"{slack_note}{authority_note}"
     )
-    suggestion = "" if not over_budget else _suggest_lever(tbd["ms_per_step"], seg_size, batch_size)
+    suggestion = (
+        ""
+        if not over_budget
+        else _suggest_lever(
+            tbd["ms_per_step"], seg_size, batch_size, profile.dataset.psd_segment_length
+        )
+    )
 
     print(f"    Parameters   : {num_params:,}")
     print(f"    Train steps  : {tbd['total_train_steps']:,}")

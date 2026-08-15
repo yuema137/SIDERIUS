@@ -27,6 +27,7 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.training_skill import estimator as est
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 # ---------------------------------------------------------------------------
 # estimate_peak_bytes
@@ -174,6 +175,7 @@ class TestEstimateWallTimeSeconds:
             {"batch_size": 1, "epochs": 1},
             self._sample_set(),
             ms_per_step=1.0,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert set(out.keys()) == {"phase", "seconds", "breakdown"}
         assert out["phase"] == "training"
@@ -213,6 +215,7 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(400),
             num_params=100_000,
             ms_per_step=None,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert out["seconds"] == pytest.approx(1560.0, rel=1e-3)
         assert out["breakdown"]["total_train_steps"] == 250_000
@@ -227,6 +230,7 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(),
             ms_per_step=5.0,
             gpu_name=None,
+            dataset_profile=TIDMAD_PROFILE,
         )
         # steps = 250_000; seconds = 250_000 × 5.0 × 1.3 / 1000 = 1625
         assert out["seconds"] == pytest.approx(1625.0, rel=1e-3)
@@ -256,6 +260,7 @@ class TestEstimateWallTimeSeconds:
             self._sample_set(),
             ms_per_step=5.0,
             gpu_name="Test GPU",
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert out["seconds"] == pytest.approx(1625.0, rel=1e-3), (
             "a historical k reached the estimate; the live measurement must be "
@@ -277,6 +282,7 @@ class TestEstimateWallTimeSeconds:
             {"segmentation_size": 16000},
             {"batch_size": 1, "epochs": 1},
             self._sample_set(),
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert calls == [("tinynet", "ce")]
         # ms/step = max(50_000 × 16000 × 1 × 3e-9, 2.0) = 2.4
@@ -290,8 +296,12 @@ class TestEstimateWallTimeSeconds:
             sample_set=self._sample_set(),
             ms_per_step=1.0,
         )
-        a = est.estimate_wall_time_seconds(train_config={"batch_size": 1, "epochs": 1}, **kw)
-        b = est.estimate_wall_time_seconds(train_config={"batch_size": 1, "epochs": 3}, **kw)
+        a = est.estimate_wall_time_seconds(
+            train_config={"batch_size": 1, "epochs": 1}, **kw, dataset_profile=TIDMAD_PROFILE
+        )
+        b = est.estimate_wall_time_seconds(
+            train_config={"batch_size": 1, "epochs": 3}, **kw, dataset_profile=TIDMAD_PROFILE
+        )
         assert b["seconds"] == pytest.approx(3 * a["seconds"], rel=1e-6)
 
     def test_train_portion_reduces_steps(self):
@@ -302,7 +312,11 @@ class TestEstimateWallTimeSeconds:
             sample_set=self._sample_set(),
             ms_per_step=1.0,
         )
-        full = est.estimate_wall_time_seconds(**kw, train_portion=1.0)
-        half = est.estimate_wall_time_seconds(**kw, train_portion=0.5)
+        full = est.estimate_wall_time_seconds(
+            **kw, train_portion=1.0, dataset_profile=TIDMAD_PROFILE
+        )
+        half = est.estimate_wall_time_seconds(
+            **kw, train_portion=0.5, dataset_profile=TIDMAD_PROFILE
+        )
         assert half["seconds"] < full["seconds"]
         assert half["seconds"] == pytest.approx(full["seconds"] / 2, rel=1e-3)

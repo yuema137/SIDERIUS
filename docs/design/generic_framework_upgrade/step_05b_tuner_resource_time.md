@@ -6,7 +6,7 @@ Step-level completion contract lives in roadmap **§15.1a**.
 
 | Field | Value |
 |---|---|
-| Status | **PR 05B DESIGN — FROZEN. OPERATOR-APPROVED DESIGN** (2026-08-14). Semantic design content frozen at **`ce88012450b312fff6cee65ebfc7dff3220f4e68`** (revision 3). **Implementation is a SEPARATE authorization and has NOT begun.** |
+| Status | **IMPLEMENTED — PR #211 OPEN, READY FOR OPERATOR REVIEW. NOT MERGED.** Semantic design content frozen at **`ce88012450b312fff6cee65ebfc7dff3220f4e68`** (revision 3); implemented from the freeze marker **`aa7e2131`** on branch `feat/generic-framework-step-05b-tuner-resource-time`. All nine semantic milestones C0-C8 complete; Checkpoints 0/A/B/C/D complete; Gate 1 and Gate 2 both **NOT REQUIRED**, each decided from recorded evidence (§18.2h). Live ledger: §18. |
 | Frozen design content | **`ce880124`** — verified from Git at freeze time, not from a working copy. A stale external copy showing revision 2 exists; **repository truth at `ce880124` is authoritative** |
 | Design base | **re-anchored to `82a548f8`** (master after 05a merged as `cfb3b1c7`). Revision 1 was written against `13b08550`; every source citation below has been re-verified and moved where it moved (§0.3) |
 | Depends on | **Step 02** (Dataset Profile) · **Step 03** (`ModelIOContract`) · **Step 04a** (`model_io_probe_skill`, the shared probe-realization authority) |
@@ -684,20 +684,20 @@ nothing about that edit.
 - Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Re-read `_build_probe_tensors` (`wrapper.py:176-249`) in full and
+- [x] Re-read `_build_probe_tensors` (`wrapper.py:176-249`) in full and
       record which inputs can move the built shape today (`loss_type`,
       `loss_name`, `model_type` → `get_output_type`).
-- [ ] Capture the probe tensor **shape and dtype** actually built under
+- [x] Capture the probe tensor **shape and dtype** actually built under
       TIDMAD for each reachable branch: `classifier` (long target),
       `regressor` (`[B, T]` float), `hybrid`/legacy (`[B, 256, T]` float).
-- [ ] Classify **each** estimator on the resource path as
+- [x] Classify **each** estimator on the resource path as
       `production live | diagnostic only | test-only | dead | fallback`,
       citing the caller that makes it live (or the absence of one).
-- [ ] Record the census in §17, including which estimators C2-C5 may touch.
-- [ ] Confirm by inspection which §6 oracles already exist (forecast
+- [x] Record the census in §17, including which estimators C2-C5 may touch.
+- [x] Confirm by inspection which §6 oracles already exist (forecast
       breakdowns, admission identities, resolved batch size) and do **not**
       restate them.
-- [ ] Confirm no capture restates a Step-02/03/04a baseline.
+- [x] Confirm no capture restates a Step-02/03/04a baseline.
 
 **Explicitly NOT required**: baselining every branch of the VRAM wrapper
 merely because it exists. A branch whose shape cannot move when a contract is
@@ -713,14 +713,14 @@ supplied is not evidence for this PR.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Baselines pass against production code that is **byte-unchanged**
+- [x] Baselines pass against production code that is **byte-unchanged**
       (`git status --porcelain` lists no production file in this commit).
-- [ ] The captured shapes are written as **hardcoded literals**, never
+- [x] The captured shapes are written as **hardcoded literals**, never
       re-derived from the code under test.
-- [ ] Every reachable target-shape branch has exactly one case.
-- [ ] The estimator census names, for each live estimator, the production
+- [x] Every reachable target-shape branch has exactly one case.
+- [x] The estimator census names, for each live estimator, the production
       caller that makes it live — a file:line, not a claim.
-- [ ] Every estimator classified `dead`/`diagnostic` is listed in §17 as
+- [x] Every estimator classified `dead`/`diagnostic` is listed in §17 as
       **out of scope for C2-C5**.
 
 **6. Failure and edge cases.**
@@ -731,10 +731,8 @@ supplied is not evidence for this PR.
   / the §11 Gate question, and this document is updated to say so.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q`
-      *(confirm the real path at implementation time)*
-- [ ] Record: test count, wall time, and explicit confirmation that zero
-      production files were modified.
+- [x] **RUN AS**: `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill/test_step05b_c0_probe_baselines.py tests/unit/agent/evaluate_vram_skill/test_probe_target_contract.py -q` — the two modules that carry the baseline, rather than the whole directory, which restates unrelated pre-flight oracles
+- [x] Recorded in §18.2: 16 passed in 1.04s (7 new + 9 existing); `git status --porcelain` listed exactly one path, the new test module.
 
 **8. Commit boundary.** Tests and a written census only. Independently
 reviewable as "what we promise not to change, and what we are allowed to
@@ -761,15 +759,15 @@ to confuse the evidence.
 - Depends on: C0.
 
 **3. Implementation plan.**
-- [ ] Re-read `realize_shape` and the `fixed → batch → symbolic` precedence
+- [x] Re-read `realize_shape` and the `fixed → batch → symbolic` precedence
       it documents.
-- [ ] Add keyword-only `batch: int | None = None` and
+- [x] Add keyword-only `batch: int | None = None` and
       `symbolic: int | None = None`, defaulting to the existing constants.
-- [ ] Preserve the precedence exactly: a `fixed` extent is a DECLARED fact
+- [x] Preserve the precedence exactly: a `fixed` extent is a DECLARED fact
       and must still win over both new parameters.
-- [ ] Update the docstring to state that omitting both arguments is
+- [x] Update the docstring to state that omitting both arguments is
       byte-identical, and why a `fixed` axis ignores them.
-- [ ] Confirm no existing call site is edited in this commit.
+- [x] Confirm no existing call site is edited in this commit.
 
 **4. Validation plan.**
 - *Unit*: for the shipped TIDMAD contract, `realize_shape(t)` returns the
@@ -784,23 +782,23 @@ to confuse the evidence.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] With both arguments omitted, `realize_shape` returns a tuple **equal**
+- [x] With both arguments omitted, `realize_shape` returns a tuple **equal**
       to the pre-change return for every contract in the existing 04a test
       fixtures — asserted by equality, not by inspection.
-- [ ] With `batch=B, symbolic=T` supplied, a declared `fixed` class extent is
+- [x] With `batch=B, symbolic=T` supplied, a declared `fixed` class extent is
       still `256` in the returned tuple, and rank and axis order are those of
       the contract, not of any assumption in this module.
-- [ ] The four probe constants are unchanged, asserted by value.
-- [ ] **`None`-sensitivity, asserted explicitly**: `batch=None` /
+- [x] The four probe constants are unchanged, asserted by value.
+- [x] **`None`-sensitivity, asserted explicitly**: `batch=None` /
       `symbolic=None` resolve to the existing Step-04a recipe defaults; a
       supplied **positive** extent is used verbatim; **zero or a negative
       extent fails** in the module's existing typed-error idiom and **never
       silently falls back**. A `0` that resolved to `PROBE_BATCH` would price
       a tensor nobody asked for.
-- [ ] Zero production call sites changed by this commit.
-- [ ] A mutation that makes the new parameter override a `fixed` axis is
+- [x] Zero production call sites changed by this commit.
+- [x] A mutation that makes the new parameter override a `fixed` axis is
       **RED**.
-- [ ] A mutation rewriting the override as `batch or PROBE_BATCH` is **RED**
+- [x] A mutation rewriting the override as `batch or PROBE_BATCH` is **RED**
       — caught by the zero case above.
 
 **6. Failure and edge cases.**
@@ -814,10 +812,8 @@ to confuse the evidence.
   the input's own rank; nothing here may assume 3-D.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/skills -k model_io_probe -q`
-      *(confirm the real path at implementation time)*
-- [ ] Record counts, wall time, and confirmation that no existing 04a test
-      required editing.
+- [x] **RUN AS**: `.venv/bin/python -m pytest tests/unit/agent/skills/test_step05b_c1_realizer_extents.py -q` plus the full 04a consumer sweep — see §18.2b. `-k model_io_probe` matches nothing: the 04a realizer tests live under the two node directories, not under a module-named file.
+- [x] Recorded in §18.2b: 17 passed in 0.92s; 474 passed in 6.11s across every existing 04a consumer, none edited.
 
 **8. Commit boundary.** One additive, defaulted signature change with zero
 behaviour change, independently revertible. No consumer wiring bundled in.
@@ -844,22 +840,22 @@ default is invisible to every caller that never passes it.
 - Depends on: C1.
 
 **3. Implementation plan.**
-- [ ] Re-read `_build_probe_tensors` and `run_skill`'s kwargs contract
+- [x] Re-read `_build_probe_tensors` and `run_skill`'s kwargs contract
       (`:483-520`) — note it is `**kwargs`, so the addition is additive.
-- [ ] Add the optional parameter and thread it from `run_skill` to the
+- [x] Add the optional parameter and thread it from `run_skill` to the
       `:588` call site.
-- [ ] With a contract: resolve the candidate's declared **form** exactly as
+- [x] With a contract: resolve the candidate's declared **form** exactly as
       validation does today (`get_output_type(model_type)`, or its current
       canonical equivalent), then derive the target shape via
       `declared_output_tensor(contract, form)` + the C1-parameterized
       `realize_shape(..., batch=batch_size, symbolic=seg_size)`. **Do not add
       a second form-resolution table** (§0.5).
-- [ ] Without a contract: take exactly today's path, including the
+- [x] Without a contract: take exactly today's path, including the
       `get_output_type` branch and the `[B, 256, T]` literal.
-- [ ] Decide and record where **dtype** comes from when a contract is
+- [x] Decide and record where **dtype** comes from when a contract is
       supplied — the loss (today's rule) remains the dtype authority; the
       contract supplies shape only. Do not silently move dtype ownership.
-- [ ] Update `evaluate_vram_skill.md` for the new optional kwarg.
+- [x] Update `evaluate_vram_skill.md` for the new optional kwarg.
 
 **4. Validation plan.**
 - *Unit*: contract supplied → the built target equals `(B, 256, T)` for the
@@ -875,25 +871,25 @@ default is invisible to every caller that never passes it.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] With `model_io_contract=None`, the returned `(input, target)` shapes
+- [x] With `model_io_contract=None`, the returned `(input, target)` shapes
       and dtypes are **equal** to the C0 baseline for every branch.
-- [ ] With the shipped TIDMAD contract supplied, the target shape equals the
+- [x] With the shipped TIDMAD contract supplied, the target shape equals the
       no-contract shape **exactly** — this is the whole legacy-compatibility
       claim, and it is an equality assertion, not a narrative.
-- [ ] With a contrast contract, the class axis moves and `batch_size` /
+- [x] With a contrast contract, the class axis moves and `batch_size` /
       `seg_size` are honoured at their real values (not `1` / `64`).
-- [ ] Target **dtype** still comes from the loss in both paths.
-- [ ] **Form/fact authority matches Step 04a**: for each declared form
+- [x] Target **dtype** still comes from the loss in both paths.
+- [x] **Form/fact authority matches Step 04a**: for each declared form
       (`classifier`, `regressor`, legacy) the VRAM path's realized output
       tensor is **equal** to what `declared_output_tensor` +
       `realize_shape` produce for the same contract and form — asserted
       against the 04a authority, not against a locally restated table.
-- [ ] A `regressor` candidate under a categorical contract is **accepted**
+- [x] A `regressor` candidate under a categorical contract is **accepted**
       and probed at the class-axis-dropped shape.
-- [ ] A `classifier` candidate under a contract carrying no class axis raises
+- [x] A `classifier` candidate under a contract carrying no class axis raises
       `ProbeConstructionError` (04a's own fail-closed case), and the VRAM
       path surfaces it rather than falling back to the literal.
-- [ ] No production caller passes a contract yet — asserted by inspection and
+- [x] No production caller passes a contract yet — asserted by inspection and
       recorded, so C4's evidence cannot be confused with C2's.
 
 **6. Failure and edge cases.**
@@ -909,8 +905,8 @@ default is invisible to every caller that never passes it.
   the module's existing `ValueError` idiom; never fall back to the literal.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q`
-- [ ] Record counts, wall time, and the no-contract equality result.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q`
+- [x] Recorded in §18.2c: 304 passed in 22.97s; no-contract equality holds for all three reachable branches, and the shipped contract reproduces the legacy tensor exactly.
 
 **8. Commit boundary.** One helper and one entry point, inert in production,
 independently revertible. No transport, no tuner change.
@@ -940,14 +936,14 @@ still inert until C4 supplies a contract.
 - Depends on: C2.
 
 **3. Implementation plan.**
-- [ ] Re-read `IsolatedProbeSpec` and the worker's `spec.get(...)` rebuild.
-- [ ] Follow the established pattern: `train_engine_sandbox.py:1249`
+- [x] Re-read `IsolatedProbeSpec` and the worker's `spec.get(...)` rebuild.
+- [x] Follow the established pattern: `train_engine_sandbox.py:1249`
       (`--model_io_json`) + `load_model_io_contract`
       (`model_io_contract.py:312`) — decide between an inline JSON field on
       the spec and a path, and record why. The spec is already a transient
       JSON IPC file, so an inline dump is the lower-ceremony option.
-- [ ] Thread parent → spec → worker → `run_skill`.
-- [ ] Confirm `None` remains legal end to end and produces today's behaviour.
+- [x] Thread parent → spec → worker → `run_skill`.
+- [x] Confirm `None` remains legal end to end and produces today's behaviour.
 
 **4. Validation plan.**
 - *Unit*: a spec round-trips through JSON with the contract intact and
@@ -962,13 +958,13 @@ still inert until C4 supplies a contract.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] A contract placed on the spec **arrives at `run_skill`** in the child —
+- [x] A contract placed on the spec **arrives at `run_skill`** in the child —
       proven by a test that fails if the forwarding line is deleted, not by a
       grep for the field name.
-- [ ] Spec JSON without the field validates and behaves exactly as today.
-- [ ] `HardwareSnapshot`'s attribute surface is unchanged (the existing
+- [x] Spec JSON without the field validates and behaves exactly as today.
+- [x] `HardwareSnapshot`'s attribute surface is unchanged (the existing
       six-attribute test still passes untouched).
-- [ ] A transport mutation — drop the field in the worker rebuild — is
+- [x] A transport mutation — drop the field in the worker rebuild — is
       **RED**.
 
 **6. Failure and edge cases.**
@@ -981,8 +977,8 @@ still inert until C4 supplies a contract.
   silently-wrong probe reports a capacity number for a different model.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q`
-- [ ] Record counts, wall time, and the transport-mutation result.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q`
+- [x] Recorded in §18.2d: 310 passed in 21.87s; M10/M11 RED first time, M12 survived and exposed an uncovered parent hop, RED after the fix.
 
 **8. Commit boundary.** IPC only. No behaviour change while no caller
 supplies a contract. No tuner change.
@@ -1021,7 +1017,7 @@ task that declares `model_io` — which is why it is isolated.
   pre-flight worker.
 ```
 
-- [ ] Re-read **only** the caller chain needed to choose the minimum
+- [x] Re-read **only** the caller chain needed to choose the minimum
       transport, and record the choice with its source evidence. Preferred
       order:
       1. **reuse an already-resolved contract** in the workflow/run context;
@@ -1029,13 +1025,13 @@ task that declares `model_io` — which is why it is isolated.
          field** — when that is the smallest explicit transport;
       3. reuse an existing run-input/sidecar boundary where one already
          exists.
-- [ ] Bind it once per run, at a point that adds **no branch** to `run()`
+- [x] Bind it once per run, at a point that adds **no branch** to `run()`
       (CLAUDE.md: `run()` sits on pyright's strict complexity ceiling).
-- [ ] Pass it through `run_production_preflight` to both the in-process and
+- [x] Pass it through `run_production_preflight` to both the in-process and
       child paths.
-- [ ] Confirm a task with no `model_io`, and a legacy caller that supplies
+- [x] Confirm a task with no `model_io`, and a legacy caller that supplies
       nothing, both yield `None` and today's behaviour.
-- [ ] Update the tuner node doc and `evaluate_vram_skill.md`.
+- [x] `evaluate_vram_skill.md` updated at C2. The tuner node doc is re-verified against merged source at C8, per the doc-sync rule.
 
 > **`load_task_config()` inside the tuner is permitted only if source proves
 > it is already the canonical run-bound input for that node and cannot
@@ -1060,22 +1056,22 @@ task that declares `model_io` — which is why it is isolated.
 - *Gate*: see §11 — the condition is decided at C7, not here.
 
 **5. Acceptance criteria.**
-- [ ] Under TIDMAD, admission decision, resolved batch size and forecast
+- [x] Under TIDMAD, admission decision, resolved batch size and forecast
       breakdown are **equal** to the C0 baseline — a single unit of drift in
       any breakdown term is failure class 3 and a **STOP**, not a tolerance.
-- [ ] A task with no `model_io`, and a legacy caller supplying nothing, both
+- [x] A task with no `model_io`, and a legacy caller supplying nothing, both
       still run the gate on the legacy no-contract path.
-- [ ] **One run binding**: the contract observed by the in-process wrapper and
+- [x] **One run binding**: the contract observed by the in-process wrapper and
       the one observed in the child are the same semantic value — asserted
       semantically, never by a call count.
-- [ ] **No resource consumer performs its own ambient task-config
+- [x] **No resource consumer performs its own ambient task-config
       resolution** — a transport mutation that makes one re-read a default
       task config is **RED**.
-- [ ] `run()` gains no new branch (verified by reading the diff, since the
+- [x] `run()` gains no new branch (verified by reading the diff, since the
       complexity ceiling is not observable from tests).
-- [ ] No new user-authored config, no new config hierarchy, no new required
+- [x] No new user-authored config, no new config hierarchy, no new required
       CLI argument; old serialized configs load without migration.
-- [ ] This commit makes **Stage-B B1** provable end to end: a contrast
+- [x] This commit makes **Stage-B B1** provable end to end: a contrast
       contract bound for the run moves the live probe shape.
 
 **6. Failure and edge cases.**
@@ -1090,9 +1086,8 @@ task that declares `model_io` — which is why it is isolated.
   resume is unaffected; assert it rather than assume it.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/agent/evaluate_vram_skill -q`
-- [ ] Record counts, wall time, the chosen transport with its source
-      evidence, and the TIDMAD equality results.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/agent/evaluate_vram_skill -q`
+- [x] Recorded in §18.2e and §18.3 D-05b-1: 4,039 passed in 372.68s across the tuner, VRAM, workflow and core suites; transport chosen with its source evidence; M14 recorded OPEN until Checkpoint C.
 
 **8. Commit boundary.** Production wiring only. No probe-logic change, no
 transport-mechanism change, no unrelated cleanup.
@@ -1122,19 +1117,19 @@ because it is the Step-02b defect shape, not a Model-I/O concern.
 - Depends on: C0 (the estimator census says which of these are live).
 
 **3. Implementation plan.**
-- [ ] Re-read each of the four call sites and record whether a resolved
+- [x] Re-read each of the four call sites and record whether a resolved
       profile is already in scope.
-- [ ] `inference_single.py` **already loads one** (`:336-339`,
+- [x] `inference_single.py` **already loads one** (`:336-339`,
       `dataset_profile` / `profile_dataset`) and simply does not pass it to
       `resolve_inference_workload` at `:563` — thread it; this is a
       one-argument fix and the clearest instance of the defect.
-- [ ] For each remaining caller, thread the run-bound profile; where none is
+- [x] For each remaining caller, thread the run-bound profile; where none is
       in scope, record the acquisition point rather than inventing one.
-- [ ] Decide per function whether the parameter becomes **required** or stays
+- [x] Decide per function whether the parameter becomes **required** or stays
       optional-with-fallback, and record the reason. Required is preferred
       where every production caller can supply it (the 05a precedent); a
       fallback that no production caller relies on is dead permission.
-- [ ] Leave `evaluate_time_skill/wrapper.py`'s reads consistent with whatever
+- [x] Leave `evaluate_time_skill/wrapper.py`'s reads consistent with whatever
       the enclosing function receives — do not create a second acquisition.
 
 **4. Validation plan.**
@@ -1149,20 +1144,20 @@ because it is the Step-02b defect shape, not a Model-I/O concern.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Under TIDMAD, `resolve_training_workload`, `resolve_inference_workload`
+- [x] Under TIDMAD, `resolve_training_workload`, `resolve_inference_workload`
       and `resolve_scoring_workload` return values **equal** to the C0
       baseline — field by field, including `detail["output_bytes"]`.
-- [ ] **Default-path invariance, asserted on the sequence and not on the
+- [x] **Default-path invariance, asserted on the sequence and not on the
       config**: for the default (`shuffle`) ordering path, the *visited
       file/sample sequence*, the resolved seeds and the **total step count**
       are unchanged. 05b touches the step-count producer, so proving the
       configuration value unchanged would be proving the wrong thing.
-- [ ] **Stage-B B2 passes**: under a contrast profile varying only the
+- [x] **Stage-B B2 passes**: under a contrast profile varying only the
       PSD/decomposition fact, the derived step counts and output-byte terms
       move and no calibration constant does.
-- [ ] An ambient-regression mutation (restore `profile or
+- [x] An ambient-regression mutation (restore `profile or
       resolve_dataset_profile()` at a migrated site) is **RED**.
-- [ ] `grep "profile or resolve_dataset_profile()"` over the live resource
+- [x] `grep "profile or resolve_dataset_profile()"` over the live resource
       path returns zero — recorded as **supporting evidence only**; the
       semantic guard above is the property.
 
@@ -1180,9 +1175,8 @@ because it is the Step-02b defect shape, not a Model-I/O concern.
   without changing a public signature that 05b does not own → **STOP**.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/agent/tune_ml_hyperparam_agent -q`
-- [ ] Record counts, wall time, the TIDMAD equality results, and the
-      ambient-mutation result.
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/agent/tune_ml_hyperparam_agent -q`
+- [x] Recorded in §18.2f: 2,116 passed in 288.28s after the call-site migration; 10 new cases; M15/M16 RED.
 
 **8. Commit boundary.** One defect family across its live call sites,
 independently revertible. No Model-I/O work, no calibration change.
@@ -1219,17 +1213,17 @@ literal pin is the *last* resort, not the default.
    re-own the value                                            -> add ONE pin
 ```
 
-- [ ] For each calibration/runtime value in §2 — `_INFERENCE_VS_TRAINING_RATIO`
+- [x] For each calibration/runtime value in §2 — `_INFERENCE_VS_TRAINING_RATIO`
       (2.7), `_MAX_BATCH_TIMESTEPS` (800k), `SEG_SIZE_BOUNDS`,
       `_ROLE_DEFAULT_RSS_GB` (incl. the 60 GiB inference cap CLAUDE.md pins),
       the batch candidate table — record which layer above covers it.
-- [ ] Add a pin **only** where layer 4 applies, and say why layers 1-3 do
+- [x] Add a pin **only** where layer 4 applies, and say why layers 1-3 do
       not.
-- [ ] Record the three `core/runtime_control` seg fallbacks
+- [x] Record the three `core/runtime_control` seg fallbacks
       (`gpu_measurement_identity.py:214`,
       `gpu_measurement_worker_main.py:254`, `probe_production.py:220`) as
       **Step-07 owned, not fixed here**.
-- [ ] Update the §14 row to record *no single semantic behind "40000"* and
+- [x] Update the §14 row to record *no single semantic behind "40000"* and
       retire its speculative "`§7d` resolver" owner.
 
 **Explicitly NOT required**: a literal pin and a mutation for every untouched
@@ -1245,15 +1239,15 @@ matter.
 - *Gate*: **none**.
 
 **5. Acceptance criteria.**
-- [ ] Every §2 calibration/runtime value is accounted for by **one named
+- [x] Every §2 calibration/runtime value is accounted for by **one named
       evidence layer**, cited by file:line or test name.
-- [ ] Any pin added compares against a literal written in the test, never
+- [x] Any pin added compares against a literal written in the test, never
       against the module attribute it guards.
-- [ ] Every pin added is justified by layer 4 — the justification is written
+- [x] Every pin added is justified by layer 4 — the justification is written
       down, and a pin that duplicates an existing oracle is **removed, not
       kept "for safety"**.
-- [ ] The §14 row no longer names a `§7d` resolver.
-- [ ] Zero production files modified by this commit.
+- [x] The §14 row no longer names a `§7d` resolver.
+- [x] Zero production files modified by this commit.
 
 **6. Failure and edge cases.**
 - A constant is already asserted elsewhere → cite the existing pin; do not
@@ -1264,10 +1258,8 @@ matter.
   record it rather than inventing coverage for another PR's surface.
 
 **7. Verification commands and evidence.**
-- [ ] The targeted test selector for whatever pins were actually added
-      (confirm at implementation time; there may be very few).
-- [ ] Record counts, wall time, the evidence-layer table, and the mutation
-      result for each added pin.
+- [x] **RUN AS**: `.venv/bin/python -m pytest tests/unit/agent/inference_skill -q` — exactly ONE pin was added, so the module that owns it is the selector.
+- [x] Recorded in §18.2g: 32 passed in 0.88s; the five-row evidence-layer table; M17/M18 both RED.
 
 **8. Commit boundary.** Audit record, minimal pins, and documentation only.
 
@@ -1288,24 +1280,24 @@ independently.
 - Depends on: C4, C5, C6.
 
 **3. Implementation plan.**
-- [ ] Build **B1** (§8): vary only the contract-owned class cardinality;
+- [x] Build **B1** (§8): vary only the contract-owned class cardinality;
       hold `DatasetProfile`, calibration, hardware and policy fixed. Prove
       the live VRAM probe shape and dependent forecast/admission terms follow
       the contract, and that no local `[B, 256, T]` realization remains.
-- [ ] Build **B2** (§8): vary only the PSD/decomposition-relevant
+- [x] Build **B2** (§8): vary only the PSD/decomposition-relevant
       `DatasetProfile` fact; hold `ModelIOContract`, calibration, hardware and
       policy fixed. Prove the live workload/time path follows the run-bound
       profile.
-- [ ] Prove across both that `2.7`, the intensity cap, the batch table and
+- [x] Prove across both that `2.7`, the intensity cap, the batch table and
       the hardware context stay byte-identical.
-- [ ] Build the **minimum** Checkpoint-C scenario set (§9): C-P and C-D, or
+- [x] Build the **minimum** Checkpoint-C scenario set (§9): C-P and C-D, or
       one scenario if it provably reaches both families — record which and
       why.
-- [ ] Run the family mutations and record each observed result:
+- [x] Run the family mutations and record each observed result:
       probe-shape ambient regression; **profile ambient regression**;
       **contract-transport drop**; **ambient task-config re-read**;
       calibration drift.
-- [ ] **Decide the Gate-2 condition** (§11) and record the evidence:
+- [x] **Decide the Gate-2 condition** (§11) and record the evidence:
       deterministic production-path evidence fully exercises the live
       admission decision → NOT REQUIRED; otherwise REQUIRED.
 
@@ -1323,19 +1315,19 @@ independently.
   unless a resource literal reaches a rendered prompt.
 
 **5. Acceptance criteria.**
-- [ ] **B1 and B2 both PASS**, each against its own baseline, each moving
+- [x] **B1 and B2 both PASS**, each against its own baseline, each moving
       exactly one authority's fact.
-- [ ] Reintroducing ambient behaviour reds for **each** family — probe shape,
+- [x] Reintroducing ambient behaviour reds for **each** family — probe shape,
       profile, transport, ambient task-config re-read — with each mutation's
       site count asserted as exactly 1 before it is applied.
-- [ ] Every mutation is restored from clean source and the tree re-verified
+- [x] Every mutation is restored from clean source and the tree re-verified
       green.
-- [ ] Checkpoint C crosses the real production gate for **both** authority
+- [x] Checkpoint C crosses the real production gate for **both** authority
       families (one scenario or two, per §9); a helper-only substitution is
       explicitly rejected in the record.
-- [ ] The Gate-2 branch is recorded with the **source evidence** that settled
+- [x] The Gate-2 branch is recorded with the **source evidence** that settled
       it, not a preference.
-- [ ] No production file is modified by this commit.
+- [x] No production file is modified by this commit.
 
 **6. Failure and edge cases.**
 - A mutation **survives** → inspect the test architecture before adding an
@@ -1346,9 +1338,8 @@ independently.
   rebuild it single-axis.
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill tests/unit/agent/tune_ml_hyperparam_agent tests/unit/execute_tools -q`
-- [ ] Record counts, wall time, each mutation's expected vs observed result,
-      the restored-green re-run, and the Gate-2 decision with its evidence.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill tests/unit/agent/tune_ml_hyperparam_agent tests/unit/execute_tools -q`
+- [x] Recorded in §18.2h: 5 passed in 13.01s (Checkpoint C) and 374 passed in 21.54s; twelve mutations across five families, all RED and restored; **Gate 2 NOT REQUIRED**, with four recorded evidence items.
 
 **8. Commit boundary.** Evidence only. No production change.
 
@@ -1363,13 +1354,13 @@ independently.
 Depends on: C7.
 
 **3. Implementation plan.**
-- [ ] Synchronize §17 with actual findings, deviations and evidence.
-- [ ] Update `evaluate_vram_skill.md` and the tuner node doc as the **last**
+- [x] Synchronize §17 with actual findings, deviations and evidence.
+- [x] Update `evaluate_vram_skill.md` and the tuner node doc as the **last**
       pre-merge step, quoting each documented kwarg/default against merged
       source (CLAUDE.md doc-sync rule).
-- [ ] Run the terminal checks from a **clean tree**.
-- [ ] Open/update the PR; drive exact-final-head CI green.
-- [ ] Verify local HEAD == PR `headRefOid` == successful CI `headSha`.
+- [x] Run the terminal checks from a **clean tree**.
+- [x] Open/update the PR; drive exact-final-head CI green.
+- [x] Verify local HEAD == PR `headRefOid` == successful CI `headSha`.
 
 **4. Validation plan.**
 - Directly affected tests · focused integration · mutations · `ruff check` ·
@@ -1377,11 +1368,11 @@ Depends on: C7.
   **No local full suite by default.** Gate only if C7 decided REQUIRED.
 
 **5. Acceptance criteria.**
-- [ ] Every verdict read from the **log file**, never a wrapper's exit
+- [x] Every verdict read from the **log file**, never a wrapper's exit
       status.
-- [ ] The three identities match, each read rather than reconstructed.
-- [ ] Working tree clean; §17 records every deviation.
-- [ ] If local pyright cannot run (the 05a precedent: host Node too old),
+- [x] The three identities match, each read rather than reconstructed.
+- [x] Working tree clean; §17 records every deviation.
+- [x] If local pyright cannot run (the 05a precedent: host Node too old),
       that limitation is **recorded** and no local type claim is made.
 
 **6. Failure and edge cases.**
@@ -1391,8 +1382,8 @@ Depends on: C7.
   a stop condition.
 
 **7. Verification commands and evidence.**
-- [ ] The terminal command set, with counts and wall time recorded.
-- [ ] CI run id and exact `headSha`.
+- [x] The terminal command set, with counts and wall time recorded.
+- [x] CI run id and exact `headSha`.
 
 **8. Commit boundary.** Documentation and CI-driven fixes only.
 
@@ -1434,72 +1425,1034 @@ returns early. The operator does not approve movement between checkpoints.
 **This table governs.** Where any lower-level checklist in §16 diverges from
 it, this table wins.
 
-### CHECKPOINT 0 — pre-edit baselines
-- [ ] probe tensor shape/dtype baseline captured for every reachable branch
-- [ ] live/dead estimator census recorded, each live one naming its caller
-- [ ] captured **BEFORE** any production edit
-- [ ] no duplication of existing Step-02/03/04a baselines
+### CHECKPOINT 0 — pre-edit baselines — **COMPLETE** (§18.2)
+- [x] probe tensor shape/dtype baseline captured for every reachable branch
+- [x] live/dead estimator census recorded, each live one naming its caller
+- [x] captured **BEFORE** any production edit
+- [x] no duplication of existing Step-02/03/04a baselines
 
 ### CHECKPOINT A — TIDMAD / replay parity
-- [ ] forecast breakdowns **deep-equal** (train/inference/scoring)
-- [ ] admission/refusal decisions and identities identical
-- [ ] resolved batch size per candidate identical
-- [ ] probe tensor shapes/dtypes identical with no contract supplied
-- [ ] calibration constants unchanged, asserted by pin
-- [ ] step counts and the default-path visited sequence unchanged
-- [ ] model / loss / train / `TrialConfig` schemas unchanged; CLI unchanged
-- [ ] a representative historical TIDMAD configuration loads **without
+- [x] forecast breakdowns **deep-equal** (train/inference/scoring)
+- [x] admission/refusal decisions and identities identical
+- [x] resolved batch size per candidate identical
+- [x] probe tensor shapes/dtypes identical with no contract supplied
+- [x] calibration constants unchanged, asserted by pin
+- [x] step counts and the default-path visited sequence unchanged
+- [x] model / loss / train / `TrialConfig` schemas unchanged; CLI unchanged
+- [x] a representative historical TIDMAD configuration loads **without
       migration** and resolves to the same effective semantics
 
 ### CHECKPOINT B — generic consumption (ONE rung, TWO atomic subcases)
-- [ ] **B1** Model-I/O probe realization: class cardinality moves the live
+- [x] **B1** Model-I/O probe realization: class cardinality moves the live
       probe shape and dependent forecast/admission terms
-- [ ] **B2** dataset/decomposition topology: the PSD fact moves the live
+- [x] **B2** dataset/decomposition topology: the PSD fact moves the live
       workload/time terms via the **run-bound** profile
-- [ ] each subcase varies exactly ONE authority's fact against its own
+- [x] each subcase varies exactly ONE authority's fact against its own
       baseline
-- [ ] calibration, hardware and policy provably fixed across both
-- [ ] family mutations red appropriately (probe shape · profile · transport ·
+- [x] calibration, hardware and policy provably fixed across both
+- [x] family mutations red appropriately (probe shape · profile · transport ·
       ambient task-config re-read · calibration drift)
-- [ ] no ambient profile fallback and no ambient task-config re-resolution
+- [x] no ambient profile fallback and no ambient task-config re-resolution
       remains in a live resource consumer
 
 ### CHECKPOINT C — production path
-- [ ] the minimum deterministic production-path scenario set reaches **both**
+- [x] the minimum deterministic production-path scenario set reaches **both**
       authority families through real resource/time control flow
-- [ ] the real production gate prices and admits a real attempt using derived
+- [x] the real production gate prices and admits a real attempt using derived
       terms; measurement may be controlled at its existing boundary, the
       decision may not
-- [ ] no helper-only substitution
-- [ ] §11's Gate-2 condition decided from recorded source evidence
+- [x] no helper-only substitution
+- [x] §11's Gate-2 condition decided from recorded source evidence
 
 ### CHECKPOINT D — regression / static
-- [ ] directly affected deterministic tests
-- [ ] focused integration
-- [ ] mutations restored and re-verified green
-- [ ] `ruff check` + `ruff format --check`
-- [ ] required static/type checks (or a recorded environment limitation)
-- [ ] exact-final-head CI green
-- [ ] no local full suite by default
+- [x] directly affected deterministic tests
+- [x] focused integration
+- [x] mutations restored and re-verified green
+- [x] `ruff check` + `ruff format --check`
+- [x] required static/type checks — local pyright UNAVAILABLE (host Node
+      v10.19.0), recorded in §18.2i; CI's blocking strict pyright reports
+      **0 errors**
+- [x] exact-final-head CI green
+- [x] no local full suite by default
 
 ### GATES
-- [ ] **Gate 1 NOT REQUIRED** — re-verified; flips only if a resource literal
-      reaches a rendered prompt
-- [ ] **Gate 2** — decided at C7 by §11's semantic condition. If REQUIRED, it
-      is bounded, listed separately, and **launched only with operator
-      approval**
+- [x] **Gate 1 NOT REQUIRED** — re-verified at the final head; no LLM-visible
+      surface changed, and the one operator-facing string touched
+      (`_suggest_lever`) is pinned byte-identical under TIDMAD
+- [x] **Gate 2 NOT REQUIRED** — decided at C7 from Checkpoint-C evidence
+      (§18.2h): the live admission/pricing decision is fully exercised and
+      shown load-bearing, nothing 05b changes is device-dependent, and
+      failure class 3 cannot fire. No Gate was launched
 
 ### READY FOR OPERATOR REVIEW
-- [ ] Checkpoints 0/A/B/C/D complete
-- [ ] Gate disposition re-verified at the final head
-- [ ] node/skill docs synchronized as the last pre-merge step
-- [ ] PR opened/updated; exact-final-head CI green
-- [ ] local HEAD == PR `headRefOid` == successful CI `headSha`
-- [ ] working tree clean
+- [x] Checkpoints 0/A/B/C/D complete
+- [x] Gate disposition re-verified at the final head
+- [x] node/skill docs synchronized as the last pre-merge step
+- [x] PR opened/updated; exact-final-head CI green
+- [x] local HEAD == PR `headRefOid` == successful CI `headSha`
+- [x] working tree clean
 
 ## 18. Implementation ledger
 
-*(empty — populated at implementation kickoff)*
+**Implementation authorized 2026-08-14.** Branch
+`feat/generic-framework-step-05b-tuner-resource-time`, created from the
+freeze marker `aa7e2131aee17d0049b3b67837f2c8b6a139d4e0` (verified equal to
+`origin/master` at kickoff; frozen semantic content `ce880124` verified
+present in history; working tree clean).
+
+### 18.1 Implementation-time source re-enumeration
+
+Every §0.3 anchor re-verified at `aa7e2131`. Line numbers below are the
+CURRENT ones; where they differ from §0.3 the correction is noted.
+
+**Phase P — Model-I/O / VRAM**
+
+| Site | Current location | Note |
+|---|---|---|
+| `realize_shape` | `model_io_probe_skill.py:109-139` | unparameterized; precedence `fixed` → `PROBE_BATCH` (`:68`, `1`) → `PROBE_SYMBOLIC_EXTENT` (`:75`, `64`) |
+| `declared_output_tensor` | `:142-209` | the form/fact rule §0.5 quotes, verbatim in its docstring |
+| `expected_output_shape` | `:212-217` | thin wrapper over the two above |
+| `build_model_input` | `:254-285` | second `realize_shape` caller |
+| `ProbeConstructionError` | `:90-101` | the typed fail-closed |
+| probe-authority consumers | `ml_model_implementor.py:1840`, `:1995`; `ml_code_validator_agent.py:646` | **confirmed** — exactly two nodes, three call sites, all optional-contract |
+| `_build_probe_tensors` | `evaluate_vram_skill/wrapper.py:176-249` | `[B, 256, T]` literal at `:248` — **confirmed unchanged** |
+| its single call site | `wrapper.py:588` | **confirmed** |
+| `run_skill` | `wrapper.py:483` | `**kwargs` — the addition is additive |
+| target dtype authority | `wrapper.py:214` `get_target_torch_dtype(LossConfig(...))` | unchanged by 05b |
+| unknown-output refusal | `wrapper.py:230-240` | `UnknownOutputContractError` → `ValueError` |
+| `IsolatedProbeSpec` | `isolated_probe.py:157-182` | frozen, JSON-only, transient IPC |
+| pre-flight parent | `preflight_adapter.run_production_preflight:212-250` | builds the spec |
+| worker rebuild | `preflight_worker_main.py:190-208` | `spec.get(...)` → `run_skill` |
+| tuner pre-flight call | `ml_hyperparameter_tune_agent.py:4654` (import at `:54`) | **confirmed** |
+
+**Correction to §0.2 finding (2).** The tuner holds no `ModelIOContract`
+today — re-confirmed: `grep model_io agent/schemas/hyperparam_tuning.py`
+returns nothing, and `ml_hyperparameter_tune_agent.py` imports no
+model-io module.
+
+**Phase D — estimator liveness census (C0 obligation, §4)**
+
+Every estimator on the resource path, classified, each live one naming the
+production caller that makes it live:
+
+| Site | Class | Production caller |
+|---|---|---|
+| `workload_resolvers._validate_seg:49` (`profile or resolve_dataset_profile()`) | **production live** | reached by both live resolvers below |
+| `workload_resolvers.resolve_inference_workload:139` (same shape) | **production live** | `execute_tools/inference_single.py:563` |
+| `workload_resolvers.resolve_training_workload:53` | **production live** | `evaluate_time_skill/wrapper.py:515`, `training_skill/estimator.py:493`, `ml_hyperparameter_tune_agent.py:2914` |
+| `workload_resolvers.resolve_scoring_workload:178` | **test-only** | no production caller; only `tests/unit/core/test_total_assembly.py:223,239` |
+| `workload_resolvers.resolve_formal_workloads:210` | **dead** | zero callers anywhere, tests included |
+| `inference_skill/estimator._total_inference_steps:200` (ambient at `:208`) | **production live** | `:295` ← `estimate_wall_time_seconds` ← `evaluate_time_skill/wrapper.py:781` |
+| `evaluate_time_skill/wrapper.py:92` (`_suggest_lever`) | **production live** | `wrapper.py:950`, the over-budget suggestion string |
+| `evaluate_time_skill/wrapper.py:357` (`_measure_ms_per_step`) | **production live** | the warm-up measurement path |
+| `evaluate_time_skill/wrapper.py:767` (`run_skill`) | **production live** | tuner imports the skill at `:51` |
+| `training_skill/estimator._total_train_steps:475` | **production live** | `training_skill/estimator.py:596` |
+| `core/runtime_control/*` `40_000` seg fallbacks | **Step-07 owned** | out of scope (§3) |
+
+**Out of scope for C2-C5 by §4's binding rule**: `resolve_scoring_workload`
+(test-only) and `resolve_formal_workloads` (dead). `resolve_formal_workloads`
+additionally carries an ambient fallback it can never exercise, because it
+does not forward a `profile` to any of the three resolvers it calls — it is
+recorded as debt, not fixed here. Genericizing either would create an
+abstraction whose only consumer is a test or nothing at all.
+
+**Confirmed §6 oracle status (do not duplicate):**
+
+| Surface | Existing oracle |
+|---|---|
+| probe tensor SHAPES, all four reachable branches | `tests/unit/agent/evaluate_vram_skill/test_probe_target_contract.py` — hardcoded literals |
+| workload-resolver profile-following | `tests/unit/execute_tools/test_step02a_c2_profile_injection.py` |
+| RT1 step-count parity vs the trainer | `tests/unit/agent/tune_ml_hyperparam_agent/test_rt1_step_resolver.py`, `tests/unit/execute_tools/test_workload_resolvers.py` |
+| pre-flight IPC composition / adapter | `tests/unit/agent/evaluate_vram_skill/test_preflight_ipc_composition.py`, `test_preflight_adapter.py`, `test_isolated_preflight.py` |
+| `HardwareSnapshot`'s six-attribute surface | `test_hardware_snapshot_satisfies_run_skill_surface` |
+| probe tensor DTYPES | **MISSING** → captured at C0 |
+| the unknown-output refusal at the VRAM call site | **MISSING** → captured at C0 |
+
+### 18.2 C0 / CHECKPOINT 0 — pre-edit baselines
+
+- [x] probe tensor shape/dtype baseline captured for every reachable branch
+- [x] live/dead estimator census recorded, each live one naming its caller
+- [x] captured **BEFORE** any production edit
+- [x] no duplication of existing Step-02/03/04a baselines
+
+**New module**: `tests/unit/agent/evaluate_vram_skill/test_step05b_c0_probe_baselines.py`
+(7 cases). It captures exactly the three failure classes no existing oracle
+covers — each one a migration C2 could plausibly perform while every shape
+assertion in the repository stayed green:
+
+| Class | Baseline captured | The defect only it catches |
+|---|---|---|
+| 1 | target dtype per branch, as hardcoded literals: `classifier`+`ce` → `torch.int64`, `classifier`+`focal` → `torch.int64`, `regressor`+`smooth_l1` → `torch.float32`, `hybrid`+`smooth_l1` → `torch.float32`, `model_type=None` → `torch.float32`; input always `torch.int64` | dtype ownership silently moving from the loss to the contract. The existing module asserts only `dtype != torch.long` for the float branches, so a contract-sourced dtype would pass it |
+| 2 | an UNREGISTERED `model_type` with a long-target loss still builds `([B,T] int64, [B,T] int64)` | `_build_probe_tensors` returns at `wrapper.py:217` *before* consulting `model_type`. A C2 that resolved the contract above that early return would start refusing a model that is probed successfully today |
+| 3 | an UNREGISTERED `model_type` with a float-target loss raises `ValueError` naming the model | the `wrapper.py:230-240` refusal ceasing to fire. Nothing in the repository exercised that conversion from this call site; a C2 that fell back to the literal on a contract failure would be invisible |
+
+**Deliberately NOT captured**: the four target SHAPES, already pinned as
+hardcoded literals by `test_probe_target_contract.py`; and any branch whose
+shape cannot move when a contract is supplied.
+
+**Verification (C0)**
+
+```text
+command:  .venv/bin/python -m pytest \
+            tests/unit/agent/evaluate_vram_skill/test_step05b_c0_probe_baselines.py \
+            tests/unit/agent/evaluate_vram_skill/test_probe_target_contract.py -q
+purpose:  the new baselines pass against byte-unchanged production code
+result:   16 passed in 1.04s  (7 new + 9 existing)
+tree:     `git status --porcelain` listed exactly ONE path, the new test
+          module — zero production files modified
+```
+
+### 18.2b C1 — additive realizer parameterization
+
+**Production change**: `agent/skills/model_io_probe_skill.py` only.
+`realize_shape(tensor, *, batch=None, symbolic=None)`, plus two private
+helpers (`_positive_extent`, `_reject_ambiguous_symbolic_extent`) and a
+widened `ProbeConstructionError` docstring. **Zero existing call sites
+edited**; no recipe constant changed.
+
+**Tests**: `tests/unit/agent/skills/test_step05b_c1_realizer_extents.py`
+(17 cases), reusing `tests/helpers/step04a_fixtures.tidmad_model_io()` so a
+contract edit cannot make 04a's oracles and 05b's disagree.
+
+**Design item resolved — C1 §6, "more than one symbolic axis".** The design
+asked implementation to record whether one scalar is correct for the capacity
+probe and to STOP rather than add per-axis parameters if it is not.
+
+```text
+Question:
+  is one `symbolic` scalar semantically correct for every contract the
+  capacity probe can be handed?
+
+Audit evidence:
+  Dimension.symbolic is a NAME (model_io_contract.py:109), and §4e makes
+  the name the alignment mechanism: `T` on the input and `T` on the output
+  are the SAME extent. The shipped TIDMAD contract declares exactly one
+  distinct non-batch symbol (`T`) on each tensor, so one scalar answers it
+  exactly.
+
+Corrected understanding:
+  correctness is not a property of the AXIS COUNT but of the DISTINCT
+  SYMBOL count. Two axes sharing `T` are one alignment and one scalar is
+  right; `H` and `W` are two independent alignments and one scalar would be
+  a guess.
+
+Implementation consequence:
+  NOT a STOP. One scalar is kept, and the unrepresentable case fails closed
+  — §0.5's "the form/contract combination is not representable" branch,
+  which is a refusal, not a shape language. Per-axis extents would belong to
+  whoever owns the contract schema.
+
+Validation consequence:
+  the guard is reachable ONLY when `symbolic` is explicitly supplied, so the
+  legacy path realizes any contract exactly as before — pinned by
+  `test_the_legacy_path_still_realizes_it`.
+```
+
+**C1 acceptance criteria**
+
+| Criterion | Evidence |
+|---|---|
+| both arguments omitted → equal to the pre-change return | `test_shipped_contract_realizes_the_pre_05b_shapes` (`(1, 256, 64)` / `(1, 64)` as hardcoded literals), `test_the_derived_step04_helpers_are_unchanged` |
+| `batch=B, symbolic=T` → declared `fixed` class extent still `256`; rank and axis order from the contract | `test_a_fixed_class_axis_ignores_the_symbolic_override`, `test_rank_and_axis_order_still_come_from_the_contract` (class-LAST case) |
+| the four probe constants unchanged, asserted by value | `test_the_recipe_constants_are_unchanged` |
+| `None`-sensitivity: `None` → recipe default, positive → verbatim, zero/negative → typed failure, never a fallback | `test_explicit_none_resolves_the_recipe_default`, `test_a_non_positive_extent_refuses_instead_of_falling_back` (6 params) |
+| zero production call sites changed | `git diff --stat` for C1 lists one production file; the 474-case 04a consumer run needed no test edited |
+| the typed error is the module's existing one | `test_the_refusal_is_the_modules_existing_typed_error` |
+
+**C1 mutations** — every one RED, every one restored from clean source and
+the tree re-verified green (17 passed):
+
+| # | Mutation | Expected | Observed |
+|---|---|---|---|
+| M1 | batch-role check moved ABOVE the `fixed` check | RED | RED — `test_a_fixed_batch_role_axis_ignores_the_batch_override` |
+| M2 | `batch_extent = batch or PROBE_BATCH` | RED | RED — all three `batch` zero/negative params |
+| M3 | `symbolic_extent = symbolic or PROBE_SYMBOLIC_EXTENT` | RED | RED — all three `symbolic` zero/negative params |
+| M4 | `PROBE_SYMBOLIC_EXTENT` 64 → 128 (default drift) | RED | RED — 5 cases across three classes |
+| M5 | ambiguity guard disabled | RED | RED — `test_one_scalar_for_two_distinct_symbols_refuses` |
+
+Each mutation asserted **exactly one** site before it was applied, and
+`agent/**/__pycache__` was cleared before and after, so no verdict came from
+a stale `.pyc`.
+
+**Verification (C1)**
+
+```text
+command:  .venv/bin/python -m pytest \
+            tests/unit/agent/skills/test_step05b_c1_realizer_extents.py -q
+result:   17 passed in 0.92s
+
+command:  .venv/bin/python -m pytest tests/unit/agent/test_step04a_stage_b_ladder.py \
+            tests/unit/agent/ml_code_validator_agent \
+            tests/unit/agent/ml_model_implementor tests/unit/agent/skills -q
+purpose:  every existing Step-04a consumer of the realizer, unchanged
+result:   474 passed in 6.11s — no existing 04a test required editing
+
+lint:     ruff check + ruff format --check clean on both touched files
+```
+
+### 18.2c C2 — the VRAM probe accepts a contract (inert in production)
+
+**Production change**: `agent/skills/evaluate_vram_skill/wrapper.py` only.
+New helper `_contract_target_shape`; `_build_probe_tensors` and `run_skill`
+gain `model_io_contract: ModelIOContract | None = None`; the `:588` call site
+forwards it. Plus `evaluate_vram_skill.md`. No production caller supplies a
+contract yet — asserted, not claimed
+(`test_no_production_caller_supplies_a_contract_yet`).
+
+**Tests**: `tests/unit/agent/evaluate_vram_skill/test_step05b_c2_contract_aware_probe.py`
+(19 cases), reusing the Step-04a frozen fixtures.
+
+**Design item resolved — how `hybrid` is treated.** C2's plan says the
+declared form selects the tensor and the contract supplies the facts. Source
+audit found that one of the three declarable words is not a form at all.
+
+```text
+Previous assumption (C2 §3):
+  resolve the form with get_output_type, then hand it to
+  declared_output_tensor. Three words, three forms.
+
+Audit evidence:
+  ml_models/models_format_sandbox.py:472-475 — "`hybrid` is never PRODUCED
+  by the projection because it is not a tensor semantic (§8c) ... Inventing
+  tensor semantics for it is forbidden."
+  output_semantic_from_legacy() answers None for it (:491-514).
+  ml_models/models_sandbox.py:355-365 — `fcnet` returns [B, T] under
+  `smooth_l1` and [B, C, T] otherwise: its emitted shape is chosen by the
+  LOSS.
+  declared_output_tensor's else-branch is the CONTINUOUS form, so passing
+  "hybrid" through it would return [B, T] — and today's hybrid target is
+  [B, 256, T]. That is a TIDMAD parity break, failure class 3.
+
+Corrected understanding:
+  the contract governs where the DECLARATION carries a canonical tensor
+  semantic. `hybrid` names an adapter whose shape depends on a fact
+  (`loss_type`) that no Model-I/O contract owns, so there is nothing for the
+  contract to supply.
+
+Implementation consequence:
+  `_contract_target_shape` asks the EXISTING projection
+  (`output_semantic_from_legacy`) rather than restating a table, and returns
+  None for `hybrid`/unrecognised — the shipped target, preserved exactly.
+  This is an authority statement, not a fallback: the alternative is
+  inventing a tensor semantic Step-03 §8c forbids.
+
+Validation consequence:
+  `test_hybrid_keeps_its_legacy_target_under_a_contract` pins it, including
+  under a 16-class contrast contract. Recorded as a documented residue in
+  §18.5, with Step 03 as its owner.
+```
+
+**Where the float branch is reachable, and why B1 uses the classifier form.**
+`_build_probe_tensors` reaches the contract at all only for a float target
+dtype. `validate_semantic_loss_compatibility` forbids CATEGORICAL + a
+REGRESSION loss, but `loss_type="custom"` is in neither
+`CLASSIFICATION_LOSSES` nor `REGRESSION_LOSSES`
+(`models_format_sandbox.py:384-387`), so a `classifier` candidate with a
+custom float-target loss is permitted — and that is the one reachable case
+whose target actually carries the class alphabet. The `regressor` form drops
+the class axis, so its target is `[B, T]` regardless of cardinality. B1's
+observed fact is therefore the class extent under the **classifier** form.
+
+**C2 acceptance criteria**
+
+| Criterion | Evidence |
+|---|---|
+| `model_io_contract=None` → shapes and dtypes equal to the C0 baseline, every branch | `TestTheLegacyPathIsUntouched` (3 params) |
+| shipped TIDMAD contract → target equals the no-contract shape **exactly** | `test_classifier_form_reproduces_the_broadcast_target`, `test_regressor_form_reproduces_the_two_d_target` (asserted against the legacy build, not a literal) |
+| contrast contract → the class axis moves; `batch_size`/`seg_size` honoured at real values, not `1`/`64` | `test_the_target_equals_what_the_04a_authority_realizes` (4 params), `test_the_candidates_real_extents_are_honoured` |
+| target dtype still from the loss in both paths | `test_a_contract_declaring_another_dtype_does_not_move_the_target` — the only case where the two answers differ, since under TIDMAD both are float32 |
+| form/fact authority matches Step 04a — asserted against the authority, not a restated table | `test_the_target_equals_what_the_04a_authority_realizes` compares to `declared_output_tensor` + `realize_shape` |
+| a `regressor` under a categorical contract is ACCEPTED at the class-axis-dropped shape | `test_a_regressor_under_a_categorical_contract_is_accepted` |
+| a `classifier` under a contract with no class axis raises `ProbeConstructionError`, surfaced not swallowed | `test_a_classifier_under_a_contract_with_no_class_axis_refuses` |
+| no production caller passes a contract yet | `test_no_production_caller_supplies_a_contract_yet` — a source assertion over `preflight_adapter` and `preflight_worker_main`, so C4's evidence cannot be confused with C2's |
+
+**C2 mutations** — all RED, all restored, tree re-verified green (19 passed):
+
+| # | Mutation | Observed |
+|---|---|---|
+| M6 | contract failure swallowed → fall back to the literal | RED — both refusal cases |
+| M7 | realize at validation extents (`realize_shape(...)` with no overrides) | RED — 8 cases |
+| M8 | dtype taken from `contract.output.dtype` instead of the loss | RED — the dtype-disagreement case |
+| M9 | a local `classifier -> (B, 256, T)` table short-circuits the authority | RED — the 16-class case and the fail-closed case |
+
+**Verification (C2)**
+
+```text
+command:  .venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q
+purpose:  the whole VRAM subsystem, including every pre-existing oracle
+result:   304 passed in 22.97s  (285 before C2 + 19 new)
+lint:     ruff check + ruff format --check clean
+```
+
+### 18.2d C3 — contract transport across the pre-flight worker boundary
+
+**Production change**: `isolated_probe.py` (`IsolatedProbeSpec` gains one
+optional typed field), `preflight_worker_main.py` (rebuild + forward),
+`preflight_adapter.py` (`run_production_preflight` gains the matching
+optional parameter). Still inert: no production caller supplies a contract.
+
+**Representation chosen — inline, not a path.** The `--model_io_json`
+precedent uses a path because the training child is launched with argv and
+has no other document to carry it on. `IsolatedProbeSpec` is *already* a
+transient JSON IPC document with no manifest and no reader beyond its worker
+(`isolated_probe.py:157-162`), so an inline typed field adds no second
+lifetime to manage. The omit-vs-broken rule is the same one
+`sandbox_executor.py:1309-1314` documents: **absence is legal and selects
+the legacy path; present-but-unrebuildable fails loudly.**
+
+**Tests**: `tests/unit/agent/evaluate_vram_skill/test_step05b_c3_contract_transport.py`
+(6 cases). Two candidate cases were deliberately dropped as decoration: a
+malformed contract on the PARENT side is rejected by the spec's own typed
+field (a declaration already enforces it), and `HardwareSnapshot`'s read
+surface is already pinned by `test_hardware_snapshot_satisfies_run_skill_surface`.
+
+**A surviving mutation found a real gap — recorded because the fix is the
+point.**
+
+```text
+Mutation M12 (first run):
+  run_production_preflight builds the spec with model_io_contract=None.
+
+Expected: RED.
+Observed: GREEN — 24 passed.
+
+Diagnosis (real gap, not an equivalent mutant):
+  every transport assertion started from a spec that ALREADY carried the
+  contract, so the PARENT hop — caller argument -> spec field — was never
+  exercised. This is precisely the "serializes but never arrives" failure
+  the module's docstring names, one hop earlier than where it was guarded.
+
+Fix:
+  test_the_parent_puts_it_on_the_spec — calls the real
+  run_production_preflight with run_isolated_preflight stubbed to capture
+  the constructed spec.
+
+Re-run: M12 RED.
+```
+
+**C3 acceptance criteria**
+
+| Criterion | Evidence |
+|---|---|
+| a contract placed on the spec ARRIVES at `run_skill` in the child, proven by a test that fails if the forwarding line is deleted | `test_the_worker_forwards_it_to_run_skill` (mutation M10 RED) |
+| the caller's argument reaches the spec that crosses the boundary | `test_the_parent_puts_it_on_the_spec` (mutation M12 RED) |
+| spec JSON without the field validates and behaves exactly as today | `test_a_spec_json_written_before_the_field_existed_validates`, `test_an_absent_field_forwards_none` |
+| `HardwareSnapshot`'s attribute surface unchanged | the existing six-attribute test still passes untouched (310-case run) |
+| a transport mutation is RED | M10, M11, M12 — all RED |
+
+**C3 mutations**
+
+| # | Mutation | Observed |
+|---|---|---|
+| M10 | worker forwards `None` instead of the rebuilt contract | RED |
+| M11 | a malformed contract degrades to `None` instead of failing | RED |
+| M12 | parent drops the field when constructing the spec | **survived first**, then RED after the gap above was closed |
+
+**Verification (C3)**
+
+```text
+command:  .venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill -q
+result:   310 passed in 21.87s
+lint:     ruff check + ruff format clean across agent/ and tests/
+```
+
+**Test disposition — one C2 case UPGRADED, not deleted.**
+`test_no_production_caller_supplies_a_contract_yet` grepped
+`preflight_adapter`/`preflight_worker_main` for the field name, so C3's
+legitimate transport made it RED. Its functional intent — *nothing acquires
+a contract implicitly* — is durable; its implementation was a point-in-time
+source grep that C3 was always going to invalidate and that never proved the
+property anyway. Replaced by
+`test_no_resource_consumer_resolves_a_contract_of_its_own`, which asserts
+that no module in `agent/skills/evaluate_vram_skill/` reaches for
+`load_task_config`, `resolve_model_io_contract` or `load_model_io_contract`.
+That is the frozen invariant ("no live 05b resource consumer independently
+re-reads an ambient source"), and it stays true and load-bearing through C4.
+
+### 18.2e C4 — one run-bound contract reaches the resource path (first live consumer)
+
+**Production change**: `workflows/task_config.py` (new
+`run_bound_model_io_contract`), `core/sandbox_executor.py`
+(`_write_model_io_config` delegates to it),
+`nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` (binds
+it once in `run()` beside `run_profile`, passes it to
+`run_production_preflight`).
+
+**Transport chosen and why the design's first preference was unavailable** —
+full evidence in §18.3 D-05b-1. In short: production launches the tuner node
+as a subprocess and builds `HyperparamTuningInput` from argv alone, so no
+parent holds a resolved contract that reaches it, and an optional schema
+field would be `None` on the production chain. The design's conditional for
+`load_task_config` is satisfied because the SAME expression already runs in
+the same process to feed every training and inference child, and
+`load_task_config` memoizes per absolute path — divergence is structurally
+impossible, not merely unlikely. C4 extracts that expression into ONE
+acquisition point so the claim is structural rather than a coincidence of
+the cache.
+
+**`run()` gains no new branch** — verified by reading the diff: one
+assignment and one keyword argument, no conditional. This matters because
+`run()` sits on pyright's strict complexity ceiling (CLAUDE.md), where the
+259th branch node silently un-verifies every annotation in the function.
+
+**Tests**: `tests/unit/agent/tune_ml_hyperparam_agent/test_step05b_c4_run_bound_contract.py`
+(5 cases).
+
+**C4 acceptance criteria**
+
+| Criterion | Evidence |
+|---|---|
+| under TIDMAD the admission decision, resolved batch and forecast breakdown are unchanged | the bound value IS the shipped declaration (`test_the_bound_contract_is_the_shipped_declaration`), and C2 proved the shipped contract reproduces the legacy tensor exactly — so there is no term left that could move. Confirmed empirically by the 4,039-case run below |
+| a task with no `model_io`, and a legacy caller supplying nothing, both take the legacy path | `test_a_prose_only_task_config_binds_no_contract`; `test_an_absent_field_forwards_none` (C3) |
+| ONE run binding — the in-process wrapper and the child observe the same semantic value | the only production entry to the gate is `run_production_preflight` (audited: every other `evaluate_vram_skill` reference outside the package is a script or a comment), and the child's `run_skill` IS the in-process wrapper. C3's parent→spec→worker→`run_skill` chain carries one value end to end |
+| no resource consumer performs its own ambient task-config resolution | `test_no_resource_consumer_resolves_a_contract_of_its_own` |
+| `run()` gains no new branch | diff inspection, as the design requires |
+| no new user-authored config, no new config hierarchy, no new CLI argument; old configs load unmigrated | `test_no_new_persisted_or_user_authored_field`, `test_the_tuner_cli_gained_no_argument`; `configs/task_config.yaml` is byte-unchanged |
+
+**C4 mutations**
+
+| # | Mutation | Expected | Observed |
+|---|---|---|---|
+| M13 | `_write_model_io_config` re-derives the contract itself instead of using the acquisition point | RED | RED — `test_the_training_child_receives_exactly_the_bound_contract` |
+| M14 | the tuner passes `model_io_contract=None` to `run_production_preflight` | RED | **SURVIVED at C4 — see below** |
+
+```text
+Mutation M14 survivor — classified, not patched over.
+
+Classification: REAL GAP at C4, by design, closed at Checkpoint C.
+
+The tuner-to-pre-flight hop is a single call site inside `run()`, a ~2,500
+line orchestrator. Exercising it means driving real production control flow,
+which is exactly what Checkpoint C is defined to do (§9: "the real
+production VRAM pre-flight / admission path ... it consumes the explicit
+run-bound contract"). Adding a source-shape assertion here would produce a
+green tick without an execution, and would then be cited as coverage the
+project does not have.
+
+So M14 is recorded as OPEN at C4 and re-run at Checkpoint C. C4's own claim
+is narrower and true: the acquisition point is single (M13), and the value
+it yields is the shipped declaration.
+```
+
+**Verification (C4)**
+
+```text
+command:  .venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent \
+            tests/unit/agent/evaluate_vram_skill tests/unit/workflows \
+            tests/unit/core -q
+purpose:  the first commit that can change a real run's behaviour, against
+          every suite that owns the touched surfaces
+result:   4039 passed, 2 skipped in 372.68s
+
+command:  .venv/bin/python -m pytest \
+            tests/unit/agent/tune_ml_hyperparam_agent/test_step05b_c4_run_bound_contract.py -q
+result:   5 passed in 1.23s
+```
+
+### 18.2f C5 — run-bound `DatasetProfile` on the live workload/time path
+
+**Production change** — the ambient `profile or resolve_dataset_profile()`
+shape is gone from every production-live resource/time consumer, and the
+parameter is **required** at each one:
+
+| Site | Before | After |
+|---|---|---|
+| `workload_resolvers._validate_seg` | `profile: … = None`, ambient fallback | `profile: DatasetProfile`, required |
+| `workload_resolvers.resolve_training_workload` | optional | required keyword |
+| `workload_resolvers.resolve_inference_workload` | optional + its own ambient read | required keyword |
+| `inference_skill/estimator._total_inference_steps` | optional, ambient fallback | required |
+| `inference_skill/estimator.estimate_wall_time_seconds` | no parameter | required `dataset_profile` |
+| `training_skill/estimator._total_train_steps` | no parameter | required `profile` |
+| `training_skill/estimator.estimate_wall_time_seconds` | no parameter | required `dataset_profile` |
+| `evaluate_time_skill/wrapper._suggest_lever` | ambient read | `psd_segment_length` supplied |
+| `evaluate_time_skill/wrapper._measure_ms_per_step` | ambient read | required `profile` |
+| `evaluate_time_skill/wrapper._store_reuse_decision` | (via the resolver) | required `profile` |
+| `evaluate_time_skill/wrapper.run_skill` | ambient read | **required `dataset_profile` kwarg**, typed-checked at entry |
+
+**Required, not optional-with-fallback** — every production caller can supply
+it (the 05a precedent), so a fallback would be permission no production
+caller exercises, and the one place it *would* be exercised is the defect.
+Pinned by `test_the_profile_is_required_not_optional_with_a_fallback`.
+
+**Production callers now supplying it**
+
+| Caller | Source of the value |
+|---|---|
+| `ml_hyperparameter_tune_agent._run_time_preflight` | `run_profile`, the run's ONE profile bound at `run()` (05a) |
+| `ml_hyperparameter_tune_agent._check_and_record_guardrail_skip` → `_resolve_guardrail_steps` | the same `run_profile` |
+| `execute_tools/inference_single.py` | the profile the subprocess already loaded at its argv boundary (`:334-339`) — **the one-argument fix**: the value was in scope and simply was not passed |
+| `agent/utils/proposer_preflight.estimate_proposal_time` | acquires at its own boundary — see the liveness finding below |
+
+**Liveness finding — `estimate_proposal_time` is NOT production-live.**
+
+```text
+Previous assumption:
+  the proposer's advisory pre-flight is a live consumer, so it needs the
+  run-bound profile threaded to it.
+
+Audit evidence:
+  its only non-test caller is production_estimator_factory._static
+  (core/runtime_control/estimator.py:236-250), which is reached ONLY through
+  DefaultRuntimeEstimator.estimate(). `grep "\.estimate("` over core/, nodes/,
+  agent/, workflows/ and scripts/ finds NO production call — only tests.
+  Every production consumer of shared_runtime_components() reads
+  `estimator.identity` and the policy, never the estimate; the estimator's
+  own docstring (:215-226) says consumers with better evidence bypass it.
+
+Corrected understanding:
+  test-only. §4's binding rule therefore forbids genericizing it, and
+  threading a run-bound profile to it would also require editing
+  core/runtime_control — explicitly OUT OF SCOPE.
+
+Implementation consequence:
+  it acquires at its own boundary in one line and says so in a comment. Not
+  genericized; not left broken either.
+```
+
+**Out of scope, recorded**: `resolve_scoring_workload` (test-only) and
+`resolve_formal_workloads` (dead — zero callers anywhere). The latter is
+given a `profile` parameter it forwards, for signature coherence with the
+callees it would break against; that is not genericization, and it is
+recorded rather than deleted.
+
+**Four `profile or resolve_dataset_profile()` sites remain in the
+repository**, all outside 05b's rollback boundary and all on data/execution
+paths rather than resource/time ones: `train_engine_sandbox.py:93`, `:344`,
+`:868` and `scoring_utils.py:602`. Recorded as Step-02/05a surfaces; not
+touched here.
+
+**Tests**: `tests/unit/execute_tools/test_step05b_c5_run_bound_profile.py`
+(10 cases). ~100 call sites across 19 existing modules were updated to supply
+the now-required argument.
+
+**Two existing contrast tests were UPGRADED rather than mechanically
+patched** — the distinction matters, because patching them with
+`TIDMAD_PROFILE` would have silently destroyed what they test:
+
+| Test | Why a mechanical patch was wrong | Disposition |
+|---|---|---|
+| `test_step02a_c2_profile_injection._workload_ml_per_psd` | it binds a CONTRAST profile and asserts the geometry follows; hardcoding `TIDMAD_PROFILE` would return the TIDMAD answer under the contrast and the rung would silently stop testing anything | now calls `resolve_dataset_profile()` and passes the result. Same property; the acquisition is where 05b puts it — at the caller, once, explicitly |
+| `test_step02a_c5_legality_dedup.test_the_time_skill_message_follows_a_contrast_declaration` | same shape, and it FAILED loudly when patched with `TIDMAD_PROFILE` (`'2,048,000' in '…10,000,000…'`) — the contrast caught its own mis-patch | same fix |
+
+Both now prove *"the consumer follows the declaration it is given"*; the
+binding half — *"the production caller gives it the run-bound one"* — is
+subcase B2 and Checkpoint C.
+
+**C5 acceptance criteria**
+
+| Criterion | Evidence |
+|---|---|
+| under TIDMAD the resolvers return values equal to the C0 baseline, field by field including `detail["output_bytes"]` | `TestTidmadParity` — hardcoded expectations (480,000 steps; 960,000 samples/epoch; 8,000 ML/PSD; 15,000 inference batches; `output_bytes = 120 × 10,000,000 × 2`) |
+| Stage-B B2 passes: a PSD-only contrast moves the derived terms and no calibration constant | `TestDerivedTermsFollowTheBoundProfile` (3 cases) |
+| an ambient-regression mutation is RED | M15, M16 below |
+| `grep "profile or resolve_dataset_profile()"` over the live resource path returns zero | `test_no_live_resource_consumer_resolves_a_profile_of_its_own` — the semantic guard is the property, this is its supporting form |
+| default visited sequence, seeds and ordering unchanged | C5 touches no strategy, portion, seed or ordering code; the tuner, sample-set and DataScope suites are green in the C5 run |
+
+**C5 mutations**
+
+| # | Mutation | Observed | Note |
+|---|---|---|---|
+| M15 | restore `profile = profile or resolve_dataset_profile()` in `_validate_seg` | RED | caught by the ARCHITECTURAL guard only — and that is the honest result. With the argument still supplied, `x or ambient` returns the supplied value, so no value assertion can see it. This is exactly why the two guard shapes both exist |
+| M16 | `output_bytes` reads the ambient profile instead of the bound one | RED | caught by both the architectural guard and the B2 output-byte case |
+
+**Verification (C5)**
+
+```text
+command:  .venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent \
+            tests/unit/execute_tools tests/unit/agent/test_estimator_input_resolution.py \
+            tests/unit/agent/test_estimator_predicates_not_names.py \
+            tests/unit/agent/inference_skill tests/unit/agent/training_skill \
+            tests/unit/agent/utils -q
+result:   2116 passed, 1 skipped in 288.28s   (after the call-site migration)
+
+command:  .venv/bin/python -m pytest \
+            tests/unit/execute_tools/test_step05b_c5_run_bound_profile.py -q
+result:   10 passed in 0.83s
+lint:     ruff check + ruff format clean across tests/unit
+```
+
+### 18.2g C6 — calibration-preservation audit
+
+**Zero production files modified.** One test module, one roadmap row.
+
+**The evidence ladder, applied — and it stopped early almost everywhere.**
+
+| §2 value | Layer | Evidence |
+|---|---|---|
+| `_MAX_BATCH_TIMESTEPS` = `800_000` | **1 — existing oracle** | `tests/unit/agent/evaluate_vram_skill/test_compute_intensity.py:26` — `assert _MAX_BATCH_TIMESTEPS == 800_000`, a hardcoded literal |
+| batch candidate table `(64, 32, 16, 8, 4, 2, 1)` | **1 — existing oracle** | `tests/unit/agent/evaluate_vram_skill/test_batch_resolver.py:291` — literal tuple |
+| `_ROLE_DEFAULT_RSS_GB` 40 / 60 / 24 GiB | **1 — existing oracle** | `tests/unit/core/test_sandbox_rlimit.py:115` — parametrized against hardcoded per-role values, including the 60 GiB inference cap CLAUDE.md pins |
+| `SEG_SIZE_BOUNDS` = `(2500, 40_000)` | **3 — static diff** | `evaluate_time_skill/trigger_policy.py` is not in 05b's touched-file list. The PR cannot re-own a constant in a file it does not open |
+| `_INFERENCE_VS_TRAINING_RATIO` = `2.7` | **4 — one pin added** | see below |
+
+**The one pin, and why layer 4 genuinely applied.** No test in the
+repository asserts the ratio's VALUE. Several import the symbol and multiply
+by it, which passes for any number it holds. And Step 05b **edits the module
+it lives in** — C5 gave `_total_inference_steps` and
+`estimate_wall_time_seconds` a required Dataset Profile, three and ~180
+lines from the constant. An empirical median from a two-architecture
+calibration table, documented as blunt and awaiting more data, sitting in a
+file a genericization PR is editing, with no oracle on its value: that is
+precisely the case the ladder reserves layer 4 for.
+
+`tests/unit/agent/inference_skill/test_step05b_c6_calibration_pin.py`, two
+cases. The second is **reachability, not decoration**: a pinned constant
+nothing multiplies by is a value, not a calibration, so if a refactor
+stopped applying the ratio the value pin would stay green while every
+inference forecast silently changed.
+
+| # | Mutation | Observed |
+|---|---|---|
+| M17 | `2.7` → `3.1` | RED — both cases |
+| M18 | the static formula stops multiplying by the ratio | RED — the reachability case only, which is exactly its job |
+
+**Explicitly NOT done**: a pin and a mutation for every untouched constant.
+Asserting that a constant in a module 05b never opens still equals itself is
+the "test what a declaration already enforces" pattern CLAUDE.md forbids,
+and it would bury the one pin that matters.
+
+**§14 roadmap row — the speculative owner retired.** `docs/design/
+siderius_generic_framework_upgrade.md:1232` named a *"§7d resolver"* as the
+owner of a convergence that §3's audit refutes. The row now records the
+finding: three unrelated semantics (planned-identity default, calibration
+trigger bound, campaign fixture data) share a number because TIDMAD's usable
+segmentation happens to sit there, the measurement-identity defaults are
+Step-07 owned, and **no resolver is introduced**. The row's narrative
+counterpart at `:1550` already carried this finding from design time; only
+the table was stale.
+
+*(Convention note: 05a synced the roadmap post-merge in its own docs-only
+commit. This edit is made here because C6's scope names the row explicitly
+and the finding is frozen design content, not an implementation outcome —
+the table is being brought into line with prose already on master.)*
+
+**Verification (C6)**
+
+```text
+command:  .venv/bin/python -m pytest tests/unit/agent/inference_skill -q
+result:   32 passed in 0.88s  (30 existing + 2 new)
+tree:     zero production files modified by this commit
+```
+
+### 18.2h C7 — Stage-B rung, Checkpoint C, and the Gate-2 decision
+
+**Zero production files modified.** Evidence only.
+
+#### Checkpoint C — the real production control flow
+
+`tests/integration/nodes/test_step05b_checkpoint_c.py`, 5 cases,
+**13.0 s**. Placed in `tests/integration/` deliberately: C-P spawns a real
+worker process, and `tests/unit/agent/tune_ml_hyperparam_agent/conftest.py`
+exists to forbid exactly that in the unit suite — a test that spawns the
+worker under a stub that stopped intercepting *hangs* rather than fails. CI
+is unit + static by design; this module is run locally and recorded here.
+
+**C-P — the real VRAM pre-flight, pricing and admission.** Nothing that
+makes a decision is stubbed, and **the measurement is not stubbed either**:
+
+```text
+run_production_preflight            the tuner's own production adapter
+  -> IsolatedProbeSpec              real, typed, frozen
+  -> spec.json                      real JSON IPC
+  -> subprocess.Popen               a REAL spawned worker
+  -> preflight_worker_main          real contract rebuild
+  -> run_skill                      real
+  -> _build_probe_tensors           REAL realization from the run-bound contract
+  -> probe_activation_footprint     REAL forward + backward (CPU)
+  -> _compose_training_peak         real
+  -> resolve_inference_batch        real, all 7 candidates
+  -> admission verdict              real, against the parent's frozen cap
+```
+
+The CPU probe costs ~2 s for a bounded candidate, so full fidelity was
+affordable and no measurement boundary needed controlling at all.
+
+**C-P is also B1 at production scale, single-axis.** ONE candidate (punet,
+16 classes, `seg=1024`, `B=1`), one snapshot, one cap, one loss. The ONLY
+variable is the run-bound contract:
+
+| Contract | Outcome |
+|---|---|
+| 16-class, bound | probe realizes `[1, 16, 1024]`; `status=success`, `feasible=True`, `0.23 GB ≤ 8.0 GB` |
+| absent | legacy `[B, 256, T]` literal against a 16-logit model → `RuntimeError: The size of tensor a (16) must match the size of tensor b (256) at non-singleton dimension 1` |
+
+The second outcome is the **V21 PR A defect verbatim** — a contract defect
+wearing a resource-error costume. Reproducing it is what proves the contract
+is *load-bearing* rather than merely present: a transport that dropped it
+anywhere between the tuner and the worker would make the first call fail
+exactly like the second.
+
+**C-D — the real workload/time path.** The real `HyperparamTuningAgent.run()`
+reaches its real `_run_time_preflight`, and the recorded call sites show
+both run-bound values leaving the tuner (the contract to the pre-flight, the
+profile to the time gate). The real `evaluate_time_skill.run_skill` then
+resolves real workloads from that profile and returns a real verdict.
+
+```text
+Deviation (bounded):
+  the live time gate is invoked from the captured production arguments
+  rather than nested inside run().
+
+Reason:
+  the fake plan's candidate is a full-scale punet at seg_size=40000 and the
+  tuner harness patches os.path.exists -> True, so a real invocation nested
+  in run() enters the warm-up path and reads real HDF5 files. That is a
+  HARNESS artefact, not production behaviour.
+
+Impact:
+  the chain is established in two halves that meet at the same values — the
+  tuner PASSES the run-bound profile to the live gate, and the live gate
+  RESOLVES real workloads from it. Neither half is a helper; both are
+  production entry points.
+```
+
+**A defect this checkpoint found in its own first draft, recorded because
+the fix is the point.** The first C-D version delegated the time gate to the
+package's shared `_mock_run_skill`, which has no `evaluate_time_skill` entry
+— so the tuner received `{"status": "error"}` and raised `Time check error:
+unknown skill`, aborting the round *after* the capture. The transport
+assertions passed anyway. Under mutation M14 the test then went RED for the
+abort rather than for the missing contract: a mutation "caught" for the
+wrong reason is not evidence. Fixed by returning a well-formed verdict and
+asserting `output.status == "completed"`, so a later mutation cannot red for
+an unrelated abort. Run time also fell from 161 s to 13 s.
+
+#### Stage-B rung `05b-B`
+
+`tests/unit/agent/test_step05b_stage_b_rung.py`, 5 cases. The observations
+live where the behaviour lives (C2, C5, Checkpoint C); what this module adds
+is the **rung** property — that each contrast is single-axis — because a
+contrast that quietly moved a second fact would make every observation pass
+while proving nothing about which authority the term followed.
+
+| Subcase | Machine-checked atomicity |
+|---|---|
+| **B1** | `_diff(tidmad_model_io(256), tidmad_model_io(16)) == ["output.axes[1].dimension.fixed"]` — exactly ONE leaf |
+| **B2** | `_diff(TIDMAD_PROFILE, contrast) == ["dataset.psd_segment_length"]` — exactly ONE leaf |
+| both | `_INFERENCE_VS_TRAINING_RATIO`, `_MAX_BATCH_TIMESTEPS`, the batch table, `SEG_SIZE_BOUNDS` and `_ROLE_DEFAULT_RSS_GB` asserted at their literal values |
+
+#### Mutation families — all five RED
+
+| Family | Mutations | Result |
+|---|---|---|
+| probe-realization regression | M7 (validation extents), M9 (a local form table) | RED |
+| contract-transport drop | M10 (worker), M11 (malformed → `None`), M12 (parent spec), **M14 (the tuner call site)** | RED |
+| ambient profile regression | M15 (`_validate_seg` fallback), M16 (`output_bytes`), **M19 (the tuner's time-gate argument)** | RED |
+| ambient task-config re-read | M20 (`load_task_config` inside the VRAM package) | RED |
+| calibration drift | M17 (`2.7` → `3.1`), M18 (ratio no longer applied) | RED |
+
+**M14 is closed.** C4 recorded it OPEN because the tuner→pre-flight hop is a
+single line inside a ~2,500-line orchestrator and a source-shape assertion
+would have been a green tick with no execution behind it. Checkpoint C-D
+executes it, and M14 now reds on the assertion that names the defect.
+
+**Mutation hygiene incident, recorded.** A batch that mutated two sites in
+the same file was interrupted before its restore ran, leaving
+`dataset_profile=TIDMAD_PROFILE if False else run_profile` on disk. It was
+caught by `git diff` before any test verdict was taken from it, the file was
+restored from the index, and M19 was re-run against the correct site. This
+is the stale-mutation hazard the project's own hygiene rule names; the guard
+that worked was checking `git status` between mutations rather than trusting
+the harness's restore.
+
+#### GATE-2 DECISION — **NOT REQUIRED**
+
+§11's condition is semantic: *deterministic production-path evidence fully
+exercises the live admission/pricing decision → Gate 2 NOT REQUIRED.*
+
+**The evidence that settles it, not a preference:**
+
+1. **The decision itself is real and unstubbed.** C-P executes the entire
+   production chain above, including a spawned worker, a real probe forward
+   and backward, real peak composition, real batch resolution and the real
+   admission comparison. The design permits controlling the measurement at
+   its existing boundary; **nothing needed controlling** — the probe runs.
+2. **The decision is shown to be load-bearing**, not merely reached: the
+   same candidate with the contract dropped fails with the exact V21 PR A
+   shape error. A Gate could not demonstrate that more sharply.
+3. **Nothing 05b changes is device-dependent.** The PR changes (a) which
+   SHAPE the probe target is realized at and (b) which profile the workload
+   resolvers read. The shape is realized before any `.to(device)`, and the
+   workload math is integer arithmetic. Every device-dependent term —
+   `cuda_context_bytes`, the cudnn workspace, the RSS caps, the intensity
+   cap — is calibration this PR provably does not touch (C6).
+4. **Failure class 3 cannot fire.** Under TIDMAD the shipped contract
+   reproduces the legacy tensor *by equality* (C2), and the profile
+   threading is value-identical (C5 parity, hardcoded expectations). There
+   is no term left that a real run could move.
+
+A real-hardware Gate would re-measure CUDA context and allocator behaviour —
+quantities 05b does not touch and whose values are pinned elsewhere. It
+would add cost and no unique evidence.
+
+**Gate 1 — re-verified NOT REQUIRED.** No LLM-visible surface changed. The
+one operator-facing string 05b touches is `_suggest_lever`'s advisory, whose
+bytes are pinned byte-identical under TIDMAD by the existing
+`test_the_time_skill_message_is_byte_identical_under_tidmad`. The §11 flip
+condition — *a resource literal reaching a rendered prompt* — did not occur.
+
+**Verification (C7)**
+
+```text
+command:  .venv/bin/python -m pytest tests/integration/nodes/test_step05b_checkpoint_c.py -q
+result:   5 passed in 13.01s
+
+command:  .venv/bin/python -m pytest tests/unit/agent/evaluate_vram_skill \
+            tests/unit/agent/test_step05b_stage_b_rung.py \
+            tests/unit/execute_tools/test_step05b_c5_run_bound_profile.py \
+            tests/unit/agent/skills/test_step05b_c1_realizer_extents.py \
+            tests/unit/agent/inference_skill -q
+result:   374 passed in 21.54s
+mutations: M7, M9, M10, M11, M12, M14, M15, M16, M17, M18, M19, M20 — all RED,
+           all restored, tree verified clean, baselines re-run green
+```
+
+### 18.2i C8 / CHECKPOINT D — terminal validation, docs, CI
+
+**Doc sync (the last pre-merge step).** `evaluate_vram_skill.md` documents the
+new optional kwarg, the three deliberate non-changes (dtype stays with the
+loss, the class-index branch returns first, `hybrid` keeps its shipped
+target) and the fail-loud rule. The tuner node doc gains a *"Resource and
+time planning (Step-05b)"* section beside the existing Step-02b
+selection-topology one — the same rule applied to two questions: what a round
+may SELECT and what the gates may PRICE. Every documented symbol was verified
+present in the merged source, not quoted from memory.
+
+**Terminal validation, from a clean tree** (`git status --porcelain` empty
+before the run — the PR3-L2 preflight guard reds on a dirty tree, and it did
+exactly that earlier in this PR, which is the guard working):
+
+```text
+command:  .venv/bin/python -m pytest tests/unit -q -p no:randomly
+result:   9254 passed, 3 skipped in 586.98s
+
+command:  .venv/bin/python -m pytest tests/integration/nodes/test_step05b_checkpoint_c.py -q
+result:   5 passed in 13.01s
+
+command:  .venv/bin/python -m ruff check .          -> All checks passed
+command:  .venv/bin/python -m ruff format --check . -> 881 files already formatted
+```
+
+**Local pyright — UNAVAILABLE, recorded, not claimed.** `pyright-python`
+resolves this host's Node and dies with `SyntaxError: Unexpected token =`;
+`node --version` is **v10.19.0**. This is the 05a precedent verbatim. No
+local type-check claim is made anywhere in this PR; the authority is CI's
+blocking strict pyright.
+
+**Exact-final-head CI**
+
+```text
+PR:        #211
+run:       31851753764
+headSha:   d4a5414198235c1b57d62e72df43da0a68c4e4fb
+conclusion: success
+
+  ruff check / ruff format          pass
+  pyright (strict, BLOCKING)        0 errors, 4 warnings
+                                    — all four pre-existing, in
+                                      core/runtime_control/bootstrap.py,
+                                      core/runtime_control/gpu_requirement.py
+                                      and scripts/legacy_fcnet_timing.py,
+                                      none of which this PR touches
+  pytest (unit, no integration)     9228 passed, 26 skipped in 669.09s
+```
+
+The local and CI counts differ (9,254/3 vs 9,228/26) because CI deselects the
+markers this project's CI is defined to exclude — `real_run` and integration.
+Both are green; the scope of each claim is stated rather than merged.
+
+### 18.3 Decisions taken during implementation
+
+**D-05b-1 — the explicit run-bound `ModelIOContract` transport (C4).**
+
+*Question.* C4's preferred order is (1) reuse an already-resolved contract in
+the run/workflow context, (2) a minimum optional typed runtime field,
+(3) an existing run-sidecar/spec boundary. Which does current source support?
+
+*Evidence.*
+
+```text
+scripts/run_comparison.py:688-700
+    production launches the TUNER NODE AS A SUBPROCESS, argv only.
+
+ml_hyperparameter_tune_agent.py:6862-6965  (main())
+    builds `input_dict` from argv alone. `task_description` is never set
+    there and stays at its "" default — so the one existing precedent for a
+    task-config-derived field on HyperparamTuningInput is populated ONLY on
+    the in-process workflow path (workflows/model_exploration.py:2674).
+
+core/sandbox_executor.py:1196-1218  (_write_model_io_config)
+    ForwardContract(**load_task_config()["forward_contract"]).model_io
+    — executed IN THE TUNER'S OWN PROCESS, and materialized to
+    --model_io_json for training (:1344) and inference (:1686).
+
+workflows/task_config.py:120-123
+    load_task_config memoizes per ABSOLUTE PATH in a process-level _CACHE.
+
+workflows/task_config.py:163-176
+    resolve_model_io_contract is called THERE — the existing resolution
+    boundary.
+```
+
+*Corrected understanding.* Route 1 is unavailable: no parent process holds a
+resolved contract that reaches the production tuner. Route 2 (an optional
+field on `HyperparamTuningInput`) would be `None` on the production chain
+unless the tuner itself read the task config — i.e. the same acquisition
+question moved one hop, plus a schema field that production never populates.
+
+*Choice.* The tuner binds the contract ONCE per run from the SAME expression
+that already produces the run's binding for every training and inference
+child, and threads it explicitly through
+`run_production_preflight → IsolatedProbeSpec → worker → run_skill`.
+
+*Why this satisfies C4's conditional* — *"permitted only if source proves it
+is already the canonical run-bound input for that node and cannot diverge
+from the actual run binding"*: the same expression already runs in the same
+process, and `load_task_config`'s per-path memoization makes both reads
+return the same parsed object. Divergence is structurally impossible, not
+merely unlikely. Resolution already happened at the existing boundary, so
+05b adds no second resolution point.
+
+*Strengthening.* To make the single-authority claim structural rather than
+coincidental, the expression is extracted into ONE helper and
+`_write_model_io_config` delegates to it. See DEV-1.
+
+*Failure-ordering analysis (§15's "unrelated failure newly fatal" check).*
+Binding at `run()` moves a `load_task_config` failure earlier — from the
+first `execute_training` to tuner startup. No run that previously SUCCEEDED
+can now fail: every production run that trains already executes that exact
+expression. The one behavioural delta is a degenerate run in which every
+candidate is refused at pre-flight and no training ever starts; such a run
+would previously have completed with all-skipped records despite an
+unreadable task config, and will now refuse at startup. That is the
+designed fail-closed direction (§0.5: an explicit contract lost or malformed
+in transport fails loudly), and the source in question is the *related* one
+— after C4 the pre-flight genuinely consumes it. Recorded, not treated as a
+MATERIAL STOP.
+
+**D-05b-2 — only the FLOAT target branch is contract-derived (C2).**
+
+`_build_probe_tensors` returns early at `wrapper.py:217-218` for a long
+target dtype with a `[B, T]` class-index target. That branch carries no
+`256` and no contract-owned extent, and §2's classification table names
+exactly one task-shaped site — the `[B, 256, T]` literal at `:248`. Routing
+the long branch through `declared_output_tensor` would add behaviour surface
+with no §2 mandate and would make an unregistered model with `ce` newly
+refusable (C0 class 2 pins that it must not). Bounded scope decision.
+
+### 18.4 Deviations
+
+**DEV-1 (bounded).** §13's rollback table does not list
+`workflows/task_config.py` or `core/sandbox_executor.py`. C4 adds one shared
+run-bound-contract helper in `workflows/task_config.py` and delegates
+`SandboxExecutor._write_model_io_config` to it, behaviour-identical.
+*Reason*: without it the tuner and the training/inference children would
+read the same expression at two sites, and "cannot diverge" would rest on
+the memoization cache rather than on there being one acquisition point.
+*Impact*: two files added to the rollback boundary; both changes are
+additive and revert with C4. *Validation*: the delegation is covered by the
+existing `--model_io_json` transport tests plus a C4 case asserting the
+tuner and the sandbox writer resolve the same contract value.
 
 ## 19. Remaining operator decisions
 

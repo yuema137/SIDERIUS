@@ -44,6 +44,7 @@ import inspect
 import math
 import signal
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
 
 import psutil
 import torch
@@ -68,10 +69,18 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
 )
+from agent.skills.model_io_probe_skill import declared_output_tensor, realize_shape
 from core.hardware_context import HardwareContext, discover
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
-from ml_models.models_format_sandbox import LossConfig, get_config_class
+from ml_models.models_format_sandbox import (
+    LossConfig,
+    get_config_class,
+    output_semantic_from_legacy,
+)
 from ml_models.models_sandbox import MODEL_REGISTRY
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agent.schemas.model_io_contract import ModelIOContract
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -173,12 +182,92 @@ def _build_model(model_type: str, model_cfg: dict, loss_type: str) -> torch.nn.M
     return model_cls(config_obj)
 
 
+def _contract_target_shape(
+    model_io_contract: ModelIOContract | None,
+    declared_output_type: str | None,
+    *,
+    batch_size: int,
+    seg_size: int,
+) -> tuple[int, ...] | None:
+    """The probe target's shape as the DECLARED Model-I/O contract states it.
+
+    Step 05b. ``None`` means *"this call has no contract-derived shape"* and
+    the caller keeps its legacy construction; it never means *"the contract
+    failed"*, which raises.
+
+    The authority split is Step 04a's, inherited unchanged (Step-05b §0.5):
+
+    ```text
+    candidate declaration  (get_output_type)  -> selects the output FORM
+    ModelIOContract                           -> supplies the FACTS inside it
+    model_io_probe_skill                      -> realizes the concrete tensor
+    ```
+
+    so this function resolves no shape of its own and carries no second
+    form table. It asks the EXISTING projection
+    (``output_semantic_from_legacy``) whether the declared word denotes a
+    tensor semantic at all, and delegates everything else.
+
+    **Why ``hybrid`` keeps its legacy target, and why that is not a
+    fallback.** ``hybrid`` is a legacy builtin adapter value, not a tensor
+    semantic — Step-03 §8c states that outright and forbids inventing one
+    for it. Source agrees: ``fcnet`` returns ``[B, T]`` under ``smooth_l1``
+    and ``[B, C, T]`` otherwise (``models_sandbox.py:362-365``), so its
+    emitted shape is chosen by the LOSS, a fact no Model-I/O contract owns.
+    There is therefore nothing for the contract to supply, and the shipped
+    target is preserved exactly rather than guessed at.
+
+    Args:
+        model_io_contract: the run's normalized declaration, or ``None`` for
+            the legacy no-contract path.
+        declared_output_type: what ``get_output_type`` answered for this
+            candidate, or ``None`` when no ``model_type`` was supplied.
+        batch_size: the candidate's real batch size — a capacity probe
+            measures the tensor that will actually run.
+        seg_size: the candidate's real segmentation size.
+
+    Returns:
+        The realized shape, or ``None`` when no contract-derived shape
+        applies (no contract supplied, or a declaration carrying no
+        canonical tensor semantic).
+
+    Raises:
+        ValueError: a contract was supplied with no candidate declaration to
+            select a form from.
+        ProbeConstructionError: the declared form needs a contract fact the
+            contract does not carry, or the realization is not
+            representable. Propagated rather than swallowed — it is already
+            this module's ``ValueError`` idiom, and falling back to the
+            literal would report a capacity number for a different tensor.
+    """
+    if model_io_contract is None:
+        return None
+    if declared_output_type is None:
+        raise ValueError(
+            "Cannot build a probe target: a Model-I/O contract was supplied "
+            "but no model_type, so there is no candidate declaration to select "
+            "an output form from. The declaration selects the form and the "
+            "contract supplies the facts inside it; one without the other is "
+            "not a probe specification."
+        )
+    if output_semantic_from_legacy(declared_output_type) is None:
+        # `hybrid`, or a value the shipped projection does not recognise:
+        # no canonical tensor semantic, so no contract-owned fact to derive.
+        return None
+    return realize_shape(
+        declared_output_tensor(model_io_contract, declared_output_type),
+        batch=batch_size,
+        symbolic=seg_size,
+    )
+
+
 def _build_probe_tensors(
     batch_size: int,
     seg_size: int,
     loss_type: str,
     loss_name: str | None = None,
     model_type: str | None = None,
+    model_io_contract: ModelIOContract | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Zero-valued ``(input, target)`` pair matching the SIDERIUS forward
     contract. Both tensors live on CPU; the probe will ``.to(device)`` them
@@ -206,6 +295,22 @@ def _build_probe_tensors(
 
     ``model_type=None`` keeps the historical dtype-derived shape so callers
     that predate the contract are unaffected.
+
+    **Step 05b — ``model_io_contract``.** When the run binds a normalized
+    Model-I/O declaration, the float target's shape is REALIZED from it
+    through the one Step-04a authority, at this candidate's real
+    ``batch_size`` and ``seg_size``, instead of from the ``[B, 256, T]``
+    literal below. Two things are deliberately unchanged:
+
+    * **dtype** still comes from the loss. The contract supplies shape only;
+      moving dtype ownership would create a second dtype mapping beside
+      ``get_target_torch_dtype``.
+    * **the class-index branch**. A long target is class indices, ``[B, T]``,
+      carrying no contract-owned extent — so it returns before any contract
+      is consulted, exactly as it does today.
+
+    ``model_io_contract=None`` is the legacy no-contract path and builds
+    byte-identical tensors to every call before Step 05b.
     """
     inp = torch.zeros((batch_size, seg_size), dtype=torch.long)
     # Dict-unpack to mirror the existing ``LossConfig(**loss_cfg)`` pattern
@@ -238,6 +343,16 @@ def _build_probe_tensors(
             # would silently describe a different model. A3c fixed exactly
             # this class of shape error during PR A.
             raise ValueError(f"Cannot build a probe target: {e!s}") from e
+
+    # Step 05b — the declared Model-I/O contract, when the run binds one.
+    # A failure here PROPAGATES: a silently-wrong probe reports a capacity
+    # number for a different model, which is the defect this seam exists to
+    # remove, not one it may reintroduce.
+    contract_shape = _contract_target_shape(
+        model_io_contract, output_type, batch_size=batch_size, seg_size=seg_size
+    )
+    if contract_shape is not None:
+        return inp, torch.zeros(contract_shape, dtype=target_dtype)
 
     if output_type == "regressor":
         tgt = torch.zeros((batch_size, seg_size), dtype=target_dtype)
@@ -497,6 +612,14 @@ def run_skill(sandbox, **kwargs):
                            function ``get_or_create`` uses, so the cap is
                            physically correct but the manifest on disk is
                            not consulted.
+        model_io_contract — the RUN-BOUND normalized Model-I/O declaration
+                           (Step 05b). Supplied explicitly by the caller;
+                           this skill never resolves one of its own, because
+                           a resource consumer that re-reads an ambient task
+                           configuration can silently price a run against a
+                           declaration the run is not using. ``None`` is the
+                           legacy no-contract path and is byte-identical to
+                           every call before Step 05b.
     """
     # Principle 2: no default architecture. If the caller failed to pass
     # ``model_type``, a ``KeyError`` is the right signal — silently
@@ -508,6 +631,7 @@ def run_skill(sandbox, **kwargs):
     loss_cfg = kwargs.get("loss_config", {})
     vram_budget_gb: float | None = kwargs.get("vram_budget_gb")
     hardware_context: HardwareContext | None = kwargs.get("hardware_context")
+    model_io_contract: ModelIOContract | None = kwargs.get("model_io_contract")
 
     loss_type = loss_cfg.get("loss_type", "ce")
     # I14 — loss_name plumbs through to _build_probe_tensors so the helper
@@ -586,7 +710,12 @@ def run_skill(sandbox, **kwargs):
         # 3. Training-phase probe ─────────────────────────────────────────
         rss_before = psutil.Process().memory_info().rss
         x_train, y_train = _build_probe_tensors(
-            batch_size, seg_size, loss_type, loss_name, model_type=model_type
+            batch_size,
+            seg_size,
+            loss_type,
+            loss_name,
+            model_type=model_type,
+            model_io_contract=model_io_contract,
         )
         with _forward_pass_timeout(_BUDGETS.single_probe_seconds, "training_probe"):
             training_probe = probe_activation_footprint(

@@ -51,7 +51,7 @@ from typing import Any
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
-from execute_tools.dataset_config import DataScope
+from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from execute_tools.sample_set_builder import build_sample_set
 
 # The synthesised default ``sample_set`` mirrors the tuner's trial-mode
@@ -166,6 +166,14 @@ def estimate_proposal_time(
 
     loss_type = _training_est.resolve_loss_type(loss_config)
 
+    # Step 05b: the estimators now require an explicit topology. This entry
+    # point is NOT production-live — its only non-test caller is
+    # `production_estimator_factory._static`, reached solely through
+    # `estimator.estimate()`, which no production code calls (ledger §18.1).
+    # So it is not genericized (§4's binding rule); it simply acquires at its
+    # own boundary and states that it does.
+    dataset_profile = resolve_dataset_profile()
+
     # All three estimators run in static-formula mode: ms_per_step=None
     # + gpu_name=None → training estimator skips MODEL_REGISTRY.
     training = _training_est.estimate_wall_time_seconds(
@@ -178,6 +186,7 @@ def estimate_proposal_time(
         gpu_name=None,
         num_params=num_params,
         loss_type=loss_type,
+        dataset_profile=dataset_profile,
     )
     inference = _inference_est.estimate_wall_time_seconds(
         model_type,
@@ -185,6 +194,7 @@ def estimate_proposal_time(
         sample_set,
         inference_ms_per_step=None,
         num_params=num_params,
+        dataset_profile=dataset_profile,
     )
     scoring = _scoring_est.estimate_wall_time_seconds(sample_set)
 

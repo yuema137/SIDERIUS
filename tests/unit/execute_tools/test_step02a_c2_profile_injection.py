@@ -84,9 +84,22 @@ class TestDeclarationParity:
 
 
 def _workload_ml_per_psd() -> int:
-    """Geometry probe through the public training resolver."""
+    """Geometry probe through the public training resolver.
+
+    Step 05b made ``profile`` a required argument, so this probe now RESOLVES
+    the currently bound declaration and passes it, instead of letting the
+    resolver reach for it. The property under test is unchanged — a consumer
+    that kept a module constant still returns the TIDMAD answer under a
+    contrast binding — and the acquisition is now where 05b puts it: at the
+    caller, once, explicitly.
+    """
     resolved = workload_resolvers.resolve_training_workload(
-        {"0": [0]}, seg_size=10, batch_size=1, train_portion=None, epochs=1
+        {"0": [0]},
+        seg_size=10,
+        batch_size=1,
+        train_portion=None,
+        epochs=1,
+        profile=resolve_dataset_profile(),
     )
     return resolved.detail["ml_segments_per_psd"]
 

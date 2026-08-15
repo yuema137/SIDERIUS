@@ -30,6 +30,7 @@ from agent.skills.training_skill.estimator import (
     resolve_model_field,
     resolve_train_field,
 )
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 _UNDECLARED = "b1_generated_model_declaring_nothing"
 
@@ -222,7 +223,13 @@ class TestPhaseMarginsDifferDeliberately:
         for mt in ("punet", "fcnet", "transformer", "wavenet", "rnn", "gated_fno"):
             vram = train.estimate_peak_bytes(mt, {}, {"batch_size": 1}, {"loss_type": "ce"}, 10**6)
             time = train.estimate_wall_time_seconds(
-                mt, {}, {"batch_size": 1, "epochs": 1}, sample, ms_per_step=1.0, num_params=10**6
+                mt,
+                {},
+                {"batch_size": 1, "epochs": 1},
+                sample,
+                ms_per_step=1.0,
+                num_params=10**6,
+                dataset_profile=TIDMAD_PROFILE,
             )
             # Both resolved the same field; recover each one's view of it.
             declared = resolve_model_field(mt, {}, "segmentation_size", safety_margin=-1)
@@ -346,6 +353,7 @@ class TestProductionReachability:
             sample_set={str(i): list(range(20)) for i in range(20)},
             train_portion=1.0,
             time_budget_minutes=60.0,
+            dataset_profile=TIDMAD_PROFILE,
         )
 
     def test_an_absent_segmentation_size_is_priced_as_the_declaration(self, monkeypatch):
@@ -421,6 +429,7 @@ class TestProductionReachability:
             time_budget_minutes=60.0,
             allow_store_reuse=True,
             observation_store_root="/nonexistent-store-root-for-this-test",
+            dataset_profile=TIDMAD_PROFILE,
         )
 
         declared = get_config_class("rnn").model_fields["segmentation_size"].default
@@ -459,15 +468,19 @@ class TestProductionReachability:
             num_params=1_000_000,
             gpu_name=None,
         )
-        ts._store_reuse_decision(train_config={"batch_size": 1}, **common)
+        ts._store_reuse_decision(train_config={"batch_size": 1}, **common, profile=TIDMAD_PROFILE)
         absent = seen.get("n_steps")
 
         seen.clear()
-        ts._store_reuse_decision(train_config={"batch_size": 1, "epochs": 10}, **common)
+        ts._store_reuse_decision(
+            train_config={"batch_size": 1, "epochs": 10}, **common, profile=TIDMAD_PROFILE
+        )
         ten = seen.get("n_steps")
 
         seen.clear()
-        ts._store_reuse_decision(train_config={"batch_size": 1, "epochs": 1}, **common)
+        ts._store_reuse_decision(
+            train_config={"batch_size": 1, "epochs": 1}, **common, profile=TIDMAD_PROFILE
+        )
         one = seen.get("n_steps")
 
         assert absent is not None, "the trigger policy was never reached"
@@ -501,6 +514,7 @@ class TestProductionReachability:
             sample_set={str(i): list(range(20)) for i in range(20)},
             train_portion=1.0,
             time_budget_minutes=60.0,
+            dataset_profile=TIDMAD_PROFILE,
         )
         banner = capsys.readouterr().out
         assert "epochs=10" in banner
@@ -529,6 +543,7 @@ class TestProductionReachability:
                 sample_set={str(i): list(range(20)) for i in range(20)},
                 train_portion=1.0,
                 time_budget_minutes=60.0,
+                dataset_profile=TIDMAD_PROFILE,
             )
 
         absent = run({"batch_size": 1, "device": "cpu"})

@@ -40,6 +40,7 @@ import pytest
 
 from agent.skills.inference_skill import estimator as inference_estimator
 from core.inference_defaults import inference_batch_for, is_inference_batch_registered
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 _UNREGISTERED = "c3b_generated_model_with_no_batch_entry"
 
@@ -93,6 +94,7 @@ def test_planning_and_runtime_agree_on_the_batch_for_a_hinted_model():
         {"0": [0]},
         inference_ms_per_step=1.0,
         inference_batch=hint,
+        dataset_profile=TIDMAD_PROFILE,
     )
     assert forecast["breakdown"]["inference_batch"] == hint
 

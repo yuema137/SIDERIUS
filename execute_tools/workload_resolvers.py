@@ -33,20 +33,21 @@ from collections.abc import Mapping, Sequence
 
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.workload import ResolvedPhaseWorkload
-from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
+from execute_tools.dataset_config import DatasetProfile
 
 SampleSet = Mapping[str, Sequence[int]] | Mapping[int, Sequence[int]]
 
 
-def _validate_seg(seg_size: int, profile: DatasetProfile | None = None) -> int:
-    """ML segments per PSD segment under the resolved decomposition geometry.
+def _validate_seg(seg_size: int, profile: DatasetProfile) -> int:
+    """ML segments per PSD segment under the RUN-BOUND decomposition geometry.
 
-    ``profile`` defaults to the Regime-A resolution so an existing caller
-    that predates the transport is unaffected.
+    Step 05b: ``profile`` is required. It used to default to an ambient
+    resolution, which meant a run bound to one topology could be PRICED
+    against whatever singleton happened to be resolved — the Step-02b defect
+    shape, on the workload side. The caller states which dataset it means.
     """
     if seg_size <= 0:
         raise ValueError(f"seg_size must be positive; got {seg_size!r}.")
-    profile = profile or resolve_dataset_profile()
     return profile.dataset.psd_segment_length // seg_size
 
 
@@ -54,7 +55,7 @@ def resolve_training_workload(
     sample_set: SampleSet,
     *,
     seg_size: int,
-    profile: DatasetProfile | None = None,
+    profile: DatasetProfile,
     batch_size: int,
     train_portion: float | None,
     epochs: int,
@@ -121,7 +122,7 @@ def resolve_inference_workload(
     *,
     seg_size: int,
     inference_batch_size: int,
-    profile: DatasetProfile | None = None,
+    profile: DatasetProfile,
 ) -> ResolvedPhaseWorkload:
     """Inference-batch workload, mirroring `inference_single.py`
     sample_set mode exactly.
@@ -136,7 +137,6 @@ def resolve_inference_workload(
     """
     if inference_batch_size <= 0:
         raise ValueError(f"inference_batch_size must be positive; got {inference_batch_size!r}.")
-    profile = profile or resolve_dataset_profile()
     ml_per_psd = _validate_seg(seg_size, profile)
 
     per_file_batches: dict[str, int] = {}
@@ -212,6 +212,7 @@ def resolve_formal_workloads(
     eval_sample_set: SampleSet,
     *,
     seg_size: int,
+    profile: DatasetProfile,
     batch_size: int,
     train_portion: float | None,
     epochs: int,
@@ -229,6 +230,7 @@ def resolve_formal_workloads(
         "training": resolve_training_workload(
             train_sample_set,
             seg_size=seg_size,
+            profile=profile,
             batch_size=batch_size,
             train_portion=train_portion,
             epochs=epochs,
@@ -237,6 +239,7 @@ def resolve_formal_workloads(
             eval_sample_set,
             seg_size=seg_size,
             inference_batch_size=inference_batch_size,
+            profile=profile,
         ),
         "scoring": resolve_scoring_workload(
             eval_sample_set,

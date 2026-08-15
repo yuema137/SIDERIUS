@@ -101,6 +101,7 @@ from execute_tools.scoring_helpers import (
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
 from nodes.agent_data_stream import log_score_table
 from nodes.scoring_reference import load_reference_scores
+from workflows.task_config import run_bound_model_io_contract
 
 SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
 
@@ -1176,6 +1177,7 @@ def _run_time_preflight(
     data_dir: str | None,
     memory_history: list,
     is_trial: bool,
+    dataset_profile,
 ) -> dict:
     """Invoke the wall-time pre-flight gate for one attempt.
 
@@ -1207,6 +1209,10 @@ def _run_time_preflight(
         allow_store_reuse=is_trial,
         observation_store_root=os.path.join(sandbox.base_dir, "runtime_observations"),
         runtime_phase=mode,
+        # Step 05b — the run's ONE topology. Every decomposition-derived
+        # term in the time gate resolves from this value; the skill no
+        # longer resolves one of its own.
+        dataset_profile=dataset_profile,
     )
 
 
@@ -2861,6 +2867,7 @@ def _resolve_guardrail_steps(
     model_config: dict,
     train_cfg: dict,
     train_portion: float | None,
+    dataset_profile,
     model_type: str = "",
     max_samples: int | None = None,
 ) -> int | None:
@@ -2916,6 +2923,7 @@ def _resolve_guardrail_steps(
             seg_size=resolve_model_field(
                 model_type, model_config, "segmentation_size", safety_margin=1000
             ),
+            profile=dataset_profile,
             batch_size=int(train_cfg.get("batch_size", 1)),
             train_portion=train_portion,
             epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
@@ -3114,6 +3122,7 @@ def _check_and_record_guardrail_skip(
     hypothesis: str,
     round_index: int,
     attempt_in_round: int,
+    dataset_profile,
 ) -> bool:
     """Run the §5 guardrails; on violation save the planner-visible
     record and return True (the attempt loop `continue`s). Single call
@@ -3128,6 +3137,7 @@ def _check_and_record_guardrail_skip(
         model_config,
         plan.train_cfg,
         trial_config.train_portion,
+        dataset_profile,
         model_type=model_type,
         max_samples=agent_input.validation_max_train_samples,
     )
@@ -3692,6 +3702,27 @@ class HyperparamTuningAgent:
         # it has no failure mode of its own and no phase moved to accommodate
         # it.
         run_profile = resolve_dataset_profile()
+
+        # --- The run's ONE Model-I/O declaration (Step 05b) ---
+        # Bound here, once, for exactly the same reason the profile above is:
+        # the resource pre-flight must price the candidate against the
+        # declaration THIS RUN will train against, not against whatever a
+        # consumer happens to resolve for itself.
+        #
+        # `run_bound_model_io_contract` is the one acquisition point. The
+        # sandbox executor already materializes its value to `--model_io_json`
+        # for every training and inference child, so the pre-flight and the
+        # run it is pricing cannot disagree — and `load_task_config` memoizes
+        # per path, so this is the same validated object, not a second read.
+        # Resolution (preset + dataset cardinality) already happened there;
+        # 05b adds no second resolution point.
+        #
+        # Failure ordering: this makes an unreadable task config fatal at
+        # startup rather than at the first training launch. No run that would
+        # have SUCCEEDED can now fail — every run that trains already
+        # executes this expression — and failing before any GPU work is the
+        # direction the fail-closed rule asks for.
+        run_model_io = run_bound_model_io_contract()
 
         # --- DataScope + HealthGate startup validation (DS5) ---
         # Dataset-resolved checks (schema validators cover only internal
@@ -4607,6 +4638,7 @@ class HyperparamTuningAgent:
                         hypothesis=hypothesis,
                         round_index=round_index,
                         attempt_in_round=attempt_in_round,
+                        dataset_profile=run_profile,
                     ):
                         continue
 
@@ -4660,6 +4692,13 @@ class HyperparamTuningAgent:
                         hardware_context=hardware_context,
                         workspace=workspace,
                         label=exp_id,
+                        # Step 05b — the run's ONE declaration, bound at
+                        # startup and passed by value. The pre-flight never
+                        # resolves one of its own: it must price the
+                        # candidate against the contract this run trains
+                        # against, and "happens to read the same file" is
+                        # not that guarantee.
+                        model_io_contract=run_model_io,
                     )
                     if resource_check.get("status") == "error":
                         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -4842,6 +4881,7 @@ class HyperparamTuningAgent:
                             data_dir=time_data_dir,
                             memory_history=memory_history,
                             is_trial=plan.is_trial,
+                            dataset_profile=run_profile,
                         )
                         if time_check.get("status") == "error":
                             # Includes the policy's ABORT path: an

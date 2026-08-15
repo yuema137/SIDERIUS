@@ -13,6 +13,7 @@ from __future__ import annotations
 import pytest
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningInput
+from execute_tools.dataset_config import TIDMAD_PROFILE
 from nodes.ml_hyperparameter_tune_agent import (
     _build_guardrail_rejection_record,
     _evaluate_step_guardrails,
@@ -85,11 +86,17 @@ class TestStepResolution:
             {"segmentation_size": 10_000},
             {"batch_size": 8, "epochs": 1},
             None,
+            dataset_profile=TIDMAD_PROFILE,
         )
         assert steps == 250
 
     def test_resolver_failure_returns_none(self):
-        assert _resolve_guardrail_steps({"0": [0]}, {"segmentation_size": 0}, {}, None) is None
+        assert (
+            _resolve_guardrail_steps(
+                {"0": [0]}, {"segmentation_size": 0}, {}, None, dataset_profile=TIDMAD_PROFILE
+            )
+            is None
+        )
 
 
 class TestRejectionRecord:

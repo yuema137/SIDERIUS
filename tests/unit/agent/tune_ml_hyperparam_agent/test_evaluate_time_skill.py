@@ -24,6 +24,7 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.evaluate_time_skill import wrapper as ts
+from execute_tools.dataset_config import TIDMAD_PROFILE
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -55,6 +56,9 @@ def _base_kwargs(**overrides) -> dict:
         "sample_set": {str(i): list(range(20)) for i in range(20)},  # 400 PSDs
         "train_portion": 1.0,
         "time_budget_minutes": 60.0,
+        # Step 05b: the run-bound topology is a REQUIRED kwarg — the skill
+        # no longer resolves one of its own.
+        "dataset_profile": TIDMAD_PROFILE,
     }
     kw.update(overrides)
     return kw
@@ -66,16 +70,31 @@ def _base_kwargs(**overrides) -> dict:
 
 
 def test_suggest_lever_high_ms_per_step_recommends_shrinking_model():
-    assert "model depth/width" in ts._suggest_lever(ms_per_step=80.0, seg_size=1000, batch_size=1)
+    assert "model depth/width" in ts._suggest_lever(
+        ms_per_step=80.0,
+        seg_size=1000,
+        batch_size=1,
+        psd_segment_length=TIDMAD_PROFILE.dataset.psd_segment_length,
+    )
 
 
 def test_suggest_lever_small_seg_bs1_recommends_raising_batch():
-    assert "batch_size" in ts._suggest_lever(ms_per_step=2.0, seg_size=1000, batch_size=1)
+    assert "batch_size" in ts._suggest_lever(
+        ms_per_step=2.0,
+        seg_size=1000,
+        batch_size=1,
+        psd_segment_length=TIDMAD_PROFILE.dataset.psd_segment_length,
+    )
 
 
 def test_suggest_lever_otherwise_recommends_raising_seg_size():
     # ms below 50 and (seg >= 10_000 or batch > 1) → seg_size branch
-    msg = ts._suggest_lever(ms_per_step=10.0, seg_size=16000, batch_size=1)
+    msg = ts._suggest_lever(
+        ms_per_step=10.0,
+        seg_size=16000,
+        batch_size=1,
+        psd_segment_length=TIDMAD_PROFILE.dataset.psd_segment_length,
+    )
     assert "segmentation_size" in msg
 
 
