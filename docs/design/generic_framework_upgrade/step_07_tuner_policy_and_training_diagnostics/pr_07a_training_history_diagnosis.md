@@ -8,11 +8,11 @@
 | Depends on | PR0 MERGED (example packs exist); Steps 02/05a/05c/06 MERGED (profile transport, run-bound SampleSets, argv oracle, metric handle + planner filter) |
 | Decomposition | ONE PR, four commits **C1 → C2 → C3 → C4** (§15) — trainer · transport + test infra · tuner boundary + record + hiding · rungs + packs + Checkpoint E |
 | Gates | Gate 1 **NOT REQUIRED** (every rendered byte and kwarg key set exact — a hard criterion, §10) · Gate 2 **REQUIRED, bounded** (real training behaviour changes; launched ONLY with operator approval after C4, §10) |
-| Status | **DRAFT — revision 2 (2026-08-15): targeted revision after the operator's review of revision 1 (verdict: APPROVE WITH TARGETED REVISION — NOT YET FREEZE). Two validation blockers + three genericity/robustness corrections + the diagnosis math applied (§0.5); §16 records the operator's dispositions of Q-07a-1..7. Awaiting freeze; no implementation; §14 ledger empty** |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 — Revision 2.** Revision 1 reviewed (APPROVE WITH TARGETED REVISION); revision 2 applied the two validation blockers, three genericity/robustness corrections and the diagnosis math (§0.5) plus one final non-architectural consistency pass at freeze (§1 R2/R3 invariant made precise; `objective_config_fingerprint`; Gate-2 completion semantics; `objective_kind` wording; training-state-neutral stop wording); §16 records the operator's dispositions of Q-07a-1..7. **Implementation NOT started; §14 ledger empty; implementation may begin only under a fresh Implementation Working Rules contract** |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
-**What this child freezes (HOW) once the operator approves it**: the trainer
+**What this child FREEZES (HOW) — operator approved 2026-08-15**: the trainer
 validation pass and its STATE isolation (§3.2), the R2/R3 comparability
 representation (§3.3), the transport IPC (`--eval_sample_set_json`, §3.4),
 the `TrainingHistory` payload and the typed trainer→tuner results contract
@@ -23,7 +23,7 @@ projection (§3.11), the rungs (§6), the Gate plan (§10) and the stop
 conditions (§13); revision 2 adds the **expected-validation contract**
 (§3.4a), the **validation-scope materialization contract** (§3.4b), the
 **R2/R3 comparability precondition and its audit** (§3.3), **state
-isolation** (§3.2) and the objective provenance fields (§3.5). **What stays the parent's**: the semantic requirements
+isolation** (§3.2) and the objective provenance fields (`objective_kind`, `objective_config_fingerprint`, §3.5). **What stays the parent's**: the semantic requirements
 (§8.2 items 1–7) — this child instantiates them and does not reinterpret
 them. **NOT frozen**: exact test-file decomposition, helper names, source
 line numbers (reading aids at `838e9cd6`; re-read before each commit).
@@ -100,7 +100,7 @@ Gate 2 at the final head) is accepted.
 | 2 | **BLOCKER** | **A declared validation scope that resolves to zero or PARTIAL samples is a validation EXECUTION failure, not `nan` evidence.** `NaN` is reserved for numerical evidence (divergence / non-finite criterion). The materialized validation identity MUST equal the requested `eval_sample_set` (`N_evaluated == N_requested`, per file); the training path keeps its legacy skip semantics; the validation contract does not inherit silent shrink. Negative test: 5 requested, 4 materialize → no R3, structured training failure | §3.4b, §3.2, §8, C1 tests |
 | 3 | SHOULD FIX | **R2/R3 comparability needs the objective-side precondition stated and source-audited**: the contract holds for objectives whose returned batch scalar is mean-normalized / sample-mean-compatible under the framework's batching (not for `sum`-reduced or batch-coupled objectives). Audited: built-ins under `reduction="mean"` satisfy it; `reduction="sum"` and custom plugin losses cannot be proven → `comparability="not_established"` recorded (never assumed); the reduction identity is not claimed for all future objectives | §3.3, §3.5, §3.6, §13 |
 | 4 | SHOULD FIX | **State isolation, not only RNG isolation**: transactional `model.eval()` with `try/finally: model.train(was_training)`; the criterion is an `nn.Module` — freeze "validation MUST NOT mutate model, optimizer or training-objective state", audit the criterion classes, restore/verify; NumPy global RNG added to the isolation census; acceptance = state-neutral (model state_dict, optimizer state, objective module state, Python / NumPy / torch CPU+CUDA RNG identical before/after) | §3.2, C1 tests |
-| 5 | SHOULD FIX | **`objective_id = loss_cfg.loss_type` is a family label, not a computation identity** (`focal(γ=1)` ≠ `focal(γ=4)`). Renamed `objective_kind` + a deterministic `objective_fingerprint` of the RESOLVED objective config; no new `TrainingObjective` class | §3.5 |
+| 5 | SHOULD FIX | **`objective_id = loss_cfg.loss_type` is a family label, not a computation identity** (`focal(γ=1)` ≠ `focal(γ=4)`). Renamed `objective_kind` + a deterministic `objective_config_fingerprint` of the RESOLVED objective configuration surface (not a hash of plugin code); no new `TrainingObjective` class | §3.5 |
 | 6 | SHOULD FIX | Trend deadband has a zero-reference pathology → symmetric scale-free relative change `r = |b−a| / max(|a|,|b|)` (0 when both 0); `observations` lists and `validation_seconds` must have `len == epochs_completed`, seconds non-negative | §3.6, §3.5 |
 | 7 | disposition | Gate 2 placement confirmed (after C4 at the final executable head; 07c owes its own Gate 2; 07b Gate 1). **Q-07a-4 APPROVED: `--max_epochs 2`** — an upper bound only; PASS does NOT require two points | §10 |
 | 8 | disposition | Q-07a-1 APPROVED (validation time excluded from the optimizer-step prior; the un-priced validation phase is recorded as **07c / runtime-control debt**); Q-07a-2, -3, -5, -7 APPROVED; **Q-07a-6 APPROVED WITH CORRECTION** (legacy absence OK; expected absence NOT OK — item 1) | §16 |
@@ -133,9 +133,15 @@ The precise invariants:
    `train_results`, at the reflect merge and on the record.
 3. **One declared argv delta.** `--eval_sample_set_json <path>` and nothing
    else; emitted only in streaming mode with an eval set.
-4. **R2 ≡ R3 semantics.** Both are the sample-weighted mean of the SAME
-   criterion; R2's existing computation is untouched; R3 is exact under an
-   unequal last batch.
+4. **R2 / R3 estimator and comparability.** R2 and R3 ALWAYS use the same
+   declared epoch estimator formula (the sample-count-weighted mean of the
+   criterion's batch scalar; R2's existing computation untouched; R3 exact
+   under an unequal last batch). They are claimed mathematically comparable
+   as observations of the SAME objective statistic ONLY when
+   `comparability == "established"` (§3.3). When comparability is
+   `not_established`, both histories may still be persisted as honest
+   evidence, but the cross-curve diagnosis fields remain unavailable and
+   that run MUST NOT claim the fully-supported R2/R3 comparability contract.
 5. **Persisted, hidden.** Two additive record keys; both renders exact; the
    record is the only place they live.
 6. **Diagnosis is a pure function** of `TrainingHistory` (deterministic,
@@ -401,9 +407,12 @@ payload (`validation_requested_samples`).
 TrainingHistory (frozen, extra="forbid")
   cadence:                Literal["per_epoch"] = "per_epoch"
   objective_kind:         str        # the run-resolved objective FAMILY = loss_cfg.loss_type (a label — NOT an identity)
-  objective_fingerprint:  str        # sha256 of the canonical JSON dump of the RESOLVED LossConfig
-                                     # (loss_type, loss_name, alpha, gamma, beta, reduction, use_class_weights …) —
-                                     # the computation identity: focal(γ=1) ≠ focal(γ=4); no new class introduced
+  objective_config_fingerprint: str  # deterministic SHA-256 of the canonical serialized RESOLVED LossConfig
+                                     # (loss_type, loss_name, alpha, gamma, beta, reduction, use_class_weights …).
+                                     # A fingerprint of the resolved objective CONFIGURATION surface: it distinguishes
+                                     # e.g. focal(γ=1) from focal(γ=4) within that surface; it does NOT hash or fully
+                                     # identify arbitrary custom plugin implementation code (no plugin provenance
+                                     # mechanism in 07a); no new class introduced
   objective_reduction:    Literal["mean", "sum"]      # LossConfig.reduction as resolved
   epoch_statistic:        Literal["sample_count_weighted_mean_of_batch_criterion"]   # R2 and R3 formula
   comparability:          Literal["established", "not_established"]                  # §3.3 precondition P
@@ -657,7 +666,7 @@ the Gate's bounds; either requires operator approval (real training).
 
 | Failure | Behaviour |
 |---|---|
-| validation pass perturbs the training trajectory | two-arm oracle RED → STOP (parent stop: cannot be made RNG-neutral) |
+| validation pass perturbs the training trajectory or any training state (model / optimizer / objective / Python / NumPy / torch RNG) | two-arm oracle or state census RED → STOP (parent stop, revision-2 wording: cannot be made training-state-neutral) |
 | `--eval_sample_set_json` supplied but unreadable / wrong shape / violates DataScope | trainer `ValueError` (fail closed) / executor `ScopeViolationError` path — never a silent fallback |
 | flag absent AND validation NOT expected (legacy / caller predating it) | R3 absent, `validation_state="absent"`, diagnosis `state="ok"` — recorded, never silent |
 | validation EXPECTED (tuner built an eval SampleSet) but the history carries no R3 (transport dropped, producer regressed) | `TrainingResultsContractError` at the tuner boundary → `error_training` record — NEVER a success record (§3.4a) |
@@ -736,7 +745,7 @@ freezes and lands after).
 
 ## 13. Stop conditions
 
-Parent §8.2 stops: the pass cannot be made RNG-neutral; the existing
+Parent §8.2 stops: the pass cannot be made training-state-neutral (training state = the frozen model / optimizer / training-objective / Python / NumPy / torch RNG invariants of §3.2); the existing
 sample-set machinery cannot express the validation set without a new SPLIT
 concept; R2/R3 cannot be made comparable without changing R2 (§3.3: the built-in mean-reduced set is proven; `sum` / custom are LABELLED not_established, which is not a stop); reflector /
 planner bytes cannot be held exact; any change to retry / round / timeout /
@@ -830,8 +839,8 @@ rule says so.
       epoch 0 and the per-epoch materialization equality inside the pass;
       `ValidationScopeError` / `ObjectiveStateMutationError` are typed
       trainer errors (non-zero exit).
-- [ ] Compute `objective_fingerprint` (sha256 of the canonical JSON dump of
-      the resolved `LossConfig`), `objective_reduction`, `comparability` +
+- [ ] Compute `objective_config_fingerprint` (deterministic SHA-256 of the
+      canonical serialized resolved `LossConfig`), `objective_reduction`, `comparability` +
       reason from the §3.3 audited set (a module-level frozenset of the
       built-in kinds proven mean-normalized; custom → not_established).
 - [ ] Tests (each named for its defect): (a) two-arm trajectory oracle
@@ -877,8 +886,9 @@ rule says so.
       `reduction="sum"` fixture → `comparability="not_established"`,
       `reason="reduction=sum"`; a custom-loss fixture → `"custom_objective_undeclared"`;
       each built-in mean-reduced kind → `"established"`; (n)
-      `objective_fingerprint` differs between `focal(γ=1)` and `focal(γ=4)`
-      and is stable across processes.
+      `objective_config_fingerprint` differs between `focal(γ=1)` and `focal(γ=4)`
+      and is stable across processes (a configuration-surface fingerprint —
+      the test does NOT claim it identifies plugin code).
 
 **4. Validation plan.**
 - Unit: the families above (`tests/unit/execute_tools/test_step07a_c1_*`).
@@ -1146,7 +1156,7 @@ consumers of the finished boundary; the docs sync is Checkpoint E.
 - Dependencies: C1–C3.
 
 **3. Implementation plan.**
-- [ ] Author the three L1 fixture histories with the EXACT §22.9a semantics (objective ids `ce` / `mae`; observations `validation_accuracy` / `validation_psnr`; the TIDMAD atomic fixture `focal`) and their expected diagnoses (literals).
+- [ ] Author the three L1 fixture histories with the EXACT §22.9a semantics (`objective_kind` values `ce` / `mae`; observations `validation_accuracy` / `validation_psnr`; the TIDMAD atomic fixture `focal`) and their expected diagnoses (literals).
 - [ ] Rung test + pack pins; pack docs; node/skill docs.
 - [ ] Docs sync; ledger §14 (counts / wall time / rc per commit; PB/WF sha256s; Checkpoint-0 values).
 - [ ] Full suite from a clean tree; push; PR; exact-head CI (id in the PR body — no trailing docs-only push).
@@ -1157,7 +1167,8 @@ consumers of the finished boundary; the docs sync is Checkpoint E.
 **5. Acceptance criteria.**
 - Rung green: the same boundary yields the expected verdict shapes for the three fixtures; atomicity diff shows only the history/objective identity varies.
 - Packs: STATUS rows present and honest (test pins); PR0 governance guards still green (no `.py`, three roots, banners).
-- Full-suite log 0 failed; CI green on the exact final head; Gate 2 PASS with the 07a boundary evidence, or the FAIL recorded with diagnosis (never re-rolled to green).
+- Full-suite log 0 failed; CI green on the exact final head.
+- **Gate 2 completion semantics (frozen):** READY FOR OPERATOR REVIEW / merge eligibility REQUIRES Gate 2 PASS with the required 07a boundary evidence (§10). A Gate 2 FAIL is preserved and diagnosed and BLOCKS 07a completion; it may be rerun ONLY after a substantive in-scope fix, or under the gate standard's explicitly permitted inconclusive / transient rerun rule (§15 C4 §6 admission-rejection handling stays as written). Never reroll an unchanged semantic failure merely to obtain green.
 
 **6. Failure and edge cases.**
 - Gate 2 planner elects a 1-epoch plan even with `--max_epochs 2` → R3 has one point; still PASS (functional) — record.
@@ -1223,5 +1234,5 @@ immediately (§3.2). Remaining for the operator: **freeze of revision 2**.
 | 12 (operator) | Expected validation could silently degrade to `absent` through a re-dropped transport | `expected_validation` at the tuner boundary → `error_training` (§3.4a) |
 | 13 (operator) | "Same criterion object" ≠ mathematically comparable epoch statistic for `sum`-reduced / batch-coupled objectives | precondition P + built-in audit + `comparability` stamp (§3.3) |
 | 14 (operator) | Mode restore relied on the next epoch; criterion statefulness and NumPy RNG were outside the isolation census | transactional pass, criterion state check, NumPy restore, state census in tests (§3.2) |
-| 15 (operator) | `objective_id = loss_type` over-claimed identity | `objective_kind` + `objective_fingerprint` (§3.5) |
+| 15 (operator) | `objective_id = loss_type` over-claimed identity | `objective_kind` + `objective_config_fingerprint` (§3.5) |
 | 16 (operator) | Relative deadband had a zero-reference pathology; observation lists could be ragged | symmetric `r(a,b)`; length validators (§3.6, §3.5) |
