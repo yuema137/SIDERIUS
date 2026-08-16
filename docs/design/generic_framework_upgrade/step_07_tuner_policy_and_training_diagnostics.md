@@ -927,7 +927,7 @@ child is about to be frozen.
 
 ## 17. Completion / Checkpoint E
 
-**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b — child design DRAFT rev 1 (2026-08-16, `pr_07b_tuner_policy.md`) awaiting operator review · 07c.**
+**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b — child design DRAFT rev 2 (2026-08-16, `pr_07b_tuner_policy.md`; rev 1 reviewed APPROVE WITH TARGETED REVISION, corrections applied) awaiting freeze · 07c.**
 
 Step 07 is COMPLETE when PR0, 07a, 07b, 07c are merged with Checkpoints
 0/A/B/C/D each, the required Gates PASSED at the assembled heads (07a G2,

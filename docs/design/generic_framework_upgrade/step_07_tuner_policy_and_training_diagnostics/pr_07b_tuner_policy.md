@@ -8,7 +8,7 @@
 | Depends on | 07a MERGED (record fields `training_history` / `training_diagnosis`, `TrainingDiagnosis` schema, Stub/pseudo multi-epoch histories, hidden-key sets); Step 06 MERGED (`MetricSpec.direction`, `run_metric` bound at run scope); Step 00 goldens PB-1/PB-2/WF-1/WF-2/REC; PR0 packs (`declared/metric_*.json`) |
 | Decomposition | ONE PR, six commits **C1 → C6** (§15): replay oracle · P1-order + validity · P1-scale + attempt-transition disposition · P2 authority-rendered task blocks + OD-1 · P3 owned rendering deltas + bridge surfaces · rungs / packs / docs / Checkpoint E + Gate 1 |
 | Gates | Gate 1 **REQUIRED, ≥ 2 rounds** (P3 changes LLM-facing SYSTEM prompt bytes; parent §11 row 07b; OD-20-6) · Gate 2 **NOT REQUIRED** (no execution-launch change; flip: any training/inference/scoring launch or execution change → Gate 2) |
-| Status | **DRAFT — for operator review (revision 1, 2026-08-16). Implementation NOT started; §14 ledger empty; implementation only under a fresh Implementation Working Rules contract after freeze.** |
+| Status | **DRAFT — revision 2 (2026-08-16): operator review of revision 1 = APPROVE WITH TARGETED REVISION, NOT YET FREEZE; the six required corrections are applied in this revision (§0.7). Awaiting freeze. Implementation NOT started; §14 ledger empty; implementation only under a fresh Implementation Working Rules contract after freeze.** |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
@@ -120,6 +120,45 @@ authorized PB-1/PB-2 byte deltas, declared file-by-file before the change;
 Gate 1 ≥ 2 rounds, Gate 2 not required; `run()` gains no branching; the
 loss rank stays lower-is-better and untouched.
 
+### 0.7 Operator review of revision 1 (2026-08-16) — corrections applied in this revision
+
+Verdict: **APPROVE WITH TARGETED REVISION — NOT YET FREEZE.** Decomposition,
+the six commits, the P1 census, the per-rule scale classification, the
+three-track coverage and the Gate disposition stand. Six corrections:
+
+| # | Class | Correction | Where |
+|---|---|---|---|
+| 1 | **BLOCKER** | The bridge / WF contract was self-contradictory (§3.9 listed only `metric_spec` while C4 adds `task_render` and C5 counts 24 kwargs). ONE final contract: `plan(..., task_render, metric_spec)` (WF-1 22 → 23 at C4 → 24 at C5); `reflect(..., metric_spec, training_diagnosis)`; `task_render=None` and `metric_spec=None` both FAIL CLOSED at a real render (no silent TIDMAD fallback) | §3.9, C4, C5 |
+| 2 | **BLOCKER** | `MetricOrder` API incomplete: `worst(items, key)` and `toward_worse(ref, magnitude)` are now first-class members of the ONE authoritative table (no "opposite-direction order" construction); `toward_better(ref, signed_delta)` semantics frozen — `signed_delta` is a coordinate on the better-direction axis (positive = toward better, negative = toward worse) | §3.2, §3.3 |
+| 3 | **BLOCKER** | Reflector transport hole (`history_meta` was rendered but not transported): the reflector renders the `TrainingDiagnosis` ONLY (it already carries `comparability`); the planner renders diagnosis + the record's `training_history.objective_kind`; no additional `TrainingHistory` transport; renderer signature `render_training_dynamics_line(diagnosis, objective_kind: str \| None)` | §3.8, C5 |
+| 4 | SHOULD FIX | Checkpoints B and D made EXPLICIT and mapped item-by-item to the parent (§6 → Checkpoint B; §8 → Checkpoint D); C6 acceptance enumerates Checkpoints 0 / A / B / C / D / E | §6, §8, C6 |
+| 5 | SHOULD FIX | Gate-1 health posture source-audited and FROZEN now (not at readiness): `--no-health_gate_enabled` (records self-describe `health_gate_enabled=False` → `classify_candidate_health` returns VALID for successful finite-score records, `candidate_eligibility.py:169-175`) + `--enable_chain_incumbent_formal_gates` + `--num_iterations 2 --max_rounds 2`; "executed" DEFINED as "the decision helpers are reached and their resolved values / verdicts are recorded", not "both mutually exclusive actions become True" | §0.5, §7, §10, Q-07b-8 |
+| 6 | SHOULD FIX | B-07b-2 no longer claims "classification / regression phrasing" — `MetricSpec` owns no task type; the rung asserts metric id, direction words, diagnosis lines and P2 task tokens as available | §6 |
+
+Gate-1 posture audit (for correction 5): `HealthGateMode = Literal["blocking",
+"observe_only"]` (`agent/schemas/hyperparam_tuning.py:48`) is a SEPARATE axis
+from the subsystem switch `health_gate_enabled` (`:52`, DS4–DS6);
+`classify_candidate_health` (`execute_tools/health_checks/candidate_eligibility.py:148-200`)
+returns INVALID for non-success / non-finite records, VALID when the record
+self-describes `health_gate_enabled=False` (`:169-175`), UNKNOWN when a
+required blocking gate is missing / not run, INVALID on a failed blocking
+check or `would_invalidate_under_production_policy` (`:194-198`) — so under
+pseudo training (no deliverables → the peeks fail) BOTH `blocking` and
+`observe_only` yield INVALID / collapse (the Step-06 Gate-1 experience),
+while `--no-health_gate_enabled` yields VALID stub successes with NO
+production health semantics modified. `sdsc_submission_scripts/run_chain.sh`
+forwards `--is_pseudo_training` (`_chain_common.sh:378/485`),
+`--no-health_gate_enabled` (`:307/505`), `--enable_chain_incumbent_formal_gates`
+(`:316/557`) and `--num_iterations` (`:280`); iteration 2 of a chain receives
+the reconstructed valid formal incumbent as `current_run_best_formal_score`
+(`workflows/model_exploration.py:2654-2655, :2772-2774`) — the
+`restored_valid_formal_incumbent` (non-sentinel) reference; iteration 1 uses
+the bootstrap sentinel. The skip helper is reached at every formal-round
+boundary when `force_formal_round` is on (`:4365-4372`, default True); the
+bypass helper is reached ONLY when a formal round's time check is infeasible
+(`:5147-5157`) — not guaranteed under pseudo training, hence NOT a Gate-1
+PASS requirement (covered deterministically by B-07b-1 / 1s).
+
 ---
 
 ## 1. Capability / final effect
@@ -223,16 +262,25 @@ nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md, docs (README
 ### 3.2 The ONE order authority and its consumers (FROZEN on approval — instantiates P1-order)
 
 ```text
-MetricOrder(spec: MetricSpec)                       # execute_tools/metric_order.py
-  direction            = spec.direction                       ("higher" | "lower")
-  is_better(a, b)      = a > b   if higher  else a < b
-  is_at_least(a, b)    = a >= b  if higher  else a <= b
-  best(items, key)     = max(...) if higher else min(...)     (ties: FIRST item wins — today's max() semantics)
-  rank(values, x)      = 1 + #(v strictly better than x)      (== today's sorted(reverse=True).index(x)+1 for higher)
-  worst_sentinel       = -inf if higher else +inf             (the "nothing is worse" value)
-  best_sentinel        = +inf if higher else -inf             (the "nothing is better" value)
-  toward_better(ref, d)= ref + d if higher else ref - d       (a signed margin in the metric's units, §3.3)
+MetricOrder(spec: MetricSpec)                       # execute_tools/metric_order.py — the ONE authoritative API
+  direction                       = spec.direction                    ("higher" | "lower")
+  is_better(a, b)                 = a > b   if higher  else a < b
+  is_at_least(a, b)               = a >= b  if higher  else a <= b
+  best(items, key)                = max(...) if higher else min(...)  (ties: FIRST item wins — today's max() semantics)
+  worst(items, key)               = min(...) if higher else max(...)  (ties: FIRST item wins — today's min() semantics)
+  rank(values, x)                 = 1 + #(v strictly better than x)   (== today's sorted(reverse=True).index(x)+1 under higher)
+  worst_sentinel                  = -inf if higher else +inf          (the "nothing is worse" value)
+  best_sentinel                   = +inf if higher else -inf          (the "nothing is better" value)
+  toward_better(ref, signed_delta)= ref + signed_delta if higher else ref - signed_delta
+        # signed_delta is a COORDINATE ON THE BETTER-DIRECTION AXIS in the metric's units:
+        # positive = toward better, negative = toward worse (so a declared skip margin of -1.0 moves the
+        # threshold to the WORSE side under BOTH directions)
+  toward_worse(ref, magnitude)    = toward_better(ref, -magnitude)   (magnitude >= 0; the efficiency band uses it)
 ```
+
+Every member interprets `direction` in this ONE class; no consumer may
+construct a second `MetricOrder` with the opposite direction to obtain the
+worst (that would be a second interpretation site).
 
 Consumers (each rewired to the authority; under `higher` byte-identical
 results — replay oracle):
@@ -245,7 +293,7 @@ results — replay oracle):
 | 4 bootstrap `:1660-1661` | `-inf ×3` | `order.worst_sentinel ×3` (source string unchanged: `"negative_infinity_bootstrap"` is a PROVENANCE label — under `lower` it names a `+inf` bootstrap; the label is kept for record compatibility and its meaning documented: "the worst-value bootstrap") |
 | 4 thresholds `:1660-1663` | `ref + delta` | `order.toward_better(ref, delta)` — see §3.3 row 1 for why the OPERATOR's `-inf` / `+inf` disable convention is preserved under both directions |
 | 5 planner table incumbent `:4469-4473` | `max` | `order.best` |
-| 7 reflection `best_score`, `best_record`, `rank`, `worst_score`, `is_new_best` | `max / sorted(reverse=True) / min / >` | `order.best / order.rank / order.best with the opposite direction (worst) / order.is_better` |
+| 7 reflection `best_score`, `best_record`, `rank`, `worst_score`, `is_new_best` | `max / sorted(reverse=True) / min / >` | `order.best / order.rank / order.worst / order.is_better` |
 | 9 finalization 5 tracks | `max` | `order.best` (per track, same filters) |
 | skip / bypass banners `:4384-4390`, `:5163-5176` | hardcoded `<` / `>=` | the banner renders the order's operator symbol (`<` under higher, `>` under lower); a formatting-only change on stdout, not an LLM surface |
 
@@ -373,11 +421,15 @@ stays green.
 
 ### 3.8 Diagnosis rendering — content and mechanism (FROZEN on approval)
 
-- Source of truth: the 07a record fields (`ExperimentRecord.training_diagnosis`, and `training_history.objective_kind` /
-  `comparability` for the label) — never recomputed (§22.6 item 3).
-- Renderer: `agent/prompt_templates/tuner/rendering.py::render_training_dynamics_line(diagnosis, history_meta) -> str`
-  — ONE compact line, e.g.
-  `train R2 2.90→2.35 (decreasing, 5 ep) · val R3 2.95→2.62 (decreasing; best ep 3, +0.07 after best) · gap +0.27 (comparable)`;
+- Source of truth: the 07a record fields (`ExperimentRecord.training_diagnosis`; for the PLANNER additionally the
+  record's `training_history.objective_kind` as a label) — never recomputed (§22.6 item 3). `comparability` is a
+  field of `TrainingDiagnosis` itself, so NO extra `TrainingHistory` transport is needed anywhere.
+- Renderer: `agent/prompt_templates/tuner/rendering.py::render_training_dynamics_line(diagnosis: TrainingDiagnosis,
+  objective_kind: str | None) -> str` — ONE compact line, e.g.
+  `[focal] train R2 2.90→2.35 (decreasing, 5 ep) · val R3 2.95→2.62 (decreasing; best ep 3, +0.07 after best) · gap +0.27 (comparable)`;
+  with `objective_kind=None` the `[…]` label is omitted (the REFLECTOR path — it deliberately renders R2/R3
+  generically and does not render the objective family; the reflector's `actual_results` already carries
+  `final_loss` / `loss_history` under the run's own loss config);
   `absent` → `training dynamics: none recorded`; `invalid` → `training dynamics: invalid (non-finite)`;
   `comparability != established` → the gap clause reads `gap n/a (not comparable)`. NO overfitting / plateau /
   converged / underfitting words (07a rule; a test asserts the vocabulary is absent from the renderer's output).
@@ -385,30 +437,37 @@ stays green.
   strips the hidden keys — the raw `training_diagnosis` / `training_history` keys stay hidden from the JSON dump
   (Step-06/07a boundary tests keep passing; a new boundary test asserts the block is present AND the raw keys are absent).
 - Reflector: the tuner passes the CURRENT attempt's diagnosis (the value it derived at the boundary in 07a) to
-  `brain.reflect(..., training_diagnosis=<TrainingDiagnosis | None>)`; the bridge renders the block into the USER
-  prompt via the renderer; `actual_results` stays the legacy payload (WF-2 `actual_results_keys` EXACT).
+  `brain.reflect(..., training_diagnosis=<TrainingDiagnosis | None>)` — the ONLY diagnosis transport to the
+  reflector; the bridge renders the block via `render_training_dynamics_line(diagnosis, objective_kind=None)`;
+  `actual_results` stays the legacy payload (WF-2 `actual_results_keys` EXACT).
 - Cadence / persistence unchanged; nothing new is written to records.
 
 ### 3.9 Bridge / kwarg surface deltas (FROZEN on approval — declared additive)
 
+The ONE final contract (both commits together):
+
 ```text
-LLMBridge.plan(..., metric_spec: MetricSpec | None = None)          # +1 kwarg → WF-1 kwarg key set 22 → 23 (declared)
+LLMBridge.plan(memory_history, ..., <22 existing kwargs>,
+               task_render:  TunerTaskRender | None = None,     # C4 (P2 tokens)   → WF-1 kwarg key set 22 → 23
+               metric_spec:  MetricSpec | None = None)          # C5 (P3 tokens)   → WF-1 kwarg key set 23 → 24
 LLMBridge.reflect(exp_id, hypothesis, actual_results, reflection_context=None,
-                  *, metric_spec: MetricSpec | None = None,
-                  training_diagnosis: TrainingDiagnosis | None = None)  # WF-2: actual_results_keys EXACT (9);
-                                                                          # reflection_context_keys EXACT (23);
-                                                                          # the two new values travel as kwargs, recorded
-                                                                          # additively in the WF-2 surface golden
+                  *, metric_spec: MetricSpec | None = None,               # C5
+                  training_diagnosis: TrainingDiagnosis | None = None)   # C5
+                  # WF-2: actual_results_keys EXACT (9); reflection_context_keys EXACT (23);
+                  # the two kwargs are recorded ADDITIVELY in the WF-2 call-surface golden
 ```
 
-- `metric_spec=None` (a caller predating 07b, e.g. the PB fixtures until regenerated) → the renderer emits the
-  direction-NEUTRAL wording? **No — fail closed at the bridge**: `None` renders the TIDMAD-compatible words ONLY when
-  the caller is the shipped TIDMAD path? That would hardcode TIDMAD in the bridge. **Decision:** `metric_spec` is
-  REQUIRED for rendering; the tuner always passes `run_metric.spec`; the bridge raises `ValueError` when it is `None`
-  (test fixtures pass the shipped spec via `derive_tidmad_metric_spec(TIDMAD_PROFILE)`; the pseudo bridges accept it).
-  Signature default `None` exists only so the WF-1 golden's kwarg surface stays additive and the stub bridges'
-  dispatch is unchanged; a real render without it is a contract error.
-- WF-1/WF-2 goldens regenerated additively in C5 with the three-part note.
+- **Fail-closed at a real render.** `task_render=None` (after C4) and `metric_spec=None` (after C5) raise
+  `ValueError` at `plan` / `reflect` before any LLM call — the templates depend on the tokens and there is NO silent
+  fallback to TIDMAD literals (that would hardcode TIDMAD in the bridge). The `None` defaults exist ONLY so the WF
+  kwarg surface is additive and the pseudo / stub bridges' dispatch is unchanged; the tuner ALWAYS passes
+  `run_metric.spec` and the run-scoped `TunerTaskRender`; the PB fixtures pass the shipped spec
+  (`derive_tidmad_metric_spec(TIDMAD_PROFILE)`) and a TIDMAD `TunerTaskRender` built from the shipped authorities.
+- `TunerTaskRender` (typed, frozen; built ONCE at run scope by the tuner from `run_profile`, `run_model_io`, the
+  materialized effective health config and the built-in registry): the rendered strings of §3.6 — roster, full-scope
+  segments, output-contract shape (or `None`), built-in loss list, focal defaults, gate-name tokens (or `None` per
+  missing check), efficiency band pct.
+- WF-1 regenerated additively in C4 (23) and again in C5 (24); WF-2 in C5; each with the three-part note.
 
 ### 3.10 OD-1 — condensed-branch byte stability (FROZEN on approval — CLOSED here)
 
@@ -472,7 +531,7 @@ run_metric.spec + run_model_io + run_profile + effective health config + LossCon
 record.training_diagnosis (07a) → renderer → planner history block + reflector block (raw keys still hidden)
 ```
 
-## 5. Stage-A parity (Checkpoint 0 / A)
+## 5. Checkpoint 0 / Checkpoint A — Stage-A parity
 
 - **Checkpoint 0 (BEFORE the first production edit, C1, test-only):** (a) the **selection replay oracle**: a
   checked-in corpus of `all_records` histories (synthetic, hand-authored — incl. `-inf`, `None`, `nan`, penalized
@@ -488,7 +547,7 @@ record.training_diagnosis (07a) → renderer → planner history block + reflect
   declared-additive; REC-2/REC-3 unchanged (no record change); `run()` AST branch count not increased (recorded);
   existing round/attempt/retry tests green.
 
-## 6. Stage-B rungs (declared REQUIRED by the parent)
+## 6. Checkpoint B — Stage-B rungs (declared REQUIRED by the parent §8.3 Checkpoint B; item-by-item)
 
 - **B-07b-1 ORDERING-direction axis (L1, STRICT one axis):** identical records / history, only `direction` flips
   (`_direction_only_metric` bound at run scope + the helpers called with both orders) → trial winner, skip / bypass
@@ -502,11 +561,14 @@ record.training_diagnosis (07a) → renderer → planner history block + reflect
   (finite float under `lower` refused with the recorded reason; `None` accepted); the invalidated outcome (§3.4)
   under both directions.
 - **B-07b-2 rendering axis (L1):** planner + reflector rendered (BoundaryRecorderBridge) for (i) the `lower`
-  direction-only spec, (ii) the Pets `declared/metric_accuracy.json` (accuracy↑, classification phrasing) and (iii)
-  the DAVIS `declared/metric_mse.json` (mse↓, regression phrasing) with a Pets / DAVIS 07a fixture history
-  (`examples/*/expected/training_diagnosis_l1_fixture.json`) → SCOPED assertions (Step-01 §13.4): the direction
-  block carries no higher-is-better residue for `lower`, the diagnosis lines are present, the metric id renders,
-  and NO calibrated label word appears; whole-prompt absence is not asserted.
+  direction-only spec, (ii) the Pets `declared/metric_accuracy.json` (`accuracy`, `higher`) and (iii) the DAVIS
+  `declared/metric_mse.json` (`mse`, `lower`), each with the pack's 07a fixture diagnosis
+  (`examples/*/expected/training_diagnosis_l1_fixture.json`) and a contrast `TunerTaskRender` → SCOPED assertions
+  (Step-01 §13.4): the direction block renders the declared direction words with no higher-is-better residue under
+  `lower`, the metric id renders verbatim, the diagnosis lines are present, the P2 task tokens render from the
+  contrast render object as available, and NO calibrated label word appears. **No "classification" /
+  "regression" phrasing is asserted — `MetricSpec` owns no task type and no landed authority supplies that word to
+  the tuner prompt** (Seam 3 gap); whole-prompt absence is not asserted.
 - **B-07b-3 task-content axis (L1):** the Step-02 3-file contrast profile + a contrast model-I/O contract + an
   effective health config with renamed checks → different roster / anchor / contract / gate-name tokens; the
   TEMPLATE constants carry no literal for any rendered token (template-scoped absence pins on `PLANNER_PROMPT` /
@@ -517,25 +579,60 @@ record.training_diagnosis (07a) → renderer → planner history block + reflect
 
 Real gpt-5.5 planner / reflector / proposer / implementor / validator, pseudo
 training (StubSandbox — 07a multi-epoch histories, so diagnosis lines render
-from a real trajectory), `max_rounds ≥ 2` so the round-2 planner sees a
-rendered round-1 record and the incumbent / skip / bypass path is exercised
-across rounds; PLUS the deterministic replay. Precedent shape: Step-06 Gate 1
-(`run_one_iteration.py … --max_rounds 2 --max_epochs 1 --data_scope 4-9
---health_gate_files 4,5,6,7,8,9 --is_pseudo_training --llm_config
-llm_configs/openai_tiered_pro.json`; the Step-06 run collapsed every pseudo
-record under `--healthgate_mode blocking` because pseudo training writes no
-deliverables). **07b's Gate 1 needs stub-scored records to be `success`
-so incumbent / skip / bypass are exercised** → the readiness packet fixes
-the health-gate mode / stub-deliverable posture from source before launch
-(§15 C6; the standard's Gate-1 bounds and cost apply; a passive
-`_chat_json` tee records every planner / reflector message so the
-"direction wording present, raw keys absent" claim is auditable).
+from a real trajectory), TWO iterations × TWO rounds; PLUS the deterministic
+replay. **Posture FROZEN from source (§0.7 correction 5):**
 
-## 8. Failure classes (each has a test or a stop rule)
+```text
+bash sdsc_submission_scripts/run_chain.sh --mode lilab --workspace <scratch>/07b_gate1 --run_name gate1_07b
+    --num_iterations 2 --max_rounds 2 --max_proposal_attempts 3 --max_epochs 1
+    --data_scope 4-9 --is_pseudo_training --no-health_gate_enabled --enable_chain_incumbent_formal_gates
+    --llm_config llm_configs/openai_tiered_pro.json                                   (cold start; no --seed_paths)
+```
 
-| Failure | Behaviour |
+- `--is_pseudo_training`: StubSandbox trains nothing, scores stub values, emits 07a histories.
+- `--no-health_gate_enabled` (an EXISTING DS6c posture; `_chain_common.sh:307/505`): records self-describe
+  `health_gate_enabled=False` and `classify_candidate_health` classifies successful finite-score records VALID
+  (`candidate_eligibility.py:169-175`) — the ONLY existing posture under which pseudo records are valid candidates
+  (`blocking` and `observe_only` both invalidate them because pseudo training writes no deliverables); NO production
+  health semantics are modified and no 07b health exception is invented. The DS8 `--health_gate_files` pairing is not
+  required when the subsystem is disabled (`run_one_iteration.py:1837`).
+- `--enable_chain_incumbent_formal_gates`: the delta gates consume the chain incumbent — iteration 1 resolves the
+  bootstrap (worst-sentinel) reference, iteration 2 the `restored_valid_formal_incumbent` reference reconstructed
+  from iteration 1's valid formal record (`workflows/model_exploration.py:2654-2655, :2772-2774`).
+- `--max_rounds 2` with the default `--force_formal_round`: round 2 is formal, so the skip helper is reached at the
+  formal-round boundary (`:4365-4372`) in BOTH iterations (sentinel in iteration 1, non-sentinel in iteration 2), the
+  trial winner is resolved, and the round-2 planner receives the round-1 record's rendered dynamics line + the
+  incumbent score table.
+- Bypass: reached ONLY when a formal round's time check is infeasible (`:5147-5157`) — not guaranteed under pseudo
+  training; NOT a PASS requirement (deterministic B-07b-1 / 1s cover it); if reached, its verdict is recorded.
+- Bounds / cost: two Step-06-shaped iterations ≈ 8–16 min, ≈ $0.6, hard timeout 40 min; no GPU work.
+- **"Executed" DEFINITION (PASS criterion):** the decision helpers are REACHED and their resolved values / verdicts
+  are RECORDED — `formal_comparison_reference_source` / `resolved_skip_formal_threshold` /
+  `resolved_bypass_formal_threshold` / `formal_reference_score` in each `run_output`, the `[SkipFormal]` /
+  winner banners in the chain log, the five `best_*` tracks — NOT that both mutually exclusive actions (skip AND
+  bypass) become `True`.
+- PASS artifacts: standard Gate-1 criteria + the 07b property — a passive `_chat_json` tee (the Step-06 shape) shows
+  every planner message with the direction block and the round-2 planner with the round-1 dynamics line, every
+  reflector message with the dynamics block, and ZERO raw hidden keys (`training_history`, `training_diagnosis`,
+  `metric_result`, `metric_refusal`) in any message; both `run_output_*.json` validate; iteration 2's
+  `formal_comparison_reference_source == "restored_valid_formal_incumbent"`.
+- If the frozen posture cannot produce valid stub successes at readiness (a source drift), STOP and re-plan the
+  harness — never invent a 07b-specific health exception.
+
+## 8. Checkpoint D — mutation / reachability validation (each row is a named mutation or reachability proof; parent §8.3 Checkpoint D item-by-item)
+
+Parent Checkpoint D items → this child: **direction mutations per family**
+(rows 1–2), **sentinel mutation** (row 2), **scale-rule mutation** (row 3),
+**invalidated-result outcome mutation** (row 5), **template-literal
+reintroduction** (row 7), **reachability — production path uses the order
+authority** (row 1), attempt-transition parity → not applicable (REMOVED;
+retry/round tests are the parity evidence). Additional child rows: raw-key
+leak, calibrated vocabulary, bridge fail-closed, WF surfaces, OD-1
+second-process, `run()` branch count.
+
+| Failure / mutation | Behaviour |
 |---|---|
-| a consumer bypasses the order authority (keeps `max` / `<`) | strict rung RED (direction flip does not invert that consumer); reachability test: `MetricOrder` monkeypatched to a sentinel-returning object → production selection RED |
+| a consumer bypasses the order authority (keeps `max` / `<`) — flip ONE ordering comparison per family | strict rung RED (direction flip does not invert that consumer); reachability: `MetricOrder` monkeypatched to a sentinel-returning object → production selection RED |
 | sentinel mutation (`-inf`↔`+inf` under `lower`) | rung RED |
 | a scale rule silently reverts to a raw-score default | policy-semantics rung RED |
 | penalty float under `lower` | refused at startup with the recorded reason (never a "better" incumbent read by the planner) |
@@ -545,7 +642,7 @@ the health-gate mode / stub-deliverable posture from source before launch
 | a P3 delta outside §3.7 | golden diff review + the declared-delta list in the ledger; test that the diff of the regenerated goldens touches ONLY the declared lines (line-set assertion recorded, not a test — reviewed) |
 | raw `training_history` / `training_diagnosis` / `metric_*` keys leak into a render | boundary tests RED (both renders) |
 | a calibrated label word rendered from the diagnosis | renderer vocabulary test RED |
-| `metric_spec=None` at a real render | bridge `ValueError` (fail closed) |
+| `metric_spec=None` or `task_render=None` at a real render | bridge `ValueError` (fail closed) |
 | WF-1/WF-2 kwarg surface changes beyond the declared additive keys | goldens RED |
 | OD-1 condensed order still unstable | 4-record golden RED under a second process (test runs the render in a subprocess and compares) |
 | `run()` gains a branch | AST count recorded; CI pyright |
@@ -583,9 +680,10 @@ removed) — `TestRoundOutcome` stays.
 
 - **Gate 1 REQUIRED, ≥ 2 rounds** (P3 changes SYSTEM prompt bytes; OD-20-6): ONE bounded run at the final
   executable head after C6, real `openai_tiered_pro.json`, pseudo training, cold-start; PASS = the standard's Gate-1
-  criteria + the 07b property (round-2 planner receives round-1's rendered dynamics line and direction wording;
-  reflector receives the diagnosis block; no raw hidden key in any message; skip / bypass / incumbent path executed
-  across the two rounds as recorded in `run_output`). **NOT launched without operator approval at launch** (or a
+  criteria + the 07b property (§7: round-2 planner receives round-1's rendered dynamics line and direction wording;
+  reflector receives the diagnosis block; no raw hidden key in any message; the trial-winner / skip / incumbent
+  helpers reached with their resolved values recorded — bootstrap in iteration 1, restored incumbent in iteration 2;
+  bypass recorded if reached). **NOT launched without operator approval at launch** (or a
   pre-authorizing Implementation Working Rules contract, as 07a's did for its Gate 2).
 - **Gate 2 NOT REQUIRED**: no execution launch changes; deterministic replay proves policy parity. Flip: any change
   to training / inference / scoring launches → Gate 2 (and this design is wrong — STOP).
@@ -825,10 +923,9 @@ golden failure with no regeneration to hide behind.
 - `agent/prompts.py`: the §3.6 RENDER tokens replace the literals in `PLANNER_PROMPT` / `REFLECTOR_PROMPT` /
   the USER builder (roster at `:1293`; shape at `:1070`); `_truncate_memory_history` iterates the record's own key
   order (OD-1).
-- `agent/llm_bridge.py`: `plan(..., task_render: TunerTaskRender | None = None)`? **No** — to keep WF-1 minimal the
-  rendered task facts travel INSIDE the existing `task_description`-style substitution: the tuner builds a typed
-  `TunerTaskRender` (profile / contract / health config / registry facts) ONCE at run scope and passes it as ONE
-  new kwarg `task_render` (declared additive; WF-1 22 → 23 in C4; C5 adds `metric_spec` → 24). Recorded as such.
+- `agent/llm_bridge.py`: `plan(..., task_render: TunerTaskRender | None = None)` — the tuner builds the typed
+  `TunerTaskRender` ONCE at run scope and passes it as ONE new kwarg (declared additive; WF-1 22 → 23 here; C5 adds
+  `metric_spec` → 24 — the ONE final contract of §3.9); `task_render=None` at a real render → `ValueError`.
 - Tests: `test_step07b_c4_task_rendering.py` (renderer units; TIDMAD byte-equality of each token vs the pre-C4
   literal captured in C1's ledger; template absence pins scoped to the rendered tokens; rung B-07b-3 with the
   Step-02 3-file contrast profile + a contrast contract + a renamed-check health config; OD-1: subprocess
@@ -840,7 +937,7 @@ golden failure with no regeneration to hide behind.
 
 **3. Implementation plan.**
 - [ ] Re-read `agent/prompts.py:10-221, 223-310, 852-935, 1044-1108, 1272-1307`, `agent/llm_bridge.py:765-919`, `models_sandbox.py:732-752`, `model_io_contract.py:206-217`, `health_checks/config.py:300-324`, `models_format_sandbox.py:384-387, 637-641`.
-- [ ] Implement the renderers + `TunerTaskRender`; the tuner builds it once at run scope from `run_profile`, `run_model_io`, the effective health config path it already materialized, and the registry.
+- [ ] Implement the renderers + `TunerTaskRender`; the tuner builds it once at run scope from `run_profile`, `run_model_io`, the effective health config path it already materialized, and the registry; the bridge fails closed on `None`.
 - [ ] Replace the literals by tokens; substitute in the bridge; OD-1 key order.
 - [ ] Tests as listed; capture the 4-record golden; regenerate WF-1 additively.
 
@@ -871,13 +968,15 @@ line-by-line against §3.7 and is what Gate 1 evaluates.
 
 **2. Scope.**
 - `agent/prompt_templates/tuner/rendering.py`: `render_metric_direction_words(spec)`,
-  `render_metric_identity_line(spec)`, `render_training_dynamics_line(diagnosis, history_meta)`,
-  `render_planner_dynamics_block(records)`, `render_reflector_dynamics_block(diagnosis)`; a vocabulary guard test
-  (no calibrated-label words).
+  `render_metric_identity_line(spec)`, `render_training_dynamics_line(diagnosis, objective_kind: str | None)`,
+  `render_planner_dynamics_block(records)` (diagnosis + each record's `training_history.objective_kind`),
+  `render_reflector_dynamics_block(diagnosis)` (calls the line renderer with `objective_kind=None` — no extra
+  transport, §3.8); a vocabulary guard test (no calibrated-label words).
 - `agent/prompts.py`: the §3.7 wording deltas; the planner USER dynamics block (from the windowed records BEFORE
   hiding); the reflector USER block; the two SYSTEM compensating blocks replaced.
-- `agent/llm_bridge.py`: `plan(..., metric_spec=None)`, `reflect(..., metric_spec=None, training_diagnosis=None)`;
-  `ValueError` when `metric_spec is None` at a real render; substitution of the direction / identity tokens.
+- `agent/llm_bridge.py`: `plan(..., task_render=…, metric_spec=None)` (the second new kwarg — WF-1 23 → 24),
+  `reflect(..., metric_spec=None, training_diagnosis=None)`; `ValueError` when `metric_spec is None` at a real render;
+  substitution of the direction / identity tokens (§3.9 is the ONE contract).
 - Tuner: passes `run_metric.spec` to `plan` and `reflect`; passes the attempt's `training_diagnosis` (already
   derived at the 07a boundary) to `reflect` — sequencing only.
 - Goldens: PB-1 (3 files) + PB-2 (2 files) + `pb1_planner_history4_user.txt` regenerated with the three-part note;
@@ -947,7 +1046,13 @@ behaviour; the Gate evaluates the final executable head.
 
 **4. Validation plan.** pins; full suite once; CI once; Gate 1 once (approved).
 
-**5. Acceptance criteria.** Pack pins green; PR0 governance guards green; full-suite log 0 failed; CI green on the exact final head; Gate 1 PASS with the 07b property (round-2 planner message contains the round-1 dynamics line + the direction block; reflector messages contain the dynamics block; zero raw hidden keys; skip / bypass / incumbent path recorded across the two rounds).
+**5. Acceptance criteria — the parent's checkpoint ladder, each explicit.**
+- Checkpoint 0 ✓ (C1 goldens + sha256s + declared-delta list recorded in §14.0).
+- Checkpoint A ✓ (replay deep-equal under `higher`; PB exact except the §3.7 deltas; WF-1 = 24 / WF-2 additive-and-declared; REC unchanged; `run()` branch count not increased) — §14 evidence from C2–C5.
+- Checkpoint B ✓ (B-07b-1, B-07b-1s, B-07b-2, B-07b-3 green — §6).
+- Checkpoint C = Gate 1 PASS with the frozen posture and "executed" definition (§7).
+- Checkpoint D ✓ (every §8 mutation / reachability row green — recorded per commit).
+- Checkpoint E ✓ (pack pins green; PR0 governance guards green; node/skill/contract/governance docs synchronized; full-suite log 0 failed from a clean tree; exact-head CI green).
 
 **6. Failure and edge cases.** Gate 1 planner returns a schema-invalid plan on the new wording → FAIL, wording fix, rerun after the fix (never a reroll of unchanged bytes); pseudo records collapse because the health-gate posture peeks absent deliverables → the readiness packet must have fixed the posture (else the Gate is inconclusive for the incumbent path and is re-planned, not rerolled).
 
@@ -973,19 +1078,27 @@ behaviour; the Gate evaluates the final executable head.
 
 ---
 
-## 16. Operator decisions — OPEN for the revision-1 review
+## 16. Operator decisions — DISPOSED at the revision-1 review (2026-08-16)
 
-| ID | Question | Recommendation |
-|---|---|---|
-| **Q-07b-1** | `AttemptTransition` / `AttemptDecision`: REMOVE (types + tests) and record the `resolved_action` hazard with a proposed owner — vs WIRE with a per-attempt reset (changes round outcomes in the crash-after-scored-attempt case) | **REMOVE** (§3.5): wiring cannot both fix the hazard and keep round semantics unchanged; the fix needs an operator decision on intended semantics |
-| **Q-07b-2** | Penalty float under `lower`: fail closed at startup (recommended) vs accept the operator's value verbatim vs reinterpret (negate) | **fail closed** (§3.3 row 5): the outcome invariant is already structural (status filters); reinterpretation would be exactly the "generic by sign-flip" the parent forbids |
-| **Q-07b-3** | Metric identity in prompts: keep the `denoising_score` FIELD noun and ADD the `spec.id` identity line (recommended) vs render `spec.id` as the noun (mismatches the record key the LLM reads) | keep field + add identity (§3.7) |
-| **Q-07b-4** | Bridge surfaces: `metric_spec` / `training_diagnosis` / `task_render` as declared additive KWARGS (recommended) vs new keys inside `reflection_context` / `task_description` | kwargs (§3.9): typed, WF goldens stay additive-and-declared |
-| **Q-07b-5** | OD-1: close by record-order iteration + a 4-record golden (recommended) vs record why not | close (§3.10) — an LLM-visible change only for ≥ 4-record histories, inside this PR's Gate 1 |
-| **Q-07b-6** | The two SYSTEM "TRAINING vs VALIDATION" / "GAP ANALYSIS" compensating blocks: REPLACE by the dynamics reading guidance (parent wording "replaced") vs keep AND add | REPLACE (parent §8.3 P3) |
-| **Q-07b-7** | Efficiency band constant `0.05`: framework generic (range-normalized) — confirm classification (i) | confirm (§3.3 row 4) |
-| **Q-07b-8** | Gate-1 posture: pseudo training with a health-gate mode that lets stub records be `success` (audited from source in the readiness packet) — confirm that the incumbent / skip / bypass path is a required Gate-1 property for 07b | confirm (§7) |
-| **Q-07b-9** | The "200 vs 4000" example anchors: render only the full-scope number (4 000) from the profile and keep the example-portion prose literal (recommended) vs derive "200" from a default that does not exist | render 4 000 only (§3.6) |
+| ID | Question | Recommendation (rev 1) | **Operator disposition** |
+|---|---|---|---|
+| **Q-07b-1** | `AttemptTransition` / `AttemptDecision`: REMOVE (types + tests) and record the `resolved_action` hazard with a proposed owner — vs WIRE with a per-attempt reset (changes round outcomes in the crash-after-scored-attempt case) | **REMOVE** (§3.5) | **APPROVED** |
+| **Q-07b-2** | Penalty float under `lower`: fail closed at startup vs accept verbatim vs reinterpret (negate) | **fail closed** (§3.3 row 5) | **APPROVED** |
+| **Q-07b-3** | Metric identity in prompts: keep the `denoising_score` FIELD noun and ADD the `spec.id` identity line vs render `spec.id` as the noun | keep field + add identity (§3.7) | **APPROVED** |
+| **Q-07b-4** | Bridge surfaces: declared additive KWARGS vs new keys inside `reflection_context` / `task_description` | kwargs (§3.9) | **APPROVED WITH CORRECTION** — the final surface unified: `plan(task_render, metric_spec)`, `reflect(metric_spec, training_diagnosis)`, both fail-closed on `None` at a real render (§0.7 item 1) |
+| **Q-07b-5** | OD-1: close by record-order iteration + a 4-record golden vs record why not | close (§3.10) | **APPROVED** |
+| **Q-07b-6** | The two SYSTEM compensating blocks: REPLACE vs keep AND add | REPLACE (parent §8.3 P3) | **APPROVED** |
+| **Q-07b-7** | Efficiency band constant `0.05`: framework generic (range-normalized) — classification (i) | confirm (§3.3 row 4) | **APPROVED** |
+| **Q-07b-8** | Gate-1 posture and the incumbent / skip / bypass property | confirm (§7) | **APPROVED WITH CORRECTION** — the exact existing posture is FROZEN NOW (`--no-health_gate_enabled` + `--enable_chain_incumbent_formal_gates`, 2 iterations × 2 rounds) and "executed" is DEFINED (helpers reached + resolved values recorded; not both exclusive actions True) — §0.7 item 5, §7 |
+| **Q-07b-9** | The "200 vs 4000" example anchors: render only 4 000 from the profile vs derive "200" from a default that does not exist | render 4 000 only (§3.6) | **APPROVED** |
+
+Three further corrections were required WITHOUT new operator decisions and
+are applied in this revision: `MetricOrder.worst` / `toward_worse` + the
+signed-delta semantics (§3.2); the reflector renders `TrainingDiagnosis`
+only, no `history_meta` transport (§3.8); Checkpoints B and D explicit
+(§6, §8) and enumerated in C6; B-07b-2 without the classification /
+regression phrasing claim (§6). Remaining for the operator: **freeze of
+revision 2**.
 
 ## 17. Adversarial self-review (this child)
 
@@ -1005,3 +1118,7 @@ behaviour; the Gate evaluates the final executable head.
 | 12 | The `"negative_infinity_bootstrap"` provenance string is direction-specific | kept as a stable label (record compatibility) with its meaning documented as "worst-value bootstrap" — a rename would be a record-vocabulary change (D1-adjacent) |
 | 13 | Gate 1 in pseudo mode collapses every record (Step-06 precedent) and would not exercise incumbents | the readiness packet must audit and fix the health-gate posture BEFORE launch (Q-07b-8) |
 | 14 | Extracting the reflection block could change `reflection_context` values | verbatim extraction first, replay deep-equal, THEN the authority rewire — two evidence points inside C2 |
+| 15 (operator) | Two competing bridge contracts (`metric_spec` only vs `task_render` + `metric_spec`) | unified in §3.9; both fail closed on `None` |
+| 16 (operator) | `worst` obtained by an opposite-direction order would be a second interpretation site | `MetricOrder.worst` / `toward_worse` in the ONE table; signed-delta semantics frozen |
+| 17 (operator) | The reflector renderer consumed `history_meta` nothing transported | reflector renders the diagnosis only; planner adds `objective_kind` from the record |
+| 18 (operator) | Gate-1 posture left to readiness — the 07a lesson (compute workload semantics before the expensive run) | frozen from source in §7 with the "executed" definition; bypass honestly NOT a PASS requirement |
