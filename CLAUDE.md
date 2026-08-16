@@ -618,8 +618,12 @@ TIDMAD's `network.py:FocalLoss1D`.
   R3 → `error_training`), derives `TrainingDiagnosis` once, persists both on
   `ExperimentRecord` and HIDES them from planner + reflector (PB/WF exact);
   Seam 5 written; TIDMAD production-backed, Pets/DAVIS L1 fixture-backed
-  (rung B-07a-1). Gate 2 / PR / CI status: child §14. Merge pending operator
-  review; 07b NOT started.
+  (rung B-07a-1). Gate 2 PASS 2026-08-16 — the RT4 watchdog killed 3/4 attempts
+  INSIDE the un-priced validation pass (validation is a missing deadline term:
+  `T_deadline = T̂_train + T̂_val + overhead + margin` is ADDED 07c scope, parent
+  §8.4; until 07c lands, `--runtime_watchdog`-enabled real campaigns are NOT a
+  reliable configuration). **MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty — 07a COMPLETE.** Next = 07b design (fresh
+  Implementation Working Rules contract; Gate 1 required); 07b NOT started.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per

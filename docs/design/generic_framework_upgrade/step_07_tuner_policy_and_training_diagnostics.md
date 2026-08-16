@@ -9,7 +9,7 @@
 | Design base | `03225ac9` (master; Rev 5.3 — **Q4 FROZEN by the operator 2026-08-15**, the same round that approved this parent for freeze). Revision 2 (2026-08-15) also re-synchronized the roadmap §7a/§15.1/§16/§20.2 anchors + Gate wording + child names, `genericity_contract.md` Seam 4 and the Step-04 parent's historical "07a" rows |
 | Depends on | Steps 00–06 all **MERGED** (06 = PR #213, `02f382eb`); Rev 5 §22 (Q1/Q2/Q3 RESOLVED; Q4 pending) |
 | Decomposition | **FOUR PRs — `PR0` → `07a` → `07b` → `07c`** (Q2, operator-resolved in Rev 5.3; re-verified from source in §7 below — the split is real, not inherited) |
-| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2): the Step-level contract (§1, §3–§8, §10–§13, §16–§18, §20) is FROZEN; the document stays LIVE only for status / ledger absorption per the freeze posture below.** Operator review: decomposition, Step-level scope, examples strategy and Gate plan APPROVED; targeted revisions applied (§20 records what this parent freezes vs leaves to children; §18 records the operator's OD dispositions). Child **PR0 detailed design FROZEN — operator approved 2026-08-15** (`step_07_tuner_policy_and_training_diagnostics/pr0_persistent_example_baseline.md`); **PR0 IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` + docs sync), **MERGED — PR #214, squash `79403b44`, 2026-08-15; exact-head CI 31911929243 SUCCESS)** — PR0 COMPLETE; child §14 is the ledger. **NEXT: 07a** — child design `step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md` **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2)**: expected-validation contract, exact validation-scope materialization, state isolation, R2/R3 comparability precondition audited and stamped, objective provenance (`objective_kind` + `objective_config_fingerprint`), diagnosis math; Gate 1 NOT REQUIRED, Gate 2 REQUIRED once at the final executable head after C4 (`--max_epochs 2` upper bound approved); **07a IMPLEMENTED 2026-08-15 (branch `step07-pr07a-training-history-diagnosis`, C1–C4, executable head `aee1e362`), Gate 2 PASS 2026-08-16 with the recorded 07c-debt watchdog finding, PR #215, exact-head CI green; operator verdict: APPROVE WITH DOC-ONLY CLOSEOUT — merge pending the operator's act (§8.2, child §14)** → 07b → 07c. Sequence: parent freeze → PR0 freeze/implement/merge ✔ → 07a design/implement ✔ → merge … |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2): the Step-level contract (§1, §3–§8, §10–§13, §16–§18, §20) is FROZEN; the document stays LIVE only for status / ledger absorption per the freeze posture below.** Operator review: decomposition, Step-level scope, examples strategy and Gate plan APPROVED; targeted revisions applied (§20 records what this parent freezes vs leaves to children; §18 records the operator's OD dispositions). Child **PR0 detailed design FROZEN — operator approved 2026-08-15** (`step_07_tuner_policy_and_training_diagnostics/pr0_persistent_example_baseline.md`); **PR0 IMPLEMENTED 2026-08-15 — C1–C4 landed on branch `step07-pr0-persistent-example-baseline` (C1 `248a227c` · C2 `c78a148b` · C3 `57031cd1` · C4 `f9398056` + docs sync), **MERGED — PR #214, squash `79403b44`, 2026-08-15; exact-head CI 31911929243 SUCCESS)** — PR0 COMPLETE; child §14 is the ledger. **NEXT: 07a** — child design `step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md` **FROZEN — OPERATOR APPROVED 2026-08-15 (revision 2)**: expected-validation contract, exact validation-scope materialization, state isolation, R2/R3 comparability precondition audited and stamped, objective provenance (`objective_kind` + `objective_config_fingerprint`), diagnosis math; Gate 1 NOT REQUIRED, Gate 2 REQUIRED once at the final executable head after C4 (`--max_epochs 2` upper bound approved); **07a IMPLEMENTED 2026-08-15 (branch `step07-pr07a-training-history-diagnosis`, C1–C4, executable head `aee1e362`), Gate 2 PASS 2026-08-16 with the recorded 07c-debt watchdog finding, PR #215, exact-head CI green; **MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty — 07a COMPLETE** (§8.2, child §14)** → **NEXT: 07b** (Gate 1 required) → 07c (now also owns validation pricing, §8.4). Sequence: parent freeze → PR0 freeze/implement/merge ✔ → 07a design/implement ✔ → merge … |
 | Freeze posture | This parent is a **LIVE governance document** (Step-02/04 multi-PR precedent): it owns Step-level scope, authority map, decomposition, per-PR acceptance contract and the completion contract; each child owns its implementation-ready design and later its ledger. Frozen contracts live in the children |
 
 This document deliberately stops short of per-commit checklists and
@@ -390,11 +390,12 @@ exact STATUS wording.
 
 ### 8.2 PR 07a — TrainingHistory / TrainingDiagnosis (R2/R3)
 
-**Status (2026-08-15): C1–C4 LANDED on branch `step07-pr07a-training-history-diagnosis`
-(C1 `ece67fa0` · C2 `83987b21` · C3 `ecc5ddf8` · C4 = the commit carrying this
-line; base `5f10b7f5`) under the Implementation Working Rules contract of
-2026-08-15; evidence, the Gate-2 packet / result, PR and exact-head CI in the
-child's §14 (`pr_07a_training_history_diagnosis.md`). Delivered exactly this
+**Status (2026-08-16): C1–C4 LANDED on branch `step07-pr07a-training-history-diagnosis`
+(C1 `ece67fa0` · C2 `83987b21` · C3 `ecc5ddf8` · C4 `aee1e362` + ledger/closeout
+`889f7cfa` · `2b664ac5` · `752f8f0e`; base `5f10b7f5`) under the Implementation
+Working Rules contract of 2026-08-15; Gate 2 PASS 2026-08-16 (with the
+watchdog / un-priced-validation finding → ADDED 07c scope, §8.4);
+**MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty**; evidence in the child's §14 (`pr_07a_training_history_diagnosis.md`). Delivered exactly this
 contract: R3 = the SAME run-resolved objective on the tuner's EXISTING eval
 SampleSet (transactional pass; exact-scope materialization; R2 unchanged;
 sample-count-weighted estimator with the comparability stamp); typed
@@ -404,8 +405,7 @@ transport; deterministic `TrainingDiagnosis` (facts + explicit deadband, no
 calibrated labels) derived once; both fields additive on `ExperimentRecord`,
 HIDDEN at both renders (PB-1/PB-2/WF-1/WF-2 byte-identical); Stub / pseudo
 multi-epoch histories; Seam 5; packs advanced (TIDMAD production-backed;
-Pets / DAVIS L1 fixture-backed, rung B-07a-1). Merge pending operator review;
-the finalizer records the merge SHA here.**
+Pets / DAVIS L1 fixture-backed, rung B-07a-1). 07a COMPLETE.**
 
 **Scope.**
 1. Trainer — **validation objective = the SAME run-resolved training
@@ -927,7 +927,7 @@ child is about to be frozen.
 
 ## 17. Completion / Checkpoint E
 
-**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a — IMPLEMENTED (C1–C4 on `step07-pr07a-training-history-diagnosis`, final executable head `aee1e362`; Gate 2 PASS 2026-08-16 with a recorded 07c-debt finding — watchdog kills inside the un-priced validation pass; merge pending operator review, child §14) · 07b · 07c.**
+**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b — NEXT (design) · 07c.**
 
 Step 07 is COMPLETE when PR0, 07a, 07b, 07c are merged with Checkpoints
 0/A/B/C/D each, the required Gates PASSED at the assembled heads (07a G2,
