@@ -8,11 +8,11 @@
 | Depends on | 07a MERGED (record fields `training_history` / `training_diagnosis`, `TrainingDiagnosis` schema, Stub/pseudo multi-epoch histories, hidden-key sets); Step 06 MERGED (`MetricSpec.direction`, `run_metric` bound at run scope); Step 00 goldens PB-1/PB-2/WF-1/WF-2/REC; PR0 packs (`declared/metric_*.json`) |
 | Decomposition | ONE PR, six commits **C1 → C6** (§15): replay oracle · P1-order + validity · P1-scale + attempt-transition disposition · P2 authority-rendered task blocks + OD-1 · P3 owned rendering deltas + bridge surfaces · rungs / packs / docs / Checkpoint E + Gate 1 |
 | Gates | Gate 1 **REQUIRED, ≥ 2 rounds** (P3 changes LLM-facing SYSTEM prompt bytes; parent §11 row 07b; OD-20-6) · Gate 2 **NOT REQUIRED** (no execution-launch change; flip: any training/inference/scoring launch or execution change → Gate 2) |
-| Status | **DRAFT — revision 2 (2026-08-16): operator review of revision 1 = APPROVE WITH TARGETED REVISION, NOT YET FREEZE; the six required corrections are applied in this revision (§0.7). Awaiting freeze. Implementation NOT started; §14 ledger empty; implementation only under a fresh Implementation Working Rules contract after freeze.** |
+| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 — Revision 2.** Revision 1 reviewed (APPROVE WITH TARGETED REVISION); revision 2 applied the three blockers (unified bridge / WF contract, `MetricOrder` complete API + signed-delta semantics, reflector diagnosis-only transport) and three corrections (Checkpoints B / D explicit, Gate-1 posture frozen from source with the rounds-vs-iterations distinction and the "executed" definition, B-07b-2 without task-type phrasing) plus one final non-architectural consistency pass at freeze (§3.1 file-table wording; §7 / §10 Gate-1 round-vs-iteration wording); §16 records the operator's dispositions of Q-07b-1..9. **Implementation NOT started; §14 ledger empty; implementation may begin only under a fresh Implementation Working Rules contract** |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
-**What this child FREEZES on approval (HOW)**: the ONE order authority
+**What this child FREEZES (HOW) — operator approved 2026-08-15 (revision 2)**: the ONE order authority
 and its consumer list (§3.2), the per-rule classification of every
 scale-sensitive policy (§3.3), the invalidated-result outcome mechanism
 (§3.4), the `AttemptTransition` / `AttemptDecision` disposition (§3.5), the
@@ -230,8 +230,9 @@ The precise invariants:
 
 ```text
 execute_tools/metric_order.py                NEW — MetricOrder: the ONE order authority derived from MetricSpec.direction
-                                             (is_better / is_at_least_as_good / best / rank / worst_sentinel /
-                                             best_sentinel / signed_margin) — pure, importable by the tuner today and by
+                                             (is_better / is_at_least / best / worst / rank / worst_sentinel /
+                                             best_sentinel / toward_better / toward_worse — the §3.2 table) — pure,
+                                             importable by the tuner today and by
                                              the D1 peripheral consumers later (never imported by execute_tools scoring)
 nodes/ml_hyperparameter_tune_agent/
     ml_hyperparameter_tune_agent.py          P1: order-authority consumers (§0.1 items 1-7, 9); scale-rule resolution;
@@ -246,9 +247,10 @@ agent/prompt_templates/tuner/rendering.py    NEW — owned renderers: metric dir
 agent/prompts.py                             PLANNER_PROMPT / REFLECTOR_PROMPT gain tokens for the rendered blocks; the
                                              P3 wording deltas; `_truncate_memory_history` deterministic key order (OD-1);
                                              planner user prompt gains the diagnosis block (from the record, before hiding)
-agent/llm_bridge.py                          plan(..., metric_spec=None) / reflect(..., metric_spec=None,
+agent/llm_bridge.py                          plan(..., task_render=None, metric_spec=None) / reflect(..., metric_spec=None,
                                              training_diagnosis=None): substitution of the new tokens (declared additive
-                                             kwargs; WF-1/WF-2 additive deltas)
+                                             kwargs — the ONE contract of §3.9; WF-1 22 → 23 (C4) → 24 (C5); WF-2 additive;
+                                             both None → fail closed at a real render)
 tests/unit/agent/tune_ml_hyperparam_agent/goldens/   NEW sel1_* replay goldens (Checkpoint 0); WF-1/WF-2 regenerated
                                              additively (three-part note); PB-1/PB-2 regenerated with the P3 deltas
 tests/unit/...                               new families (§9); selection pins UPGRADED direction-parametrized;
@@ -575,7 +577,7 @@ record.training_diagnosis (07a) → renderer → planner history block + reflect
   `REFLECTOR_PROMPT` for `4000`, `[B, 256, T]`, `punet | fcnet`, `output_diversity`, `alpha=0.5`, `5%`); the KEPT
   literals of §3.6 are NOT asserted absent (they are recorded gaps).
 
-## 7. Checkpoint C — Gate 1 (≥ 2 rounds)
+## 7. Checkpoint C — Gate 1 (≥ 2 TUNER ROUNDS; `--num_iterations 2` is additional chain-level coverage)
 
 Real gpt-5.5 planner / reflector / proposer / implementor / validator, pseudo
 training (StubSandbox — 07a multi-epoch histories, so diagnosis lines render
@@ -604,8 +606,23 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab --workspace <scratch>/07b
   trial winner is resolved, and the round-2 planner receives the round-1 record's rendered dynamics line + the
   incumbent score table.
 - Bypass: reached ONLY when a formal round's time check is infeasible (`:5147-5157`) — not guaranteed under pseudo
-  training; NOT a PASS requirement (deterministic B-07b-1 / 1s cover it); if reached, its verdict is recorded.
+  training; bypass being infeasible in the bounded Gate is NOT a failure when the deterministic B-07b-1 / 1s evidence
+  is green; if reached, its verdict is recorded.
 - Bounds / cost: two Step-06-shaped iterations ≈ 8–16 min, ≈ $0.6, hard timeout 40 min; no GPU work.
+- **Rounds vs iterations (FROZEN distinction).** The parent's / this child's "Gate 1 ≥ 2 rounds" means TUNER
+  ROUNDS: PASS requires at least ONE tuner invocation to actually complete
+  `round 1 → persisted / rendered round-1 result → round-2 planner invocation`, so that the round-2 planner message
+  demonstrably contains the rendered round-1 training-dynamics evidence. `--num_iterations 2` alone NEVER satisfies
+  the ≥ 2-round criterion; it is ADDITIONAL chain-level coverage whose purpose is to exercise both reference
+  regimes where source / runtime behaviour permits (iteration 1: bootstrap / no-restored-incumbent; iteration 2:
+  `restored_valid_formal_incumbent`) — it does not replace the within-tuner round-1 → round-2 requirement.
+- **PASS evidence is recorded SEPARATELY:**
+  A. tuner-round evidence — at least one iteration reached round 2; the round-2 planner received the round-1 rendered
+     dynamics; the reflector received the current diagnosis block; raw hidden keys absent from every message;
+  B. policy / reference evidence — the ordering / incumbent helpers were reached; `formal_comparison_reference_source`
+     / thresholds / banners / `best_*` values recorded as this design requires; the bootstrap and restored-reference
+     regimes reported honestly if both are reached (iteration 2 not reaching the restored regime is recorded, not
+     failed, provided A holds and the deterministic evidence is green).
 - **"Executed" DEFINITION (PASS criterion):** the decision helpers are REACHED and their resolved values / verdicts
   are RECORDED — `formal_comparison_reference_source` / `resolved_skip_formal_threshold` /
   `resolved_bypass_formal_threshold` / `formal_reference_score` in each `run_output`, the `[SkipFormal]` /
@@ -678,8 +695,10 @@ removed) — `TestRoundOutcome` stays.
 | New LLM-facing system prompt | Gate 1 |
 | Checkpoint (end of feature) | Gate 2 |
 
-- **Gate 1 REQUIRED, ≥ 2 rounds** (P3 changes SYSTEM prompt bytes; OD-20-6): ONE bounded run at the final
-  executable head after C6, real `openai_tiered_pro.json`, pseudo training, cold-start; PASS = the standard's Gate-1
+- **Gate 1 REQUIRED, ≥ 2 TUNER ROUNDS** (P3 changes SYSTEM prompt bytes; OD-20-6): ONE bounded run at the final
+  executable head after C6, real `openai_tiered_pro.json`, pseudo training, `--no-health_gate_enabled` (no
+  07b-specific health exception), cold-start; `--num_iterations 2` = additional chain-level reference-regime coverage,
+  never a substitute for the within-tuner round-1 → round-2 evidence (§7); PASS = the standard's Gate-1
   criteria + the 07b property (§7: round-2 planner receives round-1's rendered dynamics line and direction wording;
   reflector receives the diagnosis block; no raw hidden key in any message; the trial-winner / skip / incumbent
   helpers reached with their resolved values recorded — bootstrap in iteration 1, restored incumbent in iteration 2;
@@ -1097,8 +1116,11 @@ are applied in this revision: `MetricOrder.worst` / `toward_worse` + the
 signed-delta semantics (§3.2); the reflector renders `TrainingDiagnosis`
 only, no `history_meta` transport (§3.8); Checkpoints B and D explicit
 (§6, §8) and enumerated in C6; B-07b-2 without the classification /
-regression phrasing claim (§6). Remaining for the operator: **freeze of
-revision 2**.
+regression phrasing claim (§6). Revision 2 was **FROZEN by the operator
+(APPROVED FOR FREEZE, 2026-08-15)** after ONE final non-architectural
+consistency pass (no revision-3 round): §3.1 file-table wording aligned with
+§3.2 / §3.9, and the Gate-1 rounds-vs-iterations distinction + separate
+PASS-evidence recording made explicit in §7 / §10.
 
 ## 17. Adversarial self-review (this child)
 
