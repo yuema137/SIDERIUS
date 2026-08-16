@@ -51,6 +51,12 @@ from execute_tools.evaluation_metric import (
     derive_tidmad_metric,
 )
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
+from execute_tools.training_history import (
+    TRAINING_HISTORY_KEY,
+    TrainingHistory,
+    objective_config_fingerprint,
+    stamp_comparability,
+)
 from ml_models.models_format_sandbox import (
     PLUGIN_CONFIG_REGISTRY,
     ExperimentConfig,
@@ -1279,12 +1285,26 @@ class TidmadSandbox:
         runtime_policy: dict | None = None,
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,
+        eval_sample_set: dict | None = None,
     ):
         """Executes the training physical script.
 
         Args:
             sample_set:      Optional SampleSet dict — the data scope. When provided,
                              written to JSON and passed via --sample_set_json.
+            eval_sample_set: Step 07a — the tuner's EXISTING run-bound eval
+                             SampleSet (VALIDATION file family). Streaming mode
+                             only: when BOTH ``sample_set`` and this are given
+                             it is validated by the SAME rule as the train set
+                             (``validate_sample_set(scope=self.data_scope)``),
+                             written to ``configs/<run>/eval_sample_set_<exp_id>.json``
+                             in the SAME compact ``json.dump`` byte form, and
+                             passed as the ONE declared argv delta
+                             ``--eval_sample_set_json <path>`` immediately after
+                             the ``--sample_set_json`` pair. Legacy mode
+                             (``sample_set is None``) never emits the flag.
+                             (The inference route writes the same file name
+                             with the same tuner-owned set for the attempt.)
             train_portion:   Fraction of the scope to subsample per epoch for training.
                              Passed via --train_portion.
             train_base_seed: Base seed for per-epoch subsampling reproducibility.
@@ -1390,6 +1410,18 @@ class TidmadSandbox:
                 with open(ss_path, "w") as f:
                     json.dump(sample_set, f)
                 cmd.extend(["--sample_set_json", ss_path])
+                # Step 07a — the eval SampleSet's sibling flag: same rule, same
+                # byte form, position immediately after the train-set pair
+                # (design §3.4, Q-07a-7). Emitted ONLY when an eval set is
+                # given, so every pre-07a argv is unchanged.
+                if eval_sample_set is not None:
+                    eval_sample_set = validate_sample_set(eval_sample_set, scope=self.data_scope)
+                    ess_path = os.path.abspath(
+                        os.path.join(self.dirs["configs"], f"eval_sample_set_{exp_id}.json")
+                    )
+                    with open(ess_path, "w") as f:
+                        json.dump(eval_sample_set, f)
+                    cmd.extend(["--eval_sample_set_json", ess_path])
                 if train_portion is not None:
                     cmd.extend(["--train_portion", str(train_portion)])
                 if train_base_seed is not None:
@@ -2152,6 +2184,7 @@ class StubSandbox(TidmadSandbox):
         runtime_policy: dict | None = None,
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,
+        eval_sample_set: dict | None = None,
     ) -> dict[str, Any]:
         """Synthesise a successful training result. No subprocess launch.
 
@@ -2164,18 +2197,58 @@ class StubSandbox(TidmadSandbox):
         ``order_strategy`` / ``file_order`` are likewise accepted for
         signature parity (V19 PR 2) — the stub trains nothing, so there is
         no visitation order to apply, but a pseudo run must not diverge
-        from production at the call boundary.
+        from production at the call boundary. ``eval_sample_set`` (Step
+        07a) is accepted and scope-validated exactly like the executor's,
+        so a pseudo run exercises the same boundary as production.
         """
         if sample_set is not None:
             try:
                 validate_sample_set(sample_set, scope=self.data_scope)
+                if eval_sample_set is not None:
+                    validate_sample_set(eval_sample_set, scope=self.data_scope)
             except ScopeViolationError as e:
                 return _scope_violation_result(e)
+        # Step 07a (OD-S7-4): a plausible MULTI-EPOCH train + validation
+        # history so pseudo runs and 07b's Gate 1 exercise a real diagnosis.
+        # Deterministic from the stub's seeded rng: 5 strictly decreasing
+        # training observations ending at `final_loss`; validation
+        # decreasing for four epochs then rising slightly (a best-epoch that
+        # is not the last). R3 is emitted ONLY when an eval SampleSet was
+        # supplied — exactly the production trainer's expected/absent rule.
         final_loss = self._rng.uniform(0.5, 5.0)
+        drops = sorted(self._rng.uniform(0.05, 0.6) for _ in range(4))
+        loss_history = [final_loss]
+        for d in drops:
+            loss_history.insert(0, loss_history[0] * (1.0 + d))
+        stub_loss_cfg = LossConfig(**l_cfg)
+        validation_history = None
+        validation_seconds = None
+        validation_rows = None
+        if eval_sample_set is not None:
+            gap = self._rng.uniform(0.01, 0.15)
+            validation_history = [v * (1.0 + gap) for v in loss_history]
+            validation_history[-1] = validation_history[-2] * (1.0 + self._rng.uniform(0.01, 0.05))
+            validation_seconds = [round(self._rng.uniform(0.05, 0.5), 3) for _ in loss_history]
+            validation_rows = sum(len(v) for v in eval_sample_set.values())
+        history = TrainingHistory(
+            objective_kind=stub_loss_cfg.loss_type,
+            objective_config_fingerprint=objective_config_fingerprint(stub_loss_cfg),
+            objective_reduction=stub_loss_cfg.reduction,
+            comparability=stamp_comparability(stub_loss_cfg)[0],
+            comparability_reason=stamp_comparability(stub_loss_cfg)[1],
+            epochs_planned=len(loss_history),
+            epochs_completed=len(loss_history),
+            train_objective=loss_history,
+            validation_objective=validation_history,
+            validation_requested_samples=validation_rows,
+            validation_samples=validation_rows,
+            validation_seconds=validation_seconds,
+        )
         results = {
             "final_loss": final_loss,
-            "loss_history": [final_loss],
+            "loss_history": loss_history,
             "model_params": self._rng.randint(1_000, 100_000_000),
+            TRAINING_HISTORY_KEY: history.model_dump(),
         }
         self._train_results_cache[exp_id] = results
         return {

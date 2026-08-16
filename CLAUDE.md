@@ -607,8 +607,19 @@ TIDMAD's `network.py:FocalLoss1D`.
   imported by production), `tests/unit/examples/` (61 tests incl. the
   maturity-pinned governance guards — no `.py` under `examples/` until D14;
   no top-level `task_description`/`forward_contract` YAML under `examples/`
-  until Step 12). Next = 07a design (fresh Implementation Working Rules
-  contract required); 07a NOT started.
+  until Step 12). **07a IMPLEMENTED (2026-08-15, branch
+  `step07-pr07a-training-history-diagnosis`, C1–C4; design
+  `pr_07a_training_history_diagnosis.md` FROZEN rev 2, §14 = ledger)**: the
+  production trainer runs a transactional R3 validation pass on the tuner's
+  EXISTING eval SampleSet (`--eval_sample_set_json`; exact-scope
+  materialization; R2 unchanged; `comparability` stamped) and emits the typed
+  `training_history` beside the three legacy keys; the tuner interprets
+  results through `interpret_training_results` (expected validation + missing
+  R3 → `error_training`), derives `TrainingDiagnosis` once, persists both on
+  `ExperimentRecord` and HIDES them from planner + reflector (PB/WF exact);
+  Seam 5 written; TIDMAD production-backed, Pets/DAVIS L1 fixture-backed
+  (rung B-07a-1). Gate 2 / PR / CI status: child §14. Merge pending operator
+  review; 07b NOT started.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per

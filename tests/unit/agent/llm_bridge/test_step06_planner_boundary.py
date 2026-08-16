@@ -22,6 +22,12 @@ would leak into an LLM message. This module pins the boundary at the render:
 
 The Step-00 PB-1 goldens pin the RENDERER on a test-owned history; they cannot
 see production record content, which is why this test exists.
+
+**UPGRADED at Step 07a C3** (design pr_07a §3.7): the same mechanism now hides
+the trainer's ``training_history`` and the derived ``training_diagnosis`` —
+persisted evidence in 07a, rendered SELECTIVELY by 07b, interpreted by Step
+09. Every assertion below runs with BOTH generations of hidden keys present
+on the input records, so a regression in either is a visible diff here.
 """
 
 from __future__ import annotations
@@ -57,10 +63,41 @@ _REFUSAL = {
 }
 
 
+# Step 07a — the two record keys hidden by the same mechanism (design §3.7).
+_TRAINING_HISTORY = {
+    "cadence": "per_epoch",
+    "objective_kind": "focal",
+    "objective_config_fingerprint": "f" * 64,
+    "objective_reduction": "mean",
+    "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+    "comparability": "established",
+    "comparability_reason": None,
+    "epochs_planned": 3,
+    "epochs_completed": 3,
+    "train_objective": [2.9, 2.4, 2.1],
+    "validation_objective": [3.0, 2.5, 2.6],
+    "validation_requested_samples": 24,
+    "validation_samples": 24,
+    "validation_seconds": [0.4, 0.4, 0.4],
+    "observations": {},
+}
+_TRAINING_DIAGNOSIS = {
+    "state": "ok",
+    "validation_state": "present",
+    "best_validation_epoch": 1,
+    "validation_degraded_after_best": True,
+    "train_trend": "decreasing",
+    "validation_trend": "decreasing",
+}
+_STEP07A_KEYS = ("training_history", "training_diagnosis")
+
+
 def _with_payload(records: list[dict]) -> list[dict]:
     out = copy.deepcopy(records)
     for rec in out:
         rec["metric_result"] = dict(_PAYLOAD, scalar=rec.get("denoising_score"))
+        rec["training_history"] = copy.deepcopy(_TRAINING_HISTORY)
+        rec["training_diagnosis"] = copy.deepcopy(_TRAINING_DIAGNOSIS)
     out[0]["metric_result"] = None
     out[0]["metric_refusal"] = _REFUSAL
     return out
@@ -88,8 +125,16 @@ def test_the_planner_prompt_is_byte_identical_with_and_without_the_payload():
     loaded = _render(_with_payload(_HISTORY_3))
     assert loaded == plain
     assert "metric_result" not in loaded and "metric_refusal" not in loaded
+    # Step 07a: neither the history nor the diagnosis leaks — not the keys,
+    # not a value that exists ONLY inside them (the R3 list, the epoch stat).
+    for key in _STEP07A_KEYS:
+        assert key not in loaded
+    assert "validation_objective" not in loaded
+    assert "sample_count_weighted_mean_of_batch_criterion" not in loaded
+    assert "best_validation_epoch" not in loaded
     # ...and the payload WAS present in the input, so the equality is not vacuous.
     assert any("metric_result" in rec for rec in _with_payload(_HISTORY_3))
+    assert all(all(k in rec for k in _STEP07A_KEYS) for rec in _with_payload(_HISTORY_3))
 
 
 def test_the_condensed_tail_never_carries_the_payload_either():
@@ -101,7 +146,10 @@ def test_the_condensed_tail_never_carries_the_payload_either():
     assert len(windowed) == 6
     for entry in windowed:
         assert not (_PLANNER_HIDDEN_RECORD_KEYS & entry.keys()), entry.keys()
-    assert "metric_result" not in _render(six)
+    rendered = _render(six)
+    assert "metric_result" not in rendered
+    for key in _STEP07A_KEYS:
+        assert key not in rendered
 
 
 def test_the_persisted_record_is_untouched_by_the_render():
@@ -113,6 +161,7 @@ def test_the_persisted_record_is_untouched_by_the_render():
     _render(loaded)
     assert loaded == before
     assert "metric_result" in loaded[1] and "metric_refusal" in loaded[0]
+    assert "training_history" in loaded[1] and "training_diagnosis" in loaded[1]
 
 
 def test_a_collapsed_formal_record_renders_only_the_policy_adjusted_score():
@@ -135,9 +184,13 @@ def test_a_collapsed_formal_record_renders_only_the_policy_adjusted_score():
     assert "metric_result" not in rendered
 
 
-def test_the_hidden_key_set_is_exactly_the_step06_payload():
-    """A guard on scope: this set is a Step-06 rendering decision for its own
-    two keys. Widening it (hiding other record data from the planner) or
-    narrowing it (leaking the payload) is a Step-07a/09 decision, not a
-    tidy-up — the set is pinned so either move is a visible diff."""
-    assert _PLANNER_HIDDEN_RECORD_KEYS == frozenset({"metric_result", "metric_refusal"})
+def test_the_hidden_key_set_is_exactly_the_step06_and_step07a_payloads():
+    """A guard on scope: the set holds Step 06's two metric keys and Step 07a's
+    two training-evidence keys — 07a HIDES, 07b RENDERS selected facts, Step
+    09 INTERPRETS. Widening it (hiding other record data from the planner) or
+    narrowing it (leaking a payload) is a Gate-1-visible byte change owned by
+    those steps, not a tidy-up — the set is pinned so either move is a
+    visible diff."""
+    assert _PLANNER_HIDDEN_RECORD_KEYS == frozenset(
+        {"metric_result", "metric_refusal", "training_history", "training_diagnosis"}
+    )

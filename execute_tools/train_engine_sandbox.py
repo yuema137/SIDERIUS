@@ -5,7 +5,7 @@ import os
 import random
 import sys
 import time
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import h5py
 import numpy as np
@@ -28,6 +28,12 @@ from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
     apply_contract_cardinality,
     resolve_input_dtype,
+)
+from execute_tools.training_history import (
+    TRAINING_HISTORY_KEY,
+    TrainingHistory,
+    objective_config_fingerprint,
+    stamp_comparability,
 )
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
@@ -309,6 +315,7 @@ class TIDMADEpochDataset(Dataset):
         rng: "random.Random | None" = None,
         profile: DatasetProfile | None = None,
         max_samples: int | None = None,
+        file_family: Literal["training", "validation"] = "training",
     ):
         """
         Args:
@@ -321,6 +328,14 @@ class TIDMADEpochDataset(Dataset):
             max_samples:    VALIDATION POSTURE ONLY. Absolute ceiling on the ML
                             segments this epoch may contain. ``None`` (every
                             production campaign) loads the full selection.
+            file_family:    Which file family of the Dataset Profile the
+                            indices address — ``"training"`` (default; the
+                            pre-07a behaviour, byte-for-byte) or
+                            ``"validation"`` (Step 07a: the R3 validation pass
+                            reads the eval SampleSet from the VALIDATION
+                            family through ``DatasetConfig.validation_file_name``).
+                            The family is the ONLY thing that changes; the
+                            geometry, subsampling and row layout are shared.
 
         **Why an absolute ceiling exists beside ``train_portion``.** A
         fraction cannot bound the epoch, because what it is a fraction OF
@@ -365,7 +380,12 @@ class TIDMADEpochDataset(Dataset):
             if max_samples is not None and rows_so_far >= max_samples:
                 break
             file_index = int(file_key)
-            file_path = os.path.join(data_dir, dataset.training_file_name(file_index))
+            file_name = (
+                dataset.training_file_name(file_index)
+                if file_family == "training"
+                else dataset.validation_file_name(file_index)
+            )
+            file_path = os.path.join(data_dir, file_name)
             if not os.path.exists(file_path):
                 print(f"Warning: {file_path} not found, skipping.")
                 continue
@@ -649,6 +669,227 @@ def _save_with_sentinel(state_dict, save_path: str, exp_id: str) -> None:
         pass  # zero-byte file
 
 
+# ==========================================
+# 2a. Step 07a — the R3 validation pass (transactional observation)
+# ==========================================
+
+
+class ValidationScopeError(RuntimeError):
+    """The declared validation scope did not materialize EXACTLY (design §3.4b).
+
+    A missing VALIDATION-family file, a segment index beyond the file, zero
+    requested rows, or a per-epoch row count that differs from the request
+    is a validation EXECUTION failure: the attempt fails closed (non-zero
+    exit → the executor's subprocess-error path → ``error_training``). No R3
+    is emitted and ``NaN`` is never used to stand in for a missing scope —
+    ``NaN`` stays reserved for numerical evidence.
+    """
+
+
+class ObjectiveStateMutationError(RuntimeError):
+    """The training-objective module mutated its own state under validation.
+
+    The frozen rule (design §3.2): validation MUST NOT mutate model,
+    optimizer or training-objective state. The built-in criteria are
+    stateless in ``forward``; a custom plugin loss is an arbitrary
+    ``nn.Module``, so the rule is made executable by comparing the
+    criterion's ``state_dict`` before/after the pass. Never restored
+    silently — a plugin violating the contract fails closed.
+    """
+
+
+def _requested_validation_rows(eval_sample_set: dict, ml_segs_per_psd: int) -> dict[int, int]:
+    """``{file_index: requested ML rows}`` for the eval SampleSet."""
+    return {int(k): len(segments) * ml_segs_per_psd for k, segments in eval_sample_set.items()}
+
+
+def _preflight_validation_scope(
+    data_dir: str, eval_sample_set: dict, seg_size: int, profile: DatasetProfile
+) -> int:
+    """Check the declared validation scope BEFORE epoch 0 (design §3.4b).
+
+    Every requested VALIDATION-family file must exist and every requested
+    PSD segment index must lie within it (measured on the physical file:
+    ``len(input channel) // psd_segment_length``); the total requested ML
+    rows must be > 0. Cheap (HDF5 metadata only), so a mis-declared scope
+    costs no training time.
+
+    Returns:
+        The total number of ML rows the scope requests (Σ segments × ML segs
+        per PSD) — ``TrainingHistory.validation_requested_samples``.
+
+    Raises:
+        ValidationScopeError: on any violation.
+    """
+    dataset, channels = profile.dataset, profile.channels
+    psd_len = dataset.psd_segment_length
+    ml_segs_per_psd = psd_len // seg_size
+    total_rows = 0
+    for file_key in sorted(eval_sample_set.keys(), key=int):
+        file_index = int(file_key)
+        segments = list(eval_sample_set[file_key])
+        file_path = os.path.join(data_dir, dataset.validation_file_name(file_index))
+        if not os.path.exists(file_path):
+            raise ValidationScopeError(
+                f"validation scope requests file {file_index} but the VALIDATION-family file "
+                f"{file_path!r} does not exist. The declared validation scope must materialize "
+                f"exactly; the training path's skip-a-missing-file semantics do not apply."
+            )
+        with h5py.File(file_path, "r") as f:
+            n_samples = len(_h5_dataset(f, "timeseries", channels.input_channel, "timeseries"))
+        available = n_samples // psd_len
+        bad = [s for s in segments if not (0 <= int(s) < available)]
+        if bad:
+            raise ValidationScopeError(
+                f"validation scope requests PSD segment(s) {bad!r} of file {file_index}, but "
+                f"{file_path!r} holds only {available} PSD segment(s)."
+            )
+        total_rows += len(segments) * ml_segs_per_psd
+    if total_rows <= 0:
+        raise ValidationScopeError(
+            "validation scope requests zero ML rows — R3 (Σ n_i·L_i / Σ n_i) does not exist "
+            "for an empty scope; the pass fails closed rather than emitting NaN."
+        )
+    return total_rows
+
+
+def _snapshot_module_state(module: torch.nn.Module) -> dict[str, torch.Tensor]:
+    return {k: v.detach().clone() for k, v in module.state_dict().items()}
+
+
+def _module_state_equal(a: dict[str, torch.Tensor], b: dict[str, torch.Tensor]) -> bool:
+    if a.keys() != b.keys():
+        return False
+    return all(torch.equal(a[k].cpu(), b[k].cpu()) for k in a)
+
+
+def _validation_pass(
+    *,
+    model: torch.nn.Module,
+    criterion: torch.nn.Module,
+    model_cfg,
+    loss_cfg: LossConfig,
+    model_io: ModelIOContract | None,
+    device: torch.device,
+    data_dir: str,
+    eval_sample_set: dict,
+    seg_size: int,
+    batch_size: int,
+    profile: DatasetProfile,
+    requested_rows: int,
+) -> tuple[float, int, float]:
+    """One R3 observation: the run-resolved objective on the validation scope.
+
+    A TRANSACTIONAL observation (design §3.2): ``model.eval()`` +
+    ``torch.no_grad()`` + ``shuffle=False`` + ``train_portion=None`` (no RNG
+    draw) + ``torch.random.fork_rng`` (torch CPU/CUDA RNG) + Python-``random``
+    and NumPy global-state restore + ``try/finally`` mode restore + a
+    criterion ``state_dict`` check. The training trajectory and every piece
+    of observable training state are left exactly as found.
+
+    R3 = Σ n_i·L_i / Σ n_i over the ENTIRE validation set (``drop_last=False``,
+    weights = batch sample counts) — the SAME epoch estimator as R2
+    (``EPOCH_STATISTIC``), exact under an unequal last batch.
+
+    Returns:
+        ``(r3_value, materialized_rows, seconds)``.
+
+    Raises:
+        ValidationScopeError: the materialized rows ≠ ``requested_rows``, or
+            any file's rows ≠ its request (the disk changed mid-run).
+        ObjectiveStateMutationError: the criterion's state changed.
+    """
+    t0 = time.perf_counter()
+    was_training = model.training
+    py_state = random.getstate()
+    np_state = np.random.get_state()
+    criterion_state = _snapshot_module_state(criterion)
+    fork_devices: list[int] = []
+    if device.type == "cuda":
+        fork_devices = [device.index if device.index is not None else torch.cuda.current_device()]
+    ml_segs_per_psd = profile.dataset.psd_segment_length // seg_size
+    per_file_requested = _requested_validation_rows(eval_sample_set, ml_segs_per_psd)
+    weighted_sum = 0.0
+    n_total = 0
+    try:
+        model.eval()
+        with torch.no_grad(), torch.random.fork_rng(devices=fork_devices):
+            val_dataset = TIDMADEpochDataset(
+                data_dir=data_dir,
+                sample_set=eval_sample_set,
+                seg_size=seg_size,
+                train_portion=None,
+                rng=None,
+                profile=profile,
+                file_family="validation",
+            )
+            materialized = len(val_dataset)
+            per_file_materialized = {
+                idx: end - start for idx, (start, end) in val_dataset.file_row_ranges.items()
+            }
+            if materialized != requested_rows or per_file_materialized != per_file_requested:
+                raise ValidationScopeError(
+                    f"validation scope materialized {materialized} ML rows "
+                    f"({per_file_materialized!r}) but {requested_rows} were requested "
+                    f"({per_file_requested!r}) — the declared scope must materialize exactly."
+                )
+            val_loader = DataLoader(
+                val_dataset, batch_size=batch_size, shuffle=False, drop_last=False
+            )
+            input_dtype = resolve_input_dtype(
+                model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
+            )
+            target_dtype = get_target_torch_dtype(loss_cfg)
+            for input_batch, target_batch in val_loader:
+                input_seq = input_batch.to(device).to(input_dtype)
+                target_seq = target_batch.to(device).to(dtype=target_dtype)
+                loss = criterion(model(input_seq), target_seq)
+                n_batch = int(input_batch.shape[0])
+                weighted_sum += float(loss.item()) * n_batch
+                n_total += n_batch
+            del val_dataset, val_loader
+    finally:
+        model.train(was_training)
+        random.setstate(py_state)
+        np.random.set_state(np_state)
+    if not _module_state_equal(criterion_state, _snapshot_module_state(criterion)):
+        raise ObjectiveStateMutationError(
+            f"the training objective ({type(criterion).__name__}) mutated its own state during "
+            f"the validation pass — validation must not mutate training-objective state."
+        )
+    gc.collect()
+    r3 = weighted_sum / n_total  # n_total == requested_rows > 0 by the materialization contract
+    return r3, n_total, time.perf_counter() - t0
+
+
+def _build_training_history(
+    *,
+    loss_cfg: LossConfig,
+    epochs_planned: int,
+    train_objective: list[float],
+    validation_objective: list[float] | None,
+    validation_requested_samples: int | None,
+    validation_samples: int | None,
+    validation_seconds: list[float] | None,
+) -> TrainingHistory:
+    """Assemble the additive ``training_history`` payload (design §3.5)."""
+    comparability, reason = stamp_comparability(loss_cfg)
+    return TrainingHistory(
+        objective_kind=loss_cfg.loss_type,
+        objective_config_fingerprint=objective_config_fingerprint(loss_cfg),
+        objective_reduction=loss_cfg.reduction,
+        comparability=comparability,
+        comparability_reason=reason,
+        epochs_planned=epochs_planned,
+        epochs_completed=len(train_objective),
+        train_objective=list(train_objective),
+        validation_objective=validation_objective,
+        validation_requested_samples=validation_requested_samples,
+        validation_samples=validation_samples,
+        validation_seconds=validation_seconds,
+    )
+
+
 def run_experiment(
     model_cfg,
     train_cfg: TrainConfig,
@@ -759,11 +1000,23 @@ def run_experiment(
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 
-    # Result Summary
+    # Result Summary — the three legacy keys FIRST and byte-identical; the
+    # additive Step-07a payload last. Legacy single-file mode has NO
+    # validation scope, so R3 is honestly ABSENT (validation_objective=None
+    # — the "not expected" case of design §3.4a), never fabricated.
     summary = {
         "final_loss": history[-1],
         "loss_history": history,
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        TRAINING_HISTORY_KEY: _build_training_history(
+            loss_cfg=loss_cfg,
+            epochs_planned=train_cfg.epochs,
+            train_objective=history,
+            validation_objective=None,
+            validation_requested_samples=None,
+            validation_samples=None,
+            validation_seconds=None,
+        ).model_dump(),
     }
 
     # --- KEY FIX: Save to TIDMAD_Sandbox/cached_models ---
@@ -795,6 +1048,7 @@ def run_experiment_streaming(
     file_order: list[int] | None = None,
     profile: DatasetProfile | None = None,
     model_io: ModelIOContract | None = None,
+    eval_sample_set: dict | None = None,
 ):
     """
     Multi-file training: rebuild the epoch dataset each epoch, then train on it.
@@ -850,11 +1104,25 @@ def run_experiment_streaming(
                            ``None`` = ascending file index. Must be a
                            permutation of ``sample_set``'s files — re-checked
                            here because the engine is directly invocable.
+        eval_sample_set:   Step 07a. The tuner's EXISTING run-bound eval
+                           SampleSet ``{file_index: [segment_indices]}``,
+                           addressed on the VALIDATION file family. When
+                           given, after every completed epoch the R3
+                           validation pass evaluates the SAME resolved
+                           objective on it (no backprop, transactional —
+                           see ``_validation_pass``); the declared scope must
+                           materialize exactly (``ValidationScopeError``
+                           otherwise, checked BEFORE epoch 0). ``None`` →
+                           no pass, R3 honestly absent (legacy tolerance).
+                           The trainer never derives, resamples or re-splits
+                           this set (no second split concept).
 
     Returns:
-        The result summary dict, or ``None`` when the runtime-verification
-        admission decision rejected the attempt (the structured rejection
-        lives in the session's observation sidecar).
+        The result summary dict — the three legacy keys byte-identical to the
+        pre-07a form plus the additive ``training_history`` payload — or
+        ``None`` when the runtime-verification admission decision rejected
+        the attempt (the structured rejection lives in the session's
+        observation sidecar).
     """
     # Boundary validation, in the DataScope tradition: the caller already
     # validated, but this engine is directly invocable, so it re-checks rather
@@ -920,6 +1188,28 @@ def run_experiment_streaming(
     verifier = None
     epoch0_dataset_seconds = 0.0
     use_cuda_sync = device.type == "cuda"
+
+    # Step 07a — the R3 validation pass. Pre-flight the declared validation
+    # scope ONCE, before epoch 0 and before any optimizer step (§3.4b): a
+    # scope that cannot materialize exactly fails closed here, cheaply. The
+    # per-epoch pass runs after each COMPLETED epoch, after the training
+    # dataset is released (transient, never resident beside it — Q-07a-3),
+    # and its wall time is accumulated separately so the training ACTUAL
+    # below can exclude it (§3.9).
+    validation_requested_rows: int | None = None
+    validation_materialized_rows: int | None = None
+    validation_history: list[float] | None = None
+    validation_seconds: list[float] | None = None
+    validation_seconds_total = 0.0
+    if eval_sample_set is not None:
+        validation_requested_rows = _preflight_validation_scope(
+            data_dir, eval_sample_set, seg_size, profile
+        )
+        # Until a pass runs, the pre-flight's on-disk count is the
+        # materialized count (the pass re-checks equality every epoch).
+        validation_materialized_rows = validation_requested_rows
+        validation_history = []
+        validation_seconds = []
 
     def _finish_training_verification(decide_admission: bool) -> bool:
         """Record the training verification; optionally decide admission.
@@ -1179,6 +1469,32 @@ def run_experiment_streaming(
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 
+        # Step 07a — R3 for THIS completed epoch (one observation per R2
+        # entry, so the two curves always agree in length). Sequencing call
+        # only; the transactional pass lives in ``_validation_pass``.
+        if eval_sample_set is not None:
+            assert validation_history is not None and validation_seconds is not None
+            assert validation_requested_rows is not None
+            r3, n_val, val_secs = _validation_pass(
+                model=model,
+                criterion=criterion,
+                model_cfg=model_cfg,
+                loss_cfg=loss_cfg,
+                model_io=model_io,
+                device=device,
+                data_dir=data_dir,
+                eval_sample_set=eval_sample_set,
+                seg_size=seg_size,
+                batch_size=train_cfg.batch_size,
+                profile=profile,
+                requested_rows=validation_requested_rows,
+            )
+            validation_history.append(float(r3))
+            validation_seconds.append(float(val_secs))
+            validation_seconds_total += val_secs
+            validation_materialized_rows = n_val
+            print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
+
         # The stop ends the PHASE, not just the epoch. Continuing into
         # epoch 1 would keep executing after the parent concluded the peak
         # had settled, and the arm's measured time would include work the
@@ -1190,7 +1506,16 @@ def run_experiment_streaming(
         # The training ACTUAL spans admission → last optimizer step. It
         # includes epoch ≥ 1 dataset reconstructions — they are part of
         # what training costs in this engine (audit finding, §12 RT2-B).
-        runtime_session.record_phase_actual("training", time.perf_counter() - t_train_start)
+        # Step 07a: it EXCLUDES the accumulated validation seconds — every
+        # pass sits inside this window, and validation batches are not
+        # optimizer steps, so leaving them in would inflate the observation
+        # store's realized unit ms (actual ÷ unit_count) for every later
+        # admission (design §3.9). The pass is not priced by admission /
+        # prediction / the watchdog in 07a — 07c / runtime-control debt;
+        # ``validation_seconds`` in the payload is the evidence.
+        runtime_session.record_phase_actual(
+            "training", (time.perf_counter() - t_train_start) - validation_seconds_total
+        )
 
         # V21 PR B2 — realized peak memory, the analogue of the ACTUAL
         # above. Read here, in the training subprocess, so the counters
@@ -1213,11 +1538,23 @@ def run_experiment_streaming(
             device_index=_device,
         )
 
-    # Result summary
+    # Result summary — the three legacy keys FIRST and byte-identical to the
+    # pre-07a form (values and presence; `final_loss` stays the LAST TRAINING
+    # observation, OD-S7-3); the additive Step-07a `training_history` payload
+    # last (design §3.5).
     summary = {
         "final_loss": history[-1] if history else float("nan"),
         "loss_history": history,
         "model_params": sum(p.numel() for p in model.parameters() if p.requires_grad),
+        TRAINING_HISTORY_KEY: _build_training_history(
+            loss_cfg=loss_cfg,
+            epochs_planned=train_cfg.epochs,
+            train_objective=history,
+            validation_objective=validation_history,
+            validation_requested_samples=validation_requested_rows,
+            validation_samples=validation_materialized_rows,
+            validation_seconds=validation_seconds,
+        ).model_dump(),
     }
 
     save_path = os.path.join(
@@ -1238,6 +1575,36 @@ def run_experiment_streaming(
 # ==========================================
 # 3. Main Entry Point
 # ==========================================
+
+
+def _load_eval_sample_set_arg(path: str | None) -> dict | None:
+    """Load ``--eval_sample_set_json`` fail-closed (design §3.4).
+
+    ABSENT (``None`` / empty) → ``None`` (no validation pass, legacy
+    tolerance). SUPPLIED → the file must be readable JSON holding a
+    ``{file_index: [segment_indices]}`` mapping; anything else raises
+    ``ValueError`` naming the path — a bound validation scope must never be
+    silently dropped.
+    """
+    if not path:
+        return None
+    try:
+        with open(path) as f:
+            payload = json.load(f)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            f"--eval_sample_set_json {path!r} could not be read as JSON "
+            f"({type(exc).__name__}: {exc})."
+        ) from exc
+    if not isinstance(payload, dict) or not all(
+        isinstance(v, list) and all(isinstance(i, int) and not isinstance(i, bool) for i in v)
+        for v in payload.values()
+    ):
+        raise ValueError(
+            f"--eval_sample_set_json {path!r} must contain a JSON object mapping file "
+            f"indices to lists of integer PSD segment indices, got {type(payload).__name__}."
+        )
+    return payload
 
 
 def main():
@@ -1287,6 +1654,20 @@ def main():
         type=str,
         default=None,
         help="Path to SampleSet JSON for trial mode. Overrides --file_index.",
+    )
+    parser.add_argument(
+        "--eval_sample_set_json",
+        type=str,
+        default=None,
+        help=(
+            "Step 07a: path to the tuner's EXISTING run-bound eval SampleSet JSON "
+            "({file_index: [segment_indices]}), addressed on the VALIDATION file "
+            "family. Streaming mode only (with --sample_set_json). SUPPLIED → the R3 "
+            "validation pass runs after every completed epoch and the declared scope "
+            "must materialize exactly (fails closed otherwise). SUPPLIED but "
+            "unreadable / not a mapping → ValueError naming the path. ABSENT → no "
+            "validation pass; R3 is honestly absent (legacy tolerance)."
+        ),
     )
     parser.add_argument(
         "--train_portion",
@@ -1437,6 +1818,11 @@ def main():
                 f"list of integers, got {type(file_order).__name__}."
             )
 
+    # Step 07a — the child side of the eval-SampleSet transport, the same
+    # two-case rule as the profile / model-I/O flags: SUPPLIED but broken
+    # fails closed naming the path; ABSENT means no validation pass.
+    eval_sample_set = _load_eval_sample_set_arg(args.eval_sample_set_json)
+
     if sample_set is not None:
         # Multi-file mode: per-epoch concatenated dataset over the sample set.
         results = run_experiment_streaming(
@@ -1455,6 +1841,7 @@ def main():
             file_order=file_order,
             profile=dataset_profile,
             model_io=model_io,
+            eval_sample_set=eval_sample_set,
         )
         if results is None:
             # Runtime verification rejected the attempt: the structured

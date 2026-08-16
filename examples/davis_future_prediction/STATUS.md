@@ -23,7 +23,7 @@ This pack does not run. It claims exactly what has landed:
 | licence terms of the downloaded TrainVal-480p artifact | to be verified and pinned | recorded per artifact in `PROVENANCE.md` (frozen wording); executable provenance incomplete by design | **D14** |
 | pack-level runtime task binding | single-task authority `configs/task_config.yaml` | not representable | **Step 12** |
 | health applicability | `configs/health_checks.yaml` is TIDMAD-shaped policy | not representable | **Step 08** |
-| training history / diagnosis (R2/R3 MAE curves) | not landed | — | **Step 07a** |
+| training history / diagnosis (R2/R3 MAE curves + optional validation PSNR) | the framework's `TrainingHistory` / `TrainingDiagnosis` (Step 07a) are task-generic: the schema carries this pack's semantics (`objective_kind="mae"`, `observations={"validation_psnr": …}`) without change | **L1 — fixture-backed**: `expected/training_history_l1_fixture.json` + `expected/training_diagnosis_l1_fixture.json` (hand-authored, labelled `l1_fixture`, NOT a real training output; validation identity = the 15 sequences, clip identity D14) consumed by rung **B-07a-1** (`tests/unit/examples/test_step07a_b1_diagnosis_structure_rung.py`); real R2/R3 after **D14** | the rung derives the diagnosis from the fixture through the SAME boundary TIDMAD uses and pins the expected verdict shape as literals |
 | interpretation evidence | — | — | **Step 09** |
 
 ## Maturity pins carried by this pack at PR0 (design §3.5)

@@ -27,7 +27,7 @@ time (design §3.6).
 | launcher / run instructions inside the pack | not projected — runs go through the existing operator docs and `scripts/` | Steps 10 / 12 (binding + launcher interface) |
 | model / loss plugins, skills, `configs/` inside the pack | not projected (no consumer-less files, roadmap §22.23.3) | Step 12 (composition) |
 | task binding of the pack as a whole | `configs/task_config.yaml` remains the single runtime task authority | Step 12 |
-| training-history / diagnosis semantics | not yet landed | Step 07a |
+| training-history / diagnosis semantics | **production-backed from 07a** (Step 07 PR 07a): the production trainer emits R2 + R3 (`training_history`) and the tuner persists the derived `training_diagnosis` on every `ExperimentRecord` (`run_output_*.json`); NO new `resolved/` snapshot — the history is per-run evidence, not task config; hidden from both LLM-facing renders until 07b | landed (07a); rendering 07b; interpretation Step 09 |
 | metric-direction policy / planner-reflector rendering | not yet landed | Step 07b |
 | measurement / verification data feeding | not yet landed | Step 07c |
 | generic health applicability declaration | `configs/health_checks.yaml` referenced only | Step 08 |

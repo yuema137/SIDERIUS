@@ -48,6 +48,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from agent.schemas.ordering import parse_file_order_cli, resolve_ordering
 from agent.schemas.score_table import ScoreComparisonTable
+from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_time_skill.wrapper import (
     _aggregate_inference_file_timings,
 )
@@ -109,6 +110,11 @@ from execute_tools.scoring_helpers import (
     file_vector_to_log_space,
 )
 from execute_tools.scoring_utils import coerce_nonfinite_to_none
+from execute_tools.training_history import (
+    TrainingResults,
+    TrainingResultsContractError,
+    interpret_training_results,
+)
 from nodes.agent_data_stream import log_score_table
 from nodes.scoring_reference import load_reference_scores
 from workflows.task_config import run_bound_model_io_contract
@@ -247,6 +253,54 @@ def _build_execution_failure_record(
 def _is_cuda_oom(message: str) -> bool:
     """The tuner's own device-OOM test, kept in one place."""
     return "CUDA out of memory" in message or "OutOfMemoryError" in message
+
+
+def _interpret_training_status(
+    train_status: dict, *, expected_validation: bool
+) -> tuple[dict, TrainingResults]:
+    """Step 07a — the tuner's typed training-results boundary (design §3.4a, §3.5).
+
+    Applies :func:`interpret_training_results` — the ONE validation site of the
+    trainer→tuner contract — to a SUCCESSFUL training status, where the
+    expectation is known: ``expected_validation`` is ``eval_sample_set is not
+    None`` for the attempt. A contract violation (schema-invalid
+    ``training_history``, R2 ≠ ``loss_history``, ``final_loss`` ≠ last R2, or
+    an EXPECTED R3 that did not arrive) is converted into the EXISTING
+    training-failure status shape (``status="error"``, an ``error_training:``
+    message) so the orchestrator's pre-existing ``error`` branch records it
+    through :func:`_build_execution_failure_record` (phase ``training`` →
+    ``error_training``) — never a success record with
+    ``validation_state="absent"``. ``run()`` gains a sequencing call, not a
+    branch.
+
+    A non-success status passes through untouched with the honest
+    "no results" interpretation (``legacy_payload={}``, ``history=None``,
+    ``history_state="absent"``) — exactly what ``train_status.get("results",
+    {})`` meant before 07a on those paths (they never consume it).
+
+    Returns:
+        ``(train_status, results)`` — the (possibly rewritten) status and the
+        typed results whose ``legacy_payload`` is EXACTLY the legacy keys that
+        feed the reflect merge and the record.
+    """
+    if train_status.get("status") != "success":
+        return train_status, TrainingResults(
+            legacy_payload={}, history=None, history_state="absent"
+        )
+    try:
+        results = interpret_training_results(
+            train_status.get("results", {}), expected_validation=expected_validation
+        )
+    except TrainingResultsContractError as exc:
+        rewritten = {
+            **train_status,
+            "status": "error",
+            "error_type": "training_results_contract",
+            "message": f"error_training: training results contract violated: {exc}",
+        }
+        print(f"--- Training results contract violated ---\n{exc}")
+        return rewritten, TrainingResults(legacy_payload={}, history=None, history_state="absent")
+    return train_status, results
 
 
 #: Frozen B-C4a0 C3 vocabulary. `skipped_resource_admission` means the
@@ -5285,6 +5339,12 @@ class HyperparamTuningAgent:
                         candidate_id=agent_input.candidate_id,
                     ):
                         continue
+                    # Step 07a — typed training-results boundary (sequencing call
+                    # only): a contract violation is rewritten into the existing
+                    # error shape and recorded by the branch below.
+                    train_status, training_results = _interpret_training_status(
+                        train_status, expected_validation=eval_sample_set is not None
+                    )
                     if train_status.get("status") == "error":
                         # DataScope DS5 — scope violations are non-retryable
                         # configuration/invariant failures: terminate the run.
@@ -5615,8 +5675,12 @@ class HyperparamTuningAgent:
                             scope="tuner",
                         )
 
-                        # Extract results from each stage
-                        train_results = train_status.get("results", {})
+                        # Extract results from each stage. Step 07a: the LEGACY
+                        # payload (exactly final_loss / loss_history / model_params
+                        # as present) — the additive training_history never enters
+                        # the reflect merge; the diagnosis is derived ONCE here.
+                        train_results = training_results.legacy_payload
+                        training_diagnosis = derive_training_diagnosis(training_results.history)
                         score_results = score_res.get("results", {})
 
                         # Generic degeneracy reaction. The task-specific predicate
@@ -5902,6 +5966,11 @@ class HyperparamTuningAgent:
                         "final_loss": train_results.get("final_loss"),
                         "loss_history": train_results.get("loss_history"),
                         "model_params": train_results.get("model_params"),
+                        # Step 07a — persisted evidence, hidden from both LLM-facing
+                        # renders (planner hidden-key set; reflector gets
+                        # train_results only). Additive; None on legacy producers.
+                        "training_history": training_results.history_payload(),
+                        "training_diagnosis": training_diagnosis.model_dump(),
                         # Scoring results
                         "denoising_score": score_results.get("denoising_score"),
                         "file_vector": score_results.get("file_vector"),

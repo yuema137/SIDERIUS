@@ -160,9 +160,37 @@ FAKE_RESOURCE_CHECK_OOM = {
     "suggestion": "Reduce batch_size.",
 }
 
+# Step 07a (design §3.4a / §3.10, OD-S7-4): the fake producer honours the
+# trainer→tuner contract the REAL trainer now honours — a `training_history`
+# with R2 (== `loss_history`, last == `final_loss`) and R3. Trial-mode tests
+# build an eval SampleSet, so an R3-less result would (correctly) be recorded
+# as `error_training` by the tuner's typed boundary; the pre-07a shape of this
+# fixture is now the SUBJECT of `test_step07a_c3_tuner_boundary.py`, not a
+# background assumption of every tuner test.
 FAKE_TRAIN_RESULT = {
     "status": "success",
-    "results": {"final_loss": 0.5, "model_params": 100000},
+    "results": {
+        "final_loss": 0.5,
+        "loss_history": [1.2, 0.8, 0.5],
+        "model_params": 100000,
+        "training_history": {
+            "cadence": "per_epoch",
+            "objective_kind": "focal",
+            "objective_config_fingerprint": "f90b6486db93809357e3edd4cc7022a2a31542a3e74b2945bd1dc944e411fc05",
+            "objective_reduction": "mean",
+            "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+            "comparability": "established",
+            "comparability_reason": None,
+            "epochs_planned": 3,
+            "epochs_completed": 3,
+            "train_objective": [1.2, 0.8, 0.5],
+            "validation_objective": [1.3, 0.9, 0.6],
+            "validation_requested_samples": 40,
+            "validation_samples": 40,
+            "validation_seconds": [0.2, 0.2, 0.2],
+            "observations": {},
+        },
+    },
 }
 
 FAKE_INFERENCE_RESULT = {"status": "success", "results": {}}

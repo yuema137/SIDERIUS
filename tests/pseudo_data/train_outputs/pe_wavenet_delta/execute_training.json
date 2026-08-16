@@ -11,7 +11,42 @@
         0.6431,
         0.5712
       ],
-      "model_params": 98432
+      "model_params": 98432,
+      "training_history": {
+        "cadence": "per_epoch",
+        "objective_kind": "focal",
+        "objective_config_fingerprint": "f90b6486db93809357e3edd4cc7022a2a31542a3e74b2945bd1dc944e411fc05",
+        "objective_reduction": "mean",
+        "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+        "comparability": "established",
+        "comparability_reason": null,
+        "epochs_planned": 5,
+        "epochs_completed": 5,
+        "train_objective": [
+          1.532,
+          1.041,
+          0.812,
+          0.6431,
+          0.5712
+        ],
+        "validation_objective": [
+          1.68,
+          1.15,
+          0.9,
+          0.72,
+          0.65
+        ],
+        "validation_requested_samples": 40,
+        "validation_samples": 40,
+        "validation_seconds": [
+          0.22,
+          0.21,
+          0.2,
+          0.2,
+          0.2
+        ],
+        "observations": {}
+      }
     }
   },
   {
@@ -26,7 +61,42 @@
         0.6431,
         0.5712
       ],
-      "model_params": 98432
+      "model_params": 98432,
+      "training_history": {
+        "cadence": "per_epoch",
+        "objective_kind": "focal",
+        "objective_config_fingerprint": "f90b6486db93809357e3edd4cc7022a2a31542a3e74b2945bd1dc944e411fc05",
+        "objective_reduction": "mean",
+        "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+        "comparability": "established",
+        "comparability_reason": null,
+        "epochs_planned": 5,
+        "epochs_completed": 5,
+        "train_objective": [
+          1.532,
+          1.041,
+          0.812,
+          0.6431,
+          0.5712
+        ],
+        "validation_objective": [
+          1.68,
+          1.15,
+          0.9,
+          0.72,
+          0.65
+        ],
+        "validation_requested_samples": 40,
+        "validation_samples": 40,
+        "validation_seconds": [
+          0.22,
+          0.21,
+          0.2,
+          0.2,
+          0.2
+        ],
+        "observations": {}
+      }
     }
   }
 ]

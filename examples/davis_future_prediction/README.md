@@ -35,6 +35,9 @@ declared/model_io_contract.json     the pack's OWN ModelIOContract instance:
 declared/metric_mse.json            the pack's OWN MetricSpec instances (mse ↓ golden; psnr ↑; mae ↓)
 declared/metric_psnr.json
 declared/metric_mae.json
+expected/training_history_l1_fixture.json     Step 07a — L1 FIXTURE (hand-authored, labelled) of this pack's
+expected/training_diagnosis_l1_fixture.json   R1/R2/R3 + optional validation-PSNR semantics and the expected
+                                              diagnosis; consumed by rung B-07a-1. NOT a real training output.
 PROVENANCE.md · STATUS.md
 ```
 

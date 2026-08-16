@@ -21,7 +21,7 @@ This pack does not run. It claims exactly what has landed:
 | Gate-1 / Gate-2 / persistent NESTED subsets | sized by the D14 design | none | **D14** |
 | pack-level runtime task binding | single-task authority `configs/task_config.yaml` | not representable | **Step 12** |
 | health applicability | `configs/health_checks.yaml` is TIDMAD-shaped policy | not representable | **Step 08** |
-| training history / diagnosis (R2/R3 curves) | not landed | — | **Step 07a** |
+| training history / diagnosis (R2/R3 CE curves + optional validation accuracy) | the framework's `TrainingHistory` / `TrainingDiagnosis` (Step 07a) are task-generic: the schema carries this pack's semantics (`objective_kind="ce"`, `observations={"validation_accuracy": …}`) without change | **L1 — fixture-backed**: `expected/training_history_l1_fixture.json` + `expected/training_diagnosis_l1_fixture.json` (hand-authored, labelled `l1_fixture`, NOT a real training output) consumed by rung **B-07a-1** (`tests/unit/examples/test_step07a_b1_diagnosis_structure_rung.py`); real R2/R3 after **D14** | the rung derives the diagnosis from the fixture through the SAME boundary TIDMAD uses and pins the expected verdict shape as literals |
 | interpretation evidence | — | — | **Step 09** |
 
 ## Maturity pins carried by this pack at PR0 (design §3.5)

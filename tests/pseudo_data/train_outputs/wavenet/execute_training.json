@@ -10,6 +10,41 @@
       0.371,
       0.2891
     ],
-    "model_params": 4123456
+    "model_params": 4123456,
+    "training_history": {
+      "cadence": "per_epoch",
+      "objective_kind": "focal",
+      "objective_config_fingerprint": "f90b6486db93809357e3edd4cc7022a2a31542a3e74b2945bd1dc944e411fc05",
+      "objective_reduction": "mean",
+      "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+      "comparability": "established",
+      "comparability_reason": null,
+      "epochs_planned": 5,
+      "epochs_completed": 5,
+      "train_objective": [
+        1.452,
+        0.843,
+        0.521,
+        0.371,
+        0.2891
+      ],
+      "validation_objective": [
+        1.6,
+        0.93,
+        0.58,
+        0.41,
+        0.36
+      ],
+      "validation_requested_samples": 40,
+      "validation_samples": 40,
+      "validation_seconds": [
+        0.31,
+        0.29,
+        0.28,
+        0.27,
+        0.27
+      ],
+      "observations": {}
+    }
   }
 }

@@ -1,7 +1,7 @@
 {
   "_captured_at": {
-    "commit": "80a96eef410d5dd4a9601fbc7228e87069f28f20",
-    "note": "REGENERATED at Step 06 C4 from the C3 head plus the C4 working tree, in the C4 commit (design \u00a717 rule 3): ExperimentRecord gained the ADDITIVE metric_result / metric_refusal fields; every pre-existing key and value is unchanged. Ledger: docs/design/generic_framework_upgrade/step_06_metric_interface.md \u00a720.6"
+    "commit": "83987b216dd35d4dbc6132f5221bbdd68729099e",
+    "note": "REGENERATED at Step 07a C3 from the C2 head plus the C3 working tree, in the C3 commit (design \u00a717 rule 3; Step-06 precedent): ExperimentRecord gained the ADDITIVE training_history / training_diagnosis fields (persisted, hidden from both LLM-facing renders); every pre-existing key and value is unchanged. Ledger: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md \u00a714.3"
   },
   "record_type": "experiment",
   "exp_id": "<present>",
@@ -47,6 +47,8 @@
   "final_loss": null,
   "loss_history": null,
   "model_params": null,
+  "training_history": null,
+  "training_diagnosis": null,
   "denoising_score": null,
   "file_vector": null,
   "score_table": null,

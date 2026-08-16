@@ -26,6 +26,7 @@ from agent.schemas.ordering import (
 )
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.training_diagnosis import TrainingDiagnosis
 
 # One vocabulary for the admission posture, shared with the policy that
 # enforces it. Two independent spellings would let a value be acceptable
@@ -36,6 +37,7 @@ from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
 from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
+from execute_tools.training_history import TrainingHistory
 
 #: What a HealthGate verdict DOES in this run: enforce, or only record.
 #:
@@ -378,6 +380,35 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="Number of trainable model parameters.",
     )
+    # --- Step 07a: the training observation payload and its diagnosis (ADDITIVE) ---
+    # ``final_loss`` / ``loss_history`` / ``model_params`` keep their names and
+    # semantics (OD-S7-3: ``final_loss`` stays the LAST TRAINING objective
+    # observation). These two sit BESIDE them: persisted evidence, HIDDEN from
+    # both LLM-facing renders in 07a (planner hidden-key set; reflector receives
+    # the legacy payload only) — persistence ≠ visibility (roadmap §22.6). Every
+    # record written before 07a validates unchanged; failure / skip records
+    # carry None for both.
+    training_history: TrainingHistory | None = Field(
+        default=None,
+        description=(
+            "Step 07a — the trainer's typed per-epoch observation payload: R2 "
+            "(train_objective == loss_history), R3 (validation_objective, on the "
+            "run-bound validation scope; None only when no validation was expected), "
+            "objective identity (kind + config fingerprint + reduction), the "
+            "R2/R3 comparability stamp, materialized validation sample counts and "
+            "per-epoch validation seconds. None on pre-07a records and on attempts "
+            "that never produced training results."
+        ),
+    )
+    training_diagnosis: TrainingDiagnosis | None = Field(
+        default=None,
+        description=(
+            "Step 07a — the deterministic, calibration-free diagnosis derived ONCE "
+            "from training_history at the tuner boundary (state, best validation "
+            "epoch, trends with an explicit symmetric deadband, degradation, gap "
+            "gated on comparability). None wherever training_history is None."
+        ),
+    )
 
     # --- Scoring results ---
     denoising_score: float | None = Field(
@@ -686,6 +717,56 @@ class ExperimentRecord(BaseModel):
                 raise ValueError(
                     "metric_result.per_sample disagrees with file_vector on a success "
                     "record; the additive payload must carry the same values."
+                )
+        return self
+
+    @model_validator(mode="after")
+    def _training_history_agrees_with_the_legacy_keys(self) -> ExperimentRecord:
+        """Step 07a (design §3.8) — the additive payload and the frozen keys agree.
+
+        When both ``training_history`` and ``loss_history`` are present they are
+        the same series (R2 IS ``loss_history``); when ``final_loss`` and the
+        history are present, ``final_loss`` equals the last training
+        observation (OD-S7-3); when ``training_diagnosis`` is present, its
+        ``epochs_completed`` equals ``len(training_history.train_objective)``
+        unless the diagnosis is ``absent`` (no history to count) — an
+        ``invalid`` diagnosis still counts epochs. Non-finite values compare
+        as equal to their storage image (``None``) and to each other, exactly
+        as ``_same_score`` does for the metric payload. Pre-07a records (both
+        fields None) pass unchanged.
+        """
+        history = self.training_history
+        if history is not None:
+            if self.loss_history is not None:
+                same = len(self.loss_history) == len(history.train_objective) and all(
+                    _same_score(a, b)
+                    for a, b in zip(self.loss_history, history.train_objective, strict=True)
+                )
+                if not same:
+                    raise ValueError(
+                        "training_history.train_objective disagrees with loss_history; the "
+                        "additive payload must carry the same R2 series."
+                    )
+            if (
+                self.final_loss is not None
+                and history.train_objective
+                and not _same_score(self.final_loss, history.train_objective[-1])
+            ):
+                raise ValueError(
+                    f"final_loss={self.final_loss!r} is not the last training objective "
+                    f"observation {history.train_objective[-1]!r} (OD-S7-3)."
+                )
+        diagnosis = self.training_diagnosis
+        if diagnosis is not None and diagnosis.state != "absent":
+            if history is None:
+                raise ValueError(
+                    f"training_diagnosis.state={diagnosis.state!r} requires a training_history."
+                )
+            if diagnosis.epochs_completed != len(history.train_objective):
+                raise ValueError(
+                    f"training_diagnosis.epochs_completed={diagnosis.epochs_completed!r} "
+                    f"disagrees with len(training_history.train_objective)="
+                    f"{len(history.train_objective)}."
                 )
         return self
 

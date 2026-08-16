@@ -872,18 +872,24 @@ _CONDENSED_MEMORY_KEYS = frozenset(
     }
 )
 
-# Step 06 (operator-directed corrective, 2026-08-15): the metric interface's
-# record-facing payload is PERSISTED on every record so Steps 07a / 09 can
-# consume it, but it is NOT agent-facing yet — those steps own how (and
-# whether) raw metric identity/direction/value, the policy-adjusted
-# `denoising_score`, and later training diagnostics are explained to an
-# LLM. Left in the verbatim window, the planner would see two numbers for a
-# collapsed formal attempt (the raw `metric_result.scalar` beside the
-# penalised `denoising_score`) with no lifecycle explanation. So the planner's
-# history serialization drops exactly these keys; the persisted record is
-# untouched. Removing a key here is a rendering decision that belongs to
-# Step 07a / 09 — do not widen this set casually.
-_PLANNER_HIDDEN_RECORD_KEYS = frozenset({"metric_result", "metric_refusal"})
+# Persistence ≠ prompt visibility (roadmap §22.6). Record-facing payloads
+# that are PERSISTED on every record but NOT agent-facing yet are dropped from
+# the planner's history serialization here; the persisted record is untouched.
+#
+# * Step 06 (operator-directed corrective, 2026-08-15): the metric interface's
+#   `metric_result` / `metric_refusal`. Left in the verbatim window, the
+#   planner would see two numbers for a collapsed formal attempt (the raw
+#   `metric_result.scalar` beside the penalised `denoising_score`) with no
+#   lifecycle explanation.
+# * Step 07a: the trainer's `training_history` (R2 + R3 + objective identity)
+#   and the derived `training_diagnosis`. 07a HIDES them at both renders (this
+#   set, and the reflector's legacy-payload merge in the tuner) · 07b RENDERS
+#   selected facts with direction wording · Step 09 INTERPRETS / condenses
+#   them for the interpreter. Do not widen or narrow this set casually — a
+#   change here is an LLM-visible byte change (Gate 1).
+_PLANNER_HIDDEN_RECORD_KEYS = frozenset(
+    {"metric_result", "metric_refusal", "training_history", "training_diagnosis"}
+)
 
 
 def _planner_visible(rec: dict) -> dict:

@@ -178,6 +178,50 @@ scoreability contract.)*
 
 ---
 
+## Seam 5 — Training observation (History ≠ Diagnosis)
+
+**Status: DEFINED — Step 07 PR 07a (written BEFORE the implementation, as
+this contract requires; landed with 07a C1/C3).** Design:
+`docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md`
+(§3.2–§3.9); semantics frozen by the roadmap §22.1–§22.8 and the Step-07
+parent §8.2.
+
+A training run produces **observations** of the run-resolved training
+objective; a **diagnosis** is a pure, deterministic derivation from those
+observations. The seam separates the two so that a new task changes WHAT is
+observed, never HOW the framework records or derives.
+
+```text
+R1  the run-resolved training objective   (LossConfig → criterion; a loss family is a run choice,
+                                           NOT task semantics; identified by objective_kind +
+                                           objective_config_fingerprint — a configuration fingerprint,
+                                           not a hash of plugin code)
+R2  per-epoch TRAINING observation of R1  (= legacy loss_history; unchanged)
+R3  per-epoch VALIDATION observation of the SAME resolved computation on the run-bound validation
+    scope (the tuner's EXISTING eval SampleSet — no second split concept), no backprop, no optimizer
+    step, transactional (model / optimizer / objective state and every RNG restored)
+R4  optional checkpointed observations   (`observations: {name: [per-epoch]}` — the slot exists;
+                                           producers land with task declarations, D14 / Step 12)
+```
+
+| Concern | Contract surface (generic) | TIDMAD-shaped today |
+|---|---|---|
+| The observation payload | `execute_tools/training_history.py::TrainingHistory` — cadence `per_epoch`, `objective_kind`, `objective_config_fingerprint`, `objective_reduction`, `epoch_statistic` (R2 and R3 use ONE declared estimator: the sample-count-weighted mean of the criterion's batch scalar), `comparability` + reason (`established` only for the audited mean-normalized built-ins; `sum` / custom → `not_established`, recorded never assumed), `epochs_planned/completed`, `train_objective`, `validation_objective`, `validation_requested_samples == validation_samples > 0`, `validation_seconds`, `observations` | the producer is `execute_tools/train_engine_sandbox.py` reading TIDMAD-family HDF5 through the Dataset Profile (Seam 1); the validation family is `DatasetConfig.validation_file_name` |
+| The producer→consumer contract | `interpret_training_results(raw, *, expected_validation)` — typed, fail-closed at the ONE validation site (the tuner boundary): schema-invalid history, R2 ≠ `loss_history`, `final_loss` ≠ last R2, or an EXPECTED R3 that is missing → `TrainingResultsContractError` → the existing `error_training` path. `absent` is honest ONLY when validation was not expected | the legacy single-file trainer (no validation scope) is the only "not expected" producer |
+| Validation scope | the eval `SampleSet` (Seam 1) travels as ONE argv flag `--eval_sample_set_json`; the declared scope must materialize EXACTLY (`ValidationScopeError` on zero / partial) — validation does NOT inherit the training path's silent skip | scope validated by `validate_sample_set` against the run's `DataScope`, as the train set is |
+| The derivation | `agent/schemas/training_diagnosis.py::derive_training_diagnosis(history) -> TrainingDiagnosis` — pure, deterministic, no I/O, no LLM, computed ONCE at the tuner boundary; factual / calibration-free fields only (state, best validation epoch, trends with the symmetric scale-free deadband `r(a,b)=|b−a|/max(|a|,|b|)`, degradation, gap gated on `comparability == established`); NO overfitting / plateau / converged / underfitting labels | none — the derivation is task-agnostic by construction (contract test: rung B-07a-1 over TIDMAD focal / Pets CE + accuracy / DAVIS MAE + PSNR fixtures) |
+| Persistence vs visibility | `ExperimentRecord.training_history` / `.training_diagnosis` (additive) are persisted evidence; in 07a they are HIDDEN from BOTH LLM-facing renders (planner hidden-key set; reflector receives the legacy payload only). Rendering is 07b's; interpretation / condensation is Step 09's | — |
+| Runtime accounting | validation batches are not optimizer steps; validation seconds are excluded from the training ACTUAL and persisted as evidence; the un-priced validation phase is 07c / runtime-control debt | — |
+
+**Not yet generic (owned later)**: task-declared optional observations
+(D14 / Step 12); a plugin-loss normalization declaration that would flip
+`custom` to `established` by declaration (Step 12 / loss-plugin contract);
+selected rendering (07b); calibrated labels (Step 09).
+
+**Do not invent this seam ad hoc** — update this section first.
+
+---
+
 ## Working rules
 
 - **Contract tests, not claims.** Each genericized seam gets a unit test

@@ -1,0 +1,51 @@
+{
+  "_fixture": {
+    "label": "l1_fixture",
+    "kind": "training_history",
+    "note": "L1 FIXTURE \u2014 hand-authored per the frozen \u00a722.9a semantics for rung B-07a-1 (tests/unit/examples/test_step07a_b1_diagnosis_structure_rung.py). NOT a real training output: this pack has no executable path (D14). objective_config_fingerprint is sha256 of the fixture declaration string, not of a resolved LossConfig. comparability='established' is DECLARED by the fixture (a per-sample mean-reduced objective), not audited from framework code. validation_requested_samples = the 734-image validation scope (identity manifest); validation_accuracy = the optional checkpointed observation (\u00a722.9a).",
+    "fingerprint_of": "l1_fixture:oxford_iiit_pet:categorical_cross_entropy:mean"
+  },
+  "training_history": {
+    "cadence": "per_epoch",
+    "objective_kind": "ce",
+    "objective_config_fingerprint": "ca1a41c63f6a3c73d4c08504e4628c699909fad081450226d8ba8b15a7604080",
+    "objective_reduction": "mean",
+    "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+    "comparability": "established",
+    "comparability_reason": null,
+    "epochs_planned": 5,
+    "epochs_completed": 5,
+    "train_objective": [
+      3.61,
+      2.4,
+      1.62,
+      1.1,
+      0.78
+    ],
+    "validation_objective": [
+      3.4,
+      2.31,
+      1.72,
+      1.45,
+      1.41
+    ],
+    "validation_requested_samples": 734,
+    "validation_samples": 734,
+    "validation_seconds": [
+      4.1,
+      4.0,
+      4.0,
+      4.1,
+      4.0
+    ],
+    "observations": {
+      "validation_accuracy": [
+        0.08,
+        0.35,
+        0.55,
+        0.62,
+        0.64
+      ]
+    }
+  }
+}

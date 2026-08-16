@@ -51,7 +51,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_56 = [
+EXPERIMENT_RECORD_FIELDS_58 = [
     "record_type",
     "exp_id",
     "status",
@@ -73,6 +73,12 @@ EXPERIMENT_RECORD_FIELDS_56 = [
     "final_loss",
     "loss_history",
     "model_params",
+    # Step 07a C3 — ADDITIVE (design pr_07a §3.8 / ledger §14.3): the trainer's
+    # observation payload + its diagnosis, persisted, hidden from both LLM-facing
+    # renders. 56 → 58; positioned beside the legacy training keys, every other
+    # position unchanged.
+    "training_history",
+    "training_diagnosis",
     "denoising_score",
     "file_vector",
     "score_table",
@@ -171,7 +177,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_56
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_58
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

@@ -35,6 +35,9 @@ declared/model_io_contract.json               the pack's OWN ModelIOContract ins
                                               [B, 3, 144, 144] float32 -> [B, 37] float32
 declared/metric_accuracy.json                 the pack's OWN MetricSpec instances (accuracy, macro_f1)
 declared/metric_macro_f1.json
+expected/training_history_l1_fixture.json     Step 07a — L1 FIXTURE (hand-authored, labelled) of this pack's
+expected/training_diagnosis_l1_fixture.json   R1/R2/R3 + optional validation-accuracy semantics and the expected
+                                              diagnosis; consumed by rung B-07a-1. NOT a real training output.
 PROVENANCE.md · STATUS.md
 ```
 

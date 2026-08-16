@@ -10,6 +10,12 @@ def run_skill(sandbox, **kwargs):
         t_cfg=kwargs["train_config"],
         l_cfg=kwargs["loss_config"],
         sample_set=kwargs.get("sample_set"),
+        # Step 07a: the tuner's EXISTING run-bound eval SampleSet reaches the
+        # trainer (R3 validation pass) — before 07a this kwarg was enumerated
+        # away right here, the transport-drop defect OD-S7-1 names. The
+        # tuner boundary decides `expected_validation` from the same value,
+        # so re-dropping it can no longer produce a quiet success.
+        eval_sample_set=kwargs.get("eval_sample_set"),
         train_portion=kwargs.get("train_portion"),
         train_base_seed=kwargs.get("train_base_seed"),
         # RT2-G: operator runtime policy for in-subprocess verification

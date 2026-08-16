@@ -94,6 +94,8 @@ class RecordingSandbox:
         # Public attributes for test assertions
         self.calls: list[tuple[Any, ...]] = []
         self.saved_records: list[dict[str, Any]] = []
+        #: Step 07a — the kwargs of every ``execute_training`` call, in order.
+        self.training_kwargs: list[dict[str, Any]] = []
 
     # ------------------------------------------------------------------
     # Subprocess-execution methods (mirror TidmadSandbox)
@@ -154,6 +156,11 @@ class RecordingSandbox:
         exactly like real mode.
         """
         self.calls.append(("execute_training", exp_id, model_type, m_cfg, t_cfg, l_cfg))
+        # Step 07a: the keyword surface the wrapper forwarded (sample_set,
+        # eval_sample_set, train_portion, ...) — recorded so a test can prove
+        # the eval SampleSet actually ARRIVED at the executor boundary (or,
+        # under the delete-the-hop mutation, that it did not).
+        self.training_kwargs.append(dict(kwargs))
         result = self._pop("execute_training")
 
         result_dir = os.path.join(self.dirs["records"], run_name)

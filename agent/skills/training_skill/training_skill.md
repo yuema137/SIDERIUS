@@ -31,6 +31,7 @@ ml_hyperparameter_tune_agent
 | `train_config` | `dict` | Yes | — | Training hyperparameters (`lr`, `epochs`, `batch_size`, `device`). |
 | `loss_config` | `dict` | Yes | — | Loss specification. |
 | `sample_set` | `dict \| None` | No | `None` | `{file_index: [segment_indices]}` — the training data scope. `None` selects the legacy single-file path. |
+| `eval_sample_set` | `dict \| None` | No | `None` | **Step 07a** — the tuner's EXISTING run-bound eval SampleSet `{file_index: [segment_indices]}` (VALIDATION file family). Forwarded to `execute_training(eval_sample_set=…)`; in streaming mode (with `sample_set`) the executor validates it by the same DataScope rule as the train set, writes `configs/<run>/eval_sample_set_<exp_id>.json` and passes `--eval_sample_set_json` — the trainer's per-epoch R3 validation pass. Before 07a this kwarg was enumerated away here (the OD-S7-1 transport drop). The tuner decides `expected_validation` from the same value, so a re-dropped eval set now yields an `error_training` record, never a quiet success. |
 | `train_portion` | `float \| None` | No | `None` | Per-epoch subsample fraction from the scope. |
 | `train_base_seed` | `int \| None` | No | `None` | Base seed for per-epoch subsampling; epoch `n` uses `train_base_seed + n`. |
 | `runtime_policy` | `dict \| None` | No | `None` | RT2-G operator runtime policy; validated against `RuntimeControlPolicy` at the executor. |
@@ -40,9 +41,14 @@ ml_hyperparameter_tune_agent
 ## Output
 
 Returns the sandbox executor's result dict unchanged — `status`,
-`message`, `results` (loss history, model params), and
-`runtime_verification` (the RT2 observation block, or `None` in pseudo
-mode).
+`message`, `results` (`final_loss` / `loss_history` / `model_params` +,
+from Step 07a, the additive `training_history` payload: R2 == `loss_history`,
+R3 = the per-epoch validation objective on the eval SampleSet, objective
+identity, comparability stamp, materialized validation counts, per-epoch
+`validation_seconds`), and `runtime_verification` (the RT2 observation
+block, or `None` in pseudo mode). The tuner validates `results` through
+`execute_tools/training_history.py::interpret_training_results` — the ONE
+validation site; this skill still validates nothing.
 
 ## Key behavioral notes
 
@@ -65,8 +71,10 @@ proposal was rejected) is recorded by the tuner on the `ExperimentRecord`
 ### Signature parity with the stub
 
 `StubSandbox.execute_training` mirrors this signature exactly, including
-the ordering parameters, even though the stub trains nothing and has no
-visitation order to apply. Pseudo-mode runs must not diverge from
+the ordering parameters and (Step 07a) `eval_sample_set` — scope-validated
+like production, and answered with a plausible multi-epoch train +
+validation `training_history` (R3 only when an eval set was supplied) —
+even though the stub trains nothing and has no visitation order to apply. Pseudo-mode runs must not diverge from
 production at the call boundary, or a pseudo test could pass against a
 call shape production would reject.
 
