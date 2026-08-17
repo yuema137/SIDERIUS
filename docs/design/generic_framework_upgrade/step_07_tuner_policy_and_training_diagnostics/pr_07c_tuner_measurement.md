@@ -1,6 +1,20 @@
 # Step 07 — PR 07c: Measurement / verification data feeding, and pricing the validation pass
 
-**STATUS — revision 2, FOR OPERATOR REVIEW. Not frozen. No code written.**
+**STATUS — revision 3, READY FOR OPERATOR FREEZE (consistency pass only). No code written.**
+
+> **Revision 3 (2026-08-17)** applies the operator's final targeted revision:
+> **Q-07c-6 = B** (runtime prediction + watchdog only; admission-side pricing
+> formally deferred with a parent correction note, NOT bound to D14) ·
+> **Q-07c-9 = (ii)** (an explicit additive `TrainingHistory` field;
+> `comparability` is NOT overloaded, and rev 2's claim that it is the right
+> home for cross-round scope differences is **RETRACTED** with source
+> evidence) · **C6's envelope matrix corrected** — the three landed flags are
+> not one dimension, so "tighter wins" was wrong for two of them ·
+> **Gate 2's counterfactual now uses EFFECTIVE provider deadlines**, with the
+> floor-masking case classified INCONCLUSIVE.
+>
+> Three-track coverage (§2a), the cold-start temporal test and Q-07c-1..5/7/8
+> are CLOSED by the operator and unchanged here.
 
 > **Revision 2 (2026-08-17)** applies the operator's review of revision 1
 > (*APPROVE WITH TARGETED REVISION — NOT YET FREEZE*): the five blockers
@@ -21,7 +35,7 @@
 | Source audit base | `ad176036` (master, clean tree, 2026-08-17) |
 | Prerequisites | all merged: PR0 `79403b44` · 07a `65804b3d` · 07b `9ea3755f` · correction `a15d1366` |
 | Gates | Gate 1 **NOT REQUIRED** · Gate 2 **REQUIRED, bounded, once at the final executable head** (parent §11 row 07c) |
-| Open questions | **§16 — Q-07c-1 … Q-07c-8 all dispositioned by the operator in rev 2; Q-07c-9 ADDED by rev 2.** Two remain open and BLOCK freeze: **Q-07c-6** (admission contract vs the parent) and **Q-07c-9** (clamp provenance) |
+| Open questions | **§16 — ALL NINE dispositioned and CLOSED as of rev 3.** None blocks freeze |
 
 > **Reviewer's shortcut.** If you read only three sections, read **§2a** (the
 > three-track validation matrix, new in rev 2), **§16** (dispositions + the
@@ -269,6 +283,18 @@ change scoring, and does not change the pure per-optimizer-step cost model
 - 07a's exact-validation-scope invariant (`validation_samples ==
   validation_requested_samples`) is never relaxed; C6 clamps the REQUESTED
   scope instead.
+- `TrainingHistory.comparability` / `comparability_reason` semantics are
+  unchanged — they own R2-vs-R3 computation comparability and are not
+  widened to cross-round scope (§16 retraction).
+- **Pre-run ADMISSION pricing of validation is explicitly NOT owned by 07c**
+  (Q-07c-6 = B); it is OPEN runtime-control debt, not bound to D14.
+
+**Declared schema changes** (the only two, both additive, neither LLM-facing):
+
+| Schema | Field | Commit |
+|---|---|---|
+| `HyperparamTuningInput` | `validation_max_samples: int \| None = None` | C6 |
+| `TrainingHistory` | `validation_requested_samples_before_limit: int \| None = None` | C6 |
 - The measurement path's file selection is scope-unaware today (it globs and
   takes the first). 07c preserves that; making measurement DataScope-aware is
   not in this PR.
@@ -422,28 +448,54 @@ entirely absent.
 Gate 2 must therefore establish the counterfactual, computed from artifacts
 the run already persists:
 
-```text
-T_old   = Σ(training component predictions) × watchdog_factor     ← pre-07c deadline
-T_new   = Σ(training + validation predictions) × watchdog_factor  ← 07c deadline
-T_act   = training actual + Σ validation_seconds                  ← what the phase really cost
+**The counterfactual must use EFFECTIVE provider deadlines, not raw sums
+(rev-3 correction).** `_watchdog_deadline_provider` does not return
+`Σ predictions × factor`; it returns
 
-PASS requires BOTH:
-    T_old  <  T_act        the old deadline WOULD have been insufficient
-    T_act  ≤  T_new        the new deadline WAS sufficient
+```python
+deadline, source = min(candidates)                       # operator_budget,
+                                                         # validation_max_phase,
+                                                         # verified_components
+return max(deadline, policy.watchdog.floor_seconds), source
 ```
 
-All three are recomputable from the persisted `runtime_verification` sidecar
-block (component predictions + `record_phase_actual`) and 07a's
-`TrainingHistory.validation_seconds` — verified present at this base, so **no
-new recording is required**.
+so a raw sum can differ from what would actually have been enforced. Compute
+the counterfactual **through the provider's own resolution**:
+
+```text
+D_old_eff = provider(sidecar WITHOUT the validation component)   ← what pre-07c would enforce
+D_new_eff = provider(sidecar WITH the validation component)      ← what 07c enforces
+T_act     = training actual + Σ validation_seconds               ← what the phase really cost
+
+PASS requires BOTH:
+    D_old_eff  <  T_act        the old deadline WOULD have killed it
+    T_act      ≤  D_new_eff    the new deadline did not
+```
+
+**Plus a masking check, or the counterfactual proves nothing.** Assert
+`source == "verified_components"` for `D_new_eff`, and confirm that no other
+candidate is doing the work:
+
+| Masking case | Verdict |
+|---|---|
+| `--validation_max_phase_seconds` present | excluded by construction (Q-07c-7 omits it) |
+| `operator_budget` is the `min()` winner | **INCONCLUSIVE** — the validation term never bound |
+| `watchdog.floor_seconds > T_act` | **INCONCLUSIVE** — the floor alone would have saved the pre-07c code, so the run says nothing about the fix |
+
+`T_act` and the component predictions are recomputable from the persisted
+`runtime_verification` sidecar (component predictions + `record_phase_actual`)
+and 07a's `TrainingHistory.validation_seconds` — verified present at this
+base, so **no new recording is required**; `D_old_eff` / `D_new_eff` are
+obtained by replaying the real provider over that sidecar with and without the
+validation component.
 
 **The C6 trap, stated explicitly.** `validation_max_samples` can make the
-Gate self-defeating: clamp validation hard enough and `T_old ≥ T_act`, so the
+Gate self-defeating: clamp validation hard enough and `D_old_eff ≥ T_act`, so the
 Gate passes with C5 reverted. The Gate's bounded validation workload must
-stay large enough that the recorded `T_old` **would have been insufficient**.
+stay large enough that the recorded `D_old_eff` **would have been insufficient**.
 This does not require burning wall time — it requires that `N_val` not be
 clamped below the point where the counterfactual separates. If the run
-produces `T_old ≥ T_act`, the Gate is **INCONCLUSIVE, not PASS**, and is
+produces `D_old_eff ≥ T_act`, the Gate is **INCONCLUSIVE, not PASS**, and is
 re-run with a larger validation workload.
 
 Functional criteria from the standard still apply on top (chain exits 0, real
@@ -467,8 +519,9 @@ Parent §8.4's, plus what the audit adds:
 - a batch fact is not derivable from profile + contract;
 - **promoting the constructor introspection to a shared owner pulls a large
   API refactor** (Q-07c-3 — the operator's explicit STOP);
-- the parent's admission clause and the implementation cannot be reconciled
-  (Q-07c-6);
+- **a validation fix turns out to require changing ADMISSION** — Q-07c-6 = B
+  scopes admission OUT; a changed admission verdict is a defect, not a
+  deliverable;
 - `RuntimePhase` extension would change an existing store key or identity;
 - the validation term cannot become measurement-backed, so C8d leaves it
   inert and the fix is cosmetic;
@@ -477,8 +530,10 @@ Parent §8.4's, plus what the audit adds:
 - the clamp cannot be applied to the REQUESTED scope, so 07a's
   exact-materialization invariant would have to be relaxed (never relax it —
   that guard is 07a's frozen contract);
+- recording the clamp would require widening `comparability` or any other
+  landed 07a field beyond its declared ownership (§16 retraction);
 - **Gate 2 cannot be made discriminative** within the bounded envelope
-  (`T_old ≥ T_act` however the validation workload is sized);
+  (`D_old_eff ≥ T_act` however the validation workload is sized, or the floor/operator budget masks the term);
 - a Pets/DAVIS obligation in §2a.2 would require inventing a
   `DatasetProfile`, a dataset adapter, or downloading data — that is D14.
 
@@ -848,10 +903,11 @@ pytest tests/unit/core/ -k "bootstrap or capability or probe" -q
 
 ### C5 — Price the validation pass in the runtime model (ADDED SCOPE, root fix)
 
-> **Rev 2: Q-07c-4 and Q-07c-5 are DISPOSED** (new `RuntimePhase="validation"`;
-> BOTH evidence sources). The checklist is re-cut against those answers.
-> **Q-07c-6 (admission) remains BLOCKING** — it is a contract question against
-> the parent, not an implementation choice; see §16.
+> **Rev 3: Q-07c-4, Q-07c-5 and Q-07c-6 are all DISPOSED** — new
+> `RuntimePhase="validation"`; BOTH evidence sources; and **admission is
+> explicitly NOT in scope** (Q-07c-6 = B). This commit changes the runtime
+> PREDICTION and the watchdog DEADLINE only. Admission verdicts are a parity
+> assertion here, not a deliverable.
 
 **1. Goal.** Make `T̂_val` a real term so the watchdog deadline covers work the
 attempt actually performs. Fixes the 07a Gate-2 finding: 3 of 4 attempts
@@ -864,8 +920,8 @@ make the prediction correct.
 **2. Scope.** `core/sandbox_executor.py:446-481`; `core/runtime_control/phases.py`
 + `session.py` (per Q-07c-4); `execute_tools/train_engine_sandbox.py`
 (route 07a's per-epoch evidence into the session). Non-goals: 07a's
-validation-exclusive training ACTUAL; the pure per-step model; admission
-verdicts unless Q-07c-6 authorizes it. Independent of C2–C4.
+validation-exclusive training ACTUAL; the pure per-step model; **admission
+verdicts — NOT owned by 07c (Q-07c-6 = B)**. Independent of C2–C4.
 
 **3. Implementation plan.**
 - [ ] Record the pre-change deadline for a fixed synthetic sidecar as the
@@ -953,8 +1009,9 @@ verdicts unless Q-07c-6 authorizes it. Independent of C2–C4.
 - [ ] The training ACTUAL for the same replay is unchanged (validation-exclusive).
 - [ ] `RUNTIME_PHASES` gains at most one value; every existing
       `calibration_key` string is unchanged (asserted against captured keys).
-- [ ] Admission verdicts unchanged for a fixed input set, unless Q-07c-6
-      authorized otherwise — in which case the changed verdicts are enumerated.
+- [ ] **Admission verdicts unchanged for a fixed input set** — asserted as
+      parity, not delivered as a feature (Q-07c-6 = B). A changed admission
+      verdict is a DEFECT of this commit, not an improvement.
 
 **6. Failure and edge cases.**
 
@@ -1011,7 +1068,11 @@ changing `validation_max_portion` / `validation_max_train_samples` /
       rev-2 finding below. The ceiling must apply where the validation
       SampleSet is BUILT, so `requested == materialized == min(natural,
       ceiling)`.
-- [ ] Decide and record the comparability consequence (rev-2 finding, below).
+- [ ] Add `TrainingHistory.validation_requested_samples_before_limit`
+      (Q-07c-9 = (ii)) and populate it with the pre-limit natural scope.
+- [ ] Do NOT touch `comparability` / `comparability_reason` (rev-3
+      retraction) — a guard test asserts the clamp leaves the stamp
+      unchanged for an identical `LossConfig`.
 
 > **REV-2 FINDING — post-materialization truncation is ILLEGAL, and
 > "provenance" was an abstract bag.** Rev 1 said "record the clamp in
@@ -1033,22 +1094,25 @@ changing `validation_max_portion` / `validation_max_train_samples` /
 > and 07a's invariant holds untouched.
 >
 > **Consequence: the requested/materialized pair can no longer carry the
-> clamp's provenance**, because by construction they are equal. The remaining
-> landed slots are `TrainingHistory.observations` (`dict[str, list[float]]`,
-> length-checked against `epochs_completed` — floats only, so a boolean does
-> not fit) and `comparability` / `comparability_reason`. Three options:
-> **(i)** the run-level input already records `validation_max_samples`, and
-> that is sufficient provenance — no history change; **(ii)** an additive
-> `TrainingHistory` field, which IS a schema change and must be declared as
-> such rather than smuggled under "provenance"; **(iii)** express it through
-> `comparability`. See **Q-07c-9**.
+> clamp's provenance**, because by construction they are equal — and the
+> run-level `validation_max_samples` input cannot recover it either
+> (`ceiling=2000, requested=2000` is ambiguous between "did not bind" and
+> "clamped from 12000"). **Q-07c-9 = (ii)**, an explicit additive field:
 >
-> **And a second-order effect worth naming:** if the ceiling binds on some
-> rounds and not others, those rounds' R3 values are computed over
-> *different* validation scopes and are **not comparable across rounds** —
-> exactly what 07a's `comparability` / `comparability_reason` fields exist to
-> express. A fixed run-level ceiling that binds on every round keeps them
-> comparable. This must be decided, not discovered.
+> ```python
+> TrainingHistory.validation_requested_samples_before_limit: int | None = None
+> ```
+>
+> declared as a **schema change**, not smuggled under the word "provenance".
+> `validation_requested_samples` keeps meaning the EFFECTIVE requested scope,
+> so `was_limited = before_limit > requested` is derivable with certainty and
+> 07a's `requested == materialized` invariant is untouched.
+>
+> **`comparability` is NOT used for this** — see §16's retraction:
+> `stamp_comparability` is a function of the resolved `LossConfig` alone and
+> owns R2-vs-R3 computation comparability, not cross-round scope. Whether a
+> consumer should discount cross-round comparisons whose validation scopes
+> differ is consumer policy, and C6 does not decide it.
 
 **4. Validation plan.**
 - Unit: `None` (default) → materialized validation rows byte-identical to
@@ -1056,16 +1120,16 @@ changing `validation_max_portion` / `validation_max_train_samples` /
 - Unit: ceiling above the natural size → no clamp.
 - Unit: ceiling below → exactly `N` rows, and the clamp is recorded.
 - Negative: `0` / negative → schema rejection at startup, before spend.
-- Unit: interaction with `validation_max_portion` → the tighter wins,
-  asserted both ways.
-- **Unit — ALL THREE existing envelope flags (rev-2 blocker 5).** Rev 1
-  paired the new ceiling only with `validation_max_portion`. §0.8 records
-  three landed flags, so the new field is the fourth and must be tested
-  against each: `validation_max_portion` (fraction),
-  `validation_max_train_samples` (TRAINING rows — the one most easily
-  confused with this field, since the names differ by one word and bound
-  different sets), and `validation_max_phase_seconds` (watchdog-fused). For
-  each pair, the tighter bound wins, asserted in both orders.
+- **Unit — the envelope matrix, THREE DISTINCT RELATIONSHIPS (rev 3
+  correction).** Rev 2 said "for each pair, the tighter bound wins" for all
+  three landed flags. That is wrong for two of them: the four controls do not
+  share a dimension, and `min()` is only meaningful within one.
+
+  | Pair | Relationship | What the test asserts |
+  |---|---|---|
+  | `validation_max_portion` × `validation_max_samples` | **same dimension** (validation sample scope) | `N_val = min(N_natural/portion, N_ceiling)` — tighter wins, asserted in both orders |
+  | `validation_max_train_samples` × `validation_max_samples` | **ORTHOGONAL** — the first bounds TRAINING rows, the second VALIDATION rows | changing the training ceiling moves the training scope and leaves validation scope untouched; changing the validation ceiling does the converse. **No `min()` between them.** The names differ by one word and bound different sets, which is exactly why this needs a test |
+  | `validation_max_phase_seconds` × `validation_max_samples` | **ORTHOGONAL, different units** — seconds vs samples | the sample ceiling determines workload size by sample-space rules; the phase fuse remains independently enforceable as a wall-clock termination. Neither is expressible in the other's units, so there is no `min()` to take |
 - **Unit — WHICH samples, not just how many (rev-2 blocker 5).** 07a defines
   R3 as a real validation objective, so a clamp that silently changes *which*
   rows are evaluated changes the science:
@@ -1102,10 +1166,16 @@ changing `validation_max_portion` / `validation_max_train_samples` /
       sample-count-weighted expectation, and differs from the unweighted
       mean-of-batch-means (both numbers recorded, so the test is known to
       discriminate).
-- [ ] A clamped run is distinguishable from an unclamped one by the mechanism
-      Q-07c-9 selects — and if that mechanism is an additive
-      `TrainingHistory` field, it is declared as a schema change, not as
-      "provenance".
+- [ ] A clamped run is distinguishable from an unclamped one:
+      `before_limit > requested` exactly when the ceiling bound, and
+      `before_limit == requested` exactly when it did not — asserted for the
+      ambiguous case rev 2 got wrong (`ceiling == natural == 2000` must read
+      as NOT limited).
+- [ ] `comparability` / `comparability_reason` are byte-identical with and
+      without a clamp, for the same `LossConfig`.
+- [ ] The three envelope relationships hold as tabulated: `min()` only for
+      portion × samples; orthogonality proven in both directions for the
+      other two.
 - [ ] `--help` gains exactly one line; every other byte unchanged.
 - [ ] Schema refuses `0` and negatives with a message naming the field.
 
@@ -1158,7 +1228,7 @@ document's §17 ledger. Depends on C1–C6.
       did not inflate track maturity.
 - [ ] Terminal validation from a CLEAN tree at the final executable head.
 - [ ] **Request operator approval, then run the ONE bounded Gate 2**, and
-      compute `T_old` / `T_act` / `T_new` from the run's own artifacts
+      replay the provider for `D_old_eff` / `D_new_eff` and compute `T_act` from the run’s own artifacts
       (§4.1) — the counterfactual is part of the PASS, not commentary.
 
 **4. Validation plan.**
@@ -1182,7 +1252,7 @@ document's §17 ledger. Depends on C1–C6.
 - [ ] Gate 2 PASS on the standard's functional criteria **and** on §4.1's
       counterfactual, with all three numbers recorded from the run's own
       artifacts:
-      `T_old < T_act ≤ T_new`. `T_old ≥ T_act` ⇒ **INCONCLUSIVE**, not PASS —
+      `D_old_eff < T_act ≤ D_new_eff`, with `source == "verified_components"` and no floor/operator-budget masking. Any masking case, or `D_old_eff ≥ T_act`, ⇒ **INCONCLUSIVE**, not PASS —
       the validation workload was clamped below the discriminating point and
       the Gate is re-run larger.
 - [ ] Workspace, tested SHA, wall time and cost recorded — or a recorded FAIL
@@ -1211,11 +1281,12 @@ executable fix gets its own narrowly named commit, never hidden here.
 
 ---
 
-## 16. Open questions — operator dispositions (rev 2)
+## 16. Open questions — operator dispositions (CLOSED at rev 3)
 
-All eight rev-1 questions are dispositioned. **Q-07c-6 remains BLOCKING**
-because it is a contract question against the parent, and rev 2 adds
-**Q-07c-9** from the C6 source-grounding.
+All nine questions are dispositioned and **none blocks freeze**. Rev 2
+dispositioned Q-07c-1..5, 7 and 8 and added Q-07c-9; rev 3 closes the last
+two — Q-07c-6 (admission) and Q-07c-9 (clamp provenance) — and records one
+**retraction** of a rev-2 claim that did not survive source audit.
 
 | Q | Subject | Disposition (operator, 2026-08-17) |
 |---|---|---|
@@ -1224,10 +1295,10 @@ because it is a contract question against the parent, and rev 2 adds
 | 3 | the second model-name branch | **(a)** eliminate `:235` too, promoting the signature introspection to a shared owner. **(c) is rejected**: narrowing the guard to keep a known name-dispatch would let 07c claim a generic measurement worker while one remains. **STOP if promotion pulls a large API refactor**, then re-evaluate as a defer. |
 | 4 | validation as a `RuntimePhase` | **YES** — add `"validation"`. |
 | 5 | first `T̂_val` | **(c) BOTH**, not (a). See below. |
-| 6 | admission | **UNRESOLVED — see below. Blocks freeze.** |
+| 6 | admission | **B** — runtime prediction + watchdog only; admission-side pricing formally deferred as OPEN runtime-control debt, with a parent correction note and NO binding to D14. |
 | 7 | Gate 2 posture | **(a)** watchdog ON, no `--validation_max_phase_seconds`, **plus** §4.1's counterfactual-discriminative acceptance. |
 | 8 | measurement dtype site preference | Declare **MEASUREMENT site preference = `int32`**, preserving today's bytes. Phase-correct inference dtype recorded as separate debt. |
-| **9** | **clamp provenance (NEW)** | **OPEN — see below.** |
+| **9** | **clamp provenance (NEW in rev 2)** | **(ii)** — an explicit additive `TrainingHistory.validation_requested_samples_before_limit`, declared as a schema change. `comparability` is NOT overloaded; rev 2's claim to the contrary is RETRACTED below. |
 
 ### Q-07c-5 — why BOTH, and a correction to rev 1
 
@@ -1242,53 +1313,136 @@ complete validation pass →  full actual                   →  calibrates FUTU
 
 C5's checklist and its cold-start temporal test are re-cut accordingly.
 
-### Q-07c-6 — admission: the parent contract and the source disagree (BLOCKING)
+### Q-07c-6 — admission: DISPOSED = **B** (operator, rev 3)
 
-Parent §8.4 says the fix must make "the watchdog / admission / prediction"
-know the validation cost. Rev 1 then proposed leaving admission unchanged.
-Both cannot be frozen. Rev 2 audited whether the parent's wording is even
-implementable as written:
+Parent §8.4 required the fix to make "the watchdog / admission / prediction"
+know the validation cost. The rev-2 audit established that the admission half
+is not implementable from the landed measurement lifecycle:
 
 ```text
 core/runtime_control/admission.py:148-150
-    "The prephase measurement covers `phase="training"` only, so
-     MeasuredRequirementTable.for_phase("inference") is structurally
-     (None, None) ..."
+    "The prephase measurement covers `phase="training"` only ..."
+
+execute_tools/train_engine_sandbox.py:1474-1490
+    the validation pass runs INSIDE the training subprocess,
+    forward-only over the eval SampleSet at the training batch size
 ```
 
-and the validation pass runs **inside the training subprocess**, forward-only
-over the eval SampleSet at the training batch size
-(`train_engine_sandbox.py:1474-1490`). So at training-admission time the only
-measurement in existence is the training phase. **A validation estimate
-derived from the first validation batch arrives structurally too late for
-pre-run admission.**
+so at pre-run admission time no measurement-backed validation estimate can
+exist. Option A (a separate pre-admission validation measurement phase) would
+turn 07c from a fix for an observed watchdog defect into a measurement-
+orchestration redesign.
 
-| Option | What it costs | Honest? |
-|---|---|---|
-| **A** — add a forward-only `validation` phase to the PRE-PHASE measurement, so admission sees a measured `T̂_val` before launch | a new phase in the measurement spec + either a third isolated subprocess launch per candidate or a multi-phase run; lands inside the same worker 07c is already changing | satisfies the parent verbatim, but materially widens 07c |
-| **B** — 07c fixes prediction + watchdog only; admission-side validation pricing is formally deferred with a named owner, and parent §8.4's "admission" clause is REVISED to say so | small; fixes the observed 07a failure | requires editing a frozen parent clause |
+**Disposition — B.** 07c's contract is now:
 
-**Recommendation: B**, per the operator's own standard — *"如果实现上 A 并不
-自然，我宁愿诚实选 B 并修改 parent contract"*. Deriving `T̂_val` from the
-already-measured training phase by a fixed forward/backward ratio is
-explicitly NOT offered: that is the hand-calibrated `× 2.7` pattern
-`docs/refine_inference_time_estimator.md` was written to remove.
+```text
+07c OWNS:        validation runtime prediction
+                 validation watchdog pricing
+                 validation runtime observation / calibration
 
-Whichever is chosen, the parent and this child must agree **before freeze**.
+07c DOES NOT OWN: pre-run admission pricing of the validation workload
+```
 
-### Q-07c-9 — how a clamped validation run is identified (NEW, rev 2)
+The reason is structural, not a deferral of convenience:
 
-From the C6 source-grounding: `TrainingHistory` **fails closed** when
-`validation_samples != validation_requested_samples`
-(`training_history.py:206-211`), so the clamp must move to the requested
-scope — after which the two are equal and cannot themselves record it.
-Options: **(i)** the run-level `validation_max_samples` input is sufficient
-provenance (no history change); **(ii)** an additive `TrainingHistory` field,
-declared as a schema change; **(iii)** express it via `comparability` /
-`comparability_reason`. Coupled question: a ceiling that binds on some rounds
-and not others makes those rounds' R3 values **non-comparable**, which is
-what `comparability` exists to say. *Preference: (i) plus an explicit
-comparability decision — it adds no schema surface.*
+> At the current architecture boundary there is no measurement-backed
+> validation estimate available when pre-run admission executes.
+
+And the escape hatch is closed explicitly: `T̂_val = c · T̂_train` for a fixed
+`c` is **forbidden** — that is the hand-calibrated `× 2.7` pattern
+`docs/refine_inference_time_estimator.md` exists to remove, and it would
+disguise a guess as measurement-backed knowledge, which C8d exists to prevent.
+
+**Parent handling — a correction note beside the clause, never a silent
+rewrite.** Parent §8.4 keeps its original text and gains an explicit
+post-freeze source correction (added by this revision). The residue is
+recorded as an OPEN runtime-control debt with a named owner, and is
+deliberately **NOT** attached to D14: D14 owns the generic executable data
+path, which is a different semantic owner. If D14's infrastructure later
+happens to make pre-admission validation measurement natural, the debt can be
+picked up then — it is not pre-bound to that milestone now.
+
+### Q-07c-9 — clamp provenance: DISPOSED = **(ii)** (operator, rev 3)
+
+Rev 2 preferred (i) — "the run-level `validation_max_samples` input is
+sufficient provenance". **It is not.** Given
+
+```text
+validation_max_samples       = 2000
+validation_requested_samples = 2000
+```
+
+nothing distinguishes *the natural scope was 2000 and the ceiling did not
+bind* from *the natural scope was 12000 and the ceiling clamped it*. The
+configured ceiling plus the effective count cannot recover whether a clamp
+actually happened.
+
+**Disposition — an explicit additive `TrainingHistory` field**, declared as a
+schema change rather than smuggled under the word "provenance":
+
+```python
+validation_requested_samples_before_limit: int | None = None
+```
+
+`validation_requested_samples` keeps its meaning — the EFFECTIVE requested
+scope — so
+
+```text
+N_effective  = min(N_before_limit, N_ceiling)
+was_limited  = validation_requested_samples_before_limit
+                   > validation_requested_samples
+```
+
+is derivable with certainty, while 07a's strong invariant
+`validation_requested_samples == validation_samples` is untouched and never
+relaxed. The full chain becomes legible:
+
+```text
+natural scope → operator ceiling → effective requested → exact materialization
+```
+
+Preferred over a boolean `was_limited` flag because the pre-limit count is
+strictly more informative and cannot go stale relative to the other two.
+
+**Gate 1 is unaffected, with evidence.** The new field cannot reach an LLM:
+the planner hides the WHOLE `training_history` key
+(`agent/prompts.py:944-946`, `_PLANNER_HIDDEN_RECORD_KEYS` is a top-level
+record-key set, so inner fields cannot leak), and `llm_bridge.reflect()`
+takes `training_diagnosis` only, never the history (`agent/llm_bridge.py:1009,1062`).
+
+### RETRACTION — `comparability` is not cross-round scope metadata (rev 3)
+
+Revision 2 wrote that a ceiling binding on some rounds and not others makes
+those R3 values non-comparable, "exactly what 07a's `comparability` /
+`comparability_reason` fields exist to express". **That is withdrawn.**
+Source:
+
+```python
+execute_tools/training_history.py:104-120
+def stamp_comparability(loss_cfg: LossConfig) -> tuple[Comparability, str | None]:
+    """Decide the R2/R3 comparability stamp from the RESOLVED LossConfig."""
+    if loss_cfg.loss_type == "custom":   return "not_established", ...CUSTOM
+    if loss_cfg.reduction != "mean":     return "not_established", ...SUM
+    if loss_cfg.loss_type in COMPARABILITY_ESTABLISHED_KINDS:
+        return "established", None
+```
+
+It is a function of the resolved `LossConfig` alone — objective kind and
+reduction. It answers *"can THIS round's train objective and validation
+objective be read against each other?"*, not *"can two tuner rounds be read
+against each other?"*. Widening it to carry sample-scope metadata would make
+it the semantic bag this codebase keeps refusing to create. The two axes stay
+separate:
+
+```text
+TrainingHistory.comparability                 R2-vs-R3 computation/reduction
+validation_requested_samples_before_limit
+  + validation_requested_samples              validation SCOPE provenance
+```
+
+Whether a consumer should later discount cross-round comparisons whose
+validation scopes differ is **consumer policy**, owned by whoever consumes it
+— not something C6 may smuggle into an 07a field.
 
 ---
 

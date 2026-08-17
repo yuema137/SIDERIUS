@@ -828,6 +828,43 @@ rows). Until 07c lands: **07a merge blocker: NO; a broad
 configuration (blocker: YES).** The 07c child design must carry this as a
 frozen acceptance item; ownership: runtime-control (§7e).
 
+> **POST-FREEZE SOURCE CORRECTION — the "admission" term (operator decision,
+> 2026-08-17; 07c design review, Q-07c-6 = B).** The clause above is kept
+> verbatim as the historical requirement. Its **admission** half is not
+> implementable from the landed measurement lifecycle, and the 07c source
+> audit is why:
+>
+> * `core/runtime_control/admission.py:148-150` — "the prephase measurement
+>   covers `phase="training"` only";
+> * `execute_tools/train_engine_sandbox.py:1474-1490` — the validation pass
+>   runs INSIDE the training subprocess, forward-only over the eval
+>   SampleSet at the training batch size.
+>
+> So no measurement-backed validation estimate can exist at the moment
+> pre-run admission executes. Satisfying "admission" verbatim would require a
+> separate pre-admission validation measurement phase — a third isolated
+> subprocess per candidate or a multi-phase measurement run — turning 07c
+> from a fix for an observed watchdog defect into a measurement-orchestration
+> redesign.
+>
+> **Therefore PR 07c closes validation pricing for runtime PREDICTION and
+> WATCHDOG enforcement only.** Pre-run admission-side validation pricing
+> remains an explicit runtime-control debt, and **must not be approximated
+> from the training measurement by a fixed ratio** — that is the
+> hand-calibrated `× 2.7` pattern `docs/refine_inference_time_estimator.md`
+> exists to remove, and it would present a guess as measurement-backed
+> evidence that C8d exists to exclude.
+>
+> ```text
+> Runtime-control debt: pre-run ADMISSION pricing of the validation workload
+> Owner:  admission / runtime-control (§7e)
+> Status: OPEN after 07c
+> Not bound to D14 — D14 owns the generic executable data path, a different
+> semantic owner. If D14's infrastructure later makes a pre-admission
+> validation measurement natural, the debt may be picked up there; it is not
+> pre-assigned to that milestone now.
+> ```
+
 ---
 
 ## 9. TIDMAD compatibility surfaces (Step level)

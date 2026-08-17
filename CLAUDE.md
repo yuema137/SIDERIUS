@@ -696,6 +696,16 @@ TIDMAD's `network.py:FocalLoss1D`.
   skip/bypass threshold mathematics, retry/round semantics, record schema, prompts,
   the node's public interface. Still OPEN: the `resolved_action` stale-attempt
   hazard and 07c's validation-time/watchdog accounting debt.
+  **Runtime-control debt opened by the 07c design review (operator decision,
+  2026-08-17, Q-07c-6 = B)**: *pre-run ADMISSION pricing of the validation
+  workload*. 07c prices validation for runtime PREDICTION and the WATCHDOG
+  only — `admission.py:148-150` says the prephase measurement covers
+  `phase="training"` only, and 07a's validation pass runs inside the training
+  subprocess, so no measurement-backed validation estimate exists when
+  admission executes. Owner: admission / runtime-control (§7e); **OPEN after
+  07c; NOT bound to D14**; and it must never be approximated from the training
+  measurement by a fixed ratio (the `× 2.7` pattern
+  `docs/refine_inference_time_estimator.md` removed).
   **`resolved_action` is NOT scheduled ahead of 07c (operator decision,
   2026-08-17)**: it is conceptually adjacent to the coupling just corrected but
   is a different defect, and adjacency is not a schedule. Do not open a
