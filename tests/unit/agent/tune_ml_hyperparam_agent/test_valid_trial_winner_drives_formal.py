@@ -43,10 +43,20 @@ from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
     required_blocking_gate_ids,
 )
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
 )
+from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
+
+#: Step 07 PR 07b — the selection helpers consume the run's ONE order
+#: authority (``MetricSpec.direction`` interpreted in exactly one place).
+#: The SHIPPED higher-is-better order is this module's default, so every
+#: assertion below states exactly the property it stated before 07b.
+HIGHER_ORDER = MetricOrder(shipped_spec())
+LOWER_ORDER = MetricOrder(direction_only_spec())
+
 
 _GENERATED_MODEL = "c5a_generated_candidate_model"
 
@@ -131,7 +141,7 @@ class TestWinnerSelection:
     """`_best_trial_winner` — the first step of the head."""
 
     def test_the_highest_scoring_valid_trial_wins(self, winner_record, loser_record):
-        got = _best_trial_winner([loser_record, winner_record])
+        got = _best_trial_winner([loser_record, winner_record], order=HIGHER_ORDER)
         assert got is not None
         assert got["exp_id"] == "c5a_iter_001_002"
 
@@ -144,14 +154,14 @@ class TestWinnerSelection:
         cheater = _valid_trial_record("c5a_cheater", 9.9, batch_size=1, lr=1.0)
         cheater["health_gate_results"][0]["check_passed"] = False
 
-        got = _best_trial_winner([loser_record, winner_record, cheater])
+        got = _best_trial_winner([loser_record, winner_record, cheater], order=HIGHER_ORDER)
         assert got is not None
         assert got["exp_id"] == "c5a_iter_001_002"
 
     def test_no_valid_trial_yields_no_winner(self, winner_record):
         """The precondition of the :1798 pathology."""
         winner_record["health_gate_results"][0]["check_passed"] = False
-        assert _best_trial_winner([winner_record]) is None
+        assert _best_trial_winner([winner_record], order=HIGHER_ORDER) is None
 
 
 class TestTheWinnerDrivesTheFormalPlan:
@@ -178,7 +188,7 @@ class TestTheWinnerDrivesTheFormalPlan:
         prints it too. What distinguishes the states is which variant.
         """
         history = [loser_record, winner_record]
-        winner = _best_trial_winner(history)
+        winner = _best_trial_winner(history, order=HIGHER_ORDER)
         plan = ExperimentPlan(
             model_type=_GENERATED_MODEL,
             train_cfg={"batch_size": 1, "lr": 1e-9, "epochs": 1, "optimizer": "adam"},
@@ -204,7 +214,7 @@ class TestTheWinnerDrivesTheFormalPlan:
         inheritance is real, they are replaced by the winner's.
         """
         history = [loser_record, winner_record]
-        winner = _best_trial_winner(history)
+        winner = _best_trial_winner(history, order=HIGHER_ORDER)
         plan = ExperimentPlan(
             model_type=_GENERATED_MODEL,
             train_cfg={"batch_size": 1, "lr": 1e-9, "epochs": 1, "optimizer": "adam"},
@@ -241,7 +251,7 @@ class TestTheWinnerDrivesTheFormalPlan:
         opposite of the intended property.
         """
         history = [winner_record]
-        winner = _best_trial_winner(history)
+        winner = _best_trial_winner(history, order=HIGHER_ORDER)
         plan = ExperimentPlan(
             model_type=_GENERATED_MODEL,
             train_cfg={"batch_size": 1, "lr": 1e-9, "epochs": 1, "optimizer": "adam"},

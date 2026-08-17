@@ -19,6 +19,7 @@ from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _format_healthgate_evidence_block,
 )
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.tuner_source import tuner_node_source
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,
     _output,
@@ -132,9 +133,7 @@ class TestTunerConsumptionSurface:
     control flow."""
 
     def test_flag_referenced_exactly_twice_in_tuner(self):
-        src = (
-            REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
-        ).read_text()
+        src = tuner_node_source()
         assert src.count("agent_input.enable_structured_health_feedback") == 2
         assert src.count("agent_input.health_feedback_history_window_iterations") == 2
         assert src.count("agent_input.health_feedback_history_max_entries_per_model") == 2

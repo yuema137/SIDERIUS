@@ -1530,28 +1530,38 @@ class HyperparamTuningInput(BaseModel):
     skip_formal_min_delta: float = Field(
         default=-1.0,
         description=(
-            "Skip all formal rounds when ``best_trial_score < "
-            "(current_run_best_formal_score + skip_formal_min_delta)``. "
+            "Skip all formal rounds when the best trial score is WORSE than "
+            "the incumbent moved by this margin. Declared in the GOLDEN "
+            "METRIC'S OWN UNITS (dB under TIDMAD, whose metric is log-space); "
+            "the framework supplies the orientation, the operator supplies the "
+            "number. It is a coordinate on the better-direction axis: negative "
+            "loosens the threshold, positive tightens it, under a maximised "
+            "and a minimised metric alike (Step 07 PR 07b). "
             "When the reference is ``None`` the resolved threshold is "
             "``None`` and this gate never fires. "
             "Default ``-1.0``: only skip formal when trial is more than "
-            "1.0 dB below the current best formal score. Set to ``0.0`` "
-            "to skip formal whenever trial does not beat current best. "
-            "Set to ``float('-inf')`` to disable this gate entirely."
+            "1.0 unit worse than the current best formal score. Set to "
+            "``0.0`` to skip formal whenever trial does not beat current "
+            "best. Set to ``float('-inf')`` to disable this gate entirely — "
+            "that resolves to the metric's WORST value under either "
+            "direction, so the disable convention needs no second form."
         ),
     )
     bypass_formal_time_budget_min_delta: float = Field(
         default=0.0,
         description=(
-            "Bypass the formal time-budget gate when ``best_trial_score "
-            ">= (current_run_best_formal_score + "
-            "bypass_formal_time_budget_min_delta)``. When the reference "
-            "is ``None`` the resolved threshold is ``None`` and this "
+            "Bypass the formal time-budget gate when the best trial score is "
+            "at least as good as the incumbent moved by this margin. Declared "
+            "in the GOLDEN METRIC'S OWN UNITS (dB under TIDMAD) and, like "
+            "``skip_formal_min_delta``, a coordinate on the better-direction "
+            "axis rather than a raw addition (Step 07 PR 07b). When the "
+            "reference is ``None`` the resolved threshold is ``None`` and this "
             "gate never fires. Default ``0.0``: "
             "bypass the time gate whenever trial sets a new run best. "
             "Set to ``0.5`` to only bypass when trial beats current "
-            "best by >= 0.5 dB. Set to ``float('inf')`` to disable "
-            "bypass entirely."
+            "best by >= 0.5 units. Set to ``float('inf')`` to disable "
+            "bypass entirely — that resolves to the metric's BEST value "
+            "under either direction."
         ),
     )
 
@@ -1615,7 +1625,14 @@ class HyperparamTuningInput(BaseModel):
             "  any healthy success.\n"
             "In both cases ``status`` is set to ``'failed_mode_collapse'`` and "
             "``failure_reason`` is populated from the health-check message. "
-            "Trial rounds are immune (no benchmark to compare against)."
+            "Trial rounds are immune (no benchmark to compare against).\n"
+            "**Direction (Step 07 PR 07b §3.3 row 5).** The float convention "
+            "describes a MAXIMISED metric: under a minimised one the same "
+            "``-5.0`` is the best score in the run and the planner would read "
+            "a collapsed round as the campaign's finest. A finite float is "
+            "therefore REFUSED at startup when the bound golden metric is "
+            "lower-is-better — not negated, not reinterpreted. ``None`` is "
+            "direction-free and always accepted."
         ),
     )
 

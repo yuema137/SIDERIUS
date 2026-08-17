@@ -627,8 +627,50 @@ TIDMAD's `network.py:FocalLoss1D`.
   design FROZEN — operator approved 2026-08-15 (rev 2;
   `pr_07b_tuner_policy.md`: one order authority `MetricOrder`, per-rule
   scale classification, P2 authority-rendered blocks byte-exact, P3 declared
-  PB deltas via owned renderers, Gate 1 ≥ 2 tuner rounds pseudo-training)**;
-  07b implementation NOT started.
+  PB deltas via owned renderers, Gate 1 ≥ 2 tuner rounds pseudo-training)**.
+  **07b IMPLEMENTED 2026-08-16 (branch `step07-pr07b-tuner-policy`, C1–C6;
+  design `pr_07b_tuner_policy.md` §14 = ledger)**: `execute_tools/metric_order.py`
+  is the ONE authority interpreting `MetricSpec.direction` — all 21 golden-metric
+  ordering sites in the tuner ask it (the same-loss `final_loss` rank
+  deliberately does NOT, and is pinned not to move); every scale-sensitive rule
+  is classified rather than sign-flipped, with `degenerate_penalty_score` FAILING
+  CLOSED at startup under a minimised metric; `AttemptTransition` /
+  `AttemptDecision` REMOVED with the `resolved_action` hazard recorded at its
+  declaration (a dedicated round-semantics correction, operator decision
+  required — NOT 07b/07c); the planner/reflector prompts render task content
+  (P2, TIDMAD bytes EXACT — PB sha256 unchanged), direction wording, metric
+  identity and compact calibration-free `TrainingDiagnosis` lines (P3, the only
+  authorised PB deltas) from landed authorities; `plan(task_render, metric_spec)`
+  and `reflect(metric_spec, training_diagnosis)` FAIL CLOSED (WF-1 22→23→24;
+  WF-2 `actual_results` 9 / `reflection_context` 23 EXACT); OD-1 closed by
+  record-own key order. `run()` AST branch count 244 → 198.
+  **C7 — tuner node structural decomposition (operator scope amendment,
+  2026-08-16; C7d follow-up = decision A′)**: the node is now
+  `<node>.py` + `<node>.md` PUBLIC and eight PRIVATE modules
+  (`contracts` carriers · `planning` · `execution` 3 coarse phases ·
+  `records` BUILDS · `runtime` EMITS · `policy` · `feedback` · `cli`) on a
+  one-way acyclic private graph. Main file 7,430 → 1,473; `run()` 2,714 →
+  1,011 (branch nodes 198 → 64) and now reads as a lifecycle — plan →
+  admission → train → infer/score/health → `brain.reflect` → build record →
+  emit → finalize. `RunBindings` carries run-scoped authorities ONLY, enforced
+  at construction by `FORBIDDEN_BINDING_FIELDS`; `AttemptStage` is the single
+  deliberate mutable carrier (the raising path has no return value). All 15
+  loop-control exits translated 1:1 to `AttemptSignal` (`raise` untouched), so
+  retry/round semantics are unchanged — proven by a 13-surface differential
+  PRE/POST oracle, deep-equal on all 12 behavioural surfaces. **The node's
+  public boundary is an executable rule**
+  (`tests/unit/nodes/test_node_public_boundary.py`): never import a node's
+  private modules from outside it, and stub internals on the module that CALLS
+  them (`_run_skill` → `runtime`, `_emit_record` → `records`).
+  **07b STATUS: implementation COMPLETE, READY FOR OPERATOR REVIEW 2026-08-16,
+  NOT MERGED.** Gate 1 PASS twice (pre-/post-refactor); Gate 2 PASS — the latter was
+  NOT required by the frozen 07b disposition and was ADDED by the C7 operator scope
+  amendment as structural-refactor regression evidence. Final executable head
+  `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (documentation
+  and gate-advice JSON only in between); PR #216; exact-head CI 31989125173 SUCCESS;
+  clean tree. Deferred and UNCHANGED by 07b: the `memory.time_mode` /
+  disabled-time-budget coupling, the `resolved_action` stale-attempt hazard, and the
+  validation-time/watchdog accounting debt (07c).
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per

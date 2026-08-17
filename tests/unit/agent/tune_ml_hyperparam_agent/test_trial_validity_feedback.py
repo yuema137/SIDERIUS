@@ -24,6 +24,8 @@ mode fraction implies for a particular task is the planner's judgement.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from agent.schemas.health_feedback import TrialValidityFeedback
@@ -31,6 +33,7 @@ from execute_tools.health_checks.schemas import CandidateHealthValidity
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_trial_validity_feedback,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
 BLOCKING_IDS = (
     "output_diversity_blocking",
@@ -188,9 +191,18 @@ class TestProducerToConsumerReachability:
 
         from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent as _Agent
 
+        # The decision is still made in run(); the flag now reaches the output
+        # through RunExitSnapshot rather than a direct keyword, because output
+        # construction moved into records.finalize_run_output (07b, C7d). Both
+        # hops are pinned, so deleting either still fails here.
         src = inspect.getsource(_Agent.run)
         assert "_skipped_formal_for_no_valid_winner = True" in src
-        assert "formal_skipped_for_no_valid_winner=_skipped_formal_for_no_valid_winner" in src
+        assert "skipped_formal_for_no_valid_winner=_skipped_formal_for_no_valid_winner" in src
+        assert re.search(
+            r"formal_skipped_for_no_valid_winner=\s*"
+            r"(exit_snapshot\.)?_?skipped_formal_for_no_valid_winner",
+            tuner_node_source(),
+        ), "the skip reason no longer reaches the run output"
 
     def test_the_block_reaches_the_real_proposing_prompt_template(self):
         """The last hop: the rendered block must have a placeholder in the

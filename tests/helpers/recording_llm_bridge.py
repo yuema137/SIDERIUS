@@ -80,15 +80,24 @@ class RecordingLLMBridge:
         hypothesis: str,
         actual_results: dict[str, Any],
         reflection_context: dict[str, Any] | None = None,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """Mirror of :meth:`LLMBridge.reflect`. Returns a parsed-dict reflection.
 
         Step-00 WF-3 widening: parameter names now MATCH the production
         signature (``actual_results``, ``reflection_context`` — previously
         ``results``/``context``), closing the audited latent break for
-        keyword callers. The recorded tuple shape is unchanged.
+        keyword callers.
+
+        Step 07 PR 07b: ``**kwargs`` swallows the two ADDITIVE reflector
+        kwargs (``metric_spec``, ``training_diagnosis``) the same way
+        :meth:`plan` already swallows new planner args, and they are appended
+        as a 6th tuple element so WF-2 can pin them WITHOUT disturbing the
+        5-element shape every existing consumer indexes into.
         """
-        self.calls.append(("reflect", exp_id, hypothesis, actual_results, reflection_context))
+        self.calls.append(
+            ("reflect", exp_id, hypothesis, actual_results, reflection_context, dict(kwargs))
+        )
         return self._pop("reflect")
 
     def plan(

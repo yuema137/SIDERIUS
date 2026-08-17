@@ -18,6 +18,7 @@ import pytest
 
 from core.runtime_control.admission import AdmissionDecision
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
+from tests.helpers.tuner_source import tuner_node_source
 
 EXECUTOR = Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
 DEV = DeviceIdentity(uuid="GPU-aaaa-0000", physical_index=0)
@@ -300,7 +301,7 @@ class TestProduceAndConsumeStaySeparate:
         assert "_build_skip_record" not in called
 
     def test_the_tuner_consumes_it_through_the_approved_handler(self):
-        tree = ast.parse(self.TUNER.read_text())
+        tree = ast.parse(tuner_node_source())
         handlers = {
             fn.name
             for fn in ast.walk(tree)

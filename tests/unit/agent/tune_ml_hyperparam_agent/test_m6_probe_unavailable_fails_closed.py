@@ -24,6 +24,7 @@ import pytest
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _resolve_time_check_probe_request,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
 
 @pytest.fixture
@@ -121,14 +122,18 @@ class TestTheRefusalSurvivesTheDownstreamGates:
         # erased on the very first formal round of every new campaign —
         # M6 would never be reached. The mandate is explicit that the
         # bypass may loosen the TIME decision and nothing else.
+        from execute_tools.metric_order import MetricOrder
         from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
             _should_bypass_formal_time_budget,
             is_evidence_refusal,
         )
+        from tests.helpers.metric_fixtures import shipped_spec
 
         # the bootstrap case: no incumbent -> the bypass always fires
         assert _should_bypass_formal_time_budget(
-            {"denoising_score": -999.0}, threshold=float("-inf")
+            {"denoising_score": -999.0},
+            threshold=float("-inf"),
+            order=MetricOrder(shipped_spec()),
         ), "precondition: the -inf bootstrap must make the bypass fire"
 
         tc = _time_check()
@@ -154,14 +159,8 @@ class TestTheRefusalSurvivesTheDownstreamGates:
         # condition inline and passed while the production guard was
         # deleted. Parsed as call nodes, not grepped as a substring.
         import ast
-        import importlib
-        import inspect
-        import pathlib
 
-        mod = importlib.import_module(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
-        )
-        tree = ast.parse(pathlib.Path(inspect.getfile(mod)).read_text())
+        tree = ast.parse(tuner_node_source())
         calls = [
             n
             for n in ast.walk(tree)

@@ -38,6 +38,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _may_advise_resource_reduction,
     _oom_memory_wording,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
 #: ASCII-only fragments of the exact production shrink strings.
 #:
@@ -189,7 +190,7 @@ class TestProductionReachability:
     def _functions_containing(fragment: str) -> set[str]:
         """Which functions hold this string. Adjacent literals are joined
         by the parser, so source wrapping does not hide one."""
-        tree = ast.parse(TUNER_SOURCE.read_text())
+        tree = ast.parse(tuner_node_source())
         found = set()
         for fn in ast.walk(tree):
             if not isinstance(fn, ast.FunctionDef):
@@ -215,7 +216,7 @@ class TestProductionReachability:
         only the second half would let a new site emit shrink wording
         without ever consulting the attribution.
         """
-        tree = ast.parse(TUNER_SOURCE.read_text())
+        tree = ast.parse(tuner_node_source())
         callers = {
             fn.name
             for fn in ast.walk(tree)
@@ -230,7 +231,7 @@ class TestProductionReachability:
         assert callers == {"_build_execution_failure_record"}
 
     def test_both_failure_sites_reach_the_builder(self):
-        tree = ast.parse(TUNER_SOURCE.read_text())
+        tree = ast.parse(tuner_node_source())
         phases = [
             kw.value.value
             for node in ast.walk(tree)
@@ -249,7 +250,7 @@ class TestProductionReachability:
         the pairing is structural rather than a convention repeated at
         nine call sites.
         """
-        tree = ast.parse(TUNER_SOURCE.read_text())
+        tree = ast.parse(tuner_node_source())
         direct = [
             node.lineno
             for node in ast.walk(tree)
@@ -333,7 +334,7 @@ class TestPlannerPromptGating:
         # long string across lines, and a fragment that spans the wrap is
         # absent from the raw text while being very much present in the
         # value the tuner emits.
-        source = re.sub(r'"\s*\n\s*"', "", TUNER_SOURCE.read_text())
+        source = re.sub(r'"\s*\n\s*"', "", tuner_node_source())
         for fragment in (TRAIN_SHRINK, TRAIN_SHRINK_MEMORY, INFER_SHRINK):
             assert fragment in source, fragment
 
@@ -523,9 +524,7 @@ class TestAdmissionRefusalConsumption:
         `sleep` would miss a retry expressed as a second call."""
         from unittest.mock import patch
 
-        with patch(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent._run_skill"
-        ) as run_skill:
+        with patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill") as run_skill:
             handled, saved = self._handle(_refusal())
         assert handled is True
         assert run_skill.call_count == 0

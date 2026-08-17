@@ -33,12 +33,16 @@ def route_preflight_to_run_skill_stub():
     Resolved at call time, not at patch time, so it picks up whichever
     mock the individual test installed inside its own ``with`` block.
     """
-    tuner = importlib.import_module(
-        "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
-    )
+    # The boundary lives where the call is made: pre-flight is invoked from the
+    # tuner's private `execution` module (Step 07 PR 07b, C7d), and `_run_skill`
+    # is owned by `runtime`. Patching the node's public module would bind names
+    # nothing calls — and, as the docstring above records, a stub that stops
+    # intercepting here HANGS rather than fails.
+    execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
+    runtime = importlib.import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 
     def _delegate(**kwargs):
-        return tuner._run_skill(
+        return runtime._run_skill(
             "evaluate_vram_skill",
             None,
             model_type=kwargs.get("model_type"),
@@ -49,7 +53,7 @@ def route_preflight_to_run_skill_stub():
             hardware_context=kwargs.get("hardware_context"),
         )
 
-    with patch.object(tuner, "run_production_preflight", side_effect=_delegate):
+    with patch.object(execution, "run_production_preflight", side_effect=_delegate):
         yield
 
 

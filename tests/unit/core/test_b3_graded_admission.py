@@ -28,6 +28,7 @@ from core.runtime_control.decision_policy import (
     RuntimeMode,
 )
 from core.runtime_control.estimate_types import make_estimate
+from tests.helpers.tuner_source import tuner_node_source
 
 _GB = 1024
 _FORMAL = RuntimeMode(phase="formal", candidate_stage="post_implementation", probe_available=True)
@@ -321,7 +322,7 @@ class TestTheThresholdReachesTheProductionBudget:
 
         import nodes.ml_hyperparameter_tune_agent as tuner
 
-        src = inspect.getsource(tuner)
+        src = tuner_node_source()
         assert 'vram_threshold_gb=(resource_check or {}).get("limit_gb")' in src, (
             "the probe call site no longer passes the effective admission "
             "threshold; the S3 rule is armed by this and nothing else"

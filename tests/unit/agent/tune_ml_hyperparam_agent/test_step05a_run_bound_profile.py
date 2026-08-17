@@ -183,13 +183,15 @@ def _run_tuner(
     with (
         patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-        patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+        patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill),
         patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
         patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
             return_value=_synth_reference(),
         ),
-        patch("nodes.ml_hyperparameter_tune_agent.get_gates_for_position", return_value=[]),
+        patch(
+            "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position", return_value=[]
+        ),
         patch("os.path.exists", return_value=True),
         resolver_patch,
     ):

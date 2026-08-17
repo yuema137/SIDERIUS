@@ -26,6 +26,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.tuner_source import tuner_node_tree
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TUNER = REPO_ROOT / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
 ADAPTER = REPO_ROOT / "agent/skills/evaluate_vram_skill/preflight_adapter.py"
@@ -68,10 +70,10 @@ def _string_args(tree: ast.Module, callee: str) -> set[str]:
 class TestProductionReachesTheIsolatedWorker:
     def test_tuner_calls_the_adapter(self):
         """The audited production caller must reach the adapter."""
-        assert "run_production_preflight" in _called_names(_tree(TUNER))
+        assert "run_production_preflight" in _called_names(tuner_node_tree())
 
     def test_tuner_imports_the_adapter(self):
-        tree = _tree(TUNER)
+        tree = tuner_node_tree()
         modules = {
             node.module
             for node in ast.walk(tree)
@@ -95,7 +97,7 @@ class TestNoInProcessFallback:
         If someone restores ``_run_skill("evaluate_vram_skill", …)`` in the
         tuner, the parent gets its CUDA context back and this fails.
         """
-        assert "evaluate_vram_skill" not in _string_args(_tree(TUNER), "_run_skill")
+        assert "evaluate_vram_skill" not in _string_args(tuner_node_tree(), "_run_skill")
 
     def test_adapter_does_not_import_the_in_process_skill(self):
         tree = _tree(ADAPTER)

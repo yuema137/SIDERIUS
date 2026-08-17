@@ -24,6 +24,8 @@ from agent.llm_bridge import (
     ToolCallResult,
 )
 from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
+from tests.helpers.metric_fixtures import shipped_spec
+from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import tidmad_task_render
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -481,6 +483,7 @@ class TestReflectModelSplit:
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
                 actual_results={"denoising_score": 1.5},
+                metric_spec=shipped_spec(),
             )
             assert mock_create.call_args.kwargs["model"] == "reflector-model"
 
@@ -495,6 +498,7 @@ class TestReflectModelSplit:
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
                 actual_results={"denoising_score": 1.5},
+                metric_spec=shipped_spec(),
             )
             assert mock_create.call_args.kwargs["model"] == "single-model"
 
@@ -512,6 +516,7 @@ class TestReflectModelSplit:
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
                 actual_results={"denoising_score": 1.5},
+                metric_spec=shipped_spec(),
             )
             messages = mock_create.call_args.kwargs["messages"]
             # The reflector system prompt should be present (signature
@@ -533,6 +538,7 @@ class TestReflectModelSplit:
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
                 actual_results={"denoising_score": 1.5},
+                metric_spec=shipped_spec(),
             )
             # Two API calls expected, with two distinct model values
             assert mock_create.call_count == 2
@@ -628,6 +634,7 @@ class TestReflectProviderSplit:
                 exp_id="exp_001",
                 hypothesis="test hypothesis",
                 actual_results={"denoising_score": 1.5},
+                metric_spec=shipped_spec(),
             )
             assert main_client.chat.completions.create.call_count == 1  # unchanged
             assert reflect_client.chat.completions.create.call_count == 1  # incremented
@@ -867,6 +874,8 @@ class TestPlanScoreTableSubstitution:
             memory_history=[],
             expert_advice="none",
             score_table_md=_RENDERED_SENTINEL,
+            task_render=tidmad_task_render(),
+            metric_spec=shipped_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _TABLE_MARKER in sent_system
@@ -877,7 +886,12 @@ class TestPlanScoreTableSubstitution:
     def test_plan_none_uses_planner_fallback(self):
         create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
         bridge = self._bridge_with_mocked_create(create_mock)
-        bridge.plan(memory_history=[], expert_advice="none")  # no score_table_md
+        bridge.plan(
+            memory_history=[],
+            expert_advice="none",
+            task_render=tidmad_task_render(),
+            metric_spec=shipped_spec(),
+        )  # no score_table_md
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _PLANNER_SCORE_TABLE_FALLBACK in sent_system
         assert "{SCORE_COMPARISON_TABLE}" not in sent_system
@@ -887,7 +901,13 @@ class TestPlanScoreTableSubstitution:
         fallback text, consistent with None."""
         create_mock = MagicMock(return_value=_chat_response(VALID_JSON_STR))
         bridge = self._bridge_with_mocked_create(create_mock)
-        bridge.plan(memory_history=[], expert_advice="none", score_table_md="")
+        bridge.plan(
+            memory_history=[],
+            expert_advice="none",
+            score_table_md="",
+            task_render=tidmad_task_render(),
+            metric_spec=shipped_spec(),
+        )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _PLANNER_SCORE_TABLE_FALLBACK in sent_system
 
@@ -909,6 +929,7 @@ class TestReflectScoreTableSubstitution:
             hypothesis="hypo",
             actual_results={"denoising_score": 1.5},
             reflection_context={"score_comparison_table": _RENDERED_SENTINEL},
+            metric_spec=shipped_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _TABLE_MARKER in sent_system
@@ -923,6 +944,7 @@ class TestReflectScoreTableSubstitution:
             hypothesis="hypo",
             actual_results={"denoising_score": 1.5},
             reflection_context=None,
+            metric_spec=shipped_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _REFLECTOR_SCORE_TABLE_FALLBACK in sent_system
@@ -936,6 +958,7 @@ class TestReflectScoreTableSubstitution:
             hypothesis="hypo",
             actual_results={"denoising_score": 1.5},
             reflection_context={"baseline_score": 0.5},  # no score_comparison_table
+            metric_spec=shipped_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _REFLECTOR_SCORE_TABLE_FALLBACK in sent_system
@@ -950,6 +973,7 @@ class TestReflectScoreTableSubstitution:
             hypothesis="hypo",
             actual_results={"denoising_score": 1.5},
             reflection_context={"score_comparison_table": None},
+            metric_spec=shipped_spec(),
         )
         sent_system = create_mock.call_args.kwargs["messages"][0]["content"]
         assert _REFLECTOR_SCORE_TABLE_FALLBACK in sent_system

@@ -56,6 +56,11 @@ from execute_tools.evaluation_metric import (
     derive_tidmad_metric,
     derive_tidmad_metric_spec,
 )
+from tests.helpers.metric_fixtures import (
+    CONTRAST_ID,
+    DIRECTION_ONLY_ID,
+    direction_only_metric,
+)
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
 from tests.unit.core.test_step06_c0_two_route_oracle import (
     FILE_INDEX,
@@ -72,19 +77,10 @@ _PREFLIGHT_FIXTURE = (
     / "step00_preflight_results.json"
 )
 
-CONTRAST_ID = "step06_mean_abs_amplitude"  # C6b — the broader different-metric rung
-DIRECTION_ONLY_ID = "step06_tidmad_denoising_score_lower"  # C6a — the strict one-axis flip
-
-
-def _direction_only_metric(profile=TIDMAD_PROFILE) -> TidmadDenoisingMetric:
-    """C6a: the shipped TIDMAD spec with ONLY ``direction`` (and the id, for
-    record identification) changed; bound to the SAME ``TidmadDenoisingMetric``
-    arithmetic. Everything else — contract, references, transform, aggregation
-    — is the shipped instance's, by construction from ``model_copy``."""
-    shipped = derive_tidmad_metric_spec(profile)
-    return TidmadDenoisingMetric(
-        shipped.model_copy(update={"id": DIRECTION_ONLY_ID, "direction": "lower"})
-    )
+# Step 07 PR 07b promoted both the ids and the C6a factory to
+# ``tests/helpers/metric_fixtures.py`` so its own direction rungs bind the SAME
+# one-axis handle. The names below stay this module's vocabulary.
+_direction_only_metric = direction_only_metric
 
 
 class MeanAbsAmplitudeMetric(EvaluationMetric):

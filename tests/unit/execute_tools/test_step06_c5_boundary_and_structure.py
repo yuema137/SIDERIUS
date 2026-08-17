@@ -22,6 +22,12 @@ Three properties, each with the defect only it catches:
   the metric handle "covers" a consumer it never touched. If one of these
   goes red, someone migrated a consumer: record it as reached (Step 07a / D1),
   do not silence the guard.
+
+**Step 07 PR 07b did exactly that** for the four tuner rows: they moved from
+``NOT_REACHED_DIRECTION_CONSUMERS`` to ``MIGRATED_TO_THE_ORDER_AUTHORITY``,
+where the assertion is inverted — the hardcoded comparison must now be
+ABSENT and ``MetricOrder`` present. The D1 rows (chain / resume /
+per_file_best / dashboard) are still debt and still hold their literals.
 """
 
 from __future__ import annotations
@@ -46,6 +52,12 @@ PRODUCTION_DIRS = (
     "dashboard",
 )
 METRIC_MODULE = "execute_tools/evaluation_metric.py"
+#: Step 07 PR 07b added the ONE order authority. It is the only production
+#: module besides the metric module that may execute a direction literal,
+#: because interpreting ``MetricSpec.direction`` is precisely its job — and
+#: doing it in exactly one place is the property 07b bought. Every consumer
+#: asks this module instead of re-deriving the convention.
+ORDER_MODULE = "execute_tools/metric_order.py"
 
 
 def _production_files():
@@ -101,8 +113,14 @@ def test_per_file_best_still_emits_the_precedent_identity_through_the_import():
 def test_no_production_surface_executes_a_direction_literal_outside_the_metric_module():
     """The owned scoring surfaces (tuner live route, ``TidmadSandbox``, the
     scorer CLI) and every other production module read direction from the
-    handle or not at all; only the metric module names it — once for the
-    vocabulary (``MetricDirection``) and once for the TIDMAD derivation."""
+    handle or not at all.
+
+    TWO modules name it, and the split is the architecture: the metric module
+    DECLARES the vocabulary (``MetricDirection``) and TIDMAD's value; the
+    order module (Step 07 PR 07b) INTERPRETS it. Anything else executing
+    ``"higher"``/``"lower"`` is a third authority that a direction flip would
+    leave behind — which is the entire defect 07b removed from 21 tuner sites.
+    """
     offenders = {}
     for p in _production_files():
         rel = p.relative_to(REPO_ROOT).as_posix()
@@ -110,6 +128,20 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
         if rel == METRIC_MODULE:
             # Literal["higher", "lower"] (vocabulary) + direction="higher" (TIDMAD).
             assert sorted(found) == ["higher", "higher", "lower"], found
+            continue
+        if rel == ORDER_MODULE:
+            # Five executed literals, all in one place on purpose:
+            #   `_HIGHER = "higher"`            — the single comparison every
+            #                                     ordering decision derives from;
+            #   `direction_words`               — comparative ("higher"/"lower")
+            #                                     and antonym ("lower"/"higher"),
+            #                                     for prose that must STATE the
+            #                                     direction rather than apply it.
+            # Pinned as an exact multiset, not merely "non-empty": the guard's
+            # job is that no THIRD module reads the declaration, and an unpinned
+            # allowance here would let this one quietly grow into a second
+            # authority — the very thing it exists to prevent.
+            assert sorted(found) == ["higher", "higher", "higher", "lower", "lower"], found
             continue
         if found:
             offenders[rel] = found
@@ -126,23 +158,6 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
 # claim "the handle reaches only the live scoring route + record payload" is
 # checkable, and so migrating one of them is a visible, recorded act.
 NOT_REACHED_DIRECTION_CONSUMERS = (
-    # Step 07a — incumbent / best selection inside the tuner
-    (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-        'max(candidates, key=lambda r: r["denoising_score"])',
-    ),
-    (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-        'max(successful, key=lambda r: r["denoising_score"]) if successful else None',
-    ),
-    (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-        'max(successful_records, key=lambda r: r["denoising_score"])',
-    ),
-    (
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
-        "current_score > best_score",
-    ),
     # D1 — chain / resume / artifacts / dashboard
     (
         "workflows/model_exploration.py",
@@ -166,3 +181,43 @@ def test_the_not_reached_direction_consumers_still_hold_their_literal(relative, 
         f"NOT reached has changed — record it as reached (Step 07a / D1) rather than "
         f"silencing this guard"
     )
+
+
+# ---------------------------------------------------------------------------
+# 3b. MIGRATED (Step 07 PR 07b) — recorded as reached, per this file's own rule
+# ---------------------------------------------------------------------------
+
+# The four tuner entries above were Step 06's "not reached" debt. PR 07b
+# migrated them to ``MetricOrder``; per the docstring's instruction they are
+# RECORDED AS REACHED rather than deleted, and the guard is inverted — the
+# literal must now be ABSENT. Deleting the rows instead would have left no
+# evidence that the migration happened, which is the drift §16-Q6 was written
+# to prevent.
+MIGRATED_TO_THE_ORDER_AUTHORITY = (
+    (
+        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        'max(candidates, key=lambda r: r["denoising_score"])',
+    ),
+    (
+        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        'max(successful, key=lambda r: r["denoising_score"]) if successful else None',
+    ),
+    (
+        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        'max(successful_records, key=lambda r: r["denoising_score"])',
+    ),
+    (
+        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "current_score > best_score",
+    ),
+)
+
+
+@pytest.mark.parametrize("relative, literal", MIGRATED_TO_THE_ORDER_AUTHORITY)
+def test_the_migrated_tuner_consumers_no_longer_hold_their_literal(relative, literal):
+    source = (REPO_ROOT / relative).read_text(encoding="utf-8")
+    assert literal not in source, (
+        f"{relative} still contains {literal!r}: Step 07 PR 07b routed this consumer through "
+        f"MetricOrder, so the hardcoded higher-is-better comparison must be gone"
+    )
+    assert "MetricOrder" in source

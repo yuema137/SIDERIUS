@@ -11,6 +11,7 @@
   "last_vram_estimate_gb",
   "max_epochs",
   "max_rounds",
+  "metric_spec",
   "model_description",
   "plan_overrides",
   "plugin_source_excerpt",
@@ -18,6 +19,7 @@
   "resolved_data_scope",
   "score_table_md",
   "task_description",
+  "task_render",
   "trial_allowed",
   "trial_time_budget_minutes",
   "trial_vram_budget_gb"

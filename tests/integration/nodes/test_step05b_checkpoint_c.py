@@ -253,9 +253,13 @@ def _drive_tuner(tmp_path, harness, *, capture: dict):
     with (
         patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-        patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_spy_run_skill),
-        patch("nodes.ml_hyperparameter_tune_agent.run_production_preflight", _spy_preflight),
-        patch("nodes.ml_hyperparameter_tune_agent.get_gates_for_position", return_value=[]),
+        patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_spy_run_skill),
+        patch(
+            "nodes.ml_hyperparameter_tune_agent.execution.run_production_preflight", _spy_preflight
+        ),
+        patch(
+            "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position", return_value=[]
+        ),
         patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
         patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",

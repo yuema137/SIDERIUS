@@ -1,0 +1,465 @@
+{
+  "_captured_at": "captured at f17bbdb87e79ee823c969cee63df37bc99437d70 (07b implementation base), clean tree, BEFORE any 07b production edit \u2014 Step 07 PR 07b C1 / Checkpoint 0",
+  "winners": {
+    "h_collapse_penalty": {
+      "exp_id": "t_ok2",
+      "denoising_score": -2.7
+    },
+    "h_empty": {
+      "exp_id": null,
+      "denoising_score": null
+    },
+    "h_invalid_candidate": {
+      "exp_id": "t_ok",
+      "denoising_score": -3.0
+    },
+    "h_nan": {
+      "exp_id": "t_ok",
+      "denoising_score": -3.0
+    },
+    "h_neg_inf": {
+      "exp_id": "t_ok",
+      "denoising_score": -3.0
+    },
+    "h_no_successes": {
+      "exp_id": null,
+      "denoising_score": null
+    },
+    "h_none_score": {
+      "exp_id": "t_ok",
+      "denoising_score": -3.0
+    },
+    "h_pos_inf": {
+      "exp_id": "t_ok",
+      "denoising_score": -3.0
+    },
+    "h_simple_trials": {
+      "exp_id": "t_high",
+      "denoising_score": -2.55
+    },
+    "h_tie_first_wins": {
+      "exp_id": "t_tie_a",
+      "denoising_score": -2.5
+    },
+    "h_time_mode_mismatch": {
+      "exp_id": "t_ok",
+      "denoising_score": -3.0
+    },
+    "h_trial_formal_mix": {
+      "exp_id": "t_only",
+      "denoising_score": -3.3
+    }
+  },
+  "gates": {
+    "h_collapse_penalty": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_empty": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": true,
+        "bypass": false
+      }
+    },
+    "h_invalid_candidate": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_nan": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_neg_inf": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_no_successes": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": true,
+        "bypass": false
+      }
+    },
+    "h_none_score": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_pos_inf": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_simple_trials": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_tie_first_wins": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_time_mode_mismatch": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    },
+    "h_trial_formal_mix": {
+      "gates_off": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_none": {
+        "skip": false,
+        "bypass": false
+      },
+      "threshold_worst_sentinel": {
+        "skip": false,
+        "bypass": true
+      },
+      "threshold_best_sentinel": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_above_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_equal_winner": {
+        "skip": true,
+        "bypass": false
+      },
+      "threshold_below_winner": {
+        "skip": false,
+        "bypass": true
+      }
+    }
+  },
+  "thresholds": {
+    "gates_off_no_reference": {
+      "reference": null,
+      "skip_threshold": null,
+      "bypass_threshold": null,
+      "source": "gates_disabled"
+    },
+    "gates_off_with_reference": {
+      "reference": -2.5,
+      "skip_threshold": -3.5,
+      "bypass_threshold": -2.5,
+      "source": "restored_valid_formal_incumbent"
+    },
+    "bootstrap": {
+      "reference": "__neg_inf__",
+      "skip_threshold": "__neg_inf__",
+      "bypass_threshold": "__neg_inf__",
+      "source": "negative_infinity_bootstrap"
+    },
+    "restored_defaults": {
+      "reference": -2.5,
+      "skip_threshold": -3.5,
+      "bypass_threshold": -2.5,
+      "source": "restored_valid_formal_incumbent"
+    },
+    "restored_positive_deltas": {
+      "reference": -2.5,
+      "skip_threshold": -2.25,
+      "bypass_threshold": -2.0,
+      "source": "restored_valid_formal_incumbent"
+    },
+    "restored_skip_disabled": {
+      "reference": -2.5,
+      "skip_threshold": "__neg_inf__",
+      "bypass_threshold": -2.5,
+      "source": "restored_valid_formal_incumbent"
+    },
+    "restored_bypass_disabled": {
+      "reference": -2.5,
+      "skip_threshold": -3.5,
+      "bypass_threshold": "__pos_inf__",
+      "source": "restored_valid_formal_incumbent"
+    },
+    "restored_zero_reference": {
+      "reference": 0.0,
+      "skip_threshold": -1.0,
+      "bypass_threshold": 0.0,
+      "source": "restored_valid_formal_incumbent"
+    }
+  }
+}

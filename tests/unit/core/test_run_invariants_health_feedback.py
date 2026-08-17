@@ -21,6 +21,7 @@ from core.run_invariants import (
     ensure_run_invariants,
     load_run_invariants,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
 REPO = Path(__file__).resolve().parents[3]
 _TUNER = REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
@@ -109,7 +110,7 @@ class TestTunerPassThrough:
         assert inp_fields["health_feedback_history_max_entries_per_model"].default == 8
 
     def test_tuner_lock_call_passes_all_three(self):
-        src = _TUNER.read_text()
+        src = tuner_node_source()
         call = re.search(r"build_run_invariants\((.*?)\n        \)", src, re.DOTALL).group(1)
         for kwarg in (
             "structured_health_feedback_enabled=",
@@ -120,7 +121,7 @@ class TestTunerPassThrough:
         assert "agent_input.enable_structured_health_feedback" in call
 
     def test_tuner_run_config_stamps_all_three(self):
-        src = _TUNER.read_text()
+        src = tuner_node_source()
         for key in (
             '"enable_structured_health_feedback"',
             '"health_feedback_history_window_iterations"',

@@ -220,7 +220,7 @@ def agent_with_inference_error():
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge"),
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox"),
             patch(
-                "nodes.ml_hyperparameter_tune_agent._run_skill",
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill",
                 side_effect=side_effect,
             ),
             patch(

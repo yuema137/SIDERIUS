@@ -64,6 +64,20 @@ def project_plan_call(call: tuple) -> dict:
     projected = dict(kwargs)
     registry = projected.pop("registry", None)
     config_manual = projected.pop("config_manual", None)
+    # Step 07 PR 07b — ``task_render`` is a frozen Pydantic model of small
+    # deterministic strings, so unlike ``registry`` it is pinned by CONTENT:
+    # its fields ARE the task facts the planner is told, and a drift in any of
+    # them is exactly what this baseline exists to catch.
+    task_render = projected.pop("task_render", None)
+    # ``mode="json"`` so tuple fields land as lists: the golden round-trips
+    # through JSON, and a tuple/list mismatch fails the deep-compare while
+    # producing an EMPTY diff, which is the least debuggable failure there is.
+    projected["task_render"] = None if task_render is None else task_render.model_dump(mode="json")
+    # Step 07 PR 07b (P3) — same treatment for the metric declaration: its
+    # `direction` and `id` are what the planner prompt now states, so a drift
+    # in either is an LLM-visible change this baseline must catch.
+    metric_spec = projected.pop("metric_spec", None)
+    projected["metric_spec"] = None if metric_spec is None else metric_spec.model_dump(mode="json")
     projected["config_manual_keys"] = (
         sorted(config_manual) if isinstance(config_manual, dict) else config_manual
     )
@@ -108,7 +122,7 @@ class TestWF2ReflectCallSurface:
         reflects = [c for c in bridge.calls if c[0] == "reflect"]
         assert len(reflects) == 2, "one reflect per successful round"
         projected = []
-        for _method, exp_id, hypothesis, actual_results, reflection_context in reflects:
+        for _method, exp_id, hypothesis, actual_results, reflection_context, extra in reflects:
             projected.append(
                 {
                     "exp_id": _PRESENT if exp_id else exp_id,
@@ -117,10 +131,18 @@ class TestWF2ReflectCallSurface:
                     "reflection_context_keys": sorted(reflection_context.keys())
                     if reflection_context
                     else None,
+                    # Step 07 PR 07b — the two ADDITIVE kwargs, pinned by NAME
+                    # and TYPE. The point of WF-2 here is that they arrived as
+                    # kwargs and did NOT appear inside `actual_results` or
+                    # `reflection_context`, whose key lists above stay at their
+                    # frozen 9 and 23.
+                    "additive_kwargs": {
+                        name: type(value).__name__ for name, value in sorted(extra.items())
+                    },
                 }
             )
         assert_json_golden(
-            projected,
+            {"calls": projected},
             GOLDENS / "wf2_reflect_call_surfaces.json",
             surface="WF-2 reflect() call surfaces",
         )

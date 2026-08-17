@@ -1,0 +1,327 @@
+{
+  "_note": [
+    "Step 07 PR 07b — C1 Checkpoint-0 selection replay CORPUS (hand-authored).",
+    "Design: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md §5 / C1.",
+    "Each history names ONE awkward case the selection/threshold helpers must keep",
+    "handling identically after the MetricOrder rewire (C2) and the scale-rule",
+    "classification (C3). Non-finite scores travel as the sentinel STRINGS",
+    "'__neg_inf__' / '__pos_inf__' / '__nan__' (decoded by the test) so the fixture",
+    "stays strict-JSON parseable — the same reason _json_safe_reference refuses to",
+    "persist bare Infinity/NaN.",
+    "Record shape: only the fields the audited helpers actually read —",
+    "status, denoising_score, is_trial, memory.time_mode, health_gate_enabled",
+    "(the DS5 self-describing waiver that makes a successful finite record VALID),",
+    "health_gate_results (for the UNKNOWN/INVALID validity cases)."
+  ],
+  "histories": {
+    "h_empty": {
+      "case": "no records at all — no trial winner, both gates inert",
+      "records": []
+    },
+    "h_simple_trials": {
+      "case": "three VALID trials, distinct finite scores — the plain argmax/argmin case",
+      "records": [
+        {
+          "exp_id": "t_low",
+          "status": "success",
+          "denoising_score": -3.4,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_mid",
+          "status": "success",
+          "denoising_score": -2.91,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_high",
+          "status": "success",
+          "denoising_score": -2.55,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_tie_first_wins": {
+      "case": "two VALID trials tie at the extreme score — max()/min() keep the FIRST; C2 must not reorder",
+      "records": [
+        {
+          "exp_id": "t_tie_a",
+          "status": "success",
+          "denoising_score": -2.5,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_tie_b",
+          "status": "success",
+          "denoising_score": -2.5,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_worse",
+          "status": "success",
+          "denoising_score": -4.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_none_score": {
+      "case": "a success record whose score is None — INVALID, never a candidate",
+      "records": [
+        {
+          "exp_id": "t_none",
+          "status": "success",
+          "denoising_score": null,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_neg_inf": {
+      "case": "-inf score — non-finite, INVALID under either direction",
+      "records": [
+        {
+          "exp_id": "t_neg_inf",
+          "status": "success",
+          "denoising_score": "__neg_inf__",
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_pos_inf": {
+      "case": "+inf score — non-finite, INVALID; must never win under `higher` either",
+      "records": [
+        {
+          "exp_id": "t_pos_inf",
+          "status": "success",
+          "denoising_score": "__pos_inf__",
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_nan": {
+      "case": "NaN score — non-finite, INVALID (and never equal to itself)",
+      "records": [
+        {
+          "exp_id": "t_nan",
+          "status": "success",
+          "denoising_score": "__nan__",
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_collapse_penalty": {
+      "case": "failed_mode_collapse carrying the operator penalty -5.0 — never an incumbent under EITHER direction (under `lower` it would read as the best score)",
+      "records": [
+        {
+          "exp_id": "t_collapsed",
+          "status": "failed_mode_collapse",
+          "denoising_score": -5.0,
+          "failure_reason": "amplitude_collapse",
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok2",
+          "status": "success",
+          "denoising_score": -2.7,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_invalid_candidate": {
+      "case": "gate-bearing record whose required blocking gate FAILED (INVALID) and one whose gates are missing (UNKNOWN) — neither is a candidate although both score better than the valid record",
+      "records": [
+        {
+          "exp_id": "t_gate_failed",
+          "status": "success",
+          "denoising_score": -1.0,
+          "is_trial": true,
+          "health_gate_enabled": true,
+          "health_gate_results": [
+            {
+              "gate_name": "output_diversity",
+              "execution_status": "passed",
+              "check_passed": false,
+              "would_invalidate_under_production_policy": true
+            }
+          ],
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_gates_missing",
+          "status": "success",
+          "denoising_score": -1.5,
+          "is_trial": true,
+          "health_gate_enabled": true,
+          "health_gate_results": [],
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_trial_formal_mix": {
+      "case": "formal records score better than every trial — the winner is still a TRIAL record",
+      "records": [
+        {
+          "exp_id": "f_best",
+          "status": "success",
+          "denoising_score": -1.2,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "formal"}
+        },
+        {
+          "exp_id": "f_second",
+          "status": "success",
+          "denoising_score": -1.8,
+          "is_trial": false,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "formal"}
+        },
+        {
+          "exp_id": "t_only",
+          "status": "success",
+          "denoising_score": -3.3,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_time_mode_mismatch": {
+      "case": "is_trial=True but memory.time_mode='formal' — the two-field agreement rule excludes it",
+      "records": [
+        {
+          "exp_id": "t_mismatch",
+          "status": "success",
+          "denoising_score": -1.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "formal"}
+        },
+        {
+          "exp_id": "t_ok",
+          "status": "success",
+          "denoising_score": -3.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    },
+    "h_no_successes": {
+      "case": "every record failed — no valid trial winner, no best_* track",
+      "records": [
+        {
+          "exp_id": "t_oom",
+          "status": "skipped_oom",
+          "denoising_score": null,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        },
+        {
+          "exp_id": "t_crash",
+          "status": "error_training",
+          "denoising_score": null,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {"time_mode": "trial"}
+        }
+      ]
+    }
+  },
+  "threshold_scenarios": {
+    "_note": "reference / delta / gates_enabled inputs for _resolve_formal_comparison_thresholds",
+    "cases": [
+      {"id": "gates_off_no_reference", "reference_score": null, "skip_min_delta": -1.0, "bypass_min_delta": 0.0, "gates_enabled": false},
+      {"id": "gates_off_with_reference", "reference_score": -2.5, "skip_min_delta": -1.0, "bypass_min_delta": 0.0, "gates_enabled": false},
+      {"id": "bootstrap", "reference_score": null, "skip_min_delta": -1.0, "bypass_min_delta": 0.0, "gates_enabled": true},
+      {"id": "restored_defaults", "reference_score": -2.5, "skip_min_delta": -1.0, "bypass_min_delta": 0.0, "gates_enabled": true},
+      {"id": "restored_positive_deltas", "reference_score": -2.5, "skip_min_delta": 0.25, "bypass_min_delta": 0.5, "gates_enabled": true},
+      {"id": "restored_skip_disabled", "reference_score": -2.5, "skip_min_delta": "__neg_inf__", "bypass_min_delta": 0.0, "gates_enabled": true},
+      {"id": "restored_bypass_disabled", "reference_score": -2.5, "skip_min_delta": -1.0, "bypass_min_delta": "__pos_inf__", "gates_enabled": true},
+      {"id": "restored_zero_reference", "reference_score": 0.0, "skip_min_delta": -1.0, "bypass_min_delta": 0.0, "gates_enabled": true}
+    ]
+  },
+  "gate_scenarios": {
+    "_note": "threshold / gates_enabled inputs applied to EVERY history's resolved winner",
+    "cases": [
+      {"id": "gates_off", "threshold": -2.0, "gates_enabled": false},
+      {"id": "threshold_none", "threshold": null, "gates_enabled": true},
+      {"id": "threshold_worst_sentinel", "threshold": "__neg_inf__", "gates_enabled": true},
+      {"id": "threshold_best_sentinel", "threshold": "__pos_inf__", "gates_enabled": true},
+      {"id": "threshold_above_winner", "threshold": -2.0, "gates_enabled": true},
+      {"id": "threshold_equal_winner", "threshold": -2.55, "gates_enabled": true},
+      {"id": "threshold_below_winner", "threshold": -4.0, "gates_enabled": true}
+    ]
+  }
+}

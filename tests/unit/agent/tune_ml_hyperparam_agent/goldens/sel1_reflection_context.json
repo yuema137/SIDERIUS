@@ -1,0 +1,79 @@
+{
+  "_captured_at": "captured at f17bbdb87e79ee823c969cee63df37bc99437d70 (07b implementation base), clean tree, BEFORE any 07b production edit \u2014 Step 07 PR 07b C1 / Checkpoint 0",
+  "contexts": [
+    {
+      "baseline_epochs": null,
+      "baseline_params": null,
+      "baseline_psd_segments": null,
+      "baseline_score": null,
+      "best_config_so_far": null,
+      "best_same_loss_final_loss": null,
+      "best_score_so_far": null,
+      "current_epochs": 1,
+      "current_loss_type": "ce",
+      "current_params": 98432,
+      "epochs_ratio": null,
+      "eval_portion": 0.05,
+      "eval_psd_segments": 200,
+      "is_more_efficient": false,
+      "is_new_best": true,
+      "params_ratio": null,
+      "rank": null,
+      "same_loss_loss_rank": 1,
+      "same_loss_total": 1,
+      "score_comparison_table": "### Per-file performance (log-space, all three columns on global s_max)\n\n| file | raw_baseline | ground_truth | **model** | gain vs raw | headroom vs gt | Impact | Weight % |\n|-----:|-------------:|-------------:|----------:|------------:|---------------:|-------:|---------:|\n|    0 |     \u221211.4402 |      \u22128.2610 |   \u22120.4804 |     10.9597 |         0.0000 | 0.0000 |     3.3% |\n|    1 |     \u221211.9486 |      \u22129.3737 |   \u22120.4804 |     11.4682 |         0.0000 | 0.0000 |     3.3% |\n|    2 |     \u221210.3080 |      \u22124.6847 |   \u22120.4804 |      9.8276 |         0.0000 | 0.0000 |     3.3% |\n|    3 |      \u22126.6794 |       0.0919 |   \u22120.4804 |      6.1990 |         0.5724 | 0.0304 |     3.3% |\n|    4 |      \u22122.9261 |       4.9414 |   \u22120.4804 |      2.4456 |         5.4218 | 3.3644 |     3.3% |\n|    5 |      \u22121.8656 |       7.4617 |   \u22120.2592 |      1.6064 |         7.7209 | 5.8825 |     4.7% |\n|    6 |      \u22120.4838 |       6.5623 |   \u22120.2592 |      0.2246 |         6.8215 | 4.9833 |     4.7% |\n|    7 |      \u22120.0084 |       6.9212 |   \u22120.2592 |     \u22120.2508 |         7.1804 | 5.3421 |     4.7% |\n|    8 |       0.2964 |       7.7324 |   \u22120.2592 |     \u22120.5556 |         7.9916 | 6.1532 |     4.7% |\n|    9 |       0.4708 |       8.1803 |   \u22120.2592 |     \u22120.7300 |         8.4395 | 6.6011 |     4.7% |\n|   10 |       0.6754 |       8.6519 |   \u22120.2592 |     \u22120.9346 |         8.9111 | 7.0727 |     4.7% |\n|   11 |      \u22120.0654 |       8.8088 |   \u22120.0978 |     \u22120.0324 |         8.9066 | 7.2296 |     6.2% |\n|   12 |       0.3610 |      10.1165 |   \u22120.0978 |     \u22120.4588 |        10.2143 | 8.5373 |     6.2% |\n|   13 |       1.3150 |       9.7085 |   \u22120.0978 |     \u22121.4128 |         9.8063 | 8.1293 |     6.2% |\n|   14 |       1.6727 |      10.1949 |   \u22120.0978 |     \u22121.7704 |        10.2927 | 8.6157 |     6.2% |\n|   15 |       1.5108 |      10.3205 |   \u22120.0978 |     \u22121.6086 |        10.4183 | 8.7413 |     6.2% |\n|   16 |       1.5429 |      10.7090 |   \u22120.0978 |     \u22121.6407 |        10.8067 | 9.1298 |     6.2% |\n|   17 |       1.8326 |      11.2213 |   \u22120.0978 |     \u22121.9304 |        11.3190 | 9.6421 |     6.2% |\n|   18 |       1.7314 |      11.0215 |   \u22120.0978 |     \u22121.8291 |        11.1193 | 9.4423 |     6.2% |\n|   19 |       1.0027 |      10.5676 |   \u22120.0978 |     \u22121.1005 |        10.6654 | 8.9884 |     6.2% |\n\n### Aggregated scalar (log space, global s_max)\n\nSingle number per row \u2014 the `final_scalar` returned by `score_vector()` for each source. This is the only aggregation in the pipeline.\n\n| metric               | log scalar |\n|----------------------|-----------:|\n| ground_truth ceiling |    10.1134 |\n| **model**            | **0.6500** |\n| raw baseline         |     1.0007 |\n\nRecovery: < 0% (Model performance is below raw baseline).\n\n### Sampled files re-ranked by Impact_Score (descending)\n\nHighest-impact rows first \u2014 the marginal log-scalar gain available if each file were lifted to its ground-truth ceiling. Use this column to pick the next-iteration lever.\n\n| file | Impact | Weight % | headroom vs gt | model |\n|-----:|-------:|---------:|---------------:|------:|\n|   17 | 9.6421 |     6.2% |        11.3190 | \u22120.0978 |\n|   18 | 9.4423 |     6.2% |        11.1193 | \u22120.0978 |\n|   16 | 9.1298 |     6.2% |        10.8067 | \u22120.0978 |\n|   19 | 8.9884 |     6.2% |        10.6654 | \u22120.0978 |\n|   15 | 8.7413 |     6.2% |        10.4183 | \u22120.0978 |\n|   14 | 8.6157 |     6.2% |        10.2927 | \u22120.0978 |\n|   12 | 8.5373 |     6.2% |        10.2143 | \u22120.0978 |\n|   13 | 8.1293 |     6.2% |         9.8063 | \u22120.0978 |\n|   11 | 7.2296 |     6.2% |         8.9066 | \u22120.0978 |\n|   10 | 7.0727 |     4.7% |         8.9111 | \u22120.2592 |\n|    9 | 6.6011 |     4.7% |         8.4395 | \u22120.2592 |\n|    8 | 6.1532 |     4.7% |         7.9916 | \u22120.2592 |\n|    5 | 5.8825 |     4.7% |         7.7209 | \u22120.2592 |\n|    7 | 5.3421 |     4.7% |         7.1804 | \u22120.2592 |\n|    6 | 4.9833 |     4.7% |         6.8215 | \u22120.2592 |\n|    4 | 3.3644 |     3.3% |         5.4218 | \u22120.4804 |\n|    3 | 0.0304 |     3.3% |         0.5724 | \u22120.4804 |\n|    0 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    1 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    2 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |",
+      "total_experiments": 0,
+      "training_psd_segments": 200,
+      "trial_portion": 0.05
+    },
+    {
+      "baseline_epochs": null,
+      "baseline_params": null,
+      "baseline_psd_segments": null,
+      "baseline_score": null,
+      "best_config_so_far": {
+        "exp_id": "pe_wavenet_delta_step00_pseudo_002",
+        "run_name": "step00_pseudo",
+        "model_type": "pe_wavenet_delta",
+        "model_config": {
+          "model_type": "pe_wavenet_delta",
+          "segmentation_size": 1000,
+          "batch_size": 1,
+          "hidden_dim": 128
+        },
+        "train_config": {
+          "lr": 0.0001,
+          "epochs": 1,
+          "batch_size": 1,
+          "optimizer_type": "adamw",
+          "weight_decay": 1e-05,
+          "device": "cuda"
+        },
+        "loss_config": {
+          "loss_type": "ce",
+          "reduction": "mean",
+          "use_class_weights": false
+        },
+        "inference_batch": 32
+      },
+      "best_same_loss_final_loss": 0.5712,
+      "best_score_so_far": 0.65,
+      "current_epochs": 1,
+      "current_loss_type": "ce",
+      "current_params": 98432,
+      "epochs_ratio": null,
+      "eval_portion": 1.0,
+      "eval_psd_segments": 4000,
+      "is_more_efficient": false,
+      "is_new_best": false,
+      "params_ratio": null,
+      "rank": 1,
+      "same_loss_loss_rank": 1,
+      "same_loss_total": 2,
+      "score_comparison_table": "### Per-file performance (log-space, all three columns on global s_max)\n\n| file | raw_baseline | ground_truth | **model** | gain vs raw | headroom vs gt | Impact | Weight % |\n|-----:|-------------:|-------------:|----------:|------------:|---------------:|-------:|---------:|\n|    0 |     \u221211.4402 |      \u22128.2610 |   \u22120.4804 |     10.9597 |         0.0000 | 0.0000 |     3.3% |\n|    1 |     \u221211.9486 |      \u22129.3737 |   \u22120.4804 |     11.4682 |         0.0000 | 0.0000 |     3.3% |\n|    2 |     \u221210.3080 |      \u22124.6847 |   \u22120.4804 |      9.8276 |         0.0000 | 0.0000 |     3.3% |\n|    3 |      \u22126.6794 |       0.0919 |   \u22120.4804 |      6.1990 |         0.5724 | 0.0304 |     3.3% |\n|    4 |      \u22122.9261 |       4.9414 |   \u22120.4804 |      2.4456 |         5.4218 | 3.3644 |     3.3% |\n|    5 |      \u22121.8656 |       7.4617 |   \u22120.2592 |      1.6064 |         7.7209 | 5.8825 |     4.7% |\n|    6 |      \u22120.4838 |       6.5623 |   \u22120.2592 |      0.2246 |         6.8215 | 4.9833 |     4.7% |\n|    7 |      \u22120.0084 |       6.9212 |   \u22120.2592 |     \u22120.2508 |         7.1804 | 5.3421 |     4.7% |\n|    8 |       0.2964 |       7.7324 |   \u22120.2592 |     \u22120.5556 |         7.9916 | 6.1532 |     4.7% |\n|    9 |       0.4708 |       8.1803 |   \u22120.2592 |     \u22120.7300 |         8.4395 | 6.6011 |     4.7% |\n|   10 |       0.6754 |       8.6519 |   \u22120.2592 |     \u22120.9346 |         8.9111 | 7.0727 |     4.7% |\n|   11 |      \u22120.0654 |       8.8088 |   \u22120.0978 |     \u22120.0324 |         8.9066 | 7.2296 |     6.2% |\n|   12 |       0.3610 |      10.1165 |   \u22120.0978 |     \u22120.4588 |        10.2143 | 8.5373 |     6.2% |\n|   13 |       1.3150 |       9.7085 |   \u22120.0978 |     \u22121.4128 |         9.8063 | 8.1293 |     6.2% |\n|   14 |       1.6727 |      10.1949 |   \u22120.0978 |     \u22121.7704 |        10.2927 | 8.6157 |     6.2% |\n|   15 |       1.5108 |      10.3205 |   \u22120.0978 |     \u22121.6086 |        10.4183 | 8.7413 |     6.2% |\n|   16 |       1.5429 |      10.7090 |   \u22120.0978 |     \u22121.6407 |        10.8067 | 9.1298 |     6.2% |\n|   17 |       1.8326 |      11.2213 |   \u22120.0978 |     \u22121.9304 |        11.3190 | 9.6421 |     6.2% |\n|   18 |       1.7314 |      11.0215 |   \u22120.0978 |     \u22121.8291 |        11.1193 | 9.4423 |     6.2% |\n|   19 |       1.0027 |      10.5676 |   \u22120.0978 |     \u22121.1005 |        10.6654 | 8.9884 |     6.2% |\n\n### Aggregated scalar (log space, global s_max)\n\nSingle number per row \u2014 the `final_scalar` returned by `score_vector()` for each source. This is the only aggregation in the pipeline.\n\n| metric               | log scalar |\n|----------------------|-----------:|\n| ground_truth ceiling |    10.1134 |\n| **model**            | **0.6500** |\n| raw baseline         |     1.0007 |\n\nRecovery: < 0% (Model performance is below raw baseline).\n\n### Sampled files re-ranked by Impact_Score (descending)\n\nHighest-impact rows first \u2014 the marginal log-scalar gain available if each file were lifted to its ground-truth ceiling. Use this column to pick the next-iteration lever.\n\n| file | Impact | Weight % | headroom vs gt | model |\n|-----:|-------:|---------:|---------------:|------:|\n|   17 | 9.6421 |     6.2% |        11.3190 | \u22120.0978 |\n|   18 | 9.4423 |     6.2% |        11.1193 | \u22120.0978 |\n|   16 | 9.1298 |     6.2% |        10.8067 | \u22120.0978 |\n|   19 | 8.9884 |     6.2% |        10.6654 | \u22120.0978 |\n|   15 | 8.7413 |     6.2% |        10.4183 | \u22120.0978 |\n|   14 | 8.6157 |     6.2% |        10.2927 | \u22120.0978 |\n|   12 | 8.5373 |     6.2% |        10.2143 | \u22120.0978 |\n|   13 | 8.1293 |     6.2% |         9.8063 | \u22120.0978 |\n|   11 | 7.2296 |     6.2% |         8.9066 | \u22120.0978 |\n|   10 | 7.0727 |     4.7% |         8.9111 | \u22120.2592 |\n|    9 | 6.6011 |     4.7% |         8.4395 | \u22120.2592 |\n|    8 | 6.1532 |     4.7% |         7.9916 | \u22120.2592 |\n|    5 | 5.8825 |     4.7% |         7.7209 | \u22120.2592 |\n|    7 | 5.3421 |     4.7% |         7.1804 | \u22120.2592 |\n|    6 | 4.9833 |     4.7% |         6.8215 | \u22120.2592 |\n|    4 | 3.3644 |     3.3% |         5.4218 | \u22120.4804 |\n|    3 | 0.0304 |     3.3% |         0.5724 | \u22120.4804 |\n|    0 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    1 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |\n|    2 | 0.0000 |     3.3% |         0.0000 | \u22120.4804 |",
+      "total_experiments": 1,
+      "training_psd_segments": 400,
+      "trial_portion": 0.1
+    }
+  ]
+}

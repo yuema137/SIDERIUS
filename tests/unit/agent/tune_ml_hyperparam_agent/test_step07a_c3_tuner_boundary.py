@@ -33,6 +33,8 @@ import json
 from pathlib import Path
 
 import pytest
+
+_tuner_execution = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
 from pytest import MonkeyPatch
 
 import tests.helpers.recording_sandbox as recording_sandbox_module
@@ -293,7 +295,9 @@ class TestDeleteTheHop:
         the sentinel. A tuner that derived the diagnosis elsewhere (or not at
         all) would leave this RED."""
         sentinel = TrainingDiagnosis(state="absent", validation_state="absent", flat_rel_tol=0.123)
-        monkeypatch.setattr(tuner_module, "derive_training_diagnosis", lambda _h: sentinel)
+        # AS SEEN BY THE CALLER: the diagnosis is derived inside the node's
+        # private `execution` module (Step 07 PR 07b, C7d).
+        monkeypatch.setattr(_tuner_execution, "derive_training_diagnosis", lambda _h: sentinel)
         output, _bridge, _sandbox, _ws = run_bounded_pseudo_iteration(
             tmp_path, monkeypatch, preflight_results=_preflight()
         )

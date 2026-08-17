@@ -46,6 +46,7 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from core.scientific_authority import ScientificAuthority, resolve_record_authority
 from execute_tools.scientific_aggregation import partition_for_aggregation
+from tests.helpers.tuner_source import tuner_node_source
 
 
 class _Summary:
@@ -280,7 +281,7 @@ class TestTrialRecordsAreUntouched:
 
         import nodes.ml_hyperparameter_tune_agent as tuner
 
-        src = inspect.getsource(tuner)
+        src = tuner_node_source()
         stamp = 'final_record["scientific_authority"] = ScientificAuthority.from_context('
         assert stamp in src
         preceding = src[: src.index(stamp)]

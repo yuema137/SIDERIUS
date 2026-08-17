@@ -35,6 +35,7 @@ from execute_tools.deliverable_spec import DeliverableNaming, default_deliverabl
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_denoised_filename,
 )
+from tests.helpers.tuner_source import tuner_node_source
 from tests.unit.core.test_step05c_c0_launch_cleanup_baseline import (
     EXP_ID,
     MODEL_TYPE,
@@ -204,17 +205,19 @@ def test_sandbox_defaults_to_the_shipped_naming():
 
 
 def _tuner_source() -> str:
-    """The tuner module's source, read from the checkout this test runs in.
+    """The tuner NODE's source, read from the checkout this test runs in.
 
     Read from disk rather than via ``inspect.getsource``: the package
     ``nodes.ml_hyperparameter_tune_agent`` re-binds its own name to the module,
     so the usual import form raises. The root is derived from ``__file__``,
     never hardcoded.
+
+    Step 07 PR 07b C7 decomposed the node into a main module plus five
+    node-local submodules. This test asks whether the NODE still reads
+    deliverable paths through the naming authority, which is a claim about the
+    node, so it reads all of its files.
     """
-    repo_root = Path(__file__).resolve().parents[3]
-    return (
-        repo_root / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
-    ).read_text()
+    return tuner_node_source()
 
 
 @pytest.mark.parametrize(
@@ -222,12 +225,17 @@ def _tuner_source() -> str:
     [
         (
             "if agent_input.cleanup_denoised:",
-            "# D. REFLECT",
+            # C7d: the cleanup block ends the inference/scoring phase in
+            # `execution.py`, so the anchor that follows it is now that phase's
+            # return rather than run()'s next section comment.
+            "return AttemptExecution(",
             "experiment_glob(exp_id=exp_id)",
         ),
         (
             "def _build_denoised_filename(",
-            "def _validate_data_config(",
+            # C7: the anchor that follows it in `records.py`, where both now
+            # live (it used to be `_validate_data_config`, now in `policy.py`).
+            "def _build_scoring_failure_record(",
             "resolved.name(",
         ),
         (
@@ -281,7 +289,10 @@ def test_no_tuner_reader_executes_an_inlined_deliverable_template(
 # C3-C6 land; a site dropping OUT of this list means the seam went dead.
 MIGRATED_CONSUMERS = (
     "core/sandbox_executor.py",
-    "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+    # A directory entry means "this NODE consumes it" — C7 spread the
+    # tuner across a main module plus private submodules, and the census
+    # is about the consumer, not about which file holds the read.
+    "nodes/ml_hyperparameter_tune_agent/",
 )
 
 # Sites migrated by the OWNER the census deferred to. Step 06 (C3) took the
@@ -322,7 +333,13 @@ def test_only_the_censused_sites_consume_the_deliverable_spec():
     repo_root = Path(__file__).resolve().parents[3]
 
     for relative in MIGRATED_CONSUMERS + STEP06_CONSUMERS:
-        assert "deliverable_spec" in (repo_root / relative).read_text(), (
+        target = repo_root / relative
+        text = (
+            "\n".join(f.read_text() for f in sorted(target.glob("*.py")))
+            if target.is_dir()
+            else target.read_text()
+        )
+        assert "deliverable_spec" in text, (
             f"{relative} no longer consumes the deliverable spec — the seam is dead"
         )
 

@@ -28,6 +28,79 @@ Reason:
 an explicit operator decision changes it. `certify_minimal.json` remains
 unusable for real-LLM gates for the reason already documented below.
 
+---
+
+## Gate model size and proposer advice — BINDING POLICY
+
+```text
+Previous:
+  --trial_vram_budget_gb 24 / --formal_vram_budget_gb 24
+  no --advice required
+
+Operator decision:
+  Gate 1 and Gate 2 limit each model to 4 GiB of GPU VRAM,
+  AND pass a gate advice file stating that limit.
+
+Date:
+  2026-08-16
+
+Reason:
+  A Gate proves the plumbing still runs; it does not propose good models.
+  Told nothing, the proposer optimises for science and gets refused at the
+  structural pre-flight, which burns Gate attempts on the one outcome that
+  exercises none of the code under test.
+```
+
+Both halves are required, and neither works alone:
+
+| half | mechanism | what it does |
+|---|---|---|
+| enforcement | `--trial_vram_budget_gb 4 --formal_vram_budget_gb 4` | the pre-flight refuses anything larger |
+| intent | `--advice advice/gate/<file>.json` | the proposer is TOLD the limit, in its own terms, and can aim at it |
+
+Enforcement without intent is what produces refusals; intent without
+enforcement is a suggestion.
+
+This TIGHTENS the 24/24 in the parameter plans below, and it is not in tension
+with "be generous on GPU VRAM": generous was always relative to a production
+campaign. A wiring test wants the smallest model that honestly runs, not the
+largest that fits.
+
+**Evidence.** Step 07 PR 07b's post-refactor Gate 1 was launched without
+`--advice`. Its second iteration burned two attempts on a 24-block dilated TCN:
+
+```text
+Loop Error: worker tree reached 25.183 GiB against a 24.0 GiB allowance
+Loop Error: worker tree reached 24.881 GiB against a 24.0 GiB allowance
+```
+
+That was a POSTURE defect, not candidate bad luck — `advice/gate/` already
+existed and already said the right thing. See
+`docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md`
+§14.11, and `advice/README.md` for the `advice/gate/` contract.
+
+**Applies to Gate 1 and Gate 2**, and to any future real-LLM gate, until an
+explicit operator decision changes it.
+
+### If a Gate omits `--runtime_watchdog`, it must also omit `--validation_max_phase_seconds`
+
+They are one fuse, not two flags. `HyperparamTuningInput` refuses the
+combination at startup, before any spend:
+
+```text
+validation_max_phase_seconds requires runtime_watchdog_enabled=True:
+the watchdog is what enforces the deadline, so without it the ceiling
+would be recorded and never applied.
+```
+
+(`agent/schemas/hyperparam_tuning.py::_validate_validation_wall_clock` — "a hard
+bound nothing enforces is worse than no bound".)
+
+Dropping the fuse does NOT leave validation unbounded: `--validation_max_portion`
+and `--validation_max_train_samples` size the work and have no watchdog
+dependency — the latter is this standard's stated **primary sizing mechanism**.
+This is the only interlock of its kind; audited 2026-08-16.
+
 This policy changes ONLY which LLM config a real-LLM gate uses. Gate tier
 definitions, the assignment-by-commit-type rules, pseudo-vs-real
 definitions and every runtime bound are unchanged. A separate

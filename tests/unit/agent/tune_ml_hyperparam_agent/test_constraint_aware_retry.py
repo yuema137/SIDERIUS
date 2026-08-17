@@ -311,7 +311,7 @@ class TestTunerSchemaViolationBehavior:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill") as mock_skill,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
                 return_value=_synth_reference(),

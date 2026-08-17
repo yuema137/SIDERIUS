@@ -38,6 +38,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput, HyperparamTuningOutput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _best_trial_winner,
     _fmt_reference,
@@ -45,6 +46,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _should_bypass_formal_time_budget,
     _should_skip_formal,
 )
+from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -92,7 +94,18 @@ def _valid_trial(score: float) -> dict:
     }
 
 
-def _resolve(reference, skip_delta=-1.0, bypass_delta=0.0, *, gates_enabled=True):
+#: Step 07 PR 07b — the gates now consume the run's ONE order authority.
+#: The SHIPPED (higher-is-better) order is this module's default so every
+#: pre-07b assertion below states exactly the property it stated before; the
+#: direction-parametrized tests pass ``LOWER_ORDER`` explicitly.
+HIGHER_ORDER = MetricOrder(shipped_spec())
+LOWER_ORDER = MetricOrder(direction_only_spec())
+ORDERS = {"higher": HIGHER_ORDER, "lower": LOWER_ORDER}
+
+
+def _resolve(
+    reference, skip_delta=-1.0, bypass_delta=0.0, *, gates_enabled=True, order=HIGHER_ORDER
+):
     """The production resolver. ``gates_enabled`` defaults to the production
     posture (the switch is ON) so a test that does not mention it is
     asserting the enforced behaviour."""
@@ -101,10 +114,11 @@ def _resolve(reference, skip_delta=-1.0, bypass_delta=0.0, *, gates_enabled=True
         skip_min_delta=skip_delta,
         bypass_min_delta=bypass_delta,
         gates_enabled=gates_enabled,
+        order=order,
     )
 
 
-def _skip(records, *, threshold, gates_enabled=True) -> bool:
+def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate, the way production does it.
 
     Deliberately routed through the real `_best_trial_winner` rather than
@@ -112,15 +126,18 @@ def _skip(records, *, threshold, gates_enabled=True) -> bool:
     can never open a gate" a live assertion here instead of an assumption.
     """
     return _should_skip_formal(
-        _best_trial_winner(records),
+        _best_trial_winner(records, order=order),
         threshold=threshold,
         gates_enabled=gates_enabled,
+        order=order,
     )
 
 
-def _bypass(records, *, threshold) -> bool:
+def _bypass(records, *, threshold, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate. See :func:`_skip`."""
-    return _should_bypass_formal_time_budget(_best_trial_winner(records), threshold=threshold)
+    return _should_bypass_formal_time_budget(
+        _best_trial_winner(records, order=order), threshold=threshold, order=order
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +354,27 @@ class TestDisableGatesViaInfinity:
         _, _, bypass_t, _ = _resolve(6.0, bypass_delta=float("inf"))
         assert bypass_t == float("inf")
         assert not _bypass([_valid_trial(99.0)], threshold=bypass_t)
+
+    @pytest.mark.parametrize("direction", ["higher", "lower"], ids=["higher", "lower"])
+    def test_the_disable_deltas_keep_disabling_under_either_direction(self, direction):
+        """Step 07 PR 07b — the operator's documented disable values are
+        ``skip_delta=-inf`` / ``bypass_delta=+inf``, and they must not acquire
+        a second form when a campaign binds a lower-is-better metric.
+
+        Under ``lower`` the resolver produces ``+inf`` for skip and ``-inf``
+        for bypass, which are that metric's worst and best values — so the
+        gates stay off. Left as raw addition, the skip threshold would resolve
+        to ``-inf``, which under ``lower`` is the BEST possible score, and the
+        gate would skip every formal round in the campaign.
+        """
+        order = ORDERS[direction]
+        _, skip_t, bypass_t, _ = _resolve(
+            6.0, skip_delta=float("-inf"), bypass_delta=float("inf"), order=order
+        )
+        assert skip_t == order.worst_sentinel
+        assert bypass_t == order.best_sentinel
+        assert not _skip([_valid_trial(-99.0)], threshold=skip_t, order=order)
+        assert not _bypass([_valid_trial(99.0)], threshold=bypass_t, order=order)
 
 
 # ---------------------------------------------------------------------------

@@ -24,11 +24,18 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningInput,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
     _resume_progress,
 )
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 07 PR 07b — ``_best_trial_winner`` now selects through the run's ONE
+#: order authority. The SHIPPED higher-is-better order keeps every assertion
+#: below stating exactly the property it stated before 07b.
+HIGHER_ORDER = MetricOrder(shipped_spec())
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -51,7 +58,7 @@ def _override(plan, *, memory_history=None, **kwargs):
     return _apply_mode_override_chain(
         plan,
         memory_history=memory_history,
-        trial_winner=_best_trial_winner(memory_history or []),
+        trial_winner=_best_trial_winner(memory_history or [], order=HIGHER_ORDER),
         **kwargs,
     )
 
@@ -450,7 +457,7 @@ def test_best_trial_winner_picks_max_score():
         _make_trial_record("r2", score=5.45),  # winner
         _make_trial_record("r3", score=4.90),
     ]
-    winner = _best_trial_winner(history)
+    winner = _best_trial_winner(history, order=HIGHER_ORDER)
     assert winner is not None
     assert winner["exp_id"] == "r2"
 
@@ -462,7 +469,7 @@ def test_best_trial_winner_excludes_formal_mode():
         _make_trial_record("formal_high", score=99.0, time_mode="formal"),
         _make_trial_record("trial_low", score=5.45, time_mode="trial"),
     ]
-    winner = _best_trial_winner(history)
+    winner = _best_trial_winner(history, order=HIGHER_ORDER)
     assert winner is not None
     assert winner["exp_id"] == "trial_low"
 
@@ -475,7 +482,7 @@ def test_best_trial_winner_excludes_non_success():
         _make_trial_record("skipped", score=None, status="skipped_time_risk"),
         _make_trial_record("good", score=5.45),
     ]
-    winner = _best_trial_winner(history)
+    winner = _best_trial_winner(history, order=HIGHER_ORDER)
     assert winner is not None
     assert winner["exp_id"] == "good"
 
@@ -485,12 +492,12 @@ def test_best_trial_winner_excludes_missing_time_mode():
     they were a real trial run."""
     rec = _make_trial_record("no_mode", score=5.45)
     rec["memory"].pop("time_mode")
-    winner = _best_trial_winner([rec])
+    winner = _best_trial_winner([rec], order=HIGHER_ORDER)
     assert winner is None
 
 
 def test_best_trial_winner_returns_none_on_empty():
-    assert _best_trial_winner([]) is None
+    assert _best_trial_winner([], order=HIGHER_ORDER) is None
 
 
 # ---------------------------------------------------------------------------

@@ -63,6 +63,53 @@ Current contents:
 
 ---
 
+## `advice/gate/`
+
+Same 4-key shape as `advice/workflow/` (`mindset`, `propose`, `implement`,
+`tune`), but a different **purpose**, and the distinction is the point:
+
+```text
+workflow/  advice for a run whose goal is a better model
+gate/      advice for a run whose goal is proving the plumbing still works
+```
+
+A Gate run is a **capability / wiring validation fixture, not a scientific
+campaign**. Its files say so explicitly, because a proposer that is not told
+this will do the sensible scientific thing — propose an ambitious model — and
+the Gate then spends its attempts on pre-flight VRAM refusals instead of on the
+code path under test. The Gate standard names the cost directly:
+
+> **be generous on GPU VRAM, stingy on wall time** — a VRAM-gate rejection
+> wastes a whole Gate attempt.
+
+Every `gate/` file therefore carries, at minimum:
+
+* a `mindset` stating that scientific quality is NOT under test — a low score,
+  a collapsed model or a failed HealthGate does not make the run wrong;
+* a `propose` block bounding model size in the proposer's own terms
+  (parameter count AND the VRAM allowance the run actually enforces);
+* a `tune` block saying "conservative hyperparameters, this is a wiring
+  validation".
+
+**Binding for Gate 1 and Gate 2 (operator decision, 2026-08-16): each model is
+limited to 4 GiB of GPU VRAM.** Both halves are required or the constraint is
+unreachable — the run enforces it with
+`--trial_vram_budget_gb 4 --formal_vram_budget_gb 4`, and the advice states the
+same number so the proposer can aim at it rather than discover it by refusal.
+
+| file | purpose |
+|---|---|
+| `gate_pr_a_classifier_advice.json` | PR A Gate — classifier output contract + built-in loss |
+| `gate_pr_a_regressor_advice.json` | PR A Gate — regressor output contract + `smooth_l1` |
+| `gate_pr_c_regressor_advice.json` | PR C Gate — regressor lane |
+| `gate_07b_structural_refactor_advice.json` | Step 07 PR 07b — tuner structural-decomposition validation; 4 GiB hard allowance, shallow conv denoiser, no novelty |
+
+Passed with `--advice <path>` (which takes precedence over
+`--human_advice_file`); see `sdsc_submission_scripts/run_one_iteration.py`
+`--advice`, where list-of-lines values are normalised to newline-joined strings.
+
+---
+
 ## Adding a new advice file
 
 * If your advice targets **one agent** only, put it in `single_agent/` with

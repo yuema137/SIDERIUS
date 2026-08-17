@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 
 import scripts.c2_prephase_validation as harness
+from tests.helpers.tuner_source import tuner_node_source
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 HARNESS = REPO_ROOT / "scripts" / "c2_prephase_validation.py"
@@ -37,10 +38,13 @@ BOUNDARY_CALLS = {
 }
 
 
-def _calls(path: Path) -> set[str]:
+def _calls(source: str) -> set[str]:
+    """Takes SOURCE rather than a path: the tuner is a node of several files
+    now, and the claim below is about the node, not about whichever file the
+    boundary call currently lives in."""
     return {
         node.func.id
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        for node in ast.walk(ast.parse(source))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
 
@@ -49,19 +53,19 @@ class TestItDrivesTheProductionBoundary:
     def test_it_calls_every_boundary_function_the_tuner_calls(self):
         """Bypassing any one of them would test a path production does not
         take -- and the gate would certify it."""
-        assert BOUNDARY_CALLS <= _calls(HARNESS)
+        assert BOUNDARY_CALLS <= _calls(HARNESS.read_text(encoding="utf-8"))
 
     def test_the_tuner_calls_the_same_three(self):
         """Pins the claim above to the tuner rather than to this file's
         idea of what production does. If the tuner's boundary changes, this
         fails and the harness must follow."""
-        assert BOUNDARY_CALLS <= _calls(TUNER)
+        assert BOUNDARY_CALLS <= _calls(tuner_node_source())
 
     def test_it_uses_the_production_identity_builder(self):
         """A hand-built planned identity would hash a different key set,
         and every measurement would be refused for an identity mismatch
         that was the harness's fault."""
-        assert "build_planned_identity" in _calls(HARNESS)
+        assert "build_planned_identity" in _calls(HARNESS.read_text(encoding="utf-8"))
 
 
 class TestItImplementsNoneOfWhatItValidates:
@@ -89,7 +93,7 @@ class TestItImplementsNoneOfWhatItValidates:
         of observing one. `decide_prephase_admission` reaches all of them
         internally, which is the point: they must be reached THROUGH the
         production boundary, not beside it."""
-        assert forbidden not in _calls(HARNESS)
+        assert forbidden not in _calls(HARNESS.read_text(encoding="utf-8"))
 
     def test_the_production_sampler_is_used_only_for_the_formal_arms(self):
         """The formal arms have no production runner to sample them -- the
@@ -462,7 +466,7 @@ class TestTheFormalControlPathIsProductionAndHarnessOnly:
         assert "execute_training(" in wrapper
 
     def test_it_builds_the_sample_set_with_the_production_builder(self):
-        assert "build_sample_set" in _calls(HARNESS)
+        assert "build_sample_set" in _calls(HARNESS.read_text(encoding="utf-8"))
 
     def test_the_control_path_is_unreachable_from_production(self):
         """The no-probe arm must never become something production can
@@ -508,7 +512,7 @@ class TestTheFormalControlPathIsProductionAndHarnessOnly:
         )
         assert '"environment_shift_observed"' in source
         assert '"pair_comparable"' in source
-        assert "visible_gpu_processes" in _calls(HARNESS)
+        assert "visible_gpu_processes" in _calls(HARNESS.read_text(encoding="utf-8"))
 
     def test_the_adapter_builds_an_arm_from_a_REAL_formal_record(self):
         """THE test that was missing, and the defect it now catches.
@@ -577,7 +581,7 @@ class TestTheFormalControlPathIsProductionAndHarnessOnly:
         One min/max across both arms cannot tell a wobble inside an arm from
         a shift between them.
         """
-        called = _calls(HARNESS)
+        called = _calls(HARNESS.read_text(encoding="utf-8"))
         assert "summarize_formal_arm" in called
         assert "assess_pair_comparability" in called
 

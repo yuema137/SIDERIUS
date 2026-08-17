@@ -6,10 +6,62 @@ from typing import Any
 # ==========================================
 # 1. SYSTEM PROMPTS (The Core Logic)
 # ==========================================
+from agent.prompt_templates.tuner.rendering import (
+    EFFICIENCY_BAND_PCT,
+    render_builtin_model_roster,
+    render_metric_identity_line,
+    render_planner_dynamics_block,
+    render_reflector_dynamics_block,
+)
+
+# Step 07 PR 07b (P2) — collapse advice about a health check the run does not
+# actually run would tell the planner to look for a signal it can never
+# receive. The PROSE stays here, its current owner (what class-127 mode
+# collapse is, what a PSD amplitude collapse means is TIDMAD health semantics
+# with no generic owner until Step 08 — an invented one would be worse than a
+# recorded gap). What the authority decides is whether the sentence appears at
+# all, and which check name it names.
+_COLLAPSE_ADVICE_BY_CHECK = {
+    "output_diversity": (
+        "- `failure_reason` containing `{name}` means the model produced\n"
+        "  near-constant values, commonly class-127 mode collapse.\n"
+    ),
+    "amplitude_collapse": (
+        "- `failure_reason` containing `{name}` means the output PSD\n"
+        "  amplitude collapsed relative to the reference.\n"
+    ),
+}
+
+
+def render_collapse_advice(task_render, check_name: str) -> str:
+    """One collapse-advice sentence, or "" when the run does not run that check.
+
+    ``task_render is None`` keeps the shipped sentence: the direct callers of
+    the prompt builders (tests, tooling) predate the run-scoped render object,
+    and the bridge fails closed before a REAL render can reach here without one.
+    """
+    template = _COLLAPSE_ADVICE_BY_CHECK[check_name]
+    if task_render is not None and not task_render.has_check(check_name):
+        return ""
+    return template.format(name=check_name)
+
+
+def _builtin_roster(task_render) -> str:
+    """The built-in architecture roster for the planner's output format.
+
+    Falls back to the shipped registry when no run-scoped render object was
+    supplied. That is the SAME authority, not a TIDMAD literal — the roster has
+    no run-scoped variation today, because plugins are deliberately excluded
+    from it.
+    """
+    if task_render is not None:
+        return task_render.builtin_model_roster
+    return render_builtin_model_roster()
+
 
 PLANNER_PROMPT = """
 You are a Senior ML Research Analyst specializing in hyperparameter optimization for deep learning models.
-Your goal is to maximize the `denoising_score` metric across hyperparameter configurations for the following task:
+Your goal is to {METRIC_VERB} the `denoising_score` metric ({METRIC_IDENTITY_LINE}) across hyperparameter configurations for the following task:
 
 {TASK_DESCRIPTION}
 
@@ -34,7 +86,7 @@ Plan your experiments across rounds, not just one at a time:
   Discard configs that fail to converge. Goal: find 2-3 promising directions.
 - **Phase 2: Refinement** (middle 50% of rounds): Pick the top performing configs from
   Phase 1. Increase trial_portion to 0.1-0.3 and epochs to 5-10. Fine-tune lr,
-  loss_type, and regularization. Goal: maximize score with sufficient data.
+  loss_type, and regularization. Goal: {METRIC_VERB} the score with sufficient data.
 - **Phase 3: Solidification** (last 25% of rounds): Select the best candidate. Increase
   trial_portion to 0.5+ or switch to formal mode for definitive validation.
   The final round may be configured to require formal mode — see the
@@ -69,12 +121,8 @@ Plan your experiments across rounds, not just one at a time:
   `failure_reason` means HealthGate detected model collapse or invalid output.
 - `gate_action="continue"` with a non-None `failure_reason` means the gate
   detected a problem but allowed later rounds to run; it is NOT a healthy round.
-- `failure_reason` containing `output_diversity` means the model produced
-  near-constant values, commonly class-127 mode collapse.
-- `failure_reason` containing `amplitude_collapse` means the output PSD
-  amplitude collapsed relative to the reference.
-- If `loss_type="ce"`, switch immediately to focal loss with `alpha=0.5`
-  and `gamma=2.0`; CE is unstable on class-imbalanced data.
+{GATE_OUTPUT_DIVERSITY_ADVICE}{GATE_AMPLITUDE_COLLAPSE_ADVICE}- If `loss_type="ce"`, switch immediately to focal loss with `alpha={FOCAL_ALPHA_DEFAULT}`
+  and `gamma={FOCAL_GAMMA_DEFAULT}`; CE is unstable on class-imbalanced data.
 - If focal loss still collapses, reduce `lr` by 2-5×, for example
   `1e-3 → 5e-4 → 1e-4`.
 - If `lr` is already low and collapse persists, switch from Adam to AdamW
@@ -84,17 +132,17 @@ Plan your experiments across rounds, not just one at a time:
 - Three or more consecutive records with non-None `failure_reason` indicate
   a fundamental configuration problem, not random variance.
 - After persistent collapse, reset to the known-working baseline:
-  focal loss (`alpha=0.5`, `gamma=2.0`), `lr=5e-4`, and Adam.
+  focal loss (`alpha={FOCAL_ALPHA_DEFAULT}`, `gamma={FOCAL_GAMMA_DEFAULT}`), `lr=5e-4`, and Adam.
 - Do not continue exploring a loss/optimizer/learning-rate region that has
   collapsed repeatedly.
-- A finite negative score such as `-3.14` is NOT collapse. It is valid,
+- A finite score such as `-3.14` is NOT collapse. It is valid,
   low-but-real performance below the anchor ceiling.
 - Treat collapse as present only when `failure_reason` is set; do not infer
   collapse from the sign of a finite score alone.
 
 ### EFFICIENCY AWARENESS:
 - A simpler model (fewer parameters) or shorter training (fewer epochs) that achieves a score
-  within 5% of the current best is a **highly valuable result** — prefer it over marginal gains
+  within {EFFICIENCY_BAND_PCT}% of the current best is a **highly valuable result** — prefer it over marginal gains
   from larger, slower experiments.
 - When memory shows `is_more_efficient=True` for a past experiment, note its config:
   simpler configurations often generalise better and should be preferred as a starting point.
@@ -103,14 +151,19 @@ Plan your experiments across rounds, not just one at a time:
     - Fewer epochs with a better learning rate schedule
     - Different loss functions that may converge faster
 
-### TRAINING vs VALIDATION — CRITICAL:
-- `final_loss` / `loss_history` in memory records = measured on the **TRAINING dataset**.
-- `denoising_score` in memory records = measured on the **VALIDATION dataset**.
-- These are different datasets. Always look at BOTH when reading past results:
-    - Low training loss + poor denoising score → overfitting → propose stronger regularisation
-      (higher dropout, weight_decay, fewer epochs, smaller model).
-    - High training loss + poor denoising score → underfitting → propose larger model or more epochs.
-    - Both improve together → the direction is correct, continue exploring.
+### TRAINING DYNAMICS (per experiment, from its training history):
+- `final_loss` / `loss_history` in memory records = the TRAINING objective.
+- `denoising_score` in memory records = the golden metric, measured on the evaluation set.
+- The user message carries one compact `training dynamics` line per recent experiment. Read it as
+  facts, not as a verdict — no label is implied and none should be inferred mechanically:
+    - `train A->B (trend, N ep)` — the training objective's first and last epoch values.
+    - `val A->B (trend; best ep K, +D after best)` — the same for the validation objective, the
+      epoch at which it was best, and how far it drifted afterwards.
+    - `gap ±G (comparable)` — validation minus training at the final epoch, shown only when the
+      two were measured on the same objective; `gap n/a (not comparable)` when they were not.
+- Use them together with the score: a training objective that improves while the score does not
+  move toward {METRIC_COMPARATIVE} is the case worth acting on, and which action fits depends on
+  the trends, the gap and the data volume — decide it here rather than applying a fixed rule.
 
 ### TRIAL vs FORMAL MODE:
 You can choose how much data to use for each experiment:
@@ -166,7 +219,7 @@ model sees diverse data without loading everything at once.
   formal mode to get a definitive score.
 
 When reviewing past experiments in Research Memory:
-- Compare `training_psd_segments` across records. The baseline typically trains on 4000 segments.
+- Compare `training_psd_segments` across records. The baseline typically trains on {FULL_SCOPE_SEGMENTS} segments.
   If your experiments train on 200 segments, you have 20× less data — increase trial_portion.
 - Scores from larger portions are more reliable. A formal score (eval_portion=1.0) is the most
   definitive.
@@ -228,23 +281,24 @@ You are a Research Analyst. Your job is to transform raw experiment results into
 - **Extract Discovery**: Identify a specific pattern or rule learned from this run.
 - **Update Memory**: Write a concise 'Memory Entry' that will guide the Planner in the next iteration.
 
-### CRITICAL — GAP ANALYSIS (Generalization Gap):
-- `final_loss` and `loss_history` are measured on the **TRAINING dataset**.
-- `denoising_score` is measured on the **VALIDATION dataset**.
-- These are completely separate datasets. You MUST explicitly analyze the "Generalization Gap":
-    - Training loss decreases BUT denoising score does not improve → **OVERFITTING**.
-      Gap is widening. Action: increase dropout, weight_decay, or reduce model size/epochs.
-    - Training loss is high AND denoising score is poor → **UNDERFITTING** or **INSUFFICIENT DATA**.
-      Both metrics are stagnant. Action: if trial_portion < 0.1, recommend increasing data first.
-      If trial_portion is already large, increase model capacity or epochs.
-    - Both improve together → healthy generalisation. Gap is stable or narrowing.
+### CRITICAL — TRAINING DYNAMICS:
+- `final_loss` and `loss_history` are the TRAINING objective.
+- `denoising_score` is the golden metric, measured on the evaluation set.
+- The user message carries a compact `training dynamics` line for THIS experiment: the training
+  objective's first and last epoch values and trend, the same for the validation objective, the
+  epoch at which validation was best and how far it drifted after that, and the final
+  train-validation gap when both were measured on the same objective.
+- Reason from those facts together with the score. State what the numbers show and what it implies
+  for the next configuration; do not attach a label the numbers do not establish, and do not infer
+  one from the score's sign.
 
 ### CRITICAL — HOW TO JUDGE THE DENOISING SCORE:
+- The `denoising_score` field carries the {METRIC_IDENTITY_LINE}.
 - The Denoising Score is a relative metric. Its absolute value and sign mean nothing in isolation.
 - ALWAYS compare against the Baseline Score and Best Score So Far provided in the context.
-- A result is GOOD if its denoising_score is HIGHER than the best score so far.
+- A result is GOOD if its denoising_score is {METRIC_COMPARATIVE_UPPER} than the best score so far.
 - A result is NEUTRAL if it matches previous scores.
-- A result is BAD if it is LOWER than most previous scores.
+- A result is BAD if it is {METRIC_ANTONYM_UPPER} than most previous scores.
 - NEVER call a result a failure just because the score is negative.
 
 ### PER-FILE COMPARISON (Impact-Aware):
@@ -292,12 +346,12 @@ planner inherits them.
   improvements from bloated architectures.
 - `params_ratio` < 1.0 means this model has FEWER parameters than the baseline.
 - `epochs_ratio` < 1.0 means this model needed FEWER epochs than the baseline.
-- Even if this is NOT a new best, a small model within 5% of the best score is a meaningful result.
+- Even if this is NOT a new best, a small model within {EFFICIENCY_BAND_PCT}% of the best score is a meaningful result.
 
 ### CRITICAL — EFFICIENCY BENCHMARKING:
-A configuration is only "Better" if it beats the best score. But a configuration is
-"Valuable" if it achieves ≥95% of the best score with <50% of the parameters or training
-time. Flag these as **High-Efficiency Discoveries** in your discovery and memory_update.
+A configuration is only "Better" if it beats the best score (in the {METRIC_COMPARATIVE}-is-better
+sense). But a configuration is "Valuable" if it lands within {EFFICIENCY_BAND_PCT}% of the best
+score's observed range with <50% of the parameters or training time. Flag these as **High-Efficiency Discoveries** in your discovery and memory_update.
 These efficient configs are strong candidates for the Solidification phase.
 
 ### CRITICAL — SCORE RELIABILITY:
@@ -904,9 +958,16 @@ def _planner_visible(rec: dict) -> dict:
     return {k: v for k, v in rec.items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
 
 
+#: How many most-recent records the planner sees VERBATIM. One symbol, because
+#: Step 07 PR 07b renders a training-dynamics line per verbatim-window record:
+#: two constants could disagree about which experiments are "recent" and the
+#: block would describe a different set than the JSON beside it.
+PLANNER_FULL_WINDOW = 3
+
+
 def _truncate_memory_history(
     records: list[dict],
-    full_window: int = 3,
+    full_window: int = PLANNER_FULL_WINDOW,
 ) -> list[dict]:
     """Sliding-window truncation for the planner's history context.
 
@@ -926,10 +987,21 @@ def _truncate_memory_history(
     cutoff = len(records) - full_window
     condensed: list[dict] = []
     for rec in records[:cutoff]:
-        entry = {k: rec[k] for k in _CONDENSED_KEYS if k in rec}
+        # OD-1 (Step 07 PR 07b §3.10): iterate the RECORD's own key order,
+        # filtered by membership — never the frozenset's. A frozenset of
+        # strings iterates in hash order, so the condensed entries' JSON key
+        # order (and therefore the planner prompt's BYTES for any history
+        # longer than the verbatim window) differed between processes. Five
+        # PYTHONHASHSEEDs produced five different orders; no golden ever caught
+        # it because the PB-1 fixture has three records and never enters this
+        # branch. Sorting would have been a different fix with a different
+        # defect: it would impose an order the verbatim window does not use, so
+        # a record would be serialised one way inside the window and another
+        # way outside it.
+        entry = {k: rec[k] for k in rec if k in _CONDENSED_KEYS}
         memory = rec.get("memory", {})
         if memory:
-            entry["memory"] = {k: memory[k] for k in _CONDENSED_MEMORY_KEYS if k in memory}
+            entry["memory"] = {k: memory[k] for k in memory if k in _CONDENSED_MEMORY_KEYS}
         condensed.append(entry)
 
     return condensed + [_planner_visible(rec) for rec in records[cutoff:]]
@@ -957,6 +1029,8 @@ def get_planner_user_prompt(
     last_mode=None,
     # --- L6b — tuner planner registry awareness ---
     registry=None,
+    # --- Step 07 PR 07b (P2) — the run's authority-rendered task tokens ---
+    task_render=None,
 ):
     """
     Constructs the prompt for the Planner.
@@ -1013,6 +1087,20 @@ def get_planner_user_prompt(
         json.dumps(windowed, indent=2) if windowed else "No previous experiments recorded."
     )
 
+    # Step 07 PR 07b (P3) — the training-dynamics block is rendered from the
+    # RAW verbatim window, before `_truncate_memory_history` strips the hidden
+    # keys. That ordering is the whole design: the planner gets an OWNED,
+    # calibration-free SUMMARY of each recent trajectory, while the raw
+    # `training_history` / `training_diagnosis` payloads stay out of the JSON
+    # above (roadmap §22.6 — persistence is not prompt visibility). Nothing is
+    # recomputed here; 07a derived and persisted the diagnosis.
+    dynamics_block = (
+        render_planner_dynamics_block(memory_history[-PLANNER_FULL_WINDOW:])
+        if memory_history
+        else ""
+    )
+    dynamics_section = f"\n{dynamics_block}\n" if dynamics_block else ""
+
     # L6b — registry awareness. ``has_custom_losses`` is True when the
     # capability registry contains at least one ``capability_type="loss"``
     # entry; in that case the planner is also told it MAY use
@@ -1065,9 +1153,14 @@ def get_planner_user_prompt(
             raise ValueError(
                 f"Cannot render the planner prompt for force_model={force_model!r}: {e!s}"
             ) from e
+        # Step 07 PR 07b (P2): the output shape is the run-bound Model-I/O
+        # contract's, not a literal. A run with no bound contract omits the
+        # parenthetical rather than asserting TIDMAD's shape.
+        shape = task_render.output_contract_shape if task_render is not None else None
+        classifier_shape = f" (output {shape})" if shape else ""
         if output_type == "classifier":
             loss_note = (
-                "- This model is a **CLASSIFIER** (output [B, 256, T]). "
+                f"- This model is a **CLASSIFIER**{classifier_shape}. "
                 "Valid loss types: **ce, focal, focal_cw**. "
                 "Do NOT use smooth_l1 (regression only)."
                 f"{custom_loss_note}\n"
@@ -1276,7 +1369,7 @@ def get_planner_user_prompt(
 
 ### Current Research Memory:
 {history_context}
-{oom_warning}{inconclusive_note}{unattributed_oom_note}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
+{dynamics_section}{oom_warning}{inconclusive_note}{unattributed_oom_note}{slow_warning}{round_context}{active_budgets_section}{resource_gate_guidance_section}
 ### INSTRUCTIONS:
 1. **Review Memory**: Look for patterns and previous failures/successes.
    - Records with status='skipped_oom_risk' were NEVER trained — they exceeded GPU memory.
@@ -1290,7 +1383,7 @@ def get_planner_user_prompt(
 
 ### OUTPUT FORMAT (Strict JSON):
 {{
-    "model_type": "{force_model if force_model != "auto" else "punet | fcnet | transformer | wavenet | rnn | gated_fno"}",
+    "model_type": "{force_model if force_model != "auto" else _builtin_roster(task_render)}",
     "reasoning": "How this experiment aligns with expert advice and past memory",
     "hypothesis": "Specific prediction for this run",
     "is_trial": "true | false (choose based on confidence in config)",
@@ -1307,7 +1400,14 @@ def get_planner_user_prompt(
 """
 
 
-def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_context=None):
+def get_reflector_user_prompt(
+    exp_id,
+    hypothesis,
+    actual_results,
+    reflection_context=None,
+    training_diagnosis=None,
+    metric_spec=None,
+):
     """
     Constructs the prompt for the Reflector to summarize findings into Memory.
 
@@ -1322,6 +1422,16 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
                                    with the same loss_type as this one (None if first of its type)
         current_loss_type     - str: loss_type used in this experiment
     """
+    # Step 07 PR 07b (P3) — the CURRENT attempt's dynamics, rendered from the
+    # TrainingDiagnosis 07a derived. The reflector receives the diagnosis and
+    # nothing else: its `actual_results` already carries this round's
+    # `final_loss` / `loss_history`, so a second TrainingHistory transport
+    # would restate what is already there and widen the frozen bridge surface.
+    dynamics_block = render_reflector_dynamics_block(training_diagnosis)
+    # Step 07 PR 07b (P3) — the metric's IDENTITY beside the field name the
+    # reflector actually reads. `denoising_score` stays the field (D1 is not
+    # 07b's); what it MEASURES is now stated rather than assumed.
+    metric_identity_line = render_metric_identity_line(metric_spec) if metric_spec else ""
     context_block = ""
     if reflection_context:
         c = reflection_context
@@ -1341,7 +1451,7 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
             f"  epochs_ratio          : {c.get('epochs_ratio', 'N/A')}  "
             f"(current / baseline epochs; <1.0 = faster training)\n"
             f"  is_more_efficient     : {c.get('is_more_efficient', 'N/A')}  "
-            f"(True = score within 5% of best AND fewer params or epochs)"
+            f"(True = score within {EFFICIENCY_BAND_PCT}% of best AND fewer params or epochs)"
         )
         context_block = f"""
 ### Comparison Context (use this to judge the result):
@@ -1350,6 +1460,7 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
   this_experiment_score : {actual_results.get("denoising_score", "N/A")}
   is_new_best           : {c.get("is_new_best", "N/A")}
   denoising_score rank  : {c.get("rank", "N/A")} / {c.get("total_experiments", "N/A")} (1 = best)
+  {metric_identity_line}
   best_final_loss seen (same loss_type='{loss_type}') : {best_same if best_same is not None else "N/A (first of this type)"}
 {same_loss_block}
   best_config_so_far    : {json.dumps(c.get("best_config_so_far"), indent=2) if c.get("best_config_so_far") else "N/A"}
@@ -1374,9 +1485,7 @@ def get_reflector_user_prompt(exp_id, hypothesis, actual_results, reflection_con
 - **Original Hypothesis**: {hypothesis}
 - **Actual Results**:
 {json.dumps(actual_results, indent=2)}
-  ⚠ NOTE: final_loss/loss_history above = TRAINING dataset.
-           denoising_score above = VALIDATION dataset (different data).
-           Reason about the gap between them to detect overfitting or underfitting.
+{dynamics_block}
 {context_block}
 ### INSTRUCTIONS:
 1. Use the Comparison Context to judge whether this result is good, neutral, or bad.

@@ -35,6 +35,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from sdsc_submission_scripts.run_one_iteration import write_manifest
+from tests.helpers.tuner_source import tuner_lifecycle_source
 
 # (field, where it lives, the value the producer writes)
 OUTPUT_LEVEL = [
@@ -256,7 +257,7 @@ class TestTheLaunchDeclarationSurvivesEveryBranch:
 
         from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
-        src = inspect.getsource(HyperparamTuningAgent.run)
+        src = tuner_lifecycle_source()
         failed_block = src[src.index('"status": "failed"') :][:1200]
         assert '"healthgate_mode": agent_input.healthgate_mode' in failed_block
         assert '"result_authority": agent_input.result_authority' in failed_block

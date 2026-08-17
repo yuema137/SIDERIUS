@@ -17,7 +17,6 @@ from __future__ import annotations
 import ast
 import gc
 from dataclasses import FrozenInstanceError
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -27,8 +26,6 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     INFRASTRUCTURE_FAILURE_STATUS,
     RESOURCE_ADMISSION_REASONS,
     RESOURCE_ADMISSION_STATUS,
-    AttemptDecision,
-    AttemptTransition,
     RoundDecision,
     _build_execution_failure_record,
     _build_resource_admission_record,
@@ -36,17 +33,34 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _decide_round_outcome,
     _emit_record,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
-TUNER_SOURCE = (
-    Path(__file__).resolve().parents[4]
-    / "nodes"
-    / "ml_hyperparameter_tune_agent"
-    / "ml_hyperparameter_tune_agent.py"
+#: The per-round transients `run()` releases at the end of every round.
+#:
+#: Step 07 PR 07b, C7d changed WHICH names carry the round's large objects,
+#: not the property being defended. `file_vector` and `final_scalar` are now
+#: locals of the execution phase and are freed when it returns, so `run()` has
+#: nothing to delete; the objects the round still holds arrive on the two
+#: carriers, which is why those are released in their place.
+CLEANUP_OWNED_NAMES = (
+    "train_results",
+    "score_results",
+    "score_table",
+    "reflect_results",
+    "memory_history",
+    "prepared",
+    "executed",
 )
 
-#: The seven per-round transients `run()` releases at the end of every
-#: round. Constraint C1: no extracted helper may take ownership of one.
-CLEANUP_OWNED_NAMES = (
+#: Released by returning rather than by `del` — see above. Pinned so the
+#: transition is a stated fact: if either of these is ever re-bound in `run()`
+#: it needs a `del` again, and this test says so.
+PHASE_LOCAL_RELEASED_NAMES = ("file_vector", "final_scalar")
+
+#: The large objects no extracted helper may take ownership of. Unchanged by
+#: the decomposition — the risk is a helper capturing one, and that risk does
+#: not care which frame currently binds it.
+LEAK_FORBIDDEN_NAMES = (
     "train_results",
     "score_results",
     "score_table",
@@ -69,7 +83,10 @@ IDENTITY = dict(
 
 
 def _tree() -> ast.Module:
-    return ast.parse(TUNER_SOURCE.read_text())
+    # The node, not one of its files: C7 split the tuner into a main module
+    # plus node-local submodules, and every function below is still the
+    # node's. Scanning one file would silently stop finding them.
+    return ast.parse(tuner_node_source())
 
 
 def _fn(name: str) -> ast.FunctionDef:
@@ -100,6 +117,27 @@ class TestCleanupOwnership:
         }
         missing = [n for n in CLEANUP_OWNED_NAMES if n not in deleted]
         assert missing == [], f"no longer released by run(): {missing}"
+
+    def test_phase_local_transients_are_not_rebound_in_run(self):
+        """The other half of the C7d change, stated as a check.
+
+        `file_vector` / `final_scalar` are freed when the execution phase
+        returns. If a future edit binds either back into `run()`'s frame, it
+        lives until the next round and no `del` covers it — so that must fail
+        here rather than show up as RSS growth.
+        """
+        run = _fn("run")
+        bound = {
+            t.id
+            for node in ast.walk(run)
+            if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign))
+            for t in ast.walk(node)
+            if isinstance(t, ast.Name) and isinstance(t.ctx, ast.Store)
+        }
+        rebound = [n for n in PHASE_LOCAL_RELEASED_NAMES if n in bound]
+        assert rebound == [], (
+            f"run() re-bound phase-local transients without releasing them: {rebound}"
+        )
 
     def test_the_release_still_runs_a_collection(self):
         run = _fn("run")
@@ -132,7 +170,7 @@ class TestCleanupOwnership:
         fn = _fn(helper)
         names = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
         names |= {a.arg for a in ast.walk(fn) if isinstance(a, ast.arg)}
-        leaked = [n for n in CLEANUP_OWNED_NAMES if n in names]
+        leaked = [n for n in LEAK_FORBIDDEN_NAMES if n in names]
         assert leaked == [], f"{helper} took ownership of {leaked}"
 
     def test_a_built_record_retains_nothing_after_the_caller_drops_it(self):
@@ -419,34 +457,16 @@ class TestResourceAdmissionSurface:
 # E5 / C2 — typed decisions
 # ---------------------------------------------------------------------
 
-
-class TestAttemptDecision:
-    def test_an_admission_refusal_carries_no_gate_action(self):
-        """C2: it must not inherit the round-scoped `resolved_action`,
-        which holds whatever the last attempt that reached scoring
-        wrote."""
-        d = AttemptDecision.admission_refused(attempt_id="a1", reason="no headroom")
-        assert d.resolved_action is None
-        assert d.action_was_produced is False
-        assert d.transition is AttemptTransition.RETRY_ATTEMPT
-        assert d.attempt_id == "a1"
-
-    def test_no_action_is_distinguishable_from_a_continue_action(self):
-        """Collapsing the two is how a refusal silently inherits a
-        neighbour's verdict."""
-        none_produced = AttemptDecision(transition=AttemptTransition.RETRY_ATTEMPT, attempt_id="a1")
-        produced_continue = AttemptDecision(
-            transition=AttemptTransition.PROCEED,
-            attempt_id="a1",
-            resolved_action=GateAction.CONTINUE,
-            action_was_produced=True,
-        )
-        assert none_produced.action_was_produced is not produced_continue.action_was_produced
-
-    def test_the_decision_is_immutable(self):
-        d = AttemptDecision.admission_refused(attempt_id="a1", reason="r")
-        with pytest.raises(FrozenInstanceError):
-            d.resolved_action = GateAction.SKIP_ITER  # type: ignore[misc]
+# ``TestAttemptDecision`` lived here. Step 07 PR 07b DELETED it together with
+# the ``AttemptTransition`` / ``AttemptDecision`` types it exercised (§3.5,
+# operator decision Q-07b-1): the types had zero production consumers, and
+# wiring them would have required resetting the round-scoped
+# ``resolved_action`` per attempt — a change to round outcomes that 07b is not
+# permitted to make. Testing a type nothing calls proved nothing about the
+# tuner; the hazard those tests described is now recorded as a known defect
+# beside the ``resolved_action`` declaration in ``run()``, with a proposed fix
+# and an owner. ``TestRoundOutcome`` below is untouched: ``RoundDecision`` and
+# ``_decide_round_outcome`` ARE wired.
 
 
 def _round_inputs(**over):

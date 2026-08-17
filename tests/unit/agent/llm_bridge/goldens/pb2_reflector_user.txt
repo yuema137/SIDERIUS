@@ -21,9 +21,8 @@
   },
   "status": "success"
 }
-  ⚠ NOTE: final_loss/loss_history above = TRAINING dataset.
-           denoising_score above = VALIDATION dataset (different data).
-           Reason about the gap between them to detect overfitting or underfitting.
+### TRAINING DYNAMICS (this experiment)
+  train 0.02->0.01 (decreasing, 1 ep) · val 0.02->0.02 (decreasing; best ep 0) · gap +0.00 (comparable)
 
 ### Comparison Context (use this to judge the result):
   baseline_score        : -2.98
@@ -31,6 +30,7 @@
   this_experiment_score : -2.55
   is_new_best           : True
   denoising_score rank  : 1 / 3 (1 = best)
+  golden metric `tidmad_denoising_score` (higher is better)
   best_final_loss seen (same loss_type='focal') : N/A (first of this type)
   final_loss rank (loss_type='focal') : first experiment with this loss type
   best_config_so_far    : {

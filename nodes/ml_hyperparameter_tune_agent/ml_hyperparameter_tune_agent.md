@@ -848,9 +848,232 @@ READ from the run's `DeliverableSpec` (05c keeps producer-side representation;
 Step 06 owns evaluation-side acceptance). `_is_complete_trial_output` stays a
 crash-resume reuse guard, not this mechanism.
 
-**Not reached by Step 06** (asserted list, `tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py`):
-the tuner's incumbent/best selection (`max(... denoising_score)`, `current_score > best_score`)
-and the chain/resume/dashboard consumers still encode higher-is-better literally
-— Step 07a / D1.
+**Reached by Step 07 PR 07b** — the tuner's incumbent/best selection no longer
+encodes higher-is-better literally; see the next section. The chain / resume /
+`per_file_best` / dashboard consumers still do (Steps 09 / 10 / M2), and the
+asserted list in `tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py`
+still holds them.
 
 Design: `docs/design/generic_framework_upgrade/step_06_metric_interface.md`.
+
+---
+
+## Metric-direction policy and prompt rendering (Step 07 PR 07b, 2026-08)
+
+### The order authority
+
+`execute_tools/metric_order.py::MetricOrder` is constructed ONCE per run, at
+run scope, from `run_metric.spec`, and is the ONLY place `MetricSpec.direction`
+is interpreted. Every golden-metric ORDERING decision asks it:
+
+| Decision | Member used |
+|---|---|
+| trial winner (`_best_trial_winner`) | `best` (ties → first, as `max()` did) |
+| skip gate + its disabled sentinel | `is_better`, `worst_sentinel` |
+| bypass gate + its disabled sentinel | `is_at_least`, `best_sentinel` |
+| bootstrap reference | `worst_sentinel` |
+| resolved skip / bypass thresholds | `toward_better(reference, declared_delta)` |
+| planner score-table incumbent | `best` |
+| reflector best / worst / rank / new-best | `best`, `worst`, `rank`, `is_better` |
+| efficiency band | `toward_worse`, `is_at_least` |
+| the five `best_*` finalization tracks | `best` (per track, same filters) |
+| the `[SkipFormal]` / `[BypassTimeBudget]` banners | `comparison_symbol`, `at_least_symbol` |
+
+**Deliberately NOT routed through it**: `same_loss_loss_rank` and
+`best_same_loss_final_loss`. A training loss is lower-is-better *by definition
+of a loss* and is unrelated to the golden metric; a test flips the metric
+direction and asserts these two do not move.
+
+### Scale-sensitive rules — classified, not sign-flipped
+
+| Rule | Classification | Behaviour |
+|---|---|---|
+| `skip_formal_min_delta`, `bypass_formal_time_budget_min_delta` | DECLARED by the operator, in the golden metric's units | a COORDINATE on the better-direction axis: negative loosens, positive tightens, under both directions. The documented disable values (`-inf` skip, `+inf` bypass) still resolve to that metric's worst / best sentinel, so there is no second convention to learn |
+| bootstrap and disabled sentinels | generic ORDER facts | `worst_sentinel` / `best_sentinel` |
+| the efficiency band | generic, metric-independent by definition | ONE named `EFFICIENCY_BAND_FRACTION` (0.05), applied to the run's OBSERVED score range and moved toward worse — never a raw `best − 0.05` |
+| `degenerate_penalty_score` | DECLARED, and INAPPLICABLE under a minimised metric | a finite float is **REFUSED at startup** with a recorded reason. It is not negated and not reinterpreted: the "large negative, strictly below any healthy success" convention describes a maximised metric, and under a minimised one the same number is the run's best score. `None` (the default) is direction-free and always accepted |
+
+Under TIDMAD every resolved value is numerically identical to pre-07b.
+
+### What the LLMs see
+
+The planner and reflector prompts render, from landed authorities:
+
+* **task content** — the built-in model roster (`MODEL_REGISTRY`), the
+  full-scope segment count (the run-bound `DatasetConfig`), the output-contract
+  shape (the run-bound `ModelIOContract`), the focal defaults (`LossConfig`),
+  the health-check NAMES (the run's EFFECTIVE health config — advice about a
+  check the run does not run is OMITTED), and the efficiency band percentage;
+* **direction wording and metric identity** — "maximize"/"minimize", "GOOD if
+  HIGHER"/"LOWER", and a `golden metric \`<id>\` (<direction> is better)` line.
+  The record FIELD stays `denoising_score` (renaming it is D1's decision); what
+  it measures is now stated rather than assumed;
+* **training dynamics** — one compact, calibration-free line per recent
+  experiment for the planner (with the objective family label) and one for the
+  current attempt at the reflector (without it). Facts only: first→last values,
+  trends, best validation epoch, drift after it, and the train–validation gap
+  when the two were comparable. **No calibrated label** — no "overfitting",
+  "converged" or "plateau" — because 07a deliberately derived none, and a
+  renderer that supplied one would silently pick a threshold nobody declared.
+
+What they do NOT see, unchanged from 07a: the raw `training_history`,
+`training_diagnosis`, `metric_result` and `metric_refusal` record keys. The
+planner's dynamics block is built from the window BEFORE those keys are
+stripped, so the LLM gets an owned summary while the payloads stay out of the
+history JSON. The reflector receives the `TrainingDiagnosis` only — never the
+`TrainingHistory`.
+
+### Bridge surface
+
+```text
+brain.plan(...,  task_render=<TunerTaskRender>,   # built once at run scope
+                 metric_spec=run_metric.spec)
+brain.reflect(..., metric_spec=run_metric.spec,
+                   training_diagnosis=<the attempt's 07a diagnosis>)
+```
+
+All four are REQUIRED at a real render; the bridge raises `ValueError` rather
+than falling back to the shipped TIDMAD values, because a fallback would
+hardcode one task's facts — and one task's *goal* — into the framework's prompt
+layer.
+
+### Removed
+
+`AttemptTransition` and `AttemptDecision` had zero production consumers and
+could not be wired without changing round outcomes, which 07b is not permitted
+to do. They are deleted; the `resolved_action` hazard they documented is
+recorded as a KNOWN DEFECT beside its declaration inside `run()`, with the
+proposed fix and its owner (a dedicated round-semantics correction requiring an
+operator decision). `RoundDecision` / `_decide_round_outcome` are untouched.
+
+Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md`.
+
+
+---
+
+## Node structure and public boundary (Step 07 PR 07b, C7 / C7d, 2026-08)
+
+### The public interface is exactly two files
+
+```text
+nodes/ml_hyperparameter_tune_agent/
+    ml_hyperparameter_tune_agent.py   PUBLIC  — HyperparamTuningAgent, run(), main(), the CLI
+    ml_hyperparameter_tune_agent.md   PUBLIC  — this file: what the node promises
+    *.py                              PRIVATE — implementation, serving the main module only
+```
+
+Operator architecture rule (2026-08-16), and it is executable, not advisory:
+`tests/unit/nodes/test_node_public_boundary.py` fails if production code outside
+this directory imports one of the private modules, if a private module imports
+the main module, if the private graph acquires a cycle, or if `__all__` grows a
+private name. **Import the node, not its internals.** Nothing in here is
+contract except `HyperparamTuningAgent`, `run()`, `main()`, the CLI and the
+schemas.
+
+`_COMPATIBILITY_REEXPORTS` in the main module is scaffolding, not interface: it
+keeps pre-decomposition importers and `mock.patch` targets working. It is closed
+to new consumers.
+
+### Internal module map
+
+| Module | Responsibility |
+|---|---|
+| `contracts.py` | typed carriers only — no policy, execution, persistence or rendering |
+| `planning.py` | observe -> plan (LLM) -> overrides -> strategy/epoch clamps -> the round's sample sets |
+| `execution.py` | the physical work, in three coarse phases (admission/preflight, training, inference+scoring+health) |
+| `records.py` | BUILDS records and the run output |
+| `runtime.py` | EMITS records and runtime observations; runtime-control helpers |
+| `policy.py` | ordering, thresholds, termination and selection decisions |
+| `feedback.py` | what the next agent is told |
+| `cli.py` | argument surface and input construction |
+
+Dependency direction is one-way and acyclic:
+
+```text
+main ──> planning ──┐
+     ├─> execution ─┼─> records ──> policy, feedback
+     ├─> runtime ───┘        └────> contracts   (a leaf)
+     └─> cli
+```
+
+`records` BUILDS, `runtime` EMITS. That is the rule that decides which of the
+two owns a helper, and it is why `runtime` may import `records` and never the
+reverse.
+
+### The lifecycle, as `run()` performs it
+
+```python
+run_bindings = RunBindings(...)          # authorities + services, resolved once
+while completed_rounds < max_rounds:
+    for attempt_in_round in ...:
+        prepared  = prepare_attempt(bindings, ...)          # planning.py
+        admission = run_admission_preflight(...)            # execution.py
+        trained   = run_training(...)                       # execution.py
+        executed  = run_inference_scoring_health(...)       # execution.py
+        reflection = brain.reflect(...)                     # visible here on purpose
+        record = build_attempt_record(...)                  # records.py
+        _records._emit_record(...)                          # runtime/records
+return finalize_run_output(bindings, RunExitSnapshot(...))  # records.py
+```
+
+Each execution phase returns an `AttemptSignal` — `PROCEED`, `NEXT_ATTEMPT`
+(was `continue`) or `END_ROUND` (was `break`) — and **`run()` performs the jump**.
+The translation is 1:1 against the pre-refactor code; retry counts, round
+transitions and phase order are unchanged. `raise` is not translated: exceptions
+propagate into `run()`'s handler exactly as before.
+
+### Run-scoped authorities vs. lifecycle state
+
+`RunBindings` is frozen and carries only what startup resolved once — the
+authorities (`run_profile`, `run_model_io`, `run_deliverable_spec`,
+`run_metric`, `run_order`, `run_task_render`, `registry`), the services
+(`sandbox`, `brain`, `agent_input`) and the stable resolved facts (budgets,
+scope, thresholds, hardware and provenance).
+
+It carries **no** counters, no current plan, no current results and no
+termination flags. That is enforced at construction by
+`FORBIDDEN_BINDING_FIELDS`, not by convention, because a widely-passed object is
+exactly the thing a future change adds a field to "just this once". The
+end-of-loop values travel separately, in `RunExitSnapshot`.
+
+`AttemptStage` is the one mutable carrier, holding one field. It exists because
+the exception handler must know which phase was executing, and on the raising
+path there is no return value.
+
+### Extending the node
+
+* New behaviour inside a phase -> the phase module. New phase -> a new function
+  in `execution.py` returning an outcome, dispatched from `run()`.
+* New data crossing a phase boundary -> a field on the existing carrier if it
+  belongs to that lifecycle concept; a new carrier in `contracts.py` if it does
+  not. Never a new mutable bag.
+* Do not add a new responsibility to `run()`. It sequences; it does not
+  implement.
+
+### Stubbing internals in tests
+
+Patch the module that makes the call, not the node's public path. `_run_skill`
+and `_emit_record` are resolved through their owning modules
+(`runtime`, `records`) precisely so ONE stub intercepts every caller;
+`run_production_preflight`, `get_gates_for_position`, `build_sample_set` and
+`derive_training_diagnosis` are stubbed where they are called. A stub aimed at
+the wrong module does not raise — it lets the real thing run.
+
+Source-scanning tests should read `tests/helpers/tuner_source.py`:
+`tuner_node_source()` for claims about the node, `tuner_lifecycle_source()` for
+reachability claims about the run loop.
+
+### Known defects carried, deliberately not fixed by the decomposition
+
+* `memory.time_mode` is only stamped when a time budget is configured, so
+  without `--trial_time_budget_minutes` / `--formal_time_budget_minutes` the
+  two-field winner rule is unsatisfiable and the skip gate takes its
+  "no evidence" branch. Reserved for the dedicated round-state semantics
+  correction PR.
+* The `resolved_action` round-scoped staleness hazard — recorded beside its
+  declaration in `run()`.
+* 07a's validation pass is missing from the watchdog deadline prediction
+  (`T_deadline` needs a `T_val` term) — ADDED 07c scope. Until 07c lands,
+  `--runtime_watchdog`-enabled real campaigns are not a reliable configuration.
+
+Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md` §14.9 - §14.9.5.

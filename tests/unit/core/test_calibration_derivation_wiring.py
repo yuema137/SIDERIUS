@@ -31,8 +31,9 @@ from pathlib import Path
 import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner
+from tests.helpers.tuner_source import tuner_node_source
 
-SOURCE = Path(tuner.__file__).read_text()
+SOURCE = tuner_node_source()
 TREE = ast.parse(SOURCE)
 
 #: The three call sites that record FAILURES. Deriving calibration from any
@@ -158,12 +159,13 @@ class TestLosingCalibrationNeverCostsAnAttempt:
     def _isolated_registry(self, tmp_path, monkeypatch):
         """Point the registry at a temporary root for every test here.
 
-        These call the real production helper, which resolves the registry
-        from `SIDERIUS_CALIBRATION_DIR` or `$HOME`. Without this, an input
-        that PARSES -- `{"timestamp": "t"}` is a valid RuntimeObservation --
-        gets far enough to create profiles in the operator's real tree.
-        Caught exactly that way: a test run left a live
-        `runtime_calibration_v2` directory behind.
+                These call the real production helper, which resolves the registry
+                from `SIDERIUS_CALIBRATION_DIR` or `$HOME`. Without this, an input
+        from tests.helpers.tuner_source import tuner_node_source
+                that PARSES -- `{"timestamp": "t"}` is a valid RuntimeObservation --
+                gets far enough to create profiles in the operator's real tree.
+                Caught exactly that way: a test run left a live
+                `runtime_calibration_v2` directory behind.
         """
         monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path))
 

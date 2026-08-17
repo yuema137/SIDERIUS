@@ -1,88 +1,102 @@
-[
-  {
-    "exp_id": "<present>",
-    "hypothesis": {
-      "type": "str",
-      "present": true
-    },
-    "actual_results_keys": [
-      "denoising_score",
-      "failure_reason",
-      "file_vector",
-      "final_loss",
-      "gate_action",
-      "health_gate_results",
-      "is_degenerate",
-      "loss_history",
-      "model_params"
-    ],
-    "reflection_context_keys": [
-      "baseline_epochs",
-      "baseline_params",
-      "baseline_psd_segments",
-      "baseline_score",
-      "best_config_so_far",
-      "best_same_loss_final_loss",
-      "best_score_so_far",
-      "current_epochs",
-      "current_loss_type",
-      "current_params",
-      "epochs_ratio",
-      "eval_portion",
-      "eval_psd_segments",
-      "is_more_efficient",
-      "is_new_best",
-      "params_ratio",
-      "rank",
-      "same_loss_loss_rank",
-      "same_loss_total",
-      "score_comparison_table",
-      "total_experiments",
-      "training_psd_segments",
-      "trial_portion"
-    ]
+{
+  "_captured_at": {
+    "commit": "4f6b42e42164986e2f6373622e49b7b2ee55c0c5",
+    "note": "REGENERATED at Step 07 PR 07b C5, clean tree. WHAT CHANGED: an `additive_kwargs` projection recording that reflect() now receives `metric_spec` and `training_diagnosis` as declared kwargs. WHY: the reflector must be told which direction counts as GOOD, and must see the current attempt's 07a TrainingDiagnosis rendered as facts. WHAT DID NOT CHANGE: `actual_results_keys` stays EXACTLY 9 and `reflection_context_keys` EXACTLY 23 \u2014 the new values travel as kwargs and are NOT smuggled into either payload."
   },
-  {
-    "exp_id": "<present>",
-    "hypothesis": {
-      "type": "str",
-      "present": true
+  "calls": [
+    {
+      "exp_id": "<present>",
+      "hypothesis": {
+        "type": "str",
+        "present": true
+      },
+      "actual_results_keys": [
+        "denoising_score",
+        "failure_reason",
+        "file_vector",
+        "final_loss",
+        "gate_action",
+        "health_gate_results",
+        "is_degenerate",
+        "loss_history",
+        "model_params"
+      ],
+      "reflection_context_keys": [
+        "baseline_epochs",
+        "baseline_params",
+        "baseline_psd_segments",
+        "baseline_score",
+        "best_config_so_far",
+        "best_same_loss_final_loss",
+        "best_score_so_far",
+        "current_epochs",
+        "current_loss_type",
+        "current_params",
+        "epochs_ratio",
+        "eval_portion",
+        "eval_psd_segments",
+        "is_more_efficient",
+        "is_new_best",
+        "params_ratio",
+        "rank",
+        "same_loss_loss_rank",
+        "same_loss_total",
+        "score_comparison_table",
+        "total_experiments",
+        "training_psd_segments",
+        "trial_portion"
+      ],
+      "additive_kwargs": {
+        "metric_spec": "MetricSpec",
+        "training_diagnosis": "TrainingDiagnosis"
+      }
     },
-    "actual_results_keys": [
-      "denoising_score",
-      "failure_reason",
-      "file_vector",
-      "final_loss",
-      "gate_action",
-      "health_gate_results",
-      "is_degenerate",
-      "loss_history",
-      "model_params"
-    ],
-    "reflection_context_keys": [
-      "baseline_epochs",
-      "baseline_params",
-      "baseline_psd_segments",
-      "baseline_score",
-      "best_config_so_far",
-      "best_same_loss_final_loss",
-      "best_score_so_far",
-      "current_epochs",
-      "current_loss_type",
-      "current_params",
-      "epochs_ratio",
-      "eval_portion",
-      "eval_psd_segments",
-      "is_more_efficient",
-      "is_new_best",
-      "params_ratio",
-      "rank",
-      "same_loss_loss_rank",
-      "same_loss_total",
-      "score_comparison_table",
-      "total_experiments",
-      "training_psd_segments",
-      "trial_portion"
-    ]
-  }
-]
+    {
+      "exp_id": "<present>",
+      "hypothesis": {
+        "type": "str",
+        "present": true
+      },
+      "actual_results_keys": [
+        "denoising_score",
+        "failure_reason",
+        "file_vector",
+        "final_loss",
+        "gate_action",
+        "health_gate_results",
+        "is_degenerate",
+        "loss_history",
+        "model_params"
+      ],
+      "reflection_context_keys": [
+        "baseline_epochs",
+        "baseline_params",
+        "baseline_psd_segments",
+        "baseline_score",
+        "best_config_so_far",
+        "best_same_loss_final_loss",
+        "best_score_so_far",
+        "current_epochs",
+        "current_loss_type",
+        "current_params",
+        "epochs_ratio",
+        "eval_portion",
+        "eval_psd_segments",
+        "is_more_efficient",
+        "is_new_best",
+        "params_ratio",
+        "rank",
+        "same_loss_loss_rank",
+        "same_loss_total",
+        "score_comparison_table",
+        "total_experiments",
+        "training_psd_segments",
+        "trial_portion"
+      ],
+      "additive_kwargs": {
+        "metric_spec": "MetricSpec",
+        "training_diagnosis": "TrainingDiagnosis"
+      }
+    }
+  ]
+}

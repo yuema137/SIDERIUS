@@ -47,7 +47,7 @@ class _AmbientConsulted(RuntimeError):
 @pytest.fixture(autouse=True)
 def _disable_health_gates():
     with patch(
-        "nodes.ml_hyperparameter_tune_agent.get_gates_for_position",
+        "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position",
         return_value=[],
     ):
         yield
@@ -70,13 +70,13 @@ def _run_tuner(tmp_path, max_rounds):
     with (
         patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-        patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+        patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill),
         patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
         patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
             return_value=_synth_reference(),
         ),
-        patch("nodes.ml_hyperparameter_tune_agent.build_sample_set", side_effect=spy),
+        patch("nodes.ml_hyperparameter_tune_agent.planning.build_sample_set", side_effect=spy),
         patch.object(
             sample_set_builder,
             "resolve_dataset_profile",

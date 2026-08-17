@@ -45,6 +45,7 @@ from agent.schemas.task_config import ForwardContract
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
+from tests.helpers.tuner_source import tuner_node_source
 from tests.unit.agent.ml_code_validator_agent.test_validator_agent import (
     make_input as make_validator_input,
 )
@@ -386,16 +387,17 @@ class TestRecordStamp:
         """AST, not substring (§E.3d.9): each of the 12 production call sites
         must pass candidate_id explicitly. A new site that forgets it fails
         here rather than silently producing unjoinable records."""
-        src = (
-            _REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
-        ).read_text()
-        tree = ast.parse(src)
+        # The node, not one file: emission call sites are spread across the
+        # node's private modules since C7, and `_emit_record` is now reached
+        # through its owning module — so the callee may be spelled as a bare
+        # name OR as an attribute tail. Both are the same call site.
+        tree = ast.parse(tuner_node_source())
         sites = []
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "_emit_record"
+                and (getattr(node.func, "id", None) or getattr(node.func, "attr", None))
+                == "_emit_record"
             ):
                 kw = {k.arg for k in node.keywords}
                 sites.append((node.lineno, "candidate_id" in kw))
@@ -406,9 +408,7 @@ class TestRecordStamp:
     def test_output_dicts_echo_the_id_on_healthy_and_degraded_paths(self):
         """The run-level label survives BOTH exit paths, like the
         healthgate_mode echo it sits beside."""
-        src = (
-            _REPO / "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
-        ).read_text()
+        src = tuner_node_source()
         assert src.count('"candidate_id": agent_input.candidate_id,') == 3, (
             "expected the echo in the provenance stamp, the healthy output "
             "dict and the degraded/partial output dict"

@@ -40,6 +40,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _classify_attempt_failure,
     _raise_if_preflight_blocks,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
 #: The three that fell through. Named so a regression says which.
 FELL_THROUGH = ["timeout", "host_memory"]
@@ -160,14 +161,10 @@ class TestTheProductionPathUsesTheTable:
 
     @staticmethod
     def _tuner_source() -> str:
-        from pathlib import Path
-
-        return (
-            Path(__file__).resolve().parents[4]
-            / "nodes"
-            / "ml_hyperparameter_tune_agent"
-            / "ml_hyperparameter_tune_agent.py"
-        ).read_text()
+        # The node, not one of its files: the pre-flight resolver call moved
+        # into the node's private `execution` module (Step 07 PR 07b, C7d) and
+        # is still the same production call site.
+        return tuner_node_source()
 
     def test_run_calls_the_resolver(self):
         assert "_raise_if_preflight_blocks(resource_check)" in self._tuner_source()

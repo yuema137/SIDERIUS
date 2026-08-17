@@ -494,13 +494,10 @@ class TestTheProductionChainIsConnected:
         import ast
         from pathlib import Path
 
-        tuner = (
-            Path(__file__).resolve().parents[3]
-            / "nodes"
-            / "ml_hyperparameter_tune_agent"
-            / "ml_hyperparameter_tune_agent.py"
-        )
-        tree = ast.parse(tuner.read_text(encoding="utf-8"))
+        # The node, not one of its files (C7).
+        from tests.helpers.tuner_source import tuner_node_tree
+
+        tree = tuner_node_tree()
         calls = 0
         undeclared: list[int] = []
         for node in ast.walk(tree):

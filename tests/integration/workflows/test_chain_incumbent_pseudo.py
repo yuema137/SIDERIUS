@@ -54,7 +54,9 @@ from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from core.resume import restore_prior_state
 from core.scientific_authority import ScientificAuthority
+from execute_tools.metric_order import MetricOrder
 from sdsc_submission_scripts.run_one_iteration import write_manifest
+from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
 
 # ---------------------------------------------------------------------------
@@ -461,6 +463,7 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         skip_min_delta=tune_input.skip_formal_min_delta,
         bypass_min_delta=tune_input.bypass_formal_time_budget_min_delta,
         gates_enabled=tune_input.enable_chain_incumbent_formal_gates,
+        order=MetricOrder(shipped_spec()),
     )
     # Reference actually consumed is None (NOT the pre-V19 fixed 0.0,
     # and NOT the numeric 1.25 that was delivered on the input).
@@ -485,14 +488,18 @@ def test_branch_c_flag_off_reconstruction_still_stamps_source(tmp_path):
         "health_gate_results": _passing_verdicts(),
         "memory": {"time_mode": "trial"},
     }
-    trial_winner = _best_trial_winner([trial_winner_record])
+    # Step 07 PR 07b — the selection helpers judge through the run's ONE
+    # order authority; this chain runs the shipped higher-is-better metric.
+    order = MetricOrder(shipped_spec())
+    trial_winner = _best_trial_winner([trial_winner_record], order=order)
     assert trial_winner is not None
     assert not _should_skip_formal(
         trial_winner,
         threshold=skip_t,
         gates_enabled=tune_input.enable_chain_incumbent_formal_gates,
+        order=order,
     )
-    assert not _should_bypass_formal_time_budget(trial_winner, threshold=bypass_t)
+    assert not _should_bypass_formal_time_budget(trial_winner, threshold=bypass_t, order=order)
 
 
 # ---------------------------------------------------------------------------

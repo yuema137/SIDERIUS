@@ -29,6 +29,7 @@ import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner
 from execute_tools.dataset_config import TIDMAD_PROFILE
+from tests.helpers.tuner_source import tuner_node_source
 
 
 class TestResolvedEpochs:
@@ -154,7 +155,7 @@ class TestTheMaxEpochsBoundIsNotBypassable:
         """
         import inspect
 
-        src = inspect.getsource(tuner)
+        src = tuner_node_source()
         assert 'planned_epochs = plan.train_cfg.get("epochs", 1)' not in src, (
             "the clamp is reading the planner's dict again; an omitted "
             "epochs would bypass --max_epochs"

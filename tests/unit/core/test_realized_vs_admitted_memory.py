@@ -18,6 +18,8 @@ Design doc: ``docs/design/v21_priorities/pr_b_resource_budget_semantics.md``
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from pydantic import ValidationError
 
@@ -26,6 +28,7 @@ from core.runtime_control.realized_memory import (
     realized_vs_admitted,
 )
 from core.runtime_control.records import PhaseComponentRecord, RealizedPhaseMemory
+from tests.helpers.tuner_source import tuner_node_source
 
 _GB = 1024
 
@@ -343,7 +346,7 @@ class TestObservationOnly:
         assert rows["training"]["realized_above_threshold"] is True
 
         # 2. production calls it, immediately before the record is emitted
-        src = inspect.getsource(tuner)
+        src = tuner_node_source()
         assert src.count("_attach_realized_memory(") >= 2, (
             "expected the definition plus at least one production call site; "
             "the observation is only worth anything if the emission path runs it"
@@ -351,7 +354,13 @@ class TestObservationOnly:
         # V21 PR E appended candidate_id= to the call; anchor on the stable
         # prefix so the guarded property (attach BEFORE emit) stays pinned
         # without re-encoding unrelated kwargs.
-        emit_index = src.index("_emit_record(sandbox, final_record")
+        # `_emit_record` is reached through its owning module since C7d, so the
+        # call may be spelled `_records._emit_record(...)` and the formatter
+        # wraps its arguments. The anchor is the emission of the final record —
+        # neither the module path in front of it nor the line breaks inside it.
+        emit_match = re.search(r"(?:_records\.)?_emit_record\(\s*sandbox,\s*final_record", src)
+        assert emit_match, "the final record is no longer emitted"
+        emit_index = emit_match.start()
         preceding = src[max(0, emit_index - 400) : emit_index]
         assert "_attach_realized_memory(" in preceding, (
             "the attach call is not adjacent to the record emission — a future "

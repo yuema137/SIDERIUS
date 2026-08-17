@@ -167,7 +167,7 @@ def harness():
         cms = (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge"),
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox"),
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=side_effect),
+            patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=side_effect),
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
                 return_value=_synth_reference_stub(),

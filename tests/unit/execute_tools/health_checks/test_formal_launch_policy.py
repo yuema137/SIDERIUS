@@ -33,6 +33,8 @@ from execute_tools.health_checks.launch_policy import (
     FormalLaunchPolicyError,
     validate_formal_launch,
 )
+from execute_tools.metric_order import MetricOrder
+from tests.helpers.metric_fixtures import shipped_spec
 
 BLOCKING = "configs/health_checks.yaml"
 OBSERVE = "configs/health_checks_baseline_observe_mode.yaml"
@@ -270,6 +272,7 @@ class TestTheBootstrapIsNotRefused:
             skip_min_delta=0.0,
             bypass_min_delta=0.5,
             gates_enabled=True,
+            order=MetricOrder(shipped_spec()),
         )
         assert reference == float("-inf")
         assert source == "negative_infinity_bootstrap"

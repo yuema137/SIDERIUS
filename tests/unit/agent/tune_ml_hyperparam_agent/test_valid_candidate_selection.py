@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 from agent.schemas.hyperparam_tuning import ExperimentPlan
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
     _should_bypass_formal_time_budget,
     _should_skip_formal,
 )
+from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
+
+#: Step 07 PR 07b — the selection helpers consume the run's ONE order
+#: authority (``MetricSpec.direction`` interpreted in exactly one place).
+#: The SHIPPED higher-is-better order is this module's default, so every
+#: assertion below states exactly the property it stated before 07b.
+HIGHER_ORDER = MetricOrder(shipped_spec())
+LOWER_ORDER = MetricOrder(direction_only_spec())
+
 
 BLOCKING_IDS = (
     "output_diversity_blocking",
@@ -58,16 +68,18 @@ def _plan() -> ExperimentPlan:
 
 
 def test_valid_lower_score_beats_collapsed_higher_score() -> None:
-    winner = _best_trial_winner([_trial("collapsed", 9.0, healthy=False), _trial("healthy", -0.5)])
+    winner = _best_trial_winner(
+        [_trial("collapsed", 9.0, healthy=False), _trial("healthy", -0.5)], order=HIGHER_ORDER
+    )
     assert winner is not None
     assert winner["exp_id"] == "healthy"
 
 
 def test_no_valid_trial_returns_none() -> None:
-    assert _best_trial_winner([_trial("collapsed", 9.0, healthy=False)]) is None
+    assert _best_trial_winner([_trial("collapsed", 9.0, healthy=False)], order=HIGHER_ORDER) is None
 
 
-def _skip(records, *, threshold, gates_enabled=True) -> bool:
+def _skip(records, *, threshold, gates_enabled=True, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate, exactly as the tuner sequences it (D-C3).
 
     The gates now take an already-resolved winner so that skip, bypass and
@@ -76,13 +88,18 @@ def _skip(records, *, threshold, gates_enabled=True) -> bool:
     never open a gate" an assertion rather than an assumption.
     """
     return _should_skip_formal(
-        _best_trial_winner(records), threshold=threshold, gates_enabled=gates_enabled
+        _best_trial_winner(records, order=order),
+        threshold=threshold,
+        gates_enabled=gates_enabled,
+        order=order,
     )
 
 
-def _bypass(records, *, threshold) -> bool:
+def _bypass(records, *, threshold, order=HIGHER_ORDER) -> bool:
     """Records → winner → gate. See :func:`_skip`."""
-    return _should_bypass_formal_time_budget(_best_trial_winner(records), threshold=threshold)
+    return _should_bypass_formal_time_budget(
+        _best_trial_winner(records, order=order), threshold=threshold, order=order
+    )
 
 
 def test_skip_formal_uses_valid_candidate_and_zero_reference() -> None:
@@ -125,7 +142,7 @@ def test_failed_nontrial_and_contradictory_records_are_excluded() -> None:
         _trial("formal", 4.0, is_trial=False),
         _trial("contradictory", 3.0, memory={"time_mode": "formal"}),
     ]
-    assert _best_trial_winner(records) is None
+    assert _best_trial_winner(records, order=HIGHER_ORDER) is None
 
 
 def test_forced_formal_inherits_best_valid_trial() -> None:
@@ -140,7 +157,7 @@ def test_forced_formal_inherits_best_valid_trial() -> None:
         # FU-D-6: the winner is resolved once and supplied, exactly as the
         # tuner does — the collapsed 9.0 is still excluded by the real
         # resolver, which is the defect this test protects.
-        trial_winner=_best_trial_winner(history),
+        trial_winner=_best_trial_winner(history, order=HIGHER_ORDER),
     )
     assert plan.is_trial is False
     assert plan.model_cfg == {"depth": 2}
@@ -158,7 +175,7 @@ def test_forced_formal_with_no_valid_trial_preserves_planner_config() -> None:
         force_formal_round=True,
         formal_round_strategy="inherit_best_trial",
         memory_history=history,
-        trial_winner=_best_trial_winner(history),
+        trial_winner=_best_trial_winner(history, order=HIGHER_ORDER),
     )
     assert result.is_trial is False
     assert result.model_cfg == original_model_cfg

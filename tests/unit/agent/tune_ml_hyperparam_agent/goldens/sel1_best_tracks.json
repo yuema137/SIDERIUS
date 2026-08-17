@@ -1,0 +1,12 @@
+{
+  "_captured_at": "captured at f17bbdb87e79ee823c969cee63df37bc99437d70 (07b implementation base), clean tree, BEFORE any 07b production edit \u2014 Step 07 PR 07b C1 / Checkpoint 0",
+  "best_exp_id": "pe_wavenet_delta_step00_pseudo_002",
+  "best_denoising_score": 0.65,
+  "best_formal_denoising_score": 0.65,
+  "best_valid_exp_id": "pe_wavenet_delta_step00_pseudo_002",
+  "best_valid_denoising_score": 0.65,
+  "best_valid_formal_exp_id": "pe_wavenet_delta_step00_pseudo_003",
+  "best_valid_formal_denoising_score": 0.65,
+  "best_valid_trial_exp_id": "pe_wavenet_delta_step00_pseudo_002",
+  "best_valid_trial_denoising_score": 0.65
+}

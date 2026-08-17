@@ -22,6 +22,8 @@ from agent.prompts import (
     format_plugin_source_excerpt_block,
 )
 from ml_models.plugin_loader import _load_plugin
+from tests.helpers.metric_fixtures import shipped_spec
+from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import tidmad_task_render
 
 # ---------------------------------------------------------------------------
 # Fixtures — local classes exercised by inspect.getsource
@@ -278,6 +280,8 @@ class TestBrainPlanRendering:
         bridge.plan(
             memory_history=[],
             plugin_source_excerpt=block,
+            task_render=tidmad_task_render(),
+            metric_spec=shipped_spec(),
         )
         user_prompt = captured["user_prompt"]
         # The pinned heading appears.
@@ -288,7 +292,12 @@ class TestBrainPlanRendering:
 
     def test_section_omitted_when_excerpt_empty(self):
         bridge, captured = self._make_bridge()
-        bridge.plan(memory_history=[], plugin_source_excerpt="")
+        bridge.plan(
+            memory_history=[],
+            plugin_source_excerpt="",
+            task_render=tidmad_task_render(),
+            metric_spec=shipped_spec(),
+        )
         assert "## PLUGIN CONFIG SCHEMA" not in captured["user_prompt"]
 
     def test_excerpt_rendered_before_checklist(self):
@@ -303,6 +312,8 @@ class TestBrainPlanRendering:
             memory_history=[],
             plugin_source_excerpt=block,
             exploration_checklist=checklist,
+            task_render=tidmad_task_render(),
+            metric_spec=shipped_spec(),
         )
         user_prompt = captured["user_prompt"]
         i_schema = user_prompt.find("## PLUGIN CONFIG SCHEMA")

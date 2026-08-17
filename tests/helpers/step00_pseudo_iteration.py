@@ -67,9 +67,13 @@ def run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=None):
 
         # importlib because the package __init__ re-exports shadow the
         # module name (same quirk the tuner unit conftest works around).
-        _tuner = importlib.import_module(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
-        )
+        #
+        # The patch target is the tuner's PRIVATE execution module, because
+        # that is where the pre-flight call now lives (Step 07 PR 07b, C7d).
+        # Patching the main module would bind a name nothing calls, and the
+        # real pre-flight would run — so this must follow the code, not the
+        # node's public path.
+        _tuner = importlib.import_module("nodes.ml_hyperparameter_tune_agent.execution")
 
         queue = [dict(r) for r in preflight_results]
 

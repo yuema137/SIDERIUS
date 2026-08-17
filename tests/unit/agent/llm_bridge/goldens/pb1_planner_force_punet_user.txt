@@ -110,6 +110,11 @@ Prefer focal-family losses; keep epochs at 1.
   }
 ]
 
+### Training dynamics (last 3 experiments)
+- punet_step00_fixture_001: training dynamics: none recorded
+- punet_step00_fixture_002: training dynamics: none recorded
+- punet_step00_fixture_003: [focal] train 0.02->0.01 (decreasing, 1 ep) · val 0.02->0.02 (decreasing; best ep 0) · gap +0.00 (comparable)
+
 ### ⚠️  OOM WARNING — MANDATORY ACTION REQUIRED:
 Your last proposed config was REJECTED due to insufficient GPU memory (status='skipped_oom_risk'). It was NEVER trained.
 Required fix: Reduce batch_size from 32 to 8.

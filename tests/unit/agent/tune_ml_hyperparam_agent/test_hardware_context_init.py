@@ -117,7 +117,7 @@ def agent_run(tmp_path):
     with (
         patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-        patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+        patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill),
         patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
             return_value=_synth_reference(),

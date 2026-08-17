@@ -39,6 +39,7 @@ from core.sandbox_executor import TidmadSandbox
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _build_admission_policy,
 )
+from tests.helpers.tuner_source import tuner_node_source
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SDSC = REPO_ROOT / "sdsc_submission_scripts"
@@ -222,9 +223,7 @@ class TestTheSandboxAndGateAcceptIt:
     def test_the_tuner_sets_it_per_round(self):
         """Posture follows the round, so it cannot be resolved once at
         construction and reused across a trial/formal transition."""
-        src = Path(
-            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
-        ).read_text()
+        src = tuner_node_source()
         assert "sandbox.admission_policy = _build_admission_policy(" in src
         assert "is_trial=plan.is_trial," in src
 
@@ -279,9 +278,7 @@ class TestReachabilityGuardrails:
         """`_ValidationSandbox` may never become the configuration
         channel (§4d.3d)."""
         prod = Path(REPO_ROOT / "core" / "sandbox_executor.py").read_text()
-        tuner = Path(
-            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
-        ).read_text()
+        tuner = tuner_node_source()
         assert "_ValidationSandbox" not in prod
         assert "_ValidationSandbox" not in tuner
         assert "bg_admission_validation" not in prod
@@ -294,12 +291,7 @@ class TestReachabilityGuardrails:
             (RUNNER.read_text(), "--gpu_pair_ceiling_gib", "app args -> CLI"),
             (RUNNER.read_text(), "gpu_pair_ceiling_gib=args", "CLI -> schema"),
             (
-                Path(
-                    REPO_ROOT
-                    / "nodes"
-                    / "ml_hyperparameter_tune_agent"
-                    / "ml_hyperparameter_tune_agent.py"
-                ).read_text(),
+                tuner_node_source(),
                 "sandbox.admission_policy",
                 "tuner -> sandbox",
             ),
@@ -316,9 +308,7 @@ class TestReachabilityGuardrails:
         """The ceiling is resolved once, at a boundary. Re-reading the
         environment deeper in the runtime path is how policy stops being
         auditable."""
-        tuner = Path(
-            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
-        ).read_text()
+        tuner = tuner_node_source()
         assert "SIDERIUS_PAIR_VRAM_CEILING_GIB" not in tuner
 
     def test_the_compatibility_ceiling_default_is_unchanged(self):

@@ -16,6 +16,8 @@ the top-level status and the control flow.
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
@@ -99,6 +101,33 @@ class TestStatusHonesty:
         )
 
 
+def _signals(node, keyword: str, statement: type) -> bool:
+    """Does this branch issue the given attempt-loop control decision?
+
+    Step 07 PR 07b, C7d moved the pre-phase branches out of ``run()`` into the
+    node's ``execution`` module, where a phase cannot ``break``/``continue`` the
+    loop it no longer contains — it RETURNS the decision and ``run()`` performs
+    the jump. Both spellings are accepted because both are the same decision;
+    what must never pass is a branch that issues NEITHER, or issues the other
+    one. That is the property these tests were written to defend, and it is
+    unchanged.
+    """
+    if any(isinstance(n, statement) for n in ast.walk(node)):
+        return True
+    return any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == keyword
+        for n in ast.walk(node)
+    )
+
+
+def _ends_the_round(node) -> bool:
+    return _signals(node, "end_round", ast.Break)
+
+
+def _consumes_the_attempt(node) -> bool:
+    return _signals(node, "next_attempt", ast.Continue)
+
+
 class TestRetrySemantics:
     def test_the_two_terminal_causes_are_distinguishable(self):
         # A bool could not express this, which is why the caller conflated
@@ -117,14 +146,10 @@ class TestRetrySemantics:
         # here is the V20 attempt-2 behaviour (retry the identical condition);
         # it must be a `break` so the round ends.
         import ast
-        import importlib
-        import inspect
-        import pathlib
 
-        mod = importlib.import_module(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
-        )
-        src = pathlib.Path(inspect.getfile(mod)).read_text()
+        from tests.helpers.tuner_source import tuner_node_source
+
+        src = tuner_node_source()
         tree = ast.parse(src)
         found = []
         for node in ast.walk(tree):
@@ -132,7 +157,7 @@ class TestRetrySemantics:
                 continue
             test_src = ast.get_source_segment(src, node.test) or ""
             if "TERMINAL_INFRASTRUCTURE_FAILURE" in test_src:
-                found.append(any(isinstance(n, ast.Break) for n in ast.walk(node)))
+                found.append(_ends_the_round(node))
         assert found, "no production branch handles TERMINAL_INFRASTRUCTURE_FAILURE"
         assert all(found), (
             "the infrastructure branch must BREAK out of the attempt loop; a "
@@ -144,14 +169,10 @@ class TestRetrySemantics:
         # The guard must be narrow: a candidate that genuinely does not fit
         # should still let the next, possibly smaller, candidate try.
         import ast
-        import importlib
-        import inspect
-        import pathlib
 
-        mod = importlib.import_module(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
-        )
-        src = pathlib.Path(inspect.getfile(mod)).read_text()
+        from tests.helpers.tuner_source import tuner_node_source
+
+        src = tuner_node_source()
         tree = ast.parse(src)
         ok = []
         for node in ast.walk(tree):
@@ -159,7 +180,7 @@ class TestRetrySemantics:
                 continue
             test_src = ast.get_source_segment(src, node.test) or ""
             if "TERMINAL_RESOURCE_REFUSAL" in test_src:
-                ok.append(any(isinstance(n, ast.Continue) for n in ast.walk(node)))
+                ok.append(_consumes_the_attempt(node))
         assert ok and all(ok), "a resource refusal must still consume the attempt"
 
     @pytest.mark.parametrize(

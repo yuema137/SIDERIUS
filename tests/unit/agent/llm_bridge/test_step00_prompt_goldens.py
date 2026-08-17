@@ -35,12 +35,18 @@ from pathlib import Path
 
 import pytest
 
-from agent.prompts import _truncate_memory_history
+from agent.prompts import (
+    _PLANNER_HIDDEN_RECORD_KEYS,
+    _planner_visible,
+    _truncate_memory_history,
+)
+from agent.schemas.training_diagnosis import TrainingDiagnosis
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import (
     BoundaryRecorderBridge,
     NetworkEscapeError,
 )
+from tests.helpers.metric_fixtures import shipped_spec
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -106,6 +112,36 @@ _HISTORY_3 = [
         "model_type": "punet",
         "denoising_score": -2.55,
         "is_trial": False,
+        # Step 07 PR 07b — a real 07a payload on ONE window record. It does two
+        # jobs at once: PB-1 now pins a RENDERED dynamics line (not only the
+        # "none recorded" path), and the JSON history block above it must stay
+        # byte-identical, which is the hidden-key contract proved on a golden
+        # rather than only in a boundary test.
+        "training_history": {"objective_kind": "focal"},
+        "training_diagnosis": {
+            "state": "ok",
+            "validation_state": "present",
+            "comparability": "established",
+            "epochs_planned": 1,
+            "epochs_completed": 1,
+            "truncated": False,
+            "train_first": 0.0189,
+            "train_last": 0.0123,
+            "train_min": 0.0123,
+            "train_min_epoch": 0,
+            "validation_first": 0.0201,
+            "validation_last": 0.0155,
+            "validation_min": 0.0155,
+            "best_validation_epoch": 0,
+            "final_vs_best_validation_degradation": 0.0,
+            "final_vs_best_validation_degradation_rel": 0.0,
+            "validation_degraded_after_best": False,
+            "train_validation_gap_final": 0.0032,
+            "train_validation_gap_final_rel": 0.26,
+            "train_trend": "decreasing",
+            "validation_trend": "decreasing",
+            "flat_rel_tol": 0.01,
+        },
         "params": {
             "model_config": {"hidden_dim": 64, "depth": 3},
             "train_config": {"lr": 0.0005, "batch_size": 8, "epochs": 1},
@@ -121,8 +157,31 @@ _HISTORY_3 = [
 ]
 
 
+#: The SHIPPED TIDMAD task render (Step 07 PR 07b, P2). Built from the same
+#: authorities production uses — the shipped dataset, the shipped Model-I/O
+#: contract, the shipped health config, the shipped registry — so the goldens
+#: below remain a production-truth pin rather than a fixture of literals. If a
+#: rendered token's authority changes, these goldens fail as production drift,
+#: which is exactly what they are for.
+def tidmad_task_render():
+    from agent.prompt_templates.tuner.rendering import (
+        EFFICIENCY_BAND_FRACTION,
+        build_tuner_task_render,
+    )
+    from execute_tools.dataset_config import TIDMAD
+    from execute_tools.health_checks.config import load_health_gates_config
+    from workflows.task_config import run_bound_model_io_contract
+
+    return build_tuner_task_render(
+        dataset=TIDMAD,
+        model_io_contract=run_bound_model_io_contract(),
+        health_config=load_health_gates_config(),
+        efficiency_band_fraction=EFFICIENCY_BAND_FRACTION,
+    )
+
+
 def planner_fixture_kwargs(force_model: str = "auto") -> dict:
-    """The full 25-parameter ``plan()`` surface, every value pinned.
+    """The full ``plan()`` surface, every value pinned.
 
     Passing EVERY parameter explicitly keeps the golden independent of
     default drift and doubles as documentation of the surface WF-1 pins.
@@ -153,6 +212,8 @@ def planner_fixture_kwargs(force_model: str = "auto") -> dict:
         score_table_md=_SCORE_TABLE_MD,
         task_description=_TASK_DESCRIPTION,
         registry=None,
+        task_render=tidmad_task_render(),
+        metric_spec=shipped_spec(),
     )
 
 
@@ -201,6 +262,41 @@ def reflect_fixture_args() -> tuple:
     )
 
 
+#: Step 07 PR 07b — the reflector's two ADDITIVE kwargs. The diagnosis is the
+#: 07a shape a real round produces, so PB-2 pins a rendered dynamics block
+#: rather than an empty one.
+_REFLECT_DIAGNOSIS = TrainingDiagnosis(
+    state="ok",
+    validation_state="present",
+    comparability="established",
+    epochs_planned=1,
+    epochs_completed=1,
+    truncated=False,
+    train_first=0.0189,
+    train_last=0.0123,
+    train_min=0.0123,
+    train_min_epoch=0,
+    validation_first=0.0201,
+    validation_last=0.0155,
+    validation_min=0.0155,
+    best_validation_epoch=0,
+    final_vs_best_validation_degradation=0.0,
+    final_vs_best_validation_degradation_rel=0.0,
+    validation_degraded_after_best=False,
+    train_validation_gap_final=0.0032,
+    train_validation_gap_final_rel=0.26,
+    train_trend="decreasing",
+    validation_trend="decreasing",
+)
+
+
+def reflect_fixture_kwargs() -> dict:
+    return {
+        "metric_spec": shipped_spec(),
+        "training_diagnosis": _REFLECT_DIAGNOSIS,
+    }
+
+
 # ---------------------------------------------------------------------------
 # PB-1 planner
 # ---------------------------------------------------------------------------
@@ -244,15 +340,29 @@ class TestPB1Planner:
             surface="PB-1 planner system prompt (force_model variant)",
         )
 
-    def test_pb1_full_window_boundary_is_the_deferral_line(self):
-        """OD-1 mechanical deferral record: the <=3-record fixture renders
-        through the verbatim full-window path (`_truncate_memory_history`
-        returns the records unchanged), so PB-1's goldens never execute the
-        condensed branch whose frozenset iteration is byte-unstable across
-        processes (design §4.4). A 4th record WOULD enter that branch —
-        exact planner coverage for it is the §15.2 deferral owned by the
-        step-07a predecessor fix."""
-        assert _truncate_memory_history(_HISTORY_3) == _HISTORY_3
+    def test_pb1_full_window_boundary_is_where_the_condensed_branch_starts(self):
+        """The <=3-record fixture renders through the VERBATIM full-window path
+        and a 4th record enters the condensed branch.
+
+        **Historical note.** This began as OD-1's mechanical deferral record:
+        the condensed branch iterated a frozenset, so its JSON key order — and
+        therefore the planner's prompt bytes for any history longer than the
+        window — was not reproducible across processes, and PB-1's 3-record
+        fixture never entered it. **Step 07 PR 07b CLOSED OD-1** (record-own key
+        order) and captured `pb1_planner_history4_user.txt`, so the branch is
+        now pinned byte-exactly; `test_step07b_c4_task_rendering.py` proves the
+        cross-process stability in a subprocess. What survives here is the
+        BOUNDARY claim: which branch each history length takes.
+
+        The verbatim path returns the records unchanged EXCEPT for the hidden
+        record keys (`_planner_visible`), which is why the comparison below is
+        against the visible projection rather than the raw fixture — record 003
+        carries a 07a payload precisely so the goldens exercise that stripping.
+        """
+        assert _truncate_memory_history(_HISTORY_3) == [_planner_visible(rec) for rec in _HISTORY_3]
+        assert any(_PLANNER_HIDDEN_RECORD_KEYS & rec.keys() for rec in _HISTORY_3), (
+            "the fixture must carry a hidden key, or the assertion above is vacuous"
+        )
         four = [*_HISTORY_3, dict(_HISTORY_3[-1], exp_id="punet_step00_fixture_004")]
         condensed = _truncate_memory_history(four)
         assert len(condensed) == 4
@@ -278,7 +388,7 @@ class TestPB1Planner:
 class TestPB2Reflector:
     def test_reflector_render(self):
         bridge = BoundaryRecorderBridge()
-        out = bridge.reflect(*reflect_fixture_args())
+        out = bridge.reflect(*reflect_fixture_args(), **reflect_fixture_kwargs())
         assert out == {}
         assert len(bridge.captures) == 1
         method, label, system, user = bridge.captures[0]

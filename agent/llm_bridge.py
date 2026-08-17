@@ -42,11 +42,18 @@ from openai import OpenAI
 from openai.types.chat import ChatCompletionMessageFunctionToolCall
 from pydantic import ValidationError
 
+from agent.prompt_templates.tuner.rendering import (
+    EFFICIENCY_BAND_PCT,
+    TunerTaskRender,
+    render_metric_direction_words,
+    render_metric_identity_line,
+)
 from agent.prompts import (
     PLANNER_PROMPT,
     REFLECTOR_PROMPT,
     get_planner_user_prompt,
     get_reflector_user_prompt,
+    render_collapse_advice,
 )
 from agent.schemas.telemetry import (
     LLMBridgeContextError,
@@ -54,6 +61,7 @@ from agent.schemas.telemetry import (
     TokenUsageChars,
     TokenUsageRow,
 )
+from execute_tools.evaluation_metric import MetricSpec
 
 # Fallback markdown injected at the {SCORE_COMPARISON_TABLE} token when no
 # per-file table is available. Italicised Markdown so the LLM reads them as
@@ -791,6 +799,10 @@ class LLMBridge:
         task_description: str = "",
         # --- L6b — tuner planner registry awareness ---
         registry=None,
+        # --- Step 07 PR 07b (P2) — the run's authority-rendered task tokens ---
+        task_render: TunerTaskRender | None = None,
+        # --- Step 07 PR 07b (P3) — the run's golden-metric declaration ---
+        metric_spec: MetricSpec | None = None,
     ) -> dict:
         """
         Uses the Planner logic to observe Research Memory and decide next steps.
@@ -851,7 +863,52 @@ class LLMBridge:
                 ``docs/design/enable_global_task_config.md`` § Commit T4a).
                 Empty string is the test-fixture default; production callers
                 always pass a non-empty value.
+            task_render:
+                The run's ``TunerTaskRender`` (Step 07 PR 07b, P2) — the model
+                roster, the full-scope segment count, the output-contract
+                shape, the focal defaults, the effective health config's check
+                names and the efficiency band, each rendered ONCE at run scope
+                from the authority that owns it.
+
+                **Required at a real render.** The default is ``None`` only so
+                the kwarg surface stays additive for the pseudo/stub bridges;
+                a real ``plan()`` with ``None`` raises. There is deliberately
+                no fallback to the shipped TIDMAD values: a bridge that
+                silently rendered them would hardcode one task's facts into the
+                framework's prompt layer, which is exactly what P2 removes.
+
+            metric_spec:
+                The run's bound golden-metric declaration (Step 07 PR 07b, P3).
+                Its ``direction`` decides whether the planner is told to
+                maximize or minimize, and its ``id`` names what the
+                ``denoising_score`` field actually measures.
+
+                **Required at a real render**, for the same reason as
+                ``task_render``: rendering "maximize" by default would state
+                TIDMAD's convention as if it were the framework's, and would be
+                actively wrong — not merely incomplete — for a minimised
+                metric.
+
+        Raises:
+            ValueError: ``task_render`` or ``metric_spec`` is ``None``.
         """
+        if task_render is None:
+            raise ValueError(
+                "LLMBridge.plan requires task_render: the planner prompt's task "
+                "content (model roster, full-scope segments, output-contract "
+                "shape, focal defaults, health-check names, efficiency band) is "
+                "rendered from the run's authorities and has no default. The "
+                "tuner builds one TunerTaskRender at run scope; pass it."
+            )
+        if metric_spec is None:
+            raise ValueError(
+                "LLMBridge.plan requires metric_spec: the planner prompt states "
+                "which way is better, and there is no safe default — 'maximize' "
+                "is TIDMAD's convention, not the framework's, and would invert "
+                "the goal for a lower-is-better metric. The tuner passes "
+                "run_metric.spec."
+            )
+        _direction = render_metric_direction_words(metric_spec)
         # L6b — render the AVAILABLE CUSTOM LOSSES block. Imported lazily to
         # avoid pulling the proposal-module helper into the bridge's import
         # chain when registry is None (the back-compat path).
@@ -861,6 +918,11 @@ class LLMBridge:
             available_losses_block = render_available_losses(registry)
         else:
             available_losses_block = "No custom losses registered yet.\n"
+        # Step 07 PR 07b (P2) — the authority-rendered task tokens travel the
+        # SAME `str.replace` seam the task description and the score table
+        # already use. Under TIDMAD every one of them renders the exact bytes
+        # the template used to carry as a literal, which is why PB-1/PB-2 must
+        # pass UNCHANGED after this commit.
         system_prompt = (
             PLANNER_PROMPT.replace(
                 "{SCORE_COMPARISON_TABLE}",
@@ -868,6 +930,22 @@ class LLMBridge:
             )
             .replace("{TASK_DESCRIPTION}", task_description)
             .replace("{available_losses_block}", available_losses_block)
+            .replace(
+                "{GATE_OUTPUT_DIVERSITY_ADVICE}",
+                render_collapse_advice(task_render, "output_diversity"),
+            )
+            .replace(
+                "{GATE_AMPLITUDE_COLLAPSE_ADVICE}",
+                render_collapse_advice(task_render, "amplitude_collapse"),
+            )
+            .replace("{FOCAL_ALPHA_DEFAULT}", task_render.focal_alpha_default)
+            .replace("{FOCAL_GAMMA_DEFAULT}", task_render.focal_gamma_default)
+            .replace("{EFFICIENCY_BAND_PCT}", task_render.efficiency_band_pct)
+            .replace("{FULL_SCOPE_SEGMENTS}", str(task_render.full_scope_segments))
+            # P3 — the ONLY intentional LLM-visible byte deltas in 07b (§3.7).
+            .replace("{METRIC_VERB}", _direction["verb"])
+            .replace("{METRIC_COMPARATIVE}", _direction["comparative"])
+            .replace("{METRIC_IDENTITY_LINE}", render_metric_identity_line(metric_spec))
         )
 
         # --- 2. Inject model description + config manual ---
@@ -899,6 +977,8 @@ class LLMBridge:
             last_mode=last_mode,
             # L6b — registry awareness in the user prompt's loss_note text
             registry=registry,
+            # Step 07 PR 07b (P2) — roster + output-contract shape.
+            task_render=task_render,
         )
 
         # Assemble final prompt: user prompt + plugin source + checklist + description + manual.
@@ -924,6 +1004,9 @@ class LLMBridge:
         hypothesis: str,
         actual_results: dict,
         reflection_context: dict | None = None,
+        *,
+        metric_spec: MetricSpec | None = None,
+        training_diagnosis: Any = None,
     ) -> dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
@@ -943,15 +1026,41 @@ class LLMBridge:
         present (threaded by the tuner per sub-commit B), otherwise a fallback
         notice. See docs/aggregated_score_table_awareness.md §9.4.
         """
+        if metric_spec is None:
+            raise ValueError(
+                "LLMBridge.reflect requires metric_spec: the reflector is told "
+                "which direction counts as GOOD, and defaulting to 'HIGHER' "
+                "would make it praise every regression on a lower-is-better "
+                "metric. The tuner passes run_metric.spec."
+            )
+        _direction = render_metric_direction_words(metric_spec)
         score_table_md = (
             reflection_context.get("score_comparison_table") if reflection_context else None
         )
-        system_prompt = REFLECTOR_PROMPT.replace(
-            "{SCORE_COMPARISON_TABLE}",
-            score_table_md or _REFLECTOR_SCORE_TABLE_FALLBACK,
+        # Step 07 PR 07b (P2): the efficiency band needs no transport — it is
+        # a framework constant, and the reflector's bridge surface stays the
+        # frozen additive one (§3.9 gives `reflect` no `task_render`). The
+        # reflector's "200 vs 4000" anchor therefore stays literal, recorded as
+        # a gap rather than smuggled through a new kwarg.
+        system_prompt = (
+            REFLECTOR_PROMPT.replace(
+                "{SCORE_COMPARISON_TABLE}",
+                score_table_md or _REFLECTOR_SCORE_TABLE_FALLBACK,
+            )
+            .replace("{EFFICIENCY_BAND_PCT}", EFFICIENCY_BAND_PCT)
+            # P3 — the declared §3.7 deltas.
+            .replace("{METRIC_COMPARATIVE_UPPER}", _direction["comparative"].upper())
+            .replace("{METRIC_ANTONYM_UPPER}", _direction["antonym"].upper())
+            .replace("{METRIC_COMPARATIVE}", _direction["comparative"])
+            .replace("{METRIC_IDENTITY_LINE}", render_metric_identity_line(metric_spec))
         )
         user_prompt = get_reflector_user_prompt(
-            exp_id, hypothesis, actual_results, reflection_context
+            exp_id,
+            hypothesis,
+            actual_results,
+            reflection_context,
+            training_diagnosis=training_diagnosis,
+            metric_spec=metric_spec,
         )
 
         # Internal call site: label is fixed (§1.5). Provider is the

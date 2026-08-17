@@ -24,6 +24,7 @@ import pytest
 
 from core.scientific_authority import ScientificAuthority
 from execute_tools.health_checks.candidate_eligibility import formal_validity_of
+from tests.helpers.tuner_source import tuner_node_source
 
 BLOCKING = "configs/health_checks.yaml"
 SCIENTIFIC_GATES = (
@@ -104,12 +105,7 @@ class TestTheProductionWiring:
     def setup_class(cls):
         from pathlib import Path
 
-        cls.SRC = (
-            Path(__file__).resolve().parents[4]
-            / "nodes"
-            / "ml_hyperparameter_tune_agent"
-            / "ml_hyperparameter_tune_agent.py"
-        ).read_text(encoding="utf-8")
+        cls.SRC = tuner_node_source()
 
     def test_the_verdict_is_attached_to_formal_records_only(self):
         """MUTATION TARGET: deleting the guard, or inverting it."""
@@ -259,10 +255,5 @@ class TestThePersistedVerdictIsTamperEvident:
         # becomes a no-op against `None`.
         from pathlib import Path
 
-        src = (
-            Path(__file__).resolve().parents[4]
-            / "nodes"
-            / "ml_hyperparameter_tune_agent"
-            / "ml_hyperparameter_tune_agent.py"
-        ).read_text(encoding="utf-8")
+        src = tuner_node_source()
         assert 'final_record["scientific_authority"][' not in src

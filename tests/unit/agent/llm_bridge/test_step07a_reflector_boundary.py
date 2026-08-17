@@ -34,6 +34,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _interpret_training_status,
 )
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+from tests.helpers.metric_fixtures import shipped_spec
 from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import reflect_fixture_args
 
 _WF2_GOLDEN = (
@@ -79,7 +80,7 @@ _SCORE_RESULTS = {
 def _render_reflect(actual_results: dict) -> str:
     exp_id, hypothesis, _fixture_results, context = reflect_fixture_args()
     bridge = BoundaryRecorderBridge()
-    bridge.reflect(exp_id, hypothesis, actual_results, context)
+    bridge.reflect(exp_id, hypothesis, actual_results, context, metric_spec=shipped_spec())
     assert len(bridge.captures) == 1
     _method, label, _system, user = bridge.captures[0]
     assert label == "tuner.reflector"
@@ -100,7 +101,10 @@ def test_the_legacy_payload_merged_with_scores_is_exactly_the_wf2_key_set():
     assert tuple(payload) == LEGACY_TRAINING_RESULT_KEYS
     merged = {**payload, **_SCORE_RESULTS}
     golden = json.loads(_WF2_GOLDEN.read_text(encoding="utf-8"))
-    pinned = golden[0]["actual_results_keys"]
+    # Step 07 PR 07b wrapped the WF-2 golden in a {"calls": [...]} object so it
+    # could carry a provenance note beside the list; the pinned key set is the
+    # same one, and this test's claim is unchanged.
+    pinned = golden["calls"][0]["actual_results_keys"]
     assert sorted(merged.keys()) == pinned
 
 

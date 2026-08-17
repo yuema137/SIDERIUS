@@ -144,6 +144,28 @@ travelling as one pluggable unit rather than as literals spread across nodes.
 
 **Do not invent this seam ad hoc** — update this section first.
 
+### Recorded gaps — TIDMAD prose that stays literal, and why (Step 07 PR 07b)
+
+07b rendered every planner/reflector token whose fact a landed authority owns.
+The list below is what it deliberately did NOT render, recorded here rather
+than papered over with an invented `task_config` field. Each is a Seam-3 (or
+Step-08) gap, not an oversight:
+
+| Literal | Why no authority owns it |
+|---|---|
+| the five per-model roster one-liners (`PLANNER_PROMPT`) | the model NAMES come from `MODEL_REGISTRY` and are rendered; the descriptions are prose no registry declares |
+| the CH1/CH2 + log-space explanation | `MetricSpec` owns id, direction, aggregation, transform and references — not prose about them |
+| the regressor `[B, T]` / HYBRID sentences | the CLASSIFIER shape renders from the run-bound `ModelIOContract`; the other two describe contracts the run has not bound |
+| the built-in loss list at `PLANNER_PROMPT` | owned by `LossConfig.loss_type` and renderable — but the shipped literal WRAPS MID-LIST, so a single-token render would move an LLM-visible byte that P2 is not allowed to move |
+| the per-semantic loss subsets in the force-model branch | their literal order differs from the `Literal`'s declaration order |
+| the "200 segments" / "20× less data" illustrations | the FULL-SCOPE number renders from the profile; 200 is an example portion no default declares |
+| the reflector's "200 vs 4000" anchor | the frozen bridge contract gives `reflect()` no task-render transport, and widening it is out of 07b's scope |
+| class-127 mode collapse and PSD-amplitude wording | the check NAMES render from the effective health config; what the checks MEAN is TIDMAD health semantics — **Step 08** |
+
+A future task pack supplies these; until then they are TIDMAD-rendered from
+their current owner, and the contrast rung asserts only the tokens that ARE
+rendered.
+
 ---
 
 ## Seam 4 — Metric
@@ -156,9 +178,32 @@ travelling as one pluggable unit rather than as literals spread across nodes.
 Regime A (`derive_tidmad_metric`) and both production scoring routes go
 through the handle. Contract test evidence: the strict direction-only rung
 (C6a) and the broader different-metric rung (C6b) in
-`tests/unit/execute_tools/test_step06_c6_stage_b_direction_rung.py`. Not yet
-generic (owned later): direction-sensitive policy consumers (Step 07b under the Q2 lettering / D1),
-task-level metric declaration (Step 12), the lexical loss-id rule (temporary
+`tests/unit/execute_tools/test_step06_c6_stage_b_direction_rung.py`. 
+
+**Step 07 PR 07b LANDED the tuner's direction consumers.**
+`execute_tools/metric_order.py::MetricOrder` is now the ONE place
+`MetricSpec.direction` is interpreted: it is constructed once per run from the
+bound handle, and all 21 golden-metric ordering expressions the Step-07 census
+found in the tuner ask it — trial winner, skip/bypass orientation and their
+disabled sentinels, the bootstrap sentinel, the planner's score-table
+incumbent, the reflector's best/worst/rank/new-best/efficiency band, and the
+five `best_*` finalization tracks. The same-loss `final_loss` rank deliberately
+does NOT (a loss is lower-is-better by definition), and a test pins that it does
+not move when the metric direction flips. Scale-sensitive rules are classified
+per rule rather than sign-flipped, and the one with no honest generic reading
+(`degenerate_penalty_score` under a minimised metric) FAILS CLOSED at startup.
+The planner/reflector prompts render task content, direction wording, metric
+identity and compact `TrainingDiagnosis` lines from landed authorities.
+Structural guard: `tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py`
+allows an executed direction literal in exactly TWO modules — the metric module
+DECLARES the vocabulary, the order module INTERPRETS it — and pins each one's
+literals as an exact multiset.
+
+Not yet generic (owned later): the PERIPHERAL direction consumers
+(`workflows/model_exploration.py`, `core/resume.py`,
+`execute_tools/per_file_best.py`, `core/campaign_artifacts.py`, the dashboard)
+— **Steps 09 / 10 / M2**, and they may import `MetricOrder` when they migrate;
+task-level metric declaration (Step 12); the lexical loss-id rule (temporary
 debt — roadmap §20.8). Design: `docs/design/generic_framework_upgrade/step_06_metric_interface.md`.
 The hard constraint below still holds.
 

@@ -117,13 +117,46 @@ def _render(history: list[dict]) -> str:
     return user
 
 
+#: The heading of the block Step 07 PR 07b renders FROM the hidden diagnosis.
+_DYNAMICS_HEADING = "### Training dynamics"
+
+
+def _without_dynamics_block(prompt: str) -> str:
+    """The prompt minus the owned training-dynamics block.
+
+    07b renders a compact SUMMARY of ``training_diagnosis``, so the prompt is
+    no longer byte-identical with and without that payload — and must not be,
+    or the render would be doing nothing. What must still be identical is
+    everything else, above all the json-dumped history: that is where a raw
+    record key would actually leak.
+    """
+    if _DYNAMICS_HEADING not in prompt:
+        return prompt
+    head, _, tail = prompt.partition(_DYNAMICS_HEADING)
+    _block, sep, rest = tail.partition("\n\n")
+    return head + (rest if sep else "")
+
+
 def test_the_planner_prompt_is_byte_identical_with_and_without_the_payload():
     """Verbatim window (three records): a pre-Step-06 record and the same
     record carrying ``metric_result`` / ``metric_refusal`` render the SAME
-    bytes. This is the exact LLM boundary a Step-06 record key would cross."""
+    bytes everywhere the raw record is serialised.
+
+    **UPGRADED at Step 07 PR 07b.** The claim is now stated where it is still
+    true, and it is a sharper claim than before: the *history JSON and all
+    surrounding prose* are byte-identical, while the *owned dynamics block*
+    deliberately differs — that block is 07b rendering the diagnosis, and
+    asserting whole-prompt equality would have meant asserting the feature does
+    nothing. The absence assertions below still run against the FULL prompt, so
+    a raw key or an inner-only value leaking into the rendered block is caught.
+    """
     plain = _render(_HISTORY_3)
     loaded = _render(_with_payload(_HISTORY_3))
-    assert loaded == plain
+    assert _without_dynamics_block(loaded) == _without_dynamics_block(plain)
+    # ...and the render really is live: the block exists and reflects the
+    # payload, so the equality above is not achieved by rendering nothing.
+    assert _DYNAMICS_HEADING in loaded
+    assert loaded != plain
     assert "metric_result" not in loaded and "metric_refusal" not in loaded
     # Step 07a: neither the history nor the diagnosis leaks — not the keys,
     # not a value that exists ONLY inside them (the R3 list, the epoch stat).

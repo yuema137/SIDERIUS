@@ -20,6 +20,7 @@ from __future__ import annotations
 import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
+from tests.helpers.tuner_source import tuner_node_source
 
 BASE = {"model_type": "m", "run_name": "r", "workspace": "/tmp/ws"}
 
@@ -57,13 +58,9 @@ class TestTheClampReachesTheResolvedValues:
 
     @staticmethod
     def _tuner_source() -> str:
-        import importlib
-        import inspect
-
-        mod = importlib.import_module(
-            "nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent"
-        )
-        return inspect.getsource(mod)
+        # The node, not one file of it: C7 split the tuner into a main module plus
+        # node-local submodules, and these scans are claims about the NODE.
+        return tuner_node_source()
 
     def test_the_clamp_is_applied_after_resolution(self):
         """MUTATION TARGET: clamping `plan.*` instead of the resolved cfg.
@@ -282,10 +279,32 @@ class TestOrdinaryCampaignsAreUnchanged:
     def test_provenance_still_records_the_disabled_state(self):
         """Recorded as `enabled: False` rather than omitted, so a reader can
         tell 'no ceiling configured' from 'nobody wrote the field'."""
+        import ast
+
         src = TestTheClampReachesTheResolvedValues._tuner_source()
         block = src[src.index('final_record["validation_workload_ceiling"]') :][:900]
-        # The stamp sits OUTSIDE the `is not None` guard.
-        guard = src.index("if agent_input.validation_max_portion is not None:")
-        stamp = src.index('final_record["validation_workload_ceiling"]')
-        assert stamp > guard
         assert '"enabled": agent_input.validation_max_portion is not None' in block
+
+        # The stamp sits OUTSIDE the `is not None` guard. Stated as
+        # CONTAINMENT rather than as a byte offset: since Step 07 PR 07b C7d
+        # the clamp lives in the node's `planning` module and the stamp in its
+        # `records` module, so "appears later in the text" no longer means
+        # "runs after" — and would pass or fail on file order alone.
+        tree = ast.parse(src)
+        guards = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.If)
+            and "validation_max_portion is not None" in (ast.get_source_segment(src, n.test) or "")
+        ]
+        assert guards, "the clamp guard is gone"
+        stamped_inside = [
+            g
+            for g in guards
+            if 'final_record["validation_workload_ceiling"]'
+            in (ast.get_source_segment(src, g) or "")
+        ]
+        assert stamped_inside == [], (
+            "the provenance stamp moved inside the ceiling guard, so an "
+            "ordinary campaign would record nothing instead of enabled: False"
+        )

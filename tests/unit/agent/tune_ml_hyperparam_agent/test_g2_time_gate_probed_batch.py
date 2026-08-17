@@ -39,7 +39,11 @@ consumption added in G1.
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
+
+_tuner_runtime = importlib.import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 
 # The package __init__ rebinds sys.modules so this resolves to the inner
 # implementation module — the same object _run_time_preflight lives in.
@@ -184,7 +188,10 @@ class TestTunerTransport:
             captured["params"] = params
             return {"status": "success", "feasible": True}
 
-        monkeypatch.setattr(tuner_mod, "_run_skill", _fake_run_skill)
+        # `_run_time_preflight` and `_run_skill` are both owned by the node's
+        # private `runtime` module (Step 07 PR 07b, C7). Stubbing the public
+        # module would bind a name the callee never reads.
+        monkeypatch.setattr(_tuner_runtime, "_run_skill", _fake_run_skill)
         tuner_mod._run_time_preflight(
             sandbox=FakeSandbox(),
             active_params=active_params,

@@ -28,11 +28,12 @@ import nodes.ml_hyperparameter_tune_agent as tuner
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from core.runtime_control.probe_wiring import probe_runner_availability
 from execute_tools.data_paths import resolve_tidmad_measurement_capability
+from tests.helpers.tuner_source import tuner_node_source
 
 
 def _resolver_call() -> ast.Call:
     """The `probe_runner_availability(...)` call inside the tuner."""
-    tree = ast.parse(Path(tuner.__file__).read_text())
+    tree = ast.parse(tuner_node_source())
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             func = node.func
@@ -57,7 +58,7 @@ class TestTheTunerResolvesACapability:
     def test_it_resolves_through_the_task_owned_adapter(self):
         """Generic code must not pick the dataset. The task layer does, and
         the tuner is where the task is known."""
-        source = Path(tuner.__file__).read_text()
+        source = tuner_node_source()
         tree = ast.parse(source)
         imported = {
             f"{node.module}.{alias.name}"
@@ -104,7 +105,7 @@ class TestAnUnavailableCapabilityExplainsItself:
         breakdown. A bare `probe_resolution="unavailable"` is what let the
         V19 posture persist without anyone noticing which task was silently
         unmeasurable."""
-        source = Path(tuner.__file__).read_text()
+        source = tuner_node_source()
         code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
         assert 'breakdown["probe_capability_reason"]' in code
         assert 'breakdown["probe_capability_task"]' in code

@@ -6,9 +6,11 @@
 | Roadmap | §7a (couplings, target, Rev 5 policy half), §22.6 (persistence ≠ prompt visibility; consumer split item 5), §22.7 (no hidden multi-objective), §22.8, §22.9a (Pets accuracy↑ / DAVIS mse↓ golden metrics via the PR0 `declared/metric_*.json`), §22.12 row 07b, §22.13 (Gate corpus breadth); §15.1 step-7 row (`§7a`) |
 | Design base | `787afa08` (master; 07a MERGED `65804b3d` + finalizer) — every source line below was re-read at this head |
 | Depends on | 07a MERGED (record fields `training_history` / `training_diagnosis`, `TrainingDiagnosis` schema, Stub/pseudo multi-epoch histories, hidden-key sets); Step 06 MERGED (`MetricSpec.direction`, `run_metric` bound at run scope); Step 00 goldens PB-1/PB-2/WF-1/WF-2/REC; PR0 packs (`declared/metric_*.json`) |
-| Decomposition | ONE PR, six commits **C1 → C6** (§15): replay oracle · P1-order + validity · P1-scale + attempt-transition disposition · P2 authority-rendered task blocks + OD-1 · P3 owned rendering deltas + bridge surfaces · rungs / packs / docs / Checkpoint E + Gate 1 |
-| Gates | Gate 1 **REQUIRED, ≥ 2 rounds** (P3 changes LLM-facing SYSTEM prompt bytes; parent §11 row 07b; OD-20-6) · Gate 2 **NOT REQUIRED** (no execution-launch change; flip: any training/inference/scoring launch or execution change → Gate 2) |
-| Status | **FROZEN — OPERATOR APPROVED 2026-08-15 — Revision 2.** Revision 1 reviewed (APPROVE WITH TARGETED REVISION); revision 2 applied the three blockers (unified bridge / WF contract, `MetricOrder` complete API + signed-delta semantics, reflector diagnosis-only transport) and three corrections (Checkpoints B / D explicit, Gate-1 posture frozen from source with the rounds-vs-iterations distinction and the "executed" definition, B-07b-2 without task-type phrasing) plus one final non-architectural consistency pass at freeze (§3.1 file-table wording; §7 / §10 Gate-1 round-vs-iteration wording); §16 records the operator's dispositions of Q-07b-1..9. **Implementation NOT started; §14 ledger empty; implementation may begin only under a fresh Implementation Working Rules contract** |
+| Decomposition | ONE PR. Frozen scope = six commits **C1 → C6** (§15); **C7 / C7d** were ADDED later by the operator scope amendment (2026-08-16) and are NOT part of the frozen decomposition — §15 carries their checklist separately. Frozen six: replay oracle · P1-order + validity · P1-scale + attempt-transition disposition · P2 authority-rendered task blocks + OD-1 · P3 owned rendering deltas + bridge surfaces · rungs / packs / docs / Checkpoint E + Gate 1 |
+| Gates (ORIGINAL, frozen 2026-08-15) | Gate 1 **REQUIRED, ≥ 2 rounds** (P3 changes LLM-facing SYSTEM prompt bytes; parent §11 row 07b; OD-20-6) · Gate 2 **NOT REQUIRED** (no execution-launch change; flip: any training/inference/scoring launch or execution change → Gate 2) |
+| Gates (as RUN) | Gate 1 **PASS** twice — pre-refactor §14.6b, post-refactor §14.11 · Gate 2 **PASS** §14.13. Gate 2 was NOT required by the frozen disposition above and was not triggered by its flip; it was **ADDED by the operator C7 scope amendment (2026-08-16)** as regression evidence that the structural decomposition preserved the real execution path. The original disposition is preserved above exactly as frozen. |
+| Design status | **FROZEN — OPERATOR APPROVED 2026-08-15 — Revision 2.** Revision 1 reviewed (APPROVE WITH TARGETED REVISION); revision 2 applied the three blockers (unified bridge / WF contract, `MetricOrder` complete API + signed-delta semantics, reflector diagnosis-only transport) and three corrections (Checkpoints B / D explicit, Gate-1 posture frozen from source with the rounds-vs-iterations distinction and the "executed" definition, B-07b-2 without task-type phrasing) plus one final non-architectural consistency pass at freeze (§3.1 file-table wording; §7 / §10 Gate-1 round-vs-iteration wording); §16 records the operator's dispositions of Q-07b-1..9.
+| Implementation status | **COMPLETE — READY FOR OPERATOR REVIEW (2026-08-16).** C1–C6 landed the frozen 07b scope; **C7 / C7d** (tuner node structural decomposition) were ADDED by operator scope amendment 2026-08-16 and are recorded in §14.9–§14.9.5. §14 is the ledger and is populated end to end (§14.0–§14.13). Final **executable** HEAD `cb1a885a`; final **PR** HEAD `307fa0ce917c0afbd6ee5425fae7ef902b267019` — everything between the two is documentation and gate-advice JSON only, no executable production change. PR **#216**; exact-head CI **31989125173 SUCCESS** (ruff · ruff format · pyright strict · pytest); clean tree. Terminal validation at `cb1a885a`: 9,787 passed / 3 skipped / 0 failed from a clean tree. **Not merged** — merge is the operator's. |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
@@ -742,9 +744,1934 @@ single validation.
 
 ## 14. Implementation ledger
 
-*(empty until implementation; each commit's evidence lands here —
-Checkpoint-0 captures, counts, wall time, deviations, tests that could not
-run and why; the Gate-1 readiness packet, approval, command, result.)*
+| Field | Value |
+|---|---|
+| Implementation branch | `step07-pr07b-tuner-policy` |
+| Implementation base | `f17bbdb87e79ee823c969cee63df37bc99437d70` (`f17bbdb8`, master; `origin/master == HEAD`, clean tree at branch creation) |
+| Authorization | Implementation Working Rules contract for Step 07 PR 07b (operator, 2026-08-16) — autonomous C1→C6, Gate 1 PRE-AUTHORIZED, Gate 2 forbidden, never merge |
+| Source drift vs the design base | **NONE.** `git diff --stat 787afa08 f17bbdb8` touches only `docs/**` + `CLAUDE.md` (5 files, all documentation), so every source line number quoted in §0 is exact at the implementation base. |
+
+### 14.0 — Checkpoint 0 (C1, test-only)
+
+**Commit `98b74c07` — `test(step07/07b): C1 Checkpoint 0 — selection/threshold/reflection replay oracle`.**
+
+**Files added (no production diff):**
+
+```text
+tests/unit/agent/tune_ml_hyperparam_agent/fixtures/sel1_histories.json        corpus (12 histories + 8 threshold + 7 gate scenarios)
+tests/unit/agent/tune_ml_hyperparam_agent/goldens/sel1_gate_helpers.json      SEL-1a
+tests/unit/agent/tune_ml_hyperparam_agent/goldens/sel1_reflection_context.json SEL-1b
+tests/unit/agent/tune_ml_hyperparam_agent/goldens/sel1_best_tracks.json       SEL-1c
+tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c1_selection_replay.py 5 tests
+```
+
+**Corpus case coverage** (each history names ONE input class; `test_corpus_covers_every_required_case`
+pins the id set against a hardcoded tuple, never against the fixture itself):
+`h_empty` · `h_simple_trials` · `h_tie_first_wins` · `h_none_score` · `h_neg_inf` ·
+`h_pos_inf` · `h_nan` · `h_collapse_penalty` · `h_invalid_candidate` (gate-failed AND
+gates-missing, both outscoring the valid record) · `h_trial_formal_mix` ·
+`h_time_mode_mismatch` · `h_no_successes`. Non-finite scores travel as the sentinel
+strings `__neg_inf__` / `__pos_inf__` / `__nan__` so the fixture stays strict-JSON
+parseable (the same reason `_json_safe_reference` refuses to persist bare `Infinity`).
+
+**Captured values worth naming** (full goldens in the files):
+
+| Surface | Captured fact |
+|---|---|
+| `h_simple_trials` winner | `t_high` @ `-2.55` (argmax) — becomes the argmin `t_low` @ `-3.4` under the C2 strict rung |
+| `h_tie_first_wins` winner | `t_tie_a` — `max()`'s FIRST-wins semantics, which `MetricOrder.best` must preserve |
+| `h_collapse_penalty` winner | `t_ok2` @ `-2.7`; the `failed_mode_collapse` record at `-5.0` is not a candidate (under `lower` it would otherwise read as the best score — §3.4) |
+| `h_pos_inf` / `h_neg_inf` / `h_nan` / `h_none_score` | all resolve to the finite `t_ok` @ `-3.0`; non-finite scores are filtered by validity BEFORE any ordering |
+| `h_trial_formal_mix` winner | `t_only` @ `-3.3` although two formal records score `-1.2` / `-1.8` |
+| skip/bypass sentinels (`h_simple_trials`) | `threshold=-inf` → skip **False** / bypass **True**; `threshold=+inf` → skip **True** / bypass **False** — the asymmetric disable convention C2 must reproduce through `worst_sentinel` / `best_sentinel` |
+| threshold resolver | `gates_off_*` → `(None,None,None,"gates_disabled")`; `bootstrap` → `-inf ×3` + `"negative_infinity_bootstrap"`; `restored_defaults` (ref `-2.5`, deltas `-1.0`/`0.0`) → skip `-3.5`, bypass `-2.5`; `restored_skip_disabled` (delta `-inf`) → skip `-inf`; `restored_bypass_disabled` (delta `+inf`) → bypass `+inf` |
+| reflection context (pseudo run, 2 reflect calls) | round 1: `best_score_so_far=None`, `rank=None`, `is_new_best=True`, `is_more_efficient=False`, `same_loss_loss_rank=1`; 23 keys both calls |
+| five `best_*` tracks (pseudo run) | `best_exp_id=…_002` @ `0.65`, `best_formal_denoising_score=0.65`, `best_valid_exp_id=…_002`, `best_valid_formal_exp_id=…_003`, `best_valid_trial_exp_id=…_002` (the `_002`/`_003` tie at `0.65` re-proves first-wins at the finalization seam) |
+
+**`run()` AST branch-node baseline: 244** (`HyperparamTuningAgent.run`, lines
+3836–6657 = 2 822 lines; node set `If/For/While/Try/ExceptHandler/With/BoolOp/IfExp/
+comprehension/Assert/Match/match_case`). Pinned by
+`test_run_branch_count_not_increased` — it fails the moment a later commit puts a new
+policy branch in the orchestrator instead of behind an extracted boundary.
+
+**Baseline sha256 (at `f17bbdb8`) — PB-1 / PB-2 / WF-1 / WF-2:**
+
+```text
+a691a7f5eecce5a81cb5e802110bc8c9708d2ab4a69e52c850a2f61d9e4c8e62  pb1_planner_auto_system.txt
+3b8677e8861aa0b01d1684fe684b5f23f85c0d5f752e75b89602597cffff198e  pb1_planner_auto_user.txt
+b0cb4d90933cefe950154e9ab0ecc701974e9ee52150e0214aa281f9957f3aba  pb1_planner_force_punet_user.txt
+3566caec033e4a42c137ef2c39960e4e98177676ce6c1a89f38abc125e1f95ac  pb2_reflector_system.txt
+81fa5f496a412a1118dfd141b670da335206594ecb65c83cc56f65f3000e3e06  pb2_reflector_user.txt
+ee7403bd6d6e12620789e3da6b24dbb3b168fc04fc2e98cf54efe1600425b530  wf1_plan_kwarg_key_set.json      (22 kwargs)
+5e8943f68de20209a84e0b349466e1dc0d9bac740b142ae9ada829e294682c53  wf1_plan_call_round1_surface.json
+bbf33b097b999f6ec1bf643d8438bcb629bc8106109fd154c661241dffe8868b  wf2_reflect_call_surfaces.json  (actual_results 9 / reflection_context 23)
+```
+
+**Declared §3.7 P3 delta line-set — verbatim, re-read at `f17bbdb8`.** The design's
+§3.7 table cites the goldens' line numbers as *reading aids* (§"NOT frozen"); two of
+them had drifted and are CORRECTED here. The SET of touched semantic lines is
+unchanged — no line is added to or removed from the frozen scope.
+
+| Golden | Declared line(s) | Current bytes |
+|---|---|---|
+| `pb1_planner_auto_system.txt` | 3 | `Your goal is to maximize the \`denoising_score\` metric across hyperparameter configurations for the following task:` |
+| " | 28 | `  loss_type, and regularization. Goal: maximize score with sufficient data.` |
+| " | **81–82** (§3.7 said "89-90 area" — corrected) | `- A finite negative score such as \`-3.14\` is NOT collapse. It is valid,` / `  low-but-real performance below the anchor ceiling.` — only "negative" → "finite" per §3.7's decision |
+| " | **97–104** (§3.7 said 99-104 — corrected: the block's `###` heading and its `final_loss` line are part of the replaced block) | `### TRAINING vs VALIDATION — CRITICAL:` … `    - Both improve together → the direction is correct, continue exploring.` |
+| `pb1_planner_auto_user.txt`, `pb1_planner_force_punet_user.txt` | after the `### Current Research Memory:` JSON block | NEW dynamics block (no existing line changes) |
+| `pb2_reflector_system.txt` | **9–11** (§3.7 said 11; the `### CRITICAL — GAP ANALYSIS` heading and its `final_loss` line are part of the replaced block) | `### CRITICAL — GAP ANALYSIS (Generalization Gap):` / `- \`final_loss\` and \`loss_history\` are measured on the **TRAINING dataset**.` / `- \`denoising_score\` is measured on the **VALIDATION dataset**.` |
+| " | 23, 25 | `- A result is GOOD if its denoising_score is HIGHER than the best score so far.` / `- A result is BAD if it is LOWER than most previous scores.` |
+| " | 79–80 | `A configuration is only "Better" if it beats the best score. But a configuration is` / `"Valuable" if it achieves ≥95% of the best score with <50% of the parameters or training` |
+| " | 63 — **NOT a delta** | `- When loss_type is the same, a lower final_loss relative to previous same-loss experiments is a positive signal.` (LOSS direction, stays) |
+| `pb2_reflector_user.txt` | 24–26 | `  ⚠ NOTE: final_loss/loss_history above = TRAINING dataset.` / `           denoising_score above = VALIDATION dataset (different data).` / `           Reason about the gap between them to detect overfitting or underfitting.` |
+| " | 33 — **unchanged text**, direction-correct via the order authority | `  denoising_score rank  : 1 / 3 (1 = best)` |
+| " | new | one metric-identity line |
+
+Anything outside this set that moves a golden byte in C4/C5 is a defect (§8 row 8).
+
+**OD-1 baseline instability — reproduced, recorded as evidence (not a golden).**
+`_truncate_memory_history` (`agent/prompts.py:926-935`) builds condensed entries with
+`{k: rec[k] for k in _CONDENSED_KEYS if k in rec}` — frozenset iteration. Rendering the
+FIRST condensed entry of a 4-record history under five hash seeds produced **five
+distinct key orders**:
+
+```text
+PYTHONHASHSEED=0  {"status","is_trial","model_type","exp_id","failure_reason","denoising_score"} / memory {"conclusion","hypothesis","round_index"}
+PYTHONHASHSEED=1  {"status","model_type","is_trial","exp_id","denoising_score","failure_reason"} / memory {"hypothesis","round_index","conclusion"}
+PYTHONHASHSEED=2  {"is_trial","exp_id","failure_reason","model_type","denoising_score","status"} / memory {"round_index","conclusion","hypothesis"}
+PYTHONHASHSEED=3  {"model_type","exp_id","is_trial","failure_reason","denoising_score","status"} / memory {"hypothesis","round_index","conclusion"}
+PYTHONHASHSEED=4  {"exp_id","status","model_type","denoising_score","failure_reason","is_trial"} / memory {"conclusion","hypothesis","round_index"}
+```
+
+`json.dumps(indent=2)` bytes therefore differ across processes for ≥ 4-record
+histories. The ≤ 3-record PB-1 fixture never enters the branch, which is why no golden
+ever caught it. C4 closes it by record-own-order iteration + a 4-record golden pinned
+across a subprocess.
+
+**Validation.**
+
+```text
+.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c1_selection_replay.py -q
+  → 5 passed in 1.71s, rc=0   (/tmp/07b_c1.log)
+ruff check . / ruff format --check .   → clean (see below)
+```
+
+**Deviations at C1: NONE** beyond the two golden line-number corrections recorded
+above (reading aids, explicitly not frozen). C1 contains no production diff
+(`git diff --stat` over `nodes/`, `agent/`, `execute_tools/`, `workflows/` = empty).
+
+---
+
+### 14.1 — C2: `MetricOrder` + every ordering consumer + validity outcome (P1-order)
+
+**Commit `41baf643` — `feat(step07/07b): C2 — MetricOrder, the one golden-metric order authority`.**
+
+**Production diff**
+
+```text
+execute_tools/metric_order.py                                    NEW, 200 lines — the ONE authority (§3.2 API)
+nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py
+      + run_order = MetricOrder(run_metric.spec)                 bound at run scope beside run_metric (:3924)
+      + _identity / _score_of                                    ordering key functions
+      + _build_reflection_context(...)                           EXTRACTED from run() (139 inline lines → a typed helper)
+      + BestTracks / _select_best_records(...)                   EXTRACTED from run() (47 inline lines → a frozen dataclass + helper)
+      ~ _best_trial_winner / _should_skip_formal /               gained `order`; max()/</>= /±inf → the authority
+        _should_bypass_formal_time_budget
+      ~ planner score-table incumbent, skip + bypass banners     order.best / order.comparison_symbol / order.at_least_symbol
+```
+
+`_resolve_formal_comparison_thresholds` is deliberately UNTOUCHED at C2: its
+`ref + delta` arithmetic and its `-inf` bootstrap are SCALE rules and belong to C3,
+so the C2 diff stays ordering-only exactly as the commit plan requires.
+
+**The extraction was done in two steps, with evidence at each** (design §17 finding 14):
+
+| Step | What changed | C1 replay |
+|---|---|---|
+| 1 — VERBATIM extraction | the two blocks moved out of `run()` with their `max` / `sorted(reverse=True)` / `min` intact; gate helpers rewired | `5 passed in 1.59s`, rc=0 — deep-equal |
+| 2 — authority rewire | `best` / `worst` / `rank` / `is_better` inside the extracted helpers | `5 passed in 1.62s`, rc=0 — still deep-equal |
+
+**Consumer migration — the §0.1 census, item by item**
+
+| §0.1 site | 07b | Commit |
+|---|---|---|
+| 1 trial winner | `order.best(candidates, key=_score_of)` | C2 |
+| 2 skip gate + its disabled sentinel | `order.is_better(threshold, score)`; `threshold == order.worst_sentinel` | C2 |
+| 3 bypass gate + its disabled sentinel | `order.is_at_least(score, threshold)`; `threshold == order.best_sentinel` | C2 |
+| 4 bootstrap sentinel + `ref + delta` | — | **C3** (scale) |
+| 5 planner score-table incumbent | `run_order.best(_records_with_table, key=_score_of)` | C2 |
+| 7 reflection `best_score` / `best_record` / `rank` / `worst_score` / `is_new_best` | `order.best` / `order.rank` / `order.worst` / `order.is_better` | C2 |
+| 7 reflection `is_more_efficient` + the 5 % band | — | **C3** (scale) |
+| 8 LOSS rank (`sorted` ascending, `min`) | UNCHANGED, and pinned unchanged | C2 |
+| 9 five `best_*` tracks | `order.best` per track, same filters | C2 |
+
+**Deviation (bounded).** `MetricOrder` carries two members the §3.2 table does not
+list: `comparison_symbol` (`<` / `>`) and `at_least_symbol` (`>=` / `<=`). The
+frozen table's row for the banners says the banner "renders the order's operator
+symbol", and the bypass banner needs the at-least form. Both are FORMATTING ONLY
+(stdout, never an LLM surface, never a decision) and both live INSIDE the one
+authority, so they add no second interpretation site — which is the invariant the
+table exists to protect. *Source evidence*: skip banner `:4384-4390` hardcoded `<`,
+bypass banner `:5163-5176` hardcoded `>=`. *Validation*:
+`TestBannerSymbols`. Under `higher` the rendered bytes are unchanged.
+
+**Test disposition applied at C2**
+
+| Module | Disposition |
+|---|---|
+| `tests/helpers/metric_fixtures.py` | NEW — `direction_only_spec` / `direction_only_metric` promoted from Step 06's C6a rung (§3.11); the Step-06 module imports them, so its rung still binds the identical one-axis handle |
+| `tests/unit/execute_tools/test_metric_order.py` | NEW, 18 tests — the authority as a pure object |
+| `tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py` | NEW, 35 tests — rung **B-07b-1**, loss-rank non-flip, §3.4 validity outcome, reachability |
+| `test_delta_gates.py`, `test_valid_candidate_selection.py` | UPGRADED — module helpers take `order`, defaulting to the shipped `HIGHER_ORDER`, so every pre-07b assertion states exactly the property it stated before |
+| `test_formal_launch_decision.py` | UPGRADED — same, plus the structural single-resolution test now also pins `order=run_order` at ≥ 3 call sites and `run_order = MetricOrder(run_metric.spec)` in the tuner |
+| `test_valid_trial_winner_drives_formal.py`, `test_force_formal_round.py`, `test_m6_probe_unavailable_fails_closed.py`, `tests/integration/workflows/test_chain_incumbent_pseudo.py` | UPGRADED — mechanical `order=` plumbing at the shipped order |
+| `tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py` | UPGRADED — see below |
+
+**Step-06 C5 guard: migrated, not silenced.** Step 06 left an executable list of
+direction consumers it did NOT reach, with the instruction *"if one of these goes
+red, someone migrated a consumer: record it as reached, do not silence the guard."*
+Five of its assertions went red at C2, and both were the guard working:
+
+1. `test_no_production_surface_executes_a_direction_literal_outside_the_metric_module`
+   — `metric_order.py` executes `"higher"` once. The guard now allows exactly TWO
+   modules and states the split: the metric module DECLARES the vocabulary, the
+   order module INTERPRETS it. Any third is still an offender.
+2. The four tuner rows of `NOT_REACHED_DIRECTION_CONSUMERS` moved to a new
+   `MIGRATED_TO_THE_ORDER_AUTHORITY` table whose assertion is INVERTED — the
+   hardcoded comparison must now be ABSENT and `MetricOrder` present. Deleting the
+   rows would have erased the evidence that the migration happened, which is the
+   drift §16-Q6 exists to prevent. The D1 rows (chain / resume / `per_file_best` /
+   dashboard) are untouched debt and still hold their literals.
+
+**Mutation / reachability evidence (Checkpoint D rows 1, 2, 5, 6).** Nine mutations,
+each applied to EXACTLY ONE site (asserted: the sweep refuses to run if the target
+string occurs 0 or ≥ 2 times), `__pycache__` cleared before every run, baseline
+restored and re-proved green afterwards
+(`47 passed in 2.84s`, rc=0, `git status --short` empty). Selection:
+`test_step07b_c2_order_consumers.py` + `test_step06_c5_boundary_and_structure.py`.
+
+| # | Mutation | Defect it stands for | Observed |
+|---|---|---|---|
+| M1 | `_best_trial_winner` reverts to a bare `max` | a consumer never joined the authority | **RED** 2 failed / 45 passed |
+| M2 | skip disabled-sentinel back to the `-inf` literal | under `lower` the skip gate stays permanently armed | **RED** 1 / 46 |
+| M3 | bypass disabled-sentinel back to the `+inf` literal | under `lower` the bypass stays permanently disabled | **RED** 1 / 46 |
+| M4 | skip comparison back to `<` | the gate fires on the wrong side under `lower` | **RED** 2 / 45 |
+| M5 | `is_new_best` back to `>` | the reflector calls the worst result a new best | **RED** 3 / 44 |
+| M6 | reflection `rank` back to `sorted(reverse=True)` | the LLM is shown an inverted leaderboard | **RED** 2 / 45 |
+| M7 | `valid_records` filter dropped | an invalidated result becomes an incumbent (§3.4) | **RED** 2 / 45 |
+| M8 | loss rank routed THROUGH the metric order | the worst training run of a loss family reported as its best | **RED** 3 / 44 |
+| M9 | the five `best_*` tracks back to bare `max` | finalization ignores the declared direction | **RED** 2 / 45 |
+
+Every mutation was RED, so no test in this commit is decoration. M8 is the
+inverse-shaped proof the others cannot give: it fails BECAUSE the loss stayed put,
+which is the only way to pin "this one must NOT migrate".
+
+Reachability is separate from all nine: `test_the_production_run_reaches_the_order_authority`
+swaps `MetricOrder` for a recording double inside the production module and drives a
+real bounded tuner iteration, then asserts the reached member set is exactly
+`{best, worst, rank, is_better}`. The sentinels are asserted ABSENT there and the
+reason recorded: that harness runs with `enable_chain_incumbent_formal_gates` off, so
+`_should_skip_formal` short-circuits before the sentinel comparison. Asserting a path
+the run does not take would have been a false reachability claim; the sentinels'
+reachability is the gate-helper rung's, and in production Gate 1's
+`--enable_chain_incumbent_formal_gates`.
+
+**Validation.**
+
+```text
+.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c1_selection_replay.py \
+      tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c2_order_consumers.py \
+      tests/unit/execute_tools/test_metric_order.py -q -p no:randomly
+  → 58 passed in 1.94s, rc=0
+.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent tests/unit/execute_tools \
+      tests/unit/agent/llm_bridge tests/unit/workflows tests/unit/core -q -p no:randomly
+  → 5040 passed, 3 skipped in 447.16s (0:07:27), rc=0   (/tmp/07b_c2_all.log)
+ruff check . / ruff format --check .   → clean
+```
+
+Backward compatibility: C1 replay goldens deep-equal; PB-1/PB-2/WF-1/WF-2 untouched
+(no prompt or bridge change in C2); REC goldens untouched (no record change);
+`run()` AST branch count **198 ≤ 244** (the two extractions moved 46 branch nodes out
+of the orchestrator; the sequencing calls added none).
+
+**Process incident, recorded because it cost work.** The first mutation sweep used
+`git checkout -- <file>` to restore each mutated site. On an UNCOMMITTED tree that
+restores to `HEAD`, so it discarded the whole C2 production edit rather than the
+mutation. The edits were reapplied deterministically from the transcript with
+per-replacement count assertions. **Rule adopted for the rest of this PR: commit the
+semantic checkpoint BEFORE any mutation sweep** — which is also what CLAUDE.md's
+"final validation runs from a clean tree" rule implies, and what makes a mutation's
+`git checkout` restore the intended baseline.
+
+---
+
+### 14.2 — C3: classified scale rules + penalty guard + `AttemptTransition` REMOVE (P1-scale)
+
+**Commit `f10c9bc4` — `feat(step07/07b): C3 — the scale-sensitive rules, classified`.**
+
+**§3.3 row-by-row, as implemented**
+
+| Row | Class | Implementation | TIDMAD value |
+|---|---|---|---|
+| 1 declared skip / bypass margins | (ii) DECLARED | `_resolve_formal_comparison_thresholds(..., order)` → `order.toward_better(reference, delta)`. `signed_delta` is a coordinate on the better-direction axis, so `-1.0` loosens under BOTH directions and the operator's `-inf` / `+inf` disable values still resolve to that metric's worst / best sentinel | `ref−1.0` / `ref+0.0` — **identical** |
+| 2 bootstrap sentinel | (i) generic | `order.worst_sentinel`. The source string `negative_infinity_bootstrap` is KEPT: it is a provenance label persisted on records, so renaming it is a record-vocabulary change (D1-adjacent, not authorised). Documented as "the worst-value bootstrap" | `-inf` — identical |
+| 3 disable sentinels | (i) generic | already at C2 (`order.worst_sentinel` / `order.best_sentinel` in the two gates) | identical |
+| 4 efficiency band | (i) generic, metric-independent DEFINITION | `EFFICIENCY_BAND_FRACTION = 0.05` (ONE named module constant, exported for C4's prompt renderer); `score_range = abs(best − worst)`; `score_threshold = order.toward_worse(best, EFFICIENCY_BAND_FRACTION * range)`; `is_more_efficient` uses `order.is_at_least`. Single-distinct-score path (`range is None` → threshold = best) unchanged | `best − 0.05·range` — identical |
+| 5 collapse penalty | (ii) DECLARED + (iv) inapplicable → FAIL CLOSED | `_validate_penalty_for_direction(agent_input, order)` raises `ValueError` for a finite float under a metric the convention does not describe; `None` always accepted; `_apply_degeneracy_reaction` itself unchanged and direction-free | `None` default and a configured `-5.0` under `higher` — identical |
+| 6 `is_new_best` | ordering | C2 | identical |
+| 7 baseline `"baseline" in exp_id` | naming convention | untouched | identical |
+| 8 loss rank | not a metric rule | untouched, and pinned unchanged | identical |
+| 9 `_json_safe_reference` | storage image | untouched (`math.isfinite` already covers `+inf`) | identical |
+
+**The penalty guard's refusal path.** The design requires it "routed through the
+EXISTING startup-validation failure path". Audited: the tuner's startup refusal is
+`validate_runtime_config` (`agent/schemas/hyperparam_tuning.py:2322`) raising
+`ValueError` at `run()` entry, before any LLM call, sandbox construction or file I/O.
+`validate_runtime_config` cannot host the check — it is shared with the workflow
+pre-flight and takes no metric — so the guard is a tuner-local typed helper invoked
+on the SAME line block, immediately after `validate_runtime_config`, raising the same
+`ValueError`. Reachability is pinned structurally
+(`test_the_refusal_is_reached_from_production_startup` asserts the call site exists
+AND precedes the round loop, so a guard moved after the first LLM call fails).
+
+**Deviation (bounded).** `MetricOrder.penalty_convention_applies` is a member the
+§3.2 table does not list. It exists because the alternative was worse: the guard
+otherwise needs `order.direction == "higher"` in the tuner, which is a direction
+literal outside the metric/order modules and would have re-created exactly the
+second-authority pattern 07b removes (and would have failed Step 06's C5 guard,
+correctly). The member is phrased as a POLICY question — "does this declared
+convention have a meaning under the bound metric?" — not as a direction flag, has
+exactly one caller, and lives inside the one authority. *Validation*:
+`TestPenaltyConventionPredicate`. Its `_higher` source is the same private flag every
+other member reads, so no second interpretation exists.
+
+**`AttemptTransition` / `AttemptDecision` — REMOVED (§3.5, Q-07b-1).**
+Repo-wide grep after the change: zero references outside the replacement comment.
+The `resolved_action` hazard is recorded WHERE THE NEXT READER MEETS IT — a
+`KNOWN DEFECT` note at the declaration inside `run()` naming the mechanism (round-
+scoped, written seven nesting levels down, only on the branch that reaches health-gate
+evaluation, never reset between attempts), the proposed fix (carry per attempt;
+distinguish "no action produced" from `CONTINUE`), why 07b may not apply it (it
+changes round outcomes in the crash-after-a-scored-attempt case) and its owner (a
+dedicated round-semantics correction requiring an operator decision — neither 07b's
+nor 07c's). `tests/…/test_control_boundary.py::TestAttemptDecision` DELETED with the
+reason in place of it; `TestRoundOutcome` untouched and green (42 passed).
+
+**Schema docstrings** (`agent/schemas/hyperparam_tuning.py`): `skip_formal_min_delta`,
+`bypass_formal_time_budget_min_delta` and `degenerate_penalty_score` re-worded — units
+are the golden metric's ("dB under TIDMAD, whose metric is log-space"), the margins
+are coordinates on the better-direction axis, and the `lower` refusal is documented.
+**No field added, no default changed**, so REC-3's schema field lists are unchanged.
+
+**Rung B-07b-1s** — `tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c3_scale_rules.py`,
+28 tests, deliberately on NON-TIDMAD scales (accuracy-like `higher` in [0, 1],
+MSE-like `lower` near 0) because TIDMAD's log-space values around −3 are exactly where
+a TIDMAD-tuned default still looks right. Each test names the number a wrong
+implementation would produce, e.g.: a raw `ref + delta` resolves the MSE skip
+threshold to 0.009 — *tighter* than the incumbent, so a genuinely regressed trial
+still buys a formal round; a raw `best − 0.05·range` on the MSE metric resolves to
+0.008, better than the run's best, so the efficiency signal would be permanently dead;
+a raw `best − 0.05` on the accuracy metric widens the band eightfold.
+
+**Validation.**
+
+```text
+.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent/test_step07b_c3_scale_rules.py -q -p no:randomly
+  → 28 passed in 1.40s, rc=0
+.venv/bin/python -m pytest tests/unit/execute_tools tests/unit/agent/tune_ml_hyperparam_agent -q -p no:randomly
+  → 2283 passed, 1 skipped in 329.32s, rc=0   (/tmp/07b_c3b.log)
+ruff check . / ruff format --check .   → clean (931 files)
+```
+
+C1 replay deep-equal under `higher` after C3 (the range-normalised band and the
+`toward_better` margins reproduce every captured value); `run()` AST branch count
+**198 ≤ 244**; PB/WF/REC untouched (no prompt, bridge or record change in C3).
+
+**Mutation evidence (Checkpoint D rows 3, 4).** Nine mutations, each applied to
+EXACTLY ONE asserted site, caches cleared, baseline restored and re-proved green
+(`68 passed in 1.89s`, rc=0, `git status --short` empty). Selection: the C3 rung +
+the C1 replay + `test_delta_gates.py` + `test_degeneracy_handling.py`.
+
+| # | Mutation | Defect it stands for | Observed |
+|---|---|---|---|
+| N1 | margins revert to raw `ref + delta` | a declared rule silently reverts to a raw-score default | **RED** 4 failed / 64 passed |
+| N2 | bootstrap reverts to the `-inf` literal | a fresh minimised-metric chain is budget-blocked forever (the v15 failure) | **RED** 1 / 67 |
+| N3 | band reverts to a raw `best - 0.05` | the band stops being range-normalised — eight times too wide on an accuracy metric | **RED** 3 / 65 |
+| N4 | band keeps the fraction but drops the direction | correct width, wrong side — dead efficiency signal on every minimised metric | **RED** 1 / 67 |
+| N5 | range loses its `abs` | a signed range flips the band's sign under `lower` | **RED** 1 / 67 |
+| N6 | band comparison reverts to `>=` | the "clears the bar" test faces the wrong way | **RED** 1 / 67 |
+| N7 | penalty guard fails OPEN | a finite penalty reaches the planner as the campaign's best score | **RED** 2 / 66 |
+| N8 | penalty guard NEGATES instead of refusing | policy invented on the operator's behalf | **RED** 2 / 66 |
+| N9 | the startup guard is never called | a guard nobody calls is a comment | **RED** 1 / 67 |
+
+N4 and N5 are the pair worth naming: both keep the range normalisation the design
+asks for and would pass any test that only checked "the band is a fraction of the
+range". Only a direction-aware expectation separates them.
+
+
+### 14.3 — C4: authority-rendered task blocks, byte-exact under TIDMAD + OD-1 (P2)
+
+**Commit `50a88b50` — `feat(step07/07b): C4 — task content rendered from its authority`.**
+
+**Production diff**
+
+```text
+agent/prompt_templates/tuner/__init__.py      NEW
+agent/prompt_templates/tuner/rendering.py     NEW — 5 renderers, frozen TunerTaskRender,
+                                              build_tuner_task_render, and the ONE
+                                              EFFICIENCY_BAND_FRACTION / EFFICIENCY_BAND_PCT
+agent/prompts.py                              PLANNER/REFLECTOR tokens; render_collapse_advice;
+                                              _builtin_roster; the planner USER builder takes
+                                              task_render; OD-1 key order in _truncate_memory_history
+agent/llm_bridge.py                           plan(..., task_render=None) + fail-closed + token
+                                              substitution; reflect() substitutes the band constant
+nodes/…/ml_hyperparameter_tune_agent.py       builds ONE TunerTaskRender at run scope and passes it;
+                                              imports EFFICIENCY_BAND_FRACTION instead of defining it
+```
+
+**P2 ACCEPTANCE — MET.** After C4 the five Step-00 prompt goldens are byte-identical to
+§14.0, with **nothing regenerated**:
+
+```text
+a691a7f5…c8e62  pb1_planner_auto_system.txt          UNCHANGED
+3b8677e8…f198e  pb1_planner_auto_user.txt            UNCHANGED
+b0cb4d90…f3aba  pb1_planner_force_punet_user.txt     UNCHANGED
+3566caec…e1f95ac pb2_reflector_system.txt            UNCHANGED
+81fa5f49…000e3e06 pb2_reflector_user.txt             UNCHANGED
+```
+
+That equality IS the acceptance criterion: every rendered token reproduces the literal it
+replaced, so a P2 mistake shows up as a golden failure with no regeneration to hide behind.
+
+**Rendered tokens and their authorities** (TIDMAD values, all byte-identical to the pre-C4
+literals):
+
+| Token | Authority | TIDMAD value |
+|---|---|---|
+| `{BUILTIN_MODEL_ROSTER}` (USER) | `MODEL_REGISTRY` order ∩ `BUILTIN_OUTPUT_TYPES` | `punet \| fcnet \| transformer \| wavenet \| rnn \| gated_fno` |
+| `{FULL_SCOPE_SEGMENTS}` (planner SYSTEM) | run-bound `DatasetConfig` | `4000` |
+| `{OUTPUT_CONTRACT_SHAPE}` (USER, force-model branch) | run-bound `ModelIOContract.output.render_shape()` | `[B, 256, T]` |
+| `{FOCAL_ALPHA_DEFAULT}` / `{FOCAL_GAMMA_DEFAULT}` | `LossConfig` field defaults | `0.5` / `2.0` |
+| `{GATE_OUTPUT_DIVERSITY_ADVICE}` / `{GATE_AMPLITUDE_COLLAPSE_ADVICE}` | the run's EFFECTIVE health config | both present → both sentences render |
+| `{EFFICIENCY_BAND_PCT}` (planner + reflector SYSTEM, reflector USER) | `EFFICIENCY_BAND_FRACTION` | `5` |
+
+The plugin-loaded registry is filtered by `BUILTIN_OUTPUT_TYPES`, so a workspace with 90
+agent-generated plugins still renders the six built-ins in registry order — verified against a
+live plugin-loaded interpreter, not only in the fixture.
+
+**Where the run-scope build sits, and why.** `build_tuner_task_render` is called immediately
+AFTER the effective-config path swap (`agent_input.health_checks_config = _effective_config_path`).
+Built any earlier, the check names would come from the SHIPPED default rather than from the
+config this run actually evaluates — the prompt would advise the planner about gates the run does
+not run, which is precisely the failure §3.6's omission rule exists to prevent.
+
+**Deviations from §3.6 (two, both bounded, both forced by P2's own byte rule).**
+
+| # | §3.6 says | What was done, and why |
+|---|---|---|
+| 1 | RENDER the built-in loss list at `prompts.py:182-184` | **KEPT literal.** §3.6 quotes the literal unwrapped, but the shipped bytes WRAP MID-LIST — `pb1_planner_auto_system.txt:175-176` is `…the four built-ins (\`focal\`, \`focal_cw\`, \`ce\`,` / `` `smooth_l1`) — see the COMPATIBILITY section… ``. A single-token render moves the newline, i.e. an undeclared PB-1 delta, which P2's own acceptance rule and the frozen stop conditions forbid. Embedding the wrap inside the renderer was rejected: the next task pack would inherit TIDMAD's line wrapping from an "authority". `render_builtin_loss_types` was REMOVED rather than left consumer-less. Gap recorded beside §3.6's existing subset-ordering gap. |
+| 2 | RENDER the full-scope anchor at reflector `:271`, `:274-275` | **KEPT literal.** §3.9 — corrected by an operator BLOCKER at revision 2 — is the ONE bridge contract, and it gives `reflect()` no `task_render`; adding one is an explicit stop condition ("WF-1/WF-2 changes beyond the frozen additive contract"). Only the PLANNER renders `{FULL_SCOPE_SEGMENTS}`. `{EFFICIENCY_BAND_PCT}` DOES render at both surfaces because it is a framework constant needing no transport. Gap recorded (Seam 3). |
+
+Both are the §3.6 rule applied to itself: *a token renders from a landed authority, or it stays
+a literal with the gap recorded*. Neither invents a field; neither changes a TIDMAD byte.
+
+**Deviation 3 (placement).** `EFFICIENCY_BAND_FRACTION` moved from the tuner (where C3 put it)
+to `agent/prompt_templates/tuner/rendering.py`. The import runs one way — the tuner imports the
+renderers, and `agent/prompts.py` needs the percentage — so a constant in the tuner would make
+`prompts.py → tuner → llm_bridge → prompts` a cycle. It is still exactly ONE symbol with two
+consumers, which is what §3.3 row 4 requires; only its address changed.
+
+**OD-1 CLOSED.** `_truncate_memory_history` now iterates the RECORD's own key order filtered by
+`_CONDENSED_KEYS` membership. Before: 5 distinct key orders across 5 `PYTHONHASHSEED`s. After: 4
+seeds → 1 byte-identical render. Sorting was rejected as a different defect — it would serialise
+the same record one way inside the verbatim window and another way outside it. New golden
+`pb1_planner_history4_user.txt` (7 735 chars) captured at this commit, clean tree; the ≤ 3-record
+PB-1 goldens are untouched because that branch is never entered.
+
+**WF-1 22 → 23, additive.** One new kwarg name, `task_render`; every pre-existing name and value
+unchanged. `wf1_plan_call_round1_surface.json` pins it by CONTENT (`model_dump()`, unlike
+`registry` which is pinned by type name) — its fields ARE the task facts the planner is told, so
+a drift in any of them is what the baseline exists to catch. Both goldens carry the three-part
+note. WF-2 untouched (no reflector surface change in C4).
+
+**Test disposition.** NEW `tests/unit/agent/llm_bridge/test_step07b_c4_task_rendering.py` (17).
+UPGRADED: `test_step00_prompt_goldens.py` gains `tidmad_task_render()` built from the SAME
+shipped authorities production uses, so the goldens stay a production-truth pin;
+`test_step00_choreography_baselines.py` projection; `test_llm_bridge.py`,
+`test_plugin_source_excerpt.py`, `test_record_usage.py`, `test_stub_llm_bridge.py` thread the
+kwarg. `StubLLMBridge` inherits the real `plan()`, so `--is_pseudo_llm` runs also need the
+render — and get it, because the tuner always supplies it.
+
+**Validation.**
+
+```text
+python -m pytest tests/unit/agent/llm_bridge -q -p no:randomly
+  → 130 passed in 1.78s, rc=0   (PB goldens green, sha256 unchanged)
+python -m pytest tests/unit/agent tests/unit/nodes tests/unit/workflows tests/unit/execute_tools \
+      -q -p no:randomly
+  → 5490 passed, 1 skipped in 406.00s (0:06:46), rc=0   (/tmp/07b_c4_all2.log)
+ruff check . / ruff format --check .   → clean (934 files)
+```
+
+**One diagnosis worth keeping.** The first WF-1 run failed with an EMPTY diff — the deep-compare
+said "diverged", the rendered diff showed nothing. Cause: `model_dump()` keeps
+`gate_check_names` a `tuple`, the golden round-trips it through JSON as a `list`, and
+`json.dumps(..., default=str)` renders the two identically. Fixed with `model_dump(mode="json")`.
+Recorded because an empty diff is the least debuggable failure a golden can produce, and any
+future tuple-valued projection will hit it.
+
+**Mutation evidence (Checkpoint D rows 7, 12, 13).** Ten mutations, each applied to EXACTLY ONE
+asserted site, caches cleared, baseline restored and re-proved green (`131 passed in 1.92s`,
+`git status --short` clean). Selection: the C4 module + the PB goldens + the WF-1 baselines.
+
+| # | Mutation | Defect it stands for | Observed |
+|---|---|---|---|
+| P1 | a rendered literal reinstated beside its token | the value silently stops coming from the authority while every golden stays green | **RED** 2 failed / 33 passed |
+| P2 | the roster returns a hardcoded six-name list | a contrast task is told TIDMAD's architectures | **RED** 3 / 32 |
+| P3 | full-scope segments returns `4000` | a 3-file task is told it should train on 4 000 segments | **RED** 3 / 32 |
+| P4 | a missing contract renders `[B, 256, T]` anyway | a guessed shape makes every plan the planner produces invalid | **RED** 1 / 34 |
+| P5 | collapse advice ignores the effective config | the planner is told to read a `failure_reason` the run can never emit | **RED** 1 / 34 |
+| P6 | the bridge falls back instead of failing closed | TIDMAD hardcoded into the framework's prompt layer | **RED** 1 / 34 |
+| P7 | OD-1 reverts to frozenset iteration | prompt bytes stop being reproducible across processes | **RED** 3 / 32 |
+| P8 | OD-1 "fixed" by sorting the keys | the same record serialised one way inside the verbatim window and another way outside it | **RED** 2 / 33 |
+| P9 | the prompt's band percent drifts from the policy constant | the agent optimises against a rule the tuner does not apply | **RED** 2 / 33 |
+| P10 | focal defaults become literals | the reset advice desynchronises from what a reset produces | **SURVIVED → fixed → RED** 1 / 26 |
+
+**P10 SURVIVED the first sweep, and that is the most useful result in this commit.**
+`render_focal_defaults` replaced by `return ("0.5", "2.0")` passed every test in the module. The
+reachability test compared the renderer against `LossConfig.model_fields["alpha"].default` — the
+same value from the same place, so it agreed with the literal too. Classification: **REAL GAP in
+the test architecture**, not an equivalent mutation. The only assertion that separates a render
+from a literal PERTURBS the authority, so the test now monkeypatches the shipped defaults to
+`0.25` / `3.5` and asserts the render follows. P10 is RED at `1 failed / 26 passed`.
+
+P8 is worth naming beside P7: both close OD-1's instability, and only a record-order expectation
+tells them apart. Sorting would have produced stable bytes and passed a naive stability test
+while introducing a different defect.
+
+
+### 14.4 — C5: direction / identity / diagnosis rendering + the final bridge surfaces (P3)
+
+**Commit `a6b9e811` — `feat(step07/07b): C5 — the prompts state the declared direction`.**
+
+**The declared §3.7 deltas, and NOTHING else.** Every regenerated golden line was reviewed
+against the frozen list captured in §14.0. The diff is:
+
+| Golden | Declared line(s) | Delta as landed |
+|---|---|---|
+| `pb1_planner_auto_system.txt` | 3 | `…to maximize the \`denoising_score\` metric (golden metric \`tidmad_denoising_score\` (higher is better)) across…` |
+| " | 28 | `Goal: maximize the score with sufficient data.` |
+| " | 81 | `A finite score such as \`-3.14\` is NOT collapse` — only "negative" → "finite", exactly as §3.7 decided |
+| " | 97–104 | `### TRAINING vs VALIDATION — CRITICAL` → `### TRAINING DYNAMICS (per experiment, from its training history)`, with the direction word rendered ("does not move toward higher") |
+| `pb1_planner_auto_user.txt`, `pb1_planner_force_punet_user.txt` | after the history JSON | NEW `### Training dynamics (last 3 experiments)` block; **the JSON block itself is byte-unchanged** |
+| `pb2_reflector_system.txt` | 9–11 | `### CRITICAL — GAP ANALYSIS` → `### CRITICAL — TRAINING DYNAMICS` |
+| " | new | `- The \`denoising_score\` field carries the golden metric \`…\` (higher is better).` |
+| " | 23, 25 | direction-rendered; **byte-identical under TIDMAD** (`HIGHER`/`LOWER`), which is the point |
+| " | 79–80 | `beats the best score (in the higher-is-better sense)` / `within 5% of the best score's observed range` |
+| `pb2_reflector_user.txt` | 24–26 | the ⚠ NOTE → `### TRAINING DYNAMICS (this experiment)` + the rendered line |
+| " | new | `golden metric \`tidmad_denoising_score\` (higher is better)` in the comparison context |
+| " | 33 | rank line UNCHANGED — "(1 = best)" is already direction-correct because `rank` comes from the order authority |
+
+No line outside this set moved. Line 63 of the reflector system prompt (`a lower final_loss …`)
+is untouched, as §14.0 declared: it is LOSS direction, not metric direction.
+
+**The fixture change that strengthened the goldens.** `_HISTORY_3`'s record 003 now carries a
+real 07a `training_history` + `training_diagnosis`. Two effects, both wanted: PB-1 pins a
+RENDERED dynamics line rather than only the `none recorded` path, and the history JSON above it
+is **byte-unchanged** — the hidden-key contract proved on a golden, not only in a boundary test.
+
+**Bridge surfaces — the frozen §3.9 contract, exactly.**
+
+```text
+plan(...,  task_render: TunerTaskRender | None = None,   # C4  WF-1 22 -> 23
+           metric_spec: MetricSpec | None = None)        # C5  WF-1 23 -> 24   ✔ 24 measured
+reflect(exp_id, hypothesis, actual_results, reflection_context=None, *,
+           metric_spec: MetricSpec | None = None,
+           training_diagnosis: TrainingDiagnosis | None = None)
+           # WF-2 actual_results_keys == 9 EXACT ✔ · reflection_context_keys == 23 EXACT ✔
+```
+
+Both `None` values raise at a real render. The refusal messages say what the caller must supply
+AND why there is no default — for `metric_spec` the reason is that "maximize" is not a partial
+truth but an inverted goal on a minimised metric.
+
+**Diagnosis transport (§3.8), as implemented.** The planner block is built inside
+`get_planner_user_prompt` from `memory_history[-PLANNER_FULL_WINDOW:]` — the RAW window, before
+`_truncate_memory_history` strips the hidden keys. `PLANNER_FULL_WINDOW` is now ONE symbol shared
+with the truncation itself, so the block and the JSON beside it cannot disagree about which
+experiments are "recent". The reflector receives the `TrainingDiagnosis` ONLY; its renderer is
+called with `objective_kind=None`, and no `TrainingHistory` reaches it.
+
+**Boundary tests UPGRADED, not replaced (§9 "KEPT ... extended").** Two needed real thought:
+
+* `test_step06_planner_boundary::test_the_planner_prompt_is_byte_identical_with_and_without_the_payload`
+  went red — correctly. Whole-prompt equality is now FALSE BY DESIGN, because 07b renders a
+  summary of the payload; a test asserting it would have been asserting that the feature does
+  nothing. The claim was restated where it is still true and is now SHARPER: the history JSON and
+  all surrounding prose are byte-identical, the owned dynamics block deliberately differs, and the
+  raw-key absence assertions still run against the FULL prompt. It additionally asserts
+  `loaded != plain`, so the equality cannot be achieved by rendering nothing.
+* `test_step00_prompt_goldens::test_pb1_full_window_boundary_is_the_deferral_line` was OD-1's
+  deferral record. OD-1 is closed, so the test was renamed to what it still pins — which branch
+  each history length takes — with the history preserved, and its identity assertion now compares
+  against `_planner_visible`'s projection plus a non-vacuity guard.
+
+**Test-harness widening.** `RecordingLLMBridge.reflect` gained `**kwargs` and records them as a
+SIXTH tuple element, so WF-2 can pin the additive kwargs without disturbing the 5-element shape
+every existing consumer indexes into.
+
+**Validation.**
+
+```text
+python -m pytest tests/unit/agent/llm_bridge/test_step07b_c5_rendering.py -q -p no:randomly
+  → 38 passed in 1.20s, rc=0
+python -m pytest tests/unit/agent -q -p no:randomly
+  → 4126 passed in 283.47s, rc=0
+python -m pytest tests/unit/agent tests/unit/nodes tests/unit/workflows tests/unit/execute_tools \
+      tests/unit/core -q -p no:randomly
+  → 7955 passed, 3 skipped in 512.86s — with ONE failure, diagnosed below, then
+    5260 passed / 1 skipped in 371.09s over the affected suites after the fix
+ruff check . / ruff format --check .   → clean (935 files)
+```
+
+**The one C5 failure, and why it was the most valuable result of the commit.**
+Step 06's C5 guard (`test_no_production_surface_executes_a_direction_literal_outside_the_metric_module`)
+went red on `agent/prompt_templates/tuner/rendering.py`. The cause was real, not cosmetic:
+`render_metric_direction_words` computed its words from `spec.direction == "higher"` — a THIRD
+module reading the declaration, which is precisely the pattern 07b exists to remove and which
+every behavioural test would have passed. The fix is structural, not an allowance: the words moved
+onto `MetricOrder.direction_words`, and the renderer delegates. The guard's order-module clause is
+now an exact multiset (`higher ×3, lower ×2`) rather than an open allowance, so this module cannot
+quietly grow into a second authority either.
+
+That guard has now caught two genuine 07b defects (this one, and C2's un-migrated tuner rows). It
+is worth keeping exactly as strict as it is.
+
+**Mutation evidence (Checkpoint D rows 9, 10, 11).** Ten mutations, each applied to EXACTLY ONE
+asserted site, caches cleared, baseline restored and re-proved green (`169 passed`,
+`git status --short` clean).
+
+| # | Mutation | Defect it stands for | Observed |
+|---|---|---|---|
+| Q1 | direction words hardcode maximize/higher/lower | TIDMAD's convention reinstated as the framework's | **RED** 7 failed / 48 passed |
+| Q2 | the identity line drops the direction | the metric is named but the goal is left implicit | **RED** 9 / 46 |
+| Q3 | the planner block is built AFTER the hidden keys are stripped | the dynamics block silently renders "none recorded" forever | **RED** 4 / 51 |
+| Q4 | the raw diagnosis is dumped instead of rendered | the Step-06 leak, repeated with 07a's payload | **RED** 5 / 50 |
+| Q5 | the renderer emits a calibrated label | a threshold nobody declared, presented as a finding | **RED** 7 / 48 |
+| Q6 | an absent history renders nothing | "no history" reads to the LLM as "unremarkable training" | **RED** 5 / 50 |
+| Q7 | `plan()` falls back instead of failing closed | a minimised campaign told to maximise | **RED** 1 / 54 |
+| Q8 | `reflect()` falls back instead of failing closed | every regression praised | **RED** 1 / 54 |
+| Q9 | the reflector is handed the TrainingHistory too | the transport §3.8 explicitly refuses | **RED** 1 / 54 |
+| Q10 | the objective label leaks into the reflector line | the reflector-only distinction collapses | **RED** 1 / 54 |
+
+Q3 is the one worth naming: it produces a prompt that is *structurally* correct — the heading is
+there, one line per record — and says "none recorded" for every experiment forever. Only an
+assertion on the rendered CONTENT catches it, which is why the boundary test asserts the real line
+`[focal] train 0.02->0.01` and not merely that the block exists.
+
+
+### 14.5 — Gate-1 readiness packet (Checkpoint C)
+
+Written BEFORE launch, per the Working Rules and the Gate standard.
+
+**Approval provenance.** The Implementation Working Rules contract for this PR
+(operator, 2026-08-16) PRE-AUTHORIZES exactly ONE bounded Gate 1 and forbids Gate 2.
+The Gate standard's `Needs user approval: yes` is satisfied by that contract; the repository's
+launch hook additionally requires the approval to be recorded explicitly at the command
+(`SIDERIUS_ALLOW_LAUNCH=1`), which this run does.
+
+**The ONE property this Gate proves.** That a real LLM, given the P3-changed SYSTEM prompts,
+produces structurally valid planner and reflector output — and, specifically to 07b, that a
+SECOND tuner round's planner message actually carries the FIRST round's rendered training-dynamics
+line and the correct metric-direction wording. Deterministic tests cannot prove that: they pin the
+renderers and the boundary, but not that a frontier model still returns a schema-valid
+`ExperimentPlan` after the compensating "Low training loss + poor score → overfitting" rule was
+REPLACED by facts, nor that the round-1 → round-2 transport survives a real run.
+
+**Why Gate 2 is not required and is NOT run.** 07b changes no training, inference or scoring
+LAUNCH or execution semantics. The one production behaviour change outside prompts is ordering /
+threshold resolution, and its parity under TIDMAD is proved deterministically by the C1 replay
+oracle.
+
+**Source re-audit at the final executable head** (all confirmed at `a6b9e811`, not from memory):
+
+| Flag | Parsed at | Effect |
+|---|---|---|
+| `--mode lilab` | `_chain_common.sh:335` | foreground subprocess |
+| `--num_iterations 2` | `:280` | two chain iterations |
+| `--max_rounds 2` | forwarded to the tuner | round 2 is the forced formal round |
+| `--is_pseudo_training` | `:378` → `APP_ARGS:485` | StubSandbox; 07a multi-epoch histories, so the dynamics lines render from a real trajectory |
+| `--no-health_gate_enabled` | `:307` (`HEALTH_GATE_ENABLED=0`) → `APP_ARGS:505` | records self-describe `health_gate_enabled=False` (stamped at `ml_hyperparameter_tune_agent.py:4504, 6322, 6672`), so `classify_candidate_health` (`candidate_eligibility.py:169-175`) returns VALID for successful finite-score records — the ONLY existing posture under which pseudo records are valid candidates. No production HealthGate code is touched and no 07b-specific exception exists. |
+| `--enable_chain_incumbent_formal_gates` | `:316` → `APP_ARGS:557` | the delta gates consume the chain incumbent: iteration 1 the bootstrap (worst-sentinel) reference, iteration 2 the restored valid formal incumbent |
+| `--data_scope 4-9` | forwarded | partial scope; legal because the chain's `FORMAL_STRATEGY` default is `snapshot` (`:130`) and the health subsystem is disabled, so `validate_runtime_config`'s two partial-scope refusals do not apply |
+| `--llm_config llm_configs/openai_tiered_pro.json` | forwarded | gpt-5.5 for planner, reflector, proposer, implementor, validator (binding policy, standard §"Real-LLM Gate config") |
+
+Cold start — **no `--seed_paths`** (operator rule 2026-07-27).
+
+**Exact command** — the frozen §7 command, after the audit above, with the launch approval
+recorded at the command per the repository hook:
+
+```text
+SIDERIUS_ALLOW_LAUNCH=1 bash sdsc_submission_scripts/<chain launcher> --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/step07b_gate1 --run_name gate1_07b \
+    --num_iterations 2 --max_rounds 2 --max_proposal_attempts 3 --max_epochs 1 \
+    --data_scope 4-9 --is_pseudo_training --no-health_gate_enabled \
+    --enable_chain_incumbent_formal_gates \
+    --llm_config llm_configs/openai_tiered_pro.json
+```
+
+**Bounds owned by the HARNESS, not the planner**: 2 iterations × 2 rounds × ≤ 3 proposal
+attempts, `--max_epochs 1`, 6-file scope, pseudo training (no GPU work, no real training loop).
+Expected ≈ 8–16 min, ≈ $0.6. **Hard stop at 40 min** — a longer run is a validation-DESIGN finding,
+not a reason to wait.
+
+**PASS evidence, recorded SEPARATELY (§7):**
+
+*A — within-tuner round evidence (REQUIRED).* At least ONE tuner invocation completes
+round 1 → persisted/rendered round-1 result → round-2 planner invocation, and the round-2 planner
+message contains the round-1 rendered dynamics line; the direction wording is present; the
+reflector message contains the current diagnosis block; NO raw `training_history` /
+`training_diagnosis` / `metric_result` / `metric_refusal` key appears in any message. Two outer
+iterations without a round-2 tuner invocation do NOT satisfy this.
+
+*B — policy / reference evidence.* The ordering / incumbent helpers are REACHED and their resolved
+values recorded: `formal_comparison_reference_source`, `resolved_skip_formal_threshold`,
+`resolved_bypass_formal_threshold`, `formal_reference_score` in each `run_output`, the
+`[SkipFormal]` / winner banners in the chain log, and the five `best_*` tracks. "Executed" means
+reached with the verdict recorded — NOT that skip and bypass both evaluate True, which are mutually
+exclusive. Bypass is reachable only when a formal round's time check is infeasible, which pseudo
+training does not guarantee; its absence is recorded, not failed, because B-07b-1 / 1s cover it
+deterministically.
+
+**Failure classification decided in advance:** a schema-invalid plan or reflection on the new
+wording is a semantic FAIL owned by 07b (the wording is the child's to fix; rerun only after a
+substantive fix, never a reroll of unchanged bytes). Pseudo records collapsing despite
+`--no-health_gate_enabled` is a HARNESS incompatibility → STOP and re-plan, never a 07b-specific
+health exception. An API/transport error is transient under the standard's rule.
+
+
+### 14.6 — Gate-1 attempt 1: INCONCLUSIVE (harness), and the finding it produced
+
+| Field | Value |
+|---|---|
+| Executable HEAD | `a6b9e811` (C5); docs head `63fb3b4f` |
+| Command | the §14.5 packet's command, verbatim, with `SIDERIUS_ALLOW_LAUNCH=1` |
+| Workspace | `/home/klz/Data/SIDEREIS_DATA/step07b_gate1` (PRESERVED) |
+| Log | `/tmp/07b_gate1.log` |
+| Wall time | 10 min 4 s (14:43:30 → 14:53:34), chain exit code 0 |
+| Cost | 461 751 tokens over 19 real gpt-5.5 calls (iter 1: 215 866; iter 2: 245 885) |
+| Verdict | **INCONCLUSIVE — the required criterion A could not be reached under the frozen posture.** NOT a semantic FAIL: nothing 07b changed misbehaved. |
+
+**What happened.** Both iterations ran exactly ONE tuner round. The chain completed cleanly and
+every 07b surface behaved, but `ROUND 2/2` never started, so the round-1 → round-2 planner
+evidence criterion A requires does not exist.
+
+**Root cause — a pre-07b coupling, found by reading the log and the record, not guessed:**
+
+```text
+no --trial_time_budget_minutes / --formal_time_budget_minutes in the frozen §7 command
+  -> "[time-gate disabled / trial|formal] ... will not gate ... rounds"   (log :229-230, :538-539)
+  -> time_check is None at the round boundary
+  -> ml_hyperparameter_tune_agent.py:6238 `if time_check is not None:` is FALSE
+  -> memory.time_mode is NEVER STAMPED on the record        (the write lives at :6244, inside that guard)
+  -> _best_trial_winner's two-field agreement rule (:1556-1562) can never be satisfied
+  -> winner is None -> _should_skip_formal returns True (the D-C3 "no evidence" branch)
+  -> `break` -> "Completed 1 research rounds. Loop terminated."
+```
+
+The round-1 record confirms every link: `status=success`, `denoising_score=-2.4310…`,
+`is_trial=True`, `health_gate_enabled=False`, `best_valid_trial_exp_id` SET (so the record IS a
+valid candidate — the `--no-health_gate_enabled` posture worked exactly as §14.5 predicted) — and
+`memory.time_mode = None`.
+
+**This is not a 07b regression.** The two-field agreement rule is pre-07b, is quoted in this
+design's own §0.1 census, and C1's corpus carries a dedicated `h_time_mode_mismatch` case for it.
+C2 preserved it verbatim (replay deep-equal). `git log -S` dates the `time_mode` write to the
+pre-Step-00 node restructure (`081d6512`). 07b neither introduced nor could have prevented it.
+
+**What DID work in this run** (recorded because it is real evidence, just not the required kind):
+
+* the `--no-health_gate_enabled` posture yielded VALID pseudo records — the exact property §14.5
+  had to audit from source, now confirmed at runtime;
+* `formal_comparison_reference_source = "negative_infinity_bootstrap"` in iteration 1, i.e. the
+  C3 bootstrap sentinel resolved through the order authority on a real run;
+* the round-1 record carries a `training_diagnosis` (07a), so the planner's dynamics block had
+  real content to render;
+* 19 real gpt-5.5 calls across planner, reflector, proposer, implementor and validator completed
+  with schema-valid output on the P3-changed prompts — every round-1 planner message and every
+  reflector message rendered without a single schema failure.
+
+**FINDING (production, recorded — NOT fixed here).** The coupling above is not only a harness
+inconvenience. With `--enable_chain_incumbent_formal_gates` ON and both time budgets OFF —
+a configuration the CLI accepts and the chain defaults to — `memory.time_mode` is never stamped,
+so `_best_trial_winner` is unconditionally `None` and **every forced formal round is skipped for
+"no evidence"**, in every iteration, forever. The campaign silently never produces a formal score.
+Owner: the same round/gate-semantics correction that owns the `resolved_action` hazard (§3.5) —
+it is neither 07b's (which may not change retry/round semantics) nor 07c's. Two candidate fixes,
+both needing an operator decision: stamp `time_mode` unconditionally from `plan.is_trial` (it is a
+property of the PLAN, not of the gate), or drop the `memory.time_mode` half of the agreement rule
+now that `is_trial` is a typed record field.
+
+**Disposition.** Per the Working Rules early-stop list — *"Gate 1 cannot reach a real tuner
+round 2 within the frozen bounded harness"* — this is a STOP, not an autonomous re-plan. The
+minimal correction is a HARNESS parameter and touches no production code:
+
+```text
++ --trial_time_budget_minutes 20 --formal_time_budget_minutes 120
+```
+
+which is also the standard baseline posture in `CLAUDE.md` ("Without them, a badly-chosen
+`trial_portion` from the LLM planner can produce multi-hour trial rounds"). With the time gate
+live, `time_mode` is stamped, the trial winner resolves, the skip gate evaluates on a real
+threshold instead of the no-evidence branch, and round 2 runs as the forced formal round. The
+tested SHA does not change, so this is a rerun after a substantive harness fix under the Gate
+standard's rule — not a reroll of unchanged bytes.
+
+**Awaiting operator authorization** for that one corrected rerun (≈ 10 min, ≈ 460 k tokens
+expected, same bounded envelope). Artifacts from attempt 1 are preserved at
+`/home/klz/Data/SIDEREIS_DATA/step07b_gate1`.
+
+
+#### 14.6a — Gate-1 attempt 2: OPERATOR-APPROVED harness correction
+
+**Approval.** The operator reviewed §14.6 and accepted attempt 1 as
+**INCONCLUSIVE — HARNESS REACHABILITY**, explicitly *not* a 07b semantic failure, and accepted the
+source-grounded finding as pre-07b behaviour that **MUST NOT be fixed in this PR**. Exactly ONE
+corrected rerun is authorized, at the SAME executable HEAD and the SAME frozen Gate semantics,
+adding ONLY the two time-budget flags. The PASS criteria are unchanged.
+
+**Pre-launch checks, in the order the operator required:**
+
+| # | Check | Result |
+|---|---|---|
+| 1 | executable HEAD still `a6b9e811` | `a6b9e811a6f8ecf075bea928ce0fb5f68870f5d4`. `git diff --stat a6b9e811 HEAD` over `nodes/ agent/ execute_tools/ workflows/ core/ ml_models/ scripts/ sdsc_submission_scripts/ dashboard/` returns ONLY `ml_hyperparameter_tune_agent.md` — a markdown doc. **No executable code changed since C5.** |
+| 2 | working tree clean | `git status --short` empty |
+| 3 | attempt-1 artifacts preserved | `/home/klz/Data/SIDEREIS_DATA/step07b_gate1`, 760 K, 2 `run_output_*.json` — untouched, not deleted, not modified |
+| 4 | NEW workspace for attempt 2 | `/home/klz/Data/SIDEREIS_DATA/step07b_gate1_attempt2`, run name `gate1_07b_attempt2` — confirmed absent before launch (cold start) |
+| 5 | this record | written before launch |
+| 6 | command = attempt 1 + only the two flags | see below |
+| 7 | the two flags re-audited from CURRENT source | `_chain_common.sh:93-94` (default empty == omit == Python `None`), parsed at `:310-311`, forwarded at `:527-533` **only when non-empty**, and accepted by `run_one_iteration.py:1172, 1178`. Nothing else in the command changes. |
+
+**The corrected command** (delta from attempt 1 is exactly the workspace/run identity and the two
+flags — no production code, no prompt bytes, no policy, no Gate criteria):
+
+```text
+SIDERIUS_ALLOW_LAUNCH=1 bash sdsc_submission_scripts/<chain launcher> --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/step07b_gate1_attempt2 \
+    --run_name gate1_07b_attempt2 \
+    --num_iterations 2 --max_rounds 2 --max_proposal_attempts 3 --max_epochs 1 \
+    --data_scope 4-9 --is_pseudo_training --no-health_gate_enabled \
+    --enable_chain_incumbent_formal_gates \
+    --trial_time_budget_minutes 20 --formal_time_budget_minutes 120 \
+    --llm_config llm_configs/openai_tiered_pro.json
+```
+
+**Why this reaches round 2**, stated as a prediction before the run so the result can falsify it:
+with the budgets set, `evaluate_time_skill` gates both modes, so `time_check` is not `None` at the
+round boundary, so `ml_hyperparameter_tune_agent.py:6244` stamps `memory.time_mode`, so
+`_best_trial_winner`'s two-field agreement resolves the round-1 record as the winner, so
+`_should_skip_formal` evaluates a real threshold instead of taking the "no valid trial winner"
+branch — and round 2 runs as the forced formal round.
+
+**Standing constraints for this attempt** (operator): no reroll if a genuine 07b semantic failure
+appears — STOP; no second harness change if round 2 is still unreachable — STOP and report the new
+source-grounded blocker; no Gate 2; no real training.
+
+
+#### 14.6b — Gate-1 attempt 2: **PASS**
+
+| Field | Value |
+|---|---|
+| Executable HEAD | `a6b9e811` (unchanged from attempt 1 — only `.md` and a test file differ) |
+| Workspace | `/home/klz/Data/SIDEREIS_DATA/step07b_gate1_attempt2` (attempt 1 preserved separately) |
+| Log | `/tmp/07b_gate1_a2.log`, chain exit code 0 |
+| Wall time | 40 min 54 s (14:56 → 15:24), within the 40-min-per-attempt envelope's intent; iteration 1 spent 20 min on 16 guardrail-rejected formal attempts (see below) |
+| Cost | ~19 real gpt-5.5 calls per iteration across planner / reflector / proposer / implementor / validator |
+| Verdict | **PASS** — criterion A satisfied by iteration 2; criterion B recorded in full |
+
+**The prediction in §14.6a held.** With the time gate live, `memory.time_mode` is stamped
+(`trial` on round-1 records, `formal` on round-2 records — visible on every record in both
+iterations, where attempt 1 had `None`), `_best_trial_winner` resolved the winner, and the skip
+gate stopped taking the no-evidence branch. Iteration 1's log shows
+`[FORMAL OVERRIDE] strategy=full_clone winner='…_iter_001_001' score=-2.4310` — the winner
+resolving, which is precisely what attempt 1 could not do.
+
+---
+
+**A — WITHIN-TUNER ROUND EVIDENCE (the REQUIRED criterion): SATISFIED.**
+
+Iteration 2 completed a full tuner cycle: `completed_rounds: 2`, `status: completed`,
+`ROUND 1/2 … Round 1/2 Complete. Score: -2.3323` → `ROUND 2/2 … Round 2/2 Complete.
+Score: -2.3869`. Both records carry `training_diagnosis.state == "ok"`.
+
+*Round-2 planner content.* Rebuilt through the PRODUCTION builder
+(`agent/prompts.py::get_planner_user_prompt`) from the run's own persisted round-1 record — the
+same input the bridge passed at round 2:
+
+```text
+### Training dynamics (last 1 experiments)
+- multiscale_spectral_unet_tcn_v1_iter_002_001: [custom] train 10.94->3.90 (decreasing, 5 ep)
+  · val 12.49->5.58 (decreasing; best ep 3, +0.26 after best) · gap n/a (not comparable)
+```
+
+Real values from a real 5-epoch pseudo trajectory, the objective-family label from the record's
+`training_history.objective_kind`, the best-validation epoch and the post-best drift — and the
+`gap n/a (not comparable)` branch, exercised at runtime because this run's R2/R3 comparability
+was `not_established`. That is a live instance of the branch C5 pinned deterministically.
+
+*Direction wording*, rendered from the bound handle:
+
+```text
+Your goal is to maximize the `denoising_score` metric (golden metric `tidmad_denoising_score`
+  (higher is better)) across hyperparameter configurations for the following task:
+  loss_type, and regularization. Goal: maximize the score with sufficient data.
+- The `denoising_score` field carries the golden metric `tidmad_denoising_score` (higher is better).
+- A result is GOOD if its denoising_score is HIGHER than the best score so far.
+- A result is BAD if it is LOWER than most previous scores.
+```
+
+*Reflector*, for the round-2 attempt:
+
+```text
+### TRAINING DYNAMICS (this experiment)
+  train 8.89->3.76 (decreasing, 5 ep) · val 10.16->4.91 (decreasing; best ep 3, +0.16 after best)
+  · gap n/a (not comparable)
+```
+
+*Hidden-key leak: ZERO.* `training_history`, `training_diagnosis`, `metric_result`,
+`metric_refusal`, `objective_config_fingerprint`, `flat_rel_tol` and `objective_kind` are all
+ABSENT from both messages, while the round-1 record demonstrably CARRIES `training_history`,
+`training_diagnosis` and `metric_result` — so the absence is the boundary working, not an empty
+payload.
+
+*Honest scope of this evidence.* No `_chat_json` tee was enabled (that would have been a second
+harness change, which the operator gated), so the blocks above are rendered through the production
+functions from the run's persisted artifacts rather than captured off the wire. What the run
+itself proves directly is that every planner and reflector call at every round returned
+schema-valid output on the P3-changed prompts — 4 tuner rounds and 2 reflections across the two
+iterations, zero parse or validation failures — and that the records the renderers consume exist
+with the content shown.
+
+---
+
+**B — POLICY / REFERENCE EVIDENCE.**
+
+| Surface | Iteration 1 | Iteration 2 |
+|---|---|---|
+| `formal_comparison_reference_source` | `negative_infinity_bootstrap` | `negative_infinity_bootstrap` |
+| `formal_reference_score` / skip / bypass thresholds | `null` ×3 (the `_json_safe_reference` image of the worst sentinel) | `null` ×3 |
+| trial winner resolved | YES — `[FORMAL OVERRIDE] … winner='…_iter_001_001' score=-2.4310` | YES |
+| `best_exp_id` / `best_denoising_score` | `…_iter_001_001` / `-2.4310` | `…_iter_002_001` / **`-2.3323`** |
+| `best_formal_denoising_score` | `None` | `-2.3869` |
+| `best_valid_exp_id` / score | `…_001` / `-2.4310` | `…_002_001` / `-2.3323` |
+| `best_valid_formal_exp_id` / score | `None` | `…_002_002` / `-2.3869` |
+| `best_valid_trial_exp_id` / score | `…_001` / `-2.4310` | `…_002_001` / `-2.3323` |
+
+Iteration 2 is the informative row: the five tracks do NOT collapse to one record. The trial
+scored `-2.3323` and the formal `-2.3869`, so `best_*` (unfiltered) and `best_valid_trial_*`
+selected the TRIAL record while `best_valid_formal_*` selected the FORMAL one — the order
+authority choosing the higher value under `higher`, on real data, with the filters intact.
+
+*Regimes reported honestly.* BOTH iterations resolved the BOOTSTRAP reference, not the restored
+incumbent. Iteration 1 produced no valid FORMAL record (all 16 formal attempts were rejected
+before training, below), so iteration 2 had no incumbent to restore. The
+`restored_valid_formal_incumbent` regime was therefore NOT exercised by this Gate. Per §7 and the
+operator's criteria this is recorded, not failed: it is covered deterministically by the C1 replay
+corpus (`restored_*` scenarios) and by rung B-07b-1s (both directions).
+
+*Bypass* was not reached — it fires only when a formal round's time check is infeasible, which did
+not occur. Recorded, not failed, exactly as §7 provides; B-07b-1 / 1s cover it deterministically.
+
+*Skip gate*: reached at the formal-round boundary in both iterations with a real winner and a
+sentinel threshold, and it correctly did NOT fire (a bootstrap threshold is the worst value, so no
+winner can be worse than it) — the C2/C3 sentinel semantics on a live run.
+
+---
+
+**SECOND FINDING (production, recorded — NOT fixed here).** Iteration 1 burned all 16 formal
+attempts on:
+
+```text
+[Guardrails §5] SKIPPED: formal batch_size 2 below min_formal_batch_size 4
+```
+
+The planner explicitly proposed `batch_size=4` from attempt 2 onward and said so in its reasoning,
+but `formal_round_strategy=full_clone` INHERITS `batch_size` from the trial winner (`=2`), so the
+guardrail kept seeing 2 and every attempt was rejected before training. The planner cannot escape
+it: the inheritance overwrites the very field the guardrail rejects. Unrelated to 07b (no
+ordering, scale rule, renderer or bridge surface is involved) and not fixed here. Owner: the
+formal-round-strategy / RT5-guardrail interaction — an operator decision on whether `full_clone`
+should exempt fields a launch guardrail constrains, or whether the guardrail should be evaluated
+before inheritance.
+
+**The tuner structural decomposition intentionally preserves the pre-existing
+`memory.time_mode` / no-time-budget coupling. That defect is not corrected here; it is
+reserved for the immediately following dedicated Step-07 round-state semantics
+correction PR.**
+
+**Deferred debt carried forward from attempt 1**, restated as the operator required:
+
+```text
+enable_chain_incumbent_formal_gates=True + trial/formal time budgets disabled
+  -> memory.time_mode remains unset
+  -> a valid trial can never become _best_trial_winner
+  -> the forced formal round is skipped forever as "no evidence"
+```
+
+NOT fixed in 07b.
+
+
+### 14.7 — Terminal deterministic validation (final executable head `a6b9e811`)
+
+```text
+python -m pytest tests/unit -q -p no:randomly          (clean tree, docs head 63fb3b4f)
+  → 9770 passed, 3 skipped, 405 warnings in 679.30s (0:11:19), rc=0     /tmp/07b_full.log
+ruff check .            → All checks passed!
+ruff format --check .   → 936 files already formatted
+```
+
+The suite ran from a CLEAN tree (`git status --short` empty), per the standing rule — a
+work-in-progress tree makes the full-suite result meaningless.
+
+**`pyright` could NOT be run locally, verified rather than assumed** (CLAUDE.md's
+environment-assumptions rule: check the tool can actually run before claiming a local check).
+`.venv/bin/pyright` exists and `--version` succeeds (`v10.19.0` — that is the NODE version it
+reports, not pyright's), but an actual analysis run dies immediately in the bundled JavaScript:
+
+```text
+.venv/lib/python3.12/site-packages/pyright/dist/dist/vendor.js:2
+SyntaxError: Unexpected token =
+    at Module._compile (internal/modules/cjs/loader.js:723:23)
+```
+
+Node 10.19 cannot parse pyright 1.1.409's bundle. So the local static evidence for this PR is
+ruff + `ruff format --check` only, and **exact-head CI is the authoritative pyright verdict** — it
+is not being skipped, it is being run where it can run.
+
+Checkpoint-D mutation total across C2–C5: **38 mutations, 37 RED on the first sweep, 1 SURVIVOR**
+(C4's `render_focal_defaults`), classified as a real gap in the test architecture, fixed by
+perturbing the authority, and re-proved RED.
+
+
+
+### 14.8 — Checkpoint E: the ladder, state by state
+
+| Checkpoint | State | Evidence |
+|---|---|---|
+| **0** — pre-edit baselines | **PASS** | §14.0. 12-history corpus + SEL-1a/1b/1c goldens captured at `f17bbdb8` against byte-unchanged production; PB-1 (3) / PB-2 (2) / WF-1 (2) / WF-2 sha256 recorded; the §3.7 declared-delta line-set transcribed verbatim (two drifted reading-aid line numbers corrected); OD-1 instability reproduced across 5 hash seeds; `run()` branch baseline 244. C1 is test-only — `git diff` over production empty. |
+| **A** — Stage-A parity | **PASS** | Replay deep-equal under `higher` after C2 (twice: verbatim extraction, then the authority rewire) and after C3 (the range-normalised band and `toward_better` margins reproduce every captured value). PB-1/PB-2 sha256 IDENTICAL to §14.0 after C4 — nothing regenerated. PB regenerated in C5 ONLY on the §3.7 lines, diff reviewed line by line (§14.4 table). WF-1 22 → 23 → 24 additive; WF-2 `actual_results_keys` 9 EXACT / `reflection_context_keys` 23 EXACT. REC goldens untouched (no record change). `run()` AST branch count **244 → 198**. |
+| **B** — Stage-B rungs | **PASS** | **B-07b-1** ordering axis (`test_step07b_c2_order_consumers.py`, 35): every ordinal consumer inverts exactly, ties stay first-wins, the loss rank does NOT move, invalid/non-finite records scored to win under the bound direction still never win. **B-07b-1s** scale axis (`test_step07b_c3_scale_rules.py`, 28) on accuracy-like ↑ and MSE-like ↓ scales. **B-07b-2** rendering axis (`test_step07b_c5_rendering.py`, 38) over the `lower` spec + Pets `accuracy`↑ + DAVIS `mse`↓, each from the pack's OWN `declared/metric_*.json` and 07a fixture. **B-07b-3** task-content axis (`test_step07b_c4_task_rendering.py`, 27) with a contrast profile / contract / renamed health checks. |
+| **C** — Gate 1 | **PASS** | §14.6b, attempt 2. Attempt 1 (§14.6) is preserved as INCONCLUSIVE — harness reachability, operator-accepted. |
+| **D** — mutation / reachability | **PASS** | 38 mutations across C2–C5, each applied to exactly ONE asserted site with caches cleared and the baseline restored and re-proved green. 37 RED on the first sweep; ONE survivor (C4's `render_focal_defaults`) classified as a real gap in the test architecture, fixed by perturbing the authority, re-proved RED. Full matrices in §14.1 / §14.2 / §14.3 / §14.4. Every family the parent's Checkpoint D names is covered: direction comparison, sentinels, scale rules, invalidated outcome, template-literal reintroduction, authority-bypass reachability, raw-key leak, calibrated vocabulary, fail-closed render authorities, OD-1 cross-process, `run()` branch count. `AttemptTransition` parity is N/A (REMOVED); round/retry parity is green via the untouched round/attempt suites. |
+| **E** — governance | **PASS** | Pack rows (TIDMAD production-backed; Pets/DAVIS L1, no execution claim) + `tests/unit/examples/test_step07b_pack_pins.py` checking each claim against the thing it claims about; the tuner node `.md`; `docs/design/genericity_contract.md` Seam 4 closed for the tuner consumers and Seam 3 gaining a recorded gap table; README index, `docs/README.md`, roadmap §15.1/§22.12, parent §8.3 and `CLAUDE.md` rows. Terminal validation §14.7: full unit suite **9770 passed / 3 skipped / rc=0** from a clean tree; ruff and format clean. |
+
+**Deviations from the frozen design: THREE, all bounded, all recorded with source evidence.**
+
+1. §14.3 — the built-in loss list at `PLANNER_PROMPT` stays literal. §3.6 says RENDER, but the
+   shipped bytes wrap mid-list, so a single-token render moves an LLM-visible byte that P2's own
+   acceptance rule forbids. `render_builtin_loss_types` was removed rather than left
+   consumer-less; the gap joins §3.6's existing loss-prose gaps.
+2. §14.3 — the reflector's full-scope anchor stays literal. §3.9 (an operator BLOCKER correction)
+   gives `reflect()` no `task_render`, and widening it is an explicit stop condition.
+3. §14.1 / §14.2 / §14.4 — three members added to the ONE order authority: the two banner symbols,
+   `direction_words`, and `penalty_convention_applies`. Each keeps an interpretation of
+   `direction` from escaping into a second module; the third exists because the alternative was
+   `order.direction == "higher"` inside the tuner, which Step 06's C5 guard correctly rejects.
+
+**Deferred debt discovered during implementation, recorded and NOT fixed** (all outside 07b's
+authority, all needing an operator decision on intended semantics):
+
+1. `resolved_action` is round-scoped, written seven nesting levels down and never reset between
+   attempts, so an attempt that leaves early inherits the last SCORED attempt's gate action (§3.5;
+   note at the declaration in `run()`).
+2. Chain-incumbent gates ON + time budgets OFF ⇒ `memory.time_mode` never stamped ⇒ every forced
+   formal round skipped forever as "no evidence" (§14.6).
+3. `formal_round_strategy=full_clone` inherits `batch_size` from the trial winner, so the RT5
+   `min_formal_batch_size` guardrail can reject every formal attempt no matter what the planner
+   proposes (§14.6b).
+
+
+---
+
+## 14.9 — C7: tuner node structural decomposition (operator scope amendment, 2026-08-16)
+
+**Authority.** An operator SCOPE AMENDMENT to the current 07b PR, not a design revision. The
+frozen revision-2 semantic sections are untouched and no revision 3 exists. C7 is a **structural
+decomposition with ZERO intended behaviour change**; the amendment additionally moves all live Gate
+closure to the post-refactor executable head and adds ONE bounded Gate 2 as a refactor-regression
+check.
+
+**State when the amendment arrived** (the amendment quoted `3d7af91b`; the branch had moved on):
+
+| Fact | Value |
+|---|---|
+| HEAD | `4b13a548` — the pyright fix; `8c18eeb8` was pushed |
+| Gate 1 | **already rerun and PASSED** at executable head `a6b9e811` (§14.6b), with exactly the corrected posture the amendment authorizes |
+| PR | **#216 already OPEN**; exact-head CI `31976419268` FAILED on two pyright errors, fixed in `4b13a548` |
+
+Nothing is discarded: under the amendment the live Gates move to the post-C7 head, so §14.6b
+becomes **pre-refactor** Gate evidence and the new head earns its own Gate 1 + Gate 2. Attempt 1's
+workspace and ledger entry (§14.6) remain untouched, as required.
+
+### 14.9.0 — Decomposition audit (recorded BEFORE any production movement)
+
+**Baseline shape** (`nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`):
+
+```text
+file                                  7,430 lines
+HyperparamTuningAgent                 2,786   [4053-6838]
+HyperparamTuningAgent.run             2,714   [4125-6838]
+main                                    578   [6849-7426]
+92 top-level symbols (AST inventory: /tmp/claude-1004/c7_baseline/inventory.txt)
+```
+
+**Ownership table.** Every top-level symbol classified. Five node-local modules, at the bound the
+amendment sets — no `utils`/`helpers`/`common`/`misc`.
+
+| Module | Owns (symbol — lines) |
+|---|---|
+| **`policy.py`** — decisions on already-computed values; no I/O, no runtime APIs | `_build_reflection_context` 175 · `_apply_mode_override_chain` 153 + `_strategy_full_clone` 22 / `_strategy_hybrid_params` 12 / `_strategy_independent` 7 / `_canonical_strategy` 7 / `_LEGACY_STRATEGY_ALIASES` / `_FORMAL_STRATEGY_REGISTRY` · `_validate_data_config` 63 · `_resolve_formal_comparison_thresholds` 61 · `_apply_degeneracy_reaction` 59 · `_gate_results_to_score_meta` 52 · `_resolve_sample_set_cfg` 48 · `_compute_termination_state` 45 · `_should_skip_formal` 42 · `_validate_penalty_for_direction` 38 · `_select_best_records` 38 + `BestTracks` 28 · `_latest_trial_inference_marginal` 31 · `_best_trial_winner` 29 · `_decide_round_outcome` 24 + `RoundDecision` 6 + `_should_break_iteration` 4 + `_should_skip_to_formal` 8 · `_apply_plan_overrides` 24 · `_should_bypass_formal_time_budget` 23 · `_merge_score_validity_failure` 23 · `_json_safe_reference` 23 · `_non_retryable_termination_message` 14 · `_fmt_reference` 8 · `_identity` 3 · `_score_of` 3 |
+| **`runtime.py`** — coordination of runtime-control / preflight APIs; owns none of their science | `_resolve_time_check_probe_request` 209 · `_handle_prephase_gpu_measurement` 168 + `PrephaseOutcome` 22 + `_prephase_device_snapshot` 13 + `_prephase_worker_memory_limit_bytes` 12 + `PREPHASE_*` constants · `_derive_calibration_from_observation` 113 + `_append_runtime_observation` 22 · `_resolve_guardrail_steps` 70 · `_check_and_record_guardrail_skip` 62 · `_attach_realized_memory` 62 · `_build_runtime_policy` 60 · `_build_admission_policy` 59 · `_build_guardrail_rejection_record` 47 · `_run_time_preflight` 45 · `_handle_in_subprocess_rejection` 39 + `_build_in_subprocess_rejection_record` 54 · `_evaluate_step_guardrails` 35 · `_raise_if_preflight_blocks` 34 + `PREFLIGHT_CONSUMER_ACTIONS` + `_BLOCKED_KIND_FOR_STATUS` · `_oom_memory_wording` 32 · `is_evidence_refusal` 25 · `_apply_epoch_bound` 25 · `_raise_if_inconclusive` 24 · `_vram_skip_memory_extra` 23 + `_time_skip_memory_extra` 23 · `_resolve_effective_epochs` 22 · `_may_advise_resource_reduction` 19 · `_attach_runtime_evidence` 16 · `_raise_if_wall_clock_timeout` 15 + `WallClockTimeoutError` 9 + `_apply_watchdog_failure_fields` 10 · `_runtime_phase_for` 13 · `RuntimeEvidenceChannelError` 13 + `_raise_if_evidence_channel_failure` 11 · `_attribution_reason` 6 · `_is_cuda_oom` 3 |
+| **`records.py`** — record construction and the one persist/validate seam | `_build_scoring_failure_record` 93 · `_build_execution_failure_record` 85 + `_PHASE_FAILURE_TEXT` · `_build_resource_admission_record` 77 + `RESOURCE_ADMISSION_STATUS` / `RESOURCE_ADMISSION_REASONS` / `_STATUS_FOR_REASON` / `INFRASTRUCTURE_FAILURE_STATUS` · `_handle_admission_refusal` 53 · `_build_denoised_filename` 50 · `_build_skip_record` 47 · `_interpret_training_status` 46 · `_validate_history_and_lock` 35 · `_emit_record` 29 · `_resume_progress` 27 · `_classify_attempt_failure` 22 · `_copy_seed_plugin` 21 |
+| **`feedback.py`** — evidence assembled FOR the next planner/proposer | `_build_gate_exhaustion` 167 · `_build_trial_validity_feedback` 111 · `_render_gate_exhaustion_summary` 92 · `_render_gate_exhaustion_trigger_b_summary` 74 · `_collect_disallowed_patterns` 51 |
+| **`cli.py`** — argparse surface and args → `HyperparamTuningInput` | the parser and argument assembly extracted from `main` 578 + `PARTIAL_CAMPAIGN_EXIT_CODE` |
+| **`ml_hyperparameter_tune_agent.py`** (main, stays) | `HyperparamTuningAgent` + `run` + `__init__` + `set_run_context` · `_run_skill` 11 · `_serialize_expert_advice` · `SIDERIUS_ROOT` · a thin `main()` |
+
+Approximate movement: policy ≈ 900, runtime ≈ 1 250, records ≈ 600, feedback ≈ 500, cli ≈ 500.
+
+**Blocks that STAY inline in `run()`, decided from source, not line count.** Sequencing that reads
+arbitrary outer state (the attempt loop's `resolved_action`, `consecutive_fails`,
+`completed_rounds`, the physical-rejection buffer) is NOT extracted: pulling it out would need the
+"giant mutable context" the amendment forbids, and the `resolved_action` hazard (§3.5) makes its
+exact scoping load-bearing — a refactor that changed when it is read would be a semantic change
+disguised as cleanup.
+
+**Dependency direction** (enforced, one-way):
+
+```text
+ml_hyperparameter_tune_agent.py  ->  policy / runtime / records / feedback / cli
+                                 ->  agent schemas · execute_tools · core · skills
+```
+
+No node-local submodule imports the main module. `MetricOrder` does NOT move: its authority stays
+`execute_tools/metric_order.py`.
+
+**Pre-refactor oracles captured** (`/tmp/claude-1004/c7_baseline/`): CLI `--help`
+(33 815 bytes, sha256 `c496948d…f153`), sha256 of all 18 PB/WF/REC goldens, the AST inventory, and
+the deterministic pseudo-iteration + C1 replay outputs used as the differential oracle.
+
+
+### 14.9.1 — C7 implementation: what moved, what did not, and why
+
+**Result.**
+
+| | before | after |
+|---|---|---|
+| `ml_hyperparameter_tune_agent.py` | 7 430 | **3 170** |
+| `HyperparamTuningAgent.run` | 2 714 | **2 714** (unchanged — see the obstacle below) |
+| `main` | 578 | **11** |
+| node-local modules | 0 | **5** (`policy` 1 205 · `runtime` 1 583 · `records` 714 · `feedback` 541 · `cli` 619) |
+
+**Dependency graph — one-way, verified by `ruff`'s F821 pass over the package:**
+
+```text
+ml_hyperparameter_tune_agent.py   (imports all five)
+        |
+        +-- runtime.py  -->  records.py , policy.py
+        +-- policy.py   (leaf)
+        +-- records.py  (leaf)
+        +-- feedback.py (leaf)
+        +-- cli.py      (leaf)
+```
+
+No submodule imports the main module. `MetricOrder` did not move — its authority is still
+`execute_tools/metric_order.py`.
+
+**The cut that took three attempts, and what decided it.** The first split put every
+record-emitting handler in `records` and every runtime concern in `runtime`, which produced a
+genuine cycle: `_handle_prephase_gpu_measurement` (runtime) BUILDS and EMITS a resource-admission
+record, while `_classify_attempt_failure` (records) tests `isinstance(exc, WallClockTimeoutError)`
+(runtime). Neither direction alone resolved it. The rule that did:
+
+> **`records` BUILDS; `runtime` EMITS.**
+
+`records` became the lowest layer — record builders, the status vocabulary, the single
+`_emit_record` persist seam, and the prose helpers that shape record fields — and imports nothing
+node-local. Every handler that *evaluates a runtime verdict and then persists a record*
+(`_handle_admission_refusal`, `_handle_in_subprocess_rejection`,
+`_check_and_record_guardrail_skip`, `_classify_attempt_failure`) sits in `runtime`, which may
+import `records`. The cycle disappears because the dependency now follows the direction the data
+actually flows.
+
+**The package's `sys.modules` rebind, discovered by probe rather than assumed.**
+`nodes/ml_hyperparameter_tune_agent/__init__.py` ends with
+`sys.modules[__name__] = _impl`, so after import the package path IS the main module and is no
+longer a package. Empirically (a throwaway `_probe.py`): importing
+`nodes.ml_hyperparameter_tune_agent.<submodule>` from outside raises
+`ModuleNotFoundError: … is not a package`, and importing the submodule FIRST fails too, because
+the parent `__init__` rebinds before the submodule loads. What works — and what this refactor
+relies on — is that the MAIN module imports each submodule at its top, i.e. while `__init__` is
+still executing and the package is still a package; `sys.modules` is then populated with the
+dotted names and every later external import resolves. **Consequence for future work: a node-local
+submodule here is only reachable because the main module imports it.** The `__all__` block in the
+main module is not decoration either — it declares the moved names as deliberate re-exports so
+`ruff` does not prune them and `mock.patch("nodes.ml_hyperparameter_tune_agent.X")` keeps
+resolving, which a large body of tests depends on.
+
+**`run()` was NOT reduced. The obstacle, precisely.** `run()` is three phases —
+initialization (~528 lines), the round loop (1 952), finalization (~234) — and the round loop is a
+single 1 793-line `try:` inside the attempts `for`. Extracting that body is blocked by something
+stronger than parameter count:
+
+```python
+# Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup. Drop local refs to the
+# largest per-round transients before the next round's plan() call so
+# inter-round RSS stays flat. NameError-guarded because early-exit paths leave
+# some names unbound.
+with suppress(NameError):
+    del train_results
+...  # seven of them
+```
+
+Those seven guarded `del`s are a **documented memory-management mechanism**, and they run once per
+ROUND while the names are bound once per ATTEMPT. Moving the attempt body into a function would
+drop those references per attempt instead of per round — changing peak RSS behaviour that a design
+document specifically establishes. The `NameError` guards also prove the block deliberately relies
+on function-scope leakage across early-exit paths.
+
+So extracting it would either (a) change documented memory semantics, or (b) require passing the
+round's mutable state through a large context object — both explicitly forbidden by the amendment.
+**Reported rather than forced.** The honest reductions were taken instead: 4 260 lines left the
+main module, `main()` went 578 → 11, and a reviewer now reads the lifecycle in one file with the
+implementations one hop away.
+
+**What is left large, and why**: `run()` 2 714 (above); `_resolve_time_check_probe_request` 209 and
+`_handle_prephase_gpu_measurement` 168 in `runtime` (each one coherent probe/measurement
+protocol); `_build_reflection_context` 175 in `policy` (the 23-key WF-2 surface, built in one
+place on purpose); `_build_gate_exhaustion` 167 in `feedback`.
+
+### 14.9.2 — Zero-semantic-change evidence
+
+| Oracle | Result |
+|---|---|
+| Differential PRE/POST pseudo run — 13 surfaces (`run_output`, all records, `best_*`, reflection contexts, C1 gate-helper replay, plan kwarg key sets, reflect `actual_results`/`reflection_context`/additive kwargs, call counts, `run()` branch count) | **DEEP-EQUAL** after C7a and again after C7b, with only timestamps/paths/durations normalised |
+| CLI `--help` | **BYTE-IDENTICAL** (33 815 bytes, sha256 `c496948d…f153`) after both commits |
+| PB-1 (3) / PB-2 (2) / WF-1 (2) / WF-2 / REC goldens — 18 files | **all sha256 UNCHANGED**; nothing regenerated |
+| `ruff check` / `ruff format --check` | clean |
+
+Not one golden was regenerated for C7, by design: a structural refactor that needs a golden
+rewritten is not a structural refactor.
+
+### 14.9.3 — Standing rule adopted (operator, 2026-08-16)
+
+This is a **continuing architecture-hygiene rule for the generic-framework upgrade**, not a
+one-off for the tuner. Before adding another major capability to a node:
+
+1. inspect the current module/function complexity;
+2. if the structure is healthy — add the feature normally;
+3. if a god-file trend is emerging — first perform a behaviour-preserving coarse decomposition;
+4. preserve the public interface, the main node file, `run()`/entrypoint semantics, the CLI, the
+   data contracts and the execution order;
+5. prove before/after parity;
+6. only then continue with the next semantic feature.
+
+The signals are semantic, not a line count (1 500 lines can be fine; 600 can be a mess): one file
+holding several unrelated responsibilities; a function needing thousands of lines to express a
+lifecycle; having to understand unrelated runtime/scoring/record code to change one policy; a type
+checker that can no longer analyse a function reliably; helper count rising while ownership stays
+unclear; new features only expressible as another branch in the same orchestrator.
+
+And the other half of the rule, equally binding: **a refactor must not change the node's external
+identity.** The node keeps ONE main file that still owns the public class, `run()`, the CLI
+entrypoint, the high-level orchestration and the lifecycle ordering. Submodules extract ownership
+that has *already* become clear; they never turn the main file into a forwarding shell.
+
+> modularity ≈ semantic ownership — not modularity = more files.
+
+
+### 14.9.4 — C7d attempt: the vertical decomposition, measured
+
+The operator's follow-up correctly identified that pass 1 fixed the horizontal
+spread and left the vertical monolith: 86 % of the main file is still `run()`.
+The proposed cut — `planning.py::prepare_attempt`, `execution.py::execute_attempt`,
+`finalize_run_output` into `records.py` — was mapped against the source, and the
+seams are exactly where the amendment says they are. The `try:` inside the attempt
+loop divides cleanly at `failure_stage = "guardrails"` and at
+`print("\nGenerating Research Memory...")`.
+
+**One earlier blocker is retracted.** §14.9.1 reported that the attempt body could not
+be extracted because the seven `with suppress(NameError): del …` statements are a
+documented per-round memory mechanism. That objection does NOT apply to the operator's
+design: phases that RETURN values which `run()` re-binds leave the `del`s operating on
+`run()`'s own locals, so the flat-RSS behaviour survives. The design is sound; what
+follows is a different obstacle.
+
+**Measured coupling of each phase to `run()`'s locals** (AST: names read but not bound
+inside the block, excluding builtins and module-level symbols):
+
+| Phase | lines | inputs it reads from `run()` |
+|---|---|---|
+| PLANNING (observe → plan → overrides → TrialConfig / sample sets) | 414 | **28** |
+| EXECUTION (guardrails → preflight → train → infer → score → health) | 962 | **45** |
+| REFLECT + COMMIT (reflection → record construction → emit → bookkeeping) | 345 | **48** |
+| FINALIZATION (termination → tracks → feedback → output dict → persist) | 232 | **48** (35 excluding builtins/imports) |
+
+The amendment's own rule:
+
+> If extracting a block requires passing ~20 unrelated locals: the boundary is
+> probably wrong. Do not create a giant mutable context merely to hide those
+> parameters.
+
+Every phase exceeds it; three exceed it by more than double. Hiding 45 parameters
+behind a context object is the move the amendment explicitly forbids, and passing 45
+arguments is not an interface anyone would defend.
+
+**The one nuance worth the operator's attention.** PLANNING's 28 inputs are not 28
+unrelated things. Roughly 21 are RUN-SCOPED — bound once in `run()`'s first ~530 lines
+and never mutated afterwards (`agent_input`, `brain`, `sandbox`, `run_metric`,
+`run_order`, `run_profile`, `run_task_render`, `run_model_io`, the four budgets,
+`resolved_data_scope`, `scope_is_partial`, `model_type_setting`, `config_manual_data`,
+`expert_advice_str`, `model_description`, `run_name`, `file_index`, `max_rounds`,
+`trial_allowed`, `self`). Only ~7 are per-attempt (`iteration`, `attempt_in_round`,
+`total_attempts`, `N`, `is_formal_round`, `formal_trial_winner`).
+
+So there is a real, non-god-object type hiding here: a FROZEN `RunScope` holding the
+authorities `run()` establishes in phase 1. It is immutable, it is a concept the code
+already has (the amendment itself calls phase 1 "establish run authorities /
+services"), and it would make PLANNING a genuine `prepare_attempt(scope, round_ctx)`.
+It would NOT rescue EXECUTION or REFLECT+COMMIT, whose inputs are dominated by
+per-attempt mutable state (`train_status`, `score_results`, `time_check`,
+`resource_check`, `active_params`, `record_params`, `trial_config`, `ordering`, …).
+
+**This is a genuine architecture decision, not an implementation detail**, so it is
+referred rather than taken:
+
+* **Option A — introduce a frozen `RunScope`.** PLANNING becomes extractable
+  (~414 lines out of `run()`), and a later pass could split EXECUTION at its internal
+  seams (preflight / train / infer+score) into several narrower phases that each take
+  the scope plus a small typed input. Cost: one new type that is passed widely, which
+  is the shape the amendment warned about even though this one is immutable.
+* **Option B — stop here.** `run()` stays ~2,700 lines; the horizontal decomposition
+  and the public boundary stand on their own, and the vertical pass waits for a PR that
+  can also restructure the per-attempt state it depends on.
+
+Until that is decided, no extraction is performed: doing half of Option A would leave
+the node with a widely-passed new type AND a 2,300-line `run()`, which is worse than
+either endpoint.
+
+> **Superseded by §14.9.5.** The operator chose option A-prime (a bounded frozen
+> carrier, not the original A), which makes the measurement above the *input* to
+> the design rather than a blocker. The answers immediately below describe the
+> pre-C7d head and are kept as the record of what was true when the question was
+> referred; §14.9.5 answers them again at the head that ships.
+
+**Answers to the amendment's final review questions, at the PRE-C7d head:**
+
+1. *Lifecycle readable from `<node>.py` + `<node>.md` alone?* Partly. The file-level
+   responsibilities and the phase ORDER are visible, and the `.md` documents the
+   contract — but `run()` still inlines the phase implementations, so the honest answer
+   is **not yet**.
+2. *One coherent responsibility per internal module?* **Yes** — `policy`, `runtime`,
+   `records`, `feedback`, `cli`, each documented at its head.
+3. *External production code importing an internal submodule?* **No** — audited and now
+   enforced by `tests/unit/nodes/test_node_public_boundary.py`.
+4. *Internal submodule importing the main module?* **No** — enforced by the same test,
+   plus an acyclicity check over the private graph.
+5. *Is `run()` orchestration rather than implementation?* **No, not yet.** This is the
+   open item.
+6. *Did we avoid a giant context/state object?* **Yes** — and the measurement above is
+   why question 5 is still "no".
+7. *External Python / CLI / record / prompt interfaces unchanged?* **Yes** — CLI
+   `--help` byte-identical, 18 goldens sha256-unchanged, no record change.
+8. *PRE vs POST deterministic outputs equal?* **Yes** — the 13-surface differential
+   oracle is deep-equal after every C7 commit.
+
+### 14.9.5 — C7d: the vertical decomposition, as built (operator decision A-prime)
+
+**Decision recorded.** *A-prime — a bounded frozen carrier for run-scoped stable
+bindings only, then continue splitting along lifecycle seams.* Option B was
+rejected because it would have left the node at ~3,170 lines with `run()` still
+occupying 86 % of the main file; the original A was rejected because a context
+object holding 45-48 mutable locals is the god context the amendment forbids.
+
+**Why the measurement was not a veto.** 28/45/48 raw locals are not accepted as
+proof that a seam is wrong — they are proof that the code lacked the distinction
+between *bindings the run establishes once* and *state the loop mutates*. Naming
+that distinction removes most of the coupling without hiding any of it:
+
+```text
+bad context    = every mutable local in one bag
+good carrier   = the data boundary of ONE real lifecycle concept
+```
+
+#### The carriers (`contracts.py`, data boundaries only)
+
+| Carrier | Kind | What it is |
+|---|---|---|
+| `RunBindings` | frozen | the authorities, services and facts resolved once at startup |
+| `PreparedAttempt` | frozen | everything planning DECIDED for one attempt |
+| `AdmissionOutcome` / `TrainingOutcome` / `AttemptExecution` | frozen | one per execution phase: a control decision plus that phase's products |
+| `AttemptIdentity` | frozen | round index, attempt index, formal-or-not |
+| `RunExitSnapshot` | frozen | the nine end-of-loop facts the output is built from |
+| `AttemptSignal` | enum | `PROCEED` / `NEXT_ATTEMPT` / `END_ROUND` |
+| `AttemptStage` | **mutable, one field** | how far the attempt got — see below |
+
+`RunBindings` carries **zero** mutable loop, round or attempt state, and that is
+enforced at construction rather than by convention: `FORBIDDEN_BINDING_FIELDS`
+(28 names — counters, `plan`, `resolved_action`, the termination flags, the
+per-attempt results) is checked in `__post_init__`, because a widely-passed
+object is exactly the thing someone adds a field to "just this once".
+
+`AttemptStage` is the single deliberate exception to immutability, and it exists
+for a reason no return value can serve: `run()`'s exception handler stamps
+`failure_stage` on the failure record and classifies the exception by it, and on
+the raising path there is no return. One field, one writer at a time.
+
+#### The control-flow translation, and why it is not a redesign
+
+The execution region contained 15 loop-control exits. Every one of them sat
+**directly** in the attempt loop — none inside a nested loop — which is what
+makes the translation 1:1 rather than a restructuring:
+
+```text
+11 x continue  ->  return X.next_attempt()   ->  run(): if ... NEXT_ATTEMPT: continue
+ 4 x break     ->  return X.end_round(...)   ->  run(): if ... END_ROUND:    break
+ 3 x raise     ->  UNCHANGED — propagates into run()'s handler exactly as before
+```
+
+`raise` is deliberately not translated: the `try`/`except` that classifies
+attempt failures stays in `run()`. Retry counts, round transitions, phase order,
+timeout and signal semantics are untouched.
+
+#### Module tree, before and after
+
+```text
+BEFORE C7 (one file)              AFTER C7d
+7,430  ml_hyperparameter_tune_agent.py   1,473  ml_hyperparameter_tune_agent.py  PUBLIC
+                                          348  contracts.py                     carriers
+                                          512  planning.py                      phase
+                                        1,143  execution.py                     phase x3
+                                        1,304  records.py                       BUILDS
+                                        1,583  runtime.py                       EMITS
+                                        1,205  policy.py
+                                          541  feedback.py
+                                          621  cli.py
+```
+
+| Metric | pre-C7 | post-C7 | post-C7d |
+|---|---|---|---|
+| main file | 7,430 | 3,170 | **1,473** |
+| `run()` | 2,714 | 2,714 | **1,011** |
+| `run()` branch nodes | 198 | 198 | **64** |
+| largest function | `run()` 2,714 | `run()` 2,714 | `run()` 1,011, then `run_admission_preflight` 512 |
+
+`run()` is inside the operator's 900-1,100 band. It was not driven lower: the
+target was orchestration that reads as a lifecycle, not a line count.
+
+#### Dependency direction (acyclic, enforced)
+
+```text
+main ──> planning ──┐
+     ├─> execution ─┼─> records ──> policy, feedback
+     ├─> runtime ───┘        └────> contracts
+     └─> cli                 (contracts is a leaf)
+```
+
+Two cycles were caught and resolved **by moving the concept, not the import**:
+
+* `records -> planning` for `PreparedAttempt` — resolved by moving the carrier
+  into `contracts.py`, where the amendment placed it;
+* the record's emission tail — `_attach_realized_memory`, `_emit_record`,
+  `_append_runtime_observation`, `_derive_calibration_from_observation` — stays
+  in `run()`, because three of the four live in `runtime.py`, which imports
+  `records.py`. `records` BUILDS, `runtime` EMITS: the record dict is the seam.
+
+#### `RunBindings` final field list, classified
+
+* **Authorities** (7): `run_profile`, `run_model_io`, `run_deliverable_spec`,
+  `run_metric`, `run_order`, `run_task_render`, `registry`.
+* **Services** (3): `sandbox`, `brain`, `agent_input`.
+* **Stable resolved run facts** (23): `run_name`, `workspace`, `file_index`,
+  `max_rounds`, `model_type_setting`, `trial_allowed`, `resolved_data_scope`,
+  `scope_is_partial`, `expert_advice_str`, `config_manual_data`,
+  `model_description`, four budgets, three round/attempt budget settings, the
+  four once-resolved formal-comparison values, `hardware_context`,
+  `device_identity`, `time_data_dir`, `anchor_map_data`, `reference_scores`,
+  `started_at`, `health_checks_config_source`, `health_config_sha256`.
+* **Mutable loop / round / attempt state**: **zero**, structurally.
+
+Each of the five fields added for the execution phases was verified from source
+to be bound exactly once before the round loop and never rebound.
+
+#### Test disposition (the deferred pass, done once)
+
+Held deliberately until the layout was final. `1,187 errors + 39 failures ->
+1,188 passed` in the tuner package, in three categories, none of which weakens a
+check:
+
+1. **Patch targets follow the call site.** A stub aimed at the node's public
+   module binds a name nothing calls; the package conftest's own docstring
+   records that such a stub *hangs* rather than fails.
+2. **Source scans read the node, not one file.** `tests/helpers/tuner_source.py`
+   gains the three new modules plus `tuner_lifecycle_source()` — `run()` and
+   every phase it executes. Reachability tests use the latter, because "the node
+   contains this call" is satisfiable by dead code and "the lifecycle contains
+   it" is not.
+3. **Assertions restated at the right level.** Prephase branches accept the
+   returned control decision as well as `break`/`continue` (a branch issuing
+   neither, or the wrong one, still fails); the ceiling-provenance test compares
+   AST containment instead of byte offsets, which across two modules measured
+   file order rather than execution order; two indentation-pinned literals became
+   whitespace-insensitive on the argument that carries the meaning.
+
+**Two node-wide collaborators gained a single binding.** `_run_skill` (called
+from three modules) and `_emit_record` (four) now resolve through their owning
+module. Per-module `from X import name` gave each module its own snapshot, so a
+stub installed for one silently missed the others — a reachability hole C7a
+opened and this closes. Behaviour-neutral; both remain re-exported from the main
+module for `__init__.py`.
+
+#### Evidence
+
+* Differential PRE/POST oracle over 13 surfaces: **12/12 behavioural surfaces
+  deep-equal** after every C7d commit. Only `run_branch_nodes` moves, which is
+  the structural metric and the point of the exercise.
+* `tests/unit/nodes/test_node_public_boundary.py`: 16 passed — no external
+  production import of node internals, no submodule importing the main module,
+  private graph acyclic, `__all__` free of private names.
+* Tuner package: 1,188 passed.
+* ruff + ruff format clean across `nodes/` and `tests/`.
+
+#### The amendment's review questions, answered at the shipping head
+
+1. *Lifecycle readable from `<node>.py` + `<node>.md` alone?* **Yes.** `run()`
+   now reads plan -> admission -> train -> infer/score/health -> reflect ->
+   build record -> emit -> finalize.
+2. *One coherent responsibility per internal module?* **Yes** — eight, each
+   documented at its head.
+3. *External production code importing an internal submodule?* **No** — enforced.
+4. *Internal submodule importing the main module?* **No** — enforced.
+5. *Is `run()` orchestration rather than implementation?* **Yes** — 1,011 lines,
+   64 branch nodes, and `brain.reflect(...)` still visible in it as required.
+6. *Did we avoid a giant context/state object?* **Yes** — structurally, via
+   `FORBIDDEN_BINDING_FIELDS`.
+7. *External Python / CLI / record / prompt interfaces unchanged?* **Yes.**
+8. *PRE vs POST deterministic outputs equal?* **Yes.**
+
+#### Carried forward, deliberately not fixed here
+
+> The tuner structural decomposition intentionally preserves the pre-existing
+> `memory.time_mode` / no-time-budget coupling. That defect is not corrected
+> here; it is reserved for the immediately following dedicated Step-07
+> round-state semantics correction PR.
+
+Also untouched, as instructed: the `resolved_action` round-scoped staleness
+hazard, and 07a's validation time missing from the watchdog deadline prediction
+(ADDED 07c scope).
+
+---
+
+### 14.10 — Post-refactor Gate readiness packet (Gate 1 rerun + the bounded Gate 2)
+
+Both gates run on the SAME final executable HEAD, after the terminal full-suite
+run from a clean tree. Gate 1 first.
+
+#### Gate 1 — rerun at the post-refactor head
+
+Identical to the operator-approved attempt-2 command except the workspace and
+run identity. Cold start, no `--seed_paths`.
+
+```text
+SIDERIUS_ALLOW_LAUNCH=1 bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/step07b_gate1_postrefactor \
+    --run_name gate1_07b_postrefactor \
+    --num_iterations 2 --max_rounds 2 --max_proposal_attempts 3 --max_epochs 1 \
+    --data_scope 4-9 --is_pseudo_training --no-health_gate_enabled \
+    --enable_chain_incumbent_formal_gates \
+    --trial_time_budget_minutes 20 --formal_time_budget_minutes 120 \
+    --llm_config llm_configs/openai_tiered_pro.json
+```
+
+PASS criterion is unchanged from attempt 2: real within-tuner round evidence,
+at least 2 TUNER rounds. The time budgets stay because the `memory.time_mode`
+coupling is deliberately NOT fixed in this PR.
+
+#### Gate 2 — bounded, real training. OPERATOR DECISION on posture
+
+**`--runtime_watchdog` is intentionally OMITTED.** Operator decision, recorded
+here in full because it is a deliberate deviation from the Gate standard's
+canonical command and must not read as a quietly bypassed 07b bug:
+
+> **Operator-approved functional-execution posture.** The purpose of this
+> Gate 2 is to verify that the C7 structural refactor preserved the REAL
+> production execution path:
+>
+> ```text
+> real LLM -> real training -> validation -> inference -> scoring
+>          -> HealthGate / record persistence
+> ```
+>
+> The runtime watchdog is NOT part of the semantic change being validated here.
+> A pre-existing 07a finding already established that the current watchdog
+> deadline model does not account for the full validation pass; with the
+> watchdog enabled, bounded real attempts have been terminated DURING
+> validation. That accounting defect is explicitly deferred to 07c and MUST NOT
+> be fixed in 07b.
+>
+> Enabling the watchdog here would therefore confound *refactor correctness*
+> with *known watchdog-accounting debt*.
+>
+> This is NOT permission to alter runtime/watchdog production semantics.
+
+```text
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /tmp/gate2_$(date +%s) \
+    --run_name gate2_07b_postrefactor \
+    --num_iterations 1 --max_rounds 1 --max_proposal_attempts 3 --max_epochs 1 \
+    --data_scope 4-9 --health_gate_files 4,5,6,7,8,9 \
+    --validation_max_portion 0.01 \
+    --validation_max_train_samples 2000 \
+    --validation_max_phase_seconds 900 \
+    --no-force_formal_round \
+    --trial_vram_budget_gb 4 --formal_vram_budget_gb 4 \
+    --advice advice/gate/gate_07b_structural_refactor_advice.json \
+    --llm_config llm_configs/openai_tiered_pro.json
+```
+
+Two deltas from the canonical command beyond the watchdog, both from the
+operator decision recorded in §14.11, and both required for the Gate to be about
+wiring rather than about model size:
+
+* `--trial_vram_budget_gb 4 --formal_vram_budget_gb 4` (canonical: 24/24). The
+  standard's "be generous on GPU VRAM" was always relative to a production
+  campaign; a wiring test wants the smallest model that honestly runs.
+* `--advice advice/gate/gate_07b_structural_refactor_advice.json`, which states
+  the same 4 GiB limit in the proposer's own terms plus the "NOT a scientific
+  campaign" mindset that the `advice/gate/` convention already establishes.
+  Without it the proposer optimises for science and gets refused at pre-flight —
+  which is exactly what happened in Gate 1 (§14.11).
+
+Omission verified from source, not assumed: `_chain_common.sh:107` defaults
+`RUNTIME_WATCHDOG=0`, `:315` sets it only when the flag is passed, and `:552`
+forwards `--runtime_watchdog` to the app only when it is 1. Omitting the flag
+therefore leaves the watchdog disabled, which is also its production default
+(`docs/design/runtime_estimation_and_watchdog.md` §4).
+
+Canonical in every other respect: cold start (no `--seed_paths`), paired
+`--data_scope` + `--health_gate_files` per the DS8 partial-scope rule, and no
+`--data_dir` (the launcher resolves it and refuses before any spend).
+
+**The PASS requirement is NOT relaxed by the omission.** At least one REAL
+production attempt must reach:
+
+```text
+training completion -> validation completion -> inference completion
+    -> scoring completion -> persisted record -> HealthGate evaluated / outcome recorded
+```
+
+A scientifically poor or HealthGate-INVALID candidate still constitutes valid
+functional Gate evidence, provided the full execution path completes — which is
+consistent with the Gate standard's statement that Gate 2 is functional
+validation, not a miniature scientific campaign.
+
+**Standing constraints for this Gate 2** (operator): do not trivialize
+validation to make the run pass — that would change the execution path the Gate
+is supposed to cover; do not fix the watchdog debt here; do not run a second
+watchdog-on Gate for comparison. One bounded run.
+
+---
+
+### 14.11 — Gate 1 at the post-refactor head: **PASS**, plus a Gate-posture defect found
+
+| Field | Value |
+|---|---|
+| Executable HEAD | `cb1a885a` (clean tree at launch) |
+| Workspace | `/home/klz/Data/SIDEREIS_DATA/step07b_gate1_postrefactor` (cold start, 0 seed paths) |
+| Log | `/tmp/claude-1004/gate1_postrefactor.log`, `CHAIN_RC=0` |
+| Wall time | ~21 min (vs 40 min 54 s for the pre-refactor attempt 2) |
+| Cost | 34 real gpt-5.5 calls across both iterations |
+| Verdict | **PASS** — criterion A satisfied by iteration 1; iteration 2 recorded in full |
+
+**Criterion A — within-tuner round evidence: SATISFIED.** From
+`iter_001/.../run_output_iter_001.json`, not from the log:
+
+```text
+status=completed  completed_rounds=2
+  skipped_time_risk   time_mode='trial'
+  success             time_mode='trial'   score=-2.4310   <- round 1
+  success             time_mode='formal'  score=-2.9588   <- round 2
+[FORMAL OVERRIDE] strategy=full_clone winner='..._iter_001_002' score=-2.4310
+```
+
+Two real tuner rounds with the round-1 -> round-2 transition driven by a
+resolved formal winner, `memory.time_mode` stamped on every record. The scores
+are pseudo-training stub outputs and carry NO scientific meaning; they are
+evidence that rounds completed.
+
+**Criterion B — iteration 2: `partial`, 1 completed round.** Its formal round
+was refused 15 times as `skipped_time_risk` (`time_mode='formal'`). This is NOT
+a refactor regression: §14.6b records the same phenomenon at the PRE-refactor
+head ("iteration 1 spent 20 min on 16 guardrail-rejected formal attempts").
+Reproducing a known pre-existing behaviour is parity evidence, not a new defect.
+
+#### A Gate-posture defect this run exposed — `--advice` was not passed
+
+**Previous assumption.** The Gate-1 command inherited from attempt 2 was
+complete as-is, so the post-refactor rerun needed only a new workspace.
+
+**Audit evidence.** Iteration 2's first two attempts died at the structural
+pre-flight:
+
+```text
+Loop Error: worker tree reached 25.183 GiB against a 24.0 GiB allowance
+Loop Error: worker tree reached 24.881 GiB against a 24.0 GiB allowance
+```
+
+The proposer had chosen a 24-block dilated TCN. Auditing why, `advice/` turns
+out to hold an established convention — `advice/gate/*.json`, a `mindset` +
+`propose` bundle whose existing members say exactly what a Gate needs:
+
+> "capability validation fixture (NOT a scientific campaign) ... Scientific
+> quality is NOT under test ... Propose ONE small, conservative,
+> obviously-trainable model ... roughly 10k-500k parameters"
+
+No `--advice` was passed. With no Gate mindset injected the proposer runs its
+default posture — optimise for science — and a 24-block TCN is a perfectly
+sensible SCIENTIFIC proposal. The Gate never told it otherwise. The Gate
+standard already names the consequence (§"Gate 2 parameter plans"):
+
+> **be generous on GPU VRAM, stingy on wall time** — a VRAM-gate rejection
+> wastes a whole Gate attempt.
+
+**Corrected understanding.** A VRAM refusal burning Gate attempts is a POSTURE
+defect, not candidate bad luck, and the repository already had the mechanism to
+prevent it.
+
+**Implementation consequence.** `advice/gate/gate_07b_structural_refactor_advice.json`
+is added and is passed to Gate 2 via `--advice`.
+
+**Operator decision (2026-08-16): Gate 1 and Gate 2 limit each model to 4 GiB
+of GPU VRAM.** Both halves are required or the constraint is unreachable: the
+budget flags enforce it (`--trial_vram_budget_gb 4 --formal_vram_budget_gb 4`)
+and the advice states the same number, so the proposer can aim at it instead of
+discovering it by refusal. This tightens the standard's 24/24 for Gate runs —
+"generous" was always relative to a production campaign, and a wiring test
+needs the smallest model that honestly runs, not the largest that fits.
+
+#### OPERATOR DISPOSITION — Gate-1 advice omission (2026-08-16, at review)
+
+Recorded explicitly so the finding cannot later be misread as a defect in the
+07b property itself:
+
+* **Gate 1 remains ACCEPTED. No rerun.**
+* The missing gate advice and the 4-GiB posture were a **Gate-HARNESS posture
+  defect**, not a failure of the 07b property under test.
+* Gate 1's required acceptance property was **directly established** by the
+  persisted round-1 → round-2 evidence, produced with real LLM calls
+  (`iter_001` run-output: `completed_rounds=2`, `memory.time_mode` stamped
+  `trial` then `formal`, `[FORMAL OVERRIDE]` resolving the winner).
+* **Canonical future Gate posture** uses BOTH halves: the gate advice file and
+  the matching 4-GiB enforcement/declaration. Now binding in
+  `docs/gates/gate_testing_standard.md`.
+
+**Gate 1 is NOT re-run.** Its required property is established twice over
+(iteration 1's two rounds; iteration 2's planner correctly self-correcting
+24 -> 16 blocks after reading the refusal, which is itself evidence the
+reflect -> plan feedback path survived the decomposition). Re-running would
+spend ~20 min and 34 more real LLM calls to re-establish an already-established
+property — the minimum-sufficient-evidence rule says no. The posture fix lands
+where it actually matters: Gate 2, where a refused attempt wastes real training.
+
+---
+
+### 14.12 — Gate 2 attempt 1: REFUSED BEFORE TUNER/GPU EXECUTION by a schema interlock
+
+**Cost, stated precisely:** ~9 min wall time and **3 real LLM calls** (propose / implement / validate) were consumed before the refusal; **zero GPU and zero training spend**. It is "refused before tuner/GPU execution", NOT "no spend".
+
+`CHAIN_RC=0`, manifest `status=failed`, no tuner round, no GPU work. Not a
+failure of the refactor and not a failure of the run — a configuration error in
+the Gate command, caught after the proposal/implementation/validation LLM stages
+and before any tuner round or training began.
+
+```text
+pydantic_core.ValidationError: 1 validation error for HyperparamTuningInput
+  Value error, validation_max_phase_seconds requires runtime_watchdog_enabled=True:
+  the watchdog is what enforces the deadline, so without it the ceiling would be
+  recorded and never applied.
+```
+
+**Previous assumption.** §14.10's Gate 2 command took the Gate standard's
+canonical command and removed `--runtime_watchdog` per the operator's posture
+decision, leaving everything else intact.
+
+**Audit evidence.** `agent/schemas/hyperparam_tuning.py:2114-2129`,
+`_validate_validation_wall_clock`, whose docstring states the principle
+directly:
+
+> A hard bound nothing enforces is worse than no bound. …accepting the ceiling
+> with the watchdog off would let a Gate command record a wall-clock limit, run
+> past it, and still report the run as bounded.
+
+The Gate standard describes the same pair as a unit — "the
+`--validation_max_phase_seconds` + `--runtime_watchdog` **fuse**". They are one
+mechanism, not two flags.
+
+**Corrected understanding.** Omitting the watchdog REQUIRES omitting
+`--validation_max_phase_seconds`. The audit also confirms this is the only such
+interlock: `validation_max_portion` and `validation_max_train_samples` have no
+watchdog dependency, and the standard names the latter "**the Gate's primary
+sizing mechanism**".
+
+**Implementation consequence.** Gate 2 relaunched without the phase-seconds
+fuse. Validation stays bounded by the two mechanisms that actually size it —
+`--validation_max_portion 0.01` and `--validation_max_train_samples 2000` — so
+this does NOT trivialize validation, which the operator explicitly ruled out.
+
+**Cost of the mistake.** ~9 min and 3 real LLM calls (propose / implement /
+validate) — a real, non-zero cost; **zero GPU and zero training spend**. The
+interlock did exactly what it exists for. The
+failed workspace is preserved at
+`/home/klz/Data/SIDEREIS_DATA/step07b_gate2_postrefactor`; attempt 2 uses
+`…_a2` so no evidence is overwritten.
+
+**Standard updated**: the binding policy block in
+`docs/gates/gate_testing_standard.md` now records that dropping the watchdog
+means dropping the phase-seconds fuse with it.
+
+---
+
+### 14.13 — Gate 2 attempt 2 (bounded, real training): **PASS**
+
+| Field | Value |
+|---|---|
+| Executable HEAD | `cb1a885a` (unchanged since the terminal validation; everything after is `.md` / advice JSON) |
+| Workspace | `/home/klz/Data/SIDEREIS_DATA/step07b_gate2_postrefactor_a2` (cold start, 0 seed paths; attempt 1 preserved separately) |
+| Log | `/tmp/claude-1004/gate2_a2.log`, `CHAIN_RC=0` |
+| Wall time | ~7 min 30 s (19:42:58 → 19:46:17 for the iteration, plus proposal/implementation) |
+| Cost | 7 real gpt-5.5 calls |
+| Posture | production (pseudo off), `--data_scope 4-9` + `--health_gate_files 4,5,6,7,8,9`, **4 GiB** trial/formal, gate advice file, watchdog and the phase-seconds fuse both omitted |
+| Verdict | **PASS** — the full execution path completed |
+
+**The operator's PASS chain, each link evidenced from the persisted record, not
+from the log:**
+
+```text
+training completion    train_time_s=42.6   train_objective=[3.4451]
+        v
+validation completion  validation_objective=[4.4098]  validation_samples=12000
+                       validation_seconds=[32.23]     comparability=established
+        v
+inference completion   inference_time_s=11.7
+        v
+scoring completion     scoring_time_s=5.2
+                       metric_result={metric_id: tidmad_denoising_score,
+                                      direction: higher, scalar: -3.2917,
+                                      references_used: [anchor_map]}
+        v
+persisted record       status=failed_mode_collapse, score_table, file_vector,
+                       training_history, training_diagnosis, validation_workload_ceiling
+        v
+HealthGate outcome     health_gate_enabled=True, healthgate_mode=blocking
+                       [output_diversity_blocking] any_pass failed — per-file
+                       file_4..file_9 = 6 unique int8 (threshold > 25);
+                       class-127 collapse
+```
+
+`completed_rounds=1`, `status=completed`, `best_denoising_score=None`.
+
+**The candidate collapsed, and that is a PASS.** A tiny 8-block TCN given one
+epoch of a 1 % slice producing a constant class-127 output is the expected
+scientific outcome, and the operator's criterion says so explicitly: a
+HealthGate-INVALID candidate is still valid functional evidence provided the
+full execution path completes. What is under test is the path, and every stage
+of it ran with real work.
+
+**What this proves about C7 specifically.** Every extracted boundary executed
+against real training, real inference and real scoring, in order:
+`run_admission_preflight` → `run_training` → `run_inference_scoring_health`
+(which carries the Step 06 metric route and the health gates) →
+`build_attempt_record` → `finalize_run_output`. The Step 06 metric handle is
+visible in `metric_result` with `direction: higher` sourced from `MetricSpec`,
+and 07a's R3 validation pass is visible in `training_history` with
+`comparability: established` — i.e. 07a and 07b's own contracts both still hold
+through the decomposed node under real load.
+
+**Two recorded, expected observations:**
+
+* `memory.time_mode` is `None`. Gate 2 passes no time budgets, so the time gate
+  is disabled and the field is never stamped — this is exactly the
+  carried-forward coupling defect, reproducing on cue. Not fixed here; it is
+  reserved for the round-state semantics correction PR.
+* Omitting the watchdog was load-bearing, not cosmetic: the validation pass took
+  **32.2 s** and completed. Under 07a's watchdog model that time is unpriced,
+  which is precisely how 3 of 4 attempts died there. The posture decision let
+  this Gate measure the refactor instead of re-measuring 07c's debt.
+
+**Note on the manifest.** `iter_001/manifest.json` reports
+`status=no_records` / `best_score=None` — correct and consistent: the chain
+admits only scientifically valid candidates as iteration results, and a
+mode-collapsed candidate is not one. The tuner's own `run_output` is the
+functional evidence, and it reports `status=completed`.
+
+---
+
+### 14.14 — Finalizer: provenance, preserved evidence, and what stays deferred
+
+Doc-only finalizer pass, operator-directed at review (2026-08-16). **No
+executable production code was modified, no Gate was re-run, and no deferred
+semantic defect was fixed.**
+
+#### Final provenance
+
+| Field | Value |
+|---|---|
+| Final **executable** HEAD | `cb1a885a` |
+| Final **PR** HEAD | `307fa0ce917c0afbd6ee5425fae7ef902b267019` (+ this finalizer) |
+| Between the two | documentation and gate-advice JSON **only** — no executable production change |
+| PR | **#216** |
+| Exact-head CI | **31989125173 SUCCESS** — ruff · ruff format · pyright (strict, blocking) · pytest |
+| Working tree | clean |
+| Terminal validation | 9,787 passed / 3 skipped / 0 failed, full `tests/unit` from a clean tree at `cb1a885a` |
+| Merge | **NOT merged.** Merge is the operator's. |
+
+#### Preserved evidence — do not rewrite or delete
+
+All five Gate records stand as written, including the two that did not succeed.
+A Gate history that keeps only its successes is not evidence:
+
+| § | Record | Outcome |
+|---|---|---|
+| §14.6 | Gate 1, attempt 1 (pre-refactor) | **INCONCLUSIVE** — harness reachability |
+| §14.6b | Gate 1, attempt 2 (pre-refactor, corrected) | **PASS** |
+| §14.11 | Gate 1, post-refactor | **PASS** + the Gate-posture defect it exposed |
+| §14.12 | Gate 2, attempt 1 | **REFUSED before tuner/GPU execution** by a schema interlock |
+| §14.13 | Gate 2, attempt 2 | **PASS** — bounded real training |
+
+Their workspaces are likewise preserved and were never overwritten: each attempt
+ran in its own directory (`…_attempt2`, `…_postrefactor`, `…_postrefactor_a2`).
+
+#### Explicitly DEFERRED and UNCHANGED by this PR
+
+Each would change round, gate or runtime semantics, which 07b is not permitted
+to touch. None was modified by the decomposition, and none is modified here:
+
+1. **`memory.time_mode` / disabled-time-budget coupling.** Without time budgets
+   the field is never stamped, so the two-field winner rule is unsatisfiable and
+   the skip gate takes its "no evidence" branch. Reproduced on cue in Gate 2
+   (§14.13). Reserved for the immediately following dedicated Step-07
+   round-state semantics correction PR.
+2. **`resolved_action` stale-attempt hazard.** Round-scoped, written seven
+   nesting levels down, never reset between attempts; the hazard is recorded at
+   its declaration with a proposed fix and an owner.
+3. **Validation-time / watchdog accounting debt.** `T_deadline` carries no
+   `T_val` term, so the watchdog can kill inside the un-priced validation pass.
+   **Owned by 07c** (parent §8.4).
+
+> The tuner structural decomposition intentionally preserves the pre-existing
+> `memory.time_mode` / no-time-budget coupling. That defect is not corrected
+> here; it is reserved for the immediately following dedicated Step-07
+> round-state semantics correction PR.
 
 ---
 
@@ -793,9 +2720,9 @@ provenance); no such corpus exists (§0.4).
 - Dependencies: none (07a merged).
 
 **3. Implementation plan.**
-- [ ] Re-read `ml_hyperparameter_tune_agent.py:1534-1704, 1984-2042, 4140-4180, 4360-4400, 4460-4475, 5140-5185, 5787-5900, 6400-6560` and `tests/helpers/step00_pseudo_iteration.py` (line drift check).
-- [ ] Author the corpus (each history names the case it exercises); capture the three goldens through the current code; record sha256s + delta list + OD-1 evidence in §14.0.
-- [ ] Write the replay test module (loads goldens; asserts deep-equal today — a tautology by construction at C1, the guard for C2/C3).
+- [x] Re-read `ml_hyperparameter_tune_agent.py:1534-1704, 1984-2042, 4140-4180, 4360-4400, 4460-4475, 5140-5185, 5787-5900, 6400-6560` and `tests/helpers/step00_pseudo_iteration.py`. **NO source drift**: `git diff --stat 787afa08 f17bbdb8` is docs-only, so every §0 line number is exact at the implementation base.
+- [x] Corpus authored — 12 histories, `fixtures/sel1_histories.json`; goldens `sel1_gate_helpers.json` / `sel1_reflection_context.json` / `sel1_best_tracks.json` captured through the CURRENT code with `_captured_at` provenance; sha256s, the verbatim §3.7 delta line-set and the 5-seed OD-1 instability recorded in §14.0.
+- [x] `test_step07b_c1_selection_replay.py` — 5 tests (corpus checklist against a hardcoded id tuple, the three replays, and the `run()` AST branch guard at the measured baseline 244). 5 passed / 1.71 s / rc 0.
 
 **4. Validation plan.** Unit: the new module green; the pseudo harness runs. No negative tests (capture commit). Backward-compat: none touched.
 
@@ -843,11 +2770,11 @@ scale mutation hide behind an ordering assertion (the C6a lesson).
 - Dependencies: C1.
 
 **3. Implementation plan.**
-- [ ] Re-read the §0.1 sites (line drift), `test_step06_c6_stage_b_direction_rung.py:79-87`, `test_step06_c2_tuner_metric_binding.py:73-107`.
-- [ ] Implement `MetricOrder`; promote `_direction_only_metric` to `tests/helpers/metric_fixtures.py` (original test keeps importing it).
-- [ ] Extract `_build_reflection_context` and `_select_best_records` VERBATIM first (parity commit-internal step: replay green), then route ordering through the authority (replay still green), then the strict rung.
-- [ ] Rewire the gate helpers + planner incumbent + banners; record the `run()` AST branch count.
-- [ ] Tests as listed; UPGRADE the selection pins.
+- [x] §0.1 sites re-read and confirmed (23 direction-bearing expressions; 21 to migrate, 2 loss-rank to leave); Step-06 C6a fixture and the `_bind_once` pattern re-read.
+- [x] `execute_tools/metric_order.py` implemented (§3.2 API + the two banner symbols, §14.1 deviation); `_direction_only_metric` promoted to `tests/helpers/metric_fixtures.py` and re-imported by the Step-06 rung, which stays green.
+- [x] Two evidence points, both recorded: verbatim extraction → replay 5 passed / 1.59 s; authority rewire → replay 5 passed / 1.62 s.
+- [x] Gate helpers, planner score-table incumbent and both banners rewired. `run()` AST branch count **244 → 198** (the two extractions moved 46 branch nodes out of the orchestrator; sequencing added none).
+- [x] `test_metric_order.py` (18) + `test_step07b_c2_order_consumers.py` (35). Selection pins upgraded in `test_delta_gates.py`, `test_valid_candidate_selection.py`, `test_formal_launch_decision.py`, `test_valid_trial_winner_drives_formal.py`, `test_force_formal_round.py`, `test_m6_probe_unavailable_fails_closed.py`, `test_chain_incumbent_pseudo.py`. Step-06's C5 guard MIGRATED, not silenced (§14.1). 9/9 mutations RED.
 
 **4. Validation plan.**
 - Unit: the new modules; the upgraded pins; `tests/unit/agent/tune_ml_hyperparam_agent` (round/attempt/retry semantics untouched — green as evidence).
@@ -905,9 +2832,9 @@ same file and the same "no third state" acceptance.
 - Dependencies: C2.
 
 **3. Implementation plan.**
-- [ ] Re-read `:1620-1704`, `:1984-2042`, `:5846-5878`, `:364-414`, `:4337-4345`, the schema docstrings `:1487-1620`; the startup-validation failure path (audit which helper carries a config refusal; record the choice).
-- [ ] Implement rows 1, 4, 5; the constant; the guard; the docstrings; the removal + hazard note.
-- [ ] Tests as listed; upgrade / delete per §9.
+- [x] All re-read. Startup refusal path audited: `validate_runtime_config` (`agent/schemas/hyperparam_tuning.py:2322`) raises `ValueError` at `run()` entry before any LLM call — but is shared with the workflow pre-flight and takes no metric, so the penalty guard is a tuner-local helper invoked on the SAME block (§14.2).
+- [x] Rows 1/2/3/4/5 implemented (§14.2 table, every TIDMAD value proved identical); `EFFICIENCY_BAND_FRACTION` is ONE symbol; `_validate_penalty_for_direction` fails closed; three schema docstrings generalised with NO field or default change; `AttemptTransition`/`AttemptDecision` removed (repo-wide grep = 0) with the `resolved_action` hazard recorded at its declaration inside `run()`.
+- [x] `test_step07b_c3_scale_rules.py` (28, rung B-07b-1s on accuracy-like and MSE-like scales); `test_delta_gates.py` gains the direction axis on the disable convention; `test_degeneracy_handling.py` gains the startup-refusal pairing; `TestAttemptDecision` DELETED with the reason in its place, `TestRoundOutcome` untouched (42 passed). 9/9 mutations RED.
 
 **4. Validation plan.** Unit: new + upgraded families; `tests/unit/agent/tune_ml_hyperparam_agent` green (round/attempt semantics). Pseudo: replay deep-equal. Negative: band mutation; penalty under `lower`; a raw `ref + delta` reintroduction under `lower` → rung RED. Backward-compat: TIDMAD values identical (replay); schema JSON unchanged (docstrings only — REC-3 field lists unchanged). Gates: none.
 
@@ -955,10 +2882,10 @@ golden failure with no regeneration to hide behind.
 - Dependencies: C3 (the band constant).
 
 **3. Implementation plan.**
-- [ ] Re-read `agent/prompts.py:10-221, 223-310, 852-935, 1044-1108, 1272-1307`, `agent/llm_bridge.py:765-919`, `models_sandbox.py:732-752`, `model_io_contract.py:206-217`, `health_checks/config.py:300-324`, `models_format_sandbox.py:384-387, 637-641`.
-- [ ] Implement the renderers + `TunerTaskRender`; the tuner builds it once at run scope from `run_profile`, `run_model_io`, the effective health config path it already materialized, and the registry; the bridge fails closed on `None`.
-- [ ] Replace the literals by tokens; substitute in the bridge; OD-1 key order.
-- [ ] Tests as listed; capture the 4-record golden; regenerate WF-1 additively.
+- [x] All re-read. `render_shape` lives at `agent/schemas/model_io_contract.py:206` (not `execute_tools/`); the shipped effective health config declares 3 blocking + 3 observational checks.
+- [x] `agent/prompt_templates/tuner/rendering.py` — five renderers + frozen `TunerTaskRender` + `build_tuner_task_render`. The tuner builds it ONCE, immediately AFTER the effective-config path swap (built earlier the check names would come from the shipped default, not from what the run evaluates). `plan(task_render=None)` raises `ValueError` before any render.
+- [x] Tokens substituted through the SAME `str.replace` seam the task description already used. OD-1 closed by record-own key order — 4 hash seeds now produce identical bytes (5 distinct orders before).
+- [x] `test_step07b_c4_task_rendering.py` (17: per-token byte equality, scoped absence pins BOTH ways, rung B-07b-3, fail-closed, OD-1 subprocess stability, renderer reachability); `pb1_planner_history4_user.txt` captured (7 735 chars); WF-1 regenerated additively **22 → 23** with the three-part note. **PB-1 (3) and PB-2 (2) sha256 IDENTICAL to §14.0 — nothing regenerated.**
 
 **4. Validation plan.** Unit: renderers; absence pins; byte-equality per token. Pseudo: PB-1/PB-2 goldens PASS unchanged (the acceptance); the pseudo tuner iteration renders. Negative: a template literal reintroduced → absence pin RED; a token rendering a different byte → PB golden RED; a `None` contract → shape token omitted (no crash). Backward-compat: PB-1/PB-2 sha256 identical to §14.0; WF-2 unchanged. Gates: none (P2 changes no byte under TIDMAD; the OD-1 ≥ 4-record change is covered by C6's Gate 1).
 
@@ -1011,10 +2938,10 @@ line-by-line against §3.7 and is what Gate 1 evaluates.
 - Dependencies: C4.
 
 **3. Implementation plan.**
-- [ ] Re-read `agent/prompts.py` P3 lines (§0.3), `agent/llm_bridge.py:765-967`, the tuner call sites `:4476-4516`, `:5930`, `test_step00_prompt_goldens.py`, both boundary tests, `examples/*/declared/metric_*.json`, `examples/*/expected/training_diagnosis_l1_fixture.json`.
-- [ ] Implement renderers + prompt deltas + bridge kwargs + tuner sequencing.
-- [ ] Regenerate PB-1/PB-2/WF-1/WF-2 (+ the 4-record golden) in THIS commit; diff reviewed line-by-line vs §3.7; record the touched-line list.
-- [ ] Tests as listed.
+- [x] All re-read, including the two pack `declared/metric_*.json` (Pets `accuracy` ↑, DAVIS `mse` ↓) and both `expected/training_diagnosis_l1_fixture.json`, which the rung consumes directly rather than through a new fixture.
+- [x] `render_metric_direction_words` / `render_metric_identity_line` / `render_training_dynamics_line` / `render_planner_dynamics_block` / `render_reflector_dynamics_block` + the `CALIBRATED_LABELS` guard list; the §3.7 prompt deltas; `plan(metric_spec)` and `reflect(metric_spec, training_diagnosis)` both fail closed; the tuner passes `run_metric.spec` at both surfaces and the attempt's already-derived diagnosis at the reflector — sequencing only, `run()` branch count unchanged.
+- [x] All six goldens regenerated in THIS commit with three-part notes; the diff was reviewed line by line and matches §3.7 exactly (table in §14.4). WF-1 **23 → 24**; WF-2 `actual_results_keys` **9 EXACT**, `reflection_context_keys` **23 EXACT**, the two new values recorded as ADDITIVE kwargs.
+- [x] `test_step07b_c5_rendering.py` (38): direction/identity renderers across four declarations, the dynamics line in ok/absent/invalid/train-only/not-comparable states, the calibrated-vocabulary guard parametrized over all ten words, both fail-closed refusals, both boundary surfaces, and rung B-07b-2 over the `lower` spec + Pets accuracy↑ + DAVIS mse↓. Step-06 planner and 07a reflector boundary tests UPGRADED, not replaced.
 
 **4. Validation plan.** Unit: renderers; boundary tests; bridge; rung. Pseudo: the pseudo tuner iteration renders both surfaces (RecordingLLMBridge captures) with the block present. Negative: raw key leak → RED; calibrated word → RED; `metric_spec=None` → `ValueError`; a delta outside §3.7 → reviewed diff (recorded). Backward-compat: `actual_results_keys` (9) and `reflection_context_keys` (23) unchanged; REC goldens unchanged; `test_denoising_score_field_name_preserved` green. Gates: Gate 1 at C6 (after docs), not here.
 
@@ -1059,9 +2986,9 @@ behaviour; the Gate evaluates the final executable head.
 - Dependencies: C1–C5.
 
 **3. Implementation plan.**
-- [ ] Pack rows + pins; node doc; contract doc; governance rows; §14.
-- [ ] Full suite from a clean tree; push; PR; exact-head CI (id in the PR body — no trailing docs-only push).
-- [ ] Gate-1 readiness packet → approval → launch → record (PASS / FAIL / inconclusive, wall time, cost, the message excerpts).
+- [x] Pack rows + `tests/unit/examples/test_step07b_pack_pins.py` (16); tuner node `.md` (order authority + consumer table, scale classification, what the LLMs see, fail-closed bridge, the removed types); genericity contract Seam 4 closed for the tuner consumers + Seam 3 gap table; README / docs/README / roadmap §15.1 / parent §8.3 / CLAUDE.md rows; §14.0–§14.8.
+- [x] Full suite from a clean tree at the post-C7 head `cb1a885a`: **9,787 passed, 3 skipped, 0 failed** (`/tmp/claude-1004/full_final.log`; verdict read from the log, not the wrapper exit code). ruff + `ruff format --check` clean repo-wide. CLI `--help` byte-identical to the pre-C7 baseline; all 18 PB/WF goldens sha256-unchanged. Pushed ONCE at `307fa0ce917c0afbd6ee5425fae7ef902b267019`; PR **#216**; exact-head CI **31989125173 SUCCESS** (ruff · ruff format · pyright strict · pytest); clean tree.
+- [x] Readiness packet §14.5 → attempt 1 INCONCLUSIVE (harness reachability, §14.6) → operator-approved harness correction §14.6a → attempt 2 **PASS** §14.6b, with evidence A and B recorded separately and both new production findings deferred.
 
 **4. Validation plan.** pins; full suite once; CI once; Gate 1 once (approved).
 
@@ -1080,6 +3007,36 @@ behaviour; the Gate evaluates the final executable head.
 - Gate 1: the readiness packet's command; artifacts read from the workspace; recorded in §14.
 
 **8. Commit boundary.** packs + docs; the Gate is evidence, not code; stop and show / record.
+
+---
+
+### C7 — Tuner node structural decomposition (operator scope amendment, 2026-08-16)
+
+Added to this PR after C6 by operator amendment, then extended by the C7d
+follow-up (decision A-prime). Zero semantic change is the defining constraint;
+the differential oracle is the evidence, and every commit below re-ran it.
+
+Split into eight git commits at clean boundaries, per the standing rule that a
+planned commit is a logical unit:
+
+| Commit | What landed | Evidence |
+|---|---|---|
+| `3d718101` C7 | five owned submodules (`policy`, `runtime`, `records`, `feedback`, `cli`); main 7,430 -> 3,170 | oracle 13/13 |
+| `989b16d4` C7c | the node public-boundary rule made executable; `__all__` 17 public vs 83 `_COMPATIBILITY_REEXPORTS` | 16 boundary tests |
+| `857a4927` | the C7d measurement and the decision it referred | doc only |
+| `4f8449ee` C7d-1 | `contracts.py` + `RunBindings`; `planning.prepare_attempt` out of `run()` | oracle 12/12, branch nodes 198 -> 166 |
+| `96e9b6eb` C7d-2 | `records.finalize_run_output` + `RunExitSnapshot` | oracle 12/12, 198 -> 137 |
+| `d5f3681e` C7d-3 | the three execution subphases + the 1:1 control-signal translation | oracle 12/12, 198 -> 80 |
+| `a9038635` C7d-4 | `records.build_attempt_record`; `PreparedAttempt` -> `contracts` | oracle 12/12, 198 -> 64 |
+| `b5137bf8` C7d-5 | the deferred structural test pass, done once | tuner package 1,188 passed |
+
+**Definition of done.** `run()` reads as a lifecycle and nothing else; every
+internal module has one documented responsibility; the private graph is acyclic
+and enforced; no external production code imports a node internal; no internal
+module imports the main module; `brain.reflect(...)` still visible in `run()`;
+zero mutable lifecycle state on `RunBindings`, structurally enforced; CLI,
+record, prompt and Python interfaces unchanged; the three carried-forward
+defects untouched. Full record: §14.9 - §14.9.5.
 
 ---
 

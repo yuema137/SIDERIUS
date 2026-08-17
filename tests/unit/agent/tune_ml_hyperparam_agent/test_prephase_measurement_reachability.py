@@ -25,12 +25,19 @@ that run happened to take.
 
 from __future__ import annotations
 
+import importlib
 import inspect
 
 import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner
+
+# `_emit_record` is owned by the node's private `records` module and called
+# from four places; stubbing it on the public module would intercept none of
+# them. importlib because the package name is rebound to the main module.
+_tuner_records = importlib.import_module("nodes.ml_hyperparameter_tune_agent.records")
 from core.runtime_control.gpu_accounting import DeviceIdentity
+from tests.helpers.tuner_source import tuner_lifecycle_source
 
 UUID = "GPU-c30b6678"
 DEVICE = DeviceIdentity(uuid=UUID, physical_index=0)
@@ -78,7 +85,7 @@ class TestTheCallSiteExists:
     def test_run_calls_the_boundary(self):
         """Deleting the call from `run()` fails here. Without this the
         entire chain could be complete, green, and never executed."""
-        source = inspect.getsource(tuner.HyperparamTuningAgent.run)
+        source = tuner_lifecycle_source()
         assert "_handle_prephase_gpu_measurement(" in source
 
     def test_run_consumes_the_disposition(self):
@@ -91,7 +98,7 @@ class TestTheCallSiteExists:
         name and branched on, so this asserts BOTH terminal dispositions
         reach a control-flow statement.
         """
-        source = inspect.getsource(tuner.HyperparamTuningAgent.run)
+        source = tuner_lifecycle_source()
         index = source.index("_handle_prephase_gpu_measurement(")
         following = source[index : index + 2000]
         # bound, not discarded
@@ -113,7 +120,7 @@ class TestTheCallSiteExists:
     def test_it_runs_before_training_starts(self):
         """O-7 requires stopping BEFORE formal GPU work. A measurement
         after `_run_skill('training_skill', ...)` would be a post-mortem."""
-        source = inspect.getsource(tuner.HyperparamTuningAgent.run)
+        source = tuner_lifecycle_source()
         assert source.index("_handle_prephase_gpu_measurement(") < source.index(
             '_run_skill("training_skill"'
         )
@@ -139,7 +146,7 @@ class TestTheDispositionDrivesTheAttempt:
     what is under test here is what the TUNER does with the answer."""
 
     def _stub(self, monkeypatch, outcome):
-        monkeypatch.setattr(tuner, "_emit_record", lambda *a, **k: None)
+        monkeypatch.setattr(_tuner_records, "_emit_record", lambda *a, **k: None)
         import core.runtime_control.prephase_admission as boundary
 
         monkeypatch.setattr(
@@ -201,7 +208,7 @@ class TestTheDispositionDrivesTheAttempt:
         """PR B's three refusal lanes are unchanged. The disposition itself
         survives in the evidence, so narrowing to a lane loses nothing."""
         records: list[dict] = []
-        monkeypatch.setattr(tuner, "_emit_record", lambda _s, r, **_kw: records.append(r))
+        monkeypatch.setattr(_tuner_records, "_emit_record", lambda _s, r, **_kw: records.append(r))
         import core.runtime_control.prephase_admission as boundary
 
         monkeypatch.setattr(
@@ -280,7 +287,7 @@ class TestApplicabilityIsTypeChecked:
         """Positive control: the type check must exclude non-identities,
         not everything."""
         called: list[object] = []
-        monkeypatch.setattr(tuner, "_emit_record", lambda *a, **k: None)
+        monkeypatch.setattr(_tuner_records, "_emit_record", lambda *a, **k: None)
         monkeypatch.setattr(
             "core.runtime_control.gpu_measurement_runner.run_prephase_measurement",
             lambda *a, **k: called.append("ran"),

@@ -35,6 +35,7 @@ The frozen policy (§16.D):
 from __future__ import annotations
 
 import json
+import re
 import tempfile
 from pathlib import Path
 from typing import ClassVar
@@ -44,6 +45,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _apply_mode_override_chain,
     _best_trial_winner,
@@ -52,13 +54,24 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _should_bypass_formal_time_budget,
     _should_skip_formal,
 )
+from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
 from tests.helpers.scoring_stubs import stub_scoring
+from tests.helpers.tuner_source import tuner_node_source
+
+#: Step 07 PR 07b — the selection helpers consume the run's ONE order
+#: authority (``MetricSpec.direction`` interpreted in exactly one place).
+#: The SHIPPED higher-is-better order is this module's default, so every
+#: assertion below states exactly the property it stated before 07b.
+HIGHER_ORDER = MetricOrder(shipped_spec())
+LOWER_ORDER = MetricOrder(direction_only_spec())
+
 
 BLOCKING_IDS = (
     "output_diversity_blocking",
     "output_std_blocking",
     "amplitude_collapse_blocking",
 )
+
 
 # The production posture measured in §16.B: switch ON, skip Δ 0.0,
 # bypass Δ 0.5, restored incumbent 10.0 → thresholds 10.0 / 10.5.
@@ -123,10 +136,13 @@ def _launch(
         skip_min_delta=skip_delta,
         bypass_min_delta=bypass_delta,
         gates_enabled=gates_enabled,
+        order=HIGHER_ORDER,
     )
-    winner = _best_trial_winner(records)
-    skip = _should_skip_formal(winner, threshold=skip_t, gates_enabled=gates_enabled)
-    bypass = _should_bypass_formal_time_budget(winner, threshold=bypass_t)
+    winner = _best_trial_winner(records, order=HIGHER_ORDER)
+    skip = _should_skip_formal(
+        winner, threshold=skip_t, gates_enabled=gates_enabled, order=HIGHER_ORDER
+    )
+    bypass = _should_bypass_formal_time_budget(winner, threshold=bypass_t, order=HIGHER_ORDER)
     return Launch(
         winner=winner,
         winner_id=None if winner is None else winner["exp_id"],
@@ -388,7 +404,7 @@ class TestTheWinnerIsResolvedOnce:
     ]
 
     def test_skip_bypass_and_inheritance_all_judge_the_same_record(self):
-        winner = _best_trial_winner(self.RECORDS)
+        winner = _best_trial_winner(self.RECORDS, order=HIGHER_ORDER)
         assert winner is not None and winner["exp_id"] == "real_winner"
 
         from agent.schemas.hyperparam_tuning import ExperimentPlan
@@ -481,7 +497,7 @@ class TestTheWinnerIsResolvedOnce:
         `_best_trial_winner`'s filter. Appending formal records must
         therefore leave the winner identical.
         """
-        before = _best_trial_winner(self.RECORDS)
+        before = _best_trial_winner(self.RECORDS, order=HIGHER_ORDER)
         formal_attempt = {
             "exp_id": "formal_attempt_1",
             "status": "success",
@@ -490,7 +506,7 @@ class TestTheWinnerIsResolvedOnce:
             "health_gate_results": [],
             "memory": {"time_mode": "formal", "round_index": 2},
         }
-        after = _best_trial_winner([*self.RECORDS, formal_attempt])
+        after = _best_trial_winner([*self.RECORDS, formal_attempt], order=HIGHER_ORDER)
         assert after is before
 
     def test_the_production_site_resolves_the_winner_exactly_once(self):
@@ -499,23 +515,26 @@ class TestTheWinnerIsResolvedOnce:
         Structural, because the divergence it guards against is invisible
         to a behavioural test while the history happens to be stable.
         """
-        src = (
-            Path(__file__).resolve().parents[4]
-            / "nodes"
-            / "ml_hyperparameter_tune_agent"
-            / "ml_hyperparameter_tune_agent.py"
-        ).read_text(encoding="utf-8")
+        src = tuner_node_source()
 
         assert "formal_trial_winner = _best_trial_winner(" in src
         assert src.count("formal_trial_winner = _best_trial_winner(") == 1
         # Both gates receive the resolved winner, not a fresh list.
         assert "_should_skip_formal(\n                    formal_trial_winner," in src
-        assert (
-            "_should_bypass_formal_time_budget(\n                                formal_trial_winner,"
-            in src
+        # Whitespace-insensitive: the call moved to a different indent level
+        # when the round loop was decomposed. What is pinned is the ARGUMENT —
+        # the guard must receive the resolved winner, not rebuild one.
+        assert re.search(r"_should_bypass_formal_time_budget\(\s*formal_trial_winner,", src), (
+            "the bypass guard no longer receives the resolved formal_trial_winner"
         )
         # And the feature switch really is threaded into the skip gate.
         assert "gates_enabled=agent_input.enable_chain_incumbent_formal_gates," in src
+        # Step 07 PR 07b — and BOTH gates judge with the run's ONE order
+        # authority. A gate left on a bare comparison would still receive the
+        # right winner and still read the right threshold, and would still
+        # decide by the TIDMAD convention under a lower-is-better metric.
+        assert src.count("order=run_order,") >= 3
+        assert "run_order = MetricOrder(run_metric.spec)" in src
 
 
 class TestPersistenceIsJsonSafe:
@@ -566,6 +585,7 @@ class TestPersistenceIsJsonSafe:
             skip_min_delta=float("-inf"),
             bypass_min_delta=float("inf"),
             gates_enabled=True,
+            order=HIGHER_ORDER,
         )
         assert (skip_t, bypass_t) == (float("-inf"), float("inf"))
         persisted = {
@@ -648,12 +668,7 @@ class TestPersistenceIsJsonSafe:
         Under the bootstrap all three are `-inf` simultaneously, so a
         partial fix still emits `Infinity`.
         """
-        src = (
-            Path(__file__).resolve().parents[4]
-            / "nodes"
-            / "ml_hyperparameter_tune_agent"
-            / "ml_hyperparameter_tune_agent.py"
-        ).read_text(encoding="utf-8")
+        src = tuner_node_source()
 
         for field in (
             "formal_reference_score",
@@ -697,7 +712,7 @@ def _run_one_formal_round(tmp_path, *, seeded_trial: dict, gates_enabled: bool) 
     with (
         patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
         patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-        patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+        patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill),
         patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
             return_value=_synth_reference(),

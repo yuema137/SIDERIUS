@@ -23,6 +23,7 @@ from core.runtime_control.admission import (
     evaluate_gpu_admission,
 )
 from core.runtime_control.gpu_accounting import DeviceIdentity, GpuAccountingSnapshot
+from tests.helpers.tuner_source import tuner_node_source
 
 SOURCE = Path(__file__).resolve().parents[3] / "core" / "runtime_control" / "admission.py"
 EXECUTOR = Path(__file__).resolve().parents[3] / "core" / "sandbox_executor.py"
@@ -352,7 +353,7 @@ class TestWhoMayCallIt:
     def test_the_tuner_never_decides_admission_itself(self):
         called = {
             n.func.id
-            for n in ast.walk(ast.parse(TUNER.read_text()))
+            for n in ast.walk(ast.parse(tuner_node_source()))
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
         }
         assert "evaluate_gpu_admission" not in called

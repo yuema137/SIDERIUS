@@ -23,6 +23,7 @@ from __future__ import annotations
 import pytest
 
 from execute_tools.health_checks.schemas import GateAction, PersistedHealthGateResult
+from tests.helpers.tuner_source import tuner_lifecycle_source
 
 
 def _result(**overrides) -> PersistedHealthGateResult:
@@ -154,7 +155,7 @@ class TestTheProducerRecordsThem:
 
         from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 
-        src = inspect.getsource(HyperparamTuningAgent.run)
+        src = tuner_lifecycle_source()
         start = src.find("evaluate_and_persist_health_gates(")
         assert start != -1, "the gate-evaluation call site disappeared"
         # A bounded window rather than a balanced-paren match: the call

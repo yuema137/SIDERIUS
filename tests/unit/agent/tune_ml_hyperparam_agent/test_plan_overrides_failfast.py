@@ -89,7 +89,9 @@ class TestMergeFailFast:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill
+            ),
             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",

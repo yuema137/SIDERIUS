@@ -205,7 +205,7 @@ FAKE_SCORE_RESULT = {
 def _disable_health_gates_for_legacy_tuner_tests():
     """Keep non-gate tuner tests isolated from filesystem-backed HealthGates."""
     with patch(
-        "nodes.ml_hyperparameter_tune_agent.get_gates_for_position",
+        "nodes.ml_hyperparameter_tune_agent.execution.get_gates_for_position",
         return_value=[],
     ):
         yield
@@ -258,7 +258,9 @@ class TestHyperparamTuningAgentRun:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill
+            ),
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
                 return_value=_synth_reference(),
@@ -506,7 +508,7 @@ class TestInferenceTimingPersistedToMemory:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill") as mock_skill,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
                 return_value=_synth_reference(),
@@ -591,7 +593,7 @@ class TestHyperparamTuningAgentOOM:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill") as mock_skill,
+            patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill") as mock_skill,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
                 return_value=_synth_reference(),
@@ -678,7 +680,9 @@ class TestDynamicTrialFormal:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill
+            ),
             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
@@ -762,7 +766,9 @@ class TestDynamicTrialFormal:
             skill_calls.append((skill_folder, params))
             return original_mock(skill_folder, sandbox, **params)
 
-        with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock):
+        with patch(
+            "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=tracking_mock
+        ):
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
         # Find inference call
@@ -788,7 +794,9 @@ class TestDynamicTrialFormal:
             skill_calls.append((skill_folder, params))
             return original_mock(skill_folder, sandbox, **params)
 
-        with patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock):
+        with patch(
+            "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=tracking_mock
+        ):
             agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
         vram_calls = [p for f, p in skill_calls if f == "evaluate_vram_skill"]
@@ -827,7 +835,7 @@ class TestDynamicTrialFormal:
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
             patch(
-                "nodes.ml_hyperparameter_tune_agent._run_skill",
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill",
                 side_effect=resource_check_with_batch,
             ),
             patch(
@@ -883,8 +891,10 @@ class TestDynamicTrialFormal:
             return original_mock(skill_folder, sandbox, **params)
 
         with (
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=tracking_mock),
-            patch("nodes.ml_hyperparameter_tune_agent.build_sample_set") as mock_build,
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=tracking_mock
+            ),
+            patch("nodes.ml_hyperparameter_tune_agent.planning.build_sample_set") as mock_build,
         ):
             mock_build.return_value = {0: [0, 1], 6: [0, 1]}
 
@@ -992,7 +1002,7 @@ class TestTimeBudgetGate:
         where ``HyperparamTuningInput.is_trial=True`` flips ``trial_allowed``."""
         cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
         cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
-        cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
+        cm_skill = patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill")
         cm_ref = patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
             return_value=_synth_reference(),
@@ -1431,7 +1441,7 @@ class TestVramBudgetGate:
         clouded by the time check also blocking."""
         cm_brain = patch("nodes.ml_hyperparameter_tune_agent.LLMBridge")
         cm_sandbox = patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox")
-        cm_skill = patch("nodes.ml_hyperparameter_tune_agent._run_skill")
+        cm_skill = patch("nodes.ml_hyperparameter_tune_agent.runtime._run_skill")
         cm_ref = patch(
             "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
             return_value=_synth_reference(),
@@ -1794,7 +1804,9 @@ class TestScoreTablePropagation:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill
+            ),
             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
@@ -1855,7 +1867,9 @@ class TestScoreTablePropagation:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill
+            ),
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",
                 return_value=_synth_reference(),
@@ -1912,7 +1926,9 @@ class TestScoreTablePropagation:
         def _boom(*args, **kwargs):
             raise RuntimeError("synthetic rendering failure")
 
-        with patch("nodes.ml_hyperparameter_tune_agent.build_score_table", side_effect=_boom):
+        with patch(
+            "nodes.ml_hyperparameter_tune_agent.execution.build_score_table", side_effect=_boom
+        ):
             output = agent.run(_make_trial_input(tmp_path, max_rounds=1, is_trial=True))
 
         assert output.status == "completed"
@@ -1948,7 +1964,9 @@ class TestScoreTablePropagation:
         with (
             patch("nodes.ml_hyperparameter_tune_agent.LLMBridge") as MockBridge,
             patch("nodes.ml_hyperparameter_tune_agent.TidmadSandbox") as MockSandbox,
-            patch("nodes.ml_hyperparameter_tune_agent._run_skill", side_effect=_mock_run_skill),
+            patch(
+                "nodes.ml_hyperparameter_tune_agent.runtime._run_skill", side_effect=_mock_run_skill
+            ),
             patch("nodes.ml_hyperparameter_tune_agent.load_anchor_map") as mock_anchor,
             patch(
                 "nodes.ml_hyperparameter_tune_agent.load_reference_scores",

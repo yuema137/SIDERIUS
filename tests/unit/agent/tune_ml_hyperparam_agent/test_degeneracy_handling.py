@@ -76,7 +76,15 @@ def test_degenerate_formal_with_none_penalty_nulls_score():
 def test_degenerate_formal_with_float_penalty_uses_penalty():
     """Operator-supplied penalty (typically large-negative) replaces the
     score so the planner's rank-ordering still includes the failure but
-    strictly below any healthy success."""
+    strictly below any healthy success.
+
+    Step 07 PR 07b: ``-2.5`` is "strictly below any healthy success" only on a
+    MAXIMISED metric — on a minimised one it is the best score in the run.
+    The reaction applies the operator's number verbatim either way; what
+    changed is that a run whose golden metric is lower-is-better never gets
+    here, because ``_validate_penalty_for_direction`` refuses the
+    configuration at startup (see the test at the bottom of this module).
+    """
     plan = _make_plan(is_trial=False)
     score_results = {
         "denoising_score": 1.23,
@@ -194,3 +202,46 @@ def test_missing_keys_default_to_false_none():
     assert is_degen is False
     assert reason is None
     assert score_results["denoising_score"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# 7. Step 07 PR 07b — the direction the "large negative" convention assumes
+# ---------------------------------------------------------------------------
+
+
+def test_the_penalty_convention_is_refused_where_it_would_invert():
+    """The reaction itself is direction-free: it writes whatever number the
+    operator declared. That is exactly why the direction check cannot live
+    here — by the time a penalty reaches this helper, the round is already
+    scored and the LLM will see the value. So the guard is a STARTUP refusal,
+    and this test pins the two halves together: reaction verbatim, admission
+    fail-closed.
+    """
+    import pytest
+
+    from execute_tools.metric_order import MetricOrder
+    from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
+        _validate_penalty_for_direction,
+    )
+    from tests.helpers.metric_fixtures import direction_only_spec, shipped_spec
+
+    class _Input:
+        degenerate_penalty_score = -2.5
+
+    # Accepted on the shipped metric — the value this module's other tests use.
+    _validate_penalty_for_direction(_Input(), MetricOrder(shipped_spec()))
+
+    # Refused on the same value under a lower-is-better metric, before any
+    # round runs.
+    with pytest.raises(ValueError, match="degenerate_penalty_score"):
+        _validate_penalty_for_direction(_Input(), MetricOrder(direction_only_spec()))
+
+    # And the reaction is unchanged: it never inspects direction.
+    plan = _make_plan(is_trial=False)
+    score_results = {
+        "denoising_score": 1.23,
+        "is_degenerate": True,
+        "failure_reason": "amplitude collapse",
+    }
+    _apply_degeneracy_reaction(score_results, plan, penalty_score=-2.5)
+    assert score_results["denoising_score"] == -2.5

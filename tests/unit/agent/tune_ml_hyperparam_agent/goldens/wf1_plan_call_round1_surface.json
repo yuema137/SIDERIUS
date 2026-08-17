@@ -1,7 +1,7 @@
 {
   "_captured_at": {
-    "commit": "6a1a0674f796da8143c8de8e4ba450b4637874a3",
-    "note": "captured at clean tree (Step-00 closure-audit reconciliation); design \u00a717 rule 4"
+    "commit": "4f6b42e42164986e2f6373622e49b7b2ee55c0c5",
+    "note": "REGENERATED at Step 07 PR 07b C5 (P3 owned rendering deltas), clean tree. WHAT CHANGED: one further ADDITIVE kwarg, `metric_spec` \u2014 the run's bound golden-metric declaration, whose `direction` decides maximize/minimize and whose `id` names what the `denoising_score` field measures. Kwarg key set 23 -> 24 (22 pre-07b, +task_render at C4). WHY: P3 renders the direction wording and the metric identity from the handle instead of stating TIDMAD's convention as the framework's. WHAT DID NOT CHANGE: every pre-existing kwarg name and value."
   },
   "memory_history": {
     "type": "list",
@@ -31,6 +31,45 @@
     "last_mode": null,
     "score_table_md": null,
     "task_description": "",
+    "task_render": {
+      "builtin_model_roster": "punet | fcnet | transformer | wavenet | rnn | gated_fno",
+      "full_scope_segments": 4000,
+      "output_contract_shape": "[B, 256, T]",
+      "focal_alpha_default": "0.5",
+      "focal_gamma_default": "2.0",
+      "gate_check_names": [
+        "output_diversity",
+        "output_std",
+        "amplitude_collapse",
+        "pearson_dispersion",
+        "spectral_peak_ratio",
+        "per_file_output_std"
+      ],
+      "efficiency_band_pct": "5"
+    },
+    "metric_spec": {
+      "id": "tidmad_denoising_score",
+      "direction": "higher",
+      "aggregation": "tidmad_anchor_normalised_linear_grand_mean",
+      "transform": "log",
+      "transform_params": {
+        "log_base": 5.27
+      },
+      "references": [
+        "anchor_map",
+        "raw_baseline",
+        "ground_truth"
+      ],
+      "scoreability": {
+        "contract_id": "tidmad_denoised_h5",
+        "input_channel_group": "channel0001",
+        "required_attrs": [
+          "voltage_range_mV",
+          "sampling_frequency"
+        ],
+        "required_storage_dtype": "int8"
+      }
+    },
     "config_manual_keys": [
       "quick_notes",
       "schemas"

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ from execute_tools.evaluation_metric import (
     ScoreabilityVerdict,
 )
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
+from tests.helpers.tuner_source import tuner_node_source
 
 _TUNER = importlib.import_module("nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent")
 _PREFLIGHT_FIXTURE = Path(__file__).parent / "fixtures" / "step00_preflight_results.json"
@@ -199,8 +201,14 @@ def test_the_helper_is_what_the_live_except_path_calls():
     """Reachability of the boundary: the scoring ``except`` in ``run()`` calls
     the helper and no longer inlines the record (a re-inlined dict would
     silently drop the not-scoreable description)."""
-    source = Path(_TUNER.__file__).read_text(encoding="utf-8")
-    start = source.index("except Exception as e:\n                            scoring_time")
+    source = tuner_node_source()
+    # Indentation-insensitive: the scoring `except` kept its body but changed
+    # indent level when the attempt loop was decomposed into phase functions
+    # (Step 07 PR 07b, C7d). The anchor is the handler and the statement that
+    # opens it, not the column they happen to sit at.
+    m = re.search(r"except Exception as e:\n\s*scoring_time", source)
+    assert m, "the scoring except path is no longer recognisable"
+    start = m.start()
     block = source[start : source.index("_emit_record(", start)]
     assert "_build_scoring_failure_record(" in block
     assert '"status": "error_scoring"' not in block

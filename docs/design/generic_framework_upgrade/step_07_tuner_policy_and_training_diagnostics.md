@@ -542,6 +542,39 @@ timeout / signal semantics; > ~1 h wall or material cost per attempt.
 
 ### 8.3 PR 07b — Tuner policy on the golden metric + planner/reflector rendering (Gate 1)
 
+> **STATUS — IMPLEMENTED 2026-08-16**, branch `step07-pr07b-tuner-policy`, six
+> semantic commits C1 `98b74c07` · C2 `41baf643` · C3 `f10c9bc4` · C4 `50a88b50`
+> · C5 `a6b9e811` · C6 (packs/docs), **plus C7 — the tuner node structural
+> decomposition added by operator scope amendment (2026-08-16) and extended by
+> the C7d follow-up (decision A-prime): main file 7,430 → 1,473, `run()`
+> 2,714 → 1,011, `run()` branch nodes 198 → 64, eight node-local modules on an
+> enforced acyclic private graph, with a 13-surface differential PRE/POST
+> oracle deep-equal on all 12 behavioural surfaces after every commit. Zero
+> semantic change; the three carried-forward defects (`memory.time_mode`
+> coupling, `resolved_action` staleness, 07c's validation-time term) are
+> deliberately untouched. **Gate 1 PASS at the post-refactor head**
+> (`cb1a885a`), and it exposed a Gate-POSTURE defect — `--advice` was never
+> passed — now fixed by a binding standard update: Gate 1 / Gate 2 limit each
+> model to 4 GiB AND state that limit in a gate advice file.
+> **Gate disposition, stated honestly**: the frozen 07b contract required Gate 1 and
+> did NOT require Gate 2; the bounded Gate 2 was ADDED by the operator C7 scope
+> amendment as structural-refactor regression evidence, not by the original flip.
+> Final executable head `cb1a885a`; final PR head `307fa0ce…` (docs/advice only in
+> between); PR #216; exact-head CI **31989125173 SUCCESS**; clean tree; **NOT merged**. The child's §14 is the ledger and carries
+> the Checkpoint 0/A/B/C/D/E evidence, the 38-mutation matrix and the Gate-1
+> result. Every acceptance clause below was met as written, with two bounded
+> deviations recorded in §14.3 (the built-in loss list and the reflector's
+> full-scope anchor stay literal — both because P2's own byte rule and the
+> frozen bridge contract forbid rendering them) and three additions inside the
+> one order authority (two banner symbols, the direction words, and the
+> penalty-convention predicate), each recorded with its source evidence.
+> **ADDED finding**: `resolved_action` is a round-scoped variable written seven
+> nesting levels down and never reset between attempts; `AttemptTransition` /
+> `AttemptDecision` were REMOVED per Q-07b-1 and the hazard is now recorded at
+> the declaration inside `run()` with a proposed fix and an owner — a dedicated
+> round-semantics correction requiring an operator decision, neither 07b's nor
+> 07c's.
+
 **Scope — three INTERNAL phases (one PR) and TWO SEMANTIC LAYERS in P1.**
 
 ```text
@@ -927,7 +960,7 @@ child is about to be frozen.
 
 ## 17. Completion / Checkpoint E
 
-**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b — child design **FROZEN — operator approved 2026-08-15 (rev 2)** (`pr_07b_tuner_policy.md`; implementation NOT started — fresh Implementation Working Rules contract required) · 07c.**
+**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b ✔ **IMPLEMENTATION COMPLETE — READY FOR OPERATOR REVIEW 2026-08-16, NOT MERGED** (`pr_07b_tuner_policy.md`, child §14 is the ledger): C1–C6 = the frozen scope; **C7 / C7d** = the tuner node structural decomposition ADDED by operator scope amendment 2026-08-16 (main 7,430→1,473, `run()` 2,714→1,011, branch nodes 198→64, 12/12 behavioural surfaces deep-equal). Gate 1 PASS twice (pre- and post-refactor); **Gate 2 PASS** — NOT required by the frozen disposition, ADDED by the C7 amendment as structural-refactor regression evidence. Final executable head `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (docs/advice only in between); PR #216; exact-head CI **31989125173 SUCCESS**; clean tree. Deferred UNCHANGED: `memory.time_mode` coupling, `resolved_action` hazard, 07c's validation-time term · 07c.**
 
 Step 07 is COMPLETE when PR0, 07a, 07b, 07c are merged with Checkpoints
 0/A/B/C/D each, the required Gates PASSED at the assembled heads (07a G2,
