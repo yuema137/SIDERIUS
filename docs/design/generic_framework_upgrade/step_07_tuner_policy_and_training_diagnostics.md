@@ -562,10 +562,17 @@ timeout / signal semantics; > ~1 h wall or material cost per attempt.
 > Final executable head `cb1a885a`; final PR head `307fa0ce…` (docs/advice only in
 > between); PR #216; exact-head CI **31991133736** SUCCESS; clean tree;
 > **MERGED — squash `9ea3755f`, 2026-08-16. 07b COMPLETE.**
-> **NEXT**: the Step-07 round-state semantics correction — decouple trial/formal
-> identity from the time-budget machinery, regression-first, source-audited across
-> `plan.is_trial` / record `is_trial` / `memory.time_mode` / `_best_trial_winner`.
-> NOT in that PR: `resolved_action`, and nothing of 07c's. The child's §14 is the ledger and carries
+> **NEXT — DONE**: the Step-07 round-state semantics correction (decouple
+> trial/formal identity from the time-budget machinery) landed on branch
+> `step07-correction-trial-formal-identity`, base `48e9fb90`. Deliberately NO
+> separate detailed design document: the source audit, the semantic decision,
+> the regression evidence and the disposition live in the PR body, in the node's
+> public `ml_hyperparameter_tune_agent.md` ("Candidate role identity") and in
+> the PR handoff. Outcome: `record.is_trial` is the ONE role authority;
+> `memory.time_mode` is timing metadata whose POPULATION is unchanged, removed
+> only from role eligibility in `policy._best_trial_winner` and
+> `feedback._build_trial_validity_feedback`. `resolved_action` and 07c's
+> validation-time term were audited and left untouched, as scoped. The child's §14 is the ledger and carries
 > the Checkpoint 0/A/B/C/D/E evidence, the 38-mutation matrix and the Gate-1
 > result. Every acceptance clause below was met as written, with two bounded
 > deviations recorded in §14.3 (the built-in loss list and the reflector's
@@ -965,7 +972,7 @@ child is about to be frozen.
 
 ## 17. Completion / Checkpoint E
 
-**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b ✔ **MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16** (`pr_07b_tuner_policy.md`, child §14 is the ledger): C1–C6 = the frozen scope; **C7 / C7d** = the tuner node structural decomposition ADDED by operator scope amendment 2026-08-16 (main 7,430→1,473, `run()` 2,714→1,011, branch nodes 198→64, 12/12 behavioural surfaces deep-equal). Gate 1 PASS twice (pre- and post-refactor); **Gate 2 PASS** — NOT required by the frozen disposition, ADDED by the C7 amendment as structural-refactor regression evidence. Final executable head `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (docs/advice only in between); PR #216; exact-head CI **31989125173 SUCCESS**; clean tree. Deferred UNCHANGED: `memory.time_mode` coupling, `resolved_action` hazard, 07c's validation-time term · 07c.**
+**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b ✔ **MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16** (`pr_07b_tuner_policy.md`, child §14 is the ledger): C1–C6 = the frozen scope; **C7 / C7d** = the tuner node structural decomposition ADDED by operator scope amendment 2026-08-16 (main 7,430→1,473, `run()` 2,714→1,011, branch nodes 198→64, 12/12 behavioural surfaces deep-equal). Gate 1 PASS twice (pre- and post-refactor); **Gate 2 PASS** — NOT required by the frozen disposition, ADDED by the C7 amendment as structural-refactor regression evidence. Final executable head `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (docs/advice only in between); PR #216; exact-head CI **31989125173 SUCCESS**; clean tree. Deferred UNCHANGED by 07b: `memory.time_mode` coupling, `resolved_action` hazard, 07c's validation-time term · **trial/formal-identity correction** (no separate design doc; branch `step07-correction-trial-formal-identity`, base `48e9fb90`) — the `memory.time_mode` coupling is RESOLVED: role identity is `record.is_trial` alone, `memory.time_mode` stays timing metadata with unchanged population; `resolved_action` and 07c's validation-time term remain OPEN · 07c.**
 
 Step 07 is COMPLETE when PR0, 07a, 07b, 07c are merged with Checkpoints
 0/A/B/C/D each, the required Gates PASSED at the assembled heads (07a G2,

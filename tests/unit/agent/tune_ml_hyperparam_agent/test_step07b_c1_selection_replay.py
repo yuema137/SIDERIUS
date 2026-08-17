@@ -79,7 +79,9 @@ REQUIRED_CASE_IDS = (
     "h_collapse_penalty",
     "h_invalid_candidate",
     "h_trial_formal_mix",
-    "h_time_mode_mismatch",
+    # Step 07 correction (2026-08-16): was `h_time_mode_mismatch`, whose
+    # expectation encoded the trial/time-budget coupling defect.
+    "h_time_metadata_not_role",
     "h_no_successes",
 )
 

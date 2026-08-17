@@ -193,9 +193,23 @@ def _best_trial_winner(memory_history: list, *, order: MetricOrder) -> dict | No
     argmax under a ``higher`` metric, the argmin under a ``lower`` one, ties
     resolving to the first record exactly as ``max()`` did before.
 
-    Trial metadata must agree in both the typed ``is_trial`` field and the
-    persisted ``memory.time_mode`` field. Legacy, collapsed, non-finite, or
-    incompletely observed records are not execution candidates.
+    Role identity comes from the typed ``is_trial`` field ALONE — the same
+    field ``core/resume.py`` already consults across runs — and it is written
+    unconditionally from ``plan.is_trial`` (via ``trial_config.is_trial``).
+    Legacy records without the key, and collapsed, non-finite or incompletely
+    observed ones, are not execution candidates.
+
+    **``memory.time_mode`` is deliberately NOT consulted** (Step 07
+    correction, 2026-08-16). It is written by the record builder only when
+    the wall-time gate ran (``time_check is not None``, i.e. the active
+    mode's budget was set), so it is time-gate metadata, never a second role
+    authority. Requiring the two to agree made candidate ROLE depend on
+    whether time-budget enforcement happened to be enabled: with incumbent
+    formal gates on and both time budgets unset, a successful, finite,
+    HealthGate-valid trial produced ``winner=None``, ``_should_skip_formal``
+    read that as *no evidence*, and the forced formal round was skipped.
+    Surfaced by 07b's Gate 1; the coupling predates 07b, which was not
+    permitted to change round semantics. Its population is unchanged.
 
     Used by both the forced-formal-round hyperparameter inheritance in
     :func:`_apply_mode_override_chain` (trial winner's config drives the
@@ -205,13 +219,7 @@ def _best_trial_winner(memory_history: list, *, order: MetricOrder) -> dict | No
     ``sandbox.score_vector`` is gone — health checks now run tuner-side
     per ``docs/design/pluggable_health_checks.md`` §14 Option A.
     """
-    candidates = [
-        r
-        for r in memory_history
-        if is_valid_candidate(r)
-        and r.get("is_trial") is True
-        and (r.get("memory") or {}).get("time_mode") == "trial"
-    ]
+    candidates = [r for r in memory_history if is_valid_candidate(r) and r.get("is_trial") is True]
     if not candidates:
         return None
     return order.best(candidates, key=_score_of)

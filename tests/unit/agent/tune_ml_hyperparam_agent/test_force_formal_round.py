@@ -463,8 +463,10 @@ def test_best_trial_winner_picks_max_score():
 
 
 def test_best_trial_winner_excludes_formal_mode():
-    """Records with memory.time_mode=='formal' are NOT eligible — even
-    if their score is higher than any trial-mode record."""
+    """Formal records are NOT eligible — even when their score is higher
+    than any trial's. The factory keeps ``is_trial`` and ``time_mode`` in
+    agreement exactly as production does; since the Step 07 correction the
+    exclusion is owned by ``is_trial=False``, not by the time metadata."""
     history = [
         _make_trial_record("formal_high", score=99.0, time_mode="formal"),
         _make_trial_record("trial_low", score=5.45, time_mode="trial"),
@@ -487,13 +489,22 @@ def test_best_trial_winner_excludes_non_success():
     assert winner["exp_id"] == "good"
 
 
-def test_best_trial_winner_excludes_missing_time_mode():
-    """Records without memory.time_mode are excluded — we cannot prove
-    they were a real trial run."""
+def test_best_trial_winner_admits_a_trial_without_time_mode():
+    """Records without memory.time_mode ARE eligible (Step 07 correction).
+
+    REWRITTEN from ``test_best_trial_winner_excludes_missing_time_mode``,
+    which asserted the opposite. ``memory.time_mode`` is written only when
+    the wall-time gate ran, so the old exclusion made trial identity depend
+    on time-budget enablement: with both budgets unset every trial record
+    lacks the key, ``_best_trial_winner`` returned ``None``, and the forced
+    formal round was skipped for "no evidence". Role comes from the typed
+    ``is_trial`` field alone.
+    """
     rec = _make_trial_record("no_mode", score=5.45)
     rec["memory"].pop("time_mode")
     winner = _best_trial_winner([rec], order=HIGHER_ORDER)
-    assert winner is None
+    assert winner is not None
+    assert winner["exp_id"] == "no_mode"
 
 
 def test_best_trial_winner_returns_none_on_empty():

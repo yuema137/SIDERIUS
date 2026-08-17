@@ -120,12 +120,16 @@ def _build_trial_validity_feedback(
 
     Returns ``None`` when at least one trial is valid, so a healthy run's
     downstream prompt is byte-identical to before.
+
+    **The trial predicate mirrors :func:`_best_trial_winner` exactly** — the
+    typed ``is_trial`` field, nothing else. Step 07 correction (2026-08-16):
+    both used to additionally require ``memory.time_mode == "trial"``, which
+    is written only when the wall-time gate ran. Under time budgets disabled
+    this helper therefore found NO trials and returned ``None`` at precisely
+    the moment the skip gate reported ``no_valid_trial_winner`` — the
+    planner lost the report explaining why the formal round did not run.
     """
-    trials = [
-        r
-        for r in records
-        if r.get("is_trial") is True and (r.get("memory") or {}).get("time_mode") == "trial"
-    ]
+    trials = [r for r in records if r.get("is_trial") is True]
     if not trials:
         return None  # no trial stage at all is a different fact, not this one
     if any(is_valid_candidate(r) for r in trials):

@@ -951,6 +951,66 @@ Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training
 
 ---
 
+## Candidate role identity (Step 07 correction, 2026-08)
+
+### One authority: `is_trial`
+
+Whether a plan or a record is a **TRIAL** or a **FORMAL** candidate is owned by
+one field:
+
+| Carrier | Field | Written |
+|---|---|---|
+| the round's plan | `plan.is_trial` | by the planner, then by the run-level / forced-formal override chain |
+| the emitted record | `record.is_trial` | unconditionally from `trial_config.is_trial`, which IS `plan.is_trial` |
+
+`core/resume.py` already reconstructs chain incumbents from `record.is_trial`
+alone, across runs. Trial-winner selection (`_best_trial_winner`) and the
+all-trials-invalid planner report (`_build_trial_validity_feedback`) now use
+the same field and nothing else, so there is exactly one role authority in the
+node.
+
+### `memory.time_mode` is timing metadata, not a second authority
+
+`memory.time_mode` records **which wall-time budget was active** for a round.
+It is stamped only when the time gate actually ran — that is, when the active
+mode's `--trial_time_budget_minutes` / `--formal_time_budget_minutes` was set
+— alongside `time_estimate_minutes` and `time_budget_minutes`. Its population
+is unchanged by this correction: on a run with no time budgets the key is
+still absent from `memory`, and the planner's resource block and the
+trial→formal inference-measurement reuse read it exactly as before.
+
+```text
+candidate role identity        ⟂        time-budget enforcement state
+```
+
+Enabling or disabling the trial/formal time budgets may change time admission,
+timing evidence and time-related refusal. It must NOT change whether a record
+is classified as a trial or a formal candidate.
+
+### What this corrects
+
+Trial eligibility used to require the two fields to AGREE. Because
+`memory.time_mode` exists only when the time gate ran, a campaign launched
+with incumbent formal gates ON and both time budgets unset produced valid
+trials that no gate could see:
+
+```text
+enable_chain_incumbent_formal_gates=True, budgets unset
+  -> time gate skipped        -> memory.time_mode absent
+  -> _best_trial_winner None  -> _should_skip_formal reads "no evidence"
+  -> [SkipFormal] reason=no_valid_trial_winner
+  -> the forced formal round never runs
+```
+
+Surfaced by 07b's Gate 1, which worked around it by temporarily enabling both
+budgets. The coupling predates 07b. Everything else at the formal boundary is
+unchanged: candidate-validity filtering, `MetricOrder`, the skip/bypass
+threshold mathematics and their disabled sentinels, the no-winner-still-skips
+rule (a genuinely empty or all-invalid trial stage still skips formal), and
+all retry / round / attempt semantics.
+
+---
+
 ## Node structure and public boundary (Step 07 PR 07b, C7 / C7d, 2026-08)
 
 ### The public interface is exactly two files
@@ -1065,11 +1125,11 @@ reachability claims about the run loop.
 
 ### Known defects carried, deliberately not fixed by the decomposition
 
-* `memory.time_mode` is only stamped when a time budget is configured, so
+* ~~`memory.time_mode` is only stamped when a time budget is configured, so
   without `--trial_time_budget_minutes` / `--formal_time_budget_minutes` the
   two-field winner rule is unsatisfiable and the skip gate takes its
-  "no evidence" branch. Reserved for the dedicated round-state semantics
-  correction PR.
+  "no evidence" branch.~~ **RESOLVED** by the Step 07 trial/formal-identity
+  correction — see "Candidate role identity" below.
 * The `resolved_action` round-scoped staleness hazard — recorded beside its
   declaration in `run()`.
 * 07a's validation pass is missing from the watchdog deadline prediction

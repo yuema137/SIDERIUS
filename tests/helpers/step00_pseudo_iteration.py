@@ -28,7 +28,9 @@ PSEUDO_AGENT_FOLDER = "ml_hyperparameter_tune_agent_k9_invented"
 _PLUGIN_DIR_REL = os.path.join("tests", "pseudo_data", "plugins")
 
 
-def run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=None):
+def run_bounded_pseudo_iteration(
+    tmp_path, monkeypatch, preflight_results=None, input_overrides=None
+):
     """Run one bounded pseudo tuner iteration; return (output, bridge, sandbox, workspace).
 
     The caller's ``monkeypatch`` scopes the env/CUDA/sleep patches; the
@@ -43,13 +45,20 @@ def run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=None):
     captured from the REAL adapter during a live pseudo run, so the stub
     is production-shaped and machine-independent. ``None`` = real path
     (usable outside pytest / at the integration tier).
+
+    ``input_overrides``: optional mapping merged into the fixture's
+    ``HyperparamTuningInput`` kwargs. ``None`` (the default) leaves the
+    Step-00 fixture EXACTLY as captured, so every registered baseline that
+    replays through this helper is byte-unaffected. Callers that need a
+    different SUPPORTED posture (e.g. the Step-07 correction's
+    incumbent-formal-gates-on / time-budgets-off regression) pass it here
+    rather than forking the harness.
     """
     import time as _time
 
     import torch
 
     from agent.schemas.hyperparam_tuning import HyperparamTuningInput
-    from agent.schemas.storage import LocalStorageConfig, StorageConfig
     from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
     from ml_models.models_sandbox import MODEL_REGISTRY
     from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY, extend_registries
@@ -112,6 +121,37 @@ def run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=None):
     run_name = "step00_pseudo"
 
     agent_input = HyperparamTuningInput(
+        **{
+            **_fixture_input_kwargs(workspace, run_name),
+            **(input_overrides or {}),
+        }
+    )
+
+    bridge = RecordingLLMBridge.for_agent(PSEUDO_AGENT_FOLDER)
+    sandbox = RecordingSandbox.for_model(PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name)
+    agent = HyperparamTuningAgent(
+        bridge_factory=lambda **kw: bridge, sandbox_factory=lambda **kw: sandbox
+    )
+    try:
+        output = agent.run(agent_input)
+    finally:
+        for mt in loaded:
+            MODEL_REGISTRY.pop(mt, None)
+            PLUGIN_CONFIG_REGISTRY.pop(mt, None)
+            PLUGIN_OUTPUT_TYPE_REGISTRY.pop(mt, None)
+
+    return output, bridge, sandbox, workspace
+
+
+def _fixture_input_kwargs(workspace: str, run_name: str) -> dict:
+    """The captured Step-00 tuner input, as keyword arguments.
+
+    Kept as a dict so ``input_overrides`` can replace individual keys
+    without the helper growing one parameter per field.
+    """
+    from agent.schemas.storage import LocalStorageConfig, StorageConfig
+
+    return dict(
         model_type=PLUGIN_MODEL_TYPE,
         max_rounds=2,
         is_trial=True,
@@ -131,18 +171,3 @@ def run_bounded_pseudo_iteration(tmp_path, monkeypatch, preflight_results=None):
         ),
         progress_bar=False,
     )
-
-    bridge = RecordingLLMBridge.for_agent(PSEUDO_AGENT_FOLDER)
-    sandbox = RecordingSandbox.for_model(PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name)
-    agent = HyperparamTuningAgent(
-        bridge_factory=lambda **kw: bridge, sandbox_factory=lambda **kw: sandbox
-    )
-    try:
-        output = agent.run(agent_input)
-    finally:
-        for mt in loaded:
-            MODEL_REGISTRY.pop(mt, None)
-            PLUGIN_CONFIG_REGISTRY.pop(mt, None)
-            PLUGIN_OUTPUT_TYPE_REGISTRY.pop(mt, None)
-
-    return output, bridge, sandbox, workspace

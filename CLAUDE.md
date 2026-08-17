@@ -665,7 +665,7 @@ TIDMAD's `network.py:FocalLoss1D`.
   **07b MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16. COMPLETE.**
   NEXT = the Step-07 round-state semantics correction (decouple trial/formal
   identity from the time-budget machinery; regression-first; NOT `resolved_action`,
-  NOT 07c). Gate 1 PASS twice (pre-/post-refactor); Gate 2 PASS — the latter was
+  NOT 07c) — DONE, see the correction entry below. Gate 1 PASS twice (pre-/post-refactor); Gate 2 PASS — the latter was
   NOT required by the frozen 07b disposition and was ADDED by the C7 operator scope
   amendment as structural-refactor regression evidence. Final executable head
   `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (documentation
@@ -673,6 +673,23 @@ TIDMAD's `network.py:FocalLoss1D`.
   clean tree. Deferred and UNCHANGED by 07b: the `memory.time_mode` /
   disabled-time-budget coupling, the `resolved_action` stale-attempt hazard, and the
   validation-time/watchdog accounting debt (07c).
+- **Step 07 trial/formal-identity correction (2026-08-16, branch
+  `step07-correction-trial-formal-identity`, base `48e9fb90`)**: a SMALL semantic
+  correction PR with **no separate design document** — the source audit, decision,
+  regression evidence and disposition live in the PR body, in the tuner node's
+  public `ml_hyperparameter_tune_agent.md` ("Candidate role identity") and in the
+  PR handoff. **`record.is_trial` is the ONE authority for trial/formal candidate
+  role**; `memory.time_mode` is time-gate metadata ("which budget was active",
+  stamped only when the gate ran) and is removed from role eligibility in
+  `policy._best_trial_winner` and `feedback._build_trial_validity_feedback`. Its
+  POPULATION is deliberately unchanged, so the timing subsystem, the planner
+  resource block and the trial→formal inference-measurement reuse are untouched.
+  Fixes the 07b-Gate-1-exposed chain: incumbent formal gates ON + both time
+  budgets unset → valid trial invisible → `[SkipFormal] reason=no_valid_trial_winner`
+  → the forced formal round never ran. Unchanged: candidate validity, MetricOrder,
+  skip/bypass threshold mathematics, retry/round semantics, record schema, prompts,
+  the node's public interface. Still OPEN: the `resolved_action` stale-attempt
+  hazard and 07c's validation-time/watchdog accounting debt.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per

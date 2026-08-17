@@ -136,11 +136,18 @@ def test_bypass_uses_valid_candidate_and_half_point_threshold() -> None:
     assert not _bypass([_trial("valid", 99.0)], threshold=None)
 
 
-def test_failed_nontrial_and_contradictory_records_are_excluded() -> None:
+def test_failed_and_nontrial_records_are_excluded() -> None:
+    """Step 07 correction: the third record used to be a "contradictory"
+    case — ``is_trial=True`` beside ``memory.time_mode='formal'`` — excluded
+    by a two-field agreement rule. Production never produced that shape
+    (both derive from the same ``plan.is_trial``), and the rule's real
+    effect was to discard valid trials whenever the time gate had not run.
+    Role is now owned by ``is_trial`` alone, so the case is dropped rather
+    than inverted: it asserted nothing about a reachable state.
+    """
     records = [
         _trial("failed", 5.0, status="error"),
         _trial("formal", 4.0, is_trial=False),
-        _trial("contradictory", 3.0, memory={"time_mode": "formal"}),
     ]
     assert _best_trial_winner(records, order=HIGHER_ORDER) is None
 

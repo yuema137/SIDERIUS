@@ -11,7 +11,13 @@
     "Record shape: only the fields the audited helpers actually read —",
     "status, denoising_score, is_trial, memory.time_mode, health_gate_enabled",
     "(the DS5 self-describing waiver that makes a successful finite record VALID),",
-    "health_gate_results (for the UNKNOWN/INVALID validity cases)."
+    "health_gate_results (for the UNKNOWN/INVALID validity cases).",
+    "2026-08-16 Step 07 correction: 'h_time_mode_mismatch' became",
+    "'h_time_metadata_not_role'. The old case asserted a two-field agreement",
+    "rule (is_trial AND memory.time_mode) that production could never violate",
+    "— both derive from the same plan.is_trial — and whose real effect was to",
+    "discard every valid trial in a run launched without time budgets. The",
+    "replacement carries that reachable no-budget shape instead."
   ],
   "histories": {
     "h_empty": {
@@ -256,13 +262,21 @@
         }
       ]
     },
-    "h_time_mode_mismatch": {
-      "case": "is_trial=True but memory.time_mode='formal' — the two-field agreement rule excludes it",
+    "h_time_metadata_not_role": {
+      "case": "time metadata is NOT role — a trial with memory.time_mode absent (what a run with no time budget actually produces), one whose time_mode disagrees, one that agrees; record.is_trial alone decides eligibility (Step 07 correction)",
       "records": [
+        {
+          "exp_id": "t_no_time_mode",
+          "status": "success",
+          "denoising_score": -1.0,
+          "is_trial": true,
+          "health_gate_enabled": false,
+          "memory": {}
+        },
         {
           "exp_id": "t_mismatch",
           "status": "success",
-          "denoising_score": -1.0,
+          "denoising_score": -2.0,
           "is_trial": true,
           "health_gate_enabled": false,
           "memory": {"time_mode": "formal"}

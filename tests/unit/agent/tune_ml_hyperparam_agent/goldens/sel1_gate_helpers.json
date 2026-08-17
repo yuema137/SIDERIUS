@@ -1,5 +1,5 @@
 {
-  "_captured_at": "captured at f17bbdb87e79ee823c969cee63df37bc99437d70 (07b implementation base), clean tree, BEFORE any 07b production edit \u2014 Step 07 PR 07b C1 / Checkpoint 0",
+  "_captured_at": "captured at f17bbdb87e79ee823c969cee63df37bc99437d70 (07b implementation base), clean tree, BEFORE any 07b production edit \u2014 Step 07 PR 07b C1 / Checkpoint 0. RE-CAPTURED 2026-08-16 on the Step 07 trial/formal-identity correction (base 48e9fb90): the `h_time_mode_mismatch` case became `h_time_metadata_not_role` and its winner moved from t_ok (-3.0) to t_no_time_mode (-1.0) because trial eligibility no longer requires memory.time_mode. The re-capture is confined to that one case; the skip/bypass verdicts under it move only because the winner's SCORE changed against the same fixed thresholds \u2014 every other case is byte-identical, which is this golden's parity claim.",
   "winners": {
     "h_collapse_penalty": {
       "exp_id": "t_ok2",
@@ -41,9 +41,9 @@
       "exp_id": "t_tie_a",
       "denoising_score": -2.5
     },
-    "h_time_mode_mismatch": {
-      "exp_id": "t_ok",
-      "denoising_score": -3.0
+    "h_time_metadata_not_role": {
+      "exp_id": "t_no_time_mode",
+      "denoising_score": -1.0
     },
     "h_trial_formal_mix": {
       "exp_id": "t_only",
@@ -351,10 +351,10 @@
         "bypass": true
       }
     },
-    "h_time_mode_mismatch": {
+    "h_time_metadata_not_role": {
       "gates_off": {
         "skip": false,
-        "bypass": false
+        "bypass": true
       },
       "threshold_none": {
         "skip": false,
@@ -369,12 +369,12 @@
         "bypass": false
       },
       "threshold_above_winner": {
-        "skip": true,
-        "bypass": false
+        "skip": false,
+        "bypass": true
       },
       "threshold_equal_winner": {
-        "skip": true,
-        "bypass": false
+        "skip": false,
+        "bypass": true
       },
       "threshold_below_winner": {
         "skip": false,
