@@ -154,6 +154,32 @@ class TrainingHistory(BaseModel):
     )
     validation_requested_samples: int | None = None
     validation_samples: int | None = None
+    validation_requested_samples_before_limit: int | None = Field(
+        default=None,
+        description=(
+            "Step 07 / PR 07c C6 (Q-07c-9). The NATURAL validation scope, "
+            "before ``validation_max_samples`` was applied. ``None`` when no "
+            "ceiling was configured.\n\n"
+            "An explicit field because the clamp's provenance is otherwise "
+            "UNRECOVERABLE. The ceiling is applied to the REQUESTED scope, so "
+            "``validation_requested_samples`` afterwards means the EFFECTIVE "
+            "requested scope and equals ``validation_samples`` by "
+            "construction; and the run-level input cannot disambiguate "
+            "either — ``ceiling=2000, requested=2000`` reads identically "
+            "whether the natural scope was 2,000 and the ceiling did not "
+            "bind, or was 12,000 and the ceiling clamped it. So::\n\n"
+            "    was_limited = validation_requested_samples_before_limit\n"
+            "                      > validation_requested_samples\n\n"
+            "is derivable with certainty, and 07a's exact-materialization "
+            "invariant is untouched. Preferred over a boolean flag because "
+            "the pre-limit count is strictly more informative and cannot go "
+            "stale relative to the other two.\n\n"
+            "This is SCOPE provenance and is deliberately NOT expressed "
+            "through ``comparability``, which is a function of the resolved "
+            "``LossConfig`` alone and owns R2-vs-R3 computation "
+            "comparability, not cross-round scope."
+        ),
+    )
     validation_seconds: list[float] | None = None
     observations: dict[str, list[float]] = Field(default_factory=dict)
 
@@ -217,6 +243,23 @@ class TrainingHistory(BaseModel):
                 )
             if any(s < 0 for s in self.validation_seconds):
                 raise ValueError("every validation_seconds value must be >= 0.")
+            # 07c C6. A ceiling can only REDUCE the scope, so the pre-limit
+            # count can never be smaller than the effective one. The reverse
+            # would mean the clamp had somehow enlarged the requested scope,
+            # which is the one thing a maximum must never do — and it would
+            # invert `was_limited` for every downstream consumer.
+            if (
+                self.validation_requested_samples_before_limit is not None
+                and self.validation_requested_samples_before_limit
+                < self.validation_requested_samples
+            ):
+                raise ValueError(
+                    f"validation_requested_samples_before_limit "
+                    f"({self.validation_requested_samples_before_limit}) is smaller than "
+                    f"validation_requested_samples ({self.validation_requested_samples}) — a "
+                    f"validation-scope ceiling may only reduce the requested scope, never "
+                    f"enlarge it."
+                )
         for name, series in self.observations.items():
             if len(series) != n:
                 raise ValueError(

@@ -38,11 +38,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from agent.schemas.model_io_contract import ModelIOContract
 from core.runtime_control.gpu_measurement_identity import RealizedCandidateIdentity
 from core.runtime_control.gpu_requirement import (
     CandidateMeasurementRequest,
     MeasuredPhase,
 )
+from execute_tools.dataset_config import DatasetProfile
 
 #: How the worker as a whole ended. Distinct from a *phase* status: a
 #: worker can complete while the phase inside it OOMed, and the parent
@@ -104,6 +106,35 @@ class GpuMeasurementSpec(BaseModel):
     #: task-specific default, and a synthetic batch would measure a
     #: candidate nobody is going to run (F-1a).
     data_dir: str | None = None
+
+    #: The resolved dataset declaration the probe batch is built from
+    #: (Step 07 / PR 07c C2).
+    #:
+    #: The worker is a CLEAN subprocess, so the parent's `_ACTIVE_PROFILE`
+    #: context variable does not cross the boundary and
+    #: `resolve_dataset_profile()` inside the worker would ALWAYS answer the
+    #: shipped TIDMAD profile — a task assumption expressed by omission,
+    #: which is precisely the defect class 07c removes. `resolve_dataset_
+    #: profile`'s own contract says subprocess entry points load the profile
+    #: explicitly and pass it down; this field is that transport, and the
+    #: tuner already holds the object (`RunBindings.run_profile`).
+    #:
+    #: Optional so a spec serialized before the transport existed still
+    #: validates and still runs; `None` means Regime-A at the call site.
+    dataset_profile: DatasetProfile | None = None
+
+    #: The task's Model-I/O contract, which decides the dtype the model is
+    #: handed at the measurement boundary (Step 07 / PR 07c C3).
+    #:
+    #: Same reason as `dataset_profile`: `resolve_input_dtype` needs the
+    #: contract as an ARGUMENT, and the worker has no other way to see the one
+    #: this run is bound to. Without it the worker resolves Regime-A — the
+    #: model's own declaration, else the site preference — which is exactly
+    #: today's behaviour, so `None` is parity rather than a degradation.
+    #:
+    #: The tuner already holds the object (`RunBindings.run_model_io`); a task
+    #: declaring no `model_io` legitimately supplies `None`.
+    model_io_contract: ModelIOContract | None = None
 
     #: Run-scoped plugin directories, transported to the worker's process.
     #:

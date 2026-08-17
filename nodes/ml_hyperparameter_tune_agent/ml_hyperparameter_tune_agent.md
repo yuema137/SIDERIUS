@@ -188,7 +188,8 @@ executes, without distorting what the planner is allowed to decide. See
 |---|---|---|---|---|
 | `validation_max_portion` | `float \| None` | No | `None` | Hard ceiling on the RESOLVED `trial_portion` / `train_portion` / `eval_portion`, applied as `min(planned, ceiling)` after the planner, after `plan_overrides` and after the formal-round override chain. Governs formal rounds too — that is what stops `formal_eval_portion`'s 1.0 default pulling full scope into a smoke test. |
 | `validation_max_train_samples` | `int \| None` (`>= 1`) | No | `None` | Absolute ceiling on the ML segments one training epoch may contain, applied where the epoch is BUILT (`TIDMADEpochDataset`), so fewer segments are read and fewer optimizer steps exist before any run. Needed beside the portion because a fraction's base is not harness-owned: samples per PSD segment are `psd_segment_length // seg_size`, and `seg_size` is the planner's model config. CLAMPS, never rejects — unlike `max_steps_per_attempt`, whose refusal skipped every round of a Gate attempt. `resolve_training_workload(..., max_samples=)` mirrors it exactly, so the executed step count is knowable before launch. |
-| `validation_max_phase_seconds` | `float \| None` | No | `None` | Emergency wall-clock fuse for one execution phase, enforced by the RT4 watchdog as an extra deadline candidate — never by admission, so it cannot skip the attempt. Requires `runtime_watchdog_enabled` (refused otherwise). Not a sizing mechanism: a run killed at the deadline yields no evidence. Effective ceiling is `max(this, runtime_watchdog_floor_seconds)`. |
+| `validation_max_samples` | `int \| None` (`>= 1`) | No | `None` | Absolute ceiling on the ML segments one VALIDATION pass may contain — the validation-row counterpart of `validation_max_train_samples`, which bounds TRAINING rows. **The two names differ by one word and bound different sets**, which is why both exist: 07a's Gate 2 capped the training epoch at 2,000 rows while validation ran the full 15,000-row eval SampleSet, 7.5× the training work, every epoch. Applied to the REQUESTED scope before it materializes (`clamp_validation_scope`), so 07a's `validation_samples == validation_requested_samples` invariant is never relaxed — a ceiling applied afterwards would make every clamped run raise. CLAMPS to whole PSD segments and never overshoots: the resolved count is the largest multiple of `psd_segment_length // seg_size` at or below the ceiling. A ceiling below one PSD segment's rows is REFUSED (under TIDMAD at `seg_size` 40,000 that is 250 rows), because R3 does not exist for an empty scope. INTERIM cost bounding, not the root fix — the priced watchdog deadline is. `TrainingHistory.validation_requested_samples_before_limit` records the pre-limit natural scope, so `was_limited` is recoverable. Reaches the trainer through the runtime policy, not a new training argv flag. |
+| `validation_max_phase_seconds` | `float \| None` | No | `None` | Emergency wall-clock fuse for one execution phase, enforced by the RT4 watchdog as an extra deadline candidate — never by admission, so it cannot skip the attempt. Requires `runtime_watchdog_enabled` (refused otherwise). Not a sizing mechanism: a run killed at the deadline yields no evidence. Effective ceiling is `max(this, runtime_watchdog_floor_seconds)`. **Orthogonal to `validation_max_samples`**: seconds versus samples, so there is no `min()` between them — the sample ceiling sizes the workload, this remains an independent wall-clock termination. |
 
 ### Workflow-populated fields
 
@@ -1136,8 +1137,25 @@ reachability claims about the run loop.
   of 07c (operator decision 2026-08-17): it is conceptually adjacent to the
   coupling fixed by #217 but is a different defect, and it still needs the
   operator decision its own note names.
-* 07a's validation pass is missing from the watchdog deadline prediction
+* ~~07a's validation pass is missing from the watchdog deadline prediction
   (`T_deadline` needs a `T_val` term) — ADDED 07c scope. Until 07c lands,
-  `--runtime_watchdog`-enabled real campaigns are not a reliable configuration.
+  `--runtime_watchdog`-enabled real campaigns are not a reliable
+  configuration.~~ **FIXED by 07c C5.** `RuntimePhase` gained `"validation"`;
+  the first real validation batches are timed in-subprocess into a
+  measurement-backed prediction (`real_validation_verification`) that the
+  existing deadline provider sums with no arithmetic change, and 07a's
+  per-epoch `validation_seconds` become the phase ACTUAL so future runs
+  calibrate against it. The training ACTUAL stays validation-EXCLUSIVE — the
+  per-optimizer-step model is unchanged, and the fix is one layer up.
+* **STILL OPEN — pre-run ADMISSION pricing of the validation workload**
+  (Q-07c-6 = B, operator decision 2026-08-17). 07c prices validation for
+  runtime PREDICTION and the WATCHDOG only. `admission.py:148-150` states the
+  prephase measurement covers `phase="training"` only, and 07a's validation
+  pass runs INSIDE the training subprocess, so no measurement-backed
+  validation estimate exists when admission executes. Owner:
+  admission / runtime-control (§7e); NOT bound to D14. It must never be
+  approximated from the training measurement by a fixed ratio — that is the
+  hand-calibrated `× 2.7` pattern `docs/refine_inference_time_estimator.md`
+  exists to remove.
 
 Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md` §14.9 - §14.9.5.

@@ -1122,6 +1122,24 @@ def build_parser() -> argparse.ArgumentParser:
         "campaigns.",
     )
     parser.add_argument(
+        "--validation_max_samples",
+        type=int,
+        default=None,
+        help="VALIDATION POSTURE ONLY (07c). Absolute ceiling on the ML "
+        "segments one VALIDATION pass may contain — the validation-row "
+        "counterpart of --validation_max_train_samples, which bounds "
+        "TRAINING rows. The two names differ by one word and bound "
+        "DIFFERENT sets: 07a's Gate 2 capped the training epoch at 2,000 "
+        "rows while validation ran the full 15,000-row eval SampleSet, "
+        "7.5x the training work, every epoch. Applied to the REQUESTED "
+        "scope before it materializes, so the exact-materialization "
+        "invariant is never relaxed. Clamps to whole PSD segments and "
+        "never overshoots; a ceiling below one PSD segment's rows is "
+        "refused rather than resolving to an empty scope. INTERIM cost "
+        "bounding, not the root fix — the priced deadline is. Omit for "
+        "ordinary campaigns.",
+    )
+    parser.add_argument(
         "--validation_max_phase_seconds",
         type=float,
         default=None,
@@ -1968,6 +1986,7 @@ def main():
             max_epochs=args.max_epochs,
             validation_max_portion=args.validation_max_portion,
             validation_max_train_samples=args.validation_max_train_samples,
+            validation_max_samples=args.validation_max_samples,
             validation_max_phase_seconds=args.validation_max_phase_seconds,
             skip_formal_min_delta=args.skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,

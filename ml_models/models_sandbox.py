@@ -1,5 +1,5 @@
 import math
-from typing import cast
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -779,6 +779,51 @@ BUILTIN_OUTPUT_TYPES = {
 BUILTIN_INPUT_DTYPES: dict[str, DtypeAdmissibility] = {
     "fcnet": DtypeAdmissibility(admissible=("float32",)),
 }
+
+
+def construct_registered_model(model_type: str, config_obj: Any, *, loss_type: str) -> Any:
+    """Build a registered model, honouring its constructor's real signature.
+
+    Step 07 / PR 07c C3 (Q-07c-3) — the shared owner. Some model classes take
+    ``loss_type`` at construction because their head shape depends on it; the
+    rest take the config alone. That is a real constructor API difference, so
+    it is detected by **introspecting the signature** rather than by matching
+    a model NAME.
+
+    This lives beside ``MODEL_REGISTRY`` because "how is a registered model
+    constructed" is a property of the registry, not of any one caller. It was
+    promoted here from ``agent/skills/training_skill/estimator.py``, where the
+    same introspection was private to the parameter-count path while the
+    pre-phase measurement worker still carried the name branch it replaced —
+    two answers to one question, one of them wrong for any generated plugin
+    whose head shape depends on the loss.
+
+    Byte-identical for every built-in, and correct by construction for
+    generated plugins, whose contract is ``__init__(self, config)`` and which
+    therefore take the single-argument form exactly as before.
+
+    Args:
+        model_type: Key into the live ``MODEL_REGISTRY``.
+        config_obj: The already-validated model config instance.
+        loss_type: Passed only if the constructor declares the parameter.
+
+    Returns:
+        The constructed (host-side) model.
+    """
+    import inspect
+
+    model_cls = MODEL_REGISTRY[model_type]
+    try:
+        takes_loss_type = "loss_type" in inspect.signature(model_cls.__init__).parameters
+    except (TypeError, ValueError):
+        # Un-introspectable callable (C-extension, exotic wrapper). Fall back
+        # to the single-argument form, which is the plugin contract.
+        takes_loss_type = False
+
+    if takes_loss_type:
+        return model_cls(config_obj, loss_type=loss_type)
+    return model_cls(config_obj)
+
 
 # Extend MODEL_REGISTRY with any agent-generated plugin models.
 # Now that the codebase imports ``ml_models.models_format_sandbox`` uniformly

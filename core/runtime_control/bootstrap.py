@@ -125,7 +125,20 @@ class BootstrapDependencies(BaseModel):
     collect_hardware: Callable[[], Any]
     collect_environment: Callable[..., Any]
     build_registry: Callable[[], Any]
-    dataset_check: Callable[[], tuple[bool, str]]
+    #: This run's resolved measurement capability, or `None` when the caller
+    #: resolved none.
+    #:
+    #: Step 07 / PR 07c C4 replaced a `Callable[[], tuple[bool, str]]` that
+    #: imported `TIDMAD_DATA_DIR` inside generic runtime-control. The typed
+    #: capability is what `measurement_capability.py` exists to carry: the
+    #: verdict travels WITH the task identity and, when unavailable, with a
+    #: mandatory reason — so the bootstrap can say which task it cannot
+    #: measure and why, instead of reporting a bare `False` inferred from an
+    #: absent TIDMAD path.
+    #:
+    #: `None` fails closed, exactly as `probe_runner_availability(None)` does;
+    #: threading the capability in must never become a way to skip the check.
+    measurement_capability: Callable[[], Any]
     sample_contention: Callable[..., Any]
     build_executors: Callable[..., Any]
     run_probe: Callable[..., Any]
@@ -221,18 +234,38 @@ def run_bootstrap(
     )
 
     # 4 — dataset
-    data_ok, data_detail = deps.dataset_check()
+    #
+    # 07c C4. The verdict comes from the task-owned capability the caller
+    # resolved, not from generic code reading a TIDMAD path. `None` fails
+    # closed with the same wording `probe_runner_availability` uses, so
+    # "nobody supplied one" stays distinguishable from "the task says no".
+    capability = deps.measurement_capability()
+    if capability is None:
+        data_ok, data_detail = False, "no measurement capability was resolved by the caller"
+        data_remedy = (
+            "Resolve the task's measurement capability and pass it to "
+            "production_dependencies(); generic runtime-control does not choose a dataset."
+        )
+    else:
+        data_ok = bool(capability.probe_available)
+        data_detail = capability.detail
+        # The reason is MANDATORY on an unavailable capability (enforced by
+        # its own validator), so the remedy can always name the task and why.
+        data_remedy = (
+            ""
+            if data_ok
+            else (
+                f"{capability.task_identity}: {capability.unavailability_reason}. "
+                f"The task layer owns this dataset root (adapter "
+                f"{capability.dataset_adapter!r}); resolve it there and re-run."
+            )
+        )
     steps.append(
         BootstrapStep(
             name="dataset",
             ok=data_ok,
             detail=data_detail,
-            remedy=""
-            if data_ok
-            else (
-                "Point the run at a readable TIDMAD directory "
-                "(execute_tools/data_paths.py resolves it)."
-            ),
+            remedy=data_remedy,
         )
     )
     if not data_ok:
@@ -496,8 +529,19 @@ def run_bootstrap(
     return _finish(True)
 
 
-def production_dependencies() -> BootstrapDependencies:
-    """Wire the REAL collectors, probe and registry (lazy imports)."""
+def production_dependencies(
+    measurement_capability: Any = None,
+) -> BootstrapDependencies:
+    """Wire the REAL collectors, probe and registry (lazy imports).
+
+    Args:
+        measurement_capability: this run's `ResolvedMeasurementCapability`,
+            resolved by a caller that KNOWS the task. Step 07 / PR 07c C4:
+            generic runtime-control no longer resolves one — it used to import
+            `TIDMAD_DATA_DIR` here, which made the measured-evidence path
+            silently unavailable on every other task. `None` fails closed
+            with a named reason rather than defaulting to anybody's dataset.
+    """
     from core.runtime_control.calibration_policy import sample_contention_window
     from core.runtime_control.calibration_registry import CalibrationRegistry
     from core.runtime_control.launch_guard import run_launch_self_test
@@ -509,15 +553,6 @@ def production_dependencies() -> BootstrapDependencies:
         probe_device_vram_gb,
         production_probe_executors,
     )
-
-    def _dataset_check() -> tuple[bool, str]:
-        import os
-
-        from execute_tools.data_paths import TIDMAD_DATA_DIR
-
-        if TIDMAD_DATA_DIR and os.path.isdir(TIDMAD_DATA_DIR):
-            return True, str(TIDMAD_DATA_DIR)
-        return False, f"not found at {TIDMAD_DATA_DIR!r}"
 
     def _run_probe(
         *,
@@ -559,7 +594,7 @@ def production_dependencies() -> BootstrapDependencies:
         collect_hardware=collect_hardware_compatibility_profile,
         collect_environment=collect_execution_environment_profile,
         build_registry=CalibrationRegistry,
-        dataset_check=_dataset_check,
+        measurement_capability=lambda: measurement_capability,
         sample_contention=sample_contention_window,
         build_executors=production_probe_executors,
         run_probe=_run_probe,

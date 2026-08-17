@@ -233,6 +233,24 @@ class RuntimeControlPolicy(BaseModel):
             "production campaign) leaves training untouched."
         ),
     )
+    validation_max_samples: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "VALIDATION POSTURE ONLY (Step 07 / PR 07c C6). Absolute ceiling "
+            "on the ML segments one VALIDATION pass may contain, applied to "
+            "the REQUESTED scope before it materializes.\n\n"
+            "The counterpart of ``validation_max_train_samples`` above, and "
+            "ORTHOGONAL to it: that one bounds training rows, this one bounds "
+            "validation rows, and neither constrains the other. It reaches "
+            "the trainer by this same policy transport rather than a new "
+            "argv flag, so the 05c exact-argv oracle is untouched.\n\n"
+            "It exists because 07a's Gate 2 ran validation at 7.5x the "
+            "training epoch — the training ceiling could not bound it, "
+            "because it does not bound that set. None (the default, and "
+            "every production campaign) leaves validation untouched."
+        ),
+    )
 
 
 class RuntimeVerificationSession:

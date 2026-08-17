@@ -82,18 +82,19 @@ def registered(monkeypatch, tmp_path):
 def _patch_bounded_loader(monkeypatch):
     """Stand in for the BOUNDED loader -- the one production now calls.
 
-    Patching `load_probe_batch` here would leave these tests green while the
+    Patching anything else here would leave these tests green while the
     worker used a different path entirely, which is how a fixture stops
     describing production.
     """
     import core.runtime_control.gpu_measurement_data as data_mod
+    from execute_tools.dataset_config import TIDMAD_PROFILE
 
-    def _bounded(*, data_dir, batch_size, segment_length):
+    def _bounded(*, data_dir, batch_size, segment_length, profile=None):
         return data_mod.BoundedProbeBatch(
             tensor=torch.randint(0, 256, (batch_size, segment_length), dtype=torch.long),
             evidence=data_mod.BoundedReadEvidence(
                 source_file="fixture.h5",
-                channel=data_mod.INPUT_CHANNEL,
+                channel=(profile or TIDMAD_PROFILE).channels.input_channel,
                 segment_count=batch_size,
                 segment_length=segment_length,
                 first_sample=0,
@@ -384,17 +385,19 @@ class TestTheWorkerReadsTheDatasetBoundedly:
         build_production_components(_spec(tmp_path, registered))()
         assert seen and seen[0]["batch_size"] == 2
 
-    def test_it_never_calls_the_unbounded_loader(self, tmp_path, registered, monkeypatch):
-        """The regression guard. `load_probe_batch` cannot run under the
-        24 GiB cap, so reaching it at all is the c1 failure returning."""
-        import execute_tools.probe_data as probe_data
+    def test_the_unbounded_loader_no_longer_exists(self, tmp_path, registered):
+        """The regression guard, strengthened by 07c C2.
 
-        def forbidden(*_a, **_k):
-            raise AssertionError(
-                "the worker called load_probe_batch, which materializes the whole file"
-            )
+        `load_probe_batch` could not run under the 24 GiB cap, so Q-07c-1
+        DELETED it outright rather than leaving a shim the worker could fall
+        back into. Previously this test patched the function with a raiser and
+        proved the worker did not call it; now there is nothing to call, and
+        reintroducing the module IS the c1 failure returning.
+        """
+        import importlib
 
-        monkeypatch.setattr(probe_data, "load_probe_batch", forbidden)
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("execute_tools.probe_data")
         components = build_production_components(_spec(tmp_path, registered))()
         assert components.model_input is not None
 

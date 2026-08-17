@@ -131,12 +131,18 @@ class TestF1aDatasetResolution:
         with pytest.raises(RuntimeError, match="no silent synthetic fallback"):
             ex.setup()
 
-    def test_default_resolves_through_canonical_source(self, fresh_plugin, tmp_path, monkeypatch):
-        """data_dir=None → execute_tools.data_paths.TIDMAD_DATA_DIR (the
-        single source of truth), not any second convention."""
-        import execute_tools.data_paths as data_paths
+    def test_no_data_dir_is_refused_rather_than_defaulted(self, fresh_plugin):
+        """07c C4. This test previously asserted the opposite: that
+        `data_dir=None` resolved `execute_tools.data_paths.TIDMAD_DATA_DIR`,
+        "the single source of truth, not any second convention".
 
-        monkeypatch.setattr(data_paths, "TIDMAD_DATA_DIR", str(tmp_path / "empty"))
+        That was the right rule when TIDMAD was the only task, and it is the
+        defect now — generic runtime-control reaching for one task's dataset
+        means every other task either measures the wrong data or reports a
+        path its caller never chose. The intent survives ("never a second
+        convention, never a silent fallback"); the correct destination
+        changed from "the canonical path" to "an explicit refusal".
+        """
         ex = production_probe_executors(
             model_type=FRESH_TYPE,
             model_config={"segmentation_size": SEG},
@@ -152,13 +158,16 @@ class TestF1aDatasetResolution:
             data_dir=None,
             device="cpu",
         )
-        with pytest.raises(RuntimeError, match="dataset directory unavailable"):
-            ex.setup()  # resolved the canonical path (proven by the error path)
+        with pytest.raises(RuntimeError, match="no dataset directory was supplied") as excinfo:
+            ex.setup()
+        # The refusal must say what the CALLER has to do, or an operator
+        # cannot act on it.
+        assert "measurement capability" in str(excinfo.value)
 
     def test_empty_dataset_dir_raises(self, fresh_plugin, tmp_path):
         (tmp_path / "d").mkdir()
         ex = _executors(str(tmp_path / "d"))
-        with pytest.raises(RuntimeError, match="abra_training"):
+        with pytest.raises(RuntimeError, match="no declared training file exists"):
             ex.setup()
 
 

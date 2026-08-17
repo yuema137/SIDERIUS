@@ -59,6 +59,29 @@ class _Guard:
     policy_identity = "runtime_decision_policy@1.0.0+test"
 
 
+def _capability(*, available_at: str | None = None, unavailable_because: str | None = None):
+    """A task-owned measurement capability, built directly.
+
+    07c C4: generic runtime-control no longer resolves one, so the fixture
+    supplies it the way a task-aware launcher does. Constructed rather than
+    resolved through `resolve_measurement_capability`, which would make the
+    verdict depend on whether the host running the test has CUDA — the
+    machine-dependent-assertion defect the portability rule names.
+    """
+    from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
+
+    return ResolvedMeasurementCapability(
+        task_identity="example_task",
+        dataset_adapter="example_adapter",
+        data_shape_class="example_shape",
+        probe_available=available_at is not None,
+        unavailability_reason=unavailable_because,
+        dataset_root=available_at,
+        target_device="cuda:test" if available_at else None,
+        supported_phases=("training", "inference") if available_at else (),
+    )
+
+
 def _probe_result(**over) -> ProbeResult:
     base = dict(
         status="ok",
@@ -101,7 +124,7 @@ def _deps(tmp_path, **over) -> BootstrapDependencies:
         collect_hardware=lambda: HARDWARE,
         collect_environment=lambda **kw: ExecutionEnvironmentProfile(**kw),
         build_registry=lambda: CalibrationRegistry(tmp_path / "runtime_calibration"),
-        dataset_check=lambda: (True, str(tmp_path / "data")),
+        measurement_capability=lambda: _capability(available_at=str(tmp_path / "data")),
         sample_contention=lambda **kw: _Window(),
         build_executors=lambda **kw: object(),
         run_probe=lambda **kw: _probe_result(),
@@ -200,11 +223,29 @@ class TestRefusals:
         assert "CUDA" in failure.remedy
 
     def test_no_dataset(self, tmp_path):
+        """07c C4: the remedy is built from the TASK's capability, so it names
+        the task and the reason instead of a hardcoded 'TIDMAD directory'
+        sentence that generic code had no business knowing."""
         failure = self._first_failure(
-            _run(tmp_path, dataset_check=lambda: (False, "not found at '/data/tidmad'"))
+            _run(
+                tmp_path,
+                measurement_capability=lambda: _capability(
+                    unavailable_because="not found at '/data/tidmad'"
+                ),
+            )
         )
         assert failure.name == "dataset"
-        assert "TIDMAD" in failure.remedy
+        assert "example_task" in failure.remedy
+        assert "not found at '/data/tidmad'" in failure.remedy
+
+    def test_no_capability_at_all_fails_closed(self, tmp_path):
+        """Threading the capability in must not become a way to skip the
+        check. `None` is 'nobody resolved one', which is distinguishable from
+        'the task says no' and is still a refusal."""
+        failure = self._first_failure(_run(tmp_path, measurement_capability=lambda: None))
+        assert failure.name == "dataset"
+        assert "no measurement capability was resolved" in failure.detail
+        assert "generic runtime-control does not choose a dataset" in failure.remedy
 
     def test_external_activity_is_recorded_but_does_NOT_refuse(self, tmp_path):
         """RE-GROUNDED 2026-08-06 (operator).
@@ -286,7 +327,7 @@ class TestRefusals:
         """A bootstrap tool that crashes teaches the operator nothing."""
         for override in (
             {"collect_hardware": lambda: (_ for _ in ()).throw(RuntimeError("no gpu"))},
-            {"dataset_check": lambda: (False, "missing")},
+            {"measurement_capability": lambda: _capability(unavailable_because="missing")},
             {"device_vram_gb": lambda: (_ for _ in ()).throw(RuntimeError("no device"))},
         ):
             report = _run(tmp_path, **override)

@@ -436,6 +436,21 @@ def _watchdog_deadline_provider(
     Returns a provider yielding ``(deadline_seconds | None,
     estimate_source)``; ``None`` disables the deadline (nothing to
     enforce yet).
+
+    **CLOCK CONVENTION — TOTAL ELAPSED SINCE SUBPROCESS START, not time
+    remaining.** Recorded here by Step 07 / PR 07c C5 because it was
+    implicit, and a term added under the wrong convention produces a
+    deadline that looks right and fires at the wrong moment. The enforcement
+    site is the only authority: ``t_start = time.perf_counter()`` is taken
+    immediately after ``Popen`` and the watchdog loop compares
+    ``elapsed = time.perf_counter() - t_start`` against ``deadline``. So a
+    returned value is the whole wall-clock budget for the child, which is
+    exactly what ``sum(predicted) * watchdog_factor`` already expresses.
+
+    That is why 07c added the validation term WITHOUT touching the
+    arithmetic below: a validation component with a measurement-backed
+    prediction joins ``sum(predicted)`` and the total grows by the
+    validation term and by nothing else.
     """
     watchdog_factor = (
         policy.watchdog.safety_factor

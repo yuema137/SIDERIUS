@@ -47,6 +47,14 @@ PredictionSource = Literal[
     # Live measurement-backed sources.
     "real_dataset_setup",
     "real_training_verification",
+    # Step 07 / PR 07c C5. The first real validation batch, timed
+    # in-subprocess. Additive, following this vocabulary's own extension
+    # precedent below — no existing value changes meaning. It has to be a
+    # measurement-backed member or C8d ignores the prediction and the
+    # watchdog term is inert (`sandbox_executor.py` filters on
+    # `MEASUREMENT_BACKED_SOURCES`), which is the whole point of measuring
+    # the first batch instead of using a static prior.
+    "real_validation_verification",
     "real_inference_verification",
     "measured_representative_scoring",
     # Kept for wrapper compatibility (§7.1): the training-phase live
@@ -72,6 +80,7 @@ MEASUREMENT_BACKED_SOURCES: frozenset[str] = frozenset(
     {
         "real_dataset_setup",
         "real_training_verification",
+        "real_validation_verification",
         "real_inference_verification",
         "measured_representative_scoring",
         "real_dataset_warmup",

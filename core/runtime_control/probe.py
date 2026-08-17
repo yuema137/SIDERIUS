@@ -16,9 +16,10 @@ executors (`production_probe_executors`) wire real torch + the plugin
 registry + the canonical dataset path lazily and are exercised only in
 the operator-gated GPU smoke / C12 campaign.
 
-F-1a: the dataset path resolves through the single source of truth
-(`execute_tools.data_paths.TIDMAD_DATA_DIR`) when no explicit
-``data_dir`` is supplied — never a second convention.
+F-1a: the dataset path is the ``data_dir`` the caller supplies, resolved
+from its task's measurement capability. Step 07 / PR 07c C4 removed the
+fallback that used to fill one in from generic code — an absent root is an
+explicit refusal, never a second convention and never another task's data.
 F-1b: the production builder loads the ACTUAL implemented plugin from
 the live registry and recomputes realized properties (§16.7) — the
 LLM-authored estimate is never trusted past this point.

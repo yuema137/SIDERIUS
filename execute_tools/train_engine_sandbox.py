@@ -703,6 +703,75 @@ def _requested_validation_rows(eval_sample_set: dict, ml_segs_per_psd: int) -> d
     return {int(k): len(segments) * ml_segs_per_psd for k, segments in eval_sample_set.items()}
 
 
+def clamp_validation_scope(
+    eval_sample_set: dict, *, max_samples: int | None, ml_segs_per_psd: int
+) -> dict:
+    """The REQUESTED validation scope, bounded by ``validation_max_samples``.
+
+    Step 07 / PR 07c C6. Applied BEFORE materialization, which is not a
+    stylistic choice: ``TrainingHistory`` fails closed when
+    ``validation_samples != validation_requested_samples``
+    (``training_history.py``, design §3.4b), so a ceiling applied to the
+    materialized rows would make every clamped run RAISE. Clamping the request
+    keeps ``requested == materialized`` and leaves 07a's invariant untouched.
+
+    **Whole PSD segments are the unit a SampleSet can express**, so the
+    resolved row count is the largest multiple of ``ml_segs_per_psd`` that does
+    not exceed the ceiling. A maximum is therefore never overshot, and the
+    count equals ``min(natural, ceiling)`` exactly whenever the ceiling is a
+    multiple of ``ml_segs_per_psd``.
+
+    Deterministic by construction: files are visited in ascending numeric
+    order and each file's segments keep their declared order, so the same
+    input, config and ceiling always select the same rows in the same order —
+    which is what makes a clamped R3 a reproducible observation rather than a
+    sample of one.
+
+    Args:
+        eval_sample_set: ``{file_index: [psd_segment_indices]}``, the natural
+            requested scope.
+        max_samples: the ceiling in ML rows, or ``None`` for no ceiling.
+        ml_segs_per_psd: ML rows per PSD segment
+            (``psd_segment_length // seg_size``).
+
+    Returns:
+        The clamped scope, or ``eval_sample_set`` unchanged when no ceiling is
+        configured or the ceiling does not bind. Files that lose every segment
+        are dropped rather than left empty.
+
+    Raises:
+        ValidationScopeError: the ceiling is below one PSD segment's worth of
+            rows, so no non-empty scope can honour it.
+    """
+    if max_samples is None:
+        return eval_sample_set
+    if ml_segs_per_psd <= 0:
+        raise ValidationScopeError(
+            f"cannot bound the validation scope: ml_segs_per_psd={ml_segs_per_psd} "
+            "(psd_segment_length // seg_size) is not positive."
+        )
+    if max_samples < ml_segs_per_psd:
+        raise ValidationScopeError(
+            f"validation_max_samples={max_samples} is below one PSD segment's "
+            f"{ml_segs_per_psd} ML rows, so no non-empty validation scope can honour "
+            f"it. R3 does not exist for an empty scope, so this is refused rather "
+            f"than silently resolved to zero rows — raise the ceiling to at least "
+            f"{ml_segs_per_psd}."
+        )
+
+    budget_psd = max_samples // ml_segs_per_psd
+    clamped: dict = {}
+    for file_key in sorted(eval_sample_set.keys(), key=int):
+        if budget_psd <= 0:
+            break
+        segments = list(eval_sample_set[file_key])
+        keep = segments[:budget_psd]
+        if keep:
+            clamped[file_key] = keep
+            budget_psd -= len(keep)
+    return clamped
+
+
 def _preflight_validation_scope(
     data_dir: str, eval_sample_set: dict, seg_size: int, profile: DatasetProfile
 ) -> int:
@@ -777,6 +846,8 @@ def _validation_pass(
     batch_size: int,
     profile: DatasetProfile,
     requested_rows: int,
+    verifier: Any = None,
+    on_verified: Any = None,
 ) -> tuple[float, int, float]:
     """One R3 observation: the run-resolved objective on the validation scope.
 
@@ -790,6 +861,28 @@ def _validation_pass(
     R3 = Σ n_i·L_i / Σ n_i over the ENTIRE validation set (``drop_last=False``,
     weights = batch sample counts) — the SAME epoch estimator as R2
     (``EPOCH_STATISTIC``), exact under an unequal last batch.
+
+    Args:
+        verifier: optional ``AdaptiveUnitVerification`` for the ``validation``
+            phase (Step 07 / PR 07c C5). When supplied, each COMPLETED
+            validation batch's wall time is fed to it until it reaches a
+            terminal verdict, which turns the first real batches into a
+            measurement-backed prediction that protects THIS run. Feeding is
+            observation only — it changes no tensor, no order and no value, so
+            R3 is bit-identical with and without it.
+        on_verified: called the INSTANT ``verifier`` reaches a verdict, while
+            this pass is still running, so the run-time session can persist the
+            prediction and the watchdog can see a refreshed deadline.
+
+            **This is the Gate-2 attempt-1 defect.** The completion used to
+            happen only after this function RETURNED. In the regime 07c exists
+            to fix — where validation is long by construction — the pass cannot
+            finish before the stale training-only deadline fires, so the
+            refreshed deadline was never written and the attempt died exactly
+            as it did in 07a: killed ~26 s into a validation pass whose term
+            was absent from the deadline. The training phase never had this bug
+            because it completes its verification INSIDE its batch loop; this
+            now follows the same pattern.
 
     Returns:
         ``(r3_value, materialized_rows, seconds)``.
@@ -840,13 +933,40 @@ def _validation_pass(
                 model_cfg.model_type, model_io, site_preference=TRAINING_SITE_DTYPE
             )
             target_dtype = get_target_torch_dtype(loss_cfg)
+            use_cuda_sync = device.type == "cuda"
             for input_batch, target_batch in val_loader:
+                # 07c C5: time the batch the SAME way the training verifier
+                # does — sync before the clock starts and again before it
+                # stops, so an async CUDA queue cannot attribute this batch's
+                # cost to the next one.
+                if verifier is not None:
+                    if use_cuda_sync:
+                        torch.cuda.synchronize()
+                    t_batch = time.perf_counter()
+
                 input_seq = input_batch.to(device).to(input_dtype)
                 target_seq = target_batch.to(device).to(dtype=target_dtype)
                 loss = criterion(model(input_seq), target_seq)
                 n_batch = int(input_batch.shape[0])
                 weighted_sum += float(loss.item()) * n_batch
                 n_total += n_batch
+
+                if verifier is not None:
+                    if use_cuda_sync:
+                        torch.cuda.synchronize()
+                    # The unit is one validation SAMPLE, so a partial final
+                    # batch cannot bias the rate.
+                    elapsed_ms = max((time.perf_counter() - t_batch) * 1000.0, 1e-6)
+                    verifier.feed(elapsed_ms / max(n_batch, 1))
+                    if verifier.is_terminal:
+                        # PERSIST NOW, not when the pass ends. The deadline the
+                        # watchdog is enforcing right now was built without a
+                        # validation term; every batch after this one is
+                        # running on borrowed time until the refreshed value
+                        # reaches the sidecar.
+                        if on_verified is not None:
+                            on_verified()
+                        verifier = None
             del val_dataset, val_loader
     finally:
         model.train(was_training)
@@ -871,6 +991,7 @@ def _build_training_history(
     validation_requested_samples: int | None,
     validation_samples: int | None,
     validation_seconds: list[float] | None,
+    validation_requested_samples_before_limit: int | None = None,
 ) -> TrainingHistory:
     """Assemble the additive ``training_history`` payload (design §3.5)."""
     comparability, reason = stamp_comparability(loss_cfg)
@@ -886,6 +1007,7 @@ def _build_training_history(
         validation_objective=validation_objective,
         validation_requested_samples=validation_requested_samples,
         validation_samples=validation_samples,
+        validation_requested_samples_before_limit=validation_requested_samples_before_limit,
         validation_seconds=validation_seconds,
     )
 
@@ -1200,8 +1322,32 @@ def run_experiment_streaming(
     validation_materialized_rows: int | None = None
     validation_history: list[float] | None = None
     validation_seconds: list[float] | None = None
+    #: 07c C5 — the validation phase's adaptive verifier, live until it reaches
+    #: a terminal verdict. `None` whenever runtime control is off.
+    validation_verifier: Any = None
     validation_seconds_total = 0.0
+    #: 07c C6 — the NATURAL scope, before `validation_max_samples` bound it.
+    #: `None` when no ceiling is configured, which is every production run.
+    validation_rows_before_limit: int | None = None
     if eval_sample_set is not None:
+        # 07c C6. The ceiling bounds the REQUESTED scope, here, before the
+        # pre-flight measures it — so `validation_requested_samples` is the
+        # EFFECTIVE request and 07a's `requested == materialized` invariant
+        # holds untouched. Applied after the natural scope has been measured,
+        # so the pre-limit count survives as provenance the effective count
+        # can no longer recover (Q-07c-9).
+        max_validation_samples = (
+            runtime_session.policy.validation_max_samples if runtime_session is not None else None
+        )
+        if max_validation_samples is not None:
+            validation_rows_before_limit = _preflight_validation_scope(
+                data_dir, eval_sample_set, seg_size, profile
+            )
+            eval_sample_set = clamp_validation_scope(
+                eval_sample_set,
+                max_samples=max_validation_samples,
+                ml_segs_per_psd=profile.dataset.psd_segment_length // seg_size,
+            )
         validation_requested_rows = _preflight_validation_scope(
             data_dir, eval_sample_set, seg_size, profile
         )
@@ -1210,6 +1356,62 @@ def run_experiment_streaming(
         validation_materialized_rows = validation_requested_rows
         validation_history = []
         validation_seconds = []
+        if runtime_session is not None:
+            # 07c C5. The validation phase's EXACT workload, in the unit the
+            # verifier measures: one row per epoch, every epoch. Recorded here
+            # because this is where the count becomes known, and before any
+            # verification — `complete_phase_verification` raises on a
+            # verified phase with no workload.
+            runtime_session.record_phase_workload(
+                "validation",
+                ResolvedPhaseWorkload(
+                    phase="validation",
+                    unit="validation_sample",
+                    unit_count=validation_requested_rows * train_cfg.epochs,
+                    detail={
+                        "rows_per_pass": validation_requested_rows,
+                        "passes": train_cfg.epochs,
+                        "batch_size": train_cfg.batch_size,
+                        "derivation": "one forward-only pass over the eval SampleSet per epoch",
+                    },
+                ),
+            )
+            validation_verifier = runtime_session.start_phase_verification(
+                "validation",
+                unit="validation_sample",
+                prior_expected_unit_ms=runtime_session.lookup_phase_prior("validation"),
+            )
+
+    def _finish_validation_verification() -> None:
+        """Persist the validation verification through its normal owner.
+
+        Step 07 / PR 07c, Gate-2 attempt-1 fix. ONE owner for the completion,
+        called from two places: from INSIDE `_validation_pass` the instant the
+        verifier reaches a verdict (the case that matters — the watchdog is
+        still enforcing a deadline with no validation term), and once more
+        after the pass for a verifier that never reached one, so the
+        measurement is recorded even when the prediction cannot be (§6.2
+        event log, §2.11 fail closed).
+
+        Idempotent: it clears `validation_verifier`, so the second call is a
+        no-op after the first. Persistence itself is
+        `complete_phase_verification`'s own `_write_sidecar()` — this adds no
+        second write path.
+
+        `extra_predicted_seconds` stays 0: the prediction is
+        `unit_count x unit_ms` over EVERY validation row of every epoch, and
+        the measured batches are among those rows, so adding their cost would
+        count the first batch twice.
+        """
+        nonlocal validation_verifier
+        if runtime_session is None or validation_verifier is None:
+            return
+        runtime_session.complete_phase_verification(
+            "validation",
+            validation_verifier,
+            source="real_validation_verification",
+        )
+        validation_verifier = None
 
     def _finish_training_verification(decide_admission: bool) -> bool:
         """Record the training verification; optionally decide admission.
@@ -1488,11 +1690,19 @@ def run_experiment_streaming(
                 batch_size=train_cfg.batch_size,
                 profile=profile,
                 requested_rows=validation_requested_rows,
+                verifier=validation_verifier,
+                on_verified=_finish_validation_verification,
             )
             validation_history.append(float(r3))
             validation_seconds.append(float(val_secs))
             validation_seconds_total += val_secs
             validation_materialized_rows = n_val
+
+            # Normally already done INSIDE the pass, the instant the verifier
+            # reached a verdict (that is the Gate-2 attempt-1 fix). Idempotent,
+            # so this only fires for a pass that ended while still verifying.
+            if validation_verifier is not None and validation_verifier.is_terminal:
+                _finish_validation_verification()
             print(f"Epoch {ep} | Validation Loss: {r3:.6f} ({n_val} ML segments)")
 
         # The stop ends the PHASE, not just the epoch. Continuing into
@@ -1516,6 +1726,21 @@ def run_experiment_streaming(
         runtime_session.record_phase_actual(
             "training", (time.perf_counter() - t_train_start) - validation_seconds_total
         )
+
+        # 07c C5 — the OTHER half of Q-07c-5. The seconds 07a already
+        # accumulates become the validation phase's ACTUAL, so
+        # `realized_unit_ms = actual ÷ unit_count` calibrates FUTURE runs.
+        # The first-batch verification above protects THIS one; the two are
+        # not redundant, they serve different runs.
+        #
+        # A verifier that never reached a verdict (a pass short enough that
+        # the stopping policy was not satisfied) still leaves the ACTUAL
+        # recorded — the measurement is worth keeping even when the
+        # prediction is not, which is the §6.2 event-log rule. It is closed
+        # out here so the failure is recorded rather than dropped silently.
+        if validation_seconds:
+            _finish_validation_verification()
+            runtime_session.record_phase_actual("validation", validation_seconds_total)
 
         # V21 PR B2 — realized peak memory, the analogue of the ACTUAL
         # above. Read here, in the training subprocess, so the counters
@@ -1553,6 +1778,7 @@ def run_experiment_streaming(
             validation_objective=validation_history,
             validation_requested_samples=validation_requested_rows,
             validation_samples=validation_materialized_rows,
+            validation_requested_samples_before_limit=validation_rows_before_limit,
             validation_seconds=validation_seconds,
         ).model_dump(),
     }

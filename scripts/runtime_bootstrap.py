@@ -133,7 +133,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         return _dry_run(args, caps, model_config)
 
-    deps: BootstrapDependencies = production_dependencies()
+    # 07c C4. This script is the TASK-AWARE launcher, so it is where the
+    # task's resolver legitimately lives; generic runtime-control takes the
+    # resolved capability as an argument and never reaches for a dataset of
+    # its own. `--data-dir` overrides the task's default root.
+    from execute_tools.data_paths import resolve_tidmad_measurement_capability
+
+    deps: BootstrapDependencies = production_dependencies(
+        measurement_capability=resolve_tidmad_measurement_capability(args.data_dir)
+    )
     report = run_bootstrap(
         model_type=args.model,
         model_config=model_config,

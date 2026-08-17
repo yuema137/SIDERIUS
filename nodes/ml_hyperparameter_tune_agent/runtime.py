@@ -206,6 +206,8 @@ def _handle_prephase_gpu_measurement(
     hypothesis: str,
     round_index: int,
     attempt_in_round: int,
+    run_profile: Any = None,
+    run_model_io: Any = None,
 ) -> PrephaseOutcome:
     """Measure this candidate on this card before a formal GPU launch.
 
@@ -294,6 +296,14 @@ def _handle_prephase_gpu_measurement(
         loss_config=dict(active_params.get("loss_config") or {}),
         inference_batch_size=_inference_batch,
         data_dir=getattr(agent_input, "data_dir", None),
+        # 07c C2. The worker is a clean subprocess, so the run-bound profile
+        # has to be transported or the batch's data facts silently revert to
+        # the shipped TIDMAD declaration. The tuner already holds the object
+        # (`RunBindings.run_profile`); nothing is resolved here.
+        dataset_profile=run_profile,
+        # 07c C3. Same reason, for the dtype authority's input. A task that
+        # declares no `model_io` passes `None`, which is Regime-A parity.
+        model_io_contract=run_model_io,
         # The worker is a clean process and must rebuild the plugin
         # registry from these. Read from the SAME sandbox the training and
         # inference subprocesses use, so the candidate the worker measures
@@ -1081,6 +1091,10 @@ def _build_runtime_policy(
         # envelope: the trainer builds a smaller epoch, so the bound is
         # spent before execution rather than enforced by killing a run.
         "validation_max_train_samples": agent_input.validation_max_train_samples,
+        # 07c C6. The VALIDATION-row counterpart, orthogonal to the training
+        # ceiling above: it bounds a different set, so neither constrains the
+        # other. Same transport, so no new training argv flag.
+        "validation_max_samples": agent_input.validation_max_samples,
         "observation_store_root": os.path.join(base_dir, "runtime_observations"),
         "safety_factor": effective_safety,
         "trial_safety_factor": agent_input.runtime_trial_safety_factor,

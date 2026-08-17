@@ -414,7 +414,18 @@ class TestRuntimeAccounting:
         (the pre-07a line) would include the passes. We make each pass REPORT
         100 s (the real work is milliseconds) and read the RAW actual handed
         to the session: it must be ≈ (real elapsed − 300 s), i.e. deeply
-        negative — impossible unless the subtraction happens."""
+        negative — impossible unless the subtraction happens.
+
+        07c C5 UPGRADE. The spy now keys by PHASE. This previously asserted
+        `len(raw_actuals) == 1`, which was an incidental fact of 07a's world
+        rather than the property under test: C5 legitimately records a SECOND
+        actual, for the new ``validation`` phase, so that
+        ``realized_unit_ms = actual ÷ units`` can calibrate future runs. The
+        original claim is unchanged and still asserted on the TRAINING actual;
+        the validation actual is now pinned beside it, so the test proves both
+        halves of the split — the training observation stays pure AND the
+        validation cost is no longer discarded.
+        """
         real_pass = tes._validation_pass
 
         def slow_reporting_pass(**kwargs):
@@ -423,11 +434,11 @@ class TestRuntimeAccounting:
 
         monkeypatch.setattr(tes, "_validation_pass", slow_reporting_pass)
         session = RuntimeVerificationSession(str(tmp_path / "rv.json"), attempt_id="acct")
-        raw_actuals: list[float] = []
+        raw_actuals: list[tuple[str, float]] = []
         orig = session.record_phase_actual
 
         def spy(phase, actual_seconds):
-            raw_actuals.append(actual_seconds)
+            raw_actuals.append((phase, actual_seconds))
             orig(phase, actual_seconds)
 
         monkeypatch.setattr(session, "record_phase_actual", spy)
@@ -439,8 +450,16 @@ class TestRuntimeAccounting:
             runtime_session=session,
         )
         assert summary["training_history"]["validation_seconds"] == [100.0, 100.0, 100.0]
-        assert len(raw_actuals) == 1
-        assert -300.0 <= raw_actuals[0] < -290.0, raw_actuals
+
+        by_phase = dict(raw_actuals)
+        assert len(raw_actuals) == len(by_phase), f"a phase was recorded twice: {raw_actuals}"
+        assert set(by_phase) == {"training", "validation"}, raw_actuals
+
+        # The original 07a claim, unchanged: deeply negative is impossible
+        # unless the 300 s of reported validation was subtracted out.
+        assert -300.0 <= by_phase["training"] < -290.0, raw_actuals
+        # 07c: and those same 300 s are now RECORDED rather than discarded.
+        assert by_phase["validation"] == pytest.approx(300.0)
 
     def test_verification_unit_count_is_unchanged_by_the_pass(self, two_family, tmp_path):
         """Validation batches are NOT optimizer steps: the training workload's

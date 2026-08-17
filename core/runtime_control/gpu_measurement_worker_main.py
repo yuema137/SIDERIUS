@@ -172,6 +172,18 @@ def resolve_device(spec: GpuMeasurementSpec) -> DeviceResolution:
     return DeviceResolution(None, observed_uuid=observed, device_name=name)
 
 
+#: The MEASUREMENT site's input-dtype preference (Step 07 / PR 07c, Q-07c-8).
+#:
+#: Declared once, here, rather than inlined at the call: it is this site's
+#: historical dtype and the reason 07c's batches are byte-identical. It is
+#: deliberately NOT the phase-correct inference dtype — the measurement worker
+#: runs an inference phase at the production inference batch, so a phase-aware
+#: preference is arguably more faithful, but adopting it would CHANGE what is
+#: measured, and 07c's whole claim is that it does not. Recorded as separate
+#: debt.
+_MEASUREMENT_DTYPE_PREFERENCE = "int32"
+
+
 def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
     """A builder that constructs exactly what the phase will really run.
 
@@ -184,14 +196,17 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
     * the model comes from the LIVE `MODEL_REGISTRY` -- the validator has
       just registered the candidate, and the LLM's parameter estimate is
       never used (F-1b);
-    * `fcnet` takes `loss_type`, which the trainer passes and
-      `probe_production.py:128` does not;
+    * the model is constructed through `construct_registered_model`, so a
+      class whose head shape depends on `loss_type` receives it — decided by
+      introspecting the constructor, never by matching a model name
+      (07c C3 / Q-07c-3);
     * the optimizer comes from `build_training_optimizer`, the trainer's
       own switch, because Adam-family moments are a first-order term in
       the memory being measured;
-    * the input dtype rule (`float()` for fcnet, `int()` otherwise) and the
-      target dtype (`get_target_torch_dtype`) are the trainer's, from the
-      same single source of truth;
+    * the input dtype comes from `resolve_input_dtype` — the model's own
+      declaration where it has one, else the task's Model-I/O contract, else
+      this site's historical preference — and the target dtype from
+      `get_target_torch_dtype`, both the trainer's single sources of truth;
     * input and target are DISTINCT tensors, because the trainer holds two.
 
     `class_weights=None` matches the streaming trainer
@@ -202,6 +217,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
 
     def _build() -> CandidateComponents:
         from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
+        from execute_tools.model_input_dtype import resolve_input_dtype
         from execute_tools.train_engine_sandbox import build_training_optimizer
         from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
         from ml_models.models_format_sandbox import (
@@ -209,7 +225,7 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             TrainConfig,
             get_config_class,
         )
-        from ml_models.models_sandbox import MODEL_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY, construct_registered_model
 
         model_type = spec.request.model_type
         if model_type not in MODEL_REGISTRY:
@@ -225,17 +241,19 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
         train_cfg = TrainConfig(**spec.train_config)
         loss_cfg = LossConfig(**spec.loss_config)
 
-        model_class = MODEL_REGISTRY[model_type]
         # Construction and transfer split into two statements so a
         # milestone can sit between them (V20 PR C2, validation only), and
         # split the SAME way `inference_single.py` is, so the two traces
         # bracket the same operation. `nn.Module.to()` moves parameters in
         # place and returns `self`: the chained and split forms perform an
         # identical sequence on an identical object.
-        if model_type == "fcnet":
-            model = model_class(model_cfg, loss_type=loss_cfg.loss_type)
-        else:
-            model = model_class(model_cfg)
+        #
+        # 07c C3 / Q-07c-3: whether the constructor takes `loss_type` is read
+        # from its SIGNATURE by the shared owner beside the registry. The name
+        # branch this replaces was wrong for any generated plugin whose head
+        # shape depends on the loss — it would silently build the wrong model
+        # and measure it.
+        model = construct_registered_model(model_type, model_cfg, loss_type=loss_cfg.loss_type)
         if trace is not None:
             trace.record(
                 "after_model_construction",
@@ -270,21 +288,39 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
             if spec.phase == "inference" and spec.inference_batch_size
             else batch_size
         )
-        # D-C2-12. BOUNDED read, not `load_probe_batch`. That path
-        # materializes the whole 2,010,000,000-sample channel before
-        # `max_segments` is applied, and Gate 2 Lite-A c1 was killed at
-        # 24.10 GiB host RSS before the model was even built -- to produce a
-        # batch occupying 0.31 MiB on the GPU. The tensor here is
-        # byte-identical (proved against the production loader in
-        # `test_gpu_measurement_data.py`); only the host-side path differs,
-        # and the host path is not the GPU requirement. There is no
-        # fallback: bounded access failing is an infrastructure condition.
+        # D-C2-12. BOUNDED read. The predecessor materialized the whole
+        # 2,010,000,000-sample channel before `max_segments` applied, and
+        # Gate 2 Lite-A c1 was killed at 24.10 GiB host RSS before the model
+        # was even built -- to produce a batch occupying 0.31 MiB on the GPU.
+        # The tensor is byte-identical (pinned against the pre-refactor golden
+        # in `test_gpu_measurement_data.py`); only the host-side path differs,
+        # and the host path is not the GPU requirement. There is no fallback:
+        # bounded access failing is an infrastructure condition.
+        #
+        # 07c C2: the batch's data facts -- input channel, value encoding,
+        # training filename family -- come from the profile the PARENT
+        # transported. This process is clean, so an ambient resolution here
+        # would always answer TIDMAD regardless of the bound task.
         bounded = load_bounded_probe_batch(
-            data_dir=spec.data_dir, batch_size=input_batch, segment_length=seg
+            data_dir=spec.data_dir,
+            batch_size=input_batch,
+            segment_length=seg,
+            profile=spec.dataset_profile,
         )
         batch = bounded.tensor.to(spec.device)
 
-        model_input = batch.float() if model_type == "fcnet" else batch.int()
+        # 07c C3 / Q-07c-8. The dtype authority, not a model name. The site
+        # preference stays `int32` -- the MEASUREMENT site's historical dtype,
+        # which reproduces today's tensor exactly for every builtin in both
+        # phases, with and without a transported contract. Adopting the
+        # phase-correct inference dtype is recorded as separate debt: it would
+        # change what is measured, and this PR's whole claim is that it does
+        # not.
+        model_input = batch.to(
+            resolve_input_dtype(
+                model_type, spec.model_io_contract, site_preference=_MEASUREMENT_DTYPE_PREFERENCE
+            )
+        )
         if trace is not None:
             # The same point `inference_single.py` records: the input is on
             # the device in the dtype the model will be handed. What the

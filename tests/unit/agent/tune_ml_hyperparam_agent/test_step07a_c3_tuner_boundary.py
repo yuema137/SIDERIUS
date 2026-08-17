@@ -66,6 +66,11 @@ _HISTORY = {
     "validation_objective": [3.1, 2.1, 1.1],
     "validation_requested_samples": 8,
     "validation_samples": 8,
+    # Step 07 / PR 07c C6 (Q-07c-9). The ONE authorized addition to this
+    # payload. `None` is the no-ceiling value, i.e. every production run, so
+    # the projection is otherwise byte-identical to 07a's — which is what this
+    # whole-dict comparison exists to prove.
+    "validation_requested_samples_before_limit": None,
     "validation_seconds": [0.1, 0.1, 0.1],
     "observations": {},
 }

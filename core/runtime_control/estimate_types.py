@@ -90,6 +90,11 @@ _EVIDENCE_TIER: dict[str, int] = {
     "real_dataset_setup": 4,
     "real_dataset_warmup": 4,
     "real_training_verification": 4,
+    # Step 07 / PR 07c C5 — the first real validation batches, timed
+    # in-subprocess. Tier 4 with its siblings: it is the same KIND of
+    # evidence, an in-process verification of the actual configuration, and
+    # the phase it describes is what distinguishes it.
+    "real_validation_verification": 4,
     "real_inference_verification": 4,
     "measured_representative_scoring": 4,
     "derived_total": 4,

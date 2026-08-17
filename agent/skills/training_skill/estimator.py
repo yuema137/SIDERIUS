@@ -295,31 +295,17 @@ def attention_shape(model_type: str, model_config: dict[str, Any]) -> tuple[int,
 def _instantiate_for_param_count(model_type: str, config_obj: Any, loss_type: str) -> Any:
     """Build a model purely to count parameters.
 
-    V21 PR C3 — replaces ``if model_type == "fcnet"``. Some model classes
-    take ``loss_type`` at construction because their head shape depends on
-    it (``fcnet``, the one hybrid built-in). That is a real constructor API
-    difference, not a calibration, so it is detected by **introspecting the
-    signature** rather than by matching a name.
-
-    Byte-identical for all six built-ins, and correct by construction for
-    generated plugins, whose contract is ``__init__(self, config)`` and
-    which therefore take the single-argument form exactly as before.
+    V21 PR C3 replaced ``if model_type == "fcnet"`` here with signature
+    introspection. Step 07 / PR 07c C3 (Q-07c-3) PROMOTED that introspection
+    to ``ml_models.models_sandbox.construct_registered_model``, beside the
+    registry it reads, because the pre-phase measurement worker needed the
+    same answer and was still carrying the name branch. This function keeps
+    its name and its own responsibility — building a model purely to count
+    parameters — and delegates the construction rule.
     """
-    import inspect
+    from ml_models.models_sandbox import construct_registered_model
 
-    from ml_models.models_sandbox import MODEL_REGISTRY
-
-    model_cls = MODEL_REGISTRY[model_type]
-    try:
-        takes_loss_type = "loss_type" in inspect.signature(model_cls.__init__).parameters
-    except (TypeError, ValueError):
-        # Un-introspectable callable (C-extension, exotic wrapper). Fall back
-        # to the single-argument form, which is the plugin contract.
-        takes_loss_type = False
-
-    if takes_loss_type:
-        return model_cls(config_obj, loss_type=loss_type)
-    return model_cls(config_obj)
+    return construct_registered_model(model_type, config_obj, loss_type=loss_type)
 
 
 # Safety margin applied on top of ms/step. Raised from 1.1 to 2.0 for the

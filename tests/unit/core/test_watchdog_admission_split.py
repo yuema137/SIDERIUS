@@ -39,6 +39,7 @@ V18_FLOOR_S = 120.0
 #: `None` is the production value for both.
 _VALIDATION_POSTURE_OFF = {
     "validation_max_train_samples": None,
+    "validation_max_samples": None,
     "validation_max_phase_seconds": None,
 }
 

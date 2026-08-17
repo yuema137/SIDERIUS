@@ -50,6 +50,17 @@ _SCAN_TARGETS: list[tuple[str, str]] = [
     ("training_estimator", "agent/skills/training_skill/estimator.py"),
     ("inference_estimator", "agent/skills/inference_skill/estimator.py"),
     ("inference_defaults", "core/inference_defaults.py"),
+    # Step 07 / PR 07c C3 (Q-07c-3). The pre-phase measurement worker carried
+    # TWO model-name branches — a constructor-arity one and a dtype one — and
+    # both are gone: construction goes through the registry's own
+    # `construct_registered_model`, the dtype through `resolve_input_dtype`.
+    #
+    # The FILE is scanned, deliberately not `core/runtime_control/`. The
+    # directory contains `campaign.py`, whose `"family": "wavenet"` entries are
+    # legitimate CONFIG DATA naming a candidate to run, not a branch on a
+    # model's identity — pointing the guard at the directory would report that
+    # as a violation and the guard would have to be weakened to survive.
+    ("gpu_measurement_worker", "core/runtime_control/gpu_measurement_worker_main.py"),
 ]
 
 # Known-dirty targets pending their unblocking refactor. Each entry documents

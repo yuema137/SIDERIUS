@@ -1500,6 +1500,7 @@ def run_workflow(
     # HyperparamTuningInput field docstrings and
     # docs/gates/gate_testing_standard.md.
     validation_max_train_samples: int | None = None,
+    validation_max_samples: int | None = None,
     validation_max_phase_seconds: float | None = None,
     # --- V19 PR 1 (P1-C3) — chain formal-incumbent carry-over ---
     # Two-state design (design doc §3.4): the restored chain incumbent
@@ -2612,6 +2613,7 @@ def run_workflow(
             max_epochs=max_epochs,
             validation_max_portion=validation_max_portion,
             validation_max_train_samples=validation_max_train_samples,
+            validation_max_samples=validation_max_samples,
             validation_max_phase_seconds=validation_max_phase_seconds,
             skip_formal_min_delta=skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,

@@ -1939,6 +1939,36 @@ class HyperparamTuningInput(BaseModel):
             "unchanged. Never use it on a scientific run."
         ),
     )
+    validation_max_samples: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "VALIDATION POSTURE ONLY (Step 07 / PR 07c C6). Absolute ceiling "
+            "on the ML segments one VALIDATION pass may contain — the "
+            "validation-row counterpart of ``validation_max_train_samples``, "
+            "which bounds TRAINING rows.\n\n"
+            "The two names differ by one word and bound DIFFERENT sets, which "
+            "is exactly why both exist. 07a's Gate 2 capped the training epoch "
+            "at 2,000 rows while validation ran the full 15,000-row eval "
+            "SampleSet — 7.5x the training work, per epoch, unpriced.\n\n"
+            "Applied to the REQUESTED scope, before materialization, so 07a's "
+            "exact-materialization invariant (``validation_samples == "
+            "validation_requested_samples``) is never relaxed. A ceiling "
+            "applied afterwards would not merely lose provenance: it would "
+            "make every clamped run RAISE.\n\n"
+            "Clamps, never rejects. Whole PSD segments are the unit a "
+            "SampleSet can express, so the resolved count is the largest "
+            "multiple of ``psd_segment_length // seg_size`` that does not "
+            "exceed the ceiling — a maximum is never overshot. A ceiling "
+            "below one PSD segment's worth of rows is refused explicitly "
+            "rather than resolving to an empty scope.\n\n"
+            "INTERIM cost bounding, not the root fix: a slow model can still "
+            "be misjudged at 2,000 validation rows, and the priced deadline "
+            "(C5) is what makes the estimate correct. Operator/runtime input "
+            "only — never planner-visible. ``None`` (the default, and every "
+            "production campaign) leaves validation untouched."
+        ),
+    )
     validation_max_phase_seconds: float | None = Field(
         default=None,
         gt=0.0,

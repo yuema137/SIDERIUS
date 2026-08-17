@@ -79,6 +79,7 @@ def local_validated_model(
     # HyperparamTuningInput field docstrings and
     # docs/gates/gate_testing_standard.md.
     validation_max_train_samples: int | None = None,
+    validation_max_samples: int | None = None,
     validation_max_phase_seconds: float | None = None,
     # Tuner delta-gates (added in commit 8f1cf52). Defaults match the
     # HyperparamTuningInput schema defaults so omitting them at the
@@ -301,6 +302,7 @@ def local_validated_model(
         max_epochs=max_epochs,
         validation_max_portion=validation_max_portion,
         validation_max_train_samples=validation_max_train_samples,
+        validation_max_samples=validation_max_samples,
         validation_max_phase_seconds=validation_max_phase_seconds,
         skip_formal_min_delta=skip_formal_min_delta,
         bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,

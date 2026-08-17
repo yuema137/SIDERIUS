@@ -13,10 +13,14 @@ F-1b: ``setup`` loads the ACTUAL implemented candidate from the LIVE
 realized properties from the instantiated module — the LLM-authored
 parameter estimate is never used here.
 
-F-1a: the probe batch comes from the REAL dataset resolved through the
-single source of truth (``execute_tools.data_paths.TIDMAD_DATA_DIR``)
-when no explicit ``data_dir`` is given. A missing/unreadable dataset is
-an explicit ``load_failure`` — never a silent synthetic fallback.
+F-1a: the probe batch comes from the REAL dataset at the ``data_dir`` the
+CALLER supplies. Step 07 / PR 07c C4 removed the ``TIDMAD_DATA_DIR``
+fallback that used to fill in for an absent one: that was a task
+assumption inside generic runtime-control, so on any other task it either
+resolved somebody else's dataset or reported a path the caller never
+chose. An absent, missing or unreadable dataset is now an explicit
+failure naming what the caller must supply — never a silent synthetic or
+task-specific fallback.
 """
 
 from __future__ import annotations
@@ -204,26 +208,50 @@ def production_probe_executors(
         dtype = str(next(model.parameters()).dtype).replace("torch.", "")
         bytes_per = _DTYPE_BYTES.get(dtype, 4)
 
-        # F-1a: real data through the single source of truth.
-        resolved_dir = data_dir
-        if not resolved_dir:
-            from execute_tools.data_paths import TIDMAD_DATA_DIR
-
-            resolved_dir = TIDMAD_DATA_DIR
+        # F-1a: real data, supplied by a caller that knows the task.
+        #
+        # 07c C4 removed the `TIDMAD_DATA_DIR` fallback that used to fill in
+        # here. It was a task assumption inside generic runtime-control: on any
+        # other task it resolved somebody else's dataset, or resolved nothing
+        # and reported a path the caller never chose. An absent `data_dir` is
+        # now an explicit refusal — the caller resolves the root (from its
+        # task's measurement capability) or the probe does not run.
         import os
 
-        if not resolved_dir or not os.path.isdir(resolved_dir):
+        resolved_dir = data_dir
+        if not resolved_dir:
+            raise RuntimeError(
+                "no dataset directory was supplied to the probe. Generic "
+                "runtime-control does not choose one: pass `data_dir` resolved "
+                "from the task's measurement capability (no silent synthetic "
+                "or task-specific fallback — F-1a)."
+            )
+        if not os.path.isdir(resolved_dir):
             raise RuntimeError(
                 f"dataset directory unavailable for the probe: {resolved_dir!r} "
                 "(no silent synthetic fallback — F-1a)"
             )
         seg = int(model_config.get("segmentation_size", 40_000))
         bs = int(train_config.get("batch_size", 1))
-        from execute_tools.probe_data import load_probe_batch  # C6b helper
+        # 07c C2: the ONE builder, the same one the measurement worker goes
+        # through. It replaces `load_probe_batch`, which reached
+        # `TIDMADDataset` and materialized the WHOLE channel before
+        # `max_segments` applied — 24.10 GiB host RSS for a 0.31 MiB batch
+        # (D-C2-12). The tensor is byte-identical; only the host path differs.
+        #
+        # This call site is in-process, so it resolves the profile through the
+        # Regime-A seam exactly as `TIDMADDataset` does. The builder itself
+        # takes no default: a task assumption must be made by a caller that
+        # holds one, never by the builder's omission.
+        from execute_tools.dataset_config import resolve_dataset_profile
+        from execute_tools.probe_batch import build_bounded_probe_batch
 
-        batch = load_probe_batch(data_dir=resolved_dir, batch_size=bs, segment_length=seg).to(
-            device
-        )
+        batch = build_bounded_probe_batch(
+            profile=resolve_dataset_profile(),
+            data_dir=resolved_dir,
+            batch_size=bs,
+            segment_length=seg,
+        ).tensor.to(device)
 
         # Optimizer switch mirrors execute_tools/train_engine_sandbox.py
         # (§verified 2026-07-30: AdamW default w/ weight_decay, Adam, SGD).

@@ -604,6 +604,8 @@ def run_admission_preflight(
         hypothesis=hypothesis,
         round_index=round_index,
         attempt_in_round=attempt_in_round,
+        run_profile=run_profile,
+        run_model_io=run_model_io,
     )
     if _prephase is PrephaseOutcome.TERMINAL_INFRASTRUCTURE_FAILURE:
         # The measurement could not be established. Retrying

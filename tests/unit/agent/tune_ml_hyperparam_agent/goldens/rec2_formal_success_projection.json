@@ -1,7 +1,7 @@
 {
   "_captured_at": {
-    "commit": "83987b216dd35d4dbc6132f5221bbdd68729099e",
-    "note": "REGENERATED at Step 07a C3 from the C2 head plus the C3 working tree, in the C3 commit (design \u00a717 rule 3; Step-06 precedent): ExperimentRecord gained the ADDITIVE training_history / training_diagnosis fields (persisted, hidden from both LLM-facing renders); every pre-existing key and value is unchanged. Ledger: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07a_training_history_diagnosis.md \u00a714.3"
+    "commit": "5b64d0b01eddeb3f3a708666b3281e9e6338aa25",
+    "note": "UPDATED at Step 07 / PR 07c C6 by a targeted single-key text edit, not a regeneration (design \u00a717 rule 3; tests never write goldens). TrainingHistory gained the ADDITIVE validation_requested_samples_before_limit (Q-07c-9), whose value is null whenever no validation_max_samples ceiling is configured \u2014 i.e. every production campaign. EXACTLY ONE content line was added; every pre-existing key and value is byte-identical, which is the property this whole-object golden exists to prove. Previous capture: 83987b216dd35d4dbc6132f5221bbdd68729099e (Step 07a C3). Ledger: docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07c_tuner_measurement.md \u00a717 (C6)"
   },
   "record_type": "experiment",
   "exp_id": "<present>",
@@ -79,6 +79,7 @@
       0.65
     ],
     "validation_requested_samples": 40,
+    "validation_requested_samples_before_limit": null,
     "validation_samples": 40,
     "validation_seconds": [
       0.22,
