@@ -240,6 +240,36 @@ def _stub_baseline_config_dict() -> dict:
     }
 
 
+#: Per-request wall-clock timeout, in seconds, for every provider client.
+#:
+#: 600 s is the OpenAI SDK's OWN default (`openai._constants.DEFAULT_TIMEOUT`
+#: is `Timeout(connect=5.0, read=600, write=600, pool=600)` at v2.26.0,
+#: verified locally rather than read from docs). This bridge previously
+#: hardcoded 120 s — one fifth of that — with no recorded justification.
+#:
+#: WHY IT CHANGED (operator decision, 2026-08-17). A real Gate run proved the
+#: 120 s bound was killing legitimate work: the implementor's code-generation
+#: call against a reasoning model exceeded it TEN consecutive times and the
+#: chain never reached training, while an independent probe to the same model
+#: with a small prompt returned in 1.3 s. The API was healthy; our own client
+#: was the thing hanging up. Long generations are precisely what this system
+#: asks an implementor to do, so a bound below the vendor default cannot be
+#: the right policy.
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
+
+#: Bounded retry budget for TIMEOUT and CONNECTION errors — total attempts,
+#: not additional ones.
+#:
+#: Kept separate from `max_retries` (which governs 429 / 5xx) because the two
+#: failures mean different things. A 503 says "try again shortly" and usually
+#: heals. A timeout says "this request did not fit the budget" — and retrying
+#: it unchanged reproduces the same outcome. Combined with the old
+#: `timeout=120s, max_retries=None`, that produced a genuinely pathological
+#: loop: kill at 120 s, back off, kill at 120 s, forever, making no progress
+#: and billing every attempt.
+DEFAULT_TIMEOUT_RETRIES = 3
+
+
 class LLMBridge:
     """
     Universal API gateway for all LLM calls in SIDERIUS.
@@ -273,6 +303,8 @@ class LLMBridge:
         reflect_provider: str | None = None,
         reflect_model_id: str | None = None,
         max_retries: int | None = None,
+        request_timeout: float | None = None,
+        timeout_retries: int | None = None,
     ):
         """
         Unified LLM bridge — every provider is accessed through ``openai.OpenAI``.
@@ -327,10 +359,48 @@ class LLMBridge:
                       use where infinite retry would be annoying (e.g. 6
                       for the legacy ~77s window, 20 for ~15 minutes).
                       Backoff doubles from 2.5s up to a 60s cap.
+
+                      NOTE: this budget governs RETRYABLE STATUS errors
+                      (429 / 5xx). Timeouts and connection errors have
+                      their own bounded budget — see ``timeout_retries``.
+            request_timeout:
+                      Per-request wall-clock timeout in seconds, passed to
+                      the OpenAI client. ``None`` uses
+                      ``DEFAULT_REQUEST_TIMEOUT_SECONDS`` (600 s), which is
+                      the OpenAI SDK's own default.
+
+                      This was hardcoded to 120 s until 2026-08-17, when a
+                      real Gate proved it was cutting off legitimate work:
+                      the implementor's code-generation call against a
+                      reasoning model repeatedly exceeded 120 s and was
+                      killed by OUR client, ten times in a row, while a
+                      small probe to the same model returned in 1.3 s. A
+                      fixed 120 s bound has no basis — it was one fifth of
+                      the SDK default — and long generations are exactly
+                      what this system asks for.
+            timeout_retries:
+                      Bounded retry budget for TIMEOUT and CONNECTION
+                      errors specifically. ``None`` uses
+                      ``DEFAULT_TIMEOUT_RETRIES`` (3 total attempts).
+
+                      Deliberately separate from ``max_retries``. The
+                      pathological combination this removes is
+                      ``timeout=120s`` with unbounded retry: a request that
+                      legitimately needs 150 s is killed, retried, killed,
+                      retried — forever, making no progress and billing
+                      every attempt. A timeout that recurs is evidence the
+                      request does not fit the budget, not evidence that
+                      waiting longer will help.
         """
         load_dotenv()
         self.provider = provider.lower()
         self.max_retries = max_retries
+        self.request_timeout = (
+            DEFAULT_REQUEST_TIMEOUT_SECONDS if request_timeout is None else float(request_timeout)
+        )
+        self.timeout_retries = (
+            DEFAULT_TIMEOUT_RETRIES if timeout_retries is None else int(timeout_retries)
+        )
 
         known = _KNOWN_PROVIDERS.get(self.provider)
 
@@ -372,14 +442,14 @@ class LLMBridge:
             self.client = OpenAI(
                 api_key=self.api_key,
                 max_retries=0,
-                timeout=120.0,
+                timeout=self.request_timeout,
                 base_url=base_url,
             )
         else:
             self.client = OpenAI(
                 api_key=self.api_key,
                 max_retries=0,
-                timeout=120.0,
+                timeout=self.request_timeout,
             )
 
         # --- Reflect client setup (Phase A.2: cross-provider support) ---
@@ -414,7 +484,7 @@ class LLMBridge:
             self.reflect_client = OpenAI(
                 api_key=reflect_api_key,
                 max_retries=0,
-                timeout=120.0,
+                timeout=self.request_timeout,
                 base_url=reflect_base_url,
             )
 
@@ -1091,10 +1161,19 @@ class LLMBridge:
     # (e.g. max_retries=6 gives 1 initial + 5 retries, similar to the old
     # fixed schedule). Use this for interactive/lilab sessions.
     #
-    # Catches 429 (rate limit), 5xx (server errors incl. Google 503 "high
-    # demand"), and connection / timeout errors. Other 4xx errors (auth,
-    # bad request, model not found) are raised immediately — they will
-    # not heal on retry.
+    # Catches 429 (rate limit / quota) and 5xx (server errors incl. Google
+    # 503 "high demand"). Other 4xx errors (auth, bad request, model not
+    # found) are raised immediately — they will not heal on retry.
+    #
+    # TIMEOUT and CONNECTION errors are ALSO caught here, but they consume a
+    # SEPARATE bounded budget (`timeout_retries`, default
+    # DEFAULT_TIMEOUT_RETRIES) rather than this one. See the 2026-08-17 note
+    # on DEFAULT_REQUEST_TIMEOUT_SECONDS: unbounded timeout retry against a
+    # too-short client timeout is a loop that cannot make progress.
+    #
+    # The unbounded default for 429 is DELIBERATE and unchanged: a quota
+    # exhaustion heals when the operator tops up the balance, and the chain
+    # resuming by itself is the intended behaviour for long batch runs.
     _RETRY_INITIAL_WAIT = 2.5
     _RETRY_MAX_WAIT = 60.0
 
@@ -1132,12 +1211,15 @@ class LLMBridge:
 
         last_exc = None
         attempt = 0
+        timeout_attempts = 0
         wait = self._RETRY_INITIAL_WAIT
         while True:
+            timed_out = False
             try:
                 return fn()
             except (APIConnectionError, APITimeoutError) as e:
                 last_exc = e
+                timed_out = True
             except APIStatusError as e:
                 if e.status_code != 429 and not (500 <= e.status_code < 600):
                     raise
@@ -1150,7 +1232,27 @@ class LLMBridge:
                     if suggested is not None:
                         wait = suggested
             attempt += 1
-            # Check if we've exhausted our retry budget
+            # TIMEOUT / CONNECTION errors carry their OWN bounded budget.
+            #
+            # A timeout is not a "try again shortly" signal: it says the
+            # request did not fit the configured budget, and repeating it
+            # unchanged reproduces the same outcome. Left unbounded — as it was
+            # until 2026-08-17 — `timeout=120s` plus `max_retries=None` became
+            # a loop that killed a legitimate 150 s request forever, made no
+            # progress, and billed every attempt. A real Gate run hit exactly
+            # that, ten times, and never reached the phase it was testing.
+            if timed_out:
+                timeout_attempts += 1
+                if timeout_attempts >= self.timeout_retries:
+                    print(
+                        f"[LLMBridge.{label}] {timeout_attempts} attempts timed out or failed "
+                        f"to connect (per-request timeout {self.request_timeout:g}s); raising "
+                        f"rather than retrying indefinitely. If the request legitimately needs "
+                        f"longer, raise request_timeout — retrying will not help.",
+                        flush=True,
+                    )
+                    raise last_exc
+            # Check if we've exhausted the retryable-status budget
             if self.max_retries is not None and attempt >= self.max_retries:
                 print(f"[LLMBridge.{label}] All {attempt} attempts failed; raising.", flush=True)
                 raise last_exc
