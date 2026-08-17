@@ -673,8 +673,14 @@ TIDMAD's `network.py:FocalLoss1D`.
   clean tree. Deferred and UNCHANGED by 07b: the `memory.time_mode` /
   disabled-time-budget coupling, the `resolved_action` stale-attempt hazard, and the
   validation-time/watchdog accounting debt (07c).
-- **Step 07 trial/formal-identity correction (2026-08-16, branch
-  `step07-correction-trial-formal-identity`, base `48e9fb90`)**: a SMALL semantic
+- **Step 07 trial/formal-identity correction — MERGED (PR #217, squash
+  `a15d1366e5a86b1d3297cda65b0d3a5dfdb84a2e` / `a15d1366`, 2026-08-17; base
+  `48e9fb90`; C1 `b661a964` executable + C2 `f804d3e6` docs; final PR head
+  `f804d3e6`; exact-head CI 31995712890 SUCCESS; parity `git diff f804d3e6
+  a15d1366` empty; full unit suite 9,824 passed / 3 skipped / 0 failed from a
+  clean tree; Gate 1 and Gate 2 both NOT REQUIRED, decided separately with the
+  assignment row quoted — no live Gate run, and no time budget added anywhere
+  to make anything pass)**: a SMALL semantic
   correction PR with **no separate design document** — the source audit, decision,
   regression evidence and disposition live in the PR body, in the tuner node's
   public `ml_hyperparameter_tune_agent.md` ("Candidate role identity") and in the
@@ -690,6 +696,14 @@ TIDMAD's `network.py:FocalLoss1D`.
   skip/bypass threshold mathematics, retry/round semantics, record schema, prompts,
   the node's public interface. Still OPEN: the `resolved_action` stale-attempt
   hazard and 07c's validation-time/watchdog accounting debt.
+  **`resolved_action` is NOT scheduled ahead of 07c (operator decision,
+  2026-08-17)**: it is conceptually adjacent to the coupling just corrected but
+  is a different defect, and adjacency is not a schedule. Do not open a
+  follow-up correction PR for it merely because this work surfaced it; it still
+  needs the operator decision its own note names. **NEXT = 07c**, to be
+  re-confirmed from the merged roadmap / current-state documents at the start of
+  a fresh session — never from the conversation that produced this correction.
+  See the Step-07 parent §17.1.
 
 - **Active branch**: `feat/rt1-fixed-step-overhead` — runtime-control
   system, RT1 → RT6 COMPLETE per

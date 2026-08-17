@@ -972,7 +972,25 @@ child is about to be frozen.
 
 ## 17. Completion / Checkpoint E
 
-**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b ✔ **MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16** (`pr_07b_tuner_policy.md`, child §14 is the ledger): C1–C6 = the frozen scope; **C7 / C7d** = the tuner node structural decomposition ADDED by operator scope amendment 2026-08-16 (main 7,430→1,473, `run()` 2,714→1,011, branch nodes 198→64, 12/12 behavioural surfaces deep-equal). Gate 1 PASS twice (pre- and post-refactor); **Gate 2 PASS** — NOT required by the frozen disposition, ADDED by the C7 amendment as structural-refactor regression evidence. Final executable head `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (docs/advice only in between); PR #216; exact-head CI **31989125173 SUCCESS**; clean tree. Deferred UNCHANGED by 07b: `memory.time_mode` coupling, `resolved_action` hazard, 07c's validation-time term · **trial/formal-identity correction** (no separate design doc; branch `step07-correction-trial-formal-identity`, base `48e9fb90`) — the `memory.time_mode` coupling is RESOLVED: role identity is `record.is_trial` alone, `memory.time_mode` stays timing metadata with unchanged population; `resolved_action` and 07c's validation-time term remain OPEN · 07c.**
+**Progress: PR0 ✔ MERGED (PR #214, `79403b44`, 2026-08-15) · 07a ✔ MERGED — PR #215, squash `65804b3d83d67eac5e8821f012bfb2f9f1fbffec` (`65804b3d`), 2026-08-16; final PR head `752f8f0e`, exact-head CI 31927638592 SUCCESS; parity `git diff 752f8f0e 65804b3d` empty (executable head `aee1e362`; Gate 2 PASS 2026-08-16; the watchdog / un-priced-validation finding is ADDED 07c scope, §8.4) · 07b ✔ **MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16** (`pr_07b_tuner_policy.md`, child §14 is the ledger): C1–C6 = the frozen scope; **C7 / C7d** = the tuner node structural decomposition ADDED by operator scope amendment 2026-08-16 (main 7,430→1,473, `run()` 2,714→1,011, branch nodes 198→64, 12/12 behavioural surfaces deep-equal). Gate 1 PASS twice (pre- and post-refactor); **Gate 2 PASS** — NOT required by the frozen disposition, ADDED by the C7 amendment as structural-refactor regression evidence. Final executable head `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (docs/advice only in between); PR #216; exact-head CI **31989125173 SUCCESS**; clean tree. Deferred UNCHANGED by 07b: `memory.time_mode` coupling, `resolved_action` hazard, 07c's validation-time term · **trial/formal-identity correction ✔ MERGED — PR #217, squash `a15d1366e5a86b1d3297cda65b0d3a5dfdb84a2e` (`a15d1366`), 2026-08-17** (no separate design doc, by operator instruction: the PR body, the node's public `.md` "Candidate role identity" and the PR handoff are the record; base `48e9fb90`; C1 `b661a964` executable + C2 `f804d3e6` docs; final PR head `f804d3e6`; exact-head CI **31995712890 SUCCESS**; parity `git diff f804d3e6 a15d1366` empty; full unit suite 9,824 passed / 3 skipped / 0 failed from a clean tree; Gate 1 and Gate 2 both NOT REQUIRED, decided separately with the assignment row quoted, no live Gate run and no time budget added to make anything pass) — the `memory.time_mode` coupling is RESOLVED: role identity is `record.is_trial` alone, `memory.time_mode` stays timing metadata with unchanged population; `resolved_action` and 07c's validation-time term remain OPEN · **NEXT = 07c** (the `resolved_action` hazard is NOT scheduled ahead of it — see §17.1).**
+
+### 17.1 `resolved_action` — OPEN, and deliberately not scheduled before 07c
+
+Operator decision, 2026-08-17. The `resolved_action` stale-attempt hazard
+(`nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`, recorded
+beside its declaration inside `run()`) is conceptually adjacent to the
+trial/formal-identity coupling just corrected — both are "a conditionally
+written piece of state that higher-level round logic reads as if it were
+current" — but it is a **different defect**, and adjacency is not a schedule.
+
+Do NOT open a follow-up correction PR for it merely because this work surfaced
+it. It gets picked up only if and when the roadmap places it, and it still
+requires the operator decision its note names (what the intended round outcome
+IS in the crash-after-a-scored-attempt case).
+
+The next milestone is **07c**. A fresh session must re-confirm that from the
+merged roadmap and current-state documents, not from the conversation that
+produced this correction.
 
 Step 07 is COMPLETE when PR0, 07a, 07b, 07c are merged with Checkpoints
 0/A/B/C/D each, the required Gates PASSED at the assembled heads (07a G2,

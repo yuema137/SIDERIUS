@@ -1129,9 +1129,13 @@ reachability claims about the run loop.
   without `--trial_time_budget_minutes` / `--formal_time_budget_minutes` the
   two-field winner rule is unsatisfiable and the skip gate takes its
   "no evidence" branch.~~ **RESOLVED** by the Step 07 trial/formal-identity
-  correction — see "Candidate role identity" below.
+  correction — PR #217, squash `a15d1366`, 2026-08-17. See the
+  "Candidate role identity" section above.
 * The `resolved_action` round-scoped staleness hazard — recorded beside its
-  declaration in `run()`.
+  declaration in `run()`. Still OPEN, and deliberately **not** scheduled ahead
+  of 07c (operator decision 2026-08-17): it is conceptually adjacent to the
+  coupling fixed by #217 but is a different defect, and it still needs the
+  operator decision its own note names.
 * 07a's validation pass is missing from the watchdog deadline prediction
   (`T_deadline` needs a `T_val` term) — ADDED 07c scope. Until 07c lands,
   `--runtime_watchdog`-enabled real campaigns are not a reliable configuration.
