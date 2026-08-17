@@ -10,7 +10,7 @@
 | Gates (ORIGINAL, frozen 2026-08-15) | Gate 1 **REQUIRED, ≥ 2 rounds** (P3 changes LLM-facing SYSTEM prompt bytes; parent §11 row 07b; OD-20-6) · Gate 2 **NOT REQUIRED** (no execution-launch change; flip: any training/inference/scoring launch or execution change → Gate 2) |
 | Gates (as RUN) | Gate 1 **PASS** twice — pre-refactor §14.6b, post-refactor §14.11 · Gate 2 **PASS** §14.13. Gate 2 was NOT required by the frozen disposition above and was not triggered by its flip; it was **ADDED by the operator C7 scope amendment (2026-08-16)** as regression evidence that the structural decomposition preserved the real execution path. The original disposition is preserved above exactly as frozen. |
 | Design status | **FROZEN — OPERATOR APPROVED 2026-08-15 — Revision 2.** Revision 1 reviewed (APPROVE WITH TARGETED REVISION); revision 2 applied the three blockers (unified bridge / WF contract, `MetricOrder` complete API + signed-delta semantics, reflector diagnosis-only transport) and three corrections (Checkpoints B / D explicit, Gate-1 posture frozen from source with the rounds-vs-iterations distinction and the "executed" definition, B-07b-2 without task-type phrasing) plus one final non-architectural consistency pass at freeze (§3.1 file-table wording; §7 / §10 Gate-1 round-vs-iteration wording); §16 records the operator's dispositions of Q-07b-1..9.
-| Implementation status | **COMPLETE — READY FOR OPERATOR REVIEW (2026-08-16).** C1–C6 landed the frozen 07b scope; **C7 / C7d** (tuner node structural decomposition) were ADDED by operator scope amendment 2026-08-16 and are recorded in §14.9–§14.9.5. §14 is the ledger and is populated end to end (§14.0–§14.13). Final **executable** HEAD `cb1a885a`; final **PR** HEAD `307fa0ce917c0afbd6ee5425fae7ef902b267019` — everything between the two is documentation and gate-advice JSON only, no executable production change. PR **#216**; exact-head CI **31989125173 SUCCESS** (ruff · ruff format · pyright strict · pytest); clean tree. Terminal validation at `cb1a885a`: 9,787 passed / 3 skipped / 0 failed from a clean tree. **Not merged** — merge is the operator's. |
+| Implementation status | **MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16. 07b COMPLETE.** C1–C6 landed the frozen 07b scope; **C7 / C7d** (tuner node structural decomposition) were ADDED by operator scope amendment 2026-08-16 and are recorded in §14.9–§14.9.5. §14 is the ledger and is populated end to end (§14.0–§14.14). Final **executable** HEAD `cb1a885a` (terminal validation there: 9,787 passed / 3 skipped / 0 failed, full `tests/unit` from a clean tree); final **PR** HEAD `f5cd1193d556f358388b09ce804ecd1c2b3f39c2` — everything between the two is documentation and gate-advice JSON only, no executable production change. Exact-head CI **31991133736 SUCCESS** (ruff · ruff format · pyright strict · pytest); the preceding code head `307fa0ce` was green at **31989125173**. |
 
 `[ ]` = not done · `[x]` = done **and** verified with recorded evidence.
 
@@ -2633,7 +2633,7 @@ semantic defect was fixed.**
 | Exact-head CI | **31989125173 SUCCESS** — ruff · ruff format · pyright (strict, blocking) · pytest |
 | Working tree | clean |
 | Terminal validation | 9,787 passed / 3 skipped / 0 failed, full `tests/unit` from a clean tree at `cb1a885a` |
-| Merge | **NOT merged.** Merge is the operator's. |
+| Merge | **MERGED** — squash `9ea3755f`, 2026-08-16, operator-approved. |
 
 #### Preserved evidence — do not rewrite or delete
 
@@ -2674,6 +2674,23 @@ to touch. None was modified by the decomposition, and none is modified here:
 > round-state semantics correction PR.
 
 ---
+
+#### Next: the Step-07 round-state semantics correction (operator, at merge)
+
+Scoped deliberately narrow, and recorded here so the next session inherits the
+boundary rather than re-deriving it:
+
+```text
+source-audit the authority relationship between
+    plan.is_trial  ·  record is_trial  ·  memory.time_mode  ·  _best_trial_winner
+        v
+regression-first minimal semantic correction:
+    decouple trial/formal IDENTITY from the time-budget machinery
+```
+
+**Explicitly NOT in that PR**: the `resolved_action` stale-attempt hazard, and
+anything belonging to 07c. Both stay deferred as recorded in §14.14.
+
 
 ## 15. Commit plan — per-commit checklists
 

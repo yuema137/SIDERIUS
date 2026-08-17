@@ -662,8 +662,10 @@ TIDMAD's `network.py:FocalLoss1D`.
   (`tests/unit/nodes/test_node_public_boundary.py`): never import a node's
   private modules from outside it, and stub internals on the module that CALLS
   them (`_run_skill` → `runtime`, `_emit_record` → `records`).
-  **07b STATUS: implementation COMPLETE, READY FOR OPERATOR REVIEW 2026-08-16,
-  NOT MERGED.** Gate 1 PASS twice (pre-/post-refactor); Gate 2 PASS — the latter was
+  **07b MERGED — PR #216, squash `9ea3755fb36b916bdca5113471fb5cd74d856335` (`9ea3755f`), 2026-08-16. COMPLETE.**
+  NEXT = the Step-07 round-state semantics correction (decouple trial/formal
+  identity from the time-budget machinery; regression-first; NOT `resolved_action`,
+  NOT 07c). Gate 1 PASS twice (pre-/post-refactor); Gate 2 PASS — the latter was
   NOT required by the frozen 07b disposition and was ADDED by the C7 operator scope
   amendment as structural-refactor regression evidence. Final executable head
   `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (documentation
