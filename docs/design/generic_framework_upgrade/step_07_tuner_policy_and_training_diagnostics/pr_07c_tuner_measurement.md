@@ -1,6 +1,18 @@
 # Step 07 — PR 07c: Measurement / verification data feeding, and pricing the validation pass
 
-**STATUS — DRAFT revision 1, FOR OPERATOR REVIEW. Not frozen. No code written.**
+**STATUS — revision 2, FOR OPERATOR REVIEW. Not frozen. No code written.**
+
+> **Revision 2 (2026-08-17)** applies the operator's review of revision 1
+> (*APPROVE WITH TARGETED REVISION — NOT YET FREEZE*): the five blockers
+> (§2a three-track progressive validation matrix · Q-07c-5 → BOTH plus the
+> cold-start temporal test · Q-07c-6 parent reconciliation · a
+> counterfactual-**discriminative** Gate 2 · C6's sample-identity /
+> partial-batch / all-envelope coverage with source-grounded provenance) and
+> the four targeted corrections (C1 fixture SKIP→FAIL · C2 bounded-read vs
+> peak-RSS wording · Gate-1 schema wording · the open-question count).
+> All eight open questions now carry an operator disposition; §16 records
+> **three revision-2 findings that change the plan**, each with source
+> evidence.
 
 | | |
 |---|---|
@@ -9,11 +21,12 @@
 | Source audit base | `ad176036` (master, clean tree, 2026-08-17) |
 | Prerequisites | all merged: PR0 `79403b44` · 07a `65804b3d` · 07b `9ea3755f` · correction `a15d1366` |
 | Gates | Gate 1 **NOT REQUIRED** · Gate 2 **REQUIRED, bounded, once at the final executable head** (parent §11 row 07c) |
-| Open questions | **§16 — Q-07c-1 … Q-07c-8, seven of which are BLOCKING.** Three were surfaced by the audit and are NOT anticipated by the parent |
+| Open questions | **§16 — Q-07c-1 … Q-07c-8 all dispositioned by the operator in rev 2; Q-07c-9 ADDED by rev 2.** Two remain open and BLOCK freeze: **Q-07c-6** (admission contract vs the parent) and **Q-07c-9** (clamp provenance) |
 
-> **Reviewer's shortcut.** If you read only two sections, read **§16** (the
-> open questions — three of them change the commit plan) and **§15** (the
-> per-commit checklists). §0 is the evidence everything else stands on.
+> **Reviewer's shortcut.** If you read only three sections, read **§2a** (the
+> three-track validation matrix, new in rev 2), **§16** (dispositions + the
+> three rev-2 findings) and **§8** (the per-commit checklists). §0 is the
+> evidence everything else stands on.
 
 ---
 
@@ -248,7 +261,14 @@ change scoring, and does not change the pure per-optimizer-step cost model
   Q-07c-6 disposes for the deadline.
 - 07a's training ACTUAL stays validation-EXCLUSIVE. The fix is one layer up.
 - Planner exposure and production defaults: every new field defaults to
-  parity-preserving `None`.
+  parity-preserving `None`. `validation_max_samples` is an operator/runtime
+  input, never planner-visible (§4).
+- **Pets / DAVIS execution maturity.** §2a.2's obligations read only their
+  DECLARED artifacts. No dataset adapter, no `DatasetProfile`, no download,
+  no `STATUS.md` change. That is D14.
+- 07a's exact-validation-scope invariant (`validation_samples ==
+  validation_requested_samples`) is never relaxed; C6 clamps the REQUESTED
+  scope instead.
 - The measurement path's file selection is scope-unaware today (it globs and
   takes the first). 07c preserves that; making measurement DataScope-aware is
   not in this PR.
@@ -262,14 +282,107 @@ clarity. C5 independent of C2–C4 (different subsystem). C6 → C5. C7 → all.
 
 ---
 
+## 2a. Three-track progressive validation matrix (NEW in rev 2 — operator blocker 1)
+
+Revision 1 validated on TIDMAD (production) plus the Step-02 synthetic
+contrast profile (atomic axis) and mentioned neither persistent track. That
+is a gap against the persistent-track philosophy: a synthetic 3-file fixture
+proves the builder *reads* the profile; it does not prove the abstraction
+holds for data that is not TIDMAD-shaped.
+
+**07c does NOT run Pets or DAVIS end to end.** That is D14. What 07c does is
+extend them to *exactly the seam this PR touches* — the rule being "the
+persistent tracks are tested as far as the refactor has reached, and no
+further".
+
+```text
+        ┌────────────────────────────────────────────┐
+        │ LAYER 1 — atomic single-axis isolation     │
+        │ Step-02 3-file contrast profile (4.8-B)    │
+        │ one axis moves → bytes move                │
+        │ builder ignores profile → RED              │
+        └───────────────────┬────────────────────────┘
+                            ▼
+        ┌────────────────────────────────────────────┐
+        │ LAYER 2 — persistent three-track breadth   │
+        │ TIDMAD → executable measurement            │
+        │ Pets   → current-maturity capability       │
+        │ DAVIS  → current-maturity capability       │
+        │ no invented D14 execution                  │
+        └───────────────────┬────────────────────────┘
+                            ▼
+        ┌────────────────────────────────────────────┐
+        │ LAYER 3 — real production execution        │
+        │ TIDMAD Gate 2, watchdog ON,                │
+        │ counterfactual-discriminative              │
+        └────────────────────────────────────────────┘
+```
+
+### 2a.1 What each track is tested to, and why that is its ceiling
+
+Audited maturity at this base (`ls examples/*/declared/`):
+
+| Track | Landed artifacts | Has a `DatasetProfile`? |
+|---|---|---|
+| TIDMAD | full production path, `examples/tidmad/resolved/` | **yes** — the shipped `TIDMAD` profile |
+| Oxford-IIIT Pet | `declared/model_io_contract.json`, three metric declarations, L1 fixtures | **no** |
+| DAVIS | `declared/model_io_contract.json`, three metric declarations, L1 fixtures | **no** |
+
+That table decides the matrix. A commit whose input is a `DatasetProfile`
+cannot be exercised by Pets/DAVIS without inventing one — which §22.23
+forbids. A commit whose input is a `ModelIOContract` **can** be, today,
+because both tracks have declared one.
+
+| Commit | Its task-derived input | TIDMAD | Pets | DAVIS |
+|---|---|---|---|---|
+| C2 builder | `DatasetProfile` | byte parity, real profile | — *(no profile until D14)* | — *(no profile until D14)* |
+| C2 axis | contrast profile | Layer-1 fixture | — | — |
+| **C3 dtype** | **`ModelIOContract`** | byte parity | **REQUIRED — declared contract resolves a dtype** | **REQUIRED — declared contract resolves a dtype** |
+| **C4 capability** | task capability resolver | available | **REQUIRED — explicit unavailability** | **REQUIRED — explicit unavailability** |
+| C5/C6 validation pricing | runtime evidence, task-agnostic | full | — *(no execution)* | — *(no execution)* |
+| C7 Gate 2 | real execution | **PASS required** | — | — |
+
+### 2a.2 The Pets / DAVIS obligation, stated exactly
+
+**C3 (breadth of the dtype authority).** Load
+`examples/{oxford_iiit_pet,davis_future_prediction}/declared/model_io_contract.json`,
+pass each to `resolve_input_dtype`, and assert the resolved concrete dtype is
+the one the contract's declared admissibility implies — **not** TIDMAD's.
+DAVIS is the valuable case: RGB `[C,T,H,W]` float, the furthest thing from
+int8 ADC codes. If the dtype path has a hidden TIDMAD assumption, this is
+where it shows. No data is read and no model is built.
+
+**C4 (breadth of capability resolution).** For each track, resolve the
+measurement capability and assert the honest current answer:
+
+```text
+ResolvedMeasurementCapability(
+    task_identity        = <the track's own identity>,
+    probe_available      = False,          # correct before D14
+    unavailability_reason = <task-owned, non-empty, names the task>,
+)
+```
+
+**An explicit `False` with a task-owned reason is a PASS, not a gap.** The
+failure this catches is the one `measurement_capability.py:1-30` was written
+for: generic infrastructure deciding availability from a TIDMAD-specific
+fallback and going quiet. The assertion is on the *reason*, never on the
+boolean alone.
+
+**Forbidden in 07c**: fabricating a JPEG/video dataset adapter, inventing a
+`DatasetProfile` for either track, or downloading data. If a test needs any
+of those, it belongs to D14 and is out of scope.
+
+---
+
 ## 3. Checkpoints (parent §8.4, item by item)
 
 | Checkpoint | Content | Commit |
 |---|---|---|
 | **0** | extend `test_gpu_measurement_data.py`'s byte-identity oracle to the new builder; verify the PR-G identity/hash/key pins green BEFORE editing | C1 |
 | **A** | batches byte-identical under TIDMAD; identity components, `candidate_config_hash`, planned + inference workload hashes, `calibration_key`, `data_shape_class` exact string unchanged; store readable unchanged; RT admission/verification unchanged | C2–C4 |
-| **B** | **B-07c-1** — Step-02 3-file contrast profile (4.8-B geometry) with a non-int8 / other-channel declaration → **different bytes**, while identity keys and comparability stay byte-stable, asserted in ONE test so the axis is provably single | C7 |
-| **C** | production pre-phase measurement builds its batch from the profile in a real run — **Gate 2, bounded** | C7 |
+| **B** | **B-07c-1** — Step-02 3-file contrast profile (4.8-B geometry) with a non-int8 / other-channel declaration → **different bytes**, while identity keys and comparability stay byte-stable, asserted in ONE test so the axis is provably single. **Rev 2: this is Layer 1 only.** Layer 2 (persistent three-track breadth — Pets/DAVIS at current maturity) is added by §2a and lands in C3 + C4 | C3, C4, C7 |
+| **C** | production pre-phase measurement builds its batch from the profile in a real run — **Gate 2, bounded, watchdog ON, and counterfactual-discriminative (§4.1)** | C7 |
 | **D** | delete-the-hop (builder ignores the profile → contrast rung RED); dtype-branch reintroduction → guard RED; `TIDMAD_DATA_DIR` import inside `core/runtime_control/` → guard RED; reachability: worker AND probe path both call the one builder | C2–C4, C7 |
 
 ---
@@ -279,24 +392,69 @@ clarity. C5 independent of C2–C4 (different subsystem). C6 → C5. C7 → all.
 Quoted from `docs/gates/gate_testing_standard.md` at this base, decided
 separately (roadmap §17.0).
 
-**Gate 1 — NOT REQUIRED.** Trigger is "a commit that changes an LLM-facing
-system prompt or schema"; 07c changes neither. Flip condition: none expected.
+**Gate 1 — NOT REQUIRED.** Corrected in rev 2: 07c **does** change a Pydantic
+schema — C6 adds `validation_max_samples` to `HyperparamTuningInput`. The
+standard's trigger is an **LLM-facing** prompt or schema, and this field is
+never serialized into, nor expected from, an LLM-facing boundary: it is an
+operator/runtime input. Saying "07c changes no schema" (rev 1) was literally
+false and is replaced by:
+
+> 07c changes an operator/runtime Pydantic schema, but no schema serialized
+> into or expected from an LLM-facing boundary, and no prompt byte.
+
+Evidenced, not asserted: the existing PB-1/PB-2 and WF-1/WF-2 goldens must
+remain byte-identical (C6 acceptance). **Flip condition**: the field becomes
+planner-visible, or any prompt byte moves.
 
 **Gate 2 — REQUIRED, bounded, once, at the final executable head.** Table row
 *"Checkpoint (end of feature) | Gate 2"*, and §17 names §7e among the modules
 that change real execution behaviour. The measurement **is** real execution:
-no pseudo path exercises a profile-built batch on a device. PASS = functional
-— a measured admission reached from a profile-built batch, per the standard's
-functional criteria. Corpus: TIDMAD.
+no pseudo path exercises a profile-built batch on a device. Corpus: TIDMAD.
 
-**Gate 2 and the watchdog debt this PR is fixing.** The standard's current
-posture (§"If a Gate omits `--runtime_watchdog`…") permits omitting the
-watchdog together with `--validation_max_phase_seconds`. Whether 07c's Gate 2
-must run **with** the watchdog enabled — to demonstrate the very fix — is
-**Q-07c-7**.
+### 4.1 Gate 2 must be DISCRIMINATIVE, not merely green (rev 2 — operator blocker 4)
 
-**Not launched without operator approval.** No live Gate is run at design
-time, and none before C7.
+Rev 1's PASS criterion was the standard's functional one: the real path
+executed and admission was reached from a profile-built batch. **For a PR
+whose purpose is fixing watchdog accounting that is not sufficient** — a run
+where the model simply happened to be fast would pass it even if C5 were
+entirely absent.
+
+Gate 2 must therefore establish the counterfactual, computed from artifacts
+the run already persists:
+
+```text
+T_old   = Σ(training component predictions) × watchdog_factor     ← pre-07c deadline
+T_new   = Σ(training + validation predictions) × watchdog_factor  ← 07c deadline
+T_act   = training actual + Σ validation_seconds                  ← what the phase really cost
+
+PASS requires BOTH:
+    T_old  <  T_act        the old deadline WOULD have been insufficient
+    T_act  ≤  T_new        the new deadline WAS sufficient
+```
+
+All three are recomputable from the persisted `runtime_verification` sidecar
+block (component predictions + `record_phase_actual`) and 07a's
+`TrainingHistory.validation_seconds` — verified present at this base, so **no
+new recording is required**.
+
+**The C6 trap, stated explicitly.** `validation_max_samples` can make the
+Gate self-defeating: clamp validation hard enough and `T_old ≥ T_act`, so the
+Gate passes with C5 reverted. The Gate's bounded validation workload must
+stay large enough that the recorded `T_old` **would have been insufficient**.
+This does not require burning wall time — it requires that `N_val` not be
+clamped below the point where the counterfactual separates. If the run
+produces `T_old ≥ T_act`, the Gate is **INCONCLUSIVE, not PASS**, and is
+re-run with a larger validation workload.
+
+Functional criteria from the standard still apply on top (chain exits 0, real
+candidate registered, real training/inference/scoring executed, finite score,
+`gate_action` recorded). Posture: watchdog **ON**, `--validation_max_phase_seconds`
+**omitted** — per Q-07c-7 — so the enforced deadline is the priced prediction
+rather than a flat fuse that would mask it.
+
+**Not launched without operator approval.** No live Gate at design time, none
+before C7.
+
 
 ---
 
@@ -305,15 +463,24 @@ time, and none before C7.
 Parent §8.4's, plus what the audit adds:
 
 - any identity hash or store key would change;
-- the bounded-RSS property cannot be kept;
+- the bounded-READ property cannot be kept;
 - a batch fact is not derivable from profile + contract;
-- **the guard extension cannot be scoped without either an exclusion list or
-  an unrelated refactor** (Q-07c-3);
-- **pricing validation cannot be done without changing admission verdicts**
-  and the operator has not authorized that (Q-07c-6);
+- **promoting the constructor introspection to a shared owner pulls a large
+  API refactor** (Q-07c-3 — the operator's explicit STOP);
+- the parent's admission clause and the implementation cannot be reconciled
+  (Q-07c-6);
 - `RuntimePhase` extension would change an existing store key or identity;
-- the validation term cannot become measurement-backed, so C8d leaves it inert
-  and the fix is cosmetic (Q-07c-5).
+- the validation term cannot become measurement-backed, so C8d leaves it
+  inert and the fix is cosmetic;
+- **the cold-start temporal test cannot be satisfied** — the refreshed
+  deadline is not visible before the stale training-only one fires;
+- the clamp cannot be applied to the REQUESTED scope, so 07a's
+  exact-materialization invariant would have to be relaxed (never relax it —
+  that guard is 07a's frozen contract);
+- **Gate 2 cannot be made discriminative** within the bounded envelope
+  (`T_old ≥ T_act` however the validation workload is sized);
+- a Pets/DAVIS obligation in §2a.2 would require inventing a
+  `DatasetProfile`, a dataset adapter, or downloading data — that is D14.
 
 ---
 
@@ -390,8 +557,13 @@ yet. No dependencies.
 - [ ] Every enumerated pin test passes, listed by id with counts.
 - [ ] Deliberately corrupting one fixture byte turns the oracle RED (recorded).
 
-**6. Failure and edge cases.** Fixture absent → the test must SKIP with a
-named reason, never silently pass. Fixture too small for `batch×seg` → the
+**6. Failure and edge cases.** Fixture absent → **FAIL with a named message**
+(corrected in rev 2; rev 1 said SKIP). This is the Checkpoint-0 byte oracle
+and the fixture is committed and machine-independent, so its absence means the
+oracle is not running — and a skipped oracle would let every later commit
+report green with the one measurement that matters missing. SKIP is reserved
+for genuinely external, non-portable resources (a GPU, the real dataset);
+a committed fixture is neither. Fixture too small for `batch×seg` → the
 existing `RuntimeError` path is asserted, not worked around.
 
 **7. Verification commands and evidence.**
@@ -462,8 +634,16 @@ awareness; the evidence model's shape. Depends on C1.
       fact that a profile was passed**.
 - [ ] The **file actually opened** equals C1's recorded filename (asserted from
       `BoundedReadEvidence.source_file`, not from the config).
-- [ ] Peak host RSS during a builder call stays bounded — asserted via
-      `bytes_read` ≪ `file_sample_count`, with the ratio recorded.
+- [ ] **The bounded-READ property is preserved** (renamed in rev 2; rev 1
+      called this "peak host RSS stays bounded", which `bytes_read` does not
+      prove — a small read says the materialized HDF5 data is bounded, not
+      that process RSS is). Asserted as: `bytes_read == batch_size ×
+      segment_length × itemsize` **exactly**, `bytes_read ≪ file_sample_count`
+      with the ratio recorded, and no `np.array(channel)`-shaped whole-channel
+      materialization anywhere in the builder (source assertion). A real peak-RSS
+      measurement would need a subprocess and is deliberately not used: it is
+      not portable, and the exact-slice assertion is the stronger, cheaper
+      statement about this seam.
 - [ ] `grep -rn "channel0001\|channel0002\|abra_training_\|+ 128" core/runtime_control/ execute_tools/probe_*.py` returns nothing in live code.
 - [ ] Exactly one builder is called by both paths (reachability test named).
 - [ ] All PR-G pins green.
@@ -516,8 +696,12 @@ inference dtype (**Q-07c-8**). Depends on C2.
       = Regime-A) and thread it through spec construction and worker parse.
 - [ ] Replace `:287` with `resolve_input_dtype(model_type, contract,
       site_preference=<per Q-07c-8>)`.
-- [ ] Dispose `:235` per Q-07c-3 (leave, or move signature introspection to a
-      shared authority and use it).
+- [ ] Eliminate `:235` too (Q-07c-3 DISPOSED: (a)) — promote the signature
+      introspection at `agent/skills/training_skill/estimator.py:295-321` to a
+      shared owner and call it here. **Not** an inline copy, and **not**
+      leaving the branch behind a narrowed guard. **STOP and re-evaluate as a
+      defer if promotion pulls a large API refactor** (operator's explicit
+      condition).
 - [ ] Extend the guard's `_SCAN_TARGETS` to the measurement files chosen in
       Q-07c-3 — **not** the whole `core/runtime_control/` directory (see the
       failure table).
@@ -526,6 +710,11 @@ inference dtype (**Q-07c-8**). Depends on C2.
 **4. Validation plan.**
 - Unit: dtype matrix — every builtin × phase → the recorded pre-change dtype.
 - Unit: contract present vs `None` (Regime-A) → same dtype under TIDMAD.
+- **Unit (three-track breadth, §2a.2 — REQUIRED):** load Pets' and DAVIS'
+  `declared/model_io_contract.json` and assert `resolve_input_dtype` returns
+  the dtype each contract's declared admissibility implies, **not** TIDMAD's.
+  DAVIS (RGB float, `[C,T,H,W]`) is the discriminating case. No data read, no
+  model built, no execution maturity added.
 - Negative: a contract admitting no runtime-supported dtype →
   `UnsupportedModelInputDtypeError`, fail closed, not a silent coercion.
 - Negative (Checkpoint D): reintroduce `if model_type == "fcnet"` in a scanned
@@ -537,6 +726,8 @@ inference dtype (**Q-07c-8**). Depends on C2.
 - [ ] For every builtin and both phases, the concrete dtype fed to the forward
       is **identical** to the pre-change table, asserted per row.
 - [ ] `fcnet` → `float32` **with and without** a transported contract.
+- [ ] Pets and DAVIS contracts each resolve to their own declared dtype;
+      neither resolves to TIDMAD's, and neither raises.
 - [ ] Batch sha256 unchanged from C1's golden.
 - [ ] No `model_type ==` string comparison remains in the scanned measurement
       files (asserted by the guard, with the mutation proof recorded).
@@ -550,7 +741,8 @@ inference dtype (**Q-07c-8**). Depends on C2.
 | contract ∩ runtime-supported = ∅ | STOP, typed error |
 | plugin model with no declaration | site preference, exactly as today |
 | guard pointed at the whole directory | **fails on `campaign.py`'s legitimate `"family": "wavenet"` config data** — the guard must target files, not the directory |
-| `:235` left in place | the guard must not be pointed at a file that still contains it, or the commit is red by construction |
+| `:235` left in place | not an option in rev 2 (Q-07c-3 = (a)); if it cannot be eliminated, STOP rather than narrow the guard around it |
+| introspection promotion pulls a large refactor | STOP and re-evaluate scope — do not inline a private copy |
 
 **7. Verification commands and evidence.**
 ```bash
@@ -570,8 +762,25 @@ changes (C2), no capability routing (C4).
 
 **1. Goal.** Remove the last two `TIDMAD_DATA_DIR` imports from generic
 infrastructure by routing them through the task-owned
-`ResolvedMeasurementCapability` the caller already holds, so the measured
-path does not disable itself on a non-TIDMAD task.
+`ResolvedMeasurementCapability` the caller already holds.
+
+**Precisely what is claimed (corrected in rev 2).** Rev 1 said "non-TIDMAD
+task → measurement no longer silently disables itself — the point of the
+commit". That over-claims: before D14, `probe_available=False` is still the
+CORRECT answer for Pets and DAVIS. The honest claim is about *who decides and
+whether they say why*:
+
+```text
+BAD  (today):   non-TIDMAD → core sees no TIDMAD_DATA_DIR → silently unavailable
+GOOD (07c):     non-TIDMAD → task capability resolver
+                           → available, OR explicitly unavailable
+                             for a task-owned, stated reason
+```
+
+Generic runtime-control no longer decides measurement availability from a
+TIDMAD-specific fallback. Availability is decided by the task-owned
+`ResolvedMeasurementCapability`, whose schema already refuses
+`probe_available=False` with no reason.
 
 Separate commit: it changes *availability decisions and their reasons*, not
 bytes. A failure here looks nothing like a batch regression.
@@ -597,6 +806,13 @@ changing what `probe_available=False` does downstream. Independent of C2/C3.
 - Unit: available → same `(True, path)` verdict and same bootstrap step
   outcome as today.
 - Unit: unavailable → `ok=False` and a remedy that **names the reason**.
+- **Unit (three-track breadth, §2a.2 — REQUIRED):** resolve the measurement
+  capability for Pets and for DAVIS and assert the honest current answer —
+  `probe_available=False` with a non-empty, task-owned
+  `unavailability_reason` naming that task. An explicit `False` with a reason
+  is a PASS. The assertion is on the REASON and the task identity, never on
+  the boolean alone; asserting only `False` would pass equally for the silent
+  TIDMAD fallback this commit removes.
 - Negative (Checkpoint D): reintroduce the import → guard RED (mutation
   recorded).
 - Backward-compat: bootstrap step names, order and pass/fail unchanged on a
@@ -617,7 +833,7 @@ changing what `probe_available=False` does downstream. Independent of C2/C3.
 |---|---|
 | capability unavailable | bootstrap FAILS as today, with a better reason — not a warning |
 | caller holds no capability | STOP and report: this contradicts `measurement_capability.py`'s premise that every caller already holds the values |
-| non-TIDMAD task | measurement no longer silently disables itself — the point of the commit |
+| non-TIDMAD task (Pets / DAVIS, pre-D14) | `probe_available=False` is CORRECT; what changes is that a task-owned resolver says so with a reason, instead of generic code inferring it from an absent TIDMAD path |
 | `data_dir` explicitly supplied | highest precedence, unchanged |
 
 **7. Verification commands and evidence.**
@@ -632,9 +848,10 @@ pytest tests/unit/core/ -k "bootstrap or capability or probe" -q
 
 ### C5 — Price the validation pass in the runtime model (ADDED SCOPE, root fix)
 
-> **BLOCKED on Q-07c-4, Q-07c-5, Q-07c-6.** The checklist below is written
-> against the *preferred* answers and must be re-cut if the operator decides
-> otherwise. Do not start C5 before they are disposed.
+> **Rev 2: Q-07c-4 and Q-07c-5 are DISPOSED** (new `RuntimePhase="validation"`;
+> BOTH evidence sources). The checklist is re-cut against those answers.
+> **Q-07c-6 (admission) remains BLOCKING** — it is a contract question against
+> the parent, not an implementation choice; see §16.
 
 **1. Goal.** Make `T̂_val` a real term so the watchdog deadline covers work the
 attempt actually performs. Fixes the 07a Gate-2 finding: 3 of 4 attempts
@@ -653,15 +870,26 @@ verdicts unless Q-07c-6 authorizes it. Independent of C2–C4.
 **3. Implementation plan.**
 - [ ] Record the pre-change deadline for a fixed synthetic sidecar as the
       parity baseline (`(deadline, source)` pairs across candidate sets).
-- [ ] Implement the validation component per Q-07c-4 (new `RuntimePhase`
-      preferred: the deadline then sums it with **no arithmetic change**).
-- [ ] Route 07a's `validation_seconds` / `validation_samples` into the session
-      as the phase ACTUAL + unit count, so `realized_unit_ms` is
-      `seconds ÷ samples`.
-- [ ] Establish the first prediction per Q-07c-5 (in-subprocess measurement of
-      the first validation batch is preferred — it mirrors RT2's "verification
-      = the first production steps" and is measurement-backed, so C8d admits
-      it).
+- [ ] Add `"validation"` to `RuntimePhase` / `RUNTIME_PHASES` (Q-07c-4
+      DISPOSED: yes). The deadline then sums it with **no arithmetic change**.
+- [ ] **BOTH evidence sources (Q-07c-5 DISPOSED: (c)), and they are not
+      redundant — they serve different runs:**
+      - [ ] **first validation batch, measured in-subprocess** → a
+            measurement-backed prediction that protects **THIS** run (C8d
+            admits it; a static prior would be inert);
+      - [ ] **full-pass actual** from 07a's `validation_seconds` /
+            `validation_samples`, recorded as the phase ACTUAL + unit count so
+            `realized_unit_ms = seconds ÷ samples` calibrates **FUTURE** runs.
+- [ ] **Cold-start temporal wiring (rev-2 blocker 2).** Determine from source
+      whether `_watchdog_deadline_provider`'s deadline is compared against
+      elapsed-from-process-start or remaining-from-now
+      (`sandbox_executor.py:952-953` compares `elapsed <= deadline`), and make
+      the validation term obey that SAME convention. Record the convention in
+      the docstring — it is currently implicit.
+- [ ] Ensure the first validation batch's cost is counted **exactly once**:
+      it is both the measurement and real elapsed work.
+- [ ] Ensure the refreshed deadline becomes visible to the provider **before**
+      the old training-only deadline would fire in the 07a failure regime.
 - [ ] Confirm from source that the deadline arithmetic needs **no** edit if
       the component exists; if an edit is needed, state exactly why.
 - [ ] Assert `T_deadline` grows by the validation term and by nothing else.
@@ -678,6 +906,32 @@ verdicts unless Q-07c-6 authorizes it. Independent of C2–C4.
 - Unit: the training ACTUAL still excludes validation seconds (07a parity).
 - Unit: `calibration_key` for existing phases unchanged; the validation key is
   a NEW namespace.
+- **Unit — COLD-START TEMPORAL UPDATE (rev-2 blocker 2, the invariant rev 1
+  was missing).** Rev 1 proved only that a validation prediction eventually
+  appears in the sidecar. That is not enough: if the term arrives late, or is
+  expressed in the wrong clock convention, the process is killed by the stale
+  training-only deadline before the fix can apply, and the suite is still
+  green. Drive the provider across the real sequence with a controlled clock:
+
+  ```text
+  t = 0        watchdog begins, sidecar has training components only
+               → deadline == the OLD training-only value  (asserted)
+  training runs
+  validation batch 1 completes, its measurement lands in the sidecar
+               → provider refreshes
+               → deadline == the expected TOTAL-allowed wall time under the
+                 provider's actual clock convention  (asserted numerically)
+  ```
+
+  Three assertions, each naming a distinct defect:
+  1. the updated deadline represents the intended total allowed wall time
+     under the provider's real convention — catches an elapsed-vs-remaining
+     mix-up;
+  2. the first validation batch's cost appears **exactly once** — catches
+     double-counting it as both measurement and elapsed work;
+  3. the refreshed deadline is visible **strictly before** the old
+     training-only deadline would have fired, replaying the 07a regime
+     (9 s train / 26.45 s validate) — catches "correct but too late".
 - Pseudo: a bounded pseudo training run emits a validation component with a
   finite actual.
 - Negative: zero validation samples, `None` evidence, validation disabled →
@@ -706,7 +960,8 @@ verdicts unless Q-07c-6 authorizes it. Independent of C2–C4.
 
 | Case | Behaviour |
 |---|---|
-| first attempt, no prior | per Q-07c-5. If the term cannot be measurement-backed, C8d ignores it and the watchdog can still kill inside validation — this must be stated, not hidden |
+| first attempt, no prior | covered by the first-batch measurement (Q-07c-5 = BOTH). Residual window: the run is unpriced from process start until validation batch 1 completes — **stated, not hidden**, and bounded by the temporal test above |
+| deadline convention mismatch | STOP — the deadline is meaningless if elapsed and budget disagree on their origin |
 | validation disabled / R3 absent | no term; deadline exactly as today |
 | `validation_samples == 0` | no term; never a division by zero |
 | evidence present but `validation_seconds` empty | treated as absent |
@@ -752,8 +1007,48 @@ changing `validation_max_portion` / `validation_max_train_samples` /
 - [ ] Add the CLI flag, forwarded like its siblings.
 - [ ] Ensure clamping, never rejection (the standard's distinction between a
       sizing mechanism and a rejection guard).
-- [ ] Record the clamp in `TrainingHistory` provenance so a clamped run is not
-      mistaken for a full one.
+- [ ] **Clamp the REQUESTED SCOPE, never the materialized rows** — see the
+      rev-2 finding below. The ceiling must apply where the validation
+      SampleSet is BUILT, so `requested == materialized == min(natural,
+      ceiling)`.
+- [ ] Decide and record the comparability consequence (rev-2 finding, below).
+
+> **REV-2 FINDING — post-materialization truncation is ILLEGAL, and
+> "provenance" was an abstract bag.** Rev 1 said "record the clamp in
+> `TrainingHistory` provenance" while also listing record schemas as a
+> non-goal. Source-grounding that (operator correction) found something
+> stronger than a wording problem:
+>
+> ```python
+> execute_tools/training_history.py:206-211
+> if self.validation_samples != self.validation_requested_samples:
+>     raise ValueError(... "the declared validation scope must
+>                           materialize exactly (design §3.4b)")
+> ```
+>
+> 07a **fails closed** when requested ≠ materialized. So a ceiling applied
+> *after* materialization is not merely bad provenance — it makes every
+> clamped run raise. The ceiling must therefore be applied to the REQUESTED
+> scope at SampleSet construction, after which `requested == materialized`
+> and 07a's invariant holds untouched.
+>
+> **Consequence: the requested/materialized pair can no longer carry the
+> clamp's provenance**, because by construction they are equal. The remaining
+> landed slots are `TrainingHistory.observations` (`dict[str, list[float]]`,
+> length-checked against `epochs_completed` — floats only, so a boolean does
+> not fit) and `comparability` / `comparability_reason`. Three options:
+> **(i)** the run-level input already records `validation_max_samples`, and
+> that is sufficient provenance — no history change; **(ii)** an additive
+> `TrainingHistory` field, which IS a schema change and must be declared as
+> such rather than smuggled under "provenance"; **(iii)** express it through
+> `comparability`. See **Q-07c-9**.
+>
+> **And a second-order effect worth naming:** if the ceiling binds on some
+> rounds and not others, those rounds' R3 values are computed over
+> *different* validation scopes and are **not comparable across rounds** —
+> exactly what 07a's `comparability` / `comparability_reason` fields exist to
+> express. A fixed run-level ceiling that binds on every round keeps them
+> comparable. This must be decided, not discovered.
 
 **4. Validation plan.**
 - Unit: `None` (default) → materialized validation rows byte-identical to
@@ -763,15 +1058,54 @@ changing `validation_max_portion` / `validation_max_train_samples` /
 - Negative: `0` / negative → schema rejection at startup, before spend.
 - Unit: interaction with `validation_max_portion` → the tighter wins,
   asserted both ways.
+- **Unit — ALL THREE existing envelope flags (rev-2 blocker 5).** Rev 1
+  paired the new ceiling only with `validation_max_portion`. §0.8 records
+  three landed flags, so the new field is the fourth and must be tested
+  against each: `validation_max_portion` (fraction),
+  `validation_max_train_samples` (TRAINING rows — the one most easily
+  confused with this field, since the names differ by one word and bound
+  different sets), and `validation_max_phase_seconds` (watchdog-fused). For
+  each pair, the tighter bound wins, asserted in both orders.
+- **Unit — WHICH samples, not just how many (rev-2 blocker 5).** 07a defines
+  R3 as a real validation objective, so a clamp that silently changes *which*
+  rows are evaluated changes the science:
+  - same input + same config + same ceiling → **identical validation sample
+    identities, in identical order** (asserted on the identities, not the
+    count);
+  - the objective over the clamped set equals an explicit evaluation over
+    exactly those N rows.
+- **Unit — partial final batch weighting (rev-2 blocker 5).** With a ceiling
+  that cuts through the final batch, the epoch statistic must remain
+  `sample_count_weighted_mean_of_batch_criterion` — the value 07a already
+  DECLARES on `TrainingHistory.epoch_statistic`
+  (`training_history.py`, a pinned `Literal`). Assert the computed R3 equals
+  the sample-count-weighted expectation and **not** the unweighted
+  mean-of-batch-means; those differ precisely when the last batch is partial,
+  which is the case a ceiling creates.
+- Unit: `requested == materialized` under every ceiling, so 07a's exact-scope
+  validator never fires.
 - Backward-compat: CLI `--help` diff is exactly one new flag.
-- Gate: covered by C7's Gate 2.
+- Backward-compat: PB-1/PB-2 and WF-1/WF-2 goldens byte-identical (the Gate-1
+  NOT-REQUIRED evidence, §4).
+- Gate: covered by C7's Gate 2 — including its discriminative requirement,
+  which this commit can defeat (§4.1).
 
 **5. Acceptance criteria.**
 - [ ] Default `None` → validation row count and the resulting
       `validation_samples` are identical to a pre-change run on the same input.
-- [ ] With the ceiling, `validation_samples == min(natural, ceiling)` exactly.
-- [ ] The clamp is visible in persisted provenance; a clamped run is
-      distinguishable from an unclamped one.
+- [ ] With the ceiling, `validation_samples == min(natural, ceiling)` exactly,
+      **and** `validation_requested_samples == validation_samples` (07a's
+      exact-materialization invariant never fires).
+- [ ] The clamped validation set's sample identities and order are identical
+      across repeated runs with the same config.
+- [ ] R3 over a clamped set with a partial final batch equals the
+      sample-count-weighted expectation, and differs from the unweighted
+      mean-of-batch-means (both numbers recorded, so the test is known to
+      discriminate).
+- [ ] A clamped run is distinguishable from an unclamped one by the mechanism
+      Q-07c-9 selects — and if that mechanism is an additive
+      `TrainingHistory` field, it is declared as a schema change, not as
+      "provenance".
 - [ ] `--help` gains exactly one line; every other byte unchanged.
 - [ ] Schema refuses `0` and negatives with a message naming the field.
 
@@ -813,9 +1147,19 @@ document's §17 ledger. Depends on C1–C6.
       `validation_max_samples`, quoting each flag/default against merged source
       (the doc-sync rule) — last step before merge.
 - [ ] State the example obligation: measurement is not user-facing
-      (roadmap §22.23.8 "why not projectable"); STATUS unchanged.
+      (roadmap §22.23.8 "why not projectable"); Pets/DAVIS `STATUS.md`
+      **unchanged** — §2a.2's obligations read their DECLARED artifacts and
+      add no execution maturity.
+- [ ] Roll up the §2a matrix: confirm C3's dtype breadth and C4's capability
+      breadth are green for both persistent tracks, and record which layer
+      each piece of evidence belongs to.
+- [ ] Verify the PR0 governance guards still hold (no `.py` under
+      `examples/`, no top-level task YAML) — the mechanical proof that 07c
+      did not inflate track maturity.
 - [ ] Terminal validation from a CLEAN tree at the final executable head.
-- [ ] **Request operator approval, then run the ONE bounded Gate 2.**
+- [ ] **Request operator approval, then run the ONE bounded Gate 2**, and
+      compute `T_old` / `T_act` / `T_new` from the run's own artifacts
+      (§4.1) — the counterfactual is part of the PASS, not commentary.
 
 **4. Validation plan.**
 - Unit: B-07c-1 as above.
@@ -835,9 +1179,17 @@ document's §17 ledger. Depends on C1–C6.
 - [ ] Full unit suite green from a clean tree at the final executable head,
       counts/skips/wall time recorded from the LOG file.
 - [ ] Every documented flag and default quoted against merged source.
-- [ ] Gate 2 PASS on the standard's functional criteria, with the workspace,
-      tested SHA, wall time and cost recorded — or a recorded FAIL with
-      diagnosis and no reroll without a substantive in-scope fix.
+- [ ] Gate 2 PASS on the standard's functional criteria **and** on §4.1's
+      counterfactual, with all three numbers recorded from the run's own
+      artifacts:
+      `T_old < T_act ≤ T_new`. `T_old ≥ T_act` ⇒ **INCONCLUSIVE**, not PASS —
+      the validation workload was clamped below the discriminating point and
+      the Gate is re-run larger.
+- [ ] Workspace, tested SHA, wall time and cost recorded — or a recorded FAIL
+      with diagnosis and no reroll without a substantive in-scope fix.
+- [ ] The three-track obligations of §2a.2 are green (C3 dtype breadth, C4
+      capability breadth), and no Pets/DAVIS execution maturity was added —
+      asserted by the PR0 governance guards.
 - [ ] Exact-head CI SUCCESS at the final PR head.
 
 **6. Failure and edge cases.** Gate 2 killed by the watchdog inside validation
@@ -859,94 +1211,84 @@ executable fix gets its own narrowly named commit, never hidden here.
 
 ---
 
-## 16. Open questions (operator disposition required)
+## 16. Open questions — operator dispositions (rev 2)
 
-**Q-07c-1 — `load_probe_batch`: delete or shim? (BLOCKING, small)**
-`execute_tools/probe_data.py` is the unbounded loader whose only production
-caller is `probe_production.py:222`. Once C2 routes that to the bounded
-builder, nothing production calls it. Delete it, or keep a shim? *Preference:
-delete — the module docstring in `gpu_measurement_data.py` argues the
-unbounded path must not remain reachable.*
+All eight rev-1 questions are dispositioned. **Q-07c-6 remains BLOCKING**
+because it is a contract question against the parent, and rev 2 adds
+**Q-07c-9** from the C6 source-grounding.
 
-**Q-07c-2 — which file does the builder open? (BLOCKING)**
-Both loaders do `sorted(glob("abra_training_*.h5"))[0]`. The profile declares
-`training_file_name(file_index)` and `num_files`, with **no glob helper**
-(§0.5). Options: (a) enumerate declared indices and take the first that
-exists; (b) add a `training_file_glob()` to `DatasetConfig`; (c) take the
-lowest declared index unconditionally and fail if absent. These differ when
-file 0 is absent — e.g. under a partial `--data_scope`, where today's glob
-silently picks a different file. Byte-identity (Checkpoint A) requires
-choosing the option that opens the same file on the Gate fixture, and the
-divergence must be stated rather than discovered.
+| Q | Subject | Disposition (operator, 2026-08-17) |
+|---|---|---|
+| 1 | unbounded `load_probe_batch` | **DELETE.** No production shim. |
+| 2 | which file the builder opens | **(a)** enumerate declared indices, take the first EXISTING declared file — closest to today's "first existing", and it refuses undeclared files on disk. |
+| 3 | the second model-name branch | **(a)** eliminate `:235` too, promoting the signature introspection to a shared owner. **(c) is rejected**: narrowing the guard to keep a known name-dispatch would let 07c claim a generic measurement worker while one remains. **STOP if promotion pulls a large API refactor**, then re-evaluate as a defer. |
+| 4 | validation as a `RuntimePhase` | **YES** — add `"validation"`. |
+| 5 | first `T̂_val` | **(c) BOTH**, not (a). See below. |
+| 6 | admission | **UNRESOLVED — see below. Blocks freeze.** |
+| 7 | Gate 2 posture | **(a)** watchdog ON, no `--validation_max_phase_seconds`, **plus** §4.1's counterfactual-discriminative acceptance. |
+| 8 | measurement dtype site preference | Declare **MEASUREMENT site preference = `int32`**, preserving today's bytes. Phase-correct inference dtype recorded as separate debt. |
+| **9** | **clamp provenance (NEW)** | **OPEN — see below.** |
 
-**Q-07c-3 — the second model-name branch, and the guard's scope (BLOCKING;
-NOT anticipated by the parent)**
-`gpu_measurement_worker_main.py:235` (`if model_type == "fcnet"` for
-constructor arity) is a second name branch the parent's §2.4 does not name.
-The parent also requires extending `test_no_model_name_branches.py`'s scan
-targets to `core/runtime_control/`. Two facts collide: pointing the guard at
-the *directory* fails on `campaign.py`'s legitimate `"family": "wavenet"`
-campaign config (data, not a branch), and pointing it at the *worker file*
-fails on `:235` unless that branch is also fixed. Options: (a) fix `:235` too
-by promoting `training_skill/estimator.py:295-321`'s signature introspection
-to a shared authority — correct, but widens 07c; (b) scan the worker file and
-fix `:235` inline without a shared authority; (c) scan only the dtype-bearing
-lines and leave `:235` as declared debt. *Preference: (a), if the operator
-accepts the widening; otherwise (c) with the debt recorded.*
+### Q-07c-5 — why BOTH, and a correction to rev 1
 
-**Q-07c-4 — is validation a new `RuntimePhase`? (BLOCKING)**
-Evidence for yes: `phases.py:6-11` says new phases extend the vocabulary
-without changing the framework; `calibration_key` embeds `phase=` so existing
-keys are untouched; `records.py:575` is `p in components`-guarded; and
-critically, `_watchdog_deadline_provider` already sums **every**
-measurement-backed component prediction, so a validation component is priced
-with **zero change to the deadline arithmetic**. Evidence for caution:
-`MeasurementIdentity.phase` is an identity dimension, so validation becomes a
-measurement identity too, and 59 references mention the vocabulary.
-*Preference: yes — it is the option that changes the least code.*
+Rev 1's preference (a) contradicted its own C5 implementation plan, which
+already listed both routes. The operator's disposition is **(c)**, and the
+two are not redundant because they serve different runs:
 
-**Q-07c-5 — where does the FIRST `T̂_val` come from? (BLOCKING)**
-C8d (`sandbox_executor.py:460-467`) admits only measurement-backed sources
-into a kill deadline, so a static prior is inert. 07a's evidence lands in the
-trainer payload, not the observation store. Options: (a) measure the first
-validation batch in-subprocess and predict the rest — mirrors RT2's
-"verification = the first production steps", and is measurement-backed;
-(b) route 07a's persisted per-epoch evidence into the store and accept that
-attempt 1 of a fresh candidate is unpriced; (c) both. **Under (b) alone the
-07a Gate-2 failure can still recur on a cold start** — this must be stated in
-the PR, not discovered in a Gate. *Preference: (a).*
+```text
+first validation batch  →  measurement-backed prediction  →  protects THIS run
+complete validation pass →  full actual                   →  calibrates FUTURE runs
+```
 
-**Q-07c-6 — does 07c change ADMISSION, or only the watchdog? (BLOCKING)**
-Parent §8.4 says "the watchdog / admission / prediction know". Pricing
-validation in admission means attempts previously admitted may now be
-rejected — a production behavioural change needing its own evidence and, by
-the repository's rules, its own operator decision. Options: (a) deadline +
-prediction only, admission unchanged, admission deferred with a named owner;
-(b) all three in 07c, with enumerated verdict changes. *Preference: (a) —
-it fixes the observed failure while keeping the behavioural surface reviewable.*
+C5's checklist and its cold-start temporal test are re-cut accordingly.
 
-**Q-07c-7 — Gate 2 posture for a watchdog fix (BLOCKING)**
-The current standard permits omitting `--runtime_watchdog` (paired with
-omitting `--validation_max_phase_seconds`). But 07c exists to fix watchdog
-accounting, and a Gate that omits the watchdog cannot demonstrate the fix.
-Options: (a) run Gate 2 **with** `--runtime_watchdog` and no
-`--validation_max_phase_seconds`, so the deadline comes from the priced
-prediction — the honest demonstration; (b) two bounded Gate 2 runs
-(with/without) — exceeds "one bounded Gate"; (c) standard posture, and prove
-the fix by deterministic replay only. *Preference: (a), as a single bounded
-run.* This needs an explicit decision because it is a deviation from the
-standard's default Gate shape.
+### Q-07c-6 — admission: the parent contract and the source disagree (BLOCKING)
 
-**Q-07c-8 — the measurement site's dtype preference (BLOCKING, small)**
-Today the worker feeds `int32` (or `float32` for fcnet) in **both** training
-and inference phases (`:287`). `execute_tools/model_input_dtype.py:70-77`
-declares `TRAINING_SITE_DTYPE="int32"` and `INFERENCE_SITE_DTYPE="int64"`.
-Adopting the phase-correct preference would make measurement match production
-inference — and would change the measured tensor, i.e. break Checkpoint A's
-byte-identity and shift every stored observation value under an unchanged key
-(§0.6). *Preference: declare a MEASUREMENT site preference of `"int32"`,
-preserving today's bytes exactly, and record the training/inference divergence
-as a separate finding for the runtime-control owner.*
+Parent §8.4 says the fix must make "the watchdog / admission / prediction"
+know the validation cost. Rev 1 then proposed leaving admission unchanged.
+Both cannot be frozen. Rev 2 audited whether the parent's wording is even
+implementable as written:
+
+```text
+core/runtime_control/admission.py:148-150
+    "The prephase measurement covers `phase="training"` only, so
+     MeasuredRequirementTable.for_phase("inference") is structurally
+     (None, None) ..."
+```
+
+and the validation pass runs **inside the training subprocess**, forward-only
+over the eval SampleSet at the training batch size
+(`train_engine_sandbox.py:1474-1490`). So at training-admission time the only
+measurement in existence is the training phase. **A validation estimate
+derived from the first validation batch arrives structurally too late for
+pre-run admission.**
+
+| Option | What it costs | Honest? |
+|---|---|---|
+| **A** — add a forward-only `validation` phase to the PRE-PHASE measurement, so admission sees a measured `T̂_val` before launch | a new phase in the measurement spec + either a third isolated subprocess launch per candidate or a multi-phase run; lands inside the same worker 07c is already changing | satisfies the parent verbatim, but materially widens 07c |
+| **B** — 07c fixes prediction + watchdog only; admission-side validation pricing is formally deferred with a named owner, and parent §8.4's "admission" clause is REVISED to say so | small; fixes the observed 07a failure | requires editing a frozen parent clause |
+
+**Recommendation: B**, per the operator's own standard — *"如果实现上 A 并不
+自然，我宁愿诚实选 B 并修改 parent contract"*. Deriving `T̂_val` from the
+already-measured training phase by a fixed forward/backward ratio is
+explicitly NOT offered: that is the hand-calibrated `× 2.7` pattern
+`docs/refine_inference_time_estimator.md` was written to remove.
+
+Whichever is chosen, the parent and this child must agree **before freeze**.
+
+### Q-07c-9 — how a clamped validation run is identified (NEW, rev 2)
+
+From the C6 source-grounding: `TrainingHistory` **fails closed** when
+`validation_samples != validation_requested_samples`
+(`training_history.py:206-211`), so the clamp must move to the requested
+scope — after which the two are equal and cannot themselves record it.
+Options: **(i)** the run-level `validation_max_samples` input is sufficient
+provenance (no history change); **(ii)** an additive `TrainingHistory` field,
+declared as a schema change; **(iii)** express it via `comparability` /
+`comparability_reason`. Coupled question: a ceiling that binds on some rounds
+and not others makes those rounds' R3 values **non-comparable**, which is
+what `comparability` exists to say. *Preference: (i) plus an explicit
+comparability decision — it adds no schema surface.*
 
 ---
 
