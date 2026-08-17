@@ -710,7 +710,7 @@ TIDMAD's `network.py:FocalLoss1D`.
   2026-08-17)**: it is conceptually adjacent to the coupling just corrected but
   is a different defect, and adjacency is not a schedule. Do not open a
   follow-up correction PR for it merely because this work surfaced it; it still
-  needs the operator decision its own note names. **NEXT = 07c**, to be
+  needs the operator decision its own note names. **07c detailed design is FROZEN — Revision 3, operator approved 2026-08-17** (`docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07c_tuner_measurement.md`, source audit at `ad176036`; seven commits C1–C7; Q-07c-1..9 all closed; three-track matrix = TIDMAD executable / Pets + DAVIS at current maturity only; Gate 1 NOT REQUIRED, Gate 2 REQUIRED bounded once at the final executable head, watchdog ON and counterfactual-discriminative). **NEXT = 07c IMPLEMENTATION**, to be
   re-confirmed from the merged roadmap / current-state documents at the start of
   a fresh session — never from the conversation that produced this correction.
   See the Step-07 parent §17.1.

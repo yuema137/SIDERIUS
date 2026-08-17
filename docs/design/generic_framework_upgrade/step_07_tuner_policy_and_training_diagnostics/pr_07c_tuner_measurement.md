@@ -1,6 +1,29 @@
 # Step 07 — PR 07c: Measurement / verification data feeding, and pricing the validation pass
 
-**STATUS — revision 3, READY FOR OPERATOR FREEZE (consistency pass only). No code written.**
+**STATUS — FROZEN — Revision 3. Operator approved 2026-08-17.**
+
+| | |
+|---|---|
+| Freeze | **FROZEN — Revision 3**, operator approved **2026-08-17** |
+| Source-audit base | **`ad176036`** (master, clean tree) — every file:line in §0 was read at this SHA |
+| Open questions | **Q-07c-1 … Q-07c-9 ALL CLOSED.** None blocks implementation |
+| Code written | **none.** This document is design only |
+
+> The freeze covers the scope, the commit decomposition, the acceptance
+> criteria, the three-track validation matrix (§2a), the typed-contract
+> inventory (§2.2a), the Gate dispositions (§4) and the stop conditions (§5).
+> §17 stays LIVE as the implementation ledger. A change to anything else
+> needs a new operator decision, recorded the way the rev-1 → rev-3 review
+> trail is recorded here.
+>
+> Applied before the freeze, consistency-only (operator finalizer,
+> 2026-08-17): stale open-option wording removed for the dispositioned
+> questions · C6's file scope and commit boundary synchronized with the
+> `TrainingHistory` field · the typed/serialized contract inventory corrected
+> from "the only two" to all four deltas · "record schemas unchanged"
+> replaced by the precise `ExperimentRecord`/`HyperparamTuningOutput`
+> invariant · C7's INCONCLUSIVE handling split by cause, with relaunch
+> authorization left to the operator. **No semantic or architectural change.**
 
 > **Revision 3 (2026-08-17)** applies the operator's final targeted revision:
 > **Q-07c-6 = B** (runtime prediction + watchdog only; admission-side pricing
@@ -24,9 +47,9 @@
 > partial-batch / all-envelope coverage with source-grounded provenance) and
 > the four targeted corrections (C1 fixture SKIP→FAIL · C2 bounded-read vs
 > peak-RSS wording · Gate-1 schema wording · the open-question count).
-> All eight open questions now carry an operator disposition; §16 records
-> **three revision-2 findings that change the plan**, each with source
-> evidence.
+> At rev 2 the eight rev-1 questions carried an operator disposition and
+> Q-07c-9 was added; §16 records **three revision-2 findings that changed the
+> plan**, each with source evidence. (All nine were CLOSED at rev 3.)
 
 | | |
 |---|---|
@@ -250,15 +273,16 @@ change scoring, and does not change the pure per-optimizer-step cost model
 |---|---|---|
 | `execute_tools/probe_batch.py` *(new)* | the ONE profile-derived bounded builder | C2 |
 | `core/runtime_control/gpu_measurement_data.py` | delegate to the builder; keep `BoundedReadEvidence`; drop the three constants | C2 |
-| `execute_tools/probe_data.py` | delete `load_probe_batch` or reduce it to a shim | C2 |
+| `execute_tools/probe_data.py` | **DELETE** `load_probe_batch` (Q-07c-1 = DELETE; no production shim) | C2 |
 | `core/runtime_control/probe_production.py` | call the one builder; capability-routed dir | C2, C4 |
-| `core/runtime_control/gpu_measurement_worker_main.py` | contract-derived dtype (`:287`), constructor arity (`:235`, pending Q-07c-3) | C3 |
+| `core/runtime_control/gpu_measurement_worker_main.py` | contract-derived dtype (`:287`) **and** constructor arity (`:235`) — both eliminated (Q-07c-3 = (a)) | C3 |
 | `core/runtime_control/gpu_measurement_spec.py` | contract transport field | C3 |
 | `core/runtime_control/bootstrap.py` | `_dataset_check` + remedy via capability | C4 |
 | `core/sandbox_executor.py` | the `T̂_val` term | C5 |
-| `core/runtime_control/phases.py`, `session.py` | validation phase/component (pending Q-07c-4) | C5 |
+| `core/runtime_control/phases.py`, `session.py` | `RuntimePhase` gains `"validation"`; the phase component (Q-07c-4 = YES) | C5 |
 | `execute_tools/train_engine_sandbox.py` | route 07a's validation evidence into the session | C5 |
 | `agent/schemas/hyperparam_tuning.py`, `nodes/ml_hyperparameter_tune_agent/cli.py` | `validation_max_samples` | C6 |
+| `execute_tools/training_history.py` | `validation_requested_samples_before_limit` (Q-07c-9 = (ii)) | C6 |
 | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md`, `docs/running_chain_test.md` | operator surface | C6, C7 |
 | `tests/unit/core/test_gpu_measurement_data.py` + new test modules | oracles and rungs | C1–C7 |
 
@@ -270,9 +294,10 @@ change scoring, and does not change the pure per-optimizer-step cost model
   identity hashes do not move, and it never becomes task config.
 - `MeasurementIdentity.components()`, `candidate_config_hash`, the planned and
   inference workload hashes, `calibration_key`, the `data_shape_class` string.
-- The bounded-read (host-RSS) property.
-- RT admission / verification / timeout / signal behaviour — except exactly as
-  Q-07c-6 disposes for the deadline.
+- The bounded-READ property.
+- RT **admission** verdicts, verification, timeout and signal behaviour —
+  ALL unchanged (Q-07c-6 = B). 07c changes the runtime PREDICTION and the
+  watchdog DEADLINE only.
 - 07a's training ACTUAL stays validation-EXCLUSIVE. The fix is one layer up.
 - Planner exposure and production defaults: every new field defaults to
   parity-preserving `None`. `validation_max_samples` is an operator/runtime
@@ -289,16 +314,42 @@ change scoring, and does not change the pure per-optimizer-step cost model
 - **Pre-run ADMISSION pricing of validation is explicitly NOT owned by 07c**
   (Q-07c-6 = B); it is OPEN runtime-control debt, not bound to D14.
 
-**Declared schema changes** (the only two, both additive, neither LLM-facing):
+### 2.2a Typed / serialized contract deltas — the COMPLETE inventory
 
-| Schema | Field | Commit |
-|---|---|---|
-| `HyperparamTuningInput` | `validation_max_samples: int \| None = None` | C6 |
-| `TrainingHistory` | `validation_requested_samples_before_limit: int \| None = None` | C6 |
+Rev 3's "the only two schema changes" was too narrow: it counted the two
+Pydantic *field* additions and omitted two other typed/serialized contract
+deltas the design already requires. All four, in one place:
+
+| Commit | Contract | Delta | Character |
+|---|---|---|---|
+| C3 | `GpuMeasurementSpec` | gains an **optional** `ModelIOContract` transport field | runtime-only; **backward-compatible** — a spec serialized before 07c still validates (C3 acceptance) |
+| C5 | `RuntimePhase` / `RUNTIME_PHASES` | gains the vocabulary member `"validation"` | creates a NEW phase namespace; every existing phase identity, `calibration_key` and store key is unchanged (C5 acceptance) |
+| C6 | `HyperparamTuningInput` | `validation_max_samples: int \| None = None` | operator/runtime input; default preserves parity |
+| C6 | `TrainingHistory` | `validation_requested_samples_before_limit: int \| None = None` | additive scope provenance (Q-07c-9 = (ii)) |
+
+**None of the four is LLM-facing.** Evidence, not assertion: the planner drops
+the whole `training_history` record key (`agent/prompts.py:944-946` —
+`_PLANNER_HIDDEN_RECORD_KEYS` is a top-level key set, so inner fields cannot
+leak); `llm_bridge.reflect()` takes `training_diagnosis` only
+(`agent/llm_bridge.py:1009,1062`); `GpuMeasurementSpec` and `RuntimePhase` are
+runtime-control internals that never cross an LLM boundary; and
+`validation_max_samples` is an operator input, never rendered into a prompt.
+PB-1/PB-2 and WF-1/WF-2 byte-parity is the standing evidence (C6 validation).
 - The measurement path's file selection is scope-unaware today (it globs and
   takes the first). 07c preserves that; making measurement DataScope-aware is
   not in this PR.
-- Prompts, PB/WF surfaces, record schemas, `MetricOrder`, HealthGate.
+- Prompts, PB/WF surfaces, `MetricOrder`, HealthGate.
+- **Persisted record surfaces** — `ExperimentRecord`
+  (`agent/schemas/hyperparam_tuning.py:298`) existing fields and
+  `HyperparamTuningOutput` are **unchanged**, matching the parent §9 row's
+  wording ("`ExperimentRecord` existing fields; `HyperparamTuningOutput` —
+  unchanged; additive only"). The ONE persisted delta is the additive
+  `TrainingHistory.validation_requested_samples_before_limit` declared in
+  §2.2a. A blanket "record schemas unchanged" would contradict that field, so
+  it is stated as the precise invariant instead:
+
+  > every persisted record surface is unchanged except the explicitly
+  > declared additive `TrainingHistory` field.
 - `resolved_action` (parent §17.1).
 
 ### 2.3 Dependencies
@@ -418,19 +469,20 @@ of those, it belongs to D14 and is out of scope.
 Quoted from `docs/gates/gate_testing_standard.md` at this base, decided
 separately (roadmap §17.0).
 
-**Gate 1 — NOT REQUIRED.** Corrected in rev 2: 07c **does** change a Pydantic
-schema — C6 adds `validation_max_samples` to `HyperparamTuningInput`. The
-standard's trigger is an **LLM-facing** prompt or schema, and this field is
-never serialized into, nor expected from, an LLM-facing boundary: it is an
-operator/runtime input. Saying "07c changes no schema" (rev 1) was literally
-false and is replaced by:
+**Gate 1 — NOT REQUIRED.** 07c **does** change typed contracts — four of
+them, inventoried in §2.2a. The standard's trigger is an **LLM-facing**
+prompt or schema, and none of the four is one. Rev 1's "07c changes neither
+prompt nor schema" was literally false; rev 3's "an operator/runtime Pydantic
+schema" was true but incomplete. The frozen wording is:
 
-> 07c changes an operator/runtime Pydantic schema, but no schema serialized
-> into or expected from an LLM-facing boundary, and no prompt byte.
+> 07c changes runtime/operator typed contracts — `GpuMeasurementSpec`,
+> `RuntimePhase`, `HyperparamTuningInput`, `TrainingHistory` — but no
+> LLM-facing prompt or schema, and no prompt byte.
 
-Evidenced, not asserted: the existing PB-1/PB-2 and WF-1/WF-2 goldens must
-remain byte-identical (C6 acceptance). **Flip condition**: the field becomes
-planner-visible, or any prompt byte moves.
+Evidenced, not asserted: §2.2a's per-contract evidence, plus the existing
+PB-1/PB-2 and WF-1/WF-2 goldens remaining byte-identical (C6 acceptance).
+**Flip condition**: any of the four becomes planner- or reflector-visible, or
+any prompt byte moves.
 
 **Gate 2 — REQUIRED, bounded, once, at the final executable head.** Table row
 *"Checkpoint (end of feature) | Gate 2"*, and §17 names §7e among the modules
@@ -495,13 +547,19 @@ Gate passes with C5 reverted. The Gate's bounded validation workload must
 stay large enough that the recorded `D_old_eff` **would have been insufficient**.
 This does not require burning wall time — it requires that `N_val` not be
 clamped below the point where the counterfactual separates. If the run
-produces `D_old_eff ≥ T_act`, the Gate is **INCONCLUSIVE, not PASS**, and is
-re-run with a larger validation workload.
+produces `D_old_eff ≥ T_act` **for this reason**, the Gate is
+**INCONCLUSIVE, not PASS**, and a larger bounded validation workload is the
+relevant correction. The two masking rows above are a DIFFERENT cause with a
+DIFFERENT correction — a Gate posture change, permitted only by the current
+standard — and increasing `N_val` does not necessarily fix them. C7's
+acceptance tabulates all three causes separately; every inconclusive live
+attempt is preserved, and a relaunch needs fresh operator authorization
+rather than being folded into the one budgeted run.
 
 Functional criteria from the standard still apply on top (chain exits 0, real
 candidate registered, real training/inference/scoring executed, finite score,
 `gate_action` recorded). Posture: watchdog **ON**, `--validation_max_phase_seconds`
-**omitted** — per Q-07c-7 — so the enforced deadline is the priced prediction
+**omitted** (Q-07c-7 = (a)) — so the enforced deadline is the priced prediction
 rather than a flat fuse that would mask it.
 
 **Not launched without operator approval.** No live Gate at design time, none
@@ -708,11 +766,11 @@ awareness; the evidence model's shape. Depends on C1.
 | Case | Behaviour |
 |---|---|
 | profile channel absent in the HDF5 | STOP — typed `RuntimeError`, never fall back |
-| declared file index missing on disk | per Q-07c-2; must not silently substitute another file |
+| declared file index missing on disk | Q-07c-2 = (a): walk the declared indices in order and take the FIRST that exists; never substitute an undeclared file found on disk |
 | duplicate / ambiguous filename match | deterministic, documented choice; recorded in evidence |
 | `data_dir` unreadable | existing explicit failure (C4 makes the reason task-owned) |
 | dataset smaller than `batch×seg` | existing `RuntimeError` preserved |
-| legacy caller with no profile | per Q-07c-1 — either refused or an explicit shim; never an implicit TIDMAD default |
+| legacy caller with no profile | REFUSED (Q-07c-1 = DELETE — there is no shim to fall through to); never an implicit TIDMAD default |
 | partial `--data_scope` | unchanged behaviour, documented as a known non-goal |
 
 **7. Verification commands and evidence.**
@@ -738,9 +796,11 @@ the authority has its input.
 Separate from C2 because it is the only commit permitted to change what the
 model is handed; keeping it alone makes a byte regression attributable.
 
-**2. Scope.** `gpu_measurement_worker_main.py:287` (and `:235` iff Q-07c-3
-says so); `gpu_measurement_spec.py` (contract field); the worker's argv/spec
-serialization; `tests/.../test_no_model_name_branches.py` (scan targets).
+**2. Scope.** `gpu_measurement_worker_main.py:287` **and** `:235` (Q-07c-3 =
+(a) — both branches go); `gpu_measurement_spec.py` (contract transport field);
+the worker's argv/spec serialization; the shared introspection owner promoted
+from `agent/skills/training_skill/estimator.py:295-321`;
+`tests/.../test_no_model_name_branches.py` (scan targets).
 Non-goals: changing `resolve_input_dtype` itself; adopting phase-correct
 inference dtype (**Q-07c-8**). Depends on C2.
 
@@ -750,7 +810,8 @@ inference dtype (**Q-07c-8**). Depends on C2.
 - [ ] Add the contract field to `GpuMeasurementSpec` (optional, default `None`
       = Regime-A) and thread it through spec construction and worker parse.
 - [ ] Replace `:287` with `resolve_input_dtype(model_type, contract,
-      site_preference=<per Q-07c-8>)`.
+      site_preference="int32")` — the MEASUREMENT site preference
+      (Q-07c-8), which reproduces today's bytes exactly.
 - [ ] Eliminate `:235` too (Q-07c-3 DISPOSED: (a)) — promote the signature
       introspection at `agent/skills/training_skill/estimator.py:295-321` to a
       shared owner and call it here. **Not** an inline copy, and **not**
@@ -918,7 +979,7 @@ Separate from C6: this is the root fix; C6 is a cost envelope that does not
 make the prediction correct.
 
 **2. Scope.** `core/sandbox_executor.py:446-481`; `core/runtime_control/phases.py`
-+ `session.py` (per Q-07c-4); `execute_tools/train_engine_sandbox.py`
++ `session.py` (Q-07c-4 = YES); `execute_tools/train_engine_sandbox.py`
 (route 07a's per-epoch evidence into the session). Non-goals: 07a's
 validation-exclusive training ACTUAL; the pure per-step model; **admission
 verdicts — NOT owned by 07c (Q-07c-6 = B)**. Independent of C2–C4.
@@ -1049,11 +1110,14 @@ at 2 000 validation rows.
 After C5 because a ceiling that hides a mispriced deadline would remove the
 evidence C5 needs.
 
-**2. Scope.** `agent/schemas/hyperparam_tuning.py` (new field),
-`nodes/ml_hyperparameter_tune_agent/cli.py`, the trainer's validation
-materialization, the node `.md` and `docs/running_chain_test.md`. Non-goals:
-changing `validation_max_portion` / `validation_max_train_samples` /
-`validation_max_phase_seconds`; any default change. Depends on C5.
+**2. Scope.** `agent/schemas/hyperparam_tuning.py` (`validation_max_samples`),
+`nodes/ml_hyperparameter_tune_agent/cli.py` (the flag),
+**`execute_tools/training_history.py`
+(`validation_requested_samples_before_limit`, Q-07c-9 = (ii))**, the trainer's
+validation materialization, the node `.md` and `docs/running_chain_test.md`.
+Non-goals: changing `validation_max_portion` / `validation_max_train_samples` /
+`validation_max_phase_seconds`; any default change; any deadline math (C5's).
+Depends on C5.
 
 **3. Implementation plan.**
 - [ ] Read how `validation_max_portion` and `validation_max_train_samples` are
@@ -1191,7 +1255,10 @@ pytest tests/unit/execute_tools/ -k "train_engine or sample_set" -q
 ```
 - [ ] counts / wall time / rc recorded in §17; `--help` diff recorded.
 
-**8. Commit boundary.** One operator-surface field. No deadline math.
+**8. Commit boundary.** One operator/runtime input
+(`validation_max_samples`) plus one additive `TrainingHistory` scope-provenance
+field (`validation_requested_samples_before_limit`), and no deadline math.
+Both deltas are declared in §2.2's contract inventory; neither is LLM-facing.
 
 ---
 
@@ -1251,10 +1318,23 @@ document's §17 ledger. Depends on C1–C6.
 - [ ] Every documented flag and default quoted against merged source.
 - [ ] Gate 2 PASS on the standard's functional criteria **and** on §4.1's
       counterfactual, with all three numbers recorded from the run's own
-      artifacts:
-      `D_old_eff < T_act ≤ D_new_eff`, with `source == "verified_components"` and no floor/operator-budget masking. Any masking case, or `D_old_eff ≥ T_act`, ⇒ **INCONCLUSIVE**, not PASS —
-      the validation workload was clamped below the discriminating point and
-      the Gate is re-run larger.
+      artifacts: `D_old_eff < T_act ≤ D_new_eff`, and
+      `source == "verified_components"`.
+- [ ] Any non-PASS counterfactual is classified **INCONCLUSIVE, not PASS**,
+      and by its OWN cause — the three causes have different corrections and
+      must not be collapsed into "make N_val bigger":
+
+      | Cause | Correction |
+      |---|---|
+      | `D_old_eff ≥ T_act` because the validation workload was insufficient | a LARGER bounded validation workload is the relevant harness correction |
+      | `operator_budget` masks `verified_components` in the `min()` | correct or remove the masking Gate posture, **only if the current Gate standard permits it**. Increasing `N_val` does not necessarily help |
+      | `watchdog.floor_seconds` masks the counterfactual | likewise a POSTURE correction, permitted only by the current standard. Increasing `N_val` does not necessarily help |
+
+- [ ] Every inconclusive live attempt is **preserved** (workspace, artifacts,
+      diagnosis). A second live launch is NOT pre-authorized by this design:
+      the PR budgets **ONE** bounded Gate 2, so any relaunch follows the
+      current Gate standard and a fresh operator authorization, and is never
+      silently folded into "the same run".
 - [ ] Workspace, tested SHA, wall time and cost recorded — or a recorded FAIL
       with diagnosis and no reroll without a substantive in-scope fix.
 - [ ] The three-track obligations of §2a.2 are green (C3 dtype breadth, C4
