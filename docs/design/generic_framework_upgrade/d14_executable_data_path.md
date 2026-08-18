@@ -2,10 +2,13 @@
 
 ## 0. Status and provenance
 
-**DRAFT rev 1 — for adversarial self-review, then implementation under the
-frozen working rules (operator directive 2026-08-18: "produce the D14
-decomposition/design from source truth; adversarially review it; then proceed
-autonomously through implementation and validation").**
+**DRAFT rev 2 — READY FOR OPERATOR REVIEW (parent-design review boundary,
+operator 2026-08-18).** The parent freezes the shared architecture; after the
+operator freeze, child designs and implementation proceed autonomously, with
+adversarial self-review per child, stopping only on a parent-contract conflict
+or at PR-ready review. **No D14-1 implementation before the parent freeze.**
+Rev 2 adds §3.1 (the precise TaskDataPath contract) and §3.2 (the alternatives
+comparison) for that review.
 
 Drafted 2026-08-18 against `master` @ `7f650971`, from a fresh source audit of:
 `execute_tools/train_engine_sandbox.py::TIDMADEpochDataset` (:295-449, plus its
@@ -143,6 +146,35 @@ TaskDataPath (name final at PR-1 design)  — the EXECUTABLE data-path contract
                                     declares
     read_deliverable_for_metric(…)-> what the Step-06 metric handle scores
 ```
+
+### 3.1 The contract, precisely (review section B)
+
+| dimension | decision |
+|---|---|
+| **semantic owner** | the executable half of "storage → sample → input tensor" and "model output → persisted deliverable → metric input" — exactly the §20.5 gap. It owns HOW bytes become tensors and tensors become the deliverable. It does NOT own what the task means (task config), what shapes are legal (`ModelIOContract`), what the deliverable is named/laid out (the task's deliverable authority), or how it is scored (`MetricSpec` + the Step-06 handle) |
+| **lifecycle** | resolved ONCE at run scope and bound the way `DatasetProfile` already is — the `bind_dataset_profile` ContextVar pattern (`dataset_config.py:591-672`) and the tuner's `RunBindings` run-scoped-authority rule. Never re-resolved per phase; subprocesses receive it by explicit transport (the 07c `--dataset_profile_json` precedent), never by ambient re-lookup |
+| **registry binding** | a string id → implementation registry, registered exactly as `MODEL_REGISTRY` entries are; the id is ONE additive field on existing task configuration (§20.6: no new hierarchy). Regime A (no id) resolves to the TIDMAD implementation — every current campaign unchanged |
+| **capability key** | the id names an IMPLEMENTATION, not a task family, and resolution is by lookup only. The framework never inspects the id's spelling — asserting that is part of the leakage guardrail |
+| **inputs** | a task-opaque scope (TIDMAD: `{file:[segments]}`; Pets: manifest-row selection; DAVIS: clip-identity selection), the bound `ModelIOContract`, the run's data directory, determinism seed(s), and the task's own declared parameters (from its config/manifests) |
+| **outputs** | `training_dataset` / `validation_dataset`: a torch `Dataset` yielding `(input, target)` satisfying the bound contract. `write_deliverable`: the persisted artifact at the task's declared layout. `read_deliverable_for_metric`: what the Step-06 handle scores. Nothing else — no metrics, no health verdicts, no diagnosis |
+| **frozen vs mutable** | FROZEN by this parent: the four-method surface, registry binding, run-scoped lifecycle, scope opacity, the §1.1 prohibitions. MUTABLE at child designs: method signatures' exact types, the registry's module home, the TIDMAD relocation order |
+| **who may depend on it** | `train_engine_sandbox`, `inference_single`, and the scoring read path — the three §2.2 sites. NOT prompts, NOT the planner/reflector, NOT records (records keep their existing fields; the data path is not evidence), NOT runtime-control (07c already binds through profile/contract and stays as-is) |
+| **what it must NOT know** | task names; `examples/`; file-naming conventions of any single task (TIDMAD's live in the TIDMAD implementation, behind the seam); tensor rank beyond what the bound contract declares; metric/objective semantics; anything about which check or metric will consume the deliverable |
+
+### 3.2 Why this is the minimal abstraction (review section C)
+
+| alternative | verdict | reason |
+|---|---|---|
+| **1. Extend `DatasetProfile`** | REJECTED | its vocabulary (`DatasetConfig`/`ChannelIdentity`/`ValueEncoding`) is 1-D-segment two-channel HDF5; both packs' STATUS rows record it NOT representable for their tasks. Extending it means either (a) unioning three tasks' vocabularies into one schema — the TIDMAD-shaped-abstraction trap §21.3 names, growing per task forever — or (b) making its fields optional-per-task, which destroys the profile's current strength: every field it has is load-bearing for the task that has it. The profile also carries frozen enforcement (DataScope layers, run-invariants pinning) whose semantics are TIDMAD-scope-specific; widening the schema would silently widen those |
+| **2. Extend `DeliverableSpec`** | REJECTED | same shape of failure on the output side (per-file HDF5 naming/storage vocabulary), and it addresses only the writer — the dataset/reader half of the §20.5 gap would still need an owner |
+| **3. `TaskDataPath` (this design)** | ACCEPTED | one narrow executable contract; existing declarative authorities stay untouched and byte-parity is provable because TIDMAD's code moves *behind* it rather than through a schema rewrite; a new task binds by registration + one config field, which is the operator's stated success criterion verbatim |
+| **4. Task-specific execution branches** | REJECTED | `if tidmad / if pets / if davis` in generic core is the explicitly refused outcome (§1.1); it also fails the immutability policy — every future task edits core |
+
+Minimality check: the seam adds **no** new declarative concept. Every input it
+consumes exists today (contract, scope, config); every output it produces is
+consumed by an existing frozen interface (trainer loop, deliverable authority,
+metric handle). It is a *relocation boundary* for TIDMAD and a *binding point*
+for everything else.
 
 Binding rules (frozen):
 
