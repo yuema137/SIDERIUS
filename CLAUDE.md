@@ -627,6 +627,33 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **D14 EXECUTABLE DATA PATH — COMPLETE / MERGED (2026-08-18)**: PR #232, the
+  integrated stack #230 → #231 → #232, squash
+  `4db414b599bb1a41357ad694f78bceec4f4577e1`; canonical exact-head CI
+  **32191416252 SUCCESS** (lint · ruff-format · pyright · unit), landed master
+  verified byte-identical to the validated head `322064b2`. #230/#231 closed
+  as superseded review units (they remain the per-child review records).
+  **THREE materially different tasks now run through ONE execution
+  architecture**: TIDMAD 1-D denoising (relocated behind the seam at byte
+  parity — Gate-2 PAIR PASS), Oxford-IIIT Pet 37-way RGB classification
+  (Gate-2 PASS; accuracy 0.027 = chance, a REAL constant-prediction collapse
+  kept as Step-08 health evidence, deliberately not tuned), DAVIS 8→4
+  future-frame regression (Gate-2 PASS; global MSE 0.017290, better than the
+  last-frame-copy baseline 0.017392). Seam:
+  `execute_tools/task_data_path.py` (four methods, fail-closed registry keyed
+  on binding PRESENCE never task name, run-scoped binding, internal transport)
+  with `tidmad_data_path.py` / `pets_data_path.py` / `davis_data_path.py`.
+  Enforced invariants: zero task-name branches in generic core, zero
+  production dependency on `examples/` (plugin SOURCE only, loaded
+  dynamically), one registry / three implementations, Step-06 metric
+  ownership (three instances behind one handle) and Step-07 training
+  semantics preserved. Design + full evidence:
+  `docs/design/generic_framework_upgrade/d14_executable_data_path.md` §7a
+  (per-child ledgers in its subdirectory). Deferred, none blocking: #225,
+  #226, #227, #228, #229, #233 (stacked PRs get no CI — fix before any future
+  stacked milestone). **NEXT = Step 08 (HealthGate), whose premature draft on
+  master must be re-compared against these three tracks' actual executable
+  behaviour before any Step-08 design is written.**
 - **Generic Framework Upgrade (2026-08-15)**: Steps 00-06 COMPLETE and merged
   (Step 06 metric interface: PR #213, `02f382eb`). Roadmap
   `docs/design/siderius_generic_framework_upgrade.md` §15.1 is the status
