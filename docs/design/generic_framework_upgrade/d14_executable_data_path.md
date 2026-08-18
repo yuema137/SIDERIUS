@@ -2,13 +2,23 @@
 
 ## 0. Status and provenance
 
-**DRAFT rev 2 — READY FOR OPERATOR REVIEW (parent-design review boundary,
-operator 2026-08-18).** The parent freezes the shared architecture; after the
-operator freeze, child designs and implementation proceed autonomously, with
-adversarial self-review per child, stopping only on a parent-contract conflict
-or at PR-ready review. **No D14-1 implementation before the parent freeze.**
-Rev 2 adds §3.1 (the precise TaskDataPath contract) and §3.2 (the alternatives
-comparison) for that review.
+**FROZEN — rev 3, 2026-08-18.** Operator review verdict: APPROVED WITH
+REQUIRED AMENDMENTS (no second review required). Rev 3 applies all of them —
+Amendment 1 `model_input` / `supervision_target` semantics (no new
+TargetContract; the synthetic task's target representation must differ from
+its output representation), Amendment 2 output-codec ownership with the
+`read_evaluation_payload` rename, Amendment 3 fail-closed binding (TIDMAD is a
+regime-A compatibility default only, with a required negative test), the
+D14-1 no-dual-path acceptance tightening (AST census: zero direct
+`TIDMADEpochDataset` construction / codec dependency outside the registered
+implementation), the full-surface synthetic proof, and the scope-opacity
+residual as issue #225 — and records the post-amendment adversarial pass
+(§6.1): all five operator threats closed without widening the architecture.
+
+Child designs and implementation now proceed AUTONOMOUSLY (adversarial
+self-review per child; routine decisions unescalated), stopping only on the §7
+conditions or at each PR-ready operator review. Rev-2 history: §3.1/§3.2 added
+for the parent review. Rev-1: initial draft.
 
 Drafted 2026-08-18 against `master` @ `7f650971`, from a fresh source audit of:
 `execute_tools/train_engine_sandbox.py::TIDMADEpochDataset` (:295-449, plus its
@@ -138,14 +148,42 @@ One new seam, deliberately small:
 
 ```text
 TaskDataPath (name final at PR-1 design)  — the EXECUTABLE data-path contract
-    training_dataset(scope, …)   -> torch Dataset yielding (input, target)
-                                    tensors satisfying the bound ModelIOContract
+    training_dataset(scope, …)   -> torch Dataset yielding task-owned samples
+                                    (model_input, supervision_target)
     validation_dataset(scope, …) -> same, over the validation identity scope
     write_deliverable(outputs, …)-> the task's persisted deliverable, at the
                                     path/layout the task's deliverable authority
                                     declares
-    read_deliverable_for_metric(…)-> what the Step-06 metric handle scores
+    read_evaluation_payload(…)   -> the DECODED task payload handed to the
+                                    Step-06 evaluation authority (codec only,
+                                    never scoring)
 ```
+
+**Sample semantics (Amendment 1, operator 2026-08-18 — FROZEN).**
+`model_input` must satisfy the bound `ModelIOContract` **input** boundary.
+`supervision_target` is consumed by the already-bound training objective /
+validation computation and is **NOT required to share the model output's
+shape, dtype, rank or representation** — Pets is the canonical case: model
+output `[37]` logits, supervision target a scalar class index. No new
+`TargetContract` is introduced; the existing objective binding consumes the
+target, and a broader contract appears only if source later proves an
+existing frozen contract cannot (minimal-correction rule).
+
+**Output-codec ownership (Amendment 2, operator 2026-08-18 — FROZEN).**
+
+```text
+TaskDataPath MAY own      model/task values <-> task-native deliverable bytes
+                          <-> decoded evaluation payload        (a CODEC)
+TaskDataPath MUST NOT own metric selection · metric direction · scoreability ·
+                          scientific thresholds · metric aggregation ·
+                          the training objective · scientific interpretation
+```
+
+The output path is fixed:
+`production output → TaskDataPath codec → decoded payload → Step-06
+evaluation/metric authority → score`. The seam is never a bypass around
+Step-06 ownership — `read_deliverable_for_metric` was renamed to
+`read_evaluation_payload` precisely so the name cannot imply scoring.
 
 ### 3.1 The contract, precisely (review section B)
 
@@ -153,10 +191,10 @@ TaskDataPath (name final at PR-1 design)  — the EXECUTABLE data-path contract
 |---|---|
 | **semantic owner** | the executable half of "storage → sample → input tensor" and "model output → persisted deliverable → metric input" — exactly the §20.5 gap. It owns HOW bytes become tensors and tensors become the deliverable. It does NOT own what the task means (task config), what shapes are legal (`ModelIOContract`), what the deliverable is named/laid out (the task's deliverable authority), or how it is scored (`MetricSpec` + the Step-06 handle) |
 | **lifecycle** | resolved ONCE at run scope and bound the way `DatasetProfile` already is — the `bind_dataset_profile` ContextVar pattern (`dataset_config.py:591-672`) and the tuner's `RunBindings` run-scoped-authority rule. Never re-resolved per phase; subprocesses receive it by explicit transport (the 07c `--dataset_profile_json` precedent), never by ambient re-lookup |
-| **registry binding** | a string id → implementation registry, registered exactly as `MODEL_REGISTRY` entries are; the id is ONE additive field on existing task configuration (§20.6: no new hierarchy). Regime A (no id) resolves to the TIDMAD implementation — every current campaign unchanged |
+| **registry binding** | a string id → implementation registry, registered exactly as `MODEL_REGISTRY` entries are; the id is ONE additive field on existing task configuration (§20.6: no new hierarchy). **Regime-A absence of a binding resolves to TIDMAD as a COMPATIBILITY default only** — preserving frozen existing behaviour for current campaigns. For an explicitly bound or future task, a missing capability, unknown id, or invalid implementation **FAILS CLOSED** (Amendment 3): never `unknown → TIDMAD` |
 | **capability key** | the id names an IMPLEMENTATION, not a task family, and resolution is by lookup only. The framework never inspects the id's spelling — asserting that is part of the leakage guardrail |
 | **inputs** | a task-opaque scope (TIDMAD: `{file:[segments]}`; Pets: manifest-row selection; DAVIS: clip-identity selection), the bound `ModelIOContract`, the run's data directory, determinism seed(s), and the task's own declared parameters (from its config/manifests) |
-| **outputs** | `training_dataset` / `validation_dataset`: a torch `Dataset` yielding `(input, target)` satisfying the bound contract. `write_deliverable`: the persisted artifact at the task's declared layout. `read_deliverable_for_metric`: what the Step-06 handle scores. Nothing else — no metrics, no health verdicts, no diagnosis |
+| **outputs** | `training_dataset` / `validation_dataset`: a torch `Dataset` yielding `(model_input, supervision_target)` — the input satisfies the bound contract's INPUT boundary; the target is objective-owned and free of model-output shape (Amendment 1). `write_deliverable`: the persisted artifact at the task's declared layout. `read_evaluation_payload`: the decoded payload for the Step-06 authority — codec only (Amendment 2). Nothing else — no metrics, no health verdicts, no diagnosis |
 | **frozen vs mutable** | FROZEN by this parent: the four-method surface, registry binding, run-scoped lifecycle, scope opacity, the §1.1 prohibitions. MUTABLE at child designs: method signatures' exact types, the registry's module home, the TIDMAD relocation order |
 | **who may depend on it** | `train_engine_sandbox`, `inference_single`, and the scoring read path — the three §2.2 sites. NOT prompts, NOT the planner/reflector, NOT records (records keep their existing fields; the data path is not evidence), NOT runtime-control (07c already binds through profile/contract and stays as-is) |
 | **what it must NOT know** | task names; `examples/`; file-naming conventions of any single task (TIDMAD's live in the TIDMAD implementation, behind the seam); tensor rank beyond what the bound contract declares; metric/objective semantics; anything about which check or metric will consume the deliverable |
@@ -183,6 +221,13 @@ Binding rules (frozen):
   names its data-path id. Generic core resolves by id — a new task binds by
   registration + configuration, with zero core edits (§1.1's success
   criterion, made structural).
+* **Fail-closed binding (Amendment 3, FROZEN).** The TIDMAD default exists
+  ONLY as the regime-A compatibility path for the absence of any explicit
+  binding — it preserves frozen behaviour, it is not a generic fallback. An
+  explicitly bound task with a missing/unknown/invalid data-path id fails
+  closed with a diagnostic naming the registry and the id. D14-1 carries a
+  deterministic negative test: the synthetic non-TIDMAD task with a broken
+  binding FAILS rather than silently training on TIDMAD's path.
 * **TIDMAD's implementation IS the current code**, relocated behind the seam
   with delegation, not rewritten: `TIDMADEpochDataset` and the
   `create_abra_file` path keep their bytes; the two construction sites (:910,
@@ -239,10 +284,27 @@ bytes, never reimplementation.
   `run_output` records identical pre/post relocation on the committed
   two-family fixture AND on a TIDMAD Gate-2-shaped bounded run. Tensor hashes
   asserted, not eyeballed.
-- **Seam admits a second shape:** the synthetic implementation trains a toy
-  model end-to-end through `run_experiment_streaming` with zero generic-core
-  edits (the delete-the-hop reachability form: bypassing the registry fails
-  the test).
+- **Seam admits a second shape, across the WHOLE surface:** the synthetic
+  implementation exercises all four methods — `training_dataset`,
+  `validation_dataset`, `write_deliverable`, `read_evaluation_payload` —
+  end-to-end through `run_experiment_streaming` with zero generic-core edits
+  (the delete-the-hop reachability form: bypassing the registry fails the
+  test). **Its supervision-target representation is deliberately DIFFERENT
+  from its model-output representation** (Amendment 1's strengthening), so a
+  regression-shaped `target == output-shape` assumption anywhere in the seam
+  fails here first. This is a structural-genericity proof, NOT a fake Gate-2:
+  the materially different REAL evidence remains D14-2/3's.
+- **Fail-closed negative (Amendment 3):** the synthetic task with a
+  missing/unknown data-path id FAILS with the naming diagnostic — never a
+  silent fall-through to TIDMAD.
+- **The old bypass is REMOVED, structurally proven:** at D14-1's final state,
+  generic production call sites contain **zero direct `TIDMADEpochDataset`
+  constructions and zero direct TIDMAD deliverable-codec dependencies**
+  outside the registered TIDMAD implementation (an AST census in the
+  guardrail style, with any documented task-owned compatibility location
+  named in the census, not exempted silently). The final dependency direction
+  is `generic trainer/validation/inference/scoring → bound TaskDataPath →
+  task implementation`; **no permanent dual path**.
 - **No-name-branch guard extended:** the existing guardrail pattern
   (`test_no_model_name_branches`) gains the data-path surface with task names
   (`tidmad`, `pet`, `davis`) in its token set.
@@ -366,11 +428,32 @@ resolution: untouched. Any PB delta is a stop condition, not a judgement call.
 | launcher/runtime residue | no launcher changes anywhere in D14; runtime-control already binds through profile/contract (07c) and D14-1's parity oracle would catch a drive-by |
 | the seam becoming a second config hierarchy | §20.6 constraint honoured: binding rides existing task config; the registry id is one additive field |
 
+**Scope-opacity residual → GitHub issue
+[#225](https://github.com/Galileo-Sandbox/SIDERIUS/issues/225)** (operator
+ruling: keep the asymmetry, do NOT invent a universal scope abstraction in
+D14; task-owned disjointness evidence per pack; natural future owner is
+Step 12's composition root. Blocks D14: no · Blocks Step 08: no).
+
 Residual risks, named rather than hidden: (a) D14-1's parity obligation is the
 milestone's real risk — mitigated by per-call-site oracles and the Gate-2
 TIDMAD run; (b) DAVIS licence pinning may surface terms requiring operator
 judgement — that is a STOP, not a workaround; (c) the reference plugins must
 not drift into model research — "known-good baseline" is their frozen role.
+
+### 6.1 Post-amendment adversarial pass (operator's five threats, 2026-08-18)
+
+| threat | disposition after the amendments |
+|---|---|
+| 1. regression-shaped target assumptions | CLOSED structurally: the contract separates `model_input` (contract-input-bound) from `supervision_target` (objective-owned, representation-free), and the synthetic task's target representation is REQUIRED to differ from its model-output representation — the assumption now fails in D14-1's own tests before any real task meets it |
+| 2. TaskDataPath owning metric semantics | CLOSED by the frozen MAY/MUST-NOT codec split and the rename to `read_evaluation_payload`; the fixed output path terminates at the Step-06 authority, and §3.1's dependency row already barred records/prompts/runtime-control from the seam |
+| 3. silent TIDMAD fallback for new tasks | CLOSED: regime-A default reclassified as a compatibility path only; explicit/unknown/invalid bindings fail closed with a naming diagnostic; a deterministic negative test is a D14-1 acceptance item |
+| 4. dual old/new execution paths | CLOSED as an acceptance criterion: an AST census proves zero direct `TIDMADEpochDataset` constructions and zero direct deliverable-codec dependencies outside the registered TIDMAD implementation at D14-1's final state — no permanent dual path |
+| 5. synthetic proof exercising only the training half | CLOSED: the synthetic implementation must exercise all four methods end-to-end, and it is labelled a structural-genericity proof, not a fake Gate-2 |
+
+None of the five required widening the four-method surface, adding a
+declarative concept, or touching a Step-06/07 contract — the amendments are
+narrowings and clarifications, not architecture changes. **No new
+parent-level contradiction found.**
 
 ## 7. Stop conditions (milestone level)
 
