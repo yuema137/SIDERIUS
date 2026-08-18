@@ -99,15 +99,6 @@ class TestRawValidationNameComesFromTheProfile:
         _score(None)
         assert captured_raw_names == ["abra_validation_0007.h5"]
 
-    def test_every_index_in_the_declared_space_round_trips(self):
-        """The migration replaced two DIFFERENT inline constructions —
-        ``f"{i:04d}"`` and ``str(i).zfill(4)`` — with one method. They agree
-        only for non-negative ints, so unifying them silently would have been
-        a real risk."""
-        dataset = TIDMAD_PROFILE.dataset
-        for i in range(dataset.num_files):
-            assert dataset.validation_file_name(i) == f"abra_validation_{i:04d}.h5"
-
 
 # ---------------------------------------------------------------------------
 # §5f — derived-artifact INDEXING, parity-only

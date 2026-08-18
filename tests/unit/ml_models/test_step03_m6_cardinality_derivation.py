@@ -181,7 +181,12 @@ class TestNoConstructionLiteralSurvives:
         import pathlib
         import re
 
-        source = pathlib.Path("ml_models/models_sandbox.py").read_text()
+        # Derived from THIS file, not from the cwd: a cwd-relative read passes
+        # only when pytest happens to run from the repo root, and CLAUDE.md's
+        # portability rule exists because a test that reads a different tree
+        # than the one under test is worse than no test.
+        repo_root = pathlib.Path(__file__).resolve().parents[3]
+        source = (repo_root / "ml_models" / "models_sandbox.py").read_text()
         offenders = []
         for lineno, line in enumerate(source.splitlines(), start=1):
             code = line.split("#", 1)[0]

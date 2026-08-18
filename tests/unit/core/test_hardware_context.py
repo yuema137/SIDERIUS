@@ -41,12 +41,6 @@ def _make_ctx(**overrides) -> HardwareContext:
     return HardwareContext(**defaults)
 
 
-def test_schema_is_frozen():
-    ctx = _make_ctx()
-    with pytest.raises(ValidationError):  # frozen-model attr write
-        ctx.device_name = "CHANGED"
-
-
 def test_usable_cap_bytes_is_exactly_safety_fraction_of_total():
     total = 32 * 1024**3
     ctx = _make_ctx(total_memory_bytes=total)

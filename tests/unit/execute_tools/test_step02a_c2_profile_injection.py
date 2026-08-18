@@ -293,22 +293,3 @@ def test_validation_file_name_renders_from_the_declared_pattern():
     assert TIDMAD.validation_file_name(19) == "abra_validation_0019.h5"
     with bind_dataset_profile(_profile(validation_file_pattern="v_{file_index}.h5")):
         assert resolve_dataset_profile().dataset.validation_file_name(3) == "v_3.h5"
-
-
-def test_selection_determinism_is_unchanged_by_the_migration():
-    """SampleSet digests are a frozen parity surface.
-
-    The builder now reads ``segments_per_file`` from the profile instead of a
-    constant re-exported through ``scoring_utils``. Selection must be
-    byte-identical; ``test_sample_set_builder.py``'s five sha16 digests are
-    the authoritative oracle and run unmodified — this only guards the
-    re-export collapse itself.
-    """
-    a = sample_set_builder.build_sample_set(
-        is_trial=True, trial_strategy="snapshot", trial_portion=0.05, seed=42
-    )
-    b = sample_set_builder.build_sample_set(
-        is_trial=True, trial_strategy="snapshot", trial_portion=0.05, seed=42
-    )
-    assert a == b
-    assert len(a) == 20

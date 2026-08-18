@@ -573,16 +573,6 @@ class TestAuthorityMapping:
                 reason="fixture",
             )
 
-    @pytest.mark.parametrize("attribution", ["candidate", "oom", "contention", ""])
-    def test_the_vocabulary_is_closed(self, attribution):
-        """An outcome outside the Literal must fail, not default."""
-        with pytest.raises(ValidationError):
-            AttributionResult(
-                attribution=attribution,
-                may_recommend_resource_reduction=False,
-                reason="fixture",
-            )
-
     def test_an_unrecognised_string_is_denied_authority(self):
         assert may_recommend_resource_reduction("candidate") is False
 

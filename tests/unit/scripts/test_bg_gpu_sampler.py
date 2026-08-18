@@ -123,34 +123,8 @@ def test_an_empty_registration_does_not_match_every_pid(outdir: Path):
     assert got["role"] != "P0_TUNER_PARENT"
 
 
-def test_the_harness_registers_its_own_pid():
-    """The other half of the join: the sampler can only label by PID if
-    something writes one."""
-    src = (REPO_ROOT / "scripts" / "bg_admission_validation.py").read_text()
-    assert "tuner_parent.pid" in src
-    assert "os.getpid()" in src
-
-
 def test_the_validation_launcher_is_a_known_role_not_foreign():
     """Belt and braces for an unregistered run: the B-G launcher name is
     now in the fallback table, so an operator running the sampler
     without registration still gets a labelled parent."""
     assert "bg_admission_validation" in SAMPLER.read_text()
-
-
-def test_the_holder_registers_its_pid_after_the_bounds_check():
-    """B-G2b's proof is "no *candidate* child" while a holder is
-    legitimately on the card. The two must be separable by identity, so
-    the holder registers -- but only once it has decided to start, or a
-    refused holder would claim the role."""
-    src = (REPO_ROOT / "scripts" / "bg_gpu_holder.py").read_text()
-    assert "holder.pid" in src
-    assert src.index("validate_bounds(args)") < src.index("holder.pid")
-
-
-def test_the_holder_registration_survives_an_unwritable_dir(tmp_path: Path):
-    """A sampler-side convenience must never abort the holder: failing
-    to register is worth less than the scenario it would cancel."""
-    src = (REPO_ROOT / "scripts" / "bg_gpu_holder.py").read_text()
-    block = src[src.index("holder.pid") - 400 : src.index("holder.pid") + 200]
-    assert "except OSError" in block

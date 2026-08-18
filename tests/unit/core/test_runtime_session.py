@@ -43,17 +43,6 @@ class TestRuntimeControlPolicy:
     def test_defaults_are_record_only(self):
         assert RuntimeControlPolicy().operator_budget_seconds is None
 
-    def test_budget_must_be_positive(self):
-        with pytest.raises(ValidationError):
-            RuntimeControlPolicy(operator_budget_seconds=0.0)
-        with pytest.raises(ValidationError):
-            RuntimeControlPolicy(operator_budget_seconds=-5.0)
-
-    def test_frozen(self):
-        policy = RuntimeControlPolicy(operator_budget_seconds=60.0)
-        with pytest.raises(ValidationError):
-            policy.operator_budget_seconds = 10.0  # type: ignore[misc]
-
 
 class TestEventLogLifecycle:
     def test_sidecar_exists_from_creation(self, tmp_path):

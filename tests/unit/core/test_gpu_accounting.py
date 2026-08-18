@@ -331,10 +331,6 @@ class TestGenericity:
                 "measuring primitive; caps and ceilings are configuration"
             )
 
-    def test_device_zero_is_not_a_default(self):
-        with pytest.raises(ValidationError):
-            DeviceIdentity(physical_index=0)  # type: ignore[call-arg]
-
 
 class TestDeviceBaseline:
     """B-C2b's `baseline_before_spawn` slot.

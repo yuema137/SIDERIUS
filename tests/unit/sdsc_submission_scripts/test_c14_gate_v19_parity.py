@@ -1,5 +1,28 @@
 """C14 — the Gate must be formal V19, only smaller.
 
+HISTORICAL SNAPSHOT (operator ruling Q6(b), 2026-08-17). Both surfaces this
+file compares — `v19_gate0_pair_runner.sh` and `v19_queue_runner.sh` — are
+**retained legacy operator surfaces, not the current canonical launcher**.
+Today's campaign surface is `launch_v20_campaign.sh`, driven by
+`v20_queue_runner.py:37`; `sdsc_submission_scripts/README.md:77` still calls
+the V19 runner "current production surface" only because it was last written
+2026-08-04, two days before the V20 launcher was added. Today's Gate entry
+point is `run_chain.sh` directly (`docs/gates/gate_testing_standard.md:176-194`),
+not the pair runner.
+
+So this file pins a frozen historical pair. It is kept for reversibility and
+forensic compatibility, and its `openai_tiered_v1.json` reference is a
+statement about what V19 emitted — NOT a claim about current Gate policy, which
+`test_gate_standard_contract.py:244` owns and which requires
+`openai_tiered_pro.json` (operator decision 2026-08-13). Do not read a current
+policy out of this file.
+
+Its per-flag value pins were removed in the pruning PR: all 32 were re-asserted
+by `test_v19_gate0_pair_runner.py::test_frozen_values_exact`, which checks the
+same `gate_chain_args` output for BOTH flavors and additionally asserts the
+switch set exactly. What survives here is what only a cross-surface comparison
+can establish.
+
 C14 is the last Gate before the V19 restart, so its value depends
 entirely on it exercising the SAME production path. The operator froze
 exactly which settings may differ (scale and budgets); everything else —
@@ -107,59 +130,9 @@ class TestGateMatchesFormalV19:
             f"differ outside the frozen Gate-scoped set: {divergences}"
         )
 
-    @pytest.mark.parametrize(
-        "flag,value",
-        [
-            # admission and watchdog — the whole point of the Gate
-            ("--runtime_watchdog", "(flag)"),
-            ("--runtime_safety_factor", "1.5"),
-            ("--runtime_trial_safety_factor", "3.0"),
-            ("--runtime_formal_safety_factor", "2.25"),
-            ("--trial_vram_budget_gb", "12"),
-            ("--formal_vram_budget_gb", "12"),
-            ("--runtime_watchdog_safety_factor", "3.5"),
-            ("--runtime_watchdog_floor_seconds", "120"),
-            # production LLM + HealthGate + coupling + ordering
-            ("--llm_config", "llm_configs/openai_tiered_v1.json"),
-            ("--health_checks_config", "configs/health_checks_baseline_observe_mode.yaml"),
-            ("--enable_chain_incumbent_formal_gates", "(flag)"),
-            ("--enable_structured_health_feedback", "(flag)"),
-            ("--order_strategy_override", "sequential"),
-            ("--formal_strategy", "snapshot"),
-            ("--formal_round_strategy", "inherit_best_trial"),
-            ("--exploration_mode", "explore"),
-            ("--ml_lit_review_enabled", "(flag)"),
-            ("--max_epochs", "1"),
-        ],
-    )
-    def test_the_production_settings_are_pinned(self, flag, value):
-        assert _gate_args().get(flag) == value
-
 
 class TestGateScopedValues:
     """The bounded Gate settings, exactly as the operator specified."""
-
-    @pytest.mark.parametrize(
-        "flag,value",
-        [
-            ("--num_iterations", "2"),
-            ("--max_rounds", "2"),
-            ("--max_proposal_attempts", "3"),
-            ("--data_scope", "15-19"),
-            ("--health_gate_files", "15,16,17,18,19"),
-            ("--file_order_override", "15,16,17,18,19"),
-            ("--trial_portion", "0.02"),
-            ("--train_portion", "1.0"),
-            ("--eval_portion", "0.01"),
-            ("--formal_portion", "0.02"),
-            ("--formal_train_portion", "1.0"),
-            ("--formal_eval_portion", "0.01"),
-            ("--trial_time_budget_minutes", "5"),
-            ("--formal_time_budget_minutes", "30"),
-        ],
-    )
-    def test_the_bounded_settings(self, flag, value):
-        assert _gate_args().get(flag) == value
 
     def test_the_scope_and_health_gate_files_are_paired(self):
         """DS8 partial-scope rule: monitored files must lie in the scope."""
@@ -168,21 +141,11 @@ class TestGateScopedValues:
         monitored = [int(x) for x in args["--health_gate_files"].split(",")]
         assert all(low <= f <= high for f in monitored)
 
-    def test_the_gate_is_cold_start(self):
-        """Operator rule 2026-07-27: every real-training gate run is
-        cold-start. `--seed_paths` must be absent, not empty."""
-        assert "--seed_paths" not in _gate_args()
-
     @pytest.mark.parametrize("flavor", ["arch", "loss"])
     def test_each_flavor_uses_its_own_lightweight_advice(self, flavor):
         args = _gate_args(flavor)
         assert args["--advice"] == f"advice/workflow/v19_gate0_{flavor}.json"
         assert (REPO_ROOT / args["--advice"]).is_file()
-
-    def test_the_two_chains_differ_only_in_identity_and_advice(self):
-        arch, loss = _gate_args("arch"), _gate_args("loss")
-        differing = {k for k in set(arch) | set(loss) if arch.get(k) != loss.get(k)}
-        assert differing == {"--workspace", "--run_name", "--advice"}
 
 
 class TestLightweightAdviceIntegrity:

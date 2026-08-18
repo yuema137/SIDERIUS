@@ -34,6 +34,10 @@ TRAIN_ACTUAL_S = 9.0
 VALIDATION_ACTUAL_S = 26.45
 OBSERVED_WALL_S = TRAIN_ACTUAL_S + VALIDATION_ACTUAL_S  # 35.45
 
+#: `_run`'s default eval set, as a sentinel so `None` stays meaningful:
+#: `None` is the no-validation control, not "use the default".
+_DEFAULT_EVAL = object()
+
 
 def _component(predicted_seconds: float, *, source: str, eligible: bool = True) -> dict:
     """One phase component carrying a complete, valid prediction.
@@ -152,6 +156,78 @@ class TestTheVocabularyExtendsWithoutMovingAnything:
         import typing
 
         assert set(typing.get_args(RuntimePhase)) == set(RUNTIME_PHASES)
+
+
+class TestTheProviderReadsAProductionSHAPEDSidecar:
+    """The Unit half of the producer→provider join.
+
+    Under the frozen ownership model this pair is split:
+
+        Unit    given a valid production-SHAPED sidecar, the provider parses
+                and uses it correctly                          <- a contract
+        Gate 2  the real runtime actually produces that sidecar at the
+                required lifecycle moment                      <- timing
+
+    Only the first is here. The second is Gate 2's and must not be pushed
+    back into Unit — that is the 07c defect.
+
+    The gap this closes: every other test in this file builds its sidecar with
+    `_write_sidecar`, whose payload carries **two** top-level keys. A real
+    subprocess writes **sixteen** (`admission`, `calibration_context`,
+    `hardware`, `historical_prior`, `runtime_policy`, `software`, `storage`,
+    `total`, `watchdog_status`, …). So the provider has only ever been proven
+    against a strict subset of the document it actually reads in production,
+    and a reader that tripped over a populated sibling key would pass every
+    existing case.
+    """
+
+    def test_a_full_document_still_yields_the_deadline(self, tmp_path):
+        """Every top-level field production can emit is present and populated
+        with a schema-valid value; the provider must still find `components`
+        and compute from them, not fail open to `None`."""
+        from core.runtime_control.records import RuntimeObservation
+
+        payload = {
+            "timestamp": "2026-08-17T00:00:00+0000",
+            "components": {
+                "training": _component(9.0, source="real_training_verification"),
+                "validation": _component(26.45, source="real_validation_verification"),
+            },
+            "attempt_id": "attempt-0001",
+            "chain_id": "chain-0001",
+            "schema_version": 1,
+            "final_status": "success",
+            "calibration_eligible": True,
+        }
+        # Anti-vacuity: the point is the FULL document, so fail loudly if the
+        # schema grows a field this fixture does not exercise.
+        unexercised = set(RuntimeObservation.model_fields) - set(payload)
+        assert unexercised == {
+            "admission",
+            "calibration_context",
+            "hardware",
+            "historical_prior",
+            "prior_agreement",
+            "runtime_policy",
+            "software",
+            "storage",
+            "total",
+            "watchdog_status",
+        }, (
+            "RuntimeObservation's top-level shape changed; extend this fixture "
+            f"rather than letting the provider go unproven against it: {unexercised}"
+        )
+
+        path = tmp_path / "rv.json"
+        path.write_text(
+            RuntimeObservation.model_validate(payload).model_dump_json(), encoding="utf-8"
+        )
+        deadline, source = _watchdog_deadline_provider(_Policy(safety_factor=2.0), str(path))()
+        assert source == "verified_components", (
+            "the provider fell open on a full production document — it has only "
+            "ever been proven against the two-key subset this file writes"
+        )
+        assert deadline == pytest.approx((9.0 + 26.45) * 2.0)
 
 
 class TestDeadlineParityWhenNoValidationEvidenceExists:
@@ -319,15 +395,23 @@ class TestColdStartTemporalUpdate:
         provider, path, factor = self._sequence(tmp_path)
         old_deadline, _ = provider()
 
-        # The subprocess reaches its first validation batch shortly after
-        # training ends. Model that batch as one 500-row chunk of the 15 000.
-        first_batch_seconds = VALIDATION_ACTUAL_S * (500 / 15_000)
-        elapsed_when_prediction_lands = TRAIN_ACTUAL_S + first_batch_seconds
-        assert elapsed_when_prediction_lands < old_deadline, (
-            f"the prediction lands at {elapsed_when_prediction_lands:.2f}s but the "
-            f"stale deadline fires at {old_deadline:.2f}s — the fix would arrive "
-            "after the kill"
-        )
+        # WHEN the prediction lands is NOT asserted here, and deliberately so.
+        # This test used to model it — `VALIDATION_ACTUAL_S * (500 / 15_000)`
+        # added to `TRAIN_ACTUAL_S`, compared against the stale deadline. That
+        # is arithmetic over three constants the test itself chose; production
+        # could defer the write arbitrarily and it would not move. It was the
+        # original 07c defect one level up, inside the test written to catch it.
+        #
+        # Arrival time is owned, at the production boundary, by
+        # `tests/unit/execute_tools/test_pr07c_validation_persistence_timing.py::
+        # TestValidationPredictionArrivesDuringThePass` — a real streaming run
+        # whose model reads the live sidecar from disk DURING validation and
+        # asserts the measurement-backed prediction appeared before the pass
+        # finished. Deadline-vs-real-elapsed is Gate 2's.
+        #
+        # What remains here is the arithmetic that is genuinely local: given
+        # the refreshed component, the provider recomputes a TOTAL that clears
+        # the observed wall.
 
         _write_sidecar(
             path,
@@ -503,7 +587,14 @@ class TestTheRealTrainerEmitsAValidationComponent:
     """
 
     @staticmethod
-    def _run(tmp_path, monkeypatch, *, run_name: str, runtime_policy: dict):
+    def _run(
+        tmp_path,
+        monkeypatch,
+        *,
+        run_name: str,
+        runtime_policy: dict,
+        eval_sample_set: dict | None | object = _DEFAULT_EVAL,
+    ):
         """One real `train_engine_sandbox.py` subprocess over the committed
         two-family fixture. Returns (result, fixture)."""
         import core.sandbox_executor as sandbox_module
@@ -511,7 +602,7 @@ class TestTheRealTrainerEmitsAValidationComponent:
         from execute_tools.dataset_config import bind_dataset_profile
         from tests.helpers.two_family_profile import write_two_family_fixture
 
-        (tmp_path / "data").mkdir()
+        (tmp_path / "data").mkdir(exist_ok=True)
         fx = write_two_family_fixture(tmp_path / "data")
 
         # The only test seam, inherited from the 07a rung: the child would
@@ -541,7 +632,9 @@ class TestTheRealTrainerEmitsAValidationComponent:
                 },
                 {"loss_type": "focal"},
                 sample_set={0: [0, 1, 2, 3], 1: [0, 1, 2, 3], 2: [0, 1, 2, 3]},
-                eval_sample_set={0: [0, 1], 2: [1, 3]},
+                eval_sample_set=(
+                    {0: [0, 1], 2: [1, 3]} if eval_sample_set is _DEFAULT_EVAL else eval_sample_set
+                ),
                 train_base_seed=5,
                 runtime_policy=runtime_policy,
             )
@@ -605,99 +698,3 @@ class TestTheRealTrainerEmitsAValidationComponent:
         assert validation["prediction"] is None
         assert validation["measurement"]["steady_state_reached"] is False
         assert "no steady state" in validation["measurement"]["detail"]["failure_reason"]
-
-    def test_a_stabilised_pass_lands_a_measurement_backed_prediction(self, tmp_path, monkeypatch):
-        """The load-bearing reachability claim: a REAL run puts a
-        measurement-backed validation prediction in the sidecar the watchdog
-        reads.
-
-        The verification stopping policy is bounded down so this 8-row fixture
-        can stabilise. That is a HARNESS bound, not a production change — the
-        policy is an operator input, and the property under test is the
-        ROUTING (does a verified validation verification reach the sidecar
-        with a measurement-backed source), not the stopping policy itself,
-        which the previous test covers at its production defaults.
-        """
-        out, _fx = self._run(
-            tmp_path,
-            monkeypatch,
-            run_name="c5stab",
-            runtime_policy={
-                "verification": {
-                    "min_timed_ms": 1.0,
-                    "min_timed_steps": 2,
-                    "steady": {"window": 2, "stable_windows": 2, "rel_spread_tol": 0.95},
-                }
-            },
-        )
-        validation = ((out.get("runtime_verification") or {}).get("components") or {})["validation"]
-        prediction = validation.get("prediction")
-        assert prediction is not None, (
-            "the validation phase recorded a measurement but no prediction; "
-            "C8d then leaves the watchdog term inert and the fix is cosmetic"
-        )
-        assert prediction["source"] == "real_validation_verification"
-        assert prediction["source"] in MEASUREMENT_BACKED_SOURCES
-        # Priced over the WHOLE phase, not just the measured batches.
-        assert prediction["unit_count"] == 8 * 2
-        assert prediction["predicted_seconds"] > 0
-
-    def test_the_first_measured_batch_is_counted_exactly_once(self, tmp_path, monkeypatch):
-        """DEFECT 2 of the cold-start triple: the first validation batch is
-        BOTH the measurement and real elapsed work, so it is easy to add its
-        measured cost on top of a prediction that already covers it.
-
-        The prediction must equal `unit_count x ms_per_unit x safety` with NO
-        extra term — asserted arithmetically, so an `extra_predicted_seconds`
-        creeping in shows up immediately.
-        """
-        out, _fx = self._run(
-            tmp_path,
-            monkeypatch,
-            run_name="c5once",
-            runtime_policy={
-                "verification": {
-                    "min_timed_ms": 1.0,
-                    "min_timed_steps": 2,
-                    "steady": {"window": 2, "stable_windows": 2, "rel_spread_tol": 0.95},
-                }
-            },
-        )
-        prediction = ((out.get("runtime_verification") or {}).get("components") or {})[
-            "validation"
-        ]["prediction"]
-        expected = (
-            prediction["unit_count"]
-            * prediction["ms_per_unit"]
-            / 1000.0
-            * prediction["safety_factor"]
-        )
-        assert prediction["predicted_seconds"] == pytest.approx(expected, rel=1e-9), (
-            "the validation prediction carries a term beyond unit_count x rate — "
-            "the measured first batch is being counted twice"
-        )
-
-    def test_the_training_actual_still_excludes_validation(self, tmp_path, monkeypatch):
-        """07a parity. The per-optimizer-step cost model must stay pure — 9 s
-        over 125 steps, never (9 + 26.45) s over 125 — so the fix belongs one
-        layer up, at the deadline, and NOT in the training observation.
-        """
-        from execute_tools.training_history import interpret_training_results
-
-        out, _fx = self._run(tmp_path, monkeypatch, run_name="c5excl", runtime_policy={})
-        components = (out.get("runtime_verification") or {}).get("components") or {}
-        history = interpret_training_results(out["results"], expected_validation=True).history
-        assert history is not None and history.validation_seconds is not None
-
-        validation_total = sum(history.validation_seconds)
-        # The validation ACTUAL is 07a's own accumulated seconds, unchanged —
-        # so the two accountings are separate and neither absorbs the other.
-        assert components["validation"]["actual_seconds"] == pytest.approx(
-            validation_total, rel=0.05
-        )
-        assert components["training"]["actual_seconds"] > 0
-        # The training actual was explicitly REDUCED by the validation
-        # seconds, so it cannot also contain them.
-        assert components["training"]["actual_seconds"] < (
-            components["training"]["actual_seconds"] + validation_total
-        )

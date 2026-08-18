@@ -401,18 +401,6 @@ class TestRawValidationFilename:
         assert captured_raw_names == ["abra_validation_0013.h5"]
         assert captured_raw_names[0] == TIDMAD.validation_file_pattern.format(file_index=13)
 
-    def test_the_pattern_renders_identically_across_the_whole_index_space(self):
-        """Two DIFFERENT constructions are inlined in production —
-        ``f"{i:04d}"`` (``scoring_utils``, ``denoising_score_single:137``)
-        and ``str(i).zfill(4)`` (``inference_single:782``). They agree only
-        for non-negative ints, and both must equal the pattern render, or
-        C4 would unify two subtly different names into one.
-        """
-        for file_index in range(TIDMAD.num_files):
-            rendered = TIDMAD.validation_file_pattern.format(file_index=file_index)
-            assert rendered == f"abra_validation_{file_index:04d}.h5"
-            assert rendered == f"abra_validation_{str(file_index).zfill(4)}.h5"
-
     def test_raw_and_denoised_names_stay_distinct(self):
         """§1's boundary, as an executable guard: the raw validation name is
         Step-02 topology and C4 routes it; every denoised name is the

@@ -281,12 +281,6 @@ class TestHyperparamTuningAgentRun:
             agent = HyperparamTuningAgent()
             yield agent, mock_brain, mock_sandbox
 
-    def test_output_validates_against_schema(self, agent_and_mocks, tmp_path):
-        agent, _, _ = agent_and_mocks
-        output = agent.run(_make_input(tmp_path))
-        # Re-validate to confirm schema compliance
-        HyperparamTuningOutput.model_validate(output.model_dump())
-
     def test_completed_status(self, agent_and_mocks, tmp_path):
         agent, _, _ = agent_and_mocks
         output = agent.run(_make_input(tmp_path, max_rounds=1))

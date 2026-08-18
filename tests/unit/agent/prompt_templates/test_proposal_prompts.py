@@ -131,21 +131,31 @@ class TestComparisonStage:
 
 
 class TestNoHardcodedAgentNamesInProposalPrompts:
-    @pytest.mark.parametrize("filename", ALL_PROMPT_FILES)
-    @pytest.mark.parametrize(
-        "forbidden",
-        [
-            "Literature agents:",
-            "Physics agents:",
-            "Human directives: always take precedence",
-        ],
+    FORBIDDEN_PHRASES = (
+        "Literature agents:",
+        "Physics agents:",
+        "Human directives: always take precedence",
     )
-    def test_forbidden_phrase_absent(self, filename: str, forbidden: str):
-        text = _load(filename)
-        assert forbidden not in text, (
-            f"{filename} contains the pre-P-c hardcoded trust-hierarchy "
-            f"phrase {forbidden!r}. Calibration must flow via "
-            f"AgentCard.trust_level (P-b) — not via agent-name pattern matching."
+
+    def test_forbidden_phrase_absent(self):
+        """One property: no prompt file names an agent to set trust.
+
+        Was a stacked cross-product over phrases x files -- one failure
+        class reported N x M ways, stopping at the first cell. Scanning the
+        whole matrix reports every offending (file, phrase) pair, and the
+        cell count no longer grows multiplicatively as either list grows.
+        """
+        violations = [
+            f"{filename}: {forbidden!r}"
+            for filename in ALL_PROMPT_FILES
+            for forbidden in self.FORBIDDEN_PHRASES
+            if forbidden in _load(filename)
+        ]
+        assert not violations, (
+            "Pre-P-c hardcoded trust-hierarchy phrases found:\n  "
+            + "\n  ".join(violations)
+            + "\n\nCalibration must flow via AgentCard.trust_level (P-b) — "
+            "not via agent-name pattern matching."
         )
 
 
@@ -156,22 +166,21 @@ class TestNoHardcodedAgentNamesInProposalPrompts:
 
 
 class TestModeFilesRedirectSynthesis:
-    @pytest.mark.parametrize("filename", MODE_FILES)
-    def test_advice_json_phrase_absent(self, filename: str):
+    def test_advice_json_phrase_absent(self):
         """'Advice JSON' as the strategic-direction authority was a
-        pre-P-c dangling pointer — pipeline mode never rendered any
-        such JSON. Replaced with a redirect to the base-prompt synthesis
-        rules. The phrase must be gone from every mode file."""
-        text = _load(filename)
-        assert "Advice JSON" not in text
+        pre-P-c dangling pointer — pipeline mode never rendered any such
+        JSON. Replaced with a redirect to the base-prompt synthesis rules.
+        The phrase must be gone from EVERY mode file, and this reports all
+        the files that still carry it rather than only the first."""
+        offenders = [f for f in MODE_FILES if "Advice JSON" in _load(f)]
+        assert not offenders, f"mode files still naming the dead Advice JSON: {offenders}"
 
-    @pytest.mark.parametrize("filename", MODE_FILES)
-    def test_redirect_to_base_prompt_synthesis_present(self, filename: str):
+    def test_redirect_to_base_prompt_synthesis_present(self):
         """Every mode file's Contract Hierarchy must point at the base
-        prompt's synthesis rules so a downstream reader knows where
-        the authoritative calibration lives."""
-        text = _load(filename)
-        assert "base prompt" in text
+        prompt's synthesis rules so a downstream reader knows where the
+        authoritative calibration lives."""
+        missing = [f for f in MODE_FILES if "base prompt" not in _load(f)]
+        assert not missing, f"mode files with no redirect to the base prompt: {missing}"
 
 
 # ---------------------------------------------------------------------------

@@ -138,18 +138,25 @@ class TestHelpers:
 
 
 class TestLLMCallStructure:
-    def test_generate_text_called_once(self, agent_with_mocks, inp):
+    def test_each_bridge_method_is_called_exactly_once_with_the_reasoning(
+        self, agent_with_mocks, inp
+    ):
+        """One property, one agent run.
+
+        Was three functions -- `..._generate_text_called_once`,
+        `..._generate_called_once`, `..._reasoning_injected_into_code_prompt`
+        -- each re-running the whole agent to make one assertion about the
+        same two bridge calls. The ORDERING claim stays a separate case below,
+        because it needs different fixture wiring (side_effect recorders) and
+        breaks for a different reason.
+        """
         agent_with_mocks.run(inp)
         agent_with_mocks.bridge.generate_text.assert_called_once()
-
-    def test_generate_called_once(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
         agent_with_mocks.bridge.generate.assert_called_once()
-
-    def test_reasoning_injected_into_code_prompt(self, agent_with_mocks, inp):
-        agent_with_mocks.run(inp)
         code_user_prompt = agent_with_mocks.bridge.generate.call_args[0][1]
-        assert FAKE_REASONING in code_user_prompt
+        assert FAKE_REASONING in code_user_prompt, (
+            "the reasoning from generate_text did not reach the code prompt"
+        )
 
     def test_generate_text_called_before_generate(self, agent_with_mocks, inp):
         call_order = []
@@ -376,18 +383,20 @@ class TestDescriptionFile:
 
 
 class TestFilePersistence:
-    def test_output_record_written(self, agent_with_mocks, inp, tmp_path):
-        agent_with_mocks.run(inp)
-        assert (tmp_path / "implementor_unit_test.json").exists()
+    def test_the_record_is_written_parses_and_names_the_model(
+        self, agent_with_mocks, inp, tmp_path
+    ):
+        """One property, one agent run. Was three functions re-running the
+        agent to check existence, parseability and one key of the same file.
 
-    def test_output_record_is_valid_json(self, agent_with_mocks, inp, tmp_path):
+        `isinstance(data, dict)` is dropped rather than kept: `json.loads`
+        raising is the same failure, and the type of a JSON object is not a
+        claim about this agent.
+        """
         agent_with_mocks.run(inp)
-        data = json.loads((tmp_path / "implementor_unit_test.json").read_text())
-        assert isinstance(data, dict)
-
-    def test_output_record_contains_model_type(self, agent_with_mocks, inp, tmp_path):
-        agent_with_mocks.run(inp)
-        data = json.loads((tmp_path / "implementor_unit_test.json").read_text())
+        path = tmp_path / "implementor_unit_test.json"
+        assert path.exists(), "no implementor record was written"
+        data = json.loads(path.read_text())
         assert data["model_type"] == "gated_dilated_tcn"
 
 

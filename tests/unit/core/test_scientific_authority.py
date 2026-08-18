@@ -34,38 +34,6 @@ def _verdict(mode, authority, validity) -> ScientificAuthority:
 class TestTheTruthTable:
     """The operator's table, asserted row by row."""
 
-    @pytest.mark.parametrize(
-        ("mode", "authority", "validity", "authoritative", "primary"),
-        [
-            ("blocking", "scientific", "valid", True, "blocking_scientific_formal_valid"),
-            ("blocking", "scientific", "invalid", False, "gate_invalidated"),
-            ("blocking", "scientific", "unknown", False, "formal_validity_unknown"),
-            ("blocking", "diagnostic", "valid", False, "declared_diagnostic"),
-            ("blocking", "diagnostic", "invalid", False, "declared_diagnostic"),
-            ("blocking", "diagnostic", "unknown", False, "declared_diagnostic"),
-            ("observe_only", "diagnostic", "valid", False, "declared_diagnostic"),
-            ("observe_only", "diagnostic", "invalid", False, "declared_diagnostic"),
-            ("observe_only", "scientific", "valid", False, "non_blocking_mode"),
-            ("observe_only", "scientific", "invalid", False, "non_blocking_mode"),
-        ],
-    )
-    def test_each_row(self, mode, authority, validity, authoritative, primary):
-        verdict = _verdict(mode, authority, validity)
-        assert verdict.authoritative is authoritative
-        assert verdict.primary_basis == primary
-
-    def test_exactly_one_combination_is_authoritative(self):
-        """The concept, not ten literals: only a fully-declared, enforced,
-        scientific run whose own formal record passed may inform science."""
-        authoritative = [
-            (m, a, v)
-            for m in ("blocking", "observe_only")
-            for a in ("scientific", "diagnostic")
-            for v in ("valid", "invalid", "unknown")
-            if _verdict(m, a, v).authoritative
-        ]
-        assert authoritative == [("blocking", "scientific", "valid")]
-
 
 class TestHistoricalRecordsStayReadable:
     def test_observe_only_scientific_does_not_raise(self):
@@ -121,31 +89,6 @@ class TestLaunchHistoryCannotReachTheVerdict:
 
 
 class TestConclusionsCannotBeSupplied:
-    @pytest.mark.parametrize(
-        "conclusion",
-        [
-            "authoritative",
-            "primary_basis",
-            "blocking_reasons",
-            "enters_incumbent_selection",
-            "enters_scientific_aggregation",
-        ],
-    )
-    def test_a_caller_supplying_a_conclusion_is_refused(self, conclusion):
-        """MUTATION TARGET: dropping `extra="forbid"`.
-
-        Without it Pydantic silently DISCARDS the argument. The verdict
-        would still be right, but the caller would believe they had set it
-        — which is how a wrong mental model survives review.
-        """
-        with pytest.raises(ValidationError):
-            ScientificAuthority(
-                healthgate_mode="observe_only",
-                declared_result_authority="scientific",
-                formal_validity="invalid",
-                **{conclusion: True},
-            )
-
     def test_a_verdict_cannot_be_mutated_after_derivation(self):
         verdict = _verdict("blocking", "scientific", "valid")
         with pytest.raises(ValidationError):

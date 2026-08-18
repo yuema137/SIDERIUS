@@ -205,19 +205,6 @@ def _on_disk_plugin_files() -> list[str]:
 class TestA8PriorPluginsRemainLoadable:
     """The pre-existing plugin population, through the production loader."""
 
-    def test_the_workspace_boundary_is_declared_not_assumed(self):
-        """Record which A8 evidence this workspace can supply.
-
-        ``agent_generated/models/*`` is gitignored, so a fresh clone and CI
-        legitimately hold zero plugins while a developer checkout holds the
-        accumulated population. §5 A8 accepts either — plugins still load,
-        OR a declared and accepted workspace boundary. Asserting a count
-        here would fail on CI for a reason that has nothing to do with
-        Step 03.
-        """
-        files = _on_disk_plugin_files()
-        assert isinstance(files, list)
-
     def test_every_on_disk_plugin_still_loads_and_declares_a_valid_contract(self):
         """The real A8 claim: Step 03 must not break the existing population.
 

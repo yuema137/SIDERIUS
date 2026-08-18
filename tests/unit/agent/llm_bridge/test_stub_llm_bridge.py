@@ -330,14 +330,6 @@ def test_emit_marker_still_writes(tmp_path: Path):
     assert rows[0]["tokens"]["prompt"] is None  # marker has zeroed token counts
 
 
-def test_is_subclass_of_llm_bridge():
-    """Wiring contract: ``isinstance(stub, LLMBridge)`` must hold so
-    callers that type-check (``isinstance(bridge, LLMBridge)``) treat
-    the stub as a drop-in replacement."""
-    bridge = StubLLMBridge()
-    assert isinstance(bridge, LLMBridge)
-
-
 # ===================================================================
 # B2b — Schema round-trip tests for proposer / implementor / validator
 # ===================================================================

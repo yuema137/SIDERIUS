@@ -60,12 +60,6 @@ class TestQuarantinedEvidenceIsKept:
         assert "unresolvable" in record.reason
         assert record.missing_identity_fields == ("model_family",)
 
-    def test_a_reasonless_quarantine_is_refused(self, registry):
-        """ "Unusable" with no reason is not auditable -- it is the same
-        silence as refusing the write, with a file attached."""
-        with pytest.raises(ValidationError):
-            QuarantineRecord(observation_payload=PAYLOAD, reason="")
-
     def test_identical_records_dedup(self, registry):
         a = registry.quarantine_observation(PAYLOAD, reason="same")
         b = registry.quarantine_observation(PAYLOAD, reason="same")

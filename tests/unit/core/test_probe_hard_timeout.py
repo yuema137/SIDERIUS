@@ -209,12 +209,6 @@ class TestWorkerContract:
         payload = json.loads(paths["spec"].read_text())
         assert payload["model_type"] == "fake_candidate"
 
-    def test_the_result_schema_rejects_impossible_values(self):
-        from pydantic import ValidationError
-
-        with pytest.raises(ValidationError):
-            ProbeWorkerResult(status="ok", model_identity="m", train_ms_per_step=-1.0)
-
     def test_the_worker_writes_no_run_workspace_state(self, tmp_path):
         """Everything the worker produces lives beside its result file."""
         _run(tmp_path, COMPLETES, cap=30.0)
@@ -242,10 +236,6 @@ class TestProductionWorkerWiring:
         from core.runtime_control.probe_worker_main import main
 
         assert main([]) == 2
-
-    def test_signal_constants_are_the_expected_ones(self):
-        assert signal.SIGTERM == 15
-        assert signal.SIGKILL == 9
 
 
 SELF_SIGNAL = """

@@ -312,19 +312,6 @@ class TestConcreteDtypeDivergesAcrossBoundaries:
     EMBEDDING_ARM = tuple(m for m in BUILTINS if m != "fcnet")
 
     @pytest.mark.parametrize("model_type", EMBEDDING_ARM)
-    def test_training_is_int32_and_inference_is_int64(self, model_type):
-        assert EPOCH_TRAINING_DTYPE[model_type] is torch.int32
-        assert STREAMING_TRAINING_DTYPE[model_type] is torch.int32
-        assert INFERENCE_DTYPE[model_type] is torch.int64
-
-    def test_fcnet_is_float32_at_every_boundary(self):
-        """The non-embedding arm does NOT diverge — so the divergence is a
-        property of the embedding arm, not of the boundaries in general."""
-        assert EPOCH_TRAINING_DTYPE["fcnet"] is torch.float32
-        assert STREAMING_TRAINING_DTYPE["fcnet"] is torch.float32
-        assert INFERENCE_DTYPE["fcnet"] is torch.float32
-
-    @pytest.mark.parametrize("model_type", EMBEDDING_ARM)
     def test_the_same_builtin_accepts_both_concrete_integer_dtypes(self, model_type):
         """Executed, not asserted from a table: each embedding-arm builtin
         really does run under both int32 and int64.

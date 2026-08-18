@@ -27,6 +27,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.unit.examples import maturity_vocabulary as mv
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO_ROOT / "examples"
 
@@ -39,7 +41,7 @@ class TestTidmadClaimsProductionBacking:
     def test_the_status_row_claims_production_backing_from_07b(self):
         row = _status("tidmad")
         assert "metric-direction policy / planner-reflector rendering" in row
-        assert "**production-backed from 07b**" in row
+        assert mv.MATURITY_PRODUCTION_07B in row
 
     def test_and_the_claim_is_true_at_the_production_seam(self):
         """The row is only honest if the shipped run really derives its order
@@ -71,8 +73,8 @@ class TestContrastPacksClaimL1Only:
         self, pack, metric_file, metric_id, direction
     ):
         row = _status(pack)
-        assert "**L1 — declaration-backed**" in row
-        assert "B-07b-1" in row and "B-07b-2" in row
+        assert mv.MATURITY_L1_DECLARATION in row
+        assert all(r in row for r in mv.RUNGS_07B), f"the row must name {mv.RUNGS_07B}"
         assert f"`{metric_id}`" in row and f"`{direction}`-is-better" in row
 
     def test_the_row_does_not_claim_real_execution(self, pack, metric_file, metric_id, direction):
@@ -80,7 +82,7 @@ class TestContrastPacksClaimL1Only:
         D14 owns real Pets/DAVIS execution; until then the row must say so."""
         row = _status(pack)
         assert "no real" in row.lower() or "no executable path" in row
-        assert "D14" in row
+        assert mv.DEFERRAL_TOKEN in row
 
     def test_the_declared_spec_the_row_points_at_actually_declares_that(
         self, pack, metric_file, metric_id, direction

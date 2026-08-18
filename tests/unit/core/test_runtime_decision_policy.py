@@ -273,10 +273,6 @@ class TestIdentities:
         with pytest.raises(TypeError, match="deterministic order"):
             config_hash12({"values": {1, 2, 3}})
 
-    def test_semver_validated(self):
-        with pytest.raises(ValueError):
-            component_identity("x", "1.0", {})
-
 
 # ---------------------------------------------------------------------------
 # Characterization — legacy numeric parity

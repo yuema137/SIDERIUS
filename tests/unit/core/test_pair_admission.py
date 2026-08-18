@@ -169,10 +169,6 @@ class TestPairDecision:
         with pytest.raises(ValueError, match="at least one member"):
             evaluate_pair_admission([])
 
-    def test_a_non_positive_ceiling_is_rejected(self):
-        with pytest.raises(ValueError, match="must be positive"):
-            evaluate_pair_admission([_member("a", 1.0)], ceiling_gib=0.0)
-
 
 class TestDecisionIntegrity:
     """The record cannot claim something its own numbers contradict."""
@@ -188,14 +184,6 @@ class TestDecisionIntegrity:
             PairAdmissionDecision(
                 feasible=True, aggregate_gib=40.0, ceiling_gib=28.0, headroom_gib=-12.0
             )
-
-    def test_a_member_needs_provenance(self):
-        with pytest.raises(ValidationError):
-            PairMember(run_name="a", predicted_peak_vram_gb=1.0, provenance="")
-
-    def test_a_member_cannot_predict_zero(self):
-        with pytest.raises(ValidationError):
-            PairMember(run_name="a", predicted_peak_vram_gb=0.0, provenance="p")
 
 
 class TestConfiguredCaps:

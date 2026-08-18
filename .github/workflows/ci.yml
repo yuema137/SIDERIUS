@@ -5,6 +5,12 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Nightly full suite. The selective PR path is a speed optimisation, not a
+  # coverage reduction: master and this schedule always run everything, so a
+  # selector mistake costs at most one night, never a silent permanent gap.
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
 
 # Cancel an in-flight run if a new commit lands on the same ref. Saves
 # Actions minutes when a contributor force-pushes a PR rapidly.
@@ -35,6 +41,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history: the selector diffs against the PR base, and a shallow
+          # clone would make that diff fail. A failed diff falls back to the
+          # full suite (below), but paying for history is cheaper than paying
+          # for a full suite on every PR.
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v3
@@ -54,8 +66,51 @@ jobs:
       - name: Lint — ruff format (check only, no rewrite)
         run: uv run ruff format --check .
 
-      - name: Type check — pyright (strict, blocking)
+      # Q6, DEFERRED by operator ruling: this step is labelled "strict" but
+      # `pyrightconfig.json` sets `typeCheckingMode: basic`, and CLAUDE.md
+      # leans on the *strict* complexity ceiling to justify a binding
+      # architectural rule. Choosing the intended policy is a type-safety
+      # decision, not a test-pruning one, so this PR preserves CURRENT actual
+      # behaviour and changes neither the mode nor the rationale. The label is
+      # left as-is deliberately: correcting the prose here would quietly pick
+      # one side of the open question. Tracked as a separate follow-up.
+      - name: Type check — pyright (see Q6 note above re "strict")
         run: uv run pyright
 
+      # ---- selective unit tests -------------------------------------------
+      # PR runs only the suites the changed paths can affect; master, the
+      # nightly schedule and any ambiguity run everything. The selector is
+      # fail-closed by construction (`tools/ci_selection/`): an unmapped path,
+      # a declared hub, a change to the selector itself, or ANY exception all
+      # resolve to the full suite.
+      - name: Resolve affected test suites
+        id: selection
+        run: |
+          # NO `set -e` here, deliberately. Every failure below must fall back
+          # to the FULL SUITE, never fail the build and never skip tests. A
+          # selector that can break CI is a selector people switch off.
+          full() {
+            echo "full_suite=true" >> "$GITHUB_OUTPUT"
+            echo 'pytest_args=tests/unit/ -m "not real_run" -q' >> "$GITHUB_OUTPUT"
+            echo "FULL SUITE: $1" >&2
+            exit 0
+          }
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            full "${{ github.event_name }} runs everything by policy"
+          fi
+          git fetch --no-tags origin "${{ github.base_ref }}" \
+            || full "could not fetch the base ref"
+          CHANGED=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD") \
+            || full "could not diff against the base ref"
+          if [ -z "$CHANGED" ]; then
+            full "empty diff"
+          fi
+          printf '%s\n' "$CHANGED" | uv run python -m tools.ci_selection \
+            || full "the selector exited non-zero"
+          grep -q '^pytest_args=' "$GITHUB_OUTPUT" \
+            || full "the selector produced no pytest_args"
+
       - name: Unit tests — pytest (no real_run, no integration)
-        run: uv run pytest tests/unit/ -m "not real_run" -q
+        run: |
+          echo "full_suite=${{ steps.selection.outputs.full_suite }}"
+          uv run pytest ${{ steps.selection.outputs.pytest_args }}

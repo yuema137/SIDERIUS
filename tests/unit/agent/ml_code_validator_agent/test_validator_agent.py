@@ -56,6 +56,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+#: The provider/model pair every agent-run case in this module uses.
+_AGENT_KWARGS = {"provider": "gemini", "model_id": "gemini-3.1-flash-lite-preview"}
+
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import LLMCodeReview, ValidatorInput, ValidatorOutput
 from nodes.ml_code_validator_agent import (
@@ -668,31 +671,38 @@ def passing_mocks(mock_llm_bridge, passing_subprocess):
 
 
 class TestMLCodeValidatorAgentRun:
-    def test_all_pass_returns_passed_true(self, tmp_path, passing_mocks):
-        agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
-        out = agent.run(make_input(tmp_path))
-        assert out.passed is True
+    def test_a_fully_passing_validation_produces_the_complete_output(self, tmp_path, passing_mocks):
+        """One property, one agent run.
 
-    def test_all_pass_individual_booleans(self, tmp_path, passing_mocks):
-        agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
-        out = agent.run(make_input(tmp_path))
-        assert out.plugin_registered is True
-        assert out.tests_passed is True
-        assert out.description_valid is True
-        assert out.config_fields_valid is True
-        assert out.instantiation_passed is True
-        assert out.gradient_check_passed is True
-        assert out.llm_review_passed is True
+        Was four functions -- `..._returns_passed_true`,
+        `..._individual_booleans`, `..._error_message_is_none`,
+        `..._model_type_set` -- each executing the IDENTICAL
+        `agent.run(make_input(tmp_path))` under the same fixture and reading a
+        different attribute off the same output. That is one semantic claim
+        ("a fully-passing validation reports every check passed, names the
+        model, and carries no error") paid for with four full agent runs.
 
-    def test_all_pass_error_message_is_none(self, tmp_path, passing_mocks):
-        agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
+        Grouped rather than merged: each assertion below keeps its own message,
+        so a failure still says which half of the contract broke.
+        """
+        agent = MLCodeValidatorAgent(**_AGENT_KWARGS)
         out = agent.run(make_input(tmp_path))
-        assert out.error_message is None
 
-    def test_all_pass_model_type_set(self, tmp_path, passing_mocks):
-        agent = MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview")
-        out = agent.run(make_input(tmp_path))
-        assert out.model_type == "test_model"
+        assert out.passed is True, "the overall verdict"
+        assert out.error_message is None, "a passing run must carry no error"
+        assert out.model_type == "test_model", "the model under validation is named"
+
+        per_check = {
+            "plugin_registered": out.plugin_registered,
+            "tests_passed": out.tests_passed,
+            "description_valid": out.description_valid,
+            "config_fields_valid": out.config_fields_valid,
+            "instantiation_passed": out.instantiation_passed,
+            "gradient_check_passed": out.gradient_check_passed,
+            "llm_review_passed": out.llm_review_passed,
+        }
+        failed = sorted(name for name, ok in per_check.items() if ok is not True)
+        assert not failed, f"individual checks not reported as passed: {failed}"
 
     def test_plugin_failure_sets_passed_false(self, tmp_path, passing_subprocess, mock_llm_bridge):
         bad_plugin = tmp_path / "bad.py"
@@ -803,26 +813,24 @@ class TestMLCodeValidatorAgentRun:
 
 
 class TestFilePersistence:
-    def test_output_file_written(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            make_input(tmp_path, run_name="myrun")
-        )
-        assert (tmp_path / "validation_myrun.json").exists()
+    def test_the_artifact_is_written_and_carries_every_check(self, tmp_path, passing_mocks):
+        """One property, one agent run.
 
-    def test_output_file_is_valid_json(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            make_input(tmp_path, run_name="r1")
-        )
-        data = json.loads((tmp_path / "validation_r1.json").read_text())
-        assert "passed" in data
-        assert "model_type" in data
+        Was four functions each re-running the agent to read a different key
+        out of the same JSON file: that it exists, that it parses, that it
+        holds the check fields, and that `model_type` is right. One write, one
+        read, all four claims.
+        """
+        agent = MLCodeValidatorAgent(**_AGENT_KWARGS)
+        agent.run(make_input(tmp_path, run_name="myrun"))
 
-    def test_output_file_contains_all_check_fields(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            make_input(tmp_path, run_name="r1")
-        )
-        data = json.loads((tmp_path / "validation_r1.json").read_text())
-        for field in (
+        path = tmp_path / "validation_myrun.json"
+        assert path.exists(), "no validation artifact was written"
+        data = json.loads(path.read_text())
+
+        required = [
+            "passed",
+            "model_type",
             "plugin_registered",
             "tests_passed",
             "description_valid",
@@ -830,14 +838,9 @@ class TestFilePersistence:
             "instantiation_passed",
             "gradient_check_passed",
             "llm_review_passed",
-        ):
-            assert field in data
-
-    def test_output_file_model_type_correct(self, tmp_path, passing_mocks):
-        MLCodeValidatorAgent(provider="gemini", model_id="gemini-3.1-flash-lite-preview").run(
-            make_input(tmp_path, run_name="r1")
-        )
-        data = json.loads((tmp_path / "validation_r1.json").read_text())
+        ]
+        missing = [f for f in required if f not in data]
+        assert not missing, f"the artifact omits check fields: {missing}"
         assert data["model_type"] == "test_model"
 
     def test_workspace_created_if_missing(self, tmp_path, passing_mocks):

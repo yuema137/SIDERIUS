@@ -79,23 +79,27 @@ class TestIdentityTravelsWithTheVerdict:
                 **partial, probe_available=False, unavailability_reason="r"
             )
 
-    @pytest.mark.parametrize("field", sorted(IDENTITY))
-    def test_no_identity_field_may_be_blank(self, field):
-        with pytest.raises(ValidationError):
-            ResolvedMeasurementCapability(
-                **{**IDENTITY, field: ""},
-                probe_available=False,
-                unavailability_reason="r",
-            )
+    def test_no_identity_field_may_be_blank(self):
+        """The concept, across every identity field at once.
 
-    def test_an_unrecognised_field_is_refused(self):
-        with pytest.raises(ValidationError):
-            ResolvedMeasurementCapability(
-                **IDENTITY,
-                probe_available=False,
-                unavailability_reason="r",
-                tidmad_data_dir="/some/path",
-            )
+        A blank passes `str` and reads as an answer, so each field carries
+        `min_length=1`. Asserted here as ONE claim over the whole set rather
+        than one case per field: the per-field form restated the same
+        declaration `len(IDENTITY)` times and reported only the first field
+        that regressed. This reports all of them.
+        """
+        accepted = []
+        for field in sorted(IDENTITY):
+            try:
+                ResolvedMeasurementCapability(
+                    **{**IDENTITY, field: ""},
+                    probe_available=False,
+                    unavailability_reason="r",
+                )
+            except ValidationError:
+                continue
+            accepted.append(field)
+        assert not accepted, f"identity fields accepted a blank: {accepted}"
 
 
 @pytest.fixture

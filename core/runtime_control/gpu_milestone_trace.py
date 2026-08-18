@@ -4,19 +4,31 @@ V20 PR C2. **Not production behaviour.** Nothing here runs unless
 `SIDERIUS_C2_INFERENCE_MILESTONE_TRACE` is set, and normal production
 never sets it.
 
-WHY THIS EXISTS. The corrected pre-phase inference measurement reports
-**3434 MiB** where formal inference really holds **3642 MiB** -- a fixed
-**208 MiB (5.7 %)** under-read, reproduced with zero spread across three
-alternating runs (probe 3434/3434/3434, formal 3642/3642/3642). An
-under-read is on the wrong side: it opens a deterministic false-admission
-band, where the gate admits a candidate the real phase cannot fit.
+WHY THIS EXISTS -- and what it already answered. The corrected pre-phase
+inference measurement reported **3434 MiB** where formal inference really
+held **3642 MiB**: a fixed **208 MiB (5.7 %)** under-read, reproduced with
+zero spread across three alternating runs. An under-read is on the wrong
+side, because it opens a deterministic false-admission band.
 
-Comparing final peaks again cannot locate it. What locates it is comparing
-the two processes *at the same points in their lifecycles*, so the first
-milestone at which they diverge is visible. Milestones 1-3 have already
-been established equal by direct measurement -- 0 MiB at process start,
-0 MiB after imports, 596 MiB after CUDA initialization on both sides -- so
-the divergence lies at or after model construction.
+**That investigation is CLOSED. Cause verified**, by comparing the two
+processes at the same points in their lifecycles rather than at their final
+peaks -- see `docs/design/v20_priorities/pr_c_measured_evidence_admission.md`
+"Lifecycle audit of the 208 MiB gap -- RESOLVED, cause verified". The two
+sides are identical through `after_model_to_device` and diverge only in
+*reserved* at `after_checkpoint_load`: `load_state_dict(torch.load(...))`
+materialises a second full parameter set on the device, `allocated` returns
+to its previous value, and the caching allocator retains the freed segments
+as reserved -- which is what driver-visible memory counts. The arithmetic
+closes with no residual. The same instrument separately found that the
+probe's loop binds two output tensors at once, so its reported figure was
+right only by accident.
+
+This module is therefore no longer an open investigation. It remains as a
+standing, opt-in instrument for the next question of the same shape, and
+the tests that guard it are scoped accordingly: they assert that it stays
+inert, that it never perturbs what it measures, and that its production
+call sites keep their place -- not the details of its own record schema,
+which Pydantic declares.
 
 **No correction factor is authorised, and this module computes none.** It
 observes; it does not adjust. A systematic difference that survives

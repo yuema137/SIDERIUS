@@ -455,9 +455,18 @@ class TestRuntimeAccounting:
         assert len(raw_actuals) == len(by_phase), f"a phase was recorded twice: {raw_actuals}"
         assert set(by_phase) == {"training", "validation"}, raw_actuals
 
-        # The original 07a claim, unchanged: deeply negative is impossible
-        # unless the 300 s of reported validation was subtracted out.
-        assert -300.0 <= by_phase["training"] < -290.0, raw_actuals
+        # The original 07a claim, unchanged: NEGATIVE is impossible unless the
+        # 300 s of reported validation was subtracted out. Real elapsed time is
+        # strictly positive, so `elapsed - 300` is the only way here.
+        #
+        # The bound was `-300.0 <= x < -290.0`, which silently also asserted
+        # that the real CPU training finishes in under 10 s. It does, on an idle
+        # machine; under full-suite load it took 12.66 s and the test failed
+        # with `-287.34` — a machine-speed assumption masquerading as a
+        # correctness bound. The mutation it exists to catch (dropping the
+        # subtraction) makes the value POSITIVE, so `< 0` kills it just as
+        # dead, without pinning the host's speed.
+        assert -300.0 < by_phase["training"] < 0.0, raw_actuals
         # 07c: and those same 300 s are now RECORDED rather than discarded.
         assert by_phase["validation"] == pytest.approx(300.0)
 

@@ -124,19 +124,25 @@ class TestIdentityIsExactMatchOnly:
                 "ApplicabilityEnvelope and thresholds in CalibrationPolicy"
             )
 
-    def test_an_unrecognised_field_is_refused(self):
-        """A silently absorbed field would be an identity dimension nobody
-        compares -- the shape of every field-drop defect in this project."""
-        with pytest.raises(ValidationError):
-            MeasurementIdentity(**{**BASE, "gpu_index": 0})
+    def test_no_dimension_may_be_blank(self):
+        """The concept, across every free-text dimension at once.
 
-    @pytest.mark.parametrize("field", sorted(BASE))
-    def test_no_dimension_may_be_blank(self, field):
-        """An empty string passes `str` and reads as an answer."""
-        if field in ("measurement_kind", "phase"):
-            pytest.skip("closed vocabularies; a blank is already not a member")
-        with pytest.raises(ValidationError):
-            _identity(**{field: ""})
+        An empty string passes `str` and reads as an answer. Asserted as ONE
+        claim over the whole set rather than one case per dimension: the
+        per-field form restated the same declaration `len(BASE)` times, two of
+        those cases only to skip, and it reported just the first dimension that
+        regressed. This reports all of them.
+        """
+        # Closed vocabularies; a blank is already not a member.
+        free_text = sorted(set(BASE) - {"measurement_kind", "phase"})
+        accepted = []
+        for field in free_text:
+            try:
+                _identity(**{field: ""})
+            except ValidationError:
+                continue
+            accepted.append(field)
+        assert not accepted, f"identity dimensions accepted a blank: {accepted}"
 
     def test_the_stack_is_last_so_drift_can_group_without_it(self):
         """Mirrors `bucket_components`' convention: `components()[:-1]` is

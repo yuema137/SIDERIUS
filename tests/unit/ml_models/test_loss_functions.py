@@ -5,6 +5,7 @@ Verifies that all loss functions compute correctly on synthetic tensors
 and that get_criterion instantiates the right class for each loss_type.
 """
 
+import math
 import shutil
 import sys
 from pathlib import Path
@@ -106,6 +107,86 @@ class TestFocalLoss1D:
 # ==========================================
 # FocalLoss1DCW
 # ==========================================
+
+
+class TestFocalLoss1DNumericParity:
+    """The frozen loss's missing numeric oracle.
+
+    CLAUDE.md asserts `loss_models_sandbox.py:135-168` is line-for-line
+    identical to TIDMAD's `network.py:FocalLoss1D`, and records that
+    `alpha` was once wrong -- 0.25 where the paper uses 0.5 -- on wavenet.
+    Nothing asserted the arithmetic. `TestFocalLoss1D` above checks only
+    properties that hold for almost any loss: a scalar shape (guaranteed by
+    `reduction="mean"`), non-negativity (mathematically guaranteed), and two
+    coarse orderings. Set `alpha = 0.25` today and all four stay green.
+
+    Line 161 masks the sum to the target class, so for target class c:
+
+        loss = mean over (batch, length) of
+                   -alpha * (1 - p_c) ** gamma * log(p_c)
+
+    Every expectation below is HAND-COMPUTED from that closed form and
+    hardcoded. Nothing is read back from the implementation, and no fixture
+    is involved -- two classes, one sample, one timestep.
+    """
+
+    @staticmethod
+    def _loss(alpha: float, gamma: float, logits: tuple[float, float], target: int) -> float:
+        cfg = LossConfig(loss_type="focal", alpha=alpha, gamma=gamma, reduction="mean")
+        x = torch.tensor([[[logits[0]], [logits[1]]]], dtype=torch.float32)  # [1, 2, 1]
+        t = torch.tensor([[target]], dtype=torch.long)  # [1, 1]
+        return float(FocalLoss1D(cfg)(x, t))
+
+    def test_the_paper_alpha_and_gamma_give_the_hand_computed_value(self):
+        """alpha=0.5, gamma=2, p=0.5  ->  -0.5 * 0.25 * ln(0.5)."""
+        assert self._loss(0.5, 2.0, (0.0, 0.0), 0) == pytest.approx(0.0866433978, rel=1e-6)
+
+    def test_both_alpha_DEFAULTS_give_the_paper_value(self):
+        """The drift that actually happened was a DEFAULT, not an argument.
+
+        Every other case here passes `alpha` explicitly and therefore cannot
+        see a default change — verified by mutation: flipping
+        `loss_models_sandbox.py:143` from 0.5 to 0.25 left the four legacy
+        property tests AND every explicit-alpha case below green.
+
+        There are TWO defaults on this path and they are easy to confuse:
+        `LossConfig.alpha` is declared `default=0.5`
+        (`models_format_sandbox.py:640`), which is what an unset config
+        actually gets; the class-level `else 0.5`
+        (`loss_models_sandbox.py:143`) is reached only when alpha is
+        explicitly `None`. A config that omits alpha never touches the
+        second one, so both are pinned here.
+        """
+        x = torch.tensor([[[0.0], [0.0]]], dtype=torch.float32)
+        t = torch.tensor([[0]], dtype=torch.long)
+
+        schema_default = LossConfig(loss_type="focal", gamma=2.0, reduction="mean")
+        assert schema_default.alpha == 0.5, "the schema default moved off the paper value"
+        assert float(FocalLoss1D(schema_default)(x, t)) == pytest.approx(0.0866433978, rel=1e-6)
+
+        explicit_none = LossConfig(loss_type="focal", alpha=None, gamma=2.0, reduction="mean")
+        assert float(FocalLoss1D(explicit_none)(x, t)) == pytest.approx(0.0866433978, rel=1e-6)
+
+    def test_the_historical_alpha_drift_is_visible_here(self):
+        """The 0.5 -> 0.25 regression, as an exact factor of two. This is the
+        case the four property tests above cannot see."""
+        paper = self._loss(0.5, 2.0, (0.0, 0.0), 0)
+        drifted = self._loss(0.25, 2.0, (0.0, 0.0), 0)
+        assert drifted == pytest.approx(0.0433216989, rel=1e-6)
+        assert drifted == pytest.approx(paper / 2.0, rel=1e-6)
+
+    def test_gamma_zero_collapses_to_weighted_cross_entropy(self):
+        """gamma=0 removes the focal term: -0.5 * ln(0.5). Pins the exponent
+        -- the alpha rows alone cannot distinguish gamma=2 from gamma=1."""
+        assert self._loss(0.5, 0.0, (0.0, 0.0), 0) == pytest.approx(0.3465735912, rel=1e-6)
+
+    def test_an_asymmetric_logit_pins_the_softmax_and_the_target_mask(self):
+        """logits (ln 3, 0) -> p_0 = 0.75, so -0.5 * 0.0625 * ln(0.75).
+        A uniform-logit case cannot tell the target class from the other one;
+        this one can."""
+        assert self._loss(0.5, 2.0, (math.log(3.0), 0.0), 0) == pytest.approx(
+            0.0089900587, rel=1e-6
+        )
 
 
 class TestFocalLoss1DCW:

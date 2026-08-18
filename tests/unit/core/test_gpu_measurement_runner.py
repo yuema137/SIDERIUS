@@ -19,6 +19,7 @@ simulation of it.
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import pytest
@@ -275,9 +276,17 @@ class TestTheRawEvidenceSurvives:
 
 class TestAWorkerThatLeavesNoReport:
     def test_a_hung_worker_is_killed_at_the_deadline(self, tmp_path):
+        pgid_file = tmp_path / "worker_pgid"
         run = _run(
             tmp_path,
-            "journal('phase_start', 'setup')\ntime.sleep(60)\n",
+            # A GRANDCHILD, deliberately. The previous worker was
+            # `journal(...); sleep(60)` and spawned nothing, so the process
+            # group was trivially dead and an orphan assertion could not fail.
+            "import os, subprocess, sys\n"
+            "journal('phase_start', 'setup')\n"
+            f"open({str(pgid_file)!r}, 'w').write(str(os.getpgid(0)))\n"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+            "time.sleep(60)\n",
             [1000],
             spec={
                 "request": CandidateMeasurementRequest(
@@ -298,7 +307,18 @@ class TestAWorkerThatLeavesNoReport:
             "the classifier may only call this a timeout if the deadline was reached"
         )
         assert run.process.term_sent is True
-        assert run.process.orphans_remaining is False
+
+        # Asked of the KERNEL, not read back from the runner. This previously
+        # asserted only `run.process.orphans_remaining is False` -- a value
+        # `gpu_measurement_runner.py:423` produces via `process_group_alive`.
+        # Delete that call, hardcode False, and the assertion stayed green.
+        # Character-for-character the defect corrected at `test_watchdog.py:53`,
+        # and outside what `test_no_self_referential_expectations.py` detects by
+        # design (`:27-31`).
+        pgid = int(pgid_file.read_text().strip())
+        with pytest.raises(ProcessLookupError):
+            os.killpg(pgid, 0)
+        assert run.process.orphans_remaining is False  # and the runner agrees
 
     def test_the_journal_names_the_phase_that_was_in_flight(self, tmp_path):
         """The difference between telling an operator "it died during

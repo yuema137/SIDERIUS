@@ -68,10 +68,6 @@ class TestTheFrozenRoster:
         names = [j.run_name for j in jobs]
         assert len(set(names)) == len(names)
 
-    def test_the_chain_type_is_constrained(self):
-        with pytest.raises(ValueError):
-            CampaignJob(run_name="x", band="15-19", chain_type="architecture")
-
 
 class TestTheCampaignOpens:
     def test_exactly_two_chains_start_and_they_are_band_15_19(self, sched):
@@ -169,10 +165,6 @@ class TestTheConcurrencyCeiling:
         launched = sched.launch_order
         assert len(launched) == 8
         assert len(set(launched)) == 8
-
-    def test_a_ceiling_below_one_is_refused(self, jobs):
-        with pytest.raises(ValueError):
-            SlotScheduler(jobs, max_active=0)
 
 
 class TestOnlyATerminalStateFreesASlot:

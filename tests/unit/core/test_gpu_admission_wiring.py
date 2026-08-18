@@ -76,18 +76,6 @@ def _runner_parser() -> argparse.ArgumentParser:
 
 
 class TestTheTypedPolicy:
-    def test_it_is_frozen(self):
-        """Resolved once per attempt and read by the gate. A policy that
-        could be mutated mid-attempt would let training and inference be
-        judged under different rules."""
-        policy = GpuAdmissionPolicy(mode="formal")
-        with pytest.raises(ValidationError):
-            policy.mode = "trial"
-
-    def test_it_rejects_an_unknown_posture(self):
-        with pytest.raises(ValidationError):
-            GpuAdmissionPolicy(mode="diagnostic")
-
     def test_it_accepts_only_trial_and_formal(self):
         assert GpuAdmissionPolicy(mode="trial").mode == "trial"
         assert GpuAdmissionPolicy(mode="formal").mode == "formal"
@@ -101,11 +89,6 @@ class TestTheTypedPolicy:
         assert "requirement" not in " ".join(fields)
         with pytest.raises(ValidationError):
             GpuAdmissionPolicy(mode="formal", requirement_mib=1476)
-
-    def test_a_zero_or_negative_ceiling_is_rejected(self):
-        for bad in (0.0, -1.0):
-            with pytest.raises(ValidationError):
-                GpuAdmissionPolicy(mode="formal", ceiling_gib=bad)
 
 
 class TestPostureIsDerivedNotConfigured:

@@ -66,35 +66,3 @@ class TestGetServerConfig:
         cfg = get_server_config()
         assert calls == [None]
         assert cfg.hostname == "ligroup"
-
-
-# ---------------------------------------------------------------------------
-# ServerConfig schema
-# ---------------------------------------------------------------------------
-
-
-class TestServerConfigSchema:
-    def test_rejects_nonpositive_per_segment(self):
-        with pytest.raises(ValidationError):
-            ServerConfig(hostname="x", per_psd_segment_seconds=0.0)
-        with pytest.raises(ValidationError):
-            ServerConfig(hostname="x", per_psd_segment_seconds=-0.5)
-
-    def test_rejects_empty_hostname(self):
-        with pytest.raises(ValidationError):
-            ServerConfig(hostname="", per_psd_segment_seconds=0.5)
-
-    def test_rejects_extra_fields(self):
-        """Typos in a server file should be a validation error, not
-        silently ignored."""
-        with pytest.raises(ValidationError):
-            ServerConfig(
-                hostname="x",
-                per_psd_segment_seconds=0.5,
-                per_segment_seconds=0.5,  # wrong field name
-            )
-
-    def test_frozen(self):
-        cfg = ServerConfig(hostname="x", per_psd_segment_seconds=0.5)
-        with pytest.raises(ValidationError):
-            cfg.hostname = "y"

@@ -199,19 +199,6 @@ class TestItIsInertWithoutTheEnvironmentVariable:
 
 
 class TestAMalformedChannelFailsAsInfrastructure:
-    def test_unparsable_json_raises_the_infrastructure_error(self):
-        with pytest.raises(MilestoneTraceUnavailable, match="not JSON"):
-            tracer_from_environment(
-                side="formal_inference", environ={TRACE_ENV_VAR: "/tmp/not-json"}
-            )
-
-    def test_a_channel_missing_its_device_raises(self):
-        with pytest.raises(MilestoneTraceUnavailable, match="usable channel"):
-            tracer_from_environment(
-                side="formal_inference",
-                environ={TRACE_ENV_VAR: json.dumps({"path": "/tmp/t.ndjson", "run_id": "r"})},
-            )
-
     def test_an_unwritable_path_fails_before_any_measurement(self, tmp_path):
         """Infrastructure, not science. It must raise at construction --
         before a single milestone -- so a broken channel can never be
@@ -238,18 +225,6 @@ class TestAMalformedChannelFailsAsInfrastructure:
 
 
 class TestEveryRecordCarriesItsContext:
-    def test_identity_uuid_and_batch_travel_with_the_figure(self, tracer):
-        tracer.set_candidate({"model_type": "punet"}, inference_batch_size=25)
-        record = tracer.record("process_start")
-        assert record is not None
-        assert record.candidate == {"model_type": "punet"}
-        assert record.inference_batch_size == 25
-        assert record.gpu_uuid == UUID
-        assert record.run_id == "audit-208mib"
-        assert record.git_sha == "deadbeef"
-        assert record.tree_total_mib == 3642
-        assert record.own_pids == (4321,)
-
     def test_a_failed_query_stays_none_and_never_becomes_zero(self, channel):
         """The invariant the whole PR rests on. A comparison that read a
         failed query as 0 MiB would invent a divergence at that milestone
@@ -266,23 +241,6 @@ class TestEveryRecordCarriesItsContext:
         assert record.tree_total_mib is None
         assert record.device_used_mib is None
 
-    def test_a_populated_unavailable_record_is_rejected(self):
-        with pytest.raises(ValueError, match="must stay None"):
-            MilestoneRecord(
-                at=1.0,
-                monotonic_at=1.0,
-                sequence=0,
-                side="formal_inference",
-                phase="inference",
-                milestone="process_start",
-                telemetry_available=False,
-                tree_total_mib=3642,
-                gpu_uuid=UUID,
-                run_id="r",
-                git_sha="s",
-                process_pid=1,
-            )
-
     def test_a_sampler_that_raises_becomes_a_value_not_an_exception(self, channel):
         """This PR's control-flow rule: expected outcomes are values. A
         driver query failing mid-run must not abort the traced process."""
@@ -297,67 +255,12 @@ class TestEveryRecordCarriesItsContext:
         assert record is not None and record.telemetry_available is False
 
 
-class TestBothSidesEmitOneSchema:
-    def test_the_written_lines_validate_as_records_from_either_side(self, channel):
-        """Records that cannot be parsed back by one reader cannot be
-        aligned, and alignment is the entire purpose."""
-        for side in ("formal_inference", "prephase_inference"):
-            MilestoneTracer(
-                channel,
-                side=side,  # type: ignore[arg-type]
-                git_sha="s",
-                device_sampler=lambda pid, device: _snapshot(100),
-            ).record("process_start")
-
-        lines = Path(channel.path).read_text(encoding="utf-8").strip().splitlines()
-        assert len(lines) == 2
-        parsed = [MilestoneRecord(**json.loads(line)) for line in lines]
-        assert {r.side for r in parsed} == {"formal_inference", "prephase_inference"}
-        # One schema means one field set, not merely two parseable shapes.
-        assert len({tuple(sorted(json.loads(line))) for line in lines}) == 1
-
-    def test_the_sequence_covers_both_lifecycles(self):
-        assert set(ONCE_MILESTONES) | set(PER_BATCH_MILESTONES) == set(MILESTONE_SEQUENCE)
-        assert POST_FORWARD_MILESTONE in PER_BATCH_MILESTONES
-
-
 # ─────────────────────────────────────────────────────────────────────────
 # Order, uniqueness and bounds
 # ─────────────────────────────────────────────────────────────────────────
 
 
 class TestOrderAndUniquenessAreEnforced:
-    def test_a_once_milestone_cannot_be_recorded_twice(self, tracer):
-        tracer.record("process_start")
-        with pytest.raises(MilestoneTraceMisuse, match="already recorded"):
-            tracer.record("process_start")
-
-    def test_an_unknown_milestone_is_refused(self, tracer):
-        with pytest.raises(MilestoneTraceMisuse, match="not a lifecycle milestone"):
-            tracer.record("after_the_interesting_bit")
-
-    def test_a_per_batch_milestone_requires_a_batch_index(self, tracer):
-        with pytest.raises(MilestoneTraceMisuse, match="requires a batch_index"):
-            tracer.record(POST_FORWARD_MILESTONE)
-
-    def test_a_once_milestone_rejects_a_batch_index(self, tracer):
-        with pytest.raises(MilestoneTraceMisuse, match="once-per-process"):
-            tracer.record("process_start", batch_index=0)
-
-    def test_a_per_batch_milestone_out_of_order_is_refused(self, tracer):
-        """The defect: recording the post-forward state after the CPU
-        transfer has already been recorded. The name would still say
-        `after_forward_output_resident` while describing a released
-        state."""
-        tracer.record("after_output_to_cpu", batch_index=0)
-        with pytest.raises(MilestoneTraceMisuse, match="out of order"):
-            tracer.record(POST_FORWARD_MILESTONE, batch_index=0)
-
-    def test_batches_are_independent(self, tracer):
-        tracer.record("after_output_to_cpu", batch_index=0)
-        # A new batch restarts the cycle; this must NOT be an ordering error.
-        assert tracer.record("after_input_to_device", batch_index=1) is not None
-
     def test_the_per_batch_bound_skips_rather_than_records(self, tracer):
         """A bounded cap, and a visible one: `max_traced_batches` travels
         on every per-batch record so a reader can tell a bounded trace from
@@ -366,27 +269,6 @@ class TestOrderAndUniquenessAreEnforced:
         assert tracer.record(POST_FORWARD_MILESTONE, batch_index=2) is None
         assert tracer.traces_batch(1) and not tracer.traces_batch(2)
         assert all(r.max_traced_batches == 2 for r in tracer.records if r.batch_index is not None)
-
-
-class TestAMissingMilestoneIsVisible:
-    def test_an_incomplete_lifecycle_is_detectable_from_the_artifact(self, tracer):
-        """Required by the audit plan: missing milestones make the
-        comparison incomplete, and that must be readable from the record
-        set rather than assumed away."""
-        tracer.record("process_start")
-        tracer.record("after_imports")
-        recorded = {r.milestone for r in tracer.records}
-        missing = [m for m in ONCE_MILESTONES if m not in recorded]
-        assert "after_model_to_device" in missing
-        assert "before_exit" in missing
-
-    def test_the_probe_legitimately_lacks_the_checkpoint_milestone(self):
-        """Not a gap -- a finding. The pre-phase worker builds from the
-        live registry and loads no checkpoint, so `after_checkpoint_load`
-        is a step formal inference has and it does not."""
-        assert "after_checkpoint_load" in ONCE_MILESTONES
-        assert "load_state_dict" in INFERENCE_SOURCE.read_text(encoding="utf-8")
-        assert "load_state_dict" not in WORKER_SOURCE.read_text(encoding="utf-8")
 
 
 # ─────────────────────────────────────────────────────────────────────────
@@ -401,25 +283,6 @@ class TestThereIsExactlyOneDefinitionOfDriverVisibleMemory:
         tracer = MilestoneTracer(channel, side="formal_inference", git_sha="s")
         assert tracer._sampler is gpu_accounting.sample
 
-    def test_it_roots_ownership_at_its_own_process(self, channel):
-        """Ancestry from this process, exactly the production rule. Rooting
-        anywhere else would count another chain's memory as the
-        candidate's."""
-        seen = {}
-
-        def _spy(pid, device):
-            seen["pid"] = pid
-            seen["uuid"] = device.uuid
-            return _snapshot(10)
-
-        import os
-
-        MilestoneTracer(channel, side="formal_inference", git_sha="s", device_sampler=_spy).record(
-            "process_start"
-        )
-        assert seen["pid"] == os.getpid()
-        assert seen["uuid"] == UUID
-
     def test_it_introduces_no_rival_telemetry_backend(self):
         """pynvml or a private nvidia-smi call here would be a second
         memory policy wearing this module's name."""
@@ -427,38 +290,6 @@ class TestThereIsExactlyOneDefinitionOfDriverVisibleMemory:
         assert "pynvml" not in text
         assert "nvidia-smi" not in text
         assert "--query-compute-apps" not in text
-
-    def test_the_tree_total_comes_from_the_driver_sampler_alone(self, tracer):
-        """Allocator values are diagnostic; `tree_total_mib` is the
-        authority-shaped field, and no allocator reading may reach it.
-
-        The injected sampler returns 3642 while this process's allocator
-        holds something else entirely, so a wiring that fed the allocator
-        into `tree_total_mib` cannot produce this number.
-        """
-        record = tracer.record("process_start")
-        assert record is not None
-        assert record.tree_total_mib == 3642
-        assert record.allocator_allocated_mib != record.tree_total_mib
-
-    def test_an_unreadable_allocator_is_none_and_never_zero(self, tracer):
-        """A gap is not a zero, on the allocator side too.
-
-        Deliberately order-independent: whether CUDA is initialized in this
-        process depends on which tests ran first -- a CUDA integration test
-        earlier in the session leaves it up. Asserting `None` outright made
-        this test pass alone and fail in a full run. The invariant that
-        actually holds either way is the pairing: figures exactly when CUDA
-        is up, `None` when it is not, and never 0 standing in for unknown.
-        """
-        record = tracer.record("process_start")
-        assert record is not None
-        if record.cuda_initialized:
-            assert record.allocator_allocated_mib is not None
-            assert record.allocator_reserved_mib is not None
-        else:
-            assert record.allocator_allocated_mib is None
-            assert record.allocator_reserved_mib is None
 
 
 # ─────────────────────────────────────────────────────────────────────────

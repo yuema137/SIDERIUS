@@ -44,13 +44,32 @@ def _run(cmd: list[str], *, deadline: float | None, grace: float = 0.5, poll: fl
 
 
 class TestKillTree:
-    def test_kill_leaves_no_orphans(self):
+    def test_kill_leaves_no_orphans(self, tmp_path):
         # The subprocess spawns background children of its own — the §4
         # process-group kill must take the WHOLE tree down.
-        result, kill_info = _run(["bash", "-c", "sleep 60 & sleep 60 & wait"], deadline=0.4)
+        #
+        # The group is observed from OUTSIDE. This previously asserted
+        # `kill_info["survivors_detected"] is False`, which is a value the
+        # code under test produced: delete the orphan probe at
+        # `core/sandbox_executor.py:995-1003`, hardcode `survivors = False`,
+        # and the assertion still passed. `test_probe_hard_timeout.py:126-130`
+        # already does it the honest way, and this now matches — the child
+        # reports its own process-group id and the test asks the kernel.
+        pgid_file = tmp_path / "pgid"
+        result, kill_info = _run(
+            ["bash", "-c", f"echo $$ > {pgid_file}; sleep 60 & sleep 60 & wait"],
+            deadline=0.4,
+        )
         assert result is None
         assert kill_info is not None
-        assert kill_info["survivors_detected"] is False  # orphan-free (§4)
+
+        pgid = int(pgid_file.read_text().strip())
+        with pytest.raises(ProcessLookupError):
+            # The leader IS the group (start_new_session), so a surviving
+            # grandchild would keep the group alive and this would not raise.
+            os.killpg(pgid, 0)
+
+        assert kill_info["survivors_detected"] is False  # and production agrees
         assert kill_info["elapsed_s"] > 0.4
         assert kill_info["deadline_s"] == pytest.approx(0.4)
         assert kill_info["estimate_source"] == "operator_budget"

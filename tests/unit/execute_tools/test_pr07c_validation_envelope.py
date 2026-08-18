@@ -190,32 +190,39 @@ class TestTheEnvelopeMatrix:
 
 
 class TestTheSchemaRefusesNonsense:
-    @pytest.mark.parametrize("bad", [0, -1, -500])
-    def test_zero_and_negative_are_rejected_at_startup(self, bad):
-        """Before any spend. A ceiling of 0 would mean "validate nothing",
-        which is `eval_sample_set=None`, not a ceiling."""
-        from pydantic import ValidationError
+    """One concept: the two INDEPENDENT declarations of the ceiling agree.
 
+    Was five parametrized `ValidationError` cases across two schemas. Both
+    fields declare `ge=1` (`core/runtime_control/session.py:238`,
+    `agent/schemas/hyperparam_tuning.py:1944`), so Pydantic enforces the
+    rejection and CLAUDE.md forbids pytesting a declaration.
+
+    What a declaration CANNOT enforce is that the two schemas -- an operator
+    input and a runtime policy, edited independently -- keep the SAME bound. A
+    ceiling of 0 means "validate nothing", which is `eval_sample_set=None`, not
+    a ceiling; if one schema drifted to `ge=0` the other would still refuse and
+    the disagreement would surface as a confusing startup error rather than a
+    caught one. That cross-schema agreement is the invariant, and it is what
+    this now asserts.
+    """
+
+    def test_both_schemas_declare_the_same_lower_bound(self):
+        from agent.schemas.hyperparam_tuning import HyperparamTuningInput
         from core.runtime_control.session import RuntimeControlPolicy
 
-        with pytest.raises(ValidationError, match="validation_max_samples"):
-            RuntimeControlPolicy(validation_max_samples=bad)
+        def _lower_bound(model, field: str):
+            meta = model.model_fields[field].metadata
+            bounds = [getattr(m, "ge", None) for m in meta]
+            found = [b for b in bounds if b is not None]
+            assert found, f"{model.__name__}.{field} declares no `ge` bound"
+            return found[0]
 
-    @pytest.mark.parametrize("bad", [0, -1])
-    def test_the_operator_input_rejects_them_too(self, bad):
-        """The tuner's own input schema, so a bad value never reaches the
-        policy in the first place."""
-        from pydantic import ValidationError
-
-        from agent.schemas.hyperparam_tuning import HyperparamTuningInput
-
-        with pytest.raises(ValidationError, match="validation_max_samples"):
-            HyperparamTuningInput(
-                model_type="wavenet",
-                run_name="x",
-                workspace="/tmp/x",
-                validation_max_samples=bad,
-            )
+        policy_bound = _lower_bound(RuntimeControlPolicy, "validation_max_samples")
+        input_bound = _lower_bound(HyperparamTuningInput, "validation_max_samples")
+        assert policy_bound == input_bound == 1, (
+            f"the two independent declarations of the validation ceiling "
+            f"disagree: policy ge={policy_bound}, input ge={input_bound}"
+        )
 
 
 class TestTheClampProvenanceIsRecoverable:

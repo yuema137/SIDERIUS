@@ -33,6 +33,7 @@ import pytest
 
 from agent.schemas.training_diagnosis import TrainingDiagnosis, derive_training_diagnosis
 from execute_tools.training_history import EPOCH_STATISTIC, TrainingHistory
+from tests.unit.examples import maturity_vocabulary as mv
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLES = REPO_ROOT / "examples"
@@ -187,16 +188,27 @@ def test_the_pack_fixtures_are_consumed_from_the_packs_and_labelled_l1():
 
 
 def test_pack_docs_state_the_07a_maturity_honestly():
-    """STATUS / README pins: TIDMAD 'production-backed from 07a'; Pets / DAVIS
-    'L1 — fixture-backed' with real R2/R3 after D14; each README states R1 /
-    R2 / R3."""
-    tidmad_status = (EXAMPLES / "tidmad" / "STATUS.md").read_text(encoding="utf-8")
-    assert "production-backed from 07a" in tidmad_status
-    for pack in ("oxford_iiit_pet", "davis_future_prediction"):
-        status = (EXAMPLES / pack / "STATUS.md").read_text(encoding="utf-8")
-        assert "L1 — fixture-backed" in status and "B-07a-1" in status and "D14" in status
-        assert "training_history_l1_fixture.json" in status
-    for pack in TRACKS:
-        readme = (EXAMPLES / pack / "README.md").read_text(encoding="utf-8")
-        for token in ("R1", "R2", "R3"):
-            assert token in readme, f"{pack}/README.md must state {token}"
+    """STATUS / README pins for 07a, against the shared maturity vocabulary.
+
+    Every literal lives in `tests/unit/examples/maturity_vocabulary.py` so D14
+    edits ONE place rather than the seven prose pins Step 07 accumulated across
+    two modules. The expectations are still hardcoded, and deliberately: a
+    version that read the row and asserted it matched itself would be the
+    self-referential shape this PR has now found four times.
+    """
+    assert mv.MATURITY_PRODUCTION_07A in mv.status_text("tidmad")
+
+    for pack in mv.L1_PACKS:
+        status = mv.status_text(pack)
+        for token in (
+            mv.MATURITY_L1_FIXTURE,
+            mv.RUNG_07A,
+            mv.DEFERRAL_TOKEN,
+            mv.L1_FIXTURE_BASENAME,
+        ):
+            assert token in status, f"{pack}/STATUS.md must state {token!r}"
+
+    for pack in mv.TRACKS:
+        readme = mv.readme_text(pack)
+        missing = [t for t in mv.HISTORY_RUNGS if t not in readme]
+        assert not missing, f"{pack}/README.md must state {missing}"

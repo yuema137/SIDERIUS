@@ -18,13 +18,22 @@ stays portable on a machine that has no copy of it.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
 
-LEGACY_ROOT = Path("/home/tidmad/TIDMAD")
+#: The legacy TIDMAD checkout this module reads as a scientific oracle. It is a
+#: machine-specific resource, so it comes from the environment rather than a
+#: literal (CLAUDE.md portability rule); the default is the documented lilab
+#: location, which is what CLAUDE.md's "Reference Project Guidelines" names.
+LEGACY_ROOT = Path(os.environ.get("SIDERIUS_LEGACY_TIDMAD_ROOT", "/home/tidmad/TIDMAD"))
 legacy_required = pytest.mark.skipif(
-    not LEGACY_ROOT.is_dir(), reason="legacy TIDMAD repository not present on this host"
+    not LEGACY_ROOT.is_dir(),
+    reason=(
+        f"legacy TIDMAD repository not present at {LEGACY_ROOT} — set "
+        "SIDERIUS_LEGACY_TIDMAD_ROOT to point at a checkout"
+    ),
 )
 
 

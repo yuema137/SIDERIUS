@@ -46,14 +46,33 @@ BANNED_VOCABULARY = [
 ]
 
 
-@pytest.mark.parametrize("prompt_name,prompt_text", PRODUCTION_PROMPTS.items())
-@pytest.mark.parametrize("token", BANNED_VOCABULARY)
-def test_banned_vocabulary_absent(prompt_name, prompt_text, token):
-    assert token not in prompt_text, (
-        f"Banned vocabulary {token!r} found in {prompt_name}. "
-        f"V9 cognitive alignment requires task-agnostic, Impact_Score-driven "
-        f"framing — re-read the 'Log-of-Mean trap' section before reintroducing "
-        f"this token."
+def test_banned_vocabulary_absent():
+    """One property: no banned token appears in any production prompt.
+
+    Was a stacked cross-product — `len(BANNED_VOCABULARY)` ×
+    `len(PRODUCTION_PROMPTS)` cells, one assertion each, all reporting the
+    same single failure class. The matrix form was strictly worse in three
+    ways: pytest stops at the first failing cell, so a reintroduction across
+    several prompts showed up as one; the cell count grew multiplicatively
+    with two lists that both grow; and each parametrize id embedded the
+    entire multi-kilobyte prompt text, so `--collect-only` and `-k` output
+    were unreadable.
+
+    Scanning the whole matrix and reporting EVERY violation is the stronger
+    form of the same guard.
+    """
+    violations = [
+        f"{prompt_name}: {token!r}"
+        for token in BANNED_VOCABULARY
+        for prompt_name, prompt_text in PRODUCTION_PROMPTS.items()
+        if token in prompt_text
+    ]
+    assert not violations, (
+        "Banned vocabulary found in production prompts:\n  "
+        + "\n  ".join(violations)
+        + "\n\nV9 cognitive alignment requires task-agnostic, Impact_Score-driven "
+        "framing — re-read the 'Log-of-Mean trap' section before reintroducing "
+        "these tokens."
     )
 
 
