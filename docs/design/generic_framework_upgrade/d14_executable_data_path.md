@@ -465,6 +465,137 @@ frozen record surface would move · real training on the bounded subsets cannot
 satisfy the 07a validators without weakening them · `examples/` governance
 would need a relaxation beyond §5.4.
 
+## 7a. Milestone execution record (all three children implemented, 2026-08-18)
+
+| child | branch / head | Gate 2 | evidence |
+|---|---|---|---|
+| **D14-1** seam + TIDMAD relocation | `d14-1-task-data-path-seam` — **draft PR #230**, exact-head CI **SUCCESS** (run 32184157986) | **PASS ×2** (pre-relocation baseline + relocated path, identical posture) | child ledger §9; `/home/klz/Data/SIDEREIS_DATA/d14_gate2_{baseline,relocated}_20260818/` |
+| **D14-2** Pets | `d14-2-pets-executable` (stacked on D14-1) | **PASS** | child ledger §6 C6; `/home/klz/Data/SIDEREIS_DATA/d14_pets_gate2_20260818/` |
+| **D14-3** DAVIS | `d14-3-davis-executable` (stacked on D14-2) | **PASS** | child ledger §6 C7; `/home/klz/Data/SIDEREIS_DATA/d14_davis_gate2_20260818b/` |
+
+**The §1 sentence, demonstrated on three tasks through ONE architecture:**
+
+| | TIDMAD | Oxford-IIIT Pet | DAVIS |
+|---|---|---|---|
+| scope vocabulary | `{file: [segments]}` | manifest rows | clip identities `(sequence, start)` |
+| model input | int windows | `[3,144,144]` f32 | `[3,8,128,224]` f32 |
+| supervision target | int windows (same shape) | scalar class index | `[3,4,128,224]` dense (≠ input shape) |
+| objective | focal / ce | ce | smooth_l1 (MAE-family) |
+| deliverable | per-file ABRA HDF5 | one predictions CSV | one npz of dense tensors |
+| golden metric | frozen denoising score (higher) | accuracy (higher) | global MSE (lower) |
+| real Gate-2 result | score −0.948 (relocated run) | accuracy 0.027 (= chance; constant collapse, honestly recorded) | MSE 0.017290, **better than the last-frame-copy baseline 0.017392** |
+
+Three targets that share neither shape, rank, dtype nor cardinality; three
+deliverable formats; three metrics — and **zero task-name branches** in the
+generic core, mechanically enforced.
+
+### Cross-task validation (§21 checks, executed at the D14-3 head)
+
+* **No task-name branching on the data-path surface** — the census's
+  task-identity guardrail scans all six surface modules for
+  `tidmad|pet|pets|davis` literal comparisons: **zero** (5 census tests
+  green, including exact construction/codec-call counts, the
+  delete-the-hop detector and the parent-only transport flag).
+* **No production dependency on `examples/`** — the PERMANENT separability
+  guard is green (12 governance tests); it FIRED once during D14-2 C7 (the
+  Pets gate runner importing pack tooling) and the fix was ownership, not
+  an exemption. Plugin source under `examples/*/plugins/` is loaded
+  dynamically, never imported.
+* **One registry, three implementations** — importing all three modules
+  yields exactly `['davis_future_prediction', 'oxford_iiit_pet', 'tidmad']`.
+* **Step-07 training semantics preserved** — 07a/07c suites pass UNCHANGED
+  through every relocation; the R3 trigger generalization (D14-2 C5b) left
+  the regime-A leg byte-path-identical and added fail-closed refusals for
+  the explicit leg.
+* **Step-06 metric ownership preserved** — three instances behind ONE
+  handle; scoreability still runs before arithmetic (proven per instance
+  with poison kwargs); pack declarations rebind through one sanctioned
+  function; the frozen TIDMAD formula is untouched.
+* **TaskDataPath free of task identity and metric semantics** — the seam
+  module names no task, computes no metric; every task's naming, geometry
+  and codec live in its own implementation.
+* **Cumulative corpus honoured** — both L1 fixture pairs kept verbatim;
+  real-component variants ADDED; the 07a rung runs all of them through the
+  same boundary.
+
+**FINDING during terminal validation — stacked PRs get NO CI.**
+`ci.yml` triggers on `pull_request: branches: [master]`, so #231 and #232
+ran nothing; D14-2/D14-3 code was never type-checked. A
+`workflow_dispatch` run against the stack head surfaced **17 real pyright
+errors** across both children (config classes typed `type | None`, the
+seam's `object` payload, `MetricResult.scalar`'s `float | None`, numpy's
+`savez_compressed` kwargs binding, one heterogeneous dict annotation) —
+all fixed at the boundary, none suppressed, and **both gates re-run to
+prove runtime neutrality** (Pets accuracy 0.0270, DAVIS MSE 0.017290,
+identical to the recorded PASS evidence). Local pyright cannot substitute
+(the pinned runner crashes on this box's Node), so CI is the only type
+checker: recorded as **issue #233**, and every future stacked milestone
+must either fix the trigger or dispatch runs deliberately.
+
+**Local terminal validation** (parallel chunks, never a serial full suite):
+`tests/unit/execute_tools/` **1245 passed / 1 skipped**;
+`examples + guardrails + agent + nodes + ml_models + tools` **4830 passed /
+1 failed** — the single failure being the documented local-only stray-file
+guard (an untracked partial download from a corrected first fetch attempt;
+`rm examples/oxford_iiit_pet/data/raw/images.tar.gz` clears it, and no
+other checkout or CI is affected).
+
+### 7a.1 Terminal closeout (operator ruling, 2026-08-18)
+
+The operator ACCEPTED the architectural/executable work as complete enough
+to enter closeout and fixed the remaining scope:
+
+* **The Pets result — accuracy 0.027, a constant-prediction collapse — is
+  NOT a D14 failure and is deliberately NOT tuned away.** D14 proves
+  EXECUTABLE GENERICITY, not benchmark quality. The observation is kept
+  prominently because it is useful empirical evidence for **Step 08 Health
+  design: a task can be fully executable while the candidate is
+  unhealthy.** DAVIS beating the last-frame-copy baseline
+  (0.017290 < 0.017392) is the complementary evidence that the reference
+  path is not vacuous.
+* **No new architecture work, no model tuning, no fixing of unrelated
+  issues inside D14** (#226–#229 stay separate; the stacked-PR CI trigger
+  defect stays with #233 — D14 does not modify CI trigger architecture,
+  it only requires ONE manual exact-head dispatch to PASS).
+* **Evidence ordering is load-bearing:** final code + final docs → commit →
+  that SHA is the final intended head → exact-head CI dispatched on THAT
+  SHA. A green run that predates the last docs commit belongs to the
+  previous head and is recorded as such, never as the head's evidence.
+
+### 7a.2 Residual risks and deferred issues (none block D14)
+
+| id | what | blocks D14? | blocks Step 08? |
+|---|---|---|---|
+| **#225** | scope-opacity boundary (framework has no scope-aware checker; each implementation discharges exact materialization) — by design, recorded at the parent | no | no |
+| **#226** | chain auto-resume silently runs zero iterations and exits 0 (plugin banners pollute the inspector's stdout) | no (fresh workspaces / `--start_iter` unaffected) | no — but any resumed campaign is affected |
+| **#227** | integration-suite rot: 13 pre-existing failures at master (fixture schema drift, a moved patch target) | no | no |
+| **#228** | Step-06 two-route divergence on non-finite scores (`-inf` vs `None`) + an unseeded flaky fixture | no | no |
+| **#229** | a "pseudo" g2 test escaping to the REAL live probe when `tidmad_data_config.yaml` exists | no | no |
+| **#233** | stacked PRs get no CI (`pull_request: branches: [master]`) — found by this milestone; worked around with manual dispatch | no | **practically yes if Step 08 stacks PRs** — fix it before that, or dispatch deliberately |
+
+Known non-blocking residue inside D14's own scope, recorded where it lives:
+the engine's remaining TIDMAD-shaped knobs (`segmentation_size`, the legacy
+single-file path, sequential ordering reading `file_row_ranges`) and the
+fix-mode baseline writer's direct codec call — all census-pinned so they
+cannot grow, and all owned by later engine-genericization steps.
+
+### 7a.3 Step-08 readiness
+
+**Yes — the three tracks now provide enough real executable contrast
+evidence to begin Step 08.** Step 08 (HealthGate: A/B/C on REAL applicable
+artifacts) needs exactly what D14 produced: real deliverables and real
+training histories from tasks whose artifacts differ enough to distinguish
+"TIDMAD-specific gate is INAPPLICABLE here" from "generic gate RUNS here".
+Concretely available now: an ABRA HDF5 denoising deliverable, a
+classification CSV, a dense npz tensor set; three real `TrainingHistory`
+records (focal, ce, smooth_l1) with R2+R3 and `comparability` stamped; and
+**a genuinely unhealthy real candidate** (the Pets constant-prediction
+collapse) plus a healthy-ish one (DAVIS beating its trivial baseline) —
+i.e. both sides of the health discrimination Step 08 must make, from real
+runs rather than synthetic JSON. The premature Step-08 draft on master must
+still be re-compared against this actual behaviour before any Step-08
+design is written (§8).
+
 ## 8. Completion
 
 D14 is complete when: all three PRs are merged with their Gate-2 runs PASSED ·

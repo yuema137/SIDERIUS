@@ -183,12 +183,26 @@ class TestThePersistentTracksReportAnHonestUnavailability:
         assert resolved[0].data_shape_class != resolved[1].data_shape_class
 
     def test_no_execution_maturity_was_added(self, tracks):
-        """The mechanical half of §2.2's non-goal: these obligations read the
-        packs' DECLARED artifacts and add nothing. No `.py`, no dataset
-        adapter, no `DatasetProfile`, no download."""
+        """The mechanical half of §2.2's non-goal — **RE-SCOPED BY D14-3**
+        (D14 is the milestone that ADDS execution maturity; 07c's job was to
+        add none of it).
+
+        Still asserted: 07c's routing obligations read the packs' DECLARED
+        artifacts and add no dataset adapter, no `DatasetProfile`, no
+        download, and no `resolved/` tree. What D14 legitimately added is
+        reference PLUGIN SOURCE at `examples/<pack>/plugins/*.py` (loaded
+        dynamically, never imported by production — the same relaxation the
+        governance guards in `tests/unit/examples/` now encode); anything
+        else under a pack is still an execution path hiding where this pin
+        forbids one."""
         for track in tracks:
             pack = REPO_ROOT / "examples" / track
-            assert list(pack.rglob("*.py")) == []
+            offenders = [
+                p
+                for p in pack.rglob("*.py")
+                if p.parent != pack / "plugins"  # sanctioned plugin source (D14)
+            ]
+            assert offenders == [], offenders
             assert not (pack / "resolved").exists(), (
                 f"{track} grew a resolved/ tree; that is D14 execution maturity"
             )

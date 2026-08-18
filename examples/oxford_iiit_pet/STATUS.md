@@ -3,9 +3,9 @@
 The roadmap (`docs/design/siderius_generic_framework_upgrade.md`) is the ONE
 status authority; this file mirrors it for a reader of the pack.
 
-## Maturity: **L0 / L1** (identity fixed; declarable contracts declared through the real schemas; NO executable path)
+## Maturity: **L2/L3 EXECUTABLE (D14-2)** — identity fixed; contracts declared; the REAL data path, reference plugin, bounded training/validation/inference/scoring all executed
 
-This pack does not run. It claims exactly what has landed:
+Since D14-2 this track RUNS: real official JPEGs → `execute_tools/pets_data_path.py` (frozen transform, manifest scope) → the production training engine (real R2+R3) → inference → the classification deliverable → `accuracy` through the Step-06 handle. Gate-2 PASS evidence: `docs/design/generic_framework_upgrade/d14_executable_data_path/pr_d14_2_pets_executable.md` §6 C6 (workspace `/home/klz/Data/SIDEREIS_DATA/d14_pets_gate2_20260818/`). The rows below record each seam honestly:
 
 | contract / seam | representable today? | status in this pack | evidence |
 |---|---|---|---|
@@ -16,23 +16,26 @@ This pack does not run. It claims exactly what has landed:
 | `MetricSpec` log_loss (lower) | **NOT declarable — blocked by D16**: the Step-06 lexical rule (`_is_loss_shaped`) refuses any identity whose tokens include `loss`; the identity is INTENTIONAL (§22.9a) and forces D16 to be resolved before it crosses the production metric-declaration path | documented only; NOT declared through the schema | the test asserts `MetricSpec(id="log_loss", …)` RAISES today — the day D16 is narrowed, this documentation is forced to change |
 | `DatasetProfile` | **NOT representable**: `DatasetConfig` / `ChannelIdentity` / `ValueEncoding` are 1-D-segment, two-channel HDF5 semantics | named as a seam | — |
 | `DeliverableSpec` | **NOT representable**: per-file HDF5 naming / storage | named as a seam | — |
-| reader / preprocessing (decode, resize 160, center-crop 144, /255) | not representable as a declaration | EXECUTION-level manifest, decoder, interpolation rule | **D14** |
-| reference plugin (small CNN) | no consumer path for an example plugin yet | none (a schema-only plugin would be an L1 fixture, labelled so — none shipped) | **D14** |
-| Gate-1 / Gate-2 / persistent NESTED subsets | sized by the D14 design | none | **D14** |
+| reader / preprocessing (decode, resize 160 BILINEAR, center-crop 144, /255) | executable CODE + committed execution manifest | **LANDED (D14-2)**: `execute_tools/pets_data_path.py::decode_and_transform` (ONE authority) + `data/manifests/execution.json` (37 class-covering probe hashes, byte-pinned) | `tests/unit/examples/test_pets_execution_manifest.py` (pins, synthetic transform behaviour, REAL two-process probe parity); `tests/unit/execute_tools/test_pets_data_path.py` (probes THROUGH the seam reader) |
+| reference plugin (small CNN) | loads through the real plugin mechanism (`SIDERIUS_PLUGIN_DIRS`) | **LANDED (D14-2)**: `plugins/pets_reference_cnn.py` (61 509 params, `[B,3,144,144]f32 → [B,37]f32`) — sanctioned plugin SOURCE, dynamically loaded, never imported | `tests/unit/examples/test_pets_reference_plugin.py` |
+| Gate-1 / Gate-2 / persistent NESTED subsets | committed, derived first-N-per-class from the frozen manifests | **LANDED (D14-2)**: `data/manifests/gate2_{train,validation,final}.csv` (370/74/370, byte-pinned, re-derivation exact) | `tests/unit/examples/test_pets_execution_manifest.py`; Gate-2 PASS at the D14-2 ledger §6 C6 |
 | pack-level runtime task binding | single-task authority `configs/task_config.yaml` | not representable | **Step 12** |
 | health applicability | `configs/health_checks.yaml` is TIDMAD-shaped policy | not representable | **Step 08** |
-| training history / diagnosis (R2/R3 CE curves + optional validation accuracy) | the framework's `TrainingHistory` / `TrainingDiagnosis` (Step 07a) are task-generic: the schema carries this pack's semantics (`objective_kind="ce"`, `observations={"validation_accuracy": …}`) without change | **L1 — fixture-backed**: `expected/training_history_l1_fixture.json` + `expected/training_diagnosis_l1_fixture.json` (hand-authored, labelled `l1_fixture`, NOT a real training output) consumed by rung **B-07a-1** (`tests/unit/examples/test_step07a_b1_diagnosis_structure_rung.py`); real R2/R3 after **D14** | the rung derives the diagnosis from the fixture through the SAME boundary TIDMAD uses and pins the expected verdict shape as literals |
+| training history / diagnosis (R2/R3 CE curves + optional validation accuracy) | the framework's `TrainingHistory` / `TrainingDiagnosis` (Step 07a) are task-generic: the schema carries this pack's semantics (`objective_kind="ce"`, `observations={"validation_accuracy": …}`) without change | **L1 — fixture-backed**: `expected/training_history_l1_fixture.json` + `expected/training_diagnosis_l1_fixture.json` (hand-authored, labelled `l1_fixture`, NOT a real training output) consumed by rung **B-07a-1** (`tests/unit/examples/test_step07a_b1_diagnosis_structure_rung.py`) — KEPT verbatim (cumulative corpus), and since **D14-2** the ADDED real-component pair `expected/training_history_real_component_fixture.json` / `expected/training_diagnosis_real_component_fixture.json` carries the REAL bounded gate run's R2/R3 through the same rung | the rung derives the diagnosis from the fixture through the SAME boundary TIDMAD uses and pins the expected verdict shape as literals |
 | metric-direction policy / planner-reflector rendering (Step 07 PR 07b) | the tuner's ordering authority and the prompt renderers consume a `MetricSpec` — this pack's `declared/metric_accuracy.json` (`accuracy`, `higher`-is-better) is consumed unchanged | **L1 — declaration-backed**: rungs **B-07b-1** (ordering inverts exactly under the declared direction) and **B-07b-2** (the planner/reflector blocks render this pack's metric identity and direction words, and its `expected/training_diagnosis_l1_fixture.json` renders as a compact dynamics line) — `tests/unit/agent/llm_bridge/test_step07b_c5_rendering.py`; no executable path | the rungs load the pack's OWN declared spec and 07a fixture; **no real oxford_iiit_pet execution — that is D14** |
 | interpretation evidence | — | — | **Step 09** |
 
 ## Maturity pins carried by this pack at PR0 (design §3.5)
 
-- no production `.py` under `examples/` — valid through PR0 / Step 07;
-  relaxation owner **D14**;
+- `.py` under `examples/` is sanctioned ONLY as pack plugin source at
+  `examples/<pack>/plugins/*.py` (D14-2 exercised its named relaxation
+  ownership; production imports of `examples.*` remain forbidden);
 - no top-level `task_description` / `forward_contract` YAML under `examples/`
   — valid before Step 12; relaxation owner **Step 12**.
 
 ## Not in this pack, by design
 
-No images (`images.tar.gz` is never fetched by the framework), no extracted
-annotation files, no cache, no loader, no launcher.
+No images and no archives in the TREE — `images.tar.gz` (SHA-pinned in
+`PROVENANCE.md`) lives machine-local via
+`tools/example_packs/fetch_oxford_iiit_pet.py`; the framework receives the
+root as the data-path seam's `data_dir`. No cache, no launcher.

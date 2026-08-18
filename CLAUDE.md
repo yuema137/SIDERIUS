@@ -326,6 +326,46 @@ validate.
   or set `-o pipefail` explicitly. A background-task notification's
   "exit code 0" is **not** evidence that pytest passed; read the log.
 
+- **Validation economy: ONE expensive full CI per final head (binding,
+  operator decision 2026-08-18)**. The same failure class must not be
+  validated three times — a local chunked suite, a manual
+  `workflow_dispatch`, and then the formal PR's automatic run is waste,
+  not rigour.
+
+  | validation | default |
+  |---|---|
+  | local full unit suite | **DO NOT RUN** |
+  | manual `workflow_dispatch` full CI | **DO NOT RUN** |
+  | formal PR automatic CI | **the CANONICAL exact-head evidence** |
+
+  **Splitting the suite into several local "chunks" is still running the
+  full suite** and is not a workaround. During implementation run only:
+  the targeted tests for the changed authority, targeted static checks,
+  the relevant structural guards, and a bounded Gate when its failure
+  class is affected — then ledger, commit, continue.
+
+  **At the intended final head**: finalize code + docs → open (or
+  retarget) the formal master-targeting PR → its automatic CI runs on the
+  merge-candidate SHA → **operator review happens in parallel with that
+  run** → green + no review changes ⇒ merge; a review change moves the
+  head and CI re-runs itself.
+
+  **Stacked milestones**: child PRs are the REVIEW decomposition, not the
+  CI decomposition — targeted validation + Gate evidence per child, and
+  **one** full CI on the final integrated stack head. Review granularity
+  and CI granularity are different concepts.
+
+  **Manual dispatch is exceptional**, allowed only when automatic PR CI
+  cannot be triggered, the evidence is genuinely needed before a formal PR
+  can exist, AND no identical run will immediately follow. Ask first:
+  *"will the normal PR workflow run substantially the same suite on this
+  SHA shortly anyway?"* — if yes, do not dispatch.
+
+  **Gates are NOT duplicate CI.** Gate 2 owns real data / GPU / training /
+  validation / inference / scoring; unit+CI own deterministic repository
+  correctness. They are complementary — never drop a real Gate because CI
+  exists.
+
 **Nodes communicate exclusively through three mechanisms — schema, storage, and
 protocols. No other form of inter-node communication is permitted.**
 

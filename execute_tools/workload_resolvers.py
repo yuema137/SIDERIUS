@@ -12,7 +12,9 @@ diverge from production execution semantics — and returns a generic
 new resolvers here, not changing the framework.
 
 Authorities mirrored:
-- **Training** — `train_engine_sandbox.TIDMADEpochDataset.__init__`
+- **Training** — `tidmad_data_path.TIDMADEpochDataset.__init__`
+  (owner since D14-1; the engine re-exports the class and reaches it
+  through the run-bound `TaskDataPath`)
   (per-file ``max(1, round(portion × len(scope_segments)))`` subsample)
   + ``DataLoader(drop_last=True)`` (``total_samples // batch_size``
   floor per epoch). This is the RT1 resolver, now colocated with the

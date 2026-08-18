@@ -142,7 +142,33 @@ not by this table.
 
 ---
 
+## Executable data path (D14-1 — the TaskDataPath seam)
+
+The executable half of "storage → sample → tensor" and "output → deliverable
+→ metric input" is now a REGISTRY-RESOLVED seam
+(`execute_tools/task_data_path.py`; TIDMAD implementation
+`execute_tools/tidmad_data_path.py`). Enforcement is the no-dual-path census
+(`tests/unit/guardrails/test_task_data_path_census.py`): exact pinned
+construction/codec-call counts, delete-the-hop detector, parent-only
+transport flag, zero task-name-literal comparisons on the surface.
+
+| Status | Where | Notes |
+|---|---|---|
+| `DECOUPLED` | `train_engine_sandbox` dataset constructions (per-epoch + R3 validation) | D14-1 C3: seam calls through the run-bound `TaskDataPath`; `TIDMADEpochDataset` moved verbatim to `tidmad_data_path` (engine re-exports); exact-materialization check task-owned |
+| `DECOUPLED` | `inference_single` run-identified deliverable writes (streaming + single-file agent) | D14-1 C4: `write_deliverable`; the deliverable READER (`is_complete_trial_output`) moved to the codec module |
+| `DECOUPLED` | `denoising_score_single` agent-mode deliverable resolution | D14-1 C4: `read_evaluation_payload` → `{file_index: path}` handed to the Step-06 handle; missing-deliverable refusal unchanged (scoreability-owned) |
+| `DECOUPLED` | `evaluate_time_skill/wrapper.py` warmup probe | D14-1 C5 (census-caught): probe reaches the epoch dataset through the resolved binding |
+| `REMAINING` | `inference_single` fix-mode (baseline) writer — census-pinned at exactly 1 `create_abra_file` call | baseline deliverables carry no run/exp identity, which the seam request requires |
+| `REMAINING` | engine sequential ordering reads `dataset.file_row_ranges`; legacy single-file `TIDMADDataset` path; TIDMAD-shaped engine/inference argv | recorded C3 residue — engine-genericization seams for later steps |
+| `FROZEN` | naming/storage authority (`deliverable_spec`) stays OUTSIDE `TaskDataPath` | parent §3.1: the seam does not own what the deliverable is named/laid out |
+
+---
+
 ## Ledger changelog
+
+- **2026-08-18 — D14-1 (TaskDataPath seam)**: executable data path behind the
+  registry-resolved four-method seam; TIDMAD relocation at manifest-pinned
+  byte parity; see the "Executable data path" section above.
 
 - **2026-08-15 — Step 06 (PR #213, `02f382eb`)**: Seam 4 landed (metric identity/direction/aggregation declared once; executable scoreability); scorer-CLI denoised names → `DeliverableSpec.naming`; Deliverable-Contract ownership RESOLVED as representation/acceptance split. Direction consumers remain (D1/07a/09).
 

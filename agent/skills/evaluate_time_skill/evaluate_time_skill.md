@@ -93,6 +93,13 @@ the slack behaves exactly as it did before C8.
 
 - **No CUDA / no `data_dir` / dataset too small** → warmup skipped,
   static formula, advisory-only authority.
+- **Non-TIDMAD run binding** (D14-1): the warmup probe builds its mini
+  dataset through the run-bound `TaskDataPath`
+  (`resolve_bound_task_data_path().training_dataset(TidmadScope(...), ...)`),
+  so under a non-TIDMAD binding the implementation REFUSES the TIDMAD scope
+  loudly (`TypeError`) instead of silently timing TIDMAD data. Regime-A
+  (every current campaign) resolves the TIDMAD implementation — byte-identical
+  warmup behaviour.
 - **Warmup fast-fail** (step 0 ≥ 5000 ms) → the warmup aborts and
   reports that step's cost as a worst-case-conservative measurement.
 - **Unknown `model_type`** → `_count_params` raises; caught by the

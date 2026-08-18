@@ -1,0 +1,71 @@
+{
+  "_provenance": {
+    "generated_from_commit": "a715b84e8b980bbb378685c66046e71b77d3615c",
+    "generation_command": ".venv/bin/python -m tests.helpers.d14_tidmad_parity --write",
+    "grid": {
+      "epoch_seeds": [
+        5,
+        6
+      ],
+      "train_portions": [
+        null,
+        0.5
+      ]
+    },
+    "immutable": "BYTE-IMMUTABLE for the life of PR D14-1 (child design \u00a75 C2a). Expected values are READ from this file, never recomputed."
+  },
+  "evidence": {
+    "deliverable": {
+      "file_sha256": "3fdd10dcaf88ecb16f94e4224515f90f4465cbae559fa446e82fd9dca1371448",
+      "n_values": 8000
+    },
+    "fixture": {
+      "training_files": {
+        "0": "99f83948363f7215433f24a186fb9432762d0c8f3f6ad818aa9b9dd385506e8b",
+        "1": "54849cd581d6f601b532b2ed326a3672479907961aa9fd937170d332bd45bb23",
+        "2": "8a23c2bc7f015ba8525e92b088421f2e5906931f66a70667e0d3585dfc216b58"
+      },
+      "validation_files": {
+        "0": "6138c483bcb40fb10af71a062ffd217a78230902a88c1b12819e7236df1d3643",
+        "1": "589a78ffef6ebd7ee8c0617c8ad855ee2028c8941a4abc85b5ebe0027ddb3902",
+        "2": "790940294592c756b268b4208878468fd9444f83903d9314007081196865f0b2"
+      }
+    },
+    "training_streams": {
+      "seed=5|portion=0.5": {
+        "rows": 12,
+        "stream_sha256": "aeca158fc20aec8abd7018dd9a024a3f76cabab520520e524bbe1a60870b68c0"
+      },
+      "seed=5|portion=None": {
+        "rows": 24,
+        "stream_sha256": "79de0f601c58580c76429fb97e8b0a80cd96ee13d7da856e98c13b376a54cbfc"
+      },
+      "seed=6|portion=0.5": {
+        "rows": 12,
+        "stream_sha256": "59599ee7785db5df19db056e81b7dbe5817fd98ebb799bf1c4461bfdf787b1b6"
+      },
+      "seed=6|portion=None": {
+        "rows": 24,
+        "stream_sha256": "79de0f601c58580c76429fb97e8b0a80cd96ee13d7da856e98c13b376a54cbfc"
+      }
+    },
+    "validation": {
+      "file_row_ranges": {
+        "0": [
+          0,
+          8
+        ],
+        "1": [
+          8,
+          16
+        ],
+        "2": [
+          16,
+          24
+        ]
+      },
+      "rows": 24,
+      "stream_sha256": "12734215cb23a464fb314a4287b3dcef16ab740f0fc5fe5af40759fcecadd79f"
+    }
+  }
+}

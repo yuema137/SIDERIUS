@@ -103,6 +103,15 @@ parser.add_argument(
 parser.add_argument(
     "--output_json", type=str, help="Optional path; denoising_score is merged into this JSON."
 )
+parser.add_argument(
+    "--task_data_path_id",
+    type=str,
+    default=None,
+    help="D14-1: the child side of the task-data-path transport. Emitted by "
+    "the parent process FROM its resolved run binding only — never an "
+    "operator flag. SUPPLIED -> explicit binding (an unknown id fails "
+    "closed, never falls back); ABSENT -> regime-A (TIDMAD compatibility).",
+)
 
 args = parser.parse_args()
 
@@ -147,6 +156,9 @@ args.anchor_map = resolve_anchor_map_path(args.anchor_map)
 # Filename construction — through the Deliverable Contract (Step 06 C3)
 # ---------------------------------------------------------------------------
 
+# D14-1 C4: side-effect import — module tail registers the TIDMAD
+# implementation, which regime-A resolution (agent mode below) requires.
+import execute_tools.tidmad_data_path  # noqa: E402, F401
 from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec  # noqa: E402
 from execute_tools.evaluation_metric import (  # noqa: E402
     NotScoreableResult,
@@ -170,19 +182,52 @@ metric = derive_tidmad_metric(dataset_profile, deliverable_spec)
 if args.denoising_model == "none":
     # RAW validation file — Step-02-owned INPUT topology, from the profile.
     fname = dataset_profile.dataset.validation_file_name(args.file_index)
+    full_path = os.path.join(args.data_dir, fname)
 elif args.mode == "fix":
     fname = deliverable_spec.naming.unqualified_name(
         model_type=args.denoising_model, file_index=args.file_index
     )
+    full_path = os.path.join(args.data_dir, fname)
 else:  # agent
-    fname = deliverable_spec.naming.name(
-        model_type=args.denoising_model,
-        run_name=args.run_name,
-        exp_id=args.exp_id,
-        file_index=args.file_index,
+    # D14-1 C4 — the production scoring read resolves the run's deliverables
+    # THROUGH the task data path's decoded payload (child side of the
+    # transport: SUPPLIED+unknown fails closed; ABSENT is regime-A). A file
+    # the payload does not contain keeps its authority-derived EXPECTED path,
+    # so the Step-06 scoreability contract still owns the structured
+    # missing-deliverable refusal — the failure mode is byte-identical.
+    from execute_tools.dataset_config import bind_dataset_profile
+    from execute_tools.task_data_path import (
+        EvaluationReadRequest,
+        resolve_task_data_path,
+        resolve_transported_task_data_path,
     )
 
-full_path = os.path.join(args.data_dir, fname)
+    _data_path = (
+        resolve_transported_task_data_path(args.task_data_path_id)
+        if args.task_data_path_id is not None
+        else resolve_task_data_path(None)
+    )
+    with bind_dataset_profile(dataset_profile):
+        _payload = _data_path.read_evaluation_payload(
+            EvaluationReadRequest(
+                deliverable_dir=args.data_dir,
+                exp_id=args.exp_id,
+                run_name=args.run_name,
+                model_type=args.denoising_model,
+            )
+        )
+    _resolved = _payload.get(args.file_index) if isinstance(_payload, dict) else None
+    if _resolved is not None:
+        full_path = _resolved
+        fname = os.path.basename(_resolved)
+    else:
+        fname = deliverable_spec.naming.name(
+            model_type=args.denoising_model,
+            run_name=args.run_name,
+            exp_id=args.exp_id,
+            file_index=args.file_index,
+        )
+        full_path = os.path.join(args.data_dir, fname)
 
 # ---------------------------------------------------------------------------
 # Score THROUGH the metric handle: scoreability first, then score_vector

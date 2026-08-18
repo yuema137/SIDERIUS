@@ -1,11 +1,13 @@
 import argparse
+import contextlib
 import gc
 import json
 import os
 import random
 import sys
 import time
-from typing import Any, Literal, cast
+from collections.abc import Sized
+from typing import Any, cast
 
 import h5py
 import numpy as np
@@ -29,6 +31,27 @@ from execute_tools.model_input_dtype import (
     apply_contract_cardinality,
     resolve_input_dtype,
 )
+
+# D14-1 C2b/C3: TIDMADEpochDataset's owner is now execute_tools/tidmad_data_path.py
+# (moved verbatim) and ValidationScopeError's is execute_tools/task_data_path.py.
+# The explicit `as` aliases are compatibility re-exports — every pre-existing
+# `from execute_tools.train_engine_sandbox import <name>` keeps resolving to the
+# one moved object. The engine reaches datasets through the run-bound
+# TaskDataPath (regime-A resolves to TIDMAD's implementation); TidmadScope is
+# the legacy-argv scope assembly for that regime.
+from execute_tools.task_data_path import (
+    EpochSamplingParams,
+    EvalMaterializationParams,
+    TaskDataPath,
+    bind_task_data_path,
+    resolve_bound_task_data_path,
+    resolve_transported_task_data_path,
+)
+from execute_tools.task_data_path import (
+    ValidationScopeError as ValidationScopeError,
+)
+from execute_tools.tidmad_data_path import TIDMADEpochDataset as TIDMADEpochDataset
+from execute_tools.tidmad_data_path import TidmadScope
 from execute_tools.training_history import (
     TRAINING_HISTORY_KEY,
     TrainingHistory,
@@ -292,182 +315,6 @@ class TIDMADSingleFileDataset(Dataset):
         )
 
 
-class TIDMADEpochDataset(Dataset):
-    """
-    Dataset that loads subsampled segments from multiple HDF5 files.
-
-    Created and destroyed each epoch. Collects ``train_portion`` of each
-    file's segments, loads them via HDF5 direct slicing, and concatenates
-    into a single shuffleable dataset. Cross-file shuffling happens
-    naturally via the DataLoader's ``shuffle=True``.
-
-    Peak memory: ``train_portion * sum(segments_per_file) * seg_size`` bytes
-    per channel. E.g. train_portion=0.1, 20 files × 10 segs = 200 PSD segs
-    → 200 × 1000 × 10000 = 200 MB per channel.
-    """
-
-    def __init__(
-        self,
-        data_dir: str,
-        sample_set: dict,
-        seg_size: int,
-        train_portion: float | None = None,
-        rng: "random.Random | None" = None,
-        profile: DatasetProfile | None = None,
-        max_samples: int | None = None,
-        file_family: Literal["training", "validation"] = "training",
-    ):
-        """
-        Args:
-            data_dir:       Directory containing ``abra_training_XXXX.h5``.
-            sample_set:     ``{file_index: [segment_indices]}`` — the data scope.
-            seg_size:       ML segmentation size (e.g. 10000).
-            train_portion:  Fraction of each file's segments to use. When None
-                            or 1.0, all segments in the scope are loaded.
-            rng:            Random instance for reproducible subsampling.
-            max_samples:    VALIDATION POSTURE ONLY. Absolute ceiling on the ML
-                            segments this epoch may contain. ``None`` (every
-                            production campaign) loads the full selection.
-            file_family:    Which file family of the Dataset Profile the
-                            indices address — ``"training"`` (default; the
-                            pre-07a behaviour, byte-for-byte) or
-                            ``"validation"`` (Step 07a: the R3 validation pass
-                            reads the eval SampleSet from the VALIDATION
-                            family through ``DatasetConfig.validation_file_name``).
-                            The family is the ONLY thing that changes; the
-                            geometry, subsampling and row layout are shared.
-
-        **Why an absolute ceiling exists beside ``train_portion``.** A
-        fraction cannot bound the epoch, because what it is a fraction OF
-        is not harness-owned: ``ml_segs_per_psd`` is
-        ``psd_segment_length // seg_size`` and ``seg_size`` comes from the
-        planner's model config, so 1 % of the scope at ``seg_size=1000``
-        is ten times the samples it is at ``seg_size=10000``. During
-        Step 03 a 1 %-portion plan resolved to 12,500 optimizer steps.
-
-        Enforced by reading LESS, not by stopping later: files stop being
-        opened once the budget is met, and the concatenated arrays are cut
-        to exactly ``max_samples``. Both the HDF5 reads and the optimizer
-        steps shrink, so the epoch is small rather than merely truncated —
-        the whole point of bounding before execution instead of killing
-        during it.
-        """
-        if rng is None:
-            rng = random.Random()
-
-        # Regime-A when no profile is supplied (§5c).
-        self.profile = profile or resolve_dataset_profile()
-        dataset = self.profile.dataset
-        channels = self.profile.channels
-        enc = self.profile.encoding
-        psd_len = dataset.psd_segment_length
-        ml_segs_per_psd = psd_len // seg_size
-        all_ch1, all_ch2 = [], []
-        # Row span each file occupies in the concatenated arrays, recorded as
-        # the rows are appended. Sequential ordering needs to address one
-        # file's rows without re-deriving the layout — and re-deriving it
-        # would be wrong anyway, since a missing file is skipped below and
-        # contributes no rows at all.
-        self.file_row_ranges: dict[int, tuple[int, int]] = {}
-        rows_so_far = 0
-        #: PSD segments actually READ from disk. The envelope's claim is
-        #: that it avoids work rather than discarding it, and the row
-        #: count alone cannot show that — the post-hoc cut leaves the same
-        #: length whether one PSD segment was read or a hundred were.
-        self.psd_segments_read = 0
-
-        for file_key in sorted(sample_set.keys(), key=int):
-            if max_samples is not None and rows_so_far >= max_samples:
-                break
-            file_index = int(file_key)
-            file_name = (
-                dataset.training_file_name(file_index)
-                if file_family == "training"
-                else dataset.validation_file_name(file_index)
-            )
-            file_path = os.path.join(data_dir, file_name)
-            if not os.path.exists(file_path):
-                print(f"Warning: {file_path} not found, skipping.")
-                continue
-
-            scope_segments = sample_set[file_key]
-            # Inline the subsample predicate so pyright narrows ``train_portion``
-            # to ``float`` inside this branch (previous ``use_subsample`` helper
-            # broke that narrowing). The else-leg preserves the original
-            # "full-scope when train_portion is None or >= 1.0" semantics.
-            if train_portion is not None and train_portion < 1.0:
-                n_keep = max(1, round(train_portion * len(scope_segments)))
-                segments = rng.sample(scope_segments, n_keep)
-            else:
-                segments = scope_segments
-
-            if max_samples is not None:
-                # Stop READING once the budget is met. Ceiling division, so
-                # the last PSD needed to reach the cap is still read and the
-                # exact cut happens on the concatenated rows below.
-                needed = max_samples - rows_so_far
-                segments = segments[: -(-needed // ml_segs_per_psd)]
-
-            with h5py.File(file_path, "r") as f:
-                ch1 = _h5_dataset(f, "timeseries", channels.input_channel, "timeseries")
-                ch2 = _h5_dataset(f, "timeseries", channels.target_channel, "timeseries")
-                for psd_idx in segments:
-                    start = psd_idx * psd_len
-                    end = start + psd_len
-                    all_ch1.append(
-                        np.array(ch1[start:end], dtype=enc.storage_dtype).reshape(
-                            ml_segs_per_psd, seg_size
-                        )
-                    )
-                    all_ch2.append(
-                        np.array(ch2[start:end], dtype=enc.storage_dtype).reshape(
-                            ml_segs_per_psd, seg_size
-                        )
-                    )
-
-            self.psd_segments_read += len(segments)
-            file_rows = len(segments) * ml_segs_per_psd
-            if file_rows:
-                self.file_row_ranges[file_index] = (rows_so_far, rows_so_far + file_rows)
-                rows_so_far += file_rows
-
-            gc.collect()
-
-        self.inputs = (
-            np.concatenate(all_ch1, axis=0)
-            if all_ch1
-            else np.empty((0, seg_size), dtype=enc.storage_dtype)
-        )
-        self.targets = (
-            np.concatenate(all_ch2, axis=0)
-            if all_ch2
-            else np.empty((0, seg_size), dtype=enc.storage_dtype)
-        )
-
-        if max_samples is not None and len(self.inputs) > max_samples:
-            self.inputs = self.inputs[:max_samples]
-            self.targets = self.targets[:max_samples]
-            # Sequential ordering addresses rows through these ranges, so a
-            # range extending past the cut would index rows that no longer
-            # exist. Clip the straddling file and drop any that start beyond
-            # the cut (a file loop can only ever leave one of each).
-            self.file_row_ranges = {
-                idx: (start, min(end, max_samples))
-                for idx, (start, end) in self.file_row_ranges.items()
-                if start < max_samples
-            }
-
-    def __len__(self):
-        return len(self.inputs)
-
-    def __getitem__(self, idx):
-        enc = self.profile.encoding
-        return (
-            self.inputs[idx].astype(enc.compute_dtype) + enc.value_offset,
-            self.targets[idx].astype(enc.compute_dtype) + enc.value_offset,
-        )
-
-
 def validate_ordering_against_scope(
     order_strategy: str,
     file_order: list[int] | None,
@@ -674,18 +521,6 @@ def _save_with_sentinel(state_dict, save_path: str, exp_id: str) -> None:
 # ==========================================
 
 
-class ValidationScopeError(RuntimeError):
-    """The declared validation scope did not materialize EXACTLY (design §3.4b).
-
-    A missing VALIDATION-family file, a segment index beyond the file, zero
-    requested rows, or a per-epoch row count that differs from the request
-    is a validation EXECUTION failure: the attempt fails closed (non-zero
-    exit → the executor's subprocess-error path → ``error_training``). No R3
-    is emitted and ``NaN`` is never used to stand in for a missing scope —
-    ``NaN`` stays reserved for numerical evidence.
-    """
-
-
 class ObjectiveStateMutationError(RuntimeError):
     """The training-objective module mutated its own state under validation.
 
@@ -696,11 +531,6 @@ class ObjectiveStateMutationError(RuntimeError):
     criterion's ``state_dict`` before/after the pass. Never restored
     silently — a plugin violating the contract fails closed.
     """
-
-
-def _requested_validation_rows(eval_sample_set: dict, ml_segs_per_psd: int) -> dict[int, int]:
-    """``{file_index: requested ML rows}`` for the eval SampleSet."""
-    return {int(k): len(segments) * ml_segs_per_psd for k, segments in eval_sample_set.items()}
 
 
 def clamp_validation_scope(
@@ -840,12 +670,10 @@ def _validation_pass(
     loss_cfg: LossConfig,
     model_io: ModelIOContract | None,
     device: torch.device,
+    data_path: TaskDataPath,
+    task_eval_scope: object,
     data_dir: str,
-    eval_sample_set: dict,
-    seg_size: int,
     batch_size: int,
-    profile: DatasetProfile,
-    requested_rows: int,
     verifier: Any = None,
     on_verified: Any = None,
 ) -> tuple[float, int, float]:
@@ -888,8 +716,11 @@ def _validation_pass(
         ``(r3_value, materialized_rows, seconds)``.
 
     Raises:
-        ValidationScopeError: the materialized rows ≠ ``requested_rows``, or
-            any file's rows ≠ its request (the disk changed mid-run).
+        ValidationScopeError: the materialized rows differ from the declared
+            scope's request, per-file or in total (the disk changed mid-run).
+            Raised INSIDE ``data_path.validation_dataset`` since D14-1 C3 —
+            the exact-materialization obligation is each implementation's,
+            discharged in its own scope vocabulary.
         ObjectiveStateMutationError: the criterion's state changed.
     """
     t0 = time.perf_counter()
@@ -900,32 +731,14 @@ def _validation_pass(
     fork_devices: list[int] = []
     if device.type == "cuda":
         fork_devices = [device.index if device.index is not None else torch.cuda.current_device()]
-    ml_segs_per_psd = profile.dataset.psd_segment_length // seg_size
-    per_file_requested = _requested_validation_rows(eval_sample_set, ml_segs_per_psd)
     weighted_sum = 0.0
     n_total = 0
     try:
         model.eval()
         with torch.no_grad(), torch.random.fork_rng(devices=fork_devices):
-            val_dataset = TIDMADEpochDataset(
-                data_dir=data_dir,
-                sample_set=eval_sample_set,
-                seg_size=seg_size,
-                train_portion=None,
-                rng=None,
-                profile=profile,
-                file_family="validation",
+            val_dataset = data_path.validation_dataset(
+                task_eval_scope, EvalMaterializationParams(data_dir=data_dir)
             )
-            materialized = len(val_dataset)
-            per_file_materialized = {
-                idx: end - start for idx, (start, end) in val_dataset.file_row_ranges.items()
-            }
-            if materialized != requested_rows or per_file_materialized != per_file_requested:
-                raise ValidationScopeError(
-                    f"validation scope materialized {materialized} ML rows "
-                    f"({per_file_materialized!r}) but {requested_rows} were requested "
-                    f"({per_file_requested!r}) — the declared scope must materialize exactly."
-                )
             val_loader = DataLoader(
                 val_dataset, batch_size=batch_size, shuffle=False, drop_last=False
             )
@@ -1171,6 +984,9 @@ def run_experiment_streaming(
     profile: DatasetProfile | None = None,
     model_io: ModelIOContract | None = None,
     eval_sample_set: dict | None = None,
+    task_scope: object | None = None,
+    task_eval_scope: object | None = None,
+    validation_requested_rows: int | None = None,
 ):
     """
     Multi-file training: rebuild the epoch dataset each epoch, then train on it.
@@ -1238,6 +1054,30 @@ def run_experiment_streaming(
                            no pass, R3 honestly absent (legacy tolerance).
                            The trainer never derives, resamples or re-splits
                            this set (no second split concept).
+        task_scope:        D14-1 C3. The OPAQUE training scope handed to the
+                           run-bound ``TaskDataPath`` (the engine never reads
+                           inside it). ``None`` — every legacy caller — means
+                           regime-A: the TIDMAD scope is assembled from the
+                           legacy arguments (``sample_set`` / seg size /
+                           profile), exactly the PRESENCE-based discrimination
+                           the binding truth table uses.
+        task_eval_scope:   Same, for the validation identity scope
+                           (``eval_sample_set`` under regime-A). D14-2 C5b:
+                           an EXPLICIT eval scope (without
+                           ``eval_sample_set``) also triggers the R3 pass —
+                           the generic condition — and then REQUIRES
+                           ``validation_requested_rows``.
+        validation_requested_rows: D14-2 C5b, explicit-eval-scope leg ONLY:
+                           the caller-DECLARED total ML-row count of the
+                           validation scope, in the task's own vocabulary.
+                           The implementation's exact-materialization check
+                           enforces it; ``TrainingHistory`` pins
+                           requested == materialized exactly as under the
+                           regime-A preflight. Refused alongside
+                           ``eval_sample_set`` (the preflight is that leg's
+                           ONLY authority) and required with an explicit
+                           ``task_eval_scope`` (never a silently
+                           unvalidated R3).
 
     Returns:
         The result summary dict — the three legacy keys byte-identical to the
@@ -1259,6 +1099,18 @@ def run_experiment_streaming(
 
     device = torch.device(train_cfg.device if torch.cuda.is_available() else "cpu")
     seg_size = model_cfg.segmentation_size
+
+    # D14-1 C3 — ONE data path for the whole run, from the run-scoped binding
+    # (regime-A resolves to TIDMAD's registered implementation; an explicit
+    # binding was installed by the caller / the argv transport in main()).
+    # Scope objects are opaque here; when absent, regime-A assembles TIDMAD's
+    # from the legacy arguments — discrimination by PRESENCE, never task name.
+    data_path = resolve_bound_task_data_path()
+    if task_scope is None:
+        task_scope = TidmadScope(sample_set=sample_set, seg_size=seg_size, profile=profile)
+    # (The regime-A EVAL scope is assembled further down, after the 07c C6
+    # clamp has produced the EFFECTIVE eval_sample_set — assembling it here
+    # would freeze the pre-clamp scope and break `requested == materialized`.)
 
     # Model initialization (once)
     model_class = MODEL_REGISTRY.get(model_cfg.model_type)
@@ -1318,7 +1170,9 @@ def run_experiment_streaming(
     # dataset is released (transient, never resident beside it — Q-07a-3),
     # and its wall time is accumulated separately so the training ACTUAL
     # below can exclude it (§3.9).
-    validation_requested_rows: int | None = None
+    # (`validation_requested_rows` is the function parameter: regime-A
+    # OVERWRITES it from the preflight below; the explicit-scope leg
+    # consumes the caller's declaration — D14-2 C5b.)
     validation_materialized_rows: int | None = None
     validation_history: list[float] | None = None
     validation_seconds: list[float] | None = None
@@ -1329,6 +1183,24 @@ def run_experiment_streaming(
     #: 07c C6 — the NATURAL scope, before `validation_max_samples` bound it.
     #: `None` when no ceiling is configured, which is every production run.
     validation_rows_before_limit: int | None = None
+    # D14-2 C5b — one declaration authority per leg, refused crosswise.
+    if eval_sample_set is not None and validation_requested_rows is not None:
+        raise ValueError(
+            "validation_requested_rows is the EXPLICIT-eval-scope declaration; "
+            "under eval_sample_set (regime-A) the preflight is the only "
+            "authority — refusing two."
+        )
+    if (
+        eval_sample_set is None
+        and task_eval_scope is not None
+        and validation_requested_rows is None
+    ):
+        raise ValueError(
+            "an explicit task_eval_scope requires validation_requested_rows "
+            "(the caller-declared row count the implementation's "
+            "exact-materialization check enforces) — never a silently "
+            "unvalidated R3."
+        )
     if eval_sample_set is not None:
         # 07c C6. The ceiling bounds the REQUESTED scope, here, before the
         # pre-flight measures it — so `validation_requested_samples` is the
@@ -1351,8 +1223,24 @@ def run_experiment_streaming(
         validation_requested_rows = _preflight_validation_scope(
             data_dir, eval_sample_set, seg_size, profile
         )
-        # Until a pass runs, the pre-flight's on-disk count is the
-        # materialized count (the pass re-checks equality every epoch).
+        # D14-1 C3 — regime-A eval scope, assembled from the EFFECTIVE
+        # (post-clamp) eval_sample_set so the implementation's relocated
+        # exact-materialization check compares against the same request the
+        # preflight measured and TrainingHistory pins.
+        if task_eval_scope is None:
+            task_eval_scope = TidmadScope(
+                sample_set=eval_sample_set, seg_size=seg_size, profile=profile
+            )
+    # D14-2 C5b — the SHARED validation-pass arming, one tail for both legs:
+    # regime-A (declaration = the preflight, above) and an explicit
+    # task_eval_scope (declaration = the caller's validation_requested_rows,
+    # already required non-None by the startup refusal). The R3 machinery —
+    # histories, workload, verifier, the per-epoch pass — keys on the
+    # GENERIC condition from here on.
+    if task_eval_scope is not None:
+        assert validation_requested_rows is not None
+        # Until a pass runs, the declared count is the materialized count
+        # (the pass re-checks equality every epoch).
         validation_materialized_rows = validation_requested_rows
         validation_history = []
         validation_seconds = []
@@ -1443,20 +1331,27 @@ def run_experiment_streaming(
         # scope, loads via HDF5 slicing, enables cross-file shuffling.
         # Reproducible: base_seed from exp_id, +ep for diversity across epochs.
         epoch_seed = base_seed if freeze_subsample else base_seed + ep
-        epoch_rng = random.Random(epoch_seed)
         t_dataset = time.perf_counter()
-        dataset = TIDMADEpochDataset(
-            data_dir=data_dir,
-            sample_set=sample_set,
-            seg_size=seg_size,
-            train_portion=train_portion,
-            rng=epoch_rng,
-            profile=profile,
-            max_samples=max_train_samples,
+        # D14-1 C3: seam call. The implementation reconstructs
+        # ``random.Random(epoch_seed)`` internally — stream-identical to the
+        # pre-relocation call site (pinned per grid cell by the committed
+        # parity manifest).
+        dataset = data_path.training_dataset(
+            task_scope,
+            EpochSamplingParams(
+                data_dir=data_dir,
+                epoch_seed=epoch_seed,
+                train_portion=train_portion,
+                max_samples=max_train_samples,
+            ),
         )
+        # Every implementation returns a SIZED map-style dataset (the engine's
+        # loops depend on it); the cast records that invariant for the type
+        # checker — torch's Dataset stub deliberately omits __len__.
+        dataset_size = len(cast("Sized", dataset))
         if max_train_samples is not None:
             print(
-                f"[validation_envelope] epoch {ep}: {len(dataset)} ML segments "
+                f"[validation_envelope] epoch {ep}: {dataset_size} ML segments "
                 f"(ceiling {max_train_samples})",
                 flush=True,
             )
@@ -1468,7 +1363,12 @@ def run_experiment_streaming(
             # keeps epoch N's ordering stream from colliding with epoch N+1's
             # subsampling stream.
             order_rng = random.Random(f"order:{epoch_seed}")
-            epoch_indices = build_sequential_indices(dataset.file_row_ranges, file_order, order_rng)
+            # Recorded D14-1 C3 residue: sequential ordering is TIDMAD-file
+            # vocabulary (`file_row_ranges`) — the cast makes the residue
+            # explicit; a non-TIDMAD dataset here would fail loudly.
+            epoch_indices = build_sequential_indices(
+                cast("TIDMADEpochDataset", dataset).file_row_ranges, file_order, order_rng
+            )
             # ONE global loader with the global drop_last, exactly as the
             # shuffle path: ordering changes the visit sequence only. Batches
             # may therefore span a file boundary, and the step count is
@@ -1520,7 +1420,7 @@ def run_experiment_streaming(
                         "source": "materialized_epoch0_loader",
                         "steps_per_epoch": steps_per_epoch,
                         "epochs": train_cfg.epochs,
-                        "epoch0_samples": len(dataset),
+                        "epoch0_samples": len(cast("Sized", dataset)),
                         "batch_size": train_cfg.batch_size,
                         "train_portion": train_portion,
                         # Provenance only — ordering permutes the same rows,
@@ -1674,7 +1574,8 @@ def run_experiment_streaming(
         # Step 07a — R3 for THIS completed epoch (one observation per R2
         # entry, so the two curves always agree in length). Sequencing call
         # only; the transactional pass lives in ``_validation_pass``.
-        if eval_sample_set is not None:
+        # D14-2 C5b: the GENERIC trigger — an armed eval scope, either leg.
+        if task_eval_scope is not None:
             assert validation_history is not None and validation_seconds is not None
             assert validation_requested_rows is not None
             r3, n_val, val_secs = _validation_pass(
@@ -1684,12 +1585,10 @@ def run_experiment_streaming(
                 loss_cfg=loss_cfg,
                 model_io=model_io,
                 device=device,
+                data_path=data_path,
+                task_eval_scope=task_eval_scope,
                 data_dir=data_dir,
-                eval_sample_set=eval_sample_set,
-                seg_size=seg_size,
                 batch_size=train_cfg.batch_size,
-                profile=profile,
-                requested_rows=validation_requested_rows,
                 verifier=validation_verifier,
                 on_verified=_finish_validation_verification,
             )
@@ -1947,6 +1846,15 @@ def main():
         help="RT2-B: path to a RuntimeControlPolicy JSON (operator budget). "
         "Only meaningful together with --runtime_observation_out.",
     )
+    parser.add_argument(
+        "--task_data_path_id",
+        type=str,
+        default=None,
+        help="D14-1: the child side of the task-data-path transport. Emitted "
+        "by the parent process FROM its resolved run binding only — never an "
+        "operator flag. SUPPLIED -> explicit binding (an unknown id fails "
+        "closed, never falls back); ABSENT -> regime-A (TIDMAD compatibility).",
+    )
     args = parser.parse_args()
 
     # Dataset Profile resolution — the child side of the parent's transport.
@@ -2051,24 +1959,36 @@ def main():
 
     if sample_set is not None:
         # Multi-file mode: per-epoch concatenated dataset over the sample set.
-        results = run_experiment_streaming(
-            model_cfg,
-            train_cfg,
-            loss_cfg,
-            sample_set=sample_set,
-            data_dir=args.data_dir,
-            sandbox_dirs=sandbox_dirs,
-            exp_id=args.exp_id,
-            train_portion=args.train_portion,
-            freeze_subsample=args.freeze_subsample,
-            train_base_seed=args.train_base_seed,
-            runtime_session=runtime_session,
-            order_strategy=args.order_strategy,
-            file_order=file_order,
-            profile=dataset_profile,
-            model_io=model_io,
-            eval_sample_set=eval_sample_set,
-        )
+        #
+        # Child side of the task-data-path transport (D14-1 C3), the same
+        # two-case rule as the profile flag: SUPPLIED resolves the transported
+        # id as an EXPLICIT binding (unknown -> fail closed, never a
+        # fallback); ABSENT leaves regime-A to the run itself.
+        if args.task_data_path_id is not None:
+            binding_cm = bind_task_data_path(
+                resolve_transported_task_data_path(args.task_data_path_id)
+            )
+        else:
+            binding_cm = contextlib.nullcontext()
+        with binding_cm:
+            results = run_experiment_streaming(
+                model_cfg,
+                train_cfg,
+                loss_cfg,
+                sample_set=sample_set,
+                data_dir=args.data_dir,
+                sandbox_dirs=sandbox_dirs,
+                exp_id=args.exp_id,
+                train_portion=args.train_portion,
+                freeze_subsample=args.freeze_subsample,
+                train_base_seed=args.train_base_seed,
+                runtime_session=runtime_session,
+                order_strategy=args.order_strategy,
+                file_order=file_order,
+                profile=dataset_profile,
+                model_io=model_io,
+                eval_sample_set=eval_sample_set,
+            )
         if results is None:
             # Runtime verification rejected the attempt: the structured
             # provenance lives in the observation sidecar; deliberately no

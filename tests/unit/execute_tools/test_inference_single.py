@@ -166,37 +166,56 @@ def _find_trial_loop(tree: ast.Module) -> ast.For:
 
 
 class TestTrialModeDelPlacement:
-    """The trial-mode buffer-free block must run BEFORE ``create_abra_file``
-    and must include the canonical 6-name set, mirroring normal mode."""
+    """The trial-mode buffer-free block must run BEFORE the deliverable write
+    and must include the canonical 6-name set, mirroring normal mode.
 
-    def test_canonical_del_block_runs_before_create_abra_file(self):
+    D14-1 C4: the write is the seam call ``data_path.write_deliverable(...)``
+    (which performs the flatten/astype copies create_abra_file used to make
+    inline), so the detector matches that call — inside or outside a ``with``
+    block — while the protected property (free BEFORE write) is unchanged.
+    """
+
+    @staticmethod
+    def _is_deliverable_write(stmt: ast.stmt) -> bool:
+        candidates: list[ast.stmt] = [stmt]
+        if isinstance(stmt, ast.With):
+            candidates = list(stmt.body)
+        for inner in candidates:
+            if isinstance(inner, ast.Expr) and isinstance(inner.value, ast.Call):
+                func = inner.value.func
+                if isinstance(func, ast.Name) and func.id == "create_abra_file":
+                    return True
+                if isinstance(func, ast.Attribute) and func.attr == "write_deliverable":
+                    return True
+        return False
+
+    def test_canonical_del_block_runs_before_deliverable_write(self):
         loop = _find_trial_loop(_parse_inference_module())
 
         canonical_del_idx = None
-        create_call_idx = None
+        write_call_idx = None
         for i, stmt in enumerate(loop.body):
             if isinstance(stmt, ast.Delete):
                 names = {t.id for t in stmt.targets if isinstance(t, ast.Name)}
                 if _CANONICAL_TRIAL_FREE_NAMES.issubset(names):
                     canonical_del_idx = i
-            if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                func = stmt.value.func
-                if isinstance(func, ast.Name) and func.id == "create_abra_file":
-                    create_call_idx = i
+            if self._is_deliverable_write(stmt):
+                write_call_idx = i
 
         assert canonical_del_idx is not None, (
             f"No `del` statement freeing the canonical trial-mode set "
             f"{sorted(_CANONICAL_TRIAL_FREE_NAMES)} was found in the trial "
             f"loop body."
         )
-        assert create_call_idx is not None, (
-            "create_abra_file call not found in trial loop body — refactor "
-            "may have moved it; update this test."
+        assert write_call_idx is not None, (
+            "Deliverable write (write_deliverable / create_abra_file) not "
+            "found in trial loop body — refactor may have moved it; update "
+            "this test."
         )
-        assert canonical_del_idx < create_call_idx, (
+        assert canonical_del_idx < write_call_idx, (
             f"Trial-mode buffer-free block runs at body index "
-            f"{canonical_del_idx} but create_abra_file is at index "
-            f"{create_call_idx}. The free MUST come first — that is the "
+            f"{canonical_del_idx} but the deliverable write is at index "
+            f"{write_call_idx}. The free MUST come first — that is the "
             f"whole point of Phase 6.7 Fix 2."
         )
 

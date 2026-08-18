@@ -212,3 +212,61 @@ def test_pack_docs_state_the_07a_maturity_honestly():
         readme = mv.readme_text(pack)
         missing = [t for t in mv.HISTORY_RUNGS if t not in readme]
         assert not missing, f"{pack}/README.md must state {missing}"
+
+
+# ---------------------------------------------------------------------------
+# D14-2 C7 — the REAL-COMPONENT variant (cumulative corpus, §22.11a RULE):
+# the L1 fixtures above are KEPT verbatim; the real bounded Pets Gate-2 run's
+# TrainingHistory is ADDED and consumed through the SAME boundary.
+# ---------------------------------------------------------------------------
+
+
+def _real_component_fixture(pack: str, kind: str) -> tuple[dict, dict]:
+    path = EXAMPLES / pack / "expected" / f"{kind}_real_component_fixture.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["_fixture"]["label"] == "real_component_fixture", path
+    assert payload["_fixture"]["kind"] == kind
+    return payload["_fixture"], payload[kind]
+
+
+@pytest.mark.parametrize("pack", ["oxford_iiit_pet", "davis_future_prediction"])
+def test_real_component_history_yields_the_hand_computed_diagnosis(pack):
+    """The REAL run's curves through the SAME boundary, against literals
+    hand-computed from the documented §3.6 formulas (the fixture note shows
+    the arithmetic; expected values are never read back from the boundary).
+    What only this catches: a boundary change that summarizes a REAL
+    barely-moved 2-epoch history differently from the hand-authored
+    converging L1 curves. New input classes across the two real variants:
+    Pets is FLAT/FLAT with a tiny negative gap; DAVIS is DECREASING train
+    with FLAT validation (a MIXED trend pair) — and both have
+    epochs_planned=2. None of that is exercised by the L1 fixtures."""
+    meta, hist = _real_component_fixture(pack, "training_history")
+    _meta2, expected = _real_component_fixture(pack, "training_diagnosis")
+    assert "gate_commit" in meta["provenance"]
+    history = TrainingHistory.model_validate(hist)
+    assert (
+        history.objective_kind
+        == {
+            "oxford_iiit_pet": "ce",
+            "davis_future_prediction": "smooth_l1",
+        }[pack]
+    )
+    got = derive_training_diagnosis(history).model_dump()
+    assert set(got) == set(expected), set(got) ^ set(expected)
+    for key, exp in expected.items():
+        if key in _FLOAT_FIELDS:
+            assert got[key] == pytest.approx(exp, rel=1e-12, abs=1e-12), key
+        else:
+            assert got[key] == exp, key
+
+
+@pytest.mark.parametrize("pack", ["oxford_iiit_pet", "davis_future_prediction"])
+def test_the_l1_fixture_is_kept_verbatim_beside_the_real_variant(pack):
+    """The cumulative-corpus rule is executable: BOTH labels exist for each
+    executable pack, and the L1 pair still carries its original label
+    (nothing was replaced to make room for the real variant)."""
+    for kind in ("training_history", "training_diagnosis"):
+        l1_meta, _ = _pack_fixture(pack, kind)
+        real_meta, _ = _real_component_fixture(pack, kind)
+        assert l1_meta["label"] == "l1_fixture"
+        assert real_meta["label"] == "real_component_fixture"

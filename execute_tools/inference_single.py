@@ -15,6 +15,7 @@ from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import (
+    bind_dataset_profile,
     load_dataset_profile,
     resolve_dataset_profile,
 )
@@ -28,6 +29,16 @@ from execute_tools.model_input_dtype import (
     apply_contract_cardinality,
     resolve_input_dtype,
 )
+from execute_tools.task_data_path import (
+    DeliverableWriteRequest,
+    resolve_task_data_path,
+    resolve_transported_task_data_path,
+)
+
+# D14-1 C4: the deliverable READER lives with the TIDMAD codec now; the alias
+# preserves this module's historical import surface (test_step05c imports it
+# from here) and every in-module call site unchanged.
+from execute_tools.tidmad_data_path import is_complete_trial_output as _is_complete_trial_output
 from execute_tools.workload_resolvers import resolve_inference_workload
 from ml_models.loss_models_sandbox import get_target_torch_dtype
 from ml_models.models_format_sandbox import LossConfig, get_config_class
@@ -81,55 +92,19 @@ def _assert_training_sentinel(model_path: str, exp_id: str) -> None:
         )
 
 
-def _is_complete_trial_output(
-    path: str, expected_samples: int, storage: DeliverableStorage | None = None
-) -> bool:
-    """Return whether an attempt-scoped trial HDF5 is safe to reuse.
-
-    A CUDA/host failure can leave earlier files from the same inference
-    subprocess fully flushed while later files are absent or incomplete.
-    Reuse is deliberately opt-in and requires both channels to be readable
-    vectors of the exact expected length in the persisted storage dtype.
-
-    Step 05c — this is a READER of the deliverable and it restated both facts
-    the producer writes: the two channel-group names and the storage dtype.
-    Left inlined, a task whose profile named different channels would have had
-    every output declared incomplete and silently re-inferred. ``storage``
-    defaults to the shipped representation, so a caller predating 05c is
-    unaffected.
-    """
-    resolved = storage if storage is not None else default_deliverable_storage()
-    try:
-        with h5py.File(path, "r") as handle:
-            channel1 = _h5_dataset(handle, "timeseries", resolved.input_channel_group, "timeseries")
-            channel2 = _h5_dataset(
-                handle, "timeseries", resolved.target_channel_group, "timeseries"
-            )
-            expected_shape = (expected_samples,)
-            expected_dtype = np.dtype(resolved.storage_dtype)
-            if (
-                channel1.shape != expected_shape
-                or channel2.shape != expected_shape
-                or channel1.dtype != expected_dtype
-                or channel2.dtype != expected_dtype
-            ):
-                return False
-            # Force reads at both allocation boundaries. Opening metadata alone
-            # is insufficient evidence that the final chunks were flushed.
-            if expected_samples:
-                channel1[0]
-                channel1[-1]
-                channel2[0]
-                channel2[-1]
-        return True
-    except (KeyError, OSError, ValueError):
-        return False
-
-
 def get_parser():
     """Defines the argument parser for both Fix and Agent modes."""
     parser = argparse.ArgumentParser(description="Inference with Fixed (Baseline) or Agent mode.")
     parser.add_argument("--mode", type=str, choices=["fix", "agent"], default="fix")
+    parser.add_argument(
+        "--task_data_path_id",
+        type=str,
+        default=None,
+        help="D14-1: the child side of the task-data-path transport. Emitted "
+        "by the parent process FROM its resolved run binding only — never an "
+        "operator flag. SUPPLIED -> explicit binding (an unknown id fails "
+        "closed, never falls back); ABSENT -> regime-A (TIDMAD compatibility).",
+    )
     parser.add_argument("--data_dir", "-d", type=str, default=None)
     parser.add_argument("--denoising_model", "-m", type=str, default="punet")
     parser.add_argument("--file_index", "-i", type=int, default=6)
@@ -397,6 +372,17 @@ def main():
     # source. The INPUT-side dtype work at :82-101 and :216-218 is a different
     # contract and is deliberately untouched (§2.2).
     _storage_dtype = deliverable_spec.storage.storage_dtype
+
+    # D14-1 C4 — the run-bound TaskDataPath, resolved once (child side of the
+    # transport: SUPPLIED+unknown fails closed; ABSENT is regime-A). The
+    # production deliverable WRITE goes through it; naming for logging and the
+    # reuse probe stays on the deliverable authority above, which the
+    # implementation delegates to — one authority, same bytes.
+    data_path = (
+        resolve_transported_task_data_path(args.task_data_path_id)
+        if args.task_data_path_id is not None
+        else resolve_task_data_path(None)
+    )
 
     # V20 PR C2, validation only. ``None`` — and therefore completely
     # inert — unless SIDERIUS_C2_INFERENCE_MILESTONE_TRACE names a channel,
@@ -806,28 +792,35 @@ def main():
 
             file_loop_seconds = time.perf_counter() - t_loop_start
 
-            if os.path.exists(out_name):
-                os.remove(out_name)
-
             # Phase 6.7 Fix 2 (updated 2026-05-03) — release the
-            # view-aliasing buffers BEFORE create_abra_file. The original fix
-            # also dropped raw_ch1/raw_ch2 (~1.6 GB each from full-file
+            # view-aliasing buffers BEFORE the deliverable write. The original
+            # fix also dropped raw_ch1/raw_ch2 (~1.6 GB each from full-file
             # materialization), but the lazy-slice refactor above eliminates
             # those entirely; only the per-segment chunks remain. We still
             # drop train_loader/target_loader (views over all_input/
-            # all_target) and the chunk lists, since create_abra_file's
+            # all_target) and the chunk lists, since the writer's
             # flatten/astype copies still inflate call peak otherwise.
             del train_loader, target_loader, all_input, all_target, input_chunks, target_chunks
             gc.collect()
 
+            # D14-1 C4: seam call. The implementation resolves the SAME name
+            # through the deliverable authority (out_name above is
+            # logging/reuse addressing only), removes a stale file first, and
+            # performs the identical flatten/storage-cast ABRA write — byte
+            # parity pinned by the manifest-backed delegation suite. The
+            # profile binding scopes the implementation's spec derivation to
+            # the profile THIS child transported.
             t_write = time.perf_counter()
-            create_abra_file(
-                out_name,
-                denoised.flatten().astype(_storage_dtype),
-                injected.flatten().astype(_storage_dtype),
-                indexed=False,
-                storage=deliverable_spec.storage,
-            )
+            with bind_dataset_profile(dataset_profile):
+                data_path.write_deliverable(
+                    [(file_index, denoised, injected)],
+                    DeliverableWriteRequest(
+                        output_dir=out_dir,
+                        exp_id=args.exp_id,
+                        run_name=args.run_name,
+                        model_type=args.denoising_model,
+                    ),
+                )
             file_write_seconds = time.perf_counter() - t_write
             n_psd_this_file = max(len(psd_segment_indices), 1)
             write_seconds_per_psd.append(file_write_seconds / n_psd_this_file)
@@ -976,17 +969,33 @@ def main():
                 ),
             )
 
-        # Clean up old files before writing new one
-        if os.path.exists(out_name):
-            os.remove(out_name)
-
-        create_abra_file(
-            out_name,
-            denoised.flatten().astype(_storage_dtype),
-            injected.flatten().astype(_storage_dtype),
-            indexed=False,
-            storage=deliverable_spec.storage,
-        )
+        if args.mode == "agent":
+            # D14-1 C4: run-identified (agent) writes go through the seam —
+            # the implementation resolves the SAME authority name as out_name
+            # above, removes a stale file, and performs the identical write.
+            with bind_dataset_profile(dataset_profile):
+                data_path.write_deliverable(
+                    [(args.file_index, denoised, injected)],
+                    DeliverableWriteRequest(
+                        output_dir=out_dir,
+                        exp_id=args.exp_id,
+                        run_name=args.run_name,
+                        model_type=args.denoising_model,
+                    ),
+                )
+        else:
+            # Baseline (fix) deliverables carry no run/exp identity — the seam
+            # request requires both — so the legacy unqualified write stays on
+            # the deliverable authority directly (recorded C4 exemption).
+            if os.path.exists(out_name):
+                os.remove(out_name)
+            create_abra_file(
+                out_name,
+                denoised.flatten().astype(_storage_dtype),
+                injected.flatten().astype(_storage_dtype),
+                indexed=False,
+                storage=deliverable_spec.storage,
+            )
         print(f"Inference complete. Saved to: {out_name}")
 
     # V20 PR C2, validation only. The last thing this process records: what

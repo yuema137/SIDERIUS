@@ -1,0 +1,38 @@
+{
+  "_fixture": {
+    "label": "real_component_fixture",
+    "kind": "training_history",
+    "note": "REAL-COMPONENT VARIANT (D14-3 C8; cumulative-corpus RULE \u00a722.11a \u2014 ADDED beside the L1 fixture, which is KEPT verbatim). Values are the REAL bounded DAVIS Gate-2 run's TrainingHistory: real frames -> DavisTaskDataPath window reader -> the production engine (explicit eval leg) on the committed gate2 clip subsets (60 train / 15 validation, 2 epochs, batch 4, reference predictor). objective_kind is 'smooth_l1' \u2014 the MAE-family realization the frozen LossConfig admits (beta=0.1, its minimum; child design \u00a72.5 amendment); the L1 fixture's hand-authored 'mae' label stays untouched beside this one.",
+    "provenance": {
+      "gate_commit": "df3b9623b08725e6c1568c341056a9d3f99bc47b",
+      "evidence": "/home/klz/Data/SIDEREIS_DATA/d14_davis_gate2_20260818b/gate_evidence.json",
+      "design_ledger": "docs/design/generic_framework_upgrade/d14_executable_data_path/pr_d14_3_davis_executable.md \u00a76 C7"
+    }
+  },
+  "training_history": {
+    "cadence": "per_epoch",
+    "objective_kind": "smooth_l1",
+    "objective_config_fingerprint": "607843fac5cde0c422922a8103670099c0b655d46c27746548a3184c8ea83b02",
+    "objective_reduction": "mean",
+    "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+    "comparability": "established",
+    "comparability_reason": null,
+    "epochs_planned": 2,
+    "epochs_completed": 2,
+    "train_objective": [
+      0.04953732863068581,
+      0.047689236948887506
+    ],
+    "validation_objective": [
+      0.04443025266130765,
+      0.04429657037059466
+    ],
+    "validation_requested_samples": 15,
+    "validation_samples": 15,
+    "validation_seconds": [
+      0.5716615216806531,
+      0.530480089597404
+    ],
+    "observations": {}
+  }
+}

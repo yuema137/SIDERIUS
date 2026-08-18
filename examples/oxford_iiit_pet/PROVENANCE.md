@@ -35,6 +35,19 @@
 
 Nothing else from the archive (trimaps, xmls) is used.
 
+## Images artifact (fetched at D14-2 C1; bytes NEVER tracked — pins only)
+
+| item | value |
+|---|---|
+| URL | `https://www.robots.ox.ac.uk/~vgg/data/pets/data/images.tar.gz` |
+| fetch date (UTC) | 2026-08-18T20:04:03Z |
+| size | 791 918 971 bytes |
+| SHA-256 (archive) | `67195c5e1c01f1ab5f9b6a5d22b8c27a580d896ece458917e61d459337fa318d` |
+| independent corroboration | archive MD5 `5c4f3ee8e5d25df40f4fd59a7f44e54c` equals torchvision's official `OxfordIIITPet` resource pin — a second authority in place of a second full fetch |
+| members | 7 394 tar members; 7 390 `images/*.jpg` (+ a handful of stray `.mat` the official archive ships; ignored) |
+| verify/extract tool | `tools/example_packs/fetch_oxford_iiit_pet.py` (pins are module constants — the executable authority; this table mirrors them). Re-fetching `annotations.tar.gz` through the tool on 2026-08-18 re-verified its PR0 pin byte-identically. |
+| lifecycle | archives + extracted `images/` live in an operator-supplied MACHINE-LOCAL directory outside the tree (`data/README.md`); the framework receives the root as the data path seam's `data_dir` (D14-2 child design §2.1) |
+
 ## Identity manifests — FROZEN derivation rule (design §3.2, OD-PR0-2)
 
 - `final` = the official `test.txt` list (3 669 images).

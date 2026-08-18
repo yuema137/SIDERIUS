@@ -47,7 +47,15 @@ LICENCE_PINS = (
     "challenge-created annotations carry separate CC BY 4.0 terms",
     "consumes RGB FRAMES, not segmentation annotation masks",
     "no single licence is claimed for every DAVIS artifact",
-    "D14 MUST verify and pin the exact terms applicable to the downloaded TrainVal-480p artifact",
+    # PR0 pinned the OBLIGATION sentence ("D14 MUST verify and pin the exact
+    # terms …"); D14-3 C1 DISCHARGED it, so the pin moves to the discharge —
+    # the verdict, the primary sources it rests on, and the no-redistribution
+    # fact. Losing any of these is the same defect PR0 guarded against.
+    "D14-3 VERIFICATION",
+    "Verdict: COMPATIBLE with this task's executable path",
+    "BSD 3-Clause",
+    "zero redistribution",
+    "NOT consumed",
 )
 STATUS_SEAM_PINS = (
     "clip identity",
@@ -165,14 +173,25 @@ def test_parse_db_info_reads_only_train_and_val_names() -> None:
     assert parse_db_info(text) == (["zeta"], ["alpha"])
 
 
-def test_no_clip_manifest_and_no_frame_bytes_under_the_pack() -> None:
-    """Defect caught: a clip / window manifest or any frame / archive bytes land
-    under the pack at PR0 (clip identity is D14's; raw data never in git)."""
-    names = {p.name.lower() for p in PACK_ROOT.rglob("*") if p.is_file()}
-    assert not any("clip" in n or "window" in n for n in names), names
+def test_manifest_set_is_exactly_the_landed_identity_and_execution_artifacts() -> None:
+    """[PR0 pin, RE-SCOPED BY D14-3 — the milestone that owns clip identity]
+
+    Defect caught: an unexpected manifest appears under the pack, or ANY
+    frame / archive bytes land in git. PR0 pinned "no clip manifest" because
+    clip identity was D14's to define; D14-3 defined it, so the pin now
+    enumerates the exact landed set. The raw-bytes prohibition is UNCHANGED
+    and permanent (roadmap §22.23.10) — the dataset lives machine-local."""
     forbidden = {".jpg", ".jpeg", ".png", ".zip", ".tar", ".gz", ".h5", ".npy", ".pth", ".mp4"}
     assert [p for p in PACK_ROOT.rglob("*") if p.is_file() and p.suffix.lower() in forbidden] == []
-    assert sorted(p.name for p in MANIFESTS.iterdir()) == ["SHA256SUMS", "sequences.csv"]
+    assert sorted(p.name for p in MANIFESTS.iterdir()) == [
+        "SHA256SUMS",
+        "clips.csv",
+        "execution.json",
+        "gate2_final.csv",
+        "gate2_train.csv",
+        "gate2_validation.csv",
+        "sequences.csv",
+    ]
 
 
 # ---------------------------------------------------------------------------

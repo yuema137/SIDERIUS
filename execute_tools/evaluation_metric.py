@@ -541,6 +541,133 @@ class TidmadDenoisingMetric(EvaluationMetric):
         return scalar, file_vector, ("anchor_map",)
 
 
+class AccuracyMetric(EvaluationMetric):
+    """Instance #2 (D14-2): generic classification accuracy through the handle.
+
+    Task-agnostic arithmetic and nothing else: the fraction of TRUTH ids
+    whose prediction matches. The DENOMINATOR is the truth mapping (the
+    final-eval scope authority), so a prediction missing from a partial
+    deliverable counts as not-correct — exactly the declared aggregation
+    ("fraction_correct_over_<scope>"). Direction, aggregation identity and
+    the scoreability contract come from the binding ``MetricSpec`` (for
+    Pets, the pack's DECLARED JSON via
+    :func:`metric_spec_from_declaration`); ``per_sample`` is ``None`` — no
+    per-file vector concept exists here.
+    """
+
+    def _compute(
+        self,
+        deliverables: Mapping[int, str],
+        /,
+        *,
+        predictions: Mapping[str, int],
+        truth: Mapping[str, int],
+    ) -> tuple[float, list[float | None] | None, tuple[str, ...]]:
+        if not truth:
+            raise ValueError(
+                "accuracy needs a non-empty truth mapping — an empty final-eval "
+                "scope is a caller wiring defect, not a scoreability case."
+            )
+        correct = sum(1 for image_id, label in truth.items() if predictions.get(image_id) == label)
+        return correct / len(truth), None, ()
+
+
+class GlobalMseMetric(EvaluationMetric):
+    """Instance #3 (D14-3): dense-regression global mean squared error.
+
+    Task-agnostic arithmetic: the EXACT global mean over every element of
+    every scored sample — sums of squared error and element counts are
+    accumulated across samples and divided ONCE. Never a mean-of-means:
+    with unequal sample sizes those differ, and the frozen DAVIS
+    aggregation is explicitly "the global mean over clips × C × T × H × W".
+
+    A truth sample with no prediction is a LOUD error, not a zero: unlike a
+    classification miss (a wrong label), a missing dense prediction has no
+    defensible numeric stand-in, and a partial deliverable that scored
+    anyway would silently flatter the model.
+    """
+
+    def _compute(
+        self,
+        deliverables: Mapping[int, str],
+        /,
+        *,
+        predictions: Mapping[str, Any],
+        truth: Mapping[str, Any],
+    ) -> tuple[float, list[float | None] | None, tuple[str, ...]]:
+        import numpy as np
+
+        if not truth:
+            raise ValueError(
+                "global MSE needs a non-empty truth mapping — an empty "
+                "final-eval scope is a caller wiring defect."
+            )
+        missing = [key for key in truth if key not in predictions]
+        if missing:
+            raise ValueError(
+                f"{len(missing)} scored sample(s) have no prediction "
+                f"(first: {missing[0]!r}) — a dense deliverable must cover the "
+                "scope it is scored on."
+            )
+        squared_error_sum = 0.0
+        element_count = 0
+        for key, truth_value in truth.items():
+            expected = np.asarray(truth_value, dtype=np.float64)
+            actual = np.asarray(predictions[key], dtype=np.float64)
+            if actual.shape != expected.shape:
+                raise ValueError(
+                    f"prediction {key!r} has shape {actual.shape}, expected "
+                    f"{expected.shape} — the deliverable does not match the task's "
+                    "declared output geometry."
+                )
+            squared_error_sum += float(np.sum((actual - expected) ** 2))
+            element_count += int(expected.size)
+        return squared_error_sum / element_count, None, ()
+
+
+# ---------------------------------------------------------------------------
+# Declared-spec rebinding — the declaration IS the spec (D14-2 C5)
+# ---------------------------------------------------------------------------
+
+#: The declared-contract vocabulary: contract_id → concrete class. A
+#: DECLARATION lookup, not a plugin surface — grows only when a new contract
+#: class is added in this module.
+_SCOREABILITY_CONTRACT_TYPES: dict[str, type[ScoreabilityContract]] = {
+    "deliverable_presence": PresenceScoreabilityContract,
+    "tidmad_denoised_h5": TidmadScoreabilityContract,
+}
+
+
+def scoreability_contract_from_declaration(payload: Mapping[str, Any]) -> ScoreabilityContract:
+    """Rebuild a declared scoreability contract from its ``contract_id``.
+
+    Fail closed: an unknown id names itself and the known vocabulary —
+    a task pack cannot smuggle in an unimplemented acceptance contract.
+    """
+    contract_id = payload.get("contract_id")
+    contract_cls = _SCOREABILITY_CONTRACT_TYPES.get(str(contract_id))
+    if contract_cls is None:
+        raise ValueError(
+            f"unknown scoreability contract_id {contract_id!r}; known: "
+            f"{sorted(_SCOREABILITY_CONTRACT_TYPES)}"
+        )
+    return contract_cls.model_validate(payload)
+
+
+def metric_spec_from_declaration(payload: Mapping[str, Any]) -> MetricSpec:
+    """A pack's declared metric JSON → the executable ``MetricSpec``.
+
+    ``MetricSpec.model_validate`` alone cannot instantiate the ABSTRACT
+    scoreability field from plain JSON; this is the ONE sanctioned rebind —
+    everything else (id, direction, aggregation, transform, references)
+    passes through the schema unchanged, so the committed declaration stays
+    the single authority for the metric's identity.
+    """
+    data = dict(payload)
+    data["scoreability"] = scoreability_contract_from_declaration(dict(data["scoreability"]))
+    return MetricSpec.model_validate(data)
+
+
 # ---------------------------------------------------------------------------
 # Regime-A derivation — the TIDMAD instance with NO declaration
 # ---------------------------------------------------------------------------

@@ -21,9 +21,37 @@ under the BSD License"; the challenge-created annotations carry separate
 CC BY 4.0 terms (2017 challenge rules); the challenge download page itself
 states no licence. This SIDERIUS task consumes RGB FRAMES, not segmentation
 annotation masks — no single licence is claimed for every DAVIS artifact.
-D14 MUST verify and pin the exact terms applicable to the downloaded
-TrainVal-480p artifact before the example's executable provenance is
-considered complete.
+
+### D14-3 VERIFICATION (2026-08-18) — the PR0 obligation, discharged
+
+Primary sources re-checked on the fetch date:
+
+| source | finding (verbatim where quoted) |
+|---|---|
+| `davischallenge.org/davis2017/code.html` (the download page) | **no licence stated**; research framing: "feel free to use the full resolution ones (4k, 1080p, etc.) in any step of your research" |
+| `davischallenge.org` (main page) | **no licence stated**; "Please cite the relevant papers in your publications if DAVIS helps your research." |
+| `github.com/davisvideochallenge/davis-2017` `LICENSE` (official toolkit) | **BSD 3-Clause**, "Copyright (c) 2016, Federico Perazzi / All rights reserved." |
+| challenge ANNOTATIONS (CC BY 4.0, 2017 rules) | **NOT consumed** — this task reads RGB frames only (frozen §22.9a) |
+
+**Verdict: COMPATIBLE with this task's executable path.** The use is
+machine-local research evaluation of RGB frames, with SHA-pinned provenance
+and **zero redistribution** (this repository stores pins and derived
+identity/clip manifests, never dataset bytes); the requested citations are
+recorded above. No term found in any primary source conflicts. Should the
+publishers later state terms that do conflict, this row is what must be
+re-checked.
+
+## Frames artifact (fetched at D14-3 C1; bytes NEVER tracked — pins only)
+
+| item | value |
+|---|---|
+| URL | `https://data.vision.ee.ethz.ch/csergi/share/davis/DAVIS-2017-trainval-480p.zip` (the official link on the challenge download page) |
+| fetch date (UTC) | 2026-08-18T21:03:15Z |
+| size | 832 766 765 bytes |
+| SHA-256 (archive) | `e3d0b5b77c3d031b000a19e0e25e3e2cac65d183755601bc2cf066df1a2aa492` |
+| extracted layout | `DAVIS/JPEGImages/480p/<sequence>/%05d.jpg` — all **90** sequences named by the frozen `sequences.csv` verified present with frames (`fetch_davis.py --check-layout`) |
+| verify/extract tool | `tools/example_packs/fetch_davis.py` (pin is a module constant — the executable authority; a test asserts this table mirrors it) |
+| lifecycle | archive + frames live in an operator-supplied MACHINE-LOCAL directory outside the tree; the framework receives the root as the data-path seam's `data_dir` |
 
 ## Metadata artifact actually used (fetched 2026-08-15; NO archive body)
 

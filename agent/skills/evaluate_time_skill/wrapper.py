@@ -58,6 +58,8 @@ import os
 import statistics
 import time
 import traceback
+from collections.abc import Sized
+from typing import cast
 
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
@@ -329,11 +331,17 @@ def _measure_ms_per_step(
         return None, empty_breakdown
 
     try:
-        import random
-
         from torch.utils.data import DataLoader
 
-        from execute_tools.train_engine_sandbox import TIDMADEpochDataset
+        # D14-1 C5: the warmup probe reaches the epoch dataset through the
+        # resolved TaskDataPath like every other production consumer — under
+        # a non-TIDMAD run binding the implementation refuses the TIDMAD
+        # scope loudly instead of silently timing TIDMAD data.
+        from execute_tools.task_data_path import (
+            EpochSamplingParams,
+            resolve_bound_task_data_path,
+        )
+        from execute_tools.tidmad_data_path import TidmadScope
         from ml_models.loss_models_sandbox import (
             get_criterion,
         )
@@ -367,17 +375,15 @@ def _measure_ms_per_step(
         n_psd_needed = min(n_psd_needed, 5, len(first_psds))
         mini_sample_set = {first_key: first_psds[:n_psd_needed]}
 
-        dataset = TIDMADEpochDataset(
-            data_dir=data_dir,
-            sample_set=mini_sample_set,
-            seg_size=seg_size,
-            train_portion=1.0,
-            rng=random.Random(0),
+        dataset = resolve_bound_task_data_path().training_dataset(
+            TidmadScope(sample_set=mini_sample_set, seg_size=seg_size, profile=profile),
+            EpochSamplingParams(data_dir=data_dir, epoch_seed=0, train_portion=1.0),
         )
-        if len(dataset) < required_segs:
+        dataset_size = len(cast("Sized", dataset))
+        if dataset_size < required_segs:
             print(
                 f"    [warmup skipped] mini dataset too small "
-                f"({len(dataset)} < {required_segs} required); falling back."
+                f"({dataset_size} < {required_segs} required); falling back."
             )
             return None, empty_breakdown
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, drop_last=True)

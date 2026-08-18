@@ -116,9 +116,18 @@ class TestContrastPacksClaimL1Only:
         # 0.9 beats 0.1 on accuracy; 0.1 beats 0.9 on mse.
         assert order.is_better(0.9, 0.1) is (direction == "higher")
 
-    def test_the_pack_still_carries_no_executable_path(
+    def test_any_pack_python_is_sanctioned_plugin_source_only(
         self, pack, metric_file, metric_id, direction
     ):
-        """The PR0 maturity pin, restated where the 07b claim is made: an L1
-        row and a shipped ``.py`` under the pack cannot both be true."""
-        assert list((EXAMPLES / pack).rglob("*.py")) == []
+        """The PR0 maturity pin, RE-SCOPED BY D14-2 (the named relaxation
+        owner — see `test_pack_governance` guard (b)): the only ``.py`` a
+        pack may ship is reference PLUGIN SOURCE at
+        ``examples/<pack>/plugins/*.py`` (loaded dynamically, never
+        imported). Anything else under a pack is still an executable path
+        hiding where the maturity claims forbid one."""
+        offenders = [
+            p
+            for p in (EXAMPLES / pack).rglob("*.py")
+            if p.parent.name != "plugins" or p.parent.parent != EXAMPLES / pack
+        ]
+        assert offenders == []

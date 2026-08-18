@@ -15,10 +15,13 @@ curl -L -o DAVIS-2017-trainval-480p.zip https://data.vision.ee.ethz.ch/csergi/sh
 
 The archive holds `DAVIS/JPEGImages/480p/<sequence_name>/<frame>.jpg` (the RGB
 frames this task consumes), `Annotations/` (segmentation masks — NOT used by
-this task) and `ImageSets/2017/{train,val}.txt`. Where the machine-local
-directory lives, how the framework is told about it, and the exact terms of
-the downloaded artifact are decided / pinned by **D14** (roadmap §22.23.0,
-§22.9a). At PR0 no framework component reads DAVIS data.
+this task) and `ImageSets/2017/{train,val}.txt`. **Decided by D14-3** (the deferrals this paragraph carried): the
+machine-local root reaches the framework as the data-path seam's OWN
+`data_dir` (no new config channel); acquisition is
+`tools/example_packs/fetch_davis.py --dest <machine-local dir> --extract
+--check-layout` (verify-before-anything against the archive SHA-256 pin;
+an in-tree `--dest` is refused); and the artifact's terms are verified and
+pinned in `../PROVENANCE.md` (§D14-3 VERIFICATION — verdict COMPATIBLE).
 
 ## Manifest
 
@@ -30,9 +33,13 @@ the downloaded artifact are decided / pinned by **D14** (roadmap §22.23.0,
 Sequence-disjoint by construction; runtime resampling is forbidden (§22.9a).
 Derivation rule and source hash: `../PROVENANCE.md`.
 
-**There is no clip manifest here.** Which `(sequence_name, start_frame)`
-windows materialize (8 context → 4 future frames, stride 1; indicative caps
-≤ 8 windows per train sequence, ≤ 4 per validation / final sequence), the
-decode / resize rule and the tensor hashes are the EXECUTION-level manifest —
-D14 in full. Prepared data will live in the workspace / machine-local data
-area, never in the tracked tree.
+**Clip identity landed at D14-3.** `manifests/clips.csv` (600 rows:
+`sequence_name, start_frame, scope`) records which windows materialize —
+8 context → 4 future frames, caps 8 / 4 / 4 per train / validation / final
+sequence — derived by the pure rule
+`execute_tools/davis_data_path.py::clip_starts` from each sequence's
+on-disk frame count (no RNG). `manifests/execution.json` carries the
+decode / resize rule and 10 window probe hashes;
+`manifests/gate2_*.csv` are the bounded Gate subsets (first clip of every
+sequence). Frames themselves stay machine-local — never in the tracked
+tree.

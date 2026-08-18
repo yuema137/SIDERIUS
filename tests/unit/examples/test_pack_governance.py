@@ -156,28 +156,51 @@ def test_negative_parallel_copy_yaml_in_mirror_is_detected(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
-def test_no_python_under_examples_maturity_pin_owner_d14() -> None:
-    """[MATURITY PIN — valid through PR0 / Step 07 — relaxation owner: D14]
+def _is_sanctioned_plugin_source(rel_posix: str) -> bool:
+    """D14 re-scope: reference plugin SOURCE lives at exactly
+    ``examples/<pack>/plugins/*.py`` (parent §5.4 relaxation: plugin source +
+    execution manifests + fixtures — never framework-imported code)."""
+    parts = rel_posix.split("/")
+    return len(parts) == 4 and parts[0] == "examples" and parts[2] == "plugins"
 
-    Defect caught: a production/executable `.py` lands under `examples/` before
-    an owner introduces example-local plugins / prepare tooling. Not caught
-    elsewhere: `examples/` is outside pyright's allowlist and outside the
-    packages list, so an untyped, unpackaged module there would be silently
-    unchecked. D14 (first example-local plugin / prepare tooling) re-scopes
-    this guard in ITS design — this docstring tells that owner where the pin
-    came from (design §3.5)."""
+
+def test_python_under_examples_only_as_pack_plugin_source_d14_rescope() -> None:
+    """[MATURITY PIN, RE-SCOPED BY D14-2 (the named relaxation owner) —
+    original: NO `.py` under examples/, valid through PR0 / Step 07]
+
+    Defect caught: an executable `.py` lands under `examples/` OUTSIDE the
+    sanctioned plugin location (`examples/<pack>/plugins/*.py`) — production
+    or tooling code hiding in a pack, unchecked by pyright's allowlist and
+    the packages list. The sanctioned files are PLUGIN SOURCE loaded
+    dynamically through the plugin mechanism (never imported — guard (c)
+    stays absolute below)."""
     assert EXAMPLES_ROOT.is_dir(), f"expected layout missing: {EXAMPLES_ROOT}"
-    assert _python_files_under(EXAMPLES_ROOT) == []
-    assert [p for p in _tracked(REPO_ROOT, "examples") if p.endswith(".py")] == []
+    offenders = [
+        p
+        for p in _python_files_under(EXAMPLES_ROOT)
+        if not _is_sanctioned_plugin_source(p.relative_to(REPO_ROOT).as_posix())
+    ]
+    assert offenders == []
+    tracked_offenders = [
+        p
+        for p in _tracked(REPO_ROOT, "examples")
+        if p.endswith(".py") and not _is_sanctioned_plugin_source(p)
+    ]
+    assert tracked_offenders == []
 
 
 def test_negative_python_under_examples_mirror_is_detected(tmp_path: Path) -> None:
-    """Proves guard (b) fires: a `.py` dropped under a tmp `examples/` mirror is
-    found by the same scan the checkout passes."""
-    mirror = tmp_path / "examples" / "some_pack" / "plugins"
-    mirror.mkdir(parents=True)
-    (mirror / "model.py").write_text("PLUGIN_MODEL_TYPE = 'x'\n")
-    assert _python_files_under(tmp_path / "examples") == [mirror / "model.py"]
+    """Proves the re-scoped guard fires: a `.py` OUTSIDE a plugins/ dir is an
+    offender; one INSIDE `examples/<pack>/plugins/` is sanctioned."""
+    mirror = tmp_path / "examples" / "some_pack"
+    (mirror / "plugins").mkdir(parents=True)
+    (mirror / "plugins" / "model.py").write_text("PLUGIN_MODEL_TYPE = 'x'\n")
+    (mirror / "loader.py").write_text("import os\n")
+    found = _python_files_under(tmp_path / "examples")
+    rels = [p.relative_to(tmp_path).as_posix() for p in found]
+    offenders = [r for r in rels if not _is_sanctioned_plugin_source(r)]
+    assert offenders == ["examples/some_pack/loader.py"]
+    assert "examples/some_pack/plugins/model.py" in rels  # detected, sanctioned
 
 
 # ---------------------------------------------------------------------------
