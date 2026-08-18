@@ -2,13 +2,23 @@
 
 ## 0. Status and provenance
 
-**DRAFT rev 2 — READY FOR OPERATOR REVIEW (2026-08-18).** Supersedes the
-PREMATURE rev-1 draft (`0b2a7884`, reverted by `7f650971` — scratch only,
-never reviewed, never frozen). Every rev-1 assumption was re-checked against
-the MERGED D14 state; §3.4 lists the ones D14 refuted. Authority order:
-current source (audited at `baa77ad1`) > merged D14 implementation/evidence
-> roadmap (`siderius_generic_framework_upgrade.md` §8, §8.4/§8.4a, §15.1 §8
-row, §22.11a, §22.12) > merged Step-06/07 contracts > the scratch draft.
+**DRAFT rev 3 — READY FOR FINAL OPERATOR FREEZE (2026-08-18).** Rev 3
+applies the operator review ruling of 2026-08-18 ("APPROVED IN CORE
+DIRECTION, BUT NOT YET FROZEN"): semantic separation and task-name
+genericity passed review; the five extensibility gaps that blocked freeze
+are closed in this revision — the out-of-tree extension contract (§6a),
+the source-audited plugin-loading path (§2.6), the open view-capability
+namespace (§6.3), out-of-tree custom-check registration (§6a.2), and the
+executable extension proof replacing the fourth-task walkthrough (§12
+08b / §14.G). Q1/Q2/Q3 are RESOLVED by the same ruling (§15). Rev 2
+(reviewed) supersedes the PREMATURE rev-1 draft (`0b2a7884`, reverted by
+`7f650971` — scratch only, never reviewed, never frozen); every rev-1
+assumption was re-checked against the MERGED D14 state and §3.4 lists the
+ones D14 refuted. Authority order: the operator ruling (2026-08-18) >
+current source (audited at `baa77ad1`) > merged D14
+implementation/evidence > roadmap (`siderius_generic_framework_upgrade.md`
+§8, §8.4/§8.4a, §15.1 §8 row, §22.11a, §22.12) > merged Step-06/07
+contracts > the scratch draft.
 
 This is a PARENT design: scope, ownership, acceptance, validation and PR
 decomposition. Per-commit implementation plans belong to the child designs
@@ -39,6 +49,19 @@ collapsed to a constant prediction (accuracy 0.027 = 1/37 exactly) while
 every execution stage PASSED. Execution correctness ≠ model health, from a
 real run. Step 08 must make the framework able to SAY that, for any bound
 task, without knowing the task's name.
+
+The review ruling added the second half of the problem, and it is the
+stronger half: "zero task-name branches in generic core" is necessary but
+NOT sufficient. A future USER task must be able to bind health behaviour
+from OUTSIDE the SIDERIUS infrastructure repository — external task
+configuration plus externally loaded plugin code — without editing
+`core/`, `execute_tools/`, `agent/`, any registry source, any central
+import list, the framework health YAML, or `examples/`. A new task must
+not require a SIDERIUS PR merely to register health behaviour. In-repo
+task bindings (TIDMAD, and Pets/DAVIS in 08c) are REFERENCE packs; their
+location is packaging, never the extension mechanism. §6a freezes this
+contract; §14.H makes it a completion criterion; §12 08b proves it
+executably.
 
 ## 2. Current source census (audited at `baa77ad1`, post-D14)
 
@@ -97,6 +120,53 @@ with persistence — acceptable now, RECORDED as the watch item: 08b touches
 config composition and must not push `config.py` past one responsibility;
 if it would, the child extracts `composition.py` first (the CLAUDE.md
 decomposition rule), never as a side effect.
+
+### 2.6 The plugin-loading path (ruling §2 — source-audited, not asserted)
+
+The repository already has ONE plugin-loading idiom, instantiated twice,
+production-hardened, and proven out-of-tree by D14:
+
+* **Models** — `ml_models/plugin_loader.py`: `SIDERIUS_PLUGIN_DIRS`
+  (os.pathsep-separated directory list, `:32`); per-run mode scans EXACTLY
+  the named directories with NO fallback to the legacy
+  `agent_generated/models/` default (`_resolve_plugin_dirs`, `:96-115`);
+  files are loaded via importlib and register through a module-attribute
+  contract (`PLUGIN_MODEL_TYPE` / `PLUGIN_CONFIG_CLASS` /
+  `PLUGIN_MODEL_CLASS` (+ `PLUGIN_OUTPUT_TYPE`)); the scan runs at
+  `models_sandbox.py:836` (module tail) and a per-file API
+  (`register_model_in_memory`, `:230`) registers single plugins without a
+  rescan. The D14 gate runners loaded `examples/<pack>/plugins/` through
+  exactly this channel (`scripts/run_pets_gate2.py:40-43`) — out-of-tree
+  loading from an arbitrary directory is an EXISTING, exercised fact.
+* **Losses** — `agent_generated/_loss_loader.py` + `loss_models_sandbox.py`
+  (`register_loss_in_memory` `:51`, `preload_global_losses` `:105`): the
+  SAME idiom behind a DELIBERATELY separate env var (`SIDERIUS_LOSS_DIRS`;
+  the module docstring records why sharing the model channel would be
+  unsafe). Precedent: one idiom, one scoping channel per registry family.
+* **Subprocess propagation** — `core/subprocess_env.py`
+  (`PLUGIN_DIRS_ENV_VAR`, `:39`), `core/sandbox_executor.py:316`,
+  `core/runtime_control/gpu_measurement_runner.py:275`: the env channel
+  reaches every worker; this plumbing is already load-bearing and tested.
+* **Failure semantics of the idiom** — the SCAN is fail-open per file (a
+  plugin that does not parse is skipped with a printed warning); NAME
+  RESOLUTION is fail-closed with no default
+  (`UnknownOutputContractError`, `plugin_loader.py:158-189`; custom-loss
+  resolution raises listing the registry,
+  `loss_models_sandbox.py:263-268`). "Load what parses, refuse at the
+  name" is the repository's established pattern.
+
+**Health today, honestly**: the health registry itself is already generic
+and fail-closed — `registry.py` is a flat name→skill dict whose `get()`
+raises listing the available checks — but it is populated ONLY by
+`execute_tools/health_checks/__init__.py::_bootstrap_registry()`, a
+central import list; `registry.py:47-48` even instructs "To add a new
+check, import it in execute_tools/health_checks/__init__.py". The only
+non-test callers are that `__init__` (register) and `runner.py:24` (get).
+**Out-of-tree registration of a health check or view provider is
+IMPOSSIBLE today without an infrastructure edit.** That central import
+list is the single missing seam; closing it is 08b scope (§6a.3), by
+instantiating the existing idiom — not by inventing a second plugin
+system.
 
 ## 3. The D14 evidence that constrains this design
 
@@ -218,37 +288,192 @@ knowing the task.**
 
 Components, smallest that the three real tasks force:
 
-1. **Check input declaration** (data, on every check): which view kind it
-   consumes (`categorical_predictions` | `continuous_samples` | a
-   TIDMAD-family task view), which declared facts it requires (e.g.
-   symbol cardinality, value scale, file group), and which parameter names
-   are task thresholds.
+1. **Check input declaration** (data, on every check): which view
+   CAPABILITY KEY it consumes (§6.3 — an opaque identifier, e.g.
+   `categorical_predictions`, or a plugin-local key), which declared facts
+   it requires (e.g. symbol cardinality, value scale, file group), and
+   which parameter names are task thresholds.
 2. **Applicability verdict**: requirements compared against the bound
    task's declared health facts BEFORE any I/O →
    `applicable | inapplicable(reason names the mismatched axis)`.
    Regime-A derives TIDMAD's facts from profile + Deliverable Contract
    (presence-discriminated, D14 pattern).
-3. **View vocabulary** (deliberately two kinds + task-opaque views):
-   `categorical_predictions` (finite symbol stream + declared cardinality)
-   and `continuous_samples` (float stream + declared scale). TIDMAD's six
-   consume TIDMAD-family views (its peeks); TIDMAD MAY additionally expose
-   its int8 stream as a categorical view (it is one), but parity, not
-   unification, is the Step-08 obligation. A third view kind requires a
-   fourth task to force it — not invented now.
+3. **View capabilities — an OPEN namespace, never a closed core enum**
+   (ruling §3). A view is identified by a `HealthViewKey`: an opaque
+   string the engine NEVER interprets, branches on, or enumerates. The
+   framework SHIPS two **standard capabilities** with defined payload
+   contracts — `categorical_predictions` (finite symbol stream + declared
+   cardinality) and `continuous_samples` (float stream + declared scale)
+   — which the built-in generic checks consume. A task or external plugin
+   may declare **plugin-local capabilities** (e.g.
+   `my_lab.graph_prediction_view`) with provider-owned payload contracts,
+   consumed by its own checks; the engine's whole job is
+   `check requires key X → does the bound provider expose key X?
+   yes → transport the payload; no → inapplicable`. There is NO
+   `ViewKind` Literal/union in generic code and NO
+   `if view_kind == …` dispatch (census-refused, §13); the transport
+   envelope is the minimal common carrier, not a mega-union of scientific
+   views. Growth discipline: adding a new STANDARD capability (one with
+   framework-shipped checks) still requires a forcing task; adding a
+   plugin-local capability requires NOTHING from the framework. TIDMAD's
+   six consume TIDMAD-family task views (its peeks); TIDMAD MAY
+   additionally expose its int8 stream as a categorical view (it is one),
+   but parity, not unification, is the Step-08 obligation.
 4. **Task health binding**: family roster + parameters + dispositions
-   (blocking/recording) as task-owned CONFIG DATA; the view provider as
-   task-owned CODE, registry-bound like `TaskDataPath` (capability-keyed,
-   fail-closed on absent/unknown binding for an explicitly-bound task;
-   regime-A resolves TIDMAD). Composed with framework gate POLICY into the
-   same single pinned `health_checks_effective.yaml` — mechanism untouched.
+   (blocking/recording) + plugin REFERENCES as task-owned CONFIG DATA that
+   lives OUTSIDE the framework config (§6a.4); the view provider (and any
+   custom checks) as task-owned CODE, loaded and registered at run scope
+   (§6a.3), capability-keyed and fail-closed on a declared-but-unresolved
+   binding (regime-A resolves TIDMAD). Framework gate POLICY + the task's
+   health config compose DETERMINISTICALLY into the same single pinned
+   `health_checks_effective.yaml` — pinning mechanism untouched.
 5. **Generic engine** (existing, kept): runner, gate actions, severity,
    enforce/observe mode, persistence, eligibility classification.
 
-What the framework config keeps: gate ROLES, actions, severity, cadence.
-What moves to the task: which checks, their thresholds, their views, their
-dispositions. No mega-schema: the declaration carries only what §3.2's
-table forced, and a task omitting health entirely is regime-legal
-(UNKNOWN-style evidence-absence, §7 — never a synthesized pass).
+What the framework config keeps: gate ROLES, actions, severity, cadence —
+generic policy ONLY; it never learns a task identity (§6a.4). What the
+task owns: which checks, their thresholds, their views, their
+dispositions, and which plugin modules supply the code. No mega-schema:
+the declaration carries only what §3.2's table forced, and a task
+omitting health entirely is regime-legal (UNKNOWN-style evidence-absence,
+§7 — never a synthesized pass). A task whose declaration NAMES a plugin,
+provider or check that cannot be resolved is the opposite case and fails
+closed (§6a.5).
+
+## 6a. The out-of-tree extension contract (FROZEN — ruling §1/§4/§5)
+
+### 6a.1 The governing principle (operator, 2026-08-18)
+
+> **SIDERIUS infrastructure specifies the plugin protocol, not the
+> scientific implementation.** Task-specific scientific semantics are
+> supplied by externally loadable plugins and configuration. Multiple
+> plugin execution forms — Python, executable/script, skill/agent, and
+> future backends — may be supported through adapters, but all must
+> satisfy the same subsystem-specific semantic contract.
+
+The framework provides a plugin ABI/protocol, never a growing plugin
+catalog. For Step 08 concretely: the health engine owns the check
+protocol, the verdict vocabulary, registration, resolution, composition,
+persistence and policy; every scientific statement about what "unhealthy"
+means for a task arrives as task config + task plugin code. Step 08 ships
+the Python-plugin form only (that is what the existing idiom supports);
+other execution backends are adapters behind the SAME `HealthCheckSkill`
+semantic contract when a real need arrives — never a second semantics.
+
+### 6a.2 The two levels (both must hold at Step-08 completion)
+
+**Level 1 — a task using existing generic health primitives** integrates
+with:
+
+```text
+external task health configuration
++
+external view-provider plugin
+```
+
+**Level 2 — a task with novel health semantics** integrates with:
+
+```text
+external task health configuration
++
+external view-provider plugin
++
+external custom health-check plugin
+```
+
+In BOTH cases, ZERO edits to: `core/`, `execute_tools/`, `agent/`, any
+registry source, the framework health YAML, any central import list,
+`examples/`, or any other SIDERIUS infrastructure source. A new task must
+not require a SIDERIUS PR merely to register health behaviour. Custom
+checks are first-class: a family roster may reference built-in generic
+checks and/or externally registered task-specific checks, and the
+registry stays a generic `check id → implementation` map with no
+task-name semantics (ruling §4).
+
+### 6a.3 The loading/binding seam (08b scope — the ONE missing piece)
+
+§2.6 establishes the honest baseline: the idiom exists (env/config-named
+directories → importlib file load → attribute/registration contract →
+generic registry), is subprocess-propagated, and is exercised out-of-tree
+by D14; health merely lacks its instance — today only the central
+`__init__` import list populates the health registry. 08b closes exactly
+that gap:
+
+* The task's health config NAMES its plugin code explicitly (module file
+  paths and/or a directory list — config-driven, never guessed from the
+  environment); at startup composition, the run loads those files through
+  the same file-based mechanism the model/loss loaders use, and the
+  plugin registers its provider and checks through the SAME PUBLIC
+  registration functions the built-ins use. Registration is run-scoped:
+  it happens in the composing process before family resolution, and the
+  effective pinned artifact records what was loaded.
+* Built-in families (TIDMAD; Pets/DAVIS in 08c) register through the SAME
+  public interface. In-repo residence is reference packaging; the
+  `__init__` import list loses its status as the extension path (it may
+  remain as the built-ins' convenience bootstrap, but the census pins
+  that NO external registration requires touching it).
+* **Not a second plugin system** (ruling §2): this is the existing idiom
+  instantiated for one more registry family — the same loader shape,
+  fail-closed resolution, and env/config scoping precedent as models and
+  losses. The operator's standing preference is ONE coherent run-scoped
+  task/plugin composition mechanism (Step 10/12's composition root)
+  consumed by data path, models, objectives, metrics and health alike;
+  08b's channel is deliberately a thin instance of the idiom whose config
+  surface (plugin refs + family declaration) IS what a future task pack
+  feeds the unified mechanism — subsumable without contract change.
+
+### 6a.4 Config ownership (ruling §5)
+
+```text
+FRAMEWORK CONFIG (configs/health_checks.yaml, slimmed in 08b)
+    gate roles · actions · severity · cadence · generic policy
+    — NEVER a task identity, roster, threshold or plugin reference
+
+TASK HEALTH CONFIG (task-owned, external for external users;
+                    reference packs carry theirs in-repo)
+    health family roster · thresholds · dispositions
+    · provider/check plugin references · task health facts
+
+deterministic runtime composition
+    → ONE pinned effective artifact ({workspace}/health_checks_effective.yaml)
+```
+
+The forbidden failure mode is named: the framework YAML must never become
+`tidmad: … / pets: … / davis: … / <user task>: …` — that would move task
+branching from Python into framework YAML and still require an infra edit
+per task. TIDMAD's thresholds/provenance move OUT of the framework file
+into the TIDMAD family's task-owned config in 08b (values unchanged,
+provenance comments carried, §8 parity obligations unchanged).
+
+### 6a.5 Fail-closed resolution (ruling §4/§6 negative control)
+
+Two cases that must never be conflated:
+
+* **No binding declared** (a task says nothing about health): regime-legal
+  absence — UNKNOWN-style evidence-absence, named, never a synthesized
+  pass (§7).
+* **Binding declared but unresolvable** (named plugin file missing or
+  unloadable; named provider/check id not registered after loading;
+  required capability not exposed by the bound provider): a
+  DETERMINISTIC, diagnostic, fail-closed startup error naming the
+  unresolved reference and what IS registered — never a silent fallback,
+  never a downgrade to `inapplicable`, never "no checks ran = healthy".
+
+### 6a.6 Forward invariant (proposed for Steps 08–12; roadmap enshrinement
+at freeze)
+
+From Step 08 onward, every new generic-framework abstraction must admit
+future task-specific semantics through external task configuration and
+run-scoped plugin loading without generic-infrastructure source edits:
+no new task-name branches; no closed task-semantic enum/list whose growth
+is required per task; no framework-owned central per-task configuration
+table; no central source import/registration edit as the required
+extension path; built-in implementations allowed in-repo but exercising
+the same semantic binding interface available to external users. (The
+Steps 01–07 read-only debt audit —
+`step_01_07_extensibility_debt_audit.md` — applies the same invariant
+retrospectively and is triaged separately; historical debt does not
+license new debt.)
 
 ## 7. Blocking / recording / inapplicable / error semantics (frozen here)
 
@@ -323,6 +548,7 @@ table forced, and a task omitting health entirely is regime-legal
 | production firing + persistence through the new path | **GATE 2** (bounded TIDMAD round) | required | — | — | 08a |
 | task-owned family/threshold composition + pinning | UNIT + **GATE 2** (bounded TIDMAD, startup composition is lifecycle) | composed artifact semantically identical; verdicts identical | L1 declaration composes | L1 declaration composes | 08b |
 | D18 typed no-per-sample statement | UNIT | negative control (per-file metric unchanged) | scalar-only metric real instance | scalar-only metric real instance | 08b |
+| **out-of-tree extension proof** (external config + external plugin → loader → registration → family resolution → provider → custom check → `HealthCheckResult`; negative control: broken registration → deterministic fail-closed error) | **UNIT** (integration-style, tmp external fixture package — NOT Gate 2, no training) | — | — | — | 08b |
 | generic categorical/continuous checks on views | UNIT (hand-computed) | optional categorical view ≡ int8 parity | collapse arithmetic | dispersion arithmetic | 08c |
 | REAL collapse detected / real dense output evaluated | **GATE 2** (bounded real artifact evaluations) | unchanged behaviour re-shown | **D14 collapse artifact → blocking-fail** | real npz → verdicts, no task assumptions | 08c |
 | LLM-visible health feedback | — unchanged by default; any prompt delta ⇒ **GATE 1** at that child | counts/absence lines byte-stable | — | — | any child that renders |
@@ -342,13 +568,23 @@ Three capabilities, three blast radii, three failure classes:
 08a  CHECK INPUT CONTRACT + APPLICABILITY
      what a check declares, what it receives, how it honestly says
      "not for this task"; contract-routed TIDMAD peek; every check touched
-08b  TASK-OWNED HEALTH CONFIG + THE TIDMAD FAMILY + D18
-     who owns thresholds/roster/disposition; composition into the pinned
-     effective artifact; the six become the first task family
+08b  EXTENSION ARCHITECTURE: TASK-OWNED CONFIG + PLUGIN BINDING
+     + THE TIDMAD FAMILY + D18
+     who owns thresholds/roster/disposition; external/run-scoped plugin
+     loading + provider + custom-check registration; fail-closed
+     resolution; deterministic composition into the pinned effective
+     artifact; the six become the first task family; the executable
+     out-of-tree extension proof
 08c  CONTRAST FAMILIES + GENERIC COLLAPSE CHECKS + THREE-TASK EVIDENCE
-     the view vocabulary with its first consumers; Pets/DAVIS bindings;
+     the standard view capabilities with their first consumers;
+     Pets/DAVIS bindings (reference packs on the SAME interface);
      real-artifact evaluations incl. the D14 collapse; milestone census
 ```
+
+08b is the ARCHITECTURE owner (ruling §8): it must prove that health
+extension no longer requires an infrastructure-repository edit. Pets and
+DAVIS in 08c are real contrast evidence, not the mechanism by which
+external users extend SIDERIUS.
 
 Why not 2 (the scratch's split): pre-D14, 08c's content was L1-only and
 could ride along; post-D14 it is live production surface (two new task
@@ -384,21 +620,46 @@ closeout pattern).
   from `evaluate_and_persist_health_gates`; Gate 2 = one bounded TIDMAD
   round (gates fire + persist through the new path). Gate 1: none.
 
-### 08b — task-owned health config + first family + D18
-* **Goal**: the task owns roster/thresholds/dispositions; framework owns
-  policy; composition lands in the SAME pinned artifact; scalar-only
-  metrics reach the context as a typed statement (D18), consumed as
-  `inapplicable` by per-file checks — never a hollow pass.
+### 08b — extension architecture: task-owned config + plugin binding + first family + D18
+* **Goal**: the task owns roster/thresholds/dispositions and names its
+  plugin code; the framework config slims to policy only and never learns
+  a task identity; external plugin modules load at run scope and register
+  providers AND custom checks through the public API; declared-but-
+  unresolved bindings fail closed; composition lands DETERMINISTICALLY in
+  the SAME pinned artifact; scalar-only metrics reach the context as a
+  typed statement (D18), consumed as `inapplicable` by per-file checks —
+  never a hollow pass. 08b ends with extension provably requiring zero
+  infrastructure edits (§6a.2).
 * **Allowed changes**: `config.py` (watch the god-file line, §2.5),
-  effective-config composition, registry family identity (flat lookup
-  preserved), `HealthCheckContext` additive statement, TIDMAD family
-  relocation with values unchanged.
-* **Acceptance**: composed TIDMAD artifact semantically identical (byte
-  delta, if any, called out + fresh-workspace note); verdict parity;
-  run-invariants refusal asserted; 8.4-A; D18 positive (real scalar-only
-  `MetricSpec` instances now exist: accuracy, mse) + negative control;
-  Gate 2 = one bounded TIDMAD round (startup composition is lifecycle).
-  Gate 1: none.
+  effective-config composition, the health plugin loading seam (§6a.3 —
+  the existing idiom instantiated; config-named module refs), the public
+  registration surface for providers/checks, fail-closed family
+  resolution, registry family identity (flat lookup preserved),
+  `HealthCheckContext` additive statement, TIDMAD family relocation with
+  values unchanged (thresholds/provenance move from the framework YAML to
+  TIDMAD's task-owned config, §6a.4).
+* **Acceptance**: composed TIDMAD artifact semantically identical under
+  the Q2 terms (§15 — roster/thresholds/dispositions/actions identical,
+  verdict parity, byte/sha delta recorded, new sha pinned, old workspace
+  refused, fresh-workspace boundary; no serialization distortion to
+  chase the old sha); run-invariants refusal asserted; 8.4-A; D18
+  positive (real scalar-only `MetricSpec` instances now exist: accuracy,
+  mse) + negative control; **the executable OUT-OF-TREE EXTENSION
+  PROOF** (ruling §6): a tmp/external plugin package created by the test
+  OUTSIDE the repository import roots — `health.yaml` (an external task
+  health config declaring a family that parameterizes one built-in
+  generic mechanism AND one custom check `alternating_pattern_health`,
+  referencing a provider that exposes the plugin-local capability
+  `synthetic_boolean_pattern`) + `plugin.py` (provider + custom check,
+  registering via the public API) — driven end-to-end: external config →
+  loader → run-scoped registration → family resolution → provider →
+  check → `HealthCheckResult`; asserting zero framework registry/import/
+  YAML edits structurally (the package lives outside the tree; the
+  census guards the core); **negative control**: with the registration
+  broken/removed, resolution fails closed with a deterministic diagnostic
+  naming the unresolved reference — not a silent fallback, not
+  `inapplicable`. UNIT/integration-owned, no real training. Gate 2 = one
+  bounded TIDMAD round (startup composition is lifecycle). Gate 1: none.
 
 ### 08c — contrast families + generic checks + three-task evidence
 * **Goal**: Pets and DAVIS bind real health families; the generic
@@ -411,10 +672,13 @@ closeout pattern).
   artifact evaluation path (runner-pattern), census extension.
 * **Acceptance**: collapse fixture-of-record → blocking-fail with the
   dominant-fraction evidence persisted; DAVIS npz → verdicts through the
-  continuous family; TIDMAD untouched (goldens); census: zero task-name
-  branches in health core, zero `examples/` imports, no 37/int8/temporal
-  literals in generic code; a documented fourth-task walkthrough requiring
-  zero generic-core edits. Gate 2 = bounded real Pets + DAVIS artifact
+  continuous family; TIDMAD untouched (goldens); Pets/DAVIS bindings
+  register through the SAME public interface external plugins use
+  (reference packs, never a privileged path); census per §13 including
+  the strengthened structural items (no central task roster/mapping, no
+  view-kind dispatch). The fourth-task extensibility claim is NOT
+  re-proven here by walkthrough — it was proven EXECUTABLY in 08b and its
+  proof test keeps passing. Gate 2 = bounded real Pets + DAVIS artifact
   evaluations (≤10 min each, D14 runner pattern; PASS/FAIL from semantic
   evidence). Gate 1: none unless a prompt delta is elected.
 
@@ -425,8 +689,18 @@ health core: zero `tidmad|pet|davis` comparisons; zero `examples/` imports
 in production; no `37`, no int8 vocabulary, no channel/file literals, no
 temporal geometry in generic health code; no golden-metric arithmetic and
 no `TrainingDiagnosis` logic in any check; new-check-consumes-metric-scalar
-is census-refused; view vocabulary growth requires a task that forces it.
-A fourth task binds by declaration + registered provider only.
+is census-refused; STANDARD-capability growth requires a task that forces
+it (plugin-local capabilities require nothing, §6.3).
+
+Strengthened structural items (ruling §7) — generic health core contains:
+no central task registration list; no central task→provider mapping; no
+task-specific check roster; no closed view-kind enum/Literal/union and no
+`if view_kind == …` dispatch; no framework-YAML task identities; and no
+registration path for which a central import-list edit is REQUIRED (the
+built-ins' bootstrap import is convenience, not the contract — the
+extension proof registers without touching it). A fourth task enters
+entirely through configuration + run-scoped plugin loading + declaration
+(binding by presence/capability, never by name).
 
 ## 14. Step-08 completion criteria
 
@@ -436,19 +710,28 @@ A. TIDMAD: six verdicts byte-identical on goldens; gate IDs/records/firing
    blocking categorical-collapse failure under Pets' declared family — the
    framework can now SAY what D14 could only observe. C. DAVIS: a real
    dense artifact evaluates through the same engine with no TIDMAD or
-   classification assumption. D. Generic core: census green (§13).
-   E. Semantics: `inapplicable`/`error`/`unknown` distinct, deterministic,
-   persisted; required-blocking-uncomputable fails closed. F. Testing:
-   ownership per §10, no fake lifecycle Units, evidence cumulative.
-   G. Extensibility: the documented fourth-task walkthrough shows zero
-   generic-core edits.
+   classification assumption. D. Generic core: census green (§13,
+   including the strengthened structural items). E. Semantics:
+   `inapplicable`/`error`/`unknown` distinct, deterministic, persisted;
+   required-blocking-uncomputable fails closed. F. Testing: ownership per
+   §10, no fake lifecycle Units, evidence cumulative. G. Extensibility,
+   EXECUTABLE: the out-of-tree extension proof (§12 08b) passes — an
+   external package's config + provider + custom check + plugin-local
+   capability run end-to-end with zero framework registry/import/YAML
+   edits, and its negative control fails closed. H. THE STRONG CRITERION
+   (ruling §10) — BOTH must hold: (i) zero task-name branches in generic
+   core, AND (ii) a new task using existing health primitives integrates
+   via external task config + external view-provider plugin, and a new
+   task with novel health semantics via those plus an external
+   custom-check plugin, with ZERO SIDERIUS infrastructure-source edits
+   (§6a.2's forbidden-edit list).
 
 ## 15. Residual risks / open questions
 
 * **R1 — composed-config sha churn (08b)**: byte-identity of the effective
   artifact may be impossible under composition; fallback is "semantically
-  identical + called-out delta + fresh-workspace boundary". Operator
-  ratification requested (carried over from scratch Q4).
+  identical + called-out delta + fresh-workspace boundary". **RESOLVED by
+  Q2 (below).**
 * **R2 — TIDMAD categorical-view unification temptation**: expressing the
   int8 checks THROUGH the new generic family would be elegant and is
   deliberately NOT required — parity first; unification only if verdicts
@@ -459,9 +742,25 @@ A. TIDMAD: six verdicts byte-identical on goldens; gate IDs/records/firing
 * **R4 — #233**: stacked children get no automatic CI; the D14 closeout
   pattern (one canonical formal-PR run at the integrated head) is the
   plan of record unless #233 is fixed first.
-* **Open for operator**: (Q1) 3-PR split accepted? (Q2) R1 fallback
-  accepted? (Q3) confirm health stays prompt-invisible beyond today's
-  counts/absence lines (Gate 1 stays off by default)?
+* **Operator decisions (ruling of 2026-08-18) — all three RESOLVED**:
+  * **Q1 — three-PR split: ACCEPTED** (with 08b's responsibility widened
+    to extension-architecture owner, §11/§12).
+  * **Q2 — R1 composed-config sha fallback: ACCEPTED.** Byte identity of
+    the newly COMPOSED effective YAML is not required if composition
+    necessarily changes serialization. Required instead: deterministic
+    composition; TIDMAD roster identical; thresholds identical;
+    dispositions identical; framework actions/policy identical; health
+    VERDICT parity; the byte/sha delta explicitly recorded; the new
+    effective sha pinned; an old workspace rejects the changed sha
+    (run-invariants refusal asserted); fresh-workspace boundary used.
+    Serialization must NOT be distorted merely to preserve the old sha.
+  * **Q3 — prompt visibility: CONFIRMED.** Step 08 does not expand the
+    LLM-facing health surface by default: counts + named absence +
+    stable IDs only; raw metrics, family identity, applicability detail
+    and any new health narrative stay prompt-invisible (Step 09 owns
+    richer interpretation/consumption). Therefore Gate 1 = NOT REQUIRED
+    by default in 08a/08b/08c; any actual prompt/PB delta re-dispositions
+    Gate 1 for that child.
 
 ## 16. Explicitly deferred (none block Step 08)
 
@@ -496,4 +795,59 @@ forcing task).
    abstraction (§3.3: declaration-based applicability, view providers,
    engine-level evidence) — the design is different BECAUSE of them.
    11. *God file?* §2.5 watch item with a pre-committed extraction rule.
-   12. *Fourth task?* §14.G makes the walkthrough an acceptance item.
+   12. *Fourth task?* §14.G is now an EXECUTABLE out-of-tree proof
+   (08b), not a walkthrough.
+
+### 17a. Adversarial re-review — the ruling §11 scenarios (applied to rev 3)
+
+**A. A university user has a graph-prediction task in another repository —
+graph-specific health check without a SIDERIUS PR?** YES (Level 2,
+§6a.2): their external `health.yaml` declares the family (their check id,
+disposition, thresholds) and names their plugin module; the plugin
+registers a provider exposing the plugin-local capability
+`their_lab.graph_view` and the custom check consuming it, through the
+public API (§6a.3); the engine matches the capability key opaquely
+(§6.3). No SIDERIUS file changes; the 08b extension proof exercises this
+exact shape (custom view + custom check from a tmp external package).
+
+**B. Only built-in dominant-fraction/dispersion checks with custom
+thresholds — config + provider plugin only?** YES (Level 1): the built-in
+generic checks are parameterized by task-declared thresholds (§6.4); the
+task's provider exposes the standard capability
+(`categorical_predictions` or `continuous_samples`); no custom check code
+and no framework edit.
+
+**C. A view kind neither standard capability represents — enum/branch
+edit in generic core?** NO: there is no view-kind enum to grow and no
+view dispatch to extend — the namespace is open (§6.3), the engine only
+matches declared-required vs provided keys, and the census refuses
+`if view_kind ==` dispatch structurally (§13). Standard capabilities are
+shipped payload contracts, not a closed universe.
+
+**D. Plugin absent or misspelled — fail closed with a useful
+diagnostic?** YES (§6a.5): a DECLARED binding that cannot be resolved
+(missing/unloadable module, unregistered id, unexposed capability) is a
+deterministic startup error naming the unresolved reference and what IS
+registered — never a fallback, never `inapplicable`, never
+"no checks ran = healthy". The 08b negative control pins exactly this,
+and it is distinct from the regime-legal no-binding case (named absence).
+
+**E. The task never named anywhere in SIDERIUS source — register,
+compose, execute?** YES: binding is presence/capability-keyed (the D14
+truth-table pattern); ids and capability keys are opaque strings the
+framework never spells; composition reads the task's OWN config file; the
+census forbids central task rosters/mappings (§13). The extension-proof
+task (`synthetic_boolean_pattern` / `alternating_pattern_health`) exists
+only inside a test's tmp directory — the strongest form of "never named
+in source".
+
+**F. Search generic health core for all registration sites — would a
+synthetic fourth task touch any?** Honest answer, from §2.6: TODAY it
+would — the only registration path is the central
+`health_checks/__init__.py` import list, which is precisely the gap. As
+designed (after 08b): registration sites are (i) the public
+registration functions, callable by run-scoped loaded plugin code, and
+(ii) the built-ins' bootstrap import, which no external task needs. The
+extension proof + the strengthened census (§13) make "touches none of
+them" an executable, regression-guarded fact rather than a review
+opinion.
