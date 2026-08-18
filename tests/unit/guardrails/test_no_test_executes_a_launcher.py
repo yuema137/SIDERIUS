@@ -87,6 +87,62 @@ def _spawn_calls(tree: ast.AST) -> list[ast.Call]:
     return calls
 
 
+def _path_constants(tree: ast.AST) -> dict[str, list[str]]:
+    """Every ``NAME = ... "<file>" ...`` binding, flattened to a path.
+
+    `RUNNER = REPO_ROOT / "sdsc_submission_scripts" / "v19_queue_runner.sh"`
+    becomes `{"RUNNER": ["sdsc_submission_scripts/v19_queue_runner.sh"]}`.
+
+    Resolving the binding is what lets the argv branch below stay PRECISE.
+    Rendering the bare expression instead pushes the decision onto
+    `_executes_a_dynamic_path`, whose test is the *variable's name* — and a
+    name test cannot tell `str(RUNNER)` pointing at a launcher from
+    `str(runner)` pointing at a throwaway `_drive.sh` written into
+    `tmp_path`. Both exist in the corpus, so the name test would report
+    the second and be switched off for it. What a call would execute is a
+    property of the path, not of the identifier, so resolve the path.
+
+    FUNCTION-LOCAL bindings are collected too, which is what excludes the
+    throwaway-fixture case. Names are therefore not unique, so every
+    binding is kept and the caller prefers whichever one names a launcher:
+    a scanner that guesses wrong must guess towards reporting.
+    """
+    consts: dict[str, list[str]] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        # Source order, because `ast.walk` is breadth-first and would
+        # render `a / "b" / "c.sh"` as "c.sh/b".
+        pieces = sorted(
+            (
+                (n.lineno, n.col_offset, n.value)
+                for n in ast.walk(node.value)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            ),
+        )
+        if pieces:
+            consts.setdefault(target.id, []).append("/".join(p[2] for p in pieces))
+    return consts
+
+
+def _render_argv_element(element: ast.expr, consts: dict[str, list[str]]) -> str:
+    """One argv element as text a launcher rule can read."""
+    if isinstance(element, ast.Constant) and isinstance(element.value, str):
+        return element.value
+    fallback: str | None = None
+    for inner in ast.walk(element):
+        if not isinstance(inner, ast.Name) or inner.id not in consts:
+            continue
+        for resolved in consts[inner.id]:
+            if any(launcher in resolved for launcher in LAUNCHERS):
+                return resolved
+            fallback = fallback if fallback is not None else resolved
+    return fallback if fallback is not None else "{" + ast.unparse(element) + "}"
+
+
 def _executed_strings(path: Path) -> list[str]:
     """String content that reaches a spawn call.
 
@@ -100,6 +156,7 @@ def _executed_strings(path: Path) -> list[str]:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:  # pragma: no cover - a broken test file fails elsewhere
         return []
+    consts = _path_constants(tree)
     out: list[str] = []
     for call in _spawn_calls(tree):
         # An argv LIST is one command, not a bag of unrelated strings.
@@ -110,11 +167,17 @@ def _executed_strings(path: Path) -> list[str]:
         # proof required for the 2026-08-02 consolidation.
         for node in ast.walk(call):
             if isinstance(node, (ast.List, ast.Tuple)):
-                parts = [
-                    e.value
-                    for e in node.elts
-                    if isinstance(e, ast.Constant) and isinstance(e.value, str)
-                ]
+                # A COMPUTED element is kept as `{expr}`, exactly as the
+                # f-string branch below keeps its interpolations. Dropping
+                # it left the second blind spot of the same shape: in
+                # `subprocess.run(["bash", str(RUNNER), *args])` the path
+                # is an `ast.Call`, so the constant-only filter saw
+                # `["bash"]`, fell under the length guard, and appended
+                # nothing. The interpreter was adjacent to the launcher in
+                # the source and invisible here. Resolving the element
+                # through `_path_constants` puts the real path back next to
+                # the interpreter, where `_executes_a_launcher` reads it.
+                parts = [_render_argv_element(e, consts) for e in node.elts]
                 if len(parts) >= 2:
                     out.append(" ".join(parts))
         for node in ast.walk(call):
@@ -237,9 +300,35 @@ def _scan_every_test_file() -> tuple[dict[str, list[tuple[str, str]]], int, int]
     return offenders, scanned, with_spawns
 
 
+#: Files that DO execute a production launcher and are tolerated for now.
+#:
+#: Every one of these was invisible until the computed-argv fix: the
+#: guardrail reported the corpus clean while five files ran a launcher.
+#: They are listed rather than fixed because deciding what to do with the
+#: V19/V18 launcher suites is an operator call about an operator surface,
+#: not a detector defect.
+#:
+#: What stands between these and a real chain is a PATH `screen` shim plus
+#: a temporary GATE_ROOT/WS_ROOT — not the source-safe entry guard, which
+#: protects SOURCING and does not apply to direct execution. If a shim were
+#: non-executable, mis-pathed, or bypassed by a launcher that learned to
+#: use `nohup`/`setsid`, a real chain would start under pytest.
+#:
+#: This list may only shrink. Adding to it needs the same operator
+#: decision, because each entry is a file allowed to run a launcher.
+KNOWN_LAUNCHER_EXECUTIONS = {
+    "tests/unit/sdsc_submission_scripts/test_campaign_admission.py",
+    "tests/unit/sdsc_submission_scripts/test_launch_selection.py",
+    "tests/unit/sdsc_submission_scripts/test_multi_campaign_isolation.py",
+    "tests/unit/sdsc_submission_scripts/test_v19_gate0_pair_runner.py",
+    "tests/unit/sdsc_submission_scripts/test_v19_queue_runner.py",
+}
+
+
 def test_no_test_file_executes_a_production_launcher():
     """The guarantee this module exists for, over the whole corpus."""
-    offenders, _, _ = _scan_every_test_file()
+    found, _, _ = _scan_every_test_file()
+    offenders = {k: v for k, v in found.items() if k not in KNOWN_LAUNCHER_EXECUTIONS}
     detail = "\n".join(f"  {name}: {calls}" for name, calls in sorted(offenders.items()))
     assert not offenders, (
         "These test files would EXECUTE a production launcher, which can "
@@ -367,3 +456,103 @@ class TestTheDetectorItself:
 
     def test_it_scanned_a_meaningful_number_of_files(self):
         assert len(_test_files()) > 100
+
+
+class TestAComputedArgvElement:
+    """The second blind spot of the same shape as the argv-list one.
+
+    `subprocess.run(["bash", str(RUNNER), *args])` — the launcher path is
+    an `ast.Call`, not an `ast.Constant`. The constant-only filter saw
+    `["bash"]`, fell under its own length guard, and appended nothing, so
+    the whole corpus scan reported CLEAN while five files ran a launcher.
+
+    These write a module to disk and scan it, because the property is a
+    resolution across two statements and a string cannot express that.
+    """
+
+    def _scan(self, tmp_path: Path, body: str) -> list[str]:
+        module = tmp_path / "test_probe.py"
+        module.write_text("import subprocess\nfrom pathlib import Path\n" + body)
+        return [s for s in _executed_strings(module) if _executes_a_launcher(s)]
+
+    def test_it_catches_the_exact_missed_shape(self, tmp_path):
+        """THE regression. Fails on the pre-fix detector."""
+        hits = self._scan(
+            tmp_path,
+            'ROOT = Path("/repo")\n'
+            'RUNNER = ROOT / "sdsc_submission_scripts" / "v19_queue_runner.sh"\n'
+            "def test_x(args):\n"
+            '    subprocess.run(["bash", str(RUNNER), *args], check=False)\n',
+        )
+        assert hits, "a launcher reached through a computed argv element was not detected"
+        assert "v19_queue_runner.sh" in hits[0]
+
+    def test_it_catches_a_bare_name_too(self, tmp_path):
+        """`[..., RUNNER]` without `str()` is the same hazard."""
+        hits = self._scan(
+            tmp_path,
+            'RUNNER = Path("/repo") / "sdsc_submission_scripts" / "run_chain.sh"\n'
+            "def test_x():\n"
+            '    subprocess.run(["bash", RUNNER], check=False)\n',
+        )
+        assert hits
+
+    def test_it_permits_a_computed_throwaway_path(self, tmp_path):
+        """The negative that decides HOW the fix had to work.
+
+        `runner = outdir / "_drive.sh"` is a script the test just wrote
+        into a temporary directory. Judging the element by its variable
+        NAME reports this — `runner` reads as a launcher — and a guardrail
+        that reports `tests/unit/scripts/test_bg_gpu_sampler.py` gets
+        switched off. Resolving the path is what tells them apart.
+        """
+        hits = self._scan(
+            tmp_path,
+            "def test_x(outdir):\n"
+            '    runner = outdir / "_drive.sh"\n'
+            '    subprocess.run(["bash", str(runner)], check=False)\n',
+        )
+        assert hits == []
+
+    def test_the_resolved_path_keeps_source_order(self, tmp_path):
+        """`ast.walk` is breadth-first, so an unsorted join renders
+        `a / "b" / "c.sh"` as `c.sh/b` — which still happens to contain
+        the launcher name, and would hide the ordering bug behind a
+        passing detection."""
+        module = tmp_path / "test_probe.py"
+        module.write_text(
+            "import subprocess\nfrom pathlib import Path\n"
+            'RUNNER = Path("/repo") / "sdsc_submission_scripts" / "run_chain.sh"\n'
+            "def test_x():\n"
+            '    subprocess.run(["bash", str(RUNNER)], check=False)\n'
+        )
+        assert any("sdsc_submission_scripts/run_chain.sh" in s for s in _executed_strings(module))
+
+
+class TestTheKnownExecutionsAreRealAndListed:
+    """The allowlist is evidence, not an exemption granted on trust."""
+
+    def test_every_listed_file_is_still_detected(self):
+        """An entry that no longer executes a launcher must be removed,
+        not left behind quietly granting a permission nobody needs."""
+        found, _, _ = _scan_every_test_file()
+        stale = sorted(KNOWN_LAUNCHER_EXECUTIONS - set(found))
+        assert not stale, (
+            "these files no longer execute a launcher; drop them from "
+            f"KNOWN_LAUNCHER_EXECUTIONS: {stale}"
+        )
+
+    def test_the_list_is_exactly_what_the_corpus_does(self):
+        """Pins the blast radius. A sixth file executing a launcher fails
+        the guarantee test; this one fails if the list drifts either way."""
+        found, _, _ = _scan_every_test_file()
+        assert set(found) == KNOWN_LAUNCHER_EXECUTIONS
+
+    def test_each_one_reaches_a_launcher_named_by_the_policy(self):
+        """Not merely 'something was flagged' — the flagged path is one of
+        the scripts LAUNCHERS lists."""
+        found, _, _ = _scan_every_test_file()
+        for name in sorted(KNOWN_LAUNCHER_EXECUTIONS):
+            launchers = {launcher for launcher, _text in found[name]}
+            assert launchers <= set(LAUNCHERS), f"{name}: {launchers}"
+            assert launchers, name
