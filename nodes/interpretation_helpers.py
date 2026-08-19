@@ -6,12 +6,18 @@ These are deterministic Python functions with no LLM calls.
 They evaluate predictions, generate discoveries, and build the runtime vocabulary.
 """
 
-import math
 import re
 from collections.abc import Sequence
 from typing import Any
 
+from agent.schemas.interpretation import OUTCOME_UNEVALUATED
 from agent.schemas.proposal import VocabEntry
+from execute_tools.metric_order import MetricOrder
+
+#: The relative band inside which a score counts as "within 5% of SOTA".
+#: FROZEN at 0.05 (Step 09a Q-09a-5): C3 corrects the band's DIRECTION and its
+#: negative-reference arithmetic, and must NOT retune its width.
+_DISCOVERY_RELATIVE_BAND = 0.05
 
 # ---------------------------------------------------------------------------
 # Candidate semantic deduplication (heuristic, zero LLM cost)
@@ -213,153 +219,6 @@ def _find_duplicate_candidate(
     return None
 
 
-def evaluate_prediction(
-    prediction: dict[str, Any],
-    actual_results: dict[str, Any],
-    current_sota: float | None = None,
-    partial_margin: float = 0.05,
-) -> dict[str, Any]:
-    """
-    Evaluate whether this model beat the current SOTA.
-
-    The baseline is the SOTA at the time of proposal, not the LLM's predicted
-    value. Predicting exact scores is unreliable; the meaningful question is
-    whether the proposed architecture surpassed the bar it was designed to beat.
-
-    Args:
-        prediction: Serialized FalsifiablePrediction dict with metric,
-                    current_value (SOTA at proposal time), and optionally
-                    predicted_value. Common LLM aliases for 'denoising_score'
-                    are accepted: 'best_score', 'score', 'overall denoising
-                    score', etc.
-        actual_results: Dict with at least 'best_denoising_score' and
-                        optionally 'best_file_vector'.
-        current_sota: SOTA override. When provided, takes precedence over
-                      prediction['current_value']. Pass the dynamically
-                      tracked best score from the workflow when available.
-        partial_margin: Fraction below SOTA that still counts as 'partial'
-                        (nearly competitive). Default 0.05 (5%).
-
-    Returns:
-        Dict with: metric, predicted_value, actual_value, current_sota,
-        delta_from_sota, outcome ('confirmed'/'partial'/'refuted'), boldness,
-        information_gain.
-
-        `predicted_value` is echoed back from the input because
-        `generate_discoveries` renders it ("predicted 6.0000") and receives
-        only this dict -- it has no access to the original prediction. It was
-        omitted here until 2026-08-02, so every discovery sentence in
-        production read "(predicted N/A)".
-
-    Outcome labels (preset):
-        confirmed — actual > current_sota (beat SOTA)
-        partial   — current_sota * (1 - partial_margin) < actual <= current_sota
-        refuted   — actual <= current_sota * (1 - partial_margin)
-    """
-    metric = prediction.get("metric", "denoising_score")
-    predicted = prediction.get("predicted_value")
-
-    # Resolve effective SOTA: explicit override takes precedence over proposal-time value
-    sota = current_sota if current_sota is not None else prediction.get("current_value")
-
-    # Compute actual value from results
-    actual = _compute_metric(metric, actual_results)
-
-    if actual is None or sota is None:
-        return {
-            "metric": metric,
-            "predicted_value": predicted,
-            "actual_value": actual,
-            "current_sota": sota,
-            "delta_from_sota": None,
-            "outcome": "partial",
-            "boldness": 0.0,
-            "information_gain": 0.0,
-            "notes": "Could not compute metric from results.",
-        }
-
-    delta = actual - sota
-
-    # Outcome: confirmed beats SOTA, partial is within margin, refuted is clearly below
-    if actual > sota:
-        outcome = "confirmed"
-    elif actual >= sota * (1.0 - partial_margin):
-        outcome = "partial"
-    else:
-        outcome = "refuted"
-
-    # Boldness: how ambitious was the LLM's prediction relative to SOTA?
-    boldness = abs(predicted - sota) / max(abs(sota), 1e-6) if predicted is not None else 0.0
-    # Information gain: positive only when the architecture actually beat SOTA
-    information_gain = delta if outcome == "confirmed" else 0.0
-
-    return {
-        "metric": metric,
-        "predicted_value": predicted,
-        "actual_value": actual,
-        "current_sota": sota,
-        "delta_from_sota": round(delta, 4),
-        "outcome": outcome,
-        "boldness": round(boldness, 4),
-        "information_gain": round(information_gain, 4),
-    }
-
-
-_DENOISING_SCORE_ALIASES = {
-    "denoising_score",
-    "best_score",
-    "overall denoising score",
-    "score",
-    "best_denoising_score",
-}
-
-
-def _compute_metric(metric: str, results: dict[str, Any]) -> float | None:
-    """
-    Compute a metric value from tuning results.
-
-    Supports:
-      - 'denoising_score' (and common LLM aliases) → results['best_denoising_score']
-      - 'mean(file_vector[N:M])' → mean of file_vector slice
-      - 'file_vector[N]' → single file score
-    """
-    if metric in _DENOISING_SCORE_ALIASES:
-        return results.get("best_denoising_score")
-
-    fv = results.get("best_file_vector")
-    if fv is None:
-        return None
-
-    # Parse mean(file_vector[N:M])
-    if metric.startswith("mean(file_vector[") and metric.endswith("])"):
-        inner = metric[len("mean(file_vector[") : -len("])")].strip()
-        try:
-            parts = inner.split(":")
-            start = int(parts[0])
-            end = int(parts[1]) if len(parts) > 1 else start + 1
-            values = [
-                v
-                for v in fv[start:end]
-                if v is not None and not (isinstance(v, float) and math.isnan(v))
-            ]
-            return sum(values) / len(values) if values else None
-        except (ValueError, IndexError):
-            return None
-
-    # Parse file_vector[N]
-    if metric.startswith("file_vector[") and metric.endswith("]"):
-        try:
-            idx = int(metric[len("file_vector[") : -1])
-            val = fv[idx]
-            if val is not None and not (isinstance(val, float) and math.isnan(val)):
-                return val
-        except (ValueError, IndexError):
-            pass
-        return None
-
-    return None
-
-
 def generate_discoveries(
     prediction_eval: dict[str, Any] | None,
     model_type: str,
@@ -369,6 +228,8 @@ def generate_discoveries(
     timing: dict[str, Any] | None = None,
     slow_threshold_s: float = 1800.0,
     overall_best_score: float | None = None,
+    *,
+    order: MetricOrder,
 ) -> list[VocabEntry]:
     """
     Generate kind='discovery' VocabEntry entries from this iteration's results.
@@ -391,11 +252,25 @@ def generate_discoveries(
                             prediction_eval["current_value"] (the SOTA at
                             proposal time) when not provided, but that value
                             may be stale if a newer model has since surpassed it.
+        order: the run's ``MetricOrder`` (Step 09a C3, keyword-only, REQUIRED).
+                            Discovery 2 picks the strictest SOTA and compares
+                            against it — both are direction questions.
     """
     discoveries = []
 
     # Discovery 1: prediction outcome
-    if prediction_eval and prediction_eval.get("outcome"):
+    #
+    # Step 09a C4 (E5): an UNEVALUATED prediction produces no discovery. The
+    # pre-09a code emitted one for ANY truthy outcome, and since an
+    # uncomputable metric was labelled "partial", production published
+    # "PARTIAL: <model> achieved metric=N/A ... Results are inconclusive." as
+    # a scientific finding — then carried it in the vocabulary. A comparison
+    # that could not be made is not an inconclusive result; it is no result.
+    if (
+        prediction_eval
+        and prediction_eval.get("outcome")
+        and prediction_eval.get("outcome") != OUTCOME_UNEVALUATED
+    ):
         outcome = prediction_eval["outcome"]
         metric = prediction_eval.get("metric", "denoising_score")
         predicted = prediction_eval.get("predicted_value")
@@ -441,18 +316,32 @@ def generate_discoveries(
         # proposal time, which may be stale if a newer model has since surpassed it).
         sota_from_prediction = prediction_eval.get("current_sota") if prediction_eval else None
         if overall_best_score is not None and sota_from_prediction is not None:
-            sota_score = max(sota_from_prediction, overall_best_score)
+            # "strictest" = the BETTER of the two on the metric's own axis.
+            sota_score = order.best(
+                [sota_from_prediction, overall_best_score], key=lambda value: value
+            )
         else:
             sota_score = (
                 sota_from_prediction if sota_from_prediction is not None else overall_best_score
             )
         if sota_score is not None:
-            if best_score > sota_score:
+            # Step 09a C3. The relative band used to scale the reference by
+            # (1 - margin) and compare directly — degenerate for a NEGATIVE
+            # reference, because scaling a negative SOTA by
+            # 0.95 moves it UP, so the "within 5%" arm was unreachable for every
+            # TIDMAD score and a competitive model was reported as "significantly
+            # below". The corrected form measures the DISTANCE against a band
+            # width taken from the reference's MAGNITUDE. The margin is unchanged
+            # at 0.05 (frozen, Q-09a-5) — only direction and the negative-reference
+            # arithmetic are fixed.
+            distance = abs(best_score - sota_score)
+            band_width = _DISCOVERY_RELATIVE_BAND * abs(sota_score)
+            if order.is_better(best_score, sota_score):
                 desc = (
                     f"{model_type} scored {best_score:.4f}, beating the previous "
-                    f"SOTA of {sota_score:.4f} (+{best_score - sota_score:.4f})."
+                    f"SOTA of {sota_score:.4f} (+{distance:.4f})."
                 )
-            elif best_score > sota_score * 0.95:
+            elif distance <= band_width:
                 desc = (
                     f"{model_type} scored {best_score:.4f}, within 5% of "
                     f"SOTA ({sota_score:.4f}). Competitive but not a clear improvement."
@@ -806,6 +695,8 @@ def select_active_models(
     top_k: int = 3,
     last_n: int = 2,
     score_delta_threshold: float = 0.05,
+    *,
+    order: MetricOrder,
 ) -> set[str]:
     """Pick the active model_types as the union of three sets.
 
@@ -859,8 +750,13 @@ def select_active_models(
         for mt, entry in cache_entries.items()
     ]
     scored = [(mt, s) for mt, s in scored if s is not None]
-    # Sort by (-score, mt) so highest score comes first; lex-tiebreak for determinism.
-    scored.sort(key=lambda x: (-x[1], x[0]))
+    # Step 09a C3. Was `(-x[1], x[0])` — "biggest number first". A NEGATED sort
+    # key IS a direction literal, and it selects the WORST K under a minimised
+    # metric. `rank` is 1 + (values strictly better), so ties share a rank and
+    # still break on model_type: identical order to the old key under `higher`,
+    # correctly inverted under `lower`.
+    present_scores = [value for _, value in scored]
+    scored.sort(key=lambda x: (order.rank(present_scores, x[1]), x[0]))
     active.update(mt for mt, _ in scored[:top_k])
 
     # (2) Last-N most-recent: current iter's summaries.

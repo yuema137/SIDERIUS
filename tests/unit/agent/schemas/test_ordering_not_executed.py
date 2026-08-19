@@ -30,7 +30,13 @@ from agent.schemas.ordering import (
     ResolvedOrdering,
     resolve_ordering,
 )
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder
+#: as a REQUIRED keyword. TIDMAD is `higher`, so expectations are unchanged.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 PERMUTATION = [9, 7, 5, 4, 8, 6]
 
@@ -208,7 +214,8 @@ def test_interpreter_summary_distinguishes_the_three_absence_cases():
                 status="success",
                 memory=ExperimentMemory(expert_advice_followed="n/a", hypothesis="n/a"),
             ),
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     executed, skipped, legacy = summary.round_ordering
 

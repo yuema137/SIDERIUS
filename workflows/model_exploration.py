@@ -83,6 +83,7 @@ from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
     ModelRunSummary,
+    PredictionMemory,
 )
 from agent.schemas.ordering import OrderStrategy
 from agent.schemas.proposal import ExpertContextItem, ProposalOutput, VocabEntry
@@ -103,6 +104,7 @@ from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
 from execute_tools.dataset_config import DataScope
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_literature_review import MLLiteratureReviewAgent
@@ -110,6 +112,7 @@ from nodes.ml_model_implementor import MLModelImplementor
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.result_interpretation_agent import (
     ResultInterpretationAgent,
+    reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
@@ -309,6 +312,8 @@ def load_tuning_outputs(
 
 def tuning_outputs_to_summaries(
     outputs: list[HyperparamTuningOutput],
+    *,
+    order: MetricOrder | None,
 ) -> list[ModelRunSummary]:
     """
     Convert a list of HyperparamTuningOutput objects into condensed
@@ -317,7 +322,7 @@ def tuning_outputs_to_summaries(
     Raw experiment records are NOT carried forward — only aggregates
     and per-round scores/conclusions are extracted.
     """
-    return [tuning_output_to_model_run_summary(o) for o in outputs]
+    return [tuning_output_to_model_run_summary(o, order=order) for o in outputs]
 
 
 def _make_storage(workspace: str, run_name: str) -> StorageConfig:
@@ -647,8 +652,16 @@ def _cap_knowledge_cache(
     cache: dict,
     current_model: str,
     max_entries: int = 5,
+    *,
+    order: MetricOrder | None,
 ) -> tuple[dict, set[str]]:
-    """Keep top-N models by best_denoising_score + the current iteration's model.
+    """Keep top-N models by best score + the current iteration's model.
+
+    Interpreter-MEMORY truncation policy, hosted in the workflow file
+    (parent §7, Q-09-3: semantic owner != physical location). Step 09a C3
+    migrates its COMPARISON onto the run's ``MetricOrder`` and moves nothing:
+    the retention count, the current-model exemption and the public
+    orchestration are unchanged.
 
     Returns:
         (capped_cache, evicted_model_types)
@@ -656,12 +669,28 @@ def _cap_knowledge_cache(
     if len(cache) <= max_entries:
         return cache, set()
 
+    if order is None:
+        raise ValueError(
+            "capping the knowledge cache evicts models by score, which requires the "
+            "run's MetricOrder. None was supplied and the cache is over its limit — "
+            "refusing rather than evicting on an assumed direction."
+        )
+
     scored = [
         (mt, entry.get("_stats", {}).get("best_denoising_score"))
         for mt, entry in cache.items()
         if mt != current_model
     ]
-    scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"), reverse=True)
+    # Step 09a C3. Was `reverse=True` with a `-inf` fill — both direction
+    # literals: under a minimised metric that KEEPS the worst models and
+    # evicts the best. `rank` is 1 + (values strictly better) and Python's
+    # sort is stable, so equal ranks keep insertion order exactly as
+    # `reverse=True` did, and a scoreless entry still ranks last because
+    # `worst_sentinel` is the value nothing can be worse than.
+    present = [value for _, value in scored if value is not None]
+    scored.sort(
+        key=lambda x: order.rank(present, x[1] if x[1] is not None else order.worst_sentinel)
+    )
     keep = {current_model} | {mt for mt, _ in scored[: max_entries - 1]}
     evicted = set(cache) - keep
     capped = {mt: entry for mt, entry in cache.items() if mt in keep}
@@ -1533,6 +1562,10 @@ def run_workflow(
     health_feedback_history_window_iterations: int = 3,
     health_feedback_history_max_entries_per_model: int = 8,
     restored_collapse_fingerprint_history: dict | None = None,
+    # Step 09a C5 — the interpreter's prediction memory, restored by
+    # core.resume from the latest committed digest (Q-09a-1 = A narrow).
+    # None for in-process / first-iter callers, exactly like its siblings.
+    restored_prediction_memory: PredictionMemory | None = None,
     # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
     # When both are non-None, every agent constructed inside the iter loop
     # has its bridge bound to (workspace, iter, chain_run_name, run_id) so
@@ -1809,7 +1842,12 @@ def run_workflow(
         raise ValueError(
             "Must provide either source_paths OR (data_dir + model_types + source_run_name)."
         )
-    seed_summaries = tuning_outputs_to_summaries(tuning_outputs)
+    # Step 09a C2/C3 — the seeds' own reconciled spec orders their summaries.
+    seed_metric_spec = reconcile_metric_spec(tuning_outputs)
+    seed_summaries = tuning_outputs_to_summaries(
+        tuning_outputs,
+        order=MetricOrder(seed_metric_spec) if seed_metric_spec is not None else None,
+    )
     print(
         f"  Loaded {len(tuning_outputs)} tuning outputs "
         f"across {len(set(o.model_type for o in tuning_outputs))} model types.\n"
@@ -1981,6 +2019,11 @@ def run_workflow(
     # interpreter output REPLACES it — the interpreter is the only merge
     # point). Empty for in-process / first-iter callers.
     current_collapse_fingerprint_history: dict = dict(restored_collapse_fingerprint_history or {})
+    # Step 09a C5 — same one-direction shape as the fingerprint history:
+    # the restored value seeds the loop variable, and each iteration's
+    # interpreter output REPLACES it. The interpreter is the only place
+    # prediction state is accumulated; nothing here merges or re-bases.
+    current_prediction_memory: PredictionMemory = restored_prediction_memory or PredictionMemory()
     # Per-model Phase 1 cache (grows once per model). Commit 6.1.a — chain
     # mode forwards the latest committed iter's cache via
     # restored_model_knowledge_cache so the cache-hit branch at
@@ -2094,9 +2137,30 @@ def run_workflow(
         is_cold_start = (not new_summaries) and (not model_knowledge_cache)
 
         interp_storage = _make_storage(iter_dir, run_name)
+        # Step 09a C2 — reconcile the run's bound MetricSpec across EVERY
+        # tuning output this process has fed or will feed the interpreter:
+        # the seeds/committed outputs loaded at Step 0 plus everything tuned
+        # in-process. All present specs must be equal (one run, one metric) or
+        # this refuses; nothing here derives a spec. The synthetic
+        # gate-exhaustion placeholders are deliberately NOT included — they
+        # never reach the interpreter.
+        run_metric_spec = reconcile_metric_spec([*tuning_outputs, *iteration_results])
         interp_input = InterpretationInput(
             summaries=new_summaries,
             model_knowledge_cache=model_knowledge_cache,
+            metric_spec=run_metric_spec,
+            # Step 09a C5 — the four carried prediction-memory fields.
+            prediction_outcomes_history=dict(current_prediction_memory.prediction_outcomes_history),
+            prediction_outcomes_by_semantics={
+                version: dict(counts)
+                for version, counts in (
+                    current_prediction_memory.prediction_outcomes_by_semantics.items()
+                )
+            },
+            cumulative_information_gain=current_prediction_memory.cumulative_information_gain,
+            cumulative_information_gain_by_semantics=dict(
+                current_prediction_memory.cumulative_information_gain_by_semantics
+            ),
             cold_start=is_cold_start,
             human_advice=human_advice_interpret,
             runtime_vocab=current_runtime_vocab,
@@ -2713,7 +2777,14 @@ def run_workflow(
         all_model_types.append(proposal.model_name)
 
         # Build ModelRunSummary for the newly tuned model (fed to iter N+1 as new_summaries)
-        new_model_summaries = tuning_outputs_to_summaries([tune_output])
+        new_model_summaries = tuning_outputs_to_summaries(
+            [tune_output],
+            order=(
+                MetricOrder(tune_output.metric_spec)
+                if tune_output.metric_spec is not None
+                else None
+            ),
+        )
         for s in new_model_summaries:
             # Attach description so iter N+1 interpretation agent can find it
             # without filesystem access to the attempt directory
@@ -2729,6 +2800,7 @@ def run_workflow(
             model_knowledge_cache, evicted = _cap_knowledge_cache(
                 model_knowledge_cache,
                 current_model=proposal.model_name,
+                order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
             )
             if evicted:
                 print(
@@ -2736,6 +2808,22 @@ def run_workflow(
                     f"kept {len(model_knowledge_cache)} entries."
                 )
             print(f"  [{iteration}] Knowledge cache: {len(model_knowledge_cache)} models cached.")
+
+        # Step 09a C5 — carry the interpreter's prediction memory to the next
+        # iteration. Read straight off the digest the interpreter just wrote,
+        # so the in-process loop and the chain-subprocess restore agree by
+        # construction rather than by two independent accumulations.
+        current_prediction_memory = PredictionMemory(
+            prediction_outcomes_history=dict(interpretation.prediction_outcomes_history),
+            prediction_outcomes_by_semantics={
+                version: dict(counts)
+                for version, counts in interpretation.prediction_outcomes_by_semantics.items()
+            },
+            cumulative_information_gain=interpretation.cumulative_information_gain,
+            cumulative_information_gain_by_semantics=dict(
+                interpretation.cumulative_information_gain_by_semantics
+            ),
+        )
 
         # Update runtime vocab from interpretation output
         previous_proposal_data = proposal.model_dump()

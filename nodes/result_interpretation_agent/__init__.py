@@ -18,6 +18,7 @@ via the package path automatically.
 from nodes.result_interpretation_agent.result_interpretation_agent import (
     PER_MODEL_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
+    InterpretationContractError,
     LLMBridge,
     ResultInterpretationAgent,
     _append_evolution_log,
@@ -25,12 +26,18 @@ from nodes.result_interpretation_agent.result_interpretation_agent import (
     _build_synthesis_prompt,
     _compute_evolution_stats,
     _resolve_evolution_log_root,
+    reconcile_metric_spec,
     tuning_output_to_model_run_summary,
 )
 
 __all__ = [
     "PER_MODEL_SYSTEM_PROMPT",
     "SYNTHESIS_SYSTEM_PROMPT",
+    # Step 09a C2 — PUBLIC: the protocol, the workflow and the calibration
+    # scripts import these from the package. The sys.modules rebind below makes
+    # them reachable at runtime either way, but a type checker reads THIS list,
+    # so omitting them is an unknown-import-symbol error at every caller.
+    "InterpretationContractError",
     "LLMBridge",
     "ResultInterpretationAgent",
     "_append_evolution_log",
@@ -38,6 +45,7 @@ __all__ = [
     "_build_synthesis_prompt",
     "_compute_evolution_stats",
     "_resolve_evolution_log_root",
+    "reconcile_metric_spec",
     "tuning_output_to_model_run_summary",
 ]
 

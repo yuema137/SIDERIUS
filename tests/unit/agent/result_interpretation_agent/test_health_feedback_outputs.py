@@ -19,10 +19,12 @@ from agent.schemas.health_feedback import (
     FingerprintOccurrence,
 )
 from agent.schemas.interpretation import InterpretationInput
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import (
     ResultInterpretationAgent,
     tuning_output_to_model_run_summary,
 )
+from tests.helpers.metric_fixtures import shipped_spec
 from tests.unit.agent.result_interpretation_agent.test_interpretation_agent import (
     _llm_dispatch,
 )
@@ -31,6 +33,11 @@ from tests.unit.agent.result_interpretation_agent.test_round_health_summary impo
     _output,
     _record,
 )
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 SIGNATURE = "output_diversity_blocking:n_unique_int8_values=1"
 
@@ -48,7 +55,8 @@ def _collapse_summary():
                 health_gate_results=[_gate_result()],
             ),
             _record("wavenet_iter_002_002", denoising_score=1.1, health_gate_results=[]),
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
 
 
@@ -74,6 +82,10 @@ def _prior_history():
 def _make_input(tmp_path, **overrides):
     base = dict(
         summaries=[_collapse_summary()],
+        # Step 09a C2 — a score-bearing interpretation REQUIRES the run's bound
+        # MetricSpec; ordering direction is never assumed. The shipped TIDMAD
+        # spec is `higher`, so every assertion below is unchanged.
+        metric_spec=shipped_spec(),
         storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         collapse_fingerprint_history=_prior_history(),
         iteration=2,

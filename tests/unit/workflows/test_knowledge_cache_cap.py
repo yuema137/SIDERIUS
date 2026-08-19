@@ -6,7 +6,14 @@ across iterations.
 
 from __future__ import annotations
 
+from execute_tools.metric_order import MetricOrder
+from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import _cap_knowledge_cache
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 
 def _make_cache_entry(score: float | None = None) -> dict:
@@ -23,14 +30,14 @@ def _make_cache_entry(score: float | None = None) -> dict:
 
 def test_under_limit_no_eviction():
     cache = {f"model_{i}": _make_cache_entry(float(i)) for i in range(4)}
-    capped, evicted = _cap_knowledge_cache(cache, current_model="model_0")
+    capped, evicted = _cap_knowledge_cache(cache, current_model="model_0", order=_STEP09A_ORDER)
     assert len(capped) == 4
     assert evicted == set()
 
 
 def test_exact_limit_no_eviction():
     cache = {f"model_{i}": _make_cache_entry(float(i)) for i in range(5)}
-    capped, evicted = _cap_knowledge_cache(cache, current_model="model_0")
+    capped, evicted = _cap_knowledge_cache(cache, current_model="model_0", order=_STEP09A_ORDER)
     assert len(capped) == 5
     assert evicted == set()
 
@@ -39,7 +46,7 @@ def test_8_entries_top5_by_score():
     """8 models → keep top-5. Current model always survives."""
     cache = {f"model_{i}": _make_cache_entry(float(i)) for i in range(8)}
     # current_model = "model_0" (score=0.0, the worst)
-    capped, evicted = _cap_knowledge_cache(cache, current_model="model_0")
+    capped, evicted = _cap_knowledge_cache(cache, current_model="model_0", order=_STEP09A_ORDER)
     assert len(capped) == 5
     # model_0 kept (current), top-4 by score: model_7, model_6, model_5, model_4
     assert "model_0" in capped
@@ -60,7 +67,7 @@ def test_current_model_survives_even_if_worst():
         "good_5": _make_cache_entry(5.0),
         "good_6": _make_cache_entry(4.0),
     }
-    capped, evicted = _cap_knowledge_cache(cache, current_model="bad_current")
+    capped, evicted = _cap_knowledge_cache(cache, current_model="bad_current", order=_STEP09A_ORDER)
     assert "bad_current" in capped
     assert len(capped) == 5
     # Top-4 non-current: good_1..good_4
@@ -81,7 +88,7 @@ def test_none_scores_evicted_first():
         "none_2": _make_cache_entry(None),
         "current": _make_cache_entry(4.0),
     }
-    capped, evicted = _cap_knowledge_cache(cache, current_model="current")
+    capped, evicted = _cap_knowledge_cache(cache, current_model="current", order=_STEP09A_ORDER)
     assert len(capped) == 5
     assert "none_1" in evicted
     assert "none_2" in evicted
@@ -90,9 +97,7 @@ def test_none_scores_evicted_first():
 def test_custom_max_entries():
     cache = {f"model_{i}": _make_cache_entry(float(i)) for i in range(10)}
     capped, evicted = _cap_knowledge_cache(
-        cache,
-        current_model="model_0",
-        max_entries=3,
+        cache, current_model="model_0", max_entries=3, order=_STEP09A_ORDER
     )
     assert len(capped) == 3
     assert "model_0" in capped  # current

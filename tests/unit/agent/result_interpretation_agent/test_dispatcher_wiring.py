@@ -34,6 +34,7 @@ from agent.schemas.interpretation import (
     ModelRunSummary,
 )
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.metric_fixtures import shipped_spec
 
 # ---------------------------------------------------------------------------
 # Fixtures (mirror test_interpretation_agent.py patterns)
@@ -157,6 +158,10 @@ def _make_input(
     return InterpretationInput(
         summaries=summaries,
         model_knowledge_cache=cache,
+        # Step 09a C2 — a score-bearing interpretation REQUIRES the run's
+        # bound MetricSpec; ordering direction is never assumed. The shipped
+        # TIDMAD spec is `higher`, so every assertion below is unchanged.
+        metric_spec=shipped_spec(),
         active_model_top_k=top_k,
         active_model_last_n=last_n,
         active_model_score_delta=score_delta,

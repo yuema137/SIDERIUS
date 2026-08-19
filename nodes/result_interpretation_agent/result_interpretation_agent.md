@@ -2,6 +2,40 @@
 
 > Two-phase node that turns one or more `ModelRunSummary` records (per-model condensed views of a hyperparameter-tuning run) into a single `InterpretationOutput` carrying key findings, bottlenecks, runtime-vocabulary updates, and a cross-iteration knowledge cache that downstream proposal + future-iteration nodes read.
 
+## Module layout
+
+The node has exactly ONE public interface — `result_interpretation_agent.py` +
+this file. Everything else in the package is PRIVATE by ownership; the plain
+filenames are a guard convention (`tests/unit/nodes/test_node_public_boundary.py`
+only inspects non-underscore modules), not public-API status.
+
+| module | visibility | owns |
+|---|---|---|
+| `result_interpretation_agent.py` | **PUBLIC** | `ResultInterpretationAgent`, the `run()` lifecycle, the CLI `main()`, the prompt constants and builders, `_dedup_promoted`, evolution-log I/O, output assembly and persistence |
+| `result_interpretation_agent.md` | **PUBLIC** | this contract |
+| `evidence.py` | private | persisted evidence → typed projections: `tuning_output_to_model_run_summary`, `_round_ordering`, `_round_health`, `_collect_health_evidence`, `_required_denoising_score`, `reconcile_metric_spec`, `project_failure_counts`, `InterpretationContractError` |
+| `ordering.py` | private | the run-scoped deterministic boundary: `bind_run_order` → the ONE `MetricOrder`; `precompute_evidence` → `PrecomputedEvidence` (per-model/overall best, valid, worst, formal, configs, `total_experiments`, the summary index and the scientific-aggregation scope) and `collect_enriched_fields` → `EnrichedFields` (score tables, parameter counts, training volumes) |
+| `prediction.py` | private | prediction grammar and semantics: `evaluate_prediction`, `_compute_metric`, the FROZEN legacy alias table, and the versioned accumulators `accumulate_prediction_outcomes` / `accumulate_information_gain` / `prediction_pool_sizes`. It IMPLEMENTS the v2 rule but does not own its NAME: the semantics ids and the outcome vocabulary are declared once in `agent/schemas/interpretation.py` (the schema owning the fields they key) and re-exported here under the same names, so the schema, the helpers and `core/resume.py` all read one authority |
+
+Rules, all executable:
+
+- the dependency graph is one-way — `result_interpretation_agent.py` →
+  `{evidence, ordering, prediction}`, never the reverse, and no cycle among
+  the private modules;
+- production code OUTSIDE the node imports the node's public interface only;
+- every symbol is DEFINED exactly once in the package — the main module
+  re-exports moved names by IMPORT, never by keeping a second copy;
+- `__all__` is the node's public surface; the moved helpers re-exported for
+  backwards compatibility are listed separately in `_COMPATIBILITY_REEXPORTS`,
+  are not part of the contract, and no NEW production consumer may be added —
+  import the owning submodule from inside the node instead;
+- the private modules are imported EAGERLY at the main module's top level.
+  That is load-bearing: `__init__.py` rebinds
+  `sys.modules["nodes.result_interpretation_agent"]` to the main module, so a
+  lazily-imported submodule would be unreachable afterwards. From a test, reach
+  one with `importlib.import_module("nodes.result_interpretation_agent.<name>")`,
+  and stub an internal on the module that CALLS it.
+
 ## Position in the pipeline
 
 - **Node type**: **standalone-capable** — `nodes/result_interpretation_agent/result_interpretation_agent.py` exposes a CLI `main()` that reads a tuning agent's `run_output_{run_name}.json` from disk, builds the `InterpretationInput` itself, runs the two-phase pipeline, and writes `interpretation_{run_name}.json` back to the same workspace.
@@ -39,6 +73,7 @@
 | `health_feedback_history_window_iterations` | `int` (`>= 1`) | No | `3` | Fingerprint-history retention window: the TOTAL number of iterations retained INCLUDING the current one (`minimum_retained_iter = current_iter - window + 1`; e.g. window 3 at iteration 5 retains 3, 4, 5). Locked. |
 | `health_feedback_history_max_entries_per_model` | `int` (`>= 1`) | No | `8` | Deterministic trim bound on retained fingerprint-history entries per model (ordering: last-retained-iteration desc, windowed count desc, signature asc). Locked. |
 | `collapse_fingerprint_history` | `dict[str, list[CollapseFingerprintHistoryEntry]]` | No | `{}` | Typed carry-forward from the previous `InterpretationOutput.collapse_fingerprint_history` — the ONLY history source (digest → typed restore → workflow → here). Never rebuilt from proposer output, prompts, or LLM findings. Empty on the first iteration and on legacy digests without the field. |
+| `metric_spec` | `MetricSpec \| None` | No | `None` | **Step 09a.** The run's ALREADY-RESOLVED evaluation metric, reconciled across every tuning output feeding this interpretation and supplied by the caller (`reconcile_metric_spec`). It is the SINGLE authority for ordering direction, the run-level metric identity and the prediction default. The node NEVER derives it. `None` is legal ONLY for a cold start or a genuinely scoreless input — see "Fail-closed metric contract" below. |
 
 ## Output
 
@@ -51,6 +86,7 @@
 | `total_experiments` | `int` | Total completed rounds across all summaries (new + cached). |
 | `per_model_best` | `dict[str, float \| None]` | `model_type` → best denoising score. `None` if the model has no successful experiments. |
 | `per_model_worst` | `dict[str, float \| None]` | `model_type` → worst denoising score. `None` if the model has no successful experiments. |
+| `metric_identity` | `MetricIdentity \| None` | **Step 09a.** `{metric_id, direction}` PROVENANCE: the metric this iteration was actually ordered under, echoed from the run's bound `MetricSpec`. Written into BOTH the healthy and the degraded digest. `None` only on a cold start or a scoreless input — a NAMED absence, so a reader never has to guess whether the digest's numbers are higher- or lower-is-better. |
 | `best_denoising_score` | `float \| None` | Highest denoising score observed across all models. |
 | `worst_denoising_score` | `float \| None` | Lowest denoising score observed across all models. |
 | `best_config` | `dict[str, Any] \| None` | The params dict that produced the overall best denoising score. |
@@ -189,8 +225,193 @@ The constructor accepts `bridge_factory` (for test injection — defaults to `LL
 
 ## Scientific aggregation (V20 PR D, D-C5)
 
-`ModelRunSummary.scientific_authority` carries the verdict of the FORMAL record its `formal_score` came from, so the score and its authority cannot describe different experiments. Before any LLM call, `run()` partitions the summaries via `execute_tools.scientific_aggregation.partition_for_aggregation()` and filters `per_model_formal` to authoritative results only — a non-authoritative formal score therefore never reaches the synthesis prompt and cannot inform a scientific claim.
+`ModelRunSummary.scientific_authority` carries the verdict of the FORMAL record its `formal_score` came from, so the score and its authority cannot describe different experiments. Before any LLM call, `ordering.precompute_evidence()` partitions the summaries via `execute_tools.scientific_aggregation.partition_for_aggregation()` and filters `per_model_formal` to authoritative results only — a non-authoritative formal score therefore never reaches the synthesis prompt and cannot inform a scientific claim. The ordering is not merely conventional: `run()` calls the boundary before Phase 1, and Phase 1 consumes the summary index the same call returns.
 
 Nothing is deleted. The excluded results are retained in `InterpretationOutput.scientific_aggregation` (`included` / `excluded` / `excluded_count` / `all_excluded` / `no_records` / `exclusion_reason_counts`), written at BOTH the healthy and the degraded assembly so an interpreter LLM failure cannot lose the provenance. Render it with `AggregationScope.provenance_lines()`.
 
 The exclusion is derived and rendered **deterministically, never by the model** (design §4.7): a model may simply omit it, and exclusion text placed inside a prompt can steer the interpretation it then writes. `all_excluded` is explicit because an empty aggregate alone reads identically to a campaign that found nothing — the opposite conclusion.
+
+## Fail-closed metric contract (Step 09a)
+
+The interpreter orders results. Ordering needs a DIRECTION, and "higher is
+better" used to be assumed. Under a lower-is-better metric that assumption does
+not error — it inverts the ranking silently, and every downstream proposal is
+built on the wrong model. So the contract refuses rather than defaults.
+
+**Where the spec comes from.** The tuner resolves the run's `MetricSpec` ONCE
+(`ml_hyperparameter_tune_agent.py`) and `finalize_run_output` stamps it on
+`HyperparamTuningOutput.metric_spec`. The workflow reconciles the stamps across
+every output feeding one interpretation (`reconcile_metric_spec`: all present
+specs must be EQUAL — one run, one metric) and passes the result as
+`InterpretationInput.metric_spec`. Step 09 adds **zero** new metric-derivation
+sites; the node transports a value, it never constructs one.
+
+**What is refused, at input construction — before ordering, active-model
+selection, prediction evaluation, rendering or any LLM call:**
+
+| condition | outcome |
+|---|---|
+| the input carries ANY score (a summary score field, a `round_scores` entry, or a cached `_stats` score) and `metric_spec` is `None` | `ValueError` naming the first score-bearing summary or cache entry |
+| a summary's evidence-borne `metric_identity.metric_id` differs from the run spec's `id` | `ValueError` naming both |
+| a summary's evidence-borne `metric_identity.direction` differs from the run spec's `direction` | `ValueError` naming both |
+| the tuning outputs do not agree on one spec, or some carry one and others do not | `InterpretationContractError` naming every offending `run_name` / `model_type` |
+
+**What stays legal.** A cold start and a genuinely scoreless input need no
+ordering and are accepted with `metric_spec is None`, recorded as the named
+absence `metric_identity: null` in the digest.
+
+**Legacy consequence, intentional.** Tuning outputs written before Step 09a
+carry no spec. A chain resumed ACROSS that boundary stops at its first
+post-09a interpretation with the refusal above; the compatibility path is a
+freshly produced output, never a re-derived metric.
+
+**Two owners, never substituted for each other.** The run-bound `MetricSpec`
+owns ORDERING and the run-level identity; a record's `metric_result` owns
+EVIDENCE (what actually scored that record), projected onto
+`ModelRunSummary.metric_identity`. They are checked AGAINST each other; a
+mismatch is an error, not a preference.
+
+## Ordering direction (Step 09a C3)
+
+Every comparison of golden-metric values on this node's surface asks the run's
+`MetricOrder`. None of them spells `>`, `<`, `max`, `min`, `reverse=True` or a
+negated sort key on a score, and none reads the metric's NAME.
+
+That is not a style rule. Under a lower-is-better metric — DAVIS's `mse` is a
+declared pack metric today — a direction literal does not error, it inverts:
+the best model is reported as the worst, the Top-K active set becomes the
+bottom K, and the cache evicts the models it should keep.
+
+| consumer | what the direction decides |
+|---|---|
+| `ordering.precompute_evidence` | per-model and overall best / best-valid / worst, from summaries AND from cached `_stats` |
+| `evidence.tuning_output_to_model_run_summary` | best, best-valid, best-valid-formal records; the worst round score |
+| `interpretation_helpers.select_active_models` | which models are Top-K, i.e. which get a per-model LLM call |
+| `workflows._cap_knowledge_cache` | which models survive the cache cap |
+| `_render_health_summary_section` | which round's recording diagnostics are the "best round's" |
+| `interpretation_helpers.generate_discoveries` | the strictest SOTA, whether it was beaten, and the relative band |
+
+Two rules the migration froze:
+
+* **`order` is keyword-only with NO default** on `precompute_evidence` and on
+  `tuning_output_to_model_run_summary`. A defaulted direction is exactly how
+  "higher is better" became invisible. `None` is accepted only where nothing
+  ranks; the first comparison that needs a direction raises
+  `InterpretationContractError`.
+* **The discovery band's margin stays 0.05.** C3 corrected its DIRECTION and
+  its negative-reference arithmetic — `abs(best - sota) <= 0.05 * abs(sota)`
+  instead of scaling the reference — and did not retune its width. Scaling a
+  NEGATIVE reference by `(1 - margin)` moves it toward zero, so the old
+  "within 5% of SOTA" arm was unreachable for every TIDMAD score and a
+  competitive model was always reported as "significantly below SOTA".
+
+Enforced by an AST census over the node package, `interpretation_helpers.py`
+and `_cap_knowledge_cache`, with planted-offender proofs; and by the Step-06
+C5 `MIGRATED_TO_THE_ORDER_AUTHORITY` list, which pins each migrated literal as
+ABSENT rather than deleting the row.
+
+## Prediction semantics (Step 09a C4)
+
+The previous iteration's `FalsifiablePrediction` is evaluated against the SOTA
+it was written against — not against its own predicted value, because
+predicting exact scores is unreliable and the meaningful question is whether
+the architecture cleared the bar it was designed to beat.
+
+**The frozen band.** No task branch, no value-sign branch:
+
+```text
+distance   = abs(actual - sota)
+band_width = partial_margin * abs(sota)          # partial_margin = 0.05
+
+actual or sota unavailable      -> unevaluated   (counted in NO pool)
+order.is_better(actual, sota)   -> confirmed     (information_gain = distance)
+distance <= band_width          -> partial       (gain 0)
+otherwise                       -> refuted       (gain 0)
+```
+
+Equality is `partial` and the band edge is inclusive.
+
+**`unevaluated` is not a fourth verdict.** It is the absence of an
+observation. It is recorded on the individual evaluation, counted in neither
+pool, and never published as a discovery. Before Step 09a an uncomputable
+metric was labelled `partial`, which put a non-observation into the accuracy
+statistic and published a finding reading "achieved metric=N/A".
+
+**The metric grammar is bound, not task-named.** A prediction that omits
+`metric` resolves to the RUN's metric id — `denoising_score` was one task's
+name hardcoded as the framework's default. The frozen legacy alias table is
+accepted READ-ONLY so a chain crossing the Step-09a boundary can still
+evaluate its previous proposal, and every evaluation records HOW its metric
+resolved: `bound_id`, `legacy_alias`, `per_sample_slice`, `per_sample_index`,
+`per_sample_unavailable` (a scalar-only task, which Pets and DAVIS both are)
+or `unrecognized`. The alias table is never grown for a new task.
+
+**Counts are version-partitioned, and the digest says so.** Outcomes from the
+corrected rule are not comparable with outcomes from the old one, so they are
+never pooled:
+
+| field | meaning |
+|---|---|
+| `prediction_outcomes_history` | the LEGACY v1 pool — carried forward unchanged, never incremented by Step 09a |
+| `prediction_outcomes_by_semantics["metric_order_signsafe_v2"]` | the v2 counts; the only pool this node increments |
+| `scientific_accuracy` | fractions over the v2 pool ALONE (`None` while it is empty) |
+| `prediction_evaluation_semantics` | which semantics produced that accuracy |
+| `cumulative_information_gain` | the LEGACY accumulated scalar, preserved and never added to |
+| `cumulative_information_gain_by_semantics["metric_order_signsafe_v2"]` | the v2 running sum |
+| `prediction_pool_sizes` | both pools' sizes, so a version-pure statistic cannot be mistaken for one over every prediction on record |
+
+Old persisted digests are NEVER rewritten: a digest with no
+`prediction_evaluation_semantics` key reads as `legacy_v1`, which is what
+actually produced it.
+
+**Downstream honesty.** Step 09a changes no proposer prompt template. The
+proposer's existing "Prediction Track Record" renderer reads
+`scientific_accuracy` (now v2-only), `cumulative_information_gain` (legacy)
+and `prediction_outcomes_history` (legacy — its sum is the rendered `N`), so
+next-iteration prompt CONTENT does change deterministically, and the rendered
+`N` comes from the legacy pool while the fractions come from the v2 pool.
+That is a declared consequence of the per-field rule, not an oversight.
+
+## Evidence projection (Step 09a C6)
+
+Before Step 09a the summary builder read NONE of `metric_result`,
+`metric_refusal`, `training_history` or `training_diagnosis`. The interpreter
+could see that a score existed but nothing about how the training that
+produced it behaved, and could not name a not-scoreable round as a failure at
+all. Step 07a computes the diagnosis and Step 06 computes the identity and the
+refusal — both stopped at the tuner's records.
+
+| field | source | note |
+|---|---|---|
+| `ModelRunSummary.best_training_diagnosis` | the BEST record's `training_diagnosis`, verbatim | one per ROLE: a best trial round and the formal round are different experiments |
+| `ModelRunSummary.formal_training_diagnosis` | the FORMAL record's, verbatim | the interpreter never re-derives a diagnosis (parent §7) |
+| `ModelRunSummary.failure_counts` | `RecordFailureCounts` over the model's records | counted by EXISTING vocabularies only |
+| `ModelRunSummary.secondary_metrics` | — | EMPTY in production (see below) |
+| `InterpretationOutput.per_model_failure_counts` | the above, per model | threaded into BOTH digest paths |
+| `InterpretationOutput.per_model_secondary_metrics` | the above, per model | empty until Step 10 |
+| `_stats["failure_counts"]` | the cache | so a model that goes quiet keeps its counts, exactly as `round_health_counts` does |
+
+**No new failure taxonomy.** `RecordFailureCounts` counts `status`,
+`TrainingDiagnosis.state`, `ValidationState`, `NotScoreableResult`'s OPAQUE
+contract id, `gate_action` and `RoundHealth.provenance` — every key owned by
+an authority that already exists. They are open dicts, not enums, so a fourth
+task's novel pathology is expressed at its owning layer and rendered here
+without a SIDERIUS source change. `diagnosis_missing` is counted separately
+from `absent`: "no diagnosis object" and "the diagnosis says the history was
+absent" are different facts about different records.
+
+**Secondary metrics are observational, and empty in production.** Q-09-7 = B:
+Step 09 owns the interpreter-side CONTRACT; the upstream half — tuner-side
+evaluation, `ExperimentRecord` persistence, workflow transport — is Step 10's.
+There is therefore no record-level carrier to read, and the builder leaves the
+collection EMPTY rather than inventing values or speculatively reading keys
+Step 10 has not defined. `SecondaryMetricEvidence` distinguishes `scored`,
+`refused` and `unavailable`, because a declared-but-unavailable secondary is a
+NAMED absence and never a fabricated number. Each carries its OWN direction —
+DAVIS declares `psnr` (higher) beside `mse` (lower).
+
+Secondaries can never reach a ranking. Enforced structurally (an AST census:
+no secondary may be an operand of a comparison, an argument to a `MetricOrder`
+method, or a sort key — with planted offenders for all three shapes) and
+behaviourally (flipping every secondary value leaves every ordering output
+identical).

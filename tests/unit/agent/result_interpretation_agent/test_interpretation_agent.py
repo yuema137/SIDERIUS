@@ -34,6 +34,7 @@ from nodes.result_interpretation_agent import (
     _build_per_model_prompt,
     _build_synthesis_prompt,
 )
+from tests.helpers.metric_fixtures import shipped_spec
 
 
 def _make_score_table(fv):
@@ -151,6 +152,10 @@ def _llm_dispatch(system_prompt: str, user_prompt: str, **kwargs) -> dict:
 def make_input(summary, workspace="/tmp/interp_test", run_name="r1"):
     return InterpretationInput(
         summaries=[summary],
+        # Step 09a C2 — a score-bearing interpretation REQUIRES the run's
+        # bound MetricSpec; ordering direction is never assumed. The shipped
+        # TIDMAD spec is `higher`, so every assertion below is unchanged.
+        metric_spec=shipped_spec(),
         storage={"backend": "local", "local": {"workspace": workspace, "run_name": run_name}},
     )
 
@@ -182,6 +187,8 @@ def _run_once(workspace, summaries):
         return a.run(
             InterpretationInput(
                 summaries=summaries,
+                # Step 09a C2 — see make_input above.
+                metric_spec=shipped_spec(),
                 storage={
                     "backend": "local",
                     "local": {"workspace": str(workspace), "run_name": "r1"},
@@ -299,6 +306,9 @@ class TestSingleModel:
 class TestMultiModel:
     def test_synthesis_used_for_multi_model(self, agent, tmp_path):
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[PUNET_SUMMARY, FCNET_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
@@ -351,6 +361,9 @@ class TestModelKnowledgeCache:
     def test_cache_hit_skips_llm_call(self, agent, tmp_path):
         """Model already in cache → Phase 1 LLM not called, cached entry reused."""
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[],  # no new summaries
             model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
@@ -365,6 +378,9 @@ class TestModelKnowledgeCache:
     def test_cache_hit_scores_from_stats(self, agent, tmp_path):
         """Scores for cached model are reconstructed from cache _stats, not raw summary."""
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[],
             model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
@@ -377,6 +393,9 @@ class TestModelKnowledgeCache:
     def test_mixed_one_cached_one_new_llm_called_once(self, agent, tmp_path):
         """punet cached, fcnet new → exactly one Phase 1 LLM call (for fcnet only)."""
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[FCNET_SUMMARY],  # only fcnet is new
             model_knowledge_cache={"punet": _PUNET_CACHED_ENTRY},
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
@@ -419,6 +438,9 @@ class TestModelTypesOnly:
 class TestErrorCases:
     def test_unknown_model_type_raises(self, tmp_path):
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[
                 ModelRunSummary(
                     model_type="nonexistent_model",
@@ -710,6 +732,9 @@ class TestFormalScore:
             best_config={"model_config": {}, "train_config": {}, "loss_config": {}},
         )
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[summary],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
@@ -772,6 +797,9 @@ class TestFormalScore:
             },
         }
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[FCNET_SUMMARY],  # new model this iteration
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
             model_knowledge_cache={"punet": cached_entry},
@@ -808,6 +836,9 @@ class TestOutputEnrichedFields:
     def test_none_fields_produce_none_output(self, agent, tmp_path):
         """Old-style summary (no score_table etc) produces None for enriched fields."""
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[PUNET_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
         )
@@ -1032,6 +1063,9 @@ class TestProposedByRunInjection:
             ],
         }
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[PUNET_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
             previous_proposal=previous_proposal,
@@ -1062,6 +1096,9 @@ class TestProposedByRunInjection:
             ],
         }
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[PUNET_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
             previous_proposal=previous_proposal,
@@ -1076,6 +1113,9 @@ class TestProposedByRunInjection:
     def test_no_previous_proposal_no_crash(self, agent, tmp_path):
         """previous_proposal=None (first iteration) must not crash or produce candidates."""
         inp = InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[PUNET_SUMMARY],
             storage={"backend": "local", "local": {"workspace": str(tmp_path), "run_name": "r1"}},
             previous_proposal=None,
@@ -1116,6 +1156,9 @@ class TestDegradedInterpreterPath:
 
     def _make_input(self, tmp_path, run_name="degraded_r1"):
         return InterpretationInput(
+            # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+            # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+            metric_spec=shipped_spec(),
             summaries=[PUNET_SUMMARY],
             storage={
                 "backend": "local",
@@ -1124,6 +1167,11 @@ class TestDegradedInterpreterPath:
             runtime_vocab=self.INCOMING_VOCAB,
             cumulative_information_gain=2.5,
             prediction_outcomes_history={"confirmed": 3, "partial": 1, "refuted": 2},
+            # Step 09a C4 — the VERSIONED pools travel the degraded path too.
+            prediction_outcomes_by_semantics={
+                "metric_order_signsafe_v2": {"confirmed": 1, "partial": 0, "refuted": 1}
+            },
+            cumulative_information_gain_by_semantics={"metric_order_signsafe_v2": 0.75},
             vocab_link_confirmations={"dilated_causal_conv:receptive_field": ["run_a", "run_b"]},
         )
 
@@ -1185,12 +1233,30 @@ class TestDegradedInterpreterPath:
 
     def test_carry_forward_metrics_preserved(self, tmp_path):
         """Cumulative metrics must pass through unchanged so chain accounting
-        does not silently zero out on a degraded iter."""
+        does not silently zero out on a degraded iter.
+
+        Step 09a C4 EXTENDS this to the versioned pools. The per-field rule
+        never re-bases anything — the structure itself is versioned — so the
+        degraded path copies every pool and sum forward untouched. If it
+        rewrote or merged them here, a single LLM failure would corrupt the
+        prediction record of every iteration before it.
+        """
         agent = self._make_failing_agent()
         inp = self._make_input(tmp_path)
         output = agent.run(inp)
+        # legacy pool and scalar: unchanged, exactly as before Step 09a
         assert output.cumulative_information_gain == 2.5
         assert output.prediction_outcomes_history == {"confirmed": 3, "partial": 1, "refuted": 2}
+        # versioned pools: carried, not merged into the legacy ones
+        assert output.prediction_outcomes_by_semantics == {
+            "metric_order_signsafe_v2": {"confirmed": 1, "partial": 0, "refuted": 1}
+        }
+        assert output.cumulative_information_gain_by_semantics == {"metric_order_signsafe_v2": 0.75}
+        # and the provenance still states BOTH pool sizes
+        assert output.prediction_pool_sizes == {
+            "legacy_v1": 6,
+            "metric_order_signsafe_v2": 2,
+        }
         assert output.vocab_link_confirmations == {
             "dilated_causal_conv:receptive_field": ["run_a", "run_b"]
         }
@@ -1257,17 +1323,76 @@ class TestScientificAggregationReachesTheRealOutput:
             "aggregation boundary has nothing to partition on"
         )
 
-    def test_the_agent_partitions_before_any_llm_call(self):
+    def test_the_agent_partitions_before_any_llm_call(self, tmp_path):
         """§4.7: the filtering is deterministic. A model must not be the
-        thing that decides — or remembers to mention — the exclusion."""
-        import inspect
+        thing that decides — or remembers to mention — the exclusion.
 
-        from nodes.result_interpretation_agent import ResultInterpretationAgent as _Agent
+        Step 09a C1b UPGRADE: this was a source-text pin on ``run()``
+        (``"partition_for_aggregation(inp.summaries)" in getsource``), which
+        the node-local extraction necessarily breaks — the call now lives in
+        ``ordering.precompute_evidence``. A source pin would have forced the
+        call to stay inline to keep a test green, which is backwards.
 
-        src = inspect.getsource(_Agent.run)
-        assert "partition_for_aggregation(inp.summaries)" in src
-        # The partition must precede the synthesis call in the source.
-        assert src.index("partition_for_aggregation") < src.index("synthesis_response")
+        The REACHABILITY form is stronger anyway: it records the real call
+        ORDER through the production path. Both events are observed, and the
+        partition must be observed FIRST. Stub the authority on the module
+        that CALLS it (``ordering``), never on its defining module.
+        """
+        # `importlib.import_module` on the full dotted path is the repo's
+        # convention for reaching a node's private module (the tuner's
+        # conftest does the same): the package `__init__` rebinds
+        # `sys.modules["nodes.result_interpretation_agent"]` to the MAIN
+        # module, so `from nodes.result_interpretation_agent import ordering`
+        # would look for an attribute that does not exist there.
+        import importlib
+
+        _ordering = importlib.import_module("nodes.result_interpretation_agent.ordering")
+
+        events: list[str] = []
+        real_partition = _ordering.partition_for_aggregation
+
+        def _recording_partition(summaries, **kwargs):
+            events.append("partition")
+            return real_partition(summaries, **kwargs)
+
+        def _recording_generate(system_prompt, user_prompt, **kwargs):
+            events.append(f"llm:{kwargs.get('label')}")
+            return _llm_dispatch(system_prompt, user_prompt, **kwargs)
+
+        summaries = [
+            self._summary("punet", 1.0, self._verdict("blocking", "scientific", "valid")),
+            self._summary("fcnet", 99.0, self._verdict("blocking", "diagnostic", "valid")),
+        ]
+        with (
+            patch.object(_ordering, "partition_for_aggregation", _recording_partition),
+            patch("nodes.result_interpretation_agent.LLMBridge") as MockBridge,
+        ):
+            MockBridge.return_value.generate.side_effect = _recording_generate
+            agent = ResultInterpretationAgent(provider="gemini", model_id="test-model")
+            agent.bridge = MockBridge.return_value
+            agent.run(
+                InterpretationInput(
+                    # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+                    # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+                    metric_spec=shipped_spec(),
+                    summaries=summaries,
+                    storage={
+                        "backend": "local",
+                        "local": {"workspace": str(tmp_path), "run_name": "r1"},
+                    },
+                )
+            )
+
+        assert "partition" in events, (
+            "the production path never reached partition_for_aggregation — the "
+            "aggregation authority is not actually wired into run()"
+        )
+        assert any(e.startswith("llm:") for e in events), (
+            "no LLM call was observed, so 'before any LLM call' is vacuous here"
+        )
+        assert events.index("partition") < next(
+            i for i, e in enumerate(events) if e.startswith("llm:")
+        ), f"the partition must precede every LLM call; observed order: {events}"
 
     def test_a_non_authoritative_formal_score_is_kept_out_of_the_aggregate(self, tmp_path):
         """The behaviour, end to end through the real agent."""
@@ -1325,6 +1450,9 @@ class TestScientificAggregationReachesTheRealOutput:
             agent.bridge = MockBridge.return_value
             agent.run(
                 InterpretationInput(
+                    # Step 09a C2 — score-bearing input: the run's bound MetricSpec
+                    # is REQUIRED (shipped TIDMAD spec is `higher`, assertions unchanged).
+                    metric_spec=shipped_spec(),
                     summaries=[good, diag],
                     storage={
                         "backend": "local",

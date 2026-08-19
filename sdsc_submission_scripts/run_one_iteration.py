@@ -2059,6 +2059,11 @@ def main():
                 args.health_feedback_history_max_entries_per_model
             ),
             restored_collapse_fingerprint_history=state.collapse_fingerprint_history,
+            # Step 09a C5 — the interpreter's prediction memory crosses the
+            # chain-subprocess boundary the same way, one line below its
+            # sibling. Without this forward the restore would load it and
+            # then drop it on the floor.
+            restored_prediction_memory=state.prediction_memory,
             # External agents (Commit 6) — see Design Decisions 1 + 2 in
             # docs/commit_plan_ml_literature_review.md. The enable flag is
             # resolved above (CLI > YAML > False); the config path

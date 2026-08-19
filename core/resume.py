@@ -35,6 +35,10 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningOutput,
     PhysicalRejection,
 )
+from agent.schemas.interpretation import (
+    PREDICTION_SEMANTICS_SIGNSAFE_V2,
+    PredictionMemory,
+)
 from agent.schemas.proposal import VocabEntry
 from core.run_invariants import (
     RunInvariants,
@@ -195,6 +199,11 @@ class RestoredState:
     collapse_fingerprint_history: dict[str, list[CollapseFingerprintHistoryEntry]] = field(
         default_factory=dict
     )
+    #: Step 09a C5 — the interpreter's prediction state (four digest fields in
+    #: one typed carrier). Exactly ONE new restored field, by the ruling's
+    #: scope: no other restored value, no restore-precedence change, and no
+    #: second store — the digest remains the canonical record.
+    prediction_memory: PredictionMemory = field(default_factory=PredictionMemory)
 
     # --- V19 PR 1 chain incumbents (design doc §3.3) -----------------------
     # ``chain_best_valid_formal_*`` is the DECISION-STATE incumbent: the best
@@ -940,6 +949,82 @@ def load_latest_fingerprint_history(
     return history
 
 
+def load_latest_prediction_memory(
+    workspace: str,
+    current_iter: int,
+    committed_iters: Sequence[int],
+) -> PredictionMemory:
+    """Read prior iters' digests; return the latest interpreter prediction state.
+
+    Step 09a C5 (operator ruling Q-09a-1 = A, NARROW). A sibling of
+    :func:`load_latest_fingerprint_history` in every respect that matters:
+    same digest source, same ascending scan, same LATEST-WINS overwrite, same
+    FILE-level soft-fail (missing or unreadable digest -> warn and skip), and
+    the same DATA-level refusal to guess (a digest whose prediction state
+    fails typed validation raises rather than silently restoring a partial
+    pool, because an accuracy statistic assembled from half a record is worse
+    than none).
+
+    Latest-wins is correct for the same reason it is correct there: each
+    digest already holds the pool AFTER that iteration, so concatenating
+    across iters would double-count every outcome.
+
+    A legacy digest carrying only the pre-09a fields yields those fields with
+    EMPTY versioned pools — which is exactly right: it has a v1 history and no
+    v2 history, and nothing is invented for it.
+    """
+    if current_iter <= 1 or not committed_iters:
+        return PredictionMemory()
+
+    memory = PredictionMemory()
+
+    for iter_idx in committed_iters:  # ascending per restore_prior_state
+        path = _interpretation_path(workspace, iter_idx)
+        if not os.path.isfile(path):
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: interpretation digest not "
+                f"found at {path}. Skipping for prediction-memory carry-over.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            warnings.warn(
+                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
+                f"digest {path}: {e}. Skipping for prediction-memory carry-over.",
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+
+        fields = {
+            "prediction_outcomes_history": data.get("prediction_outcomes_history") or {},
+            "prediction_outcomes_by_semantics": (
+                data.get("prediction_outcomes_by_semantics") or {}
+            ),
+            "cumulative_information_gain": data.get("cumulative_information_gain") or 0.0,
+            "cumulative_information_gain_by_semantics": (
+                data.get("cumulative_information_gain_by_semantics") or {}
+            ),
+        }
+        if not any(fields.values()):
+            continue
+        try:
+            memory = PredictionMemory.model_validate(fields)  # overwrite: LATEST wins
+        except Exception as e:
+            raise ValueError(
+                f"[resume] iter {iter_idx:03d}: corrupted prediction memory in "
+                f"{path}: {e}. Refusing to restore a partial prediction record — "
+                f"an accuracy statistic assembled from half a pool is worse than "
+                f"none. Fix or remove the digest."
+            ) from e
+
+    return memory
+
+
 def load_latest_knowledge_cache(
     workspace: str,
     current_iter: int,
@@ -1421,6 +1506,22 @@ def restore_prior_state(
         current_iter,
         state.committed_iters,
     )
+    # Step 09a C5 — the interpreter's prediction memory rides the SAME
+    # canonical path, one line below the fingerprint history it mirrors.
+    state.prediction_memory = load_latest_prediction_memory(
+        abs_workspace,
+        current_iter,
+        state.committed_iters,
+    )
+    _v2_pool = state.prediction_memory.prediction_outcomes_by_semantics.get(
+        PREDICTION_SEMANTICS_SIGNSAFE_V2, {}
+    )
+    if sum(state.prediction_memory.prediction_outcomes_history.values()) or sum(_v2_pool.values()):
+        print(
+            f"[resume] prediction-memory carry-over: "
+            f"legacy pool n={sum(state.prediction_memory.prediction_outcomes_history.values())}, "
+            f"v2 pool n={sum(_v2_pool.values())}"
+        )
     if state.collapse_fingerprint_history:
         n_entries = sum(len(v) for v in state.collapse_fingerprint_history.values())
         print(

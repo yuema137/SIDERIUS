@@ -117,6 +117,29 @@ def _record(exp_id: str, model_type: str, **overrides) -> ExperimentRecord:
     return ExperimentRecord.model_validate(base)
 
 
+def _simulated_run_metric_spec():
+    """The spec a REAL tuner would have stamped on these synthetic outputs.
+
+    Step 09a C2 (operator ruling Q-09a-7). This module is a SIMULATED
+    TUNER-OUTPUT WRITER: `_tune_output` hand-builds `HyperparamTuningOutput`
+    objects that no tuner produced, so it must also stamp the field a tuner
+    would have written, or the interpreter refuses them exactly as it refuses
+    a legacy output.
+
+    This is TEST-FIXTURE CONSTRUCTION, not a production metric-derivation
+    authority. `scripts.pr3_l2_calibration` is imported only by its sibling
+    calibration scripts and by tests — never by production code, which the
+    Step 09a production spec-constructor census asserts — and Step 09 adds
+    ZERO production `derive_tidmad_metric` / `derive_tidmad_metric_spec`
+    sites. It calls the authoritative Step-06 constructor rather than
+    hand-writing a spec, so the fixture cannot drift from the real one.
+    """
+    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.evaluation_metric import derive_tidmad_metric_spec
+
+    return derive_tidmad_metric_spec(resolve_dataset_profile())
+
+
 def _tune_output(model_type: str, records: list[ExperimentRecord]) -> HyperparamTuningOutput:
     return HyperparamTuningOutput(
         run_name=f"p3l2p_{model_type}",
@@ -128,6 +151,7 @@ def _tune_output(model_type: str, records: list[ExperimentRecord]) -> Hyperparam
         started_at="2026-07-29T00:00:00Z",
         finished_at="2026-07-29T01:00:00Z",
         all_records=list(records),
+        metric_spec=_simulated_run_metric_spec(),
     )
 
 

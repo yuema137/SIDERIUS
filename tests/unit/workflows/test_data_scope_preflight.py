@@ -23,6 +23,7 @@ from core.run_invariants import (
     load_run_invariants,
 )
 from execute_tools.dataset_config import DataScope
+from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
 
 PARTIAL = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
@@ -125,6 +126,12 @@ class TestPreflightPass:
                 resolved_data_scope=[4, 5, 6, 7, 8, 9],
                 health_gate_enabled=True,
                 health_config_sha256=lock.health_config_sha256,
+                # Step 09a C2 — this seed is meant to REACH interpretation (the
+                # sentinel below fires at agent construction). A seed that
+                # reaches interpretation must carry the run's stamped
+                # MetricSpec; the deliberately LEGACY seeds elsewhere in this
+                # file fail earlier, on the invariants they are testing.
+                metric_spec=shipped_spec().model_dump(mode="json"),
             )
             with pytest.raises(RuntimeError, match="preflight-sentinel"):
                 _run(

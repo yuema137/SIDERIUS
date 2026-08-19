@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
@@ -32,6 +32,201 @@ from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.proposal import VocabEntry
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from agent.schemas.training_diagnosis import TrainingDiagnosis
+from execute_tools.evaluation_metric import (
+    MetricDirection,
+    MetricResult,
+    MetricSpecField,
+    NotScoreableResult,
+)
+
+# ---------------------------------------------------------------------------
+# Prediction-accounting vocabulary — the ONE declaration (Step 09a C4, F-09a-17)
+# ---------------------------------------------------------------------------
+# These are framework-level contract values, not node policy: they are the
+# literal keys of `InterpretationOutput.prediction_evaluation_semantics`,
+# `prediction_outcomes_by_semantics` and `prediction_pool_sizes`, which this
+# module declares. They live HERE because this is the lowest layer every
+# consumer already depends on downward — the schema itself, the interpreter's
+# `prediction.py` (which implements the v2 rule and re-exports these under the
+# same names), `nodes/interpretation_helpers.py`, and `core/resume.py`. The
+# reverse edge (schema -> node) would be a genuine import cycle, which is why
+# the first implementation copied the literals instead; centralizing here
+# removes the copies without adding a module or a layer.
+
+#: Evaluation semantics implemented by `prediction.py`: direction read from the
+#: bound metric via `MetricOrder`, band measured as a sign-safe distance.
+PREDICTION_SEMANTICS_SIGNSAFE_V2 = "metric_order_signsafe_v2"
+
+#: What an evaluation carrying no recorded semantics was produced under.
+#: Absence means legacy; it is NEVER back-filled onto an old record, because
+#: nobody can know which rule actually ran. This is the schema default.
+PREDICTION_SEMANTICS_LEGACY_V1 = "legacy_v1"
+
+#: The three COMPARABLE outcomes. `unevaluated` is deliberately not among them:
+#: it is the absence of an observation, not a fourth verdict.
+COMPARABLE_OUTCOMES = ("confirmed", "partial", "refuted")
+
+#: The outcome recorded when the comparison could not be made at all.
+OUTCOME_UNEVALUATED = "unevaluated"
+
+
+class PredictionMemory(BaseModel):
+    """The interpreter's prediction state, carried between iterations.
+
+    Step 09a C5 (operator ruling Q-09a-1 = A, NARROW). Four digest fields
+    travelling together because they are read and written together; NOT a
+    second store. The canonical interpretation digest remains the ONE record,
+    and this is the typed shape in which four of its keys ride the EXISTING
+    lifecycle: digest -> workflow loop carry -> `RestoredState` latest-wins
+    -> the next `InterpretationInput`.
+
+    Why it had to be wired at all: at the pre-09a anchor NO production path
+    carried or restored any of these (parent §0.3 erratum E2). Every
+    production digest's pool therefore held exactly ONE outcome, and the
+    proposer's "Prediction Track Record" always read N=1. Without C5 the
+    versioned pools C4 introduced would be dead schema.
+
+    The v1/v2 separation is preserved across the hop: the legacy pool and
+    scalar travel beside the versioned ones and are never merged into them.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    prediction_outcomes_history: dict[str, int] = Field(
+        default_factory=dict,
+        description="The LEGACY v1 pool, carried verbatim and never incremented.",
+    )
+    prediction_outcomes_by_semantics: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description="Version-keyed comparable pools; the v2 key is the live one.",
+    )
+    cumulative_information_gain: float = Field(
+        default=0.0,
+        description="The LEGACY accumulated gain, preserved and never pooled with v2.",
+    )
+    cumulative_information_gain_by_semantics: dict[str, float] = Field(
+        default_factory=dict,
+        description="Version-keyed running gain sums.",
+    )
+
+
+class SecondaryMetricEvidence(BaseModel):
+    """One DECLARED secondary metric and whatever is known about it.
+
+    Step 09a C6 (parent §4b; operator ruling Q-09-7 = B). Secondaries are
+    OBSERVATIONAL evidence only. Each carries its own identity and direction
+    and is rendered with its own direction words; none of them ever affects
+    primary ordering, incumbent selection, active-model selection, cache
+    capping, the prediction default or prediction evaluation.
+
+    The three states are distinguishable ON PURPOSE. "declared but not
+    available" is a different fact from "not declared", and both are different
+    from "refused by its scoreability contract". Collapsing them would let a
+    renderer print a confident silence where a named absence belongs — the
+    failure mode this whole step is about.
+
+    Step 09a populates this from FIXTURES only. There is no record-level
+    carrier to read: `ExperimentRecord.secondary_metric_results`,
+    `secondary_metric_refusals` and `HyperparamTuningOutput.secondary_metric_specs`
+    are Step 10's, and reading undeclared keys would be a hidden contract. The
+    production builder therefore leaves this EMPTY rather than inventing
+    placeholder numbers.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    spec: MetricSpecField = Field(
+        description="The secondary metric's own declaration — its id and its OWN direction."
+    )
+    result: MetricResult | None = Field(
+        default=None, description="Its value, when it was evaluated."
+    )
+    refusal: NotScoreableResult | None = Field(
+        default=None, description="Its structured refusal, when the contract rejected the input."
+    )
+
+    @model_validator(mode="after")
+    def _result_and_refusal_are_exclusive(self) -> SecondaryMetricEvidence:
+        if self.result is not None and self.refusal is not None:
+            raise ValueError(
+                f"secondary metric {self.spec.id!r} carries both a result and a refusal; "
+                "an evaluation either produced a value or refused to."
+            )
+        return self
+
+    @property
+    def status(self) -> str:
+        """``scored`` | ``refused`` | ``unavailable`` — a NAMED absence."""
+        if self.result is not None:
+            return "scored"
+        if self.refusal is not None:
+            return "refused"
+        return "unavailable"
+
+
+class RecordFailureCounts(BaseModel):
+    """What went wrong across one model's records, counted by EXISTING vocabularies.
+
+    Step 09a C6 (parent §5). Deliberately NOT a new closed ``FailureKind``
+    enum: the interpreter is a projection layer, and inventing its own failure
+    taxonomy would mean a fourth task's novel pathology needs a SIDERIUS source
+    change before it can be reported. Every key below comes from an authority
+    that already owns it — ``ExperimentRecord.status``, ``TrainingDiagnosis``,
+    ``ValidationState``, ``NotScoreableResult``'s contract id, and Health's
+    ``GateAction`` / ``RoundHealth.provenance`` — so an unknown future value
+    simply appears under its own key.
+
+    Ids are OPAQUE: ``refusal_contract_ids`` is counted, never parsed.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    records_total: int = Field(default=0)
+    status_counts: dict[str, int] = Field(
+        default_factory=dict, description="ExperimentRecord.status, verbatim."
+    )
+    diagnosis_state_counts: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "TrainingDiagnosis.state for records carrying one, plus "
+            "'diagnosis_missing' for records with no diagnosis object at all — "
+            "an absence, counted rather than silently folded into 'absent'."
+        ),
+    )
+    validation_state_counts: dict[str, int] = Field(default_factory=dict)
+    metric_refusal_count: int = Field(default=0)
+    refusal_contract_ids: dict[str, int] = Field(
+        default_factory=dict, description="Opaque contract ids, counted and never parsed."
+    )
+    gate_action_counts: dict[str, int] = Field(
+        default_factory=dict, description="RoundHealth.gate_action; None is counted as 'none'."
+    )
+    health_provenance_counts: dict[str, int] = Field(default_factory=dict)
+
+
+class MetricIdentity(BaseModel):
+    """Which metric a number is on, and which way is better.
+
+    Step 09a C2. Two fields, both read from an existing authority — never
+    parsed, never inferred from a name. It appears in two roles that must not
+    be confused (parent §4a):
+
+    * on ``ModelRunSummary`` it is EVIDENCE — the identity the records were
+      actually scored under, projected from their ``metric_result``;
+    * on ``InterpretationOutput`` it is PROVENANCE — the identity the digest
+      was actually ORDERED under, echoed from the run's bound ``MetricSpec``.
+
+    Whenever both exist they must agree exactly; a disagreement is a contract
+    error, never a silent preference for one source.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    metric_id: str = Field(description="The metric's stable id, carried verbatim and never parsed.")
+    direction: MetricDirection = Field(
+        description="'higher' or 'lower' — the ONLY thing ordering may read."
+    )
 
 
 class RoundOrdering(BaseModel):
@@ -270,6 +465,58 @@ class ModelRunSummary(BaseModel):
         description="Model parameter count per round. Shows if the agent explored model sizes.",
     )
 
+    # --- Evidence-borne metric identity (Step 09a C2) ---
+    metric_identity: MetricIdentity | None = Field(
+        default=None,
+        description=(
+            "The metric identity the records behind this summary were actually "
+            "scored under, projected from their MetricResult. Every scored record "
+            "in one tuning output must agree, or the builder refuses. None when no "
+            "record carries a MetricResult (outputs predating Step 06). This is "
+            "EVIDENCE; the run's bound MetricSpec is what ORDERS — they are "
+            "checked against each other, never substituted for each other."
+        ),
+    )
+
+    # --- Deterministic evidence projection (Step 09a C6) ---
+    best_training_diagnosis: TrainingDiagnosis | None = Field(
+        default=None,
+        description=(
+            "Step 09a — the 07a diagnosis of the record the summary's BEST score "
+            "came from, carried verbatim. Before this the interpreter could see "
+            "that a score existed but nothing about how the training that "
+            "produced it behaved. None on records predating 07a or without a "
+            "diagnosis."
+        ),
+    )
+    formal_training_diagnosis: TrainingDiagnosis | None = Field(
+        default=None,
+        description=(
+            "Step 09a — the same, for the FORMAL record. Two roles, two "
+            "diagnoses: a best trial round and the formal round are different "
+            "experiments and may have behaved differently."
+        ),
+    )
+    secondary_metrics: list[SecondaryMetricEvidence] = Field(
+        default_factory=list,
+        description=(
+            "Step 09a — declared secondary metrics, present-when-present. "
+            "OBSERVATIONAL only: never consulted for ordering, incumbent or "
+            "active-model selection, cache capping, or prediction. EMPTY in "
+            "production until Step 10 lands the record-level carrier and the "
+            "tuner-side evaluation (Q-09-7 = B) — the builder does not invent "
+            "values, and a declared-but-unavailable secondary is a NAMED absence."
+        ),
+    )
+    failure_counts: RecordFailureCounts | None = Field(
+        default=None,
+        description=(
+            "Step 09a — what went wrong across this model's records, counted by "
+            "vocabularies that already exist. No new failure enum: the "
+            "interpreter reports what the authorities state."
+        ),
+    )
+
 
 class InterpretationInput(BaseModel):
     """
@@ -470,6 +717,134 @@ class InterpretationInput(BaseModel):
         "non-zero score change trigger activation.",
     )
 
+    # --- Versioned prediction memory (Step 09a C4) ---
+    prediction_outcomes_by_semantics: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — outcome counts keyed by the SEMANTICS that produced them, "
+            "e.g. {'metric_order_signsafe_v2': {'confirmed': 2, 'partial': 1}}. "
+            "Carried forward beside the legacy `prediction_outcomes_history`, never "
+            "merged with it: outcomes produced by the pre-09a direction-blind, "
+            "sign-degenerate rule are not comparable with corrected ones, so pooling "
+            "them would yield a hit-rate that means nothing. Empty on a legacy input."
+        ),
+    )
+    cumulative_information_gain_by_semantics: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — running information-gain sums keyed by semantics, for the same "
+            "reason as the counts above. The legacy scalar "
+            "`cumulative_information_gain` is preserved separately and never added to "
+            "these; no single number anywhere means 'legacy + v2'."
+        ),
+    )
+
+    # --- The run's bound evaluation metric (Step 09a C2) ---
+    metric_spec: MetricSpecField | None = Field(
+        default=None,
+        description=(
+            "The run's ALREADY-RESOLVED MetricSpec, reconciled across every "
+            "tuning output feeding this interpretation and forwarded by the "
+            "caller. It is the SINGLE authority for ordering direction, the "
+            "run-level metric identity and the prediction default. Nothing "
+            "here derives it: the tuner resolved it once and stamped it on its "
+            "output. None is legal ONLY for a cold start or a genuinely "
+            "scoreless input — see the validator below."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def metric_spec_is_present_and_agrees_with_the_evidence(self) -> InterpretationInput:
+        """Fail closed BEFORE anything reads a score (parent §4a, Q-09a-4).
+
+        Two clauses, both refusals rather than defaults:
+
+        (a) an input carrying ORDERING EVIDENCE — any summary score field or
+            any cached ``_stats`` score — must carry the run's ``metric_spec``.
+            There is no "assume higher is better" fallback: under a
+            lower-is-better metric that assumption inverts every ranking
+            silently, which is precisely the failure Step 09 exists to remove.
+            A cold start or a genuinely scoreless input needs no ordering and
+            is accepted with a NAMED absence.
+
+        (b) where a summary carries its own evidence-borne ``metric_identity``,
+            it must equal the run spec's id AND direction. A record scored
+            under a different metric than the run is bound to is a contract
+            error — never resolved by preferring one side.
+
+        Construction time is the earliest possible point, so the refusal lands
+        before ordering, active-model selection, prediction evaluation,
+        evidence rendering and any LLM call.
+        """
+        if self.metric_spec is None:
+            witness = self._first_score_bearing_witness()
+            if witness is not None:
+                raise ValueError(
+                    f"metric_spec is required for score-bearing interpretation: {witness} "
+                    "carries a score, but no run MetricSpec was supplied. A legacy/pre-09a "
+                    "tuning output lacks the stamped run MetricSpec this contract needs to "
+                    "order results — re-produce the output under Step 09a or start a fresh "
+                    "chain. Ordering direction is never assumed."
+                )
+            return self
+
+        for summary in self.summaries:
+            identity = summary.metric_identity
+            if identity is None:
+                continue
+            if identity.metric_id != self.metric_spec.id:
+                raise ValueError(
+                    f"metric identity mismatch on summary {summary.model_type!r} "
+                    f"(run {summary.run_name!r}): its records were scored under "
+                    f"metric_id={identity.metric_id!r}, but the run's MetricSpec is "
+                    f"{self.metric_spec.id!r}. One interpretation covers one metric."
+                )
+            if identity.direction != self.metric_spec.direction:
+                raise ValueError(
+                    f"metric direction mismatch on summary {summary.model_type!r} "
+                    f"(run {summary.run_name!r}): its records carry "
+                    f"direction={identity.direction!r}, but the run's MetricSpec declares "
+                    f"{self.metric_spec.direction!r}. Ordering cannot proceed on a "
+                    "contradiction."
+                )
+        return self
+
+    def _first_score_bearing_witness(self) -> str | None:
+        """Name the first thing that would need an ordering direction.
+
+        Returning the WITNESS rather than a bool is what makes the refusal
+        actionable: the message says which summary or cache entry made the
+        spec mandatory.
+        """
+        score_fields = (
+            "best_denoising_score",
+            "best_valid_denoising_score",
+            "worst_denoising_score",
+            "formal_score",
+            "best_valid_formal_score",
+        )
+        for summary in self.summaries:
+            for field in score_fields:
+                if getattr(summary, field, None) is not None:
+                    return f"summary {summary.model_type!r} field {field!r}"
+            if any(score is not None for score in summary.round_scores):
+                return f"summary {summary.model_type!r} field 'round_scores'"
+
+        cached_fields = (
+            "best_denoising_score",
+            "best_valid_denoising_score",
+            "worst_denoising_score",
+            "formal_score",
+        )
+        for model_type, entry in self.model_knowledge_cache.items():
+            stats = entry.get("_stats", {}) if isinstance(entry, dict) else {}
+            if not isinstance(stats, dict):
+                continue
+            for field in cached_fields:
+                if stats.get(field) is not None:
+                    return f"cache entry {model_type!r} _stats field {field!r}"
+        return None
+
     @model_validator(mode="after")
     def require_at_least_one_model(self) -> InterpretationInput:
         if self.model_types is not None and len(self.model_types) == 0:
@@ -642,13 +1017,19 @@ class InterpretationOutput(BaseModel):
     prediction_evaluation: dict[str, Any] | None = Field(
         default=None,
         description="Evaluation of the previous proposal's FalsifiablePrediction. "
-        "Outcome is SOTA-based (not predicted-value-based): "
-        "confirmed = beat SOTA, partial = within 5%% of SOTA, refuted = clearly below. "
-        "Contains: metric, predicted_value, actual_value, current_sota, "
-        "delta_from_sota, outcome ('confirmed'/'partial'/'refuted'), boldness, "
-        "information_gain. predicted_value is echoed from the proposal so that "
+        "Outcome is SOTA-based (not predicted-value-based) and DIRECTION-correct "
+        "under the run's bound metric (Step 09a): confirmed = better than SOTA, "
+        "partial = within the relative band abs(actual - sota) <= 0.05 * abs(sota), "
+        "refuted = outside it, unevaluated = the comparison could not be made at all "
+        "(counted in NO pool and never published as a discovery). "
+        "Contains: metric, metric_resolution, predicted_value, actual_value, "
+        "current_sota, delta_from_sota, outcome "
+        "('confirmed'/'partial'/'refuted'/'unevaluated'), boldness, "
+        "information_gain, notes, prediction_evaluation_semantics. "
+        "predicted_value is echoed from the proposal so that "
         "generate_discoveries can render it; the outcome does not depend on it. "
-        "None if no previous prediction exists.",
+        "The key set is UNIFORM across every branch — the pre-09a uncomputable "
+        "path returned a different one. None if no previous prediction exists.",
     )
     new_discoveries: list[VocabEntry] = Field(
         default_factory=list,
@@ -758,4 +1139,74 @@ class InterpretationOutput(BaseModel):
         "threshold), is_degraded (bool — mirrors the field above). "
         "Also appended as one row to {workspace}/evolution_log.jsonl "
         "for tail -f monitoring. See docs/V8_Gap_Report.md Domain 3.",
+    )
+
+    # --- Ordering provenance (Step 09a C2) ---
+    metric_identity: MetricIdentity | None = Field(
+        default=None,
+        description=(
+            "PROVENANCE: the metric identity this iteration was actually ordered "
+            "under, echoed from the run's bound MetricSpec. Threaded into BOTH the "
+            "healthy and the degraded digest, so an interpreter LLM failure cannot "
+            "lose it. None ONLY on a cold start or a genuinely scoreless input — a "
+            "NAMED absence, which is why a reader never has to guess whether a "
+            "digest's numbers are higher- or lower-is-better."
+        ),
+    )
+
+    # --- Versioned prediction accounting (Step 09a C4) ---
+    prediction_evaluation_semantics: str = Field(
+        # The DEFAULT is the legacy id on purpose: a digest written before
+        # Step 09a has no such key, and it must read as what actually produced
+        # it. Step-09a runs write the v2 id explicitly.
+        default=PREDICTION_SEMANTICS_LEGACY_V1,
+        description=(
+            "Step 09a — the semantics `scientific_accuracy` and the v2 pool of THIS "
+            "digest were computed under. A digest written before Step 09a has no such "
+            "key and reads as `legacy_v1`; old digests are NEVER rewritten."
+        ),
+    )
+    prediction_outcomes_by_semantics: dict[str, dict[str, int]] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — version-keyed comparable pools. "
+            "`['metric_order_signsafe_v2']` owns the confirmed / partial / refuted "
+            "counts this iteration contributes to; the legacy "
+            "`prediction_outcomes_history` below is a DIFFERENT pool under a different "
+            "rule and is never incremented here. An `unevaluated` outcome is counted "
+            "in neither."
+        ),
+    )
+    cumulative_information_gain_by_semantics: dict[str, float] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — version-keyed information-gain sums. The legacy scalar is "
+            "preserved in `cumulative_information_gain`; the two are never added."
+        ),
+    )
+    prediction_pool_sizes: dict[str, int] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — how many outcomes each pool holds, e.g. "
+            "{'legacy_v1': 2, 'metric_order_signsafe_v2': 1}. Explicit provenance so a "
+            "reader cannot mistake a version-pure `scientific_accuracy` for a "
+            "statistic over every prediction on record."
+        ),
+    )
+
+    # --- Per-model evidence projection (Step 09a C6) ---
+    per_model_secondary_metrics: dict[str, list[SecondaryMetricEvidence]] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — secondary-metric evidence per model, present-when-present. "
+            "Empty in production until Step 10 carries secondaries upstream."
+        ),
+    )
+    per_model_failure_counts: dict[str, RecordFailureCounts] = Field(
+        default_factory=dict,
+        description=(
+            "Step 09a — authority-derived failure counts per model, threaded into "
+            "BOTH the healthy and the degraded digest so an interpreter LLM "
+            "failure cannot lose them."
+        ),
     )

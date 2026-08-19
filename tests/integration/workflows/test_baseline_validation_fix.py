@@ -39,6 +39,14 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
+from execute_tools.metric_order import MetricOrder
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
+
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
@@ -175,7 +183,7 @@ def _run_propose_implement_validate(
     # --- Step 1: Interpret ---
     print(f"\n[{run_name}] Loading seed tuning outputs...")
     tuning_outputs = load_tuning_outputs_from_paths(SEED_PATHS)
-    summaries = tuning_outputs_to_summaries(tuning_outputs)
+    summaries = tuning_outputs_to_summaries(tuning_outputs, order=_STEP09A_ORDER)
     existing_model_types = list({o.model_type for o in tuning_outputs})
 
     interp_storage = _make_storage(str(iter_dir), run_name)

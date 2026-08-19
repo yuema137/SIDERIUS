@@ -1,0 +1,1956 @@
+{
+  "_captured_at": "captured at a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e (Step-09a C1a base, UNMODIFIED production code); uncommitted at capture time: test-only files (tests/unit/agent/result_interpretation_agent/_step09a_fixture.py, tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py) | REGENERATED at Step 09a C2 (run MetricSpec transport). DECLARED DELTA: exactly ONE key added, `metric_identity` = {\"metric_id\": \"tidmad_denoising_score\", \"direction\": \"higher\"} \u2014 the ordering provenance echoed from the run's bound MetricSpec (child design \u00a73.2-6). ZERO existing keys changed or removed, and the LLM-call manifest is unchanged, so this commit adds a field and moves no behaviour. | REGENERATED at Step 09a C4 (prediction v2). DECLARED DELTA, all four parts predicted by the frozen child design \u00a74.5: (1) FOUR keys added \u2014 prediction_evaluation_semantics='metric_order_signsafe_v2', prediction_outcomes_by_semantics={V2:{confirmed:1,partial:0,refuted:0}}, cumulative_information_gain_by_semantics={V2:0.12}, prediction_pool_sizes={legacy_v1:2, V2:1}; (2) prediction_outcomes_history reverts to the INPUT value {confirmed:1,partial:0,refuted:1} \u2014 the legacy pool is no longer incremented; (3) cumulative_information_gain reverts to the INPUT 0.3 \u2014 the legacy scalar no longer accumulates; (4) scientific_accuracy becomes v2-only {confirmed:1.0,partial:0.0,refuted:0.0} and prediction_evaluation gains the uniform-shape keys metric_resolution / notes / prediction_evaluation_semantics. The LLM-call manifest is UNCHANGED. The outcome itself is still 'confirmed' with gain 0.12: v1 and v2 agree on this fixture by construction, so the delta is the version PARTITION alone. | REGENERATED at Step 09a C6 (evidence projection). DECLARED DELTA: TWO keys added \u2014 per_model_failure_counts (authority-derived counts for the two NEW summaries; punet is cached with no stored counts and is therefore ABSENT rather than reported as zero failures) and per_model_secondary_metrics (EMPTY in production, Q-09-7 = B); plus the additive `_stats['failure_counts']` cache key on the two models that got a fresh per-model call, which is the design's own \u00a73.5 provision so a model that goes quiet keeps its counts. NOTHING else changed inside model_knowledge_cache (verified key-by-key), no existing top-level key moved, and the LLM-call manifest is unchanged.",
+  "model_types": [
+    "bidirectional_gated_tcn",
+    "punet",
+    "wavenet"
+  ],
+  "model_descriptions": {
+    "bidirectional_gated_tcn": "bidirectional_gated_tcn: gated temporal conv, both directions (step09a fixture).",
+    "punet": "punet: U-net style encoder/decoder (step09a fixture).",
+    "wavenet": "wavenet: dilated causal convolution stack (step09a fixture)."
+  },
+  "total_experiments": 9,
+  "cold_start": false,
+  "per_model_best": {
+    "wavenet": -2.0,
+    "bidirectional_gated_tcn": -2.43,
+    "punet": -2.9
+  },
+  "per_model_best_valid": {
+    "wavenet": -2.0,
+    "bidirectional_gated_tcn": -2.43,
+    "punet": -2.9
+  },
+  "per_model_raw_best_health_validity": {
+    "wavenet": "valid",
+    "bidirectional_gated_tcn": "valid",
+    "punet": "valid"
+  },
+  "per_model_worst": {
+    "wavenet": -3.1,
+    "bidirectional_gated_tcn": -2.9,
+    "punet": -3.4
+  },
+  "scientific_aggregation": {
+    "included": [
+      "wavenet"
+    ],
+    "excluded": [
+      {
+        "record_id": "bidirectional_gated_tcn",
+        "reason": "unreconstructable_legacy",
+        "basis": "unreconstructable_legacy"
+      }
+    ],
+    "included_count": 1,
+    "excluded_count": 1,
+    "all_excluded": false,
+    "no_records": false,
+    "exclusion_reason_counts": {
+      "unreconstructable_legacy": 1
+    }
+  },
+  "best_denoising_score": -2.0,
+  "best_valid_denoising_score": -2.0,
+  "worst_denoising_score": -3.4,
+  "best_config": {
+    "model_config": {
+      "depth": 4
+    },
+    "train_config": {
+      "lr": 0.0005
+    },
+    "loss_config": {
+      "loss_type": "focal",
+      "gamma": 2.0
+    }
+  },
+  "best_valid_config": {
+    "model_config": {
+      "depth": 4
+    },
+    "train_config": {
+      "lr": 0.0005
+    }
+  },
+  "model_knowledge_cache": {
+    "bidirectional_gated_tcn": {
+      "key_findings": [
+        "focal gamma=2 beats ce by ~0.05 at equal depth",
+        "depth beyond 3 yields diminishing returns"
+      ],
+      "bottlenecks": [
+        "capacity ceiling at depth=3 \u2014 the score plateaus"
+      ],
+      "best_config_analysis": "Depth 4 with focal loss gamma=2 was the best configuration.",
+      "score_trend": "Scores improved early, then plateaued after depth=3.",
+      "_stats": {
+        "best_denoising_score": -2.43,
+        "best_valid_denoising_score": -2.43,
+        "best_raw_health_validity": "valid",
+        "worst_denoising_score": -2.9,
+        "best_file_vector": [
+          -2.53,
+          -2.52,
+          -2.51,
+          -2.5,
+          -2.49,
+          -2.48,
+          -2.47,
+          -2.46,
+          -2.45,
+          -2.44,
+          -2.43,
+          -2.42,
+          -2.41,
+          -2.4,
+          -2.39,
+          -2.38,
+          -2.37,
+          -2.36,
+          -2.35,
+          -2.34
+        ],
+        "best_score_table": {
+          "rows": [
+            {
+              "file_index": 0,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.53,
+              "gain_vs_raw": -2.63,
+              "headroom_vs_gt": 102.53,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 1,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.52,
+              "gain_vs_raw": -2.62,
+              "headroom_vs_gt": 102.52,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 2,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.51,
+              "gain_vs_raw": -2.61,
+              "headroom_vs_gt": 102.51,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 3,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.5,
+              "gain_vs_raw": -2.6,
+              "headroom_vs_gt": 102.5,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 4,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.49,
+              "gain_vs_raw": -2.5900000000000003,
+              "headroom_vs_gt": 102.49,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 5,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.48,
+              "gain_vs_raw": -2.58,
+              "headroom_vs_gt": 102.48,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 6,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.47,
+              "gain_vs_raw": -2.5700000000000003,
+              "headroom_vs_gt": 102.47,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 7,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.46,
+              "gain_vs_raw": -2.56,
+              "headroom_vs_gt": 102.46,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 8,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.45,
+              "gain_vs_raw": -2.5500000000000003,
+              "headroom_vs_gt": 102.45,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 9,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.44,
+              "gain_vs_raw": -2.54,
+              "headroom_vs_gt": 102.44,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 10,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.43,
+              "gain_vs_raw": -2.5300000000000002,
+              "headroom_vs_gt": 102.43,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 11,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.42,
+              "gain_vs_raw": -2.52,
+              "headroom_vs_gt": 102.42,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 12,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.41,
+              "gain_vs_raw": -2.5100000000000002,
+              "headroom_vs_gt": 102.41,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 13,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.4,
+              "gain_vs_raw": -2.5,
+              "headroom_vs_gt": 102.4,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 14,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.39,
+              "gain_vs_raw": -2.49,
+              "headroom_vs_gt": 102.39,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 15,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.38,
+              "gain_vs_raw": -2.48,
+              "headroom_vs_gt": 102.38,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 16,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.37,
+              "gain_vs_raw": -2.47,
+              "headroom_vs_gt": 102.37,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 17,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.36,
+              "gain_vs_raw": -2.46,
+              "headroom_vs_gt": 102.36,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 18,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.35,
+              "gain_vs_raw": -2.45,
+              "headroom_vs_gt": 102.35,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 19,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.34,
+              "gain_vs_raw": -2.44,
+              "headroom_vs_gt": 102.34,
+              "linear_weight": null,
+              "impact_score": null
+            }
+          ],
+          "aggregate": {
+            "raw_baseline_scalar": 0.1,
+            "ground_truth_scalar": 100.0,
+            "model_scalar": -2.435,
+            "percent_of_ceiling_log": -0.02435,
+            "num_sampled_files": 20
+          },
+          "s_max_global": 1.0,
+          "reference_source": "step09a_fixture",
+          "rendered_markdown": "| file | raw | gt | model |\n(step09a fixture table)",
+          "linear_weight_total": 0.0
+        },
+        "best_model_params": 980000,
+        "completed_rounds": 3,
+        "best_config": {
+          "model_config": {
+            "gate_width": 5
+          },
+          "train_config": {
+            "lr": 0.0005
+          },
+          "loss_config": {
+            "loss_type": "focal",
+            "gamma": 2.0
+          }
+        },
+        "best_valid_config": {
+          "model_config": {
+            "depth": 4
+          },
+          "train_config": {
+            "lr": 0.0005
+          }
+        },
+        "formal_score": -2.43,
+        "model_description": "bidirectional_gated_tcn: gated temporal conv, both directions (step09a fixture).",
+        "round_health_counts": {
+          "valid": 3,
+          "invalid": 0,
+          "unknown": 0
+        },
+        "failure_counts": {
+          "records_total": 3,
+          "status_counts": {
+            "success": 3
+          },
+          "diagnosis_state_counts": {
+            "diagnosis_missing": 3
+          },
+          "validation_state_counts": {},
+          "metric_refusal_count": 0,
+          "refusal_contract_ids": {},
+          "gate_action_counts": {
+            "none": 3
+          },
+          "health_provenance_counts": {
+            "gates_disabled": 3
+          }
+        },
+        "collapse_fingerprints": []
+      }
+    },
+    "punet": {
+      "key_findings": [
+        "punet saturates well before the wavenet family",
+        "shallow encoders lose the high-frequency band"
+      ],
+      "bottlenecks": [
+        "encoder depth is the binding constraint"
+      ],
+      "best_config_analysis": "Best at depth 3; deeper variants diverged.",
+      "score_trend": "Flat after iteration 1.",
+      "_stats": {
+        "best_denoising_score": -2.9,
+        "best_valid_denoising_score": -2.9,
+        "best_raw_health_validity": "valid",
+        "worst_denoising_score": -3.4,
+        "best_file_vector": [
+          -2.95,
+          -2.94,
+          -2.93,
+          -2.92,
+          -2.91,
+          -2.9,
+          -2.89,
+          -2.88,
+          -2.87,
+          -2.86,
+          -2.85,
+          -2.84,
+          -2.83,
+          -2.82,
+          -2.81,
+          -2.8,
+          -2.79,
+          -2.78,
+          -2.77,
+          -2.76
+        ],
+        "best_score_table": {
+          "rows": [
+            {
+              "file_index": 0,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.95,
+              "gain_vs_raw": -3.0500000000000003,
+              "headroom_vs_gt": 102.95,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 1,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.94,
+              "gain_vs_raw": -3.04,
+              "headroom_vs_gt": 102.94,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 2,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.93,
+              "gain_vs_raw": -3.0300000000000002,
+              "headroom_vs_gt": 102.93,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 3,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.92,
+              "gain_vs_raw": -3.02,
+              "headroom_vs_gt": 102.92,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 4,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.91,
+              "gain_vs_raw": -3.0100000000000002,
+              "headroom_vs_gt": 102.91,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 5,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.9,
+              "gain_vs_raw": -3.0,
+              "headroom_vs_gt": 102.9,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 6,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.89,
+              "gain_vs_raw": -2.99,
+              "headroom_vs_gt": 102.89,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 7,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.88,
+              "gain_vs_raw": -2.98,
+              "headroom_vs_gt": 102.88,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 8,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.87,
+              "gain_vs_raw": -2.97,
+              "headroom_vs_gt": 102.87,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 9,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.86,
+              "gain_vs_raw": -2.96,
+              "headroom_vs_gt": 102.86,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 10,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.85,
+              "gain_vs_raw": -2.95,
+              "headroom_vs_gt": 102.85,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 11,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.84,
+              "gain_vs_raw": -2.94,
+              "headroom_vs_gt": 102.84,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 12,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.83,
+              "gain_vs_raw": -2.93,
+              "headroom_vs_gt": 102.83,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 13,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.82,
+              "gain_vs_raw": -2.92,
+              "headroom_vs_gt": 102.82,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 14,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.81,
+              "gain_vs_raw": -2.91,
+              "headroom_vs_gt": 102.81,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 15,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.8,
+              "gain_vs_raw": -2.9,
+              "headroom_vs_gt": 102.8,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 16,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.79,
+              "gain_vs_raw": -2.89,
+              "headroom_vs_gt": 102.79,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 17,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.78,
+              "gain_vs_raw": -2.88,
+              "headroom_vs_gt": 102.78,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 18,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.77,
+              "gain_vs_raw": -2.87,
+              "headroom_vs_gt": 102.77,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 19,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.76,
+              "gain_vs_raw": -2.86,
+              "headroom_vs_gt": 102.76,
+              "linear_weight": null,
+              "impact_score": null
+            }
+          ],
+          "aggregate": {
+            "raw_baseline_scalar": 0.1,
+            "ground_truth_scalar": 100.0,
+            "model_scalar": -2.855,
+            "percent_of_ceiling_log": -0.02855,
+            "num_sampled_files": 20
+          },
+          "s_max_global": 1.0,
+          "reference_source": "step09a_fixture",
+          "rendered_markdown": "| file | raw | gt | model |\n(step09a fixture table)",
+          "linear_weight_total": 0.0
+        },
+        "best_model_params": 640000,
+        "completed_rounds": 2,
+        "best_config": {
+          "model_config": {
+            "depth": 3
+          },
+          "train_config": {
+            "lr": 0.0005
+          }
+        },
+        "formal_score": -2.9,
+        "model_description": "punet: U-net style encoder/decoder (step09a fixture)."
+      }
+    },
+    "wavenet": {
+      "model_type": "wavenet",
+      "key_findings": [
+        {
+          "statement": "consolidated observation",
+          "evidence_iters": [
+            2
+          ],
+          "strength": "moderate"
+        }
+      ],
+      "bottlenecks": [
+        {
+          "statement": "consolidated observation",
+          "evidence_iters": [
+            2
+          ],
+          "strength": "moderate"
+        }
+      ],
+      "best_config_analysis": {
+        "latest": "Depth 4 with focal loss gamma=2 was the best configuration.",
+        "history": [
+          [
+            2,
+            "Depth 4 / focal gamma=2 (iter 2)."
+          ]
+        ]
+      },
+      "score_trend": {
+        "latest": "Scores improved early, then plateaued after depth=3.",
+        "history": [
+          [
+            2,
+            "Improving, decelerating."
+          ]
+        ]
+      },
+      "per_file_analysis": {
+        "latest": "",
+        "history": []
+      },
+      "data_sensitivity": {
+        "latest": "",
+        "history": []
+      },
+      "efficiency_assessment": {
+        "latest": "",
+        "history": []
+      },
+      "strategy_assessment": {
+        "latest": "",
+        "history": []
+      },
+      "error_signatures": [],
+      "_stats": {
+        "best_denoising_score": -2.0,
+        "best_valid_denoising_score": -2.0,
+        "best_raw_health_validity": "valid",
+        "worst_denoising_score": -3.1,
+        "best_file_vector": [
+          -2.1,
+          -2.09,
+          -2.08,
+          -2.07,
+          -2.06,
+          -2.05,
+          -2.04,
+          -2.03,
+          -2.02,
+          -2.01,
+          -2.0,
+          -1.99,
+          -1.98,
+          -1.97,
+          -1.96,
+          -1.95,
+          -1.94,
+          -1.93,
+          -1.92,
+          -1.91
+        ],
+        "best_score_table": {
+          "rows": [
+            {
+              "file_index": 0,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.1,
+              "gain_vs_raw": -2.2,
+              "headroom_vs_gt": 102.1,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 1,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.09,
+              "gain_vs_raw": -2.19,
+              "headroom_vs_gt": 102.09,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 2,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.08,
+              "gain_vs_raw": -2.18,
+              "headroom_vs_gt": 102.08,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 3,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.07,
+              "gain_vs_raw": -2.17,
+              "headroom_vs_gt": 102.07,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 4,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.06,
+              "gain_vs_raw": -2.16,
+              "headroom_vs_gt": 102.06,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 5,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.05,
+              "gain_vs_raw": -2.15,
+              "headroom_vs_gt": 102.05,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 6,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.04,
+              "gain_vs_raw": -2.14,
+              "headroom_vs_gt": 102.04,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 7,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.03,
+              "gain_vs_raw": -2.13,
+              "headroom_vs_gt": 102.03,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 8,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.02,
+              "gain_vs_raw": -2.12,
+              "headroom_vs_gt": 102.02,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 9,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.01,
+              "gain_vs_raw": -2.11,
+              "headroom_vs_gt": 102.01,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 10,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -2.0,
+              "gain_vs_raw": -2.1,
+              "headroom_vs_gt": 102.0,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 11,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.99,
+              "gain_vs_raw": -2.09,
+              "headroom_vs_gt": 101.99,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 12,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.98,
+              "gain_vs_raw": -2.08,
+              "headroom_vs_gt": 101.98,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 13,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.97,
+              "gain_vs_raw": -2.07,
+              "headroom_vs_gt": 101.97,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 14,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.96,
+              "gain_vs_raw": -2.06,
+              "headroom_vs_gt": 101.96,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 15,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.95,
+              "gain_vs_raw": -2.05,
+              "headroom_vs_gt": 101.95,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 16,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.94,
+              "gain_vs_raw": -2.04,
+              "headroom_vs_gt": 101.94,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 17,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.93,
+              "gain_vs_raw": -2.03,
+              "headroom_vs_gt": 101.93,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 18,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.92,
+              "gain_vs_raw": -2.02,
+              "headroom_vs_gt": 101.92,
+              "linear_weight": null,
+              "impact_score": null
+            },
+            {
+              "file_index": 19,
+              "raw_baseline": 0.1,
+              "ground_truth": 100.0,
+              "model": -1.91,
+              "gain_vs_raw": -2.01,
+              "headroom_vs_gt": 101.91,
+              "linear_weight": null,
+              "impact_score": null
+            }
+          ],
+          "aggregate": {
+            "raw_baseline_scalar": 0.1,
+            "ground_truth_scalar": 100.0,
+            "model_scalar": -2.005,
+            "percent_of_ceiling_log": -0.02005,
+            "num_sampled_files": 20
+          },
+          "s_max_global": 1.0,
+          "reference_source": "step09a_fixture",
+          "rendered_markdown": "| file | raw | gt | model |\n(step09a fixture table)",
+          "linear_weight_total": 0.0
+        },
+        "best_model_params": 1450000,
+        "completed_rounds": 4,
+        "best_config": {
+          "model_config": {
+            "depth": 4
+          },
+          "train_config": {
+            "lr": 0.0005
+          },
+          "loss_config": {
+            "loss_type": "focal",
+            "gamma": 2.0
+          }
+        },
+        "best_valid_config": {
+          "model_config": {
+            "depth": 4
+          },
+          "train_config": {
+            "lr": 0.0005
+          }
+        },
+        "formal_score": -2.0,
+        "model_description": "wavenet: dilated causal convolution stack (step09a fixture).",
+        "round_health_counts": {
+          "valid": 2,
+          "invalid": 2,
+          "unknown": 0
+        },
+        "failure_counts": {
+          "records_total": 4,
+          "status_counts": {
+            "success": 2,
+            "failed_mode_collapse": 1,
+            "skipped_oom_risk": 1
+          },
+          "diagnosis_state_counts": {
+            "diagnosis_missing": 4
+          },
+          "validation_state_counts": {},
+          "metric_refusal_count": 0,
+          "refusal_contract_ids": {},
+          "gate_action_counts": {
+            "none": 3,
+            "invalidate_round": 1
+          },
+          "health_provenance_counts": {
+            "gates_disabled": 3,
+            "gated": 1
+          }
+        },
+        "collapse_fingerprints": [
+          {
+            "check_name": "output_diversity_blocking",
+            "signature": "output_diversity_blocking:n_unique_int8_values=1",
+            "metrics": {
+              "n_unique_int8_values": 1
+            },
+            "human_readable": "output_diversity_blocking: n_unique_int8_values=1.0"
+          }
+        ]
+      }
+    }
+  },
+  "key_findings": [
+    "wavenet leads the iteration on the formal round",
+    "the gated TCN trails but is the freshest architecture"
+  ],
+  "bottlenecks": [
+    "every architecture plateaus at a similar training budget"
+  ],
+  "take_home_message": "The current family has saturated; change the receptive-field mechanism.",
+  "per_model_score_tables": {
+    "wavenet": {
+      "rows": [
+        {
+          "file_index": 0,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.1,
+          "gain_vs_raw": -2.2,
+          "headroom_vs_gt": 102.1,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 1,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.09,
+          "gain_vs_raw": -2.19,
+          "headroom_vs_gt": 102.09,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 2,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.08,
+          "gain_vs_raw": -2.18,
+          "headroom_vs_gt": 102.08,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 3,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.07,
+          "gain_vs_raw": -2.17,
+          "headroom_vs_gt": 102.07,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 4,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.06,
+          "gain_vs_raw": -2.16,
+          "headroom_vs_gt": 102.06,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 5,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.05,
+          "gain_vs_raw": -2.15,
+          "headroom_vs_gt": 102.05,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 6,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.04,
+          "gain_vs_raw": -2.14,
+          "headroom_vs_gt": 102.04,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 7,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.03,
+          "gain_vs_raw": -2.13,
+          "headroom_vs_gt": 102.03,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 8,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.02,
+          "gain_vs_raw": -2.12,
+          "headroom_vs_gt": 102.02,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 9,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.01,
+          "gain_vs_raw": -2.11,
+          "headroom_vs_gt": 102.01,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 10,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.0,
+          "gain_vs_raw": -2.1,
+          "headroom_vs_gt": 102.0,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 11,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.99,
+          "gain_vs_raw": -2.09,
+          "headroom_vs_gt": 101.99,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 12,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.98,
+          "gain_vs_raw": -2.08,
+          "headroom_vs_gt": 101.98,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 13,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.97,
+          "gain_vs_raw": -2.07,
+          "headroom_vs_gt": 101.97,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 14,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.96,
+          "gain_vs_raw": -2.06,
+          "headroom_vs_gt": 101.96,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 15,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.95,
+          "gain_vs_raw": -2.05,
+          "headroom_vs_gt": 101.95,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 16,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.94,
+          "gain_vs_raw": -2.04,
+          "headroom_vs_gt": 101.94,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 17,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.93,
+          "gain_vs_raw": -2.03,
+          "headroom_vs_gt": 101.93,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 18,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.92,
+          "gain_vs_raw": -2.02,
+          "headroom_vs_gt": 101.92,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 19,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -1.91,
+          "gain_vs_raw": -2.01,
+          "headroom_vs_gt": 101.91,
+          "linear_weight": null,
+          "impact_score": null
+        }
+      ],
+      "aggregate": {
+        "raw_baseline_scalar": 0.1,
+        "ground_truth_scalar": 100.0,
+        "model_scalar": -2.005,
+        "percent_of_ceiling_log": -0.02005,
+        "num_sampled_files": 20
+      },
+      "s_max_global": 1.0,
+      "reference_source": "step09a_fixture",
+      "rendered_markdown": "| file | raw | gt | model |\n(step09a fixture table)",
+      "linear_weight_total": 0.0
+    },
+    "bidirectional_gated_tcn": {
+      "rows": [
+        {
+          "file_index": 0,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.53,
+          "gain_vs_raw": -2.63,
+          "headroom_vs_gt": 102.53,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 1,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.52,
+          "gain_vs_raw": -2.62,
+          "headroom_vs_gt": 102.52,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 2,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.51,
+          "gain_vs_raw": -2.61,
+          "headroom_vs_gt": 102.51,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 3,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.5,
+          "gain_vs_raw": -2.6,
+          "headroom_vs_gt": 102.5,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 4,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.49,
+          "gain_vs_raw": -2.5900000000000003,
+          "headroom_vs_gt": 102.49,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 5,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.48,
+          "gain_vs_raw": -2.58,
+          "headroom_vs_gt": 102.48,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 6,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.47,
+          "gain_vs_raw": -2.5700000000000003,
+          "headroom_vs_gt": 102.47,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 7,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.46,
+          "gain_vs_raw": -2.56,
+          "headroom_vs_gt": 102.46,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 8,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.45,
+          "gain_vs_raw": -2.5500000000000003,
+          "headroom_vs_gt": 102.45,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 9,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.44,
+          "gain_vs_raw": -2.54,
+          "headroom_vs_gt": 102.44,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 10,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.43,
+          "gain_vs_raw": -2.5300000000000002,
+          "headroom_vs_gt": 102.43,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 11,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.42,
+          "gain_vs_raw": -2.52,
+          "headroom_vs_gt": 102.42,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 12,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.41,
+          "gain_vs_raw": -2.5100000000000002,
+          "headroom_vs_gt": 102.41,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 13,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.4,
+          "gain_vs_raw": -2.5,
+          "headroom_vs_gt": 102.4,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 14,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.39,
+          "gain_vs_raw": -2.49,
+          "headroom_vs_gt": 102.39,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 15,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.38,
+          "gain_vs_raw": -2.48,
+          "headroom_vs_gt": 102.38,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 16,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.37,
+          "gain_vs_raw": -2.47,
+          "headroom_vs_gt": 102.37,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 17,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.36,
+          "gain_vs_raw": -2.46,
+          "headroom_vs_gt": 102.36,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 18,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.35,
+          "gain_vs_raw": -2.45,
+          "headroom_vs_gt": 102.35,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 19,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.34,
+          "gain_vs_raw": -2.44,
+          "headroom_vs_gt": 102.34,
+          "linear_weight": null,
+          "impact_score": null
+        }
+      ],
+      "aggregate": {
+        "raw_baseline_scalar": 0.1,
+        "ground_truth_scalar": 100.0,
+        "model_scalar": -2.435,
+        "percent_of_ceiling_log": -0.02435,
+        "num_sampled_files": 20
+      },
+      "s_max_global": 1.0,
+      "reference_source": "step09a_fixture",
+      "rendered_markdown": "| file | raw | gt | model |\n(step09a fixture table)",
+      "linear_weight_total": 0.0
+    },
+    "punet": {
+      "rows": [
+        {
+          "file_index": 0,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.95,
+          "gain_vs_raw": -3.0500000000000003,
+          "headroom_vs_gt": 102.95,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 1,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.94,
+          "gain_vs_raw": -3.04,
+          "headroom_vs_gt": 102.94,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 2,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.93,
+          "gain_vs_raw": -3.0300000000000002,
+          "headroom_vs_gt": 102.93,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 3,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.92,
+          "gain_vs_raw": -3.02,
+          "headroom_vs_gt": 102.92,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 4,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.91,
+          "gain_vs_raw": -3.0100000000000002,
+          "headroom_vs_gt": 102.91,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 5,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.9,
+          "gain_vs_raw": -3.0,
+          "headroom_vs_gt": 102.9,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 6,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.89,
+          "gain_vs_raw": -2.99,
+          "headroom_vs_gt": 102.89,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 7,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.88,
+          "gain_vs_raw": -2.98,
+          "headroom_vs_gt": 102.88,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 8,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.87,
+          "gain_vs_raw": -2.97,
+          "headroom_vs_gt": 102.87,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 9,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.86,
+          "gain_vs_raw": -2.96,
+          "headroom_vs_gt": 102.86,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 10,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.85,
+          "gain_vs_raw": -2.95,
+          "headroom_vs_gt": 102.85,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 11,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.84,
+          "gain_vs_raw": -2.94,
+          "headroom_vs_gt": 102.84,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 12,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.83,
+          "gain_vs_raw": -2.93,
+          "headroom_vs_gt": 102.83,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 13,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.82,
+          "gain_vs_raw": -2.92,
+          "headroom_vs_gt": 102.82,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 14,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.81,
+          "gain_vs_raw": -2.91,
+          "headroom_vs_gt": 102.81,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 15,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.8,
+          "gain_vs_raw": -2.9,
+          "headroom_vs_gt": 102.8,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 16,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.79,
+          "gain_vs_raw": -2.89,
+          "headroom_vs_gt": 102.79,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 17,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.78,
+          "gain_vs_raw": -2.88,
+          "headroom_vs_gt": 102.78,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 18,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.77,
+          "gain_vs_raw": -2.87,
+          "headroom_vs_gt": 102.77,
+          "linear_weight": null,
+          "impact_score": null
+        },
+        {
+          "file_index": 19,
+          "raw_baseline": 0.1,
+          "ground_truth": 100.0,
+          "model": -2.76,
+          "gain_vs_raw": -2.86,
+          "headroom_vs_gt": 102.76,
+          "linear_weight": null,
+          "impact_score": null
+        }
+      ],
+      "aggregate": {
+        "raw_baseline_scalar": 0.1,
+        "ground_truth_scalar": 100.0,
+        "model_scalar": -2.855,
+        "percent_of_ceiling_log": -0.02855,
+        "num_sampled_files": 20
+      },
+      "s_max_global": 1.0,
+      "reference_source": "step09a_fixture",
+      "rendered_markdown": "| file | raw | gt | model |\n(step09a fixture table)",
+      "linear_weight_total": 0.0
+    }
+  },
+  "per_model_params": {
+    "wavenet": 1450000,
+    "bidirectional_gated_tcn": 980000,
+    "punet": 640000
+  },
+  "per_model_training_segments": {
+    "wavenet": 40960,
+    "bidirectional_gated_tcn": 38000
+  },
+  "runtime_vocab": [
+    {
+      "name": "dilated_causal_conv",
+      "kind": "feature",
+      "description": "Causal convolution with exponentially growing dilation.",
+      "related_to": [
+        "receptive_field"
+      ],
+      "tier": "canonical",
+      "pattern": null,
+      "proposed_by_run": null,
+      "seen_in_runs": [
+        "wavenet"
+      ],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "receptive_field",
+      "kind": "capability",
+      "description": "How far back in time one output sample can see.",
+      "related_to": [],
+      "tier": "canonical",
+      "pattern": null,
+      "proposed_by_run": null,
+      "seen_in_runs": [
+        "wavenet"
+      ],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "bidirectional_gating",
+      "kind": "feature",
+      "description": "Gated fusion of forward and backward context.",
+      "related_to": [],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [
+        "bidirectional_gated_tcn"
+      ],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "prediction_bidirectional_gated_tcn_confirmed",
+      "kind": "discovery",
+      "description": "CONFIRMED: bidirectional_gated_tcn achieved denoising_score=-2.4300 (predicted -2.4000). The hypothesis was supported.",
+      "related_to": [
+        "dilated_causal_conv"
+      ],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "score_bidirectional_gated_tcn_vs_sota",
+      "kind": "discovery",
+      "description": "bidirectional_gated_tcn scored -2.4300, significantly below SOTA (-2.0000). The approach needs revision.",
+      "related_to": [],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "timing_bidirectional_gated_tcn_slow",
+      "kind": "discovery",
+      "description": "bidirectional_gated_tcn: 31.7 min/experiment (train=20.0, infer=11.7 min). High compute cost \u2014 reduce segmentation_size or complexity.",
+      "related_to": [],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "gated_residual_fusion",
+      "kind": "feature",
+      "description": "Residual path fused through a learned gate.",
+      "related_to": [],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [
+        "bidirectional_gated_tcn"
+      ],
+      "aliases": [],
+      "origin": null
+    }
+  ],
+  "prediction_evaluation": {
+    "metric": "denoising_score",
+    "metric_resolution": "legacy_alias",
+    "predicted_value": -2.4,
+    "actual_value": -2.43,
+    "current_sota": -2.55,
+    "delta_from_sota": 0.12,
+    "outcome": "confirmed",
+    "boldness": 0.0588,
+    "information_gain": 0.12,
+    "notes": null,
+    "prediction_evaluation_semantics": "metric_order_signsafe_v2"
+  },
+  "new_discoveries": [
+    {
+      "name": "prediction_bidirectional_gated_tcn_confirmed",
+      "kind": "discovery",
+      "description": "CONFIRMED: bidirectional_gated_tcn achieved denoising_score=-2.4300 (predicted -2.4000). The hypothesis was supported.",
+      "related_to": [
+        "dilated_causal_conv"
+      ],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "score_bidirectional_gated_tcn_vs_sota",
+      "kind": "discovery",
+      "description": "bidirectional_gated_tcn scored -2.4300, significantly below SOTA (-2.0000). The approach needs revision.",
+      "related_to": [],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [],
+      "aliases": [],
+      "origin": null
+    },
+    {
+      "name": "timing_bidirectional_gated_tcn_slow",
+      "kind": "discovery",
+      "description": "bidirectional_gated_tcn: 31.7 min/experiment (train=20.0, infer=11.7 min). High compute cost \u2014 reduce segmentation_size or complexity.",
+      "related_to": [],
+      "tier": "candidate",
+      "pattern": null,
+      "proposed_by_run": "bidirectional_gated_tcn",
+      "seen_in_runs": [],
+      "aliases": [],
+      "origin": null
+    }
+  ],
+  "vocab_changes": [],
+  "vocab_diversity_ratio": 0.5,
+  "cumulative_information_gain": 0.3,
+  "scientific_accuracy": {
+    "confirmed": 1.0,
+    "partial": 0.0,
+    "refuted": 0.0
+  },
+  "prediction_outcomes_history": {
+    "confirmed": 1,
+    "partial": 0,
+    "refuted": 1
+  },
+  "vocab_link_confirmations": {
+    "bidirectional_gating:receptive_field": [
+      "seed_run",
+      "bidirectional_gated_tcn"
+    ]
+  },
+  "per_model_round_health_counts": {
+    "wavenet": {
+      "valid": 2,
+      "invalid": 2,
+      "unknown": 0
+    },
+    "bidirectional_gated_tcn": {
+      "valid": 3,
+      "invalid": 0,
+      "unknown": 0
+    }
+  },
+  "per_model_collapse_fingerprints": {
+    "wavenet": [
+      {
+        "check_name": "output_diversity_blocking",
+        "signature": "output_diversity_blocking:n_unique_int8_values=1",
+        "metrics": {
+          "n_unique_int8_values": 1
+        },
+        "human_readable": "output_diversity_blocking: n_unique_int8_values=1.0"
+      }
+    ]
+  },
+  "collapse_fingerprint_history": {
+    "wavenet": [
+      {
+        "signature": "output_diversity_blocking:n_unique_int8_values=1",
+        "check_name": "output_diversity_blocking",
+        "metrics": {
+          "n_unique_int8_values": 1
+        },
+        "human_readable": "output_diversity_blocking: n_unique_int8_values=1.0",
+        "occurrences": [
+          {
+            "iteration": 3,
+            "count": 1,
+            "source_exp_ids": [
+              "wavenet_r2"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "is_degraded": false,
+  "evolution_stats": {
+    "vocab_total": 7,
+    "vocab_canonical": 2,
+    "vocab_candidate": 5,
+    "promoted_this_iter": 0,
+    "is_degraded": false
+  },
+  "metric_identity": {
+    "metric_id": "tidmad_denoising_score",
+    "direction": "higher"
+  },
+  "prediction_evaluation_semantics": "metric_order_signsafe_v2",
+  "prediction_outcomes_by_semantics": {
+    "metric_order_signsafe_v2": {
+      "confirmed": 1,
+      "partial": 0,
+      "refuted": 0
+    }
+  },
+  "cumulative_information_gain_by_semantics": {
+    "metric_order_signsafe_v2": 0.12
+  },
+  "prediction_pool_sizes": {
+    "legacy_v1": 2,
+    "metric_order_signsafe_v2": 1
+  },
+  "per_model_secondary_metrics": {},
+  "per_model_failure_counts": {
+    "wavenet": {
+      "records_total": 4,
+      "status_counts": {
+        "success": 2,
+        "failed_mode_collapse": 1,
+        "skipped_oom_risk": 1
+      },
+      "diagnosis_state_counts": {
+        "diagnosis_missing": 4
+      },
+      "validation_state_counts": {},
+      "metric_refusal_count": 0,
+      "refusal_contract_ids": {},
+      "gate_action_counts": {
+        "none": 3,
+        "invalidate_round": 1
+      },
+      "health_provenance_counts": {
+        "gates_disabled": 3,
+        "gated": 1
+      }
+    },
+    "bidirectional_gated_tcn": {
+      "records_total": 3,
+      "status_counts": {
+        "success": 3
+      },
+      "diagnosis_state_counts": {
+        "diagnosis_missing": 3
+      },
+      "validation_state_counts": {},
+      "metric_refusal_count": 0,
+      "refusal_contract_ids": {},
+      "gate_action_counts": {
+        "none": 3
+      },
+      "health_provenance_counts": {
+        "gates_disabled": 3
+      }
+    }
+  }
+}

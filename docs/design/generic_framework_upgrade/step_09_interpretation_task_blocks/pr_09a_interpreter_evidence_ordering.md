@@ -4,9 +4,24 @@
 
 **REVISION 2 — FROZEN (operator final ruling 2026-08-19: "APPROVED WITH
 MINOR FINAL AMENDMENTS" — freeze authority exercised after the mandated
-adversarial pass, §11, closed without a new material contradiction).
-IMPLEMENTATION NOT STARTED. Every checkbox in §4 is `[ ]`; every §10
-ledger entry is empty.**
+adversarial pass, §11, closed without a new material contradiction). The
+SEMANTIC design is frozen and is not reopened by implementation.**
+
+*(Freeze-time state, preserved: implementation had NOT started; every
+checkbox in §4 was `[ ]` and every §10 ledger entry was empty.)*
+
+**IMPLEMENTATION COMPLETE** on branch
+`step09-pr09a-interpreter-evidence-ordering` from the frozen base
+`a325f33b`. This document is now also the LIVE implementation ledger: §4
+checkboxes carry real state and §10 carries the evidence. Current
+checkpoint: **C1a-C7 COMPLETE + pre-merge closeout applied** (operator
+review 2026-08-19: code/semantic review PASS with two bounded closeout
+items — the ledger synchronization below, and the F-09a-17 single-authority
+audit, which CENTRALIZED the prediction-semantics ids). §4 is fully
+synchronized against §10: **104 `[x]` / 0 `[ ]`** — every implementation-owned
+box carries the evidence that satisfies it, and no box was ticked from a
+re-run staged for that purpose. State: awaiting the exact-head CI on the
+final candidate head, then operator merge.
 
 Rev 1 (`79bfd564`, DRAFT) was reviewed by the operator; the C1a→C1b … C7
 architecture and sequence were approved and the seven open questions were
@@ -918,7 +933,8 @@ is preserved.
   edits, at the implementation head; ambiguity or larger scope than this
   design assumes → **STOP and ask before changing the plan**.
 * `[ ]` = not done; `[x]` only with recorded evidence (test counts, wall
-  time, log path) in §10. **Every box below is `[ ]`.** Pytest verdicts
+  time, log path) in §10. **Every box below was `[ ]` at freeze** (they now
+  carry real implementation state, per §0). Pytest verdicts
   come from complete log files (`> log 2>&1; rc=$?`), never a wrapper's
   exit status.
 * Before EVERY commit: stop and show the exact diff summary, staged file
@@ -963,13 +979,13 @@ llm_calls.json` (labels + sha256 of system/user prompts per call, in
 order). Zero production changes. Depends on nothing.
 
 **Implementation plan.**
-- [ ] Re-read `test_dispatcher_wiring.py:87-227` (label dispatch for
+- [x] Re-read `test_dispatcher_wiring.py:87-227` (label dispatch for
       `interpretation.per_model` / `interpretation.synthesis` /
       `cache_consolidator.list_merge`) and `test_step00_prompt_goldens.py:
       100-137` (`BoundaryRecorderBridge`) to reuse the stub/recording
       idioms; reuse `_gate_result/_record/_output` from
       `test_round_health_summary.py:22-57` for health-bearing records.
-- [ ] Fixture: TWO new TIDMAD-shaped `HyperparamTuningOutput`s → summaries
+- [x] Fixture: TWO new TIDMAD-shaped `HyperparamTuningOutput`s → summaries
       through the REAL `tuning_output_to_model_run_summary` (success /
       skipped / collapse records; one with `score_table` + `file_vector`;
       persisted gate evidence on one record; `metric_result` on success
@@ -982,30 +998,37 @@ order). Zero production changes. Depends on nothing.
       {confirmed:1, partial:0, refuted:1}`, `cumulative_information_gain =
       0.3` (so C4's partition delta is VISIBLE and declared);
       `enable_structured_health_feedback=False`; storage = `tmp_path`.
-- [ ] Stub bridge returning canned JSON per label; record every
+      — `tests/unit/agent/result_interpretation_agent/_step09a_fixture.py`
+      (509 lines); THREE model types, see §10.1 finding F-09a-1.
+- [x] Stub bridge returning canned JSON per label; record every
       `generate` call (label, sha256(system), sha256(user)).
-- [ ] Assert the digest (`json.loads(output.model_dump_json())`) and the
+      — `RecordingStubBridge`; also records `emit_marker` calls (§10.1).
+- [x] Assert the digest (`json.loads(output.model_dump_json())`) and the
       call sequence against the two goldens via `tests/helpers/golden.py`
       (the harness NEVER regenerates — §17 rule 1; a missing golden fails
       with capture instructions, so the two goldens are captured ONCE by a
       one-off manual run against the UNMODIFIED production code at the C1a
       base, committed with `_captured_at` provenance in this same commit).
-- [ ] Assert the on-disk `interpretation_<run>.json` equals the in-memory
+      — captured at `a325f33b`, provenance recorded in both goldens.
+- [x] Assert the on-disk `interpretation_<run>.json` equals the in-memory
       digest (persistence parity).
 
 **Validation plan.**
-- [ ] Unit: the oracle test (green on the unmodified tree); a second run is
-      byte-identical (determinism).
-- [ ] Negative: a planted one-field perturbation of the digest (test-local
+- [x] Unit: the oracle test (green on the unmodified tree); a second run is
+      byte-identical (determinism). — 8 passed, twice; the repeatability
+      test runs the fixture through TWO different workspaces.
+- [x] Negative: a planted one-field perturbation of the digest (test-local
       mutation of the expected JSON) fails with a field-level diff message.
-- [ ] Backward-compat: nothing else changes.
+      — `TestTheOracleIsStrict`, two probes (digest field + prompt digest).
+- [x] Backward-compat: nothing else changes. — `git status` shows FOUR
+      untracked test-only files and zero modified production files.
 
 **Acceptance criteria.**
-- [ ] `goldens/step09a_differential_digest.json` exists with `_captured_at`
+- [x] `goldens/step09a_differential_digest.json` exists with `_captured_at`
       provenance naming the base commit; `step09a_differential_llm_calls.json`
       lists exactly the per-model / list-merge / synthesis calls the fixture
       causes (count asserted in the test, hardcoded).
-- [ ] The oracle is green twice in a row from a clean tree; the perturbation
+- [x] The oracle is green twice in a row from a clean tree; the perturbation
       probe is red.
 
 **Failure and edge cases.** Non-deterministic content (timestamps, tmp
@@ -1013,8 +1036,8 @@ paths) must NOT appear in the digest — asserted by the determinism run; if
 one appears, normalize at the fixture (never in production).
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py -q > /tmp/09a_c1a.log 2>&1; rc=$?` — record counts/time in §10.1.
-- [ ] `ruff check` + `ruff format --check` on the new files.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py -q > /tmp/09a_c1a.log 2>&1; rc=$?` — **rc=0, 8 passed in 9.21s** (re-run after formatting: 8 passed in 7.81s, `/tmp/09a_c1a_final.log`).
+- [x] `ruff check` + `ruff format --check` on the new files. — check clean; format reformatted the test module once, then `ruff format --check` over the whole directory: 19 files clean.
 
 **Commit boundary.** Test-only; reviewable as "is this the right fixed
 input and is the oracle strict enough?"; no production file touched.
@@ -1047,35 +1070,38 @@ contract, persistence, CLI, `__init__.py`, `MetricOrder`, any semantics.
 Depends on C1a.
 
 **Implementation plan.**
-- [ ] Re-read `run()` regions `:943-1056`, `:1284-1319`, `:1548-1575` and
+- [x] Re-read `run()` regions `:943-1056`, `:1284-1319`, `:1548-1575` and
       `:1907-2140`; capture the AST inventory (symbol/lines) into the
-      ledger BEFORE moving anything.
-- [ ] `evidence.py`: move `_required_denoising_score`, `_round_ordering`,
+      ledger BEFORE moving anything. — §10.2 "AST inventory".
+- [x] `evidence.py`: move `_required_denoising_score`, `_round_ordering`,
       `_round_health`, `_collect_health_evidence`,
       `tuning_output_to_model_run_summary` verbatim (lazy imports inside
-      them preserved as they are).
-- [ ] `ordering.py`: `PrecomputedEvidence` (frozen dataclass) +
+      them preserved as they are). — 274 lines.
+- [x] `ordering.py`: `PrecomputedEvidence` (frozen dataclass) +
       `precompute_evidence(summaries, model_knowledge_cache, effective_types)`
       reproducing `:943-1056` line-for-line incl. the authority filter and
       `total_experiments` from cache `_stats.completed_rounds`;
       `EnrichedFields` + `collect_enriched_fields(...)` reproducing
       `:1284-1319`; `run()` unpacks at the same positions (enriched inside
-      the try).
-- [ ] `prediction.py`: move `evaluate_prediction`, `_compute_metric`, the
+      the try). — 248 lines; see F-09a-5 (one dead local NOT re-created).
+- [x] `prediction.py`: move `evaluate_prediction`, `_compute_metric`, the
       alias table verbatim; extract `accumulate_prediction_outcomes(history,
       evaluation) -> (new_history, scientific_accuracy)` and
       `accumulate_information_gain(prior, evaluation) -> float` reproducing
       `:1548-1575` exactly (same `round(…, 4)`); `run()` calls them.
-- [ ] Main module: eager `from nodes.result_interpretation_agent.evidence
+      — 215 lines.
+- [x] Main module: eager `from nodes.result_interpretation_agent.evidence
       import …` etc. at the top (rebind rule); `__all__` declares the moved
       names it re-exports; `run()` lifecycle comments; no other edits.
-- [ ] `nodes/interpretation_helpers.py`: delete the moved symbols; module
+      — `__all__` (7 PUBLIC names) + `_COMPATIBILITY_REEXPORTS` (9 moved
+      helpers), the tuner-C7 split; see F-09a-6.
+- [x] `nodes/interpretation_helpers.py`: delete the moved symbols; module
       docstring updated; `generate_discoveries` still imports nothing
-      node-local.
-- [ ] Tests per Scope; node `.md` layout section.
+      node-local. — 1,024 → 876 lines; the now-unused `math` import removed.
+- [x] Tests per Scope; node `.md` layout section.
 
 **Validation plan.**
-- [ ] Unit: C1a oracle EXACT (digest + call sequence); all PB-0/PB-7/PB-8 +
+- [x] Unit: C1a oracle EXACT (digest + call sequence); all PB-0/PB-7/PB-8 +
       flag-ON goldens EXACT (`git status` clean on `goldens/`); the whole
       `tests/unit/agent/result_interpretation_agent/` directory;
       `tests/unit/agent/test_cold_start_prompt.py`;
@@ -1084,30 +1110,34 @@ Depends on C1a.
       `tests/unit/sdsc_submission_scripts/test_health_feedback_workspace_cases.py`;
       `tests/unit/workflows/test_model_exploration.py` (patch targets);
       `tests/unit/nodes/test_node_public_boundary.py` (generalized halves
-      green for tuner AND interpreter).
-- [ ] Reachability: the upgraded partition-before-LLM test is RED when the
+      green for tuner AND interpreter). — see §10.2 validation table.
+- [x] Reachability: the upgraded partition-before-LLM test is RED when the
       partition call is moved after the first `generate` (test-local
-      mutation proof, recorded).
-- [ ] Negative: a private module importing the main module reds the
+      mutation proof, recorded). — mutations A and B, §10.2.
+- [x] Negative: a private module importing the main module reds the
       inward half; an outside production file importing
       `nodes.result_interpretation_agent.evidence` reds the outward half
-      (planted, recorded, removed).
-- [ ] Backward-compat: import census — every external importer of the
+      (planted, recorded, removed). — both RED naming the interpreter, §10.2.
+- [x] Backward-compat: import census — every external importer of the
       node's public names (`workflows/model_exploration.py:111-114`,
       `scripts/pr3_l2_calibration/{preflight,runner}.py`, the protocol,
       `__init__.py`) still resolves; `main --help` byte-identical (sha256
       recorded); `patch("nodes.result_interpretation_agent.LLMBridge")`
-      still intercepts (existing tests).
+      still intercepts (existing tests). — all four importers import
+      cleanly; 10 `__init__` re-exports + 9 compatibility re-exports resolve
+      on the package path; `--help` sha256 `bb964c11…` identical, 762 chars.
 
 **Acceptance criteria.**
-- [ ] Oracle goldens byte-identical; zero prompt-golden bytes changed;
+- [x] Oracle goldens byte-identical; zero prompt-golden bytes changed;
       `nodes/interpretation_helpers.py` no longer defines the three moved
       symbols; `run()` contains no inline best/worst/valid/formal
       accumulation loop and no E.4 arithmetic; the dependency graph is
       `main → {evidence, ordering, prediction}` with no reverse edge
       (boundary test); AST inventory before/after recorded (main-file and
-      `run()` line counts, moved symbols).
-- [ ] Ruling §8 precision: `result_interpretation_agent.py` remains the
+      `run()` line counts, moved symbols). — `git status` on `goldens/`
+      empty; main 2,144 → 1,826; `run()` 874 → 746 lines, branch-ish nodes
+      114 → 71.
+- [x] Ruling §8 precision: `result_interpretation_agent.py` remains the
       ONE obvious main node file (public class, `run()`, CLI entrypoint,
       orchestration, lifecycle ordering); every moved symbol is DEFINED
       exactly once (the main module re-exports by import — never a copy,
@@ -1126,9 +1156,9 @@ package path — the census of patch targets (§2.7) shows none besides
 `LLMBridge`/`open`; if one appears, patch the module that CALLS it.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/test_cold_start_prompt.py tests/unit/agent/schemas tests/unit/agent/protocols/test_ml_model_tune_to_ml_result_interp.py tests/unit/nodes tests/unit/sdsc_submission_scripts/test_health_feedback_workspace_cases.py tests/unit/workflows/test_model_exploration.py -q > /tmp/09a_c1b.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`; pyright is CI-owned (recorded, never claimed locally).
-- [ ] `git diff --stat` on `goldens/` empty; sha256 of `--help`.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/test_cold_start_prompt.py tests/unit/agent/schemas tests/unit/agent/protocols/test_ml_model_tune_to_ml_result_interp.py tests/unit/nodes tests/unit/sdsc_submission_scripts/test_health_feedback_workspace_cases.py tests/unit/workflows/test_model_exploration.py -q > /tmp/09a_c1b.log 2>&1; rc=$?` — see §10.2.
+- [x] `ruff check` + `ruff format --check`; pyright is CI-owned (recorded, never claimed locally). — check clean over `nodes/` and the four touched test areas; format clean over 30 files (two files reformatted once during development). **pyright NOT claimed locally — CI owns it.**
+- [x] `git diff --stat` on `goldens/` empty; sha256 of `--help`. — goldens untouched; `--help` sha256 `bb964c115155b99a2a2f917cdce7658eed0b8db5ae666da98b867f29ba5b2bcd` at BOTH `a325f33b` and the C1b head.
 
 **Commit boundary.** Structural only; reviewable as "is the boundary
 right and is parity proven?"; no semantic change; no new field.
@@ -1162,33 +1192,36 @@ Must NOT change: any ordering behaviour (C3), `MetricOrder`, the
 prompt bytes. Depends on C1b.
 
 **Implementation plan.**
-- [ ] Re-read `records.py:747-1016`, `hyperparam_tuning.py:2665-3020`,
+- [x] Re-read `records.py:747-1016`, `hyperparam_tuning.py:2665-3020`,
       `evaluation_metric.py:355-387, :657-668`, `model_exploration.py:
       1804-1812, 2083-2120, 2687-2721`, `preflight.py:88-135`,
       `runner.py:185-253`, `fixtures.py:120-131`, the protocol file.
-- [ ] `MetricSpecField` in the metric module (BeforeValidator → the ONE
+      The §2.4 round-trip finding was RE-VERIFIED at the head by probe, not
+      taken on trust (§10.3).
+- [x] `MetricSpecField` in the metric module (BeforeValidator → the ONE
       rebind; passthrough for instances/None).
-- [ ] `HyperparamTuningOutput.metric_spec` appended; `finalize_run_output`
+- [x] `HyperparamTuningOutput.metric_spec` appended; `finalize_run_output`
       writes `bindings.run_metric.spec` (main dict) / `.model_dump()`
       (partial dict).
-- [ ] `reconcile_metric_spec` + `InterpretationContractError` in
+- [x] `reconcile_metric_spec` + `InterpretationContractError` in
       `evidence.py` (re-exported from main); builder projects
       `metric_identity` from records' `metric_result` (agreement enforced).
-- [ ] `InterpretationInput.metric_spec` + the two-clause validator;
+- [x] `InterpretationInput.metric_spec` + the two-clause validator;
       `InterpretationOutput.metric_identity`; `run()` → `bind_run_order`
       (after cold start), echo threaded into both dicts.
-- [ ] Workflow: `run_metric_spec = reconcile_metric_spec([*tuning_outputs,
+- [x] Workflow: `run_metric_spec = reconcile_metric_spec([*tuning_outputs,
       *iteration_results])` per iteration; `InterpretationInput(...,
       metric_spec=run_metric_spec)`; CLI `main()`, preflight, runner,
       protocol supply the spec from their outputs; the calibration fixture
       stamps `metric_spec=derive_tidmad_metric_spec(TIDMAD_PROFILE)` on
       its synthetic outputs (the simulated writer; documented in the
       fixture module docstring).
-- [ ] Regenerate `rec3_schema_field_lists.json` (delta: the two appended
-      names); node `.md`.
+- [x] Regenerate `rec3_schema_field_lists.json` (delta: the two appended
+      names); node `.md`. — 46 → 47 and 35 → 36, append-only, prefixes
+      unchanged (verified programmatically before writing).
 
 **Validation plan.**
-- [ ] Unit (tuner side, new `tests/unit/agent/tune_ml_hyperparam_agent/
+- [x] Unit (tuner side, new `tests/unit/agent/tune_ml_hyperparam_agent/
       test_step09a_c2_output_metric_spec.py`, `pseudo_run` pattern of
       `test_step06_c4_record_payload.py`): the output carries
       `metric_spec == bindings.run_metric.spec`; the persisted JSON
@@ -1196,31 +1229,38 @@ prompt bytes. Depends on C1b.
       degraded partial output also carries it (forced serialization
       failure); the committed pre-Step-06 replay artifact validates with
       `metric_spec is None`.
-- [ ] Unit (schemas): `InterpretationInput` validator — score-bearing
+      — §10.3 — 8 passed (live stamping, JSON round trip, written file, DEGRADED partial, three carrier shapes, pre-Step-06 replay).
+- [x] Unit (schemas): `InterpretationInput` validator — score-bearing
       summaries + None spec ⇒ error naming the summary; cache `_stats`
       scores + None spec ⇒ error; cold start / scoreless ⇒ accepted;
       identity mismatch on id, on direction ⇒ error naming both;
       agreement ⇒ accepted; `MetricSpecField` accepts instance / mapping /
       rejects garbage; `metric_spec_from_declaration` equivalence pinned.
-- [ ] Unit (reconciliation): equal specs across 3 outputs ⇒ value; one
+      — §10.3 — part of the 28 interpreter-side cases (7 spec-required refusals, 3 named absences, 4 identity cases) + the carrier's three shapes; `MetricSpecField` equivalence pinned by F-09a-9.
+- [x] Unit (reconciliation): equal specs across 3 outputs ⇒ value; one
       None among present ⇒ refusal naming it; two unequal ⇒ refusal naming
       both; all None ⇒ None; placeholders never included (workflow test).
-- [ ] Unit (builder): `metric_identity` projected; disagreeing records ⇒
+      — §10.3 — 6 reconciliation cases.
+- [x] Unit (builder): `metric_identity` projected; disagreeing records ⇒
       refusal; no `metric_result` ⇒ None.
-- [ ] Reachability: the workflow passes the reconciled spec (patch
+      — §10.3 — 4 builder-projection cases.
+- [x] Reachability: the workflow passes the reconciled spec (patch
       `ResultInterpretationAgent` and assert `run()`'s input carries it);
       the CLI `main()` on a legacy output fails with the named error (not
       a traceback from ordering); `test_pr3_l2p_preflight.py` green.
-- [ ] Mutation (recorded): remove the validator clause (a) ⇒ the spec-less
+      — §10.3 — protocol + CLI reachability cases; `test_pr3_l2p_preflight` green from a clean tree (F-09a-11).
+- [x] Mutation (recorded): remove the validator clause (a) ⇒ the spec-less
       test goes green-on-bad (RED expected); swap reconciliation equality
       for id-only ⇒ the direction-mismatch test must fail.
-- [ ] Backward-compat: C1a oracle — ALLOWED delta = `metric_identity`
+      — §10.3 — mutations C2-1 and C2-2, both RED, both restored.
+- [x] Backward-compat: C1a oracle — ALLOWED delta = `metric_identity`
       present (echo) and nothing else; prompt goldens EXACT; all C1b suites
       green; `tests/unit/core/test_resume*.py` (outputs with/without the
       field validate); `tests/unit/workflows/test_model_exploration.py`.
+      — §10.3 — oracle 8 passed, delta EXACTLY `metric_identity`, call manifest byte-identical.
 
 **Acceptance criteria.**
-- [ ] Production spec-constructor census (executable, NEW in this commit's
+- [x] Production spec-constructor census (executable, NEW in this commit's
       test module): the set of production modules (`nodes/`, `agent/`,
       `core/`, `execute_tools/`, `workflows/`, `dashboard/`, `scripts/`
       minus the fixture module below) that CALL `derive_tidmad_metric` or
@@ -1233,8 +1273,10 @@ prompt bytes. Depends on C1b.
       unreachable from production (no production module imports
       `scripts.pr3_l2_calibration`); planted offender (an untracked
       production module calling the constructor) turns the census RED.
-- [ ] Every negative test above named and green; the oracle delta is
+      — §10.3 — `TestStep09AddsNoProductionMetricDerivationSite`: 4 modules, ZERO added, fixture module proved unreachable, planted offender RED.
+- [x] Every negative test above named and green; the oracle delta is
       exactly the declared additive field.
+      — §10.3 — all negatives named and green; oracle delta is the one additive field.
 
 **Failure and edge cases.** Legacy outputs (None) ⇒ named refusal at input
 construction whose message is ACTIONABLE and says, in substance,
@@ -1254,8 +1296,10 @@ operational consequence: auto-resume of a chain whose committed outputs
 predate 09a stops at its first post-09a interpretation with that refusal.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step09a_c2_output_metric_spec.py tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py tests/unit/agent/tune_ml_hyperparam_agent/test_step06_c4_record_payload.py tests/unit/agent/schemas tests/unit/agent/protocols/test_ml_model_tune_to_ml_result_interp.py tests/unit/workflows tests/unit/scripts/test_pr3_l2p_preflight.py tests/unit/core/test_resume.py tests/unit/execute_tools/test_step06_c1_evaluation_metric.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py -q > /tmp/09a_c2.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step09a_c2_output_metric_spec.py tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py tests/unit/agent/tune_ml_hyperparam_agent/test_step06_c4_record_payload.py tests/unit/agent/schemas tests/unit/agent/protocols/test_ml_model_tune_to_ml_result_interp.py tests/unit/workflows tests/unit/scripts/test_pr3_l2p_preflight.py tests/unit/core/test_resume.py tests/unit/execute_tools/test_step06_c1_evaluation_metric.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py -q > /tmp/09a_c2.log 2>&1; rc=$?`
+      — §10.3 — rc=0, 1,080 passed from the clean commit.
+- [x] `ruff check` + `ruff format --check`.
+      — §10.3 — clean.
 
 **Commit boundary.** One authority, one writer, one reader, one contract;
 no ordering behaviour changes; reviewable as "is the spec transported and
@@ -1292,16 +1336,16 @@ extended; node `.md`. Must NOT change: any value under the shipped TIDMAD
 spec; prompt bytes; `MetricOrder`. Depends on C2.
 
 **Implementation plan.**
-- [ ] Re-read every §2.2 site at the head; confirm no additional literal
+- [x] Re-read every §2.2 site at the head; confirm no additional literal
       appeared since the anchor (the census below is the proof).
-- [ ] Migrate rows 1–12 (pre-computation + builder) with `is_better` /
+- [x] Migrate rows 1–12 (pre-computation + builder) with `is_better` /
       `best` / `worst` exactly per the table (ties → FIRST; the dead
       `-inf` arm deleted with the filter it duplicated).
-- [ ] Row 13: `_render_health_summary_section(summary, *, order)`;
+- [x] Row 13: `_render_health_summary_section(summary, *, order)`;
       `_build_per_model_prompt(..., order: MetricOrder | None = None)`
       raising `ValueError` when `structured_health_feedback and order is
       None`; `run()` passes `order` (flag-ON path only renders it).
-- [ ] Rows 17–19 (`generate_discoveries`): `order.best` for the strictest
+- [x] Rows 17–19 (`generate_discoveries`): `order.best` for the strictest
       SOTA; `order.is_better`; the relative band becomes
       `abs(best - sota) <= 0.05 * abs(sota)` with **margin 0.05 preserved
       exactly** (direction + negative-reference handling only; no
@@ -1309,39 +1353,47 @@ spec; prompt bytes; `MetricOrder`. Depends on C2.
       delta text. This discovery rule does NOT feed the versioned accuracy
       pool, so NO third counter/version system — a declared deterministic
       correction pinned by hand-computed positive/negative × higher/lower
-      cases (Q-09a-5).
-- [ ] Row 20 (`select_active_models`): `rank`-keyed sort.
-- [ ] Row 21 (`_cap_knowledge_cache`): `rank`-keyed stable sort with
+      cases (Q-09a-5). The margin is now the named constant
+      `_DISCOVERY_RELATIVE_BAND = 0.05`, pinned by its own test.
+- [x] Row 20 (`select_active_models`): `rank`-keyed sort.
+- [x] Row 21 (`_cap_knowledge_cache`): `rank`-keyed stable sort with
       `worst_sentinel` for None; workflow passes
       `MetricOrder(run_metric_spec)`.
-- [ ] Census test + planted-offender proof; extend the Step-06 C5 lists.
+- [x] Census test + planted-offender proof; extend the Step-06 C5 lists.
+      — 9 interpreter literals added to `MIGRATED_TO_THE_ORDER_AUTHORITY`.
 
 **Validation plan.**
-- [ ] Unit (new): per-site inversion under `direction_only_spec()` —
+- [x] Unit (new): per-site inversion under `direction_only_spec()` —
       builder best/valid-best/valid-formal/worst, pre-compute per-model and
       overall extremes (summaries AND cache `_stats`), active-set Top-K,
       cache-cap keep/evict, health-summary best round, discoveries (SOTA
       choice, beating, within-5% band, below), each with a hand-computed
       expectation under `higher` AND `lower`; tie pins (equal scores →
       first record / lexicographic `mt`; `None` last in the cap).
-- [ ] Unit (upgraded): all existing consumer tests green with `order`
+      — §10.4 — 39 passed: per-site `higher` vs `lower` inversion for every row, tie pins, band matrix, inclusive edge.
+- [x] Unit (upgraded): all existing consumer tests green with `order`
       passed; flag-ON rendering without `order` raises.
-- [ ] Census: the AST census over the interpreter surface is green; a
+      — §10.4 — C3 targeted suite rc=0, 1,644 passed; row 13 raises when the flag is ON without `order`.
+- [x] Census: the AST census over the interpreter surface is green; a
       planted `if s.best_denoising_score > best:` in an untracked probe
       module under the node package turns it RED (evidence recorded,
       probe removed); anti-vacuity count of visited `order.` consumers
       asserted; Step-06 C5 MIGRATED list asserts the old literals ABSENT
       and `"MetricOrder"` present in the three migrated files.
-- [ ] Backward-compat: C1a oracle byte-identical EXCEPT nothing (TIDMAD
+      — §10.4 — census green with 3 planted-offender probes; Step-06 C5 list extended with 9 interpreter literals (21 passed).
+- [x] Backward-compat: C1a oracle byte-identical EXCEPT nothing (TIDMAD
       is `higher`) — asserted; all prompt goldens EXACT; the health flag-ON
       golden EXACT; `test_dispatcher_wiring.py` call counts unchanged.
-- [ ] Mutation (recorded): flip one migrated site back to `>` ⇒ the
+      — §10.4 — the oracle is BYTE-IDENTICAL across C3 (digest AND call manifest); all 11 prompt goldens untouched.
+- [x] Mutation (recorded): flip one migrated site back to `>` ⇒ the
       lower-direction test for that site is RED AND the census is RED.
+      — §10.4 — mutations C3-1 (per-site + census RED after F-09a-16 closed the gap) and C3-2.
 
 **Acceptance criteria.**
-- [ ] §2.2 rows 1–13 and 17–21 contain no literal (rows 14–16 are C4's);
+- [x] §2.2 rows 1–13 and 17–21 contain no literal (rows 14–16 are C4's);
       census green with planted-offender evidence; oracle and goldens
       byte-identical; the inversion suite green.
+      — §10.4 — remaining offender set asserted EQUAL to `C4_OWNED_COMPARISONS` (rows 14-16), falsifiable in both directions (F-09a-13).
 
 **Failure and edge cases.** Empty candidate lists: `order.best` raises on
 empty exactly like `max` — every call stays guarded by the existing
@@ -1349,8 +1401,10 @@ emptiness checks (`if success`, `if valid_records`, …); `None` scores
 excluded before ranking as today; flag-ON without an order fails closed.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/workflows/test_knowledge_cache_cap.py tests/unit/workflows/test_model_exploration.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py tests/unit/agent/test_cold_start_prompt.py -q > /tmp/09a_c3.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/workflows/test_knowledge_cache_cap.py tests/unit/workflows/test_model_exploration.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py tests/unit/agent/test_cold_start_prompt.py -q > /tmp/09a_c3.log 2>&1; rc=$?`
+      — §10.4 — rc=0, 1,644 passed in 591.55s.
+- [x] `ruff check` + `ruff format --check`.
+      — §10.4 — clean.
 
 **Commit boundary.** Ordering semantics only; reviewable as "is every
 direction read gone and is TIDMAD provably unchanged?".
@@ -1399,31 +1453,33 @@ the legacy dict and legacy scalar values; vocab machinery beyond the
 `unevaluated` branch. Depends on C3.
 
 **Implementation plan.**
-- [ ] Re-read `prediction.py` (moved code), `generate_discoveries`
+- [x] Re-read `prediction.py` (moved code), `generate_discoveries`
       `:397-435`, the E.4 accounting, the proposer's track-record reader
       `:1146-1165` (read-only — no change).
-- [ ] Grammar: `_compute_metric(metric, results, *, bound_metric_id) ->
+- [x] Grammar: `_compute_metric(metric, results, *, bound_metric_id) ->
       (value, resolution)`; the alias table renamed to a LEGACY
       compatibility constant with the R-09-5 note; default metric = bound
       id.
-- [ ] Band exactly per §3.4; uniform record keys; semantics constants.
-- [ ] `generate_discoveries`: explicit `unevaluated` ⇒ no outcome
+- [x] Band exactly per §3.4; uniform record keys; semantics constants.
+- [x] `generate_discoveries`: explicit `unevaluated` ⇒ no outcome
       discovery.
-- [ ] Versioned accounting per the §3.4 table (legacy dict/scalar copied
+- [x] Versioned accounting per the §3.4 table (legacy dict/scalar copied
       unchanged; v2 dict/sum incremented; label; pool sizes); `run()`
       healthy and degraded dicts; input fields appended.
-- [ ] Descriptions fixed per the table; REC-3 + C1a goldens regenerated
-      with the delta named.
+- [x] Descriptions fixed per the table; REC-3 + C1a goldens regenerated
+      with the delta named. — REC-3 `InterpretationOutput` 36 → 40, verified
+      APPEND-ONLY after a correction (F-09a-18).
 
 **Validation plan.**
-- [ ] Unit: the hand-computed band matrix (§3.4 — nine cases × the
+- [x] Unit: the hand-computed band matrix (§3.4 — nine cases × the
       direction/sign quadrants, equality, zero sota, just-inside/outside,
       uncomputable); grammar table (bound id, each legacy alias, slice,
       index, per-sample form without evidence ⇒ `unevaluated` +
       `per_sample_unavailable`, unrecognized ⇒ `unevaluated`); record keys
       uniform across branches and equal to the description's list (the
       existing pin); `information_gain == distance` only when confirmed.
-- [ ] Unit (per-field partition, §3.4 table): a legacy-only input (no
+      — §10.5 — 58 passed: the 12-cell band matrix, equality, inclusive edge, zero-SOTA, gain rules, the 10-row grammar table, uniform record shape across 5 branches.
+- [x] Unit (per-field partition, §3.4 table): a legacy-only input (no
       `_by_semantics` keys) ⇒ legacy dict/scalar copied byte-identically,
       v2 dict = this outcome only, v2 sum = this gain, accuracy v2-only,
       label V2, pool sizes `{legacy_v1: n, V2: 1}`; an input already
@@ -1434,33 +1490,40 @@ the legacy dict and legacy scalar values; vocab machinery beyond the
       `prediction_evaluation_semantics` on the record AND the digest;
       no scalar anywhere equals legacy + v2 (asserted on a fixture where
       both are non-zero).
-- [ ] Unit (discoveries): `unevaluated` ⇒ no `prediction_*` discovery;
+      — §10.5 — 7 partition cases.
+- [x] Unit (discoveries): `unevaluated` ⇒ no `prediction_*` discovery;
       confirmed/partial/refuted sentences unchanged.
-- [ ] Negative: `evaluate_prediction` without `order` / `bound_metric_id`
+      — §10.5 — `unevaluated`: 5 cases including the no-discovery case and its anti-vacuity twin.
+- [x] Negative: `evaluate_prediction` without `order` / `bound_metric_id`
       is a TypeError (keyword-only, no default); a "higher"/"lower" string
       in the new module would red the Step-06 C5 census (none is written).
-- [ ] Mutation (recorded): (i) drop the `abs` in `band_width` ⇒ the
+      — §10.5 — `TestTheEvaluatorRefusesToGuess::test_order_and_bound_id_are_required_keywords`; the Step-06 C5 census stays green in the C4 targeted suite.
+- [x] Mutation (recorded): (i) drop the `abs` in `band_width` ⇒ the
       higher/negative partial case goes RED; (ii) count `unevaluated` ⇒
       the not-counted test RED; (iii) increment the legacy dict with a new
       outcome ⇒ the legacy-untouched test RED; (iv) add the v2 gain into
       `cumulative_information_gain` ⇒ the never-pooled test RED.
-- [ ] Backward-compat: C1a oracle delta = exactly the declared prediction/
+      — §10.5 — mutations C4-1, C4-2, C4-3 and C4-4 (the legacy scalar pooling the v2 gain), all RED, all restored.
+- [x] Backward-compat: C1a oracle delta = exactly the declared prediction/
       pool fields (enumerated in §10.5); prompt goldens EXACT (the
       synthesis "Cumulative information gain" line renders the INPUT
       legacy value `:1353`, unchanged); proposer tests untouched; the
       Q-09a-3 honesty statement (§3.4) re-checked — if an honest v1/v2
       distinction in the proposer rendering would need a template edit →
       STOP.
-- [ ] Manual (not CI, recorded): `tests/integration/workflows/
+      — §10.5 — delta table verified key-by-key, call manifest byte-identical; Q-09a-3 re-checked at the head — NOT a STOP (see §10.5).
+- [x] Manual (not CI, recorded): `tests/integration/workflows/
       test_vocab_accumulation.py` upgraded to carry the `_by_semantics`
       dicts between its hand-chained runs and re-run in pseudo mode.
+      — §10.5 — UPGRADED and run: rc=0, 5 passed (`/tmp/09a_c4_pseudo.log`). It was RED before the upgrade — F-09a-25.
 
 **Acceptance criteria.**
-- [ ] Every matrix cell (20: 4 direction×sign quadrants × 3 outcomes,
+- [x] Every matrix cell (20: 4 direction×sign quadrants × 3 outcomes,
       equality, zero-sota ×3, just-inside, just-outside, uncomputable ×2)
       and grammar row has a named test; the four mutations are RED; the
       oracle's declared delta matches §3.4; the REC-3 delta is the four
       appended names; descriptions match emitted keys.
+      — §10.5 — every cell and grammar row named; four mutations RED; oracle delta matches §3.4; REC-3 delta is the four appended names.
 
 **Failure and edge cases.** `sota == 0` ⇒ band width 0 (equality partial,
 else confirmed/refuted); `sota is None` (no `current_value`, no override)
@@ -1470,9 +1533,12 @@ malformed `mean(file_vector[a:b])` ⇒ `unevaluated`/`unrecognized` (as
 today's `None`, now named).
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py -q > /tmp/09a_c4.log 2>&1; rc=$?`
-- [ ] `.venv/bin/python -m pytest tests/integration/workflows/test_vocab_accumulation.py -q > /tmp/09a_c4_pseudo.log 2>&1; rc=$?` (manual; recorded only).
-- [ ] `ruff check` + `ruff format --check`.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py -q > /tmp/09a_c4.log 2>&1; rc=$?`
+      — §10.5 — rc=0, 1,671 passed in 395.90s.
+- [x] `.venv/bin/python -m pytest tests/integration/workflows/test_vocab_accumulation.py -q > /tmp/09a_c4_pseudo.log 2>&1; rc=$?` (manual; recorded only).
+      — §10.5 — rc=0, 5 passed after the §5 UPGRADE (F-09a-25).
+- [x] `ruff check` + `ruff format --check`.
+      — §10.5 — clean.
 
 **Commit boundary.** Prediction semantics only; reviewable as "is the
 frozen band implemented exactly and is the version partition honest?".
@@ -1518,42 +1584,49 @@ prediction-memory contract; recorded as Step-10 debt, parent §19).
 Depends on C4.
 
 **Implementation plan.**
-- [ ] Re-read `core/resume.py:101-214, :838-1134, :1393-1447`,
+- [x] Re-read `core/resume.py:101-214, :838-1134, :1393-1447`,
       `run_one_iteration.py:2030-2061, :2122-2126`,
       `model_exploration.py:1949-2002, :2724-2746`; confirm the fingerprint
-      loader's malformed-digest contract and mirror it exactly.
-- [ ] `PredictionMemory` carrier; loader + `RestoredState` field + forward
+      loader's malformed-digest contract and mirror it exactly. — mirrored
+      exactly: FILE-level warn+skip, DATA-level raise, ascending scan,
+      latest-wins overwrite.
+- [x] `PredictionMemory` carrier; loader + `RestoredState` field + forward
       + loop carry + first-input seeding — each a few additive lines beside
       its fingerprint-history sibling.
 
 **Validation plan.**
-- [ ] Unit: loop carry in-process (iteration 2's input equals iteration
+- [x] Unit: loop carry in-process (iteration 2's input equals iteration
       1's digest's four values); restore latest-wins (two committed
       digests; the later wins; a legacy digest without the
       `_by_semantics` keys ⇒ legacy dict/scalar restored + empty v2 dicts;
       a missing digest ⇒ defaults); forward from `run_one_iteration.py`
       (the fingerprint-history arg-plumbing test pattern).
-- [ ] Negative: a digest with malformed pools ⇒ the SAME contract as the
+      — §10.6 — 16 passed + 2 workflow reachability cases (loop carry, latest-wins, legacy digest, defaults, the AST-parsed chain forward).
+- [x] Negative: a digest with malformed pools ⇒ the SAME contract as the
       fingerprint loader (confirmed at re-read; named); the restore never
       touches any other `RestoredState` field (pinned: every other field
       equals the pre-09a restore on the same fixture workspace).
-- [ ] Backward-compat: every existing resume / workflow test green; C1a
+      — §10.6 — the corrupt-pool refusal and the FILE/DATA split; scope pinned as exactly-one-new-`RestoredState`-field plus a read-only loader (rather than a field-by-field diff against a pre-09a restore).
+- [x] Backward-compat: every existing resume / workflow test green; C1a
       oracle unchanged (it never passes through the workflow).
+      — §10.6 — C5 targeted suite rc=0, 4,019 passed; the oracle never passes through the workflow and is unchanged.
 
 **Acceptance criteria.**
-- [ ] A two-iteration pseudo chain accumulates a v2 pool of size 2 with
+- [x] A two-iteration pseudo chain accumulates a v2 pool of size 2 with
       v2-only accuracy and an untouched legacy dict; a chain whose first
       digest is legacy shows `prediction_pool_sizes.legacy_v1` preserved and
       the v2 pool starting at the first 09a iteration; exactly ONE new
       `RestoredState` field; no new loader beyond the one sibling of the
       fingerprint loader.
+      — §10.6 — in-process loop carry + restore tests; and the C4 pseudo integration run now proves the two-iteration accumulation end-to-end (v2 pool 2, accuracy 0.5, legacy pool untouched). Exactly ONE new field, ONE loader (`TestTheScopeStayedNarrow`).
 
 **Failure and edge cases.** Missing/legacy digests; latest-wins across
 gaps; forwarding omitted ⇒ defaults (never a crash); malformed pools ⇒
 the fingerprint loader's contract.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/core tests/unit/workflows tests/unit/sdsc_submission_scripts -q > /tmp/09a_c5.log 2>&1; rc=$?`
+- [x] `.venv/bin/python -m pytest tests/unit/core tests/unit/workflows tests/unit/sdsc_submission_scripts -q > /tmp/09a_c5.log 2>&1; rc=$?`
+      — §10.6 — rc=0, 4,019 passed in 271.61s.
 
 **Commit boundary.** Narrow transport only; reviewable as "does the
 interpreter's memory ride the existing canonical path and nothing else?".
@@ -1590,35 +1663,40 @@ values to project before Step 10 — represented honestly as an empty
 collection; **no placeholder fake values**. Depends on C5.
 
 **Implementation plan.**
-- [ ] Re-read the builder and `run()`'s `new_stats` block (`:1186-1208`).
-- [ ] Models + projections per §3.5; counts keyed by the existing Literal
+- [x] Re-read the builder and `run()`'s `new_stats` block (`:1186-1208`).
+- [x] Models + projections per §3.5; counts keyed by the existing Literal
       values as strings; `refusal_contract_ids` opaque.
-- [ ] `run()`: per-model aggregation for NEW summaries; cached models'
+- [x] `run()`: per-model aggregation for NEW summaries; cached models'
       counts from `_stats` when present (else absent — never invented).
 
 **Validation plan.**
-- [ ] Unit: diagnosis projected from the best and formal records (and
+- [x] Unit: diagnosis projected from the best and formal records (and
       None when absent); failure counts hand-computed on a mixed record
       set (every status value present once; diagnosis ok/absent/invalid/
       missing; one refusal with a contract id; gate actions; provenances);
       `SecondaryMetricEvidence` validator (result+refusal rejected;
       unavailable status); summary default `[]`; digest aggregation in
       both healthy and degraded paths; `_stats` carries counts.
-- [ ] Census: AST — no `secondary_metrics` reference inside any function
+      — §10.7 — 24 passed: per-role diagnosis + its record-contract coupling (F-09a-23), hand-counted mixed record set, missing-vs-absent split, the three secondary states, both digest paths, `_stats` counts.
+- [x] Census: AST — no `secondary_metrics` reference inside any function
       that references `order`/`MetricOrder` in the interpreter surface;
       planted offender RED; behavioural — flipping secondary values leaves
       the pre-compute and builder outputs identical.
-- [ ] Negative: the builder never reads undeclared record keys for
+      — §10.7 — the NARROWED census (F-09a-22) with 3 planted offenders + 1 anti-over-reach case, plus the behavioural inertness test.
+- [x] Negative: the builder never reads undeclared record keys for
       secondaries (a record dict with a stray `secondary_metric_results`
       key yields an empty summary collection — pinned, with the Step-10
       pointer).
-- [ ] Backward-compat: C1a oracle delta = exactly the declared additive
+      — §10.7 — the undeclared-key negative with its Step-10 pointer.
+- [x] Backward-compat: C1a oracle delta = exactly the declared additive
       fields; prompt goldens EXACT; `test_round_health_summary.py:246-261`
       legacy-summary validation still green.
+      — §10.7 — TWO added keys plus the `_stats["failure_counts"]` provision, verified key-by-key; call manifest unchanged.
 
 **Acceptance criteria.**
-- [ ] All new fields typed, appended, threaded into both digest dicts;
+- [x] All new fields typed, appended, threaded into both digest dicts;
       census + planted offender evidence; the REC-3 delta is the two names.
+      — §10.7 — REC-3 `InterpretationOutput` 40 -> 42, append-only; census + planted-offender evidence recorded.
 
 **Failure and edge cases.** Records without diagnosis/refusal/gate data ⇒
 zero counts and `None` diagnosis (named absence, never invented);
@@ -1626,7 +1704,8 @@ unknown future status strings count under their own key (open dict, no
 enum growth required).
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py -q > /tmp/09a_c6.log 2>&1; rc=$?`
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py -q > /tmp/09a_c6.log 2>&1; rc=$?`
+      — §10.7 — rc=0, 4,112 passed in 212.94s.
 
 **Commit boundary.** Projection only; reviewable as "is every new field a
 deterministic read of an existing authority, and are secondaries inert
@@ -1654,46 +1733,53 @@ doc-sync rule (not in this commit unless the operator directs). No
 production code. Depends on C6.
 
 **Implementation plan.**
-- [ ] Re-read `tests/unit/examples/test_step07a_b1_diagnosis_structure_
+- [x] Re-read `tests/unit/examples/test_step07a_b1_diagnosis_structure_
       rung.py:42-187` (the L1 pattern) and the pack governance guards.
-- [ ] Fixtures per §3.6 (declared specs via `metric_spec_from_declaration`
+- [x] Fixtures per §3.6 (declared specs via `metric_spec_from_declaration`
       from the packs' `declared/` JSON; diagnosis from the packs' 07a L1
       fixtures; `_fixture` label + note + provenance listing the
       authorities).
-- [ ] Rung test: parametrized; hand-computed literals; atomicity (only the
+- [x] Rung test: parametrized; hand-computed literals; atomicity (only the
       declared axis varies between TIDMAD and `direction_only_spec`);
       consumer-existence test (§22.23.7); mismatch refusal; secondaries
       inert.
-- [ ] Node `.md`: every flag/default/field quoted against the merged
-      source (the standing doc-sync rule).
+- [x] Node `.md`: every flag/default/field quoted against the merged
+      source (the standing doc-sync rule). — four sections added across
+      C1b/C2/C3/C4/C6 plus the module layout.
 
 **Validation plan.**
-- [ ] Unit: the rung (all three tasks); `tests/unit/examples/` whole
+- [x] Unit: the rung (all three tasks); `tests/unit/examples/` whole
       directory (governance, pack pins, maturity vocabulary);
       `test_pack_governance.py` still green (JSON only under `expected/`;
       no production import of `examples`).
-- [ ] Census: the interpreter-surface direction census (C3), the
+      — §10.8 — rung 31 passed; `tests/unit/examples` 204 passed with pack governance untouched.
+- [x] Census: the interpreter-surface direction census (C3), the
       secondaries census (C6), the semantics-id census — all green with
       their planted-offender evidence re-recorded at the final head.
-- [ ] Backward-compat: oracle + goldens EXACT; the whole interpreter test
+      — §10.8 — all three censuses green; re-run at the final head after the F-09a-17 centralization (the semantics-id census is now a single-authority census with its own planted-offender proof).
+- [x] Backward-compat: oracle + goldens EXACT; the whole interpreter test
       directory.
+      — §10.8 / §10.9 — oracle and goldens EXACT; the whole interpreter directory green (422 passed at the final head).
 
 **Acceptance criteria.**
-- [ ] Pets and DAVIS fixtures load through the REAL builder with their
+- [x] Pets and DAVIS fixtures load through the REAL builder with their
       declared specs; DAVIS best is the SMALLEST mse; TIDMAD partial
       reachable; secondaries present-when-present and inert; `.md`
       current; §10 ledger complete; parent §19/§21 references to 09a
       unchanged (status surfaces synced at freeze/merge).
+      — §10.8 — fixtures compare field-by-field against each pack's OWN `declared/`; DAVIS best is the smallest mse (with its anti-vacuity guard); honesty pins asserted; node `.md` updated; §10 complete.
 
 **Failure and edge cases.** Pack pins over `declared/` untouched (no new
 declared file); STATUS rows keep the maturity vocabulary tokens the pins
 require.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/examples tests/unit/agent/result_interpretation_agent -q > /tmp/09a_c7.log 2>&1; rc=$?`
-- [ ] Then: finalize docs → open the formal master-targeting PR → ONE
+- [x] `.venv/bin/python -m pytest tests/unit/examples tests/unit/agent/result_interpretation_agent -q > /tmp/09a_c7.log 2>&1; rc=$?`
+      — §10.8 — subsumed by the terminal run recorded in §10.9 (rc=0, 9,842 passed), which is a strict superset of this command.
+- [x] Then: finalize docs → open the formal master-targeting PR → ONE
       exact-head CI on the final head (no local full suite, no manual
       dispatch).
+      — §10.9 — docs finalized, PR #238 opened against master, ONE automatic CI per head and no manual dispatch or local full suite.
 
 **Commit boundary.** Fixtures + docs + census; no production change.
 
@@ -1809,15 +1895,873 @@ Open operator questions: **0**.
 
 *(filled per commit during implementation; empty at REVISION 2 — FROZEN)*
 
+### 10.0 Implementation-context provenance
+
+Branch `step09-pr09a-interpreter-evidence-ordering`, created from the frozen
+master `a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e` (== local master ==
+`origin/master` at initialization; clean tree). Design confirmed at that SHA:
+REVISION 2 — FROZEN, 104 `[ ]` / 0 `[x]`, 0 open operator questions.
+
+**Working-rule reconciliation (recorded, not a design change).** §4.0's third
+standing rule ("Before EVERY commit: stop and show the exact diff summary …
+wait for permission (the operator's standing per-commit rule for this child)")
+was written during the design session. The operator's 09a IMPLEMENTATION
+authorization supersedes it explicitly — "Commits are AUTONOMOUS … No
+operator checkpoint is required", and the Step-09a Implementation Working
+Rules state the contract "does NOT introduce: per-commit operator approval".
+Implementation therefore commits autonomously; every other clause of §4.0
+(bounded re-read first, `[x]` only with recorded evidence, pytest verdicts
+from complete log files, prompt-golden delta = STOP) stands unchanged.
+
 ### 10.1 C1a — differential digest oracle
+
+**Commit.** `Step 09a C1a: capture the pre-refactor differential oracle`
+(test-only; zero production files touched — `git status` at commit time
+listed exactly the four new test artifacts).
+
+**What landed.**
+
+| artifact | role |
+|---|---|
+| `tests/unit/agent/result_interpretation_agent/_step09a_fixture.py` | the FIXED input + `RecordingStubBridge` (canned JSON per label; records label + sha256(system) + sha256(user) + `emit_marker` calls) |
+| `…/test_step09a_c1a_differential_oracle.py` | 8 tests: digest golden, persistence parity, workspace-independence/repeatability, call-sequence golden, hardcoded label/marker shape, prompt repeatability, two anti-vacuity perturbation probes |
+| `…/goldens/step09a_differential_digest.json` | the full `InterpretationOutput` (52 KB), `_captured_at` = `a325f33b` |
+| `…/goldens/step09a_differential_llm_calls.json` | the ordered call manifest + markers, same provenance |
+
+**F-09a-1 — the fixture uses THREE model types, not two.** §4.1 specifies
+"TWO new `HyperparamTuningOutput`s"; it also requires a legacy-flat cache
+entry, a modern `CacheEntry`-shaped entry and the `consolidate` path. Source
+reading showed those cannot all sit on two model types while ALSO exercising
+the cache-`_stats` reconstruction loop (`:995-1025`), the Stability-Filter
+skip (`emit_marker`), the cached score-table re-validation (`:1307-1317`) and
+`compress_model_summary` — every one of which needs a model that has a cache
+entry and NO new summary. The fixture therefore keeps the two new tuning
+outputs the design asks for and adds a third, cache-only model:
+
+* `wavenet` — new output + MODERN `CacheEntry`-shaped entry (stored with the
+  `stats`→`_stats` rename `run()` itself performs at `:1259`); active +
+  4 rounds vs 3 cached ⇒ `interpretation.per_model`, then `consolidate` ⇒ two
+  `cache_consolidator.list_merge` calls. Carries the run's only authoritative
+  formal record, a `score_table`, a `file_vector`, a gated collapse round and
+  a `skipped_oom_risk` round.
+* `bidirectional_gated_tcn` — new output, NO cache entry ⇒ cache-miss build;
+  it is the previous proposal's model, so it drives prediction evaluation and
+  all three discovery branches. Its formal record carries NO
+  `scientific_authority`, so `partition_for_aggregation` has both an included
+  and an excluded member.
+* `punet` — cache-only, LEGACY-FLAT shape, outside the active set ⇒ the skip
+  marker, the `_stats` reconstruction loop, the cached-table re-validation and
+  the compression path.
+
+Classified as a BOUNDED deviation (§15): the frozen contract ("a committed,
+CI-portable, FIXED interpretation input whose full deterministic digest and
+LLMBridge call sequence are pinned") is achieved more completely, and nothing
+semantic changes.
+
+**F-09a-2 — the fixture pins candidate validity with the DS5 waiver.**
+`classify_candidate_health` consults `required_blocking_gate_ids()` — i.e. the
+ambient effective HealthGate roster — for any successful record that does not
+carry `health_gate_enabled=False`. A fixture depending on that would make the
+oracle move whenever `configs/health_checks.yaml` or a task health config
+moves, which is exactly the kind of coupling a differential baseline must not
+have. Every success record therefore carries `health_gate_enabled=False` (the
+DS5 self-describing waiver, `candidate_eligibility.py:190-191`); the collapse
+record carries real persisted gate results instead, so `RoundHealth`
+provenance (`gated`), `gate_outcomes` and the collapse fingerprint are still
+on the recorded path.
+
+**F-09a-3 — the workspace is the only run-varying string, and it is
+normalised at the RECORDER.** The tmp workspace is interpolated VERBATIM into
+the synthesis prompt's compressed-model hint (`:641-651`, a MIGRATION-PARITY
+behaviour PB-7 already pins with a frozen literal). It never reaches the
+digest — proven by `test_the_digest_is_workspace_independent_and_repeatable`,
+which runs the fixture through two different workspaces and deep-equals the
+digests — but it would perturb the recorded prompt hash. `RecordingStubBridge`
+replaces it with `<STEP09A_WORKSPACE>` before hashing (§4.1 "Failure and edge
+cases": normalize at the fixture, never in production);
+`test_the_recorded_prompts_are_repeatable_across_workspaces` fails if any
+other interpolation site is missed.
+
+**F-09a-4 — the fixture's prediction values are chosen so C3 and C4 have
+DISJOINT declared deltas.** The design's prediction numbers are used exactly
+(`current_value = -2.55`, actual best `-2.43` ⇒ confirmed, `delta_from_sota =
+0.12`, `information_gain = 0.12`, `cumulative_information_gain` 0.3 → 0.42),
+so v1 and v2 band semantics AGREE here and C4's delta is the version PARTITION
+alone. Separately, the discovery-2 relative band (§2.2 row 19) is
+sign-degenerate for negative SOTA and would otherwise diverge at C3: the
+fixture makes `wavenet` the overall best at `-2.00`, so the strictest SOTA is
+`-2.00`, `|−2.43 − (−2.00)| = 0.43` and `0.05 × |−2.00| = 0.10`. The old rule
+(`best > sota × 0.95`) and the sign-safe replacement
+(`|best − sota| ≤ 0.05 × |sota|`) BOTH resolve to "significantly below SOTA",
+so §4.4's "C1a oracle byte-identical at C3" holds on this fixture. Observed
+sentence at capture: *"bidirectional_gated_tcn scored -2.4300, significantly
+below SOTA (-2.0000). The approach needs revision."*
+
+**Recorded baseline (from the capture run at `a325f33b`).**
+
+```text
+effective_types      ['bidirectional_gated_tcn', 'punet', 'wavenet']
+active set           2/3 — {'bidirectional_gated_tcn', 'wavenet'}  (punet skipped)
+LLM calls            5, in order:
+                       interpretation.per_model        (bidirectional_gated_tcn)
+                       interpretation.per_model        (wavenet)
+                       cache_consolidator.list_merge   (key_findings)
+                       cache_consolidator.list_merge   (bottlenecks)
+                       interpretation.synthesis
+markers              1 — interpretation.per_model_skipped {reason: stable, model_type: punet}
+overall best         -2.0
+prediction           confirmed, delta_from_sota=0.12, actual=-2.43
+discoveries          3 (prediction / score-vs-SOTA / timing)
+runtime vocab        7 entries (3 discoveries, 2 canonical) — ZERO promotions,
+                     so the dedup call site never fires and the sequence length is fixed
+scientific_accuracy  {'confirmed': 0.6667, 'partial': 0.0, 'refuted': 0.3333}  (n=3, v1 pooled)
+cumulative gain      0.42  (0.3 carried + 0.12 this iteration)
+```
+
+**Validation.**
+
+| command | result |
+|---|---|
+| `.venv/bin/python -m pytest …/test_step09a_c1a_differential_oracle.py -q` | **rc=0 — 8 passed in 9.21s** (`/tmp/09a_c1a.log`) |
+| the same, second consecutive run | rc=0 — 8 passed in 7.77s (`/tmp/09a_c1a_run2.log`) |
+| the same, after `ruff format` | rc=0 — 8 passed in 7.81s (`/tmp/09a_c1a_final.log`) |
+| `ruff check` (both new files) | All checks passed |
+| `ruff format --check` (whole node test directory) | 19 files clean |
+| `git status --porcelain` | 4 untracked test artifacts, 0 modified production files |
+
+Anti-vacuity: both perturbation probes are RED against the committed goldens
+(`total_experiments` +1 ⇒ the diff names the field; a zeroed `user_sha256` on
+call 0 ⇒ the diff names it). The goldens contain no `/tmp` path and no
+timestamp (grep at capture time).
+
+**Deviations.** F-09a-1 (bounded, above). None material.
 ### 10.2 C1b — node-local extraction
+
+**Commit.** `Step 09a C1b: extract evidence / ordering / prediction into
+node-private modules`. Structural only; no intended semantic change.
+
+**AST inventory (before → after).**
+
+| surface | at `a325f33b` | after C1b |
+|---|---|---|
+| `result_interpretation_agent.py` | 2,144 lines | **1,826** |
+| `ResultInterpretationAgent.run()` | 874 lines, 114 branch-ish AST nodes | **746 lines, 71** |
+| `nodes/interpretation_helpers.py` | 1,024 lines | **876** |
+| `evidence.py` / `ordering.py` / `prediction.py` | — | 274 / 248 / 215 |
+
+Moved out of `run()`: the deterministic pre-computation (`:943-1056`), the
+enriched-field pre-compute (`:1284-1319`) and the E.4 accounting
+(`:1548-1575`). Moved out of the file: the five evidence-projection functions
+(`:1907-2140`). Moved out of the mixed helpers module: `evaluate_prediction`,
+`_compute_metric`, `_DENOISING_SCORE_ALIASES`.
+
+`run()` now reads as a lifecycle: cold start → effective types + descriptions
+→ `precompute_evidence` → expert advice + health merge → Phase 1 →
+`collect_enriched_fields` → Phase 2 → Phase C → accumulate → build → persist,
+with the degraded fallback unchanged.
+
+**Single-definition census (executable, added this commit).** All twelve moved
+symbols have exactly ONE definition site in the package; zero duplicates. The
+rule is now
+`tests/unit/nodes/test_node_public_boundary.py::test_a_decomposed_node_defines_each_symbol_exactly_once`,
+parametrized over every decomposed node.
+
+**F-09a-5 — the extraction surfaced a dead local in the pre-09a `run()`.**
+`per_model_best_config` was written in three places (`:951`, `:971`, `:1010`,
+`:1033` at `a325f33b`) and READ in none. Once the region became a typed
+boundary, ruff's F841 saw it immediately — subscript assignment had hidden it.
+The boundary still computes and exposes it on `PrecomputedEvidence` (C6's
+projections are its first real consumer); `run()` simply does not unpack it,
+with the reason recorded at the site. Behaviour-identical: an unread value.
+
+**F-09a-6 — `__all__` and `_COMPATIBILITY_REEXPORTS` are now separated for the
+interpreter too.** `__all__` = the 7 PUBLIC names (`ResultInterpretationAgent`,
+`main`, `tuning_output_to_model_run_summary`, the four prompt constants);
+`_COMPATIBILITY_REEXPORTS` = the 9 moved helpers kept resolvable at the old
+path for `__init__.py` and existing `mock.patch` targets. The tuner-only
+`__all__` guard was generalised to every decomposed node, deriving the public
+anchors from the module's own AST (its public classes + `main`) rather than
+hardcoding a node's names.
+
+**F-09a-7 — the first cut of the duplicate-authority rule was too broad.** It
+flagged three TUNER names — `_records` / `_runtime` (module-alias bindings via
+`_import_module`, present in three and two files) and `SIDERIUS_ROOT` (derived
+from `__file__` in two). Those are local bindings of the same object, not two
+implementations that can drift. The rule was narrowed to `def` / `class` plus
+module-level assignments of LITERAL data (so a duplicated lookup table such as
+`_DENOISING_SCORE_ALIASES` is still covered), and the reason is recorded in the
+test's docstring. It then passed on BOTH nodes and went RED on a planted copy.
+
+**F-09a-8 — reaching a private module from a test needs the dotted path.** The
+package `__init__` rebinds `sys.modules["nodes.result_interpretation_agent"]`
+to the MAIN module, so `from nodes.result_interpretation_agent import ordering`
+raises `ImportError` (no such attribute). The repo convention —
+`importlib.import_module("nodes.<node>.<private>")`, as the tuner's conftest
+does — is what the upgraded reachability test uses, and the reason is recorded
+both in the test and in the node `.md`.
+
+**Test dispositions applied.**
+
+| surface | disposition | what changed |
+|---|---|---|
+| `test_vocab_feedback.py`, `test_prediction_evaluation_join.py` | **MOVE** | import `evaluate_prediction` from its new single definition site (`…prediction`), NOT a compatibility alias — the cases still exercise production code |
+| `test_interpretation_agent.py` partition-before-LLM | **UPGRADE** | source-text pin on `getsource(run)` → REACHABILITY: a recording `partition_for_aggregation` patched on `ordering` (the CALLER) plus a recording bridge; asserts both events occurred and that the partition came first |
+| `test_interpretation_agent.py` builder source pin | **KEEP** | `inspect.getsource` follows the moved function — green unchanged |
+| `test_node_public_boundary.py` acyclicity + `__all__` halves | **UPGRADE** | tuner-hardcoded → parametrized over every decomposed node; plus the NEW duplicate-authority rule |
+| `test_health_feedback_p3v1_audit.py` retention-constant scan | **UPGRADE** | single main file → the whole node package (a constant introduced in `evidence.py` would have been invisible), with a ≥4-file anti-vacuity assertion |
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| C1a differential oracle | **rc=0 — 8 passed**, digest and call sequence BYTE-IDENTICAL to the pre-refactor goldens (`/tmp/09a_c1b_oracle.log`) |
+| the full C1b targeted suite (design command) | **rc=0 — 798 passed in 189.09s** (`/tmp/09a_c1b.log`); the pre-upgrade run was `rc=1 — 1 failed, 793 passed`, the single failure being the source pin now upgraded |
+| `git status` on `goldens/` | empty — zero prompt-golden bytes changed |
+| import census | all 4 production importers import cleanly; 10 `__init__` re-exports + 9 compatibility re-exports resolve on the package path |
+| `main --help` | sha256 `bb964c11…b2bcd`, 762 chars, IDENTICAL at `a325f33b` (measured in a throwaway worktree) and at the C1b head |
+| `ruff check` / `ruff format --check` | clean (30 files) |
+| pyright | NOT run locally — CI owns it |
+
+**Mutations / planted offenders (each RED, each restored, `git diff` empty
+after restore, `__pycache__` cleared around every run).**
+
+| # | mutation | expected | observed |
+|---|---|---|---|
+| A | `precompute_evidence` builds the scope itself instead of calling `partition_for_aggregation` | reachability RED | RED — *"the production path never reached partition_for_aggregation — the aggregation authority is not actually wired into run()"* |
+| B | the recorded authority call relocated into `collect_enriched_fields` (which runs AFTER Phase 1) via an import-time alias | ORDER RED | RED — *"the partition must precede every LLM call; observed order: ['llm:interpretation.per_model', 'llm:interpretation.per_model', 'partition', 'llm:interpretation.synthesis']"* |
+| C | `prediction.py` imports the main module | inward half RED | RED — *"result_interpretation_agent: private modules imported the main module: {'prediction.py': [...]}"* |
+| D | `workflows/model_exploration.py` imports `nodes.result_interpretation_agent.evidence` | outward half RED | RED — *"production code outside a node imported that node's private modules: {'workflows/model_exploration.py': ['nodes.result_interpretation_agent.evidence']}"* |
+| E | a copy of `accumulate_information_gain` added to the main module | duplicate-authority RED | RED — naming both `prediction.py` and `result_interpretation_agent.py` |
+
+Mutations C and D name the INTERPRETER, which is what proves the generalised
+boundary rule actually covers the new node rather than only the tuner.
+
+**Deviations.** F-09a-5 and F-09a-7 (both bounded, above). None material; the
+oracle is byte-identical, so no behaviour moved.
+
 ### 10.3 C2 — run MetricSpec transport + contract
+
+**Commit.** `Step 09a C2: transport the run's MetricSpec and fail closed
+without it`.
+
+**Route (parent §2.11 B), as built.**
+
+```text
+ml_hyperparameter_tune_agent.py:541   the ONE derivation (untouched)
+  -> RunBindings.run_metric.spec
+  -> records.finalize_run_output       ONE writer, BOTH dicts
+  -> HyperparamTuningOutput.metric_spec
+  -> reconcile_metric_spec(outputs)    workflow / CLI / preflight / runner / protocol
+  -> InterpretationInput.metric_spec   fail-closed validator
+  -> ordering.bind_run_order           the ONE MetricOrder (consumed from C3)
+  -> InterpretationOutput.metric_identity   provenance echo, both digests
+```
+
+**F-09a-9 — the round-trip finding re-verified at the head, not trusted.**
+The design's §2.4 audit claimed `MetricSpec.model_validate(spec.model_dump())`
+FAILS while `metric_spec_from_declaration(json round-trip) == spec` holds. A
+probe at the implementation head reproduced it exactly: 3 `extra_forbidden`
+errors (the dumped `scoreability` carries the SUBCLASS fields `contract_id`,
+`input_channel_group`, `required_attrs`, `required_storage_dtype`), and the
+rebind round-trips to an equal spec. `MetricSpecField` is therefore load-bearing,
+and `TestTheCarrierSurvivesItsOwnDump::test_a_bare_metric_spec_cannot_revalidate_its_own_dump`
+pins the finding so the machinery cannot outlive its reason.
+
+**F-09a-10 — the fail-closed contract's blast radius was 79 tests, and that is
+the evidence.** Adding the validator turned 79 existing tests red at once.
+Every one was a score-bearing `InterpretationInput` (or a fake tuning output
+feeding one) built with no metric binding — i.e. every one of them had been
+silently relying on the assumed direction. They were UPGRADED per the frozen
+§5 disposition, not weakened: the fixtures now stamp
+`tests.helpers.metric_fixtures.shipped_spec()` (TIDMAD, `higher`), so every
+assertion is unchanged. Three central builders covered most of it
+(`test_dispatcher_wiring._make_input`, `test_interpretation_agent.make_input` /
+`_run_once`, `test_health_feedback_outputs._make_input`) plus 14 inline sites,
+the two calibration entry points, the protocol's `make_tuning_output`, the
+workflow's `_make_tuning_output`, and ONE DataScope preflight seed — the one
+seed in that file designed to REACH interpretation; its sibling LEGACY seeds
+are untouched because they fail earlier, on the invariants they exist to test.
+
+**F-09a-11 — the PR3-L2 preflight failure was the guard, not a defect.**
+`test_pr3_l2p_preflight.py::test_preflight_all_invariants` failed mid-C2 with
+`no_production_file_modified` listing the nine production files this commit
+edits. That is the documented PR3-L2 protocol rule (CLAUDE.md, operator
+decision 2026-08-08): the full suite's verdict is meaningless from a
+work-in-progress tree. It was NOT relaxed; the checkpoint was committed and the
+suite re-run from a clean tree.
+
+**Q-09a-7 made executable.** `TestStep09AddsNoProductionMetricDerivationSite`
+walks the AST of every production module and pins the derivation call-site set
+to exactly `{tuner, denoising_score_single, sandbox_executor, evaluation_metric}`
+— four modules, ZERO added by Step 09 — with an anti-vacuity assertion that the
+walk found them, plus proof that `scripts/pr3_l2_calibration/fixtures.py` is the
+ONE spec-stamping script module and that NO production module imports
+`pr3_l2_calibration`. The fixture stamp is a simulated tuner-output writer; it
+calls the authoritative Step-06 constructor so it cannot drift.
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09a_c2_metric_spec_contract.py` (interpreter side) | **28 passed** — 7 spec-required refusals, 3 named-absence cases, 4 identity-agreement cases, 4 builder-projection cases, 6 reconciliation cases, protocol + CLI reachability, 3 census tests |
+| NEW `test_step09a_c2_output_metric_spec.py` (tuner side) | **8 passed** — live stamping, JSON round trip, the written file, the DEGRADED partial output, the carrier's three input shapes, the pre-Step-06 replay artifact |
+| C1a differential oracle | **8 passed** — delta is EXACTLY one added key, `metric_identity = {"metric_id": "tidmad_denoising_score", "direction": "higher"}`; ZERO existing keys changed or removed; the LLM-call manifest byte-identical |
+| REC-3 schema golden | regenerated: `HyperparamTuningOutput` 46 → 47 (`metric_spec`), `InterpretationOutput` 35 → 36 (`metric_identity`), both APPENDED with prefixes unchanged |
+| `tests/unit/agent/result_interpretation_agent` | 298 passed |
+| C2 targeted suite (design command), from the CLEAN commit | **1,080 passed, 0 failed**. The run made mid-edit reported `1 failed` — `test_pr3_l2p_preflight` — and the guard's offender list named exactly one file: `ordering.py`, an in-flight C3 edit. Re-run against the stashed clean tree at `fcfdb78e`: **rc=0, 1 passed**. Sequencing error on my part (editing production while a suite ran), not a C2 defect; the guard was not relaxed (F-09a-11) |
+| `ruff check` / `ruff format --check` | clean across `agent/ nodes/ execute_tools/ workflows/ scripts/ tests/unit/` |
+| pyright | NOT run locally — CI owns it |
+
+**Mutations (both RED, both restored clean, caches cleared).**
+
+| # | mutation | expected | observed |
+|---|---|---|---|
+| C2-1 | the validator's clause (a) witness scan always returns `None` (i.e. the spec-required rule is dropped) | the spec-less refusals go green-on-bad | RED — all 7 `TestAScoreBearingInputRequiresTheRunSpec` cases fail |
+| C2-2 | reconciliation compares `metric_spec.id` instead of the whole spec | the direction disagreement is waved through | RED — and ONLY `test_two_specs_with_the_SAME_id_but_opposite_direction_are_refused` fails, which is exactly the case id-only comparison misses |
+
+Mutation C2-2 required ADDING that case: the pre-existing unequal-spec test
+used `direction_only_spec()`, which differs in id AND direction, so an id-only
+comparison would still have caught it. The mutation is what exposed the gap —
+recorded because a mutation that changes nothing is a finding about the tests,
+not about the code.
+
+**Deviations.** F-09a-10's scope (79 test upgrades) is larger than the design's
+sentence implies but is exactly the disposition it names. None material.
+
 ### 10.4 C3 — ordering consumers + census
+
+**Commit.** `Step 09a C3: every interpreter direction consumer reads
+MetricOrder`.
+
+**All 21 censused sites migrated.**
+
+| rows | site | migration |
+|---|---|---|
+| 1–8 | `ordering.precompute_evidence` | per-model + overall best / best-valid / worst, over BOTH the summaries loop and the cache-`_stats` loop, via `is_better`. "Worse than" is asked as `is_better(incumbent, candidate)` — never by constructing an opposite-direction order |
+| 9–12 | `evidence.tuning_output_to_model_run_summary` | `order.best` for best / best-valid / best-valid-formal, `order.worst` for the worst round score. The dead `float("-inf")` arm is deleted with the filter it duplicated |
+| 13 | `_render_health_summary_section` | best-scoring round via `is_better`; `_build_per_model_prompt` gained `order=None` and RAISES when the flag is ON without it, so every flag-OFF caller and all 11 prompt goldens are untouched |
+| 17–19 | `generate_discoveries` | strictest SOTA via `order.best`; "beating" via `is_better`; the second sign-degenerate band corrected to `abs(best - sota) <= 0.05 * abs(sota)`; the "(+delta)" text uses a MAGNITUDE so it cannot print `(+-1.0000)` under `lower` |
+| 20 | `select_active_models` | `rank`-keyed sort replacing `(-score, mt)` |
+| 21 | `_cap_knowledge_cache` | `rank`-keyed stable sort replacing `reverse=True` + a `-inf` fill; `worst_sentinel` ranks a scoreless entry last under BOTH directions |
+| 14–16 | the prediction band | **C4's**, by the frozen plan — see the census note below |
+
+`order` is keyword-only with NO default on `precompute_evidence` and on
+`tuning_output_to_model_run_summary`; each carries its own fail-closed clause,
+because the builder is called by the workflow, the CLI, the calibration
+scripts and the protocol BEFORE any `InterpretationInput` exists.
+
+**PARITY: the C1a oracle is BYTE-IDENTICAL across C3** — digest AND LLM-call
+manifest. Twenty-one ordering sites changed shape and nothing observable
+moved, which is the strongest available evidence that the migration is
+faithful under TIDMAD's `higher`.
+
+**F-09a-12 — the margin became a named constant.** `0.05` appeared as a bare
+literal inside the band expression. It is now
+`_DISCOVERY_RELATIVE_BAND = 0.05` with the Q-09a-5 freeze recorded at its
+declaration, and `test_the_frozen_margin_is_still_five_percent` pins it. A
+future edit that retunes the width now has to walk past the freeze note.
+
+**F-09a-13 — the census flags the prediction band, and that is correct.** At
+C3 the AST census reports exactly two remaining offenders,
+`actual > sota` and `actual >= sota * (1.0 - partial_margin)` — rows 14–16,
+which the frozen plan assigns to C4. Rather than exempting `prediction.py`,
+the test names them in `C4_OWNED_COMPARISONS` and asserts the remaining set
+equals it EXACTLY. The claim is therefore falsifiable in both directions: C3
+fails if it left anything else behind, and C4 fails if it does not empty the
+set.
+
+**F-09a-14 — a literal in a COMMENT broke the migrated-literal guard.** The
+first version of the C3 comment quoted the old band expression verbatim, and
+`MIGRATED_TO_THE_ORDER_AUTHORITY` (a substring scan) failed on the comment
+rather than the code. The comment was reworded to describe the old rule
+instead of quoting it. Same class as the `... or True` incident this repo
+already recorded: a scan-based guard cannot tell code from prose, so prose
+must not contain the thing being banned.
+
+**F-09a-15 — the "order=" substring check false-matched `resolved_file_order=`.**
+The mechanical test-threading pass used `"order=" in call`, which is a
+substring of `resolved_file_order=`, so three multi-line builder calls were
+silently skipped and reported as already-threaded. Fixed with a word-boundary
+regex `(?<![\w_])order=`. Worth recording because the same trap applies to any
+future kwarg-threading sweep.
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09a_c3_order_consumers.py` | **39 passed** — per-site `higher` vs `lower` inversion for the builder, the pre-computation (summaries AND cache), the active set, the cache cap, the health best-round and the discovery comparison; tie pins; the four-quadrant sign-safe band matrix; the inclusive edge; the frozen-margin pin; the census + 3 planted-offender probes |
+| C1a differential oracle | **8 passed — BYTE-IDENTICAL** (digest + call manifest), as §4.4 requires |
+| Step-06 C5 boundary/structure | 21 passed; `MIGRATED_TO_THE_ORDER_AUTHORITY` extended with 9 interpreter literals, each asserted ABSENT with `MetricOrder` present |
+| C3 targeted suite (interpreter + schemas + protocol + cold-start + workflows + sdsc + Step-06 C5 + nodes + resume) | **rc=0 — 1,644 passed in 591.55s** (`/tmp/09a_c3.log`) |
+| `ruff check` / `ruff format --check` | clean |
+| pyright | NOT run locally — CI owns it |
+
+**Mutations (both RED, both restored clean, caches cleared).**
+
+| # | mutation | expected | observed |
+|---|---|---|---|
+| C3-1 | row 1 reverted to `s.best_denoising_score > current_best` | the per-site test AND the census RED | **first run: only the CENSUS went red** — see below |
+| C3-2 | `_DISCOVERY_RELATIVE_BAND` retuned 0.05 → 0.10 | the band matrix RED | RED — 3 of the 4 quadrants plus the frozen-margin pin |
+
+**F-09a-16 — mutation C3-1 exposed a real coverage gap, and it was closed.**
+On its first run only the census caught the reverted literal: every test in
+`TestThePrecomputationInverts` asserted OVERALL extremes, so the PER-MODEL
+best (row 1) and per-model worst (row 4) had no per-site coverage at all. A
+census that catches what no localised test catches is a census doing work it
+cannot localise. Two cases were added
+(`test_per_model_best_is_opposite_when_one_model_has_two_summaries`, which
+also pins that the winning CONFIG travels with the winning score, and the
+per-model worst equivalent); re-running C3-1 then turned BOTH the per-site
+test and the census red. This is the mutation earning its place rather than
+confirming what was already known.
+
+**Deviations.** None material. F-09a-12 through F-09a-16 are bounded findings.
+
 ### 10.5 C4 — prediction semantics v2
+
+**Commit.** `Step 09a C4: sign-safe prediction band, unevaluated, and the
+v1/v2 partition`.
+
+**The three defects, all fixed together because they share one call.**
+
+| defect | before | after |
+|---|---|---|
+| direction-blind | `actual > sota` — labels every regression a confirmation under a minimised metric | `order.is_better(actual, sota)` |
+| sign-degenerate | `actual >= sota * (1 - margin)` — scaling a NEGATIVE reference moves it toward zero, so `partial` was UNREACHABLE for every TIDMAD score and a near-miss was recorded as `refuted` | `distance <= partial_margin * abs(sota)`, margin unchanged at 0.05 |
+| uncomputable counted | `outcome="partial"` + a note — entered the accuracy pool and was published as a discovery reading "achieved metric=N/A" | `unevaluated`, counted in NO pool, no discovery |
+
+**Grammar.** `_compute_metric` returns `(value, resolution)`. The default
+metric is the run's BOUND id, not the literal `denoising_score` (one task's
+name hardcoded as the framework default). Resolutions: `bound_id`,
+`legacy_alias` (the FROZEN table, read-only, never grown for a new task),
+`per_sample_slice`, `per_sample_index`, `per_sample_unavailable` (a
+scalar-only task — Pets and DAVIS both are) and `unrecognized`. The old
+single `None` return collapsed the last three into one.
+
+**Version partition (Q-09a-2), exactly per the §3.4 table.** The legacy dict
+and scalar are carried forward and NEVER incremented; the v2 pool and sum
+accumulate under `metric_order_signsafe_v2`; accuracy is v2-only and labelled;
+`prediction_pool_sizes` states both. The degraded path copies every pool
+forward unchanged — no re-basing exists, because the structure itself is
+versioned.
+
+**F-09a-17 — the semantics ids were copied into three modules, and the copies
+are now gone (CLOSED at the pre-merge audit, operator review 2026-08-19).**
+
+*The finding as first recorded.* Declaring the ids in `prediction.py` put them
+where the schema cannot reach: `agent/schemas/interpretation.py` importing the
+node package is a genuine cycle (node → schemas → node), and
+`nodes/interpretation_helpers.py` must not depend on the node package either.
+Both therefore spelled the ids as LITERALS, with an equality test pinning the
+spellings together. Functionally correct, but the shape is
+`one authority → three copies → a test keeping them equal`, which is debt.
+
+*The bounded import-layer audit (operator ruling: centralize only if an
+existing lower-layer home is legal and the move is small).* Five functional
+spellings existed, not three — `core/resume.py:1514` and the node's own
+`result_interpretation_agent.py:1618` also carried literals, neither named in
+the original finding. The audit asked which module every consumer can import
+downward without a cycle, a node-private leak, or a new module:
+
+```text
+agent/schemas/interpretation.py        <- imports agent.schemas.* + execute_tools
+    ^            ^              ^  ^      (NEVER nodes.*)
+    |            |              |  |
+prediction.py  helpers.py  resume.py  <node>.py
+```
+
+`core/resume.py` ALREADY imported this module (`PredictionMemory`), and
+`interpretation_helpers.py` already imports `agent.schemas.proposal`, so the
+edge exists in both cases. The schema also OWNS the fields these values key
+(`prediction_evaluation_semantics`, `prediction_outcomes_by_semantics`,
+`prediction_pool_sizes`), which makes it the contract layer rather than a
+convenience location.
+
+*Disposition: CENTRALIZED.* `PREDICTION_SEMANTICS_SIGNSAFE_V2`,
+`PREDICTION_SEMANTICS_LEGACY_V1`, `COMPARABLE_OUTCOMES` and
+`OUTCOME_UNEVALUATED` are declared ONCE in `agent/schemas/interpretation.py`.
+`prediction.py` imports and re-exports them under the same names, so no
+caller's import site changed; the helpers, the resume path and the node main
+file consume the declaration. NO new module, NO new layer, NO enum system, NO
+loader — four moved constants and four import lines. `import` of all five
+modules verified cycle-free at runtime.
+
+`TestTheSemanticsIdsAgreeAcrossModules` is REPLACED by
+`TestTheSemanticsIdsHaveOneAuthority`, which is strictly stronger: it parses
+each production module and asserts each id is spelled exactly ONCE, outside
+any docstring, in the declaring module only — plus an anti-vacuity check that
+every consumer still imports it. Copying a literal back into `core/resume.py`
+turns it RED (verified), which the old equality pin could not detect.
+
+The schema's DEFAULT remains `legacy_v1`, not v2: a digest written before Step
+09a has no such key and must read as what actually produced it.
+
+**F-09a-18 — the first REC-3 regeneration broke the append-only rule.** The
+four C4 fields were declared before `metric_identity`, so the golden's ordered
+prefix moved (`prefix_unchanged=False`) even though nothing was removed. The
+Step-00 harness requires fields to be APPENDED so the existing prefix is
+untouched; the block was moved to the end of `InterpretationOutput` and the
+prefix check re-run green. Caught only because the regeneration script prints
+the prefix check rather than diffing counts.
+
+**F-09a-19 — a hand-computed expectation was wrong, and the test caught it.**
+`test_the_same_input_gets_opposite_verdicts_under_opposite_directions`
+originally asserted that actual −2.43 vs SOTA −2.55 is `refuted` under
+`lower`. It is `partial`: distance 0.12 ≤ 0.05 × 2.55 = 0.1275. The CODE was
+right and the assertion was sloppy. The case now uses −2.20 (distance 0.35,
+genuinely outside the band) so the two directions really do land on opposite
+verdicts. Recorded because "hand-computed" is only a virtue if the hand
+computation is checked.
+
+**Declared C1a oracle delta (all four parts predicted by §4.5).**
+
+| part | delta |
+|---|---|
+| added | `prediction_evaluation_semantics = "metric_order_signsafe_v2"`; `prediction_outcomes_by_semantics = {V2: {confirmed:1, partial:0, refuted:0}}`; `cumulative_information_gain_by_semantics = {V2: 0.12}`; `prediction_pool_sizes = {legacy_v1: 2, V2: 1}` |
+| reverted to the INPUT value | `prediction_outcomes_history` 2/0/1 → **1/0/1** (the legacy pool is no longer incremented); `cumulative_information_gain` 0.42 → **0.3** (the legacy scalar no longer accumulates) |
+| recomputed | `scientific_accuracy` {0.6667, 0.0, 0.3333} → **{1.0, 0.0, 0.0}**, v2-only |
+| reshaped | `prediction_evaluation` gains `metric_resolution`, `notes`, `prediction_evaluation_semantics` — the UNIFORM key set |
+| unchanged | the LLM-call manifest, byte-identical |
+
+The outcome itself is still `confirmed` with gain 0.12: v1 and v2 agree on
+this fixture by construction (F-09a-4), so the delta is the version PARTITION
+alone.
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09a_c4_prediction_semantics.py` | **58 passed** — the 12-cell band matrix over all four direction×sign quadrants, the reachable negative `partial`, equality, the inclusive edge, zero-SOTA, the gain rules, `unevaluated` (5 cases incl. no-discovery + its anti-vacuity twin), the 10-row grammar table, the uniform record shape across 5 branches, 7 partition cases, and the cross-module id pins |
+| `tests/unit/agent/result_interpretation_agent` | 396 → **404 passed** |
+| REC-3 golden | `InterpretationOutput` 36 → 40, append-only prefix verified |
+| C4 targeted suite | **rc=0 — 1,671 passed in 395.90s** (`/tmp/09a_c4.log`) |
+| `ruff check` / `ruff format --check` | clean |
+| pyright | NOT run locally — CI owns it |
+
+**Mutations (all RED, all restored clean, caches cleared).**
+
+| # | mutation | observed |
+|---|---|---|
+| C4-1 | drop `abs()` from `band_width` | RED — 5 cases incl. the negative `partial`, equality and the inclusive edge |
+| C4-2 | count `unevaluated` as comparable | RED — `test_it_increments_neither_pool` |
+| C4-3 | pool the v2 counts into the legacy size | RED — 2 partition cases |
+| C4-4 | the legacy scalar accumulates the v2 gain (`run()`:1627) | RED — 15 cases including the C1a differential oracle |
+
+C4-1's first attempt silently applied NOTHING: its anchor matched the
+DOCSTRING copy of the band, not the executable line, and the script's assert
+fired. The mutation was redone against line 204 by index. A mutation that
+does not apply reports "green" and proves the opposite of what it claims —
+recorded as a hygiene note.
+
+C4-4 is worth reading precisely: the C4 unit file itself stayed GREEN, because
+it owns `accumulate_information_gain` in isolation while the mutation sits at
+the `run()` composition site. The property is caught by the agent-level tests
+and the differential oracle instead. Unlike F-09a-16 this is NOT a coverage
+gap — the never-pooled claim is asserted where the pooling would actually
+happen — but it is recorded so nobody reads "the C4 file is green" as "the
+mutation survived".
+
+**F-09a-25 — a planned test UPGRADE was never executed, and only the pre-merge
+ledger audit found it.** §5 assigns C4 an UPGRADE of
+`tests/integration/workflows/test_vocab_accumulation.py` (carry the
+`_by_semantics` dicts between its two hand-chained runs). The implementation
+never touched the file. Because integration tests are deliberately outside CI,
+NOTHING was red: the file simply sat broken on the branch — all 5 tests failed,
+9 score-bearing `InterpretationInput` constructions refused by C2's fail-closed
+contract, and the accumulation assertions still written against the legacy
+pool. It was found by checking the box against its evidence rather than by a
+failing run, which is the argument for the audit itself.
+
+Fixed as the disposition specified: every input stamps `shipped_spec()` (the
+same upgrade the 79 unit tests received, F-09a-10), the two hand-chained runs
+carry BOTH pools, and the assertions moved to the v2 pool with the legacy dict
+pinned UNTOUCHED across both iterations (`{confirmed:0, partial:0, refuted:0}`
+after a refuted and a confirmed outcome), accuracy 0.5 computed on the 2
+comparable v2 outcomes, and `prediction_pool_sizes` stating both. **rc=0, 5
+passed.** This is now the only test that proves the v1/v2 partition survives a
+real two-iteration agent chain rather than a single call — which is also the
+evidence C5's "two-iteration pseudo chain" acceptance criterion asked for.
+
+**Q-09a-3 re-checked at the head (the frozen §3.4 STOP condition).** The
+proposer's renderer (`ml_model_proposal_agent.py:1146-1165`) reads
+`scientific_accuracy` (now v2-only), `cumulative_information_gain` (the frozen
+legacy scalar) and `prediction_outcomes_history` (legacy; its sum is the
+rendered `N`). Confirmed at the implementation head: the rendered
+`Scientific accuracy (N=…)` line therefore pairs v2 FRACTIONS with a v1
+DENOMINATOR. This is exactly the consequence §3.4 declares and freezes, not a
+new discovery. Judgement, stated explicitly because the ruling demands one: an
+honest v1/v2 distinction here does NOT require a template edit *in 09a* — the
+digest already carries `prediction_evaluation_semantics` and
+`prediction_pool_sizes`, so the honest data is present and only the proposer's
+rendering is stale, and the proposer's rendering surface is 09b's. **No STOP.**
+Carried forward as a named 09b item.
+
+**Deviations.** None material.
+
 ### 10.6 C5 — prediction-memory transport (existing canonical path)
+
+**Commit.** `Step 09a C5: carry the interpreter's prediction memory through
+the existing canonical path`.
+
+**Why it was needed at all.** Parent erratum E2: at the pre-09a anchor NO
+production path carried or restored `prediction_outcomes_history` or
+`cumulative_information_gain`. Every production digest's pool therefore held
+exactly ONE outcome and the proposer's "Prediction Track Record" always
+rendered `N=1` — the research-accounting feature had been inert since it was
+written. C4's versioned pools would have been dead schema in the same way.
+
+**The five additive hops, each beside its fingerprint-history sibling.**
+
+| hop | where |
+|---|---|
+| the carrier | `PredictionMemory` in `agent/schemas/interpretation.py` — frozen, exactly the four ruled fields, no persistence methods |
+| the loader | `core/resume.load_latest_prediction_memory`, a sibling of `load_latest_fingerprint_history`: same digest source, same ascending scan, same latest-wins overwrite, same FILE-level warn+skip / DATA-level raise split |
+| the restored field | ONE additive `RestoredState.prediction_memory` |
+| the chain forward | `run_one_iteration.py`, one line below `restored_collapse_fingerprint_history` |
+| the loop carry + seeding | `model_exploration.py`: `restored_prediction_memory` seeds the loop variable; each iteration's digest REPLACES it; the four values are passed on the next `InterpretationInput` |
+
+**F-09a-20 — mutation C5-3 initially SURVIVED, and the gap was real.**
+Making the restore ACCUMULATE instead of overwrite left every test green,
+because `test_latest_wins_rather_than_accumulating` exercised only the v2 pool
+and gain while the mutation summed the LEGACY dict. A loader that fabricated a
+legacy history would have shipped. The case now asserts ALL FOUR carried
+fields; re-running C5-3 turns it RED.
+
+**F-09a-21 — mutation C5-2 exposed a hop with NO test at all.** Deleting the
+`run_one_iteration.py` forward leaves the restore loading state that nothing
+consumes: every `core/` test passed, every workflow test passed, and the carry
+silently stopped at the process boundary — exactly the pre-09a defect. Three
+tests were added, asserting the kwarg by PARSING the `run_workflow(...)` call
+(AST) rather than scanning for a substring, since F-09a-14 already showed a
+substring can be satisfied by a comment; plus an anti-vacuity check that the
+parse found the real call, and a signature check that the callee declares the
+keyword.
+
+**Scope, kept narrow and made checkable.** `TestTheScopeStayedNarrow` pins:
+exactly ONE new `RestoredState` field (and that the four values live INSIDE
+the carrier rather than as four restored fields); the carrier holds exactly
+the four ruled fields; there is exactly ONE prediction-memory loader in
+`core/resume.py` (a second restore path would take the shape of a second
+loader); the loader only READS, so the digest remains the ONE store; and the
+carrier is frozen, so restored state cannot become a second source of truth.
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `tests/unit/core/test_step09a_c5_prediction_transport.py` | **16 passed** — restore of all four fields, latest-wins across two digests, the legacy-digest case (v1 restored, v2 NOT invented), first-iteration default, missing/unreadable warn+skip, the corrupt-pool refusal, the three forward tests, and five scope pins |
+| NEW workflow reachability (2 cases in `TestRunWorkflowMultiIteration`) | iteration 2 receives iteration 1's digest with the v1/v2 separation intact; a restored memory seeds the FIRST iteration of a chain subprocess |
+| C5 targeted suite (core + workflows + sdsc + interpreter + schemas) | **rc=0 — 4,019 passed in 271.61s** (`/tmp/09a_c5.log`) |
+| `ruff check` / `ruff format --check` | clean |
+| pyright | NOT run locally — CI owns it |
+
+**Mutations (all RED after the gaps above were closed; all restored clean).**
+
+| # | mutation | observed |
+|---|---|---|
+| C5-1 | delete the workflow loop carry | RED immediately |
+| C5-2 | delete the chain forward | initially caught by NOTHING (F-09a-21); RED after the forward tests were added |
+| C5-3 | restore accumulates instead of latest-wins | initially SURVIVED (F-09a-20); RED after the latest-wins case covered all four fields |
+
+Two of the three mutations found a genuine hole. That is the value the
+technique is supposed to provide, and it is recorded rather than smoothed
+over.
+
+**Deviations.** None material. The design's "two-iteration pseudo chain"
+acceptance is covered by the in-process loop-carry test plus the restore
+tests, which together exercise both hops deterministically; no pseudo
+integration run was needed.
+
 ### 10.7 C6 — evidence projection
+
+**Commit.** `Step 09a C6: project diagnosis, failure counts and the secondary
+contract`.
+
+**What reaches the summary now.** `best_training_diagnosis` and
+`formal_training_diagnosis` (verbatim, ONE PER ROLE — a best trial round and
+the formal round are different experiments), `failure_counts`, and the
+`secondary_metrics` contract. Per-model aggregates are threaded into BOTH
+digest paths, and `_stats["failure_counts"]` keeps a quiet model's counts
+across iterations exactly as `round_health_counts` does.
+
+**No new failure taxonomy (parent §5).** Every key comes from an authority
+that already owns it. `diagnosis_missing` is counted SEPARATELY from `absent`:
+"no diagnosis object" and "the diagnosis says the history was absent" are
+different facts about different records, and folding them would report
+training that never ran as training that ran without validation.
+
+**Q-09-7 = B held.** The builder leaves `secondary_metrics` EMPTY —
+pinned as a positive claim, with the Step-10 pointer — and
+`TestQ097StaysBinding` asserts no secondary field was added to
+`ExperimentRecord` or `HyperparamTuningOutput` and that no production module
+defines a secondary evaluator/loader/binder.
+
+**F-09a-22 — the first secondaries census was too coarse and would have
+distorted the code.** It asked "does a function that reads `order` also
+mention secondaries?" and flagged `run` and
+`tuning_output_to_model_run_summary` — both of which legitimately RANK primary
+scores and PROJECT secondary evidence in the same scope. Satisfying that test
+would have meant splitting the projection into a contrived second function.
+The rule was narrowed to what it actually claims: a secondary may not be an
+operand of a comparison, an argument to a `MetricOrder` method, or a sort key.
+Three planted offenders (one per shape) prove it bites, and a fourth case
+proves it does NOT flag the legitimate projection.
+
+**F-09a-23 — the record contract constrains what a diagnosis fixture may
+be.** `ExperimentRecord` enforces `training_diagnosis.state != "absent" =>
+training_history is not None` (`hyperparam_tuning.py:759-763`), so a fixture
+asserting the PROJECTION cannot invent an `ok` diagnosis on a record with no
+training results. Rather than working around it silently, the projection cases
+use states the record admits and
+`test_a_non_absent_diagnosis_requires_its_history` asserts the coupling
+directly — it is what makes "carried verbatim" safe.
+
+**F-09a-24 — mutation C6-3 survived twice, and the second survival was a real
+gap.** The first attempt was a no-op (it read an attribute that does not
+exist, so it fabricated nothing and proved nothing — the same hygiene failure
+as C4-1). The second attempt fabricated a secondary only for records carrying
+a `metric_result`, and SURVIVED because the emptiness test used a bare record
+that never reached that branch. A "the builder leaves it empty" claim has to
+be made on the record shape production actually produces; the case is now
+parametrized over a bare AND a fully-scored record, and the mutation is RED on
+the latter.
+
+**Declared C1a oracle delta.** TWO keys added — `per_model_failure_counts`
+(the two NEW summaries; `punet` is cached with no stored counts and is
+therefore ABSENT rather than reported as zero failures) and
+`per_model_secondary_metrics` (EMPTY) — plus the additive
+`_stats["failure_counts"]` cache key on the two models that got a fresh
+per-model call, which is the design's own §3.5 provision. Verified key-by-key
+that NOTHING else inside `model_knowledge_cache` moved; the LLM-call manifest
+is unchanged.
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09a_c6_evidence_projection.py` | **24 passed** — the per-role diagnosis projection and its record-contract coupling, a hand-counted mixed record set, the missing-vs-absent split, the opaque refusal contract id, the open-dict future-status case, the DEGRADED-path reachability, the three secondary states and their exclusivity, the two emptiness cases, the undeclared-key negative, the narrowed census with 3 planted offenders + 1 anti-over-reach case, the behavioural inertness test, and the three Q-09-7 pins |
+| REC-3 golden | `InterpretationOutput` 40 → **42**, append-only — the design's §11.2 predicted final total |
+| C6 targeted suite | **rc=0 — 4,112 passed in 212.94s** (`/tmp/09a_c6.log`) |
+| `ruff check` / `ruff format --check` | clean |
+| pyright | NOT run locally — CI owns it |
+
+**Mutations (all RED after F-09a-24 was closed; all restored clean).**
+
+| # | mutation | observed |
+|---|---|---|
+| C6-1 | stop projecting the formal diagnosis | RED |
+| C6-2 | fold `diagnosis_missing` into `absent` | RED — 2 cases |
+| C6-3 | the builder fabricates a placeholder secondary | RED after the emptiness claim was made on a fully-scored record (F-09a-24) |
+
+**Deviations.** None material.
+
 ### 10.8 C7 — three-task rung + docs
+
+**Commit.** `Step 09a C7: three-task L1 interpretation evidence, censuses and
+docs`.
+
+**The rung.** `tests/unit/examples/test_step09a_interpretation_evidence_rung.py`
+drives the SAME production boundaries —
+`tuning_output_to_model_run_summary`, `ordering.precompute_evidence`,
+`prediction.evaluate_prediction` — over three materially different
+declarations:
+
+| task | primary | per-sample | declared secondaries |
+|---|---|---|---|
+| TIDMAD | `tidmad_denoising_score`, higher, negative | present | none |
+| Pets | `accuracy`, higher, [0,1] | scalar-only | `macro_f1` (higher), scored |
+| DAVIS | `mse`, **LOWER** | scalar-only | `psnr` (higher) scored, `mae` (lower) **unavailable** |
+
+DAVIS is the load-bearing row: under `lower` the best score is the SMALLEST
+number, so a direction literal anywhere on the interpreter's path reports the
+worst model as the best. Every expectation is a hand-computed literal, and
+`test_the_hand_computed_davis_expectation_is_the_smallest_value` is the
+anti-vacuity guard — without it a DAVIS expectation computed the TIDMAD way
+would make the parametrized rung pass while proving nothing.
+
+`mae` is DECLARED BUT UNAVAILABLE on purpose: the contract's third state, a
+named absence that must never render as a number.
+
+**Why the fixtures cannot drift.** They embed the packs' OWN `declared/`
+metric JSON rather than restating it, and
+`test_the_fixture_uses_the_packs_OWN_declared_specs` compares them
+field-by-field against `declared/`. A fixture that hand-copied a declaration
+could silently disagree with the thing it claims to represent.
+
+**Honesty pins.** Each fixture's `_fixture` note must contain "NOT a real
+tuning output" AND name **Step 10** as the owner of the production half —
+asserted, because a reader who skips the note would otherwise take the
+secondaries block for a production capability. Pack `STATUS.md` rows say the
+same in the maturity vocabulary the existing pins require, and JSON was added
+ONLY under `expected/` (no new `declared/` file), so the pack-governance
+guards are untouched.
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09a_interpretation_evidence_rung.py` | **31 passed** — direction, identity, precompute agreement, the prediction band, per-sample capability, secondaries present-when-present with their own directions, secondary inertness and the identity-mismatch refusal, each across all three tasks; plus atomicity, the two honesty pins, the declared-spec comparison and the no-`examples`-import census |
+| `tests/unit/examples` | **204 passed** — pack governance, maturity vocabulary and the existing rungs unaffected |
+| C7 / terminal targeted suite | see §10.9 |
+
+**Deviations.** None material.
 ### 10.9 Final validation + PR + exact-head CI
+
+**Terminal local validation at the final executable head.**
+
+```text
+python -m pytest tests/unit/agent tests/unit/core tests/unit/workflows \
+    tests/unit/nodes tests/unit/examples tests/unit/sdsc_submission_scripts \
+    tests/unit/execute_tools tests/unit/scripts -q > /tmp/09a_terminal.log 2>&1; rc=$?
+```
+
+**rc=0 — 9,842 passed, 1 skipped, 0 failed in 923.33s.** Verdict read from the
+LOG, not a wrapper's exit status.
+
+*Honest note on its breadth.* This is wider than the standing evidence-economy
+rule prefers — eight top-level unit directories is close to the full local
+suite, and the rule's default is 0 local full-suite runs because the canonical
+repository-wide evidence is the ONE exact-head PR CI. It was run once, at the
+final executable head, because Step 09a changed schemas (`HyperparamTuningOutput`,
+`InterpretationInput`/`Output`, `ModelRunSummary`), a restore path and a
+workflow signature — a fan-out the per-commit targeted suites do not bound. It
+is recorded as what it is rather than relabelled "targeted", and it is NOT
+repeated: the PR CI below is the canonical run.
+
+**Static checks.** `ruff check` and `ruff format --check` clean across
+`nodes/ agent/ core/ workflows/ execute_tools/ scripts/ tests/ examples/`.
+**pyright was NOT run locally and is NOT claimed** — CI owns it.
+
+**Gates.** Gate 1 = 0, Gate 2 = 0, real LLM = 0, real training/inference = 0,
+GPU = 0, external API cost = 0 — exactly the frozen §7 disposition.
+
+**Exact-head CI, and the two heads that preceded the final one.** pyright is
+the one check this repository cannot run from the system node (v10.19 cannot
+execute pyright's vendored bundle), so the first two PR heads failed on it:
+
+| head | CI run | result |
+|---|---|---|
+| `fd9739fb` | 32310070368 | FAILURE — 5 pyright errors: the package `__init__` did not re-export `reconcile_metric_spec` / `InterpretationContractError` (runtime works through the `sys.modules` rebind; a type checker reads the explicit import list), and a set comprehension widened `MetricDirection` to `str` |
+| `39afca72` | 32310562165 | FAILURE — 1 pyright error: the replacement `set[MetricIdentity]` is not provably hashable, because `frozen=True` lives in a runtime `ConfigDict` |
+| `44121989` | 32311341230 | **SUCCESS** — fixed by declaring `set[tuple[str, MetricDirection]]`, which keeps hashable entries AND the Literal |
+
+After run 32311341230 the local pyright limitation was solved rather than
+worked around: a modern node (v26) ships inside `~/.cache/pyright-python/
+nodeenv`, so `PATH=…/nodeenv/bin pyright` runs the real checker locally.
+**0 errors, 13 warnings** at the final head — the same 13 pre-existing
+warnings CI reports, none in files this PR touches. This is recorded because
+§10.3-§10.8 each say "pyright NOT run locally — CI owns it", which was true
+when written and is no longer the whole story.
+
+**Pre-merge closeout (operator review 2026-08-19).** Two bounded items, both
+applied at the final head: the §4 ledger synchronization (47 boxes ticked
+against already-recorded evidence — which surfaced F-09a-25, a planned test
+UPGRADE that had never been executed and had left an integration file broken
+outside CI), and the F-09a-17 single-authority audit (CENTRALIZED; see §10.5).
+The closeout ran only the narrow owning suites — the C4 file (60 passed), the
+interpreter directory (422 passed), the pseudo integration file (5 passed),
+schemas + protocols + boundary (867 passed), resume + workflows (325 passed),
+ruff, and pyright — never the broad sweep again.
 
 ## 11. Final adversarial consistency pass (ruling §12 — 24 attacks) and freeze record
 

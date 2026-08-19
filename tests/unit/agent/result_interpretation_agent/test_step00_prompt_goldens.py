@@ -18,6 +18,7 @@ from pathlib import Path
 from agent.cache_consolidator import _LIST_MERGE_SYSTEM_PROMPT, consolidate
 from agent.schemas.cache_entry import CacheEntry, ConsolidatedFinding
 from agent.schemas.interpretation import InterpretationInput, VocabEntry
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import ResultInterpretationAgent
 from nodes.result_interpretation_agent.result_interpretation_agent import (
     DEDUP_SYSTEM_PROMPT,
@@ -29,9 +30,14 @@ from nodes.result_interpretation_agent.result_interpretation_agent import (
 )
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
+from tests.helpers.metric_fixtures import shipped_spec
 from tests.unit.agent.result_interpretation_agent.test_health_prompt_parity import (
     _summary_collapse,
 )
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder
+#: as a REQUIRED keyword. TIDMAD is `higher`, so expectations are unchanged.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 GOLDENS = Path(__file__).parent / "goldens"
 
@@ -47,6 +53,7 @@ class TestPB7PerModelFlagOn:
             expert_advice_str="Focus on stability.",
             human_advice=None,
             structured_health_feedback=True,
+            order=_STEP09A_ORDER,
         )
         assert_golden(
             rendered,

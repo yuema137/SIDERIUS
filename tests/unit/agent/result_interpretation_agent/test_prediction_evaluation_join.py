@@ -35,7 +35,23 @@ import json
 import pytest
 
 from agent.schemas.interpretation import InterpretationOutput
-from nodes.interpretation_helpers import evaluate_prediction, generate_discoveries
+from execute_tools.metric_order import MetricOrder
+from nodes.interpretation_helpers import generate_discoveries
+
+# Step 09a C1b: `evaluate_prediction` moved to the node's private `prediction`
+# module (its single definition site); `generate_discoveries` stayed in the
+# helpers module. The JOIN this file pins spans both, which is the point.
+from nodes.result_interpretation_agent.prediction import evaluate_prediction
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
+
+#: Step 09a C4 — a NEW prediction's default metric is the run's BOUND id,
+#: never the literal `denoising_score` (one task's name, hardcoded).
+_BOUND_METRIC_ID = shipped_spec().id
 
 #: The SOTA the proposal was written against, and the value it predicted.
 SOTA = 5.0
@@ -65,6 +81,8 @@ def _evaluate(actual: float, predicted_value: float | None = PREDICTED) -> dict:
         _prediction(predicted_value),
         {"best_denoising_score": actual},
         current_sota=SOTA,
+        order=_STEP09A_ORDER,
+        bound_metric_id=_BOUND_METRIC_ID,
     )
 
 
@@ -76,6 +94,7 @@ def _discover(evaluation: dict, best_score: float | None) -> list:
         best_score=best_score,
         inherited_components=[],
         proposed_vocab_links=[],
+        order=_STEP09A_ORDER,
     )
 
 
@@ -119,7 +138,13 @@ class TestThePredictedValueReachesTheDiscovery:
         from the main one independently -- which is how this defect would
         come back at half strength.
         """
-        evaluation = evaluate_prediction(_prediction(), {}, current_sota=None)
+        evaluation = evaluate_prediction(
+            _prediction(),
+            {},
+            current_sota=None,
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert "notes" in evaluation, "fixture no longer reaches the degenerate branch"
         assert evaluation["predicted_value"] == PREDICTED
 

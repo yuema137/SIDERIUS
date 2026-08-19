@@ -1,0 +1,39 @@
+{
+  "_captured_at": "captured at a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e (Step-09a C1a base, UNMODIFIED production code); uncommitted at capture time: test-only files (tests/unit/agent/result_interpretation_agent/_step09a_fixture.py, tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py)",
+  "calls": [
+    {
+      "label": "interpretation.per_model",
+      "system_sha256": "4416e487cb221c312a508763fb1e28f1ca8b3a8e90c963e38e9aa6a60891cf9e",
+      "user_sha256": "da591ff0825e895879ce570df097956688865a4d87673e2435331c75eda7c865"
+    },
+    {
+      "label": "interpretation.per_model",
+      "system_sha256": "4416e487cb221c312a508763fb1e28f1ca8b3a8e90c963e38e9aa6a60891cf9e",
+      "user_sha256": "7a6fada23fab9f1925b31f7edca323618505e489be8d79bbf1a7828d5f086701"
+    },
+    {
+      "label": "cache_consolidator.list_merge",
+      "system_sha256": "7313f9641a1fc7d109a2b10cd52344d9f608292ad8b751c1678d5b4fcec2cc72",
+      "user_sha256": "719abe9e7d27437b2b7dba8dd2e7cf2763a3d573195396028daf7b1be4f35cb8"
+    },
+    {
+      "label": "cache_consolidator.list_merge",
+      "system_sha256": "7313f9641a1fc7d109a2b10cd52344d9f608292ad8b751c1678d5b4fcec2cc72",
+      "user_sha256": "f517ba1192d602dfddc0bcc18370c8dcd6398dce564d5f370c9fbe958beca0d3"
+    },
+    {
+      "label": "interpretation.synthesis",
+      "system_sha256": "94546e72a8a29f5f2b3e9911d43927982bb9758698e7d0e2ac2cd5feb8e28baf",
+      "user_sha256": "67842e75efe11fe14c6a5f1f87c889a37fbbc113126b2d5b7d3489899280f1d1"
+    }
+  ],
+  "markers": [
+    {
+      "label": "interpretation.per_model_skipped",
+      "extra": {
+        "reason": "stable",
+        "model_type": "punet"
+      }
+    }
+  ]
+}

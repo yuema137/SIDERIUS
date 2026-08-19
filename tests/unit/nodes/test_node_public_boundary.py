@@ -133,14 +133,28 @@ def test_no_private_module_imports_its_own_nodes_main_module(node: Path):
     assert offenders == {}, f"{node.name}: private modules imported the main module: {offenders}"
 
 
-def test_the_tuner_nodes_private_modules_form_an_acyclic_graph():
-    """The concrete graph C7 established, pinned so a future move cannot
-    reintroduce the ``records`` <-> ``runtime`` cycle the first cut produced.
+def _decomposed_nodes() -> list[Path]:
+    """Every node that actually HAS private modules.
+
+    Step 09a C1b: the two halves below were hardcoded to the tuner, the only
+    decomposed node at the time. The interpreter is the second, and a rule that
+    only ever examines one node is not a rule — so they are parametrized over
+    whichever nodes are decomposed, and the tuner's concrete graph stays
+    covered by being one of them.
+    """
+    return [n for n in _node_packages() if _private_modules(n)]
+
+
+@pytest.mark.parametrize("node", _decomposed_nodes(), ids=lambda p: p.name)
+def test_a_decomposed_nodes_private_modules_form_an_acyclic_graph(node: Path):
+    """Pinned so a future move cannot reintroduce the ``records`` <->
+    ``runtime`` cycle the tuner's first cut produced.
 
     ``records`` BUILDS records; ``runtime`` EMITS them. That is why ``runtime``
-    may import ``records`` and never the reverse.
+    may import ``records`` and never the reverse. The interpreter's graph is
+    main -> {evidence, ordering, prediction} with ``ordering`` permitted to
+    reach ``evidence``; the same one-way rule applies.
     """
-    node = NODES_DIR / "ml_hyperparameter_tune_agent"
     edges: dict[str, set[str]] = {}
     names = {p.stem for p in _private_modules(node)}
     for p in _private_modules(node):
@@ -169,30 +183,88 @@ def test_the_tuner_nodes_private_modules_form_an_acyclic_graph():
             visit(n, [])
 
 
-def test_the_tuner_main_module_separates_public_api_from_compatibility_reexports():
+@pytest.mark.parametrize("node", _decomposed_nodes(), ids=lambda p: p.name)
+def test_a_decomposed_node_defines_each_symbol_exactly_once(node: Path):
+    """MUTATION TARGET: COPY a helper into a private module and leave the
+    original in the main file.
+
+    That is the failure mode an extraction is most likely to produce and least
+    likely to notice: both definitions are green, both are imported somewhere,
+    and the two drift. "Moved" has to mean the definition site MOVED — the main
+    module re-exports by IMPORT, never by keeping a second copy.
+
+    Step 09a C1b (design §4.2 acceptance: "every moved symbol is DEFINED
+    exactly once ... never a copy, no duplicate authority").
+
+    Scope: ``def`` / ``class``, plus module-level assignments of LITERAL data
+    (a duplicated lookup table drifts exactly like a duplicated function). It
+    deliberately does NOT cover a name bound to a call result: the tuner binds
+    its own private modules as ``_records = _import_module(...)`` in three
+    files and derives ``SIDERIUS_ROOT`` from ``__file__`` in two, and those are
+    local bindings of the same thing, not two implementations of it. The first
+    cut of this rule flagged them, which is how the scope was settled.
+    """
+    literal = (ast.Dict, ast.Set, ast.List, ast.Tuple, ast.Constant)
+    definitions: dict[str, list[str]] = {}
+    for module in [node / f"{node.name}.py", *_private_modules(node)]:
+        tree = ast.parse(module.read_text(encoding="utf-8"))
+        for stmt in tree.body:
+            if isinstance(stmt, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                definitions.setdefault(stmt.name, []).append(module.name)
+            elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, literal):
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        definitions.setdefault(target.id, []).append(module.name)
+
+    duplicated = {n: sorted(where) for n, where in definitions.items() if len(where) > 1}
+    assert duplicated == {}, (
+        f"{node.name}: these names are defined in more than one module of the "
+        f"node package — a re-export must be an import, not a copy: {duplicated}"
+    )
+
+
+@pytest.mark.parametrize("node", _decomposed_nodes(), ids=lambda p: p.name)
+def test_a_decomposed_main_module_separates_public_api_from_compatibility_reexports(node: Path):
     """``__all__`` must not quietly redefine the node's public API.
 
-    C7 re-exported several dozen moved private helpers from the main module so
-    existing importers and ``mock.patch`` targets kept working. That is a
+    A decomposition re-exports moved private helpers from the main module so
+    existing importers and ``mock.patch`` targets keep working (the tuner's C7
+    moved several dozen; the interpreter's C1b moved nine). That is a
     COMPATIBILITY scaffold, not an interface: leaving it undistinguished would
     make "what is this node's public API" unanswerable again, which is the
     condition the decomposition set out to remove.
+
+    Step 09a C1b generalised this from the tuner to every decomposed node. The
+    public anchors are derived from the node's own source rather than
+    hardcoded: its agent CLASS and its ``main`` entrypoint.
     """
-    main = NODES_DIR / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
+    main = node / f"{node.name}.py"
     src = main.read_text(encoding="utf-8")
 
     public = re.search(r"^__all__ = \[(.*?)^\]", src, re.S | re.M)
-    assert public, "the main module must declare __all__"
+    assert public, f"{node.name}: the main module must declare __all__"
     names = re.findall(r'"([^"]+)"', public.group(1))
-    assert names, "__all__ must not be empty"
+    assert names, f"{node.name}: __all__ must not be empty"
 
-    assert "HyperparamTuningAgent" in names and "main" in names
+    tree = ast.parse(src)
+    classes = [
+        n.name for n in tree.body if isinstance(n, ast.ClassDef) and not n.name.startswith("_")
+    ]
+    assert classes, f"{node.name}: the main module defines no public class"
+    missing = [c for c in classes if c not in names]
+    assert missing == [], (
+        f"{node.name}: the node's public class(es) must appear in __all__ — "
+        f"otherwise the declared surface omits the thing callers actually use: {missing}"
+    )
+    assert "main" in names, f"{node.name}: the CLI entrypoint belongs in __all__"
+
     private = [n for n in names if n.startswith("_")]
     assert private == [], (
-        "__all__ is the node's PUBLIC surface; private helpers re-exported for "
-        f"compatibility belong in _COMPATIBILITY_REEXPORTS, not here: {private}"
+        f"{node.name}: __all__ is the node's PUBLIC surface; private helpers "
+        f"re-exported for compatibility belong in _COMPATIBILITY_REEXPORTS, "
+        f"not here: {private}"
     )
     assert "_COMPATIBILITY_REEXPORTS" in src, (
-        "the compatibility re-exports must be named as such, so a reader can "
-        "tell the node's contract from its scaffolding"
+        f"{node.name}: the compatibility re-exports must be named as such, so "
+        "a reader can tell the node's contract from its scaffolding"
     )

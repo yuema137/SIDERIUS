@@ -28,11 +28,18 @@ from typing import Any, Optional
 import pytest
 
 from agent.schemas.interpretation import ModelRunSummary
+from execute_tools.metric_order import MetricOrder
 from nodes.interpretation_helpers import (
     compress_model_summary,
     select_active_models,
     should_recall_per_model,
 )
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 # ---------------------------------------------------------------------------
 # Test fixtures
@@ -120,6 +127,7 @@ class TestSelectActiveModels:
             top_k=3,
             last_n=2,
             score_delta_threshold=0.05,
+            order=_STEP09A_ORDER,
         )
 
         # Top-3: mt_e (5.0), mt_d (4.0), mt_c (3.0)
@@ -134,14 +142,16 @@ class TestSelectActiveModels:
             "rank_me": _entry(best=1.0),
             "no_score": _entry(best=None),
         }
-        active = select_active_models(cache, current_iter_summaries=[], top_k=2, last_n=0)
+        active = select_active_models(
+            cache, current_iter_summaries=[], top_k=2, last_n=0, order=_STEP09A_ORDER
+        )
         assert active == {"rank_me"}
 
     def test_last_n_truncates_to_first_n(self):
         """When current_iter_summaries > last_n, take the first N (caller-ordered)."""
         cache: dict[str, dict] = {}
         summaries = [_summary(f"mt_{i}", best=1.0) for i in range(5)]
-        active = select_active_models(cache, summaries, top_k=0, last_n=2)
+        active = select_active_models(cache, summaries, top_k=0, last_n=2, order=_STEP09A_ORDER)
         # First two only.
         assert active == {"mt_0", "mt_1"}
 
@@ -150,7 +160,7 @@ class TestSelectActiveModels:
         cache: dict[str, dict] = {}  # no prior data
         summaries = [_summary("brand_new", best=10.0)]
         active = select_active_models(
-            cache, summaries, top_k=3, last_n=1, score_delta_threshold=0.05
+            cache, summaries, top_k=3, last_n=1, score_delta_threshold=0.05, order=_STEP09A_ORDER
         )
         assert active == {"brand_new"}  # via Last-N, not Delta
 
@@ -160,7 +170,7 @@ class TestSelectActiveModels:
         # Score went 2.0 → 2.01: |Δ|=0.01 < 0.05 threshold.
         summaries = [_summary("stable", best=2.01)]
         active = select_active_models(
-            cache, summaries, top_k=0, last_n=0, score_delta_threshold=0.05
+            cache, summaries, top_k=0, last_n=0, score_delta_threshold=0.05, order=_STEP09A_ORDER
         )
         # Top-K=0 disables ranking, Last-N=0 disables recency, Δ below threshold:
         # active set is empty.
@@ -175,7 +185,7 @@ class TestSelectActiveModels:
         cache = {"changed": _entry(best=2.0)}
         summaries = [_summary("changed", best=2.5)]  # |Δ|=0.5 == threshold
         active = select_active_models(
-            cache, summaries, top_k=0, last_n=0, score_delta_threshold=0.5
+            cache, summaries, top_k=0, last_n=0, score_delta_threshold=0.5, order=_STEP09A_ORDER
         )
         assert active == {"changed"}
 
@@ -186,22 +196,26 @@ class TestSelectActiveModels:
             "apple": _entry(best=5.0),
             "mango": _entry(best=5.0),
         }
-        active = select_active_models(cache, current_iter_summaries=[], top_k=2, last_n=0)
+        active = select_active_models(
+            cache, current_iter_summaries=[], top_k=2, last_n=0, order=_STEP09A_ORDER
+        )
         # Ties → sorted lexicographically → "apple", "mango" win Top-2.
         assert active == {"apple", "mango"}
 
     def test_empty_cache_and_no_summaries(self):
         cache: dict[str, dict] = {}
-        active = select_active_models(cache, current_iter_summaries=[], top_k=3, last_n=2)
+        active = select_active_models(
+            cache, current_iter_summaries=[], top_k=3, last_n=2, order=_STEP09A_ORDER
+        )
         assert active == set()
 
     def test_negative_thresholds_rejected(self):
         with pytest.raises(ValueError, match="non-negative"):
-            select_active_models({}, [], top_k=-1)
+            select_active_models({}, [], top_k=-1, order=_STEP09A_ORDER)
         with pytest.raises(ValueError, match="non-negative"):
-            select_active_models({}, [], last_n=-1)
+            select_active_models({}, [], last_n=-1, order=_STEP09A_ORDER)
         with pytest.raises(ValueError, match="non-negative"):
-            select_active_models({}, [], score_delta_threshold=-0.1)
+            select_active_models({}, [], score_delta_threshold=-0.1, order=_STEP09A_ORDER)
 
 
 # ---------------------------------------------------------------------------

@@ -49,7 +49,8 @@
     "consecutive_fail_rounds_at_exit",
     "termination_reason",
     "started_at",
-    "finished_at"
+    "finished_at",
+    "metric_spec"
   ],
   "interpretation_output": [
     "model_types",
@@ -86,7 +87,14 @@
     "per_model_collapse_fingerprints",
     "collapse_fingerprint_history",
     "is_degraded",
-    "evolution_stats"
+    "evolution_stats",
+    "metric_identity",
+    "prediction_evaluation_semantics",
+    "prediction_outcomes_by_semantics",
+    "cumulative_information_gain_by_semantics",
+    "prediction_pool_sizes",
+    "per_model_secondary_metrics",
+    "per_model_failure_counts"
   ],
   "trial_config": [
     "is_trial",

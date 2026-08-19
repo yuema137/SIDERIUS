@@ -46,9 +46,16 @@ from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.ordering import resolve_ordering
 from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from sdsc_submission_scripts.run_one_iteration import write_manifest
+from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 SCOPE = list(range(20))
 PERMUTATION = [4, 6, 5, 9, 7, 8, 0, 1, 2, 3, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
@@ -245,7 +252,7 @@ def test_agent_proposal_wins_when_no_override(tmp_path):
     assert tune_input.order_strategy_override is None
     assert tune_input.file_order_override is None
 
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="sequential", source="agent_proposal")
     assert manifest["ordering_by_experiment"][0]["resolved_file_order"] == PERMUTATION
 
@@ -267,7 +274,7 @@ def test_operator_override_wins_and_is_not_attributed_to_the_agent(tmp_path):
 
     assert tune_input.order_strategy_override == "shuffle"
 
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="shuffle", source="operator_override")
 
     entry = manifest["ordering_by_experiment"][0]
@@ -288,7 +295,7 @@ def test_default_shuffle_when_nothing_is_proposed_or_overridden(tmp_path):
     tune_input, manifest = _run_iteration(str(tmp_path), output)
 
     assert tune_input.order_strategy_override is None
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="shuffle", source="default")
     assert manifest["ordering_by_experiment"][0]["proposed_order_strategy"] is None
     assert manifest["ordering_by_experiment"][0]["ordering_proposal_rejected"] is False
@@ -314,7 +321,7 @@ def test_rejected_proposal_without_override_falls_back_and_is_recorded(tmp_path)
     output = _tune_output(_record("r1", 1, ordering))
     _tune_input, manifest = _run_iteration(str(tmp_path), output)
 
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="shuffle", source="default")
 
     entry = manifest["ordering_by_experiment"][0]
@@ -334,7 +341,7 @@ def test_rejected_proposal_with_override_records_both(tmp_path):
         file_order_override=PERMUTATION,
     )
 
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="sequential", source="operator_override")
 
     entry = manifest["ordering_by_experiment"][0]
@@ -361,7 +368,7 @@ def test_two_rounds_with_different_ordering_stay_distinct_end_to_end(tmp_path):
     _tune_input, manifest = _run_iteration(str(tmp_path), output)
 
     assert len(manifest["ordering_by_experiment"]) == 2
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     _assert_agree(manifest, summary, resolved="sequential", source="agent_proposal", index=0)
     _assert_agree(manifest, summary, resolved="shuffle", source="default", index=1)
     assert [e["exp_id"] for e in manifest["ordering_by_experiment"]] == ["r1", "r2"]

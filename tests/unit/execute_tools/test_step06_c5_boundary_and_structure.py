@@ -210,14 +210,55 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
         "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         "current_score > best_score",
     ),
+    # --- Step 09a C3: the INTERPRETER surface, same rule, same evidence ---
+    # One literal per migrated site family. Recorded as reached rather than
+    # deleted, so the migration leaves a trace that a later edit cannot
+    # silently undo.
+    (
+        "nodes/result_interpretation_agent/ordering.py",
+        "s.best_denoising_score > current_best",
+    ),
+    (
+        "nodes/result_interpretation_agent/ordering.py",
+        "s.worst_denoising_score < current_worst",
+    ),
+    (
+        "nodes/result_interpretation_agent/ordering.py",
+        "best > overall_best_score",
+    ),
+    (
+        "nodes/result_interpretation_agent/evidence.py",
+        "max(valid_records, key=_required_denoising_score)",
+    ),
+    (
+        "nodes/result_interpretation_agent/evidence.py",
+        "min(valid_scores)",
+    ),
+    (
+        "nodes/interpretation_helpers.py",
+        "scored.sort(key=lambda x: (-x[1], x[0]))",
+    ),
+    (
+        "nodes/interpretation_helpers.py",
+        "max(sota_from_prediction, overall_best_score)",
+    ),
+    (
+        "nodes/interpretation_helpers.py",
+        "best_score > sota_score * 0.95",
+    ),
+    (
+        "workflows/model_exploration.py",
+        'scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"), reverse=True)',
+    ),
 )
 
 
 @pytest.mark.parametrize("relative, literal", MIGRATED_TO_THE_ORDER_AUTHORITY)
-def test_the_migrated_tuner_consumers_no_longer_hold_their_literal(relative, literal):
+def test_the_migrated_consumers_no_longer_hold_their_literal(relative, literal):
     source = (REPO_ROOT / relative).read_text(encoding="utf-8")
     assert literal not in source, (
-        f"{relative} still contains {literal!r}: Step 07 PR 07b routed this consumer through "
-        f"MetricOrder, so the hardcoded higher-is-better comparison must be gone"
+        f"{relative} still contains {literal!r}: this consumer was routed through "
+        f"MetricOrder (tuner: Step 07 PR 07b; interpreter: Step 09a C3), so the "
+        f"hardcoded higher-is-better comparison must be gone"
     )
     assert "MetricOrder" in source

@@ -15,16 +15,23 @@ from agent.schemas.health_feedback import (
     HealthFeedbackRetentionPolicy,
     merge_fingerprint_history,
 )
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _format_healthgate_evidence_block,
 )
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.metric_fixtures import shipped_spec
 from tests.helpers.tuner_source import tuner_node_source
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,
     _output,
     _record,
 )
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 REPO = Path(__file__).resolve().parents[4]
 SIG = "output_diversity_blocking:n_unique_int8_values=1"
@@ -61,18 +68,28 @@ class TestPolicyIsAlwaysAParameter:
         assert sig.parameters["policy"].default is inspect.Parameter.empty
 
     def test_renderers_import_no_retention_constant(self):
-        for renderer in (
-            REPO / "nodes/result_interpretation_agent/result_interpretation_agent.py",
+        # Step 09a C1b: scan the whole node PACKAGE, not one file. The
+        # interpreter's decomposition means a future retention constant could
+        # be introduced in `evidence.py` / `ordering.py` / `prediction.py` and
+        # the single-file scan would never see it — the guard would still be
+        # green while the rule it protects was broken.
+        renderers = [
+            *sorted((REPO / "nodes/result_interpretation_agent").glob("*.py")),
             REPO / "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
-        ):
+        ]
+        assert len(renderers) >= 4, (
+            "expected the interpreter package to contain its main module plus "
+            f"the C1b private modules; found {[p.name for p in renderers]}"
+        )
+        for renderer in renderers:
             src = renderer.read_text()
             # A `... or True` assertion on the bare window name used to sit
             # here. It was neutered because the name may legitimately appear
             # in a comment, which left an assertion that could never fail --
             # a live false negative dressed as coverage. The two checks below
             # are the binding ones, and they were always the real content.
-            assert "HealthFeedbackRetentionPolicy(" not in src
-            assert "DEFAULT_HISTORY_WINDOW" not in src
+            assert "HealthFeedbackRetentionPolicy(" not in src, renderer
+            assert "DEFAULT_HISTORY_WINDOW" not in src, renderer
 
 
 class TestWindowedNotLifetimeEndToEnd:
@@ -164,7 +181,8 @@ class TestBuilderAlignmentWithAttemptFailures:
                     counts_toward_completed_rounds=False,
                 ),
                 _record("r4", status="skipped_time_risk", denoising_score=None),
-            )
+            ),
+            order=_STEP09A_ORDER,
         )
         n = len(summary.round_scores)
         assert n == 4

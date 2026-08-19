@@ -26,28 +26,89 @@ from agent.llm_bridge import LLMBridge
 from agent.schemas.cache_entry import CacheEntry
 from agent.schemas.health_feedback import (
     CollapseFingerprint,
-    RoundHealth,
-    build_collapse_fingerprint,
-    build_gate_outcomes,
-    classify_round_provenance,
     merge_fingerprint_history,
 )
-from agent.schemas.hyperparam_tuning import ExperimentRecord, serialize_expert_advice
+from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
+    MetricIdentity,
     ModelRunSummary,
-    RoundOrdering,
 )
-from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from execute_tools.scientific_aggregation import partition_for_aggregation
+from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import get_model_description
 
+# Node-private modules (Step 09a C1b). Imported EAGERLY and at module scope on
+# purpose: `__init__.py` rebinds `sys.modules["nodes.result_interpretation_agent"]`
+# to THIS module, so after that rebind the package path has no `__path__` and a
+# lazy `import nodes.result_interpretation_agent.evidence` would fail. Binding
+# them while `__init__` is still executing puts each submodule in `sys.modules`
+# for good. (Same rule the tuner's C7 decomposition follows.)
+from nodes.result_interpretation_agent.evidence import (
+    InterpretationContractError,
+    _collect_health_evidence,
+    _required_denoising_score,
+    _round_health,
+    _round_ordering,
+    reconcile_metric_spec,
+    tuning_output_to_model_run_summary,
+)
+from nodes.result_interpretation_agent.ordering import (
+    bind_run_order,
+    collect_enriched_fields,
+    precompute_evidence,
+)
+from nodes.result_interpretation_agent.prediction import (
+    PREDICTION_SEMANTICS_LEGACY_V1,
+    PREDICTION_SEMANTICS_SIGNSAFE_V2,
+    accumulate_information_gain,
+    accumulate_prediction_outcomes,
+    evaluate_prediction,
+    prediction_pool_sizes,
+)
+
 if TYPE_CHECKING:
-    from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
     from agent.schemas.proposal import VocabEntry
+
+__all__ = [
+    "DEDUP_SYSTEM_PROMPT",
+    "HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS",
+    "PER_MODEL_SYSTEM_PROMPT",
+    "SYNTHESIS_SYSTEM_PROMPT",
+    "InterpretationContractError",
+    "ResultInterpretationAgent",
+    "main",
+    "reconcile_metric_spec",
+    "tuning_output_to_model_run_summary",
+]
+
+#: COMPATIBILITY ONLY — not part of the node's contract.
+#:
+#: C1b moved these helpers into the node-local submodules. They are re-exported
+#: here because the package `__init__` and a body of tests reach them at this
+#: path, and because `mock.patch("nodes.result_interpretation_agent.X")` must
+#: keep resolving to the object production actually calls.
+#:
+#: They are NOT documented in result_interpretation_agent.md, they are NOT a
+#: promise to callers, and NO new production consumer may be added: import the
+#: owning submodule from inside the node instead. The list is expected to
+#: shrink, never grow.
+#:
+#: Listing them here also KEEPS them alive: without a reference the linter
+#: prunes the re-export and the package `__init__` fails at import.
+_COMPATIBILITY_REEXPORTS = (
+    _collect_health_evidence,
+    _required_denoising_score,
+    _round_health,
+    _round_ordering,
+    accumulate_information_gain,
+    accumulate_prediction_outcomes,
+    collect_enriched_fields,
+    evaluate_prediction,
+    precompute_evidence,
+)
 
 # ---------------------------------------------------------------------------
 # Phase 1 — Per-model summarization
@@ -178,12 +239,17 @@ not opinions. Rules:
   from. Never transfer evidence between models."""
 
 
-def _render_health_summary_section(summary: ModelRunSummary) -> list[str]:
+def _render_health_summary_section(summary: ModelRunSummary, *, order: MetricOrder) -> list[str]:
     """Deterministic ``### HealthGate summary`` body (V19 PR 3 §3.6 item 2).
 
     Reads ONLY the ``round_health`` data — never LLM prose. Returns [] when
     every round is legacy/unknown with nothing to report, so the caller can
     skip the header entirely.
+
+    ``order`` (Step 09a C3) picks the BEST-SCORING round whose recording
+    diagnostics are rendered. That selection is a direction question: under a
+    lower-is-better metric the old ``s > best_score`` literal would surface the
+    WORST round's diagnostics while calling them the best round's.
     """
     counts = {"valid": 0, "invalid": 0, "unknown": 0}
     fingerprint_rounds: dict[str, list[int]] = {}
@@ -217,7 +283,7 @@ def _render_health_summary_section(summary: ModelRunSummary) -> list[str]:
     best_idx = None
     best_score = None
     for i, s in enumerate(summary.round_scores):
-        if s is not None and (best_score is None or s > best_score):
+        if s is not None and (best_score is None or order.is_better(s, best_score)):
             best_idx, best_score = i, s
     if best_idx is not None and best_idx < len(summary.round_health):
         recording = {
@@ -243,6 +309,7 @@ def _build_per_model_prompt(
     human_advice: str | None = None,
     *,
     structured_health_feedback: bool = False,
+    order: MetricOrder | None = None,
 ) -> str:
     """Build the user prompt for a single model's summarization.
 
@@ -252,7 +319,19 @@ def _build_per_model_prompt(
     byte-identical to the pre-PR3 prompt, proven by golden-file equality
     in ``test_health_prompt_parity.py`` — every PR 3 addition below must
     stay behind this flag.
+
+    ``order`` (Step 09a C3) is needed ONLY by that flag-ON section, which
+    picks a best-scoring round. It therefore keeps a ``None`` default so every
+    flag-OFF caller and every prompt golden is untouched — and raises when the
+    flag is ON without it, rather than rendering a round chosen by an assumed
+    direction.
     """
+    if structured_health_feedback and order is None:
+        raise ValueError(
+            "structured_health_feedback=True renders the best-scoring round's "
+            "diagnostics, which requires the run's MetricOrder. Pass order=; the "
+            "direction is never assumed."
+        )
     lines = [
         f"## Model: {summary.model_type}",
         f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
@@ -355,8 +434,11 @@ def _build_per_model_prompt(
     # validity counts, distinct fingerprints with occurrence counts and
     # round indices, and recording-only diagnostics for the best round.
     # Rendered ONLY when there is something to say (no empty headers).
-    if structured_health_feedback and summary.round_health:
-        health_lines = _render_health_summary_section(summary)
+    # `order is not None` is guaranteed by the guard at the top of this
+    # function whenever the flag is on; restating it here is what lets a type
+    # checker see the narrowing, and it can never change behaviour.
+    if structured_health_feedback and order is not None and summary.round_health:
+        health_lines = _render_health_summary_section(summary, order=order)
         if health_lines:
             lines += ["", "### HealthGate summary", *health_lines]
 
@@ -906,6 +988,48 @@ class ResultInterpretationAgent:
                 ),
             )
 
+        # --- Bind the run's ordering authority (Step 09a C2) ---
+        # ONE MetricOrder for the whole iteration, from the spec the run
+        # already resolved and transported. `None` only where the input
+        # contract admitted a spec-less input (cold start / scoreless); a
+        # score-bearing input without a spec was refused at construction, so
+        # nothing below can silently fall back to "higher is better".
+        run_order = bind_run_order(inp)
+
+        def _require_order(what: str) -> MetricOrder:
+            """The bound order, or a refusal naming what needed it.
+
+            ``run_order`` is ``None`` only on the cold-start / scoreless path
+            the contract admits. Anything below that actually ranks says so.
+            """
+            if run_order is None:
+                raise InterpretationContractError(
+                    f"{what} requires the run's MetricOrder, but this input was admitted "
+                    "without a MetricSpec (cold start / scoreless). Refusing rather than "
+                    "assuming a direction."
+                )
+            return run_order
+
+        def _require_metric_identity(what: str) -> MetricIdentity:
+            """The bound metric's identity, or a refusal naming what needed it.
+
+            Step 09a C4: a NEW prediction's default metric is the run's bound
+            id — never the literal ``denoising_score``, which was one task's
+            name hardcoded in the framework.
+            """
+            if run_metric_identity is None:
+                raise InterpretationContractError(
+                    f"{what} requires the run's bound metric identity, but this input "
+                    "was admitted without a MetricSpec (cold start / scoreless)."
+                )
+            return run_metric_identity
+
+        run_metric_identity = (
+            MetricIdentity(metric_id=inp.metric_spec.id, direction=inp.metric_spec.direction)
+            if inp.metric_spec is not None
+            else None
+        )
+
         # --- Effective model types ---
         # Union of: new summaries + explicitly listed types + cache (models from prior iterations)
         effective_types = sorted(
@@ -940,119 +1064,57 @@ class ResultInterpretationAgent:
             # Priority 3: load from description.md on disk (built-in or plugin models)
             model_descriptions[mt] = get_model_description(mt)
 
-        # --- Deterministic pre-computation ---
-        # New models: read from inp.summaries.
-        # Cached models: read from inp.model_knowledge_cache[mt]["_stats"].
-        per_model_best: dict[str, float | None] = {}
-        per_model_best_valid: dict[str, float | None] = {}
-        per_model_raw_best_health_validity: dict[str, str] = {}
-        per_model_worst: dict[str, float | None] = {}
-        per_model_formal: dict[str, float | None] = {}
-        per_model_best_config: dict[str, dict | None] = {}
-        overall_best_score: float | None = None
-        overall_best_valid_score: float | None = None
-        overall_worst_score: float | None = None
-        overall_best_config: dict[str, Any] | None = None
-        overall_best_valid_config: dict[str, Any] | None = None
-        total_experiments = 0
+        # --- Deterministic pre-computation (ordering.precompute_evidence) ---
+        # New models are read from inp.summaries, cached models from their
+        # `_stats` block, and the scientific-aggregation authority filter runs
+        # inside the boundary — all BEFORE any LLM call. Unpacked into the
+        # local names the rest of the lifecycle already reads.
+        evidence = precompute_evidence(
+            inp.summaries, inp.model_knowledge_cache, effective_types, order=run_order
+        )
+        per_model_best = evidence.per_model_best
+        per_model_best_valid = evidence.per_model_best_valid
+        per_model_raw_best_health_validity = evidence.per_model_raw_best_health_validity
+        per_model_worst = evidence.per_model_worst
+        per_model_formal = evidence.per_model_formal
+        # `evidence.per_model_best_config` is deliberately NOT unpacked: the
+        # pre-C1b `run()` built that dict in three places and read it in none
+        # (verified at a325f33b). The boundary still computes and exposes it —
+        # C6's projections are its first real consumer — but reintroducing a
+        # dead local here would be noise, not parity.
+        overall_best_score = evidence.overall_best_score
+        overall_best_valid_score = evidence.overall_best_valid_score
+        overall_worst_score = evidence.overall_worst_score
+        overall_best_config = evidence.overall_best_config
+        overall_best_valid_config = evidence.overall_best_valid_config
+        total_experiments = evidence.total_experiments
+        per_model_summary_input = evidence.per_model_summary_input
+        aggregation_scope = evidence.aggregation_scope
 
-        # Map model_type → ModelRunSummary (new models only)
-        per_model_summary_input: dict[str, ModelRunSummary] = {}
-
-        for s in inp.summaries:
-            mt = s.model_type
-            per_model_summary_input[mt] = s
-            total_experiments += s.completed_rounds
-
-            if s.best_denoising_score is not None:
-                current_best = per_model_best.get(mt)
-                if current_best is None or s.best_denoising_score > current_best:
-                    per_model_best[mt] = s.best_denoising_score
-                    per_model_best_config[mt] = s.best_config
-                if overall_best_score is None or s.best_denoising_score > overall_best_score:
-                    overall_best_score = s.best_denoising_score
-                    overall_best_config = s.best_config
-            per_model_best_valid[mt] = s.best_valid_denoising_score
-            per_model_raw_best_health_validity[mt] = s.best_raw_health_validity
-            if s.best_valid_denoising_score is not None and (
-                overall_best_valid_score is None
-                or s.best_valid_denoising_score > overall_best_valid_score
-            ):
-                overall_best_valid_score = s.best_valid_denoising_score
-                overall_best_valid_config = s.best_valid_config
-
-            if s.worst_denoising_score is not None:
-                current_worst = per_model_worst.get(mt)
-                if current_worst is None or s.worst_denoising_score < current_worst:
-                    per_model_worst[mt] = s.worst_denoising_score
-                if overall_worst_score is None or s.worst_denoising_score < overall_worst_score:
-                    overall_worst_score = s.worst_denoising_score
-
-            if s.formal_score is not None:
-                per_model_formal[mt] = s.formal_score
-
-        # Reconstruct stats for cached models from their _stats block
-        for mt, entry in inp.model_knowledge_cache.items():
-            if mt in per_model_summary_input:
-                continue  # new summary takes precedence
-            stats = entry.get("_stats", {})
-            best = stats.get("best_denoising_score")
-            best_valid = stats.get("best_valid_denoising_score")
-            worst = stats.get("worst_denoising_score")
-            total_experiments += stats.get("completed_rounds", 0)
-
-            per_model_best[mt] = best
-            per_model_best_valid[mt] = best_valid
-            per_model_raw_best_health_validity[mt] = stats.get(
-                "best_raw_health_validity", "unknown"
-            )
-            per_model_worst[mt] = worst
-            per_model_best_config[mt] = stats.get("best_config")
-            if stats.get("formal_score") is not None:
-                per_model_formal[mt] = stats["formal_score"]
-
-            if best is not None and (overall_best_score is None or best > overall_best_score):
-                overall_best_score = best
-                overall_best_config = stats.get("best_config")
-            if best_valid is not None and (
-                overall_best_valid_score is None or best_valid > overall_best_valid_score
-            ):
-                overall_best_valid_score = best_valid
-                overall_best_valid_config = stats.get("best_valid_config") or stats.get(
-                    "best_config"
-                )
-            if worst is not None and (overall_worst_score is None or worst < overall_worst_score):
-                overall_worst_score = worst
-
-        # Fill None for any model type still missing
-        for mt in effective_types:
-            per_model_best.setdefault(mt, None)
-            per_model_best_valid.setdefault(mt, None)
-            per_model_raw_best_health_validity.setdefault(mt, "unknown")
-            per_model_worst.setdefault(mt, None)
-            per_model_best_config.setdefault(mt, None)
-
-        # --- V20 PR D (D-C5): the scientific aggregate excludes
-        #     non-authoritative formal results, and says so ---
-        # Deterministic and BEFORE any LLM call. `per_model_formal` is the
-        # formal-score aggregate that reaches the synthesis prompt, so a
-        # non-authoritative formal score left in it would inform a
-        # scientific claim — which is exactly what the authority verdict
-        # exists to prevent.
-        #
-        # The excluded results are NOT deleted: they stay on the summaries
-        # and in the typed scope below, which the report renders. §4.7
-        # keeps that rendering deterministic rather than asking the model
-        # to mention it — a model may simply not, and exclusion text inside
-        # a prompt can steer the interpretation it then writes.
-        #
-        # Cached-model entries (from `_stats`, no verdict) resolve to
-        # `unreconstructable_legacy` and are excluded, which is the frozen
-        # rule for anything missing the authority contract.
-        aggregation_scope = partition_for_aggregation(inp.summaries)
-        _authoritative = set(aggregation_scope.included)
-        per_model_formal = {
-            mt: score for mt, score in per_model_formal.items() if mt in _authoritative
+        # --- Step 09a C6: per-model evidence projection ---
+        # Deterministic reads of persisted record fields, computed BEFORE the
+        # LLM block for the same structural reason the health evidence is: an
+        # interpreter LLM failure must not lose them. New summaries project
+        # fresh; cached models keep whatever their `_stats` carried, and a
+        # cached model with no stored counts is simply ABSENT rather than
+        # reported as zero failures.
+        per_model_failure_counts: dict[str, Any] = {
+            s_.model_type: s_.failure_counts
+            for s_ in inp.summaries
+            if s_.failure_counts is not None
+        }
+        for _mt, _entry in inp.model_knowledge_cache.items():
+            if _mt in per_model_failure_counts:
+                continue
+            _cached_counts = (_entry.get("_stats") or {}).get("failure_counts")
+            if _cached_counts is not None:
+                per_model_failure_counts[_mt] = _cached_counts
+        # Present-when-present. Empty in production until Step 10 carries
+        # secondaries upstream (Q-09-7 = B); L1 fixtures supply them directly.
+        per_model_secondary_metrics: dict[str, Any] = {
+            s_.model_type: list(s_.secondary_metrics)
+            for s_ in inp.summaries
+            if s_.secondary_metrics
         }
 
         # Serialize expert advice (soft edge input)
@@ -1079,10 +1141,17 @@ class ResultInterpretationAgent:
             inp.health_feedback_retention_policy(),
         )
 
+        # The bound metric is stated in the operator log: "overall best" means
+        # nothing without knowing which way is better (Step 09a C2).
+        _metric_banner = (
+            f"{run_metric_identity.metric_id} ({run_order.direction}-is-better)"
+            if run_order is not None and run_metric_identity is not None
+            else "no bound metric (scoreless input)"
+        )
         print(
             f"Interpreting {len(inp.summaries)} model summary(ies) across "
             f"{len(effective_types)} model(s): {effective_types} "
-            f"(overall best: {overall_best_score})"
+            f"(overall best: {overall_best_score}; metric: {_metric_banner})"
         )
 
         # --- LLM-dependent flow ---
@@ -1115,6 +1184,7 @@ class ResultInterpretationAgent:
                 top_k=inp.active_model_top_k,
                 last_n=inp.active_model_last_n,
                 score_delta_threshold=inp.active_model_score_delta,
+                order=_require_order("selecting the active model set"),
             )
             print(
                 f"  Active models ({len(active_set)}/{len(effective_types)}): {sorted(active_set)}"
@@ -1173,6 +1243,7 @@ class ResultInterpretationAgent:
                     expert_advice_str=expert_advice_str,
                     human_advice=inp.human_advice,
                     structured_health_feedback=inp.enable_structured_health_feedback,
+                    order=run_order,
                 )
                 # T4b — system prompt has {TASK_DESCRIPTION} placeholder
                 # substituted at call time from inp.task_description; see
@@ -1202,6 +1273,14 @@ class ResultInterpretationAgent:
                     # cached (non-active) models keep their health facts
                     # without a fresh LLM call.
                     "round_health_counts": per_model_round_health_counts.get(mt, {}),
+                    # Step 09a C6 — so a model that goes quiet keeps its
+                    # failure counts across iterations without a fresh LLM
+                    # call, exactly as round_health_counts does.
+                    "failure_counts": (
+                        summary.failure_counts.model_dump()
+                        if summary.failure_counts is not None
+                        else None
+                    ),
                     "collapse_fingerprints": [
                         fp.model_dump() for fp in per_model_collapse_fingerprints.get(mt, [])
                     ],
@@ -1281,42 +1360,16 @@ class ResultInterpretationAgent:
                     f"LLM call(s) this iter)."
                 )
 
-            # --- Pre-compute enriched fields ---
-            # New models: read from inp.summaries.
-            # Cached models: read from model_knowledge_cache[mt]["_stats"].
-            per_model_score_tables: dict[str, ScoreComparisonTable] = {}
-            per_model_params: dict[str, int] = {}
-            per_model_training_segments: dict[str, int] = {}
-
-            def _register_score_table(mt: str, table: ScoreComparisonTable | None):
-                if table is None:
-                    return
-                per_model_score_tables[mt] = table
-
-            for s in inp.summaries:
-                mt = s.model_type
-                _register_score_table(mt, s.best_score_table)
-                if s.best_model_params is not None:
-                    per_model_params[mt] = s.best_model_params
-                if s.training_psd_segments is not None:
-                    per_model_training_segments[mt] = s.training_psd_segments
-
-            # Fill from cache _stats for cached models not in new summaries. The
-            # cache stores best_score_table as a plain dict (JSON round-trip safe)
-            # — re-validate it back into a ScoreComparisonTable before registering.
-            for mt, entry in inp.model_knowledge_cache.items():
-                if mt in per_model_summary_input:
-                    continue
-                stats = entry.get("_stats", {})
-                cached_table_data = stats.get("best_score_table")
-                cached_table = (
-                    ScoreComparisonTable.model_validate(cached_table_data)
-                    if cached_table_data is not None
-                    else None
-                )
-                _register_score_table(mt, cached_table)
-                if stats.get("best_model_params") is not None:
-                    per_model_params[mt] = stats["best_model_params"]
+            # --- Pre-compute enriched fields (ordering.collect_enriched_fields) ---
+            # Called from HERE, inside the try-block, exactly as before: a
+            # malformed cached score table raises, and the degraded path is the
+            # designed outcome for that.
+            enriched = collect_enriched_fields(
+                inp.summaries, inp.model_knowledge_cache, per_model_summary_input
+            )
+            per_model_score_tables = enriched.per_model_score_tables
+            per_model_params = enriched.per_model_params
+            per_model_training_segments = enriched.per_model_training_segments
 
             # --- Phase 2: Cross-model synthesis (Sliding Window — Commit 6.1) ---
             # Active models: full LLM-text block expanded into the synthesis
@@ -1406,7 +1459,6 @@ class ResultInterpretationAgent:
             # --- Phase C: Vocabulary feedback loop ---
             from nodes.interpretation_helpers import (
                 build_runtime_vocab,
-                evaluate_prediction,
                 generate_discoveries,
                 promote_candidates,
                 update_vocab_link_confirmations,
@@ -1447,6 +1499,10 @@ class ResultInterpretationAgent:
                         prev_prediction,
                         actual_results,
                         current_sota=sota_at_proposal,
+                        order=_require_order("evaluating the previous prediction"),
+                        bound_metric_id=_require_metric_identity(
+                            "evaluating the previous prediction"
+                        ).metric_id,
                     )
                     print(
                         f"  Prediction evaluation: {prediction_evaluation.get('outcome', '?')} "
@@ -1465,6 +1521,7 @@ class ResultInterpretationAgent:
                     proposed_vocab_links=prev_vocab_links,
                     timing=prev_timing,
                     overall_best_score=overall_best_score,
+                    order=_require_order("generating score-comparison discoveries"),
                 )
                 if new_discoveries:
                     print(f"  New discoveries: {len(new_discoveries)}")
@@ -1545,30 +1602,32 @@ class ResultInterpretationAgent:
                         f"added '{capability}' to {feature}.related_to."
                     )
 
-            # --- Phase E.4: Scientific accuracy tracking ---
-            # Accumulate outcome counts and compute hit-rate fractions.
-            new_outcomes_history = dict(inp.prediction_outcomes_history)
-            if prediction_evaluation:
-                outcome_label = prediction_evaluation.get("outcome")
-                if outcome_label in ("confirmed", "partial", "refuted"):
-                    new_outcomes_history[outcome_label] = (
-                        new_outcomes_history.get(outcome_label, 0) + 1
-                    )
-            total_preds = sum(new_outcomes_history.values())
-            scientific_accuracy: dict[str, float] | None = (
-                {k: round(v / total_preds, 4) for k, v in new_outcomes_history.items()}
-                if total_preds > 0
-                else None
+            # --- Phase E.4: Scientific accuracy tracking (prediction.py) ---
+            # Step 09a C4: the LEGACY pool is carried forward untouched; only
+            # the versioned pool accumulates, and the accuracy is computed from
+            # that pool alone (Q-09a-2).
+            legacy_outcomes_history = dict(inp.prediction_outcomes_history)
+            new_outcomes_by_semantics, scientific_accuracy = accumulate_prediction_outcomes(
+                inp.prediction_outcomes_by_semantics, prediction_evaluation
             )
+            pool_sizes = prediction_pool_sizes(legacy_outcomes_history, new_outcomes_by_semantics)
             if scientific_accuracy:
-                print(f"  Scientific accuracy: {scientific_accuracy} (n={total_preds})")
+                v2_total = pool_sizes[PREDICTION_SEMANTICS_SIGNSAFE_V2]
+                print(
+                    f"  Scientific accuracy ({PREDICTION_SEMANTICS_SIGNSAFE_V2}): "
+                    f"{scientific_accuracy} (n={v2_total}; "
+                    f"legacy pool n={pool_sizes[PREDICTION_SEMANTICS_LEGACY_V1]}, "
+                    f"not pooled)"
+                )
 
             # --- Centrifugal health metrics (post-Phase-C, on the updated vocab) ---
             vocab_diversity_ratio = _cvdr(runtime_vocab)
-            this_info_gain = (
-                prediction_evaluation.get("information_gain", 0.0) if prediction_evaluation else 0.0
+            # The legacy scalar is preserved verbatim; only the versioned sum
+            # accumulates. No single number anywhere means "legacy + v2".
+            cumulative_information_gain = inp.cumulative_information_gain
+            new_gain_by_semantics = accumulate_information_gain(
+                inp.cumulative_information_gain_by_semantics, prediction_evaluation
             )
-            cumulative_information_gain = inp.cumulative_information_gain + this_info_gain
             print(
                 f"  Vocab diversity ratio: {vocab_diversity_ratio:.3f} "
                 f"(cumulative info gain: {cumulative_information_gain:.4f})"
@@ -1630,10 +1689,22 @@ class ResultInterpretationAgent:
                     "cumulative_information_gain": cumulative_information_gain,
                     # Phase E: scientific accuracy + vocab link promotion
                     "scientific_accuracy": scientific_accuracy,
-                    "prediction_outcomes_history": new_outcomes_history,
+                    # Step 09a C4 — the legacy pool passes through UNCHANGED;
+                    # the versioned pools carry this iteration's outcome.
+                    "prediction_outcomes_history": legacy_outcomes_history,
+                    "prediction_outcomes_by_semantics": new_outcomes_by_semantics,
+                    "cumulative_information_gain_by_semantics": new_gain_by_semantics,
+                    "prediction_pool_sizes": pool_sizes,
+                    "prediction_evaluation_semantics": PREDICTION_SEMANTICS_SIGNSAFE_V2,
                     "vocab_link_confirmations": link_confirmations,
                     # V8 Domain 3 — evolution observability
                     "evolution_stats": evolution_stats,
+                    # Step 09a C2 — which metric this iteration was ORDERED
+                    # under. Provenance, not evidence.
+                    "metric_identity": run_metric_identity,
+                    # Step 09a C6 — deterministic evidence projection.
+                    "per_model_failure_counts": per_model_failure_counts,
+                    "per_model_secondary_metrics": per_model_secondary_metrics,
                 }
             )
 
@@ -1717,10 +1788,33 @@ class ResultInterpretationAgent:
                     "new_discoveries": [],
                     "vocab_changes": [],
                     "prediction_outcomes_history": dict(inp.prediction_outcomes_history),
+                    # Step 09a C4 — the degraded path copies every pool and sum
+                    # forward unchanged. No re-basing exists: the structure is
+                    # versioned, so nothing has to be reinterpreted here.
+                    "prediction_outcomes_by_semantics": {
+                        version: dict(counts)
+                        for version, counts in inp.prediction_outcomes_by_semantics.items()
+                    },
+                    "cumulative_information_gain_by_semantics": dict(
+                        inp.cumulative_information_gain_by_semantics
+                    ),
+                    "prediction_pool_sizes": prediction_pool_sizes(
+                        dict(inp.prediction_outcomes_history),
+                        inp.prediction_outcomes_by_semantics,
+                    ),
+                    "prediction_evaluation_semantics": PREDICTION_SEMANTICS_SIGNSAFE_V2,
                     "vocab_link_confirmations": dict(inp.vocab_link_confirmations),
                     "cumulative_information_gain": inp.cumulative_information_gain,
                     "is_degraded": True,
                     "evolution_stats": degraded_stats,
+                    # Step 09a C2 — threaded into the degraded dict too: an
+                    # interpreter LLM failure must not lose the ordering
+                    # provenance (the same structural rule the health
+                    # evidence and the aggregation scope follow).
+                    "metric_identity": run_metric_identity,
+                    # Step 09a C6 — deterministic evidence projection.
+                    "per_model_failure_counts": per_model_failure_counts,
+                    "per_model_secondary_metrics": per_model_secondary_metrics,
                 }
             )
             if inp.storage.backend == "local" and inp.storage.local:
@@ -1864,10 +1958,18 @@ def main():
     from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 
     tune_output = HyperparamTuningOutput.model_validate(run_data)
-    summary = tuning_output_to_model_run_summary(tune_output)
+    run_metric_spec = reconcile_metric_spec([tune_output])
+    summary = tuning_output_to_model_run_summary(
+        tune_output,
+        order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
+    )
 
     agent_input = InterpretationInput(
         summaries=[summary],
+        # Step 09a C2 — the spec comes FROM the loaded output; the CLI derives
+        # nothing. A legacy/pre-09a output carries none, and the input contract
+        # then refuses with a named error instead of ordering on a guess.
+        metric_spec=run_metric_spec,
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=args.workspace, run_name=args.run_name),
@@ -1897,247 +1999,6 @@ def main():
     print("\n  Take-home message:")
     print(f"    {output.take_home_message}")
     print(f"{'=' * 60}\n")
-
-
-# ---------------------------------------------------------------------------
-# Utility: convert HyperparamTuningOutput → ModelRunSummary
-# ---------------------------------------------------------------------------
-
-
-def _required_denoising_score(record: ExperimentRecord) -> float:
-    """Return a score after enforcing the valid-record invariant."""
-
-    score = record.denoising_score
-    if score is None:
-        raise ValueError(
-            f"Experiment {record.exp_id!r} entered valid-record ranking without a score."
-        )
-    return score
-
-
-def _round_ordering(record) -> RoundOrdering:
-    """Read one record's ordering provenance for the interpreter.
-
-    A record written before the ordering option existed carries no ordering
-    fields at all. That is read explicitly as the global shuffle with source
-    ``legacy_default`` — never guessed at, and never confused with a run that
-    actively chose the default.
-    """
-    ordering = ResolvedOrdering.from_record(record)
-    return RoundOrdering(
-        exp_id=record.exp_id,
-        resolved_order_strategy=ordering.resolved_strategy,
-        resolved_file_order=ordering.resolved_file_order,
-        resolution_source=ordering.resolution_source,
-        proposed_order_strategy=ordering.proposed_strategy,
-        proposal_rejected=ordering.proposal_rejected,
-        proposal_rejection_reason=ordering.proposal_rejection_reason,
-    )
-
-
-def _round_health(record) -> RoundHealth:
-    """Condense one record's HealthGate evidence for the interpreter.
-
-    Deterministic — never reads LLM output (V19 PR 3,
-    ``docs/design/v19_priorities/pr3_healthgate_feedback.md`` §3.2/§3.5).
-    Classification follows the evidence-precedence ladder in
-    ``classify_round_provenance``: persisted gate evidence is never
-    discarded by a status rule, and nothing is inferred from missing
-    fields — a round without evidence is carried LABELED (its
-    ``provenance``), never guessed at.
-
-    ``failure_reason`` is carried verbatim for every provenance. On
-    ``gate_not_evaluated`` records (attempt failures, pre-gate errors)
-    it holds the execution failure, NOT gate evidence — the provenance
-    label is what keeps downstream from misreading it (the §2.5
-    field-overload finding).
-    """
-    # Same lazy-import precedent as the summary builder below.
-    from execute_tools.health_checks.candidate_eligibility import (
-        classify_candidate_health,
-    )
-
-    provenance = classify_round_provenance(record)
-    gate_results = record.health_gate_results if provenance == "gated" else []
-    return RoundHealth(
-        exp_id=record.exp_id,
-        status=record.status,
-        health_validity=classify_candidate_health(record),
-        gate_action=record.gate_action,
-        failure_reason=record.failure_reason,
-        gate_outcomes=build_gate_outcomes(gate_results),
-        fingerprint=build_collapse_fingerprint(gate_results, record.gate_action),
-        provenance=provenance,
-    )
-
-
-def _collect_health_evidence(
-    summaries: list[ModelRunSummary],
-) -> tuple[
-    dict[str, dict[str, int]],
-    dict[str, list],
-    dict[str, list],
-]:
-    """Deterministic per-iteration health aggregates from ``round_health``.
-
-    Returns ``(counts_by_model, distinct_fingerprints_by_model,
-    merge_input_by_model)`` where merge_input maps model_type →
-    ``[(fingerprint, exp_id)]`` in CHRONOLOGICAL round order (the
-    representative-observation rule relies on this order — design §3.8).
-    Reads ONLY the deterministic RoundHealth data CB2 placed on the
-    summary — never LLM output (§3.1 principle 5).
-    """
-    counts: dict[str, dict[str, int]] = {}
-    distinct: dict[str, list] = {}
-    merge_input: dict[str, list] = {}
-    for summary in summaries:
-        mt = summary.model_type
-        for health in summary.round_health:
-            bucket = counts.setdefault(mt, {"valid": 0, "invalid": 0, "unknown": 0})
-            bucket[str(health.health_validity)] += 1
-            if health.fingerprint is not None:
-                merge_input.setdefault(mt, []).append((health.fingerprint, health.exp_id))
-                seen = distinct.setdefault(mt, [])
-                if health.fingerprint.signature not in {f.signature for f in seen}:
-                    seen.append(health.fingerprint)
-    return counts, distinct, merge_input
-
-
-def tuning_output_to_model_run_summary(
-    output: "HyperparamTuningOutput",
-) -> ModelRunSummary:
-    """
-    Convert a HyperparamTuningOutput to a condensed ModelRunSummary.
-
-    Extracts aggregates, per-round trajectory, file_vector, data volume,
-    and efficiency metrics from the all_records field. The raw records
-    are NOT carried forward — only the condensed summary.
-    """
-    records = output.all_records
-
-    # Per-round extraction
-    round_scores: list[float | None] = []
-    round_conclusions: list[str] = []
-    round_trial_portions: list[float | None] = []
-    round_model_params: list[int | None] = []
-    round_ordering: list[RoundOrdering] = []
-    round_health: list[RoundHealth] = []
-
-    for r in records:
-        round_scores.append(r.denoising_score)
-        round_trial_portions.append(r.trial_portion)
-        round_model_params.append(r.model_params)
-        if r.memory is None:
-            round_conclusions.append("")
-        else:
-            round_conclusions.append(r.memory.conclusion or "")
-        round_ordering.append(_round_ordering(r))
-        round_health.append(_round_health(r))
-
-    from execute_tools.health_checks.candidate_eligibility import (
-        CandidateHealthValidity,
-        classify_candidate_health,
-        is_valid_candidate,
-    )
-
-    # Find raw best record (highest finite successful denoising_score).
-    success = [r for r in records if r.status == "success" and r.denoising_score is not None]
-    best_rec = (
-        max(
-            success,
-            key=lambda r: r.denoising_score if r.denoising_score is not None else float("-inf"),
-        )
-        if success
-        else None
-    )
-    valid_records = [r for r in success if is_valid_candidate(r)]
-    valid_best_rec = max(valid_records, key=_required_denoising_score) if valid_records else None
-    valid_formal_records = [r for r in valid_records if not r.is_trial]
-    valid_formal_rec = (
-        max(valid_formal_records, key=_required_denoising_score) if valid_formal_records else None
-    )
-
-    # Find formal round (last record with is_trial=False)
-    formal_rec = None
-    for r in reversed(success):
-        if not r.is_trial:
-            formal_rec = r
-            break
-
-    # Compute worst score
-    valid_scores = [s for s in round_scores if s is not None]
-    worst_score = min(valid_scores) if valid_scores else None
-
-    # --- Score tables (Phase 4 — enriched replacement for file_vector) ---
-    # best_score_table prefers the pre-computed top-level field on the tuning
-    # output (populated by the tuner per §7.1). The best_rec's own score_table
-    # is a fallback in case the top-level field is None but the record carries
-    # one. formal_score_table comes from the tuning output's top-level field
-    # directly — it points at the last successful formal round's table.
-    def _as_table(value) -> ScoreComparisonTable | None:
-        if value is None:
-            return None
-        if isinstance(value, ScoreComparisonTable):
-            return value
-        return ScoreComparisonTable.model_validate(value)
-
-    best_score_table = _as_table(output.best_score_table)
-    if best_score_table is None and best_rec is not None:
-        best_score_table = _as_table(best_rec.score_table)
-
-    formal_score_table = _as_table(output.formal_score_table)
-    if formal_score_table is None and formal_rec is not None:
-        formal_score_table = _as_table(formal_rec.score_table)
-
-    return ModelRunSummary(
-        model_type=output.model_type,
-        run_name=output.run_name,
-        status=output.status,
-        completed_rounds=output.completed_rounds,
-        best_denoising_score=output.best_denoising_score,
-        best_valid_denoising_score=(valid_best_rec.denoising_score if valid_best_rec else None),
-        best_raw_health_validity=(
-            classify_candidate_health(best_rec).value
-            if best_rec
-            else CandidateHealthValidity.UNKNOWN.value
-        ),
-        worst_denoising_score=worst_score,
-        best_config=output.best_config,
-        best_valid_config=(valid_best_rec.params if valid_best_rec else None),
-        round_scores=round_scores,
-        round_conclusions=round_conclusions,
-        round_ordering=round_ordering,
-        round_health=round_health,
-        # Per-file performance (raw primitive retained per §7.2 scope note)
-        best_file_vector=best_rec.file_vector if best_rec else None,
-        formal_score=formal_rec.denoising_score if formal_rec else None,
-        best_valid_formal_score=(valid_formal_rec.denoising_score if valid_formal_rec else None),
-        # D-C5: the verdict of the SAME formal record `formal_score` came
-        # from, so the score and its authority cannot describe different
-        # experiments. None when no formal record exists — which excludes
-        # this model from the scientific aggregate rather than admitting it
-        # on an unestablished authority.
-        scientific_authority=(formal_rec.scientific_authority if formal_rec else None),
-        formal_file_vector=formal_rec.file_vector if formal_rec else None,
-        # Per-file performance (enriched — Phase 4)
-        best_score_table=best_score_table,
-        best_valid_score_table=(
-            _as_table(output.best_valid_score_table)
-            or (_as_table(valid_best_rec.score_table) if valid_best_rec else None)
-        ),
-        formal_score_table=formal_score_table,
-        # Efficiency
-        best_model_params=best_rec.model_params if best_rec else None,
-        # Compute cost
-        best_timing=best_rec.timing.model_dump() if best_rec and best_rec.timing else None,
-        # Data volume
-        training_psd_segments=best_rec.training_psd_segments if best_rec else None,
-        eval_psd_segments=best_rec.eval_psd_segments if best_rec else None,
-        trial_portion=best_rec.trial_portion if best_rec else None,
-        # Per-round trends
-        round_trial_portions=round_trial_portions,
-        round_model_params=round_model_params,
-    )
 
 
 if __name__ == "__main__":

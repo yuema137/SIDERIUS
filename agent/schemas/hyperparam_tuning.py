@@ -35,7 +35,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
 from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
-from execute_tools.evaluation_metric import MetricResult, NotScoreableResult
+from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
 
@@ -3018,3 +3018,18 @@ class HyperparamTuningOutput(BaseModel):
     # --- Timing ---
     started_at: str
     finished_at: str
+
+    # --- The run's bound evaluation metric (Step 09a C2) ---
+    metric_spec: MetricSpecField | None = Field(
+        default=None,
+        description=(
+            "Step 09a — the run's ALREADY-RESOLVED MetricSpec, transported so the "
+            "interpreter can order and label results without deriving a second "
+            "instance. Written ONCE by finalize_run_output from "
+            "bindings.run_metric.spec (the tuner's single derivation at "
+            "ml_hyperparameter_tune_agent.py:541); nothing downstream re-derives "
+            "it. None on outputs predating this field — a legacy output therefore "
+            "fails closed at score-bearing interpretation rather than falling back "
+            "to a guessed direction (child design §3.2, Q-09a-4/Q-09a-6)."
+        ),
+    )

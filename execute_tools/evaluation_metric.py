@@ -55,11 +55,12 @@ import os
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Mapping
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 import h5py
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     SerializeAsAny,
@@ -666,6 +667,34 @@ def metric_spec_from_declaration(payload: Mapping[str, Any]) -> MetricSpec:
     data = dict(payload)
     data["scoreability"] = scoreability_contract_from_declaration(dict(data["scoreability"]))
     return MetricSpec.model_validate(data)
+
+
+def _metric_spec_from_any(value: Any) -> Any:
+    """Accept a ``MetricSpec``, or its own dumped declaration, unchanged.
+
+    Step 09a C2. A ``MetricSpec`` cannot re-validate its own dump:
+    ``scoreability`` is an ABSTRACT ``SerializeAsAny`` field, so
+    ``spec.model_dump()`` emits the SUBCLASS's fields and
+    ``MetricSpec.model_validate(...)`` rejects them as ``extra_forbidden``
+    (verified: 3 errors). Any schema that PERSISTS a spec therefore has to
+    route a mapping through :func:`metric_spec_from_declaration` — the ONE
+    sanctioned rebind — on the way back in.
+
+    Instances and ``None`` pass through untouched; anything else is left for
+    pydantic to reject with its own message.
+    """
+    if isinstance(value, Mapping):
+        return metric_spec_from_declaration(value)
+    return value
+
+
+#: A ``MetricSpec`` field that survives a JSON round trip.
+#:
+#: Use this — never a bare ``MetricSpec`` annotation — on any model that gets
+#: written to disk and re-validated (``HyperparamTuningOutput.metric_spec``,
+#: ``InterpretationInput.metric_spec``, ``SecondaryMetricEvidence.spec``).
+#: It transports a value the run ALREADY resolved; it derives nothing.
+MetricSpecField = Annotated[MetricSpec, BeforeValidator(_metric_spec_from_any)]
 
 
 # ---------------------------------------------------------------------------

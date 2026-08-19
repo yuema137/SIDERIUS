@@ -23,7 +23,11 @@ database_all_records    DB-backed transfer. Raises NotImplementedError until wir
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput
 from agent.schemas.storage import StorageConfig
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from execute_tools.metric_order import MetricOrder
+from nodes.result_interpretation_agent import (
+    reconcile_metric_spec,
+    tuning_output_to_model_run_summary,
+)
 
 
 def local_all_records(
@@ -45,15 +49,25 @@ def local_all_records(
         HealthGate evidence incl. collapse fingerprints, V19 PR 3 —
         then discarded; raw records are NOT passed to the
         interpretation agent)
+      - metric_spec (Step 09a — the run's already-resolved MetricSpec,
+        forwarded so the interpreter can order without deriving one)
 
     Populates in ml-result-interp (InterpretationInput):
       - summaries    : [ModelRunSummary] — condensed run summary
+      - metric_spec  : the reconciled run MetricSpec (None on a legacy output,
+                       which the input contract then refuses if it carries
+                       scores — the protocol maps the field, it does not judge)
       - storage      : passed through from the workflow
     """
-    summary = tuning_output_to_model_run_summary(output)
+    run_metric_spec = reconcile_metric_spec([output])
+    summary = tuning_output_to_model_run_summary(
+        output,
+        order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
+    )
 
     return InterpretationInput(
         summaries=[summary],
+        metric_spec=run_metric_spec,
         storage=storage,
     )
 

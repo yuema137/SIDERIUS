@@ -55,6 +55,13 @@ from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.validator import ValidatorOutput
+from execute_tools.metric_order import MetricOrder
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as
+#: a REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation
+#: in this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 from workflows.model_exploration import (
     _CONSTRUCTION_RSS_THRESHOLD_GB,
     _add_plugin_to_registries,
@@ -101,6 +108,11 @@ def _make_tuning_output(model_type="punet", run_name="v1", score=1.5):
         ],
         started_at="2026-01-01 00:00:00",
         finished_at="2026-01-01 01:00:00",
+        # Step 09a C2 — a real tuner stamps its already-resolved MetricSpec on
+        # every output, and the workflow reconciles those stamps into the
+        # interpreter's input. Without it here the interpreter would (correctly)
+        # refuse this score-bearing fixture.
+        metric_spec=shipped_spec(),
     )
 
 
@@ -282,7 +294,7 @@ class TestLoadTuningOutputsFromPaths:
 
 class TestTuningOutputsToSummaries:
     def test_converts_single_output(self):
-        summaries = tuning_outputs_to_summaries([_make_tuning_output()])
+        summaries = tuning_outputs_to_summaries([_make_tuning_output()], order=_STEP09A_ORDER)
         assert len(summaries) == 1
         assert summaries[0].model_type == "punet"
 
@@ -291,16 +303,17 @@ class TestTuningOutputsToSummaries:
             [
                 _make_tuning_output(model_type="punet"),
                 _make_tuning_output(model_type="wavenet", score=1.2),
-            ]
+            ],
+            order=_STEP09A_ORDER,
         )
         assert len(summaries) == 2
 
     def test_preserves_best_score(self):
-        summaries = tuning_outputs_to_summaries([_make_tuning_output()])
+        summaries = tuning_outputs_to_summaries([_make_tuning_output()], order=_STEP09A_ORDER)
         assert summaries[0].best_denoising_score == 1.5
 
     def test_extracts_round_scores(self):
-        summaries = tuning_outputs_to_summaries([_make_tuning_output()])
+        summaries = tuning_outputs_to_summaries([_make_tuning_output()], order=_STEP09A_ORDER)
         assert len(summaries[0].round_scores) == 1
         assert summaries[0].round_scores[0] == 1.5
 
@@ -561,6 +574,85 @@ class TestRunWorkflowMultiIteration:
         # Iter 2: only new model in summaries, seeds in cache
         assert len(iter2_inp.summaries) == 1  # new model only
         assert "punet" in iter2_inp.model_knowledge_cache  # seed carried forward
+
+    def test_prediction_memory_carries_from_one_iteration_to_the_next(self, workflow_env):
+        """Step 09a C5 — the loop carry, through the REAL workflow.
+
+        Before Step 09a nothing carried this state: every iteration's
+        interpreter received the schema defaults, so every production digest's
+        pool held exactly one outcome and the proposer's track record always
+        read N=1. This asserts iteration 2 receives what iteration 1's digest
+        actually wrote — the reachability half of the claim (the restore half
+        is `tests/unit/core/test_step09a_c5_prediction_transport.py`).
+        """
+        digest = _make_interpretation_output()
+        digest.prediction_outcomes_history = {"confirmed": 1, "partial": 0, "refuted": 1}
+        digest.prediction_outcomes_by_semantics = {
+            "metric_order_signsafe_v2": {"confirmed": 2, "partial": 1, "refuted": 0}
+        }
+        digest.cumulative_information_gain = 0.30
+        digest.cumulative_information_gain_by_semantics = {"metric_order_signsafe_v2": 0.45}
+        workflow_env["interp"].return_value.run.return_value = digest
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=2,
+        )
+        interp_calls = workflow_env["interp"].return_value.run.call_args_list
+        iter1_inp, iter2_inp = interp_calls[0][0][0], interp_calls[1][0][0]
+
+        # Iteration 1 starts from nothing — the schema defaults.
+        assert iter1_inp.prediction_outcomes_by_semantics == {}
+        assert iter1_inp.cumulative_information_gain == 0.0
+
+        # Iteration 2 receives iteration 1's digest, all four fields, with the
+        # v1/v2 separation intact across the hop.
+        assert iter2_inp.prediction_outcomes_history == {
+            "confirmed": 1,
+            "partial": 0,
+            "refuted": 1,
+        }
+        assert iter2_inp.prediction_outcomes_by_semantics == {
+            "metric_order_signsafe_v2": {"confirmed": 2, "partial": 1, "refuted": 0}
+        }
+        assert iter2_inp.cumulative_information_gain == 0.30
+        assert iter2_inp.cumulative_information_gain_by_semantics == {
+            "metric_order_signsafe_v2": 0.45
+        }
+
+    def test_restored_prediction_memory_seeds_the_first_iteration(self, workflow_env):
+        """The chain-subprocess half: what `core.resume` restored must reach
+        the FIRST iteration of the next subprocess, or the carry stops at the
+        process boundary."""
+        from agent.schemas.interpretation import PredictionMemory
+
+        run_workflow(
+            data_dir=workflow_env["data_dir"],
+            model_types=["punet"],
+            source_run_name="v1",
+            workspace=workflow_env["workspace"],
+            run_name="test_run",
+            max_iterations=1,
+            restored_prediction_memory=PredictionMemory(
+                prediction_outcomes_history={"confirmed": 4, "partial": 0, "refuted": 1},
+                prediction_outcomes_by_semantics={
+                    "metric_order_signsafe_v2": {"confirmed": 3, "partial": 0, "refuted": 0}
+                },
+                cumulative_information_gain=1.25,
+                cumulative_information_gain_by_semantics={"metric_order_signsafe_v2": 0.9},
+            ),
+        )
+        inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
+        assert inp.prediction_outcomes_history == {"confirmed": 4, "partial": 0, "refuted": 1}
+        assert inp.prediction_outcomes_by_semantics == {
+            "metric_order_signsafe_v2": {"confirmed": 3, "partial": 0, "refuted": 0}
+        }
+        assert inp.cumulative_information_gain == 1.25
+        assert inp.cumulative_information_gain_by_semantics == {"metric_order_signsafe_v2": 0.9}
 
     def test_restored_model_knowledge_cache_seeds_first_iter(self, workflow_env):
         """Commit 6.1.a — chain runner forwards prior iter's cache via the

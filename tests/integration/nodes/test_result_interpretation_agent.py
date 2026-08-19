@@ -18,7 +18,14 @@ import pytest
 from dotenv import load_dotenv
 
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, ModelRunSummary
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
@@ -359,7 +366,7 @@ def test_interpretation_feedback_loop(
 
     # At least one discovery was generated
     assert len(output.new_discoveries) >= 1, (
-        "No discoveries generated — generate_discoveries() returned empty"
+        "No discoveries generated — generate_discoveries(order=_STEP09A_ORDER) returned empty"
     )
 
     # Discovery description contains the outcome label (CONFIRMED / REFUTED)

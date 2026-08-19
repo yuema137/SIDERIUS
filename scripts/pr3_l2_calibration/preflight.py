@@ -101,9 +101,11 @@ def run_arm(scenario: str, arm: str) -> dict:
         local_full_context,
     )
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
+    from execute_tools.metric_order import MetricOrder
     from nodes.ml_model_proposal_agent import MLModelProposalAgent
     from nodes.result_interpretation_agent import (
         ResultInterpretationAgent,
+        reconcile_metric_spec,
         tuning_output_to_model_run_summary,
     )
     from scripts.pr3_l2_calibration.fixtures import MODEL_DESCRIPTIONS, SCENARIOS
@@ -114,12 +116,19 @@ def run_arm(scenario: str, arm: str) -> dict:
     tmp = tempfile.mkdtemp(prefix=f"p3l2p_preflight_{scenario}_{arm}_")
 
     summaries = []
-    for out in spec["tune_outputs"]():
-        s = tuning_output_to_model_run_summary(out)
+    tune_outputs = spec["tune_outputs"]()
+    run_metric_spec = reconcile_metric_spec(tune_outputs)
+    run_order = MetricOrder(run_metric_spec) if run_metric_spec is not None else None
+    for out in tune_outputs:
+        s = tuning_output_to_model_run_summary(out, order=run_order)
         s.model_description = MODEL_DESCRIPTIONS.get(s.model_type)
         summaries.append(s)
     interp_input = InterpretationInput(
         summaries=summaries,
+        # Step 09a C2 — reconciled from the outputs, exactly as the workflow
+        # does. The FIXTURE stamped the spec (Q-09a-7: simulated tuner-output
+        # writer); this entry point derives nothing.
+        metric_spec=run_metric_spec,
         storage=StorageConfig(
             backend="local", local=LocalStorageConfig(workspace=tmp, run_name="pf")
         ),

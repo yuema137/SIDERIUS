@@ -931,6 +931,12 @@ def finalize_run_output(
         "max_fail_rounds": max_fail_rounds_setting,
         "consecutive_fail_rounds_at_exit": consecutive_fails,
         "termination_reason": termination_reason,
+        # Step 09a C2 — the ONE writer of the run's bound MetricSpec. The
+        # tuner already resolved it (`ml_hyperparameter_tune_agent.py:541`);
+        # this transports THAT value so the interpreter never derives a
+        # second one. Passed as the instance: the field's validator accepts
+        # a MetricSpec unchanged and rebinds only a mapping.
+        "metric_spec": bindings.run_metric.spec,
     }
 
     output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -986,6 +992,12 @@ def finalize_run_output(
             "started_at": started_at,
             "finished_at": finished_at,
             "termination_reason": termination_reason,
+            # Step 09a C2 — the same rule the healthgate_mode comment above
+            # states: the run's metric binding is a LAUNCH fact and does not
+            # stop existing because the tuner later failed. Dumped rather
+            # than passed as an instance because this dict is written with
+            # `json.dump(..., default=str)`, which would stringify the model.
+            "metric_spec": bindings.run_metric.spec.model_dump(),
             "_partial_reason": f"{type(e).__name__}: {e}",
         }
         with open(output_path, "w", encoding="utf-8") as f:

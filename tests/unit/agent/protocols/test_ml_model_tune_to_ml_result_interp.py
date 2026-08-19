@@ -33,6 +33,7 @@ from agent.schemas.protocols.ml_model_tune_to_ml_result_interp import (
     local_all_records,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
+from tests.helpers.metric_fixtures import shipped_spec
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -170,6 +171,10 @@ def make_tuning_output(model_type, run_name, records, best_score=None, best_conf
         all_records=records,
         started_at="2026-01-01T00:00:00",
         finished_at="2026-01-01T01:00:00",
+        # Step 09a C2 — a real tuner stamps its already-resolved MetricSpec on
+        # every output; the interpreter now REFUSES a score-bearing input that
+        # carries none. Stamping here keeps this fixture a faithful stand-in.
+        metric_spec=shipped_spec(),
     )
 
 

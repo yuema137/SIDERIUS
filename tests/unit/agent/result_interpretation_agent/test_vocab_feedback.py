@@ -11,16 +11,31 @@ accumulation helpers (E.4).
 import pytest
 
 from agent.schemas.proposal import VocabEntry
+from execute_tools.metric_order import MetricOrder
 from nodes.interpretation_helpers import (
     _content_words,
     _find_duplicate_candidate,
     build_runtime_vocab,
     compute_vocab_diversity_ratio,
-    evaluate_prediction,
     generate_discoveries,
     promote_candidates,
     update_vocab_link_confirmations,
 )
+
+# Step 09a C1b: prediction evaluation is interpreter-owned semantics and moved
+# out of the mixed helpers module into the node's private `prediction` module.
+# It is DEFINED there exactly once — this import is the definition site, not a
+# compatibility alias, so these cases keep testing the production code path.
+from nodes.result_interpretation_agent.prediction import evaluate_prediction
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder
+#: as a REQUIRED keyword. TIDMAD is `higher`, so expectations are unchanged.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
+
+#: Step 09a C4 — a NEW prediction's default metric is the run's BOUND id,
+#: never the literal `denoising_score` (one task's name, hardcoded).
+_BOUND_METRIC_ID = shipped_spec().id
 
 # ---------------------------------------------------------------------------
 # evaluate_prediction
@@ -52,7 +67,12 @@ class TestEvaluatePrediction:
 
     def test_confirmed_beats_sota(self):
         """actual > sota: confirmed, positive delta, gain == delta."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.5})
+        result = evaluate_prediction(
+            self._pred(current_value=5.0),
+            {"best_denoising_score": 5.5},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["outcome"] == "confirmed"
         assert result["actual_value"] == 5.5
         assert result["delta_from_sota"] > 0
@@ -63,7 +83,12 @@ class TestEvaluatePrediction:
     def test_partial_within_margin(self):
         """actual slightly below sota but within 5%: partial, no gain."""
         # sota=5.0, margin=0.05 → partial if actual >= 4.75
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.8})
+        result = evaluate_prediction(
+            self._pred(current_value=5.0),
+            {"best_denoising_score": 4.8},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["outcome"] == "partial"
         assert result["delta_from_sota"] < 0
         assert result["information_gain"] == 0.0
@@ -71,14 +96,24 @@ class TestEvaluatePrediction:
     def test_refuted_clearly_below_sota(self):
         """actual clearly below sota (> 5% gap): refuted, no gain."""
         # sota=5.0, 5% threshold=4.75 → refuted if actual < 4.75
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 4.0})
+        result = evaluate_prediction(
+            self._pred(current_value=5.0),
+            {"best_denoising_score": 4.0},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["outcome"] == "refuted"
         assert result["delta_from_sota"] < 0
         assert result["information_gain"] == 0.0
 
     def test_exactly_at_sota_is_partial(self):
         """actual == sota (not strictly greater) → partial (not confirmed)."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 5.0})
+        result = evaluate_prediction(
+            self._pred(current_value=5.0),
+            {"best_denoising_score": 5.0},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["outcome"] == "partial"
         assert result["delta_from_sota"] == 0.0
 
@@ -88,14 +123,25 @@ class TestEvaluatePrediction:
         """Explicit current_sota replaces prediction['current_value']."""
         pred = self._pred(current_value=5.0)  # stale SOTA in prediction
         # Pass fresher SOTA of 6.0 — actual=6.5 should still confirm
-        result = evaluate_prediction(pred, {"best_denoising_score": 6.5}, current_sota=6.0)
+        result = evaluate_prediction(
+            pred,
+            {"best_denoising_score": 6.5},
+            current_sota=6.0,
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["outcome"] == "confirmed"
         assert result["current_sota"] == 6.0
         assert abs(result["delta_from_sota"] - 0.5) < 1e-6
 
     def test_missing_current_sota_falls_back_to_current_value(self):
         """Without override, current_value from prediction is used."""
-        result = evaluate_prediction(self._pred(current_value=5.0), {"best_denoising_score": 6.0})
+        result = evaluate_prediction(
+            self._pred(current_value=5.0),
+            {"best_denoising_score": 6.0},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["current_sota"] == 5.0
 
     def test_partial_margin_custom(self):
@@ -105,6 +151,8 @@ class TestEvaluatePrediction:
             self._pred(current_value=5.0),
             {"best_denoising_score": 4.6},
             partial_margin=0.10,
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
         )
         assert result["outcome"] == "partial"
 
@@ -118,27 +166,44 @@ class TestEvaluatePrediction:
             "predicted_value": 2.5,
         }
         fv = [1.0, 1.5, 2.0, 2.5, 3.0] + [None] * 15
-        result = evaluate_prediction(pred, {"best_denoising_score": 5.0, "best_file_vector": fv})
+        result = evaluate_prediction(
+            pred,
+            {"best_denoising_score": 5.0, "best_file_vector": fv},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
+        )
         assert result["actual_value"] == 2.0  # mean of [1, 1.5, 2, 2.5, 3]
         assert result["outcome"] == "confirmed"  # 2.0 > 1.5 SOTA
 
     # --- Missing data fallback ---
 
     def test_missing_actual_results(self):
-        """No metric data in actual_results → partial with notes."""
-        result = evaluate_prediction(self._pred(), {})
-        assert result["outcome"] == "partial"
-        assert "Could not compute" in result.get("notes", "")
+        """No metric data → UNEVALUATED (Step 09a C4), not a weak "partial".
+
+        This was the defect: an uncomputable metric was labelled `partial`,
+        which put a non-observation into the accuracy pool and published it as
+        a discovery reading "achieved metric=N/A".
+        """
+        result = evaluate_prediction(
+            self._pred(), {}, order=_STEP09A_ORDER, bound_metric_id=_BOUND_METRIC_ID
+        )
+        assert result["outcome"] == "unevaluated"
+        assert "not evaluated" in result["notes"]
         assert result["delta_from_sota"] is None
+        assert result["information_gain"] == 0.0
 
     def test_missing_current_sota_and_current_value(self):
-        """Neither override nor current_value → partial with notes."""
+        """No baseline at all → UNEVALUATED. There is nothing to compare to,
+        and the actual value alone is evidence for or against nothing."""
         result = evaluate_prediction(
             {"metric": "denoising_score", "predicted_value": 6.0},
             {"best_denoising_score": 6.5},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
         )
-        assert result["outcome"] == "partial"
+        assert result["outcome"] == "unevaluated"
         assert result["current_sota"] is None
+        assert "no SOTA baseline" in result["notes"]
 
     # --- Boldness and information_gain ---
 
@@ -152,6 +217,8 @@ class TestEvaluatePrediction:
         result = evaluate_prediction(
             {"metric": "denoising_score", "current_value": 5.0},
             {"best_denoising_score": 6.0},
+            order=_STEP09A_ORDER,
+            bound_metric_id=_BOUND_METRIC_ID,
         )
         assert result["boldness"] == 0.0
 
@@ -179,6 +246,7 @@ class TestGenerateDiscoveries:
             best_score=6.5,
             inherited_components=[{"component": "dilated_causal_conv"}],
             proposed_vocab_links=[],
+            order=_STEP09A_ORDER,
         )
         assert len(discoveries) >= 1
         assert any("CONFIRMED" in d.description for d in discoveries)
@@ -197,6 +265,7 @@ class TestGenerateDiscoveries:
             best_score=4.0,
             inherited_components=[],
             proposed_vocab_links=[],
+            order=_STEP09A_ORDER,
         )
         assert any("REFUTED" in d.description for d in discoveries)
 
@@ -214,6 +283,7 @@ class TestGenerateDiscoveries:
             best_score=None,
             inherited_components=[],
             proposed_vocab_links=[],
+            order=_STEP09A_ORDER,
         )
         assert any("PARTIAL" in d.description for d in discoveries)
         assert any("N/A" in d.description for d in discoveries)
@@ -232,6 +302,7 @@ class TestGenerateDiscoveries:
             best_score=5.0,
             inherited_components=[],
             proposed_vocab_links=[],
+            order=_STEP09A_ORDER,
         )
         assert discoveries == []
 
@@ -248,6 +319,7 @@ class TestGenerateDiscoveries:
             best_score=6.5,
             inherited_components=[],
             proposed_vocab_links=[],
+            order=_STEP09A_ORDER,
         )
         score_discoveries = [d for d in discoveries if "score" in d.name]
         assert len(score_discoveries) >= 1
@@ -272,6 +344,7 @@ class TestGenerateDiscoveries:
             inherited_components=[],
             proposed_vocab_links=[],
             overall_best_score=6.2,  # real current SOTA this iteration
+            order=_STEP09A_ORDER,
         )
         score_disc = next((d for d in discoveries if "score" in d.name), None)
         assert score_disc is not None
@@ -298,6 +371,7 @@ class TestGenerateDiscoveries:
             inherited_components=[],
             proposed_vocab_links=[],
             overall_best_score=6.0,  # real SOTA is higher — model did NOT beat it
+            order=_STEP09A_ORDER,
         )
         score_disc = next((d for d in discoveries if "score" in d.name), None)
         assert score_disc is not None
@@ -312,6 +386,7 @@ class TestGenerateDiscoveries:
             inherited_components=[],
             proposed_vocab_links=[],
             overall_best_score=5.5,
+            order=_STEP09A_ORDER,
         )
         score_disc = next((d for d in discoveries if "score" in d.name), None)
         assert score_disc is not None

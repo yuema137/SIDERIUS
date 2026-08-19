@@ -16,7 +16,14 @@ import pytest
 from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 
 def _gate_result(
@@ -86,7 +93,8 @@ def test_gated_collapse_round_carries_evidence_and_fingerprint():
                 failure_reason="[output_diversity_blocking] collapse",
                 health_gate_results=[_gate_result()],
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     [health] = summary.round_health
     assert health.provenance == "gated"
@@ -106,7 +114,8 @@ def test_v17_skip_record_empty_list_is_not_evaluated_not_legacy():
     summary = tuning_output_to_model_run_summary(
         _output(
             _record("r1", status="skipped_time_risk", denoising_score=None, health_gate_results=[])
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     [health] = summary.round_health
     assert health.provenance == "gate_not_evaluated"
@@ -117,7 +126,7 @@ def test_v17_skip_record_empty_list_is_not_evaluated_not_legacy():
 def test_current_gated_empty_list_on_executed_round_is_gated():
     """Present-but-empty on an EXECUTED status → current gated era."""
     summary = tuning_output_to_model_run_summary(
-        _output(_record("r1", status="success", health_gate_results=[]))
+        _output(_record("r1", status="success", health_gate_results=[])), order=_STEP09A_ORDER
     )
     [health] = summary.round_health
     assert health.provenance == "gated"
@@ -137,7 +146,8 @@ def test_mid_vintage_round_fields_only_preserved_verbatim_no_fingerprint():
                 gate_action="invalidate_round",
                 failure_reason="[output_diversity_blocking] unique=1",
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     [health] = summary.round_health
     assert health.provenance == "round_fields_only"
@@ -148,7 +158,7 @@ def test_mid_vintage_round_fields_only_preserved_verbatim_no_fingerprint():
 
 
 def test_legacy_executed_record_carries_no_verdict():
-    summary = tuning_output_to_model_run_summary(_output(_record("r1")))
+    summary = tuning_output_to_model_run_summary(_output(_record("r1")), order=_STEP09A_ORDER)
     [health] = summary.round_health
     assert health.provenance == "legacy"
     assert health.fingerprint is None
@@ -158,7 +168,9 @@ def test_legacy_executed_record_carries_no_verdict():
 
 
 def test_gates_disabled_round_is_valid_by_rule():
-    summary = tuning_output_to_model_run_summary(_output(_record("r1", health_gate_enabled=False)))
+    summary = tuning_output_to_model_run_summary(
+        _output(_record("r1", health_gate_enabled=False)), order=_STEP09A_ORDER
+    )
     [health] = summary.round_health
     assert health.provenance == "gates_disabled"
     assert health.health_validity == "valid"  # DS5 waiver
@@ -179,7 +191,8 @@ def test_attempt_failure_exception_text_is_not_gate_evidence():
                 failure_reason="RuntimeError: CUDA out of memory",
                 counts_toward_completed_rounds=False,
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     [health] = summary.round_health
     assert health.provenance == "gate_not_evaluated"
@@ -201,7 +214,8 @@ def test_evidence_precedence_error_status_with_persisted_results_is_gated():
                 health_gate_results=[_gate_result()],
                 gate_action="invalidate_round",
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     [health] = summary.round_health
     assert health.provenance == "gated"
@@ -232,7 +246,8 @@ def test_round_health_aligned_with_round_scores_incl_attempt_failures():
                 counts_toward_completed_rounds=False,
             ),
             _record("r3"),
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     assert len(summary.round_health) == len(summary.round_scores) == 3
     assert [h.exp_id for h in summary.round_health] == ["r1", "r2", "r3"]
@@ -247,7 +262,7 @@ def test_pre_pr3_summary_fields_unchanged():
     """Backward-compat bar (§11-CB2): every existing ModelRunSummary field
     is byte-identical with round_health present."""
     output = _output(_record("r1", denoising_score=2.5))
-    summary = tuning_output_to_model_run_summary(output)
+    summary = tuning_output_to_model_run_summary(output, order=_STEP09A_ORDER)
     dumped = summary.model_dump()
     new_fields = {"round_health"}
     baseline = {k: v for k, v in dumped.items() if k not in new_fields}
@@ -272,7 +287,8 @@ def test_summary_round_trips_through_json():
                 failure_reason="x",
                 health_gate_results=[_gate_result()],
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     from agent.schemas.interpretation import ModelRunSummary
 

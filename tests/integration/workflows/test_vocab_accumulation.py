@@ -43,10 +43,17 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
+from agent.schemas.interpretation import (
+    PREDICTION_SEMANTICS_LEGACY_V1 as LEGACY_V1,
+)
+from agent.schemas.interpretation import (
+    PREDICTION_SEMANTICS_SIGNSAFE_V2 as V2,
+)
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput, ModelRunSummary
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.result_interpretation_agent import ResultInterpretationAgent
+from tests.helpers.metric_fixtures import shipped_spec
 
 # Reuse seed summaries and proposal fixtures defined in the interpretation node test
 from tests.integration.nodes.test_result_interpretation_agent import (
@@ -177,6 +184,7 @@ def test_vocab_grows_across_two_iterations(tmp_path, request):
     )
 
     iter1_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, attn_wavenet_bad],
         previous_proposal=_PREVIOUS_PROPOSAL_REFUTED,
         runtime_vocab=[],
@@ -249,6 +257,7 @@ def test_vocab_grows_across_two_iterations(tmp_path, request):
     # -----------------------------------------------------------------------
 
     iter2_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, _SPECTRAL_NET_SUMMARY],
         previous_proposal=_PREVIOUS_PROPOSAL_ITER2,
         runtime_vocab=iter1_output.runtime_vocab,  # carry forward iter 1 vocab
@@ -505,6 +514,7 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
     # spectral_gating proposed by attn_wavenet → seen_in_runs = ["attn_wavenet"]
     # -----------------------------------------------------------------------
     iter1_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, _ATTN_WAVENET_BAD_SUMMARY],
         previous_proposal=_PROMO_PROPOSAL_ITER0,
         runtime_vocab=[],
@@ -535,6 +545,7 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
     # spectral_gating proposed by spectral_net → seen_in_runs = [.., "spectral_net"]
     # -----------------------------------------------------------------------
     iter2_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SPECTRAL_NET_SUMMARY_PROMO],
         previous_proposal=_PROMO_PROPOSAL_ITER1,
         runtime_vocab=iter1_output.runtime_vocab,
@@ -575,6 +586,7 @@ def test_vocab_candidate_promotion_across_three_iterations(tmp_path, request):
     # _dedup_promoted runs and keeps the entry (is_duplicate=false in pseudo data)
     # -----------------------------------------------------------------------
     iter3_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_WAVELET_NET_SUMMARY],
         previous_proposal=_PROMO_PROPOSAL_ITER2,
         runtime_vocab=iter2_output.runtime_vocab,
@@ -667,6 +679,7 @@ def test_vocab_discoveries_appear_in_proposal_prompt(tmp_path, request):
     )
 
     iter1_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, attn_wavenet_bad],
         previous_proposal=_PREVIOUS_PROPOSAL_REFUTED,
         runtime_vocab=[],
@@ -888,19 +901,28 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
     """H.4 — Phase E integration: scientific_accuracy and vocab_link_confirmations
     carry forward correctly across two iterations.
 
+    Step 09a C4 upgraded this test in place (design §5): outcomes now accumulate
+    in the VERSIONED pool `prediction_outcomes_by_semantics[v2]`, and the legacy
+    `prediction_outcomes_history` is carried forward WITHOUT being incremented.
+    This is the only test that proves the partition survives a real two-iteration
+    hand-chained agent run rather than a single call.
+
     Iteration 1 (REFUTED):
       - attn_wavenet proposed with vocab link: dilated_causal_conv → receptive_field
       - actual=-1.509 << current_sota=5.576 → outcome='refuted'
-      - prediction_outcomes_history = {"confirmed": 0, "partial": 0, "refuted": 1}
-      - scientific_accuracy = {"confirmed": 0.0, "partial": 0.0, "refuted": 1.0}
+      - v2 pool = {"confirmed": 0, "partial": 0, "refuted": 1}
+      - legacy pool = {"confirmed": 0, "partial": 0, "refuted": 0} — UNTOUCHED
+      - scientific_accuracy = {"confirmed": 0.0, "partial": 0.0, "refuted": 1.0} (v2-only)
       - vocab_link_confirmations: unchanged (refuted does not add confirmation)
 
     Iteration 2 (CONFIRMED):
       - spectral_net proposed with same vocab link
       - actual=6.1 > current_sota=5.576 → outcome='confirmed'
-      - carry forward: prediction_outcomes_history + vocab_link_confirmations from iter 1
-      - prediction_outcomes_history = {"confirmed": 1, "partial": 0, "refuted": 1}
+      - carry forward: BOTH pools + vocab_link_confirmations from iter 1
+      - v2 pool = {"confirmed": 1, "partial": 0, "refuted": 1}
+      - legacy pool still {"confirmed": 0, "partial": 0, "refuted": 0}
       - scientific_accuracy = {"confirmed": 0.5, "partial": 0.0, "refuted": 0.5}
+        — 1 confirmed out of the 2 COMPARABLE v2 outcomes, with no v1 outcome mixed in
       - vocab_link_confirmations["dilated_causal_conv:receptive_field"] = ["spectral_net"]
         (1 confirmation, not yet at min_runs=3 threshold → not yet in related_to)
 
@@ -933,6 +955,7 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
     )
 
     iter1_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, attn_wavenet_bad],
         previous_proposal=_E4_PROPOSAL_REFUTED,
         runtime_vocab=[],
@@ -970,11 +993,16 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
         f"Iter 1: expected 'refuted', got {iter1_output.prediction_evaluation['outcome']!r}"
     )
 
-    assert iter1_output.prediction_outcomes_history["refuted"] == 1, (
-        f"Iter 1: expected refuted=1, got {iter1_output.prediction_outcomes_history}"
-    )
-    assert iter1_output.prediction_outcomes_history["confirmed"] == 0
-    assert iter1_output.prediction_outcomes_history["partial"] == 0
+    v2_pool_1 = iter1_output.prediction_outcomes_by_semantics[V2]
+    assert v2_pool_1["refuted"] == 1, f"Iter 1: expected refuted=1, got {v2_pool_1}"
+    assert v2_pool_1["confirmed"] == 0
+    assert v2_pool_1["partial"] == 0
+    assert iter1_output.prediction_outcomes_history == {
+        "confirmed": 0,
+        "partial": 0,
+        "refuted": 0,
+    }, "the legacy v1 pool must be carried through untouched, never incremented"
+    assert iter1_output.prediction_evaluation_semantics == V2
 
     assert iter1_output.scientific_accuracy is not None, (
         "Iter 1: scientific_accuracy is None — should be computed after first prediction"
@@ -1025,11 +1053,17 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
     )
 
     iter2_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, spectral_net_good],
         previous_proposal=_E4_PROPOSAL_CONFIRMED,
         runtime_vocab=iter1_output.runtime_vocab,
-        # Carry forward Phase E state
+        # Carry forward Phase E state — BOTH pools, exactly as the workflow
+        # loop and the resume path carry them (Step 09a C5).
         prediction_outcomes_history=iter1_output.prediction_outcomes_history,
+        prediction_outcomes_by_semantics=iter1_output.prediction_outcomes_by_semantics,
+        cumulative_information_gain_by_semantics=(
+            iter1_output.cumulative_information_gain_by_semantics
+        ),
         vocab_link_confirmations=iter1_output.vocab_link_confirmations,
         storage={
             "backend": "local",
@@ -1061,19 +1095,26 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
         f"Iter 2: expected 'confirmed', got {iter2_output.prediction_evaluation['outcome']!r}"
     )
 
-    # History: 1 refuted (from iter 1) + 1 confirmed (this iter) = 2 total
-    assert iter2_output.prediction_outcomes_history["confirmed"] == 1, (
-        f"Iter 2: expected confirmed=1, got {iter2_output.prediction_outcomes_history}"
-    )
-    assert iter2_output.prediction_outcomes_history["refuted"] == 1
-    assert iter2_output.prediction_outcomes_history["partial"] == 0
+    # v2 pool: 1 refuted (from iter 1) + 1 confirmed (this iter) = 2 total
+    v2_pool_2 = iter2_output.prediction_outcomes_by_semantics[V2]
+    assert v2_pool_2["confirmed"] == 1, f"Iter 2: expected confirmed=1, got {v2_pool_2}"
+    assert v2_pool_2["refuted"] == 1
+    assert v2_pool_2["partial"] == 0
+    assert iter2_output.prediction_outcomes_history == {
+        "confirmed": 0,
+        "partial": 0,
+        "refuted": 0,
+    }, "two accumulating iterations must still leave the legacy v1 pool untouched"
 
-    # scientific_accuracy: 1 confirmed / 2 total = 0.5
+    # scientific_accuracy: 1 confirmed / 2 COMPARABLE v2 outcomes = 0.5, with the
+    # legacy pool contributing nothing to the denominator.
     assert iter2_output.scientific_accuracy is not None
     assert abs(iter2_output.scientific_accuracy["confirmed"] - 0.5) < 1e-4, (
         f"Iter 2: expected confirmed=0.5, got {iter2_output.scientific_accuracy}"
     )
     assert abs(iter2_output.scientific_accuracy["refuted"] - 0.5) < 1e-4
+    assert iter2_output.prediction_pool_sizes[V2] == 2
+    assert iter2_output.prediction_pool_sizes[LEGACY_V1] == 0
 
     # CONFIRMED prediction → vocab link gets 1 confirmation from run "spectral_net"
     link_confs = iter2_output.vocab_link_confirmations
@@ -1208,6 +1249,7 @@ def test_vocab_link_confirmed_populates_related_to_and_renders(tmp_path, request
     )
 
     iter_inp = InterpretationInput(
+        metric_spec=shipped_spec(),
         summaries=[_SEED_WAVENET, _SEED_PUNET, spectral_net_good],
         previous_proposal=_E4_PROPOSAL_CONFIRMED,  # model_name="spectral_net"
         runtime_vocab=[dilated_conv_entry],  # carry-in: dilated_causal_conv

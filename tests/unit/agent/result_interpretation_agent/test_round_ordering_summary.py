@@ -12,7 +12,14 @@ it may legitimately differ between rounds when no override is in force.
 """
 
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
+from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.metric_fixtures import shipped_spec
+
+#: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
+#: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
+#: this file is unchanged; the direction is now stated instead of assumed.
+_STEP09A_ORDER = MetricOrder(shipped_spec())
 
 PERMUTATION = [4, 6, 5, 9, 7, 8]
 
@@ -60,7 +67,8 @@ def test_resolved_ordering_is_carried_per_round():
                 resolved_order_strategy="shuffle",
                 ordering_resolution_source="default",
             ),
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     assert len(summary.round_ordering) == len(summary.round_scores) == 2
 
@@ -85,7 +93,8 @@ def test_an_overridden_proposal_is_not_presented_as_what_ran():
                 resolved_file_order=None,
                 ordering_resolution_source="operator_override",
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     entry = summary.round_ordering[0]
     assert entry.resolved_order_strategy == "shuffle"
@@ -108,7 +117,8 @@ def test_a_rejected_proposal_is_visible_as_rejected():
                 resolved_order_strategy="shuffle",
                 ordering_resolution_source="default",
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     entry = summary.round_ordering[0]
     assert entry.proposal_rejected is True
@@ -134,7 +144,8 @@ def test_silence_and_rejection_are_distinguishable():
                 resolved_order_strategy="shuffle",
                 ordering_resolution_source="default",
             ),
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     quiet, overruled = summary.round_ordering
     # Same executed ordering, materially different agent behavior.
@@ -148,7 +159,7 @@ def test_silence_and_rejection_are_distinguishable():
 def test_pre_ordering_records_read_as_legacy_default():
     """A record written before the ordering option existed has no ordering
     fields. It is read explicitly, not guessed at."""
-    summary = tuning_output_to_model_run_summary(_output(_record("legacy")))
+    summary = tuning_output_to_model_run_summary(_output(_record("legacy")), order=_STEP09A_ORDER)
     entry = summary.round_ordering[0]
     assert entry.resolved_order_strategy == "shuffle"
     assert entry.resolution_source == "legacy_default"
@@ -166,7 +177,8 @@ def test_summary_round_trips_through_json():
                 ordering_resolution_source="operator_override",
                 override_order_strategy="sequential",
             )
-        )
+        ),
+        order=_STEP09A_ORDER,
     )
     from agent.schemas.interpretation import ModelRunSummary
 
