@@ -811,19 +811,23 @@ must start from them, not from the pre-implementation assumptions):
 
 ### 08c — contrast families + generic checks + three-task evidence
 
-> **Child design status: FROZEN — rev 2, operator ruling 2026-08-18.**
+> **Child design status: FROZEN — rev 2, operator rulings 2026-08-18
+> (freeze amendments + final approval).**
 > `step_08_health_check_task_profile/pr_08c_contrast_families.md`, frozen at
-> `573ee835` (`573ee8355e92d27c5e566cdfba7eaf9d133173c6`). Source audit anchored
-> at master `d7b2c8c9` (merged 08b squash `13e28796`). All four Q-08c
-> questions resolved (all A, with the ruling's refinements); sixteen freeze
-> amendments applied, including the ONE-TIME DAVIS measurement (preserved
-> npz, population dispersion `0.2156402715035823` → frozen
-> `min_dispersion = 0.04`) and the frozen Pets floors
-> (`min_distinct_symbols = 5`, `max_dominant_fraction = 0.95`, with the
-> real collapse evidence pinned as n=370 / distinct=2 / occupancy=2/37 /
-> dominant=369/370 — correcting this parent's own "fraction = 1.0" prose,
-> child §2.7). Every implementation checkbox unchecked. **Implementation
-> NOT started.** This is a child-design status entry only — the parent
+> `9be5cc25` (`9be5cc25aca0912b4784267d5e8e02426b8c99b7`) — the initial rev-2
+> freeze `573ee835` plus the operator's three final-approval corrections
+> (parent factual erratum · `shares_memory` no-copy contract · DAVIS
+> float-precision ownership). Source audit anchored at master `d7b2c8c9`
+> (merged 08b squash `13e28796`). All four Q-08c questions resolved (all A,
+> with the ruling's refinements); sixteen freeze amendments applied,
+> including the ONE-TIME DAVIS measurement (preserved npz, population
+> dispersion `0.2156402715035823` → frozen `min_dispersion = 0.04`) and the
+> frozen Pets floors (`min_distinct_symbols = 5`,
+> `max_dominant_fraction = 0.95`, with the real collapse evidence pinned as
+> n=370 / distinct=2 / occupancy=2/37 / dominant=369/370 — this parent's
+> former "fraction = 1.0" prose corrected by the dated erratum above, child
+> §2.7). Every implementation checkbox unchecked. **Implementation NOT
+> started.** This is a child-design status entry only — the parent
 > architecture above is unchanged.
 
 * **Goal**: Pets and DAVIS bind real health families; the generic
