@@ -2,769 +2,904 @@
 
 ## 0. Status and provenance
 
-**DRAFT rev 1 — NOT FROZEN. For operator review.** Drafted while the 08a
-Gate 2 was executing, at 08a head `7ae72ae5`. Implementation must not begin
-until this document is frozen under the normal child-design process.
+**REVISION 2 — READY FOR OPERATOR REVIEW. NOT YET FROZEN.**
 
-Child of the FROZEN Step-08 parent (`step_08_health_check_task_profile.md`,
-rev 3), which is the semantic authority for everything below — especially
-§6a.2 (the two extension levels), §6a.3 (the loading/binding seam), §6a.4
-(config ownership), §6a.5 (fail-closed resolution) and §12 08b.
+Rev 1 was drafted at the PRE-MERGE 08a head `7ae72ae5` and carried six
+`SOURCE-INSPECTION REQUIRED` markers. The operator's review ruling
+(2026-08-19) returned it **APPROVED IN DIRECTION / NOT READY TO FREEZE**
+with eighteen load-bearing items. Rev 2 answers all eighteen.
 
-Authority order: the frozen parent > current source (audited in §2) > the
-merged 08a implementation and its ledger > roadmap §8/§22.24 >
-`docs/design/pluggable_health_checks.md`.
+**Audit anchor.** Every statement below is verified against **master
+`a226495b`**, which contains the merged 08a (squash **`7da1e45e`**, PR #235)
+plus its doc sync. Rev 1's pre-merge assumptions were re-verified, and two
+of 08a's own recorded findings were CORRECTED in the process (§2.7).
 
-**This design starts from 08a's findings, not from pre-implementation
-assumptions.** The parent's "08a implementation status" subsection records
-six that constrain this PR; §2.4 restates the three that change what 08b
-must do.
+**No `SOURCE-INSPECTION REQUIRED` markers remain.** D18, the composition
+callers, the framework YAML, the run lifecycle, `TASK_HEALTH_PEEK` and the
+numerical value scale were all read at the anchor and are recorded below
+with file and line.
 
-**Sections marked `SOURCE-INSPECTION REQUIRED` must be closed before
-freeze.** They are places where this draft states an intent that has not
-yet been verified against code. Per the operator's standing rule, no commit
-plan is finalized on a guessed file path, interface or behaviour.
+Child of the FROZEN Step-08 parent (rev 3). Authority order: frozen parent >
+current source (§2) > merged 08a implementation and ledger > roadmap
+§8/§22.24 > `pluggable_health_checks.md`.
 
-## 1. Mandate (quoted from the frozen parent, §12 08b)
+### 0.1 Operator rulings incorporated (all four questions closed)
 
-* **Goal**: "the task owns roster/thresholds/dispositions and names its
-  plugin code; the framework config slims to policy only and never learns a
-  task identity; external plugin modules load at run scope and register
-  providers AND custom checks through the public API; declared-but-
-  unresolved bindings fail closed; composition lands DETERMINISTICALLY in
-  the SAME pinned artifact; scalar-only metrics reach the context as a
-  typed statement (D18), consumed as `inapplicable` by per-file checks —
-  never a hollow pass. 08b ends with extension provably requiring zero
-  infrastructure edits (§6a.2)."
-* **Allowed changes** (parent §12 08b): "`config.py` (watch the god-file
-  line, §2.5), effective-config composition, the health plugin loading seam
-  (§6a.3 — the existing idiom instantiated; config-named module refs), the
-  public …" registration surface, the TIDMAD family's task-owned config,
-  and the D18 typed statement.
-* **Acceptance** (parent §10, §14.G): the out-of-tree extension proof is
-  **UNIT**-owned (integration-style, tmp external fixture package — NOT
-  Gate 2, no training), with a negative control proving a broken
-  registration fails closed deterministically; task-owned family/threshold
-  composition + pinning is UNIT + **GATE 2** (bounded TIDMAD; startup
-  composition is lifecycle); D18 is UNIT.
+| id | ruling |
+|---|---|
+| **Q-08b-1** | **RESOLVED — config is the semantic authority.** Task config chooses plugin refs. An env var may exist ONLY as framework-generated subprocess transport for the already-resolved set. No ambient user-facing override, no precedence guessing. |
+| **Q-08b-2** | **RESOLVED — the composed artifact SHA MAY change.** Do not distort serialization to preserve the old one. Required instead: deterministic composition, semantic TIDMAD parity, exact delta recorded, new pin used, old-workspace mismatch still fail-closed, fresh-workspace boundary. |
+| **Q-08b-3** | **RESOLVED as a source-grounded disposition** — see §2.5 and §3.8. Not an architecture question. |
+| **Q-08b-4** | **RESOLVED AS PROPOSED.** 08b owns opaque capability keys, the provider protocol, payload transport, external provider/check registration and plugin-local capabilities. 08c owns the framework-standard `categorical_predictions` / `continuous_samples` and the reusable generic checks plus Pets/DAVIS bindings. 08b's synthetic capability is an extension PROOF, not a new scientific primitive. |
 
-## 2. Source audit (at 08a head `7ae72ae5`)
+### 0.2 The three contracts this revision exists to freeze
 
-### 2.1 The plugin-loading idiom that 08b instantiates
+```text
+schema parse            ≠   plugin resolution
+invalid binding         ≠   inapplicable check
+external plugin bytes   ∈   pinned run identity
+```
 
-Verified against source, matching the parent's §2.6 audit:
+Each was open in rev 1 and each would have become Step-10/12 architecture
+debt. They are frozen in §3.1, §3.2 and §3.6.
+
+## 1. Mandate (frozen parent, §12 08b)
+
+**Goal.** The task owns roster, thresholds and dispositions and names its
+plugin code; the framework config slims to policy only and never learns a
+task identity; external plugin modules load at run scope and register
+providers AND custom checks through the public API; declared-but-unresolved
+bindings fail closed; composition lands deterministically in the SAME pinned
+artifact; scalar-only metrics reach the context as a typed statement (D18),
+consumed as `inapplicable` by per-file checks rather than a hollow pass. 08b
+ends with extension provably requiring zero infrastructure edits.
+
+**Acceptance** (parent §10, §14.G). The out-of-tree extension proof is
+**UNIT**-owned — integration-style, temporary external fixture package, NOT
+Gate 2, no training — with a negative control proving a broken registration
+fails closed. Task-owned composition + pinning is UNIT + **Gate 2**. D18 is
+UNIT.
+
+## 2. Source audit (at master `a226495b`, merged 08a `7da1e45e`)
+
+### 2.1 The plugin-loading idiom 08b instantiates
 
 | element | location | behaviour |
 |---|---|---|
-| directory resolution | `ml_models/plugin_loader.py::_resolve_plugin_dirs` (`:96-115`) | `SIDERIUS_PLUGIN_DIRS`, `os.pathsep`-separated; **per-run mode scans exactly those dirs with NO fallback** to `AGENT_GENERATED_DIR` |
-| registration contract | module attributes (`PLUGIN_MODEL_TYPE` / `PLUGIN_CONFIG_CLASS` / `PLUGIN_MODEL_CLASS`) | importlib file load, attribute contract |
-| per-file API | `register_model_in_memory` (`:230`) | registers one plugin with no rescan |
-| second instance | `agent_generated/_loss_loader.py`, `loss_models_sandbox.py` (`register_loss_in_memory:51`, `preload_global_losses:105`) | same idiom, **deliberately separate env var** `SIDERIUS_LOSS_DIRS` |
-| subprocess propagation | `core/subprocess_env.py` (`PLUGIN_DIRS_ENV_VAR:39`), `core/sandbox_executor.py:316`, `core/runtime_control/gpu_measurement_runner.py:275` | already load-bearing and tested |
-| failure semantics | scan fail-OPEN per file (unparseable file skipped + warning); **name resolution fail-CLOSED** (`UnknownOutputContractError`, `plugin_loader.py:158-189`) | "load what parses, refuse at the name" |
-| out-of-tree proof | `scripts/run_pets_gate2.py:40-43` loaded `examples/<pack>/plugins/` through this channel in D14 | out-of-tree loading is an EXISTING exercised fact |
+| directory resolution | `ml_models/plugin_loader.py::_resolve_plugin_dirs` `:96-115` | `SIDERIUS_PLUGIN_DIRS`, `os.pathsep`-separated; per-run mode scans exactly those dirs, **no fallback** |
+| registration contract | module attributes (`PLUGIN_MODEL_TYPE` / `_CONFIG_CLASS` / `_MODEL_CLASS`) | importlib file load |
+| per-file API | `register_model_in_memory` `:230` | one plugin, no rescan |
+| second instance | `agent_generated/_loss_loader.py`, `loss_models_sandbox.py` | same idiom, deliberately **separate** env var `SIDERIUS_LOSS_DIRS` |
+| subprocess propagation | `core/subprocess_env.py:39`, `sandbox_executor.py:316` | already load-bearing |
+| failure split | `plugin_loader.py:158-189` | scan fail-**open** per file; name resolution fail-**closed** |
+| out-of-tree precedent | `scripts/run_pets_gate2.py:40-43` | D14 already loaded `examples/<pack>/plugins/` this way |
 
-**08b instantiates this idiom for health. It does not invent a second
-plugin system** (parent §6a.3, ruling §2).
+08b instantiates this idiom. It does not invent a second plugin system.
 
-### 2.2 The health registry and its one missing seam
+### 2.2 The health registry and the one missing seam
 
-`execute_tools/health_checks/registry.py` is already generic and
-fail-closed: a flat `name → skill` dict; `register()` raises on duplicates;
-`get()` raises listing available checks. It is populated ONLY by
-`execute_tools/health_checks/__init__.py::_bootstrap_registry()` — a
-central import list, which `registry.py:47-48` even documents as the way to
-add a check. **That central import list is the single missing seam.**
+`registry.py` is a flat `name → skill` dict; `register()` raises on
+duplicates; `get()` raises listing what is available. It is populated ONLY
+by `__init__.py::_bootstrap_registry()` (`:68`, invoked `:93`) — a central
+import list. **That is the single missing seam.** 08a added a seventh
+built-in through the same bootstrap and recorded it as predating 08b.
 
-08a added a seventh built-in (`sample_dispersion_floor`) through that same
-bootstrap and recorded it as predating 08b's external channel.
+### 2.3 The framework YAML, gate by gate (the migration table's source)
 
-### 2.3 Config, composition and pinning
+Read verbatim at the anchor. Both shipped configs
+(`configs/health_checks.yaml`, `..._baseline_observe_mode.yaml`) have the
+identical six-gate shape:
 
-* `config.py` (514 lines pre-08a) holds `CheckRef` (`:47`), `ActionConfig`
-  (`:116`), `GateConfig` (`:131`), `HealthChecksConfig` (`:256`),
-  `load_health_gates_config` (`:300`, module-cached at `:297`),
-  `apply_monitored_files` (`:338`), `validate_health_scope` (`:369`),
-  `materialize_effective_config` (`:414`).
-* **A task-owned-resolution precedent already exists**: `TASK_HEALTH_PEEK`
-  (`config.py:39`, `"task_health_peek"`) is a sentinel inside a `CheckRef`
-  config that resolves at load time to the bound task's declared
-  health-peek file set. 08b generalizes this direction of travel; it must
-  also decide the sentinel's fate once the roster itself is task-owned
-  (§8 Q-08b-3).
+| gate id | `gate_role` | `after_round` | `short_circuit` | `on_pass` | `on_fail` | check config keys |
+|---|---|---|---|---|---|---|
+| `output_diversity_blocking` | blocking | every | true | continue | invalidate_round | `min_unique_int8_values: 25`, `peek_samples: 100000`, `peek_file_indices: task_health_peek`, `aggregation: any_pass` |
+| `output_std_blocking` | blocking | every | true | continue | invalidate_round | `min_std_mv: 1.0`, `peek_samples`, `peek_file_indices`, `aggregation` |
+| `amplitude_collapse_blocking` | blocking | every | true | continue | invalidate_round | `collapse_threshold: 0.95`, `peek_samples`, `peek_file_indices`, `aggregation` |
+| `pearson_dispersion_recording` | observational | every | false | continue | continue | `peek_samples: 1000000` |
+| `spectral_peak_ratio_recording` | observational | every | false | continue | continue | `peek_samples: 1000000` |
+| `per_file_output_std_recording` | observational | every | false | continue | continue | `peek_samples: 100000` |
+
+**The decisive observation for §3.7**: the policy fields are perfectly
+correlated with two classes and nothing else. Every blocking gate is
+`(blocking, true, continue, invalidate_round)`; every recording gate is
+`(observational, false, continue, continue)`. There are exactly **two**
+policy shapes in production, which is what makes a disposition-key
+composition rule a description of current reality rather than a new
+invention.
+
+Each gate also carries a long `reason:` prose block. That prose is TASK
+science (empirical margins, band exemplars, the 6.3556 investigation) and
+migrates with the task, not with policy.
+
+### 2.4 Composition, pinning and their callers
+
 * `materialize_effective_config(source, files, workspace, resolved_scope)`
-  → `(path, body_sha256)`: load → monitored-file override → scope
-  validation → atomic write of `{workspace}/health_checks_effective.yaml`,
-  sha over the canonical YAML body (header excluded). **Workspace-immutable
-  on resume**: same body sha is reused, a mismatch RAISES and distinguishes
-  "operator inputs changed" from "source YAML drifted".
-* `core/run_invariants.py:340-375` materializes and hashes FIRST, then
-  builds `RunInvariants`, so the pinned sha always describes the config the
-  run will read. Its docstring is explicit: *never duplicate the
-  normalization/hashing logic at a call site.*
+  → `(path, body_sha256)`; load → monitored-file override → scope validation
+  → atomic write; **sha over the canonical YAML body, header excluded**;
+  workspace-immutable on resume (same sha reused; mismatch RAISES and
+  distinguishes "operator inputs changed" from "source YAML drifted").
+* **The only production caller is `core/run_invariants.py:380`**, inside
+  `build_run_invariants`, which materializes and hashes FIRST and then
+  builds the lock — its docstring forbids duplicating that logic at a call
+  site. `core/resume.py:354` MIRRORS the computation for resume and must be
+  kept in step.
+* `build_run_invariants` has **four** production callers:
+  `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:576`,
+  `scripts/run_comparison.py:1221`,
+  `sdsc_submission_scripts/run_one_iteration.py:1446`,
+  `workflows/model_exploration.py:1845`.
+* `RunInvariants._CANONICAL` (`core/run_invariants.py:134-`) includes
+  **`health_config_sha256`**; `validate_run_invariants` (`:264`) raises
+  naming every drifted field. **Consequence for §3.6**: anything folded
+  into the hashed BODY is automatically part of the pinned run identity and
+  automatically fail-closed on resume — no new canonical field, no new
+  comparison logic.
+* Effective-artifact consumers outside the health package:
+  `scripts/v18_wave_summary.py:97` reads it and asserts every check's
+  effective config; `core/resume.py:374` locates it. Both must survive the
+  composed layout — pinned as a compatibility assertion in C4.
 
-**Consequence for 08b**: composition must happen INSIDE
-`materialize_effective_config` (or a function it calls), never beside it.
-Any second composition path would produce a sha that does not describe what
-the run reads — exactly the failure the current design prevents.
+### 2.5 `TASK_HEALTH_PEEK` — full census (closes Q-08b-3)
 
-### 2.4 What 08a leaves for 08b (the three that change the plan)
+Defined `config.py:39` (`"task_health_peek"`); documented `:68`; validated
+`:104`; and resolved at `:110-112` to
+`list(resolve_dataset_profile().health_peek_files)`. Used in BOTH shipped
+YAMLs, on the three BLOCKING gates only (6 occurrences). **No Python
+consumer outside `config.py`.**
 
-1. **`value_scale_unit` has no owner.** `_MV_PER_LSB = 40.0 / 128.0` is a
-   module literal in `output_std.py`, `per_file_output_std.py` and
-   `pearson_dispersion.py`. 08a's regime-A derivation leaves the axis
-   ABSENT and **no 08a check requires it**, because requiring it would flip
-   TIDMAD's std checks to `inapplicable`. **08b owns moving this scale into
-   the TIDMAD family's task config** — and only after that may a check
-   declare the axis. This is a real behavioural coupling: the migration
-   commit must move the literal AND add the declaration together, or parity
-   breaks in between.
-2. **`threshold_parameter_names` is populated and asserted** ⊆ the keys each
-   check reads. It is 08b's migration input. `peek_file_indices` and
-   `aggregation` are deliberately EXCLUDED as framework policy.
-3. **One classifier, one call site.** `schemas.classify_verdict` is the
-   single verdict mapping; `applicability()` has exactly one production
-   call site (`runner.evaluate_gate`), test-pinned. 08b must not add a
-   second of either. The two functions 08b redirects for facts are
-   `_regime_a_facts.resolve_health_facts()` and
-   `runner._resolve_task_facts()` — a call-site change, not a contract
-   change.
+So it is already the "task-owned data reaching the framework config"
+pattern, keyed on Step-02c's `DatasetProfile.health_peek_files`. Disposition
+in §3.8.
 
-### 2.5 God-file watch (parent §2.5)
+### 2.6 D18 — the producer, read at the anchor (no invention)
 
-`config.py` is the module 08b grows most: task-config schema, plugin-ref
-resolution, composition, and the existing gate/scope machinery would all
-land in one file. **The repository's node-local decomposition rule applies
-before adding a third responsibility.** §3.6 proposes the split; C1's first
-checklist item re-measures the file at the implementation head rather than
-trusting this number.
+**The typed scalar-only statement already exists.**
+`execute_tools/evaluation_metric.py:406`:
 
-### 2.6 `SOURCE-INSPECTION REQUIRED` before freeze
-
-* D18: the exact shape of the scalar-only metric statement at its producer
-  (Step-06 metric handle / `evaluation_metric.py`) and how it would reach
-  `HealthCheckContext`. **Not yet inspected.**
-* Every caller of `materialize_effective_config` and
-  `build_run_invariants`, to size the composition change.
-* `configs/health_checks.yaml` current content, gate by gate, to enumerate
-  exactly which keys migrate to task ownership and which stay policy.
-* Whether any consumer reads `health_checks_effective.yaml` expecting the
-  pre-08b key layout (`scripts/v18_wave_summary.py:97` does — its
-  expectations must be checked).
-
-## 3. Design (proposed)
-
-### 3.1 Task health config — a task-owned document
-
-A task declares its health behaviour in its OWN config, outside the
-framework YAML (parent §6a.4):
-
-```text
-task health config
-    facts            the declared health facts (08a's TaskHealthFacts axes)
-    plugins          module file paths / directory list supplying code
-    providers        capability key -> provider id (registered by a plugin)
-    family           roster of {check id, parameters, disposition}
+```python
+per_sample: list[float | None] | None = Field(
+    default=None,
+    description="Optional structured evidence indexed by input identity; None for scalar-only.",
+)
 ```
 
-Framework config keeps gate ROLES, actions, severity, cadence — generic
-policy only. **The forbidden shape is named and census-refused**: the
-framework YAML must never grow `tidmad:` / `pets:` / `<user task>:` keys.
+The Pets `AccuracyMetric` docstring (`:554`) states it explicitly:
+*"`per_sample` is `None` — no per-file vector concept exists here."*
+TIDMAD's instance returns `(scalar, file_vector, ("anchor_map",))` (`:540`).
 
-### 3.2 Run-scoped plugin loading
+**The hollow bridge is at `nodes/ml_hyperparameter_tune_agent/execution.py:894-897`:**
 
-The task config NAMES its plugin files/directories explicitly
-(config-driven, never guessed from the environment). At composition the run
-loads them through the same file-based mechanism the model/loss loaders
-use, and each plugin registers through the SAME PUBLIC functions the
-built-ins use. Registration is run-scoped and happens before family
-resolution; the pinned artifact records what was loaded.
+```python
+file_vector, final_scalar = (
+    list(metric_result.per_sample or []),
+    metric_result.scalar,
+)
+```
 
-Following the §2.1 precedent exactly: a **separate** scoping channel for
-health (as losses got their own rather than sharing the model channel), the
-same importlib file load, and the same "load what parses, refuse at the
-name" failure split.
+with the comment *"a scalar-only instance an empty one"*, and
+`file_vector=file_vector` reaches `HealthCheckContext` at `:951`. So a
+scalar-only task presents per-file checks with `[]`, which today reads as
+"no files" and yields a passing NA — exactly the hollow pass the parent
+forbids. **D18 is therefore a transport change, not a new flag**: the
+statement exists at the producer and is destroyed at the bridge.
 
-### 3.3 View providers and capability transport
+### 2.7 Two corrections to 08a's own recorded findings
 
-A provider exposes capability keys; a check declares one
-(`consumes_view`, already carried since 08a). The engine's whole job stays
-`check requires key X → does the bound provider expose X? yes → transport
-the payload; no → inapplicable`. **No `ViewKind` enum, no
-`if view_kind == …` dispatch** (parent §6.3, census-refused).
+Found while re-auditing at the anchor. Both are recorded here rather than
+silently fixed, because 08b consumes them:
 
-### 3.4 Fail-closed resolution (parent §6a.5)
+1. **`_MV_PER_LSB` is duplicated in FOUR check modules, not three.** 08a's
+   ledger and the parent's status note say three (`output_std`,
+   `per_file_output_std`, `pearson_dispersion`). Source at the anchor shows
+   a fourth: `spectral_peak_ratio.py:44`, used at `:116` to scale samples
+   to mV before the PSD. C5 must migrate four.
+2. **`output_std.py:43`'s comment — "matches `execute_tools/scoring_utils.py`"
+   — is STALE.** `scoring_utils.py` contains no such constant at the anchor
+   (verified by grep). The nearest other copies are five one-off scripts
+   under `scripts/`. So the health package is the only production owner, and
+   there is no scoring-side authority to defer to.
 
-Two cases that must never be conflated:
+### 2.8 Run lifecycle — is "run-scoped" real? (closes ruling item 6)
 
-| case | behaviour |
+Audited because the registry is module-global and "loaded at startup" is not
+by itself proof of run scope.
+
+* `run_workflow` (`workflows/model_exploration.py:1340`) is the RUN
+  boundary: it calls `build_run_invariants` **once** (`:1845`), then loops
+  iterations (`for iteration in range(start_iteration, start_iteration +
+  max_iterations)`) and, within an iteration, tunes multiple model types.
+  So **one run may contain many iterations and many models — but it is still
+  ONE run, one workspace, one invariants lock, one effective health config.**
+* **Chain mode runs each iteration as its own subprocess with
+  `max_iterations=1`** (comment in `run_workflow`; `run_one_iteration.py`'s
+  module docstring: *"Runs ONE iteration of `run_workflow()`
+  (max_iterations=1)"*).
+* Each of the four `build_run_invariants` call sites is a `main()`/startup
+  path. **No production entry point loops over runs.**
+
+**Conclusion — source-proven, with a caveat.** In production one process
+hosts at most one run, so plugins loaded at run startup are run-scoped *in
+fact*. But that is an emergent invariant, not an enforced one, and tests
+already execute many things in one process. **Rev 2 therefore does not rely
+on it**: §3.5 makes the invariant executable and fail-closed.
+
+## 3. Design (frozen for rev 2)
+
+### 3.1 Two validation phases — authoring vs resolution
+
+**The contract:** a schema may not require an externally supplied identifier
+to exist, because it necessarily does not exist until its plugin loads.
+
+```text
+PHASE A — AUTHORING / SCHEMA VALIDATION        (no plugins loaded)
+    field shape · non-empty ids · plugin-ref syntax
+    duplicate roster entries · valid disposition names
+    contradictory facts · unknown schema fields
+    ACCEPTS any syntactically valid check/provider/capability id
+    NEVER interprets an opaque capability value
+
+           ↓  load declared plugins  ↓
+
+PHASE B — BINDING RESOLUTION                   (plugins loaded)
+    resolve check ids · resolve provider ids
+    validate capability exposure · validate family references
+    UNRESOLVED  →  deterministic fail-closed startup error
+```
+
+Phase A rejects: empty id, malformed ref, duplicate roster entry,
+contradictory facts, unknown field, invalid disposition.
+Phase A must **not** reject: unknown check id, unknown provider id, unknown
+capability key.
+
+### 3.2 Unresolvable binding is an ERROR, never `inapplicable`
+
+Rev 1 said both, in §3.3 and §3.4. Frozen resolution:
+
+| situation | outcome |
 |---|---|
-| no binding declared | regime-legal absence — UNKNOWN-style evidence-absence, NAMED, never a synthesized pass |
-| binding declared but unresolvable (missing plugin file, unregistered provider/check id, capability not exposed) | **deterministic diagnostic startup error** naming the unresolved reference and what IS registered — never a silent fallback, never a downgrade to `inapplicable` |
+| family declares a check requiring capability `X`; bound provider does not advertise `X` | **deterministic startup/binding ERROR** |
+| declared plugin file missing / unloadable | **deterministic startup ERROR** |
+| declared check/provider id not registered after loading | **deterministic startup ERROR** |
+| task declares no health binding at all | regime-legal absence — UNKNOWN-style evidence-absence, NAMED, never a synthesized pass |
+| binding VALID, but task facts / round context make the check semantically non-applicable | `CheckVerdict.INAPPLICABLE` (08a semantics, unchanged) |
+| provider raises while materializing an applicable view | `CheckVerdict.ERROR` — fail closed, never inapplicable |
 
-The second row is the negative control the parent requires as executable
-evidence.
+**A configuration error is never downgraded to a Health verdict.**
 
-### 3.5 Deterministic composition into ONE pinned artifact
+### 3.3 The minimal view-provider protocol (two phases, I/O-ordered)
 
-`framework policy + task health config → the SAME
-{workspace}/health_checks_effective.yaml`, composed deterministically
-inside the existing materialization path (§2.3), so the existing sha
-pinning, resume immutability and run-invariants lock keep working
-unchanged in MECHANISM. Parent §15 R1/Q2 already resolved that byte
-identity of the artifact may be impossible under composition; the fallback
-is "semantically identical + called-out delta + fresh-workspace boundary",
-with the run-invariants refusal asserted rather than weakened.
-
-### 3.6 Decomposition of `config.py` (god-file rule)
-
-Proposed split, applied BEFORE the new responsibilities land:
+Frozen because 08a's pre-I/O applicability invariant would otherwise be
+undermined: a provider must not have to open an artifact to decide whether a
+check applies.
 
 ```text
-config.py            framework gate policy schema + loader (unchanged surface)
-_task_health_config.py   task-owned document schema + validation
-_plugin_binding.py       run-scoped load + registration + fail-closed resolution
-_composition.py          framework policy x task config -> effective artifact
+PHASE 1 — METADATA ONLY, NO ARTIFACT I/O
+    provider_id      : str                 stable identity, config-referenced
+    capabilities     : frozenset[str]      opaque keys, never interpreted
+  (advertised at registration; composition resolves against these)
+
+PHASE 2 — MATERIALIZATION, I/O PERMITTED
+    materialize(capability_key, ctx, config) -> HealthView
+  invoked by the RUNNER, only after applicability returned applicable
 ```
 
-Public import paths stay where consumers already point (`config.py`
-re-exports), following the `schemas.py`/`runner.py` re-export precedent
-already used for `severity_of` and `CandidateHealthValidity`.
+* `HealthView` is a thin frozen envelope: `capability_key`, `provider_id`,
+  and an opaque `payload`. The engine never inspects `payload`. Standard
+  payload contracts are 08c.
+* **Transport to the check**: `HealthCheckSkill.run(ctx, config, *,
+  view=None)` — keyword-only with a default, so all seven existing checks
+  and any pre-08b/external check keep working untouched. A check that
+  declares `consumes_view` and is invoked through a gate receives the
+  materialized view; one that does not, does not.
+* **Provider errors** are caught by the runner exactly like check
+  exceptions (the PR #101 Bug-B guard shape) and produce
+  `CheckVerdict.ERROR`.
+* Provider config lives in the task health config beside the provider ref.
 
-## 4. Commit decomposition — detailed implementation checklists
+**Required ordering, executable:**
 
-### 4.0 Standing rules for every commit (binding during implementation)
+```text
+binding resolution → capability advertisement → applicability
+    → (only if applicable) materialize → check.run
+```
 
-* **Inspect before finalizing.** Each commit's first checklist item is a
-  bounded read of the exact functions it edits, re-verified at the
-  implementation head. If inspection reveals ambiguity or larger scope than
-  this design assumes, **STOP and ask** before changing the plan.
-* **Checkbox discipline.** `[ ]` = not done; `[x]` only after the change is
-  implemented AND its evidence line is filled in — test counts and wall
-  time, or the recorded reason a check could not run. **Every box in this
-  draft is `[ ]`.**
-* **Pytest verdicts come from the full log file**, never a piped tail's
-  exit code.
-* **Per the operator amendment of 2026-08-18** (recorded in the 08a design
-  §4.0a): commits are autonomous and bounded Gates launch autonomously
-  after their specification is written into the ledger. The pre-commit
-  information set is still established and recorded — it is a
-  self-verification checklist, not a blocking checkpoint.
-* **Out of scope for ALL commits**: planner/prompt exposure of health
-  (byte-pinned instead), production-default changes, the generic
-  categorical/continuous check families and Pets/DAVIS bindings (08c),
-  Step-09 interpretation, Step-10/12 composition-root unification.
-* **Ordering-behaviour rule, adapted.** The operator's checklist standard
-  asks that ordering acceptance validate the actual visited sequence rather
-  than a configuration value. 08b has no `file_order`; its analogue is the
-  **executed check sequence and the composed roster**. Every parity
-  criterion below is written against the actual executed sequence and the
-  actual persisted values, never against the composed config object.
+C3 adds a test that FAILS if an inapplicable check causes
+`materialize` to be called or any artifact to be opened.
+
+### 3.4 `evaluate_gate` does change — a rev-1 error corrected
+
+Rev 1's C3 said `evaluate_gate` "must NOT change" while C7 required a
+provider→check flow through it. That is not satisfiable. Rev 2 states
+plainly: **`evaluate_gate` gains the materialization step** between
+applicability and `skill.run`, and nothing else about it moves — check
+order, short-circuit, action selection and the exception guard are
+unchanged, pinned by the 08a tests.
+
+### 3.5 Run scope, made executable rather than assumed
+
+Given §2.8's emergent one-run-per-process invariant, 08b adds a **run-scoped
+registration ledger**:
+
+* at run start, plugin loading records the resolved plugin set (refs +
+  digests, §3.6) in a process-level ledger alongside the registrations it
+  produced;
+* a SECOND load in the same process with a **different** resolved set
+  **fails closed** with a diagnostic naming both sets;
+* an identical re-load is idempotent (re-entrant startup, resume);
+* built-ins remain bootstrapped independently and are never removed by
+  external loading.
+
+This converts "one run per process" from an assumption into an enforced,
+testable property, and gives a deterministic two-run counterfactual test
+(§4.2 validation) rather than relying on the test-only `clean_registry`
+fixture as production evidence.
+
+### 3.6 External plugin identity is part of the pinned run identity
+
+The hashed effective-config body — and therefore the canonical
+`health_config_sha256` (§2.4) — **must include the resolved plugin set and
+each file's content digest**:
+
+```yaml
+resolved_plugins:
+  - ref: ./plugins/health.py
+    resolved_path: /abs/path/plugins/health.py
+    sha256: "abc…"
+```
+
+* a configured DIRECTORY is resolved deterministically, sorted
+  deterministically, and every loaded file is pinned individually;
+* because this rides the existing hashed body, **no new canonical field and
+  no new comparison logic is needed** — `validate_run_invariants` already
+  raises naming the drifted field;
+* consequence, and the reason this is required: *same config, same path,
+  changed plugin bytes* → different body sha → **resume fails closed**.
+  Recording the plugin only in the unhashed header would leave that case
+  silently accepted.
+
+Negative test in C4: mutate a plugin file in place, resume, expect refusal.
+
+### 3.7 Task disposition ↔ framework policy (deterministic, no duplicate truth)
+
+Frozen shape, and §2.3 shows it is a description of the current YAML rather
+than a new invention (production has exactly two policy shapes):
+
+```text
+TASK  chooses WHICH disposition applies, per roster entry
+FRAMEWORK  defines WHAT that disposition does operationally
+```
+
+| field | owner after 08b |
+|---|---|
+| gate `id` | **task** roster — they are persisted join keys for `health_gate_results`; TIDMAD keeps its six ids byte-identical |
+| check `name` | **task** roster |
+| thresholds (`min_unique_int8_values`, `min_std_mv`, `collapse_threshold`) | **task** (08a's `threshold_parameter_names`) |
+| `peek_samples` | **task** parameter — read by the check, NOT a threshold (08a's corrected semantics) |
+| `peek_file_indices` | **task** (see §3.8) |
+| numerical value scale | **task** (§3.9) |
+| `reason:` prose | **task** — it is task science |
+| `disposition` | **task** selects the key |
+| `gate_role`, `on_pass`, `on_fail`, `short_circuit`, severity | **framework** policy, DERIVED from the disposition |
+| `after_round` (cadence) | **framework** policy |
+| `aggregation` | **framework** policy (08a already excluded it from task thresholds) |
+
+There is exactly ONE definition of each field. A task cannot set
+`gate_role`/`action`/`severity`, so the conflicting-copies failure mode is
+structurally impossible rather than resolved by precedence.
+
+### 3.8 `TASK_HEALTH_PEEK` disposition (Q-08b-3, source-grounded)
+
+Its only job (§2.5) is to inject `DatasetProfile.health_peek_files` into a
+framework-owned check config. Once the roster is task-owned, the task config
+states its peek files directly and the sentinel has no remaining purpose.
+
+**Disposition: remove it in C5**, together with the framework YAML entries
+that use it — provided the C5 audit confirms no consumer outside
+`config.py`. If a bounded legacy Regime-A path still needs it, it may remain
+strictly as a **legacy compatibility adapter**, explicitly *not* the future
+extension mechanism, *not* required by external tasks, and *not* task-package
+protocol vocabulary. Either way it is never promoted into generic Health
+vocabulary.
+
+### 3.9 Numerical value-scale ownership (not just the unit)
+
+`value_scale_unit` is an applicability FACT. The arithmetic needs the
+NUMBER. Four checks currently hold `_MV_PER_LSB = 40.0/128.0` (§2.7).
+
+Frozen: the task health config declares **one** typed value-scale
+declaration — unit plus numerical factor — at family level; the four checks
+receive the resolved factor as a parameter. **Not** three or four duplicated
+literals. The unit declaration and the numerical factor migrate **atomically
+in C5** together with the checks' `value_scale_unit` requirement, because
+08a proved that separating a scale declaration from its consumers breaks
+parity in between.
+
+### 3.10 How a run selects its task health config (interim binding path)
+
+Step-10/12's unified composition root does not exist yet, so 08b freezes a
+narrow, bounded seam:
+
+```text
+EXPLICIT PATH (new/external tasks)
+    the caller supplies an explicit task-health-config binding, threaded
+    through build_run_invariants -> materialize_effective_config
+
+LEGACY REGIME-A PATH (no explicit binding supplied)
+    resolve the in-repo TIDMAD reference pack's health config
+```
+
+The legacy path is selected by **absence of an explicit binding**, never by
+a task name — no `if task == "tidmad"` anywhere. It is a bounded
+compatibility seam that Step 10/12 replaces with the unified root, and it is
+explicitly NOT the extension mechanism. **C5 cannot move TIDMAD's science
+out of the framework YAML until this path exists**, which is why it lands in
+C4/C5 and not later.
+
+## 4. Commit decomposition
+
+Restructured from rev 1 per ruling item 17: **no commit exists to preserve a
+number, and no empty modules are created.** Rev 1's standalone "`config.py`
+decomposition" commit is dissolved — new responsibilities land in new
+private modules as they arrive, and `config.py` is split only if the C1
+audit shows it has actually become mixed-responsibility.
+
+### 4.0 Standing rules
+
+* Each commit's first item is a bounded read of the exact functions it
+  edits, at the implementation head. Ambiguity or larger scope than assumed
+  → **STOP and ask**.
+* `[ ]` = not done; `[x]` only with recorded evidence. **Every box below is
+  `[ ]`.**
+* Pytest verdicts from complete log files.
+* Commits are autonomous; bounded Gates launch autonomously after their spec
+  is written into the ledger (08a §4.0a amendment).
+* Out of scope for all commits: prompt/planner exposure, production-default
+  changes, the standard categorical/continuous families and Pets/DAVIS
+  bindings (08c), Step-09, Step-10/12 composition root.
+* **Ordering-behaviour rule, adapted**: 08b has no `file_order`; its
+  analogue is the **executed check sequence, the composed roster and the
+  persisted values**. Every parity criterion below is written against those,
+  never against the composed config object.
 
 ---
 
-### 4.1 C1 — `config.py` decomposition (behaviour-preserving)
+### 4.1 C1 — task health config schema (authoring validation only)
 
-**Goal.** Create the module boundaries 08b's new responsibilities will land
-in, while changing NO behaviour — so that every later commit's diff is the
-feature, not the feature tangled with a move. It is first because the
-god-file rule requires establishing the boundary before adding
-responsibility, and because a move done later would obscure the migration
-diff that most needs review.
+**Goal.** The task-owned document exists as a validated schema that accepts
+externally supplied identifiers, so content review is separate from loading
+mechanics — and so the Phase-A/Phase-B split (§3.1) is established before
+anything can blur it.
 
-**Scope.**
-* Changes: `execute_tools/health_checks/config.py` split per §3.6, with
-  `config.py` re-exporting every currently-public name.
-* Must NOT change: any schema field, any validation message, the module
-  cache semantics, `materialize_effective_config`'s signature or output
-  bytes, any YAML, any test.
-* Depends on: nothing (08a is merged).
+**Scope.** New `_task_health_config.py` (document schema: facts, plugin
+refs, provider bindings, roster of `{gate_id, check, disposition,
+parameters}`, value-scale declaration). Deliberately unreachable from
+production; a grep-test asserts it, INVERTED in C3 rather than deleted (the
+08a precedent). Must not change framework config, registry, runner or any
+check. Depends on: nothing.
 
 **Implementation plan.**
-- [ ] Re-measure `config.py` at the implementation head and enumerate every
-      symbol imported from it across the repository (production AND tests),
-      recording the list here. If the file has not in fact grown into
-      mixed responsibility, **say so and skip the split** rather than
-      performing a refactor for its own sake.
-      Evidence: _(pending)_
-- [ ] Extract the task-config/plugin/composition seams as empty-but-typed
-      modules only if C2–C4 will genuinely fill them; otherwise defer.
-      Evidence: _(pending)_
-- [ ] Move code with re-exports; no signature changes.
-      Evidence: _(pending)_
+- [ ] Re-measure `config.py` at the head and decide whether it has become
+      mixed-responsibility. **If not, do not split it**; place new
+      responsibilities in new modules and say so here.
+- [ ] Produce the exact ownership/migration table from the CURRENT
+      `configs/health_checks.yaml`, gate by gate, against §2.3.
+- [ ] Define the schema with **authoring validation only** (§3.1 Phase A);
+      reuse 08a's `TaskHealthFacts` rather than a second facts vocabulary.
+- [ ] Define the value-scale declaration (§3.9) as one typed family-level
+      value.
 
-**Validation plan.**
-* Unit: entire health package green with **zero test edits** — the proof
-  that the surface did not move.
-* Backward-compat: an import census test asserting every previously public
-  name is still importable from `config.py`.
-* Static: ruff + (CI) pyright.
-* Gate: none.
+**Validation plan.** Unit: a TIDMAD-shaped document parses; parsed values
+equal hardcoded expectations (never read back from the parser). Negative:
+empty id, malformed plugin ref, duplicate roster entry, invalid disposition
+name, unknown field, contradictory facts. **Positive-negative pair proving
+Phase A is not Phase B**: a roster naming a check that is NOT registered
+**parses successfully**. Backward-compat: grep-test asserts no production
+module imports the schema yet.
 
 **Acceptance criteria.**
-- [ ] Health package green, zero pre-existing test files modified.
-- [ ] `materialize_effective_config` output bytes identical for a fixed
-      input (asserted against a captured sha, not recomputed).
-- [ ] Import census test green.
+- [ ] A roster referencing an unregistered external check id **parses**, and
+      a test asserts it (this is the operator's item 2 made executable).
+- [ ] Every Phase-A invalid class raises at construction naming the offender.
+- [ ] Unreachability grep-test green and mutation-proven.
+- [ ] The ownership table is recorded in this document before C5 uses it.
 
-**Failure and edge cases.** A circular import between the new modules
-(compose imports task config imports framework config) — resolve by keeping
-schema modules leaf-level and putting orchestration in `_composition.py`.
-If the split cannot be made acyclic without changing a public path, STOP.
+**Failure and edge cases.** A task declaring health but no roster = legal
+absence; a roster naming an unregistered check = legal at Phase A, fatal at
+Phase B — asserted as DIFFERENT outcomes.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08b_c1.log 2>&1`
       Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] Pure move + re-exports; zero behavioural diff.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** Schema + tests only; no wiring; no empty modules.
 
 ---
 
-### 4.2 C2 — task health config schema (inert)
+### 4.2 C2 — run-scoped plugin loading, registration, and lifecycle
 
-**Goal.** The task-owned document exists as a validated Pydantic schema
-with fail-closed authoring-time errors, before anything loads or composes
-it. Separate from C3/C4 so the CONTENT review (what a task may declare) is
-not entangled with loading mechanics.
+**Goal.** External code registers health providers and checks from
+config-named files at run scope, and "run-scoped" is enforced rather than
+asserted.
 
-**Scope.**
-* Changes: NEW `_task_health_config.py` — the document schema (facts,
-  plugin refs, provider bindings, family roster with parameters and
-  dispositions); NEW unit tests.
-* Must NOT change: framework config, registry, runner, any check.
-  Deliberately UNREACHABLE from production in this commit, asserted by a
-  grep-test that C3 removes (the 08a C2 precedent — and note 08a INVERTED
-  that guard rather than deleting it, which C3 should do again).
-* Depends on: C1.
+**Scope.** New `_plugin_binding.py` (file load, registration, the run-scoped
+ledger of §3.5); public registration surface; `__init__.py` exports. Must
+not change the built-ins' bootstrap or `registry.get` semantics. Depends on
+C1.
 
 **Implementation plan.**
-- [ ] Inspect `configs/health_checks.yaml` gate by gate and enumerate
-      exactly which keys are task-owned vs framework policy, recording the
-      table here BEFORE writing the schema. Cross-check against each
-      check's `threshold_parameter_names` (08a) and against the exclusion
-      of `peek_file_indices` / `aggregation`.
-      Evidence: _(pending)_
-- [ ] Define the document schema, frozen, with unknown-field rejection.
-      Evidence: _(pending)_
-- [ ] Reuse 08a's `TaskHealthFacts` for the facts block rather than
-      declaring a second facts vocabulary.
-      Evidence: _(pending)_
+- [ ] Re-read both existing loaders at the head and record the exact idiom
+      being instantiated, so health's instance is demonstrably the same
+      shape.
+- [ ] Implement load → register with the idiom's failure split: scan
+      fail-OPEN per file, name resolution fail-CLOSED.
+- [ ] Implement the run-scoped ledger: idempotent identical re-load; a
+      different resolved set in the same process fails closed naming both.
+- [ ] Env var, if any, is framework-GENERATED subprocess transport for the
+      already-resolved set (Q-08b-1) — never a user-facing parallel input.
 
-**Validation plan.**
-* Unit: a valid TIDMAD-shaped document parses; each field's semantics
-  pinned against hardcoded expectations.
-* Negative/invalid: unknown check id in a roster; unknown capability key
-  shape; missing plugin path; contradictory facts (delegated to 08a's
-  validator); duplicate roster entries; empty roster.
-* Backward-compat: production untouched — grep-test asserts no production
-  module imports the new schema yet.
-* Gate: none.
+**Validation plan.** Unit (integration-style, `tmp_path` package outside the
+repo): a plugin registers a provider and a custom check. Negative: missing
+file; unparseable file; registers nothing; name colliding with a built-in.
+**Two-run counterfactual**: load set A, then attempt set B in the same
+process → fail closed; re-load A → idempotent. Backward-compat: with no task
+plugins declared, `all_registered()` is exactly the built-ins.
 
 **Acceptance criteria.**
-- [ ] Every invalid class above raises at CONSTRUCTION with a message
-      naming the offending reference.
-- [ ] The TIDMAD-shaped fixture document parses and its parsed values equal
-      hardcoded expectations (never read back from the parser).
-- [ ] Unreachability grep-test green and **mutation-proven** by adding a
-      real import to a production module.
+- [ ] An out-of-tree file registers a check that `registry.get` resolves.
+- [ ] The two-run counterfactual is RED without the ledger and green with
+      it (mutation-proven).
+- [ ] No external registration path requires editing
+      `execute_tools/health_checks/__init__.py` — census test.
 
-**Failure and edge cases.** A task declaring health but no roster (legal
-absence, §3.4 row 1) vs a roster naming an unregistered check (fail closed,
-row 2) — both asserted, and asserted to be DIFFERENT outcomes.
+**Failure and edge cases.** Registration leaking across tests (use
+`clean_registry`); a plugin raising at import (fail-open per the idiom, but
+its declared ids then fail closed at Phase B); duplicate registration.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08b_c2.log 2>&1`
       Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] Schema + tests only; no wiring.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** Loading + registration + lifecycle only; no resolution
+policy, no composition.
 
 ---
 
-### 4.3 C3 — run-scoped plugin loading + public registration API
+### 4.3 C3 — provider protocol, binding resolution, payload transport
 
-**Goal.** External code can register health providers and checks through a
-public API, loaded from config-named files at run scope — closing the ONE
-missing seam (§2.2). Separate from C4 so the loading mechanism is reviewed
-apart from what gets composed with it.
+**Goal.** The provider→payload→check path exists end to end, binding
+resolution fails closed, and 08a's pre-I/O applicability invariant survives.
 
-**Scope.**
-* Changes: NEW `_plugin_binding.py` (file load + registration + fail-closed
-  resolution); the public registration surface (`registry.register` reused,
-  plus a provider registry if §3.3 requires one); `__init__.py` exports.
-* Must NOT change: the built-ins' bootstrap behaviour, `registry.get`
-  semantics, `evaluate_gate`.
-* Depends on: C1, C2.
+**Scope.** Provider protocol (§3.3); `HealthCheckSkill.run(..., *,
+view=None)`; `evaluate_gate` gains the materialization step (§3.4);
+Phase-B resolution (§3.1) with fail-closed errors (§3.2). Must not change
+check order, short-circuit, action selection or the exception guard.
+Depends on C1, C2.
 
 **Implementation plan.**
-- [ ] Re-read `ml_models/plugin_loader.py` and
-      `agent_generated/_loss_loader.py` at the implementation head and
-      record the exact idiom being instantiated (env var name, scan
-      semantics, per-file API, failure split), so health's instance is
-      demonstrably the same shape and not a variant.
-      Evidence: _(pending)_
-- [ ] Decide and record the scoping channel: a health-specific env var
-      following the losses precedent, config-named paths, or both. The
-      parent says config-named, "never guessed from the environment" — so
-      an env var, if added, is a subprocess-propagation detail, not the
-      extension contract. **Ambiguity: resolve with the operator if the
-      two readings diverge.**
-      Evidence: _(pending)_
-- [ ] Implement load → register → resolve, with the failure split: scan
-      fail-OPEN per file, name resolution fail-CLOSED.
-      Evidence: _(pending)_
-- [ ] Remove/INVERT C2's unreachability guard into a "registration happens
-      through the public API only" guard.
-      Evidence: _(pending)_
+- [ ] Re-read `runner.evaluate_gate`, `HealthCheckSkill` and
+      `HealthCheckContext` at the head; record the exact insertion point.
+- [ ] Define `HealthViewProvider` (`provider_id`, `capabilities`,
+      `materialize`) and the `HealthView` envelope.
+- [ ] Wire materialization strictly AFTER applicability.
+- [ ] Implement Phase-B resolution: unresolved check/provider/capability →
+      deterministic startup error naming the reference and what IS
+      registered.
+- [ ] Invert C1's unreachability guard into "resolution happens through the
+      public API only".
 
-**Validation plan.**
-* Unit (integration-style, `tmp_path` external package): a plugin file
-  outside the repo tree registers a provider and a custom check and both
-  resolve.
-* Negative: missing file; unparseable file; file that registers nothing;
-  roster naming an id nothing registered; duplicate registration.
-* Backward-compat: with no task plugins declared, the built-ins bootstrap
-  exactly as before — asserted on `all_registered()`.
-* Gate: none (the parent assigns the extension proof to UNIT, not Gate 2).
+**Validation plan.** Unit: an external custom check consumes an external
+provider's opaque payload and returns a `HealthCheckResult`. **Ordering
+test**: an INAPPLICABLE declaring check causes zero `materialize` calls AND
+zero `h5py.File` opens (the 08a spy shape). Negative: capability not
+advertised → startup ERROR, explicitly asserted **not** `INAPPLICABLE`;
+provider raises during materialize → `CheckVerdict.ERROR`. Backward-compat:
+all seven built-ins, which pass no `view`, behave byte-identically — C1
+manifest replayed.
 
 **Acceptance criteria.**
-- [ ] An out-of-tree file registers a check that `registry.get` resolves,
-      **with zero edits to any file under `execute_tools/`** — asserted by
-      the test performing the whole flow from a `tmp_path` package.
-- [ ] Each negative case raises a DETERMINISTIC error naming the
-      unresolved reference AND listing what is registered.
-- [ ] A census test asserts no external registration path requires editing
-      `execute_tools/health_checks/__init__.py`.
+- [ ] Capability-missing raises at startup and the test asserts the verdict
+      vocabulary is NOT involved (item 3 made executable).
+- [ ] The inapplicable-check-no-materialize test is RED if the
+      materialization step is moved before applicability (mutation-proven).
+- [ ] 08a's 27-case manifest byte-identical.
 
-**Failure and edge cases.** Registration leaking across tests (the existing
-`clean_registry` fixture is the precedent and must be used); a plugin that
-raises at import; a plugin registering a name that collides with a built-in
-(must raise, per `register`'s existing duplicate rule).
+**Failure and edge cases.** A provider advertising a capability it cannot
+materialize → ERROR at materialize, not at startup (advertisement is a
+claim; failure to honour it is a runtime error). A check declaring
+`consumes_view` with no provider bound → Phase-B startup error.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08b_c3.log 2>&1`
       Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] Loading + registration only; no composition, no TIDMAD migration.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** Protocol + resolution + transport; no TIDMAD migration.
 
 ---
 
-### 4.4 C4 — deterministic composition into the pinned effective artifact
+### 4.4 C4 — deterministic composition, plugin pinning, binding path
 
-**Goal.** Framework policy and the task health config compose into the SAME
-pinned `health_checks_effective.yaml`, inside the existing materialization
-path, so the sha keeps describing what the run reads.
+**Goal.** Framework policy and task config compose deterministically into
+the SAME pinned artifact, the resolved plugin identity is part of the pinned
+run identity, and a run can actually select its task health config.
 
-**Scope.**
-* Changes: NEW `_composition.py`; `materialize_effective_config` gains the
-  task config as an input; `core/run_invariants.py` call-site threading.
-* Must NOT change: the sha mechanism, resume immutability semantics, the
-  atomic-write behaviour, or the artifact's basename.
-* Depends on: C1–C3.
+**Scope.** New `_composition.py`; `materialize_effective_config` gains the
+task-config binding; `core/run_invariants.py` and `core/resume.py` threading;
+the §3.10 binding path. Must not change the sha MECHANISM, resume
+immutability semantics, atomic write, or the artifact basename.
+Depends on C1–C3.
 
 **Implementation plan.**
-- [ ] Enumerate every caller of `materialize_effective_config` and
-      `build_run_invariants` and record them here before changing the
-      signature.
-      Evidence: _(pending)_
-- [ ] Compose deterministically (stable key order) and record in the
-      artifact header what task config and which plugin files were loaded.
-      Evidence: _(pending)_
-- [ ] Decide and record whether the composed body is byte-identical to
-      pre-08b for TIDMAD. If not (parent §15 R1 anticipates this), record
-      the exact delta and rely on the fresh-workspace boundary, with the
-      run-invariants refusal ASSERTED, not weakened.
-      Evidence: _(pending)_
+- [ ] Confirm the caller census at the head (§2.4: one materialize caller,
+      four `build_run_invariants` callers, one resume mirror).
+- [ ] Compose deterministically (stable key order) from disposition →
+      policy (§3.7).
+- [ ] Fold `resolved_plugins` with per-file `sha256` into the **hashed
+      body** (§3.6), not the header.
+- [ ] Implement the explicit / legacy-Regime-A binding path (§3.10) with no
+      task-name branching.
+- [ ] Keep `core/resume.py:354`'s mirrored computation in step.
 
-**Validation plan.**
-* Unit: composition determinism (same inputs → byte-identical body across
-  repeated runs and across dict ordering perturbation).
-* Backward-compat / default parity: with no task config supplied, the
-  artifact is byte-identical to pre-08b — captured BEFORE this commit as a
-  frozen sha, following 08a's capture-first discipline.
-* Negative: resume with a changed task config raises the existing mismatch
-  error, and the message distinguishes the new cause from the two existing
-  ones.
-* Gate 2: **required** (parent §10 — startup composition is lifecycle).
-  Specified in §7 and launched only after its spec is written.
+**Validation plan.** Determinism across repeated runs and shuffled input
+ordering. Default parity: with no task config supplied, the artifact is
+byte-identical to pre-08b — captured BEFORE this commit as a frozen sha.
+**Plugin-pinning negative test**: same config, same path, mutated plugin
+bytes → resume fails closed. Compatibility: `scripts/v18_wave_summary.py`'s
+reader still works against the composed artifact.
 
 **Acceptance criteria.**
-- [ ] No-task-config artifact byte-identical to the captured pre-08b sha.
-- [ ] Composition is order-independent and repeatable (asserted over
-      shuffled input orderings).
-- [ ] Resume mismatch raises and NAMES which input changed.
-- [ ] The pinned sha still describes the file the run reads — asserted by
-      re-reading the artifact and re-hashing, not by trusting the return.
+- [ ] The pinned sha describes the file the run reads — asserted by
+      re-reading and re-hashing the written artifact, not by trusting the
+      return value.
+- [ ] Mutated-plugin resume raises, naming `health_config_sha256`.
+- [ ] Composition is order-independent and repeatable.
+- [ ] No second composition path exists — census test.
 
-**Failure and edge cases.** A second composition path appearing anywhere
-(census-refuse it); a task config that composes to a roster referencing an
-unregistered check (must fail closed at startup, not at round 1); scope
-validation interacting with a task-owned roster.
+**Failure and edge cases.** A task config composing to a roster with an
+unresolved reference → fails at startup (Phase B), not at round 1. Directory
+plugin refs resolve deterministically and pin the actual loaded file set.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/core/ -q > /tmp/08b_c4.log 2>&1`
       Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] Composition only; TIDMAD's values still in the framework file.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** Composition + pinning + binding path; TIDMAD values
+still in the framework file.
 
 ---
 
-### 4.5 C5 — TIDMAD family ownership migration (the parity commit)
+### 4.5 C5 — TIDMAD ownership migration (the parity commit)
 
-**Goal.** TIDMAD's roster, thresholds, dispositions **and the millivolt
-scale** move out of framework-owned code/config into the TIDMAD family's
-task-owned config, with values unchanged and provenance comments carried.
-This is where the framework YAML stops carrying task science.
+**Goal.** TIDMAD's roster, thresholds, dispositions, peek files, `reason`
+prose **and the numerical value scale** move into the TIDMAD task-owned
+config; the framework YAML keeps policy only.
 
-**Scope.**
-* Changes: `configs/health_checks.yaml` slimmed to policy; NEW TIDMAD task
-  health config; `_MV_PER_LSB` migrated out of `output_std.py`,
-  `per_file_output_std.py`, `pearson_dispersion.py`; those checks may then
-  declare `value_scale_unit` (08a deliberately could not).
-* Must NOT change: any threshold VALUE, any gate id, any check id, any
-  action/severity, the firing point, or any verdict.
-* Depends on: C1–C4.
+**Scope.** `configs/health_checks.yaml` and the observe-mode variant slimmed
+to policy; new TIDMAD task health config; `_MV_PER_LSB` removed from **four**
+check modules (§2.7); `value_scale_unit` then declared by the checks that
+need it; `TASK_HEALTH_PEEK` disposition applied (§3.8). Must not change any
+threshold VALUE, gate id, check id, action, severity, firing point or
+verdict. Depends on C1–C4.
 
 **Implementation plan.**
-- [ ] Capture-first: freeze the six checks' verdicts AND the composed
-      effective artifact BEFORE the migration, reusing 08a's manifest
-      generator where possible.
-      Evidence: _(pending)_
-- [ ] Move values with provenance comments; **the mV scale and the
-      `value_scale_unit` declaration move in the SAME commit** — 08a
-      recorded that separating them breaks parity in between.
-      Evidence: _(pending)_
-- [ ] Census: framework YAML contains no task identity, no threshold, no
-      roster.
-      Evidence: _(pending)_
+- [ ] Capture-first: freeze the six checks' verdicts and the composed
+      artifact BEFORE migrating, reusing 08a's manifest generator.
+- [ ] Move values with provenance comments intact.
+- [ ] **Atomically**: the numerical scale, its task-owned declaration, and
+      the checks' `value_scale_unit` requirement move in ONE commit.
+- [ ] Apply the `TASK_HEALTH_PEEK` disposition after re-confirming its
+      consumer census.
+- [ ] Census: framework YAML contains no task identity, threshold, roster,
+      peek set or science prose.
 
-**Validation plan.**
-* Parity: 08a's manifest replayed — `passed`/`reason`/`metrics`/`verdict`
-  byte-identical for all 27 cases.
-* Default parity on the executed sequence: same gates selected, same
-  executed check SEQUENCE, same actions, field-by-field equality of every
-  persisted `PersistedHealthGateResult` field against a pre-C5 dump.
-* Negative: a framework YAML carrying a task threshold is REFUSED.
-* Gate 2: **required** — the composed artifact and real verdicts on the
-  real path.
+**Validation plan.** 08a's 27-case manifest byte-identical. Default parity on
+the **executed sequence**: same gates selected, same executed check order,
+same actions, field-by-field persisted equality against a pre-C5 dump.
+Negative: a framework YAML carrying a task threshold is REFUSED.
 
 **Acceptance criteria.**
 - [ ] 27/27 manifest cases byte-identical.
-- [ ] Persisted fields byte-equal on TIDMAD-shaped fixtures.
-- [ ] Framework-YAML census green.
-- [ ] `value_scale_unit` is now DECLARED by the std checks and the derived
-      TIDMAD facts SUPPLY it — both directions asserted, so the axis is
-      live rather than merely present.
+- [ ] Persisted `PersistedHealthGateResult` fields byte-equal on
+      TIDMAD-shaped fixtures; the six gate ids unchanged.
+- [ ] `value_scale_unit` is DECLARED by the checks that need it AND
+      SUPPLIED by the task facts — both directions asserted.
+- [ ] Exactly ONE numerical scale value exists in the task config; zero
+      `_MV_PER_LSB` literals remain in the health package.
+- [ ] TIDMAD runs with its science out of framework YAML and **no
+      task-name branch anywhere** — census test.
 
-**Failure and edge cases.** A threshold value silently changing during the
-move (the manifest catches it); the effective-config sha changing (expected
-— handled by the fresh-workspace boundary, asserted); a check declaring the
-scale axis before the facts supply it (parity break — the reason both move
+**Failure and edge cases.** A threshold silently changing (manifest catches
+it); the effective sha moving (EXPECTED per Q-08b-2 — record the exact
+delta, rely on the fresh-workspace boundary, assert the refusal); a check
+declaring the scale axis before facts supply it (the reason both move
 together).
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08b_c5.log 2>&1`
       Evidence: _(pending)_
-- [ ] Manifest parity script output recorded.
-      Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] Ownership move only; no new mechanism.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** Ownership move only; no new mechanism.
 
 ---
 
 ### 4.6 C6 — D18: scalar-only metrics as a typed statement
 
-**Goal.** A task whose metric produces only a scalar says so in a TYPED
-way, and per-file checks consume that as `inapplicable` — never a hollow
-pass.
+**Goal.** A scalar-only metric's absence of per-sample evidence reaches
+Health as a TYPED statement, and per-file checks report `inapplicable`
+rather than a hollow pass.
 
-**Scope.**
-* Changes: the typed statement at its producer; `HealthCheckContext`
-  transport; per-file checks' declarations.
-* Must NOT change: any metric value, any golden-metric arithmetic. **No
-  check may consume the metric SCALAR** (parent §5, census-refused).
-* Depends on: C1–C5.
+**Scope.** Replace the `list(metric_result.per_sample or [])` collapse
+(`execution.py:894-897`) with a typed carrier; per-file checks declare the
+corresponding requirement. **Health consumes capability metadata only — never
+the golden scalar** (parent §5, census-refused). Metric arithmetic ownership
+stays in Step 06. Depends on C1–C5.
 
 **Implementation plan.**
-- [ ] **SOURCE-INSPECTION REQUIRED (§2.6)**: inspect the Step-06 metric
-      handle and `evaluation_metric.py` to establish where a scalar-only
-      statement originates and how it reaches the tuner's context
-      construction. Record the real path before designing the transport.
-      Evidence: _(pending)_
-- [ ] Add the typed statement and thread it; declare it as a context input
-      in 08a's `CONTEXT_INPUT_PREDICATES` vocabulary if that is the right
-      seam (verify).
-      Evidence: _(pending)_
+- [ ] Re-confirm §2.6 at the head: `MetricResult.per_sample is None` is the
+      producer-side statement; the bridge destroys it.
+- [ ] Carry the statement into `HealthCheckContext` as a typed value
+      distinguishing "no per-sample evidence exists for this task" from
+      "per-sample evidence exists and is empty".
+- [ ] Per-file checks declare the requirement so the engine yields
+      `INAPPLICABLE` with the axis named.
 
-**Validation plan.**
-* Unit: a scalar-only task makes per-file checks `inapplicable` with the
-  axis named; a per-file-capable task leaves them applicable.
-* Negative control: TIDMAD (per-file metric) unchanged — asserted.
-* Gate: none.
+**Validation plan.** Unit: scalar-only task → per-file checks
+`INAPPLICABLE`, axis named; per-file-capable task → applicable. **Negative
+control**: TIDMAD unchanged (per_sample present) — manifest replayed.
+Census: no check reads `denoising_score` or the metric scalar.
 
 **Acceptance criteria.**
-- [ ] The statement is TYPED (not an absent field read as a signal).
-- [ ] Per-file checks report `inapplicable`, not `passed`, under a
-      scalar-only task.
-- [ ] TIDMAD's per-file behaviour is unchanged.
+- [ ] The statement is TYPED — an absent/empty field is never the signal.
+- [ ] Under a scalar-only metric, per-file checks report `inapplicable`,
+      NOT `passed`.
+- [ ] TIDMAD per-file behaviour byte-identical.
 
-**Failure and edge cases.** A task that declares nothing about per-file
-capability (absence ≠ scalar-only — must not be inferred); a metric that
-changes capability mid-run (out of scope; refuse).
+**Failure and edge cases.** A task declaring nothing about per-sample
+capability: absence ≠ scalar-only, must not be inferred.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08b_c6.log 2>&1`
+- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/agent/ -q > /tmp/08b_c6.log 2>&1`
       Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] D18 only.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** D18 only. **This is the last production-code commit —
+the Gate-2 head (§7).**
 
 ---
 
-### 4.7 C7 — out-of-tree extension proof + census + docs sync
+### 4.7 C7 — out-of-tree extension proof, census, docs
 
-**Goal.** The completion criterion (parent §14.G/H) becomes executable: an
-external package's config + provider + custom check + plugin-local
-capability run end-to-end with ZERO framework edits, and the negative
-control fails closed.
+**Goal.** Make the completion criterion executable, with the claim stated
+correctly (ruling item 15).
 
-**Scope.**
-* Changes: NEW integration-style unit test building a `tmp_path` external
-  package; census guardrail tests; docs
-  (`pluggable_health_checks.md`, this ledger, the parent's status).
-* Must NOT change: any production behaviour.
-* Depends on: C1–C6.
+**Scope.** New integration-style unit test building a `tmp_path` external
+package; census guardrails; docs. **No production behaviour change.**
+Depends on C1–C6.
+
+**The claim, corrected.** 08b necessarily edits `execute_tools/` to CREATE
+the seam, so "zero diffs to `execute_tools/`" is the wrong assertion. The
+real claim is:
+
+> **After the generic seam exists, adding the synthetic external fourth task
+> requires ZERO ADDITIONAL infrastructure-source registration, config or
+> import edits.**
 
 **Implementation plan.**
-- [ ] Build the external fixture package OUTSIDE the repo tree
-      (`tmp_path`): task health config + provider plugin + custom check
-      plugin declaring a plugin-local capability key.
-      Evidence: _(pending)_
-- [ ] Assert the full chain: config → loader → registration → family
-      resolution → provider → custom check → `HealthCheckResult`.
-      Evidence: _(pending)_
-- [ ] Negative control: break the registration (missing file / wrong id /
-      unexposed capability) → deterministic fail-closed error.
-      Evidence: _(pending)_
+- [ ] Build the fixture package entirely under `tmp_path`: task health
+      config + provider plugin + custom check declaring a plugin-local
+      capability.
+- [ ] Assert the full chain: config → loader → registration → resolution →
+      provider → custom check → `HealthCheckResult`.
+- [ ] Assert the fixture's ids/names appear **nowhere in production source**
+      (grep census), and that the loader receives only external config/paths.
+- [ ] Negative control: remove/break the plugin → deterministic fail-closed
+      resolution; restore → flow succeeds.
 - [ ] Census: zero task-name branches; no central task registry; no closed
-      view-kind enum; no framework-YAML task identity; **no registration
-      path requiring a central import edit**.
-      Evidence: _(pending)_
-- [ ] Docs sync as the last step, quoting each documented flag/behaviour
-      against merged source.
-      Evidence: _(pending)_
-
-**Validation plan.**
-* Unit: the whole extension proof and its negative control.
-* Census: the guardrail suite above.
-* Gate: none (parent §10 explicitly assigns this to UNIT, not Gate 2).
+      view-kind enum; no framework-YAML task identity; no registration path
+      requiring a central import edit.
+- [ ] Docs sync last, quoting each documented behaviour against merged
+      source.
 
 **Acceptance criteria.**
-- [ ] The proof test passes with **zero diffs** to `core/`,
-      `execute_tools/`, `agent/`, `configs/` and `examples/` — asserted by
-      the test's own construction, and by a census that the fixture package
-      lives entirely under `tmp_path`.
-- [ ] The negative control fails closed with a message naming the
-      unresolved reference.
-- [ ] Every census guardrail green.
+- [ ] The proof passes without any fixture-specific entry in a registry,
+      import list or shipped YAML — asserted by the id-absence census, **not**
+      by checking `git diff`.
+- [ ] Remove-plugin → fail closed; restore → succeed (both directions).
 
 **Failure and edge cases.** The proof passing because the fixture
-accidentally imported an in-repo module (assert the package's files are the
-only source of its provider/check); registration leaking into other tests.
+accidentally imported an in-repo module — assert its provider/check come
+only from its own files.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08b_c7.log 2>&1`
       Evidence: _(pending)_
 
-**Commit boundary.**
-- [ ] Proof + census + docs; no production change.
-- [ ] Diff summary + staged list + evidence + deviations recorded.
+**Commit boundary.** Proof + census + docs; no production change; **no Gate**.
 
-## 5. Test disposition (existing families)
+## 5. Test disposition
 
-To be completed at freeze, after the §2.6 inspections. Provisionally: all
-08a families KEEP; `test_config_loader.py` and
-`test_step00_health_config_baseline.py` need explicit dispositions because
-C5 changes the framework YAML they pin — **that disposition must be argued,
-not assumed**, since a baseline test that is simply updated to match a new
-value proves nothing.
+`test_config_loader.py` and `test_step00_health_config_baseline.py` pin the
+framework YAML that C5 slims. Their disposition is **UPGRADE with an
+argued claim**, not "update the expected values": the baseline test must
+assert the new POLICY-ONLY shape and, separately, that the migrated task
+config carries the same threshold VALUES as before. A baseline test silently
+re-pointed at new values proves nothing. All 08a families KEEP.
 
 ## 6. Evidence economy
 
-Targeted per-commit tests + the health package per commit; NO local full
-suite; NO manual dispatch; ONE canonical full CI on the final integrated
-Step-08 head (parent §11). Gate 2 twice at most — C4 and C5 share one
-bounded run if their heads permit, which §7 decides at implementation time.
+Targeted per-commit tests plus the health package per commit. No local full
+suite; no manual dispatch; one canonical full CI on the final head.
 
 ## 7. Gates
 
-* **Gate 1: NOT REQUIRED** — parent §10/§15 Q3. 08b makes no prompt/PB
-  delta; the 08a byte-pin discipline applies unchanged. Any accidental
-  delta re-dispositions Gate 1 with the operator.
-* **Gate 2: REQUIRED, bounded** — parent §10 assigns "task-owned
-  family/threshold composition + pinning" to UNIT + Gate 2 because startup
-  composition is lifecycle. Full specification (HEAD, command, claim,
-  expected evidence, bounded scope, wall time, evidence destination) is
-  written into §10 BEFORE launch, per the 08a §4.0a amendment.
-* **The out-of-tree extension proof is NOT a Gate** — parent §10 assigns it
-  to UNIT, integration-style, no training. Do not escalate it.
+* **Gate 1 — NOT REQUIRED.** No prompt/PB delta; the 08a byte-pin
+  discipline applies unchanged. Any accidental delta re-dispositions it.
+* **Gate 2 — ONE bounded TIDMAD run at the final executable head
+  (after C6)**, per ruling item 16. C4 and C5 are the same lifecycle failure
+  class and the later head subsumes the earlier; C7 is tests/docs and needs
+  no Gate. It must prove: startup composition; the pinned task-owned TIDMAD
+  config; plugin/binding lifecycle if exercised; six gates fire; the TIDMAD
+  executed sequence preserved; verdicts and persisted values semantically
+  correct; **no unintended inapplicability**. Spec written into §10 before
+  launch. Retry only for a genuine INCONCLUSIVE run or an independent
+  failure class.
+* **The out-of-tree proof is NOT a Gate** — UNIT, no training.
 
-## 8. Risks / open questions (for operator review)
+## 8. Risks
 
-* **Q-08b-1 — the scoping channel.** Parent §6a.3 says plugin refs are
-  config-named and "never guessed from the environment", while the idiom
-  being instantiated is env-var-driven. Proposal: config names the files;
-  an env var exists only for subprocess propagation of what the config
-  already chose. **Needs an explicit ruling.**
-* **Q-08b-2 — effective-artifact byte identity.** Parent §15 R1/Q2 already
-  allows "semantically identical + called-out delta + fresh-workspace
-  boundary". Confirm that fallback is acceptable for TIDMAD at C4/C5, since
-  the sha WILL move once composition includes a task document.
-* **Q-08b-3 — the `TASK_HEALTH_PEEK` sentinel.** It already resolves
-  task-owned data inside the framework config (`config.py:39`). Once the
-  roster is task-owned, does the sentinel stay, move, or disappear?
-* **Q-08b-4 — provider payload contracts.** How much of the view payload
-  contract lands in 08b versus 08c, given 08c owns the STANDARD
-  capabilities? Proposal: 08b ships the transport and plugin-local keys
-  only; standard capabilities ship in 08c.
-* **R-08b-1 — `config.py` growth.** Mitigated by C1, but C1 must be honest:
-  if the split is not warranted, skip it rather than refactor for its own
-  sake.
-* **R-08b-2 — the migration commit (C5) is the highest-risk diff in
-  Step 08.** It moves real thresholds and a real physical scale. Capture-
-  first parity is mandatory, and the mV scale must move together with its
-  declaration.
+* **R-08b-1 — C5 is the highest-risk diff in Step 08.** It moves real
+  thresholds and a real physical constant. Capture-first parity is
+  mandatory; the numerical scale and its declaration move atomically.
+* **R-08b-2 — provider protocol over-reach.** 08b must ship the opaque
+  transport only; any standard payload contract belongs to 08c.
+* **R-08b-3 — the legacy binding path becoming the extension mechanism.**
+  Bounded by §3.10 and the C7 census.
+* **R-08b-4 — plugin pinning cost.** Digesting every resolved plugin file at
+  startup is cheap for file-based plugins; if a directory ref ever resolves
+  to a large tree this needs revisiting.
 
-## 9. Adversarial self-review
+## 9. Adversarial self-review (the operator's A–H)
 
-1. *Does 08b invent a second plugin system?* No — §2.1 pins the existing
-   idiom and C3's first item requires re-reading it so health's instance is
-   the same shape.
-2. *Could the extension proof pass while a framework edit is still
-   required?* The census in C7 asserts no registration path needs the
-   central import list, and the proof package lives entirely under
-   `tmp_path`.
-3. *Could TIDMAD verdicts move during the migration?* C5 is capture-first
-   and replays 08a's 27-case manifest; the mV scale moves together with its
-   declaration precisely because 08a proved separating them breaks parity.
-4. *Could composition produce a sha that lies?* C4 asserts by re-reading
-   and re-hashing the written artifact, not by trusting the return value.
-5. *Does anything here consume the golden metric?* No — C6 explicitly
-   forbids it and the census refuses it.
-6. *Is "no binding declared" distinguishable from "binding unresolvable"?*
-   Yes — §3.4, asserted as two DIFFERENT outcomes in C2 and C3.
-7. *Checkbox honesty?* Every box in this draft is `[ ]`; §2.6 lists what is
-   not yet inspected rather than pretending it is.
+**A. Can a new external plugin ID be parsed before it exists in the
+registry?** **Yes.** §3.1 Phase A validates structure only and explicitly
+accepts unknown check/provider/capability ids; C1 asserts a roster naming an
+unregistered check *parses*. Resolution is Phase B, after loading.
+
+**B. Can a malformed/unresolved binding ever become INAPPLICABLE?** **No.**
+§3.2 makes unresolvable binding a deterministic startup ERROR, and C3
+asserts the capability-missing case raises at startup with the verdict
+vocabulary explicitly not involved. `INAPPLICABLE` is reserved for a validly
+bound check whose facts/context make it non-applicable.
+
+**C. Can an inapplicable check cause provider artifact I/O?** **No.** §3.3
+splits the provider into advertisement (metadata, no I/O) and materialization
+(I/O), and §3.4 places materialization strictly after applicability. C3's
+test fails if `materialize` is called or a file opened for an inapplicable
+check, and is mutation-proven by moving the step earlier.
+
+**D. Can Run B see Run A's plugin registration?** **Not silently.** §2.8
+shows production hosts one run per process, but §3.5 does not rely on that:
+a second, different resolved plugin set in the same process fails closed,
+with a two-run counterfactual test that is RED without the ledger.
+
+**E. Can `plugin.py` change in place without changing the pinned run
+identity?** **No.** §3.6 folds each resolved plugin's `sha256` into the
+hashed effective-config body, which is the already-canonical
+`health_config_sha256`; a mutated plugin therefore changes the pin and
+resume fails closed. C4 asserts it.
+
+**F. Can task disposition contradict framework action/role?** **No.** §3.7
+gives each field exactly one owner: the task selects a disposition KEY and
+cannot set `gate_role`/`action`/`severity` at all, so there is no second
+copy to contradict.
+
+**G. Can TIDMAD run after its science leaves framework YAML, without a
+task-name branch?** **Yes.** §3.10's legacy path is selected by ABSENCE of
+an explicit binding, never by name, and C5's census asserts zero task-name
+branches.
+
+**H. Does the external fourth-task proof require any fixture-specific infra
+registration after the seam exists?** **No** — and C7 asserts it by the
+fixture's ids being absent from production source plus the remove/restore
+negative control, rather than by inspecting `git diff`.
 
 ## 10. Ledger
 
