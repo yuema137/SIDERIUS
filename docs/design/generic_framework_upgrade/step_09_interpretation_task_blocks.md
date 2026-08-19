@@ -37,7 +37,7 @@ recorded (§2.10), never silently resolved.
 | Q-09-1 task-block carrier | **B refined** — `InterpretationTaskBlocks` is a typed VALUE contract; TIDMAD content lives in ONE dedicated TIDMAD-owned declaration resolved by a bounded compatibility adapter; NO new science in central `task_config.yaml`; no loader/registry; no `examples/` dependency | §4, §9, §13 |
 | Q-09-2 metric-spec source | workflow-supplied `InterpretationInput.metric_spec` is the boundary, but NO second `derive_tidmad_metric()` site — route **B** from source audit (§2.11): the tuner's already-resolved `run_metric.spec` rides additively on `HyperparamTuningOutput`, reconciled across outputs | §2.11, §4, §11 |
 | metric-spec ↔ record identity | distinct ownership + fail-closed consistency rule | §4a |
-| secondary metrics | contract gap CLOSED by audit (§2.12): **no carrier exists in production**; exact typed additive carrier designed; decision surfaced as the ONE remaining operator question (Q-09-7) | §2.12, §4b |
+| secondary metrics | contract gap CLOSED by audit (§2.12): **no carrier exists in production**; exact typed additive carrier designed; ownership surfaced as Q-09-7 — **RULED B (2026-08-19, §0.2): Step 09 owns the interpreter-side contract; Step 10 owns production transport** | §0.2, §2.12, §4b |
 | Q-09-3 `_cap_knowledge_cache` | 09a owns the SEMANTIC migration; helper stays physically in the workflow file; ordering parameterized by the same `MetricOrder` | §7, §16 |
 | god-file audit | mandatory parent section; 09a begins with behavior-preserving node-local extraction; one obvious main file preserved | §13a |
 | Q-09-6 prediction band | **A** — sign-safe, direction-correct band; exact rule frozen; historical records untouched | §13 ¶1, §16 |
@@ -52,6 +52,49 @@ recorded (§2.10), never silently resolved.
 | extensibility wording | CONDITIONAL PASS during editing → PASS at freeze (criteria met, §9/§22) | §9, §23 |
 | per-milestone god-file rule | recorded as forward discipline | §13a.5 |
 | adversarial pass | 18-point re-read performed (§23a) | §23a |
+
+### 0.2 Q-09-7 final operator ruling (2026-08-19) — scope placement, NOT a parent revision
+
+**Q-09-7 = B — RESOLVED.** An operator scope-placement ruling on a contract
+this parent already froze (§4b); the parent remains **REVISION 2 — FROZEN**
+and is not reopened. Applied narrowly at every surface that previously
+carried the A/B ambiguity (§2.12, §4, §4b, §9, §15, §16, §19, §20, §21,
+§23, §23a); nothing else in this document changed.
+
+* **Step 09 owns**: the typed secondary-metric interpretation contract;
+  the `ModelRunSummary.secondary_metrics` projection;
+  present-when-present deterministic evidence; named absence; explicit
+  rendering; each secondary metric's own identity/direction words;
+  three-task L1 contract evidence.
+* **Step 09 does NOT own**: production secondary-metric declaration
+  binding; execution of additional metric handles; tuner-side secondary
+  scoring; secondary-result persistence into `ExperimentRecord`;
+  production workflow transport of secondaries. Those are **B — FORWARD
+  CONSTRAINT, OWNER: Step 10**, when the generic workflow/persistence path
+  first carries task-declared secondary metrics — preserving the forward
+  invariant *open semantic contract now + unified workflow/composition
+  later*, rather than an interim Step-09-specific secondary
+  evaluation/binding path.
+* **The frozen semantic rule is unchanged** (§4b): PRIMARY owns run
+  ordering / incumbent comparisons / active-model ordering / prediction
+  default; SECONDARIES are observational evidence ONLY, each with its own
+  `metric_id` and direction, rendered with its own direction words, never
+  affecting primary ordering/policy. Declared-but-unavailable secondary
+  evidence is a NAMED ABSENCE; numbers are never fabricated.
+* **Three-task Step-09 evidence (09a/09b L1 fixtures)**: TIDMAD — no
+  declared secondary metrics; Pets — primary `accuracy` (higher),
+  secondary `macro_f1` (higher); DAVIS — primary `mse` (lower), secondary
+  `psnr` (higher), secondary `mae` (lower). Pets/DAVIS fixtures use
+  carrier-shaped Step-06 authoritative result objects; they are L1
+  synthetic / contract-level interpretation evidence, explicitly NOT a
+  claim that the production workflow evaluates secondaries. Production
+  code retains zero dependency on `examples/`.
+* **Step-10 obligation (recorded in §19)**: task-declared secondary
+  `MetricSpec`s → binding through the unified task/workflow composition
+  mechanism → evaluation through the Step-06 metric protocol →
+  `ExperimentRecord` persistence → tuning/workflow transport → the SAME
+  Step-09 `secondary_metrics` contract. Step 10 must NOT invent a
+  replacement Step-09 schema.
 
 ## 1. Step-09 mandate (roadmap, verbatim obligations)
 
@@ -385,13 +428,13 @@ records), not a reopening of Step-06 semantics** — the carrier SHAPE is
 fully determined by Step-06 authorities (§4b) and adds no new vocabulary.
 Per the ruling ("do not fabricate one silently"; "determine whether the
 narrow additive carrier belongs to 09a"): the carrier is DESIGNED here
-(§4b) and its ownership is **Q-09-7** — the ONE question this revision
-cannot close from source alone, because it is a scope decision (09a owns
-the additive record/output carrier + the interpreter rendering; or Step 10
-owns the tuner-side evaluation/persistence and 09 renders
-present-when-present). Everything interpreter-side is frozen either way:
-typed open collection in, rendered with its own identity/direction,
-never consulted for ordering.
+(§4b) and its ownership was surfaced as **Q-09-7** — the ONE question
+rev 2 could not close from source alone, because it is a scope decision.
+**RULED B (2026-08-19, §0.2): Step 10 owns the tuner-side evaluation /
+record persistence / workflow transport; Step 09 renders
+present-when-present.** Everything interpreter-side is frozen: typed open
+collection in, rendered with its own identity/direction, never consulted
+for ordering.
 
 ### 2.13 Prediction-history aggregation — how old and new records would mix (rev 2, ruling §8)
 
@@ -459,7 +502,7 @@ All additions are ADDITIVE fields; the D1-frozen names stay (D1 unchanged).
 | `HyperparamTuningOutput.metric_spec` (NEW additive, `MetricSpec` dump; written ONCE from `bindings.run_metric.spec` in `finalize_run_output`, `records.py:747-863`) → `InterpretationInput.metric_spec` (NEW, the reconciled value) | the tuner's existing run-scope binding (`ml_hyperparameter_tune_agent.py:541` — the ONE derivation; §2.11 route B) — the workflow reconciles all outputs' specs (equal or fail closed) and forwards ONE value; Step 12 later supplies the same typed value from the composition root | ONE run-scoped ordering + identity authority for every interpreter comparison and rendered line (the 07b pattern); NO second derivation site | reference/declaration (transported evidence of the run's binding) |
 | `ModelRunSummary.training_diagnosis` (NEW, `TrainingDiagnosis \| None`, from the record the summary's best/formal facts came from — one per role as designed in the child) | `ExperimentRecord.training_diagnosis` (`hyperparam_tuning.py:403`) | Rev-5 mandate: agent-facing rendering of diagnosis | verbatim persisted evidence |
 | `ModelRunSummary.metric_identity` (NEW: `{metric_id, direction}` from the formal/best record's `metric_result`; refusal summary from `metric_refusal`) | record `:659,674` | evidence-borne identity/provenance; refusal-derived failure rendering ("not_scoreable" rounds are failures the interpreter currently cannot name); consistency check vs the run spec (§4a) | normalized evidence |
-| `ModelRunSummary.secondary_metrics` (NEW, typed OPEN collection — §4b) | the additive record carrier (§4b; ownership Q-09-7) | Rev-5 mandate: render secondary metrics with their own identity/direction | verbatim persisted evidence |
+| `ModelRunSummary.secondary_metrics` (NEW, typed OPEN collection — §4b) | the additive record carrier (§4b) — production transport is Step 10's (Q-09-7 = B, §0.2); Step 09 projects present-when-present, a declared-but-absent secondary is a NAMED ABSENCE | Rev-5 mandate: render secondary metrics with their own identity/direction | verbatim persisted evidence |
 | existing `summaries` fields (scores, tables, RoundHealth, ordering, conclusions, timing, volumes) | §2.5 | unchanged | projection |
 | existing carry-forward memory (cache, vocab, fingerprints, prediction history) | §2.8 | unchanged | memory |
 | `task_description` | 04b accessor (unchanged) | prompt context | declaration |
@@ -497,7 +540,7 @@ interpreter may reinterpret); Health CHECK thresholds beyond what
   provenance).
 * 09a owns explicit negative tests for every clause above.
 
-### 4b. Secondary metrics — the exact generic transport (carrier designed; ownership = Q-09-7)
+### 4b. Secondary metrics — the exact generic transport (carrier designed; ownership Q-09-7 = B, §0.2)
 
 Step-06 authorities are sufficient to TYPE the carrier with zero new
 vocabulary:
@@ -522,14 +565,18 @@ selection, cache capping or prediction evaluation. Declared-but-absent
 secondary ⇒ rendered as a named absence, never a number. No task-specific
 field anywhere.
 
-Ownership (Q-09-7): the interpreter-side projection/rendering is 09a/09b
-either way; the UPSTREAM half (tuner-side evaluation of declared
-secondaries through the same Step-06 handle pattern + record persistence)
-is either (A) an additive 09a milestone (evaluation + carrier + projection
-land together so B/C L1 fixtures can carry REAL-shaped `MetricResult`s),
-or (B) Step 10 (with 09 rendering present-when-present and the three-task
-fixtures carrying carrier-shaped secondaries built from the packs' declared
-specs). The interpreter contract is identical under both.
+Ownership (Q-09-7 = B, RESOLVED — §0.2): the interpreter-side
+projection/rendering is 09a/09b; the UPSTREAM half (tuner-side evaluation
+of declared secondaries through the same Step-06 handle pattern + record
+persistence + workflow transport) is **Step 10's**, when the generic
+workflow/persistence path first carries task-declared secondary metrics.
+Step 09 renders present-when-present; the three-task fixtures carry
+carrier-shaped secondaries built from the packs' declared specs
+(Pets `macro_f1` higher; DAVIS `psnr` higher + `mae` lower; TIDMAD none)
+— L1 contract evidence, not a production-evaluation claim. The record- and
+output-level lines of the carrier above are the contract Step 10 must
+land UNCHANGED (it must not invent a replacement Step-09 schema); 09a
+lands only the summary-level projection and its consumers.
 
 ## 5. Exact Step-09 output contract
 
@@ -667,7 +714,7 @@ is NOT in scope.
 | interpreter ordering/identity | OPEN — any `MetricSpec` (direction Literal higher/lower is universal per debt item 13) | `InterpretationInput.metric_spec` VALUE, reconciled from the tuner's additive `HyperparamTuningOutput.metric_spec` (the ONE existing derivation's value, transported — §2.11 route B) | n/a (value, not code) | the run's binding; Step 12 replaces the tuner's regime-A derivation at the composition root and the SAME value flows — **no new derivation site** | none | none new |
 | record ↔ spec consistency (§4a) | framework rule, metric-agnostic | n/a | n/a | n/a | none | none |
 | prediction grammar + versioned band | OPEN — bound metric id + capability-gated per-sample forms; band via `MetricOrder` only | from `metric_spec` + evidence presence | n/a | n/a | none | alias set DELETED, not grown; forms keyed on evidence capability, not task; `prediction_evaluation_semantics` is FRAMEWORK version metadata, not task vocabulary |
-| secondary metrics (§4b) | OPEN — typed collection of Step-06 `MetricSpec`/`MetricResult`/`NotScoreableResult` | record/output-borne (carrier ownership Q-09-7) | n/a | task declares secondaries (packs already do, as JSON) | none | none (open ids, universal direction) |
+| secondary metrics (§4b) | OPEN — typed collection of Step-06 `MetricSpec`/`MetricResult`/`NotScoreableResult` | record/output-borne (carrier transport = Step 10, Q-09-7 = B; Step 09 = summary projection, present-when-present) | n/a | task declares secondaries (packs already do, as JSON) | none | none (open ids, universal direction) |
 | `InterpretationTaskBlocks` (§13 ¶3) | OPEN — a typed VALUE of declarative prose sections any task can author | caller supplies the value (`InterpretationInput.task_blocks`); regime-A: ONE bounded compatibility adapter resolves TIDMAD's value from ONE dedicated TIDMAD-owned declaration | with Step 12 the external package supplies the value directly — the missing composition root is the ONLY gap (class B; the contract is open); the interpreter never discovers task files itself | task-owned declaration content; **no new science in framework-owned central `task_config.yaml`**; no central per-task table | none | section keys = FIXED framework-protocol set (`evidence_reading`, `per_model_guidance`, `synthesis_guidance`, `prediction_guidance`); growth is a framework decision, never per task |
 | explicit renderers (interp prompt-templates module) | framework-owned protocol; renders ONLY from authorities (MetricOrder words, diagnosis, health counts, secondaries, blocks) | function args | n/a | n/a | none | none |
 | additive summary/digest fields | typed, task-free (`TrainingDiagnosis`, `{metric_id, direction}`, secondaries, version id, counts from existing authorities) | record-borne | n/a | n/a | none | none (no new failure enum — §5) |
@@ -977,7 +1024,7 @@ ownership the rule forbids.
 
 | PR | semantic owner | deps | key surfaces | prod behavior | LLM-facing | Gate 1 | Gate 2 |
 |---|---|---|---|---|---|---|---|
-| **09a — interpreter evidence & ordering on the metric handle** | behavior-preserving node-local decomposition of the surfaces it touches (§13a); ONE run `MetricSpec` authority transported + reconciled (§2.11); record/spec consistency (§4a); primary + secondary evidence projection (§4b, per Q-09-7); ALL interpreter D1 ordering consumers incl. the memory-policy helpers (§7); prediction grammar; versioned sign-safe band (§13 ¶1, §8); additive deterministic digest provenance (§5); three-task deterministic ordering/evidence fixtures | Step 06/07 (landed) | `hyperparam_tuning.py` (additive `metric_spec` [+ secondary carriers per Q-09-7]), `records.py` (one writer), `interpretation.py` schemas (additive), `result_interpretation_agent.py` + NEW private node modules, `interpretation_helpers.py`, `model_exploration.py` (input construction + reconciliation + cache-cap semantics), node `.md` | deterministic only; TIDMAD ordering results identical (higher-is-better); prediction outcomes under v2 semantics | **No prompt-TEMPLATE / prompt-protocol change** (templates + PB-0/PB-7/PB-8 goldens EXACT; same LLMBridge kwargs for a fixed input); **deterministic persisted-memory semantics change where frozen** (v2 band → versioned accuracy fields the PROPOSER renders, §2.13) | NOT required | NOT required |
+| **09a — interpreter evidence & ordering on the metric handle** | behavior-preserving node-local decomposition of the surfaces it touches (§13a); ONE run `MetricSpec` authority transported + reconciled (§2.11); record/spec consistency (§4a); primary evidence projection + the secondary-metric summary projection rendered present-when-present (§4b; production transport is Step 10's — Q-09-7 = B); ALL interpreter D1 ordering consumers incl. the memory-policy helpers (§7); prediction grammar; versioned sign-safe band (§13 ¶1, §8); additive deterministic digest provenance (§5); three-task deterministic ordering/evidence fixtures | Step 06/07 (landed) | `hyperparam_tuning.py` (additive `metric_spec` ONLY — no secondary carriers in 09a), `records.py` (one writer), `interpretation.py` schemas (additive), `result_interpretation_agent.py` + NEW private node modules, `interpretation_helpers.py`, `model_exploration.py` (input construction + reconciliation + cache-cap semantics), node `.md` | deterministic only; TIDMAD ordering results identical (higher-is-better); prediction outcomes under v2 semantics | **No prompt-TEMPLATE / prompt-protocol change** (templates + PB-0/PB-7/PB-8 goldens EXACT; same LLMBridge kwargs for a fixed input); **deterministic persisted-memory semantics change where frozen** (v2 band → versioned accuracy fields the PROPOSER renders, §2.13) | NOT required | NOT required |
 | **09b — interpretation prompts from `InterpretationTaskBlocks` via explicit renderers** | `InterpretationTaskBlocks` value contract; bounded TIDMAD compatibility declaration + adapter; explicit rendering module; task-free framework prompts; TIDMAD science extraction; diagnosis/primary/secondary/health/failure rendering; B/C L1 rendering fixtures; interpreter structural/extensibility census; Gate 1 | 09a | NEW `agent/prompt_templates/interpretation/rendering.py`, prompt constants/builders (moved), the TIDMAD declaration file + adapter, `InterpretationInput.task_blocks`, goldens (declared deltas), guardrail census | prompt rendering only | **YES** | **REQUIRED** (bounded, §17) | NOT required (no data/training/lifecycle claim — §17) |
 
 Merge order 09a → 09b. Each child gets its own detailed design + frozen
@@ -999,8 +1046,9 @@ consistency (fail-closed) → M3 ordering consumers onto `MetricOrder`
 (summary builder maxima/minima, `run()` pre-computation, active-model
 selection, recall delta, `_cap_knowledge_cache` comparison) → M4 prediction
 grammar + versioned sign-safe band + `unevaluated` + version-partitioned
-counters → M5 evidence projection (diagnosis, identity, secondaries per
-Q-09-7, failure counts from existing authorities) → M6 three-task
+counters → M5 evidence projection (diagnosis, identity, secondaries
+present-when-present — summary projection only, Q-09-7 = B; failure
+counts from existing authorities) → M6 three-task
 deterministic fixtures (pack `expected/`, L1-labelled) + node `.md`.
 
 Frozen invariants (**differential parity — no "same full digest" claim**):
@@ -1126,7 +1174,7 @@ adds the direction-literal census (§16) earlier.
 |---|---|---|
 | `evaluation.py` name tables (§12) | **B** | Step 10 |
 | ~~workflow-side `metric_spec` derivation (rev 1)~~ — **REMOVED**: route B transports the tuner's single derivation (§2.11); no new site exists | — | — |
-| secondary-metric transport absent in production (§2.12) — the roadmap's "render secondary metrics" needs an additive evaluation/persistence carrier upstream of the interpreter | **B** (open contract; carrier fully typed by Step-06 authorities; ownership = Q-09-7) | 09a or Step 10 per Q-09-7 |
+| secondary-metric transport absent in production (§2.12) — the roadmap's "render secondary metrics" needs an additive evaluation/persistence carrier upstream of the interpreter | **B — FORWARD CONSTRAINT** (Q-09-7 = B, RESOLVED 2026-08-19, §0.2; open contract; carrier fully typed by Step-06 authorities, §4b) | **Step 10** — when the generic workflow/persistence path first carries task-declared secondaries: declared `MetricSpec`s → binding through the unified task/workflow composition mechanism → Step-06 metric-protocol evaluation → `ExperimentRecord` persistence → tuning/workflow transport → the SAME Step-09 `secondary_metrics` contract (no replacement schema). Step 09 renders present-when-present |
 | TIDMAD blocks resolved by a bounded regime-A adapter from an in-repo declaration until the composition root supplies the value (§13 ¶3) | **B** (compatibility plumbing, self-labelled; the contract is the typed value) | Step 12 |
 | the tuner's regime-A `derive_tidmad_metric` (debt item 12) — unchanged, now also the ONLY source of the interpreter's spec | **B** (pre-existing, not deepened) | Step 12 |
 | `resume.py`/chain-incumbent + dashboard direction literals (§2.3) | **B** (pre-existing, out of scope here) | Step 10 |
@@ -1160,21 +1208,25 @@ No A-class findings: nothing here closes a contract Step 09 must build on.
   older digests carry alias metrics. Mitigation: evaluation of a PRIOR
   prediction accepts the alias set read-only for backward records while
   new predictions are constrained (explicit compatibility note in 09a).
-* **R-09-6 secondary-metric scope creep** — if Q-09-7 = A, 09a touches
-  tuner-side evaluation + record persistence; bounded by the frozen carrier
-  shape (§4b), the "never consulted for ordering" rule, and the Step-06
-  handle pattern (no new metric semantics). If Q-09-7 = B, 09's rendering
-  is present-when-present and the three-task fixtures carry carrier-shaped
-  secondaries from the packs' declared specs.
+* **R-09-6 secondary-metric scope creep — bounded by Q-09-7 = B (§0.2).**
+  09a touches NO tuner-side evaluation, NO record persistence and NO
+  workflow transport of secondaries (all Step 10's); 09's rendering is
+  present-when-present and the three-task fixtures carry carrier-shaped
+  secondaries from the packs' declared specs. Residual risk: a 09a
+  implementation "helpfully" adding a secondary evaluator/loader/binding
+  path — forbidden (it would create exactly the interim Step-09-specific
+  path the ruling rejects); the 09a child design carries the explicit
+  prohibition and a census pin.
 * **R-09-7 reconciliation false-refusals** — multi-output inputs whose
   specs legitimately differ (a resumed run whose metric binding changed
   between chain segments) would fail closed. Mitigation: one run = one
   metric is the Step-06 invariant (`run_metric` bound once per run); a
   changed binding IS a different run; the refusal names both specs.
 
-## 21. Operator rulings on the rev-1 questions + the ONE remaining question
+## 21. Operator rulings on the rev-1 questions + Q-09-7 (ALL RESOLVED)
 
-All six rev-1 questions are RESOLVED by the 2026-08-19 ruling (§0.1):
+All six rev-1 questions are RESOLVED by the 2026-08-19 ruling (§0.1), and
+Q-09-7 by the 2026-08-19 final ruling (§0.2):
 
 * **Q-09-1 = B refined** — `InterpretationTaskBlocks` typed VALUE; TIDMAD
   content in ONE dedicated TIDMAD-owned declaration via ONE bounded
@@ -1192,31 +1244,25 @@ All six rev-1 questions are RESOLVED by the 2026-08-19 ruling (§0.1):
   versioned `metric_order_signsafe_v2`, historical records untouched,
   version-partitioned aggregation. (§13 ¶1, §8)
 
-**Q-09-7 (NEW, the only question this revision cannot close from source) —
-secondary-metric carrier ownership.** The audit (§2.12) found NO secondary
-evaluation/persistence in production; the carrier shape is frozen (§4b)
-and the interpreter contract is identical under both options:
-
-* **(A, recommended)** 09a lands the additive upstream carrier too:
-  declared secondaries evaluated through the existing Step-06 handle
-  pattern at the tuner's scoring step (observational — never consulted by
-  policy), persisted per record (`secondary_metric_results` /
-  `secondary_metric_refusals`) and stamped per output
-  (`secondary_metric_specs`), projected into `ModelRunSummary` — so the
-  roadmap's "render secondary metrics" is satisfied end-to-end in Step 09
-  and the B/C L1 fixtures carry real-shaped results. Cost: 09a touches the
-  tuner scoring step and record schema (additive, one writer each); no
-  semantic reopening of Step 06.
-* **(B)** Step 10 owns the upstream carrier; 09 renders
-  present-when-present, with the three-task fixtures carrying
-  carrier-shaped secondaries built from the packs' declared specs. Cost:
-  the roadmap sentence is satisfied at the interpreter boundary only until
-  Step 10; TIDMAD (no declared secondaries) is unaffected either way.
-
-The freeze does NOT wait on Q-09-7: it selects between two bounded scope
-placements of an already-frozen contract, and 09a's child design opens
-with whichever the operator rules (default A if unruled at 09a kickoff,
-per the recommendation).
+**Q-09-7 — secondary-metric carrier ownership: RULED B — RESOLVED
+(operator, 2026-08-19; full text §0.2).** The audit (§2.12) found NO
+secondary evaluation/persistence in production; the carrier shape is
+frozen (§4b) and the interpreter contract is identical under both options
+that were offered. The operator selected **B**: Step 10 owns the upstream
+carrier (declaration binding, additional metric-handle execution,
+tuner-side secondary scoring, `ExperimentRecord` persistence, workflow
+transport) through the unified task/workflow composition mechanism, and
+Step 09 renders present-when-present with the three-task fixtures
+carrying carrier-shaped secondaries built from the packs' declared specs
+(TIDMAD none; Pets `macro_f1` higher; DAVIS `psnr` higher + `mae` lower).
+The roadmap sentence "render secondary metrics" is therefore satisfied at
+the interpreter boundary in Step 09 and end-to-end only when Step 10
+lands the transport against the SAME Step-09 contract. The rejected
+option A (an additive 09a milestone landing tuner-side evaluation +
+record carrier + projection together) is recorded here as history only;
+09a must NOT introduce a secondary-metric evaluator, loader, task-specific
+binding path or new metric derivation site. The freeze was never gated on
+this question; 09a's child design opens under B.
 
 ## 22. Step-12 forward-compatibility proof
 
@@ -1263,8 +1309,9 @@ version-partitioned counters are one structure in that digest; §8).
 **STEP 09 IMPLEMENTATION SHAPE: PARENT + 2 CHILD PRs (09a → 09b) — APPROVED
 by the operator ruling and FROZEN here.**
 
-Freeze record (ruling §19): all Q-09-1..6 resolved (§21); Q-09-7 is a
-scope placement of a frozen contract and does not gate the freeze;
+Freeze record (ruling §19): all Q-09-1..6 resolved (§21); Q-09-7 was a
+scope placement of a frozen contract that did not gate the freeze and is
+now RESOLVED = B (§0.2, 2026-08-19);
 strong-extensibility verdict **PASS** (§9); A blockers = none (§19); exact
 09a/09b ownership (§15/§16); node-local structure disposition (§13a);
 exact secondary-metric transport (§4b); exact run MetricSpec authority
@@ -1290,7 +1337,9 @@ Step-07/08 kickoff protocol. **Implementation has NOT started.**
    silent preference.
 5. *Secondaries actually transported or merely named?* Audited: NO
    transport exists today (§2.12); the carrier is TYPED here (§4b);
-   ownership is Q-09-7 (09a recommended) — not prose-only.
+   ownership RULED — Q-09-7 = B: transport is Step 10's forward
+   constraint against this exact carrier, Step 09 renders
+   present-when-present (§0.2) — not prose-only.
 6. *Could a secondary affect primary ordering?* NO — §4b rule + census
    §18-7 (AST: no `secondary_metrics` reference in `MetricOrder`-consuming
    functions).
