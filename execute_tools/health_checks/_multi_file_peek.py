@@ -37,6 +37,7 @@ from typing import Literal
 import numpy as np
 from pydantic import BaseModel, Field
 
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._peek import peek_int8_at_channel
 from execute_tools.health_checks.schemas import HealthCheckContext
 
@@ -174,7 +175,7 @@ def peek_and_aggregate(
     predicate: Callable[[float | int], bool],
     aggregation: AggregationMode,
     peek_samples: int,
-    channel: str = "channel0001",
+    channel: str | None = None,
 ) -> MultiFilePeekOutcome:
     """Peek each file, compute per-file metric, apply predicate, aggregate.
 
@@ -191,8 +192,14 @@ def peek_and_aggregate(
             ``median`` modes.
         aggregation: how to combine per-file verdicts.
         peek_samples: forwarded to ``peek_int8_at_channel``.
-        channel: which HDF5 channel to read — always ``"channel0001"``
-            for blocking checks.
+        channel: which in-file channel group to read. ``None`` resolves it
+            from the Deliverable Contract, which OWNS that identity
+            (Step 08a C5) — the same adapter shape
+            :func:`~execute_tools.deliverable_spec.default_deliverable_storage`
+            was introduced for at 05c, so a caller predating the parameter
+            keeps reading exactly what it read before while no channel
+            literal survives in this module. Production checks pass it
+            explicitly, resolved once per ``run``.
 
     Returns:
         ``MultiFilePeekOutcome`` with per-file breakdown and aggregated
@@ -200,6 +207,8 @@ def peek_and_aggregate(
         ``HealthCheckResult.metrics["per_file_json"]``
         (json-serialised) for record observability.
     """
+    if channel is None:
+        channel = default_deliverable_storage().input_channel_group
     resolved = _resolve_indices(ctx, peek_file_indices)
     per_file: list[PerFilePeekResult] = []
     no_path_count = 0

@@ -52,6 +52,9 @@ from execute_tools.health_checks.runner import (
     resolve_action,
     severity_of,
 )
+from execute_tools.health_checks.sample_dispersion_floor import (
+    SampleDispersionFloorCheck,
+)
 from execute_tools.health_checks.schemas import (
     BLOCKING_ACTIONS,
     GateAction,
@@ -77,6 +80,11 @@ def _bootstrap_registry() -> None:
         PearsonDispersionCheck(),
         SpectralPeakRatioCheck(),
         PerFileOutputStdCheck(),
+        # Step 08a 8.4-C negative control. Registered like any other
+        # built-in, referenced by NO production YAML — being registered is
+        # not being configured, and the config baseline test proves it
+        # never fires in production.
+        SampleDispersionFloorCheck(),
     ):
         if check.name not in _REGISTRY:
             register(check)

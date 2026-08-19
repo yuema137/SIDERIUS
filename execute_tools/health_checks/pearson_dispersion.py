@@ -28,8 +28,16 @@ from typing import Any, ClassVar
 import numpy as np
 
 from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._peek import peek_int8_at_channel
-from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
+from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
+    CheckVerdict,
+    FactRequirement,
+    HealthCheckContext,
+    HealthCheckResult,
+    classify_verdict,
+)
 
 _MV_PER_LSB: float = 40.0 / 128.0
 
@@ -38,6 +46,21 @@ class PearsonDispersionCheck:
     """Record pearson_dispersion = stdev(per_file_pearsons). Never blocks."""
 
     name: ClassVar[str] = "pearson_dispersion"
+
+    declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+        # The only check that reads BOTH channels: denoised CH1 against
+        # target CH2, per file, then reports the dispersion of the per-file
+        # correlations. It therefore needs a target source as well as a
+        # denoised one, and a file group to disperse across.
+        consumes_view="tidmad.target_comparison_peek",
+        required_context_inputs=("denoised_source", "target_source"),
+        required_facts=(
+            FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),
+            FactRequirement(axis="file_group_size"),
+        ),
+        # EMPTY — recording-only, no threshold. See per_file_output_std.
+        threshold_parameter_names=(),
+    )
 
     _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 1_000_000
 
@@ -50,21 +73,31 @@ class PearsonDispersionCheck:
         peek_samples = int(cfg.get("peek_samples", self._DEFAULT_PEEK_SAMPLES))
 
         if ctx.target_path_fn is None:
+            # Defensive only: the declaration above names ``target_source``,
+            # so ``evaluate_gate`` returns an inapplicable verdict without
+            # calling this check. Reached only by a direct caller.
             return HealthCheckResult(
                 check_name=self.name,
                 passed=True,
                 reason=f"{self.name}: not applicable — no target_path_fn in context",
                 metrics={"peek_samples_requested": peek_samples},
+                verdict=CheckVerdict.INAPPLICABLE,
             )
 
         files = self._resolve_files(ctx, cfg)
         if not files:
+            # Defensive only — see above.
             return HealthCheckResult(
                 check_name=self.name,
                 passed=True,
                 reason=f"{self.name}: not applicable — no files in context",
                 metrics={"peek_samples_requested": peek_samples},
+                verdict=CheckVerdict.INAPPLICABLE,
             )
+
+        # Step 08a C5: channel identity from the Deliverable Contract,
+        # resolved once per run rather than spelled at the read site.
+        storage = default_deliverable_storage()
 
         per_file_values: list[float] = []
         per_file: dict[str, float] = {}
@@ -76,8 +109,8 @@ class PearsonDispersionCheck:
                 io_failed_count += 1
                 continue
             try:
-                ch1 = peek_int8_at_channel(denoised_path, "channel0001", peek_samples)
-                ch2 = peek_int8_at_channel(target_path, "channel0002", peek_samples)
+                ch1 = peek_int8_at_channel(denoised_path, storage.input_channel_group, peek_samples)
+                ch2 = peek_int8_at_channel(target_path, storage.target_channel_group, peek_samples)
             except (OSError, KeyError):
                 io_failed_count += 1
                 continue
@@ -140,11 +173,13 @@ class PearsonDispersionCheck:
                     f"{self.name}: all {len(files)} files failed I/O; no per-file pearson computed"
                 ),
                 metrics=metrics,
+                verdict=classify_verdict(passed=False, reason="", metrics=metrics),
             )
         return HealthCheckResult(
             check_name=self.name,
             passed=True,
             metrics=metrics,
+            verdict=CheckVerdict.PASSED,
         )
 
     @staticmethod

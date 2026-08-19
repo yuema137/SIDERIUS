@@ -19,7 +19,7 @@ from collections.abc import Callable
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 # ---------------------------------------------------------------------------
 # GateAction — routing verdict enum
@@ -237,16 +237,125 @@ class HealthCheckContext(BaseModel):
     def get_target_path(self, file_index: int) -> str | None:
         """Resolve the target-signal HDF5 filename for one file_index.
 
-        Returns None when ``target_path_fn`` is not set. Recording-only
-        checks (pearson_correlation, spectral_peak_ratio) that need the
-        target signal must treat None as "not applicable" and pass
-        without judgement — mirrors the ``get_denoised_path`` fallback
-        contract used by ``output_diversity`` when no denoised path is
-        available. See M8 §3.4.
+        Returns None when ``target_path_fn`` is not set.
+
+        Step 08a: absence is no longer each check's problem to paper over.
+        A check that needs the target signal declares ``target_source`` in
+        its :class:`CheckInputDeclaration`, and ``evaluate_gate`` decides
+        applicability BEFORE invoking it, so None here yields a typed
+        ``CheckVerdict.INAPPLICABLE`` result. The M8 §3.4 convention this
+        docstring used to prescribe — return a healthy verdict and a prose
+        excuse — is superseded; see the Step-08 parent design §7.
         """
         if self.target_path_fn is not None:
             return self.target_path_fn(file_index)
         return None
+
+
+# ---------------------------------------------------------------------------
+# CheckVerdict — the four-way execution vocabulary (Step 08a)
+# ---------------------------------------------------------------------------
+
+
+class CheckVerdict(StrEnum):
+    """What one check execution actually was.
+
+    Step 08a (parent design §7). Before this enum, "not applicable" was
+    spelled ``passed=True`` with a prose reason — indistinguishable from a
+    genuine pass in ``evaluate_gate``'s aggregation, in eligibility inputs
+    and in every count, while persistence string-matched its way back to
+    ``execution_status="not_run"``. The verdict is the typed fact those
+    surfaces should have been reading all along.
+
+    ``passed`` keeps its exact meaning ("did not fail" — the field that
+    drives ``on_pass`` / ``on_fail`` and ``short_circuit``), so gate ACTIONS
+    are unchanged by the introduction of this vocabulary. Honesty moves to
+    the layers that were lying: counting, persistence and eligibility.
+    """
+
+    PASSED = "passed"
+    """The check ran and found no pathology."""
+
+    FAILED = "failed"
+    """The check ran and flagged the output. Drives ``on_fail``."""
+
+    INAPPLICABLE = "inapplicable"
+    """The check's declared inputs are not present for this task/context, so
+    it was not evaluated. Never blocks — and **never counts as a pass**
+    (parent §7). Decided before artifact I/O once the 08a applicability
+    engine is wired."""
+
+    ERROR = "error"
+    """The check should have run but could not compute. On a blocking check
+    this fails closed via ``on_fail`` — it is never converted to a pass or
+    silently skipped."""
+
+
+_NON_FAILING_VERDICTS: frozenset[CheckVerdict] = frozenset(
+    {CheckVerdict.PASSED, CheckVerdict.INAPPLICABLE}
+)
+"""Verdicts that must accompany ``passed=True``.
+
+The complement (``FAILED`` / ``ERROR``) must accompany ``passed=False``.
+``HealthCheckResult`` enforces the equivalence at construction so a result
+can never assert one thing in its typed verdict and the opposite in the
+field that routes the gate."""
+
+
+NA_REASON_MARKER: str = "not applicable"
+"""The exact lowercase prose marker the pre-08a checks emit for an
+inapplicable outcome (``_multi_file_peek.py``, ``spectral_peak_ratio.py``,
+``per_file_output_std.py``, ``pearson_dispersion.py``).
+
+Load-bearing ONLY for :func:`classify_verdict`, which exists so that
+pre-08a constructor calls keep producing the right verdict. Production code
+must branch on ``CheckVerdict``, never on this string."""
+
+
+def classify_verdict(
+    *,
+    passed: bool,
+    reason: str,
+    metrics: dict[str, Any],
+) -> CheckVerdict:
+    """Classify one check outcome into the four-way vocabulary.
+
+    THE single spelling of the Step-08a §3.1 mapping. Both the
+    backward-compatibility validator on :class:`HealthCheckResult` and the
+    production checks that derive a verdict from an aggregation outcome call
+    this, so there is one rule rather than one rule and six transcriptions
+    of it that drift apart.
+
+    * ``passed`` + the exact :data:`NA_REASON_MARKER` → ``INAPPLICABLE``
+    * ``passed`` otherwise → ``PASSED``
+    * not passed, with ``exception_type`` in metrics, or every attempted
+      file having failed I/O → ``ERROR``
+    * not passed otherwise → ``FAILED``
+
+    The distinction in the third rule is the one that matters: "nothing was
+    measurable" is not the same claim as "the model is bad", and a required
+    blocking check that could not compute must fail closed rather than be
+    read as a scientific failure.
+
+    Reason prose that merely resembles the marker (different wording)
+    classifies from ``passed`` alone — so a reworded check surfaces as a
+    verdict test failure rather than a silent reclassification.
+    """
+    if passed:
+        return (
+            CheckVerdict.INAPPLICABLE if NA_REASON_MARKER in reason.lower() else CheckVerdict.PASSED
+        )
+    if "exception_type" in metrics:
+        return CheckVerdict.ERROR
+    attempted = metrics.get("n_files_attempted")
+    io_failed = metrics.get("n_files_io_failed")
+    all_io_failed = (
+        isinstance(attempted, int)
+        and not isinstance(attempted, bool)
+        and attempted > 0
+        and io_failed == attempted
+    )
+    return CheckVerdict.ERROR if all_io_failed else CheckVerdict.FAILED
 
 
 # ---------------------------------------------------------------------------
@@ -262,6 +371,11 @@ class HealthCheckResult(BaseModel):
     ``passed=False`` means "flagged" (was ``is_degenerate=True``). This
     inversion aligns with the rev-6 gate model where ``on_pass`` / ``on_fail``
     are the branching semantics.
+
+    Step 08a adds ``verdict``: the typed four-way statement of what the
+    execution WAS, beside ``passed``'s statement of what the gate should DO.
+    A caller that does not supply one gets it derived from the legacy shape
+    (see ``_derive_verdict``); the two can never contradict each other.
     """
 
     check_name: str = Field(
@@ -289,6 +403,60 @@ class HealthCheckResult(BaseModel):
             "and by the Run Monitor's cross-iter policy."
         ),
     )
+    verdict: CheckVerdict = Field(
+        description=(
+            "What this execution WAS: passed / failed / inapplicable / "
+            "error (Step 08a; parent design §7). Distinct from ``passed``, "
+            "which says what the gate should DO. Derived from the legacy "
+            "fields when a caller omits it — see ``_derive_verdict`` — so "
+            "pre-08a construction keeps working; production checks pass it "
+            "explicitly."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_verdict(cls, data: Any) -> Any:
+        """Fill ``verdict`` from the pre-08a fields when it was not supplied.
+
+        The backward-compatibility bridge. It delegates to
+        :func:`classify_verdict` rather than restating the mapping, so the
+        bridge can never disagree with the rule production applies
+        explicitly — there is one classifier, reached two ways.
+        """
+        if not isinstance(data, dict) or "verdict" in data:
+            return data
+        passed = data.get("passed")
+        if not isinstance(passed, bool):
+            # Let Pydantic report the missing/invalid ``passed`` itself.
+            return data
+        metrics = data.get("metrics")
+        reason = data.get("reason")
+        return {
+            **data,
+            "verdict": classify_verdict(
+                passed=passed,
+                reason=reason if isinstance(reason, str) else "",
+                metrics=metrics if isinstance(metrics, dict) else {},
+            ),
+        }
+
+    @model_validator(mode="after")
+    def _verdict_agrees_with_passed(self) -> HealthCheckResult:
+        """Reject a result that routes one way and reports another.
+
+        A ``verdict=PASSED, passed=False`` result would take ``on_fail``
+        while every counting surface recorded a pass. Such a result must
+        never be constructed, let alone persisted.
+        """
+        expected_passed = self.verdict in _NON_FAILING_VERDICTS
+        if self.passed is not expected_passed:
+            raise ValueError(
+                f"HealthCheckResult verdict/passed contradiction for "
+                f"{self.check_name!r}: verdict={self.verdict.value!r} requires "
+                f"passed={expected_passed}, got passed={self.passed}."
+            )
+        return self
 
 
 class PersistedHealthGateResult(BaseModel):
@@ -349,6 +517,23 @@ class PersistedHealthGateResult(BaseModel):
         description="The run's declared result authority (D-C1a). None on legacy results.",
     )
 
+    # --- Step 08a: the typed per-check outcome, beside the gate's summary ---
+    check_verdicts: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "check_name → CheckVerdict value for every check that produced "
+            "a result this round (Step 08a, Q-08a-1). Additive and "
+            "OPTIONAL: ``None`` on records written before 08a, which must "
+            "never be reinterpreted as a pass — the absence of verdicts is "
+            "the absence of evidence about verdicts.\n\n"
+            "It lives here rather than inside ``metrics`` because records "
+            "are read by resume and interpretation tooling: a key buried in "
+            "a free-form dict would be a contract nobody declared. "
+            "``execution_status`` keeps its exact legacy VALUES; this field "
+            "is where the honest four-way statement lives."
+        ),
+    )
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def display_label(self) -> str:
@@ -396,9 +581,14 @@ class GateResult(BaseModel):
     )
     passed: bool = Field(
         description=(
-            "True when every check inside this gate passed. False when "
-            "any check failed (the gate short-circuits on the first "
-            "failure)."
+            "True when no check inside this gate failed. False when any "
+            "check failed (the gate short-circuits on the first failure).\n\n"
+            "Step 08a: this is a ROUTING fact — it selects ``on_pass`` or "
+            "``on_fail`` — and an INAPPLICABLE check does not make it "
+            "False, because an inapplicable check has nothing to object "
+            "to. It is NOT a count of passes: what each check actually "
+            "did is in each result's ``verdict``, and inapplicable never "
+            "counts as passed (parent design §7)."
         ),
     )
     action: GateAction = Field(
@@ -432,3 +622,332 @@ class GateResult(BaseModel):
     @property
     def should_invalidate_round(self) -> bool:
         return self.action == GateAction.INVALIDATE_ROUND
+
+
+# ---------------------------------------------------------------------------
+# Check input declaration + applicability (Step 08a)
+# ---------------------------------------------------------------------------
+#
+# What a check DECLARES it needs, what a bound task DECLARES it has, and the
+# pure comparison between them. Nothing here performs I/O, resolves a
+# profile, or imports a task binding: applicability is decided BEFORE any
+# artifact is opened (parent design §6.1-§6.2, child design §3.2-§3.3), which
+# is what makes "not for this task" a statement the framework can make
+# cheaply and honestly.
+#
+# Two vocabularies are deliberately OPAQUE to this module:
+#
+#   * ``consumes_view`` — a view capability key (parent §6.3). The engine
+#     never interprets, branches on, or enumerates it.
+#   * fact axis VALUES (e.g. ``"int8_symbol_stream"``) — compared for
+#     equality, never parsed. A fourth task declares its own family string
+#     without any framework edit.
+#
+# The axis NAMES and the context-input NAMES are framework-owned generic
+# vocabulary: they describe properties of data, never identities of tasks.
+# A new task binds by declaring axis VALUES, not by adding an axis.
+
+
+CONTEXT_INPUT_PREDICATES: dict[str, Callable[[HealthCheckContext], bool]] = {
+    "denoised_source": lambda ctx: bool(ctx.denoised_paths) or ctx.denoised_filename_fn is not None,
+    "target_source": lambda ctx: ctx.target_path_fn is not None,
+    "file_vector": lambda ctx: bool(ctx.file_vector),
+    "denoising_score": lambda ctx: ctx.denoising_score is not None,
+}
+"""Logical context inputs a check may declare, and how presence is decided.
+
+Logical, not raw field names: a check needs "somewhere to read the denoised
+output from", which ``HealthCheckContext`` satisfies through EITHER
+``denoised_paths`` OR ``denoised_filename_fn``. Declaring the raw fields
+would force every check to restate that disjunction.
+
+Framework-owned and generic — these describe what a round produced, never
+which task produced it. A check needing something outside this vocabulary is
+declaring a task-owned view, which is 08b/08c's plugin surface, not a new
+entry here."""
+
+
+FACT_AXES: frozenset[str] = frozenset(
+    {
+        "encoding_family",
+        "symbol_cardinality",
+        "value_scale_unit",
+        "file_group_size",
+        "sampling_frequency_hz",
+    }
+)
+"""The declarable health-fact axes.
+
+Generic data properties. Growth discipline mirrors the parent's rule for
+STANDARD view capabilities (§6.3): adding an AXIS requires a task that
+forces it, because every check and every task must then be able to reason
+about it. Adding a task requires no new axis — a task declares VALUES."""
+
+
+class FactRequirement(BaseModel):
+    """One axis a check requires of the bound task's declared health facts.
+
+    ``equals=None`` means presence-only: the check needs the task to have
+    declared this axis at all, without caring what it says.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    axis: str = Field(
+        description="Which declared fact axis this requirement is about; must be in FACT_AXES.",
+    )
+    equals: str | int | float | None = Field(
+        default=None,
+        description=(
+            "Required value, compared for EQUALITY and never parsed. None "
+            "means the requirement is satisfied by the axis being declared "
+            "at all."
+        ),
+    )
+
+    @field_validator("axis")
+    @classmethod
+    def _axis_is_known(cls, value: str) -> str:
+        """Fail closed at AUTHORING time rather than at evaluation time.
+
+        A typo'd axis would otherwise be permanently unsatisfiable: the task
+        can never declare ``encodng_family``, so the check would report
+        itself inapplicable forever and look like a deliberate opt-out.
+        """
+        if value not in FACT_AXES:
+            raise ValueError(
+                f"Unknown health fact axis {value!r}; expected one of "
+                f"{sorted(FACT_AXES)}. An unknown axis can never be declared "
+                f"by a task, so the check would be silently inapplicable "
+                f"for every run."
+            )
+        return value
+
+
+class TaskHealthFacts(BaseModel):
+    """What the bound task DECLARES about the data its checks would inspect.
+
+    **Presence-discriminated** (the D14 truth-table pattern): every axis is
+    optional, and ``None`` means "this task declares nothing about this
+    axis" — which is NOT the same as declaring a value that happens to
+    mismatch. The two produce different inapplicability reasons, because
+    they are different situations: one is an undeclared property, the other
+    is a declared incompatibility.
+
+    Values are opaque strings/numbers. Nothing here is interpreted; the
+    engine only compares.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    encoding_family: str | None = Field(
+        default=None,
+        description=(
+            "Opaque family identifier for how output samples are encoded, "
+            "e.g. 'int8_symbol_stream' or 'continuous_float'. Compared for "
+            "equality only — the framework ships no closed family list."
+        ),
+    )
+    symbol_cardinality: int | None = Field(
+        default=None,
+        gt=1,
+        description=(
+            "Size of the symbol alphabet when the family is a symbol "
+            "stream. Rejected at 1 or below: an alphabet of one symbol is "
+            "the collapse these checks exist to detect, not a declaration."
+        ),
+    )
+    value_scale_unit: str | None = Field(
+        default=None,
+        description=(
+            "Physical unit declared samples carry once scaled, e.g. 'mV'. "
+            "Absent when the task declares no physical scale."
+        ),
+    )
+    file_group_size: int | None = Field(
+        default=None,
+        gt=0,
+        description="How many files the task's deliverable is split across.",
+    )
+    sampling_frequency_hz: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Sampling frequency of the stored series, when the task declares one.",
+    )
+
+    @model_validator(mode="after")
+    def _dependent_axes_have_their_parent(self) -> TaskHealthFacts:
+        """A cardinality without a family is a contradiction, not a fact.
+
+        Checked structurally rather than semantically: deciding whether a
+        given family string "is symbolic" would require interpreting an
+        opaque value, which this module must never do. But declaring how
+        many symbols exist while declaring nothing about the encoding is
+        incoherent regardless of what the family would have said.
+        """
+        if self.symbol_cardinality is not None and self.encoding_family is None:
+            raise ValueError(
+                f"symbol_cardinality={self.symbol_cardinality} declared without "
+                f"encoding_family. A symbol count is a property OF an encoding; "
+                f"declaring it alone leaves checks unable to tell a symbol "
+                f"stream from a continuous one."
+            )
+        return self
+
+    def declared(self, axis: str) -> str | int | float | None:
+        """Value declared for ``axis``, or None when the task is silent."""
+        return getattr(self, axis, None)
+
+
+class CheckInputDeclaration(BaseModel):
+    """What one check needs, as DATA rather than as in-check control flow.
+
+    Carries only what the six shipped checks were audited to actually
+    consume (child design §3.2) — no mega-schema. A check declares this as a
+    ``ClassVar``; the engine reads it before deciding to invoke the check at
+    all.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    consumes_view: str = Field(
+        description=(
+            "View capability key this check reads (parent §6.3). OPAQUE: the "
+            "engine never interprets, branches on, or enumerates it. 08a's "
+            "six declare TIDMAD-family keys; the standard capabilities ship "
+            "in 08c."
+        ),
+    )
+    required_context_inputs: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Logical context inputs that must be present; keys of CONTEXT_INPUT_PREDICATES."
+        ),
+    )
+    required_facts: tuple[FactRequirement, ...] = Field(
+        default=(),
+        description="Fact axes the bound task must declare (and optionally match).",
+    )
+    threshold_parameter_names: tuple[str, ...] = Field(
+        default=(),
+        description=(
+            "Config keys that are TASK thresholds rather than framework "
+            "policy. Pure metadata in 08a; 08b consumes it for the "
+            "ownership migration."
+        ),
+    )
+
+    @field_validator("required_context_inputs")
+    @classmethod
+    def _context_inputs_are_known(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        """Fail closed at authoring time — same reasoning as ``FactRequirement.axis``."""
+        unknown = sorted(set(value) - set(CONTEXT_INPUT_PREDICATES))
+        if unknown:
+            raise ValueError(
+                f"Unknown context input(s) {unknown}; expected a subset of "
+                f"{sorted(CONTEXT_INPUT_PREDICATES)}. An unknown input can "
+                f"never be satisfied, so the check would be silently "
+                f"inapplicable for every run."
+            )
+        return value
+
+
+class ApplicabilityVerdict(BaseModel):
+    """Whether a check's declared inputs are satisfiable for this run.
+
+    The decision is TYPED: ``applicable`` routes, and ``axis`` names what
+    decided it. ``reason`` is explanatory prose for the persisted record and
+    must never be the thing production branches on.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    applicable: bool = Field(
+        description="True when every declared requirement is satisfied.",
+    )
+    axis: str | None = Field(
+        default=None,
+        description=(
+            "The context input or fact axis that made this inapplicable. "
+            "None exactly when applicable."
+        ),
+    )
+    reason: str = Field(
+        default="",
+        description=(
+            "Deterministic explanation, without a check-name prefix — the "
+            "runner prefixes it so the persisted prose keeps the existing "
+            "'{check_name}: not applicable — …' shape. Empty exactly when "
+            "applicable."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _shape_matches_the_decision(self) -> ApplicabilityVerdict:
+        if self.applicable and (self.axis is not None or self.reason):
+            raise ValueError("An applicable verdict carries no axis and no reason.")
+        if not self.applicable and (self.axis is None or not self.reason):
+            raise ValueError(
+                "An inapplicable verdict must name the deciding axis and carry a reason."
+            )
+        return self
+
+
+APPLICABLE: ApplicabilityVerdict = ApplicabilityVerdict(applicable=True)
+"""The single applicable verdict — it carries no information beyond itself."""
+
+
+def _inapplicable(axis: str, reason: str) -> ApplicabilityVerdict:
+    return ApplicabilityVerdict(applicable=False, axis=axis, reason=f"not applicable — {reason}")
+
+
+def applicability(
+    declaration: CheckInputDeclaration,
+    task_facts: TaskHealthFacts,
+    ctx: HealthCheckContext,
+) -> ApplicabilityVerdict:
+    """Decide, WITHOUT touching any artifact, whether this check applies.
+
+    Pure and total. Evaluation order is load-bearing and asserted by test:
+
+    1. **Declared context inputs**, in declaration order — the cheapest
+       question, answerable from the context object alone.
+    2. **Declared fact axes**, in declaration order — an absent axis and a
+       mismatched axis are distinguished.
+
+    The FIRST unsatisfied requirement wins, so the reason is deterministic
+    for a given declaration rather than depending on which of several
+    problems is "worst".
+
+    An empty declaration is legal and always applicable: a check that
+    declares no requirements is asserting that it can run anywhere, which is
+    a meaningful claim rather than a missing one.
+
+    Args:
+        declaration: what the check needs.
+        task_facts: what the bound task declares it has. Regime-A derives
+            this from the dataset profile and Deliverable Contract; a task
+            binding supplies it in 08b.
+        ctx: the round's health-check context.
+
+    Returns:
+        ``APPLICABLE``, or an inapplicable verdict naming the deciding axis.
+    """
+    for name in declaration.required_context_inputs:
+        if not CONTEXT_INPUT_PREDICATES[name](ctx):
+            return _inapplicable(name, f"required context input {name!r} is absent")
+
+    for requirement in declaration.required_facts:
+        actual = task_facts.declared(requirement.axis)
+        if actual is None:
+            return _inapplicable(
+                requirement.axis,
+                f"task declares no {requirement.axis!r} fact",
+            )
+        if requirement.equals is not None and actual != requirement.equals:
+            return _inapplicable(
+                requirement.axis,
+                f"{requirement.axis} is {actual!r}, check requires {requirement.equals!r}",
+            )
+
+    return APPLICABLE

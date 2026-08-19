@@ -37,10 +37,14 @@ from execute_tools.health_checks.runner import (
     severity_of,
 )
 from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
+    CheckVerdict,
+    FactRequirement,
     GateAction,
     GateResult,
     HealthCheckContext,
     HealthCheckResult,
+    TaskHealthFacts,
 )
 
 # ---------------------------------------------------------------------------
@@ -493,3 +497,290 @@ class TestEvaluateGate:
         captured = capsys.readouterr()
         assert "crashy" in captured.out
         assert "ValueError" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Step 08a C3 — applicability is decided BEFORE the skill is invoked
+# ---------------------------------------------------------------------------
+
+
+class _DeclaringCheck(_ScriptedCheck):
+    """A scripted check that also carries a ``CheckInputDeclaration``.
+
+    Hand-built rather than borrowed from a real check: C3 wires the ENGINE,
+    and the six shipped checks deliberately still carry no declaration until
+    C4. Using a real check here would test C4's content a commit early and
+    would stop this test from failing if the wiring regressed.
+    """
+
+    def __init__(self, name: str, declaration: CheckInputDeclaration, **kwargs: Any):
+        super().__init__(name, **kwargs)
+        self.declaration = declaration
+
+
+# Requires an encoding family no contrast task declares.
+_INT8_ONLY = CheckInputDeclaration(
+    consumes_view="tidmad.int8_prefix_peek",
+    required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
+)
+# Requires only a context input, so it applies under any facts.
+_ANY_TASK = CheckInputDeclaration(
+    consumes_view="anything",
+    required_context_inputs=(),
+)
+
+_CONTRAST_FACTS = TaskHealthFacts(encoding_family="continuous_float", file_group_size=4)
+_TIDMAD_FACTS = TaskHealthFacts(encoding_family="int8_symbol_stream", symbol_cardinality=256)
+
+
+@pytest.fixture
+def contrast_task(monkeypatch):
+    """Bind facts that make the int8 family inapplicable, and count resolutions."""
+    calls = {"n": 0}
+
+    def _facts() -> TaskHealthFacts:
+        calls["n"] += 1
+        return _CONTRAST_FACTS
+
+    monkeypatch.setattr(runner, "_resolve_task_facts", _facts)
+    return calls
+
+
+@pytest.fixture
+def no_file_may_be_opened(monkeypatch):
+    """Fail loudly if anything opens an HDF5 file during the gate evaluation.
+
+    This is the 8.4-B claim in its executable form: inapplicability must be
+    decided BEFORE artifact I/O, not by opening the file and giving up. A
+    test that only asserted ``run_calls == 0`` would still pass if the
+    engine peeked first and skipped afterwards.
+    """
+    import h5py
+
+    def _boom(*args: Any, **kwargs: Any):
+        raise AssertionError(f"h5py.File opened during an inapplicable check: {args!r}")
+
+    monkeypatch.setattr(h5py, "File", _boom)
+
+
+class TestApplicabilityWiring:
+    def test_inapplicable_check_is_not_invoked_and_opens_no_file(
+        self, clean_registry, monkeypatch, contrast_task, no_file_may_be_opened
+    ):
+        """8.4-B: declared-float task ⇒ the int8 check does not run at all."""
+        check = _DeclaringCheck("int8_only", _INT8_ONLY, passed=False, reason="should never run")
+        register(check)
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(_make_gate("g", 1, [CheckRef(name="int8_only")])),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert check.run_calls == 0
+        assert len(gr.check_results) == 1
+        result = gr.check_results[0]
+        assert result.verdict is CheckVerdict.INAPPLICABLE
+        assert result.passed is True
+        assert result.reason == (
+            "int8_only: not applicable — encoding_family is 'continuous_float', "
+            "check requires 'int8_symbol_stream'"
+        )
+        assert result.metrics["inapplicable_axis"] == "encoding_family"
+
+    def test_sibling_applicable_check_still_executes_in_config_order(
+        self, clean_registry, monkeypatch, contrast_task
+    ):
+        """The engine skips ONE check, not the gate.
+
+        Asserts the executed SEQUENCE, not the configuration: an
+        implementation that dropped the applicable check, or reordered the
+        results, fails here.
+        """
+        skipped = _DeclaringCheck("int8_only", _INT8_ONLY)
+        ran = _DeclaringCheck("universal", _ANY_TASK)
+        register(skipped)
+        register(ran)
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(
+                _make_gate("g", 1, [CheckRef(name="int8_only"), CheckRef(name="universal")])
+            ),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert skipped.run_calls == 0
+        assert ran.run_calls == 1
+        assert [r.check_name for r in gr.check_results] == ["int8_only", "universal"]
+        assert [r.verdict for r in gr.check_results] == [
+            CheckVerdict.INAPPLICABLE,
+            CheckVerdict.PASSED,
+        ]
+
+    def test_declaration_less_check_is_unconditionally_applicable(
+        self, clean_registry, monkeypatch, contrast_task
+    ):
+        """Pre-08a behaviour bit-for-bit — this is why C3 is a TIDMAD no-op.
+
+        The six shipped checks carry no declaration until C4, so the whole
+        wiring must be inert for them even under facts that would make a
+        declaring check inapplicable.
+        """
+        plain = _ScriptedCheck("plain", passed=False, reason="plain: flagged")
+        register(plain)
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(_make_gate("g", 1, [CheckRef(name="plain")])),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert plain.run_calls == 1
+        assert gr.passed is False
+        assert gr.action is GateAction.SKIP_ITER
+        assert gr.check_results[0].verdict is CheckVerdict.FAILED
+        # Facts are never resolved when no check declares any.
+        assert contrast_task["n"] == 0
+
+    def test_task_facts_are_resolved_once_per_gate(
+        self, clean_registry, monkeypatch, contrast_task
+    ):
+        """Two declaring checks must not each re-resolve the profile."""
+        register(_DeclaringCheck("a", _INT8_ONLY))
+        register(_DeclaringCheck("b", _INT8_ONLY))
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(
+                _make_gate("g", 1, [CheckRef(name="a"), CheckRef(name="b")])
+            ),
+        )
+
+        evaluate_gate("g", _ctx())
+
+        assert contrast_task["n"] == 1
+
+    def test_all_inapplicable_gate_takes_on_pass_and_never_blocks(
+        self, clean_registry, monkeypatch, contrast_task
+    ):
+        """Q-08a-2. 'Takes on_pass' is not 'counts as pass' — see the verdicts."""
+        register(_DeclaringCheck("int8_only", _INT8_ONLY))
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(
+                _make_gate(
+                    "g",
+                    1,
+                    [CheckRef(name="int8_only")],
+                    on_pass_action=GateAction.CONTINUE,
+                    on_fail_action=GateAction.SKIP_ITER,
+                )
+            ),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert gr.passed is True
+        assert gr.action is GateAction.CONTINUE
+        assert gr.failure_reason == ""
+        assert all(r.verdict is CheckVerdict.INAPPLICABLE for r in gr.check_results)
+
+    def test_inapplicable_is_never_chosen_as_the_failure_reason(
+        self, clean_registry, monkeypatch, contrast_task
+    ):
+        """Mixed gate: the FAILED check owns the reason, the skipped one does not."""
+        register(_DeclaringCheck("int8_only", _INT8_ONLY))
+        register(_ScriptedCheck("flagger", passed=False, reason="flagger: collapsed"))
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(
+                _make_gate("g", 1, [CheckRef(name="int8_only"), CheckRef(name="flagger")])
+            ),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert gr.passed is False
+        assert gr.failure_reason == "flagger: collapsed"
+        assert gr.action is GateAction.SKIP_ITER
+
+    def test_inapplicable_does_not_trigger_short_circuit(
+        self, clean_registry, monkeypatch, contrast_task
+    ):
+        """short_circuit stops on FAILURE. An inapplicable check is not one."""
+        register(_DeclaringCheck("int8_only", _INT8_ONLY))
+        later = _ScriptedCheck("later", passed=True)
+        register(later)
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(
+                _make_gate(
+                    "g",
+                    1,
+                    [CheckRef(name="int8_only"), CheckRef(name="later")],
+                    short_circuit=True,
+                )
+            ),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert later.run_calls == 1
+        assert len(gr.check_results) == 2
+
+    def test_applicable_declaring_check_runs_normally(self, clean_registry, monkeypatch):
+        """The other direction of the axis: matching facts ⇒ the check runs.
+
+        Without this, a wiring bug that made EVERY declaring check
+        inapplicable would pass every test above.
+        """
+        monkeypatch.setattr(runner, "_resolve_task_facts", lambda: _TIDMAD_FACTS)
+        check = _DeclaringCheck("int8_only", _INT8_ONLY, passed=True)
+        register(check)
+        monkeypatch.setattr(
+            runner,
+            "load_health_gates_config",
+            lambda *a, **k: _make_config(_make_gate("g", 1, [CheckRef(name="int8_only")])),
+        )
+
+        gr = evaluate_gate("g", _ctx())
+
+        assert check.run_calls == 1
+        assert gr.check_results[0].verdict is CheckVerdict.PASSED
+
+
+class TestApplicabilityIsReachableFromTheProductionEntryPoint:
+    """Reachability: the boundary must sit on the path production actually takes.
+
+    Every test above calls ``evaluate_gate`` directly. This one enters
+    through ``evaluate_and_persist_health_gates`` — the function the tuner
+    calls — so a refactor that bypassed the applicability step on the real
+    path (a second gate loop, an inlined runner) fails here even while the
+    direct-call tests stay green.
+    """
+
+    def test_production_entry_point_honours_applicability_and_persists_verdicts(
+        self, clean_registry, monkeypatch, contrast_task, no_file_may_be_opened
+    ):
+        from execute_tools.health_checks import evaluation
+
+        check = _DeclaringCheck("int8_only", _INT8_ONLY, passed=False, reason="never runs")
+        register(check)
+        config = _make_config(_make_gate("g", 1, [CheckRef(name="int8_only")]))
+        monkeypatch.setattr(runner, "load_health_gates_config", lambda *a, **k: config)
+        monkeypatch.setattr(evaluation, "load_health_gates_config", lambda *a, **k: config)
+
+        _, persisted, action = evaluation.evaluate_and_persist_health_gates(_ctx())
+
+        assert check.run_calls == 0
+        assert action is GateAction.CONTINUE
+        assert len(persisted) == 1
+        assert persisted[0].check_verdicts == {"int8_only": "inapplicable"}
+        assert persisted[0].execution_status == "not_run"

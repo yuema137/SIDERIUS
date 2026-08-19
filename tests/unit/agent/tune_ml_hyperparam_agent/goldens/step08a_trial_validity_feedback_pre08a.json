@@ -1,0 +1,174 @@
+{
+  "all_invalid__skipped_False": {
+    "evidence_absent": [],
+    "execution_failure_count": 0,
+    "formal_skipped_for_no_valid_winner": false,
+    "healthgate_mode": "enforce",
+    "invalid_count": 1,
+    "outcomes": [
+      {
+        "exp_id": "e1",
+        "failed_gate_names": [
+          "output_diversity_blocking"
+        ],
+        "failure_reasons": [
+          "collapsed"
+        ],
+        "health_validity": "invalid",
+        "key_metrics": {
+          "output_diversity_blocking.unique_int8": 1
+        },
+        "status": "success"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 0
+  },
+  "all_invalid__skipped_True": {
+    "evidence_absent": [],
+    "execution_failure_count": 0,
+    "formal_skipped_for_no_valid_winner": true,
+    "healthgate_mode": "enforce",
+    "invalid_count": 1,
+    "outcomes": [
+      {
+        "exp_id": "e1",
+        "failed_gate_names": [
+          "output_diversity_blocking"
+        ],
+        "failure_reasons": [
+          "collapsed"
+        ],
+        "health_validity": "invalid",
+        "key_metrics": {
+          "output_diversity_blocking.unique_int8": 1
+        },
+        "status": "success"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 0
+  },
+  "execution_failure__skipped_False": {
+    "evidence_absent": [],
+    "execution_failure_count": 1,
+    "formal_skipped_for_no_valid_winner": false,
+    "healthgate_mode": "enforce",
+    "invalid_count": 0,
+    "outcomes": [
+      {
+        "exp_id": "e4",
+        "failed_gate_names": [],
+        "failure_reasons": [],
+        "health_validity": "invalid",
+        "key_metrics": {},
+        "status": "error_training"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 0
+  },
+  "execution_failure__skipped_True": {
+    "evidence_absent": [],
+    "execution_failure_count": 1,
+    "formal_skipped_for_no_valid_winner": true,
+    "healthgate_mode": "enforce",
+    "invalid_count": 0,
+    "outcomes": [
+      {
+        "exp_id": "e4",
+        "failed_gate_names": [],
+        "failure_reasons": [],
+        "health_validity": "invalid",
+        "key_metrics": {},
+        "status": "error_training"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 0
+  },
+  "no_gates__skipped_False": {
+    "evidence_absent": [
+      "e3: validity unknown \u2014 no gate results persisted"
+    ],
+    "execution_failure_count": 0,
+    "formal_skipped_for_no_valid_winner": false,
+    "healthgate_mode": "enforce",
+    "invalid_count": 0,
+    "outcomes": [
+      {
+        "exp_id": "e3",
+        "failed_gate_names": [],
+        "failure_reasons": [],
+        "health_validity": "unknown",
+        "key_metrics": {},
+        "status": "success"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 1
+  },
+  "no_gates__skipped_True": {
+    "evidence_absent": [
+      "e3: validity unknown \u2014 no gate results persisted"
+    ],
+    "execution_failure_count": 0,
+    "formal_skipped_for_no_valid_winner": true,
+    "healthgate_mode": "enforce",
+    "invalid_count": 0,
+    "outcomes": [
+      {
+        "exp_id": "e3",
+        "failed_gate_names": [],
+        "failure_reasons": [],
+        "health_validity": "unknown",
+        "key_metrics": {},
+        "status": "success"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 1
+  },
+  "not_run_gate__skipped_False": {
+    "evidence_absent": [
+      "e2: validity unknown \u2014 only 3 gate result(s) persisted, required set incomplete"
+    ],
+    "execution_failure_count": 0,
+    "formal_skipped_for_no_valid_winner": false,
+    "healthgate_mode": "enforce",
+    "invalid_count": 0,
+    "outcomes": [
+      {
+        "exp_id": "e2",
+        "failed_gate_names": [],
+        "failure_reasons": [],
+        "health_validity": "unknown",
+        "key_metrics": {},
+        "status": "success"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 1
+  },
+  "not_run_gate__skipped_True": {
+    "evidence_absent": [
+      "e2: validity unknown \u2014 only 3 gate result(s) persisted, required set incomplete"
+    ],
+    "execution_failure_count": 0,
+    "formal_skipped_for_no_valid_winner": true,
+    "healthgate_mode": "enforce",
+    "invalid_count": 0,
+    "outcomes": [
+      {
+        "exp_id": "e2",
+        "failed_gate_names": [],
+        "failure_reasons": [],
+        "health_validity": "unknown",
+        "key_metrics": {},
+        "status": "success"
+      }
+    ],
+    "trial_records_considered": 1,
+    "unknown_validity_count": 1
+  }
+}

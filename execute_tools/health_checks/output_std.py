@@ -30,8 +30,15 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
-from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
+from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
+    FactRequirement,
+    HealthCheckContext,
+    HealthCheckResult,
+    classify_verdict,
+)
 
 _MV_PER_LSB: float = 40.0 / 128.0  # int8 -> mV, matches execute_tools/scoring_utils.py
 
@@ -40,6 +47,19 @@ class OutputStdCheck:
     """Reject denoised outputs whose sample std falls below a mV floor."""
 
     name: ClassVar[str] = "output_std"
+
+    declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+        # Dispersion floor over a prefix of the denoised CH1 stream. The
+        # millivolt conversion (`_MV_PER_LSB`) is a CHECK-LOCAL constant,
+        # not a task declaration, so `value_scale_unit` is deliberately NOT
+        # required: no profile field declares it today, and requiring it
+        # would make this check inapplicable under TIDMAD — a parity break.
+        # The scale moves with the thresholds in 08b.
+        consumes_view="tidmad.int8_prefix_peek",
+        required_context_inputs=("denoised_source",),
+        required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
+        threshold_parameter_names=("min_std_mv",),
+    )
 
     _DEFAULT_MIN_STD_MV: ClassVar[float] = 1.0
     _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
@@ -57,6 +77,10 @@ class OutputStdCheck:
         peek_file_indices = list(cfg.get("peek_file_indices", self._DEFAULT_PEEK_FILE_INDICES))
         aggregation = cfg.get("aggregation", self._DEFAULT_AGGREGATION)
 
+        # Step 08a C5: the channel identity comes from the Deliverable
+        # Contract, which owns it — resolved once per run, not spelled here.
+        storage = default_deliverable_storage()
+
         outcome = peek_and_aggregate(
             ctx,
             peek_file_indices=peek_file_indices,
@@ -64,6 +88,7 @@ class OutputStdCheck:
             predicate=lambda m: m >= min_std_mv,
             aggregation=aggregation,
             peek_samples=peek_samples,
+            channel=storage.input_channel_group,
         )
 
         reason = ""
@@ -77,18 +102,20 @@ class OutputStdCheck:
         elif outcome.reason:
             reason = f"{self.name}: {outcome.reason}"
 
+        metrics = {
+            "aggregated_passed": outcome.passed,
+            "aggregation": outcome.aggregation,
+            "n_files_attempted": outcome.n_files_attempted,
+            "n_files_io_failed": outcome.n_files_io_failed,
+            "per_file": [r.model_dump() for r in outcome.per_file],
+            "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
+            "threshold_mv": min_std_mv,
+            "peek_samples_requested": peek_samples,
+        }
         return HealthCheckResult(
             check_name=self.name,
             passed=outcome.passed,
             reason=reason,
-            metrics={
-                "aggregated_passed": outcome.passed,
-                "aggregation": outcome.aggregation,
-                "n_files_attempted": outcome.n_files_attempted,
-                "n_files_io_failed": outcome.n_files_io_failed,
-                "per_file": [r.model_dump() for r in outcome.per_file],
-                "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
-                "threshold_mv": min_std_mv,
-                "peek_samples_requested": peek_samples,
-            },
+            metrics=metrics,
+            verdict=classify_verdict(passed=outcome.passed, reason=reason, metrics=metrics),
         )

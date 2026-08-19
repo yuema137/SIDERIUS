@@ -645,6 +645,52 @@ closeout pattern).
   from `evaluate_and_persist_health_gates`; Gate 2 = one bounded TIDMAD
   round (gates fire + persist through the new path). Gate 1: none.
 
+#### 08a implementation status (bookkeeping — the architecture above is unchanged)
+
+**IMPLEMENTED, C1–C6, on `step08-pr08a-check-input-contract`** from base
+`a37fd15d`: `ac580514` (verdict vocabulary + capture-first parity manifest)
+· `2d1c7b61` (declarations + pure applicability engine) · `aac9b3ba`
+(wiring + verdict transport — the behavioural commit) · `ab9b5909` (the six
+declarations) · `7e25e541` (peek via the Deliverable Contract) · `7ae72ae5`
+(8.4-C control + rung pair + docs). Full evidence, deviations and per-commit
+checklists live in the child ledger
+`step_08_health_check_task_profile/pr_08a_check_input_contract.md` §4/§10.
+Gate 1 confirmed NOT REQUIRED — the LLM-facing rendering is byte-identical
+to a worktree at `a37fd15d`.
+
+**Findings from 08a that CONSTRAIN 08b** (recorded here because 08b's design
+must start from them, not from the pre-implementation assumptions):
+
+1. **`value_scale_unit` is owned by nothing today.** TIDMAD's millivolt
+   scale is `_MV_PER_LSB = 40/128`, a module literal inside `output_std`,
+   `per_file_output_std` and `pearson_dispersion`. No `DatasetProfile` field
+   declares it, so 08a's regime-A derivation leaves the axis ABSENT and no
+   08a check may require it — requiring it would flip TIDMAD's std checks to
+   `inapplicable`. **08b must move this scale into the TIDMAD family's
+   task-owned config alongside the thresholds** (§6a.4), and only then may a
+   check declare the axis.
+2. **`spectral_peak_ratio` reads only the denoised channel.** It never peeks
+   the target; it needs a declared sampling frequency. Any 08b/08c family
+   roster that treats it as a target-comparison check is wrong.
+3. **The `"timeseries"` in-file group-walk literal still has no owner.**
+   `DeliverableStorage` owns channel groups/dtype/offset and
+   `DeliverableNaming` owns filenames; nothing owns the in-file group path,
+   so 08a left it in place. Whoever introduces a view PROVIDER (08b) either
+   gives that path an owner or inherits the literal knowingly.
+4. **`threshold_parameter_names` is populated and asserted ⊆ the keys each
+   check actually reads.** It is 08b's migration input.
+   `peek_file_indices` (run-level DataScope policy) and `aggregation` (gate
+   policy) are deliberately EXCLUDED — they are framework policy and must
+   not move to task ownership.
+5. **One classifier, one call site.** `schemas.classify_verdict` is the
+   single spelling of the verdict mapping, and `applicability()` has exactly
+   one production call site (`runner.evaluate_gate`), pinned by a test. 08b
+   must not add a second of either.
+6. **`_regime_a_facts.resolve_health_facts()` and `runner._resolve_task_facts()`
+   are the two functions 08b redirects** when a task binding supplies facts
+   directly. Neither contains a task name, and the redirect is a call-site
+   change, not a contract change.
+
 ### 08b — extension architecture: task-owned config + plugin binding + first family + D18
 * **Goal**: the task owns roster/thresholds/dispositions and names its
   plugin code; the framework config slims to policy only and never learns

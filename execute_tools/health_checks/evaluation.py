@@ -18,6 +18,7 @@ import numpy as np
 from execute_tools.health_checks.config import GateConfig, load_health_gates_config
 from execute_tools.health_checks.runner import evaluate_gate, resolve_action
 from execute_tools.health_checks.schemas import (
+    CheckVerdict,
     GateAction,
     GateResult,
     HealthCheckContext,
@@ -165,12 +166,36 @@ def _per_file_metrics(
 def _execution_status(
     result: GateResult, metrics: dict[str, Any]
 ) -> Literal["passed", "failed", "not_run", "error"]:
+    """Persisted execution state for one gate — now derived from TYPED verdicts.
+
+    Step 08a replaced the ``"not applicable" in reasons`` string sniff: this
+    function used to reverse-engineer an honest verdict out of prose that a
+    check happened to emit, which meant a reworded reason silently changed a
+    persisted status.
+
+    The VALUES are unchanged, deliberately and byte-for-byte. Rule order is
+    load-bearing and matches the pre-08a function exactly:
+
+    1. an exception inside a check → ``"error"``;
+    2. every attempted file having failed I/O → ``"not_run"``, **kept ahead
+       of any verdict-derived error** because that is what the pre-08a rule
+       produced for this input class. Such a result also carries
+       ``CheckVerdict.ERROR`` in ``check_verdicts``, which is where the
+       four-way truth now lives; ``execution_status`` keeps its legacy
+       meaning so no existing reader changes behaviour;
+    3. every check inapplicable → ``"not_run"`` (the sniff's replacement,
+       now typed);
+    4. otherwise the gate's routing verdict.
+    """
     if any("exception_type" in check.metrics for check in result.check_results):
         return "error"
     attempted = metrics.get("n_files_attempted")
     io_failed = metrics.get("n_files_io_failed")
-    reasons = " ".join(check.reason for check in result.check_results).lower()
-    if (attempted and io_failed == attempted) or "not applicable" in reasons:
+    if attempted and io_failed == attempted:
+        return "not_run"
+    if result.check_results and all(
+        check.verdict is CheckVerdict.INAPPLICABLE for check in result.check_results
+    ):
         return "not_run"
     return "passed" if result.passed else "failed"
 
@@ -226,6 +251,11 @@ def _persist(
         healthgate_mode=healthgate_mode,
         result_authority=result_authority,
         execution_status=_execution_status(result, metrics),
+        # Step 08a: what each check actually WAS, beside what the gate did.
+        # Built from the checks that produced a result, so a short-circuited
+        # gate reports the checks that ran rather than inventing entries for
+        # the ones that never did.
+        check_verdicts={check.check_name: check.verdict.value for check in result.check_results},
         check_passed=result.passed,
         would_invalidate_under_production_policy=would_invalidate,
         resolved_action=result.action,

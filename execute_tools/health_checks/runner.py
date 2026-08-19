@@ -30,12 +30,29 @@ from execute_tools.health_checks.registry import get
 # in schemas.py.
 from execute_tools.health_checks.schemas import (
     _SEVERITY,
+    CheckInputDeclaration,
+    CheckVerdict,
     GateAction,
     GateResult,
     HealthCheckContext,
     HealthCheckResult,
+    TaskHealthFacts,
+    applicability,
 )
 from execute_tools.health_checks.schemas import severity_of as severity_of
+
+
+def _resolve_task_facts() -> TaskHealthFacts:
+    """The bound task's declared health facts for this run.
+
+    Imported inside the function so ``runner`` keeps no import-time
+    dependency on profile/deliverable resolution — and so 08b has ONE call
+    site to redirect when a task binding supplies facts directly, rather
+    than a module-level name that consumers may have bound already.
+    """
+    from execute_tools.health_checks._regime_a_facts import resolve_health_facts
+
+    return resolve_health_facts()
 
 
 def resolve_action(gate_results: Iterable[GateResult]) -> GateAction:
@@ -106,8 +123,36 @@ def evaluate_gate(
 
     check_results: list[HealthCheckResult] = []
     first_failure_reason = ""
+    facts: TaskHealthFacts | None = None
     for check_ref in gate_cfg.checks:
         skill = get(check_ref.name)
+
+        # Step 08a: applicability is decided BEFORE the skill is invoked, so
+        # a check that does not apply to this task never opens an artifact.
+        # A declaration-less check is unconditionally applicable — exactly
+        # pre-08a behaviour — which is why this block is a no-op until the
+        # six checks declare their inputs.
+        declaration = getattr(skill, "declaration", None)
+        if isinstance(declaration, CheckInputDeclaration):
+            if facts is None:
+                # Resolved lazily and once per gate: a gate of
+                # declaration-less checks pays nothing, and a gate of
+                # declaring checks resolves the profile a single time.
+                facts = _resolve_task_facts()
+            verdict = applicability(declaration, facts, ctx)
+            if not verdict.applicable:
+                check_results.append(
+                    HealthCheckResult(
+                        check_name=check_ref.name,
+                        passed=True,
+                        reason=f"{check_ref.name}: {verdict.reason}",
+                        metrics={"inapplicable_axis": verdict.axis},
+                        verdict=CheckVerdict.INAPPLICABLE,
+                    )
+                )
+                # No `skill.run`, no I/O, and no effect on short_circuit:
+                # an inapplicable check has nothing to object to.
+                continue
         # D8-B: empty CheckRef.config becomes None so the skill sees "use
         # defaults" per Protocol §6, matching design §8's ``.get("config")``
         # semantic.
@@ -136,6 +181,10 @@ def evaluate_gate(
                 passed=False,
                 reason=(f"{check_ref.name}: check raised unexpected {_err_name}: {exc}"),
                 metrics={"exception_type": _err_name},
+                # A check that should have run but could not compute. On a
+                # blocking gate this still takes on_fail — failing closed,
+                # exactly as the PR #101 Bug-B guard always did.
+                verdict=CheckVerdict.ERROR,
             )
         check_results.append(result)
         if not result.passed and not first_failure_reason:

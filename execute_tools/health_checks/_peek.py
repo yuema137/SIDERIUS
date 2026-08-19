@@ -4,9 +4,10 @@ Shared HDF5-peek primitives for health checks that need int8 sample streams.
 
 Both ``OutputDiversityCheck`` (unique-value count) and
 ``AmplitudeCollapseCheck`` (single-bin dominance) operate on a small peek
-of the first denoised HDF5's ``channel0001`` dataset. The peek walk is
-identical (``timeseries/channel0001/timeseries[:peek_samples]``); this
-module owns it so checks don't drift.
+of the first denoised HDF5's INPUT channel. The peek walk is identical
+(``timeseries/<channel>/timeseries[:peek_samples]``); this module owns
+it so checks don't drift. The channel identity is supplied by the
+caller from the Deliverable Contract (Step 08a C5), never spelled here.
 
 Design split:
     * ``choose_peek_file_index(ctx)`` — pick which file_index to peek at
@@ -31,6 +32,7 @@ from typing import Any, cast
 import h5py
 import numpy as np
 
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks.schemas import HealthCheckContext
 
 
@@ -62,9 +64,11 @@ def peek_int8_at_channel(path: str, channel: str, peek_samples: int) -> np.ndarr
 
     Args:
         path: Absolute or CWD-relative path to the HDF5 file.
-        channel: Channel key inside ``timeseries`` — e.g. ``"channel0001"``
-            (model output in denoised files, raw noisy readout in
-            ground-truth files) or ``"channel0002"`` (target DM signal).
+        channel: Channel-group key inside ``timeseries``. Supply it from
+            the Deliverable Contract's ``input_channel_group`` (model
+            output in denoised files, raw noisy readout in ground-truth
+            files) or ``target_channel_group`` (the injected truth
+            signal) — this module never names a channel itself.
         peek_samples: Upper bound on how many leading samples to read.
             The returned array's shape reflects the actual read — reading
             fewer than requested is normal for tiny fixtures (numpy's
@@ -90,11 +94,22 @@ def peek_int8_at_channel(path: str, channel: str, peek_samples: int) -> np.ndarr
 
 
 def peek_int8_at_path(path: str, peek_samples: int) -> np.ndarray:
-    """Read up to ``peek_samples`` from ``channel0001`` of an HDF5 file.
+    """Read up to ``peek_samples`` from the INPUT channel of an HDF5 file.
 
     Thin wrapper around ``peek_int8_at_channel`` preserving the pre-M8
     signature — all existing callers continue to work unchanged.
 
+    **Deprecated (M9; kept for compatibility).** New code should call
+    ``peek_int8_at_channel`` with a channel resolved from the Deliverable
+    Contract, as the checks now do.
+
+    Step 08a C5: the channel identity comes from the contract rather than
+    from a literal here. The VALUE is unchanged — the contract derives
+    ``input_channel_group`` from the same profile the pre-C5 literal
+    transcribed — so every existing caller reads the same bytes.
+
     See ``peek_int8_at_channel`` for full docstring, args, and errors.
     """
-    return peek_int8_at_channel(path, "channel0001", peek_samples)
+    return peek_int8_at_channel(
+        path, default_deliverable_storage().input_channel_group, peek_samples
+    )

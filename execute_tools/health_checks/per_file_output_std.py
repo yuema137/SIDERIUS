@@ -24,8 +24,16 @@ from typing import Any, ClassVar
 import numpy as np
 
 from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._peek import peek_int8_at_channel
-from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
+from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
+    CheckVerdict,
+    FactRequirement,
+    HealthCheckContext,
+    HealthCheckResult,
+    classify_verdict,
+)
 
 _MV_PER_LSB: float = 40.0 / 128.0
 
@@ -34,6 +42,26 @@ class PerFileOutputStdCheck:
     """Record per-file output-std distribution. Never blocks."""
 
     name: ClassVar[str] = "per_file_output_std"
+
+    declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+        # Per-FILE dispersion diagnostics: it needs the denoised stream, an
+        # int8 alphabet, and a task whose deliverable is split across a
+        # file group at all — a single-artifact task has no per-file
+        # structure for this to describe. The mV conversion is check-local
+        # (see output_std) and is deliberately not a declared fact.
+        consumes_view="tidmad.int8_prefix_peek",
+        required_context_inputs=("denoised_source",),
+        required_facts=(
+            FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),
+            FactRequirement(axis="file_group_size"),
+        ),
+        # EMPTY, and deliberately so: this check is recording-only. It
+        # applies no threshold — it passes on numeric completion and
+        # fails only when every file failed I/O. `peek_samples` is a
+        # config parameter it reads, not a threshold, and declaring it
+        # here would hand 08b a mis-classified ownership migration.
+        threshold_parameter_names=(),
+    )
 
     _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
 
@@ -47,12 +75,20 @@ class PerFileOutputStdCheck:
 
         files = self._resolve_files(ctx, cfg)
         if not files:
+            # Defensive only: ``evaluate_gate`` decides applicability from
+            # the declaration above BEFORE calling this check, so this path
+            # is reached only by a direct (non-gate) caller.
             return HealthCheckResult(
                 check_name=self.name,
                 passed=True,
                 reason=f"{self.name}: not applicable — no files in context",
                 metrics={"peek_samples_requested": peek_samples},
+                verdict=CheckVerdict.INAPPLICABLE,
             )
+
+        # Step 08a C5: channel identity from the Deliverable Contract,
+        # resolved once per run rather than spelled at the read site.
+        storage = default_deliverable_storage()
 
         per_file: dict[int, float] = {}
         io_failed: dict[int, str] = {}
@@ -62,7 +98,7 @@ class PerFileOutputStdCheck:
                 io_failed[i] = "missing_path"
                 continue
             try:
-                ch1 = peek_int8_at_channel(denoised_path, "channel0001", peek_samples)
+                ch1 = peek_int8_at_channel(denoised_path, storage.input_channel_group, peek_samples)
             except (OSError, KeyError) as exc:
                 io_failed[i] = f"{type(exc).__name__}: {exc}"
                 continue
@@ -99,11 +135,13 @@ class PerFileOutputStdCheck:
                     f"see io_failed_json for per-file errors"
                 ),
                 metrics=metrics,
+                verdict=classify_verdict(passed=False, reason="", metrics=metrics),
             )
         return HealthCheckResult(
             check_name=self.name,
             passed=True,
             metrics=metrics,
+            verdict=CheckVerdict.PASSED,
         )
 
     @staticmethod

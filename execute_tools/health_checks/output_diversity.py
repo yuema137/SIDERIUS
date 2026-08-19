@@ -33,14 +33,35 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
-from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
+from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
+    FactRequirement,
+    HealthCheckContext,
+    HealthCheckResult,
+    classify_verdict,
+)
 
 
 class OutputDiversityCheck:
     """Reject denoised outputs with too few unique int8 values."""
 
     name: ClassVar[str] = "output_diversity"
+
+    declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+        # Counts distinct int8 symbols in a prefix of the denoised CH1
+        # stream: it needs somewhere to read the output from, and an
+        # encoding whose samples ARE a finite alphabet. A float stream has
+        # no "unique value count" worth thresholding.
+        consumes_view="tidmad.int8_prefix_peek",
+        required_context_inputs=("denoised_source",),
+        required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
+        # ONLY the key that decides the pass/fail boundary. `peek_samples`
+        # is sampling width and `peek_file_indices`/`aggregation` are
+        # framework policy — none of them is a threshold.
+        threshold_parameter_names=("min_unique_int8_values",),
+    )
 
     _DEFAULT_MIN_UNIQUE: ClassVar[int] = (
         5  # class-default backward compat; production YAML overrides to 25 (M8)
@@ -60,6 +81,10 @@ class OutputDiversityCheck:
         peek_file_indices = list(cfg.get("peek_file_indices", self._DEFAULT_PEEK_FILE_INDICES))
         aggregation = cfg.get("aggregation", self._DEFAULT_AGGREGATION)
 
+        # Step 08a C5: the channel identity comes from the Deliverable
+        # Contract, which owns it — resolved once per run, not spelled here.
+        storage = default_deliverable_storage()
+
         outcome = peek_and_aggregate(
             ctx,
             peek_file_indices=peek_file_indices,
@@ -67,6 +92,7 @@ class OutputDiversityCheck:
             predicate=lambda m: m > min_unique,
             aggregation=aggregation,
             peek_samples=peek_samples,
+            channel=storage.input_channel_group,
         )
 
         reason = ""
@@ -80,18 +106,20 @@ class OutputDiversityCheck:
         elif outcome.reason:  # "not applicable" pass carries a reason
             reason = f"{self.name}: {outcome.reason}"
 
+        metrics = {
+            "aggregated_passed": outcome.passed,
+            "aggregation": outcome.aggregation,
+            "n_files_attempted": outcome.n_files_attempted,
+            "n_files_io_failed": outcome.n_files_io_failed,
+            "per_file": [r.model_dump() for r in outcome.per_file],
+            "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
+            "threshold": min_unique,
+            "peek_samples_requested": peek_samples,
+        }
         return HealthCheckResult(
             check_name=self.name,
             passed=outcome.passed,
             reason=reason,
-            metrics={
-                "aggregated_passed": outcome.passed,
-                "aggregation": outcome.aggregation,
-                "n_files_attempted": outcome.n_files_attempted,
-                "n_files_io_failed": outcome.n_files_io_failed,
-                "per_file": [r.model_dump() for r in outcome.per_file],
-                "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
-                "threshold": min_unique,
-                "peek_samples_requested": peek_samples,
-            },
+            metrics=metrics,
+            verdict=classify_verdict(passed=outcome.passed, reason=reason, metrics=metrics),
         )

@@ -1,12 +1,20 @@
 """HealthCheckContext.target_path_fn + get_target_path() tests (M8 §3.4).
 
 The target-path field lets checks read a CH2-style ground-truth HDF5
-without hardcoding task-specific paths. Recording-only checks must
-degrade gracefully when the field is absent — this file covers both
-paths.
+without hardcoding task-specific paths.
+
+**Step 08a**: the RESOLUTION behaviour below is unchanged — absent field
+still returns None — but what absence MEANS moved. It used to oblige each
+check to "treat None as not applicable and pass without judgement"; a
+check now declares ``target_source`` and ``evaluate_gate`` decides
+applicability before invoking it, yielding a typed
+``CheckVerdict.INAPPLICABLE``. The superseded contract is pinned as absent
+below.
 """
 
 from __future__ import annotations
+
+import inspect
 
 from execute_tools.health_checks.schemas import HealthCheckContext
 
@@ -54,3 +62,27 @@ class TestGetTargetPath:
         assert "target_path_fn" not in dumped
         # model_dump_json must also succeed without raising
         _ = ctx.model_dump_json()
+
+
+class TestTheSupersededNotApplicableContractIsGone:
+    """Step 08a: the docstring is a CONTRACT, and it changed.
+
+    ``get_target_path``'s docstring used to instruct every check needing a
+    target signal to return ``passed=True`` with a "not applicable" reason —
+    the exact convention that made inapplicability indistinguishable from
+    health. A future contributor reading a stale docstring would reimplement
+    the defect, so its removal is pinned rather than assumed.
+
+    This is not testing prose for its own sake: the sentence prescribed
+    behaviour, and no other test would notice its return.
+    """
+
+    def test_the_old_pass_without_judgement_instruction_is_absent(self):
+        doc = inspect.getdoc(HealthCheckContext.get_target_path) or ""
+        assert "pass without judgement" not in doc
+        assert "not applicable" not in doc
+
+    def test_the_docstring_states_the_typed_contract_instead(self):
+        doc = inspect.getdoc(HealthCheckContext.get_target_path) or ""
+        assert "INAPPLICABLE" in doc
+        assert "CheckInputDeclaration" in doc

@@ -27,7 +27,7 @@ from execute_tools.health_checks.config import load_health_gates_config
 # membership now comes from the declared `gate_role`; the action still
 # decides ENFORCEMENT (whether a round is invalidated), and that use lives
 # in the tuner. Conflating the two is the defect this module was fixed for.
-from execute_tools.health_checks.schemas import CandidateHealthValidity
+from execute_tools.health_checks.schemas import CandidateHealthValidity, CheckVerdict
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
@@ -145,6 +145,22 @@ def required_blocking_gate_ids(production_config_path: str | None = None) -> fro
     return resolve_scientific_gate_ids(path) or frozenset()
 
 
+def _all_checks_inapplicable(result: dict[str, Any]) -> bool:
+    """Whether every check in this persisted gate result was inapplicable.
+
+    Reads the additive Step-08a ``check_verdicts`` and nothing else. A
+    record written before 08a has no verdicts at all, and **absence is not
+    inapplicability**: such a record returns False and takes exactly the
+    pre-08a path. Fabricating verdicts for historical records — or reading a
+    missing field as "nothing to check here" — would silently promote old
+    UNKNOWN rounds to VALID.
+    """
+    verdicts = result.get("check_verdicts")
+    if not isinstance(verdicts, dict) or not verdicts:
+        return False
+    return all(value == CheckVerdict.INAPPLICABLE.value for value in verdicts.values())
+
+
 def classify_candidate_health(
     record: Any,
     *,
@@ -189,6 +205,16 @@ def classify_candidate_health(
         result = results[gate_id]
         execution_status = result.get("execution_status")
         if execution_status in {"not_run", "error"}:
+            # Step 08a: a gate whose checks were ALL inapplicable carries no
+            # missing evidence — there was nothing for it to establish about
+            # this task — so it is excluded from the required set rather than
+            # rendering the round UNKNOWN (parent design §7).
+            #
+            # An ERRORED check is never excluded: "we could not compute it"
+            # IS missing evidence, and a required blocking check that could
+            # not be computed must fail closed.
+            if _all_checks_inapplicable(result):
+                continue
             return CandidateHealthValidity.UNKNOWN
         if execution_status != "passed":
             return CandidateHealthValidity.INVALID

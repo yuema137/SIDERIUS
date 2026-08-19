@@ -40,8 +40,15 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
-from execute_tools.health_checks.schemas import HealthCheckContext, HealthCheckResult
+from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
+    FactRequirement,
+    HealthCheckContext,
+    HealthCheckResult,
+    classify_verdict,
+)
 
 
 def _dominant_fraction(samples: np.ndarray) -> float:
@@ -61,6 +68,17 @@ class AmplitudeCollapseCheck:
 
     name: ClassVar[str] = "amplitude_collapse"
 
+    declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
+        # Dominant-symbol fraction over a prefix of the denoised CH1
+        # stream. The MECHANISM is family-generic (parent design §4 class
+        # B) and 08c lifts it to the categorical family; in 08a it reads
+        # TIDMAD's int8 peek and declares exactly that.
+        consumes_view="tidmad.int8_prefix_peek",
+        required_context_inputs=("denoised_source",),
+        required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
+        threshold_parameter_names=("collapse_threshold",),
+    )
+
     _DEFAULT_COLLAPSE_THRESHOLD: ClassVar[float] = 0.95
     _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
     _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
@@ -77,6 +95,10 @@ class AmplitudeCollapseCheck:
         peek_file_indices = list(cfg.get("peek_file_indices", self._DEFAULT_PEEK_FILE_INDICES))
         aggregation = cfg.get("aggregation", self._DEFAULT_AGGREGATION)
 
+        # Step 08a C5: the channel identity comes from the Deliverable
+        # Contract, which owns it — resolved once per run, not spelled here.
+        storage = default_deliverable_storage()
+
         outcome = peek_and_aggregate(
             ctx,
             peek_file_indices=peek_file_indices,
@@ -87,6 +109,7 @@ class AmplitudeCollapseCheck:
             predicate=lambda m: m <= threshold,
             aggregation=aggregation,
             peek_samples=peek_samples,
+            channel=storage.input_channel_group,
         )
 
         reason = ""
@@ -100,18 +123,20 @@ class AmplitudeCollapseCheck:
         elif outcome.reason:
             reason = f"{self.name}: {outcome.reason}"
 
+        metrics = {
+            "aggregated_passed": outcome.passed,
+            "aggregation": outcome.aggregation,
+            "n_files_attempted": outcome.n_files_attempted,
+            "n_files_io_failed": outcome.n_files_io_failed,
+            "per_file": [r.model_dump() for r in outcome.per_file],
+            "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
+            "threshold": threshold,
+            "peek_samples_requested": peek_samples,
+        }
         return HealthCheckResult(
             check_name=self.name,
             passed=outcome.passed,
             reason=reason,
-            metrics={
-                "aggregated_passed": outcome.passed,
-                "aggregation": outcome.aggregation,
-                "n_files_attempted": outcome.n_files_attempted,
-                "n_files_io_failed": outcome.n_files_io_failed,
-                "per_file": [r.model_dump() for r in outcome.per_file],
-                "per_file_json": json.dumps([r.model_dump() for r in outcome.per_file]),
-                "threshold": threshold,
-                "peek_samples_requested": peek_samples,
-            },
+            metrics=metrics,
+            verdict=classify_verdict(passed=outcome.passed, reason=reason, metrics=metrics),
         )

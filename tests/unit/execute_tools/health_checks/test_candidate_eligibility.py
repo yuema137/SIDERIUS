@@ -120,3 +120,111 @@ def test_enabled_true_stamp_takes_normal_path() -> None:
 def test_legacy_none_stamp_takes_normal_path() -> None:
     record = _record(health_gate_results=[], health_gate_enabled=None)
     assert _classify(record) is CandidateHealthValidity.UNKNOWN
+
+
+# ---------------------------------------------------------------------------
+# Step 08a C3 — inapplicable is excluded from the required set; error is not
+# ---------------------------------------------------------------------------
+
+
+def _inapplicable_gate(name: str, verdicts: dict[str, str]) -> dict:
+    """A gate that did not run, carrying the typed reason it did not."""
+    gate = _gate(name, execution_status="not_run", check_passed=True)
+    gate["check_verdicts"] = verdicts
+    return gate
+
+
+class TestInapplicableExclusion:
+    def test_all_inapplicable_required_gate_does_not_make_the_round_unknown(self):
+        """There was nothing for that gate to establish about this task.
+
+        UNKNOWN means "evidence is missing". An inapplicable check is not
+        missing evidence — it is a statement that the question does not
+        arise, which is exactly the distinction the typed verdict added.
+        """
+        record = _record(
+            health_gate_results=[
+                _gate("diversity"),
+                _gate("output_std"),
+                _inapplicable_gate("amplitude", {"amplitude_collapse": "inapplicable"}),
+            ]
+        )
+        assert (
+            classify_candidate_health(record, required_gate_ids=REQUIRED)
+            is CandidateHealthValidity.VALID
+        )
+
+    def test_errored_required_gate_is_never_excluded(self):
+        """ "We could not compute it" IS missing evidence — fail closed."""
+        record = _record(
+            health_gate_results=[
+                _gate("diversity"),
+                _gate("output_std"),
+                _inapplicable_gate("amplitude", {"amplitude_collapse": "error"}),
+            ]
+        )
+        assert (
+            classify_candidate_health(record, required_gate_ids=REQUIRED)
+            is CandidateHealthValidity.UNKNOWN
+        )
+
+    def test_partially_inapplicable_gate_is_not_excluded(self):
+        """One inapplicable check among several does not excuse the gate."""
+        record = _record(
+            health_gate_results=[
+                _gate("diversity"),
+                _gate("output_std"),
+                _inapplicable_gate(
+                    "amplitude",
+                    {"amplitude_collapse": "inapplicable", "output_diversity": "error"},
+                ),
+            ]
+        )
+        assert (
+            classify_candidate_health(record, required_gate_ids=REQUIRED)
+            is CandidateHealthValidity.UNKNOWN
+        )
+
+    def test_legacy_record_without_verdicts_keeps_pre_08a_behaviour(self):
+        """Absence of verdicts is not inapplicability.
+
+        A pre-08a record has no ``check_verdicts`` at all. Reading that as
+        "nothing applied here" would silently promote historical UNKNOWN
+        rounds to VALID — inventing evidence that was never recorded.
+        """
+        record = _record(
+            health_gate_results=[
+                _gate("diversity"),
+                _gate("output_std"),
+                _gate("amplitude", execution_status="not_run"),
+            ]
+        )
+        assert (
+            classify_candidate_health(record, required_gate_ids=REQUIRED)
+            is CandidateHealthValidity.UNKNOWN
+        )
+
+    def test_empty_verdict_map_is_not_inapplicability(self):
+        record = _record(
+            health_gate_results=[
+                _gate("diversity"),
+                _gate("output_std"),
+                _inapplicable_gate("amplitude", {}),
+            ]
+        )
+        assert (
+            classify_candidate_health(record, required_gate_ids=REQUIRED)
+            is CandidateHealthValidity.UNKNOWN
+        )
+
+    def test_tidmad_shaped_record_is_unaffected(self):
+        """Every check applicable ⇒ the required set is exactly what it was."""
+        record = _record(
+            health_gate_results=[
+                dict(_gate(name), check_verdicts={name: "passed"}) for name in REQUIRED
+            ]
+        )
+        assert (
+            classify_candidate_health(record, required_gate_ids=REQUIRED)
+            is CandidateHealthValidity.VALID
+        )

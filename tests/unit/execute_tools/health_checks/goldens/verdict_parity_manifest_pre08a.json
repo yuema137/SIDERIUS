@@ -1,0 +1,903 @@
+{
+  "case_count": 27,
+  "cases": [
+    {
+      "case_id": "amplitude_collapse__all_io_failed",
+      "check_name": "amplitude_collapse",
+      "expected_verdict": "error",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 2,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          },
+          {
+            "file_index": 1,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}, {\"file_index\": 1, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}]",
+        "threshold": 0.95
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": false,
+      "reason": "amplitude_collapse: all 2 peeked file(s) failed I/O; first error: FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0) (threshold: dominant_fraction < 0.95). Single-class dominance \u2014 the model is producing a near-constant output."
+    },
+    {
+      "case_id": "amplitude_collapse__fail_collapsed",
+      "check_name": "amplitude_collapse",
+      "expected_verdict": "failed",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 1.0,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 1.0, \"passed\": false, \"io_error\": null}]",
+        "threshold": 0.95
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": false,
+      "reason": "amplitude_collapse: aggregation=any_pass failed \u2014 per-file: file_0=1.0 (threshold: dominant_fraction < 0.95). Single-class dominance \u2014 the model is producing a near-constant output."
+    },
+    {
+      "case_id": "amplitude_collapse__na_no_path_configured",
+      "check_name": "amplitude_collapse",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "aggregated_passed": true,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 1,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": "no path resolved for file_index=0",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": null, \"passed\": false, \"io_error\": \"no path resolved for file_index=0\"}]",
+        "threshold": 0.95
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": true,
+      "reason": "amplitude_collapse: not applicable \u2014 no path configured in context"
+    },
+    {
+      "case_id": "amplitude_collapse__partial_io_failed",
+      "check_name": "amplitude_collapse",
+      "expected_verdict": "failed",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 1,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 1.0,
+            "passed": false
+          },
+          {
+            "file_index": 1,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_c.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 1.0, \"passed\": false, \"io_error\": null}, {\"file_index\": 1, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_c.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}]",
+        "threshold": 0.95
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": false,
+      "reason": "amplitude_collapse: aggregation=any_pass failed \u2014 per-file: file_0=1.0, file_1=io_err (threshold: dominant_fraction < 0.95). Single-class dominance \u2014 the model is producing a near-constant output."
+    },
+    {
+      "case_id": "amplitude_collapse__pass_healthy",
+      "check_name": "amplitude_collapse",
+      "expected_verdict": "passed",
+      "metrics": {
+        "aggregated_passed": true,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 0.015380859375,
+            "passed": true
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 0.015380859375, \"passed\": true, \"io_error\": null}]",
+        "threshold": 0.95
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "output_diversity__all_io_failed",
+      "check_name": "output_diversity",
+      "expected_verdict": "error",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 2,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          },
+          {
+            "file_index": 1,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}, {\"file_index\": 1, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}]",
+        "threshold": 5
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": false,
+      "reason": "output_diversity: all 2 peeked file(s) failed I/O; first error: FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0) (threshold: unique_int8 > 5). Class-127 collapse artifact \u2014 score would be 5.5762667 via 2^17 FP ratio."
+    },
+    {
+      "case_id": "output_diversity__fail_collapsed",
+      "check_name": "output_diversity",
+      "expected_verdict": "failed",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 1,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 1, \"passed\": false, \"io_error\": null}]",
+        "threshold": 5
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": false,
+      "reason": "output_diversity: aggregation=any_pass failed \u2014 per-file: file_0=1 (threshold: unique_int8 > 5). Class-127 collapse artifact \u2014 score would be 5.5762667 via 2^17 FP ratio."
+    },
+    {
+      "case_id": "output_diversity__na_no_path_configured",
+      "check_name": "output_diversity",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "aggregated_passed": true,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 1,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": "no path resolved for file_index=0",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": null, \"passed\": false, \"io_error\": \"no path resolved for file_index=0\"}]",
+        "threshold": 5
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": true,
+      "reason": "output_diversity: not applicable \u2014 no path configured in context"
+    },
+    {
+      "case_id": "output_diversity__partial_io_failed",
+      "check_name": "output_diversity",
+      "expected_verdict": "failed",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 1,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 1,
+            "passed": false
+          },
+          {
+            "file_index": 1,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_c.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 1, \"passed\": false, \"io_error\": null}, {\"file_index\": 1, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_c.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}]",
+        "threshold": 5
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": false,
+      "reason": "output_diversity: aggregation=any_pass failed \u2014 per-file: file_0=1, file_1=io_err (threshold: unique_int8 > 5). Class-127 collapse artifact \u2014 score would be 5.5762667 via 2^17 FP ratio."
+    },
+    {
+      "case_id": "output_diversity__pass_healthy",
+      "check_name": "output_diversity",
+      "expected_verdict": "passed",
+      "metrics": {
+        "aggregated_passed": true,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 80,
+            "passed": true
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 80, \"passed\": true, \"io_error\": null}]",
+        "threshold": 5
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold"
+      ],
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "output_std__all_io_failed",
+      "check_name": "output_std",
+      "expected_verdict": "error",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 2,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          },
+          {
+            "file_index": 1,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}, {\"file_index\": 1, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}]",
+        "threshold_mv": 1.0
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold_mv"
+      ],
+      "passed": false,
+      "reason": "output_std: all 2 peeked file(s) failed I/O; first error: FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0) (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal."
+    },
+    {
+      "case_id": "output_std__fail_collapsed",
+      "check_name": "output_std",
+      "expected_verdict": "failed",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 0.0,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 0.0, \"passed\": false, \"io_error\": null}]",
+        "threshold_mv": 1.0
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold_mv"
+      ],
+      "passed": false,
+      "reason": "output_std: aggregation=any_pass failed \u2014 per-file: file_0=0.0 (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal."
+    },
+    {
+      "case_id": "output_std__na_no_path_configured",
+      "check_name": "output_std",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "aggregated_passed": true,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 1,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": "no path resolved for file_index=0",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": null, \"passed\": false, \"io_error\": \"no path resolved for file_index=0\"}]",
+        "threshold_mv": 1.0
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold_mv"
+      ],
+      "passed": true,
+      "reason": "output_std: not applicable \u2014 no path configured in context"
+    },
+    {
+      "case_id": "output_std__partial_io_failed",
+      "check_name": "output_std",
+      "expected_verdict": "failed",
+      "metrics": {
+        "aggregated_passed": false,
+        "aggregation": "any_pass",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 1,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 0.0,
+            "passed": false
+          },
+          {
+            "file_index": 1,
+            "io_error": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_c.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+            "metric_value": null,
+            "passed": false
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 0.0, \"passed\": false, \"io_error\": null}, {\"file_index\": 1, \"metric_value\": null, \"passed\": false, \"io_error\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_c.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}]",
+        "threshold_mv": 1.0
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold_mv"
+      ],
+      "passed": false,
+      "reason": "output_std: aggregation=any_pass failed \u2014 per-file: file_0=0.0, file_1=io_err (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal."
+    },
+    {
+      "case_id": "output_std__pass_healthy",
+      "check_name": "output_std",
+      "expected_verdict": "passed",
+      "metrics": {
+        "aggregated_passed": true,
+        "aggregation": "any_pass",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "peek_samples_requested": 8192,
+        "per_file": [
+          {
+            "file_index": 0,
+            "io_error": null,
+            "metric_value": 7.205624074314811,
+            "passed": true
+          }
+        ],
+        "per_file_json": "[{\"file_index\": 0, \"metric_value\": 7.205624074314811, \"passed\": true, \"io_error\": null}]",
+        "threshold_mv": 1.0
+      },
+      "metrics_keyset": [
+        "aggregated_passed",
+        "aggregation",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "peek_samples_requested",
+        "per_file",
+        "per_file_json",
+        "threshold_mv"
+      ],
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "pearson_dispersion__all_io_failed",
+      "check_name": "pearson_dispersion",
+      "expected_verdict": "error",
+      "metrics": {
+        "calculation_version": "pearson_dispersion_v1",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 1,
+        "n_files_measured": 0,
+        "pearson_dispersion": "__nan__",
+        "pearson_mean": "__nan__",
+        "pearson_per_file": {},
+        "pearson_range": "__nan__",
+        "peek_samples_requested": 8192,
+        "unit": "dimensionless_correlation"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "pearson_dispersion",
+        "pearson_mean",
+        "pearson_per_file",
+        "pearson_range",
+        "peek_samples_requested",
+        "unit"
+      ],
+      "passed": false,
+      "reason": "pearson_dispersion: all 1 files failed I/O; no per-file pearson computed"
+    },
+    {
+      "case_id": "pearson_dispersion__na_no_files",
+      "check_name": "pearson_dispersion",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "peek_samples_requested": 8192
+      },
+      "metrics_keyset": [
+        "peek_samples_requested"
+      ],
+      "passed": true,
+      "reason": "pearson_dispersion: not applicable \u2014 no files in context"
+    },
+    {
+      "case_id": "pearson_dispersion__na_no_target_path_fn",
+      "check_name": "pearson_dispersion",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "peek_samples_requested": 8192
+      },
+      "metrics_keyset": [
+        "peek_samples_requested"
+      ],
+      "passed": true,
+      "reason": "pearson_dispersion: not applicable \u2014 no target_path_fn in context"
+    },
+    {
+      "case_id": "pearson_dispersion__pass_measured",
+      "check_name": "pearson_dispersion",
+      "expected_verdict": "passed",
+      "metrics": {
+        "calculation_version": "pearson_dispersion_v1",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 0,
+        "n_files_measured": 2,
+        "pearson_dispersion": 0.001962776820771341,
+        "pearson_mean": 0.00043213127858546447,
+        "pearson_per_file": {
+          "0": -0.0009557615213377235,
+          "1": 0.0018200240785086524
+        },
+        "pearson_range": 0.002775785599846376,
+        "peek_samples_requested": 8192,
+        "unit": "dimensionless_correlation"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "pearson_dispersion",
+        "pearson_mean",
+        "pearson_per_file",
+        "pearson_range",
+        "peek_samples_requested",
+        "unit"
+      ],
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "per_file_output_std__all_io_failed",
+      "check_name": "per_file_output_std",
+      "expected_verdict": "error",
+      "metrics": {
+        "calculation_version": "per_file_output_std_v1",
+        "io_failed": {
+          "0": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)",
+          "1": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)"
+        },
+        "io_failed_json": "{\"0\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\", \"1\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 2,
+        "n_files_measured": 0,
+        "peek_samples_requested": 8192,
+        "std_mv_mean": "__nan__",
+        "std_mv_per_file": {},
+        "std_mv_per_file_json": "{}",
+        "unit": "mV"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "io_failed",
+        "io_failed_json",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "peek_samples_requested",
+        "std_mv_mean",
+        "std_mv_per_file",
+        "std_mv_per_file_json",
+        "unit"
+      ],
+      "passed": false,
+      "reason": "per_file_output_std: all 2 files failed I/O; see io_failed_json for per-file errors"
+    },
+    {
+      "case_id": "per_file_output_std__na_no_files",
+      "check_name": "per_file_output_std",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "peek_samples_requested": 8192
+      },
+      "metrics_keyset": [
+        "peek_samples_requested"
+      ],
+      "passed": true,
+      "reason": "per_file_output_std: not applicable \u2014 no files in context"
+    },
+    {
+      "case_id": "per_file_output_std__partial_io_failed",
+      "check_name": "per_file_output_std",
+      "expected_verdict": "passed",
+      "metrics": {
+        "calculation_version": "per_file_output_std_v1",
+        "io_failed": {
+          "1": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)"
+        },
+        "io_failed_json": "{\"1\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_b.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}",
+        "n_files_attempted": 2,
+        "n_files_io_failed": 1,
+        "n_files_measured": 1,
+        "peek_samples_requested": 8192,
+        "std_mv_max": 7.205624074314811,
+        "std_mv_mean": 7.205624074314811,
+        "std_mv_median": 7.205624074314811,
+        "std_mv_min": 7.205624074314811,
+        "std_mv_per_file": {
+          "0": 7.205624074314811
+        },
+        "std_mv_per_file_json": "{\"0\": 7.205624074314811}",
+        "unit": "mV"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "io_failed",
+        "io_failed_json",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "peek_samples_requested",
+        "std_mv_max",
+        "std_mv_mean",
+        "std_mv_median",
+        "std_mv_min",
+        "std_mv_per_file",
+        "std_mv_per_file_json",
+        "unit"
+      ],
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "per_file_output_std__pass_measured",
+      "check_name": "per_file_output_std",
+      "expected_verdict": "passed",
+      "metrics": {
+        "calculation_version": "per_file_output_std_v1",
+        "io_failed": {},
+        "io_failed_json": "{}",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "n_files_measured": 1,
+        "peek_samples_requested": 8192,
+        "std_mv_max": 7.205624074314811,
+        "std_mv_mean": 7.205624074314811,
+        "std_mv_median": 7.205624074314811,
+        "std_mv_min": 7.205624074314811,
+        "std_mv_per_file": {
+          "0": 7.205624074314811
+        },
+        "std_mv_per_file_json": "{\"0\": 7.205624074314811}",
+        "unit": "mV"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "io_failed",
+        "io_failed_json",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "peek_samples_requested",
+        "std_mv_max",
+        "std_mv_mean",
+        "std_mv_median",
+        "std_mv_min",
+        "std_mv_per_file",
+        "std_mv_per_file_json",
+        "unit"
+      ],
+      "passed": true,
+      "reason": ""
+    },
+    {
+      "case_id": "spectral_peak_ratio__all_io_failed",
+      "check_name": "spectral_peak_ratio",
+      "expected_verdict": "error",
+      "metrics": {
+        "calculation_version": "spectral_peak_ratio_v1",
+        "io_failed": {
+          "0": "FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)"
+        },
+        "io_failed_json": "{\"0\": \"FileNotFoundError: [Errno 2] Unable to synchronously open file (unable to open file: name = '<WORKDIR>/absent_a.h5', errno = 2, error message = 'No such file or directory', flags = 0, o_flags = 0)\"}",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 1,
+        "n_files_measured": 0,
+        "peek_samples_requested": 8192,
+        "ratio_mean": "__nan__",
+        "ratio_per_file": {},
+        "ratio_per_file_json": "{}",
+        "unit": "dimensionless_ratio"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "io_failed",
+        "io_failed_json",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "peek_samples_requested",
+        "ratio_mean",
+        "ratio_per_file",
+        "ratio_per_file_json",
+        "unit"
+      ],
+      "passed": false,
+      "reason": "spectral_peak_ratio: all 1 files failed I/O; see io_failed_json for per-file errors"
+    },
+    {
+      "case_id": "spectral_peak_ratio__all_io_failed_missing_dataset",
+      "check_name": "spectral_peak_ratio",
+      "expected_verdict": "error",
+      "metrics": {
+        "calculation_version": "spectral_peak_ratio_v1",
+        "io_failed": {
+          "0": "KeyError: \"Unable to synchronously open object (object 'timeseries' doesn't exist)\""
+        },
+        "io_failed_json": "{\"0\": \"KeyError: \\\"Unable to synchronously open object (object 'timeseries' doesn't exist)\\\"\"}",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 1,
+        "n_files_measured": 0,
+        "peek_samples_requested": 8192,
+        "ratio_mean": "__nan__",
+        "ratio_per_file": {},
+        "ratio_per_file_json": "{}",
+        "unit": "dimensionless_ratio"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "io_failed",
+        "io_failed_json",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "peek_samples_requested",
+        "ratio_mean",
+        "ratio_per_file",
+        "ratio_per_file_json",
+        "unit"
+      ],
+      "passed": false,
+      "reason": "spectral_peak_ratio: all 1 files failed I/O; see io_failed_json for per-file errors"
+    },
+    {
+      "case_id": "spectral_peak_ratio__na_no_files",
+      "check_name": "spectral_peak_ratio",
+      "expected_verdict": "inapplicable",
+      "metrics": {
+        "peek_samples_requested": 8192
+      },
+      "metrics_keyset": [
+        "peek_samples_requested"
+      ],
+      "passed": true,
+      "reason": "spectral_peak_ratio: not applicable \u2014 no files in context"
+    },
+    {
+      "case_id": "spectral_peak_ratio__pass_measured",
+      "check_name": "spectral_peak_ratio",
+      "expected_verdict": "passed",
+      "metrics": {
+        "calculation_version": "spectral_peak_ratio_v1",
+        "io_failed": {},
+        "io_failed_json": "{}",
+        "n_files_attempted": 1,
+        "n_files_io_failed": 0,
+        "n_files_measured": 1,
+        "peek_samples_requested": 8192,
+        "ratio_max": 31.520290015890932,
+        "ratio_mean": 31.520290015890932,
+        "ratio_median": 31.520290015890932,
+        "ratio_min": 31.520290015890932,
+        "ratio_per_file": {
+          "0": 31.520290015890932
+        },
+        "ratio_per_file_json": "{\"0\": 31.520290015890932}",
+        "unit": "dimensionless_ratio"
+      },
+      "metrics_keyset": [
+        "calculation_version",
+        "io_failed",
+        "io_failed_json",
+        "n_files_attempted",
+        "n_files_io_failed",
+        "n_files_measured",
+        "peek_samples_requested",
+        "ratio_max",
+        "ratio_mean",
+        "ratio_median",
+        "ratio_min",
+        "ratio_per_file",
+        "ratio_per_file_json",
+        "unit"
+      ],
+      "passed": true,
+      "reason": ""
+    }
+  ],
+  "design_doc": "docs/design/generic_framework_upgrade/step_08_health_check_task_profile/pr_08a_check_input_contract.md",
+  "purpose": "Pre-08a capture of the six TIDMAD health checks' HealthCheckResult fields and the design-\u00a73.1 verdict class each one maps to. Expected verdicts are transcribed independently in _verdict_corpus.classify_expected_verdict \u2014 never read back from production.",
+  "schema_version": 1,
+  "source_tree_sha": "a37fd15d1141d096e5310ae02ae392da67345c99"
+}

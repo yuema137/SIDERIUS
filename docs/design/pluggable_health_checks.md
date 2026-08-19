@@ -319,6 +319,46 @@ no `__init__` body. A skill implementation should treat `config=None` as
 "use my defaults" and merge any provided keys over those defaults so
 partial YAML overrides work naturally.
 
+### 6a. Step 08a — checks declare their inputs (SUPERSEDES the NA convention)
+
+**Amended by Step 08a** (`docs/design/generic_framework_upgrade/
+step_08_health_check_task_profile.md` §7 and its child
+`step_08_health_check_task_profile/pr_08a_check_input_contract.md`). The
+code block above is the rev-6 shape; the Protocol now also carries:
+
+```python
+    declaration: ClassVar[CheckInputDeclaration]
+```
+
+Two things changed, and the second is the point.
+
+1. **A check publishes what it consumes, as data** — a view capability
+   key, which logical context inputs it needs (`denoised_source`,
+   `target_source`, `file_vector`, `denoising_score`), which task-fact
+   axes it requires, and which config keys are task thresholds.
+2. **`evaluate_gate` decides applicability BEFORE calling `run`.** The
+   rev-6 instruction — a skill finding its inputs missing returns
+   `passed=True` with a `"not applicable"` reason — is **superseded**. It
+   made inapplicability indistinguishable from health in every aggregate,
+   count and record, and forced persistence to recover the truth by
+   string-matching prose. A check that does not apply is now never
+   invoked, opens no artifact, and is recorded as
+   `CheckVerdict.INAPPLICABLE`, which **never counts as a pass**.
+
+`HealthCheckResult` gains `verdict: CheckVerdict` —
+`passed | failed | inapplicable | error`. `passed` keeps its exact
+meaning (it is what selects `on_pass` / `on_fail` and drives
+`short_circuit`), so gate ACTIONS are unchanged; the honest four-way
+statement lives in `verdict` and reaches records as the additive
+`PersistedHealthGateResult.check_verdicts`.
+
+Checks written before 08a still work: `evaluate_gate` treats a
+declaration-less check as unconditionally applicable, and a result
+constructed without `verdict=` has one derived from the legacy fields.
+The in-check "not applicable" returns that remain in the shipped checks
+are **defensive only** — reachable by a direct caller, never through a
+gate.
+
 ---
 
 ## 7. Registry
@@ -357,6 +397,26 @@ via a pytest fixture for isolation.
 ## 8. Runner
 
 Location: `execute_tools/health_checks/runner.py`.
+
+> **Step 08a amendment.** The pseudo-code below predates the
+> applicability step. `evaluate_gate` now runs, for each configured check
+> in config-listed order:
+>
+> ```text
+> declaration present?
+>   no  -> invoke the skill (exactly pre-08a behaviour)
+>   yes -> applicability(declaration, task facts, ctx)
+>            applicable   -> invoke the skill
+>            inapplicable -> record CheckVerdict.INAPPLICABLE and DO NOT
+>                            invoke it — no artifact is opened
+> ```
+>
+> The task's declared health facts are resolved lazily and once per gate,
+> so a gate whose checks carry no declaration resolves nothing at all.
+> An inapplicable result has `passed=True`, so it never triggers
+> `on_fail` and never stops `short_circuit` — but it is not a pass, and
+> counting, persistence and eligibility read the verdict rather than
+> `passed`. See §6a and the Step-08 parent design §7.
 
 ```python
 def get_gates_for_position(round_index: int) -> list[str]:
@@ -587,14 +647,38 @@ was deleted (zero non-test callers), and the rev-6 `HealthCheckContext`
 no longer carries `reference_file_vector` (commit-1 D2). This class
 operates on the int8 distribution directly — no reference needed.
 
+### 9.3 `SampleDispersionFloorCheck` (FIXTURE-SCOPED — not in production)
+
+Added by Step 08a C6 as roadmap §8.4-C's **negative control**, and
+deliberately referenced by **no production YAML**. It is registered like
+any other built-in — being registered is not being configured, and a test
+asserts it appears in neither shipped config.
+
+Its declaration requires `encoding_family == "continuous_float"`, so it is
+`inapplicable` under TIDMAD while the six TIDMAD checks are `inapplicable`
+under a declared-float task. That symmetry is the whole point: it proves
+that inapplicability is a statement about ONE family and never an
+exemption from health evaluation — on the same declared-float output where
+the int8 family reports `inapplicable`, this check FIRES, can FAIL, and can
+block a round.
+
+Mechanism: population standard deviation of the supplied samples against a
+floor; an empty sample set is `error`, not a pass. Samples arrive through
+its own config because 08a has no view-provider mechanism yet (08b), and
+its view key `step08.fixture_continuous_samples` is spelled in the
+plugin-local style to demonstrate §6.3's claim that the engine never
+interprets a view key. The real generic continuous family is 08c.
+
 ---
 
 ## 10. Adding a New Health Check
 
 1. Create `execute_tools/health_checks/checks/my_check.py`
 2. Implement the `HealthCheckSkill` protocol: a `name: ClassVar[str]`
-   attribute and a `run(ctx, config)` method returning
-   `HealthCheckResult`.
+   attribute, a `declaration: ClassVar[CheckInputDeclaration]` stating
+   what the check consumes (Step 08a, §6a), and a `run(ctx, config)`
+   method returning `HealthCheckResult`. State the `verdict=` explicitly
+   rather than relying on the legacy derivation.
 3. Call `register(MyCheck())` at module scope.
 4. Import the module in `execute_tools/health_checks/checks/__init__.py`
    so registration fires at package import.

@@ -24,7 +24,9 @@ mode fraction implies for a particular task is the planner's judgement.
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 import pytest
 
@@ -362,3 +364,130 @@ class TestBothPromptPathsCarryTheBlock:
             "expected the formatter at the legacy splice, the pipeline "
             "variable and the token accounting"
         )
+
+
+# ---------------------------------------------------------------------------
+# Step 08a C3 — the LLM-facing rendering is byte-stable
+# ---------------------------------------------------------------------------
+
+
+def _step08a_gate(
+    name,
+    *,
+    execution_status="passed",
+    check_passed=True,
+    would_invalidate=False,
+    reason=None,
+):
+    return {
+        "gate_name": name,
+        "execution_status": execution_status,
+        "check_passed": check_passed,
+        "would_invalidate_under_production_policy": would_invalidate,
+        "resolved_action": "continue",
+        "failure_reason": reason,
+        "key_metrics": {"unique_int8": 1} if reason else {},
+    }
+
+
+_STEP08A_REQUIRED = [
+    "output_diversity_blocking",
+    "output_std_blocking",
+    "amplitude_collapse_blocking",
+]
+
+_STEP08A_RECORD_SETS = {
+    "all_invalid": [
+        {
+            "exp_id": "e1",
+            "is_trial": True,
+            "status": "success",
+            "denoising_score": 3.0,
+            "health_gate_results": [
+                _step08a_gate(
+                    _STEP08A_REQUIRED[0],
+                    check_passed=False,
+                    execution_status="failed",
+                    reason="collapsed",
+                ),
+                _step08a_gate(_STEP08A_REQUIRED[1]),
+                _step08a_gate(_STEP08A_REQUIRED[2]),
+            ],
+        }
+    ],
+    "not_run_gate": [
+        {
+            "exp_id": "e2",
+            "is_trial": True,
+            "status": "success",
+            "denoising_score": 3.0,
+            "health_gate_results": [
+                _step08a_gate(_STEP08A_REQUIRED[0]),
+                _step08a_gate(_STEP08A_REQUIRED[1]),
+                _step08a_gate(_STEP08A_REQUIRED[2], execution_status="not_run"),
+            ],
+        }
+    ],
+    "no_gates": [
+        {
+            "exp_id": "e3",
+            "is_trial": True,
+            "status": "success",
+            "denoising_score": 3.0,
+            "health_gate_results": [],
+        }
+    ],
+    "execution_failure": [
+        {
+            "exp_id": "e4",
+            "is_trial": True,
+            "status": "error_training",
+            "health_gate_results": [],
+        }
+    ],
+}
+
+
+def test_trial_validity_feedback_is_byte_identical_to_pre_step08a():
+    """Step 08a changes nothing the planner can see.
+
+    The golden was CAPTURED from a worktree at ``a37fd15d`` — the commit
+    before any 08a code existed — so it is not this implementation's own
+    output played back. The records are pre-08a shaped (no
+    ``check_verdicts``), which is the case that must not move: 08a alters
+    eligibility only for gates that carry the new typed evidence.
+
+    If this fails, an LLM-facing surface changed and Gate 1 must be
+    re-dispositioned with the operator before the PR proceeds (frozen 08a
+    design §7; parent §10).
+    """
+    golden_path = (
+        Path(__file__).resolve().parent / "goldens" / "step08a_trial_validity_feedback_pre08a.json"
+    )
+    golden = json.loads(golden_path.read_text())
+
+    rendered = {}
+    for name, records in _STEP08A_RECORD_SETS.items():
+        for skipped in (False, True):
+            block = _build_trial_validity_feedback(
+                records,
+                formal_skipped_for_no_valid_winner=skipped,
+                healthgate_mode="enforce",
+            )
+            rendered[f"{name}__skipped_{skipped}"] = (
+                None if block is None else block.model_dump(mode="json")
+            )
+
+    assert rendered == golden
+
+
+def test_the_feedback_golden_actually_exercises_the_rendering():
+    """Guards the guard: an all-``None`` golden would compare nothing."""
+    golden_path = (
+        Path(__file__).resolve().parent / "goldens" / "step08a_trial_validity_feedback_pre08a.json"
+    )
+    golden = json.loads(golden_path.read_text())
+    populated = [key for key, value in golden.items() if value]
+    assert populated, golden
+    assert any(value.get("evidence_absent") for value in golden.values() if value)
+    assert any(value.get("outcomes") for value in golden.values() if value)
