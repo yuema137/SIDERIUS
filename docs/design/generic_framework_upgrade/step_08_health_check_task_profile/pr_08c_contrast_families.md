@@ -2,8 +2,18 @@
 
 ## 0. Status and provenance
 
-**REVISION 2 — FROZEN. Operator ruling 2026-08-18. IMPLEMENTATION NOT
-STARTED.**
+**REVISION 2 — FROZEN. Operator ruling 2026-08-18. IMPLEMENTED AND MERGED
+2026-08-19: PR #237, squash `3f4effb54444e2f0c6e93216e8ddda90b522d89e`;
+final PR head `532035e6` (exact-head CI 32226620524 SUCCESS), final
+EXECUTABLE head `ede11fd5` (C5 — everything after it is verified
+docs/tests only); Pets Gate 2 PASS + DAVIS Gate 2 PASS (§10.6–§10.7);
+operator review verdict: STEP 08c — REVIEW PASS (2026-08-19). §4's
+checklists and the §10 ledger are the implementation record.**
+
+*(Freeze-time provenance, preserved: at the freeze this header read
+"IMPLEMENTATION NOT STARTED" and every §4 checkbox was `[ ]` — that was
+the frozen design's state at `9be5cc25`, before this implementation
+context began.)*
 
 Rev 1 (`3e94133f`) was reviewed by the operator with the verdict **APPROVED
 IN DIRECTION / REQUIRED FINAL FREEZE AMENDMENTS**: the six-commit
@@ -22,8 +32,9 @@ current source (§2) > merged 08a/08b implementations and ledgers > roadmap
 **Audit anchor.** Master **`d7b2c8c9`** (merged 08b squash `13e28796` + doc
 sync), with three amendment-mandated audits added at rev 2 (§2.8–§2.11) and
 real-artifact claims verified against the preserved D14 evidence on this
-machine. **Zero `SOURCE-INSPECTION REQUIRED` markers. Every implementation
-checkbox in §4 is `[ ]`.**
+machine. **Zero `SOURCE-INSPECTION REQUIRED` markers.** *(At freeze, every
+§4 checkbox was `[ ]`; all are now closed with evidence — implementation
+base `70eb21b9`, six semantic commits C1–C6, §10 ledger.)*
 
 ### 0.1 Operator rulings incorporated (all four questions closed)
 

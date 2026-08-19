@@ -641,6 +641,55 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 08c — COMPLETE / MERGED (2026-08-19) ⇒ STEP 08 COMPLETE**: PR
+  #237, squash `3f4effb5`; exact-head CI **32226620524 SUCCESS** on
+  `532035e6` (final EXECUTABLE head `ede11fd5` — C6 is verified
+  docs/tests only, so the Gate evidence covers the final executable
+  state). **The first REAL contrast content runs through the 08b
+  extension architecture.** Two framework-standard view capabilities
+  (`categorical_predictions` / `continuous_samples`,
+  `execute_tools/health_checks/standard_views.py`) with a frozen
+  NumPy ABI: 1-D typed streams, strict dtype kinds, NO coercion,
+  read-only no-copy views (`np.shares_memory`, never `.base`), NATIVE
+  dtype preserved, runtime-only, ENGINE-OPAQUE (censused). Three generic
+  collapse checks consume them: `categorical_distinct_symbols` (records
+  occupancy = distinct/cardinality), `categorical_dominant_fraction`
+  (thresholds a FRACTION — the real collapse is 369/370 NEAR-constant),
+  and `sample_dispersion_floor` UPGRADED in place (view-consuming,
+  `required_facts=()`, `np.std(dtype=float64, ddof=0)`, config-borne
+  samples retired). `symbol_cardinality` reaches checks ONLY by
+  declaration-driven composition injection from the frozen
+  `INJECTABLE_AXIS_PARAMETERS` table (`_composition.py`); a roster
+  hand-authoring ANY injected key is a deterministic
+  `HealthCompositionError` (the silent-overwrite hazard is gone). §3.2a
+  verdict boundary: unreadable/empty ⇒ ERROR; read-but-invalid
+  (out-of-range symbol, non-finite sample) ⇒ FAILED — the categorical
+  family shares ONE mechanism (`_categorical_validity.py`). Pets and
+  DAVIS bind task-owned Health families through the EXTERNAL state-C
+  interface (pack `declared/task_health.yaml` + underscore-prefixed pack
+  plugins loaded ONLY by explicit `kind: file` refs — both directory
+  scanners skip `_` members; frozen thresholds 5 / 0.95 / 0.04; committed
+  real Pets collapse fixture sha `cc847026…f752c`; codec parity both
+  packs). Both D14 runners gained ONE shared Health evidence stage
+  (`scripts/_gate2_health_stage.py`: explicit binding keyword-only with
+  no default, EVERY selected gate persisted, additive `health:` block);
+  the 08b cross-task guardrail is INVERTED, never deleted. **Gate 2:
+  Pets PASS + DAVIS PASS at `ede11fd5`** — Pets deterministically
+  REPRODUCED the D14 collapse byte-identically and both blocking gates
+  caught it with independently-recomputed-consistent evidence; DAVIS's
+  fresh npz reproduced the preserved artifact and the FULL
+  5,160,960-sample view passed at the frozen floor with dispersion
+  `0.2156402715035823` bit-equal. TIDMAD parity owners byte-identical at
+  every commit (NO new TIDMAD Gate); Gate 1 NOT REQUIRED; the 08b
+  out-of-tree fourth-task proof stays green; health-core census (124
+  tests) + three-task rung landed; parent §14 A–H ALL CLOSED (mapping:
+  child §10.8). **Debt carried to Step 9/10 (parent §15 R5)**:
+  `evaluation.py`'s per-check-NAME threshold tables must become
+  declaration-driven — census-excluded by listed name today. Design +
+  evidence:
+  `generic_framework_upgrade/step_08_health_check_task_profile/pr_08c_contrast_families.md`
+  §10. **NEXT = Step 09** — to be re-confirmed from the merged roadmap in
+  a fresh session, never from the conversation that produced 08c.
 - **STEP 08a — COMPLETE / MERGED (2026-08-19)**: PR #235, squash
   `7da1e45e`; exact-head CI **32207685908 SUCCESS** on `3055af66`. Health
   checks no longer say "not applicable" by returning `passed=True` with prose:

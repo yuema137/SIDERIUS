@@ -826,9 +826,83 @@ must start from them, not from the pre-implementation assumptions):
 > `max_dominant_fraction = 0.95`, with the real collapse evidence pinned as
 > n=370 / distinct=2 / occupancy=2/37 / dominant=369/370 — this parent's
 > former "fraction = 1.0" prose corrected by the dated erratum above, child
-> §2.7). Every implementation checkbox unchecked. **Implementation NOT
-> started.** This is a child-design status entry only — the parent
-> architecture above is unchanged.
+> §2.7). *(At freeze: every implementation checkbox unchecked,
+> implementation not started.)*
+>
+> **IMPLEMENTED AND MERGED 2026-08-19.** PR **#237**, squash
+> **`3f4effb54444e2f0c6e93216e8ddda90b522d89e`**; final PR head `532035e6`,
+> final EXECUTABLE head `ede11fd5` (C5 — the two later commits are
+> verified docs/tests only); exact-head CI **32226620524** SUCCESS on
+> `532035e6`. Six semantic commits C1–C6; the child design is the
+> implementation ledger (§4 checklists closed, §10.1–§10.8 evidence).
+> Operator review verdict: **STEP 08c — REVIEW PASS**. This is a
+> child-design status entry only — the parent architecture above is
+> unchanged.
+>
+> **What landed.** The two framework-standard view capabilities
+> (`categorical_predictions` / `continuous_samples`, frozen NumPy
+> read-only no-copy ABI, engine-opaque) with their first consumers — the
+> generic collapse family (`categorical_distinct_symbols`,
+> `categorical_dominant_fraction`, and `sample_dispersion_floor` upgraded
+> in place to real view consumption with its 08a `encoding_family`
+> scaffold and config-borne samples retired); declaration-driven
+> `symbol_cardinality` injection bounded by a frozen injectable-axes
+> table, with a deterministic `HealthCompositionError` on any authored
+> injected key; the Pets and DAVIS task-owned families binding state C
+> through their reference packs (frozen floors 5 / 0.95 / 0.04; committed
+> real Pets collapse fixture-of-record sha `cc847026…f752c`;
+> underscore-prefixed pack plugins loaded ONLY by explicit `kind: file`
+> refs); mandatory codec-parity regressions for both packs; ONE shared
+> D14-runner Health evidence stage (explicit binding, every selected gate
+> persisted, additive `health:` block) with the 08b cross-task guardrail
+> INVERTED in place; and the health-core structural census (124 tests,
+> planted-offender probes incl. one in the bootstrap) + the three-task
+> composition rung (state A byte-stable across B/C interleaving).
+>
+> **Gate 2: Pets PASS + DAVIS PASS at `ede11fd5`** (specs written into the
+> child §10.6 before launch; classified from persisted evidence, child
+> §10.7). Pets: the bounded seed-11 run deterministically REPRODUCED the
+> D14 collapse — the fresh deliverable is byte-identical to the committed
+> fixture — and both blocking gates FAILED with `invalidate_round`,
+> metrics equal to independently recomputed artifact statistics, zero
+> TIDMAD in the effective artifact. DAVIS: the fresh npz is byte-identical
+> to the preserved artifact; the FULL 5,160,960-sample float32 view
+> reproduces the frozen dispersion `0.2156402715035823` bit-equal and
+> PASSES at the 0.04 floor. Combined ≈45 s. Gate 1 NOT REQUIRED (no
+> prompt/PB delta). NO new TIDMAD Gate: the four deterministic parity
+> owners (27-case verdict manifest, composed state-A executed-semantics
+> golden, value-scale injection, state-A roster/order) ran byte-identical
+> at every semantic commit. Evidence:
+> `/home/klz/Data/SIDEREIS_DATA/step08c_{pets,davis}_gate2_20260818/`.
+>
+> **§14 A–H: ALL CLOSED** — the per-item evidence mapping is the child
+> §10.8 (A re-verified by per-commit parity; B/C by the real Gates + the
+> committed fixture; D by the census; E by the verdict-boundary owners;
+> F by the per-commit ownership record; G by the still-green 08b
+> out-of-tree proof; H by the zero-infrastructure-edit pack integrations
+> plus the census's one quarantined legacy constant).
+>
+> **Deviations (all bounded, recorded in the child ledger):** AST
+> code-level censuses instead of raw grep (prose collisions);
+> underscore-prefixed pack health plugins (both directory scanners follow
+> the `_` convention — the ML loader EXECUTES every non-underscore `.py`
+> it scans); the §3.2a ERROR half shared in `_categorical_validity`
+> beside the FAILED half; `compose_gate`'s 4th parameter renamed
+> `injected_parameters`; the census collector excludes bare-string
+> attribute docstrings and pydantic `description=` strings as
+> documentation.
+>
+> **Debt carried forward to Step 9/10 (operator-directed at review):**
+> `execute_tools/health_checks/evaluation.py` — the pre-08a campaign
+> persistence adapter — still hardcodes per-check-NAME threshold/metric
+> tables (`_threshold`, `_per_file_metrics`) for the six TIDMAD checks.
+> It did not block Step-08 extensibility (the proven generic path never
+> touches it), and it is census-EXCLUDED by listed name; the Step-9/10
+> design must caller-census it and make the persisted threshold/metric
+> semantics declaration-driven instead of a central name table. See §15.
+>
+> **NEXT = Step 09**, to be re-confirmed from the merged roadmap in a
+> FRESH session — never from the conversation that produced 08c.
 
 * **Goal**: Pets and DAVIS bind real health families; the generic
   categorical/continuous collapse checks exist with hand-computed
@@ -872,6 +946,11 @@ entirely through configuration + run-scoped plugin loading + declaration
 
 ## 14. Step-08 completion criteria
 
+> **STEP 08 COMPLETE — 2026-08-19.** A–H all closed at 08c (PR #237,
+> squash `3f4effb5`); the per-item evidence mapping lives in the 08c
+> child ledger §10.8. Milestone lineage: 08a PR #235 (`7da1e45e`) ·
+> 08b PR #236 (`13e28796`) · 08c PR #237 (`3f4effb5`).
+
 A. TIDMAD: six verdicts byte-identical on goldens; gate IDs/records/firing
    point/severity/mode unchanged; production Gate-2 evidence at 08a and
    08b heads. B. Pets: the real D14 collapse artifact evaluates to a
@@ -910,6 +989,20 @@ A. TIDMAD: six verdicts byte-identical on goldens; gate IDs/records/firing
 * **R4 — #233**: stacked children get no automatic CI; the D14 closeout
   pattern (one canonical formal-PR run at the integrated head) is the
   plan of record unless #233 is fixed first.
+* **R5 — `evaluation.py` per-check-name tables (08c C6 finding; owner:
+  Step 9/10, operator-directed at the 08c review)**: the pre-08a campaign
+  persistence adapter `execute_tools/health_checks/evaluation.py`
+  hardcodes `_threshold` / `_per_file_metrics` dispatch on the six TIDMAD
+  check NAMES — task-family knowledge in a generically-named module,
+  predating declarations. It does not block Step-08 extensibility (the
+  proven generic path — external config → provider → generic check →
+  state-C composition → `evaluate_gate` → persisted evidence — never
+  touches it) and is census-EXCLUDED by listed name
+  (`tests/unit/guardrails/test_health_core_census.py`). The Step-9/10
+  design must first caller-census it, then move per-check
+  threshold/persisted-metric semantics into declaration/check-result
+  metadata consumed by a generic persistence adapter — never grow the
+  central name table.
 * **Operator decisions (ruling of 2026-08-18) — all three RESOLVED**:
   * **Q1 — three-PR split: ACCEPTED** (with 08b's responsibility widened
     to extension-architecture owner, §11/§12).
