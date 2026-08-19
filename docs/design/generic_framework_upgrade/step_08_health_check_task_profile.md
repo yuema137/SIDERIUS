@@ -704,6 +704,14 @@ must start from them, not from the pre-implementation assumptions):
    change, not a contract change.
 
 ### 08b — extension architecture: task-owned config + plugin binding + first family + D18
+
+> **Child design status: FROZEN — rev 3, operator ruling 2026-08-19.**
+> `step_08_health_check_task_profile/pr_08b_extension_architecture.md`,
+> frozen at `8440a7a6` (`8440a7a67101be31e1218a06416dec470824f22d`). Source audit anchored at master
+> `a226495b` (merged 08a squash `7da1e45e`). All four Q-08b questions
+> resolved; zero `SOURCE-INSPECTION REQUIRED` markers; every implementation
+> checkbox unchecked. **Implementation NOT started.** This is a child-design
+> status entry only — the parent architecture above is unchanged.
 * **Goal**: the task owns roster/thresholds/dispositions and names its
   plugin code; the framework config slims to policy only and never learns
   a task identity; external plugin modules load at run scope and register
