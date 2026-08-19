@@ -2,9 +2,24 @@
 
 ## 0. Status and provenance
 
-**DRAFT rev 3 — READY FOR FINAL OPERATOR FREEZE (2026-08-18).** Rev 3
-applies the operator review ruling of 2026-08-18 ("APPROVED IN CORE
-DIRECTION, BUT NOT YET FROZEN"): semantic separation and task-name
+**FROZEN — rev 3 APPROVED AND FROZEN by operator ruling, 2026-08-18.**
+The freeze ruling also: ratifies the Steps 01–07 audit triage (A-class =
+NONE; do not reopen 01–07; B-class owned by Step 10/12); fixes the
+three-PR decomposition as final (08a → 08b → 08c, 08b = extension
+architecture); enshrines the forward external-extensibility invariant
+and the Step-12 out-of-tree task-package acceptance criterion in the
+roadmap (§22.24); files issue #234 (model-plugin output-type
+fail-closed/vocabulary consistency — NOT Step-08 scope; must be resolved
+before Step-10/12 external composition is accepted); and freezes the
+task-plugin-semantics vs execution-backend distinction (§6a.1). CLAIM
+BOUNDARY (ruling §8): after Step 08 the HEALTH SUBSYSTEM is out-of-tree
+extensible; a full external-task one-command workflow is NOT claimable
+until Step 10/12 composition and is proved only by the Step-12
+acceptance test. Implementation begins only after the 08a child design
+is frozen under the normal child-design process.
+
+Rev 3 applied the operator review ruling of 2026-08-18 ("APPROVED IN
+CORE DIRECTION, BUT NOT YET FROZEN"): semantic separation and task-name
 genericity passed review; the five extensibility gaps that blocked freeze
 are closed in this revision — the out-of-tree extension contract (§6a),
 the source-audited plugin-loading path (§2.6), the open view-capability
@@ -359,6 +374,16 @@ means for a task arrives as task config + task plugin code. Step 08 ships
 the Python-plugin form only (that is what the existing idiom supports);
 other execution backends are adapters behind the SAME `HealthCheckSkill`
 semantic contract when a real need arrives — never a second semantics.
+
+Frozen distinction (ruling §4, 2026-08-18; roadmap §22.24.2):
+**task-specific plugin semantics** (a new check, view capability,
+threshold family) must be externally extensible with zero generic-core
+edits, while **plugin execution backends** (Python · executable/script ·
+skill/agent · container · MCP) are FRAMEWORK capabilities — a genuinely
+new backend may legitimately require a framework capability change, is
+added only when a real use case requires it, and always normalizes into
+the same semantic contract. A new TASK plugin never requires a core
+edit; backends are never multiplied speculatively.
 
 ### 6a.2 The two levels (both must hold at Step-08 completion)
 

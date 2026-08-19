@@ -2,7 +2,19 @@
 
 ## 0. Status and mandate
 
-**READY FOR OPERATOR TRIAGE (2026-08-18).** Commissioned by the operator
+**TRIAGE ACCEPTED — operator ruling 2026-08-18.** The ruling ratifies:
+A-class forward blockers = NONE; Steps 01–07 are NOT reopened; Steps
+08–12 continue under the forward invariant (now roadmap §22.24); the
+B-class items in §7.2 are owned by Step 10/12 composition and re-audited
+at Step 12 (§22.24.3); the Step-06 metric disposition is ratified as-is
+(semantic layer stands; Step 10/12 supplies declaration + `plugin_ref` +
+run-scoped resolution + backend adapter; NO interim metric name branches
+or central metric catalog in the meantime); §3.5 findings 1–2 are filed
+as **issue #234** (blocks Step 08: NO; blocks Step-09 planning: NO; must
+be resolved before Step-10/12 external composition acceptance: YES);
+finding 3 stays C-class untracked.
+
+Commissioned by the operator
 directive of 2026-08-18, in parallel with the Step-08 parent-design
 amendments (rev 3 of `step_08_health_check_task_profile.md`). This is a
 READ-ONLY architectural audit of the MERGED Step 01–07 surfaces against
