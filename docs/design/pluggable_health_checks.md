@@ -730,22 +730,94 @@ interprets a view key. The real generic continuous family is 08c.
 
 ---
 
+## 9a. Standard view capabilities & the generic collapse family (Step 08c)
+
+Two FRAMEWORK-STANDARD view capabilities ship in
+`execute_tools/health_checks/standard_views.py` (exported from the
+package root — the surface pack plugins import):
+
+| key | payload | ABI |
+|---|---|---|
+| `categorical_predictions` | `CategoricalPredictionsPayload.symbols` | 1-D `np.ndarray`, integer dtype kind `{"i","u"}` |
+| `continuous_samples` | `ContinuousSamplesPayload.samples` | 1-D `np.ndarray`, floating dtype kind `"f"` (NATIVE dtype preserved — float64 enters only inside a check's estimator) |
+
+Payload construction is strict (no coercion; bool/str/object/sequence and
+non-1-D inputs rejected naming the offender) and stores a READ-ONLY
+no-copy view (`np.shares_memory` with the provider's array; the
+provider's array keeps its own contents and writeability). Payloads are
+runtime-only (never persisted) and ENGINE-OPAQUE: no engine module
+references the keys or types — the contract binds provider↔check only,
+and a plugin-local key remains exactly as legitimate as a standard one.
+
+Three generic checks consume them (framework-shipped built-ins,
+configured by NO shipped YAML — consuming tasks bind them in their own
+task health configs):
+
+- `categorical_distinct_symbols` — threshold `min_distinct_symbols`;
+  records `distinct_symbols` and `occupancy = distinct /
+  symbol_cardinality`.
+- `categorical_dominant_fraction` — threshold `max_dominant_fraction`;
+  records the dominant symbol and its fraction (a NEAR-constant
+  deliverable fails, not only an exactly-constant one).
+- `sample_dispersion_floor` — threshold `min_dispersion` (population
+  std, `np.std(samples, dtype=np.float64, ddof=0)`), upgraded in place
+  from its 08a config-borne fixture form to real view consumption; it
+  declares NO facts (§2.11 biconditional — binding the capability IS the
+  applicability statement).
+
+The categorical checks declare `FactRequirement(axis="symbol_cardinality")`
+and receive the alphabet size by COMPOSITION INJECTION from
+`TaskHealthFacts.symbol_cardinality` — the one authority. Injection is
+declaration-driven and bounded by the frozen table in `_composition.py`
+(`INJECTABLE_AXIS_PARAMETERS`: `value_scale_unit` → factor+unit,
+`symbol_cardinality` → `symbol_cardinality`); a roster hand-authoring any
+injected key is a deterministic `HealthCompositionError`.
+
+Verdict boundary (frozen, §3.2a of the 08c child design): an unreadable /
+unmaterializable artifact or an EMPTY stream is `ERROR`; a READ stream
+with out-of-range symbols or non-finite continuous values is `FAILED`.
+The categorical family draws both lines through ONE shared mechanism
+(`_categorical_validity.py`).
+
+Reference bindings: `examples/oxford_iiit_pet/declared/task_health.yaml`
+(cardinality 37; floors 5 / 0.95 — the committed real D14 collapse
+fixture FAILS both) and
+`examples/davis_future_prediction/declared/task_health.yaml`
+(`min_dispersion 0.04` over the FULL decoded npz view). Both bind state C
+through the external interface; the D14 Gate-2 runners evaluate them on
+each run's fresh deliverable via the ONE shared
+`scripts/_gate2_health_stage.py` (additive `health:` block in
+`gate_evidence.json`; every selected gate persisted).
+
 ## 10. Adding a New Health Check
 
-1. Create `execute_tools/health_checks/checks/my_check.py`
+**Built-in (framework-shipped)** — a check generic enough to ship with
+SIDERIUS:
+
+1. Create `execute_tools/health_checks/my_check.py`.
 2. Implement the `HealthCheckSkill` protocol: a `name: ClassVar[str]`
    attribute, a `declaration: ClassVar[CheckInputDeclaration]` stating
-   what the check consumes (Step 08a, §6a), and a `run(ctx, config)`
-   method returning `HealthCheckResult`. State the `verdict=` explicitly
-   rather than relying on the legacy derivation.
-3. Call `register(MyCheck())` at module scope.
-4. Import the module in `execute_tools/health_checks/checks/__init__.py`
-   so registration fires at package import.
-5. Add a gate entry (or extend an existing one) in
-   `configs/health_checks.yaml` that references your check name and
-   supplies its config.
+   what the check consumes (Step 08a, §6a — declare ONLY what the
+   arithmetic reads), and a
+   `run(ctx, config=None, *, view=None) -> HealthCheckResult`. State the
+   `verdict=` explicitly.
+3. Add it to `_bootstrap_registry` in
+   `execute_tools/health_checks/__init__.py` (the built-ins' convenience
+   bootstrap) and to the hardcoded `BUILTIN_CHECK_NAMES` census.
 
-No pipeline code changes required.
+**External (task-owned)** — the extension path (Step 08b), requiring ZERO
+central registry/import/YAML edits:
+
+1. Put the check (and any view provider) in a plugin `.py` your task
+   health config names under `plugins:`; the module calls the public
+   `register(...)` / `register_view_provider(...)` at import.
+2. Reference the check from your task config's `roster:` with its
+   disposition and task-owned thresholds.
+
+Task rosters live in TASK health configs (state C path, or
+`configs/task_health/tidmad.yaml` for the legacy default) —
+`configs/health_checks.yaml` carries framework POLICY only and never
+gains a check reference.
 
 ### Future check candidates
 
@@ -862,6 +934,16 @@ compatibly against the pre-rev-6 API.
 
 ## 13. Change log
 
+- **Step 08c (2026-08-19)** — standard view capabilities
+  (`categorical_predictions` / `continuous_samples`, NumPy payload ABI),
+  the generic collapse family (`categorical_distinct_symbols`,
+  `categorical_dominant_fraction`, `sample_dispersion_floor` upgraded to
+  view consumption), declaration-driven `symbol_cardinality` injection
+  with authored-collision refusal, the Pets/DAVIS task-owned families
+  bound state C through their reference packs, and the shared D14-runner
+  Health evidence stage. §9a and §10 updated; bootstrap grew to nine
+  built-ins. Design: `docs/design/generic_framework_upgrade/
+  step_08_health_check_task_profile/pr_08c_contrast_families.md`.
 - **rev 6 (2026-07-08)** — Five follow-on corrections to the rev-5
   design. The rev-5 helper signature and the `RECORD_SCORE` action
   turned out to be wrong on further review:

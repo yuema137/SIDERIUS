@@ -47,6 +47,8 @@ from execute_tools.health_checks._task_health_config import TaskHealthConfig
 
 BUILTIN_CHECK_NAMES = (
     "amplitude_collapse",
+    "categorical_distinct_symbols",
+    "categorical_dominant_fraction",
     "output_diversity",
     "output_std",
     "pearson_dispersion",
@@ -54,10 +56,12 @@ BUILTIN_CHECK_NAMES = (
     "sample_dispersion_floor",
     "spectral_peak_ratio",
 )
-"""The seven checks ``__init__._bootstrap_registry`` registers, hardcoded.
+"""The nine checks ``__init__._bootstrap_registry`` registers, hardcoded.
 
-Read back from ``all_registered()`` this would compare the registry to
-itself and pass for any bootstrap, including an empty one."""
+Seven from 08a/08b plus the two Step-08c generic categorical checks —
+framework-shipped built-ins, configured by no shipped YAML. Read back from
+``all_registered()`` this would compare the registry to itself and pass
+for any bootstrap, including an empty one."""
 
 
 @pytest.fixture(autouse=True)

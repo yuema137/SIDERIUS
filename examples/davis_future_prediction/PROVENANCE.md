@@ -100,3 +100,22 @@ sha256sum /tmp/davis/db_info.yaml   # must equal the SHA-256 above
 .venv/bin/python -m tools.example_packs.davis_future_prediction --db-info /tmp/davis/db_info.yaml
 # alternatively: --lists train.txt val.txt (official one-name-per-line files)
 ```
+
+## Health threshold provenance (Step 08c C4)
+
+`declared/task_health.yaml` freezes `min_dispersion = 0.04` against the
+ONE preserved healthy real artifact (NOT in the repo — 17.9 MB,
+machine-local beside the D14 corpus):
+
+- `/home/klz/Data/SIDEREIS_DATA/d14_davis_gate2_20260818c/predictions_davis_reference_predictor_d14d_davis_gate2_001.npz`
+- sha256 `ee52a7109798a1c4c608e7824e623604e2986dab8d499b75a4794d443e0fa010`
+- 15 float32 clips `[3,4,128,224]`, n = 5,160,960 samples, all finite
+- population dispersion (full decoded view, `np.std(..., dtype=np.float64,
+  ddof=0)`) = `0.2156402715035823` — measured ONCE at design freeze and
+  reproduced bit-equal by the skip-guarded test in
+  `tests/unit/examples/test_davis_health_family.py`.
+
+Honest caveat: exactly one healthy real artifact exists, so 0.04 is a
+safety floor against near-constancy in the deliverable's native units,
+not a calibrated healthy-population statistic. No sweep or re-measurement
+is performed.

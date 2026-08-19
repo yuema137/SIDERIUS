@@ -1,0 +1,60 @@
+# Oxford-IIIT Pet — task-owned Health family (Step 08c C3).
+#
+# Binds through the EXTERNAL interface (explicit state-C task-health-config
+# path + config-named pack plugin) — exactly the route an out-of-tree task
+# takes. No SIDERIUS source names this file; the D14 Gate-2 runner passes
+# its path as data.
+#
+# Threshold provenance (Step 08c child design §2.5/§3.4 — FROZEN, safety
+# floors chosen against the preserved REAL D14 collapse, not tuned
+# results). The committed fixture-of-record
+# (../expected/d14_gate2_collapse_predictions.csv, sha256 cc847026…f752c)
+# measures:
+#
+#     n predictions      = 370
+#     distinct classes   = 2 of 37   (occupancy 2/37 = 0.0540540…)
+#     dominant fraction  = 369/370   = 0.9972972972972973  (class 5)
+#
+# min_distinct_symbols = 5 FAILS that collapse (2 < 5) and passes any
+# healthy 37-class spread; max_dominant_fraction = 0.95 FAILS it
+# (0.99729… > 0.95) — a NEAR-constant deliverable must fail, which is why
+# the family thresholds on a fraction rather than testing distinct == 1.
+
+facts:
+  # Opaque family value — the framework ships no closed list. Its job is
+  # to make the int8-specific TIDMAD checks honestly INAPPLICABLE here.
+  encoding_family: categorical_labels
+  # The 37 Oxford-IIIT Pet breeds. The ONE cardinality authority (§3.3):
+  # composition injects it into the checks that declare the axis; it is a
+  # FACT, never a threshold, and never hand-authored in parameters.
+  symbol_cardinality: 37
+
+plugins:
+  # Underscore-prefixed so neither generic directory scanner (the ML
+  # plugin loader, ml_models/plugin_loader.py; the Health directory-kind
+  # loader) ever execs it as a scanned member — this explicit file ref is
+  # its only loading path.
+  - kind: file
+    ref: ../plugins/_pets_health_views.py
+
+providers:
+  - provider_id: pets.prediction_views
+
+roster:
+  - gate_id: pets_distinct_symbols_blocking
+    check: categorical_distinct_symbols
+    disposition: blocking
+    parameters:
+      min_distinct_symbols: 5
+    reason: >-
+      A 37-breed classifier predicting fewer than 5 distinct breeds has
+      stopped using its alphabet — the preserved D14 collapse used 2.
+
+  - gate_id: pets_dominant_fraction_blocking
+    check: categorical_dominant_fraction
+    disposition: blocking
+    parameters:
+      max_dominant_fraction: 0.95
+    reason: >-
+      One breed above 95% of predictions is a constant or near-constant
+      deliverable — the preserved D14 collapse sat at 369/370.

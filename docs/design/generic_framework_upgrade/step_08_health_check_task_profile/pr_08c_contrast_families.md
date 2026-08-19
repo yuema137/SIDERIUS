@@ -642,40 +642,65 @@ anti-vacuity defences, INVERTED in C2). Must not change: any check,
 any YAML, the engine's opacity. Depends on: nothing.
 
 **Implementation plan.**
-- [ ] Re-read `_view_provider.py` (`arbitrary_types_allowed` at `:56`) and
-      the 08b acme fixture's import surface at the head.
-- [ ] Define the two key constants with the parent §6.3 spellings, declared
-      exactly once.
-- [ ] Define the payload models per §3.1: 1-D `np.ndarray`; dtype-kind
-      checks (categorical `{"i","u"}`, continuous `"f"`); reject bool /
-      string / object dtypes and non-array inputs with the offender named;
-      store a read-only no-copy VIEW (`writeable=False`).
-- [ ] Export via `__init__.py`; add the inertness grep-guard (root
-      assertion, exit-code assertion, positive probe, `--untracked`).
+- [x] Re-read `_view_provider.py` (`arbitrary_types_allowed` at `:56`
+      confirmed) and the 08b acme fixture's import surface
+      (`test_out_of_tree_extension.py:361-378`: plugins import ONLY
+      `execute_tools.health_checks` / `.schemas` — so C1 exports through the
+      package root).
+- [x] Two key constants in `standard_views.py`, parent §6.3 spellings,
+      declared exactly once (census-enforced).
+- [x] Payload models per §3.1: `_validated_readonly_stream` does
+      isinstance/ndim/dtype-kind checks naming the offender, returns
+      `value.view()` with `writeable=False`; frozen pydantic models with
+      `arbitrary_types_allowed` (the `HealthView` precedent); before-mode
+      validators.
+- [x] Exported via `__init__.py` (4 names); guard module
+      `tests/unit/execute_tools/health_checks/test_standard_views.py` —
+      root assertion, rc∈{0,1} assertion, positive probes, `--untracked`.
 
 **Validation plan.**
-- [ ] Unit: valid construction (int8/int64 symbols; float32/float64
-      samples); rejection of each wrong class — bool array, string array,
-      object array, int array as continuous, 2-D array, Python list/tuple.
-- [ ] Unit: read-only + no-copy semantics — in-place mutation through the
-      stored view raises; `np.shares_memory(stored_view, provider_array)`
-      is True (no copy — deliberately NOT `.base` identity); construction
-      leaves the provider array's writeability state and contents unchanged,
-      tested for BOTH a writable input (stays writable) and a read-only
-      input (stays read-only).
-- [ ] Unit: the key strings equal the parent §6.3 spellings, hardcoded.
-- [ ] Census: no engine module references the keys or payload types.
-- [ ] Backward-compat: health package green; 27-case manifest
-      byte-identical; inertness guard green and mutation-proven.
+- [x] Unit: valid construction (int8/int64/uint8/uint32 symbols;
+      float32/float64 samples, native dtype preserved); rejection of every
+      wrong class — bool, string, object, float-as-categorical,
+      int-as-continuous, 2-D, list, tuple — each naming the offender;
+      empty arrays and non-finite floats ACCEPTED (check-level per §3.2a).
+- [x] Unit: read-only + no-copy — mutation through the stored view raises
+      `ValueError: read-only`; `np.shares_memory` True (NOT `.base`);
+      writable input stays writable; read-only input stays read-only and is
+      accepted; contents unchanged.
+- [x] Unit: key strings hardcoded; package-root export identity asserted.
+- [x] Census: engine modules (`runner.py`, `_view_provider.py`,
+      `_plugin_binding.py`, `_composition.py`) have zero CODE references.
+- [x] Backward-compat: health package 626 passed (`/tmp/08c_c1.log`,
+      rc=0); goldens 0 bytes changed (`git status` clean on `goldens/`);
+      inertness guard mutation-proven (below).
 
 **Acceptance criteria.**
-- [ ] The two capability-key strings exist in exactly ONE production module
-      (grep census counts definitions).
-- [ ] Every §3.1 ABI bullet has a failing test: wrong dtype-kind rejected
+- [x] The two capability-key strings exist in exactly ONE production module
+      (`test_key_string_is_defined_in_exactly_one_production_module`).
+- [x] Every §3.1 ABI bullet has a failing test: wrong dtype-kind rejected
       with the dtype named; non-1-D rejected; mutation raises; no copy via
       `shares_memory`; provider writeability preserved in both directions.
-- [ ] Engine opacity census green; inertness guard green and
+- [x] Engine opacity census green; inertness guard green and
       mutation-proven; manifest byte-identical.
+
+**C1 deviation (bounded, recorded).** The §3.1/§4.1 census is implemented
+CODE-level (AST: identifiers, imports, class/function definitions,
+non-docstring string literals; git-grep `--untracked` as substring
+prefilter) rather than raw-text grep. Reason, from source at the head:
+`_view_provider.py:33` (08b, must-not-change in C1) names both standard
+keys in PROSE while remaining perfectly opaque to them, and
+`sample_dispersion_floor.py`'s plugin-local key
+`step08.fixture_continuous_samples` contains `continuous_samples` as a
+substring. A raw-text census would cry wolf on both; the code-level census
+tests the actual §3.1 claim (no import/branch/literal). Keys are matched
+EXACTLY (keys are exact strings); the module name `standard_views` as a
+substring (dotted import paths). Non-`.py` production files (YAML etc.)
+count on the raw hit. Mutation evidence: an untracked
+`execute_tools/_c1_mutation_probe.py` (import + key literal) turned 3
+census tests RED, and an untracked `configs/_c1_mutation_probe.yaml`
+(`capability: continuous_samples`) turned the non-Python census RED;
+removed → 46/46 green.
 
 **Failure and edge cases.** Empty arrays are ACCEPTED by the payload
 (emptiness is check-level ERROR per §3.2a — a provider must be able to say
@@ -684,10 +709,14 @@ ACCEPTED by the payload and condemned by the check (§3.2a). NaN cannot hide
 in an integer categorical payload by construction.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08c_c1.log 2>&1`
-      Evidence: _(pending)_
-- [ ] `ruff check` + `ruff format --check`. Evidence: _(pending)_
-- [ ] `pyright` — CI-owned; recorded, never claimed locally.
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08c_c1.log 2>&1`
+      Evidence: **626 passed in 2.55s, rc=0** (46 new + 580 existing; the
+      27-case verdict manifest, composed state-A goldens and value-scale
+      owners all inside this run; goldens byte-identical on disk).
+- [x] `ruff check` + `ruff format --check`. Evidence: **All checks passed /
+      3 files already formatted** (after fixing 2 RUF043 in the new test
+      module — escaped regex dots in `pytest.raises(match=)`).
+- [x] `pyright` — CI-owned; recorded, never claimed locally.
 
 **Commit boundary.** Vocabulary + tests only; no consumer; no check
 changes; independently reviewable as "is this the right standard-view ABI?".
@@ -715,72 +744,115 @@ change: the six TIDMAD checks, `runner.py` semantics, any threshold value,
 any YAML. Depends on C1 (inertness guard INVERTED here).
 
 **Implementation plan.**
-- [ ] Re-read `sample_dispersion_floor.py`, `test_step08_44_rungs.py` and
-      `_composition.py:186-292` at the head; record the exact rung-test
-      surfaces the upgrade touches and the injection/refusal insertion
-      points.
-- [ ] Implement the two categorical checks per §3.2 (declarations exact:
-      `consumes_view=CATEGORICAL_PREDICTIONS`, `requires_view=True`,
-      `FactRequirement(axis="symbol_cardinality")`,
-      `threshold_parameter_names` = exactly the one boundary key each);
-      NumPy arithmetic over the read-only view (`np.unique` /
-      `np.bincount`-class reductions — no mutation).
-- [ ] Implement the shared categorical validity helper (§3.2a: out-of-range
-      symbol → FAILED naming the symbol and the range) consumed by BOTH
-      categorical checks.
-- [ ] Upgrade `sample_dispersion_floor`: view consumption; keep name,
-      threshold name, ERROR-on-empty and the hand-computed arithmetic; the
-      estimator becomes `np.std(samples, dtype=np.float64, ddof=0)` (§3.5a
-      — float64 accumulation, the NumPy equivalent of the existing
-      `math.fsum` form); drop the facts requirement; add the non-finite →
-      FAILED guard.
-- [ ] Implement the frozen injectable-axes table + authored-collision
-      refusal in `_composition`; value-scale behaviour otherwise provably
-      unchanged.
-- [ ] Register the two new checks in the bootstrap; update
-      `BUILTIN_CHECK_NAMES` to 9 (§5).
+- [x] Re-read at the head: `sample_dispersion_floor.py` (full),
+      `test_step08_44_rungs.py` (full), `_composition.py` (full),
+      `schemas.py:720-1049`, `runner.py:130-240`,
+      `_plugin_binding.py:466-602`, `_task_health_config.py:95-169`,
+      `test_view_provider.py` idiom, `test_check_declarations.py`
+      biconditionals, `test_per_sample_evidence.py` censuses. Insertion
+      point confirmed: `compose_gate`'s update order (silent-overwrite
+      hazard) + `value_scale_parameters_for` (the declaration-driven
+      precedent).
+- [x] Two categorical checks (`categorical_distinct_symbols.py`,
+      `categorical_dominant_fraction.py`): declarations exactly as frozen;
+      `np.unique`(+`return_counts`) over the read-only view; occupancy =
+      distinct/cardinality recorded (the injected fact provably in the
+      arithmetic); dominant records the dominant symbol and fraction.
+- [x] Shared family module `_categorical_validity.py`: `validate_symbols`
+      (out-of-range → FAILED half, deterministic report naming first
+      offender + range) AND `resolve_categorical_inputs` (the ERROR half:
+      absent view / foreign payload / missing injected cardinality / empty
+      stream) — one §3.2a mechanism, both checks consume it.
+- [x] `sample_dispersion_floor` upgraded in place: `CONTINUOUS_SAMPLES`
+      view, `requires_view=True`, `required_facts=()` (§2.11), config-borne
+      `samples` RETIRED, `np.std(samples, dtype=np.float64, ddof=0)` +
+      float64 mean, non-finite → FAILED naming index/value, metric keys
+      unchanged (dispersion/mean/min_dispersion/n_samples), default floor
+      0.5 kept.
+- [x] `_composition.py`: `SYMBOL_CARDINALITY_PARAMETER`, frozen
+      `INJECTABLE_AXIS_PARAMETERS` table (+ derived
+      `INJECTED_PARAMETER_KEYS`), `symbol_cardinality_parameters_for` +
+      `injected_parameters_for` (union of table injectors),
+      authored-collision refusal in `compose_gate` (deterministic
+      `HealthCompositionError` naming the keys, before config assembly);
+      `value_scale_parameters_for` semantics byte-preserved (shared
+      `_declared_axes` extracted); `compose_gate` 4th param renamed
+      `injected_parameters` (all callers positional — verified).
+- [x] Bootstrap 7→9 (`__init__.py` registers both, with the §4.6
+      built-in-vs-external comment); `BUILTIN_CHECK_NAMES` hardcoded to 9.
 
 **Validation plan.**
-- [ ] Unit, hand-computed anchors (expectations hardcoded): the four §2.5
-      values — distinct=2 → FAILED at floor 5; occupancy = 2/37 =
-      0.05405405405405406 recorded as a metric; dominant 369/370 =
-      0.9972973 → FAILED at ceiling 0.95; a healthy spread PASSES both;
-      dispersion √5 series kept verbatim from the existing suite.
-- [ ] §3.2a boundary: empty view → ERROR; out-of-range symbol → FAILED
-      (via the shared helper — mutation-prove the helper is load-bearing
-      for BOTH checks); NaN sample → FAILED naming it; provider raise →
-      ERROR (existing 08b guard, re-asserted).
-- [ ] Injection (amendment 4's four required tests): positive injection;
-      no-declaration ⇒ no injection; authored-collision ⇒ deterministic
-      refusal naming the key (for `symbol_cardinality` AND a value-scale
-      key); value-scale behaviour unchanged (its tests + manifest).
-- [ ] Ordering/transport: a task declaring no cardinality → categorical
-      checks INAPPLICABLE (axis named) with ZERO materialize calls (the
-      08b spy shape); a view-consuming check receives the keyword-only
-      `view`.
-- [ ] Backward-compat/default-parity: §3.6's four deterministic owners
-      byte-identical; `test_check_declarations` biconditionals green over
-      the grown registry (new checks declare NO value-scale axis, NO
-      `per_sample_evidence`; the upgraded dispersion check declares NO
-      facts); new checks configured in NO shipped config (extend the
-      `:150` pattern); TIDMAD's shipped task config authors NO injected
-      key (the §3.3 census).
+- [x] Unit, hand-computed anchors (hardcoded in
+      `test_generic_collapse_checks.py`): all four §2.5 values (n=370,
+      distinct=2 FAILED at 5, occupancy 0.05405405405405406, dominant
+      0.9972972972972973 FAILED at 0.95, dominant symbol 5); healthy
+      37-cycle spread PASSES both (dominant exactly 10/370); inclusive
+      boundaries load-bearing both directions; dispersion √5 series kept
+      verbatim (upgraded rung module, via views).
+- [x] §3.2a boundary: empty → ERROR (both categorical + dispersion);
+      out-of-range → FAILED naming offender+range, mutation-proven
+      load-bearing for BOTH checks (helper silenced per-module → ruling
+      disappears); NaN → FAILED naming index; absent view → ERROR;
+      foreign payload → ERROR naming type; missing injected cardinality →
+      ERROR; provider raise → ERROR through `evaluate_gate` (08b guard
+      re-asserted with a categorical provider).
+- [x] Injection: positive (composed config carries 37 for both gates);
+      no-declaration ⇒ nothing (dispersion check); no-cardinality task ⇒
+      nothing; authored-collision refusal for ALL THREE injected keys +
+      the agreeing-value case; frozen table hardcoded
+      (`INJECTABLE_AXIS_PARAMETERS` / `INJECTED_PARAMETER_KEYS`);
+      value-scale behaviour owned by the untouched existing tests + the
+      byte-identical composed goldens.
+- [x] Ordering/transport: no-cardinality task → INAPPLICABLE with
+      `inapplicable_axis == symbol_cardinality` and `provider.calls == []`
+      (spy); the composed→bound→evaluated chain delivers the keyword-only
+      view (occupancy in persisted metrics proves injection reached
+      `run`).
+- [x] Backward-compat/default-parity: health package 672 passed + goldens
+      0 changes on disk (`/tmp/08c_c2.log` final: 808 passed with
+      `tests/unit/guardrails/`, rc=0); declaration censuses green over the
+      grown registry (new checks: no value-scale axis, no
+      `per_sample_evidence`, `symbol_cardinality` in NO
+      `threshold_parameter_names`); `:150` pattern extended to all three
+      generic checks; TIDMAD task config authors NO injected key
+      (`test_tidmads_shipped_task_config_authors_no_injected_key`).
 
 **Acceptance criteria.**
-- [ ] Each check's declaration lists exactly its one threshold key;
-      `symbol_cardinality` appears in NO `threshold_parameter_names`.
-- [ ] The real-collapse anchors pass with all four §2.5 values hardcoded —
+- [x] Each check's declaration lists exactly its one threshold key;
+      `symbol_cardinality` appears in NO `threshold_parameter_names`
+      (asserted over the whole registry).
+- [x] The real-collapse anchors pass with all four §2.5 values hardcoded —
       occupancy included, proving the injected cardinality enters the
-      arithmetic.
-- [ ] `sample_dispersion_floor`'s config-borne `samples` path and its
-      `encoding_family` requirement are GONE (grep + declaration census);
-      the 8.4-C property survives through the view path (§5 disposition,
-      mutation-proven: reverting the upgrade fails the upgraded rung).
-- [ ] The authored-collision refusal is deterministic and named; the
-      silent-overwrite hazard at `_composition.py:226-230` is gone
-      (mutation: restoring silent overwrite turns the collision tests RED).
-- [ ] Registry census: bootstrap registers exactly 9; value-scale
-      biconditional set still exactly the four TIDMAD checks.
+      arithmetic (also end-to-end through the composed chain).
+- [x] Config-borne `samples` + `encoding_family` requirement GONE (grep:
+      only prose comments remain; declaration census `required_facts ==
+      ()`); 8.4-C survives through the view path — **mutation: reverting
+      `sample_dispersion_floor.py` to the pre-C2 committed form → 10 rung
+      tests RED including both decisive rungs; restored → green.**
+- [x] Collision refusal deterministic and named; silent overwrite gone —
+      **mutation: neutralizing the refusal intersection → all 4 collision
+      tests RED (3 keys + agreeing-value); restored → 9/9 green.**
+- [x] Registry census: bootstrap registers exactly 9 (hardcoded
+      `BUILTIN_CHECK_NAMES`); value-scale biconditional set still exactly
+      the four TIDMAD checks (existing biconditional + new-check
+      assertions).
+
+**C2 deviations (bounded, recorded).**
+1. The §3.2a ERROR half is shared family code too:
+   `resolve_categorical_inputs` lives beside `validate_symbols` in
+   `_categorical_validity.py` (the design named one shared helper for the
+   validity arithmetic; the ERROR guards are the other half of the same
+   boundary and putting them in one check would have forced a check→check
+   import).
+2. `test_view_provider.py::test_all_seven_builtins_declare_a_capability_
+   but_require_no_view` asserted `requires_view is False` for ALL
+   registered checks — an 08b-era premise C2 deliberately changes.
+   UPGRADED (not deleted) to a hardcoded partition: six TIDMAD checks
+   legacy-path, three generic checks view-requiring.
+3. `compose_gate`'s 4th parameter renamed `value_scale_parameters` →
+   `injected_parameters` (it now carries the table's union); all callers
+   audited positional-only, `value_scale_parameters_for` behaviour
+   preserved byte-for-byte.
 
 **Failure and edge cases.** A roster naming a categorical check while the
 task declares no cardinality: INAPPLICABLE, not an error (validly bound,
@@ -791,11 +863,13 @@ must not overflow or coerce (NumPy handles it; asserted with an int8
 fixture).
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ -q > /tmp/08c_c2.log 2>&1`
-      Evidence: _(pending)_
-- [ ] Manifest `--check` byte-identical; composed state-A golden
-      byte-identical. Evidence: _(pending)_
-- [ ] `ruff` clean; `pyright` CI-owned. Evidence: _(pending)_
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/guardrails/ -q > /tmp/08c_c2.log 2>&1`
+      Evidence: **808 passed, rc=0** (health package 672 incl. the 104
+      new/upgraded C2 tests + guardrails 136).
+- [x] Manifest + composed state-A goldens byte-identical: their owner
+      tests green inside the run AND `git status goldens/` = 0 changes.
+- [x] `ruff check` clean; `ruff format` applied (2 new test files
+      reformatted, then re-run green); `pyright` CI-owned.
 
 **Commit boundary.** Generic family + injection only; no pack content; no
 runner change; TIDMAD untouched.
@@ -818,51 +892,69 @@ change: any framework module, any shipped config, `pets_data_path.py`, the
 runners (C5's job). Depends on C1–C2.
 
 **Implementation plan.**
-- [ ] Re-read the pack-governance guards and `_task_health_config.py`
-      constraints at the head (confirm the `../plugins/…` relative ref
-      resolves from `declared/`, or place the config at the pack root —
-      a bounded layout decision); STOP only if the layout fights a
-      governance guard.
-- [ ] Author the family per §3.4 with the frozen thresholds and provenance
-      comments quoting §2.5.
-- [ ] Implement the provider: registers `pets.prediction_views` exposing
-      `CATEGORICAL_PREDICTIONS` from the CSV at `ctx.get_denoised_path(0)`
-      (header-checked projection; unreadable/bad header → raise → ERROR).
-- [ ] Commit the fixture-of-record byte-identical; pin sha
-      `cc8470267fbf…f752c` and size 6 812 in the test.
-- [ ] Codec-parity regression (§2.12): production-writer bytes (the
-      fixture) → `pets_data_path.read_evaluation_payload` AND → the
-      provider projection agree on the `{image_id: class}` content.
-- [ ] Evidence tests: full state-C chain on the fixture → BOTH gates
-      evaluated: `categorical_dominant_fraction` FAILED with
-      `dominant_fraction == 369/370`, `categorical_distinct_symbols`
-      FAILED with `distinct == 2` and `occupancy == 2/37`, actions
-      `invalidate_round`; counterfactual healthy CSV → both PASS.
-- [ ] TIDMAD's int8 checks under Pets' DECLARED facts → `inapplicable`
-      (the 8.4-B rung with a real task's declaration).
+- [x] Re-read governance guards + `_task_health_config.py` + the plugin
+      loaders at the head. Layout: relative ref `../plugins/…` from
+      `declared/` is legal (refs are config-relative, `HealthPluginRef`).
+      **Bounded deviation (loader-convention collision):** the plugin file
+      is `plugins/_pets_health_views.py` (underscore-prefixed), not
+      `pets_health_views.py` — BOTH generic directory scanners exec/skip
+      by the `_` convention (`ml_models/plugin_loader.py:136` EXECUTES
+      every non-underscore `.py` it scans, and
+      `tests/unit/examples/test_pets_reference_plugin.py` +
+      `SIDERIUS_PLUGIN_DIRS` scan the pack's whole `plugins/` dir, which
+      would exec the health plugin and leak its provider registration
+      into unrelated processes/tests; `_plugin_binding.py:261` skips `_`
+      members in directory-kind scans identically). The explicit
+      `kind: file` ref is underscore-exempt and is the plugin's ONLY
+      loading path.
+- [x] `declared/task_health.yaml`: facts `categorical_labels` +
+      `symbol_cardinality: 37`; both blocking gates with the FROZEN
+      thresholds; §2.5 provenance comments carried verbatim.
+- [x] Provider `pets.prediction_views` (in `_pets_health_views.py`):
+      header-checked pack-local projection `project_predictions` →
+      image-id-sorted int64 stream → `CategoricalPredictionsPayload`;
+      missing file / bad header raise → ERROR; imports ONLY the package
+      public surface (the acme shape).
+- [x] Fixture-of-record committed byte-identical from
+      `/home/klz/Data/SIDEREIS_DATA/d14_pets_gate2_20260818/`; sha256
+      `cc847026…f752c` + size 6 812 verified at copy time and pinned in
+      `TestFixtureOfRecord`. Real distribution confirmed from the bytes:
+      369× class 5, 1× class 33.
+- [x] Codec parity (§2.12): same bytes through
+      `PetsTaskDataPath.read_evaluation_payload` (production grammar name
+      in tmp) AND `project_predictions` → identical `{image_id: class}`
+      (370 entries); BOTH readers refuse the same bad header.
+- [x] Evidence tests: full state-C chain (shipped policy-only framework
+      config + pack binding) → both gates FAILED with all four §2.5
+      values + `invalidate_round`; healthy 37-class counterfactual →
+      both PASS.
+- [x] TIDMAD's six int8 checks inapplicable under the pack's RESOLVED
+      facts, each on `axis == encoding_family` (full context supplied so
+      the fact axis, not a context input, decides).
 
 **Validation plan.**
-- [ ] Unit as above; negative: broken CSV header → ERROR; missing
-      deliverable path → ERROR; fail-closed pair (plugin file removed →
-      `HealthPluginError`; roster naming an unregistered check →
-      `HealthBindingError`).
-- [ ] Census: `37` and every pack identifier appear in the PACK + its
-      tests only, never in generic health core.
-- [ ] Backward-compat: EXPLICIT_NONE and state-A regressions untouched;
-      §3.6 parity owners byte-identical; pack-governance suite green.
+- [x] Unit as above (15 tests, `test_pets_health_family.py`); negative:
+      bad header → ERROR through the gate (`view provider failed`);
+      missing deliverable → ERROR; fail-closed pair (plugin file absent →
+      `HealthPluginError`; roster naming `pets_nonexistent_check` →
+      `HealthBindingError`); relocated-pack composition still resolves
+      (path-independence).
+- [x] Census: AST id census over `execute_tools/health_checks/*.py` —
+      no `pets`/`oxford`/`categorical_labels`/gate-id identifier and NO
+      integer literal 37 in generic health core (anti-vacuity probe on a
+      known identifier).
+- [x] Backward-compat: examples 152 + health 672 = 824 passed rc=0
+      (`/tmp/08c_c3.log`); goldens 0 changes; pack-governance suite green
+      inside the run (the new YAML + underscore plugin pass the guards).
 
 **Acceptance criteria.**
-- [ ] The committed fixture's sha256 equals
-      `cc8470267fbf5331827c7b641ac2ce8efb834b07441a31836084d4d417ff752c`
-      (asserted, so the fixture-of-record cannot silently drift).
-- [ ] On that fixture, BOTH blocking gates FAIL with all four §2.5 evidence
-      values persisted — the parent §12 acceptance with the corrected
-      numbers.
-- [ ] The healthy counterfactual passes (without it, an always-failing
-      family satisfies the collapse test).
-- [ ] Codec parity holds for Pets (both readers agree on the fixture).
-- [ ] Every Pets identifier is absent from production source (id census,
-      C7-08b pattern).
+- [x] Committed fixture sha256 == `cc847026…f752c` and size 6 812,
+      asserted (`TestFixtureOfRecord`).
+- [x] BOTH blocking gates FAIL on the fixture with all four §2.5 values
+      persisted in check metrics; actions `invalidate_round`.
+- [x] Healthy counterfactual passes both gates.
+- [x] Codec parity holds (content equality + shared header refusal).
+- [x] Pets identifier census green over generic health core.
 
 **Failure and edge cases.** CSV with unknown image ids: irrelevant to
 health (the checks see symbols only) — recorded, not guarded. Symbols
@@ -871,8 +963,9 @@ pack threshold: caught by nothing here BY DESIGN (thresholds are
 task-owned); only the fixture EVIDENCE values are pinned.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/examples/ -q > /tmp/08c_c3.log 2>&1`
-      Evidence: _(pending)_
+- [x] `.venv/bin/python -m pytest tests/unit/examples/ tests/unit/execute_tools/health_checks/ -q > /tmp/08c_c3.log 2>&1`
+      Evidence: **824 passed, rc=0**; goldens 0 changes on disk; ruff
+      check clean + format applied; pyright CI-owned.
 
 **Commit boundary.** Pets content only; DAVIS is C4; runners untouched.
 
@@ -893,45 +986,59 @@ modules, shipped configs, `davis_data_path.py`, runners. Depends on C1–C2
 (not C3).
 
 **Implementation plan.**
-- [ ] Re-read `davis_data_path.py:310-340` at the head; record the npz
-      payload shape the provider projects.
-- [ ] Implement the provider: `davis.sample_views` exposing
-      `CONTINUOUS_SAMPLES` as the FULL decoded view — sorted clip keys →
-      `ravel()` → one concatenated 1-D array (the §2.9 semantics; **no
-      cap, no sampling** — amendment 7).
-- [ ] Author the family per §3.4 with the §2.9 provenance comment
-      (measurement, margin, single-artifact caveat).
-- [ ] Codec-parity regression (§2.12): a production-writer-produced npz
-      (synthetic, written through `davis_data_path.write_deliverable`) →
-      `read_evaluation_payload` AND → the provider projection agree on
-      clip-key set, shapes, dtype and values.
-- [ ] Evidence tests: synthetic near-constant npz → FAILED; synthetic
-      varied npz (hand-computed dispersion) → PASSED; skip-guarded test
-      over the preserved npz (sha `ee52a710…0a010`) → PASSED reproducing
-      dispersion `0.2156402715035823` exactly (skips with the declared
-      reason when the machine-local artifact is absent — never claimed as
-      run when skipped).
-- [ ] TIDMAD's int8 checks inapplicable under DAVIS' declared facts.
+- [x] Re-read `davis_data_path.py` writer/reader (`:310-339`), `clip_key`
+      (`{sequence}:{start}`), `deliverable_name` (`.npz` grammar) and the
+      request models at the head.
+- [x] Provider `davis.sample_views`
+      (`plugins/_davis_health_views.py`, underscore-prefixed — the C3
+      loader-convention deviation applies identically):
+      `project_full_sample_stream` = missing file → raise; sorted clip
+      keys → per-clip C-order `ravel()` → ONE `np.concatenate`, native
+      dtype preserved; unequal clip shapes → raise (structurally
+      inconsistent artifact); zero clips → EMPTY float32 stream (the
+      artifact WAS read; the CHECK rules emptiness). No cap, no
+      sampling.
+- [x] `declared/task_health.yaml`: facts `continuous_float`;
+      `davis_dispersion_blocking` with FROZEN `min_dispersion: 0.04`;
+      §2.9 provenance comment (measurement, ≈5.4× margin,
+      single-artifact caveat) verbatim.
+- [x] Codec parity (§2.12): three clips written through the PRODUCTION
+      `write_deliverable` → `read_evaluation_payload` (key set, shapes,
+      float32 dtype, values vs originals) AND → provider stream ==
+      concat(sorted ravel of the reader payload), dtype-equal.
+- [x] Evidence tests: constant npz → FAILED dispersion 0.0 exact; §2.9
+      near-collapse perturbation control → FAILED at ≈√7e-6; varied npz →
+      PASSED at hand-computed √5; skip-guarded real-npz tests (sha
+      verified; n = 5,160,960; dispersion == 0.2156402715035823 EXACT;
+      gate PASSED at 0.04 with the frozen value persisted) — **RAN on
+      this machine** (artifact present), skip path declared.
+- [x] TIDMAD's six int8 checks inapplicable under DAVIS' resolved facts,
+      each on `axis == encoding_family`.
 
 **Validation plan.**
-- [ ] Unit as above; negative: corrupt/missing npz → ERROR; NaN frames →
-      FAILED; unequal clip shapes → provider raises → ERROR; empty npz
-      (`{}` from the reader's missing-file contract) → ERROR; fail-closed
-      plugin/binding pair as C3.
-- [ ] Census: DAVIS identifiers absent from production source; no new
-      `FACT_AXES`; the generic dispersion check declares NO facts (§2.11).
-- [ ] Backward-compat: §3.6 parity owners byte-identical; C3's Pets
-      evidence untouched-green (families independent).
+- [x] Negative paths all through `evaluate_gate`: missing npz → ERROR
+      (`view provider failed`); corrupt bytes → ERROR; unequal shapes →
+      ERROR naming them; empty npz → ERROR at the check with
+      `n_samples == 0`; NaN frame → FAILED with
+      `non_finite_samples == 1`; fail-closed pair (missing plugin →
+      `HealthPluginError`; unregistered check → `HealthBindingError`).
+- [x] Census: DAVIS identifiers (`davis`, gate id, `sample_views`)
+      absent from generic health core (AST census); no new `FACT_AXES`
+      (nothing added); the dispersion check's empty facts declaration
+      owned by the C2 rung module.
+- [x] Backward-compat: examples 173 + health 672 = 845 passed rc=0
+      (`/tmp/08c_c4.log`); goldens 0 changes; C3 Pets evidence green in
+      the same run (families independent).
 
 **Acceptance criteria.**
-- [ ] Verdicts flow through the SAME engine path as Pets with zero
-      task-name knowledge (id census; no framework surface touched).
-- [ ] The synthetic pair is decisive (one FAILED, one PASSED, hand-computed
-      expectations hardcoded).
-- [ ] The skip-guarded real-npz test reproduces the §2.9 dispersion to the
-      recorded value on this machine and skips honestly elsewhere.
-- [ ] Codec parity holds for DAVIS (both readers agree on a
-      production-written npz).
+- [x] Verdicts flow through the SAME engine path as Pets with zero
+      task-name knowledge (id census; no framework surface touched — the
+      C4 diff contains no `execute_tools/health_checks/` change).
+- [x] The synthetic pair is decisive (FAILED 0.0 / PASSED √5, hardcoded).
+- [x] The skip-guarded real-npz test reproduces the §2.9 dispersion
+      EXACTLY on this machine (ran, not skipped) and skips honestly
+      elsewhere with the declared reason.
+- [x] Codec parity holds for DAVIS.
 
 **Failure and edge cases.** The payload carries the artifact's NATIVE
 float32; float64 enters only inside the check's estimator (§3.5a precision
@@ -939,8 +1046,11 @@ ownership) — no contract claims concatenation upcasts. A future clip-count
 change alters n but not the semantics — nothing pins 15.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/examples/ -q > /tmp/08c_c4.log 2>&1`
-      Evidence: _(pending)_
+- [x] `.venv/bin/python -m pytest tests/unit/examples/ tests/unit/execute_tools/health_checks/ -q > /tmp/08c_c4.log 2>&1`
+      Evidence: **845 passed, rc=0** (incl. the 21 new DAVIS tests with
+      the 3 real-npz tests EXECUTED — the preserved artifact is present
+      on this machine); goldens 0 changes; ruff clean + format applied;
+      pyright CI-owned.
 
 **Commit boundary.** DAVIS content only.
 
@@ -964,46 +1074,73 @@ stages or their existing evidence fields, any framework module, any pack
 family content. Depends on C3–C4.
 
 **Implementation plan.**
-- [ ] Re-read both runners end-to-end at the head; record the exact
-      insertion point after the metric stage and the existing evidence-JSON
-      block convention.
-- [ ] Implement the shared stage per §3.5: explicit binding; EVERY selected
-      gate evaluated (no short-circuit across gates — this is evidence
-      collection); the additive `health:` block with binding path,
-      effective sha, resolved plugin identities, ordered gate entries.
-- [ ] Wire both runners through the ONE helper; define and print each
-      runner's health-stage PASS semantics (stage ran; family evaluated;
-      verdicts persisted; a FAILED verdict on a genuinely collapsed
-      deliverable is the stage WORKING).
-- [ ] INVERT the guardrail: from "never enters Health composition" to
-      "enters composition ONLY through the shared stage with an explicit
-      pack binding; an OMITTED binding is census-refused" — keep the
-      anti-vacuity probe; KEEP the sibling classes unchanged.
-- [ ] Update both runners' docstrings (CLI/docs sync rule) with the new
-      stage and evidence block.
+- [x] Re-read both runners end-to-end at the head. Insertion point: after
+      `evidence["metric"]`, before `evidence["verdict"]` and the single
+      JSON dump (both runners follow one convention — an `evidence` dict
+      written once). Both runners set `SIDERIUS_PLUGIN_DIRS` to the
+      pack's whole `plugins/` dir, retroactively confirming the C3/C4
+      underscore-prefix decision (the ML scan at Gate-2 runtime would
+      have EXEC'd a non-underscore health plugin).
+- [x] Shared stage `scripts/_gate2_health_stage.py::run_health_stage`
+      (keyword-only, binding REQUIRED with no default): loud
+      `FileNotFoundError` on a missing binding BEFORE evaluation;
+      `materialize_effective_config(None, None, workspace,
+      task_health_binding=…)` (state C); `get_gates_for_position(1)` →
+      `evaluate_gate` for EVERY selected gate (no cross-gate
+      short-circuit); returns the additive block (binding path, pinned
+      sha, `loaded_plugin_set()` canonical identities, ordered gate
+      entries with check ids / composed check configs / verdicts /
+      resolved action / failure reason / metrics).
+- [x] Both runners wired through the ONE helper
+      (`from scripts._gate2_health_stage import run_health_stage`; the
+      namespace-package import the scripts tests already use);
+      per-gate verdict/action printed; PASS framing documented in both
+      docstrings ("a FAILED verdict on a genuinely collapsed deliverable
+      is the stage WORKING").
+- [x] Guardrail INVERTED in place
+      (`TestExistingTasksEnterHealthOnlyThroughTheExplicitBinding`):
+      runners reach Health ONLY through the shared stage (no raw
+      entry-point call, no direct health import, stage import REQUIRED);
+      every `run_health_stage` call carries `task_health_binding=` and
+      names the pack's own `task_health.yaml`; the stage parameter is
+      keyword-only with NO default; every composition call in the stage
+      passes the keyword; the stage is the ONLY
+      `materialize_effective_config` caller under `scripts/`;
+      anti-vacuity probes kept (omitted-shape detection + health-import
+      detection). Sibling classes untouched.
+- [x] Both runners' docstrings updated (stage, binding, additive
+      evidence block, PASS semantics).
 
 **Validation plan.**
-- [ ] Shared-stage owner tests (tmp deliverable + tmp pack config):
-      explicit binding threaded; effective sha in the block equals the
-      artifact's pin; EVERY selected gate persisted even when the first
-      blocking gate fails (a two-gate fixture where gate 1 fails — gate 2's
-      evidence MUST be present); existing D14 evidence keys untouched
-      (additivity asserted against a golden of the pre-C5 key set).
-- [ ] Mutation: omitting the binding in the stage → the inverted guardrail
-      RED; short-circuiting after the first failed gate → the
-      every-gate-persisted test RED.
-- [ ] NO real run in this commit's validation — the live half is Gate 2
-      (§7), autonomous at this head once the specs are written.
+- [x] Shared-stage owner tests (`tests/unit/scripts/test_gate2_health_stage.py`,
+      12 tests — the FIRST owner of the runner evidence contract, per the
+      §2.8 audit): binding threaded (block path == pack path; block sha ==
+      `read_effective_config_body_sha` of the materialized artifact;
+      plugin canonical identity present); BOTH Pets gates persisted on
+      the collapsed fixture although the FIRST resolves
+      `invalidate_round` — with thresholds (5 / 0.95 / injected 37) and
+      the §2.5 decisive metrics in the block; JSON-serializable; DAVIS
+      pack flows through the SAME helper (√5 synthetic PASS at the 0.04
+      floor); missing binding refuses loudly with NO effective config
+      written; runner evidence keys == golden pre-C5 set ∪ {health}
+      (AST census over both runners, extractor anti-vacuity).
+- [x] Mutations (all RED then restored green): stage binding acquires a
+      default → kwonly-no-default guard RED; stage drops the binding
+      keyword at the composition call → keyword census RED; pets runner
+      drops the explicit kwarg → runner census RED; stage short-circuits
+      after the first failed gate → every-gate-persisted owner RED.
+- [x] NO real run in this commit — Gate 2 (§7) at this head after the
+      §10 specs are written.
 
 **Acceptance criteria.**
-- [ ] Both runners share ONE stage implementation (census: no second
-      composition/evaluation code path in `scripts/`).
-- [ ] The inverted guardrail is RED under the omitted-binding mutation and
-      green at the commit head.
-- [ ] The `health:` block is ADDITIVE (pre-C5 key set unchanged) and
-      carries every §3.5 field.
-- [ ] On a collapsed fixture deliverable, BOTH Pets gates' evidence is
-      present in one evidence file.
+- [x] ONE stage implementation (census: the stage is the only
+      `materialize_effective_config` caller under `scripts/`).
+- [x] Inverted guardrail RED under the omitted-binding mutations, green
+      at the head.
+- [x] `health:` block ADDITIVE (pre-C5 key set unchanged, structural)
+      and carries every §3.5 field.
+- [x] On the collapsed fixture, BOTH Pets gates' evidence present in one
+      block.
 
 **Failure and edge cases.** Pack config path missing → the stage fails
 LOUDLY before evaluation (a runner that silently dropped its health stage
@@ -1013,8 +1150,9 @@ prior run in the same workspace: the stage writes into THIS run's evidence
 dict before the single JSON dump — no partial-file merge logic.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/guardrails/ tests/unit/execute_tools/health_checks/ <new shared-stage module> -q > /tmp/08c_c5.log 2>&1`
-      Evidence: _(pending)_
+- [x] `.venv/bin/python -m pytest tests/unit/guardrails/ tests/unit/execute_tools/health_checks/ tests/unit/scripts/test_gate2_health_stage.py -q > /tmp/08c_c5.log 2>&1`
+      Evidence: **820 passed, rc=0**; goldens 0 changes; ruff clean +
+      format applied; pyright CI-owned.
 
 **Commit boundary.** Runner stage + guardrail inversion + stage owner
 tests. **Gate 2 (§7) runs at THIS head, autonomously, after its §10 specs
@@ -1038,52 +1176,87 @@ this document's ledger incl. the §14 A–H table. Roadmap/parent/CLAUDE.md
 status = post-merge bookkeeping, not PR content. Depends on C1–C5.
 
 **Implementation plan.**
-- [ ] Census over the enumerated GENERIC health modules (the TIDMAD-family
-      check modules excluded BY LISTED NAME as task-owned): zero
-      `tidmad|pet|davis` comparisons; zero `examples` imports; no `37`; no
-      int8/channel/mV literals; no closed view-kind enum/dispatch; no
-      metric-scalar reads; no central task roster/mapping; **the corrected
-      registration claim (amendment 10)**: adding an EXTERNAL
-      task/package/provider/custom check requires no central
-      registry/import/config edit — asserted structurally as: the central
-      bootstrap enumerates ONLY framework-shipped built-ins, and no Pets
-      id, DAVIS id or synthetic external-task id appears in the bootstrap,
-      any central mapping, or the framework policy files.
-- [ ] Three-task rung: compose TIDMAD (state A), Pets (state C), DAVIS
-      (state C) in one module — `reset_run_scope` between, per the 08b
-      run-scope semantics — asserting disjoint rosters, generic checks
-      firing for B/C, int8 checks inapplicable under B/C facts, state A
-      byte-stable.
-- [ ] Map parent §14 A–H to evidence in this document's ledger.
-- [ ] Docs sync last, quoting each documented behaviour against merged
-      source (node/skill doc-sync rule).
+- [x] Census (`tests/unit/guardrails/test_health_core_census.py`, 124
+      tests) over the ENUMERATED generic partition (TIDMAD-family
+      surfaces excluded BY LISTED NAME, exhaustiveness-guarded so a new
+      module lands censused by default): zero task tokens
+      (`tidmad|pets|davis|oxford|acme`) in generic CODE with exactly ONE
+      quarantined allowance (`LEGACY_DEFAULT_TASK_HEALTH_CONFIG`'s
+      `tidmad.yaml` string, named + still-real-asserted); zero `examples`
+      imports package-wide; no literal 37; no `int8`/`channel000x`/`mV`
+      code literals (Field `description=` strings and bare-string
+      attribute docstrings excluded as documentation — the collector fix
+      below); the standard vocabulary confined to
+      `standard_views/__init__` + the three consumers; no metric-scalar
+      consumption outside the two NAMED non-check allowances
+      (`schemas.py` carrier/predicates; `candidate_eligibility.py`
+      record-eligibility read) + the invariant-16 check-source census
+      re-run over the grown registry; **amendment 10 exactly**: the
+      bootstrap enumerates ONLY the nine hardcoded framework built-ins,
+      and no pack/external id appears in the bootstrap, any package
+      module, or the framework policy YAMLs.
+- [x] Three-task rung (same module): state A composes the six known
+      TIDMAD gate ids; Pets state C the two categorical gates; DAVIS
+      state C the dispersion gate; rosters pairwise disjoint; the six
+      int8 declarations inapplicable (axis `encoding_family`) under BOTH
+      contrast tasks' resolved facts; state A re-materialized AFTER the
+      interleaving is byte-identical (sha + full text) —
+      `reset_run_scope` between compositions (the 08b idiom).
+- [x] Parent §14 A–H mapped to evidence (§10.8 below).
+- [x] Docs sync: `docs/design/pluggable_health_checks.md` — NEW §9a
+      (standard capabilities + generic family + reference bindings,
+      quoted against merged source), §10 registration story corrected to
+      the current two-path reality (built-in bootstrap vs external
+      zero-edit; task rosters in TASK configs — the framework YAML is
+      policy-only), changelog entry; both pack STATUS health rows →
+      C5-landed with Gate-2 results.
 
 **Validation plan.**
-- [ ] The census is anti-vacuous (planted-offender probes, the C7-08b
-      pattern) — including a probe that a fixture id planted in the
-      bootstrap IS detected.
-- [ ] Terminal deterministic validation (amendment 11): health package +
-      `tests/unit/guardrails/` + `tests/unit/examples/` + the C5
-      shared-stage owner module.
-- [ ] `git diff` of this commit shows tests/docs only (recorded in the
-      ledger, so Gate-2 coverage of the final executable state is a fact,
-      not an assumption).
+- [x] Census anti-vacuity: collector self-probe (code string seen,
+      docstring/description prose skipped); planted task-comparison
+      probe; planted examples-import probe; planted science-literal
+      probe; **a fixture id planted in a synthetic bootstrap IS detected
+      and breaks the hardcoded-nine equality**.
+- [x] Terminal deterministic validation (amendment 11) — see the
+      verification command below.
+- [x] `git diff` of this commit: tests/docs only (verified before
+      committing — zero production-source bytes).
 
 **Acceptance criteria.**
-- [ ] Every §13 strengthened item is one executable assertion with a
+- [x] Every §13 strengthened item is one executable assertion with a
       planted-offender probe; the registration claim reads exactly as
       amendment 10 froze it.
-- [ ] The three-task rung passes; the §14 A–H table in the ledger cites
-      per-item evidence.
-- [ ] Zero production-source bytes changed by this commit.
+- [x] The three-task rung passes; the §14 A–H table cites per-item
+      evidence.
+- [x] Zero production-source bytes changed by this commit.
+
+**C6 finding (bounded, recorded — out of scope).**
+`execute_tools/health_checks/evaluation.py` (the pre-08a campaign
+persistence adapter) hardcodes per-check-name threshold/metric tables for
+the six TIDMAD checks (`_threshold`, `_per_file_metrics`) — TIDMAD-family
+knowledge in a generically-named module, predating declarations. It is
+EXCLUDED from the generic census by listed name with a comment, exactly
+like the six check modules. Making it declaration-driven is future debt
+(Step 9/10 territory), deliberately NOT absorbed into 08c.
+
+**C6 census-collector correction (bounded).** The first census run flagged
+`_composition.py`/`_plugin_binding.py` on bare-string ATTRIBUTE docstrings
+(the `CONSTANT = …` + `"""prose"""` idiom) — prose, not code. The
+collector now treats EVERY bare string expression statement as
+documentation (a bare string has no runtime effect), alongside pydantic
+`description=` strings; the self-probe pins both exclusions.
 
 **Failure and edge cases.** A census pattern that would fire on the
 TIDMAD-owned check modules: excluded by an explicit LISTED set with a
 comment, so the census cannot silently widen or narrow.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/guardrails/ tests/unit/examples/ <shared-stage module> -q > /tmp/08c_c6.log 2>&1`
-      Evidence: _(pending)_
+- [x] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/guardrails/ tests/unit/examples/ tests/unit/scripts/test_gate2_health_stage.py -q > /tmp/08c_c6.log 2>&1`
+      Evidence: **1117 passed, rc=0** (health 672 · guardrails incl. the
+      124 new census/rung tests · examples 173 · stage 12); goldens 0
+      changes; working tree carries ZERO production-source changes
+      (verified by `git status` category filter before commit); ruff
+      clean; pyright CI-owned.
 
 **Commit boundary.** Census + rung + docs; no Gate; no production change.
 
@@ -1189,3 +1362,304 @@ re-disposition trigger.
 
 *(filled per commit during implementation; the Gate-2 specs land here
 before launch; the parent §14 A–H completion table lands here at C6)*
+
+### 10.1 C1 — standard view capabilities (2026-08-18)
+
+* Base `70eb21b9` (== master == origin/master, verified; clean tree at
+  start). Files: NEW `execute_tools/health_checks/standard_views.py`
+  (2 key constants, `_validated_readonly_stream`, 2 frozen payload
+  models); `__init__.py` +2 import blocks / +4 `__all__`; NEW
+  `tests/unit/execute_tools/health_checks/test_standard_views.py`
+  (46 tests: ABI, read-only/no-copy, key spellings, engine-opacity census,
+  C1 inertness census).
+* TIDMAD parity at this commit: health package 626 passed rc=0
+  (`/tmp/08c_c1.log`); `goldens/` 0 changes on disk — 27-case manifest,
+  composed state-A executed-semantics golden, value-scale owners all
+  green and byte-identical.
+* Mutation evidence: planted untracked `.py` (import + key literal) → 3
+  RED; planted untracked YAML key use → 1 RED; removed → 46/46 green.
+* Bounded deviation: census is AST/code-level, not raw-text (prose
+  collisions in `_view_provider.py:33` and the fixture-spelled key —
+  recorded under §4.1 acceptance).
+* Ruff clean; pyright CI-owned.
+
+### 10.2 C2 — generic collapse checks + cardinality injection (2026-08-18)
+
+* Files: NEW `_categorical_validity.py` (shared §3.2a mechanism:
+  `validate_symbols` FAILED half + `resolve_categorical_inputs` ERROR
+  half), NEW `categorical_distinct_symbols.py`, NEW
+  `categorical_dominant_fraction.py`; UPGRADED
+  `sample_dispersion_floor.py` (view-consuming, no facts, float64
+  estimator, non-finite guard, config-samples retired); `_composition.py`
+  (frozen `INJECTABLE_AXIS_PARAMETERS` table, `INJECTED_PARAMETER_KEYS`,
+  cardinality injector, union injector, collision refusal in
+  `compose_gate`); `__init__.py` bootstrap 7→9. Tests: NEW
+  `test_generic_collapse_checks.py` (37 tests); `test_step08_44_rungs.py`
+  REWRITTEN for the real transport (real provider + real binding path, no
+  runner monkeypatch; anchors verbatim); `test_standard_views.py`
+  inertness census INVERTED to the enumerated 4-module consumer set;
+  `BUILTIN_CHECK_NAMES` → 9; `test_view_provider.py` partition upgrade
+  (deviation 2).
+* TIDMAD parity at this commit: 808 passed rc=0 (health 672 + guardrails
+  136); goldens 0 changes on disk (27-case manifest, composed state-A
+  executed-semantics, value-scale owners all inside the run).
+* Mutations: (A) revert `sample_dispersion_floor.py` to pre-C2 → 10 rung
+  tests RED, restored green; (B) neutralize the collision-refusal
+  intersection → 4 collision tests RED, restored green; (C1 carryover)
+  helper-silencing per check module → range ruling disappears (in-suite
+  permanent mutation tests).
+* Ruff clean; pyright CI-owned.
+
+### 10.3 C3 — Pets family + committed collapse fixture-of-record (2026-08-18)
+
+* Files: NEW `examples/oxford_iiit_pet/declared/task_health.yaml` (frozen
+  floors 5 / 0.95, §2.5 provenance comments); NEW
+  `examples/oxford_iiit_pet/plugins/_pets_health_views.py` (provider
+  `pets.prediction_views`, pack-local `project_predictions`,
+  underscore-prefixed — bounded deviation recorded in §4.3, the explicit
+  `kind: file` ref is the only loading path); NEW committed fixture
+  `examples/oxford_iiit_pet/expected/d14_gate2_collapse_predictions.csv`
+  (sha `cc847026…f752c`, 6 812 B, verified at copy: 369× class 5 + 1×
+  class 33); STATUS.md health row → 08c C3; PROVENANCE.md fixture
+  section; NEW `tests/unit/examples/test_pets_health_family.py`
+  (15 tests, local registry-isolation fixture since the health conftest
+  is out of scope there).
+* Framework config for the state-C chain is the SHIPPED policy-only
+  `configs/health_checks.yaml` (source_path=None) — more
+  production-faithful than the acme fixture's synthesized policy file.
+* One test-bug diagnosis during bring-up: the int8-inapplicability
+  assertion first used a ctx without a target source, so
+  `pearson_dispersion` was inapplicable on `target_source` (context
+  inputs precede fact axes — the 08a order working as designed); fixed by
+  satisfying all context inputs so the FACT axis decides.
+* TIDMAD parity at this commit: examples 152 + health 672 = 824 passed
+  rc=0; goldens 0 changes.
+* Ruff clean; pyright CI-owned.
+
+### 10.4 C4 — DAVIS family (2026-08-18)
+
+* Files: NEW `examples/davis_future_prediction/declared/task_health.yaml`
+  (frozen floor 0.04, §2.9 provenance + single-artifact caveat); NEW
+  `examples/davis_future_prediction/plugins/_davis_health_views.py`
+  (provider `davis.sample_views`, FULL decoded view — sorted keys →
+  C-order ravel → concat, native float32, no cap; unequal shapes refuse);
+  STATUS.md health row → 08c C4; PROVENANCE.md threshold-provenance
+  section; NEW `tests/unit/examples/test_davis_health_family.py`
+  (21 tests).
+* The frozen §2.9 dispersion REPRODUCED on this machine from the
+  preserved npz (sha `ee52a710…0a010` verified): full 5,160,960-sample
+  view, `np.std(dtype=float64, ddof=0)` == `0.2156402715035823`
+  bit-equal, and the composed gate PASSES it at the 0.04 floor with the
+  value persisted. Skip guard covers machines without the corpus.
+* Codec parity proven on production-written bytes (three clips, both
+  readers agree on keys/shapes/dtype/values; provider stream equals the
+  reader-derived expectation exactly).
+* No framework module touched in this commit (engine untouched by
+  construction — the diff is pack + tests only).
+* TIDMAD parity at this commit: examples 173 + health 672 = 845 passed
+  rc=0; goldens 0 changes.
+* Ruff clean; pyright CI-owned.
+
+### 10.5 C5 — shared runner Health stage + guardrail inversion (2026-08-18)
+
+* Files: NEW `scripts/_gate2_health_stage.py` (`run_health_stage`,
+  keyword-only explicit binding, every-gate evidence collection, additive
+  block); `scripts/run_pets_gate2.py` + `scripts/run_davis_gate2.py`
+  (docstring + `TASK_HEALTH_BINDING` + one `evidence["health"]`
+  assignment + per-gate print — training/inference/metric stages and all
+  existing evidence fields untouched);
+  `tests/unit/guardrails/test_step08b_cross_task_compatibility.py`
+  guard class INVERTED in place (module docstring records the inversion;
+  siblings untouched); NEW `tests/unit/scripts/test_gate2_health_stage.py`
+  (12 tests — first owner of the runner evidence contract).
+* Mutations (4/4 decisive, restored green): stage default / stage
+  keyword drop / runner kwarg drop / cross-gate short-circuit.
+* TIDMAD parity at this commit: guardrails + health + stage = 820 passed
+  rc=0; goldens 0 changes.
+* Ruff clean; pyright CI-owned.
+* **This commit is the FINAL EXECUTABLE-PRODUCTION HEAD — the Gate-2
+  head.** C6 is tests/docs only.
+
+### 10.6 Gate-2 specifications (written BEFORE launch — §7 / amendment 13)
+
+Preconditions verified before writing these specs: both data roots exist
+(`/home/klz/Data/OXFORD_IIIT_PET/images`, `/home/klz/Data/DAVIS_2017`),
+CUDA available (RTX 5090), and the D14 evidence corpora confirm the
+runner shape (D14 pets train 3.42 s at these exact bounds).
+
+#### 10.6.1 Pets Gate 2 — specification
+
+* **Exact executable HEAD**: `ede11fd518b4f7037ec23bed2009f60db0792e81`
+  (C5).
+* **Claim**: the REAL Pets lifecycle — fresh train → infer → deliverable
+  → metric — now ends in the pack's Health family evaluating that fresh
+  deliverable through the explicit state-C binding, with both categorical
+  gates' verdicts numerically consistent with the artifact and the full
+  §3.5 evidence block persisted.
+* **Command**:
+  `SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_pets_gate2.py
+  --data_dir /home/klz/Data/OXFORD_IIIT_PET/images
+  --workspace /home/klz/Data/SIDEREIS_DATA/step08c_pets_gate2_20260818`
+* **Bounds**: the committed D14 gate manifests — 370 train / 74
+  validation / 370 final images, 2 epochs, batch 32 (runner defaults).
+* **Binding**: `examples/oxford_iiit_pet/declared/task_health.yaml`
+  (hardwired in the runner as `TASK_HEALTH_BINDING`; state C).
+* **Expected lifecycle**: plugin scan → training (R2+R3, comparability
+  established) → inference (370 predictions) → deliverable written →
+  accuracy through the Step-06 handle → health stage (effective config
+  materialized into the workspace; BOTH gates evaluated) → evidence JSON.
+* **Expected wall time**: ≤ ~2 min (startup-dominated; D14 measured
+  train 3.52 s + infer 0.74 s); hard bound 10 min.
+* **PASS evidence** (from `gate_evidence.json`, never exit code): all
+  pre-C5 stages complete (finite R2/R3, comparability `established`,
+  370 predictions, finite accuracy in [0,1]); `health.task_health_binding`
+  = the pack path; `health.effective_config_sha256` present and matches
+  the workspace artifact; `health.resolved_plugins[0].configured_ref` =
+  `../plugins/_pets_health_views.py` with a 64-hex content sha; BOTH
+  gates present in order with verdicts ∈ {passed, failed} that are
+  NUMERICALLY consistent with the fresh deliverable (recomputable from
+  the deliverable bytes: distinct count vs floor 5, dominant fraction vs
+  ceiling 0.95); no TIDMAD gate id in the block; no INAPPLICABLE, no
+  ERROR. **Healthy or collapsed fresh predictions BOTH yield Gate PASS
+  when the verdicts are numerically correct** — the reference CNN's
+  2-epoch collapse is EXPECTED to recur, and FAILED verdicts on it are
+  the framework working.
+* **FAIL**: a verdict inconsistent with the fresh artifact's recomputed
+  statistics; a TIDMAD roster in the health block; an unintended
+  INAPPLICABLE/ERROR; a missing gate entry; a pre-C5 evidence key
+  renamed/removed.
+* **INCONCLUSIVE**: training/inference/metric fails before the health
+  stage runs; no fresh deliverable; the stage never reached for a reason
+  unrelated to the health claim.
+* **Evidence destination**:
+  `/home/klz/Data/SIDEREIS_DATA/step08c_pets_gate2_20260818/`
+  (fresh workspace beside the D14 corpora; nothing preserved is
+  overwritten).
+
+#### 10.6.2 DAVIS Gate 2 — specification
+
+* **Exact executable HEAD**: `ede11fd518b4f7037ec23bed2009f60db0792e81`
+  (C5).
+* **Claim**: the REAL DAVIS lifecycle ends in the pack's Health family
+  evaluating the FULL decoded view of the fresh npz through the explicit
+  state-C binding, with the dispersion metric persisted and the verdict
+  consistent with the frozen 0.04 floor.
+* **Command**:
+  `SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_davis_gate2.py
+  --data_dir /home/klz/Data/DAVIS_2017
+  --workspace /home/klz/Data/SIDEREIS_DATA/step08c_davis_gate2_20260818`
+* **Bounds**: the committed D14 gate manifests — 60 train / 15
+  validation / 15 final clips, 2 epochs, batch 4 (runner defaults).
+* **Binding**: `examples/davis_future_prediction/declared/task_health.yaml`.
+* **Expected lifecycle**: plugin scan → training → inference (15/15
+  clips) → npz written → global MSE through the Step-06 handle → health
+  stage (FULL 15 × [3,4,128,224] = 5,160,960-sample view) → evidence
+  JSON.
+* **Expected wall time**: ≤ ~2 min (D14 measured train 7.28 s + infer
+  0.58 s); hard bound 10 min.
+* **PASS evidence**: all pre-C5 stages complete (finite MSE ≥ 0, 15
+  predictions); explicit binding + sha + plugin identity as for Pets
+  (`../plugins/_davis_health_views.py`); exactly ONE gate
+  (`davis_dispersion_blocking`) with `sample_dispersion_floor` verdict ∈
+  {passed, failed}, `n_samples == 5,160,960` (the FULL view), and the
+  persisted dispersion NUMERICALLY consistent with the fresh npz
+  (recomputable: `np.std(full stream, dtype=float64, ddof=0)` vs the
+  0.04 floor); no TIDMAD fallback; no INAPPLICABLE; no ERROR.
+* **FAIL**: dispersion/verdict inconsistent with the fresh artifact; a
+  partial view (`n_samples` ≠ full element count of the fresh npz); a
+  TIDMAD roster; unintended INAPPLICABLE/ERROR; a pre-C5 key changed.
+* **INCONCLUSIVE**: the real workflow fails before the health claim is
+  exercised.
+* **Evidence destination**:
+  `/home/klz/Data/SIDEREIS_DATA/step08c_davis_gate2_20260818/`.
+
+### 10.7 Gate-2 results (2026-08-19, both at HEAD `ede11fd5`)
+
+#### Pets Gate 2 — **PASS**
+
+* Command exactly as specified; wall time ≈ 20 s end-to-end (training
+  3.8 s, inference 0.7 s), inside every bound; exit 0 (not used as the
+  verdict). Log `/tmp/08c_pets_gate2.log`; evidence
+  `/home/klz/Data/SIDEREIS_DATA/step08c_pets_gate2_20260818/gate_evidence.json`.
+* Lifecycle: plugin scan → 2-epoch training (R2 [3.6223, 3.6118], R3
+  [3.6109, 3.6107], comparability established) → 370 predictions →
+  deliverable → accuracy `0.02702702702702703` (exactly chance — the
+  reference CNN's collapse RECURRED as projected) → health stage →
+  evidence.
+* **The fresh deliverable is BYTE-IDENTICAL to the committed
+  fixture-of-record** (`cc8470267bf…f752c`) — the seed-11 bounded run is
+  deterministic, so the Gate's live artifact and the C3 fixture are one
+  measurement.
+* Health block: binding = the pack's `task_health.yaml` (state C);
+  `effective_config_sha256 = 22804f138b17…c2602b` — matches the
+  workspace artifact's own header; plugin
+  `../plugins/_pets_health_views.py` with content sha `9203c038…70d7d4`;
+  BOTH gates present in order, both FAILED with `invalidate_round`.
+* Independent recomputation from the fresh bytes: n=370, distinct=2,
+  dominant symbol 5 at 369/370 = 0.9972972972972973 — the persisted
+  metrics equal these exactly; verdict arithmetic consistent both
+  directions (2 < 5 ⇒ failed; 0.99729… > 0.95 ⇒ failed). Verdict union
+  == {failed}: no INAPPLICABLE, no ERROR. Effective config carries ZERO
+  `tidmad` mentions; gate ids are the pack's two. Pre-C5 evidence keys
+  intact + exactly one new `health` key.
+* Classification: **PASS** — a collapsed fresh deliverable with
+  numerically CORRECT blocking failures is the framework working (§7).
+
+#### DAVIS Gate 2 — **PASS**
+
+* Command exactly as specified; wall time ≈ 25 s end-to-end (training
+  7.3 s, inference 0.6 s); exit 0 (not the verdict). Log
+  `/tmp/08c_davis_gate2.log`; evidence
+  `/home/klz/Data/SIDEREIS_DATA/step08c_davis_gate2_20260818/gate_evidence.json`.
+* Lifecycle: plugin scan → 2-epoch training (R2 [0.04954, 0.04769], R3
+  [0.04443, 0.04430], comparability established) → 15/15 predictions →
+  npz → global MSE `0.017289766656259548` (better than last-frame-copy
+  `0.017392…` — the D14 record values reproduced) → health stage →
+  evidence.
+* **The fresh npz is BYTE-IDENTICAL to the preserved §2.9 artifact**
+  (`ee52a710…0a010`) — the bounded run is deterministic end-to-end.
+* Health block: binding = the pack's `task_health.yaml` (state C); sha
+  pin matches the workspace artifact; plugin
+  `../plugins/_davis_health_views.py` with content sha `138ed7c5…e0b28`;
+  ONE gate (`davis_dispersion_blocking`), `sample_dispersion_floor`
+  PASSED with `continue`.
+* Independent recomputation from the fresh npz: 15 clips, n = 5,160,960
+  float32 samples (the FULL view — 15 × 3 × 4 × 128 × 224 exactly),
+  `np.std(dtype=float64, ddof=0)` = `0.2156402715035823` — equal to the
+  persisted dispersion AND to the frozen §2.9 value bit-for-bit;
+  0.2156… ≥ 0.04 ⇔ passed ✓. `min_dispersion` 0.04 in the block; NO
+  `symbol_cardinality` injected (no declaration). Zero `tidmad` mentions
+  in the effective config; no INAPPLICABLE, no ERROR; pre-C5 keys
+  intact + `health`.
+* Classification: **PASS**.
+
+Combined real runtime ≈ 45 s — far inside the ≤ ~20 min projection and
+the ≤ ~1 h envelope. No retry was needed for either Gate. No preserved
+evidence was overwritten (fresh `step08c_*` workspaces).
+
+### 10.8 C6 — census + three-task rung + docs; parent §14 A–H closure (2026-08-19)
+
+* Files (tests/docs ONLY — zero production-source bytes): NEW
+  `tests/unit/guardrails/test_health_core_census.py` (124 tests: census +
+  anti-vacuity probes + the three-task rung);
+  `docs/design/pluggable_health_checks.md` §9a/§10/changelog; both pack
+  STATUS health rows → C5-landed + Gate-2 results; this ledger.
+* Terminal deterministic validation: **1117 passed rc=0**
+  (`/tmp/08c_c6.log`) — health package, guardrails (inverted cross-task
+  guard + census + rung), examples (both families + governance +
+  **the 08b out-of-tree fourth-task proof**, green inside the health
+  package run), shared-stage owner. Goldens byte-identical at every one
+  of the six semantic commits.
+
+**Parent §14 A–H completion mapping (the 08c halves + A re-verified):**
+
+| item | evidence at this head |
+|---|---|
+| **A** TIDMAD untouched | §3.6's four deterministic owners green at every commit C1–C6 (27-case verdict manifest, composed state-A executed-semantics golden, value-scale owners, state-A roster/order — all inside the health-package runs; goldens 0 bytes moved); real-lifecycle authority remains 08b Gate-2 PASS at `bf6e9e19`; no 08c commit touched a TIDMAD check/roster/threshold |
+| **B** Pets | committed real collapse fixture FAILS both blocking gates with the four §2.5 values persisted (C3 unit chain) AND the live half: 08c Pets Gate-2 PASS at `ede11fd5` — the fresh deliverable reproduced the collapse byte-identically and the family caught it (§10.7) |
+| **C** DAVIS | real dense npz through the SAME engine with zero TIDMAD/classification assumption: frozen dispersion reproduced bit-equal on the preserved artifact (C4, skip-guarded, RAN) and on the fresh Gate-2 artifact (§10.7); no framework module changed in C4 |
+| **D** generic core census | `test_health_core_census.py` — strengthened items executable + planted-offender probes (incl. the bootstrap probe) |
+| **E** semantics | verdict vocabulary distinct/deterministic/persisted (08a authority, re-proven: verdict manifests byte-identical; §3.2a ERROR/FAILED boundaries owned by C2 tests; required-blocking-uncomputable fails closed — ERROR takes `on_fail`, asserted through gates in C2/C3/C4) |
+| **F** testing ownership | per-commit ownership declared and executed (§4.1–§4.6 validation plans); no fake lifecycle Units — the live halves are the two real Gates; evidence cumulative (08a/08b corpora untouched) |
+| **G** extensibility EXECUTABLE | the 08b out-of-tree proof (`test_out_of_tree_extension.py`) green at every commit — NOT re-proven by walkthrough, per the parent |
+| **H** strong criterion | (i) zero task-name branches in generic core — census item 1 with the ONE quarantined constant; (ii) Pets (existing primitives + external provider plugin) and DAVIS (same) integrate via external task config + pack plugin with ZERO SIDERIUS infrastructure-source edits — C3/C4 diffs contain no `execute_tools/health_checks/` change, and the packs' ids appear nowhere in the package (census); the novel-semantics half is owned by the 08b acme proof (custom check + plugin-local capability), kept green |

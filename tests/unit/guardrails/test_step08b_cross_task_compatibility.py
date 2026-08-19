@@ -20,6 +20,15 @@ replaces the other:
 
     C7   a NEW external task can EXTEND the seam with no infra edit.
     here the two EXISTING tasks did not silently acquire TIDMAD's.
+
+**Step 08c C5 INVERTED the first class** (upgraded, never deleted — the
+08a/08b precedent): the runners now DO evaluate their pack's Health family
+on the fresh deliverable, so the pinned property became HOW they enter:
+through the ONE shared stage (`scripts/_gate2_health_stage.py`) with an
+EXPLICIT state-C pack binding. The omitted-binding SHAPE — a composition
+call without the `task_health_binding` keyword — is census-refused, and
+the stage's parameter is keyword-only with no default, so the hazard
+cannot be reintroduced by deleting one argument.
 """
 
 from __future__ import annotations
@@ -81,13 +90,33 @@ def _siderius_imports(path: Path) -> set[str]:
     }
 
 
-class TestNeitherExistingTaskCanReachTheTidmadFallback:
-    """The blocker question, answered structurally rather than by intent.
+SHARED_STAGE = REPO_ROOT / "scripts" / "_gate2_health_stage.py"
 
-    Both runners are direct-execution harnesses — task data path, training
-    engine, metric — and never enter the Health composition path at all. So
-    they cannot inherit TIDMAD Health: there is no binding decision on their
-    route to make wrongly.
+
+def _calls_with_keyword(source: str, function_name: str) -> list[set[str]]:
+    """Keyword names at each call of ``function_name``, by AST."""
+    tree = ast.parse(source)
+    calls: list[set[str]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            callee = node.func
+            name = callee.attr if isinstance(callee, ast.Attribute) else getattr(callee, "id", None)
+            if name == function_name:
+                calls.append({kw.arg for kw in node.keywords if kw.arg is not None})
+    return calls
+
+
+class TestExistingTasksEnterHealthOnlyThroughTheExplicitBinding:
+    """08b pinned "never enters composition"; 08c C5 INVERTED it.
+
+    Upgraded, never deleted: the runners now evaluate their pack's Health
+    family on the FRESH deliverable, so the pinned property became HOW —
+    through the ONE shared stage, with an EXPLICIT state-C pack binding.
+    An omitted-binding shape would silently compose TIDMAD (the 08b
+    hazard), so it is refused structurally at every layer this class can
+    see: the runners never call raw composition entry points, the stage's
+    binding parameter is keyword-only with no default, and every
+    composition call inside the stage passes the keyword.
     """
 
     @pytest.mark.parametrize("task", sorted(EXISTING_NON_TIDMAD_RUNNERS))
@@ -96,33 +125,88 @@ class TestNeitherExistingTaskCanReachTheTidmadFallback:
         assert EXISTING_NON_TIDMAD_RUNNERS[task].is_file()
 
     @pytest.mark.parametrize("task", sorted(EXISTING_NON_TIDMAD_RUNNERS))
-    def test_the_runner_never_calls_a_health_composition_entry_point(self, task):
+    def test_the_runner_reaches_health_only_through_the_shared_stage(self, task):
+        """No raw composition call, no direct health import — ONE stage."""
         source = EXISTING_NON_TIDMAD_RUNNERS[task].read_text(encoding="utf-8")
-
         for entry_point in HEALTH_COMPOSITION_ENTRY_POINTS:
             assert f"{entry_point}(" not in source, (
-                f"{task} runner calls {entry_point}; it would then be subject to "
-                f"the legacy-omitted binding state, and omitting the argument "
-                f"would give it TIDMAD's Health config"
+                f"{task} runner calls {entry_point} directly; Health entry is "
+                f"owned by the shared stage, which makes the binding explicit"
             )
-
-    @pytest.mark.parametrize("task", sorted(EXISTING_NON_TIDMAD_RUNNERS))
-    def test_the_runner_imports_no_health_composition_module(self, task):
         imported = _siderius_imports(EXISTING_NON_TIDMAD_RUNNERS[task])
-        offenders = sorted(
+        health_imports = sorted(
             m for m in imported if m in HEALTH_COMPOSITION_MODULES or "health_checks" in m
         )
-
-        assert offenders == [], (
-            f"{task} runner imports {offenders}. If it is ever routed through "
-            f"Health, it must pass an EXPLICIT binding state — an omitted "
-            f"argument now means TIDMAD."
+        assert health_imports == [], (
+            f"{task} runner imports {health_imports} directly; it must go "
+            f"through scripts._gate2_health_stage"
         )
+        assert "scripts._gate2_health_stage" in imported, (
+            f"{task} runner no longer imports the shared health stage — the "
+            f"08c C5 evidence stage was dropped"
+        )
+
+    @pytest.mark.parametrize("task", sorted(EXISTING_NON_TIDMAD_RUNNERS))
+    def test_the_runner_passes_an_explicit_pack_binding(self, task):
+        source = EXISTING_NON_TIDMAD_RUNNERS[task].read_text(encoding="utf-8")
+        calls = _calls_with_keyword(source, "run_health_stage")
+        assert calls, f"{task} runner never calls run_health_stage"
+        for keywords in calls:
+            assert "task_health_binding" in keywords, (
+                f"{task} runner calls run_health_stage without an explicit task_health_binding"
+            )
+        assert 'PACK_ROOT / "declared" / "task_health.yaml"' in source, (
+            f"{task} runner's binding is not the pack's own task_health.yaml"
+        )
+
+    def test_the_stage_binding_parameter_is_keyword_only_with_no_default(self):
+        """Deleting one argument must be a TypeError, never a TIDMAD binding."""
+        tree = ast.parse(SHARED_STAGE.read_text(encoding="utf-8"))
+        functions = {
+            node.name: node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+        }
+        stage = functions["run_health_stage"]
+        kwonly = {
+            arg.arg: default
+            for arg, default in zip(stage.args.kwonlyargs, stage.args.kw_defaults, strict=True)
+        }
+        assert "task_health_binding" in kwonly
+        assert kwonly["task_health_binding"] is None, (
+            "task_health_binding acquired a DEFAULT — an omitted binding "
+            "would silently select a task"
+        )
+
+    def test_every_composition_call_in_the_stage_passes_the_binding(self):
+        source = SHARED_STAGE.read_text(encoding="utf-8")
+        calls = _calls_with_keyword(source, "materialize_effective_config")
+        assert calls, "the stage no longer materializes an effective config"
+        for keywords in calls:
+            assert "task_health_binding" in keywords, (
+                "the stage calls materialize_effective_config without the "
+                "explicit task_health_binding keyword — the omitted-binding "
+                "shape composes TIDMAD"
+            )
+
+    def test_the_stage_is_the_only_composition_caller_under_scripts(self):
+        """§4.5 acceptance: ONE stage — no second composition path."""
+        offenders = sorted(
+            path.name
+            for path in (REPO_ROOT / "scripts").glob("*.py")
+            if path != SHARED_STAGE
+            and "materialize_effective_config(" in path.read_text(encoding="utf-8")
+        )
+        assert offenders == []
+
+    def test_the_omitted_binding_shape_is_actually_detected(self):
+        """Anti-vacuity: the keyword census flags a call WITHOUT the binding."""
+        bad = "materialize_effective_config(None, None, workspace)\n"
+        calls = _calls_with_keyword(bad, "materialize_effective_config")
+        assert calls == [set()]
 
     def test_the_import_probe_actually_detects_a_health_import(self):
         """Anti-vacuity: the same probe finds a module that DOES import Health.
 
-        Without this, a broken AST walk would make both assertions above pass
+        Without this, a broken AST walk would make the assertions above pass
         while proving nothing.
         """
         imported = _siderius_imports(REPO_ROOT / "core" / "resume.py")

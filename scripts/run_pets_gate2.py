@@ -1,17 +1,28 @@
-"""Bounded Pets Gate-2 runner (D14-2 C6).
+"""Bounded Pets Gate-2 runner (D14-2 C6; Health stage Step 08c C5).
 
 The full Track-B loop at the COMMITTED gate subsets — real JPEGs → the Pets
 TaskDataPath → the PRODUCTION training engine (real R2+R3 through the 07a
 machinery) → inference → the classification deliverable → accuracy through
-the Step-06 handle. Work is bounded BEFORE anything starts (§17.0.1): the
-committed ``gate2_*.csv`` manifests fix 370 train / 74 validation / 370
-final-eval images; 2 epochs.
+the Step-06 handle → the pack's Health family on that FRESH deliverable
+(the ONE shared ``scripts/_gate2_health_stage.py``, bound EXPLICITLY to
+``examples/oxford_iiit_pet/declared/task_health.yaml`` — state C, never
+the omitted-binding TIDMAD default). Work is bounded BEFORE anything
+starts (§17.0.1): the committed ``gate2_*.csv`` manifests fix 370 train /
+74 validation / 370 final-eval images; 2 epochs.
 
 PASS is FUNCTIONAL (roadmap §17.0.1): finite CE curves accepted by the
-``TrainingHistory`` validators with ``comparability`` stamped, and a finite
-accuracy in [0, 1] from the real metric handle on the real deliverable.
-Model quality is NOT a pass condition; accuracy is recorded as an
-observation.
+``TrainingHistory`` validators with ``comparability`` stamped, a finite
+accuracy in [0, 1] from the real metric handle on the real deliverable,
+and the Health stage evaluated with its evidence persisted. Model quality
+is NOT a pass condition; accuracy is recorded as an observation, and a
+FAILED Health verdict on a genuinely collapsed deliverable is the stage
+WORKING, not a runner failure.
+
+Evidence: ``gate_evidence.json`` keeps every pre-08c field unchanged and
+gains ONE additive ``health`` block (binding path, pinned effective-config
+sha, resolved plugin identities, per-gate check ids/configs/verdicts/
+actions/metrics — every selected gate present, no cross-gate
+short-circuit).
 
 Usage::
 
@@ -63,8 +74,10 @@ from execute_tools.task_data_path import (  # noqa: E402
     EvaluationReadRequest,
     bind_task_data_path,
 )
+from scripts._gate2_health_stage import run_health_stage  # noqa: E402
 
 MODEL_TYPE = "pets_reference_cnn"
+TASK_HEALTH_BINDING = PACK_ROOT / "declared" / "task_health.yaml"
 
 
 def _rows(name: str) -> tuple[PetsItem, ...]:
@@ -227,6 +240,24 @@ def main() -> int:
         "accuracy": accuracy,
         "chance": 1.0 / 37.0,
     }
+
+    # Step 08c C5: the pack's Health family on the FRESH deliverable, bound
+    # EXPLICITLY (state C). A FAILED verdict on a genuinely collapsed
+    # deliverable is the stage WORKING — the runner still exits 0; the Gate
+    # claim is that Health classified the artifact CORRECTLY.
+    evidence["health"] = run_health_stage(
+        workspace=workspace,
+        task_health_binding=TASK_HEALTH_BINDING,
+        deliverable_path=deliverable,
+        model_name=MODEL_TYPE,
+        run_name="d14p",
+    )
+    for gate_entry in evidence["health"]["gates"]:
+        print(
+            f"[gate2] health {gate_entry['gate_id']}: "
+            f"verdicts={gate_entry['check_verdicts']} action={gate_entry['resolved_action']}"
+        )
+
     evidence["verdict"] = "PASS"
     (workspace / "gate_evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print(f"[gate2] accuracy={accuracy:.4f} (chance {1 / 37:.4f})  -> PASS")

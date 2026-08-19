@@ -1,0 +1,51 @@
+# DAVIS future prediction — task-owned Health family (Step 08c C4).
+#
+# Binds through the EXTERNAL interface (explicit state-C task-health-config
+# path + config-named pack plugin) — exactly the route an out-of-tree task
+# takes. No SIDERIUS source names this file; the D14 Gate-2 runner passes
+# its path as data.
+#
+# Threshold provenance (Step 08c child design §2.9 — FROZEN;
+# min_dispersion measured ONCE before the design froze, then never swept
+# or tuned). The one preserved healthy real artifact
+# (predictions_davis_reference_predictor_d14d_davis_gate2_001.npz,
+# sha256 ee52a710…0a010, 15 float32 clips [3,4,128,224],
+# n = 5,160,960 samples, all finite) measures
+#
+#     population dispersion = 0.2156402715035823
+#     (np.std over the FULL decoded view, float64 accumulation, ddof=0)
+#
+# so the floor 0.04 sits ≈5.4× below it, while the synthetic
+# near-collapse control (constant plus a tiny perturbation, dispersion
+# ≈ 0–10⁻³) fails it by orders of magnitude. Honest caveat, carried
+# verbatim from the measurement record: exactly ONE healthy real artifact
+# exists, so this is a safety floor against near-constancy in the
+# deliverable's native units, not a calibrated healthy-population
+# statistic.
+
+facts:
+  # Makes the int8-specific TIDMAD checks honestly INAPPLICABLE here.
+  # The generic dispersion check deliberately declares NO facts (§2.11):
+  # binding the continuous_samples capability IS its applicability.
+  encoding_family: continuous_float
+
+plugins:
+  # Underscore-prefixed so neither generic directory scanner (the ML
+  # plugin loader; the Health directory-kind loader) ever execs it as a
+  # scanned member — this explicit file ref is its only loading path.
+  - kind: file
+    ref: ../plugins/_davis_health_views.py
+
+providers:
+  - provider_id: davis.sample_views
+
+roster:
+  - gate_id: davis_dispersion_blocking
+    check: sample_dispersion_floor
+    disposition: blocking
+    parameters:
+      min_dispersion: 0.04
+    reason: >-
+      A future-frame prediction whose full sample stream barely varies is
+      a constant or near-constant deliverable; the one preserved healthy
+      artifact disperses at 0.2156 while a near-collapse sits below 1e-3.

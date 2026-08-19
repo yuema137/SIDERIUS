@@ -86,3 +86,21 @@ tar -xzf /tmp/pets/annotations.tar.gz -C /tmp/pets annotations/trainval.txt anno
 
 A regeneration that changes any manifest byte must be committed with its
 reason and the new source SHA-256 recorded here.
+
+## Health fixture-of-record (Step 08c C3)
+
+`expected/d14_gate2_collapse_predictions.csv` is the REAL preserved D14
+Gate-2 deliverable `predictions_pets_reference_cnn_d14p_pets_gate2_001.csv`
+(byte-identical copy from
+`/home/klz/Data/SIDEREIS_DATA/d14_pets_gate2_20260818/`, also preserved
+byte-identical in `…20260818b/`):
+
+- sha256 `cc8470267fbf5331827c7b641ac2ce8efb834b07441a31836084d4d417ff752c`
+- size 6 812 bytes
+- content: 370 predictions — 369× class 5, 1× class 33 (distinct 2 of 37,
+  dominant fraction 369/370 = 0.9972972972972973)
+
+It is the constant-prediction collapse D14 deliberately preserved as
+Step-08 health evidence (accuracy 0.02702702702702703 = exactly chance).
+Immutable evidence: `tests/unit/examples/test_pets_health_family.py` pins
+the sha256 and size, so the fixture cannot silently drift.

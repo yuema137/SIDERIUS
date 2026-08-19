@@ -459,21 +459,30 @@ class TestNoViewMeansTheUnchangedCallPath:
         assert len(check.calls) == 1
         assert "view" not in check.calls[0][1]
 
-    def test_all_seven_builtins_declare_a_capability_but_require_no_view(self):
-        """Why the built-ins keep the legacy path, stated as a property.
+    def test_the_requires_view_partition_is_exactly_the_declared_one(self):
+        """Which built-ins keep the legacy path, stated as a partition.
 
-        They name what they conceptually read and then read it themselves.
-        If one ever set ``requires_view``, it would need a bound provider or
-        the run would fail closed — a real behavioural change that must not
-        happen by accident.
+        The six TIDMAD checks name what they conceptually read and then
+        read it themselves — ``requires_view=False``, the unchanged
+        ``run(ctx, config)`` path. The Step-08c generic family consumes
+        REAL views, so it requires a bound provider and fails closed at
+        binding without one. Both sets are HARDCODED: a check drifting
+        across this line is a real behavioural change that must not happen
+        by accident (upgraded from 08b's all-seven form when 08c C2 grew
+        the registry to nine).
         """
         from execute_tools.health_checks import registry
 
+        view_requiring = {
+            "sample_dispersion_floor",
+            "categorical_distinct_symbols",
+            "categorical_dominant_fraction",
+        }
         for name in registry.all_registered():
             declaration = getattr(registry.get(name), "declaration", None)
             assert isinstance(declaration, CheckInputDeclaration), name
             assert declaration.consumes_view, name
-            assert declaration.requires_view is False, name
+            assert declaration.requires_view is (name in view_requiring), name
 
     def test_nothing_is_bound_by_default(self):
         """A run that binds no provider has no capabilities bound at all."""

@@ -1,16 +1,28 @@
-"""Bounded DAVIS Gate-2 runner (D14-3 C7).
+"""Bounded DAVIS Gate-2 runner (D14-3 C7; Health stage Step 08c C5).
 
 The full Track-C loop at the COMMITTED gate subsets — real frames → the
 DAVIS TaskDataPath window reader → the PRODUCTION training engine (real
 R2+R3 through the 07a machinery, the D14-2 C5b explicit eval leg) →
-inference → the npz deliverable → global MSE through the Step-06 handle.
-Work is bounded BEFORE anything starts (§17.0.1): 60 train / 15 validation
-/ 15 final clips, 2 epochs.
+inference → the npz deliverable → global MSE through the Step-06 handle →
+the pack's Health family on that FRESH deliverable (the ONE shared
+``scripts/_gate2_health_stage.py``, bound EXPLICITLY to
+``examples/davis_future_prediction/declared/task_health.yaml`` — state C,
+never the omitted-binding TIDMAD default; the provider evaluates the FULL
+decoded view, no cap). Work is bounded BEFORE anything starts (§17.0.1):
+60 train / 15 validation / 15 final clips, 2 epochs.
 
 PASS is FUNCTIONAL: validated R2+R3 with ``comparability`` stamped, 15/15
-predictions, a finite MSE >= 0 from the real handle. Model quality is NOT a
-pass condition; MSE against the trivial last-frame-copy baseline is
-recorded as an observation.
+predictions, a finite MSE >= 0 from the real handle, and the Health stage
+evaluated with its evidence persisted. Model quality is NOT a pass
+condition; MSE against the trivial last-frame-copy baseline is recorded
+as an observation, and the dispersion verdict must simply be numerically
+consistent with the fresh artifact at the frozen 0.04 floor.
+
+Evidence: ``gate_evidence.json`` keeps every pre-08c field unchanged and
+gains ONE additive ``health`` block (binding path, pinned effective-config
+sha, resolved plugin identities, per-gate check ids/configs/verdicts/
+actions/metrics — every selected gate present, no cross-gate
+short-circuit).
 
 Usage::
 
@@ -61,8 +73,10 @@ from execute_tools.task_data_path import (  # noqa: E402
     EvaluationReadRequest,
     bind_task_data_path,
 )
+from scripts._gate2_health_stage import run_health_stage  # noqa: E402
 
 MODEL_TYPE = "davis_reference_predictor"
+TASK_HEALTH_BINDING = PACK_ROOT / "declared" / "task_health.yaml"
 
 
 def main() -> int:
@@ -230,6 +244,22 @@ def main() -> int:
         "mse": mse,
         "last_frame_copy_baseline_mse": baseline_outcome.scalar,
     }
+
+    # Step 08c C5: the pack's Health family on the FRESH deliverable, bound
+    # EXPLICITLY (state C); the provider projects the FULL decoded view.
+    evidence["health"] = run_health_stage(
+        workspace=workspace,
+        task_health_binding=TASK_HEALTH_BINDING,
+        deliverable_path=deliverable,
+        model_name=MODEL_TYPE,
+        run_name="d14d",
+    )
+    for gate_entry in evidence["health"]["gates"]:
+        print(
+            f"[gate2] health {gate_entry['gate_id']}: "
+            f"verdicts={gate_entry['check_verdicts']} action={gate_entry['resolved_action']}"
+        )
+
     evidence["verdict"] = "PASS"
     (workspace / "gate_evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print(

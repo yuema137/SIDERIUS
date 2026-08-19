@@ -58,6 +58,12 @@ from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
     required_blocking_gate_ids,
 )
+from execute_tools.health_checks.categorical_distinct_symbols import (
+    CategoricalDistinctSymbolsCheck,
+)
+from execute_tools.health_checks.categorical_dominant_fraction import (
+    CategoricalDominantFractionCheck,
+)
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.output_diversity import OutputDiversityCheck
 from execute_tools.health_checks.output_std import OutputStdCheck
@@ -90,6 +96,12 @@ from execute_tools.health_checks.schemas import (
     HealthCheckResult,
 )
 from execute_tools.health_checks.spectral_peak_ratio import SpectralPeakRatioCheck
+from execute_tools.health_checks.standard_views import (
+    CATEGORICAL_PREDICTIONS,
+    CONTINUOUS_SAMPLES,
+    CategoricalPredictionsPayload,
+    ContinuousSamplesPayload,
+)
 
 
 def _bootstrap_registry() -> None:
@@ -107,11 +119,19 @@ def _bootstrap_registry() -> None:
         PearsonDispersionCheck(),
         SpectralPeakRatioCheck(),
         PerFileOutputStdCheck(),
-        # Step 08a 8.4-C negative control. Registered like any other
-        # built-in, referenced by NO production YAML — being registered is
-        # not being configured, and the config baseline test proves it
-        # never fires in production.
+        # Step 08a 8.4-C negative control, upgraded at 08c into the generic
+        # continuous-family check. Registered like any other built-in,
+        # referenced by NO production YAML — being registered is not being
+        # configured, and the config baseline test proves it never fires in
+        # production.
         SampleDispersionFloorCheck(),
+        # Step 08c generic categorical collapse family. Framework-shipped
+        # built-ins joining the bootstrap is legal (§4.6): EXTERNAL checks
+        # register through task plugins and never appear here. Like the
+        # dispersion check, configured by NO shipped YAML — the consuming
+        # tasks (Pets) bind them through their own pack configs.
+        CategoricalDistinctSymbolsCheck(),
+        CategoricalDominantFractionCheck(),
     ):
         if check.name not in _REGISTRY:
             register(check)
@@ -122,7 +142,11 @@ _bootstrap_registry()
 
 __all__ = [
     "BLOCKING_ACTIONS",
+    "CATEGORICAL_PREDICTIONS",
+    "CONTINUOUS_SAMPLES",
     "CandidateHealthValidity",
+    "CategoricalPredictionsPayload",
+    "ContinuousSamplesPayload",
     "GateAction",
     "GateResult",
     "HealthBindingError",

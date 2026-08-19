@@ -182,12 +182,44 @@ VALUE_SCALE_UNIT_PARAMETER: str = "value_scale_unit"
 Travels with the factor, never separately: a number without its unit is how
 a millivolt threshold silently becomes a volt threshold."""
 
+SYMBOL_CARDINALITY_PARAMETER: str = "symbol_cardinality"
+"""Check-config key carrying the task's declared symbol-alphabet size.
+
+An injected scientific FACT (Step 08c §3.3), with exactly one authority:
+``TaskHealthFacts.symbol_cardinality``. It is NOT a threshold — it never
+appears in ``threshold_parameter_names`` (the 08a ``peek_samples``
+lesson) — and it is never independently authored in gate parameters."""
+
+
+INJECTABLE_AXIS_PARAMETERS: dict[str, tuple[str, ...]] = {
+    "value_scale_unit": (VALUE_SCALE_PARAMETER, VALUE_SCALE_UNIT_PARAMETER),
+    "symbol_cardinality": (SYMBOL_CARDINALITY_PARAMETER,),
+}
+"""The FROZEN table of injectable fact axes (Step 08c §3.3).
+
+Injection is declaration-driven AND table-bounded: a check receives an
+axis's parameters iff its declaration requires that axis AND the axis has
+an entry here. An axis without a frozen injection rule injects nothing —
+"every FACT_AXES value becomes a check parameter" is census-refused.
+Growing this table is a framework decision requiring a task that forces
+it, exactly like growing ``FACT_AXES`` itself."""
+
+
+INJECTED_PARAMETER_KEYS: frozenset[str] = frozenset(
+    key for keys in INJECTABLE_AXIS_PARAMETERS.values() for key in keys
+)
+"""Every check-config key composition may inject.
+
+A task roster may not hand-author ANY of these (§3.3): composition refuses
+the collision deterministically rather than silently overwriting in either
+direction. Derived from the frozen table so the two can never disagree."""
+
 
 def compose_gate(
     entry: HealthRosterEntry,
     health_peek_files: tuple[int, ...],
     policy_table: dict[str, DispositionPolicy] | None = None,
-    value_scale_parameters: dict[str, Any] | None = None,
+    injected_parameters: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One roster entry + framework policy → one gate, as a plain dict.
 
@@ -204,15 +236,18 @@ def compose_gate(
             which is a policy change rather than an ownership change.
         policy_table: the framework's disposition policy; the built-in
             default when the framework config declares none.
-        value_scale_parameters: the task's resolved numerical value scale,
-            injected only into checks that DECLARE they need the axis. See
-            :func:`compose_health_gates`.
+        injected_parameters: the declaration-driven fact parameters for this
+            entry's check, per the frozen ``INJECTABLE_AXIS_PARAMETERS``
+            table. See :func:`injected_parameters_for`.
 
     Raises:
         HealthCompositionError: the framework policy declares no entry for
             this disposition — refused rather than defaulted, because
             guessing what a gate DOES is the one thing composition must
-            never do.
+            never do. Also raised when the entry hand-authors an INJECTED
+            parameter key (§3.3): before this refusal existed, the update
+            order below silently overwrote the authored value, and a silent
+            winner in either direction is a hazard, not a resolution.
     """
     table = policy_table if policy_table is not None else DEFAULT_DISPOSITION_POLICY
     policy = table.get(entry.disposition.value)
@@ -222,12 +257,21 @@ def compose_gate(
             f"{entry.disposition.value!r}, for which the framework config "
             f"declares no policy. Known dispositions: {sorted(table)}."
         )
+    authored_injected = sorted(INJECTED_PARAMETER_KEYS & entry.parameters.keys())
+    if authored_injected:
+        raise HealthCompositionError(
+            f"Gate {entry.gate_id!r} hand-authors injected parameter key(s) "
+            f"{authored_injected} in its parameters. These keys are "
+            f"composition-owned facts injected from the task's declarations "
+            f"(value_scale, facts.symbol_cardinality); author the "
+            f"declaration instead of the parameter."
+        )
     check_config: dict[str, Any] = dict(entry.parameters)
     check_config.update(policy.check_config)
     if entry.uses_health_peek_files:
         check_config["peek_file_indices"] = list(health_peek_files)
-    if value_scale_parameters:
-        check_config.update(value_scale_parameters)
+    if injected_parameters:
+        check_config.update(injected_parameters)
     return {
         "id": entry.gate_id,
         "gate_role": policy.gate_role,
@@ -256,16 +300,51 @@ def value_scale_parameters_for(check_name: str, config: TaskHealthConfig) -> dic
     """
     if config.value_scale is None:
         return {}
-    from execute_tools.health_checks.registry import _REGISTRY
-
-    skill = _REGISTRY.get(check_name)
-    declaration = getattr(skill, "declaration", None)
-    axes = {r.axis for r in getattr(declaration, "required_facts", ())}
-    if "value_scale_unit" not in axes:
+    if "value_scale_unit" not in _declared_axes(check_name):
         return {}
     return {
         VALUE_SCALE_PARAMETER: config.value_scale.units_per_sample,
         VALUE_SCALE_UNIT_PARAMETER: config.value_scale.unit,
+    }
+
+
+def _declared_axes(check_name: str) -> set[str]:
+    """The fact axes the registered check's declaration requires."""
+    from execute_tools.health_checks.registry import _REGISTRY
+
+    skill = _REGISTRY.get(check_name)
+    declaration = getattr(skill, "declaration", None)
+    return {r.axis for r in getattr(declaration, "required_facts", ())}
+
+
+def symbol_cardinality_parameters_for(check_name: str, config: TaskHealthConfig) -> dict[str, Any]:
+    """The injected cardinality a check receives, or nothing (§3.3).
+
+    Same declaration-driven shape as :func:`value_scale_parameters_for`:
+    only a check requiring the ``symbol_cardinality`` axis receives the
+    parameter, and only when the task declares one. A declaring check under
+    a task with NO declared cardinality never reaches ``run`` anyway —
+    applicability rules it inapplicable with the axis named — so the empty
+    dict is never a silent fallback to some default alphabet.
+    """
+    if config.facts.symbol_cardinality is None:
+        return {}
+    if "symbol_cardinality" not in _declared_axes(check_name):
+        return {}
+    (parameter_key,) = INJECTABLE_AXIS_PARAMETERS["symbol_cardinality"]
+    return {parameter_key: config.facts.symbol_cardinality}
+
+
+def injected_parameters_for(check_name: str, config: TaskHealthConfig) -> dict[str, Any]:
+    """Every parameter the frozen injectable-axes table grants this check.
+
+    The union of the per-axis injectors, one per
+    ``INJECTABLE_AXIS_PARAMETERS`` entry. An axis outside the table injects
+    nothing, no matter what a declaration requires.
+    """
+    return {
+        **value_scale_parameters_for(check_name, config),
+        **symbol_cardinality_parameters_for(check_name, config),
     }
 
 
@@ -285,7 +364,7 @@ def compose_health_gates(
             entry,
             config.health_peek_files,
             policy_table,
-            value_scale_parameters_for(entry.check, config),
+            injected_parameters_for(entry.check, config),
         )
         for entry in config.roster
     ]
