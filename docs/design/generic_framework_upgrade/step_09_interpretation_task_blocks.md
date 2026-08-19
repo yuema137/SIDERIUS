@@ -96,6 +96,24 @@ carried the A/B ambiguity (§2.12, §4, §4b, §9, §15, §16, §19, §20, §21,
   Step-09 `secondary_metrics` contract. Step 10 must NOT invent a
   replacement Step-09 schema.
 
+### 0.3 Post-freeze factual errata from the 09a child source audit (2026-08-19) — architecture unchanged
+
+Applied with the 09a child freeze (operator final ruling, "factual source
+correction only; frozen Step-09 architecture unchanged"): (a) **§2.3
+census +4 sites** (`_render_health_summary_section:219-221`;
+`generate_discoveries:444/:450/:455` incl. a second sign-degenerate 5%
+band) — 12 → 16 interpreter-side entries, all 09a C3; (b) **§2.13/§8
+prediction-pool premise corrected** — at the pre-09a anchor NO production
+path carries or restores `prediction_outcomes_history` /
+`cumulative_information_gain` (nor `vocab_link_confirmations`); the frozen
+target is 09a's NARROW interpreter-owned carry/restore through the existing
+canonical path (Q-09a-1 = A narrow), exact per-field v1/v2 spellings in
+the child §3.4 (Q-09a-2); (c) §15 09a surfaces + §19 rows updated
+accordingly. The 09a child design (`step_09_interpretation_task_blocks/
+pr_09a_interpreter_evidence_ordering.md`) is **REVISION 2 — FROZEN**
+(2026-08-19); 09b's child design is not yet written; Step 09
+implementation has NOT started.
+
 ## 1. Step-09 mandate (roadmap, verbatim obligations)
 
 Roadmap §15.1, row "§11 Interpretation | 9" (roadmap :1540):
@@ -181,6 +199,10 @@ Interpreter-side comparisons that re-read metric direction as literals
 | `nodes/interpretation_helpers.py:284-296` | the **sign-band**: `actual > sota` ⇒ confirmed; `actual >= sota*(1-partial_margin)` ⇒ partial — WRONG under a lower-is-better metric (roadmap :1225 "latent sign bug recorded"); `information_gain = delta if confirmed` assumes positive-is-good; `boldness` uses `abs(predicted-sota)/max(abs(sota),1e-6)` (direction-neutral but scale-naive — recorded, unchanged) |
 | `interpretation_helpers.py:857-864` (`select_active_models`) | Top-K sort `key=(-score, mt)` — highest-first literal |
 | `workflows/model_exploration.py:646-667` (`_cap_knowledge_cache`) | "Keep top-N by best_denoising_score", `sort(reverse=True)` — interpreter-MEMORY truncation policy hosted in the workflow file |
+| *(added by the 09a child source audit, 2026-08-19 — factual census update, E1; 12 → 16 entries)* `result_interpretation_agent.py:219-221` (`_render_health_summary_section`) | best-scoring round for the recording diagnostics: `s > best_score` (flag-ON prompt path) |
+| `interpretation_helpers.py:444` (`generate_discoveries`) | `sota_score = max(sota_from_prediction, overall_best_score)` — "strictest SOTA" as `max` |
+| `interpretation_helpers.py:450` (`generate_discoveries`) | `best_score > sota_score` — "beating the previous SOTA (+delta)" |
+| `interpretation_helpers.py:455` (`generate_discoveries`) | `best_score > sota_score * 0.95` — a SECOND relative 5% band, sign-degenerate for negative sota exactly like §2.4; margin 0.05 preserved, direction/sign corrected in 09a (Q-09a-5) |
 
 Explicitly NOT Step 09's (allocation per roadmap V8 row :1377 and Rev 5.1):
 `core/resume.py:436` `_pick_best` (`score > best_score`) and the chain
@@ -439,13 +461,30 @@ for ordering.
 ### 2.13 Prediction-history aggregation — how old and new records would mix (rev 2, ruling §8)
 
 `result_interpretation_agent.py:1548-1575`: `prediction_outcomes_history`
-is a carried-forward dict of three pooled COUNTS (no per-record provenance),
-incremented by the current iteration's `outcome` label (`:1550-1556`);
-`scientific_accuracy` = per-bucket fraction of the pooled total
-(`:1557-1562`); `cumulative_information_gain` = running sum (`:1571`).
-Degraded mode carries all three forward unchanged (`:1719-1721`). Across
-chain subprocesses they restore latest-wins from the committed digest
-(`core/resume.py` `RestoredState`). Consumers: the PROPOSER renders all
+is DESIGNED as a carried-forward dict of three pooled COUNTS (no per-record
+provenance), incremented by the current iteration's `outcome` label
+(`:1550-1556`); `scientific_accuracy` = per-bucket fraction of the pooled
+total (`:1557-1562`); `cumulative_information_gain` = running sum (`:1571`).
+Degraded mode carries the INPUT values forward unchanged (`:1719-1721`).
+**FACTUAL SOURCE ERRATUM (09a child audit E2, 2026-08-19 — factual source
+correction only; frozen Step-09 architecture unchanged):** rev 2 stated
+here that these fields "restore latest-wins from the committed digest
+(`core/resume.py` `RestoredState`)". At the anchor that is FALSE: NO
+production path populates them — the workflow's inline
+`InterpretationInput(...)` (`workflows/model_exploration.py:2097-2120`)
+passes none of `prediction_outcomes_history` / `cumulative_information_gain`
+/ `vocab_link_confirmations`; the in-process loop (`:2724-2746`) carries
+only cache / vocab / fingerprints / proposal; `core/resume.py` has zero
+occurrences of the three names; `run_one_iteration.py` forwards none. Every
+production digest's pool is therefore exactly ONE outcome (the preserved
+`step07b_gate1_postrefactor` digest: `{partial: 1}`). Pre-09a source: no
+prediction-pool carry/restore. Frozen Step-09 target (operator ruling
+Q-09a-1 = A, narrow): **09a lands the NARROW interpreter-owned carry/restore
+of the prediction-memory fields through the EXISTING canonical lifecycle**
+(digest → next-iteration workflow carry → existing `RestoredState`
+latest-wins), generic resume policy untouched; the E.7
+`vocab_link_confirmations` carry stays absent (Step-10 debt, §19).
+Consumers: the PROPOSER renders all
 three into its prompt ("### Prediction Track Record",
 `ml_model_proposal_agent.py:1147-1160`; also whitelisted at `:1681-1683`);
 the workflow's lit-review gate documents them as "reserved for future
@@ -457,10 +496,11 @@ Consequences frozen in §8: (i) a corrected band changes FUTURE counts, so
 pooling v1 and v2 outcomes into one `scientific_accuracy` scalar would mix
 incomparable classifications — the rule is **version-partitioned
 additive counters** (no schema migration: the existing three-bucket dict
-stays the legacy/v1 pool exactly as restored; NEW outcomes accumulate in an
+stays the legacy/v1 pool exactly as carried; NEW outcomes accumulate in an
 additive versioned structure; `scientific_accuracy` is computed ONLY within
 the current semantics version, and the digest states the version and the
-legacy pool size explicitly); (ii) because the proposer RENDERS these
+legacy pool size explicitly — exact per-field spellings frozen in the 09a
+child §3.4 by operator ruling Q-09a-2); (ii) because the proposer RENDERS these
 fields, 09a's corrected band IS reachable in next-iteration prompt CONTENT
 even with prompt-TEMPLATE bytes exact — recorded honestly in §16 (09a) per
 ruling §9; (iii) uncomputable predictions stop polluting the pool (§2.4
@@ -686,26 +726,38 @@ is NOT in scope.
   NOT task identity). Absence ⇒ `legacy_v1`. Old persisted digests are
   NEVER rewritten.
 * The legacy three-bucket `prediction_outcomes_history` dict is carried
-  forward UNCHANGED as the v1 pool (restore semantics untouched —
-  `RestoredState` latest-wins). NEW outcomes accumulate in an ADDITIVE
+  forward UNCHANGED as the v1 pool. *(Factual erratum, 2026-08-19 — see
+  §2.13: the pre-09a source has NO production carry/restore of this dict;
+  "restore semantics untouched — `RestoredState` latest-wins" in rev 2
+  described an intended lifecycle, not the source. Frozen target by
+  operator ruling Q-09a-1 = A narrow: 09a C5 adds the NARROW interpreter-
+  owned carry/restore of the prediction-memory fields through the existing
+  canonical digest → workflow carry → `RestoredState` latest-wins path;
+  generic resume policy, chain-incumbent restoration and every other
+  restored field untouched.)* NEW outcomes accumulate in an ADDITIVE
   version-keyed structure (`prediction_outcomes_by_semantics:
   {version: {confirmed, partial, refuted}}`, exact naming fixed in 09a) and
   are NOT added to the v1 dict.
 * `scientific_accuracy` is computed ONLY within the CURRENT semantics
   version (`metric_order_signsafe_v2` pool); the digest states the version
   and the legacy pool's size so no reader can mistake a pooled statistic
-  for a comparable one. `cumulative_information_gain` likewise continues
-  as a running sum only of v2 gains (additive field), with the legacy sum
-  preserved alongside — no mixed-version single scalar is claimed.
+  for a comparable one. `cumulative_information_gain` likewise: legacy and
+  v2 gains are NEVER pooled — the legacy accumulated value is preserved in
+  the existing field and the v2 running sum lives in its own additive
+  version-keyed field (exact per-field spellings: 09a child §3.4, operator
+  ruling Q-09a-2) — no mixed-version single scalar is claimed.
 * `unevaluated` outcomes (uncomputable predictions, §2.4) are recorded on
   the prediction record and counted in neither pool.
 * Consumers: the proposer's "Prediction Track Record" rendering
   (`ml_model_proposal_agent.py:1147-1160`) reads the digest fields it
   already reads; 09a supplies the versioned fields such that the rendered
-  accuracy is the version-pure one and labels it (the ONLY prompt-content
-  change 09a makes, honestly recorded in §16). This is possible without a
-  schema migration because all additions are additive and the legacy dict
-  is left byte-for-byte as restored.
+  accuracy is the version-pure one and the DIGEST labels it (the
+  proposer's rendered `N` still comes from the legacy dict it reads — a
+  declared deterministic content delta, operator ruling Q-09a-3; a
+  proposer TEMPLATE edit is never made in 09a — if one is needed for an
+  honest v1/v2 distinction, implementation STOPS). This is possible
+  without a schema migration because all additions are additive and the
+  legacy dict is left byte-for-byte as carried.
 
 ## 9. Strong extensibility audit matrix (A–F per new/modified surface)
 
@@ -961,8 +1013,10 @@ ownership the rule forbids.
   evidence/ordering/projection logic 09a is about to modify moves into
   PRIVATE node-local modules under `nodes/result_interpretation_agent/`
   (the tuner's 07b-C7 precedent: `<node>.py` + `<node>.md` public, private
-  `_`-modules on an acyclic graph, `tests/unit/nodes/
-  test_node_public_boundary.py` rule). Exact private module names follow
+  modules on an acyclic graph, `tests/unit/nodes/
+  test_node_public_boundary.py` rule — private BY OWNERSHIP: the guard
+  convention uses plain filenames, not leading underscores; filename
+  spelling is not public-API status — 09a child E3). Exact private module names follow
   the 09a source audit, not this parent; the responsibility partition is
   fixed here: **evidence projection** (records → `ModelRunSummary`:
   today's `:1907-2140` + the new diagnosis/identity/secondary/failure
@@ -1024,7 +1078,7 @@ ownership the rule forbids.
 
 | PR | semantic owner | deps | key surfaces | prod behavior | LLM-facing | Gate 1 | Gate 2 |
 |---|---|---|---|---|---|---|---|
-| **09a — interpreter evidence & ordering on the metric handle** | behavior-preserving node-local decomposition of the surfaces it touches (§13a); ONE run `MetricSpec` authority transported + reconciled (§2.11); record/spec consistency (§4a); primary evidence projection + the secondary-metric summary projection rendered present-when-present (§4b; production transport is Step 10's — Q-09-7 = B); ALL interpreter D1 ordering consumers incl. the memory-policy helpers (§7); prediction grammar; versioned sign-safe band (§13 ¶1, §8); additive deterministic digest provenance (§5); three-task deterministic ordering/evidence fixtures | Step 06/07 (landed) | `hyperparam_tuning.py` (additive `metric_spec` ONLY — no secondary carriers in 09a), `records.py` (one writer), `interpretation.py` schemas (additive), `result_interpretation_agent.py` + NEW private node modules, `interpretation_helpers.py`, `model_exploration.py` (input construction + reconciliation + cache-cap semantics), node `.md` | deterministic only; TIDMAD ordering results identical (higher-is-better); prediction outcomes under v2 semantics | **No prompt-TEMPLATE / prompt-protocol change** (templates + PB-0/PB-7/PB-8 goldens EXACT; same LLMBridge kwargs for a fixed input); **deterministic persisted-memory semantics change where frozen** (v2 band → versioned accuracy fields the PROPOSER renders, §2.13) | NOT required | NOT required |
+| **09a — interpreter evidence & ordering on the metric handle** | behavior-preserving node-local decomposition of the surfaces it touches (§13a); ONE run `MetricSpec` authority transported + reconciled (§2.11); record/spec consistency (§4a); primary evidence projection + the secondary-metric summary projection rendered present-when-present (§4b; production transport is Step 10's — Q-09-7 = B); ALL interpreter D1 ordering consumers incl. the memory-policy helpers (§7); prediction grammar; versioned sign-safe band (§13 ¶1, §8); additive deterministic digest provenance (§5); three-task deterministic ordering/evidence fixtures | Step 06/07 (landed) | `hyperparam_tuning.py` (additive `metric_spec` ONLY — no secondary carriers in 09a), `records.py` (one writer), `interpretation.py` schemas (additive), `result_interpretation_agent.py` + NEW private node modules, `interpretation_helpers.py`, `model_exploration.py` (input construction + reconciliation + cache-cap semantics), node `.md`; plus — operator ruling Q-09a-1 = A narrow (2026-08-19) — the NARROW interpreter-owned prediction-memory carry/restore through the existing canonical path (`model_exploration.py` loop carry, `core/resume.py` `RestoredState` latest-wins, `run_one_iteration.py` forward; semantic owner interpreter, physical location workflow/resume; generic resume policy untouched) | deterministic only; TIDMAD ordering results identical (higher-is-better); prediction outcomes under v2 semantics | **No prompt-TEMPLATE / prompt-protocol change** (templates + PB-0/PB-7/PB-8 goldens EXACT; same LLMBridge kwargs for a fixed input); **deterministic persisted-memory semantics change where frozen** (v2 band → versioned accuracy fields the PROPOSER renders, §2.13) | NOT required | NOT required |
 | **09b — interpretation prompts from `InterpretationTaskBlocks` via explicit renderers** | `InterpretationTaskBlocks` value contract; bounded TIDMAD compatibility declaration + adapter; explicit rendering module; task-free framework prompts; TIDMAD science extraction; diagnosis/primary/secondary/health/failure rendering; B/C L1 rendering fixtures; interpreter structural/extensibility census; Gate 1 | 09a | NEW `agent/prompt_templates/interpretation/rendering.py`, prompt constants/builders (moved), the TIDMAD declaration file + adapter, `InterpretationInput.task_blocks`, goldens (declared deltas), guardrail census | prompt rendering only | **YES** | **REQUIRED** (bounded, §17) | NOT required (no data/training/lifecycle claim — §17) |
 
 Merge order 09a → 09b. Each child gets its own detailed design + frozen
@@ -1183,6 +1237,8 @@ adds the direction-literal census (§16) earlier.
 | synthesis workspace-string interpolation into prompt (`:638-651`, golden-pinned migration-parity behavior) | **C** (recorded hazard, pinned) | post-Step-12 |
 | `boldness` scale-naive arithmetic (§2.3) | **B** (recorded; unchanged in 09a — no consumer requires more) | Step 10+ if ever forced |
 | uncomputable predictions counted as `partial` (§2.4, production-observed) | **fixed in 09a** (`unevaluated`, not counted) | 09a |
+| prediction-pool production carry/restore ABSENT at the pre-09a anchor (09a child audit E2, 2026-08-19 — the rev-2 premise that `RestoredState` restores it was a factual source error) | **fixed NARROWLY in 09a C5** (operator ruling Q-09a-1 = A: interpreter-owned prediction-memory fields only, through the existing canonical digest → workflow carry → `RestoredState` latest-wins path; generic resume policy, chain-incumbent restoration and every other restored field untouched) | 09a |
+| E.7 `vocab_link_confirmations` never carried/restored in production (same audit; vocabulary machinery, not the prediction-memory contract) | **B** (pre-existing workflow-transport gap) | Step 10 |
 
 No A-class findings: nothing here closes a contract Step 09 must build on.
 

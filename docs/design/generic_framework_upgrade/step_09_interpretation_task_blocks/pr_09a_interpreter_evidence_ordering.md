@@ -2,8 +2,16 @@
 
 ## 0. Status and provenance
 
-**DRAFT rev 1 — READY FOR OPERATOR REVIEW. IMPLEMENTATION NOT STARTED.
-Every checkbox in §4 is `[ ]`; every §10 ledger entry is empty.**
+**REVISION 2 — FROZEN (operator final ruling 2026-08-19: "APPROVED WITH
+MINOR FINAL AMENDMENTS" — freeze authority exercised after the mandated
+adversarial pass, §11, closed without a new material contradiction).
+IMPLEMENTATION NOT STARTED. Every checkbox in §4 is `[ ]`; every §10
+ledger entry is empty.**
+
+Rev 1 (`79bfd564`, DRAFT) was reviewed by the operator; the C1a→C1b … C7
+architecture and sequence were approved and the seven open questions were
+ruled (§0.4). Rev 2 applies those rulings, the narrow parent factual
+erratum they mandate, and the final adversarial pass.
 
 Child of the FROZEN Step-09 parent
 (`docs/design/generic_framework_upgrade/step_09_interpretation_task_blocks.md`,
@@ -71,13 +79,35 @@ delta is a material deviation requiring operator review.
 | id | parent text | source at `205a4170` | consequence for 09a |
 |---|---|---|---|
 | **E1** | §2.3 table lists 12 interpreter direction-consumer sites | FOUR more exist: `result_interpretation_agent.py:219-221` (`_render_health_summary_section` picks the "best-scoring round" with `s > best_score` — flag-ON prompt path); `nodes/interpretation_helpers.py:444` (`max(sota_from_prediction, overall_best_score)` "strictest SOTA"), `:450` (`best_score > sota_score`), `:455` (`best_score > sota_score * 0.95` — a SECOND relative band, sign-degenerate for negative sota exactly like §2.4) | all four migrate in C3 (§3.3); the discoveries band becomes sign-safe with its existing 0.05 width (Q-09a-5) |
-| **E2** | §2.13 / §8: `prediction_outcomes_history` / `cumulative_information_gain` are "carried-forward" and "restore latest-wins from the committed digest (`core/resume.py` RestoredState)" | **No production carry-forward exists.** The workflow's inline `InterpretationInput(...)` (`workflows/model_exploration.py:2097-2120`) passes NEITHER field (nor `vocab_link_confirmations`); the in-process loop carries only cache / vocab / fingerprints / proposal (`:2724-2746`); `core/resume.py` has zero occurrences of the three names; `sdsc_submission_scripts/run_one_iteration.py` forwards none. Every production digest's pool is therefore exactly ONE outcome (the preserved `step07b_gate1_postrefactor` digest: `{partial: 1}`, accuracy `{partial: 1.0}`) | the §8 version-partition rule is designed for a pool that does not yet travel; its transport is Q-09a-1 (§8); the partition semantics are Q-09a-2 |
+| **E2** | §2.13 / §8: `prediction_outcomes_history` / `cumulative_information_gain` are "carried-forward" and "restore latest-wins from the committed digest (`core/resume.py` RestoredState)" | **No production carry-forward exists.** The workflow's inline `InterpretationInput(...)` (`workflows/model_exploration.py:2097-2120`) passes NEITHER field (nor `vocab_link_confirmations`); the in-process loop carries only cache / vocab / fingerprints / proposal (`:2724-2746`); `core/resume.py` has zero occurrences of the three names; `sdsc_submission_scripts/run_one_iteration.py` forwards none. Every production digest's pool is therefore exactly ONE outcome (the preserved `step07b_gate1_postrefactor` digest: `{partial: 1}`, accuracy `{partial: 1.0}`) | the §8 version-partition rule was designed for a pool that does not yet travel; RULED: 09a lands the NARROW interpreter-owned carry/restore through the existing canonical path (Q-09a-1 = A narrow, C5) and the exact per-field v1/v2 partition (Q-09a-2, §3.4) |
 | **E3** | §13a: "private `_`-modules" | the executable boundary rule `tests/unit/nodes/test_node_public_boundary.py:54-59` treats ONLY non-underscore `*.py` files as a node's private modules (underscore-prefixed files are invisible to both halves of the rule); the tuner precedent uses plain names (`policy.py`, `records.py`, …) | 09a's private modules use PLAIN names so the rule covers them (§3.1) |
 | **E4** | §22 "Temporary compatibility paths … the regime-A spec derivation (workflow)" | route B (§2.11) puts the ONE derivation in the TUNER (`ml_hyperparameter_tune_agent.py:541`); the workflow RECONCILES transported values | wording only; 09a adds no derivation site |
 | **E5** | §2.4 documents the uncomputable-⇒-"partial" defect | additionally, `generate_discoveries` (`interpretation_helpers.py:397-435`) turns that label into a vocabulary DISCOVERY `prediction_<model>_partial` ("PARTIAL: … achieved metric=N/A …") | the `unevaluated` rule must also suppress the outcome discovery (§3.4) |
 
-None of these reopens the parent's frozen architecture; E2 changes the
-honest scope statement of the version-partition work (§8 Q-09a-1/2).
+None of these reopens the parent's frozen architecture. E2 and the E1
+census count are applied to the parent as a NARROW factual source erratum
+("factual source correction only; frozen Step-09 architecture unchanged")
+in the same freeze commit (parent §0.3, §2.3, §2.13, §8, §15, §19).
+
+### 0.4 Operator final ruling (2026-08-19) — the seven questions, RESOLVED
+
+| id | ruling | landed at |
+|---|---|---|
+| **Q-09a-1** | **A, NARROWLY** — 09a owns the narrow interpreter-memory transport that makes the frozen v1/v2 prediction-memory contract production-reachable: ONLY the interpreter-owned prediction fields, ONLY through the EXISTING canonical lifecycle (current digest → next-iteration workflow carry → existing `RestoredState` latest-wins). C5 is no longer conditional. Forbidden: redesigning generic resume, changing latest-wins policy, changing chain-incumbent restoration, touching unrelated workflow state, a new memory store, a second restore path, a task-specific resume branch. Semantic owner = interpreter; physical transport may touch workflow/resume ("semantic owner ≠ physical file location"). Parent factual erratum applied | §3.4, §4.6 (C5), parent §2.13/§8 |
+| **Q-09a-2** | **exact per-field v1/v2 partition** — `prediction_outcomes_history` REMAINS the legacy/v1 pool (never incremented by 09a; old digests never rewritten); `prediction_outcomes_by_semantics["metric_order_signsafe_v2"]` owns the v2 confirmed/partial/refuted counts; `unevaluated` is recorded on the individual evaluation and counted in NEITHER comparable pool; `scientific_accuracy` is computed ONLY from the v2 pool and provenance-labelled by `prediction_evaluation_semantics = "metric_order_signsafe_v2"`; the digest exposes legacy-pool provenance explicitly; legacy and v2 information gain are NEVER pooled (legacy value preserved in the existing field; v2 accumulation in its own additive field); a field-semantics table is frozen (§3.4) | §3.4, §4.5 (C4) |
+| **Q-09a-3** | **CONFIRMED** — no proposer prompt-template/protocol change in 09a; honesty statement: corrected deterministic prediction state IS planner/proposer-visible, so next-iteration prompt CONTENT may change through the existing renderer ("no prompt-template/protocol change; deterministic content change only through the explicitly frozen prediction-semantic correction"); if implementation finds a template edit is required to distinguish v1/v2 honestly → **STOP** (09b prompt work never moves into 09a) | §3.4, §4.5, §7 |
+| **Q-09a-4** | **CONFIRMED** — bound run `MetricSpec` REQUIRED for any score-bearing interpretation; record `metric_id`/`direction` must match it exactly whenever a primary `MetricResult` exists; mismatch or absence ⇒ deterministic contract error BEFORE ordering, active-model selection, prediction evaluation, evidence rendering and any LLM call; no fallback to higher-is-better / `denoising_score` / task identity / `derive_tidmad_metric`; cold-start / genuinely scoreless inputs keep the frozen named-absence path; explicit negative owners for missing spec, id mismatch, direction mismatch, multi-output disagreement | §3.2, §4.3 (C2) |
+| **Q-09a-5** | **CONFIRMED, source-bounded** — the four additional interpreter-semantic direction sites belong to 09a C3 (the final source re-read confirms they are ordering/comparison semantics); the second sign-degenerate relative 5% comparison in `generate_discoveries` becomes direction-correct / sign-safe with **margin 0.05 preserved exactly** (direction + negative-reference handling only; `MetricOrder` for better/worse; no higher/lower literal, task identity or metric-id branch); it does NOT feed the versioned accuracy pool, so NO third counter/version system — a declared deterministic correction pinned by hand-computed positive/negative × higher/lower cases; parent/child census counts reconciled (§2.2) | §2.2, §3.3, §4.4 (C3) |
+| **Q-09a-6** | **ACKNOWLEDGED / FROZEN** — a pre-09a score-bearing tuning output lacking `metric_spec` FAILS CLOSED; no replacement spec is derived at interpreter / workflow / CLI / resume / PR3 path; the refusal is actionable and names "legacy/pre-09a output lacks the stamped run MetricSpec required for interpretation ordering"; a fresh/re-produced output is the compatibility path; documented as an intentional boundary incl. the auto-resume consequence | §3.2-8, §4.3 |
+| **Q-09a-7** | **CONFIRMED WITH PRECISE WORDING** — the PR3 calibration fixture stamping a `MetricSpec` is TEST-FIXTURE CONSTRUCTION ("simulated tuner-output writer / fixture stamping"), not a production derivation authority; the production census proves Step 09 adds ZERO production `derive_tidmad_metric` / `derive_tidmad_metric_spec` sites; the helper stays unreachable from production code | §2.5, §4.3 |
+
+Additional closeout precision from the ruling: C1b keeps ONE obvious main
+node file with the old import surface through narrow re-exports, reduces
+mixed responsibility (no duplicate authorities) — the extracted modules are
+node-private BY OWNERSHIP even though the guard convention requires plain
+filenames (§3.1, §4.2); C6 never re-opens Q-09-7 (§3.5, §4.7); Gate 1 and
+Gate 2 stay NOT REQUIRED (§7); roadmap/README carry DESIGN status only
+(§11.2).
 
 ## 1. Mandate (frozen parent §15 / §16 09a — quoted obligations)
 
@@ -95,7 +125,11 @@ honest scope statement of the version-partition work (§8 Q-09a-1/2).
   `interpretation.py` schemas (additive), `result_interpretation_agent.py`
   + NEW private node modules, `interpretation_helpers.py`,
   `model_exploration.py` (input construction + reconciliation + cache-cap
-  semantics), node `.md`.
+  semantics), node `.md` — plus, by the Q-09a-1 = A-narrow ruling, the
+  NARROW interpreter-owned prediction-memory carry/restore through the
+  existing canonical path (`workflows/model_exploration.py` loop carry,
+  `core/resume.py` `RestoredState` latest-wins, `run_one_iteration.py`
+  forward) — semantic owner interpreter, physical location workflow/resume.
 * **Prod behaviour**: deterministic only; TIDMAD ordering results identical
   (higher-is-better); prediction outcomes under v2 semantics.
 * **LLM-facing**: no prompt-TEMPLATE / prompt-protocol change (templates +
@@ -217,6 +251,18 @@ vocabulary (`_STOPWORDS`, `_content_words`, `_find_duplicate_candidate`,
 | 19 | **`:455`** (E1) | `best_score > sota_score * 0.95` → "within 5% of SOTA" (unreachable for negative sota) | sign-safe: `abs(best_score - sota_score) <= 0.05 * abs(sota_score)`; width 0.05 unchanged (Q-09a-5) |
 | 20 | `:863` (`select_active_models`) | `scored.sort(key=lambda x: (-x[1], x[0]))` Top-K highest | `sorted(key=lambda x: (order.rank(present_scores, x[1]), x[0]))` — `rank` = 1 + #strictly-better; ties share a rank and break on `mt`, reproducing `(-score, mt)` exactly under `higher` and inverting under `lower` |
 | 21 | `workflows/model_exploration.py:664` (`_cap_knowledge_cache`) | `scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"), reverse=True)` | `scored.sort(key=lambda x: order.rank(present, x[1] if x[1] is not None else order.worst_sentinel))`; Python's sort is stable, so equal ranks keep insertion order exactly as `reverse=True` did; `None` scores rank last under both directions |
+
+**Count reconciliation (ruling §5 / §12)**: the parent §2.3 table has 15
+entries — 12 node sites (`:969, :972, :979, :986, :988, :1014, :1018,
+:1024, :2046-2049, :2054, :2057, :2069`) + the helpers sign-band entry
+(`:284-296`, ONE entry holding the three literals `:284`, `:286`, `:294`)
++ `select_active_models` + `_cap_knowledge_cache`. Expanding the band entry
+into its three literals gives 17 rows; the four E1 sites (rows 13, 17, 18,
+19) bring the child census to **21 rows = 21 literal sites**. The parent's
+§2.3 table is extended with the four E1 rows in the same freeze commit
+(factual census update; 12 → 16 interpreter-side table entries there, the
+band staying one entry). No other interpreter literal exists at the anchor
+(the C3 AST census is the executable proof).
 
 Direction-NEUTRAL on purpose (unchanged): `interpretation_helpers.py:292`
 (`boldness`, `abs`), `:879` and `:1023` (absolute score deltas in the
@@ -341,7 +387,7 @@ does not match the code (`delta`) — corrected in C4.
 | caller | construction | 09a treatment |
 |---|---|---|
 | node CLI `main()` `:1832-1899` | loads ONE `run_output_{run_name}.json` → `HyperparamTuningOutput.model_validate` → `InterpretationInput(summaries=[summary], storage=…)` (`:1869-1875`) | C2: `metric_spec=reconcile_metric_spec([tune_output])`; a legacy output (None) fails closed by the input contract with a named error |
-| `scripts/pr3_l2_calibration/preflight.py:88-135` (`run_arm`) and `runner.py:185-253` (`run_sample`) | summaries from `spec["tune_outputs"]()` — SYNTHETIC `HyperparamTuningOutput`s built in code by `scripts/pr3_l2_calibration/fixtures.py:120-131` (`_tune_output`) — then `InterpretationInput(summaries, storage, iteration, enable_structured_health_feedback, collapse_fingerprint_history, task_description[, runtime_vocab])` | **`tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants` runs `preflight.main()` in CI.** C2: the fixture stamps `metric_spec` on its synthetic outputs (the fixture IS the simulated tuner writer — it is not a derivation site; it calls the existing Step-06 constructor exactly as the tuner does), and both entry points reconcile like the workflow. No fresh derivation at the entry points (R-09-3) |
+| `scripts/pr3_l2_calibration/preflight.py:88-135` (`run_arm`) and `runner.py:185-253` (`run_sample`) | summaries from `spec["tune_outputs"]()` — SYNTHETIC `HyperparamTuningOutput`s built in code by `scripts/pr3_l2_calibration/fixtures.py:120-131` (`_tune_output`) — then `InterpretationInput(summaries, storage, iteration, enable_structured_health_feedback, collapse_fingerprint_history, task_description[, runtime_vocab])` | **`tests/unit/scripts/test_pr3_l2p_preflight.py::test_preflight_all_invariants` runs `preflight.main()` in CI.** C2 (Q-09a-7, CONFIRMED with precise wording): the FIXTURE module stamps `metric_spec` on its synthetic outputs — **TEST-FIXTURE CONSTRUCTION ("simulated tuner-output writer / fixture stamping"), not a production MetricSpec derivation authority**; it calls the authoritative Step-06 constructor to create the expected stamped value; `scripts.pr3_l2_calibration` is imported ONLY by its sibling calibration scripts and tests (grep at the anchor) and must stay unreachable from production code; both entry points reconcile like the workflow. The production census (C2 acceptance) proves Step 09 adds ZERO production `derive_tidmad_metric` / `derive_tidmad_metric_spec` sites: the executable production sites remain the tuner `:541`, `execute_tools/denoising_score_single.py:180`, `core/sandbox_executor.py:2009` and the metric module's own composition (`evaluation_metric.py:716`); `tools/example_packs/projection.py:122` is tooling never imported by production. No fresh derivation at the entry points (R-09-3) |
 | `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py:29-58` `local_all_records(output, storage)` | `InterpretationInput(summaries=[summary], storage=storage)`; no production caller (re-exported by `protocols/__init__.py:34-39`; tests only) | C2: maps `output.metric_spec` → `metric_spec` (protocol completeness rule — no field silently dropped); its unit tests supply stamped outputs |
 
 ### 2.6 The carry-forward that does not exist (E2) and what it means for the version partition
@@ -443,9 +489,10 @@ semantics decision that stays coherent with the proposer's rendering
 * **Pseudo accumulation (not CI)**: `tests/integration/workflows/
   test_vocab_accumulation.py:886-1110` carries the pool across two agent
   runs by hand and asserts v1 pooling (`{refuted:1}` then
-  `{confirmed:1, refuted:1}` / 0.5) — UPGRADED by C4 (it must thread the
-  semantics marker), run manually and recorded in the ledger (never added
-  to CI).
+  `{confirmed:1, refuted:1}` / 0.5) — UPGRADED by C4 (it must carry the
+  `_by_semantics` dicts between its hand-chained runs and assert the v2
+  pool + untouched legacy dict), run manually and recorded in the ledger
+  (never added to CI).
 * **Artifacts**: the preserved `step07b_gate1_postrefactor` run outputs
   have NO `metric_spec` and every record carries `metric_result`
   (`{metric_id: "tidmad_denoising_score", direction: "higher", …}`); the
@@ -713,45 +760,48 @@ is not a finding); `update_vocab_link_confirmations` is unaffected
 (`== "confirmed"`); the E.4 counter ignores it; the digest's
 `prediction_evaluation.outcome == "unevaluated"` names it.
 
-**Version partition + accounting (parent §8; Q-09a-2 reading (a),
-recommended — the only reading coherent with the proposer's rendering,
-§2.3/§2.6)**:
+**Version partition + accounting (parent §8; Q-09a-2 RULED — exact
+per-field semantics, FROZEN; implementation may not reinterpret)**:
 
-* `InterpretationInput.prediction_evaluation_semantics: str | None = None`
-  (appended) — the previous digest's version; `None` ⇒ legacy input.
-  Additive input fields `legacy_prediction_outcomes_history: dict[str,int]
-  = {}` and `legacy_cumulative_information_gain: float = 0.0`.
-* `prediction.partition_incoming_pools(inp) -> IncomingPools`: a v2 input
-  (`semantics == V2`) carries `prediction_outcomes_history` /
-  `cumulative_information_gain` as the CURRENT (v2) pool and its `legacy_*`
-  fields as the preserved v1 pool; a legacy input (`None`/`legacy_v1`)
-  is RE-BASED — its `prediction_outcomes_history` /
-  `cumulative_information_gain` become the preserved `legacy_*` values
-  (byte-identical content, carried unchanged forever after) and the
-  current pool starts empty.
-* Accounting: `confirmed|partial|refuted` increments the CURRENT pool and
-  adds `information_gain` to the current sum; `unevaluated` touches
-  neither pool; `scientific_accuracy` = fractions over the CURRENT pool
-  (`None` when empty) — version-pure.
-* Digest (appended fields): `prediction_evaluation_semantics = V2`,
-  `prediction_outcomes_history` = CURRENT pool, `cumulative_information_
-  gain` = current sum, `legacy_prediction_outcomes_history`,
-  `legacy_cumulative_information_gain`, `prediction_pool_size: int`,
-  `legacy_prediction_pool_size: int` (the parent's "states the version
-  and the legacy pool's size explicitly"). Existing field NAMES keep one
-  stable meaning — "the pool/sum/accuracy of THIS digest's semantics
-  version" — so the proposer's `N = sum(prediction_outcomes_history)`
-  and its `scientific_accuracy` describe the SAME pool with no template
-  change (Q-09a-3). The degraded path applies the same partition with no
-  accumulation (so `test_carry_forward_metrics_preserved` UPGRADES:
-  legacy input `{3,1,2}` / `2.5` ⇒ `legacy_*` carry them, current pool
-  empty, semantics V2; a v2 input passes through unchanged).
-* The rejected literal reading (b) — existing fields = the v1 pool frozen
-  forever, new fields = v2 — is recorded in §8 with its defect (the
-  proposer would render `N=0` beside a non-empty accuracy).
-* Transport of the carried fields (workflow loop + `RestoredState`) is
-  Q-09a-1 (recommended: wire it in C5, the V19-PR3 fingerprint-history
-  precedent; strikable as a whole commit).
+| field (Input ⇄ Output, same name) | semantics | written by 09a |
+|---|---|---|
+| `prediction_outcomes_history: dict[str,int]` (EXISTING) | the **legacy / v1 three-bucket pool** — carried forward byte-identically; **never incremented by 09a**; old persisted digests never rewritten | copied from the input (healthy AND degraded paths) |
+| `prediction_outcomes_by_semantics: dict[str, dict[str,int]]` (NEW, appended; default `{}`) | version-keyed comparable pools; **`["metric_order_signsafe_v2"]` owns the v2 `confirmed` / `partial` / `refuted` counts** — the ONLY dict 09a increments; a legacy input simply has no v2 key yet | input copy + this iteration's v2 outcome |
+| `prediction_evaluation.outcome == "unevaluated"` | recorded on the INDIVIDUAL evaluation only; **counted in NEITHER comparable pool**, never a discovery | — |
+| `scientific_accuracy: dict[str,float] or None` (EXISTING) | fractions over the **v2 pool ONLY** (`None` while that pool is empty); **provenance-labelled** by `prediction_evaluation_semantics` | computed from `prediction_outcomes_by_semantics[V2]` |
+| `prediction_evaluation_semantics: str` (NEW, appended; Output) | the semantics id the accuracy/v2 pool of THIS digest was computed under — `"metric_order_signsafe_v2"`; legacy digests lack the key ⇒ `legacy_v1` (never rewritten) | constant V2 |
+| `prediction_pool_sizes: dict[str,int]` (NEW, appended; Output) | explicit legacy-pool provenance the parent §8 demands ("states the version and the legacy pool's size"): `{"legacy_v1": sum(prediction_outcomes_history), "metric_order_signsafe_v2": sum(v2 pool)}` — so no reader can mistake v1+v2 for one comparable statistic | derived |
+| `cumulative_information_gain: float` (EXISTING) | the **legacy accumulated value — preserved, never pooled with v2**; carried forward unchanged (09a adds nothing to it) | copied from the input |
+| `cumulative_information_gain_by_semantics: dict[str,float]` (NEW, appended; default `{}`) | **`["metric_order_signsafe_v2"]` = the v2 running sum** of `information_gain` (confirmed only); no single scalar anywhere means legacy + v2 | input copy + this iteration's gain |
+
+* Accounting: `confirmed|partial|refuted` increments ONLY the v2 dict and
+  adds `information_gain` ONLY to the v2 sum; `unevaluated` touches
+  nothing; the legacy dict and legacy scalar pass through unchanged.
+  No re-basing exists (the structure itself is versioned), so the degraded
+  path simply copies every pool/sum/dict forward unchanged — the existing
+  `test_carry_forward_metrics_preserved` (legacy `{3,1,2}` / `2.5` pass
+  through) stays GREEN (KEEP) and is EXTENDED for the two `_by_semantics`
+  dicts.
+* Honesty statement (Q-09a-3, CONFIRMED): 09a makes NO proposer
+  prompt-template/protocol change; but the proposer's existing renderer
+  (`ml_model_proposal_agent.py:1146-1165`) reads `scientific_accuracy`
+  (now v2-only), `cumulative_information_gain` (legacy) and
+  `prediction_outcomes_history` (legacy; its sum is the rendered `N`).
+  The rendered next-iteration CONTENT therefore changes deterministically
+  — and `N` comes from the LEGACY pool while the fractions come from the
+  v2 pool. That is a declared, frozen consequence of the per-field rule
+  ("no prompt-template/protocol change; deterministic content change only
+  through the explicitly frozen prediction-semantic correction"). **If
+  implementation judges that an HONEST v1/v2 distinction in that rendering
+  REQUIRES a proposer template edit → STOP and return** — 09b prompt work
+  must not move into 09a silently.
+* Transport (Q-09a-1 = A, NARROW): the four carried values
+  (`prediction_outcomes_history`, `prediction_outcomes_by_semantics`,
+  `cumulative_information_gain`, `cumulative_information_gain_by_semantics`)
+  travel ONLY through the existing canonical lifecycle — C5 (§4.6): the
+  workflow loop carry and the existing `RestoredState` latest-wins restore
+  (the V19-PR3 fingerprint-history precedent); no new memory store, no
+  second restore path, no resume redesign.
 
 ### 3.5 Evidence projection (C6) — identity, diagnosis, secondaries, failure counts
 
@@ -853,10 +903,12 @@ production (none).
 | input contract validator (§3.2-4) | framework rule | n/a | n/a | n/a | none | none |
 | private node modules | structure only | n/a | n/a | n/a | none | none |
 | `MetricIdentity`, `SecondaryMetricEvidence`, `RecordFailureCounts` | typed, task-free; keys = existing authority vocabularies; ids opaque | record-borne / fixture-supplied | n/a | n/a | none | none new (no closed enum) |
-| semantics ids + pool fields | framework version metadata | n/a | n/a | n/a | none | none |
+| semantics ids + versioned pool fields (`prediction_outcomes_by_semantics`, `cumulative_information_gain_by_semantics`, `prediction_pool_sizes`, `prediction_evaluation_semantics`) | framework version metadata; version-keyed dicts (no per-task growth) | n/a | n/a | n/a | none | the two version ids only |
+| `PredictionMemory` carrier + `RestoredState.prediction_memory` + `load_latest_prediction_memory` (C5) | carrier of four digest fields; the digest stays the ONE store | existing canonical latest-wins path | n/a | n/a | none | none |
 
 No new loader, registry, task-name branch, per-task table, derivation
-site, or central config content. Verdict: the parent's PASS is preserved.
+site, memory store, or central config content. Verdict: the parent's PASS
+is preserved.
 
 ## 4. Commit decomposition
 
@@ -1055,6 +1107,17 @@ Depends on C1a.
       `main → {evidence, ordering, prediction}` with no reverse edge
       (boundary test); AST inventory before/after recorded (main-file and
       `run()` line counts, moved symbols).
+- [ ] Ruling §8 precision: `result_interpretation_agent.py` remains the
+      ONE obvious main node file (public class, `run()`, CLI entrypoint,
+      orchestration, lifecycle ordering); every moved symbol is DEFINED
+      exactly once (the main module re-exports by import — never a copy,
+      no duplicate authority; pinned by an AST test that each moved name
+      has one definition site in the package); the external import surface
+      proven by the §2.1 census keeps resolving through the narrow
+      re-exports; the extracted modules are node-private BY OWNERSHIP
+      (plain filenames are a guard convention, not public-API status —
+      the boundary test's outward half enforces privacy); no
+      `utils`/`helpers`/`common` module.
 
 **Failure and edge cases.** The rebind: a submodule imported lazily would
 be unreachable from outside — all imports eager; `ruff` pruning an unused
@@ -1157,20 +1220,38 @@ prompt bytes. Depends on C1b.
       field validate); `tests/unit/workflows/test_model_exploration.py`.
 
 **Acceptance criteria.**
-- [ ] `grep -rn derive_tidmad_metric` production call sites unchanged
-      (three — `ml_hyperparameter_tune_agent.py:541`, `denoising_score_
-      single.py:180`, `sandbox_executor.py:2009`); the ONLY new call of a
-      spec constructor in the tree is the calibration FIXTURE (scripts,
-      simulated writer) — named in the ledger.
+- [ ] Production spec-constructor census (executable, NEW in this commit's
+      test module): the set of production modules (`nodes/`, `agent/`,
+      `core/`, `execute_tools/`, `workflows/`, `dashboard/`, `scripts/`
+      minus the fixture module below) that CALL `derive_tidmad_metric` or
+      `derive_tidmad_metric_spec` equals exactly {`nodes/ml_hyperparameter_
+      tune_agent/ml_hyperparameter_tune_agent.py`, `execute_tools/denoising_
+      score_single.py`, `core/sandbox_executor.py`, `execute_tools/
+      evaluation_metric.py` (its own composition)} — Step 09 adds ZERO;
+      `scripts/pr3_l2_calibration/fixtures.py` is the ONE fixture-stamping
+      module (test-fixture construction, Q-09a-7) and is asserted
+      unreachable from production (no production module imports
+      `scripts.pr3_l2_calibration`); planted offender (an untracked
+      production module calling the constructor) turns the census RED.
 - [ ] Every negative test above named and green; the oracle delta is
       exactly the declared additive field.
 
 **Failure and edge cases.** Legacy outputs (None) ⇒ named refusal at input
-construction; mixed present/None ⇒ refusal; unequal specs ⇒ refusal
-naming both (R-09-7: a changed binding IS a different run); a record
-identity disagreeing with the spec ⇒ refusal; a corrupt output with
-disagreeing record identities ⇒ builder refusal; `partial_dict` path
-keeps the spec; the pr3 CI test keeps passing because the fixture stamps.
+construction whose message is ACTIONABLE and says, in substance,
+"legacy/pre-09a tuning output `<run_name>` (`<model_type>`) lacks the
+stamped run MetricSpec required for interpretation ordering — re-produce
+the output under 09a or start a fresh chain" (Q-09a-6: an intentional
+schema/semantic boundary, never loosened for resume convenience; no
+replacement spec is derived at interpreter / workflow / CLI / resume /
+PR3 path); mixed present/None ⇒ refusal; unequal specs ⇒ refusal naming
+both (R-09-7: a changed binding IS a different run); a record identity
+disagreeing with the spec ⇒ refusal (id mismatch and direction mismatch
+each have a named negative owner, plus multi-output disagreement — Q-09a-4);
+a corrupt output with disagreeing record identities ⇒ builder refusal;
+`partial_dict` path keeps the spec; the pr3 CI test keeps passing because
+the FIXTURE stamps (test-fixture construction, Q-09a-7). Documented
+operational consequence: auto-resume of a chain whose committed outputs
+predate 09a stops at its first post-09a interpretation with that refusal.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/tune_ml_hyperparam_agent/test_step09a_c2_output_metric_spec.py tests/unit/agent/tune_ml_hyperparam_agent/test_step00_record_baselines.py tests/unit/agent/tune_ml_hyperparam_agent/test_step06_c4_record_payload.py tests/unit/agent/schemas tests/unit/agent/protocols/test_ml_model_tune_to_ml_result_interp.py tests/unit/workflows tests/unit/scripts/test_pr3_l2p_preflight.py tests/unit/core/test_resume.py tests/unit/execute_tools/test_step06_c1_evaluation_metric.py tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py -q > /tmp/09a_c2.log 2>&1; rc=$?`
@@ -1221,7 +1302,14 @@ spec; prompt bytes; `MetricOrder`. Depends on C2.
       raising `ValueError` when `structured_health_feedback and order is
       None`; `run()` passes `order` (flag-ON path only renders it).
 - [ ] Rows 17–19 (`generate_discoveries`): `order.best` for the strictest
-      SOTA; `order.is_better`; sign-safe 5% band; `abs` delta text.
+      SOTA; `order.is_better`; the relative band becomes
+      `abs(best - sota) <= 0.05 * abs(sota)` with **margin 0.05 preserved
+      exactly** (direction + negative-reference handling only; no
+      higher/lower literal, no task identity, no metric-id branch); `abs`
+      delta text. This discovery rule does NOT feed the versioned accuracy
+      pool, so NO third counter/version system — a declared deterministic
+      correction pinned by hand-computed positive/negative × higher/lower
+      cases (Q-09a-5).
 - [ ] Row 20 (`select_active_models`): `rank`-keyed sort.
 - [ ] Row 21 (`_cap_knowledge_cache`): `rank`-keyed stable sort with
       `worst_sentinel` for None; workflow passes
@@ -1278,27 +1366,37 @@ version-partitioned pools with version-pure accuracy and the legacy pool
 preserved; uniform record shape carrying its semantics id. Belongs after
 C3 (same order) and before transport (C5).
 
-**Scope.** `prediction.py` (grammar, band, constants, `partition_incoming_
-pools`, accounting), `nodes/interpretation_helpers.py::generate_discoveries`
+**Scope.** `prediction.py` (grammar, band, constants, versioned
+accounting), `nodes/interpretation_helpers.py::generate_discoveries`
 (`unevaluated` branch), main (`run()` passes `order` + bound id; threads
-the partition into both dicts), `agent/schemas/interpretation.py`
-(`InterpretationInput.prediction_evaluation_semantics`, `legacy_*` inputs;
-`InterpretationOutput.prediction_evaluation_semantics`, `legacy_prediction_
-outcomes_history`, `legacy_cumulative_information_gain`,
-`prediction_pool_size`, `legacy_prediction_pool_size` — appended;
-descriptions of `prediction_evaluation` (key list) and
-`cumulative_information_gain` corrected); REC-3 golden regenerated (five
-appended `InterpretationOutput` names); tests: UPGRADE
-`test_vocab_feedback.py TestEvaluatePrediction` (signature; uncomputable ⇒
-`unevaluated`), `test_prediction_evaluation_join.py` (key list; join),
-`test_interpretation_agent.py:1186-1196` (partition on the degraded path),
-the C1a oracle goldens regenerated with the DECLARED delta (this
-iteration's confirmed outcome now lands in the v2 pool: `{confirmed:1}`,
-gain `0.12`; the fixture's `{1,0,1}` / `0.3` move to `legacy_*`; version
-fields present); NEW `test_step09a_c4_prediction_semantics.py` (band
-matrix, grammar table, partition); node `.md`. Must NOT change: prompt
-bytes; the proposer; `boldness`; the `partial_margin` default; vocab
-machinery beyond the `unevaluated` branch. Depends on C3.
+the versioned pools into both dicts), `agent/schemas/interpretation.py`
+(`InterpretationInput.prediction_outcomes_by_semantics`,
+`InterpretationInput.cumulative_information_gain_by_semantics` — appended,
+default `{}`; `InterpretationOutput.prediction_evaluation_semantics`,
+`prediction_outcomes_by_semantics`, `cumulative_information_gain_by_
+semantics`, `prediction_pool_sizes` — appended (FOUR names); descriptions
+of `prediction_outcomes_history` (now explicitly the legacy/v1 pool),
+`scientific_accuracy` (v2-only, labelled), `cumulative_information_gain`
+(legacy value, never pooled), `prediction_evaluation` (key list) corrected
+per the §3.4 table); REC-3 golden regenerated (the four appended
+`InterpretationOutput` names); tests: UPGRADE `test_vocab_feedback.py
+TestEvaluatePrediction` (signature; uncomputable ⇒ `unevaluated`),
+`test_prediction_evaluation_join.py` (key list; join); KEEP + EXTEND
+`test_interpretation_agent.py:1186-1196` (legacy values still pass
+through the degraded path unchanged; the two `_by_semantics` dicts pass
+through too); the C1a oracle goldens regenerated with the DECLARED delta
+(the fixture's legacy `{1,0,1}` / `0.3` UNCHANGED; NEW
+`prediction_outcomes_by_semantics = {V2: {confirmed:1, partial:0,
+refuted:0}}`, `cumulative_information_gain_by_semantics = {V2: 0.12}`,
+`scientific_accuracy = {confirmed:1.0, partial:0.0, refuted:0.0}` (v2-only
+— the pre-09a value over the pooled `{2,0,1}` differs, declared),
+`prediction_evaluation_semantics = V2`, `prediction_pool_sizes =
+{legacy_v1: 2, V2: 1}`, the uniform record keys); NEW
+`test_step09a_c4_prediction_semantics.py` (band matrix, grammar table,
+per-field partition); node `.md`. Must NOT change: prompt bytes; the
+proposer (template/protocol); `boldness`; the `partial_margin` default;
+the legacy dict and legacy scalar values; vocab machinery beyond the
+`unevaluated` branch. Depends on C3.
 
 **Implementation plan.**
 - [ ] Re-read `prediction.py` (moved code), `generate_discoveries`
@@ -1311,10 +1409,11 @@ machinery beyond the `unevaluated` branch. Depends on C3.
 - [ ] Band exactly per §3.4; uniform record keys; semantics constants.
 - [ ] `generate_discoveries`: explicit `unevaluated` ⇒ no outcome
       discovery.
-- [ ] Partition + accounting; `run()` healthy and degraded dicts; input
-      fields appended.
-- [ ] Descriptions fixed; REC-3 + C1a goldens regenerated with the delta
-      named.
+- [ ] Versioned accounting per the §3.4 table (legacy dict/scalar copied
+      unchanged; v2 dict/sum incremented; label; pool sizes); `run()`
+      healthy and degraded dicts; input fields appended.
+- [ ] Descriptions fixed per the table; REC-3 + C1a goldens regenerated
+      with the delta named.
 
 **Validation plan.**
 - [ ] Unit: the hand-computed band matrix (§3.4 — nine cases × the
@@ -1324,12 +1423,17 @@ machinery beyond the `unevaluated` branch. Depends on C3.
       `per_sample_unavailable`, unrecognized ⇒ `unevaluated`); record keys
       uniform across branches and equal to the description's list (the
       existing pin); `information_gain == distance` only when confirmed.
-- [ ] Unit (partition): legacy input ⇒ re-based (legacy preserved
-      byte-identically, current pool empty + this outcome, semantics V2,
-      sizes); v2 input ⇒ pools continue; `unevaluated` touches neither
-      pool; accuracy version-pure; degraded path applies the same
-      partition without accumulation; `prediction_evaluation_semantics`
-      on the record AND the digest.
+- [ ] Unit (per-field partition, §3.4 table): a legacy-only input (no
+      `_by_semantics` keys) ⇒ legacy dict/scalar copied byte-identically,
+      v2 dict = this outcome only, v2 sum = this gain, accuracy v2-only,
+      label V2, pool sizes `{legacy_v1: n, V2: 1}`; an input already
+      carrying v2 dicts ⇒ they continue accumulating and the legacy values
+      still pass through unchanged; `unevaluated` increments NOTHING;
+      `scientific_accuracy is None` while the v2 pool is empty; the
+      degraded path copies every pool/sum forward unchanged;
+      `prediction_evaluation_semantics` on the record AND the digest;
+      no scalar anywhere equals legacy + v2 (asserted on a fixture where
+      both are non-zero).
 - [ ] Unit (discoveries): `unevaluated` ⇒ no `prediction_*` discovery;
       confirmed/partial/refuted sentences unchanged.
 - [ ] Negative: `evaluate_prediction` without `order` / `bound_metric_id`
@@ -1337,21 +1441,26 @@ machinery beyond the `unevaluated` branch. Depends on C3.
       in the new module would red the Step-06 C5 census (none is written).
 - [ ] Mutation (recorded): (i) drop the `abs` in `band_width` ⇒ the
       higher/negative partial case goes RED; (ii) count `unevaluated` ⇒
-      the not-counted test RED; (iii) add a new outcome to the legacy dict
-      ⇒ the legacy-untouched test RED.
+      the not-counted test RED; (iii) increment the legacy dict with a new
+      outcome ⇒ the legacy-untouched test RED; (iv) add the v2 gain into
+      `cumulative_information_gain` ⇒ the never-pooled test RED.
 - [ ] Backward-compat: C1a oracle delta = exactly the declared prediction/
       pool fields (enumerated in §10.5); prompt goldens EXACT (the
-      synthesis "Cumulative information gain" line renders the INPUT value
-      `:1353`, unchanged); proposer tests untouched.
+      synthesis "Cumulative information gain" line renders the INPUT
+      legacy value `:1353`, unchanged); proposer tests untouched; the
+      Q-09a-3 honesty statement (§3.4) re-checked — if an honest v1/v2
+      distinction in the proposer rendering would need a template edit →
+      STOP.
 - [ ] Manual (not CI, recorded): `tests/integration/workflows/
-      test_vocab_accumulation.py` upgraded to thread the semantics marker
-      and re-run in pseudo mode.
+      test_vocab_accumulation.py` upgraded to carry the `_by_semantics`
+      dicts between its hand-chained runs and re-run in pseudo mode.
 
 **Acceptance criteria.**
-- [ ] Every matrix cell and grammar row has a named test; the three
-      mutations are RED; the oracle's declared delta matches §3.4; the
-      REC-3 delta is the five appended names; descriptions match emitted
-      keys.
+- [ ] Every matrix cell (20: 4 direction×sign quadrants × 3 outcomes,
+      equality, zero-sota ×3, just-inside, just-outside, uncomputable ×2)
+      and grammar row has a named test; the four mutations are RED; the
+      oracle's declared delta matches §3.4; the REC-3 delta is the four
+      appended names; descriptions match emitted keys.
 
 **Failure and edge cases.** `sota == 0` ⇒ band width 0 (equality partial,
 else confirmed/refuted); `sota is None` (no `current_value`, no override)
@@ -1370,63 +1479,84 @@ frozen band implemented exactly and is the version partition honest?".
 
 ---
 
-### 4.6 C5 — prediction-pool transport (workflow carry + resume restore) — **conditional on Q-09a-1 = A**
+### 4.6 C5 — prediction-memory transport through the EXISTING canonical path (Q-09a-1 = A, NARROW)
 
-**Goal.** The version-partitioned pool actually travels across iterations
-and chain subprocesses (the V19-PR3 precedent for interpreter-owned
-memory: workflow loop carry + `RestoredState` latest-wins from the
-digest), so §8's rule has an object in production. Separable: if the
-operator rules Q-09a-1 = B (Step 10 transport), this commit is STRUCK and
-the parent §19 gains a forward-constraint row; nothing else in 09a depends
-on it.
+**Goal.** The frozen v1/v2 prediction-memory contract becomes
+production-reachable: the interpreter-owned prediction state travels
+across in-process iterations and chain subprocesses through the EXISTING
+canonical lifecycle — current-iteration digest → next-iteration workflow
+carry → existing `RestoredState` latest-wins restore (the V19-PR3
+fingerprint-history precedent) — so the versioned pool is not
+production-dead state (ruling Q-09a-1). Semantic owner = interpreter
+(Step 09); physical location = workflow/resume because that is where the
+canonical lifecycle lives ("semantic owner ≠ physical file location").
+Step 10 keeps generic workflow/resume architecture and the remaining
+direction/resume debt.
 
-**Scope.** `workflows/model_exploration.py` (loop carry of
-`prediction_outcomes_history`, `cumulative_information_gain`,
-`prediction_evaluation_semantics`, `legacy_*` from `interpretation` into
-the next `InterpretationInput`; `run_workflow(restored_prediction_ledger=…)`
-seeding), `core/resume.py` (`load_latest_prediction_ledger(...)` — digest
-keys above, latest-wins, same idiom as `load_latest_fingerprint_history`;
-`RestoredState.prediction_ledger`), `sdsc_submission_scripts/run_one_
-iteration.py` (forward), tests (`tests/unit/core/test_resume*.py` additive;
+**Scope (ONLY this).** Carried values = exactly the four §3.4 fields:
+`prediction_outcomes_history`, `prediction_outcomes_by_semantics`,
+`cumulative_information_gain`, `cumulative_information_gain_by_semantics`
+(typed together as ONE small frozen carrier `PredictionMemory` in
+`agent/schemas/interpretation.py` — a carrier of digest fields, NOT a
+store). `workflows/model_exploration.py`: loop carry of the four values
+from `interpretation` into the next `InterpretationInput` (beside the
+existing cache / vocab / fingerprint carry, `:2724-2746`) and
+`run_workflow(restored_prediction_memory=…)` seeding of the first input;
+`core/resume.py`: `load_latest_prediction_memory(...)` reading the four
+digest keys with the SAME latest-wins idiom and error contract as
+`load_latest_fingerprint_history` (`core/resume.py:863-942`; digest key read `:920`, latest-wins overwrite `:938`), and ONE additive
+`RestoredState.prediction_memory` field; `sdsc_submission_scripts/
+run_one_iteration.py`: forward the restored value (beside the fingerprint
+history forward). Tests: `tests/unit/core/test_resume*.py` additive;
 `tests/unit/workflows/test_model_exploration.py` carry; NEW `test_step09a_
-c5_prediction_transport.py`). NOT carried: `vocab_link_confirmations`
-(E.7 vocabulary — recorded as debt, §9). Must NOT change: any other
-restored field, latest-wins semantics, the digest. Depends on C4.
+c5_prediction_transport.py`. **Must NOT (ruling, verbatim)**: redesign
+generic resume; change latest-wins policy; change chain-incumbent
+restoration; touch unrelated workflow state; introduce a new memory store;
+introduce a second restore path; introduce a task-specific resume branch.
+NOT carried: `vocab_link_confirmations` (E.7 vocabulary — not part of the
+prediction-memory contract; recorded as Step-10 debt, parent §19).
+Depends on C4.
 
 **Implementation plan.**
 - [ ] Re-read `core/resume.py:101-214, :838-1134, :1393-1447`,
       `run_one_iteration.py:2030-2061, :2122-2126`,
-      `model_exploration.py:1949-2002, :2724-2746`.
-- [ ] Typed `PredictionLedger` (small frozen model in
-      `agent/schemas/interpretation.py`: the five carried values) built
-      from a digest; loader + restore + forward + loop carry.
+      `model_exploration.py:1949-2002, :2724-2746`; confirm the fingerprint
+      loader's malformed-digest contract and mirror it exactly.
+- [ ] `PredictionMemory` carrier; loader + `RestoredState` field + forward
+      + loop carry + first-input seeding — each a few additive lines beside
+      its fingerprint-history sibling.
 
 **Validation plan.**
 - [ ] Unit: loop carry in-process (iteration 2's input equals iteration
-      1's digest fields); restore latest-wins (two committed digests; the
-      later wins; a legacy digest without the fields ⇒ legacy re-base
-      input; a missing digest ⇒ defaults); forward from
-      `run_one_iteration.py` (arg plumbing test pattern of the fingerprint
-      history).
-- [ ] Negative: a digest with the semantics id but malformed pools ⇒
-      named skip to the previous digest (same contract as the fingerprint
-      loader — confirm at re-read).
-- [ ] Backward-compat: every existing resume test green; C1a oracle
-      unchanged (the oracle never passes through the workflow).
+      1's digest's four values); restore latest-wins (two committed
+      digests; the later wins; a legacy digest without the
+      `_by_semantics` keys ⇒ legacy dict/scalar restored + empty v2 dicts;
+      a missing digest ⇒ defaults); forward from `run_one_iteration.py`
+      (the fingerprint-history arg-plumbing test pattern).
+- [ ] Negative: a digest with malformed pools ⇒ the SAME contract as the
+      fingerprint loader (confirmed at re-read; named); the restore never
+      touches any other `RestoredState` field (pinned: every other field
+      equals the pre-09a restore on the same fixture workspace).
+- [ ] Backward-compat: every existing resume / workflow test green; C1a
+      oracle unchanged (it never passes through the workflow).
 
 **Acceptance criteria.**
 - [ ] A two-iteration pseudo chain accumulates a v2 pool of size 2 with
-      version-pure accuracy; a chain whose first digest is legacy shows
-      `legacy_prediction_pool_size` preserved and the v2 pool starting
-      from the first 09a iteration.
+      v2-only accuracy and an untouched legacy dict; a chain whose first
+      digest is legacy shows `prediction_pool_sizes.legacy_v1` preserved and
+      the v2 pool starting at the first 09a iteration; exactly ONE new
+      `RestoredState` field; no new loader beyond the one sibling of the
+      fingerprint loader.
 
 **Failure and edge cases.** Missing/legacy digests; latest-wins across
-gaps; forwarding omitted ⇒ defaults (never a crash).
+gaps; forwarding omitted ⇒ defaults (never a crash); malformed pools ⇒
+the fingerprint loader's contract.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/core tests/unit/workflows tests/unit/sdsc_submission_scripts -q > /tmp/09a_c5.log 2>&1; rc=$?`
 
-**Commit boundary.** Transport only; strikable as a unit.
+**Commit boundary.** Narrow transport only; reviewable as "does the
+interpreter's memory ride the existing canonical path and nothing else?".
 
 ---
 
@@ -1449,7 +1579,15 @@ appended; `InterpretationOutput.per_model_secondary_metrics`,
 REC-3 golden regenerated (two appended `InterpretationOutput` names); NEW
 `test_step09a_c6_evidence_projection.py`; secondaries-never-ordered census
 (AST + behavioural); node `.md`. Must NOT change: prompt bytes; ordering;
-any record schema. Depends on C4 (and C5 if present).
+any record schema. **Q-09-7 = B stays binding (ruling §9)** — C6 may add
+the `ModelRunSummary.secondary_metrics` contract, named absence, the
+deterministic rendering-facing evidence shape and L1 fixture population;
+C6 must NOT add `ExperimentRecord` secondary fields, tuner secondary
+evaluation, secondary metric-handle invocation, tuning-output secondary
+transport, workflow secondary binding, or a secondary plugin loader (all
+Step 10). The production builder therefore has NO production secondary
+values to project before Step 10 — represented honestly as an empty
+collection; **no placeholder fake values**. Depends on C5.
 
 **Implementation plan.**
 - [ ] Re-read the builder and `run()`'s `new_stats` block (`:1186-1208`).
@@ -1569,17 +1707,17 @@ require.
 | `test_node_public_boundary.py` acyclicity + `__all__` halves (tuner-hardcoded) | **UPGRADE** → generic over nodes with private modules | C1b |
 | `test_health_feedback_p3v1_audit.py:63-73` (single-file scan) | **UPGRADE** → node package | C1b |
 | `test_vocab_feedback.py:19`, `test_prediction_evaluation_join.py:38` imports of `evaluate_prediction` | **MOVE** to `nodes.result_interpretation_agent.prediction` | C1b |
-| REC-3 `rec3_schema_field_lists.json` | **REGENERATE** in C2 (+2), C4 (+5), C6 (+2), each delta named | C2/C4/C6 |
+| REC-3 `rec3_schema_field_lists.json` | **REGENERATE** in C2 (+1 `InterpretationOutput` name and +1 `HyperparamTuningOutput` name), C4 (+4), C6 (+2) — `InterpretationOutput` 35 → 42 names, `HyperparamTuningOutput` 46 → 47, each delta named | C2/C4/C6 |
 | `test_prediction_evaluation_join.py:166-187` key-list pin | **KEEP** (description updated with the code) | C4 |
 | `test_vocab_feedback.py TestEvaluatePrediction` | **UPGRADE** (signature; uncomputable ⇒ `unevaluated`; values unchanged — positive sota agrees) | C4 |
 | `test_vocab_feedback.py TestGenerateDiscoveries`, `test_prediction_evaluation_join.py` join | **UPGRADE** (pass `order`; `unevaluated` case added) | C3/C4 |
 | `test_stability_filter.py` | **UPGRADE** (pass `order`; lower-direction Top-K added) | C3 |
 | `tests/unit/workflows/test_knowledge_cache_cap.py` | **UPGRADE** (pass `order`; lower-direction + None-last pins) | C3 |
-| `test_interpretation_agent.py:1186-1196` degraded carry-forward | **UPGRADE** (version partition on the degraded path; v2 passthrough added) | C4 |
+| `test_interpretation_agent.py:1186-1196` degraded carry-forward | **KEEP + EXTEND** (legacy dict/scalar still pass through unchanged — the per-field rule never re-bases; the two `_by_semantics` dicts are asserted to pass through too) | C4 |
 | `test_step06_c5_boundary_and_structure.py` MIGRATED list | **EXTEND** with interpreter literals; NOT_REACHED untouched | C3 |
 | all `InterpretationInput` constructions with scores (unit + pr3 scripts + protocol tests) | **UPGRADE** (supply `metric_spec` via `tests/helpers/metric_fixtures.shipped_spec()` / the fixture stamp) | C2 |
 | every `tuning_output_to_model_run_summary(...)` call in tests (`test_round_health_summary.py`, `test_round_ordering_summary.py`, `test_health_prompt_parity.py`, `test_health_prompt_rendering.py`, `test_health_feedback_outputs.py`, `tests/unit/agent/schemas/{test_health_feedback_p3v1_audit,test_ordering_not_executed}.py`, `tests/unit/sdsc_submission_scripts/test_health_feedback_workspace_cases.py`, `tests/integration/workflows/test_ordering_resolution_pseudo.py`) | **UPGRADE** (pass `order=MetricOrder(shipped_spec())`; assertions unchanged under `higher`) | C3 |
-| `tests/integration/workflows/test_vocab_accumulation.py:886-1110` | **UPGRADE** (thread the semantics marker); manual pseudo run recorded, never CI | C4 |
+| `tests/integration/workflows/test_vocab_accumulation.py:886-1110` | **UPGRADE** (carry the `_by_semantics` dicts between its two hand-chained runs; assert the v2 pool `{refuted:1}` → `{confirmed:1, refuted:1}` / accuracy 0.5 and the legacy dict untouched); manual pseudo run recorded, never CI | C4 |
 | `tests/integration/protocols/test_tune_to_interp*.py` | **UPGRADE** (stamped outputs); manual pseudo run recorded | C2 |
 | everything else in §2.7 | **KEEP** | — |
 
@@ -1597,30 +1735,34 @@ runs are manual, recorded in §10, never added to CI.
 
 ## 7. Gate disposition
 
-**Gate 1 — NOT REQUIRED** (parent §17, Q-09-4): no prompt-template or
-prompt-protocol change; the deterministic prompt-CONTENT deltas (proposer
-track record values; the synthesis "Cumulative information gain" input
-value; discovery sentences on uncomputable/now-partial cases) are owned by
-the C1a differential oracle and the C4 tests. Any accidental template byte
-delta is a STOP → operator re-disposition. **Gate 2 — NOT REQUIRED**: no
-data / training / inference / subprocess / lifecycle claim; the tuner's
-only change is one additive output field (unit-proven through the pseudo
-run). No Step-06/07/08 Gate is re-run.
+**Gate 1 — NOT REQUIRED** (parent §17, Q-09-4; re-confirmed by the final
+ruling §10): no prompt-template or prompt-protocol change; the
+deterministic prompt-CONTENT deltas (proposer track-record values — v2-only
+accuracy beside the legacy `N`; the synthesis "Cumulative information gain"
+legacy input value; discovery sentences on uncomputable/now-partial cases)
+are owned by the C1a differential oracle and the C4 tests. A real LLM Gate
+is NOT added merely because corrected prediction state can later affect
+proposer prompt content — 09a changes deterministic state semantics, not
+the LLM prompt/protocol; 09b owns the real LLM Gate. Any accidental
+template byte delta is a STOP → operator re-disposition. **Gate 2 — NOT
+REQUIRED**: no data / training / inference / subprocess / lifecycle claim;
+the tuner's only change is one additive output field (unit-proven through
+the pseudo run). No Step-06/07/08 Gate is re-run. No local
+repository-wide full suite by default; no manual duplicate full CI.
 
-## 8. Open operator questions
+## 8. Operator questions — ALL RESOLVED (final ruling 2026-08-19)
 
-| id | question | options | recommendation |
-|---|---|---|---|
-| **Q-09a-1** (blocks C5) | E2: no production carry-forward/restore of the prediction pool exists. Does 09a wire the transport of the versioned pool (workflow loop carry + `RestoredState` latest-wins restore + `run_one_iteration` forward — the V19-PR3 fingerprint-history precedent; bounded, additive, touching `core/resume.py`), or is transport Step 10's (09a lands the contract; pools stay per-iteration in production, stated honestly by `prediction_pool_size`)? | A wire in C5 · B Step 10 (strike C5; parent §19 row) | **A** — the frozen §8 rule needs an object; the precedent for interpreter-owned carried memory is the feature PR wiring it; cost ≈ 60 additive lines + tests. If B, C5 is struck wholesale and nothing else changes |
-| **Q-09a-2** (blocks C4) | §8 field semantics: (a) existing field names = the CURRENT semantics version's pool/sum/accuracy, legacy pool preserved in additive `legacy_*` fields, a legacy input is re-based once; (b) literal: existing fields = the v1 pool frozen forever, new versioned fields carry v2 | a · b | **(a)** — the proposer reads `N` from `prediction_outcomes_history` and the fractions from `scientific_accuracy` (`:1146-1165`); under (b) it would render `N=0` beside a non-empty accuracy without a template change. (a) keeps every field name's meaning stable and the rendering coherent; legacy values are preserved byte-identically under `legacy_*` |
-| **Q-09a-3** (confirm) | The proposer's "Prediction Track Record" template is NOT changed in 09a (the digest carries the semantics id; any proposer label is a prompt-template change → Gate-1 territory, 09b/Step 10) | yes · no | **yes** |
-| **Q-09a-4** (confirm; blocks C2 detail) | Enforce the fail-closed spec rule (presence iff ordering evidence; identity agreement) at `InterpretationInput` construction (schema = completeness contract; the protocol must map the field) rather than inside `run()` | schema · run() | **schema** |
-| **Q-09a-5** (confirm) | E1 sites (`_render_health_summary_section:220`, `generate_discoveries:444/450/455`) are 09a C3's; the discoveries band keeps its 0.05 width (not retuned, not tied to `partial_margin`) but becomes sign-safe; the "(+delta)" text becomes `abs` | yes · no | **yes** (parent completeness erratum; no retuning) |
-| **Q-09a-6** (confirm) | Operational consequence: a chain resumed across the 09a boundary fails closed at its first interpretation (legacy outputs carry no spec; R-09-3 forbids a fresh derivation at the entry points) — a fresh chain is required | acknowledge | — |
-| **Q-09a-7** (confirm) | The CI-exercised pr3_l2 calibration scripts build SYNTHETIC tuning outputs in code (`scripts/pr3_l2_calibration/fixtures.py:120-131`); to keep `test_preflight_all_invariants` green under the fail-closed rule, that fixture stamps `metric_spec=derive_tidmad_metric_spec(TIDMAD_PROFILE)` on its outputs — the fixture plays the TUNER's writer role in a simulation and calls the SAME Step-06 constructor the tuner calls; the two entry points then reconcile like the workflow. Is this acceptable as "not a derivation site" (the only alternatives are a hand-copied TIDMAD declaration literal — a second copy — or reading `examples/tidmad/resolved/metric_spec.json` from a `scripts/` module — an `examples/` dependency)? | stamp via the Step-06 constructor · other | **stamp** (named in the C2 ledger as the ONLY new constructor call in the tree; production call sites of `derive_tidmad_metric` unchanged at three) |
+| id | question (as posed at rev 1) | RULING |
+|---|---|---|
+| **Q-09a-1** | transport of the versioned prediction pool — 09a or Step 10? | **A, NARROWLY** — C5 (§4.6): interpreter-owned fields only, through the existing canonical digest → workflow carry → `RestoredState` latest-wins path; generic resume policy untouched; parent factual erratum applied |
+| **Q-09a-2** | version-partition field semantics | **exact per-field table (§3.4)**: `prediction_outcomes_history` stays the legacy/v1 pool; `prediction_outcomes_by_semantics[V2]` owns v2 counts; `scientific_accuracy` v2-only + labelled by `prediction_evaluation_semantics`; `prediction_pool_sizes` explicit; legacy gain preserved in `cumulative_information_gain`, v2 gain in `cumulative_information_gain_by_semantics[V2]`; never pooled. The rev-1 "existing names = current pool" reading is REJECTED |
+| **Q-09a-3** | proposer "Prediction Track Record" template untouched? | **CONFIRMED** — no template/protocol change; honest statement that deterministic CONTENT changes through the existing renderer; a template edit needed for an honest v1/v2 distinction ⇒ STOP |
+| **Q-09a-4** | fail-closed spec rule at `InterpretationInput` construction? | **CONFIRMED** — required spec + exact id/direction agreement before ordering / active-model selection / prediction / rendering / any LLM call; no fallback; named negative owners (missing spec, id mismatch, direction mismatch, multi-output disagreement) |
+| **Q-09a-5** | the four extra direction sites + the discoveries 5% band | **CONFIRMED, source-bounded** — C3; margin 0.05 exact; direction/negative-reference correction only; no third counter; hand-computed positive/negative × higher/lower cases; census counts reconciled (§2.2) |
+| **Q-09a-6** | legacy-chain consequence | **ACKNOWLEDGED / FROZEN** — pre-09a score-bearing outputs without `metric_spec` FAIL CLOSED with an actionable refusal; no re-derivation anywhere; fresh/re-produced output is the compatibility path |
+| **Q-09a-7** | the pr3 calibration fixture's spec stamp | **CONFIRMED WITH PRECISE WORDING** — test-fixture construction ("simulated tuner-output writer / fixture stamping"); production census proves ZERO new `derive_tidmad_metric` / `derive_tidmad_metric_spec` production sites; helper unreachable from production |
 
-None of these reopens the parent; Q-09a-1/2 place scope and fix spellings
-the parent left to the child.
+Open operator questions: **0**.
 
 ## 9. Risks
 
@@ -1636,9 +1778,18 @@ the parent left to the child.
 * **R-09a-4 tie/stability drift in extremum migration** — `best`/`worst`
   are first-wins like `max`/`min`; `rank`-keyed stable sorts reproduce the
   old orders; pinned by tie tests under both directions.
-* **R-09a-5 version-partition incoherence** — Q-09a-2 (a); the proposer's
-  rendering stays coherent without a template change; C1a's oracle shows
-  the exact delta.
+* **R-09a-5 version-partition incoherence at the proposer** — the per-field
+  rule (Q-09a-2) means the proposer's existing renderer shows `N` from the
+  LEGACY pool beside a v2-only accuracy; this is a declared deterministic
+  content delta (Q-09a-3), pinned by C1a's oracle; if an honest v1/v2
+  distinction is judged to need a proposer TEMPLATE edit → STOP (never
+  silently moved into 09a); a future proposer-side rendering change is
+  09b/Step-10 prompt work.
+* **R-09a-11 C5 scope creep into resume/workflow architecture** — the
+  ruling's verbatim must-not list is C5's scope statement; acceptance pins
+  exactly ONE new `RestoredState` field and one sibling loader; every other
+  restored field equal to the pre-09a restore on the same fixture
+  workspace; a wider change is a STOP (ruling §13).
 * **R-09a-6 scope creep into secondary transport** — the builder never
   populates secondaries; no record field; no evaluator/loader/binding;
   the C6 negative test pins it with the Step-10 pointer.
@@ -1651,19 +1802,148 @@ the parent left to the child.
   regeneration is a declared delta attributed to a §3 rule (C2, C4, C6);
   an undeclared delta is a STOP.
 * **R-09a-10 E.7 `vocab_link_confirmations` never carried (E2)** — not
-  09a's surface; recorded as debt for Step 10 (workflow transport) in the
-  parent §19 at freeze.
+  part of the prediction-memory contract, so not carried by C5; recorded
+  as Step-10 debt in the parent §19 at freeze.
 
 ## 10. Ledger
 
-*(filled per commit during implementation; empty at DRAFT rev 1)*
+*(filled per commit during implementation; empty at REVISION 2 — FROZEN)*
 
 ### 10.1 C1a — differential digest oracle
 ### 10.2 C1b — node-local extraction
 ### 10.3 C2 — run MetricSpec transport + contract
 ### 10.4 C3 — ordering consumers + census
 ### 10.5 C4 — prediction semantics v2
-### 10.6 C5 — prediction-pool transport (if Q-09a-1 = A)
+### 10.6 C5 — prediction-memory transport (existing canonical path)
 ### 10.7 C6 — evidence projection
 ### 10.8 C7 — three-task rung + docs
 ### 10.9 Final validation + PR + exact-head CI
+
+## 11. Final adversarial consistency pass (ruling §12 — 24 attacks) and freeze record
+
+### 11.1 The 24 attacks, re-read against the FULL child at freeze
+
+1. *Does C1 extraction preserve one main node + the old import surface?*
+   YES — `result_interpretation_agent.py` keeps the class, `run()`, the CLI,
+   the lifecycle; the five production import sites of
+   `tuning_output_to_model_run_summary` (§3.1) resolve through narrow
+   re-exports; moved names are defined once (§4.2 acceptance); the
+   boundary test's outward/inward halves + the generalized acyclicity /
+   `__all__` halves enforce it.
+2. *Exactly ONE production MetricSpec authority?* YES — the tuner's `:541`
+   binding, transported (§3.2); `reconcile_metric_spec` compares
+   transported values, derives nothing.
+3. *Did any compatibility path secretly call `derive_tidmad_metric` again?*
+   NO — the C2 executable census (§4.3 acceptance) pins the production
+   call-site set; the pr3 FIXTURE stamp is test-fixture construction in a
+   module unreachable from production (Q-09a-7).
+4. *Does every score-bearing path fail closed without a stamped spec?*
+   YES — `InterpretationInput` validator (clause a), the builder's own
+   `order` requirement when it would rank (§3.3), `_build_per_model_prompt`
+   flag-ON guard; cold start / scoreless keep the named absence; negative
+   owners named (§4.3).
+5. *Are all discovered direction consumers enumerated exactly once?* YES —
+   §2.2 rows 1–21, each with one migration; the count reconciliation
+   paragraph ties 21 child rows to the parent's 15 (+4 erratum) entries.
+6. *Do lower/higher and positive/negative hand cases prove the census is
+   substantive?* YES — C3 per-site inversion suite under
+   `direction_only_spec()`, tie pins, planted-offender census proof, and
+   the Step-06 C5 MIGRATED-list extension; C4's 20-cell matrix covers all
+   four direction×sign quadrants.
+7. *Does `generate_discoveries` retain exactly the frozen 0.05 margin?*
+   YES — `abs(best - sota) <= 0.05 * abs(sota)`; width unchanged; no
+   retuning; no third counter (§3.3, §4.4, Q-09a-5).
+8. *Does the prediction band retain the parent's exact semantics?* YES —
+   §3.4 reproduces parent §13 ¶1 verbatim (distance/band_width,
+   `is_better`, `<=` inclusive, gain = distance when confirmed).
+9. *Is uncomputable always UNEVALUATED and excluded from all comparable
+   counters/discoveries?* YES — §3.4 table row; `generate_discoveries`
+   explicit branch; E.4 ignores it; mutation (ii) pins it.
+10. *Are v1 and v2 counters/gains never silently pooled?* YES — per-field
+    table (§3.4): legacy dict/scalar copied unchanged; v2 in
+    `_by_semantics` dicts; `prediction_pool_sizes` explicit; mutations (iii)
+    and (iv) pin it; accuracy labelled by `prediction_evaluation_semantics`.
+11. *Does the production lifecycle actually carry the new v2 state after
+    C5?* YES — loop carry + `RestoredState` restore + `run_one_iteration`
+    forward + first-input seeding; two-iteration pseudo-chain acceptance
+    (§4.6).
+12. *Does C5 use the existing canonical workflow/resume path rather than a
+    new memory mechanism?* YES — the digest stays the ONE store;
+    `PredictionMemory` is a carrier; one loader sibling of the fingerprint
+    loader; same latest-wins idiom.
+13. *Does any `RestoredState` change exceed the narrow interpreter-owned
+    fields?* NO — exactly one additive field; every other restored field
+    pinned equal to the pre-09a restore (§4.6 negative).
+14. *Are legacy/pre-09a score-bearing outputs refused rather than
+    re-derived?* YES — Q-09a-6 wording in §4.3; no derivation at
+    interpreter / workflow / CLI / resume / PR3 path.
+15. *Is Q-09-7 = B still intact?* YES — §3.5, §4.7 must-not list; builder
+    projects no secondaries; no record field, evaluator, loader, binding,
+    transport; no placeholder values.
+16. *Are secondary metrics observational only and unable to reach any
+    primary `MetricOrder` consumer?* YES — AST census (no
+    `secondary_metrics` reference in any `order`/`MetricOrder`-consuming
+    function) + behavioural inertness test + planted offender (§4.7).
+17. *Does TIDMAD retain higher-is-better ordering exactly?* YES — the
+    shipped spec is `higher`; every migrated site returns the identical
+    value/order; C1a oracle byte-identical at C3; prompt goldens EXACT
+    throughout.
+18. *Do Pets and DAVIS fixtures remain L1 contract evidence, not maturity
+    inflation?* YES — `_fixture.label = "l1_fixture"`, notes naming "NOT a
+    real tuning output" and "secondaries not evaluated in production
+    (Step 10)"; STATUS rows keep the maturity vocabulary (§3.6, §4.8).
+19. *Are PB-0/PB-7/PB-8 template-byte parity claims scoped correctly
+    against the intended deterministic digest-content changes?* YES — the
+    11 prompt goldens stay byte-identical (templates + fixed-input user
+    prompts); digest/content deltas are owned by the C1a differential
+    oracle and declared per commit (§1 frozen invariants; §7).
+20. *Are every test/census/mutation owner and anti-vacuity proof
+    explicit?* YES — §4 per commit (named owners, planted offenders,
+    recorded mutations); §5 disposition; §6 evidence economy.
+21. *Are C1→C7 semantic boundaries coherent and independently
+    reviewable?* YES — each commit's "Commit boundary" line; dependencies
+    form a chain C1a → C1b → C2 → C3 → C4 → C5 → C6 → C7.
+22. *Does 09a still add zero task-name branches, zero subsystem loaders,
+    zero per-task vocabulary growth?* YES — §3.8 matrix; the only new
+    vocabulary is the two framework version ids.
+23. *Does Step 12 still supply the SAME MetricSpec / interpretation
+    contracts without replacing 09a?* YES — the composition root supplies
+    the same typed `MetricSpec` value to the same carriers (parent §22);
+    no interpreter loader exists to swap.
+24. *Does any main node/module become MORE mixed after this PR?* NO —
+    C1b removes the deterministic pre-computation, the E.4 arithmetic and
+    the evidence projection from `run()`; the helpers file loses the
+    prediction cluster; no new responsibility is added to any main file
+    (the parent §13a.5 discipline).
+
+### 11.2 Numeric reconciliation (ruling §12)
+
+| claim | number | where |
+|---|---|---|
+| interpreter direction-literal sites | **21** child rows = parent 15 table entries (+4 erratum ⇒ 16 entries; band entry expanded to its 3 literals ⇒ 17 rows) + 4 E1 sites | §2.2 |
+| production import sites of `tuning_output_to_model_run_summary` | **5** (workflow, preflight, runner, protocol, package `__init__`) + tests | §3.1 |
+| REC-3 schema-golden regenerations | **3** (C2: +1 `InterpretationOutput`, +1 `HyperparamTuningOutput`; C4: +4; C6: +2) ⇒ `InterpretationOutput` 35 → 42, `HyperparamTuningOutput` 46 → 47; no pin over `InterpretationInput` (21 → 24) or `ModelRunSummary` (30 → 35) | §5 |
+| prompt goldens kept byte-identical | **11** files (PB-0 ×3, flag-ON ×2, PB-7 ×4, PB-8 ×2) | §2.7 |
+| prediction band matrix cells | **20** | §4.5 |
+| production spec-constructor call sites after 09a | **4 modules, unchanged** (tuner, scoring subprocess, sandbox fallback, the metric module's own composition); new production sites: **0** | §4.3 |
+| `RestoredState` additive fields | **1** | §4.6 |
+| git commits / semantic milestones | **8 / 7** (C1a, C1b, C2, C3, C4, C5, C6, C7) | §4 |
+| operator questions open | **0** (7 RESOLVED) | §0.4, §8 |
+
+Zero `SOURCE-INSPECTION REQUIRED` markers; zero unresolved `Q-09a-*`; zero
+"conditional on Q-09a-*"; zero implementation `[x]`.
+
+### 11.3 Freeze record and status sync (ruling §11/§13)
+
+* Child status → **REVISION 2 — FROZEN**; Q-09a-1..7 RESOLVED (§0.4, §8);
+  implementation boxes all `[ ]`.
+* Parent (same freeze commit, NARROW factual erratum — architecture
+  unchanged): §0.3 erratum note; §2.3 census +4 rows; §2.13/§8 prediction-
+  pool carry/restore premise corrected (pre-09a source: none; frozen
+  target: 09a C5 narrow carry/restore); §15 09a surfaces note; §19 rows.
+* Roadmap §15.1 Step-09 row and the README index: DESIGN status only —
+  Step 09 parent FROZEN (rev 2 + Q-09-7 = B); 09a child FROZEN rev 2 /
+  IMPLEMENTATION NOT STARTED; 09b design not yet written. Nothing marks
+  Step 09 implementation started.
+* No implementation code; no Gate 1 / Gate 2 / training / inference / local
+  full suite.
