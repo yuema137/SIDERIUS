@@ -19,6 +19,10 @@ from __future__ import annotations
 
 import pytest
 
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
 from execute_tools.health_checks.config import (
     EFFECTIVE_CONFIG_BASENAME,
@@ -48,6 +52,17 @@ ALL_GATE_IDS = {
     "spectral_peak_ratio_recording",
     "per_file_output_std_recording",
 }
+
+
+_TIDMAD_VALUE_SCALE: dict[str, object] = {
+    VALUE_SCALE_PARAMETER: 40.0 / 128.0,
+    VALUE_SCALE_UNIT_PARAMETER: "mV",
+}
+"""What composition injects for TIDMAD (Step 08b C5).
+
+Supplied explicitly because these tests invoke checks DIRECTLY, bypassing
+composition. A check that scales samples now refuses to guess a physical
+scale rather than falling back to a literal of its own."""
 
 
 @pytest.fixture(autouse=True)
@@ -153,9 +168,17 @@ class TestMaterializeEffectiveConfig:
         assert len(sha) == 64
 
     def test_files_none_materializes_source_unchanged(self, tmp_path):
+        """The ROSTER survives materialization untouched.
+
+        Compared gate-by-gate rather than model-to-model since Step 08b C5:
+        the materialized artifact deliberately carries no `health_policy`
+        (composition already consumed it and baked the result into each
+        gate), so the two models differ in a field whose absence is the
+        point.
+        """
         path, _sha = materialize_effective_config(REPO_DEFAULT_YAML, None, str(tmp_path))
         loaded = load_health_gates_config(path)
-        assert loaded == _repo_config()
+        assert loaded.health_gates == _repo_config().health_gates
 
     def test_reuse_on_identical_inputs(self, tmp_path):
         path1, sha1 = materialize_effective_config(REPO_DEFAULT_YAML, MONITORED, str(tmp_path))
@@ -174,7 +197,11 @@ class TestMaterializeEffectiveConfig:
         src.write_text(open(REPO_DEFAULT_YAML).read())
         ws = tmp_path / "ws"
         materialize_effective_config(str(src), MONITORED, str(ws))
-        src.write_text(src.read_text().replace("min_std_mv: 1.0", "min_std_mv: 2.0"))
+        # Drift a value the framework file actually owns. Since C5 the
+        # thresholds live in the task config, and policy is what this file
+        # carries — flipping a blocking gate's on_fail is exactly the kind
+        # of silent change workspace-immutability exists to catch.
+        src.write_text(src.read_text().replace("on_fail: invalidate_round", "on_fail: continue"))
         with pytest.raises(ValueError, match="source YAML content drifted"):
             materialize_effective_config(str(src), MONITORED, str(ws))
 
@@ -232,7 +259,7 @@ class TestAttemptedOpenSets:
     @pytest.mark.parametrize("check", ALL_CHECKS, ids=lambda c: c.name)
     def test_monitored_files_bound_the_attempted_set(self, check, tmp_path):
         rec = _RecordingCtx(tmp_path)
-        check.run(rec.ctx, {"peek_file_indices": MONITORED})
+        check.run(rec.ctx, {**_TIDMAD_VALUE_SCALE, "peek_file_indices": MONITORED})
         assert rec.requested, f"{check.name} requested no paths at all"
         assert rec.requested <= set(MONITORED), (
             f"{check.name} requested out-of-monitored files: "
@@ -248,7 +275,7 @@ class TestAttemptedOpenSets:
         """Full-scope behavioral identity: no configured list → the
         pre-DS4 range(20) fallback via denoised_filename_fn."""
         rec = _RecordingCtx(tmp_path)
-        check.run(rec.ctx, {})
+        check.run(rec.ctx, {**_TIDMAD_VALUE_SCALE})
         assert rec.requested == set(range(20))
 
     def test_recording_check_prefers_denoised_paths_over_fallback(self, tmp_path):
@@ -260,7 +287,7 @@ class TestAttemptedOpenSets:
             round_index=1,
             denoised_paths={5: str(tmp_path / "d5.h5"), 8: str(tmp_path / "d8.h5")},
         )
-        result = check.run(ctx, {})
+        result = check.run(ctx, {**_TIDMAD_VALUE_SCALE})
         assert result.metrics["n_files_attempted"] == 2
 
     # -- Step 02c C1 / §9 row C2 -------------------------------------------
@@ -292,7 +319,7 @@ class TestAttemptedOpenSets:
         populated = {5: str(tmp_path / "d5.h5"), 8: str(tmp_path / "d8.h5")}
         assert not set(populated) & set(MONITORED), "the two tiers must stay disjoint"
         rec = _RecordingCtx(tmp_path, denoised_paths=populated)
-        check.run(rec.ctx, {"peek_file_indices": MONITORED})
+        check.run(rec.ctx, {**_TIDMAD_VALUE_SCALE, "peek_file_indices": MONITORED})
         assert rec.requested == set(MONITORED), (
             f"{check.name} resolved {sorted(rec.requested)} — the configured "
             f"peek_file_indices {MONITORED} must outrank ctx.denoised_paths "

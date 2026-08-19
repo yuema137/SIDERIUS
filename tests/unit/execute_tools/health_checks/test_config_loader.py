@@ -18,15 +18,28 @@ import textwrap
 import pytest
 from pydantic import ValidationError
 
+from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.config import (
     ActionConfig,
     CheckRef,
     GateConfig,
     HealthChecksConfig,
     clear_health_gates_config_cache,
+    load_composed_health_config,
     load_health_gates_config,
 )
 from execute_tools.health_checks.schemas import GateAction
+
+SHIPPED_GATE_IDS = (
+    "output_diversity_blocking",
+    "output_std_blocking",
+    "amplitude_collapse_blocking",
+    "pearson_dispersion_recording",
+    "spectral_peak_ratio_recording",
+    "per_file_output_std_recording",
+)
+"""TIDMAD's six gates, hardcoded — read back from the loader they would
+compare the composition to itself."""
 
 
 @pytest.fixture(autouse=True)
@@ -231,17 +244,46 @@ class TestLoadHealthGatesConfig:
         assert g.on_pass.action is GateAction.CONTINUE
         assert g.on_fail.action is GateAction.SKIP_ITER
 
-    def test_empty_yaml_produces_empty_config(self, tmp_path):
-        """Empty file → HealthChecksConfig(health_gates=[])."""
+    def test_a_rosterless_file_composes_the_task_roster_and_only_explicit_none_is_empty(
+        self, tmp_path
+    ):
+        """Step 08b C5 — the A/B distinction, at the loader.
+
+        A file carrying no roster is not a statement that there are no gates:
+        after C5 the framework file carries POLICY only, so "no gates here"
+        is the normal case and the roster comes from the task (state A).
+        Declaring that a run has no Health binding at all is a DIFFERENT
+        claim, made explicitly — and the two must not collapse, or a task
+        that deliberately declares no health would silently inherit
+        another's family.
+        """
         p = tmp_path / "empty.yaml"
         p.write_text("")
-        cfg = load_health_gates_config(path=str(p))
-        assert cfg.health_gates == []
+
+        composed = load_health_gates_config(path=str(p))
+        explicit_none, _, _ = load_composed_health_config(str(p), HealthBindingState.EXPLICIT_NONE)
+
+        assert [g.id for g in composed.health_gates] == list(SHIPPED_GATE_IDS)
+        assert explicit_none.health_gates == []
 
     def test_path_override_bypasses_cache(self, tmp_path):
         """Passing ``path=`` should always re-read from disk."""
         p = tmp_path / "hc.yaml"
-        p.write_text("health_gates: []\n")
+        # A file with its OWN roster, so the reload is compared against a
+        # roster rather than against the composed task default.
+        p.write_text(
+            textwrap.dedent(
+                """
+                health_gates:
+                  - id: "g0"
+                    after_round: 1
+                    checks:
+                      - name: output_diversity
+                    on_pass: {action: continue}
+                    on_fail: {action: skip_iter}
+                """
+            ).lstrip()
+        )
         cfg1 = load_health_gates_config(path=str(p))
         p.write_text(
             textwrap.dedent(
@@ -257,8 +299,8 @@ class TestLoadHealthGatesConfig:
             ).lstrip()
         )
         cfg2 = load_health_gates_config(path=str(p))
-        assert cfg1.health_gates == []
-        assert len(cfg2.health_gates) == 1
+        assert [g.id for g in cfg1.health_gates] == ["g0"]
+        assert [g.id for g in cfg2.health_gates] == ["g1"]
 
     def test_default_path_loads_shipped_config(self):
         """The shipped configs/health_checks.yaml must load cleanly and

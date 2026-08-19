@@ -177,17 +177,39 @@ class TestTheProducerRecordsThem:
 
 
 class TestNoConfigWasTouched:
-    def test_the_audited_config_shas_are_unchanged(self):
-        """ACCEPTANCE CRITERION: recording the fields must not shift
-        `health_config_sha256`, or every workspace invariant lock would
-        break at the boundary. These are the exact pre-hotfix values in the
-        audited compatibility map.
-        """
-        from execute_tools.health_checks.candidate_eligibility import legacy_config_body_sha
+    def test_the_audited_compatibility_map_is_unchanged(self, tmp_path):
+        """ACCEPTANCE CRITERION, restated against what it actually protects.
 
-        assert legacy_config_body_sha("configs/health_checks.yaml") == (
-            "3b5521180f5460a4a7aa67ad0ff67701633d75ed8fdcac4277c222b713655b74"
+        The original form asserted that the SHIPPED files still hashed to the
+        audited values — a proxy for "old workspaces keep resolving". Step
+        08b C5 moved the roster into the task config, so the shipped files
+        legitimately hash differently now (Q-08b-2 authorises exactly that,
+        with the fresh-workspace boundary as the mitigation).
+
+        What must never change is the map, and what must never break is a
+        historical artifact. Both are asserted here from FROZEN pre-08b
+        bytes, so this cannot be made green by re-keying the map to today's
+        values — which would silently make every real historical artifact
+        UNKNOWN.
+        """
+        import json
+        from pathlib import Path
+
+        from execute_tools.health_checks.candidate_eligibility import (
+            _LEGACY_ROLES_BY_CONFIG_SHA,
+            legacy_config_body_sha,
         )
-        assert legacy_config_body_sha("configs/health_checks_baseline_observe_mode.yaml") == (
-            "d133a12d3133fb20d632383aa010b1a861fe0fdb6fb6436874b2142d6b5ef58d"
+
+        golden = json.loads(
+            (
+                Path(__file__).resolve().parent / "goldens" / "pre_08b_shipped_configs.json"
+            ).read_text()
         )
+        for key, expected in (
+            ("blocking", "3b5521180f5460a4a7aa67ad0ff67701633d75ed8fdcac4277c222b713655b74"),
+            ("observe", "d133a12d3133fb20d632383aa010b1a861fe0fdb6fb6436874b2142d6b5ef58d"),
+        ):
+            path = tmp_path / f"{key}.yaml"
+            path.write_text(golden[key]["raw"])
+            assert legacy_config_body_sha(str(path)) == expected
+            assert expected in _LEGACY_ROLES_BY_CONFIG_SHA

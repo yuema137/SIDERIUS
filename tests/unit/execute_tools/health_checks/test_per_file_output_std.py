@@ -11,6 +11,10 @@ import json
 import h5py
 import numpy as np
 
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks.per_file_output_std import PerFileOutputStdCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
 
@@ -28,6 +32,23 @@ def _ctx(**overrides) -> HealthCheckContext:
     return HealthCheckContext(**base)
 
 
+TIDMAD_VALUE_SCALE: dict[str, object] = {
+    VALUE_SCALE_PARAMETER: 40.0 / 128.0,
+    VALUE_SCALE_UNIT_PARAMETER: "mV",
+}
+"""The scale composition injects for TIDMAD (Step 08b C5).
+
+These tests assert MILLIVOLT arithmetic, so they now have to say what a
+millivolt is. Before C5 the factor was a module-local literal inside the
+check and every test inherited it silently — which is exactly why no task
+could supply a different one."""
+
+
+def _cfg(**overrides) -> dict:
+    """Check config as composition would build it: scale + the test's keys."""
+    return {**TIDMAD_VALUE_SCALE, **overrides}
+
+
 class TestPerFileOutputStdCheck:
     def test_uniform_std_across_files(self, tmp_path):
         """Three files with the same std → tight distribution."""
@@ -38,7 +59,7 @@ class TestPerFileOutputStdCheck:
             _write_ch1(p, rng.integers(-24, 25, size=10_000, dtype=np.int8))
             paths[i] = str(p)
         ctx = _ctx(denoised_paths=paths)
-        r = PerFileOutputStdCheck().run(ctx, config={"peek_samples": 10_000})
+        r = PerFileOutputStdCheck().run(ctx, config=_cfg(**{"peek_samples": 10_000}))
         assert r.passed is True
         assert r.metrics["n_files_measured"] == 3
         # Std distribution is tight (all ~ same); max - min should be small
@@ -61,7 +82,7 @@ class TestPerFileOutputStdCheck:
         paths[1] = str(p1)
 
         ctx = _ctx(denoised_paths=paths)
-        r = PerFileOutputStdCheck().run(ctx, config={"peek_samples": 10_000})
+        r = PerFileOutputStdCheck().run(ctx, config=_cfg(**{"peek_samples": 10_000}))
         assert r.passed is True
         assert r.metrics["n_files_measured"] == 2
         # Wide distribution: max >> min
@@ -77,7 +98,7 @@ class TestPerFileOutputStdCheck:
                 1: str(tmp_path / "missing1.h5"),
             }
         )
-        r = PerFileOutputStdCheck().run(ctx)
+        r = PerFileOutputStdCheck().run(ctx, config=_cfg())
         assert r.passed is False
         assert r.metrics["n_files_io_failed"] == 2
 
@@ -92,7 +113,7 @@ class TestPerFileOutputStdCheck:
                 1: str(tmp_path / "missing.h5"),
             }
         )
-        r = PerFileOutputStdCheck().run(ctx, config={"peek_samples": 5_000})
+        r = PerFileOutputStdCheck().run(ctx, config=_cfg(**{"peek_samples": 5_000}))
         assert r.passed is True
         assert r.metrics["n_files_measured"] == 1
         assert r.metrics["n_files_io_failed"] == 1
@@ -101,6 +122,6 @@ class TestPerFileOutputStdCheck:
         assert "1" not in per_file
 
     def test_no_files_passes_not_applicable(self):
-        r = PerFileOutputStdCheck().run(_ctx())
+        r = PerFileOutputStdCheck().run(_ctx(), config=_cfg())
         assert r.passed is True
         assert "no files in context" in r.reason

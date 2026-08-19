@@ -16,6 +16,10 @@ import json
 import h5py
 import numpy as np
 
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks.output_std import OutputStdCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
 
@@ -37,6 +41,23 @@ def _per_file(result) -> list[dict]:
     return json.loads(result.metrics["per_file_json"])
 
 
+TIDMAD_VALUE_SCALE: dict[str, object] = {
+    VALUE_SCALE_PARAMETER: 40.0 / 128.0,
+    VALUE_SCALE_UNIT_PARAMETER: "mV",
+}
+"""The scale composition injects for TIDMAD (Step 08b C5).
+
+These tests assert MILLIVOLT arithmetic, so they now have to say what a
+millivolt is. Before C5 the factor was a module-local literal inside the
+check and every test inherited it silently — which is exactly why no task
+could supply a different one."""
+
+
+def _cfg(**overrides) -> dict:
+    """Check config as composition would build it: scale + the test's keys."""
+    return {**TIDMAD_VALUE_SCALE, **overrides}
+
+
 class TestOutputStdCheck:
     def test_fcnet_like_input_passes(self, tmp_path):
         """int8 with wide range (~ +/-24 → std_mv ~ 7.3) passes 1.0 mV floor."""
@@ -45,7 +66,7 @@ class TestOutputStdCheck:
         wide = rng.integers(-24, 25, size=100_000, dtype=np.int8)
         _write_ch1(p, wide)
         ctx = _ctx(denoised_paths={0: str(p)})
-        r = OutputStdCheck().run(ctx)
+        r = OutputStdCheck().run(ctx, config=_cfg())
         assert r.passed is True
         assert _per_file(r)[0]["metric_value"] > 1.0
         assert r.metrics["threshold_mv"] == 1.0
@@ -57,7 +78,7 @@ class TestOutputStdCheck:
         arr[:7] = -68  # 0.007% perturbation, matches agent_012 pattern
         _write_ch1(p, arr)
         ctx = _ctx(denoised_paths={0: str(p)})
-        r = OutputStdCheck().run(ctx)
+        r = OutputStdCheck().run(ctx, config=_cfg())
         assert r.passed is False
         assert _per_file(r)[0]["metric_value"] < 1.0
         # M9: reason no longer contains "output_std_mv" literal; it contains
@@ -74,16 +95,16 @@ class TestOutputStdCheck:
         _write_ch1(p, arr)
         ctx = _ctx(denoised_paths={0: str(p)})
         # First measure without threshold to know the value
-        r0 = OutputStdCheck().run(ctx, config={"min_std_mv": 0.0001})
+        r0 = OutputStdCheck().run(ctx, config=_cfg(**{"min_std_mv": 0.0001}))
         measured = _per_file(r0)[0]["metric_value"]
         # Set threshold above measured → must fail (predicate: m >= threshold)
-        r = OutputStdCheck().run(ctx, config={"min_std_mv": measured * 2})
+        r = OutputStdCheck().run(ctx, config=_cfg(**{"min_std_mv": measured * 2}))
         assert r.passed is False
 
     def test_missing_path_passes_not_applicable(self):
         """No path → passed=True with 'not applicable' reason."""
         ctx = _ctx()
-        r = OutputStdCheck().run(ctx)
+        r = OutputStdCheck().run(ctx, config=_cfg())
         assert r.passed is True
         assert "not applicable" in r.reason
 
@@ -92,7 +113,7 @@ class TestOutputStdCheck:
         and path via the exception message."""
         bogus = tmp_path / "does_not_exist.h5"
         ctx = _ctx(denoised_paths={0: str(bogus)})
-        r = OutputStdCheck().run(ctx)
+        r = OutputStdCheck().run(ctx, config=_cfg())
         assert r.passed is False
         per_file = _per_file(r)
         assert per_file[0]["io_error"] is not None
@@ -109,6 +130,6 @@ class TestOutputStdCheck:
         _write_ch1(p, arr)
         ctx = _ctx(denoised_paths={0: str(p)})
         # Config threshold 100 mV — must fail
-        r = OutputStdCheck().run(ctx, config={"min_std_mv": 100.0})
+        r = OutputStdCheck().run(ctx, config=_cfg(**{"min_std_mv": 100.0}))
         assert r.passed is False
         assert r.metrics["threshold_mv"] == 100.0

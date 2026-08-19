@@ -26,6 +26,10 @@ from __future__ import annotations
 import pytest
 
 from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks.pearson_dispersion import PearsonDispersionCheck
 from execute_tools.health_checks.per_file_output_std import PerFileOutputStdCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
@@ -36,6 +40,17 @@ RECORDING_CHECKS = [
     SpectralPeakRatioCheck(),
     PerFileOutputStdCheck(),
 ]
+
+
+_TIDMAD_VALUE_SCALE: dict[str, object] = {
+    VALUE_SCALE_PARAMETER: 40.0 / 128.0,
+    VALUE_SCALE_UNIT_PARAMETER: "mV",
+}
+"""What composition injects for TIDMAD (Step 08b C5).
+
+Supplied explicitly because these tests invoke checks DIRECTLY, bypassing
+composition. A check that scales samples now refuses to guess a physical
+scale rather than falling back to a literal of its own."""
 
 
 class _RecordingCtx:
@@ -84,7 +99,7 @@ class TestAllFilesTracksTheDeclaredTopology:
         )
         rec = _RecordingCtx(tmp_path)
         with bind_dataset_profile(profile):
-            check.run(rec.ctx, {})
+            check.run(rec.ctx, {**_TIDMAD_VALUE_SCALE})
         assert rec.requested == set(range(num_files)), (
             f"{check.name} evaluated {sorted(rec.requested)} — the all-files "
             f"tier must derive from the bound profile's num_files={num_files}, "

@@ -12,6 +12,10 @@ import h5py
 import numpy as np
 import pytest
 
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks.schemas import HealthCheckContext
 from execute_tools.health_checks.spectral_peak_ratio import SpectralPeakRatioCheck
 
@@ -29,6 +33,23 @@ def _ctx(**overrides) -> HealthCheckContext:
     return HealthCheckContext(**base)
 
 
+TIDMAD_VALUE_SCALE: dict[str, object] = {
+    VALUE_SCALE_PARAMETER: 40.0 / 128.0,
+    VALUE_SCALE_UNIT_PARAMETER: "mV",
+}
+"""The scale composition injects for TIDMAD (Step 08b C5).
+
+These tests assert MILLIVOLT arithmetic, so they now have to say what a
+millivolt is. Before C5 the factor was a module-local literal inside the
+check and every test inherited it silently — which is exactly why no task
+could supply a different one."""
+
+
+def _cfg(**overrides) -> dict:
+    """Check config as composition would build it: scale + the test's keys."""
+    return {**TIDMAD_VALUE_SCALE, **overrides}
+
+
 class TestSpectralPeakRatioCheck:
     def test_synthetic_sinusoid_produces_finite_high_ratio(self, tmp_path):
         """Sinusoid at 1 kHz: PSD peak is dominant → ratio finite and high."""
@@ -39,7 +60,7 @@ class TestSpectralPeakRatioCheck:
         p = tmp_path / "sin.h5"
         _write_ch1(p, sig)
         ctx = _ctx(denoised_paths={0: str(p)})
-        r = SpectralPeakRatioCheck().run(ctx, config={"peek_samples": n})
+        r = SpectralPeakRatioCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True  # recording-only
         per_file = json.loads(r.metrics["ratio_per_file_json"])
         # For a strong pure sinusoid the peak dominates the neighborhood.
@@ -54,7 +75,7 @@ class TestSpectralPeakRatioCheck:
         p = tmp_path / "const.h5"
         _write_ch1(p, np.full(n, -65, dtype=np.int8))
         ctx = _ctx(denoised_paths={0: str(p)})
-        r = SpectralPeakRatioCheck().run(ctx, config={"peek_samples": n})
+        r = SpectralPeakRatioCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True  # recording-only
         per_file = json.loads(r.metrics["ratio_per_file_json"])
         # Constant signal → noise window at subnormal → guarded to NaN
@@ -67,12 +88,12 @@ class TestSpectralPeakRatioCheck:
                 1: str(tmp_path / "missing1.h5"),
             }
         )
-        r = SpectralPeakRatioCheck().run(ctx)
+        r = SpectralPeakRatioCheck().run(ctx, config=_cfg())
         assert r.passed is False
         assert r.metrics["n_files_io_failed"] == 2
 
     def test_no_files_passes_not_applicable(self):
-        r = SpectralPeakRatioCheck().run(_ctx())
+        r = SpectralPeakRatioCheck().run(_ctx(), config=_cfg())
         assert r.passed is True
         assert "no files in context" in r.reason
 
@@ -82,7 +103,7 @@ class TestSpectralPeakRatioCheck:
         p = tmp_path / "n.h5"
         _write_ch1(p, rng.integers(-40, 41, size=n, dtype=np.int8))
         ctx = _ctx(denoised_paths={0: str(p)})
-        r = SpectralPeakRatioCheck().run(ctx, config={"peek_samples": n})
+        r = SpectralPeakRatioCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True
         # Summary stats present because at least one file measured
         assert "ratio_mean" in r.metrics

@@ -73,7 +73,10 @@ EXPECTED = {
     "output_std": {
         "consumes_view": "tidmad.int8_prefix_peek",
         "required_context_inputs": ("denoised_source",),
-        "fact_axes": (("encoding_family", "int8_symbol_stream"),),
+        "fact_axes": (
+            ("encoding_family", "int8_symbol_stream"),
+            ("value_scale_unit", None),
+        ),
         "threshold_parameter_names": ("min_std_mv",),
     },
     "amplitude_collapse": {
@@ -88,6 +91,7 @@ EXPECTED = {
         "fact_axes": (
             ("encoding_family", "int8_symbol_stream"),
             ("file_group_size", None),
+            ("value_scale_unit", None),
         ),
         "threshold_parameter_names": (),
     },
@@ -98,6 +102,7 @@ EXPECTED = {
         "fact_axes": (
             ("encoding_family", "int8_symbol_stream"),
             ("sampling_frequency_hz", None),
+            ("value_scale_unit", None),
         ),
         "threshold_parameter_names": (),
     },
@@ -107,6 +112,7 @@ EXPECTED = {
         "fact_axes": (
             ("encoding_family", "int8_symbol_stream"),
             ("file_group_size", None),
+            ("value_scale_unit", None),
         ),
         "threshold_parameter_names": (),
     },
@@ -117,6 +123,17 @@ def _ctx(**overrides) -> HealthCheckContext:
     base = {"model_name": "m", "run_name": "r", "round_index": 1}
     base.update(overrides)
     return HealthCheckContext(**base)
+
+
+def _bound_tidmad_facts() -> TaskHealthFacts:
+    """TIDMAD's DECLARED health facts, read from its task health config."""
+    import yaml
+
+    from execute_tools.health_checks._composition import LEGACY_DEFAULT_TASK_HEALTH_CONFIG
+    from execute_tools.health_checks._task_health_config import TaskHealthConfig
+
+    with open(LEGACY_DEFAULT_TASK_HEALTH_CONFIG) as handle:
+        return TaskHealthConfig.model_validate(yaml.safe_load(handle)).resolved_facts()
 
 
 def _full_ctx() -> HealthCheckContext:
@@ -153,16 +170,30 @@ class TestDeclarationContent:
         }
         assert needs_target == {"pearson_dispersion"}
 
-    def test_no_check_declares_a_value_scale_fact(self):
-        """The mV scale is check-local, not a task declaration (C2 finding 2).
+    def test_exactly_the_scale_consuming_checks_declare_the_value_scale_axis(self):
+        """08a's guard, INVERTED at 08b C5 rather than deleted.
 
-        Requiring it would make the std checks inapplicable under TIDMAD,
-        because the profile declares no scale unit — a parity break wearing
-        a declaration's clothes. Ownership moves with the thresholds in 08b.
+        08a asserted that NO check declared this axis, because the mV factor
+        was a check-local literal that nothing declared — requiring the axis
+        would have flipped TIDMAD's std checks to inapplicable. C5 moved the
+        factor and its unit into the task's own config, so the requirement
+        is now both true and load-bearing.
+
+        The invariant is a BICONDITIONAL, which is what makes it worth
+        keeping: a check that scales samples must declare the axis, and a
+        check that does not must not — otherwise it would report itself
+        inapplicable for a property it never uses.
         """
+        scale_consuming = {
+            "output_std",
+            "per_file_output_std",
+            "pearson_dispersion",
+            "spectral_peak_ratio",
+        }
         for cls in SHIPPED_CHECKS:
             axes = {r.axis for r in cls.declaration.required_facts}
-            assert "value_scale_unit" not in axes, cls.name
+            declares = "value_scale_unit" in axes
+            assert declares is (cls.name in scale_consuming), cls.name
 
 
 class TestDeclarationsMatchWhatTheCheckReads:
@@ -271,10 +302,25 @@ class TestTheAxisCutsBothWays:
     )
 
     @pytest.mark.parametrize("check_cls", SHIPPED_CHECKS, ids=lambda c: c.name)
-    def test_every_shipped_check_applies_under_derived_tidmad_facts(self, check_cls):
-        """The parity claim: 08a must not stop any TIDMAD check from running."""
-        verdict = applicability(check_cls.declaration, resolve_health_facts(), _full_ctx())
+    def test_every_shipped_check_applies_under_the_bound_tidmad_facts(self, check_cls):
+        """The parity claim: no shipped TIDMAD check may stop running.
+
+        Reads the facts TIDMAD now DECLARES in its own health config, which
+        is what production resolves since C5. The regime-A derivation cannot
+        establish `value_scale_unit` — nothing in the dataset profile says
+        what a sample is worth — which is precisely why ownership moved.
+        """
+        verdict = applicability(check_cls.declaration, _bound_tidmad_facts(), _full_ctx())
         assert verdict.applicable is True, verdict.reason
+
+    def test_the_regime_a_derivation_still_cannot_establish_the_scale(self):
+        """Records WHY the facts above are declared rather than derived.
+
+        If this ever starts passing, some profile field began claiming a
+        physical scale it does not own, and the task config would no longer
+        be the single source.
+        """
+        assert resolve_health_facts().value_scale_unit is None
 
     @pytest.mark.parametrize("check_cls", SHIPPED_CHECKS, ids=lambda c: c.name)
     def test_every_shipped_check_is_inapplicable_under_a_declared_float_task(self, check_cls):

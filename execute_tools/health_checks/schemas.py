@@ -110,6 +110,62 @@ class CandidateHealthValidity(StrEnum):
 # ---------------------------------------------------------------------------
 
 
+class PerSampleEvidence(StrEnum):
+    """Whether the round's metric produces per-sample evidence — D18.
+
+    **The distinction this exists to preserve.** Step 06 already states it at
+    the producer: ``MetricResult.per_sample`` is ``None`` for a scalar-only
+    metric, and the Pets ``AccuracyMetric`` says so explicitly — "no per-file
+    vector concept exists here". The tuner's bridge then collapsed it with
+    ``list(metric_result.per_sample or [])``, so a scalar-only task presented
+    per-file checks with ``[]`` — indistinguishable from a task that has
+    per-file evidence and happens to have none this round.
+
+    That is not a cosmetic loss. A check handed ``[]`` reports "no files" and
+    PASSES, so "this question does not arise for this task" is recorded as
+    health. This carries the producer's statement across the bridge intact so
+    the engine can answer ``INAPPLICABLE`` instead.
+
+    **No second flag is invented** (invariant 16): these three values are a
+    faithful transport of what ``per_sample`` already says, and Step-06
+    arithmetic is untouched. Health consumes the CAPABILITY only — never the
+    golden metric scalar.
+    """
+
+    AVAILABLE = "available"
+    """The metric produced per-sample evidence. It may still be empty — that
+    is ``file_vector``'s question, deliberately a different one."""
+
+    SCALAR_ONLY = "scalar_only"
+    """The metric declares that no per-sample concept exists for this task.
+    A positive statement, not an absence."""
+
+    UNDECLARED = "undeclared"
+    """Nothing was stated. The default, so every pre-D18 context and every
+    pre-scoring gate keeps its exact meaning.
+
+    **Absence is not scalar-only and must never be inferred as it.** A
+    context that says nothing has not told us the task has no per-sample
+    concept; it has told us nothing."""
+
+    @classmethod
+    def for_per_sample(cls, per_sample: list[float | None] | None) -> PerSampleEvidence:
+        """Read Step 06's existing statement — the ONE place that maps it.
+
+        ``MetricResult.per_sample`` already means what this enum says:
+        ``None`` for a scalar-only metric, a list otherwise. Defined here
+        rather than inline at the tuner bridge so there is exactly one
+        spelling of the mapping; a second site could disagree, and the
+        disagreement would be invisible because both would produce a valid
+        member.
+
+        An EMPTY list is ``AVAILABLE``. The metric produces per-sample
+        evidence and produced none this round, which is a different claim
+        from having no per-sample concept — the distinction D18 exists for.
+        """
+        return cls.SCALAR_ONLY if per_sample is None else cls.AVAILABLE
+
+
 class HealthCheckContext(BaseModel):
     """Shared context passed to every health check skill.
 
@@ -209,7 +265,21 @@ class HealthCheckContext(BaseModel):
         description=(
             "Per-file PSD magnitudes from the current scoring run. None "
             "entries mark files outside the sample set. Post-scoring "
-            "checks read this; pre-scoring checks do not."
+            "checks read this; pre-scoring checks do not.\n\n"
+            "An EMPTY list means 'nothing to read here'. It does NOT mean "
+            "the task has no per-sample concept — that is a different "
+            "statement and lives in ``per_sample_evidence`` (D18)."
+        ),
+    )
+    per_sample_evidence: PerSampleEvidence = Field(
+        default=PerSampleEvidence.UNDECLARED,
+        description=(
+            "Whether this round's metric produces per-sample evidence at all "
+            "(Step 08b C6 / D18). A TYPED statement, because the alternative "
+            "— an empty ``file_vector`` — cannot distinguish 'this task has "
+            "no per-file concept' from 'it has one and it is empty', and a "
+            "check handed the empty list answers the wrong question "
+            "confidently."
         ),
     )
     denoising_score: float | None = Field(
@@ -653,6 +723,7 @@ CONTEXT_INPUT_PREDICATES: dict[str, Callable[[HealthCheckContext], bool]] = {
     "target_source": lambda ctx: ctx.target_path_fn is not None,
     "file_vector": lambda ctx: bool(ctx.file_vector),
     "denoising_score": lambda ctx: ctx.denoising_score is not None,
+    "per_sample_evidence": lambda ctx: ctx.per_sample_evidence is PerSampleEvidence.AVAILABLE,
 }
 """Logical context inputs a check may declare, and how presence is decided.
 
@@ -738,7 +809,14 @@ class TaskHealthFacts(BaseModel):
     engine only compares.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # ``extra="forbid"`` for the same reason ``FactRequirement`` rejects an
+    # unknown axis: a typo'd axis that is silently DROPPED leaves the task
+    # declaring nothing about it, so every check requiring that axis reports
+    # itself inapplicable forever and looks like a deliberate opt-out. That
+    # was harmless while these facts were only ever derived in-repo from a
+    # resolved profile; Step 08b makes the vocabulary externally AUTHORABLE,
+    # where a hand-written ``encodng_family`` is exactly the expected slip.
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     encoding_family: str | None = Field(
         default=None,
@@ -816,6 +894,24 @@ class CheckInputDeclaration(BaseModel):
             "engine never interprets, branches on, or enumerates it. 08a's "
             "six declare TIDMAD-family keys; the standard capabilities ship "
             "in 08c."
+        ),
+    )
+    requires_view: bool = Field(
+        default=False,
+        description=(
+            "Whether this check can only run when a bound provider supplies "
+            "``consumes_view`` (Step 08b C3).\n\n"
+            "The two fields answer different questions, which is why both "
+            "exist. ``consumes_view`` NAMES the capability; this says whether "
+            "the check is helpless without it. 08a's seven built-ins name a "
+            "capability and still read their own artifacts, so they keep the "
+            "default and are invoked through the unchanged "
+            "``run(ctx, config)`` path — a check that never heard of views is "
+            "called exactly as before, at runtime, not merely by relying on a "
+            "parameter default.\n\n"
+            "``True`` makes the binding MANDATORY: if no bound provider "
+            "advertises the key, startup fails closed (§3.2). That is a "
+            "configuration error and must never become a Health verdict."
         ),
     )
     required_context_inputs: tuple[str, ...] = Field(

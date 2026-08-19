@@ -134,7 +134,11 @@ class TestTheDeclarationMustMatchTheConfig:
         config is UNKNOWN, and UNKNOWN is not a licence to assume."""
         import yaml
 
-        body = yaml.safe_load(open(BLOCKING, encoding="utf-8"))
+        from execute_tools.health_checks.config import load_health_gates_config
+
+        # Step 08b C5: the COMPOSED roster — the framework file now carries
+        # policy only, and what a launch validates is the config in effect.
+        body = load_health_gates_config(BLOCKING).model_dump(mode="json")
         for gate in body["health_gates"]:
             gate.pop("gate_role", None)
         body["health_gates"][0]["checks"][0]["config"]["min_unique_ratio"] = 0.123456

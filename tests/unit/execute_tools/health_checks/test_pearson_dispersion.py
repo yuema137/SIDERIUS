@@ -12,6 +12,10 @@ import h5py
 import numpy as np
 import pytest
 
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks.pearson_dispersion import PearsonDispersionCheck
 from execute_tools.health_checks.schemas import HealthCheckContext
 
@@ -31,12 +35,29 @@ def _ctx(**overrides) -> HealthCheckContext:
     return HealthCheckContext(**base)
 
 
+TIDMAD_VALUE_SCALE: dict[str, object] = {
+    VALUE_SCALE_PARAMETER: 40.0 / 128.0,
+    VALUE_SCALE_UNIT_PARAMETER: "mV",
+}
+"""The scale composition injects for TIDMAD (Step 08b C5).
+
+These tests assert MILLIVOLT arithmetic, so they now have to say what a
+millivolt is. Before C5 the factor was a module-local literal inside the
+check and every test inherited it silently — which is exactly why no task
+could supply a different one."""
+
+
+def _cfg(**overrides) -> dict:
+    """Check config as composition would build it: scale + the test's keys."""
+    return {**TIDMAD_VALUE_SCALE, **overrides}
+
+
 class TestPearsonDispersionCheck:
     def test_no_target_path_fn_passes_not_applicable(self, tmp_path):
         d = tmp_path / "d0.h5"
         _write_two_channel(d, np.zeros(100, np.int8), np.zeros(100, np.int8))
         ctx = _ctx(denoised_paths={0: str(d)})
-        r = PearsonDispersionCheck().run(ctx)
+        r = PearsonDispersionCheck().run(ctx, config=_cfg())
         assert r.passed is True
         assert "not applicable" in r.reason
         # No per-file exposure regardless of context state
@@ -65,7 +86,7 @@ class TestPearsonDispersionCheck:
             denoised_paths={0: str(d0), 1: str(d1)},
             target_path_fn=lambda i: str(t0) if i == 0 else str(t1),
         )
-        r = PearsonDispersionCheck().run(ctx, config={"peek_samples": n})
+        r = PearsonDispersionCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True
         assert r.metrics["n_files_measured"] == 2
         # Non-zero dispersion because per-file pearsons differ substantially
@@ -84,7 +105,7 @@ class TestPearsonDispersionCheck:
             denoised_paths={0: str(d0)},
             target_path_fn=lambda i: str(t0),
         )
-        r = PearsonDispersionCheck().run(ctx, config={"peek_samples": n})
+        r = PearsonDispersionCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True
         assert r.metrics["n_files_measured"] == 1
         # Sample stdev is undefined for n=1 → NaN by convention
@@ -99,7 +120,7 @@ class TestPearsonDispersionCheck:
             },
             target_path_fn=lambda i: str(tmp_path / f"tmissing{i}.h5"),
         )
-        r = PearsonDispersionCheck().run(ctx)
+        r = PearsonDispersionCheck().run(ctx, config=_cfg())
         assert r.passed is False
         assert "all 2 files failed I/O" in r.reason
         assert r.metrics["n_files_measured"] == 0
@@ -131,7 +152,7 @@ class TestPearsonDispersionCheck:
                 )
             ),
         )
-        r = PearsonDispersionCheck().run(ctx, config={"peek_samples": n})
+        r = PearsonDispersionCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True
         assert r.metrics["n_files_measured"] == 2
         assert r.metrics["n_files_io_failed"] == 1
@@ -151,13 +172,13 @@ class TestPearsonDispersionCheck:
             denoised_paths={0: str(d0)},
             target_path_fn=lambda i: str(t0),
         )
-        r = PearsonDispersionCheck().run(ctx, config={"peek_samples": n})
+        r = PearsonDispersionCheck().run(ctx, config=_cfg(**{"peek_samples": n}))
         assert r.passed is True
         forbidden_keys = {"pearson_per_file_json", "per_file_pearsons"}
         assert not (set(r.metrics.keys()) & forbidden_keys)
 
     def test_no_files_at_all_passes_not_applicable(self):
         ctx = _ctx(target_path_fn=lambda i: f"/nowhere/{i}.h5")
-        r = PearsonDispersionCheck().run(ctx)
+        r = PearsonDispersionCheck().run(ctx, config=_cfg())
         assert r.passed is True
         assert "no files in context" in r.reason

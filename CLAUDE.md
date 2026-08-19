@@ -505,10 +505,20 @@ SIDERIUS uses a rev-6 **HealthGate** system to catch model failures during
 tuning without polluting the scoring pipeline. Migration landed in PR #101
 (commits 1-6).
 
-- **Config**: `configs/health_checks.yaml` — source of truth for gate
-  POLICY (which check runs at which round, thresholds, `GateAction` on
-  failure, and the DEFAULT monitored-file placement). Edit this file, not
-  code, to change gate behavior. Two things are run-level INPUTS, not YAML
+- **Config (Step 08b, 2026-08-18 — split by OWNER)**:
+  `configs/health_checks.yaml` now carries FRAMEWORK POLICY ONLY — a
+  `health_policy` block mapping each disposition (`blocking` / `recording`)
+  to gate role, cadence, short-circuit, `on_pass`/`on_fail` and per-check
+  policy keys such as `aggregation`. It must NEVER carry a task identity,
+  roster, threshold, peek set or science prose. TIDMAD's roster, thresholds,
+  `peek_samples`, health-peek files, mV value scale and `reason` prose live
+  in **`configs/task_health/tidmad.yaml`**; an external task supplies its own
+  file anywhere on disk and needs no SIDERIUS edit. The two compose
+  deterministically into the same pinned
+  `{workspace}/health_checks_effective.yaml`, and
+  `load_health_gates_config()` returns that COMPOSED result. To change a
+  THRESHOLD edit the task config; to change what a failure DOES edit the
+  framework policy. Two things are run-level INPUTS, not YAML
   (DataScope feature, DS4-DS6): `health_gate_enabled` (subsystem switch)
   and `health_gate_files` (shared monitored-file list overriding every
   check's `peek_file_indices`). At startup the run materializes the
@@ -516,9 +526,13 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   pinned by the run-invariants lock) and every path-based loader reads
   that file — never override the config in memory.
 - **Skills**: `execute_tools/health_checks/` — each check is a
-  `HealthCheckSkill` conforming to `run(ctx, config) -> HealthCheckResult`.
-  Built-in checks: `OutputDiversityCheck`, `AmplitudeCollapseCheck`. Add new
-  checks by registering a subclass and referencing it from the YAML.
+  `HealthCheckSkill` conforming to
+  `run(ctx, config, *, view=None) -> HealthCheckResult`. A check that does
+  not require a view is invoked as `run(ctx, config)` exactly as before;
+  only a view-consuming check receives `view=`. **The `__init__` import list
+  is the built-ins' bootstrap, NOT the extension path** (Step 08b): an
+  external task names plugin files in its own task health config, and they
+  register through the same public `register` / `register_view_provider`.
 - **Gate actions**: `CONTINUE`, `INVALIDATE_ROUND`, `SKIP_TO_FORMAL`,
   `SKIP_ITER`. Severity resolution when multiple gates fire in one round:
   `SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE`.

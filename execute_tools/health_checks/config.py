@@ -23,6 +23,17 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.health_checks._composition import (
+    DEFAULT_DISPOSITION_POLICY,
+    LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
+    DispositionPolicy,
+    HealthBindingState,
+    TaskHealthBinding,
+    body_markers,
+    resolve_composed_gates,
+)
+from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
+from execute_tools.health_checks._task_health_config import TaskHealthConfig
 from execute_tools.health_checks.schemas import GateAction
 
 _DEFAULT_CONFIG_PATH: str = os.path.join("configs", "health_checks.yaml")
@@ -32,10 +43,21 @@ _DEFAULT_CONFIG_PATH: str = os.path.join("configs", "health_checks.yaml")
 # override is applied. See docs/design/enable_partial_file_list.md (DS4).
 EFFECTIVE_CONFIG_BASENAME: str = "health_checks_effective.yaml"
 
-# Marker a check's ``peek_file_indices`` may carry INSTEAD of a literal
-# list, meaning "the bound task's declared health-peek file set"
-# (``DatasetProfile.health_peek_files``). Resolved once, at config
-# validation — see ``CheckRef._resolve_declared_peek_selection``. Step 02c.
+# LEGACY COMPATIBILITY ADAPTER since Step 08b C5. This marker is written into a check's
+# ``peek_file_indices`` and resolved, at config validation, into
+# ``DatasetProfile.health_peek_files`` — the one route by which task-owned
+# data reached the framework config. The task now states its peek set
+# directly in its own health config, so the sentinel has no remaining job
+# and no production YAML uses it (census at C5: zero, and no Python consumer
+# outside this module).
+#
+# It still RESOLVES, and the C5 audit is why: a pre-08b config is re-read to
+# reproduce its recorded ``health_config_sha256`` (see
+# ``candidate_eligibility._LEGACY_ROLES_BY_CONFIG_SHA``), the sha is computed
+# over the RESOLVED document, and those configs carry this marker — so
+# refusing it would make a historical artifact unreadable and turn every
+# affected candidate UNKNOWN. Bounded legacy adapter, never the extension
+# mechanism and never generic task-package vocabulary.
 TASK_HEALTH_PEEK: str = "task_health_peek"
 
 
@@ -65,38 +87,41 @@ class CheckRef(BaseModel):
         description=(
             "Per-gate config override passed to the check's ``run()`` method. "
             "Empty dict (default) means the check uses its own defaults.\n\n"
-            f"``peek_file_indices: {TASK_HEALTH_PEEK}`` resolves to the bound "
-            "task's declared health-peek file set at load time; an explicit "
-            "list is taken verbatim."
+            "``peek_file_indices`` must be an explicit list. Step 08b C5 "
+            f"retired the ``{TASK_HEALTH_PEEK}`` marker: the task states its "
+            "peek set in its own health config and composition injects it."
         ),
     )
 
     @field_validator("config")
     @classmethod
-    def _resolve_declared_peek_selection(cls, value: dict[str, Any]) -> dict[str, Any]:
-        """Resolve the declared-default marker into the task's file set.
+    def _resolve_legacy_peek_marker(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """Resolve the LEGACY marker into the task's file set. Legacy adapter only.
 
-        Which files a task's blocking checks watch is a property of the
-        TASK, not of this file — but the YAML must stay the operator's
-        policy surface, so the marker is written where the literal used to
-        be and is resolved here, at the one point every config object is
-        built through (``model_validate``). Resolution is idempotent: a
-        concrete list is already resolved and passes through untouched.
+        Which files a task's blocking checks watch is a property of the TASK.
+        Until Step 08b C5 this marker was the one route by which that fact
+        reached the framework config; a task now declares its peek set in its
+        own health config and composition injects the resolved list, so **no
+        shipped config uses this any more**.
 
-        Read through ``resolve_dataset_profile`` rather than an argument
-        because Pydantic field validation is precisely the case its
-        docstring reserves the ambient seam for — no caller can reach here.
+        **It resolves rather than raises, and the reason is concrete.** A
+        pre-08b config is re-read to reproduce its recorded
+        ``health_config_sha256`` — that is how
+        ``candidate_eligibility._LEGACY_ROLES_BY_CONFIG_SHA`` recovers the
+        gate roles of a workspace written before ``gate_role`` existed. Those
+        configs carry the marker, and the sha is computed over the RESOLVED
+        document, so refusing to resolve it would make a historical artifact
+        unreadable and turn every such candidate UNKNOWN.
 
-        **Only sites that already carry the key are touched.** A check with
-        no ``peek_file_indices`` keeps falling through to its own tier-2 /
-        tier-3 fallback; injecting the declaration there would move the
-        three recording gates from every file onto a three-file triplet,
-        which is a policy change, not an authority change.
+        Strictly a bounded legacy compatibility adapter (child design §3.8):
+        **not** the extension mechanism, **not** required by any future task,
+        and **not** task-package vocabulary. A new task declares
+        ``health_peek_files`` in its own config instead.
 
-        Any OTHER string is rejected. Left alone, a typo'd marker is
-        truthy, and ``_resolve_indices`` would iterate it CHARACTER by
-        character and peek file indices like ``'t'`` — a silent wrong
-        answer rather than an error.
+        Any OTHER string is rejected. Left alone, a typo'd marker is truthy,
+        and ``_resolve_indices`` would iterate it CHARACTER by character and
+        peek file indices like ``'t'`` — a silent wrong answer rather than an
+        error.
         """
         peek = value.get("peek_file_indices")
         if not isinstance(peek, str):
@@ -104,8 +129,10 @@ class CheckRef(BaseModel):
         if peek != TASK_HEALTH_PEEK:
             raise ValueError(
                 f"peek_file_indices={peek!r} is not a recognized marker. Use "
-                f"an explicit list of file indices, or {TASK_HEALTH_PEEK!r} "
-                f"to inherit the bound task's declared health-peek file set."
+                f"an explicit list of file indices. (The legacy "
+                f"{TASK_HEALTH_PEEK!r} marker is retained only so pre-08b "
+                f"configs stay readable; a task declares health_peek_files in "
+                f"its own health config.)"
             )
         return {
             **value,
@@ -265,9 +292,40 @@ class HealthChecksConfig(BaseModel):
         default_factory=list,
         description=(
             "Ordered list of gates. Empty list = no gates fire "
-            "(``get_gates_for_position`` returns ``[]`` for every round)."
+            "(``get_gates_for_position`` returns ``[]`` for every round).\n\n"
+            "Step 08b: this is the COMPOSED roster in a materialized "
+            "effective config. In the shipped framework config it is empty — "
+            "the roster is task-owned and ``health_policy`` below is what "
+            "the framework contributes."
         ),
     )
+    health_policy: dict[str, DispositionPolicy] = Field(
+        default_factory=dict,
+        # EXCLUDED from serialization on purpose. The policy table is an
+        # INPUT to composition, not part of its result: once gates are
+        # composed, each one carries its resolved role, cadence, actions and
+        # short-circuit directly. Emitting it into the materialized effective
+        # config would put the same facts in the document twice — and would
+        # change the pinned sha of every existing workspace for a change in
+        # nothing.
+        exclude=True,
+        description=(
+            "Disposition → what the framework DOES for gates of that "
+            "disposition (Step 08b §3.7). The operator policy surface: "
+            "gate role, cadence, short-circuit, actions, severity and "
+            "per-check policy keys such as ``aggregation``.\n\n"
+            "Empty means the built-in default table, which reproduces the "
+            "six shipped gates exactly — so a pre-08b custom YAML keeps "
+            "working without acquiring a block it never had. The shipped "
+            "observe-mode config exists precisely because this is data: it "
+            "differs from the production config ONLY in ``on_fail`` for "
+            "blocking gates."
+        ),
+    )
+
+    def resolved_policy(self) -> dict[str, DispositionPolicy]:
+        """The policy table in effect — declared, or the built-in default."""
+        return self.health_policy or DEFAULT_DISPOSITION_POLICY
 
     @model_validator(mode="after")
     def _validate_unique_ids(self) -> HealthChecksConfig:
@@ -297,27 +355,49 @@ class HealthChecksConfig(BaseModel):
 _CACHED_GATES: HealthChecksConfig | None = None
 
 
+def _load_raw_health_config(path: str | None = None) -> HealthChecksConfig:
+    """Parse one config file verbatim. No composition, no binding.
+
+    Split out at Step 08b C5 so composition has something to build FROM
+    without recursing through the public loader.
+    """
+    resolved = path or _DEFAULT_CONFIG_PATH
+    with open(resolved) as f:
+        raw = yaml.safe_load(f) or {}
+    return HealthChecksConfig.model_validate(raw)
+
+
 def load_health_gates_config(path: str | None = None) -> HealthChecksConfig:
-    """Load + validate the rev-6 HealthGate config.
+    """The HealthGate config IN EFFECT — framework policy plus task roster.
 
     Cached per process for the default path. When ``path`` is provided
     the cache is bypassed and the returned config is not cached — so
     tests can point at a fixture YAML without polluting the default
     cache.
 
+    **Step 08b C5: this returns the COMPOSED config.** The framework file
+    now carries policy only, so a loader that returned it verbatim would
+    hand every caller an empty roster. Composition happens here, once, which
+    is why no consumer had to change: `runner`, `candidate_eligibility`,
+    `launch_policy`, `evaluation` and `scripts/run_comparison.py` all keep
+    asking the same question and keep getting the roster that will actually
+    run.
+
+    A file that already carries gates — a materialized effective config, or
+    a pre-08b/custom YAML — is returned untouched (see
+    :func:`load_composed_health_config`).
+
     Args:
         path: Optional override for the config file location.
 
     Returns:
-        A validated ``HealthChecksConfig``.
+        A validated ``HealthChecksConfig`` whose ``health_gates`` are the
+        gates in effect.
     """
     global _CACHED_GATES
     if path is None and _CACHED_GATES is not None:
         return _CACHED_GATES
-    resolved = path or _DEFAULT_CONFIG_PATH
-    with open(resolved) as f:
-        raw = yaml.safe_load(f) or {}
-    cfg = HealthChecksConfig.model_validate(raw)
+    cfg, _task_config, _plugins = load_composed_health_config(path)
     if path is None:
         _CACHED_GATES = cfg
     return cfg
@@ -363,7 +443,10 @@ def apply_monitored_files(config: HealthChecksConfig, files: list[int]) -> Healt
         for check in gate.get("checks", []):
             check_cfg = check.setdefault("config", {})
             check_cfg["peek_file_indices"] = list(normalized)
-    return HealthChecksConfig.model_validate(dumped)
+    # ``health_policy`` is excluded from the dump (see its Field), so it is
+    # carried across explicitly. A "pure transform" that silently dropped a
+    # field would be a worse defect than the one this function fixes.
+    return HealthChecksConfig.model_validate({**dumped, "health_policy": config.health_policy})
 
 
 def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int]) -> None:
@@ -411,11 +494,95 @@ def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int])
         )
 
 
+def _load_task_binding(
+    binding: TaskHealthBinding,
+) -> tuple[TaskHealthConfig | None, tuple[ResolvedHealthPlugin, ...]]:
+    """Resolve an explicit task-health-config binding (§3.10 state C).
+
+    States A and B load nothing: "the caller said nothing" and "the caller
+    says there is none" are different claims, and NEITHER may be satisfied by
+    reading some other task's config. That distinction is what stops a task
+    which deliberately declares no health from silently inheriting another
+    task's family.
+
+    Returns:
+        ``(task_config, resolved_plugins)``; ``(None, ())`` for states A and B.
+    """
+    if binding is HealthBindingState.EXPLICIT_NONE:
+        return None, ()
+    resolved_ref = (
+        LEGACY_DEFAULT_TASK_HEALTH_CONFIG
+        if binding is HealthBindingState.LEGACY_OMITTED
+        else binding
+    )
+
+    from execute_tools.health_checks._plugin_binding import (
+        load_task_health_plugins,
+        resolve_task_health_bindings,
+    )
+
+    with open(resolved_ref) as handle:
+        raw = yaml.safe_load(handle) or {}
+    task_config = TaskHealthConfig.model_validate(raw)  # Phase A
+    config_dir = os.path.dirname(os.path.abspath(resolved_ref))
+    resolved_plugins = load_task_health_plugins(task_config, config_dir)
+    resolve_task_health_bindings(task_config)  # Phase B — fails closed
+    return task_config, resolved_plugins
+
+
+def load_composed_health_config(
+    source_path: str | None = None,
+    task_health_binding: TaskHealthBinding = HealthBindingState.LEGACY_OMITTED,
+) -> tuple[HealthChecksConfig, TaskHealthConfig | None, tuple[ResolvedHealthPlugin, ...]]:
+    """The gate roster in effect, composed from framework policy + task config.
+
+    **The one composition path.** ``load_health_gates_config`` stays a pure
+    loader of whatever file it is given; this is what any caller that needs
+    the ROSTER should use, because after Step 08b C5 the framework file
+    carries policy only and the roster is the task's.
+
+    A config that ALREADY carries gates is returned untouched. That covers
+    two important cases with one rule: a materialized effective config (whose
+    gates are the composed result and must not be composed again), and a
+    pre-08b or hand-written custom YAML that still carries its own roster.
+    Neither should acquire a second roster from a task binding, and the
+    "two authorities" refusal in :func:`resolve_composed_gates` states the
+    same principle from the other side.
+
+    Returns:
+        ``(config, task_config, resolved_plugins)`` — the latter two are
+        ``None``/empty unless a task binding was actually loaded here.
+    """
+    cfg = _load_raw_health_config(source_path)
+
+    if task_health_binding is HealthBindingState.EXPLICIT_NONE:
+        # A NAMED absence outranks whatever the framework file happens to
+        # carry: a task stating it has no Health binding must never acquire
+        # a roster, least of all another task's.
+        return cfg.model_copy(update={"health_gates": []}), None, ()
+
+    if cfg.health_gates:
+        return cfg, None, ()
+
+    task_config, resolved_plugins = _load_task_binding(task_health_binding)
+    if task_config is None:
+        return cfg, None, ()
+    composed = resolve_composed_gates([], task_config, cfg.resolved_policy())
+    return (
+        HealthChecksConfig.model_validate(
+            {"health_gates": composed, "health_policy": cfg.health_policy}
+        ),
+        task_config,
+        resolved_plugins,
+    )
+
+
 def materialize_effective_config(
     source_path: str | None,
     files: list[int] | None,
     workspace: str,
     resolved_scope: list[int] | None = None,
+    task_health_binding: TaskHealthBinding = HealthBindingState.LEGACY_OMITTED,
 ) -> tuple[str, str]:
     """Materialize the run's effective HealthGate config to the workspace.
 
@@ -433,16 +600,28 @@ def materialize_effective_config(
     (same inputs, different body — e.g. the shipped
     ``configs/health_checks.yaml`` changed underneath the workspace).
 
+    Step 08b: ``task_health_binding`` selects between the three binding
+    states (§3.10). The default — the argument omitted — is the pre-08b
+    compatibility path and produces a BYTE-IDENTICAL artifact, so every
+    existing workspace and every existing caller is unaffected.
+
     Returns:
         (effective_config_path, body_sha256)
     """
-    cfg = load_health_gates_config(source_path)
+    cfg, _task_config, resolved_plugins = load_composed_health_config(
+        source_path, task_health_binding
+    )
     if files is not None:
         cfg = apply_monitored_files(cfg, files)
     if resolved_scope is not None:
         validate_health_scope(cfg, resolved_scope)
 
-    body = yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=True)
+    # State A adds no keys, so its document is the pre-08b one exactly.
+    document = {
+        **cfg.model_dump(mode="json"),
+        **body_markers(task_health_binding, resolved_plugins),
+    }
+    body = yaml.safe_dump(document, sort_keys=True)
     sha = hashlib.sha256(body.encode()).hexdigest()
     files_repr = sorted({int(i) for i in files}) if files else None
     header = (
@@ -502,6 +681,49 @@ def materialize_effective_config(
             os.unlink(tmp_path)
         raise
     return path, sha
+
+
+def read_effective_config_body_sha(path: str) -> str | None:
+    """Canonical body sha of a materialized effective config, from its BYTES.
+
+    The single implementation of "what is this artifact's body sha", so
+    ``core/resume.py`` no longer mirrors the computation. That mirror
+    re-derived the sha by loading the file into ``HealthChecksConfig`` and
+    re-dumping it, which silently dropped any key the model does not
+    declare — and Step 08b's ``resolved_plugins`` / ``task_health_binding``
+    are exactly such keys. A verifier that cannot see part of what was hashed
+    reports a mismatch that is not there.
+
+    Hashing the on-disk body is also strictly more faithful: it verifies the
+    bytes the run actually reads, rather than a re-serialization that could
+    drift from them.
+
+    Returns:
+        The sha256, or ``None`` when the file is missing or unparseable —
+        the same contract the previous mirror offered its callers.
+    """
+    try:
+        with open(path) as handle:
+            content = handle.read()
+    except OSError:
+        return None
+
+    lines = content.splitlines(keepends=True)
+    start = 0
+    for index, line in enumerate(lines):
+        if not line.startswith("#"):
+            start = index
+            break
+    else:
+        return None
+    body = "".join(lines[start:])
+
+    try:
+        # Parsed for validity only; the sha comes from the bytes above.
+        yaml.safe_load(body)
+    except yaml.YAMLError:
+        return None
+    return hashlib.sha256(body.encode()).hexdigest()
 
 
 def _header_value(content: str, prefix: str) -> str | None:

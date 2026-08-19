@@ -30,7 +30,9 @@ import numpy as np
 
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.deliverable_spec import default_deliverable_storage
+from execute_tools.health_checks._composition import VALUE_SCALE_PARAMETER
 from execute_tools.health_checks._peek import peek_int8_at_channel
+from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
@@ -41,9 +43,34 @@ from execute_tools.health_checks.schemas import (
 )
 from execute_tools.scoring_utils import find_peak
 
-_MV_PER_LSB: float = 40.0 / 128.0
 _SIG_HALF_WIDTH: Final[int] = 1  # matches get_snr sig_range
 _NOISE_HALF_WIDTH: Final[int] = 50  # matches get_snr noise_range
+
+
+def _value_scale(config: dict[str, Any] | None) -> float:
+    """The task's numerical value scale, supplied by composition.
+
+    Step 08b C5. This was a module-local ``_MV_PER_LSB = 40.0 / 128.0``
+    literal, duplicated across four check modules and declared by nothing —
+    so 08a could not require the ``value_scale_unit`` axis without flipping
+    these checks to inapplicable. The number now travels with its unit from
+    the task's own config, and this check DECLARES the axis, so it is only
+    ever invoked when the bound task actually supplies one.
+
+    Raises:
+        KeyError: composition did not inject the scale. Deliberately fatal
+            rather than defaulted: a silent fallback constant is how one
+            task's millivolts get applied to another task's data.
+    """
+    cfg = config or {}
+    if VALUE_SCALE_PARAMETER not in cfg:
+        raise KeyError(
+            f"{VALUE_SCALE_PARAMETER!r} missing from this check's config. It "
+            f"is injected by composition for checks declaring the "
+            f"'value_scale_unit' axis; running without it would mean "
+            f"guessing a physical scale."
+        )
+    return float(cfg[VALUE_SCALE_PARAMETER])
 
 
 class SpectralPeakRatioCheck:
@@ -60,9 +87,16 @@ class SpectralPeakRatioCheck:
         # build the PSD axis.
         consumes_view="tidmad.int8_prefix_peek",
         required_context_inputs=("denoised_source",),
+        # Step 08b C5: the millivolt scale is now TASK-owned — declared
+        # once, with its unit, in the task's health config — so this check
+        # REQUIRES the `value_scale_unit` axis and receives the numerical
+        # factor as a parameter. Requiring the axis is what makes a task
+        # that declares no physical scale yield `inapplicable` here instead
+        # of silently applying someone else's millivolts.
         required_facts=(
             FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),
             FactRequirement(axis="sampling_frequency_hz"),
+            FactRequirement(axis="value_scale_unit"),
         ),
         # EMPTY — recording-only, no threshold. See per_file_output_std.
         threshold_parameter_names=(),
@@ -74,8 +108,15 @@ class SpectralPeakRatioCheck:
         self,
         ctx: HealthCheckContext,
         config: dict[str, Any] | None = None,
+        *,
+        view: HealthView | None = None,
     ) -> HealthCheckResult:
+        # ``view`` is Protocol conformance only (Step 08b C3). This check
+        # declares a capability key but does not REQUIRE a view — it reads
+        # its own artifacts — so the runner dispatches it through the
+        # unchanged ``run(ctx, config)`` path and it never receives one.
         cfg = config or {}
+        scale = _value_scale(config)
         peek_samples = int(cfg.get("peek_samples", self._DEFAULT_PEEK_SAMPLES))
         sampling_freq = float(resolve_dataset_profile().dataset.sampling_frequency)
 
@@ -113,7 +154,7 @@ class SpectralPeakRatioCheck:
                 per_file[i] = float("nan")
                 continue
 
-            sig = ch1.astype(np.float64) * _MV_PER_LSB
+            sig = ch1.astype(np.float64) * scale
             fft = np.fft.rfft(sig)
             psd = (1.0 / sampling_freq / len(sig)) * np.abs(fft) ** 2
 

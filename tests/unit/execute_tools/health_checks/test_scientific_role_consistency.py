@@ -32,7 +32,9 @@ config rather than only on the blocking one.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+from pathlib import Path
 
 import pytest
 import yaml
@@ -44,6 +46,27 @@ from execute_tools.health_checks.candidate_eligibility import (
 )
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.schemas import CandidateHealthValidity
+
+PRE_08B_SHIPPED_CONFIGS = (
+    Path(__file__).resolve().parent / "goldens" / "pre_08b_shipped_configs.json"
+)
+"""The two shipped configs as they were when the audited shas were measured."""
+
+
+def _historical_config(tmp_path, key: str) -> str:
+    """Materialize the frozen pre-08b config bytes to a readable path.
+
+    The historical-artifact invariant is about HISTORICAL bytes. Testing it
+    by reconstructing a role-less body from TODAY's shipped file was always a
+    proxy, and Step 08b C5 broke the proxy while leaving the invariant
+    untouched — the framework file legitimately changed, and old workspaces
+    still carry the old shas.
+    """
+    payload = json.loads(PRE_08B_SHIPPED_CONFIGS.read_text())[key]
+    path = tmp_path / f"historical_{key}.yaml"
+    path.write_text(payload["raw"])
+    return str(path)
+
 
 BLOCKING_CONFIG = "configs/health_checks.yaml"
 OBSERVE_CONFIG = "configs/health_checks_baseline_observe_mode.yaml"
@@ -83,7 +106,11 @@ def _collapsed_record() -> dict:
 def _role_less_copy(tmp_path, source: str, mutate=None) -> str:
     """A copy of ``source`` with every ``gate_role`` stripped — i.e. the
     config as it was written before the field existed."""
-    body = yaml.safe_load(open(source, encoding="utf-8"))
+    # Step 08b C5: read the COMPOSED roster rather than the framework file,
+    # which now carries policy only. This function writes a file named
+    # `health_checks_effective.yaml`, and a materialized effective config is
+    # precisely the composed document — so this is the shape it always meant.
+    body = load_health_gates_config(source).model_dump(mode="json")
     for gate in body["health_gates"]:
         gate.pop("gate_role", None)
     if mutate is not None:
@@ -174,25 +201,43 @@ class TestTheRoleIsDeclaredNotDerived:
 
 
 class TestHistoricalConfigsStayReadable:
-    def test_a_known_historical_config_is_recovered_by_sha(self, tmp_path):
-        """Adding the field changes every config's body sha, so a recorded
-        `health_config_sha256` from before the hotfix can only be matched by
-        reproducing the OLD body."""
-        legacy = _role_less_copy(tmp_path, OBSERVE_CONFIG)
+    """A workspace recorded before 08b must still resolve its gate roles.
 
-        assert (
-            legacy_config_body_sha(legacy)
-            == "d133a12d3133fb20d632383aa010b1a861fe0fdb6fb6436874b2142d6b5ef58d"
-        )
-        assert resolve_scientific_gate_ids(legacy) == SCIENTIFIC
+    Read from FROZEN historical bytes since Step 08b C5. These tests used to
+    rebuild a role-less body from today's shipped file, which silently
+    assumed the shipped file never changes — and C5 changed it deliberately,
+    moving the roster into the task config. The artifacts those shas belong
+    to did not change, so the invariant is unchanged; only the way it is
+    tested had to stop depending on the present.
+    """
 
-    def test_the_blocking_config_historical_sha_also_resolves(self, tmp_path):
-        legacy = _role_less_copy(tmp_path, BLOCKING_CONFIG)
-        assert (
-            legacy_config_body_sha(legacy)
-            == "3b5521180f5460a4a7aa67ad0ff67701633d75ed8fdcac4277c222b713655b74"
+    @pytest.mark.parametrize(
+        ("key", "expected_sha"),
+        [
+            ("observe", "d133a12d3133fb20d632383aa010b1a861fe0fdb6fb6436874b2142d6b5ef58d"),
+            ("blocking", "3b5521180f5460a4a7aa67ad0ff67701633d75ed8fdcac4277c222b713655b74"),
+        ],
+    )
+    def test_a_known_historical_config_is_recovered_by_sha(self, tmp_path, key, expected_sha):
+        historical = _historical_config(tmp_path, key)
+
+        assert legacy_config_body_sha(historical) == expected_sha
+        assert resolve_scientific_gate_ids(historical) == SCIENTIFIC
+
+    def test_the_audited_map_still_keys_on_those_exact_shas(self):
+        """The map itself must never be re-keyed to today's values.
+
+        Re-keying would make every genuinely historical artifact UNKNOWN
+        while making this suite green — the failure mode most worth pinning.
+        """
+        from execute_tools.health_checks.candidate_eligibility import (
+            _LEGACY_ROLES_BY_CONFIG_SHA,
         )
-        assert resolve_scientific_gate_ids(legacy) == SCIENTIFIC
+
+        assert set(_LEGACY_ROLES_BY_CONFIG_SHA) == {
+            "d133a12d3133fb20d632383aa010b1a861fe0fdb6fb6436874b2142d6b5ef58d",
+            "3b5521180f5460a4a7aa67ad0ff67701633d75ed8fdcac4277c222b713655b74",
+        }
 
     def test_an_unknown_role_less_config_is_UNKNOWN_not_guessed(self, tmp_path):
         """MUTATION TARGET: inferring the role from the `_blocking` suffix,

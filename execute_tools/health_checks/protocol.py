@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any, ClassVar, Protocol, runtime_checkable
 
+from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     HealthCheckContext,
@@ -61,6 +62,8 @@ class HealthCheckSkill(Protocol):
         self,
         ctx: HealthCheckContext,
         config: dict[str, Any] | None = None,
+        *,
+        view: HealthView | None = None,
     ) -> HealthCheckResult:
         """Execute the check.
 
@@ -72,5 +75,15 @@ class HealthCheckSkill(Protocol):
                 skills merge provided keys over their instance defaults,
                 so YAML can override just one threshold and leave the
                 rest at the check's default.
+            view: The materialized view this check declared, when it
+                declared ``requires_view`` and a provider was bound
+                (Step 08b). **Backward compatibility is a DISPATCH rule,
+                not merely this default**: a check that does not require a
+                view is invoked as ``run(ctx, config)`` and is never
+                gratuitously passed ``view=None``, so a pre-08b or
+                externally supplied check is called exactly as it always
+                was. The parameter exists on this Protocol so a
+                view-consuming check is structurally typed; implementations
+                that ignore views accept it and never see it.
         """
         ...

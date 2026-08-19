@@ -1,155 +1,166 @@
 {
   "_captured_at": {
-    "commit": "4d3e460bb8817e62f002128fd49b535fa07513c0",
-    "note": "captured at clean tree (Step-00 0B capture); design \u00a717 rule 4"
+    "original": {
+      "commit": "4d3e460bb8817e62f002128fd49b535fa07513c0",
+      "note": "captured at clean tree (Step-00 0B capture); design \u00a717 rule 4"
+    },
+    "recaptured": "Step 08b C5 \u2014 the resolved config is now COMPOSED (framework policy + configs/task_health/tidmad.yaml). Values verified equal to the pre-C5 capture by TestTidmadOwnershipMigrationPreservesExecutedSemantics."
   },
   "health_gates": [
     {
-      "id": "output_diversity_blocking",
-      "gate_role": "blocking",
       "after_round": "every",
-      "short_circuit": true,
       "checks": [
         {
-          "name": "output_diversity",
           "config": {
+            "aggregation": "any_pass",
             "min_unique_int8_values": 25,
-            "peek_samples": 100000,
             "peek_file_indices": [
               3,
               10,
               17
             ],
-            "aggregation": "any_pass"
-          }
-        }
-      ],
-      "on_pass": {
-        "action": "continue"
-      },
-      "on_fail": {
-        "action": "invalidate_round"
-      },
-      "reason": "Blocking diversity gate. FCNet real-learning reproduction has unique_int8=127+; the worst observed non-collapse baseline had 15. Threshold of 25 gives 2.08\u00d7 FCNet safety margin and 40% baseline rejection headroom. M9 peek: [3, 10, 17] + any_pass \u2014 file 3 is the narrowest-margin FCNet band (52 uniq), file 10 first mid-band exemplar (127), file 17 high-band exemplar (143). Any_pass means a real learning model whose diversity clears the bar on ANY single peeked file passes; collapse fails only when all three files degrade.\n"
-    },
-    {
-      "id": "output_std_blocking",
-      "gate_role": "blocking",
-      "after_round": "every",
-      "short_circuit": true,
-      "checks": [
-        {
-          "name": "output_std",
-          "config": {
-            "min_std_mv": 1.0,
-            "peek_samples": 100000,
-            "peek_file_indices": [
-              3,
-              10,
-              17
-            ],
-            "aggregation": "any_pass"
-          }
-        }
-      ],
-      "on_pass": {
-        "action": "continue"
-      },
-      "on_fail": {
-        "action": "invalidate_round"
-      },
-      "reason": "Blocking std gate. Complements output_diversity \u2014 an output with many unique values but tight std (edge-case not observed but theoretically possible) would also fail here. 1.0 mV threshold gives ~5\u00d7 margin above worst-observed collapse (0.19 mV). M9 peek matches output_diversity: [3, 10, 17] + any_pass.\n"
-    },
-    {
-      "id": "amplitude_collapse_blocking",
-      "gate_role": "blocking",
-      "after_round": "every",
-      "short_circuit": true,
-      "checks": [
-        {
-          "name": "amplitude_collapse",
-          "config": {
-            "collapse_threshold": 0.95,
-            "peek_samples": 100000,
-            "peek_file_indices": [
-              3,
-              10,
-              17
-            ],
-            "aggregation": "any_pass"
-          }
-        }
-      ],
-      "on_pass": {
-        "action": "continue"
-      },
-      "on_fail": {
-        "action": "invalidate_round"
-      },
-      "reason": "Blocking amplitude gate. Catches single-value-dominance collapse even when unique_count is above threshold (e.g. output has 40 unique values but 96% are the same one). Threshold 0.95 unchanged from rev-6; extended to every round. M9 peek: [3, 10, 17] + any_pass. Note: any_pass semantics are lenient here \u2014 a partial-collapse case where ONE file has 96% dominance and the other two are healthy would pass. all_pass would arguably be stricter; deferred to post-V17 empirical validation (see m9 execution plan \u00a79 Q1).\n"
-    },
-    {
-      "id": "pearson_dispersion_recording",
-      "gate_role": "observational",
-      "after_round": "every",
-      "short_circuit": false,
-      "checks": [
-        {
-          "name": "pearson_dispersion",
-          "config": {
-            "peek_samples": 1000000
-          }
-        }
-      ],
-      "on_pass": {
-        "action": "continue"
-      },
-      "on_fail": {
-        "action": "continue"
-      },
-      "reason": "Records the spread of per-file pearson(CH1_denoised, CH2_target) as a single scalar: pearson_dispersion = stdev(per_file_pearsons, ddof=1). Empirical 24\u00d7 separation between real learning (FCNet ~0.048) and paper-spec collapse (~0.002). Per-file pearson values are computed internally but NOT exposed \u2014 they were shown to be uninformative per-file (noise-limited on files 0-9; can sign-invert on high-signal files). See docs/design/paper_and_collapse_reference_baselines.md \u00a76.3.\n"
-    },
-    {
-      "id": "spectral_peak_ratio_recording",
-      "gate_role": "observational",
-      "after_round": "every",
-      "short_circuit": false,
-      "checks": [
-        {
-          "name": "spectral_peak_ratio",
-          "config": {
-            "peek_samples": 1000000
-          }
-        }
-      ],
-      "on_pass": {
-        "action": "continue"
-      },
-      "on_fail": {
-        "action": "continue"
-      },
-      "reason": "Records PSD(f_inj) / median(PSD_around_f_inj) per file. Direct spectral analog of the scoring pipeline's SNR; useful for detecting the \"phantom scored high\" case without triggering it. Never blocks.\n"
-    },
-    {
-      "id": "per_file_output_std_recording",
-      "gate_role": "observational",
-      "after_round": "every",
-      "short_circuit": false,
-      "checks": [
-        {
-          "name": "per_file_output_std",
-          "config": {
             "peek_samples": 100000
-          }
+          },
+          "name": "output_diversity"
         }
       ],
+      "gate_role": "blocking",
+      "id": "output_diversity_blocking",
+      "on_fail": {
+        "action": "invalidate_round"
+      },
       "on_pass": {
         "action": "continue"
       },
+      "reason": "Blocking diversity gate. FCNet real-learning reproduction has unique_int8=127+; the worst observed non-collapse baseline had 15. Threshold of 25 gives 2.08\u00d7 FCNet safety margin and 40% baseline rejection headroom. M9 peek: [3, 10, 17] + any_pass \u2014 file 3 is the narrowest-margin FCNet band (52 uniq), file 10 first mid-band exemplar (127), file 17 high-band exemplar (143). Any_pass means a real learning model whose diversity clears the bar on ANY single peeked file passes; collapse fails only when all three files degrade.",
+      "short_circuit": true
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "aggregation": "any_pass",
+            "min_std_mv": 1.0,
+            "peek_file_indices": [
+              3,
+              10,
+              17
+            ],
+            "peek_samples": 100000,
+            "value_scale_unit": "mV",
+            "value_scale_units_per_sample": 0.3125
+          },
+          "name": "output_std"
+        }
+      ],
+      "gate_role": "blocking",
+      "id": "output_std_blocking",
+      "on_fail": {
+        "action": "invalidate_round"
+      },
+      "on_pass": {
+        "action": "continue"
+      },
+      "reason": "Blocking std gate. Complements output_diversity \u2014 an output with many unique values but tight std (edge-case not observed but theoretically possible) would also fail here. 1.0 mV threshold gives ~5\u00d7 margin above worst-observed collapse (0.19 mV). M9 peek matches output_diversity: [3, 10, 17] + any_pass.",
+      "short_circuit": true
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "aggregation": "any_pass",
+            "collapse_threshold": 0.95,
+            "peek_file_indices": [
+              3,
+              10,
+              17
+            ],
+            "peek_samples": 100000
+          },
+          "name": "amplitude_collapse"
+        }
+      ],
+      "gate_role": "blocking",
+      "id": "amplitude_collapse_blocking",
+      "on_fail": {
+        "action": "invalidate_round"
+      },
+      "on_pass": {
+        "action": "continue"
+      },
+      "reason": "Blocking amplitude gate. Catches single-value-dominance collapse even when unique_count is above threshold (e.g. output has 40 unique values but 96% are the same one). Threshold 0.95 unchanged from rev-6; extended to every round. M9 peek: [3, 10, 17] + any_pass. Note: any_pass semantics are lenient here \u2014 a partial-collapse case where ONE file has 96% dominance and the other two are healthy would pass. all_pass would arguably be stricter; deferred to post-V17 empirical validation (see m9 execution plan \u00a79 Q1).",
+      "short_circuit": true
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "peek_samples": 1000000,
+            "value_scale_unit": "mV",
+            "value_scale_units_per_sample": 0.3125
+          },
+          "name": "pearson_dispersion"
+        }
+      ],
+      "gate_role": "observational",
+      "id": "pearson_dispersion_recording",
       "on_fail": {
         "action": "continue"
       },
-      "reason": "Records per-file output std distribution (mean, min, max, per-file list). Complements output_std_blocking (aggregate) with per-file granularity for diagnosis. Never blocks.\n"
+      "on_pass": {
+        "action": "continue"
+      },
+      "reason": "Records the spread of per-file pearson(CH1_denoised, CH2_target) as a single scalar: pearson_dispersion = stdev(per_file_pearsons, ddof=1). Empirical 24\u00d7 separation between real learning (FCNet ~0.048) and paper-spec collapse (~0.002). Per-file pearson values are computed internally but NOT exposed \u2014 they were shown to be uninformative per-file (noise-limited on files 0-9; can sign-invert on high-signal files). See docs/design/paper_and_collapse_reference_baselines.md \u00a76.3.",
+      "short_circuit": false
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "peek_samples": 1000000,
+            "value_scale_unit": "mV",
+            "value_scale_units_per_sample": 0.3125
+          },
+          "name": "spectral_peak_ratio"
+        }
+      ],
+      "gate_role": "observational",
+      "id": "spectral_peak_ratio_recording",
+      "on_fail": {
+        "action": "continue"
+      },
+      "on_pass": {
+        "action": "continue"
+      },
+      "reason": "Records PSD(f_inj) / median(PSD_around_f_inj) per file. Direct spectral analog of the scoring pipeline's SNR; useful for detecting the \"phantom scored high\" case without triggering it. Never blocks.",
+      "short_circuit": false
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "peek_samples": 100000,
+            "value_scale_unit": "mV",
+            "value_scale_units_per_sample": 0.3125
+          },
+          "name": "per_file_output_std"
+        }
+      ],
+      "gate_role": "observational",
+      "id": "per_file_output_std_recording",
+      "on_fail": {
+        "action": "continue"
+      },
+      "on_pass": {
+        "action": "continue"
+      },
+      "reason": "Records per-file output std distribution (mean, min, max, per-file list). Complements output_std_blocking (aggregate) with per-file granularity for diagnosis. Never blocks.",
+      "short_circuit": false
     }
   ]
 }

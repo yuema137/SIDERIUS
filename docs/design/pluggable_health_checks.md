@@ -64,7 +64,66 @@ consequences.
 
 ---
 
-## 3. Configuration (`configs/health_checks.yaml`)
+## 3. Configuration
+
+### 3.0 Where configuration lives since Step 08b (2026-08-18)
+
+**`configs/health_checks.yaml` no longer carries a gate roster.** Step 08b
+split Health configuration by OWNER, so that adding a task stops meaning
+editing framework source:
+
+```text
+FRAMEWORK POLICY          configs/health_checks.yaml
+    health_policy:          what a gate DOES — role, cadence, short-circuit,
+      blocking:   {...}     on_pass/on_fail, and per-check policy keys such
+      recording:  {...}     as `aggregation`. NEVER a task identity, roster,
+                            threshold, peek set or science prose.
+
+TASK-OWNED SCIENCE        configs/task_health/tidmad.yaml   (TIDMAD's own;
+    facts / value_scale     an external task supplies its own file anywhere)
+    health_peek_files       which gates exist, what they measure, where the
+    roster: [{gate_id,      boundaries are, which files they watch, the
+      check, disposition,   numerical value scale, and WHY — with the task
+      parameters, reason}]  selecting a `disposition` key and nothing more.
+
+                    deterministic composition
+                              ↓
+        {workspace}/health_checks_effective.yaml   (unchanged artifact,
+                                                    pinned by the lock)
+```
+
+A task selects a disposition; the framework answers with the policy block.
+There is exactly ONE definition of each field, so the two cannot disagree and
+no precedence rule is needed — a task config that tries to set `gate_role`,
+`on_fail`, `short_circuit`, `severity`, `after_round`, `aggregation` or
+`peek_file_indices` is REFUSED at authoring time.
+
+Consequences worth knowing before editing anything here:
+
+* **`load_health_gates_config()` returns the COMPOSED config.** A file that
+  already carries `health_gates` — a materialized effective config, or a
+  pre-08b custom YAML — is returned untouched.
+* **Three binding states, never two**: an omitted binding is the legacy
+  compatibility path and resolves to the task-owned TIDMAD config; an
+  EXPLICIT no-binding is a named absence that must never fall back to another
+  task's family; an explicit path loads that task's config.
+* **External plugins** may register checks and view providers through the
+  public `register` / `register_view_provider`; their content digests join
+  the pinned `health_config_sha256`, so an edited plugin fails a resume
+  closed.
+* The observe-mode config is now a two-line difference from production
+  (`blocking.on_fail`), not a duplicated roster, so it cannot drift from
+  production science.
+
+Full design: `docs/design/generic_framework_upgrade/
+step_08_health_check_task_profile/pr_08b_extension_architecture.md`.
+
+### 3.1 The gate shape (rev-6; still what a COMPOSED gate looks like)
+
+The YAML below is the historical rev-6 authoring shape. Since 08b a roster in
+this shape is what composition PRODUCES into the effective artifact, and what
+a pre-08b custom config may still carry directly.
+
 
 ```yaml
 # Each entry is an independent HealthGate.

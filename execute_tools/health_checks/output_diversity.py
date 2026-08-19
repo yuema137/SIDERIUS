@@ -35,6 +35,7 @@ import numpy as np
 
 from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
+from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     FactRequirement,
@@ -74,7 +75,13 @@ class OutputDiversityCheck:
         self,
         ctx: HealthCheckContext,
         config: dict[str, Any] | None = None,
+        *,
+        view: HealthView | None = None,
     ) -> HealthCheckResult:
+        # ``view`` is Protocol conformance only (Step 08b C3). This check
+        # declares a capability key but does not REQUIRE a view — it reads
+        # its own artifacts — so the runner dispatches it through the
+        # unchanged ``run(ctx, config)`` path and it never receives one.
         cfg = config or {}
         min_unique = int(cfg.get("min_unique_int8_values", self._DEFAULT_MIN_UNIQUE))
         peek_samples = int(cfg.get("peek_samples", self._DEFAULT_PEEK_SAMPLES))

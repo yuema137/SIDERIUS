@@ -187,16 +187,32 @@ class TestTheDeclarationsAreActuallyTheAuthority:
             "anchor_selection_files — it is still reading a literal"
         )
 
-    def test_blocking_peeks_read_the_bound_declaration(self):
-        from execute_tools.dataset_config import bind_dataset_profile
+    def test_blocking_peeks_read_the_bound_declaration(self, tmp_path):
+        """Blocking peeks follow a DECLARATION, never a literal.
+
+        Step 08b C5 moved WHERE that declaration lives — from the dataset
+        profile, injected into the framework config by the `task_health_peek`
+        marker, to the TASK's own health config, injected by composition.
+        The invariant is unchanged and is what this test still asserts: a
+        different declared set produces a different peek set on exactly the
+        blocking gates, and the recording gates keep reading every file.
+        """
+        import yaml as _yaml
+
+        from execute_tools.health_checks._composition import (
+            LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
+        )
+        from execute_tools.health_checks.config import load_composed_health_config
 
         declared = [2, 8, 14, 18]
-        profile = TIDMAD_PROFILE.model_copy(update={"health_peek_files": declared})
-        # An EXPLICIT path — ``load_health_gates_config`` only caches the
-        # default path, so this cannot serve a config resolved under a
-        # different profile.
-        with bind_dataset_profile(profile):
-            cfg = load_health_gates_config("configs/health_checks.yaml")
+        document = _yaml.safe_load(open(LEGACY_DEFAULT_TASK_HEALTH_CONFIG))
+        document["health_peek_files"] = declared
+        task_config = tmp_path / "task_health.yaml"
+        task_config.write_text(_yaml.safe_dump(document, sort_keys=False))
+        framework = tmp_path / "framework.yaml"
+        framework.write_text(_yaml.safe_dump({"health_gates": []}))
+
+        cfg, _, _ = load_composed_health_config(str(framework), str(task_config))
 
         for gate in cfg.health_gates:
             for check in gate.checks:

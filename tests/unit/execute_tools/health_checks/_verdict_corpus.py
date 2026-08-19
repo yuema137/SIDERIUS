@@ -385,10 +385,22 @@ def classify_expected_verdict(passed: bool, reason: str, metrics: dict[str, Any]
 # ---------------------------------------------------------------------------
 
 
+TIDMAD_VALUE_SCALE: dict[str, Any] = {
+    "value_scale_units_per_sample": 40.0 / 128.0,
+    "value_scale_unit": "mV",
+}
+"""What composition injects for TIDMAD since Step 08b C5.
+
+Supplied here so the 27 frozen cases keep replaying the SAME arithmetic they
+were captured under. Before C5 the factor was a literal inside four check
+modules and this corpus inherited it silently; the number is unchanged —
+only its owner is."""
+
+
 def run_case(case_id: str, workdir: Path) -> HealthCheckResult:
     """Build this case's fixtures under ``workdir`` and run its check."""
     skill, ctx, config = CASES[case_id](workdir)
-    return skill.run(ctx, config)
+    return skill.run(ctx, {**TIDMAD_VALUE_SCALE, **(config or {})})
 
 
 def record_case(case_id: str, workdir: Path) -> dict[str, Any]:

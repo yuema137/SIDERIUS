@@ -1,0 +1,358 @@
+# execute_tools/health_checks/_composition.py
+"""Framework policy + task-owned config → the ONE pinned effective artifact.
+
+**What composition is for.** The framework owns operational policy — what a
+gate DOES. The task owns its science — which gates exist, what they measure,
+where the boundaries are, and why. Until 08b both lived in
+`configs/health_checks.yaml`, so a second task could not exist without
+editing framework source. This module is where the two halves meet, and it
+meets them in exactly one place so there is never a second answer.
+
+**One definition per field** (§3.7). The task selects a
+:class:`~execute_tools.health_checks._task_health_config.HealthDisposition`
+KEY; the framework derives every operational consequence from it::
+
+    blocking   -> gate_role=blocking,      after_round=every,
+                  short_circuit=true,      on_pass=continue,
+                  on_fail=invalidate_round, aggregation=any_pass
+
+    recording  -> gate_role=observational, after_round=every,
+                  short_circuit=false,     on_pass=continue,
+                  on_fail=continue
+
+A task cannot state any of those, so the conflicting-copies failure mode is
+structurally impossible rather than resolved by a precedence rule. The two
+shapes are not an invention: read verbatim at master ``a226495b``, the six
+shipped gates have exactly these two policy shapes and nothing else.
+
+**Three binding states, never two** (§3.10). "The caller did not mention a
+task binding" and "the caller states there is no task binding" are different
+claims and must not collapse — because collapsing them means a task that
+deliberately declares no health silently inherits another task's family,
+which is the synthesized-evidence failure the parent §6a.5 forbids::
+
+    A. LEGACY OMITTED   the pre-08b compatibility path. Byte-identical
+                        output. NOT the extension mechanism.
+    B. EXPLICIT NONE    a NAMED absence, recorded in the pinned artifact.
+                        Never falls back to another task's family.
+    C. EXPLICIT BINDING load, resolve and compose the named task config.
+
+The three are distinguished by a typed sentinel and the parameter's default
+state — never by a task name, which appears nowhere in this module.
+"""
+
+from __future__ import annotations
+
+import os
+from enum import StrEnum
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from execute_tools.health_checks._plugin_binding import ResolvedHealthPlugin
+from execute_tools.health_checks._task_health_config import (
+    HealthDisposition,
+    HealthRosterEntry,
+    TaskHealthConfig,
+)
+from execute_tools.health_checks.schemas import GateAction
+
+
+class HealthBindingState(StrEnum):
+    """The two non-path binding states (§3.10 A and B).
+
+    State C is expressed by passing a path instead of one of these, so the
+    three states are one typed union rather than two booleans whose
+    combinations include impossible ones.
+    """
+
+    LEGACY_OMITTED = "legacy_omitted"
+    """The caller said nothing about a task Health binding.
+
+    The DEFAULT, and deliberately so: every pre-08b call site keeps working
+    unchanged and produces a byte-identical artifact. C5 redirects this state
+    to TIDMAD's task-owned config, once that config exists — which is why C4
+    and C5 are separate commits rather than one."""
+
+    EXPLICIT_NONE = "explicit_none"
+    """The caller states this task has no Health binding.
+
+    A legal, NAMED absence — recorded in the pinned artifact so a reader can
+    tell "no gates were configured" from "gates were configured and passed".
+    It must never be satisfied by falling back to another task's family."""
+
+
+TaskHealthBinding = HealthBindingState | str
+"""Either a binding state, or a path to a task health config (state C)."""
+
+
+LEGACY_DEFAULT_TASK_HEALTH_CONFIG: str = os.path.join("configs", "task_health", "tidmad.yaml")
+"""Where state A (legacy omitted) finds its task Health config.
+
+**This is the bounded legacy compatibility path, not the extension
+mechanism** (§3.10 A). Before 08b, a caller that said nothing about a task
+binding got the roster baked into the framework YAML; that roster is now
+task-owned, so the same caller gets the same science from the file it moved
+into. Behaviour is preserved for every existing call site, which is the whole
+purpose.
+
+It is a CONSTANT, not a branch. There is no ``if task == …`` anywhere: one
+unconditional default, quarantined here and named by the census so it cannot
+quietly grow into a task registry. An external task passes its own path and
+never touches this."""
+
+
+class DispositionPolicy(BaseModel):
+    """What the FRAMEWORK does for one disposition. Operator policy surface.
+
+    Every field here is one a task may not state (§3.7), which is what makes
+    the ownership split structural rather than conventional.
+
+    This lives in the framework YAML rather than in code because the two
+    shipped configs genuinely differ in it: `health_checks.yaml` and
+    `health_checks_baseline_observe_mode.yaml` carry the identical six gates
+    and differ ONLY in `on_fail` for blocking gates. Observe mode is a policy
+    choice about what a failure DOES — exactly the thing the framework owns —
+    so hard-coding the table would have made the observe-mode config
+    inexpressible.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    gate_role: Literal["blocking", "observational"]
+    after_round: int | Literal["every"] | list[int] = "every"
+    short_circuit: bool
+    on_pass: GateAction
+    on_fail: GateAction
+    check_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "Per-check policy keys the framework injects into every gate of "
+            "this disposition. ``aggregation`` lives here: 08a deliberately "
+            "excluded it from task thresholds, and every shipped blocking "
+            "gate carries ``any_pass`` while no recording gate carries it."
+        ),
+    )
+
+
+DEFAULT_DISPOSITION_POLICY: dict[str, DispositionPolicy] = {
+    HealthDisposition.BLOCKING.value: DispositionPolicy(
+        gate_role="blocking",
+        after_round="every",
+        short_circuit=True,
+        on_pass=GateAction.CONTINUE,
+        on_fail=GateAction.INVALIDATE_ROUND,
+        check_config={"aggregation": "any_pass"},
+    ),
+    HealthDisposition.RECORDING.value: DispositionPolicy(
+        gate_role="observational",
+        after_round="every",
+        short_circuit=False,
+        on_pass=GateAction.CONTINUE,
+        on_fail=GateAction.CONTINUE,
+        check_config={},
+    ),
+}
+"""The policy a framework config that declares none falls back to.
+
+Reproduces the six shipped gates exactly, so a pre-08b custom YAML — of which
+there are several under `tests/` and in operator workspaces — keeps working
+without acquiring a `health_policy` block it never had. Adding a disposition
+is a framework decision requiring a task that forces one; adding a TASK
+requires nothing here, which is what keeps this from being a per-task
+registry."""
+
+
+class HealthCompositionError(RuntimeError):
+    """Framework policy and task config cannot be composed coherently."""
+
+
+VALUE_SCALE_PARAMETER: str = "value_scale_units_per_sample"
+"""Check-config key carrying the task's numerical value scale.
+
+The FACTOR the arithmetic needs, delivered as a parameter beside the
+thresholds. Before 08b each of four check modules held its own
+``_MV_PER_LSB = 40.0 / 128.0`` literal that nothing declared — so the axis
+could not be required without flipping TIDMAD's std checks to inapplicable,
+which is why 08a had to leave it absent."""
+
+VALUE_SCALE_UNIT_PARAMETER: str = "value_scale_unit"
+"""Check-config key carrying the unit the factor converts INTO.
+
+Travels with the factor, never separately: a number without its unit is how
+a millivolt threshold silently becomes a volt threshold."""
+
+
+def compose_gate(
+    entry: HealthRosterEntry,
+    health_peek_files: tuple[int, ...],
+    policy_table: dict[str, DispositionPolicy] | None = None,
+    value_scale_parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One roster entry + framework policy → one gate, as a plain dict.
+
+    A dict rather than a ``GateConfig`` because this is the SERIALIZED shape
+    the pinned artifact carries; building the model here and dumping it again
+    would create a second serialization to keep in step with the first.
+
+    Args:
+        entry: the task's roster entry.
+        health_peek_files: the task's declared peek set, injected only into
+            entries that opted in. An entry that did not opt in keeps its
+            check's own default file source — injecting one everywhere would
+            move the recording gates from every file onto a small triplet,
+            which is a policy change rather than an ownership change.
+        policy_table: the framework's disposition policy; the built-in
+            default when the framework config declares none.
+        value_scale_parameters: the task's resolved numerical value scale,
+            injected only into checks that DECLARE they need the axis. See
+            :func:`compose_health_gates`.
+
+    Raises:
+        HealthCompositionError: the framework policy declares no entry for
+            this disposition — refused rather than defaulted, because
+            guessing what a gate DOES is the one thing composition must
+            never do.
+    """
+    table = policy_table if policy_table is not None else DEFAULT_DISPOSITION_POLICY
+    policy = table.get(entry.disposition.value)
+    if policy is None:
+        raise HealthCompositionError(
+            f"Gate {entry.gate_id!r} declares disposition "
+            f"{entry.disposition.value!r}, for which the framework config "
+            f"declares no policy. Known dispositions: {sorted(table)}."
+        )
+    check_config: dict[str, Any] = dict(entry.parameters)
+    check_config.update(policy.check_config)
+    if entry.uses_health_peek_files:
+        check_config["peek_file_indices"] = list(health_peek_files)
+    if value_scale_parameters:
+        check_config.update(value_scale_parameters)
+    return {
+        "id": entry.gate_id,
+        "gate_role": policy.gate_role,
+        "after_round": policy.after_round,
+        "short_circuit": policy.short_circuit,
+        "checks": [{"name": entry.check, "config": check_config}],
+        "on_pass": {"action": policy.on_pass.value},
+        "on_fail": {"action": policy.on_fail.value},
+        "reason": entry.reason,
+    }
+
+
+def value_scale_parameters_for(check_name: str, config: TaskHealthConfig) -> dict[str, Any]:
+    """The scale parameters a check receives, or nothing.
+
+    Injected only into checks whose DECLARATION requires the
+    ``value_scale_unit`` axis — declaration-driven, never keyed on a check
+    name or a task name. A check that does not declare the axis is not given
+    a number it never asked for, and a check that DOES declare it cannot even
+    reach ``run`` unless the task declared the unit, because 08a's
+    applicability engine will already have ruled it inapplicable.
+
+    Returns an empty dict when the task declares no scale, which is the same
+    thing as the check being inapplicable — and is therefore never a silent
+    fallback to some default number.
+    """
+    if config.value_scale is None:
+        return {}
+    from execute_tools.health_checks.registry import _REGISTRY
+
+    skill = _REGISTRY.get(check_name)
+    declaration = getattr(skill, "declaration", None)
+    axes = {r.axis for r in getattr(declaration, "required_facts", ())}
+    if "value_scale_unit" not in axes:
+        return {}
+    return {
+        VALUE_SCALE_PARAMETER: config.value_scale.units_per_sample,
+        VALUE_SCALE_UNIT_PARAMETER: config.value_scale.unit,
+    }
+
+
+def compose_health_gates(
+    config: TaskHealthConfig,
+    policy_table: dict[str, DispositionPolicy] | None = None,
+) -> list[dict[str, Any]]:
+    """The task's roster, in declaration order, as composed gates.
+
+    Order is PRESERVED rather than sorted: the sequence of gates is the
+    sequence they fire in, which is a semantic property of the task's
+    declaration and not a serialization detail. Determinism comes from the
+    canonical key ordering applied when the body is dumped.
+    """
+    return [
+        compose_gate(
+            entry,
+            config.health_peek_files,
+            policy_table,
+            value_scale_parameters_for(entry.check, config),
+        )
+        for entry in config.roster
+    ]
+
+
+def resolve_composed_gates(
+    framework_gates: list[dict[str, Any]],
+    task_config: TaskHealthConfig,
+    policy_table: dict[str, DispositionPolicy] | None = None,
+) -> list[dict[str, Any]]:
+    """Which roster the run actually evaluates, for an explicit binding.
+
+    Raises:
+        HealthCompositionError: both the framework YAML and the task config
+            declare a roster. Exactly ONE authority owns it — the framework
+            file keeps policy only — so this is refused rather than merged or
+            resolved by precedence. (Reachable only in the window between C4
+            and C5, while the shipped YAML still carries TIDMAD's gates.)
+    """
+    task_gates = compose_health_gates(task_config, policy_table)
+    if framework_gates and task_gates:
+        raise HealthCompositionError(
+            f"Both the framework config and the task health config declare a "
+            f"roster ({len(framework_gates)} framework gate(s), "
+            f"{len(task_gates)} task gate(s)). Exactly one authority owns the "
+            f"roster: the framework file keeps policy only. Slim the framework "
+            f"config, or remove the task roster."
+        )
+    return task_gates or framework_gates
+
+
+def body_markers(
+    binding: TaskHealthBinding,
+    resolved_plugins: tuple[ResolvedHealthPlugin, ...],
+) -> dict[str, Any]:
+    """The non-gate keys the HASHED effective body carries, if any.
+
+    **State A returns nothing at all**, so its body is the pre-08b document
+    key for key. Any addition — even an empty list — would change the pinned
+    sha of every existing workspace and force a needless re-materialization
+    for runs whose Health behaviour did not change. The extra keys appear
+    only when the run actually has something to say.
+
+    The plugin set is folded in by CANONICAL identity — ``configured_ref`` +
+    relative member + ``content_sha256``, never an absolute path — so two
+    identical task packages checked out at different absolute paths pin ONE
+    identity (§3.6), while edited plugin bytes correctly change it and a
+    resume fails closed. Recording plugins only in the unhashed header would
+    leave that last case silently accepted.
+    """
+    if binding is HealthBindingState.LEGACY_OMITTED:
+        # C5: state A now composes from the legacy default task config, so
+        # the pin records which path produced the roster. The sha therefore
+        # MOVES at C5 — expected and authorised (Q-08b-2), with parity
+        # measured on executed semantics rather than on bytes.
+        markers: dict[str, Any] = {"task_health_binding": "legacy_default"}
+        if resolved_plugins:
+            markers["resolved_plugins"] = [p.canonical_identity() for p in resolved_plugins]
+        return markers
+
+    if binding is HealthBindingState.EXPLICIT_NONE:
+        # A NAMED absence, in the HASHED body: "no task family was bound"
+        # must be readable as a decision rather than inferred from an empty
+        # gate list, which is also what a fully-passing run looks like.
+        return {"task_health_binding": HealthBindingState.EXPLICIT_NONE.value}
+
+    markers: dict[str, Any] = {"task_health_binding": "explicit"}
+    if resolved_plugins:
+        markers["resolved_plugins"] = [p.canonical_identity() for p in resolved_plugins]
+    return markers

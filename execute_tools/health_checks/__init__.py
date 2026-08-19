@@ -16,10 +16,17 @@ function (removed in commit-3a), the ``HealthCheckOutput`` /
 ``CheckConfig`` configs are all gone. All references now point at the
 rev-6 HealthGate API.
 
-Registration policy: import-time side effect. Concrete checks import at the
-bottom of this file and self-register via :func:`register`. Adding a new
-check = write the check file + append two lines here. See
-``docs/design/pluggable_health_checks.md`` §4.
+Registration policy: import-time side effect. The BUILT-IN checks import at
+the bottom of this file and self-register via :func:`register`.
+
+**That import list is the built-ins' convenience bootstrap, not the
+extension path** (Step 08b C2). An external task registers its own checks by
+naming plugin files in its task health config; the run loads them through
+:func:`load_task_health_plugins`, and they call the SAME public
+:func:`register` the built-ins use. Adding a check therefore does NOT require
+editing this file — a census test asserts it. See
+``docs/design/pluggable_health_checks.md`` §4 and the Step-08b child design
+§3.5.
 
 Tests that need registry isolation call ``_REGISTRY.clear()`` via a pytest
 fixture and re-register the checks they exercise.
@@ -27,6 +34,23 @@ fixture and re-register the checks they exercise.
 
 from __future__ import annotations
 
+from execute_tools.health_checks._plugin_binding import (
+    HealthBindingError,
+    HealthPluginError,
+    HealthPluginRunScopeError,
+    ResolvedHealthPlugin,
+    bound_view_capabilities,
+    externally_registered_checks,
+    externally_registered_view_providers,
+    load_task_health_plugins,
+    loaded_plugin_set,
+    resolve_task_health_bindings,
+)
+from execute_tools.health_checks._view_provider import (
+    HealthView,
+    HealthViewMaterializationError,
+    HealthViewProvider,
+)
 from execute_tools.health_checks.amplitude_collapse import AmplitudeCollapseCheck
 from execute_tools.health_checks.candidate_eligibility import (
     CandidateHealthValidity,
@@ -43,8 +67,11 @@ from execute_tools.health_checks.protocol import HealthCheckSkill
 from execute_tools.health_checks.registry import (
     _REGISTRY,
     all_registered,
+    all_registered_view_providers,
     get,
+    get_view_provider,
     register,
+    register_view_provider,
 )
 from execute_tools.health_checks.runner import (
     evaluate_gate,
@@ -98,18 +125,34 @@ __all__ = [
     "CandidateHealthValidity",
     "GateAction",
     "GateResult",
+    "HealthBindingError",
     "HealthCheckContext",
     "HealthCheckResult",
     "HealthCheckSkill",
+    "HealthPluginError",
+    "HealthPluginRunScopeError",
+    "HealthView",
+    "HealthViewMaterializationError",
+    "HealthViewProvider",
+    "ResolvedHealthPlugin",
     "all_registered",
+    "all_registered_view_providers",
+    "bound_view_capabilities",
     "classify_candidate_health",
     "evaluate_and_persist_health_gates",
     "evaluate_gate",
+    "externally_registered_checks",
+    "externally_registered_view_providers",
     "get",
     "get_gates_for_position",
+    "get_view_provider",
     "is_valid_candidate",
+    "load_task_health_plugins",
+    "loaded_plugin_set",
     "register",
+    "register_view_provider",
     "required_blocking_gate_ids",
     "resolve_action",
+    "resolve_task_health_bindings",
     "severity_of",
 ]

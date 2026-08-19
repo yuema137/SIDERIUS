@@ -1,0 +1,129 @@
+{
+  "_captured_at": "Step 08b C4 head e4b06ae1, BEFORE the C5 ownership migration",
+  "_what": "The six TIDMAD gates as configs/health_checks.yaml carried them while the roster still lived in the framework file. C5 moved the roster, thresholds, peek set, value scale and prose into configs/task_health/tidmad.yaml; this is what the composed result must still produce. `reason` is normalised to a whitespace-collapsed string because YAML folded blocks re-wrap on round-trip and the prose is not consumed by the runner.",
+  "gates": [
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "aggregation": "any_pass",
+            "min_unique_int8_values": 25,
+            "peek_file_indices": [
+              3,
+              10,
+              17
+            ],
+            "peek_samples": 100000
+          },
+          "name": "output_diversity"
+        }
+      ],
+      "gate_role": "blocking",
+      "id": "output_diversity_blocking",
+      "on_fail": "invalidate_round",
+      "on_pass": "continue",
+      "reason_sha": "abae5e3c7319",
+      "short_circuit": true
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "aggregation": "any_pass",
+            "min_std_mv": 1.0,
+            "peek_file_indices": [
+              3,
+              10,
+              17
+            ],
+            "peek_samples": 100000
+          },
+          "name": "output_std"
+        }
+      ],
+      "gate_role": "blocking",
+      "id": "output_std_blocking",
+      "on_fail": "invalidate_round",
+      "on_pass": "continue",
+      "reason_sha": "06c9a0c7c6b1",
+      "short_circuit": true
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "aggregation": "any_pass",
+            "collapse_threshold": 0.95,
+            "peek_file_indices": [
+              3,
+              10,
+              17
+            ],
+            "peek_samples": 100000
+          },
+          "name": "amplitude_collapse"
+        }
+      ],
+      "gate_role": "blocking",
+      "id": "amplitude_collapse_blocking",
+      "on_fail": "invalidate_round",
+      "on_pass": "continue",
+      "reason_sha": "5d09d57a832a",
+      "short_circuit": true
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "peek_samples": 1000000
+          },
+          "name": "pearson_dispersion"
+        }
+      ],
+      "gate_role": "observational",
+      "id": "pearson_dispersion_recording",
+      "on_fail": "continue",
+      "on_pass": "continue",
+      "reason_sha": "45f9de7e3bf0",
+      "short_circuit": false
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "peek_samples": 1000000
+          },
+          "name": "spectral_peak_ratio"
+        }
+      ],
+      "gate_role": "observational",
+      "id": "spectral_peak_ratio_recording",
+      "on_fail": "continue",
+      "on_pass": "continue",
+      "reason_sha": "4f7bfcb29bf5",
+      "short_circuit": false
+    },
+    {
+      "after_round": "every",
+      "checks": [
+        {
+          "config": {
+            "peek_samples": 100000
+          },
+          "name": "per_file_output_std"
+        }
+      ],
+      "gate_role": "observational",
+      "id": "per_file_output_std_recording",
+      "on_fail": "continue",
+      "on_pass": "continue",
+      "reason_sha": "11929f36218c",
+      "short_circuit": false
+    }
+  ]
+}

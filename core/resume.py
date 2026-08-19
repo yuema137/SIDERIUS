@@ -29,8 +29,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-import yaml
-
 from agent.schemas.health_feedback import CollapseFingerprintHistoryEntry
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -54,7 +52,7 @@ from execute_tools.health_checks.candidate_eligibility import (
 )
 from execute_tools.health_checks.config import (
     EFFECTIVE_CONFIG_BASENAME,
-    load_health_gates_config,
+    read_effective_config_body_sha,
 )
 from workflows.model_exploration import _add_plugin_to_registries
 
@@ -349,19 +347,18 @@ def _round_provenance(record: dict[str, Any]) -> tuple[int | None, str]:
 
 
 def _effective_config_body_sha(path: str) -> str | None:
-    """Recompute the canonical body sha of a materialized effective config.
+    """Canonical body sha of a materialized effective config.
 
-    Mirrors ``materialize_effective_config`` exactly (load → model_dump →
-    ``yaml.safe_dump(sort_keys=True)`` → sha256) so the recorded
-    ``health_config_sha256`` stamp can be verified against the on-disk
-    artifact. ``None`` when the file is missing or unparseable.
+    **Delegates rather than mirrors** (Step 08b C4). This used to re-derive
+    the sha by loading the file into ``HealthChecksConfig`` and re-dumping
+    it, which silently dropped any key the model does not declare — and 08b's
+    ``resolved_plugins`` / ``task_health_binding`` are exactly such keys, so
+    the mirror would have reported a mismatch that was not there. One
+    implementation cannot drift from itself.
+
+    ``None`` when the file is missing or unparseable, unchanged.
     """
-    try:
-        cfg = load_health_gates_config(path)
-        body = yaml.safe_dump(cfg.model_dump(mode="json"), sort_keys=True)
-        return hashlib.sha256(body.encode()).hexdigest()
-    except Exception:
-        return None
+    return read_effective_config_body_sha(path)
 
 
 def _commit_time_gate_ids(

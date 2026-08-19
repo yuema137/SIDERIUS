@@ -1,157 +1,50 @@
 # configs/health_checks.yaml
 #
-# HealthGate configuration for the scoring pipeline (rev-7 + M9).
-# See docs/design/pluggable_health_checks.md §3 for the full schema,
-#     docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md
-#     for the coverage rationale (empirical from 6.3556 investigation + Pearson feasibility),
-#     docs/design/m9_multi_file_peek_execution_plan.md
-#     for the multi-file peek + aggregation strategy adopted for blocking checks.
+# FRAMEWORK HealthGate policy. Step 08b C5 slimmed this file to policy only.
 #
-# Coverage rule for V17: EVERY round is gated. No round can slip through
-# and score a phantom output as `success`. See M8 §3.1 for context.
+# What lives here: what a gate DOES. Role, cadence, short-circuit, the
+# actions taken on pass and on fail, and the per-check policy keys the
+# framework injects (`aggregation`).
 #
-# Gate categories:
-#   * BLOCKING gates — on_fail: invalidate_round (score is discarded, chain continues)
-#   * RECORDING-ONLY gates — on_fail: continue (metric is stored, chain continues)
+# What NO LONGER lives here: the gate roster, thresholds, check parameters,
+# the health-peek file set, the millivolt value scale, and the scientific
+# reason prose. All of that is TASK-owned and moved, unchanged, to
+# `configs/task_health/tidmad.yaml`. The framework config must never become
+# `tidmad: … / pets: … / <user task>: …` — that would move task branching
+# out of Python and into YAML while still requiring a SIDERIUS edit per task
+# (Step-08 parent §6a.4).
 #
-# All BLOCKING gates fire on every round (schema-level `after_round: every` — see M8 §3.2).
-# All RECORDING-ONLY gates fire on every round as well.
+# A task selects a `disposition` key per gate; the framework answers with
+# the block below. There is exactly one definition of each field, so a task
+# and the framework cannot disagree and no precedence rule is needed.
 #
-# M9 peek strategy: each blocking check peeks CH1 at `peek_file_indices`
-# and combines per-file verdicts with `aggregation`. Empty peek_file_indices
-# would fall back to single-file min-key peek (pre-M9 backward compat).
+# The observe-mode sibling (`health_checks_baseline_observe_mode.yaml`) is
+# now a two-line difference rather than a duplicated six-gate roster: it
+# differs ONLY in `blocking.on_fail`. That was always the only difference —
+# the duplication was an artifact of the roster living here.
 
-health_gates:
-  # ---------------------------------------------------------------- BLOCKING
-  - id: "output_diversity_blocking"
+health_policy:
+  blocking:
+    # Decides whether a round's record is a valid candidate.
     gate_role: blocking
-    after_round: every                    # NEW schema value; requires M8 §3.2 extension
-    short_circuit: true
-    checks:
-      - name: output_diversity
-        config:
-          min_unique_int8_values: 25      # empirical: FCNet floor=52 → 2.08× margin; baseline max=15 → 40% headroom (2026-07-16 scan)
-          peek_samples: 100000
-          peek_file_indices: task_health_peek  # the task's declared health-peek set (TIDMAD: [3, 10, 17])
-          aggregation: any_pass           # M9: pass if ANY of the 3 files clears the threshold
-    on_pass:
-      action: continue
-    on_fail:
-      action: invalidate_round
-    reason: >
-      Blocking diversity gate. FCNet real-learning reproduction has
-      unique_int8=127+; the worst observed non-collapse baseline had 15.
-      Threshold of 25 gives 2.08× FCNet safety margin and 40% baseline
-      rejection headroom. M9 peek: [3, 10, 17] + any_pass — file 3 is the
-      narrowest-margin FCNet band (52 uniq), file 10 first mid-band
-      exemplar (127), file 17 high-band exemplar (143). Any_pass means a
-      real learning model whose diversity clears the bar on ANY single
-      peeked file passes; collapse fails only when all three files degrade.
+    after_round: every                # every round is gated — no round may
+                                      # slip through and score a phantom
+                                      # output as `success` (M8 §3.1)
+    short_circuit: true               # stop at the first real failure
+    on_pass: continue
+    on_fail: invalidate_round         # the score is discarded, chain continues
+    check_config:
+      aggregation: any_pass           # M9: pass if ANY peeked file clears the
+                                      # threshold; collapse fails only when
+                                      # every peeked file degrades
 
-  - id: "output_std_blocking"
-    gate_role: blocking
-    after_round: every
-    short_circuit: true
-    checks:
-      - name: output_std                  # NEW check — see M8 §3.3
-        config:
-          min_std_mv: 1.0                 # FCNet≈7.35 mV, collapse<0.2 mV
-          peek_samples: 100000
-          peek_file_indices: task_health_peek  # same declared set as output_diversity
-          aggregation: any_pass           # M9
-    on_pass:
-      action: continue
-    on_fail:
-      action: invalidate_round
-    reason: >
-      Blocking std gate. Complements output_diversity — an output with
-      many unique values but tight std (edge-case not observed but
-      theoretically possible) would also fail here. 1.0 mV threshold
-      gives ~5× margin above worst-observed collapse (0.19 mV). M9 peek
-      matches output_diversity: [3, 10, 17] + any_pass.
-
-  - id: "amplitude_collapse_blocking"
-    gate_role: blocking
-    after_round: every                    # was: after_round: 1
-    short_circuit: true
-    checks:
-      - name: amplitude_collapse
-        config:
-          collapse_threshold: 0.95
-          peek_samples: 100000
-          peek_file_indices: task_health_peek  # same declared set as the other two blocking gates
-          aggregation: any_pass           # M9
-    on_pass:
-      action: continue
-    on_fail:
-      action: invalidate_round            # was: continue (round 1 only)
-    reason: >
-      Blocking amplitude gate. Catches single-value-dominance collapse
-      even when unique_count is above threshold (e.g. output has 40 unique
-      values but 96% are the same one). Threshold 0.95 unchanged from
-      rev-6; extended to every round. M9 peek: [3, 10, 17] + any_pass.
-      Note: any_pass semantics are lenient here — a partial-collapse case
-      where ONE file has 96% dominance and the other two are healthy would
-      pass. all_pass would arguably be stricter; deferred to post-V17
-      empirical validation (see m9 execution plan §9 Q1).
-
-  # -------------------------------------------------------- RECORDING ONLY
-  # Recording gates always return passed=True on numeric completion; they
-  # never cause is_degenerate=True. The measured value lives in
-  # HealthCheckResult.metrics and is persisted via GateResult.check_results
-  # into the round's record.
-
-  - id: "pearson_dispersion_recording"
+  recording:
+    # Measures and records only; never invalidates anything. The measured
+    # value lives in HealthCheckResult.metrics and is persisted via
+    # GateResult.check_results into the round's record.
     gate_role: observational
     after_round: every
-    short_circuit: false
-    checks:
-      - name: pearson_dispersion          # M8 §3.4 (revised 2026-07-16 — was per-file pearson_correlation)
-        config:
-          peek_samples: 1000000           # 100 ms at 10 MS/s per file
-    on_pass:
-      action: continue
-    on_fail:
-      action: continue                    # recording only
-    reason: >
-      Records the spread of per-file pearson(CH1_denoised, CH2_target) as
-      a single scalar: pearson_dispersion = stdev(per_file_pearsons,
-      ddof=1). Empirical 24× separation between real learning (FCNet
-      ~0.048) and paper-spec collapse (~0.002). Per-file pearson values
-      are computed internally but NOT exposed — they were shown to be
-      uninformative per-file (noise-limited on files 0-9; can sign-invert
-      on high-signal files). See docs/design/paper_and_collapse_reference_baselines.md §6.3.
-
-  - id: "spectral_peak_ratio_recording"
-    gate_role: observational
-    after_round: every
-    short_circuit: false
-    checks:
-      - name: spectral_peak_ratio         # NEW check — see M8 §3.4
-        config:
-          peek_samples: 1000000
-    on_pass:
-      action: continue
-    on_fail:
-      action: continue
-    reason: >
-      Records PSD(f_inj) / median(PSD_around_f_inj) per file. Direct
-      spectral analog of the scoring pipeline's SNR; useful for detecting
-      the "phantom scored high" case without triggering it. Never blocks.
-
-  - id: "per_file_output_std_recording"
-    gate_role: observational
-    after_round: every
-    short_circuit: false
-    checks:
-      - name: per_file_output_std         # NEW check — see M8 §3.4
-        config:
-          peek_samples: 100000
-    on_pass:
-      action: continue
-    on_fail:
-      action: continue
-    reason: >
-      Records per-file output std distribution (mean, min, max, per-file
-      list). Complements output_std_blocking (aggregate) with per-file
-      granularity for diagnosis. Never blocks.
+    short_circuit: false              # run every check for full diagnostics
+    on_pass: continue
+    on_fail: continue
+    check_config: {}

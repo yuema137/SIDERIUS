@@ -36,6 +36,7 @@ from __future__ import annotations
 import math
 from typing import Any, ClassVar
 
+from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
@@ -63,7 +64,13 @@ class SampleDispersionFloorCheck:
         self,
         ctx: HealthCheckContext,
         config: dict[str, Any] | None = None,
+        *,
+        view: HealthView | None = None,
     ) -> HealthCheckResult:
+        # ``view`` is Protocol conformance only (Step 08b C3). This check
+        # declares a capability key but does not REQUIRE a view — it reads
+        # its own artifacts — so the runner dispatches it through the
+        # unchanged ``run(ctx, config)`` path and it never receives one.
         cfg = config or {}
         floor = float(cfg.get("min_dispersion", self._DEFAULT_MIN_DISPERSION))
         raw = cfg.get("samples")

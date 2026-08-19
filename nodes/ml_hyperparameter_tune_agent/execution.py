@@ -48,6 +48,7 @@ from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
     GateAction,
     HealthCheckContext,
+    PerSampleEvidence,
 )
 from execute_tools.scoring_helpers import (
     build_score_table,
@@ -885,16 +886,22 @@ def run_inference_scoring_health(
                     s_max=anchor_map_data["s_max"],
                     denoised_filename_fn=_denoised_fn,
                 )
-                # `per_sample` is Optional on the generic result
-                # (a scalar-only metric carries none); the
-                # HealthGate context and the record's
-                # `file_vector` want a list — TIDMAD always
-                # supplies one, a scalar-only instance an
-                # empty one.
+                # `per_sample` is Optional on the generic result: a
+                # scalar-only metric carries NONE, and the Pets
+                # AccuracyMetric says so in as many words. The
+                # record's `file_vector` still wants a list, so the
+                # list is still built — but the STATEMENT is carried
+                # separately rather than collapsed into it (D18,
+                # Step 08b C6). Collapsing the two made a scalar-only
+                # task present per-file checks with `[]`, which reads
+                # as "no files" and PASSES: "this question does not
+                # arise here" recorded as health.
+                per_sample = metric_result.per_sample
                 file_vector, final_scalar = (
-                    list(metric_result.per_sample or []),
+                    list(per_sample or []),
                     metric_result.scalar,
                 )
+                per_sample_evidence = PerSampleEvidence.for_per_sample(per_sample)
                 # Step 06 C4 — the record-facing payload. Kept
                 # OUT of `score_res["results"]` on purpose: that
                 # dict is json-dumped verbatim into the reflector
@@ -950,6 +957,7 @@ def run_inference_scoring_health(
                         checkpoint_path=_checkpoint_path,
                         file_vector=file_vector,
                         denoising_score=final_scalar,
+                        per_sample_evidence=per_sample_evidence,
                     )
                     _gate_results, _persisted_gate_results, resolved_action = (
                         evaluate_and_persist_health_gates(

@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
+from execute_tools.health_checks._plugin_binding import materialize_view
+from execute_tools.health_checks._view_provider import HealthViewMaterializationError
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.registry import get
 
@@ -49,10 +51,19 @@ def _resolve_task_facts() -> TaskHealthFacts:
     dependency on profile/deliverable resolution — and so 08b has ONE call
     site to redirect when a task binding supplies facts directly, rather
     than a module-level name that consumers may have bound already.
+
+    **Step 08b C5 uses that redirect.** When a task health binding resolved
+    for this run, its DECLARED facts are authoritative and the regime-A
+    derivation does not run: regime A exists precisely because nothing
+    declared them. Deriving facts from the dataset profile while the task
+    states them in its own config would be two answers to one question, and
+    the derivation is the one that cannot see ``value_scale_unit``.
     """
+    from execute_tools.health_checks._plugin_binding import bound_task_facts
     from execute_tools.health_checks._regime_a_facts import resolve_health_facts
 
-    return resolve_health_facts()
+    declared = bound_task_facts()
+    return declared if declared is not None else resolve_health_facts()
 
 
 def resolve_action(gate_results: Iterable[GateResult]) -> GateAction:
@@ -157,6 +168,18 @@ def evaluate_gate(
         # defaults" per Protocol §6, matching design §8's ``.get("config")``
         # semantic.
         cfg_override = check_ref.config or None
+        # Step 08b C3: materialize the check's declared view, STRICTLY after
+        # applicability and strictly before the skill runs (§3.3/§3.4). The
+        # ordering is the invariant — a provider must never open an artifact
+        # to decide whether a check applies, or 08a's pre-I/O applicability
+        # guarantee would be undone by the mechanism meant to extend it.
+        #
+        # ``None`` means no bound provider serves this capability, which is
+        # every pre-08b run and TIDMAD: the check is then invoked through the
+        # unchanged ``run(ctx, config)`` path, not gratuitously handed
+        # ``view=None``. Backward compatibility is a DISPATCH rule, not a
+        # parameter default.
+        view = None
         # Bug B fix (PR #101 Gate 2 forensic, 2026-07-15): guard the skill
         # call so an unhandled exception inside a check does not propagate
         # out of evaluate_gate and crash the tuner. Individual checks may
@@ -166,11 +189,25 @@ def evaluate_gate(
         # comes from ``on_fail`` per the gate's YAML config, keeping policy
         # in config and mechanism in code.
         try:
-            result = skill.run(ctx, config=cfg_override)
+            if isinstance(declaration, CheckInputDeclaration):
+                view = materialize_view(declaration, ctx)
+            result = (
+                skill.run(ctx, config=cfg_override, view=view)
+                if view is not None
+                else skill.run(ctx, config=cfg_override)
+            )
         except Exception as exc:
             import traceback
 
             _err_name = type(exc).__name__
+            # A provider that failed to honour an advertised capability is
+            # named as such: "the check raised" would send whoever reads this
+            # to the wrong component.
+            _what = (
+                "view provider failed"
+                if isinstance(exc, HealthViewMaterializationError)
+                else "check raised unexpected"
+            )
             print(
                 f"[Gate {gate_id}] check {check_ref.name!r} raised {_err_name}: {exc}",
                 flush=True,
@@ -179,7 +216,7 @@ def evaluate_gate(
             result = HealthCheckResult(
                 check_name=check_ref.name,
                 passed=False,
-                reason=(f"{check_ref.name}: check raised unexpected {_err_name}: {exc}"),
+                reason=(f"{check_ref.name}: {_what} {_err_name}: {exc}"),
                 metrics={"exception_type": _err_name},
                 # A check that should have run but could not compute. On a
                 # blocking gate this still takes on_fail — failing closed,

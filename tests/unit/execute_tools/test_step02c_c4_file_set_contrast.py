@@ -90,19 +90,17 @@ def _diff_paths(left, right, prefix=""):
 
 
 def _resolved_peeks(profile) -> dict[str, object]:
-    """gate id -> resolved peek_file_indices, through the SHIPPED config.
+    """gate id -> resolved peek_file_indices, through the SHIPPED roster.
 
-    An explicit path, because ``load_health_gates_config`` caches only the
-    default path and a cached entry could otherwise have been resolved
-    under a different profile.
+    Step 08b C5: the peek set is declared by the TASK's own health config,
+    not derived from the bound ``DatasetProfile``, so the declaration is
+    substituted where it now lives. The claim under test is unchanged — a
+    declared set must reach exactly the blocking gates — and it is still
+    made against production's real roster.
     """
-    with bind_dataset_profile(profile):
-        cfg = load_health_gates_config(SHIPPED_CONFIG)
-    return {
-        gate.id: check.config.get("peek_file_indices")
-        for gate in cfg.health_gates
-        for check in gate.checks
-    }
+    from tests.helpers.health_task_config import resolved_peek_files
+
+    return resolved_peek_files(list(profile.health_peek_files))
 
 
 def _anchor_population(profile) -> list[int]:

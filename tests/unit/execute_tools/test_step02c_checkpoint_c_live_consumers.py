@@ -120,11 +120,25 @@ class _RealFiles:
 # ---------------------------------------------------------------------------
 
 
+def _declared_config(tmp_path) -> str:
+    """The shipped roster composed with the contrast peek declaration.
+
+    Step 08b C5: the peek set is declared by the TASK's own health config,
+    so the contrast is expressed there and the composed result is handed to
+    the real ``evaluate_gate``. What this module tests — that the
+    DECLARATION decides which files are judged, at the real evaluation
+    boundary — is unchanged.
+    """
+    from tests.helpers.health_task_config import write_composed_config
+
+    return write_composed_config(list(DECLARED_PEEK), tmp_path)
+
+
 class TestRealHealthGateEvaluation:
     def test_the_blocking_gate_opens_exactly_the_declared_files(self, tmp_path):
         files = _RealFiles(tmp_path)
         with bind_dataset_profile(_contrast_profile()):
-            result = evaluate_gate(BLOCKING_GATE, files.ctx, config_path=SHIPPED_CONFIG)
+            result = evaluate_gate(BLOCKING_GATE, files.ctx, config_path=_declared_config(tmp_path))
 
         assert files.opened == set(DECLARED_PEEK), (
             f"the blocking gate actually opened {sorted(files.opened)}; the "
@@ -145,7 +159,7 @@ class TestRealHealthGateEvaluation:
         """
         files = _RealFiles(tmp_path)
         with bind_dataset_profile(_contrast_profile()):
-            evaluate_gate(RECORDING_GATE, files.ctx, config_path=SHIPPED_CONFIG)
+            evaluate_gate(RECORDING_GATE, files.ctx, config_path=_declared_config(tmp_path))
 
         assert files.opened == set(range(TIDMAD_PROFILE.dataset.num_files))
 
@@ -160,7 +174,7 @@ class TestGateVerdictSemanticsAreUnchanged:
     def test_a_degenerate_declared_file_still_fails_and_invalidates(self, tmp_path):
         files = _RealFiles(tmp_path, degenerate=set(DECLARED_PEEK))
         with bind_dataset_profile(_contrast_profile()):
-            result = evaluate_gate(BLOCKING_GATE, files.ctx, config_path=SHIPPED_CONFIG)
+            result = evaluate_gate(BLOCKING_GATE, files.ctx, config_path=_declared_config(tmp_path))
 
         assert result.passed is False
         assert result.action is GateAction.INVALIDATE_ROUND, (
@@ -177,7 +191,7 @@ class TestGateVerdictSemanticsAreUnchanged:
         """
         files = _RealFiles(tmp_path, degenerate={3})
         with bind_dataset_profile(_contrast_profile()):
-            result = evaluate_gate(BLOCKING_GATE, files.ctx, config_path=SHIPPED_CONFIG)
+            result = evaluate_gate(BLOCKING_GATE, files.ctx, config_path=_declared_config(tmp_path))
 
         assert result.passed is True
         assert 3 not in files.opened

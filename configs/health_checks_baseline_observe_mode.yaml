@@ -1,80 +1,41 @@
-# Frozen observe-only policy for the v17_pregate_baseline campaign.
-# Threshold evidence is reviewed in docs/design/v17_pregate_baseline_launch_plan.md §6.
-health_gates:
-  - id: output_diversity_blocking
+# configs/health_checks_baseline_observe_mode.yaml
+#
+# FRAMEWORK HealthGate policy — OBSERVE-ONLY variant. Step 08b C5.
+#
+# Identical to `configs/health_checks.yaml` except for ONE field:
+#
+#     blocking.on_fail:  invalidate_round  ->  continue
+#
+# That was always the only difference between the two shipped configs; before
+# C5 it was buried in a duplicated six-gate roster, and now it is the whole
+# file. Used for baseline characterization runs where a degenerate result
+# must be MEASURED rather than discarded.
+#
+# `gate_role: blocking` is deliberately unchanged here. The role is a
+# property of the SCIENCE, not of enforcement — deriving it from the action
+# instead does not merely lose information, it INVERTS the answer: under this
+# config every action is `continue`, so an action-derived scientific set
+# would be EMPTY and every record would classify as valid. That was a live
+# defect (see `resolve_scientific_gate_ids`).
+#
+# The gate roster, thresholds, peek set, value scale and reason prose are
+# task-owned and live in `configs/task_health/tidmad.yaml` — shared by both
+# policy files, so observe mode cannot drift from production science.
+
+health_policy:
+  blocking:
     gate_role: blocking
     after_round: every
     short_circuit: true
-    checks:
-      - name: output_diversity
-        config:
-          min_unique_int8_values: 25
-          peek_samples: 100000
-          peek_file_indices: task_health_peek
-          aggregation: any_pass
-    on_pass: {action: continue}
-    on_fail: {action: continue}
-    reason: Observe only; production policy would invalidate a failed result.
+    on_pass: continue
+    on_fail: continue                 # THE observe-mode difference
+    check_config:
+      aggregation: any_pass
 
-  - id: output_std_blocking
-    gate_role: blocking
-    after_round: every
-    short_circuit: true
-    checks:
-      - name: output_std
-        config:
-          min_std_mv: 1.0
-          peek_samples: 100000
-          peek_file_indices: task_health_peek
-          aggregation: any_pass
-    on_pass: {action: continue}
-    on_fail: {action: continue}
-    reason: Observe only; production policy would invalidate a failed result.
-
-  - id: amplitude_collapse_blocking
-    gate_role: blocking
-    after_round: every
-    short_circuit: true
-    checks:
-      - name: amplitude_collapse
-        config:
-          collapse_threshold: 0.95
-          peek_samples: 100000
-          peek_file_indices: task_health_peek
-          aggregation: any_pass
-    on_pass: {action: continue}
-    on_fail: {action: continue}
-    reason: Observe only; production policy would invalidate a failed result.
-
-  - id: pearson_dispersion_recording
+  recording:
     gate_role: observational
     after_round: every
     short_circuit: false
-    checks:
-      - name: pearson_dispersion
-        config: {peek_samples: 1000000}
-    on_pass: {action: continue}
-    on_fail: {action: continue}
-    reason: Recording only.
-
-  - id: spectral_peak_ratio_recording
-    gate_role: observational
-    after_round: every
-    short_circuit: false
-    checks:
-      - name: spectral_peak_ratio
-        config: {peek_samples: 1000000}
-    on_pass: {action: continue}
-    on_fail: {action: continue}
-    reason: Recording only.
-
-  - id: per_file_output_std_recording
-    gate_role: observational
-    after_round: every
-    short_circuit: false
-    checks:
-      - name: per_file_output_std
-        config: {peek_samples: 100000}
-    on_pass: {action: continue}
-    on_fail: {action: continue}
-    reason: Recording only.
+    on_pass: continue
+    on_fail: continue
+    check_config: {}
