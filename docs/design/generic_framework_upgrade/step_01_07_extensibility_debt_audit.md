@@ -14,6 +14,14 @@ as **issue #234** (blocks Step 08: NO; blocks Step-09 planning: NO; must
 be resolved before Step-10/12 external composition acceptance: YES);
 finding 3 stays C-class untracked.
 
+**Post-ruling update (2026-08-18).** One matrix row has since closed:
+**item 16 (health registration)** was the audit's only "central edit
+required TODAY" row with a named near-term owner, and **Step 08b merged
+it** (PR #236, squash `13e28796`). §2 row 16 and the §4 inventory now
+record the landed state. Nothing else in this audit changed: the B-class
+§7.2 items remain Step-10/12's, the Step-06 metric disposition stands
+as ratified, and issue #234 is still open.
+
 Commissioned by the operator
 directive of 2026-08-18, in parallel with the Step-08 parent-design
 amendments (rev 3 of `step_08_health_check_task_profile.md`). This is a
@@ -94,7 +102,7 @@ disposition · owner/timing. "Config" means the task-side declaration;
 | 13 | 06 EvaluationMetric / MetricSpec / Scoreability | `execute_tools/evaluation_metric.py` | YES — declaration constructors exist and fail closed (`metric_spec_from_declaration` `:657`, `scoreability_contract_from_declaration` `:641`) | **NO — no metric registry, no plugin_ref, no loader**; binding is direct class construction at call sites (`run_pets_gate2.py:220`, `run_davis_gate2.py:215`, `derive_tidmad_metric` `:712`) | YES for a novel metric implementation today | `MetricDirection = Literal["higher","lower"]` (`:110`) is universal, not per-task; no task enums | **B** — THE canonical example of the operator's two-layer target (§5): the semantic layer (ABC + `MetricResult` normalization + scoreability-before-arithmetic) already matches; the declaration→`plugin_ref`→adapter layer is absent | Step 10/12 unified composition (declaration gains `plugin_ref`; backends as adapters) |
 | 14 | 07 TrainingObjective | `models_format_sandbox.py:637` + `loss_models_sandbox.py` | YES (`loss_type="custom"` + open `loss_name` `:651`) | **YES — out-of-tree TODAY** (`SIDERIUS_LOSS_DIRS` two-tier resolution `:253-268`; separate env var by documented design) | NO to RUN; YES only to PROMOTE a kind to first-class (`loss_type` Literal member + `COMPARABILITY_ESTABLISHED_KINDS`, "added by SOURCE AUDIT, never by assumption" — `training_history.py:71-73`) | closed Literal WITH a first-class `custom` escape | **SATISFIES**, with the honest lossy consequence recorded: all external objectives report `objective_kind="custom"` and are stamped `not_established` — distinguishable only by `objective_config_fingerprint` | promotion procedure = audit-gated by design; document it at Step 12 |
 | 15 | 07 TrainingHistory / TrainingDiagnosis | `execute_tools/training_history.py`, `agent/schemas/training_diagnosis.py` | — | — | NO | `objective_kind: str` OPEN (`:133`); fingerprint generic (sha256 of the dumped config, `:100-101`, no per-kind table); Diagnosis Literals are framework-policy only (`ok/absent/invalid`, trends); **zero task/objective vocabulary** — "no overfitting/converged labels" is an explicit design commitment | **SATISFIES** | — |
-| 16 | 08-subject: health registration | `execute_tools/health_checks/__init__.py` central import list | — | **NO today** | **YES today** | no | being closed by **08b** (Step-08 parent §2.6/§6a — not re-dispositioned here) | 08b |
+| 16 | 08-subject: health registration | task-owned Health config names plugin refs; `_plugin_binding.py` loads them at run scope; `__init__.py`'s import list is now the BUILT-INS' bootstrap only | **YES** — `configs/task_health/<task>.yaml` (any path) | **YES** — config-named `.py` files register checks AND view providers through the public `register` / `register_view_provider` | **NO** | no | **CLOSED by 08b** — MERGED 2026-08-18, PR #236 squash `13e28796`. Proven by an executable out-of-tree fourth-task test whose identifiers are absent from all production source, with a remove/restore negative control. Plugin content digests join the pinned `health_config_sha256`. | **DONE (08b)** |
 
 ## 3. Findings that need more than a matrix row
 
@@ -196,16 +204,18 @@ fix is flat-cost whenever scheduled.
 |---|---|---|---|---|
 | models | `SIDERIUS_PLUGIN_DIRS` (+ per-file API) | **YES** (D14-proven) | — (coercion defect §3.5.1 aside) | — |
 | losses / objectives | `SIDERIUS_LOSS_DIRS` (two-tier) | **YES** | first-class-kind promotion procedure (documented, audit-gated) | Step 12 docs |
-| health checks / views | central `__init__` import list ONLY | NO | run-scoped config-named loading — **08b** (Step-08 parent §6a.3) | 08b |
+| health checks / views | config-named refs from the task Health config, loaded run-scoped by `_plugin_binding.py` (the same importlib idiom as models/losses); `__init__` retains the built-ins' bootstrap | **YES** (08b-proven, out-of-tree fixture) | — (its run-scoped ledger is an 08b INTERNAL enforcement seam that Step 10/12 may subsume, provided one run never inherits another's plugin set) | **DONE (08b)** |
 | task data paths | module-tail registration; leaf-entry-point imports; `transport_argv` dormant | NO | unified task-pack loading + transport emission | **Step 10/12** |
 | metrics / scoreability | none (direct construction) | NO | declaration `plugin_ref` + adapter layer | **Step 10/12** |
 | task config (identity) | hardcoded default path | NO | run-scoped config binding | **Step 12** |
 
 Per the directive's §7 preference, this audit recommends **no new
-per-subsystem loaders now**: the health channel in 08b is the single
-operator-mandated exception, deliberately shaped as a thin instance of
-the existing idiom that the Step-10/12 composition root subsumes without
-contract change (Step-08 parent §6a.3). Task-data-path, metric and
+per-subsystem loaders now**: the health channel was the single
+operator-mandated exception and **landed in 08b** (MERGED 2026-08-18),
+deliberately shaped as a thin instance of the existing idiom that the
+Step-10/12 composition root subsumes without contract change (Step-08
+parent §6a.3). That exception is now spent — the recommendation stands
+unchanged for every remaining family. Task-data-path, metric and
 task-config loading all WAIT for that one mechanism.
 
 ## 5. Forward roadmap invariant (proposed; binding on Steps 08–12 at Step-08 freeze)
