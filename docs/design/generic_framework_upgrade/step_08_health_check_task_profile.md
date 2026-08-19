@@ -191,13 +191,13 @@ system.
 |---|---|---|---|
 | deliverable | per-file HDF5, int8 stream | ONE CSV `{image_id: class}` | ONE npz `{clip: float32 [3,4,128,224]}` |
 | output semantics | **per-sample 256-way categorical** (argmax of `[B,256,T]` logits → int8 symbols) | per-image 37-way categorical | dense continuous tensor |
-| real health event | mode collapse observed for years (the gates' raison d'être); D14 gate pair reproduced `failed_mode_collapse` | **constant-prediction collapse observed at D14** (dominant class fraction = 1.0; 10/370 correct = exactly chance) | healthy-ish: beat the last-frame-copy baseline (0.017290 < 0.017392) |
+| real health event | mode collapse observed for years (the gates' raison d'être); D14 gate pair reproduced `failed_mode_collapse` | **constant-prediction collapse observed at D14** (dominant class fraction = 369/370 = 0.9972972972972973, 2 distinct classes of 37; 10/370 correct = exactly chance) *[factual erratum 2026-08-18, measured from the preserved artifact at the 08c freeze — child §2.5/§2.7; architecture unchanged]* | healthy-ish: beat the last-frame-copy baseline (0.017290 < 0.017392) |
 
 The middle row is the load-bearing discovery: **TIDMAD's blocking checks
 are already categorical-collapse checks** — unique-symbol count, dominant-
 symbol fraction, dispersion floor — expressed in int8/mV vocabulary. The
 same three mechanisms, parameterized differently, describe the OBSERVED
-Pets collapse (37 symbols, dominant fraction 1.0, occupancy 1) and the
+Pets collapse (37 symbols, dominant fraction 369/370, 2 distinct classes → occupancy 2/37) and the
 DAVIS analogue (per-tensor dispersion). The generic family is not invented;
 it is extracted.
 
@@ -242,7 +242,7 @@ Blocking-vs-recording and every numeric threshold: task-declared, always.
 * "No real deliverable exists before D14 / L2 is a deferred obligation" →
   real artifacts exist; real-artifact evidence is now REQUIRED milestone
   scope (§14), including the preserved Pets collapse artifact
-  (`/home/klz/Data/SIDEREIS_DATA/d14_pets_gate2_20260818b/`).
+  (`/home/klz/Data/SIDEREIS_DATA/d14_pets_gate2_20260818b/`; the same CSV is byte-identical in `…20260818/`, one sha `cc8470267fbf…f752c` — and the DAVIS npz lives in `d14_davis_gate2_20260818c/`, the D14 ledger's `…818b/` holding the evidence JSON) *[evidence-provenance erratum 2026-08-18, child §2.7]*.
 * "Deliverable facts come from the Deliverable Contract" (as the universal
   comparison surface) → true only for regime-A/TIDMAD; B/C facts come from
   the task's health declaration (§3.3.1).
@@ -552,7 +552,7 @@ license new debt.)
 * **L2 (real artifacts)**: the D14 gate artifacts are the first real
   corpus — the preserved Pets collapse CSV becomes a committed-fixture-of-
   record (small, deterministic) whose evaluation by the generic engine
-  yields `dominant-fraction = 1.0 → blocking-fail` under Pets' declared
+  yields `dominant-fraction = 369/370 = 0.9972973 → blocking-fail` (a NEAR-constant deliverable — the reason the check thresholds on a fraction) under Pets' declared
   family; a DAVIS npz evaluates through the continuous family with no
   TIDMAD/classification assumption. Fresh bounded runs (D14 runner
   pattern) provide the live half.

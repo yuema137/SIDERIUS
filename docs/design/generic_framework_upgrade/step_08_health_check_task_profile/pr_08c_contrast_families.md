@@ -55,6 +55,29 @@ checkbox in §4 is `[ ]`.**
 | 15 | the final Step-08 validation stack made explicit | §3.7 |
 | 16 | freeze/bootstrap procedure (adversarial pass → freeze → master → fresh implementation branch → do NOT implement) | executed at this commit |
 
+### 0.2a Final operator approval (2026-08-18) — three minor corrections
+
+The operator's final review returned **APPROVED WITH THREE MINOR
+CORRECTIONS — NO FURTHER DESIGN REVIEW REQUIRED**, applied in this
+revision:
+
+1. **Parent factual erratum** — the parent's "dominant fraction = 1.0"
+   prose (§3.1 table, §3.1 narrative, §9 L2) corrected to the measured
+   369/370 = 0.9972972972972973 with 2 distinct classes, and the
+   Pets/DAVIS evidence-directory citations annotated; marked in the parent
+   as factual evidence/provenance correction only, frozen architecture and
+   acceptance unchanged. The child's authority chain is now free of the
+   §2.7 inconsistency (that section stands as the audit record of what was
+   corrected).
+2. **NumPy no-copy contract precision** — the ABI asserts
+   `np.shares_memory` + read-only view + provider writeability/contents
+   preserved (both directions), never exact `.base` identity (§3.1, C1).
+3. **DAVIS float precision ownership** — the provider hands over the
+   NATIVE float32 stream; the CHECK owns float64 accumulation
+   (`np.std(..., dtype=np.float64, ddof=0)`); no contract claims
+   concatenation upcasts (§2.9, §3.5/§3.5a, C2, C4). Verified at freeze to
+   reproduce the frozen dispersion bit-equal.
+
 ### 0.3 What this PR is, in one paragraph
 
 08b built the extension architecture and proved it with a synthetic fourth
@@ -215,10 +238,13 @@ in their name.
 
 ### 2.9 The one-time DAVIS measurement (amendment 6 — executed at rev 2)
 
-Measured ONCE, before freeze, with the final standard-view semantics (§3.1:
-sorted clip keys → per-clip `ravel()` → concatenated 1-D float64 view;
-population std, ddof 0 — the same population variance
-`sample_dispersion_floor` has always computed):
+Measured ONCE, before freeze, with the final standard-view semantics:
+sorted clip keys → per-clip `ravel()` → one concatenated 1-D array in the
+artifact's NATIVE float32 (concatenation does not change dtype), with the
+population statistic (ddof 0) computed under FLOAT64 ACCUMULATION — the
+estimator the check owns (§3.5a). Verified at freeze:
+`np.std(native_float32_stream, dtype=np.float64, ddof=0)` reproduces the
+value below EXACTLY equal:
 
 ```text
 artifact   /home/klz/Data/SIDEREIS_DATA/d14_davis_gate2_20260818c/
@@ -324,9 +350,14 @@ Frozen ABI properties (amendment 2, each an executable C1 criterion):
   named. A Python list/tuple is rejected (it is not an `np.ndarray`);
   providers construct arrays explicitly.
 * **Consumer must not mutate.** The payload stores a READ-ONLY VIEW
-  (`arr.view()` with `writeable=False`) — no copy, and the provider's own
-  array is untouched; a check attempting in-place mutation raises. Checks
-  may compute through NumPy freely (reductions allocate their own results).
+  (`writeable=False`); a check attempting in-place mutation raises. No-copy
+  is the SEMANTIC contract, asserted as
+  `np.shares_memory(stored_view, provider_array) is True` — never as exact
+  `.base` identity, which NumPy does not guarantee for an input that is
+  itself already a view. Construction must not change the provider array's
+  own writeability state or contents (a writable input stays writable; a
+  read-only input stays read-only — both cases tested). Checks may compute
+  through NumPy freely (reductions allocate their own results).
 * **Runtime-only.** The payload is not required to be JSON/persistence
   serializable; nothing persists it (verdicts and metrics persist, views do
   not).
@@ -463,9 +494,20 @@ generic "produced artifact" slot; no schema change; its docstring gains a
 sentence saying so.
 
 **DAVIS evaluates the FULL decoded view** (amendment 7): sorted clip keys →
-`ravel()` → one concatenated 1-D array — the §2.9 semantics exactly. No
-prefix cap, no sampling: 17.9 MB is not too large for a bounded evaluation,
-and a prefix would make dispersion depend on flatten ordering. If
+`ravel()` → one concatenated 1-D array, **preserving the artifact's native
+floating dtype** (float32 for the real npz) — the §2.9 semantics exactly.
+No prefix cap, no sampling: 17.9 MB is not too large for a bounded
+evaluation, and a prefix would make dispersion depend on flatten ordering.
+
+**Precision ownership (§3.5a, final-approval correction 3).** The PROVIDER
+owns the artifact projection and hands over the native-dtype sample stream;
+the CHECK owns the numerical estimator and computes the population
+dispersion with float64 accumulation (`np.std(samples, dtype=np.float64,
+ddof=0)` — the NumPy equivalent of the estimator the current check already
+owns, whose `math.fsum` accumulation is float64). Ordinary NumPy
+concatenation of float32 arrays does NOT upcast, and no contract relies on
+it doing so. This division reproduces the frozen §2.9 value exactly
+(verified at freeze, bit-equal). If
 implementation evidence ever suggests a cap is needed, that is a
 frozen-semantics change → STOP; any future sampling policy would have to be
 explicit task-owned config, deterministic and coverage-preserving — it is
@@ -615,10 +657,12 @@ any YAML, the engine's opacity. Depends on: nothing.
 - [ ] Unit: valid construction (int8/int64 symbols; float32/float64
       samples); rejection of each wrong class — bool array, string array,
       object array, int array as continuous, 2-D array, Python list/tuple.
-- [ ] Unit: read-only enforcement — in-place mutation through the stored
-      view raises; the provider's ORIGINAL array stays writable and
-      unchanged (no copy: the stored view's `.base` is the provider's
-      array).
+- [ ] Unit: read-only + no-copy semantics — in-place mutation through the
+      stored view raises; `np.shares_memory(stored_view, provider_array)`
+      is True (no copy — deliberately NOT `.base` identity); construction
+      leaves the provider array's writeability state and contents unchanged,
+      tested for BOTH a writable input (stays writable) and a read-only
+      input (stays read-only).
 - [ ] Unit: the key strings equal the parent §6.3 spellings, hardcoded.
 - [ ] Census: no engine module references the keys or payload types.
 - [ ] Backward-compat: health package green; 27-case manifest
@@ -628,7 +672,8 @@ any YAML, the engine's opacity. Depends on: nothing.
 - [ ] The two capability-key strings exist in exactly ONE production module
       (grep census counts definitions).
 - [ ] Every §3.1 ABI bullet has a failing test: wrong dtype-kind rejected
-      with the dtype named; non-1-D rejected; mutation raises; no copy.
+      with the dtype named; non-1-D rejected; mutation raises; no copy via
+      `shares_memory`; provider writeability preserved in both directions.
 - [ ] Engine opacity census green; inertness guard green and
       mutation-proven; manifest byte-identical.
 
@@ -684,8 +729,11 @@ any YAML. Depends on C1 (inertness guard INVERTED here).
       symbol → FAILED naming the symbol and the range) consumed by BOTH
       categorical checks.
 - [ ] Upgrade `sample_dispersion_floor`: view consumption; keep name,
-      threshold name, ERROR-on-empty and the hand-computed arithmetic; drop
-      the facts requirement; add the non-finite → FAILED guard.
+      threshold name, ERROR-on-empty and the hand-computed arithmetic; the
+      estimator becomes `np.std(samples, dtype=np.float64, ddof=0)` (§3.5a
+      — float64 accumulation, the NumPy equivalent of the existing
+      `math.fsum` form); drop the facts requirement; add the non-finite →
+      FAILED guard.
 - [ ] Implement the frozen injectable-axes table + authored-collision
       refusal in `_composition`; value-scale behaviour otherwise provably
       unchanged.
@@ -885,10 +933,10 @@ modules, shipped configs, `davis_data_path.py`, runners. Depends on C1–C2
 - [ ] Codec parity holds for DAVIS (both readers agree on a
       production-written npz).
 
-**Failure and edge cases.** float32 → float64 upcast in the concatenation
-is deliberate and recorded (the §2.9 measurement used it; the payload
-carries the concatenated array's dtype). A future clip-count change alters
-n but not the semantics — nothing pins 15.
+**Failure and edge cases.** The payload carries the artifact's NATIVE
+float32; float64 enters only inside the check's estimator (§3.5a precision
+ownership) — no contract claims concatenation upcasts. A future clip-count
+change alters n but not the semantics — nothing pins 15.
 
 **Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/execute_tools/health_checks/ tests/unit/examples/ -q > /tmp/08c_c4.log 2>&1`
