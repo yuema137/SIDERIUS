@@ -2,12 +2,50 @@
 
 ## 0. Status and provenance
 
-**REVISION 2 — READY FOR OPERATOR REVIEW. NOT YET FROZEN.**
+**REVISION 3 — FROZEN. Operator ruling 2026-08-19. IMPLEMENTATION NOT
+STARTED.**
 
 Rev 1 was drafted at the PRE-MERGE 08a head `7ae72ae5` and carried six
-`SOURCE-INSPECTION REQUIRED` markers. The operator's review ruling
-(2026-08-19) returned it **APPROVED IN DIRECTION / NOT READY TO FREEZE**
-with eighteen load-bearing items. Rev 2 answers all eighteen.
+`SOURCE-INSPECTION REQUIRED` markers. The operator's first review ruling
+returned it **APPROVED IN DIRECTION / NOT READY TO FREEZE** with eighteen
+load-bearing items; rev 2 answered all eighteen. The operator's second
+ruling returned **APPROVE WITH MINOR FREEZE AMENDMENTS** — four narrow
+amendments, no redesign, C1–C7 not reopened. Rev 3 applies them and freezes.
+
+### 0.0 The four final amendments (operator ruling, 2026-08-19)
+
+1. **The public view-transport signature is APPROVED**, and backward
+   compatibility is frozen as a DISPATCH rule, not merely a default value:
+   a check that does not declare `consumes_view` is invoked as
+   `run(ctx, config)` with no gratuitous `view=None` (§3.3). A mechanical
+   `*, view=None` on the built-ins for Protocol conformance is an allowed
+   behaviour-preserving C3 adaptation.
+2. **Plugin load failure semantics refined** — an EXPLICITLY named plugin
+   file that is missing/unreadable/unparseable/raising fails closed at
+   startup; a configured DIRECTORY keeps the idiom's per-member fail-open
+   scan; either way an unresolved declared binding fails closed in Phase B.
+   **Scan tolerance ≠ declared-binding tolerance** (§3.2).
+3. **Plugin identity is canonical, not host-specific** — the hashed body
+   carries `configured_ref` + relative member + `content_sha256`; absolute
+   filesystem paths are diagnostics-only header content, so two identical
+   task packages at different absolute paths share one semantic identity
+   (§3.6).
+4. **Legacy omission ≠ explicit no-binding** — three semantic states, with
+   explicit no-binding never falling back to TIDMAD, and an explicit C4/C5
+   sequencing split that reconciles C4's byte-parity criterion with §3.10
+   (§3.10).
+
+Additionally: the run-scoped ledger is recorded as an 08b-INTERNAL
+enforcement mechanism, not the permanent public task-package ABI (§3.5).
+
+### 0.0a Freeze state
+
+* Audit anchor re-verified at freeze time: `origin/master` had **not**
+  advanced beyond `a226495b`, so no audited surface changed and no re-audit
+  was required.
+* All four Q-08b questions **RESOLVED** (§0.1).
+* **Zero** `SOURCE-INSPECTION REQUIRED` markers remain.
+* Every implementation checkbox is `[ ]`. **No implementation has started.**
 
 **Audit anchor.** Every statement below is verified against **master
 `a226495b`**, which contains the merged 08a (squash **`7da1e45e`**, PR #235)
@@ -258,13 +296,23 @@ Rev 1 said both, in §3.3 and §3.4. Frozen resolution:
 | situation | outcome |
 |---|---|
 | family declares a check requiring capability `X`; bound provider does not advertise `X` | **deterministic startup/binding ERROR** |
-| declared plugin file missing / unloadable | **deterministic startup ERROR** |
+| task config names a plugin FILE that is missing / unreadable / unparseable / raises at import | **deterministic startup ERROR** — the user asked for THAT file; silently skipping it is not valid |
+| a MEMBER of a configured plugin DIRECTORY is unloadable | per-member fail-open warning (the existing loader idiom), **but** any declared binding that then fails to resolve is a Phase-B fail-closed error |
 | declared check/provider id not registered after loading | **deterministic startup ERROR** |
 | task declares no health binding at all | regime-legal absence — UNKNOWN-style evidence-absence, NAMED, never a synthesized pass |
 | binding VALID, but task facts / round context make the check semantically non-applicable | `CheckVerdict.INAPPLICABLE` (08a semantics, unchanged) |
 | provider raises while materializing an applicable view | `CheckVerdict.ERROR` — fail closed, never inapplicable |
 
 **A configuration error is never downgraded to a Health verdict.**
+
+**Scan tolerance ≠ declared-binding tolerance** (operator amendment). The
+existing loader idiom is fail-open per scanned file; config is now the
+semantic authority, so an EXPLICITLY named file is not a scan candidate —
+its failure is fatal. Directory scanning keeps the tolerant idiom, because
+an unrelated member is not something the task asked for. Either way, a
+check/provider/capability the task config REQUIRES that does not resolve
+after loading fails closed in Phase B. Every such error names the configured
+ref wherever the source permits.
 
 ### 3.3 The minimal view-provider protocol (two phases, I/O-ordered)
 
@@ -286,11 +334,31 @@ PHASE 2 — MATERIALIZATION, I/O PERMITTED
 * `HealthView` is a thin frozen envelope: `capability_key`, `provider_id`,
   and an opaque `payload`. The engine never inspects `payload`. Standard
   payload contracts are 08c.
-* **Transport to the check**: `HealthCheckSkill.run(ctx, config, *,
-  view=None)` — keyword-only with a default, so all seven existing checks
-  and any pre-08b/external check keep working untouched. A check that
-  declares `consumes_view` and is invoked through a gate receives the
-  materialized view; one that does not, does not.
+* **Transport to the check — APPROVED (operator ruling 2026-08-19)**:
+
+  ```python
+  HealthCheckSkill.run(ctx, config, *, view=None)
+  ```
+
+  This is RESOLVED, not an open risk. **Backward compatibility is a
+  dispatch rule, not merely a default value:**
+
+  ```text
+  check does NOT declare consumes_view
+      -> runner calls the LEGACY shape   run(ctx, config)
+         and does NOT gratuitously pass view=None
+
+  check DOES declare consumes_view
+      -> runner calls                    run(ctx, config, view=resolved_view)
+  ```
+
+  So a pre-08b or externally supplied check that never heard of `view` is
+  invoked exactly as before, at runtime, not merely by relying on a
+  default. If structural typing requires the seven built-in `run()`
+  implementations to gain a mechanical `*, view=None` parameter for
+  Protocol conformance, that is an ALLOWED C3 behaviour-preserving
+  adaptation — it is not a semantic redesign and must not change their
+  runtime behaviour.
 * **Provider errors** are caught by the runner exactly like check
   exceptions (the PR #101 Bug-B guard shape) and produce
   `CheckVerdict.ERROR`.
@@ -334,6 +402,13 @@ testable property, and gives a deterministic two-run counterfactual test
 (§4.2 validation) rather than relying on the test-only `clean_registry`
 fixture as production evidence.
 
+**Status of the ledger (operator amendment).** It is an **08b-internal
+enforcement mechanism for the current one-run-per-process lifecycle**, not
+the permanent public task-package ABI. Step 10/12 may subsume or replace the
+enforcement when the unified composition root lands, provided the semantic
+requirement survives: one run must never silently inherit another run's
+plugin set.
+
 ### 3.6 External plugin identity is part of the pinned run identity
 
 The hashed effective-config body — and therefore the canonical
@@ -342,13 +417,21 @@ each file's content digest**:
 
 ```yaml
 resolved_plugins:
-  - ref: ./plugins/health.py
-    resolved_path: /abs/path/plugins/health.py
-    sha256: "abc…"
+  - configured_ref: ./plugins/health.py      # normalized logical ref
+    member: ""                                # relative member path; "" for a file ref
+    content_sha256: "abc…"
 ```
 
-* a configured DIRECTORY is resolved deterministically, sorted
-  deterministically, and every loaded file is pinned individually;
+**Absolute filesystem paths are deliberately NOT part of the hashed
+identity** (operator amendment). Two scientifically identical task packages
+checked out at different absolute paths must produce the SAME semantic
+plugin identity. The canonical identity is therefore
+`configured_ref` + `relative member path` + `content_sha256`; resolved
+absolute paths MAY appear in the unhashed header for diagnostics only.
+
+* a configured DIRECTORY contributes its normalized configured ref plus
+  deterministically sorted RELATIVE member paths, each with the digest of
+  the member actually loaded;
 * because this rides the existing hashed body, **no new canonical field and
   no new comparison logic is needed** — `validate_run_invariants` already
   raises naming the drifted field;
@@ -417,23 +500,51 @@ parity in between.
 ### 3.10 How a run selects its task health config (interim binding path)
 
 Step-10/12's unified composition root does not exist yet, so 08b freezes a
-narrow, bounded seam:
+narrow, bounded seam. **Three semantic states, never two** (operator
+amendment — "argument omitted" and "explicitly no binding" must not collapse
+into one state):
 
 ```text
-EXPLICIT PATH (new/external tasks)
-    the caller supplies an explicit task-health-config binding, threaded
-    through build_run_invariants -> materialize_effective_config
+A. LEGACY ARGUMENT OMITTED
+     the pre-08b production compatibility path.
+     May use the frozen Regime-A TIDMAD fallback.
+     NOT the extension mechanism.
 
-LEGACY REGIME-A PATH (no explicit binding supplied)
-    resolve the in-repo TIDMAD reference pack's health config
+B. EXPLICIT NO-HEALTH / NO-BINDING
+     the caller states that no task Health binding exists.
+     -> legal NAMED absence / UNKNOWN-style evidence absence (§3.2).
+     MUST NEVER synthesize or fall back to TIDMAD.
+
+C. EXPLICIT TASK-HEALTH-CONFIG BINDING
+     load and resolve the named external/task-owned config.
 ```
 
-The legacy path is selected by **absence of an explicit binding**, never by
-a task name — no `if task == "tidmad"` anywhere. It is a bounded
-compatibility seam that Step 10/12 replaces with the unified root, and it is
-explicitly NOT the extension mechanism. **C5 cannot move TIDMAD's science
-out of the framework YAML until this path exists**, which is why it lands in
-C4/C5 and not later.
+A and B are distinguished by a typed sentinel / default-state (or another
+source-grounded representation), **never by a task-name branch**. Collapsing
+them would mean a task that deliberately declares "no health" silently
+inherits TIDMAD's family — the exact synthesized-evidence failure the parent
+§6a.5 forbids.
+
+**C4/C5 sequencing (operator amendment — this is what makes C4's byte-parity
+criterion and this section mutually consistent):**
+
+```text
+C4  introduces the GENERIC explicit binding + composition mechanism.
+    For state A (legacy omitted) behaviour remains PRE-08b, and the
+    no-task-config artifact stays byte-identical to the captured baseline.
+    C4 does NOT yet require state A to consume a task-owned TIDMAD config.
+
+C5  atomically: lands the TIDMAD task-owned Health config; slims the
+    framework YAML to policy only; migrates thresholds / roster / prose /
+    peek ownership / numerical scale; AND redirects state A to that
+    task-owned TIDMAD config.
+```
+
+Without that split, C4 would have to both preserve byte-identical output and
+already route TIDMAD through a config that does not exist until C5 — a
+contradiction. **C5 cannot move TIDMAD's science out of the framework YAML
+until this path exists**, which is why the two commits are ordered this way
+and not merged.
 
 ## 4. Commit decomposition
 
@@ -530,22 +641,32 @@ C1.
 - [ ] Re-read both existing loaders at the head and record the exact idiom
       being instantiated, so health's instance is demonstrably the same
       shape.
-- [ ] Implement load → register with the idiom's failure split: scan
-      fail-OPEN per file, name resolution fail-CLOSED.
+- [ ] Implement load → register with the AMENDED failure split (§3.2):
+      an explicitly named plugin FILE that is missing/unreadable/
+      unparseable/raising at import → fail closed at startup, naming the
+      configured ref; a configured DIRECTORY keeps the idiom's per-member
+      fail-open warning; any declared binding unresolved after loading →
+      Phase-B fail closed.
 - [ ] Implement the run-scoped ledger: idempotent identical re-load; a
       different resolved set in the same process fails closed naming both.
 - [ ] Env var, if any, is framework-GENERATED subprocess transport for the
       already-resolved set (Q-08b-1) — never a user-facing parallel input.
 
 **Validation plan.** Unit (integration-style, `tmp_path` package outside the
-repo): a plugin registers a provider and a custom check. Negative: missing
-file; unparseable file; registers nothing; name colliding with a built-in.
+repo): a plugin registers a provider and a custom check. Negative, and the
+pair is the point: an **explicitly named** missing/unparseable/raising file
+→ startup FAILS CLOSED; an unloadable **member of a configured directory**
+→ warning only, yet a binding that then fails to resolve still fails closed
+in Phase B. Also: registers nothing; name colliding with a built-in.
 **Two-run counterfactual**: load set A, then attempt set B in the same
 process → fail closed; re-load A → idempotent. Backward-compat: with no task
 plugins declared, `all_registered()` is exactly the built-ins.
 
 **Acceptance criteria.**
 - [ ] An out-of-tree file registers a check that `registry.get` resolves.
+- [ ] Explicit-file failure and directory-member failure produce DIFFERENT
+      outcomes, asserted as a pair (scan tolerance ≠ declared-binding
+      tolerance).
 - [ ] The two-run counterfactual is RED without the ledger and green with
       it (mutation-proven).
 - [ ] No external registration path requires editing
@@ -601,6 +722,13 @@ manifest replayed.
       vocabulary is NOT involved (item 3 made executable).
 - [ ] The inapplicable-check-no-materialize test is RED if the
       materialization step is moved before applicability (mutation-proven).
+- [ ] **All pre-08b checks execute through the unchanged no-view call
+      path** — asserted by a spy on the invocation, not merely by their
+      results being unchanged.
+- [ ] **A view-consuming external check receives the keyword-only `view`.**
+- [ ] Pyright (CI) verifies the public Protocol relationship; if the seven
+      built-ins need a mechanical `*, view=None` for conformance, their
+      runtime behaviour is unchanged and the manifest proves it.
 - [ ] 08a's 27-case manifest byte-identical.
 
 **Failure and edge cases.** A provider advertising a capability it cannot
@@ -633,24 +761,38 @@ Depends on C1–C3.
       four `build_run_invariants` callers, one resume mirror).
 - [ ] Compose deterministically (stable key order) from disposition →
       policy (§3.7).
-- [ ] Fold `resolved_plugins` with per-file `sha256` into the **hashed
-      body** (§3.6), not the header.
-- [ ] Implement the explicit / legacy-Regime-A binding path (§3.10) with no
-      task-name branching.
+- [ ] Fold `resolved_plugins` into the **hashed body** (§3.6) using the
+      CANONICAL identity — `configured_ref` + relative member +
+      `content_sha256`. **No absolute filesystem path in the hashed body**;
+      resolved absolute paths go in the unhashed header only.
+- [ ] Implement the THREE binding states (§3.10) with a typed sentinel and
+      no task-name branching. **State A keeps PRE-08b behaviour in C4** —
+      redirecting it to the task-owned TIDMAD config is C5's job.
 - [ ] Keep `core/resume.py:354`'s mirrored computation in step.
 
 **Validation plan.** Determinism across repeated runs and shuffled input
 ordering. Default parity: with no task config supplied, the artifact is
 byte-identical to pre-08b — captured BEFORE this commit as a frozen sha.
-**Plugin-pinning negative test**: same config, same path, mutated plugin
-bytes → resume fails closed. Compatibility: `scripts/v18_wave_summary.py`'s
-reader still works against the composed artifact.
+**Plugin-pinning negative test**: same configured ref, mutated plugin bytes
+→ different `health_config_sha256` → resume fails closed. **Path-independence
+test**: the same package resolved from two different absolute directories
+produces the SAME plugin identity and the same body sha. **Three-way binding
+test**: legacy-omitted vs explicit-no-binding vs explicit-external-binding
+produce three distinct intended behaviours — and explicit-no-binding NEVER
+falls back to TIDMAD. Compatibility: `scripts/v18_wave_summary.py`'s reader
+still works against the composed artifact.
 
 **Acceptance criteria.**
 - [ ] The pinned sha describes the file the run reads — asserted by
       re-reading and re-hashing the written artifact, not by trusting the
       return value.
 - [ ] Mutated-plugin resume raises, naming `health_config_sha256`.
+- [ ] Two checkouts at different absolute paths yield an identical pinned
+      identity (host paths are not load-bearing).
+- [ ] The three binding states are distinct, and explicit-no-binding yields
+      named absence rather than a TIDMAD fallback.
+- [ ] With no task config supplied (state A), the artifact is byte-identical
+      to the captured pre-08b baseline.
 - [ ] Composition is order-independent and repeatable.
 - [ ] No second composition path exists — census test.
 
@@ -688,6 +830,9 @@ verdict. Depends on C1–C4.
       the checks' `value_scale_unit` requirement move in ONE commit.
 - [ ] Apply the `TASK_HEALTH_PEEK` disposition after re-confirming its
       consumer census.
+- [ ] **Redirect binding state A (legacy omitted) to the task-owned TIDMAD
+      config** — the step C4 deliberately deferred, done atomically here so
+      C4's byte-parity criterion and §3.10 never contradict.
 - [ ] Census: framework YAML contains no task identity, threshold, roster,
       peek set or science prose.
 
