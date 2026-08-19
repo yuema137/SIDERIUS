@@ -666,10 +666,47 @@ TIDMAD's `network.py:FocalLoss1D`.
   `threshold_parameter_names` means THRESHOLDS, not parameters read —
   recording-only checks declare `()`. Design + evidence:
   `generic_framework_upgrade/step_08_health_check_task_profile/pr_08a_check_input_contract.md`
-  §4/§10. **NEXT = 08b**, whose child design is a DRAFT rev 1 on master
-  (`b46279cf`) and is **NOT FROZEN**: four open questions (§8) and an
-  uninspected-source list (§2.6, chiefly D18's producer shape) must close
-  before implementation begins.
+  §4/§10.
+- **STEP 08b — COMPLETE / MERGED (2026-08-18)**: PR #236, squash `13e28796`;
+  exact-head CI **32217121228 SUCCESS** on `65a3c7d9` (final executable head
+  `bf6e9e19` — C7 is test/docs only). **The task owns its Health science and
+  an external task extends the system with no SIDERIUS edit.**
+  `configs/health_checks.yaml` is now a policy-only `health_policy` block
+  (disposition → role, cadence, short-circuit, actions, `aggregation`);
+  TIDMAD's roster, thresholds, `peek_samples`, health-peek files, mV value
+  scale and `reason` prose live in **`configs/task_health/tidmad.yaml`**. The
+  two compose deterministically into the same pinned
+  `health_checks_effective.yaml`, and **`load_health_gates_config()` returns
+  that COMPOSED result** — a file already carrying `health_gates` (an
+  effective config, or a pre-08b custom YAML) is returned untouched. To
+  change a THRESHOLD edit the task config; to change what a failure DOES edit
+  the framework policy. External plugins register checks AND view providers
+  through the public `register` / `register_view_provider`; their content
+  digests join the pinned `health_config_sha256`, so an edited plugin fails a
+  resume closed, while host paths are excluded so the same package at two
+  absolute paths pins one identity. Three binding states are frozen —
+  `LEGACY_OMITTED` (resolves to the TIDMAD config; the bounded legacy path),
+  `EXPLICIT_NONE` (a NAMED absence that must never fall back to another
+  task's family), and an explicit path. **D18 landed**: a scalar-only metric
+  reaches Health as a typed `PerSampleEvidence` instead of an empty list.
+  **Gate 2 PASS**; **Gate 1 NOT REQUIRED**. Parity is measured on EXECUTED
+  SEMANTICS, not bytes (the composed sha moved `c933bcee`→`7a4debd6`, and
+  08a's 27-case verdict manifest is byte-identical after the millivolt factor
+  changed owner). Four things future work must not re-break: `TASK_HEALTH_PEEK`
+  is a **bounded legacy adapter** kept ONLY so pre-08b configs stay readable
+  (removal was implemented and falsified — their recorded sha is computed over
+  the RESOLVED document); a check must declare an input only if it CONSUMES it
+  (the `value_scale_unit` and `per_sample_evidence` biconditionals); the
+  Pets/DAVIS D14 runners are direct-execution harnesses that never enter
+  Health composition, so `EXPLICIT_NONE` is what will protect them when 08c
+  routes them through it; and **DAVIS is scalar-only too** (`GlobalMseMetric`
+  returns `per_sample=None`), so 2 of the 3 executable tracks depend on D18.
+  Design + evidence:
+  `generic_framework_upgrade/step_08_health_check_task_profile/pr_08b_extension_architecture.md`
+  §4/§10/§11. **NEXT = 08c** (standard `categorical_predictions` /
+  `continuous_samples` capabilities, the reusable generic checks, and the
+  Pets/DAVIS Health families) — to be re-confirmed from the merged roadmap in
+  a fresh session, never from the conversation that produced 08b.
 - **D14 EXECUTABLE DATA PATH — COMPLETE / MERGED (2026-08-18)**: PR #232, the
   integrated stack #230 → #231 → #232, squash
   `4db414b599bb1a41357ad694f78bceec4f4577e1`; canonical exact-head CI

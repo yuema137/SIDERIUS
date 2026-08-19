@@ -4,10 +4,14 @@
 
 **REVISION 3 — FROZEN. Operator ruling 2026-08-19.**
 
-**Implementation state: IN PROGRESS** (branch
-`step08-pr08b-extension-architecture`, base `be11ec09`). The SEMANTIC design
-below is frozen and unchanged; §4's checkboxes and §10's ledger are LIVE
-implementation evidence and are filled in as each commit lands.
+**Implementation state: COMPLETE / MERGED 2026-08-18.** PR **#236**, squash
+**`13e28796f1dcf7f61b3bce0b3e0b7559978b6721`**; final PR head `65a3c7d9`,
+final EXECUTABLE head `bf6e9e19`; exact-head CI **32217121228 SUCCESS** on
+`65a3c7d9` (job "Lint + Type + Unit Tests" — also the pyright evidence).
+Landed master verified byte-identical to the reviewed head. Seven commits
+C1–C7 (§10), Gate 2 PASS, Gate 1 NOT REQUIRED, plus the operator-directed
+cross-task audit (§11). The SEMANTIC design below was frozen and is
+unchanged; §4's checkboxes and §10's ledger are the implementation record.
 
 Rev 1 was drafted at the PRE-MERGE 08a head `7ae72ae5` and carried six
 `SOURCE-INSPECTION REQUIRED` markers. The operator's first review ruling
@@ -658,7 +662,8 @@ Phase B — asserted as DIFFERENT outcomes.
       reproduce the committed manifest byte-identically."*
 - [x] `ruff check` clean; `ruff format --check` clean across
       `execute_tools/health_checks/` and its test package (51 files).
-- [ ] `pyright` — **not runnable locally** (Node `v10.19.0` too old for the
+- [x] `pyright` — **CI-owned**, satisfied by exact-head CI 32217121228 (job
+      "Lint + Type + Unit Tests", SUCCESS on `65a3c7d9`). Not runnable locally (Node `v10.19.0` too old for the
       vendored bundle, per 08a's ledger). CI-owned; not claimed as a local
       pass.
 
@@ -746,7 +751,7 @@ its declared ids then fail closed at Phase B); duplicate registration.
       allowlist-vacuity guard). Verdict read from the complete log.
 - [x] 08a's 27-case verdict-parity manifest `--check`: **byte-identical**.
 - [x] `ruff check` + `ruff format --check` clean (53 files).
-- [ ] `pyright` — CI-owned (Node `v10.19.0` too old locally).
+- [x] `pyright` — CI-owned; **SUCCESS** in exact-head CI 32217121228 on `65a3c7d9` (Node `v10.19.0` too old locally).
 
 **Commit boundary.** Loading + registration + lifecycle only; no resolution
 policy, no composition.
@@ -823,7 +828,7 @@ manifest replayed.
       → `test_a_view_consuming_check_receives_the_keyword_only_view`, which
       also asserts the payload, `provider_id` and `capability_key` arrive
       intact.
-- [ ] Pyright (CI) verifies the public Protocol relationship; the seven
+- [x] Pyright (CI) verifies the public Protocol relationship — **SUCCESS** in exact-head CI 32217121228; the seven
       built-ins took the mechanical `*, view=None` (an allowed C3
       adaptation), their runtime behaviour is unchanged, and the manifest
       proves it. **Pyright itself is CI-owned** — not runnable locally.
@@ -845,7 +850,7 @@ claim; failure to honour it is a runtime error). A check declaring
       Import-sanity confirmed for the tuner node, `core.run_invariants` and
       `workflows.model_exploration`.
 - [x] `ruff check` + `ruff format --check` clean (645 files formatted).
-- [ ] `pyright` — CI-owned.
+- [x] `pyright` — CI-owned; **SUCCESS** in exact-head CI 32217121228 on `65a3c7d9`.
 
 **Commit boundary.** Protocol + resolution + transport; no TIDMAD migration.
 
@@ -957,7 +962,7 @@ plugin refs resolve deterministically and pin the actual loaded file set.
       hashed body → **3 failed / 18 passed**, including the mutated-plugin
       resume refusal. Restored, caches cleared, re-baselined green.
 - [x] `ruff check` + `ruff format --check` clean (718 files).
-- [ ] `pyright` — CI-owned.
+- [x] `pyright` — CI-owned; **SUCCESS** in exact-head CI 32217121228 on `65a3c7d9`.
 
 **Commit boundary.** Composition + pinning + binding path; TIDMAD values
 still in the framework file.
@@ -1057,7 +1062,7 @@ together).
       semantics required.
 - [x] 08a's 27-case verdict-parity manifest: **byte-identical**.
 - [x] `ruff check` + `ruff format --check` clean (810 files).
-- [ ] `pyright` — CI-owned.
+- [x] `pyright` — CI-owned; **SUCCESS** in exact-head CI 32217121228 on `65a3c7d9`.
 
 **Commit boundary.** Ownership move only; no new mechanism.
 
@@ -1133,7 +1138,7 @@ capability: absence ≠ scalar-only, must not be inferred.
 - [x] `tests/unit/agent/tune_ml_hyperparam_agent/`: see §10 C6 below.
 - [x] 08a's 27-case verdict-parity manifest: **byte-identical**.
 - [x] `ruff check` + `ruff format --check` clean (765 files).
-- [ ] `pyright` — CI-owned.
+- [x] `pyright` — CI-owned; **SUCCESS** in exact-head CI 32217121228 on `65a3c7d9`.
 
 **Commit boundary.** D18 only. **This is the last production-code commit —
 the Gate-2 head (§7).**
@@ -1200,7 +1205,7 @@ only from its own files.
       Evidence: **580 passed, rc=0** (563 at C6 + 17 new).
 - [x] With `tests/unit/guardrails/`: **716 passed, rc=0**.
 - [x] `ruff check` + `ruff format --check` clean.
-- [ ] `pyright` — CI-owned.
+- [x] `pyright` — CI-owned; **SUCCESS** in exact-head CI 32217121228 on `65a3c7d9`.
 
 **Docs synchronized** (quoted against merged source):
 

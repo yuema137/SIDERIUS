@@ -705,13 +705,70 @@ must start from them, not from the pre-implementation assumptions):
 
 ### 08b — extension architecture: task-owned config + plugin binding + first family + D18
 
-> **Child design status: FROZEN — rev 3, operator ruling 2026-08-19.**
-> `step_08_health_check_task_profile/pr_08b_extension_architecture.md`,
-> frozen at `8440a7a6` (`8440a7a67101be31e1218a06416dec470824f22d`). Source audit anchored at master
-> `a226495b` (merged 08a squash `7da1e45e`). All four Q-08b questions
-> resolved; zero `SOURCE-INSPECTION REQUIRED` markers; every implementation
-> checkbox unchecked. **Implementation NOT started.** This is a child-design
-> status entry only — the parent architecture above is unchanged.
+> **Child design FROZEN (rev 3, `8440a7a6`) — IMPLEMENTED AND MERGED
+> 2026-08-18.** `step_08_health_check_task_profile/pr_08b_extension_architecture.md`
+> is the implementation ledger (§4 per-commit checklists, §10 per-commit
+> ledger, §11 cross-task audit). PR **#236**, squash **`13e28796f1dcf7f61b3bce0b3e0b7559978b6721`**;
+> final PR head `65a3c7d9`, final EXECUTABLE head `bf6e9e19` (everything
+> after it is test/docs only); exact-head CI **32217121228** SUCCESS on
+> `65a3c7d9`. Seven commits C1–C7. This is a child-design status entry only
+> — the parent architecture above is unchanged.
+>
+> **What landed.** The task owns its Health science and an external task
+> extends the system with no SIDERIUS edit: `configs/health_checks.yaml` is
+> FRAMEWORK POLICY ONLY (a `health_policy` block mapping each disposition to
+> role/cadence/short-circuit/actions/aggregation), TIDMAD's roster,
+> thresholds, peek set, mV value scale and science prose live in
+> `configs/task_health/tidmad.yaml`, and the two compose deterministically
+> into the SAME pinned `health_checks_effective.yaml`. External plugins
+> register checks AND view providers through the public API at run scope;
+> their content digests join the pinned `health_config_sha256`, so an edited
+> plugin fails a resume closed. Three binding states are frozen
+> (`LEGACY_OMITTED` / `EXPLICIT_NONE` / explicit path), and D18 carries the
+> scalar-only statement as a typed `PerSampleEvidence` rather than an empty
+> list.
+>
+> **Parity is measured on executed semantics, not bytes** (the composed sha
+> legitimately moved `c933bcee` → `7a4debd6`, authorised by Q-08b-2): gate
+> ids and ORDER, roles, cadence, short-circuit, actions, check names and
+> every threshold/parameter are identical field-by-field against a golden
+> captured at the C4 head, and **08a's 27-case verdict-parity manifest is
+> byte-identical** after the millivolt factor changed owner.
+>
+> **Gate 2 PASS** at `bf6e9e19` (one bounded run, classified from the
+> persisted record): six gates fired, verdict union exactly
+> `{passed, failed}` with **no `inapplicable`**, `task_health_binding:
+> legacy_default` in the pinned artifact, and the migrated scale
+> NUMERICALLY confirmed — 5 unique int8 values ≈ 1.17 LSB × 40/128 =
+> 0.365 mV, matching the persisted `output_std_mv`. Gate 1 NOT REQUIRED (no
+> prompt/PB delta). Evidence:
+> `/home/klz/Data/SIDEREIS_DATA/step08b_gate2_evidence_20260818/`.
+>
+> **Five deviations, all recorded in the child ledger**, of which three
+> constrain later work: `CheckInputDeclaration` gained `requires_view`
+> because `consumes_view` is required and all built-ins populate it;
+> framework policy had to become DATA because the observe-mode config is
+> otherwise inexpressible; and **`TASK_HEALTH_PEEK` is RETAINED as a bounded
+> legacy adapter** — removal was implemented and then falsified, because
+> pre-08b configs carry the marker and their recorded sha is computed over
+> the RESOLVED document.
+>
+> **Cross-task audit (operator-directed, §11): NOT A BLOCKER.** The Pets and
+> DAVIS D14 runners are direct-execution harnesses that never enter Health
+> composition, so `LEGACY_OMITTED → TIDMAD` is structurally unreachable for
+> them; no correction was required or made. **Finding: DAVIS's
+> `GlobalMseMetric` also returns `per_sample=None`**, so TWO of the three
+> executable tracks are scalar-only and only TIDMAD is not — which makes D18
+> load-bearing today rather than anticipatory.
+>
+> **NEXT = 08c**, which owns the standard `categorical_predictions` /
+> `continuous_samples` capabilities, the reusable generic checks and the
+> Pets/DAVIS Health families. Three things 08c must not re-break: the
+> `EXPLICIT_NONE` forward guarantee is what keeps a non-TIDMAD task from
+> inheriting TIDMAD once it IS routed through Health; a check must declare
+> an input only if it consumes it (the `value_scale_unit` and
+> `per_sample_evidence` biconditionals); and `TASK_HEALTH_PEEK` is a legacy
+> adapter, never task-package vocabulary.
 * **Goal**: the task owns roster/thresholds/dispositions and names its
   plugin code; the framework config slims to policy only and never learns
   a task identity; external plugin modules load at run scope and register
