@@ -641,6 +641,61 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 09a — COMPLETE / MERGED (2026-08-19)**: PR #238, squash
+  `4cf38dec0934cf22c59c80cc69711d7c2bd0401b`; final PR head `9d85f67b`,
+  exact-head CI **32313798097 SUCCESS**; merged master byte-identical to the
+  validated head. **The interpreter no longer assumes which direction is
+  better, and it refuses to guess.** The run's `MetricSpec` is stamped on
+  `HyperparamTuningOutput` by the tuner's ONE existing derivation
+  (Step 09a adds ZERO new `derive_tidmad_metric*` production sites — pinned by
+  an executable census over every production module), reconciled across
+  outputs by `reconcile_metric_spec`, and `InterpretationInput` FAILS CLOSED
+  when a score-bearing input carries no spec — a legacy/pre-09a output is a
+  NAMED refusal, never a re-derivation (adding the validator turned 79 tests
+  red at once; every one had been silently relying on the assumed direction,
+  and all were UPGRADED, never weakened). All **21** interpreter direction
+  consumers now read `MetricOrder`, and the C1a differential oracle is
+  **BYTE-IDENTICAL** across that migration — 21 ordering sites changed shape
+  and nothing observable moved. Prediction semantics v2
+  (`metric_order_signsafe_v2`) fixes three defects that all looked like
+  working code: direction-blindness, a sign-degenerate band (scaling a
+  NEGATIVE reference made `partial` UNREACHABLE for every TIDMAD score), and
+  uncomputable results counted as evidence (now `unevaluated`, in NO pool).
+  v1 and v2 statistics are NEVER mixed: the legacy pool is frozen and carried,
+  accuracy is v2-only and labelled, and both pool sizes are stated. The
+  interpreter's prediction memory now actually rides the EXISTING canonical
+  lifecycle (digest → loop carry → `RestoredState` latest-wins → next input);
+  pre-09a it was carried by NOTHING (parent erratum E2), so every production
+  digest's pool held exactly ONE outcome and the proposer always rendered
+  `N=1`. Evidence projection adds per-role training diagnosis, failure counts
+  derived only from authorities that already own them, and the typed secondary
+  contract with **Q-09-7 = B held** — the builder NEVER populates
+  `secondary_metrics` and no evaluator/record field/tuner persistence/
+  transport/loader exists. Three-task L1 rung (TIDMAD higher · Pets accuracy ·
+  **DAVIS `mse` LOWER**, hand-computed literals). **Gate 1 = 0, Gate 2 = 0,
+  real LLM/training/inference = 0** — exactly the frozen §7 disposition.
+  Pre-merge closeout: the semantics ids were centralized to ONE schema-layer
+  authority (F-09a-17 — five literal sites, replaced by a single-authority
+  census that is mutation-proven RED), and the ledger audit found **F-09a-25**,
+  a planned §5 integration-test UPGRADE never executed which had left
+  `tests/integration/workflows/test_vocab_accumulation.py` broken *outside CI*
+  — a reminder that a test excluded from CI is only as green as the last
+  person who ran it. Design + evidence:
+  `docs/design/generic_framework_upgrade/step_09_interpretation_task_blocks/pr_09a_interpreter_evidence_ordering.md`
+  §10 (104 `[x]` / 0 `[ ]`). **Debt carried forward, none blocking**: Q-09-7
+  production secondary transport → Step 10; `evaluation.py`'s per-check-NAME
+  threshold tables → Step 10; the bounded TIDMAD interpretation-block
+  compatibility adapter → Step 12; the unchanged tuner Regime-A metric binding
+  → Step 12; resume/dashboard direction literals → Step 10; scale-naive
+  boldness → Step 10+; the `vocab_link_confirmations` carry → Step 10; and the
+  proposer's "Prediction Track Record" rendering, which pairs v2 FRACTIONS
+  with the v1 DENOMINATOR — the consequence Q-09a-3 explicitly declares and
+  freezes, owned by 09b's rendering surface. **NEXT = Step 09b** (interpreter-
+  local decomposition owned by its prompt/rendering semantics), and after 09b
+  merges but BEFORE Step 10 implementation, the dedicated repo-wide production
+  structural-debt + test-topology audit (operator sequencing, 2026-08-19) — all
+  to be re-confirmed from the merged roadmap in a fresh session, never from the
+  conversation that produced 09a.
 - **STEP 08c — COMPLETE / MERGED (2026-08-19) ⇒ STEP 08 COMPLETE**: PR
   #237, squash `3f4effb5`; exact-head CI **32226620524 SUCCESS** on
   `532035e6` (final EXECUTABLE head `ede11fd5` — C6 is verified

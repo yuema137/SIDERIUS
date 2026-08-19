@@ -10,7 +10,12 @@ SEMANTIC design is frozen and is not reopened by implementation.**
 *(Freeze-time state, preserved: implementation had NOT started; every
 checkbox in §4 was `[ ]` and every §10 ledger entry was empty.)*
 
-**IMPLEMENTATION COMPLETE** on branch
+**COMPLETE / MERGED 2026-08-19 — PR #238, squash
+`4cf38dec0934cf22c59c80cc69711d7c2bd0401b`; final PR head `9d85f67b`,
+exact-head CI **32313798097** SUCCESS; merged master verified byte-identical
+to the validated head.**
+
+Implemented on branch
 `step09-pr09a-interpreter-evidence-ordering` from the frozen base
 `a325f33b`. This document is now also the LIVE implementation ledger: §4
 checkboxes carry real state and §10 carries the evidence. Current

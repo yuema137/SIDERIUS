@@ -4,7 +4,15 @@
 
 **REVISION 2 — FROZEN (operator freeze authority granted in the
 2026-08-19 review ruling, exercised after the mandated source audits closed
-without a new material contradiction). IMPLEMENTATION NOT STARTED.**
+without a new material contradiction).**
+
+**IMPLEMENTATION STATUS: 09a COMPLETE / MERGED (2026-08-19) — PR #238,
+squash `4cf38dec0934cf22c59c80cc69711d7c2bd0401b`, exact-head CI 32313798097
+SUCCESS on `9d85f67b`. 09b is NEXT and NOT IMPLEMENTED (its child design is
+not yet written).** The 09a evidence, ledger and findings live in
+`step_09_interpretation_task_blocks/pr_09a_interpreter_evidence_ordering.md`
+§10 (104 `[x]` / 0 `[ ]`). Nothing in this parent's architecture changed
+during 09a implementation.
 
 Rev 1 (`6c2802cd`, DRAFT) was reviewed by the operator with the verdict
 **APPROVED ARCHITECTURE / REQUIRED REVISION BEFORE FREEZE**: the
