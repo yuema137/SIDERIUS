@@ -1432,6 +1432,20 @@ evidence, not a recomputed claim.
 
 ## 10. Ledger
 
+### FINAL — 08a MERGED
+
+**PR #235, squash `7da1e45e` on master, 2026-08-19.** Final PR head
+`3055af66`; executable head `2d6d08d2`. Exact-head CI **32207685908
+SUCCESS** (Lint + Type + Unit Tests) — which also supplied the pyright
+evidence that could not be produced locally (this host's Node is
+`v10.19.0`, too old for the vendored bundle). Gate 2 **PASS**; Gate 1 **NOT
+REQUIRED**. Landed diff: 33 files, +6 284 / −206. Health package on merged
+master: 440 passed.
+
+Merged as a single squash rather than held for an integrated Step-08 head —
+an operator decision on 2026-08-19 that supersedes the earlier stacked-merge
+preference recorded in §6/§7.
+
 *(filled per commit during implementation)*
 
 ### Implementation context

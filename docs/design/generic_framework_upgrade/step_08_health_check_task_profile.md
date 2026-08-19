@@ -647,8 +647,9 @@ closeout pattern).
 
 #### 08a implementation status (bookkeeping — the architecture above is unchanged)
 
-**IMPLEMENTED, C1–C6, on `step08-pr08a-check-input-contract`** from base
-`a37fd15d`: `ac580514` (verdict vocabulary + capture-first parity manifest)
+**MERGED 2026-08-19 — PR #235, squash `7da1e45e`** (exact-head CI
+32207685908 SUCCESS on `3055af66`). Implemented as C1–C6 on
+`step08-pr08a-check-input-contract` from base `a37fd15d`: `ac580514` (verdict vocabulary + capture-first parity manifest)
 · `2d1c7b61` (declarations + pure applicability engine) · `aac9b3ba`
 (wiring + verdict transport — the behavioural commit) · `ab9b5909` (the six
 declarations) · `7e25e541` (peek via the Deliverable Contract) · `7ae72ae5`
@@ -657,6 +658,17 @@ checklists live in the child ledger
 `step_08_health_check_task_profile/pr_08a_check_input_contract.md` §4/§10.
 Gate 1 confirmed NOT REQUIRED — the LLM-facing rendering is byte-identical
 to a worktree at `a37fd15d`.
+
+**One defect was caught in operator code review, not by any test**, and is
+worth carrying forward as a review lesson: `threshold_parameter_names`
+declared `peek_samples` — a parameter each check READS — as a threshold, on
+all six checks. The existing assertion was `declared ⊆ keys run() reads`,
+which any read key satisfies, so it was structurally blind. Fixed before
+merge (blocking checks declare exactly their one boundary key; recording-only
+checks declare `()`), with a semantic test whose mutation proof shows the
+subset assertion staying green while the new one fails. **08b consumes this
+metadata for ownership migration**, so shipping it would have frozen a wrong
+classification into a task config.
 
 **Findings from 08a that CONSTRAIN 08b** (recorded here because 08b's design
 must start from them, not from the pre-implementation assumptions):

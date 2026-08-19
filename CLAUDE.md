@@ -627,6 +627,35 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 08a — COMPLETE / MERGED (2026-08-19)**: PR #235, squash
+  `7da1e45e`; exact-head CI **32207685908 SUCCESS** on `3055af66`. Health
+  checks no longer say "not applicable" by returning `passed=True` with prose:
+  **`CheckVerdict` (`passed|failed|inapplicable|error`) is a typed fact**, and
+  applicability is decided in `runner.evaluate_gate` BEFORE the skill is
+  invoked, so an inapplicable check opens no artifact. `passed` keeps its
+  exact meaning (it selects `on_pass`/`on_fail` and drives `short_circuit`),
+  so gate ACTIONS are unchanged; honesty moved to counting, persistence
+  (`PersistedHealthGateResult.check_verdicts`, additive) and eligibility (an
+  all-inapplicable gate is excluded from the required set; an errored one
+  never is). The six checks declare their inputs as data
+  (`CheckInputDeclaration`); the peek reads channel identity from the
+  Deliverable Contract (zero `channel0001`/`channel0002` literals left in the
+  peek path, one whitelisted persisted label). **Gate 2 PASS** — six gates
+  fired, all six persisted `check_verdicts`, verdict union exactly
+  `{passed, failed}` with no `inapplicable`, and a real mode collapse drove
+  `invalidate_round` on two blocking gates while four passed. **Gate 1 NOT
+  REQUIRED** (LLM-facing rendering byte-identical to a worktree at
+  `a37fd15d`). Three things future work must not re-break: `value_scale_unit`
+  is owned by NOTHING today (the mV constant is a check-local literal), so
+  08b must move it TOGETHER with its declaration or parity breaks in between;
+  `spectral_peak_ratio` reads ONLY the denoised channel; and
+  `threshold_parameter_names` means THRESHOLDS, not parameters read —
+  recording-only checks declare `()`. Design + evidence:
+  `generic_framework_upgrade/step_08_health_check_task_profile/pr_08a_check_input_contract.md`
+  §4/§10. **NEXT = 08b**, whose child design is a DRAFT rev 1 on master
+  (`b46279cf`) and is **NOT FROZEN**: four open questions (§8) and an
+  uninspected-source list (§2.6, chiefly D18's producer shape) must close
+  before implementation begins.
 - **D14 EXECUTABLE DATA PATH — COMPLETE / MERGED (2026-08-18)**: PR #232, the
   integrated stack #230 → #231 → #232, squash
   `4db414b599bb1a41357ad694f78bceec4f4577e1`; canonical exact-head CI
