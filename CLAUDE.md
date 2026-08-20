@@ -641,6 +641,51 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 09 — COMPLETE (2026-08-20). NEXT = STEP 09.5, *not* Step 10.**
+  09b merged: PR #239, squash `e9a1f9fbb1c2e882be5b017756e2552a6b9f8d7c`,
+  exact-head CI **32324124087 SUCCESS** on `ce3b971d`; merged master
+  byte-identical to the validated head. **The interpreter's prompts no longer
+  own task science.** `InterpretationTaskBlocks` — four framework keys
+  (`evidence_reading` / `per_model_guidance` / `synthesis_guidance` /
+  `prediction_guidance`), task-owned prose, absent ⇒ nothing rendered — arrives
+  as a CALLER-SUPPLIED value on `InterpretationInput.task_blocks`; TIDMAD's
+  science moved VERBATIM into `configs/task_interpretation/tidmad.yaml` behind
+  ONE bounded Regime-A adapter (`agent/prompt_templates/interpretation/task_blocks.py`)
+  whose single task-identity occurrence is a default-path CONSTANT, not a
+  branch — AST-guarded, and a second task constant or an `if "tidmad" in …`
+  turns it RED. The whole prompt surface moved byte-exactly to
+  `agent/prompt_templates/interpretation/rendering.py` (node main file 2,005 →
+  1,252 lines) and now also owns explicit renderers — ONE authority per
+  evidence family: metric identity, per-role `TrainingDiagnosis`, secondaries
+  in their scored/refused/**named-absent** states, and `RecordFailureCounts`
+  keyed only by existing authority vocabularies — reusing 07b's direction-word
+  and diagnosis-line authorities rather than re-implementing them. The
+  prediction track record became version-aware in BOTH consumer nodes, closing
+  the declared Q-09a-3 consequence in which v2 fractions rendered over the
+  frozen v1 denominator; both N's count comparable outcomes by construction.
+  **Gate 1 PASS** — ONE launch, exactly 5 calls, 13/13 checks: the real model
+  designated the better model in TIDMAD's negative-valued higher-is-better
+  regime AND in DAVIS's lower-is-better regime, and reported the ABSENCE of
+  per-file evidence instead of inventing a lever; Gate 2 not required. Three
+  findings were defects in the Gate's own EVALUATION function (decimal-breaking
+  sentence splitter; a fabrication probe contradicting the frozen A/B split; a
+  name-only matcher mis-reading a winner referenced by score) — the verdict was
+  read from the persisted artifacts re-evaluated with corrected probes, zero
+  extra LLM calls. Design + ledger:
+  `generic_framework_upgrade/step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`
+  §22 (72 `[x]` / 0 `[ ]`). **Things future work must not re-break**: the
+  framework templates are census-proven task-free in BOTH directions (banned in
+  the template, required in the TIDMAD-assembled prompt) — a new task-science
+  sentence in `rendering.py` is RED; absent task blocks must render no header
+  and no bytes; and secondaries stay observational (Q-09-7 = B) with no
+  evaluator, record field or transport. **NEXT = Step 09.5** — the repository
+  structural-debt + test-topology AUDIT (roadmap §15.1b), whose disposition
+  gates Step-10 entry. Debt carried forward unchanged: proposer
+  prediction-authoring grammar · proposer task-science prompts ·
+  `evaluation.py` per-check-NAME tables · resume/dashboard direction literals ·
+  secondary transport · `vocab_link_confirmations` → **Step 10**; the TIDMAD
+  interpretation adapter · tuner Regime-A binding · composition root →
+  **Step 12**.
 - **STEP 09a — COMPLETE / MERGED (2026-08-19)**: PR #238, squash
   `4cf38dec0934cf22c59c80cc69711d7c2bd0401b`; final PR head `9d85f67b`,
   exact-head CI **32313798097 SUCCESS**; merged master byte-identical to the

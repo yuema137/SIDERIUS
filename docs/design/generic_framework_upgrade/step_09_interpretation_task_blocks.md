@@ -6,16 +6,59 @@
 2026-08-19 review ruling, exercised after the mandated source audits closed
 without a new material contradiction).**
 
-**IMPLEMENTATION STATUS: 09a COMPLETE / MERGED (2026-08-19) — PR #238,
-squash `4cf38dec0934cf22c59c80cc69711d7c2bd0401b`, exact-head CI 32313798097
-SUCCESS on `9d85f67b`. 09b is NEXT and NOT IMPLEMENTED; its child design
-(`step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`)
-is REVISION 2 — FROZEN (operator final ruling 2026-08-19: approved with
-four minor final amendments; Q-09b-1..3 all RESOLVED = YES).** The 09a
-evidence, ledger and findings live in
+**IMPLEMENTATION STATUS: STEP 09 COMPLETE — both children MERGED; Step-09
+acceptance CLOSED (2026-08-20).**
+
+| child | status | PR | squash SHA | exact-head CI |
+|---|---|---|---|---|
+| **09a** — interpreter evidence & ordering on the metric handle | COMPLETE / MERGED 2026-08-19 | #238 | `4cf38dec0934cf22c59c80cc69711d7c2bd0401b` | 32313798097 SUCCESS on `9d85f67b` |
+| **09b** — interpretation prompts from `InterpretationTaskBlocks` via explicit renderers | COMPLETE / MERGED 2026-08-20 | #239 | `e9a1f9fbb1c2e882be5b017756e2552a6b9f8d7c` | 32324124087 SUCCESS on `ce3b971d` |
+
+Merged master was verified byte-identical to each validated head. The
+per-child evidence, ledgers and findings live in
 `step_09_interpretation_task_blocks/pr_09a_interpreter_evidence_ordering.md`
-§10 (104 `[x]` / 0 `[ ]`). Nothing in this parent's architecture changed
-during 09a implementation.
+§10 (104 `[x]` / 0 `[ ]`) and
+`step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`
+§22 (72 `[x]` / 0 `[ ]`). **Nothing in this parent's architecture changed
+during either child's implementation** — the sections below remain the
+freeze-time design and are NOT rewritten as post-implementation
+observations.
+
+**What Step 09 delivered.**
+
+* **09a — deterministic evidence, ordering and prediction semantics.** The
+  run's `MetricSpec` is transported from the tuner's ONE existing derivation
+  (Step 09 adds zero derivation sites) and interpretation FAILS CLOSED
+  without it; all 21 interpreter direction consumers read `MetricOrder`,
+  with the differential oracle byte-identical across that migration;
+  prediction semantics v2 is sign-safe and direction-aware, `unevaluated`
+  counts in no pool, and the v1/v2 partition is frozen per field; the
+  interpreter's prediction memory now rides the existing canonical lifecycle
+  (pre-09a it was carried by nothing — erratum E2); evidence projection adds
+  diagnosis, authority-derived failure counts and the typed secondary
+  contract with Q-09-7 = B held.
+* **09b — task-owned interpretation blocks and explicit rendering.**
+  `InterpretationTaskBlocks` (four framework keys, task-owned prose, absent
+  ⇒ nothing rendered) reaches the interpreter as a caller-supplied VALUE;
+  TIDMAD's science moved VERBATIM into `configs/task_interpretation/tidmad.yaml`
+  behind ONE bounded Regime-A adapter whose single task-identity occurrence
+  is a constant, not a branch; the framework prompts are task-free (census
+  with planted offenders both ways) and the last task-specific Health
+  check-id example is gone; explicit renderers give one authority per
+  evidence family (metric identity, per-role `TrainingDiagnosis`,
+  secondaries in their three states, failure counts); the prediction track
+  record is version-aware in BOTH consumer nodes, closing the declared
+  Q-09a-3 consequence in which v2 fractions were rendered over the frozen
+  v1 denominator. Three-task contrast and the roadmap 11-A/11-B rungs
+  landed. **Gate 1 PASS** (one launch, exactly 5 calls, 13/13 checks);
+  Gate 2 not required.
+
+**Forward debt is unchanged and preserved with its owners** — see §19; the
+09b child §19 carries the same list plus the structural/test hotspots it
+recorded. Those hotspots are the input to **Step 09.5**, the repository
+structural-debt + test-topology audit the operator sequenced between Step 09
+and Step 10 (roadmap §15.1); Step 09.5 is an AUDIT and does not pre-commit
+the project to refactoring.
 
 Rev 1 (`6c2802cd`, DRAFT) was reviewed by the operator with the verdict
 **APPROVED ARCHITECTURE / REQUIRED REVISION BEFORE FREEZE**: the
@@ -120,12 +163,14 @@ path carries or restores `prediction_outcomes_history` /
 target is 09a's NARROW interpreter-owned carry/restore through the existing
 canonical path (Q-09a-1 = A narrow), exact per-field v1/v2 spellings in
 the child §3.4 (Q-09a-2); (c) §15 09a surfaces + §19 rows updated
-accordingly. The 09a child design (`step_09_interpretation_task_blocks/
-pr_09a_interpreter_evidence_ordering.md`) is **REVISION 2 — FROZEN**
-(2026-08-19) and MERGED; the 09b child design
-(`step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`)
-is **REVISION 2 — FROZEN** (2026-08-19); 09b implementation has NOT
-started.
+accordingly. Both child designs are **REVISION 2 — FROZEN** (2026-08-19)
+and both are now MERGED: `step_09_interpretation_task_blocks/
+pr_09a_interpreter_evidence_ordering.md` (PR #238) and
+`step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`
+(PR #239). *(This paragraph records what the 09a source audit found AT ITS
+ANCHOR; the freeze-time statements are preserved as written and are not
+restated as post-implementation observations — only the child status line
+is brought current, per §0.)*
 
 ## 1. Step-09 mandate (roadmap, verbatim obligations)
 
@@ -1252,6 +1297,10 @@ adds the direction-literal census (§16) earlier.
 | uncomputable predictions counted as `partial` (§2.4, production-observed) | **fixed in 09a** (`unevaluated`, not counted) | 09a |
 | prediction-pool production carry/restore ABSENT at the pre-09a anchor (09a child audit E2, 2026-08-19 — the rev-2 premise that `RestoredState` restores it was a factual source error) | **fixed NARROWLY in 09a C5** (operator ruling Q-09a-1 = A: interpreter-owned prediction-memory fields only, through the existing canonical digest → workflow carry → `RestoredState` latest-wins path; generic resume policy, chain-incumbent restoration and every other restored field untouched) | 09a |
 | E.7 `vocab_link_confirmations` never carried/restored in production (same audit; vocabulary machinery, not the prediction-memory contract) | **B** (pre-existing workflow-transport gap) | Step 10 |
+| *(added at 09b closure, 2026-08-20)* proposer prediction-AUTHORING grammar — new predictions are still not constrained to the bound metric id, and per-sample forms are not capability-gated at authoring time | **B** | Step 10 |
+| *(09b closure)* the proposer's OWN task science in `PROPOSAL_REASONING_PROMPT` / `PROPOSAL_COMMIT_PROMPT` — 09b's scope was bounded to the two prediction-track reader surfaces | **B** | Step 10/12 (proposer-side task blocks) |
+| *(09b closure)* the TIDMAD interpretation declaration + its bounded adapter (`configs/task_interpretation/tidmad.yaml`, `task_blocks.py`) — self-labelled compatibility PACKAGING; Step 12 replaces the CALL SITE, not the contract | **B** | Step 12 |
+| *(09b closure)* production **structural** hotspots recorded by the 09b audit — the proposer node's duplicated legacy/pipeline reader surfaces, `workflows/model_exploration.py`, `ResultInterpretationAgent.run()`, the mixed `nodes/interpretation_helpers.py`, and the merged rendering module — plus test-topology duplication | **B — STRUCTURAL/TEST debt, deliberately separate from the semantic rows above** | **Step 09.5** (repository structural-debt + test-topology AUDIT, sequenced between Step 09 and Step 10; roadmap §15.1). The audit decides whether any repair is a Step-10 prerequisite — it does not pre-commit one |
 
 No A-class findings: nothing here closes a contract Step 09 must build on.
 
@@ -1387,7 +1436,17 @@ exact secondary-metric transport (§4b); exact run MetricSpec authority
 (§2.11/§4); prediction semantics + version rule (§13 ¶1, §8); Gate plan
 (§17); Step-12 compatibility (§22). Child detailed designs (per-commit
 checklists, frozen invariants, ledgers) follow per the established
-Step-07/08 kickoff protocol. **Implementation has NOT started.**
+Step-07/08 kickoff protocol. *(Freeze-time statement, preserved: at the
+freeze, implementation had NOT started.)*
+
+**Acceptance record (2026-08-20): STEP-09 ACCEPTANCE CLOSED.** Both child
+PRs merged (#238, #239 — §0), each on a green exact-head CI with merged
+master verified byte-identical to the validated head; the roadmap's Step-09
+obligations are discharged — interpretation renders from the metric handle
++ task blocks, the prediction grammar is metric-parameterized, the sign-band
+is fixed, the 11-A/11-B rungs landed, and the production node rendered a
+REAL preserved iteration through handle+blocks under Gate 1. No parent
+architecture was reopened by either child.
 
 ### 23a. Final adversarial consistency pass (ruling §18 — 18 attacks)
 
