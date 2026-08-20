@@ -1,6 +1,11 @@
 # Step 09.5 — Repository Structural-Debt & Test-Topology Audit
 
-**STATUS: DRAFT — REVISION 1 — READY FOR OPERATOR REVIEW. NOT FROZEN.**
+**STATUS: REVISION 2 — FROZEN (operator ruling, 2026-08-20).**
+
+**Step-10 entry verdict: STRUCTURAL PREREQUISITE REQUIRED — APPROVED.**
+Structural class A = 2 · test-topology class A = 0 · one prerequisite milestone
+(**Step 09.5a**) · five operator questions **RESOLVED** · zero open operator
+questions.
 
 ---
 
@@ -21,6 +26,34 @@
 **Every measurement in this document is taken at the audit anchor unless
 explicitly labelled otherwise.**
 
+### 0.0 Operator rulings (2026-08-20) — FROZEN
+
+The audit was reviewed and **APPROVED** with three consistency amendments. All
+five operator questions are closed; §27 records each ruling in full.
+
+| # | question | ruling |
+|---|---|---|
+| **Q1** | prerequisite PR vs absorb into Step 10 | **A — land the prerequisite first.** Formalized as the milestone **Step 09.5a — Workflow Run-State Structural Prerequisite**. |
+| **Q2** | include the `core/resume.py:61` private registry import | **B — OUT OF SCOPE.** Different semantic owner (plugin/registry lifecycle); a named **Step-12** composition/layering input. |
+| **Q3** | health-core census stays always-on | **A — keep it always-on.** The stale `~134` prose may be corrected the next time `manifest.py` is legitimately touched; no dedicated PR. |
+| **Q4** | CI-side reproducible runtime baseline | **A — approved**, non-blocking. |
+| **Q5** | real-subprocess evidence lane | **A — approved**, unconditionally (no longer gated on Q4). Split into its own parallel CI job; delete/mock/weaken nothing. |
+
+**Three consistency amendments applied at freeze** — §20 amendment A (carriers
+are semantic boundaries, **not** a 99-argument parameter bag), §22 amendment B
+(the `run_workflow` **Python call signature is allowed to change**; identity and
+operator/persisted contracts are what stay stable), §20/§23 amendment C (the
+private registry import is out of prerequisite scope and is no longer presented
+as evidence the prerequisite resolves).
+
+**Gate disposition for Step 09.5a, frozen by the operator** — Gate 1 **NOT
+REQUIRED if exact LLM-facing parity is proven**, otherwise REQUIRED; Gate 2
+**REQUIRED, ≥ 2 iterations** (§20).
+
+**Non-blocking follow-up recorded, not implemented:** the CI validation-topology
+maintenance item (§20.2) covering Q4 + Q5. It does **not** gate Step 10 and is
+**not** part of Step 09.5a.
+
 ### 0.1 Roadmap synchronization — verified, no repair needed
 
 The post-Step-09 synchronization required by the kickoff was already present on
@@ -38,7 +71,17 @@ master and was **not** modified by this audit:
 The child designs
 (`step_09_interpretation_task_blocks/pr_09a_…md`, `…/pr_09b_…md`) and the parent
 (`step_09_interpretation_task_blocks.md`) are present and record the merged
-state. **No inconsistency was found; no synchronization repair was performed.**
+state. **No inconsistency was found; no synchronization repair was performed
+before or during the audit.**
+
+**At FREEZE (revision 2), the roadmap was updated forward** to record the
+outcome — the quoted line numbers above therefore describe master *at the audit
+anchor*, not after the freeze. The freeze commit updates: the Step-09.5 row to
+`AUDIT COMPLETE — REVISION 2 FROZEN`; a new **Step 09.5a** row; the Step-10 row
+to `BLOCKED until Step 09.5a merges`; a supersession note on §15.1b; a new
+**§15.1c** carrying the outcome, the three frozen Step-09.5a rules, the Q2 = B
+scope exclusion, the non-blocking CI follow-up and the sequencing; and the
+document index.
 
 ---
 
@@ -55,10 +98,15 @@ decision**.
 * no Step-10 implementation and no Step-10 child design;
 * no implementation of the carried Step-10/12 semantic debt (§8.4 below records
   where it lives and what it would cost; it does not fix it);
-* no Gate 1, no Gate 2, no real LLM, no real training or inference;
-* no CI change;
-* no change to any production or test file. The only repository change proposed
-  by this session is **this document** plus the Step-09.5 handoff file.
+* no Gate 1, no Gate 2, no real LLM, no real training or inference. The only
+  test execution was read-only measurement: `--collect-only` inventories, a
+  bounded 12-case `allow_real_subprocess` timing run (§11.4), and one
+  full-suite profile deliberately aborted at 80 % (§11.1);
+* no CI change — the §20.2 lane split is **recorded and approved, not
+  implemented**;
+* no change to any production or test file. The only repository changes made by
+  this session are **this document**, the roadmap status synchronization
+  (§0.1), and the local Step-09.5 handoff file.
 
 **The audit separates OBSERVATION from RECOMMENDATION from FUTURE
 IMPLEMENTATION**, and recommendations are described by ownership, never by line
@@ -265,8 +313,14 @@ The disqualifying properties are ownership properties, not length:
    from workflows.model_exploration import _add_plugin_to_registries
    ```
    A lower layer importing a **private** symbol from the highest-layer
-   orchestrator. Any decomposition of O5 is simultaneously a change to `core`.
-   **MEASURED.**
+   orchestrator. Any decomposition of **O5 (the plugin/loss registry
+   lifecycle)** is simultaneously a change to `core`. **MEASURED.**
+
+   **Scope note (Q2 = B, FROZEN):** this is a real finding about *O5*, which
+   Step 09.5a does **not** touch — the prerequisite owns O2 and O3. It is
+   therefore **out of prerequisite scope** and is carried as a named **Step-12**
+   composition/layering input. It is evidence that layering debt exists; it is
+   **not** evidence for the prerequisite (§23, amendment C).
 
 2. **The task binding is pulled, not injected.** `:106`
    `from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG`, used at
@@ -654,6 +708,11 @@ The four `task_config` pulls are the *mechanism* Step 10 is chartered to
 replace. The `core/resume.py` one is different in kind: it is a private-symbol
 dependency that makes O5 of §6.1.2 undecomposable without touching `core`.
 
+**Owner (Q2 = B, FROZEN):** the private registry import belongs to the
+**plugin/registry lifecycle** owner, not to the run-state carrier owner. It is
+**OUT OF SCOPE for Step 09.5a** and is carried as a named **Step-12**
+composition/layering input.
+
 ### 8.6 Investigated and found NOT to be duplicate authority
 Recorded so they are not re-flagged:
 
@@ -712,8 +771,10 @@ mechanical, behaviour-preserving, and strictly cheaper to establish **before**
 two more copies exist than after.
 
 **A-1 and A-2 share one semantic boundary** — "run-scoped state that is
-restored, carried across iterations, and persisted" — and should therefore be
-one prerequisite PR, not two (§20).
+restored, carried across iterations, and persisted" — and are therefore **one**
+prerequisite milestone, **Step 09.5a**, not two (§20). Neither A finding cites
+the `core/resume.py:61` private registry import, which is out of scope under
+Q2 = B (§23, amendment C).
 
 ### Class B — FORWARD CONSTRAINT (Step-10-owned; no separate prerequisite)
 
@@ -954,9 +1015,14 @@ the contended host of §11.1 and **cannot be converted to a CI number** — a
 
 **This is the single largest available lever on validation cost, and pulling it
 removes no evidence** — moving a marked lane into its own CI job is a
-*scheduling* change, not a coverage reduction. It is raised as operator
-question **Q5** (§27) rather than as a recommendation, because splitting a CI
-lane is a policy decision about where real evidence runs, not a cleanup.
+*scheduling* change, not a coverage reduction.
+
+> **RESOLVED (operator, 2026-08-20 — Q5 = A).** The split is **approved
+> unconditionally**, and the draft's "measure the CI-side share first" condition
+> is **removed**: these tests are not ordinary unit tests, and that alone
+> justifies the lane. Target topology and constraints are frozen in §20.2; the
+> CI-side share remains UNKNOWN and is answered by the same follow-up (Q4), not
+> a precondition for it.
 
 ---
 
@@ -1411,7 +1477,12 @@ honest recommendation is **accept it**.
 
 ## 19. Test-topology A / B / C triage
 
-### Class A — PRE-STEP-10 BLOCKER: **NONE**
+### Class A — PRE-STEP-10 BLOCKER: **NONE** — FROZEN
+
+> **TEST-TOPOLOGY PRE-STEP-10 BLOCKER: NONE.** Confirmed by the operator
+> (2026-08-20). No broad duplicate-test cleanup is justified before Step 10, and
+> **no prerequisite cleanup may be manufactured** merely because
+> `tests = 10,780`, test LOC exceeds production LOC, or CI takes ~16.5 minutes.
 
 No test finding meets the bar. The concrete reasons, each independently
 sufficient:
@@ -1475,30 +1546,108 @@ gate to force through an unrelated CI decision.
 
 ---
 
-## 20. Recommended prerequisite work
+## 20. Required prerequisite work — **Step 09.5a** (FROZEN)
 
-**One prerequisite PR is recommended. It is structural, not test-topology.**
+**One prerequisite milestone. It is structural, not test-topology.** Approved by
+the operator (Q1 = A).
 
 A-1 and A-2 (§9) share **one** semantic boundary — *run-scoped state that is
-restored, carried across iterations, and persisted* — so they are one PR, not
-two. Splitting them would put the producer and the consumer of the same carrier
-in different PRs.
+restored, carried across iterations, and persisted* — so they are one milestone,
+not two. Splitting them would put the producer and the consumer of the same
+carrier in different PRs.
 
-### PR-X — Run-scoped binding and chain-state carrier (behaviour-preserving)
+> **Milestone identity: `Step 09.5a — Workflow Run-State Structural
+> Prerequisite`.** It is deliberately **not** called "Step 10a": it exists
+> because Step 09.5 blocks Step 10, and it owns no Step-10 semantics. *PR-X* is
+> retained below only as an explanatory alias.
+
+### 20.1 Step 09.5a — semantic contract (frozen at the semantic level ONLY)
 
 | field | content |
 |---|---|
-| **semantic owner** | run-scoped configuration + restored/carried/persisted chain state for the exploration loop |
+| **semantic owner** | workflow run-scoped authorities/bindings **+** restored/carried/persisted exploration-chain state |
 | **production surfaces** | `workflows/model_exploration.py` (`run_workflow` signature and its `:1974-2069` state block), `core/resume.py` (the four `load_latest_*` loaders + `RestoredState`), the three `run_workflow` call sites, `sdsc_submission_scripts/run_one_iteration.py` (kwarg assembly only) |
-| **shape** | (a) ONE parameterised committed-digest reader replacing the four identical loaders — parameterised by digest key, validator and merge rule; (b) ONE typed run-scoped binding carrier and ONE typed chain-state carrier, following the tuner's landed `RunBindings` / `AttemptStage` precedent, so `run_workflow` takes carriers instead of 99 parameters |
-| **explicit NON-goals** | no new registry, no new loader subsystem, no composition root (item 5 of the Steps 01–07 register says *"do NOT build a per-subsystem loader now"* — that is Step 10/12); **no** implementation of secondary transport, `vocab_link_confirmations` carry, direction-literal migration, `evaluation.py` tables or proposer grammar; no change to `_register_plugin`/promotion (O5) beyond what removing `core/resume.py:61`'s private import requires; no prompt bytes |
-| **invariants that must not move** | iteration ordering and count; retry/attempt semantics; every persisted artifact and its key order; `run_invariants_lock.json` contents and the effective-config sha256; CLI surface of `run_one_iteration.py`; the public `run_workflow` name; resume soft-fail policy (warn-and-skip) exactly as today |
-| **required parity evidence** | a differential PRE/POST oracle over the persisted artifacts of one pseudo-mode chain iteration, deep-equal; an importer/caller census for `run_workflow` and every `load_latest_*`; a reachability test that fails if the production path bypasses the new reader; `pyright` over the extracted units |
+| **shape (A)** | ONE authoritative committed-interpretation-digest read path replacing the four duplicated read/parse/soft-fail implementations. Projections may differ by **digest key · validator · merge rule** and nothing else. **The old loaders must not survive as active wrappers around four copies of the same authority.** |
+| **shape (B)** | typed **immutable** run-scoped authority/binding carrier(s) **and** a typed **mutable** exploration-chain state carrier — separate types, following the tuner's landed `RunBindings` / `AttemptStage` precedent |
+| **shape (C)** | one obvious `run_workflow` orchestration entrypoint; **atomic migration** of every current repository caller to the new typed boundary |
+| **explicit NON-goals** | no secondary-metric production transport · no `vocab_link_confirmations` carry · no direction-literal migration · no `evaluation.py` Health table cleanup · no proposer prediction-authoring repair · **no plugin-registry cleanup (Q2 = B)** · no generic composition root · no task loader/registry · no new registry or loader subsystem · no Step-12 semantics · no prompt bytes |
+| **invariants that must not move** | see §22 — operator-facing and persisted contracts. The **Python call signature of `run_workflow` is explicitly EXCLUDED from this list** and is expected to change (amendment B). |
+| **required parity evidence** | a differential PRE/POST oracle over the persisted artifacts of a bounded pseudo-mode chain run, deep-equal; an importer/caller census for `run_workflow` and every `load_latest_*`; a reachability test that fails if the production path bypasses the new reader; the executable ownership guard of §20.1a; `pyright` over the extracted units |
 | **Step-10 work it unlocks** | launcher-owned task binding lands on a carrier instead of parameter #100; the two new carried items cost one declaration each instead of a fifth and sixth loader; workflow/resume direction literals become a two-site migration against `MetricOrder`, which `model_exploration.py:108` already imports |
-| **Gates** — quoted from `docs/gates/gate_testing_standard.md`, not asserted | The assignment-by-commit-type table (`:446-452`) gives **"New agent node or workflow wiring → Gate 1"** and **"Checkpoint (end of feature) → Gate 2"**; `manifest.py:120` independently advises `("gate1", "gate2-at-checkpoint")` for `workflows/`. So the **default is Gate 1 REQUIRED**. It may be dispositioned NOT REQUIRED only on the precedent 08a and 08b set — a proof that the LLM-facing rendering is **byte-identical** to a worktree at the base commit — which is why prompt-byte parity is listed in the evidence row above. **Gate 2 is REQUIRED once at the final executable head**, and because PR-X touches resume, the temporal-depth table (`:262-267`, *"cross-iteration behaviour or resume → ≥ 2 iterations"*) makes it a **≥ 2-iteration** run, not a 1×1 smoke. Cold-start, `--llm_config openai_tiered_pro.json`, and the DS8-mandatory `--data_scope` + `--health_gate_files` pairing all apply. The final disposition is the PR's to make and the operator's to approve; this audit records the governing rows, not a ruling. |
 
-**No test-topology prerequisite PR is recommended** (§19). TB-1/TB-2/TB-3 travel
-with the Step-10 work that owns their production surfaces.
+**Frozen at the semantic level only.** The Step-09.5a child design must re-read
+source and freeze for itself: exact module names, exact class names, the exact
+carrier field lists, and the exact number of extracted units. **This audit
+freezes none of those.**
+
+### 20.1a AMENDMENT A (operator, FROZEN) — the carrier is a semantic boundary, NOT a parameter bag
+
+The single largest failure mode available to Step 09.5a is to declare victory
+after moving 99 arguments into one dataclass. **That is explicitly forbidden:**
+
+```python
+@dataclass
+class RunBindings:
+    # ...all 99 run_workflow arguments copied here...   # <-- NOT a decomposition
+```
+
+The child design **MUST** perform a **field-by-field ownership audit** of every
+current `run_workflow` input and every loop-carried local, classifying each into
+at least:
+
+| class | meaning |
+|---|---|
+| **A** | immutable run-scoped authorities / bindings |
+| **B** | mutable restored / carried / persisted chain state |
+| **C** | launch or runtime controls and configuration that belong to their proper owner and must **not** become "bindings" |
+| **D** | services / resources whose owner is elsewhere |
+| **E** | ordinary local or derived values that must **not** become carrier fields at all |
+
+The tuner's `RunBindings` / `AttemptStage` precedent is **semantic, not
+cosmetic**: immutable bindings and mutable state are separate types, and the
+separation is enforced at construction. Step 09.5a must carry an **executable
+ownership guard** analogous in intent to `FORBIDDEN_BINDING_FIELDS`, so mutable
+chain state cannot later leak back into the immutable bindings.
+
+**Acceptance is fewer mixed owners and lower change amplification — never
+"99 parameters became one parameter object".**
+
+### 20.2 Non-blocking follow-up — CI validation-topology maintenance (Q4 + Q5)
+
+Recorded here as an approved future item. **Not implemented by this audit, not
+part of Step 09.5a, and not a Step-10 gate.** It may proceed independently or in
+parallel.
+
+Approved scope, as ONE small CI-only maintenance PR:
+
+* the deterministic unit job **explicitly excludes** `allow_real_subprocess`;
+* a **parallel** real-subprocess evidence job runs exactly that marker family;
+* both lanes emit a preserved / machine-readable `--durations` artifact, giving
+  future runtime audits a reproducible CI-side baseline (§11.1, TC-4);
+* **every current real test is preserved** — nothing is deleted, mocked,
+  weakened, or relabelled as synthetic evidence;
+* fail-closed selective-CI behaviour is unchanged (§18.4).
+
+Its purpose is **scheduling and observability, not coverage reduction.**
+
+### 20.3 Gate disposition for Step 09.5a — FROZEN by operator ruling
+
+The default assignment in `docs/gates/gate_testing_standard.md:446-452` is
+*"New agent node or workflow wiring → Gate 1"* and *"Checkpoint (end of
+feature) → Gate 2"*, and `manifest.py:120` independently advises
+`("gate1", "gate2-at-checkpoint")` for `workflows/`. The operator has tightened
+this for Step 09.5a specifically, on validation-economy grounds:
+
+| gate | disposition |
+|---|---|
+| **Gate 1** | **NOT REQUIRED — *if* Step 09.5a proves exact LLM-facing parity.** Step 09.5a is a behaviour-preserving state/workflow decomposition and owns no prompt or LLM semantics, so a real-LLM run would add no new failure-class evidence. The waiver must be earned by a differential oracle/manifest strong enough to detect movement in: **prompt bytes · LLM call labels · LLM call order and count · LLM-facing structured inputs**. **If that exact parity cannot be proven, Gate 1 automatically becomes REQUIRED.** |
+| **Gate 2** | **REQUIRED**, once at the final executable head. Reason: the resume / cross-iteration state lifecycle is materially changed. Temporal depth **≥ 2 iterations**, per the standard's table (`:262-267`, *"cross-iteration behaviour or resume → ≥ 2 iterations"*). The child design defines the exact bounded input and acceptance criteria, preserving cold-start, the DS8-mandatory `--data_scope` + `--health_gate_files` pairing, `--llm_config openai_tiered_pro.json`, and bounded runtime/cost. |
+
+**No Gate was run by this audit session, and none may be run to freeze it.**
+
+**No test-topology prerequisite PR is required** (§19). TB-1…TB-4 travel with
+the Step-10 work that owns their production surfaces; TC items go to later
+cleanup or to §20.2.
 
 ---
 
@@ -1546,21 +1695,51 @@ only for trend.
 
 ## 22. Expected cleanup acceptance criteria
 
-Binding on PR-X if it is authorized, and on any future test consolidation.
+Binding on Step 09.5a, and on any future test consolidation.
 
-**Structural (PR-X):**
+### 22.1 AMENDMENT B (operator, FROZEN) — what "stable" means, precisely
 
-* every public API, serialization contract, persisted artifact, CLI flag and
-  workflow semantic is unchanged, and proven so by the differential oracle;
-* no duplicate authority is left behind — the old loaders are removed, not
-  wrapped;
+Revision 1 asserted both *"`run_workflow` takes carriers instead of 99
+parameters"* and *"every public API remains unchanged"*. **Those two statements
+are inconsistent, and the operator has resolved the contradiction in favour of
+the migration:**
+
+> **The Python CALL SIGNATURE of `run_workflow` IS ALLOWED TO CHANGE.**
+> That signature change is part of the prerequisite's purpose.
+
+Every repository production and test caller migrates **atomically** to the new
+typed boundary. **A 99-argument compatibility wrapper must NOT be kept merely to
+satisfy a "public API unchanged" clause** — doing so would preserve, verbatim,
+the exact structural debt Step 09.5a exists to remove.
+
+The distinction the acceptance criteria actually turn on:
+
+| category | stability |
+|---|---|
+| **external / operator-facing** — CLI flags and launcher behaviour of `run_one_iteration.py` and `scripts/`; the public **entrypoint identity** `run_workflow` (name and role) | **MUST remain stable** |
+| **persisted / contractual** — every persisted artifact and serialization contract; persisted key semantics and ordering where contractually relevant; `run_invariants_lock.json` contents; effective-config fingerprint / sha256 semantics | **MUST remain stable** |
+| **behavioural** — iteration ordering and count; retry / attempt semantics; workflow output semantics; resume warn-and-skip soft-fail policy; LLM-facing prompt and call semantics unless separately proven otherwise | **MUST remain stable** |
+| **repository-internal** — the `run_workflow` Python parameter list and every internal call site | **INTENTIONALLY MIGRATED** to the typed carrier boundary |
+
+### 22.2 Structural acceptance (Step 09.5a)
+
+* every **external/operator-facing, persisted and behavioural** contract in the
+  table above is unchanged, and proven so by the differential oracle;
+* the `run_workflow` **internal signature** is migrated, with **no** legacy
+  99-argument wrapper retained;
+* no duplicate authority is left behind — the four digest loaders are
+  **removed**, not wrapped, and the surviving read path is one I/O and
+  soft-fail authority;
+* the immutable/mutable carrier separation holds and is enforced by the
+  executable ownership guard of §20.1a;
 * no generic `utils` module, no new registry, no new loader subsystem, no
   gratuitous abstraction layer;
 * one obvious `run_workflow` entrypoint survives;
-* Step 12 can still reach the out-of-tree composition target — PR-X must make
-  the composition root *easier* to introduce, never pre-empt it.
+* Step 12 can still reach the out-of-tree composition target — Step 09.5a must
+  make the composition root *easier* to introduce, never pre-empt it, and must
+  not require Step 12 to replace these carrier contracts.
 
-**Test (any future consolidation):**
+### 22.3 Test acceptance (any future consolidation)
 
 * every named failure class is preserved or strengthened; fail-closed behaviour
   stays covered; independent adversarial contrasts (§17) survive;
@@ -1600,48 +1779,75 @@ Binding on PR-X if it is authorized, and on any future test consolidation.
    (§6.2), self-documented as mirrors of each other; Step 10 adds **two** more
    carried items by name, and the change amplification for each is traced,
    MEASURED, across three production files.
-4. `core/resume.py:61` imports a **private** symbol from
-   `workflows/model_exploration.py` — the decomposition and the `core` layer are
-   already entangled, and that entanglement only grows.
-5. Test topology does **not** block: 27 % CI headroom, lean fixtures, correct
+4. Test topology does **not** block: 27 % CI headroom, lean fixtures, correct
    fail-closed selection whose over-approximation this audit **verified rather
-   than assumed** (§18.4), 646 KB of goldens, and only two defensible
-   ownership findings — both Step-10-owned.
+   than assumed** (§18.4), 646 KB of goldens, and a small set of defensible
+   ownership findings — all Step-10-owned or later cleanup.
 
-**Required prerequisite:** **PR-X** (§20) — one behaviour-preserving PR
-establishing the run-scoped binding carrier and the single committed-digest
-reader. **Step-10 semantic implementation remains blocked until PR-X closes.**
+**The verdict stands on items 1–3 alone: A-1 (mixed run-binding / chain-state
+ownership in `run_workflow`) and A-2 (duplicated committed-digest restoration
+authority). Those are sufficient.**
+
+**AMENDMENT C (operator, FROZEN).** Revision 1 additionally cited
+`core/resume.py:61`'s private import of
+`workflows.model_exploration._add_plugin_to_registries` as load-bearing verdict
+evidence. Under **Q2 = B** that import is **OUT OF SCOPE for Step 09.5a** — it
+belongs to the plugin/registry lifecycle owner, not the run-state carrier owner.
+It remains a **valid structural finding** and supporting evidence that layering
+debt exists (§8.5), and it is a **named Step-12 composition/layering input** —
+but it is **not** a problem the prerequisite solves, and it is no longer
+presented as one.
+
+**Required prerequisite:** **Step 09.5a** (§20) — one behaviour-preserving
+milestone establishing the typed run-scoped binding and chain-state carriers and
+the single committed-digest read path. **Step-10 semantic implementation remains
+BLOCKED until Step 09.5a merges.**
 
 ---
 
-## 24. Step-10 sequencing recommendation
+## 24. Step-10 sequencing — FROZEN
 
 ```
-PR-X  (structural prerequisite, behaviour-preserving)
-  │      run-scoped binding carrier + one committed-digest reader
-  │      Gate 1 REQUIRED by default (waivable on byte parity) ·
-  │      Gate 2 once at the final executable head, >= 2 iterations
-  ▼
-Step 10 PARENT design            ← may be drafted NOW, in parallel with PR-X
-  │
-  ▼
-Step 10 CHILD designs            ← freeze only AFTER PR-X lands
+Step 09.5   audit FROZEN  (this document, REVISION 2)
+      ↓
+Step 09.5a  Workflow Run-State Structural Prerequisite
+      │       typed immutable binding carrier(s) + typed mutable chain-state carrier
+      │       + ONE committed-digest read path
+      │       Gate 1 NOT REQUIRED if exact LLM-facing parity is proven, else REQUIRED
+      │       Gate 2 REQUIRED, >= 2 iterations
+      ↓
+Step 10     detailed design / children / implementation
 ```
 
-**Step-10 *parent* design may begin immediately**, in parallel with PR-X. It
-consumes this audit, fixes scope and the debt inventory, and reasons about
-ownership — none of which depends on the file topology PR-X changes.
+**Frozen sequencing rules:**
 
-**Step-10 *child* (implementation-owning) designs must NOT freeze until PR-X has
-landed.** A child design names exact functions, signatures and line-anchored
-call paths; freezing one against `run_workflow`'s 99-parameter signature would
-freeze it against a signature PR-X is about to replace. This is the same
-sequencing error the project avoided in 07b, where the C7 decomposition was an
-operator scope amendment *inside* the PR rather than a design frozen against the
-pre-refactor shape.
+* **Step-10 semantic implementation is BLOCKED until Step 09.5a merges.**
+* **Step-10 *parent*-level design MAY be drafted before or in parallel with
+  Step 09.5a** — its semantic scope and debt inventory do not depend on exact
+  post-refactor signatures.
+* **Step-10 implementation-owning *child* designs MUST NOT freeze against the
+  pre-09.5a source topology.** A child design names exact functions, signatures
+  and line-anchored call paths; freezing one against `run_workflow`'s
+  99-parameter signature would freeze it against a signature Step 09.5a is about
+  to replace — the same sequencing error the project avoided in 07b, where the
+  C7 decomposition became an operator scope amendment *inside* the PR rather
+  than a design frozen against the pre-refactor shape.
 
-**PR-decomposition implication:** the child split should follow the carriers PR-X
-establishes (binding vs carried state), not the current file boundaries.
+**Operator's recommended operational sequence** (for context and source-topology
+cleanliness — a recommendation, *not* a semantic prohibition on parallel parent
+drafting):
+
+```
+freeze Step 09.5  →  design Step 09.5a  →  implement / merge Step 09.5a
+                  →  Step-10 detailed design / children
+```
+
+**PR-decomposition implication:** the Step-10 child split should follow the
+carriers Step 09.5a establishes (immutable bindings vs mutable carried state),
+not the current file boundaries.
+
+**The §20.2 CI follow-up (Q4 + Q5) is independent of this chain** — it may
+proceed in parallel and gates nothing.
 
 ---
 
@@ -1666,7 +1872,7 @@ none of them.
 | 3 | Did I mistake breadth for duplicated authority in the CI hub list? | **CORRECTED — the most important correction in this audit.** Depth-1 reach suggested `HUBS` was 2.5–8× over-broad; measuring **transitive** reach (41–76 %) vindicated every hub. §18.4 now recommends **against** narrowing it |
 | 4 | Did I recommend a generic utils/common module? | **PASS** — §20 forbids it explicitly, as does §22 |
 | 5 | Did I mistake re-exports/wrappers for duplicated authority? | **PASS** — §8.6 lists five investigated-and-cleared cases, including `render_prediction_track_record` (one authority, two consumers) and the `agent/prompts.py` ↔ `prompt_templates/tuner` delegation |
-| 6 | Could PR-X be done inside Step 10 without extra debt? | **OPEN FINDING, reasoned** — it could, but only by making Step 10's first commit a large behaviour-preserving refactor of a surface its own child design would already be frozen against. §24 explains why separating them is cheaper; the operator may overrule (§27 Q1) |
+| 6 | Could the prerequisite be done inside Step 10 without extra debt? | **CLOSED by operator ruling Q1 = A.** Reasoned at draft as an open finding — it could, but only by making Step 10's first commit a large behaviour-preserving refactor of a surface its own child design would already be frozen against. §24 explains why separating them is cheaper; the operator may overrule (§27 Q1) |
 | 7 | Did I report a deliberate design as a defect? | **CORRECTED** — the proposer's pipeline path was initially read as "the 09b track record never reaches the LLM". Source verification (`:1668-1694`, the explicit "Step 09b C4" comment) shows a deliberate two-transport design preserving the version partition. **No frozen Step-09 contract is violated**, and §47's stop condition was correctly not triggered. The surviving finding is the *test* (§14.1) |
 | 8 | Did I reopen accepted Steps 01–07 B debt? | **PASS** — the register was read; items 1, 2, 4, 5, 12, 13 remain assigned to Step 10/12 and are untouched. A-1/A-2 are new findings about state carriers, not extensibility items |
 | 9 | Did I absorb Step-10 semantic work into 09.5? | **PASS** — §20's non-goals list every carried semantic debt by name; §8.2 records the inert `vocab_link_confirmations` feature as a finding and explicitly does not fix it |
@@ -1675,35 +1881,67 @@ none of them.
 | 12 | Did I mistake independent adversarial cases for redundancy? | **PASS** — §14.3 and §17 preserve the direction/sign/presence contrasts by name |
 | 13 | Did I treat unit + census as duplication? | **PASS** — §13 and §15 keep both, and §15 records the mutation-oracle evidence that a census caught what review did not |
 | 14 | Did I keep a golden merely because it exists? | **PASS** — §16 keeps them on the byte-identity contract and flags the proposer's dual-surface set as a Step-10 decision |
-| 15 | Did I propose replacing real evidence with fake unit tests? | **PASS** — §22 forbids it; Gate 2 is *required* for PR-X |
+| 15 | Did I propose replacing real evidence with fake unit tests? | **PASS** — §22 forbids it; Gate 2 is *required* for Step 09.5a |
 | 16 | Did I weaken fail-closed selective CI for runtime? | **PASS** — §18.4/§22 make narrowing `HUBS` an explicit non-goal |
 | 17 | Did I measure setup cost separately from assertion cost? | **OPEN FINDING** — only partially. Conftest/autouse topology was measured (§12); per-module fixture cost was not, because §11.1 makes local timing invalid here. Recorded as TC-4 |
 | 18 | Did I count parameterized cases as independent owners? | **PASS** — §13's counts are labelled ESTIMATED upper bounds, and §14.4 states the per-test pass was not done |
 | 19 | Did I double-count tests through several directory views? | **PASS** — §10.2 sums to 10,780 and partitions the tree; §13's per-invariant counts are explicitly overlapping and labelled |
 | 20 | Did I use historical test counts as current truth? | **PASS** — §10.5 and §18.4 both mark the manifest's figures HISTORICAL and re-measure |
 | 21 | Did I run an expensive suite CI already measured? | **CORRECTED** — one local full `--durations` run was launched, then **stopped** at 80 % when the host proved contended by other users (§11.1). It was replaced by a **bounded targeted** run of the 12-case `allow_real_subprocess` lane (382.66 s, §11.4) — which CI cannot answer, since CI reports only a total. That is the ladder §12 of the mandate prescribes, in the order it prescribes |
-| 31 | Did I take the sub-agents' findings on trust? | **PASS — and it mattered.** Every load-bearing sub-agent claim was re-verified by the main agent: the dead `InterpretationOutput` fields were checked against the live schema; the proposer's production mode was resolved by *constructing* all four shipped `llm_configs`; the "13 real-subprocess tests" was re-counted as **12**; the "5 disagreeing `PRODUCTION_DIRS`" was re-counted as **3 verified**; and one sub-agent's headline claim — that 09b's track record "never reaches the LLM" — was **falsified** by reading `:1668-1694` (item 7) |
-| 32 | Does any finding contradict a frozen Step-09 contract, triggering the mandate's stop condition? | **PASS — checked explicitly, and NO.** The one candidate (item 7) proved to be a deliberate documented design. The `vocab_link_confirmations` inertness (§8.2) is *carried Step-10 debt behaving exactly as the roadmap already describes it*, not a broken contract. No stop condition was met |
 | 22 | Did I inspect CI selector topology? | **PASS** — read from source and replayed against 10 real diffs and 6 hypothetical ones |
 | 23 | Did I inspect the Step-10 touch surfaces specifically? | **PASS** — §7, one row per roadmap-named responsibility |
-| 24 | Would PR-X actually make Step 10 simpler? | **PASS** — §20's "unlocks" row is concrete: carrier instead of parameter #100; one declaration instead of a fifth loader; two-site direction migration |
-| 25 | Would delaying PR-X materially increase cost? | **PASS** — the migration would then also have to unwind two *new* loaders, two new parameters and two new accumulators |
-| 26 | Does PR-X change public contracts unnecessarily? | **PASS** — §20 pins the public `run_workflow` name, the CLI, artifacts and lock contents |
+| 24 | Would Step 09.5a actually make Step 10 simpler? | **PASS** — §20's "unlocks" row is concrete: carrier instead of parameter #100; one declaration instead of a fifth loader; two-site direction migration |
+| 25 | Would delaying Step 09.5a materially increase cost? | **PASS** — the migration would then also have to unwind two *new* loaders, two new parameters and two new accumulators |
+| 26 | Does the prerequisite change public contracts unnecessarily? | **CORRECTED at freeze** — revision 1 claimed "every public API unchanged" while also replacing the 99-parameter signature. Amendment B (§22.1) resolves it: entrypoint **identity**, CLI, artifacts and lock contents are pinned; the **internal Python signature is intentionally migrated**, with no compatibility wrapper |
 | 27 | Does the cleanup preserve one obvious entrypoint? | **PASS** — §22 requires it |
-| 28 | Does PR-X create new registries/loaders/dependency debt? | **PASS** — forbidden in §20's non-goals, citing the Steps 01–07 register's own "do NOT build a per-subsystem loader now" |
-| 29 | Can Step 12 still reach the out-of-tree composition target? | **PASS** — §22 makes it an acceptance criterion; PR-X touches carriers, not binding resolution |
-| 30 | Is the verdict actually supported by evidence? | **PASS** — §23 lists five items, all MEASURED at the anchor |
+| 28 | Does Step 09.5a create new registries/loaders/dependency debt? | **PASS** — forbidden in §20's non-goals, citing the Steps 01–07 register's own "do NOT build a per-subsystem loader now" |
+| 29 | Can Step 12 still reach the out-of-tree composition target? | **PASS** — §22 makes it an acceptance criterion; Step 09.5a touches carriers, not binding resolution |
+| 30 | Is the verdict actually supported by evidence? | **PASS** — §23 now rests on three MEASURED items (A-1, A-2, and the Step-10 interaction), plus the non-blocking test finding. Amendment C removed the private-import item from the load-bearing list |
+| 31 | Did I take the sub-agents' findings on trust? | **PASS — and it mattered.** Every load-bearing sub-agent claim was re-verified by the main agent: the dead `InterpretationOutput` fields were checked against the live schema; the proposer's production mode was resolved by *constructing* all four shipped `llm_configs`; the "13 real-subprocess tests" was re-counted as **12**; the "5 disagreeing `PRODUCTION_DIRS`" was re-counted as **3 verified**; and one sub-agent's headline claim — that 09b's track record "never reaches the LLM" — was **falsified** by reading `:1668-1694` (item 7) |
+| 32 | Does any finding contradict a frozen Step-09 contract, triggering the mandate's stop condition? | **PASS — checked explicitly, and NO.** The one candidate (item 7) proved to be a deliberate documented design. The `vocab_link_confirmations` inertness (§8.2) is *carried Step-10 debt behaving exactly as the roadmap already describes it*, not a broken contract. No stop condition was met |
 
-**32 challenges examined. Material contradictions remaining: 0. Corrected: 4
-(items 2, 3, 7, 21). Open findings: 2 (items 6, 17), both recorded and neither
-changing the verdict.**
+**32 challenges examined. Material contradictions remaining: 0. Corrected: 5
+(items 2, 3, 7, 21, 26). Open findings at freeze: 1 (item 17 — per-module
+fixture cost, unmeasurable on a contended shared host, carried as TC-4).**
+Item 6 is **CLOSED by operator ruling Q1 = A**.
 
 ---
 
-## 27. Open operator questions
+### 26.1 Final pre-freeze adversarial re-read (operator-mandated, 18 challenges)
 
-Five. Each is a genuine policy decision; none is a source-mechanical choice this
-audit could resolve itself. **Only Q1 blocks Step 10.**
+Run at freeze, against the amended document.
+
+| # | challenge | outcome |
+|---|---|---|
+| 1 | Does Step 09.5a simply move 99 arguments into a bag? | **CORRECTED — this was the single biggest gap in revision 1.** §20.1a now forbids it in so many words, shows the anti-pattern as code, and requires a field-by-field ownership audit into five classes (A–E) before any carrier is declared |
+| 2 | Are immutable run authorities and mutable chain state still mixed? | **PASS** — §20.1 shape (B) makes them **separate types**, and §20.1a requires an executable ownership guard analogous to `FORBIDDEN_BINDING_FIELDS` so they cannot re-merge |
+| 3 | Is any Step-10 semantic debt accidentally implemented by the prerequisite? | **PASS** — §20.1's NON-goals name every carried item explicitly: secondary transport, `vocab_link_confirmations`, direction literals, `evaluation.py` tables, proposer grammar, composition root |
+| 4 | Does "public API stable" accidentally require keeping a 99-argument wrapper? | **CORRECTED** — §22.1 (amendment B) states the signature **is allowed to change** and that a compatibility wrapper **must not** be kept; §22.2 requires atomic caller migration |
+| 5 | Does Q2 = B conflict with any remaining prerequisite-scope sentence? | **CORRECTED** — the offending clause ("beyond what removing `core/resume.py:61`'s private import requires") is **deleted** from §20.1's NON-goals, which now reads "no plugin-registry cleanup (Q2 = B)" |
+| 6 | Is the private plugin-registry import incorrectly claimed as fixed or unlocked by the prerequisite? | **CORRECTED** — removed from §23's load-bearing evidence (amendment C); §6.1.3 and §8.5 now carry explicit scope notes marking it a **Step-12** input |
+| 7 | Do duplicated resume loaders remain active under thin wrappers? | **PASS** — §20.1 shape (A) and §22.2 both state the old loaders are **removed, not wrapped** |
+| 8 | Is the committed-digest reader actually ONE I/O and soft-fail authority? | **PASS** — §20.1 (A) permits divergence only in **digest key · validator · merge rule**; §22.2 requires "one I/O and soft-fail authority" |
+| 9 | Does Step 09.5a pre-empt the Step-12 composition root? | **PASS** — an explicit NON-goal in §20.1 and an acceptance criterion in §22.2, which additionally requires that Step 12 not have to *replace* these carrier contracts |
+| 10 | Is Gate 1 being required despite proven byte/call parity? | **CORRECTED by operator ruling** — §20.3 now waives Gate 1 **conditionally** on proven exact LLM-facing parity (prompt bytes, call labels, call order/count, structured inputs), instead of applying the assignment table mechanically |
+| 11 | Is Gate 2 accidentally waived despite resume/cross-iteration changes? | **PASS** — §20.3 keeps Gate 2 **REQUIRED at ≥ 2 iterations**, citing the standard's temporal-depth row for resume |
+| 12 | Did Q4/Q5 accidentally become a Step-10 blocker? | **PASS** — §20.2 states three times that the CI item is non-blocking, not part of Step 09.5a, and not implemented here; §24 repeats it |
+| 13 | Did the audit recommend deleting or mocking the real-subprocess tests? | **PASS** — §20.2 and §27 Q5 both forbid delete/mock/weaken/relabel; the change is *scheduling* only |
+| 14 | Did the audit weaken fail-closed selective CI? | **PASS** — §18.4 recommends **against** narrowing `HUBS`; §20.2 and §22.3 preserve fail-closed behaviour |
+| 15 | Does any test finding get promoted to A without Step-10 amplification? | **PASS** — §19 keeps class A empty and explains why §11.4's real-training concentration, despite being the largest lever, is **not** Step-10-amplified |
+| 16 | Are B/C structural findings still assigned to the correct future owners? | **PASS** — §9 B-1…B-6 → Step 10; C-1…C-7 → later cleanup; the private import → Step 12; §20.2 absorbs the CI-topology items |
+| 17 | Can Step-10 child design wait until the new carrier topology actually lands? | **PASS** — §24 freezes exactly that: parent may draft in parallel, children must not freeze pre-09.5a |
+| 18 | Can Step 12 still supply out-of-tree task composition without replacing these carrier contracts? | **PASS** — §22.2 makes it an explicit acceptance criterion; the carriers hold run-scoped *state*, while Step 12 owns *binding resolution*, which §20.1 leaves untouched |
+
+**18 challenges examined. PASS 12 · CORRECTED 6 · OPEN FINDING 0. Material
+contradictions before freeze: 0. Open operator questions before freeze: 0.**
+
+---
+
+## 27. Operator questions — ALL RESOLVED (2026-08-20)
+
+Five were raised. **All five are now closed by operator ruling; zero remain
+open.** Each entry keeps the evidence and options as put to the operator, and
+records the ruling.
 
 ### Q1 — Is PR-X worth its migration cost, or should Step 10 absorb it? **(Step 10 IS blocked by this answer)**
 
@@ -1718,6 +1956,15 @@ situation, where the decomposition became a mid-PR operator scope amendment —
 which worked, but only because the operator amended scope rather than because
 the design anticipated it.
 *Recommendation:* **A.**
+> **RULING: A — APPROVED.** Land the structural prerequisite BEFORE Step-10
+> semantic implementation, formalized as the milestone **Step 09.5a — Workflow
+> Run-State Structural Prerequisite** (deliberately *not* "Step 10a": it exists
+> because Step 09.5 blocks Step 10). Step-10 parent-level reasoning **may** be
+> drafted in parallel; implementation-owning child designs **must not** freeze
+> against the pre-09.5a topology. The operator's recommended operational
+> sequence — freeze → design 09.5a → merge 09.5a → Step-10 design — is a
+> context-cleanliness preference, not a prohibition on parallel parent drafting
+> (§24).
 
 ### Q2 — Should PR-X include the `core/resume.py:61` private-import inversion? **(does not block Step 10)**
 
@@ -1729,7 +1976,14 @@ owner (O5) undecomposable, and PR-X is already touching both files.
 different owner). B leaves a private cross-layer import in place, which Step 12's
 composition work will meet again.
 *Recommendation:* **B**, with the inversion recorded as a named Step-12 input —
-PR-X should stay inside one semantic boundary.
+the prerequisite should stay inside one semantic boundary.
+> **RULING: B — APPROVED.** Do **not** absorb
+> `core/resume.py → workflows.model_exploration._add_plugin_to_registries` into
+> the prerequisite. It belongs to the **plugin / registry lifecycle** owner and
+> is a named future **Step-12** composition-layering input. The prerequisite
+> stays scoped to run-scoped configuration/bindings + restored/carried/persisted
+> chain state. Every sentence implying the prerequisite removes this import has
+> been repaired (§6.1.3, §8.5, §20.1, §23 amendment C).
 
 ### Q3 — Should the 124-case health-core census stay in the always-on block? **(does not block Step 10)**
 
@@ -1743,6 +1997,11 @@ and 2.7 % of the suite is cheap.
 always-on list exists to prevent, since the census reads a directory.
 *Recommendation:* **A**, and update the stale "~134" figure in
 `manifest.py:19-21` whenever that file is next touched.
+> **RULING: A — APPROVED.** Keep the structural Health census in the always-on
+> block; do not weaken a directory-wide structural owner to save a small
+> fraction of the suite. The stale "~134" prose may be corrected the next time
+> `manifest.py` is legitimately touched — **no dedicated PR is required** for a
+> prose-only cleanup.
 
 ### Q4 — Should a reproducible runtime baseline be established CI-side? **(does not block Step 10)**
 
@@ -1755,7 +2014,12 @@ already runs everything, so it costs nothing extra).
 uploaded artifact on an already-scheduled job. B means the next audit hits the
 same wall.
 *Recommendation:* **A**, as a small independent change — explicitly **not**
-part of PR-X, and not a Step-10 dependency.
+part of the prerequisite, and not a Step-10 dependency.
+> **RULING: A — APPROVED.** Future full / nightly CI should produce a
+> machine-readable or preserved `--durations` artifact, so runtime audits use
+> reproducible CI-side data instead of a shared developer host. It is
+> **non-blocking for Step 10**, **not** part of Step 09.5a, and **not** evidence
+> for changing semantic coverage. Folded into the §20.2 follow-up.
 
 ### Q5 — Should the 12 real-training unit tests keep running in the default CI lane? **(does not block Step 10; largest available runtime lever)**
 
@@ -1775,55 +2039,83 @@ UNKNOWN), at the price of one more job definition and a second runner. It also
 makes the real-evidence lane *visible* as its own signal rather than hidden
 inside a 10,780-case dot stream. B costs nothing now and revisits the question
 when the cap binds (§11.3: ~12 milestones out).
-*Recommendation:* **A, but only after Q4 supplies the CI-side measurement** —
-splitting a lane on an ESTIMATED share would be optimising a number nobody has
-measured where it matters. Sequence Q4, then Q5.
+*Recommendation (revision 1):* **A, but only after Q4 supplies the CI-side
+measurement.**
 *Explicitly NOT recommended:* mocking these tests, marking them `real_run`, or
 deleting any of them. §22 forbids replacing real evidence with synthetic
 evidence, and 07a/07c depend on exactly this lane.
+> **RULING: A — APPROVED, and the "measure first" condition is REMOVED.** The
+> operator ruled that splitting the lane is **already justified on its own
+> merits**: these 12 tests are not ordinary unit tests — they run real
+> training/scoring subprocesses, and they sit in the default deterministic lane
+> only because the marker is named `allow_real_subprocess` rather than
+> `real_run`. The target topology is:
+>
+> ```text
+> deterministic unit job     excludes allow_real_subprocess
+> real-subprocess job        runs allow_real_subprocess, in parallel
+> ```
+>
+> Nothing is deleted, mocked, weakened, or relabelled as synthetic evidence.
+> Q4 and Q5 may land together as **ONE small CI-only maintenance PR** (§20.2),
+> which is **not** part of Step 09.5a, **not** a Step-10 blocker, and **not**
+> authorized for implementation by this audit session.
 
 ---
 
 ## 28. Final recommendation
 
 ```
-STEP 09.5 VERDICT:  STRUCTURAL PREREQUISITE REQUIRED
-                    (structural: 2 × class A · test topology: 0 × class A)
+STEP 09.5 VERDICT:  STRUCTURAL PREREQUISITE REQUIRED   — APPROVED, FROZEN
+                    structural class A = 2 · test-topology class A = 0
+                    5 operator questions RESOLVED · 0 open
 
-First   PR-X   run-scoped binding carrier + ONE committed-digest reader
-               behaviour-preserving · differential parity oracle
-               Gates per the standard's assignment table: Gate 1 REQUIRED by
-               default (waivable only on proven LLM-facing byte parity, the
-               08a/08b precedent) · Gate 2 once at the final executable head,
-               >= 2 iterations because resume is touched
-               NON-GOALS: no registry, no loader subsystem, no composition
-               root, and none of the carried Step-10/12 semantic debt
+NEXT     Step 09.5a — Workflow Run-State Structural Prerequisite
+         owner: workflow run-scoped authorities + restored/carried/persisted
+                exploration-chain state
+         shape: typed IMMUTABLE binding carrier(s)
+              + typed MUTABLE chain-state carrier   (separate types)
+              + ONE committed-digest read path replacing four copies
+              + atomic migration of every internal caller
+         RULE:  the carrier is a SEMANTIC PARTITION, never a 99-argument bag
+                (field-by-field ownership audit into classes A-E,
+                 plus an executable FORBIDDEN_BINDING_FIELDS-style guard)
+         API:   run_workflow IDENTITY preserved; internal Python signature
+                INTENTIONALLY migrated; no compatibility wrapper
+         GATES: Gate 1 NOT REQUIRED if exact LLM-facing parity is proven,
+                otherwise REQUIRED
+                Gate 2 REQUIRED, >= 2 iterations (resume lifecycle changes)
+         OUT:   plugin-registry private import (Q2 = B -> Step 12)
+                and every carried Step-10/12 semantic debt
 
-Then    Step 10 PARENT design — may be drafted in PARALLEL with PR-X
+THEN     Step 10 PARENT design  — may be drafted in parallel
+         Step 10 CHILD designs  — freeze only AFTER Step 09.5a merges
+         Step 10 implementation — BLOCKED until Step 09.5a merges
 
-Then    Step 10 CHILD designs — freeze only AFTER PR-X lands, decomposed
-                                along the carriers PR-X establishes
+PARALLEL CI validation-topology maintenance (Q4 + Q5), non-blocking:
+         deterministic unit job excludes allow_real_subprocess
+         + parallel real-subprocess evidence job
+         + durations artifacts on both lanes
+         no test deleted, mocked, weakened or relabelled
 
-Carry   B findings into the Step-10 design as named constraints
-        C findings into later cleanup
-        5 operator questions (§27); only Q1 blocks Step 10
-        Q5 = the largest runtime lever: 12 real-training tests, 0.11 % of
-        the cases, currently inside the default CI unit lane
+CARRY    B findings -> Step-10 design as named constraints
+         C findings -> later cleanup
+         private registry import -> Step 12 composition/layering
 ```
 
-**No test-topology prerequisite PR is recommended.** The suite is large but its
+**No test-topology prerequisite PR is required.** The suite is large but its
 ownership is, on the evidence this audit could verify, sound; its runtime is
 92 % of a CI job with 27 % headroom; and its selective-CI behaviour is correct
 in a way this audit set out to challenge and ended up confirming.
 
-**The one thing the operator should know independently of Step 10:** suite cost
-is not spread across 10,780 tests — it is concentrated in **12** of them
-(0.11 %) that run real training and scoring inside the default CI unit lane
-(§11.4). That is the largest available lever on the validation runtime the
-operator has flagged as a problem, it is a *scheduling* decision rather than a
-coverage one, and it is **Q5** — sequenced after **Q4**, so the split is made
-against a measured CI-side share rather than this audit's estimate.
+**The one thing worth knowing independently of Step 10:** suite cost is not
+spread across 10,780 tests — it is concentrated in **12** of them (0.11 %) that
+run real training and scoring inside the default CI unit lane (§11.4). That is
+the largest available lever on validation runtime, it is a *scheduling*
+decision rather than a coverage one, and it is now approved unconditionally as
+the §20.2 follow-up.
 
 ---
 
-*END — DRAFT REVISION 1. Not frozen. Awaiting operator review.*
+*END — **REVISION 2 — FROZEN** (operator ruling, 2026-08-20). Five operator
+questions resolved; zero open. Step 10 remains BLOCKED until Step 09.5a merges.*

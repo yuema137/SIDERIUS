@@ -1537,9 +1537,10 @@ production consumer that proves the seam); **Deps** = must land before;
 | §7a Tuner planning & policy (+ §20.2 training diagnostics) | 7 | Incumbent selection, best-score comparison, direction-sensitive threshold/delta logic, and skip/bypass policy consume the metric handle (the step-7 half of the metric migration — freeze reconciliation 2); round/attempt mechanics metric-agnostic; planner/reflector prompts render from the profile | planner/reflector prompts EXACT-equal + same kwargs reach LLMBridge (§2 nondeterministic surface); override-chain resolution deep-equal; record fields unchanged | metric-direction axis (7a fixture: lower-is-better through the policy) | production rounds select incumbents through the handle | 6 | **Q2 RESOLVED (Rev 5.3)**: parent `step_07_tuner_policy_and_training_diagnostics.md` (acceptance / decomposition, LIVE governance) + children under `step_07_tuner_policy_and_training_diagnostics/`: `pr0_persistent_example_baseline.md` (preflight, no semantic letter) · `pr_07a_training_history_diagnosis.md` · `pr_07b_tuner_policy.md` (Step-04 layout, OD-S7-8) | **COMPLETE — MERGED**, PR #214 (PR0 example packs, squash `79403b44`) + #215 (07a diagnostics, squash `65804b3d`, CI 31927638592) + #216 (07b tuner policy) + #217 (trial/formal identity correction) + 07c measurement. Gate 1 NOT REQUIRED for 07a; **Gate 2 PASS** 2026-08-16. `MetricOrder` became the ONE direction authority and the tuner node was decomposed behind a public boundary. |
 | §7e Tuner measurement/verification | 7 | Measurement data-feeding derives from the dataset profile; identity/comparability keys byte-stable | identity hashes/comparability unchanged (PR-G 0.R.12 pattern); store keys stable | measurement data-feeding axis (§7e fixture) | production prephase measurement builds batches from the profile | 2 | `step_07_tuner_policy_and_training_diagnostics/pr_07c_tuner_measurement.md` (Q2 RESOLVED — Rev 5.3; parent `step_07_tuner_policy_and_training_diagnostics.md`) | NOT STARTED. B/C at L0/L1 (measurement data-feeding from a contrast profile) |
 | §8 HealthGates | 8 | A task ships its own health-check family: checks declare their task-profile inputs, int8/amplitude checks become inapplicable-by-declaration on non-int8 deliverables while generic checks still FIRE and can block, and per-task thresholds live in task health config; TIDMAD's six checks are the golden instances | TIDMAD verdicts identical on fixture outputs; sha-pin MECHANISM untouched (fresh-workspace boundary for content) | atomic ladder §8.4 (groups / encoding declaration / generic-check firing) | production gate evaluation at tuner round boundaries uses declared inputs | 2, Deliverable Contract reader seam | `step_08_health_check_task_profile.md` | **STEP 08 COMPLETE — MERGED**, PRs #235 (08a, `7da1e45e`, CI 32207685908) + #236 (08b, `13e28796`, CI 32217121228) + #237 (08c, `3f4effb5`, CI 32226620524). Gate 1 NOT REQUIRED throughout; **Gate 2 PASS** at each child (08c: Pets PASS + DAVIS PASS). A task now ships its own health family: `inapplicable` is a typed verdict decided before artifact I/O, checks declare their inputs as data, roster/thresholds/prose live in `configs/task_health/tidmad.yaml` while `configs/health_checks.yaml` is policy-only, external plugins register checks AND view providers with their digests pinned, and the generic collapse family runs on standard NumPy view capabilities. Debt to Step 10: `evaluation.py`'s per-check-NAME threshold tables. |
-| §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `step_09_interpretation_task_blocks.md` | **STEP 09 COMPLETE — MERGED**, PRs #238 (09a, squash `4cf38dec`, CI 32313798097) + #239 (09b, squash `e9a1f9fb`, CI 32324124087); merged master byte-identical to each validated head. 09a: the run's `MetricSpec` is transported from the tuner's ONE derivation and interpretation FAILS CLOSED without it, all 21 interpreter direction consumers read `MetricOrder`, prediction semantics v2 is sign-safe with `unevaluated` in no pool and a frozen v1/v2 partition, and the prediction memory finally rides the canonical lifecycle. 09b: `InterpretationTaskBlocks` (four framework keys, task-owned prose, absent ⇒ nothing rendered) arrives as a caller-supplied VALUE, TIDMAD's science moved VERBATIM to `configs/task_interpretation/tidmad.yaml` behind ONE bounded adapter, framework prompts are census-proven task-free, explicit renderers give one authority per evidence family, and the prediction track record is version-aware in both consumer nodes. Gate 1 (09a) NOT REQUIRED; **Gate 1 (09b) PASS** — one launch, 5 calls, 13/13 checks, correct designation in BOTH direction regimes; Gate 2 NOT REQUIRED. **NEXT = Step 09.5 (§15.1b), NOT Step 10.** |
-| **Step 09.5 Structural-debt & test-topology audit** | 9.5 | The repository's production structure and test topology are measured at merged master and explicitly dispositioned BEFORE Step 10 adds workflow/resume/launcher/task-binding complexity | n/a — audit, not a migration | n/a | n/a | 9 | `step_09_5_structural_and_test_topology_audit.md` (DRAFT rev 1) | **IN PROGRESS — DRAFT REVISION 1 WRITTEN, AWAITING OPERATOR REVIEW (2026-08-20).** Operator sequencing decision (2026-08-20): an AUDIT, not a refactor commitment. Two workstreams — (A) production structural debt, (B) test topology/redundancy — ending in an explicit Step-10 entry decision (§15.1b). Audit anchor `85fa4b74`. **Draft verdict: STRUCTURAL PREREQUISITE REQUIRED** — 2 class-A structural findings (`run_workflow` at 1,572 lines / 130 branch nodes / 99 parameters with no run-scoped binding or chain-state carrier; `core/resume.py`'s four structurally identical committed-digest loaders, which Step 10 would make six), **0 class-A test findings** (CI pytest 993 s = 92 % of a 1,084 s job with 27 % headroom; 5 conftests / 4 autouse fixtures; selective-CI hub declarations verified CORRECT by transitive reach). Recommends ONE behaviour-preserving prerequisite PR-X, Step-10 PARENT design in parallel, Step-10 CHILD designs frozen only after PR-X lands. 5 open operator questions; only Q1 blocks. Largest runtime lever found: 12 real-training unit tests (0.11 % of cases, 382.66 s locally) run inside the default CI unit lane — Q5. **NOT FROZEN — Step 10 remains BLOCKED pending the operator's ruling.** |
-| §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | **NOT STARTED — BLOCKED pending the Step 09.5 disposition (§15.1b).** **Rev 5 (§22.12)**: workflow/resume D1 comparisons via the handle; a second bound task (B or C) at honest maturity. Inherited semantic debt due here: production secondary-metric transport (Q-09-7 = B), `evaluation.py` per-check-NAME tables, resume/dashboard direction literals, `vocab_link_confirmations` carry, proposer prediction-authoring grammar. |
+| §11 Interpretation | 9 | Interpretation renders from the metric handle + task blocks; prediction grammar metric-parameterized; sign-band fixed | 3 existing interpreter goldens + new ones EXACT-equal + same kwargs reach LLMBridge | atomic 11-A/11-B (metric identity / table indexing) | the production interpretation node renders a real iteration from handle+blocks | 6 | `step_09_interpretation_task_blocks.md` | **STEP 09 COMPLETE — MERGED**, PRs #238 (09a, squash `4cf38dec`, CI 32313798097) + #239 (09b, squash `e9a1f9fb`, CI 32324124087); merged master byte-identical to each validated head. 09a: the run's `MetricSpec` is transported from the tuner's ONE derivation and interpretation FAILS CLOSED without it, all 21 interpreter direction consumers read `MetricOrder`, prediction semantics v2 is sign-safe with `unevaluated` in no pool and a frozen v1/v2 partition, and the prediction memory finally rides the canonical lifecycle. 09b: `InterpretationTaskBlocks` (four framework keys, task-owned prose, absent ⇒ nothing rendered) arrives as a caller-supplied VALUE, TIDMAD's science moved VERBATIM to `configs/task_interpretation/tidmad.yaml` behind ONE bounded adapter, framework prompts are census-proven task-free, explicit renderers give one authority per evidence family, and the prediction track record is version-aware in both consumer nodes. Gate 1 (09a) NOT REQUIRED; **Gate 1 (09b) PASS** — one launch, 5 calls, 13/13 checks, correct designation in BOTH direction regimes; Gate 2 NOT REQUIRED. Step 09.5 has since run and is FROZEN (§15.1c): **NEXT = Step 09.5a, NOT Step 10.** |
+| **Step 09.5 Structural-debt & test-topology audit** | 9.5 | The repository's production structure and test topology are measured at merged master and explicitly dispositioned BEFORE Step 10 adds workflow/resume/launcher/task-binding complexity | n/a — audit, not a migration | n/a | n/a | 9 | `step_09_5_structural_and_test_topology_audit.md` (DRAFT rev 1) | **AUDIT COMPLETE — REVISION 2 FROZEN (operator ruling, 2026-08-20).** Audit anchor `85fa4b74`. **VERDICT: STRUCTURAL PREREQUISITE REQUIRED** — 2 class-A structural findings (`run_workflow` at 1,572 lines / 130 branch nodes / 99 parameters with no run-scoped binding or chain-state carrier; `core/resume.py`'s four structurally identical committed-digest loaders, which Step 10 would make six), **0 class-A test findings** (CI pytest 993 s = 92 % of a 1,084 s job with 27 % headroom; 5 conftests / 4 autouse fixtures; selective-CI hub declarations challenged and verified CORRECT by transitive reach 41–76 %). All five operator questions RESOLVED (Q1 = A · Q2 = B · Q3 = A · Q4 = A · Q5 = A); **zero open**. Largest runtime finding: 12 real-training unit tests (0.11 % of cases, 382.66 s locally) sit in the default CI unit lane — approved for a parallel lane as non-blocking CI maintenance, deleting/mocking nothing. **NEXT = Step 09.5a; Step 10 remains BLOCKED until it merges.** |
+| **Step 09.5a Workflow run-state structural prerequisite** | 9.5a | `run_workflow`'s run-scoped authorities and its restored/carried/persisted chain state get typed carriers, and the four duplicated committed-interpretation-digest loaders collapse to ONE read path — behaviour-preserving | differential PRE/POST oracle over the persisted artifacts of a bounded pseudo-mode chain run, deep-equal; caller/importer census; reachability test for the new reader | n/a — behaviour-preserving decomposition, no new semantics | the production chain runs through the carriers and the single digest reader | 9.5 | `step_09_5a_workflow_run_state_prerequisite.md` (to be written) | **NEXT — NOT STARTED.** Required by the frozen Step-09.5 verdict (§15.1c). Owner: workflow run-scoped authorities + exploration-chain state. **The carrier is a SEMANTIC PARTITION, never a 99-argument parameter bag** — a field-by-field ownership audit (immutable bindings / mutable chain state / launch controls / foreign services / non-carrier locals) plus an executable `FORBIDDEN_BINDING_FIELDS`-style guard. `run_workflow` **identity** is preserved; its **internal Python signature is intentionally migrated** with no compatibility wrapper. NON-GOALS: the plugin-registry private import (Q2 = B → Step 12), secondary-metric transport, `vocab_link_confirmations` carry, direction-literal migration, `evaluation.py` tables, proposer grammar, composition root. **Gate 1 NOT REQUIRED if exact LLM-facing parity is proven, else REQUIRED; Gate 2 REQUIRED at ≥ 2 iterations.** |
+| §12 Orchestration binding | 10 | Task binding lives at the launcher; §12's OWN surfaces (workflow binding, campaign_artifacts, orchestration inputs to resume) carry zero TIDMAD residue — §9's core-infra residue (sandbox dirs/globs, runtime-control fallbacks) clears at step 11 | k9/l_fail choreographies pass unmodified; resume inventory field-stable | launcher-binding axis: a second bound task initializes the loop | run_one_iteration binds a task in production | 1-9 as landed | `step_10_orchestration_task_binding.md` | **NOT STARTED — semantic implementation BLOCKED until Step 09.5a merges** (Step 09.5 verdict FROZEN 2026-08-20, §15.1b/§15.1c). Parent-level design MAY be drafted in parallel with Step 09.5a; implementation-owning CHILD designs must NOT freeze against the pre-09.5a source topology. **Rev 5 (§22.12)**: workflow/resume D1 comparisons via the handle; a second bound task (B or C) at honest maturity. Inherited semantic debt due here: production secondary-metric transport (Q-09-7 = B), `evaluation.py` per-check-NAME tables, resume/dashboard direction literals, `vocab_link_confirmations` carry, proposer prediction-authoring grammar. |
 | §9 Execution infrastructure | 11 | Spawn/IPC/limits fully task-free; calibration explicit with defined precedence (env override preserved) | argv/IPC/sentinels byte-identical; rlimits resolve to same TIDMAD values | infra axis: contrast task spawns with zero infra edits | all production spawns | most prior steps | `step_11_execution_infrastructure.md` | NOT STARTED. Rev 5: contrast tasks spawn with zero infra edits (L2/L3 as D14 allows); D14 owner decision §22.21-Q3 |
 | Step 12 Task composition + regime B | 12 | A task binds its module configs through a thin reference root; bound tasks fail closed on missing semantics (§2 regime B) | regime-A callers byte-unchanged | binding axis: the composed contrast task binds and fails closed on a removed field | Milestone-1 composed task runs bound | ≥3 module configs (expected after step 5) | `step_12_task_composition_binding.md` | NOT STARTED (D12 governs). **ACCEPTANCE UPGRADED (operator ruling 2026-08-18, §22.24.3)**: the Step-12 completion criterion is the OUT-OF-TREE task-package executable proof — an external package (task config + data-path/model/objective/metric/health plugins+configs) executes through the composition root with ZERO infrastructure-source edits; final claim = "SIDERIUS supports a task-package protocol; TIDMAD/Pets/DAVIS are three packages using it"; Step 12 re-audits every B-class item in `step_01_07_extensibility_debt_audit.md` (incl. issue #234) against the actual composition root. **Rev 5 (§22.12, §22.14)**: first point at which Tracks B and C MUST demonstrate full declared composition + end-to-end execution (L3→L4); task-level metric / objective / history / health declarations; after this Step the three tracks are the mandatory regression suite; PREREQUISITE: dataset selection §22.21-Q1 |
 | Deliverable Contract (**ownership RESOLVED at Step 06 — split**, see §14; **non-HDF5 rung DISCHARGED at D14, 2026-08-18** — a classification CSV and a dense npz now ship beside the ABRA HDF5, each written and read by its task's own codec behind `TaskDataPath`) | 5→6 for ownership (RESOLVED); non-HDF5 rung → D14 (DONE) / Step 12 | One owner for deliverable naming/layout/dtype/attrs/completeness; non-HDF5 deliverables expressible | provisional TIDMAD extraction preserves **exact logical artifact equality** (05c §4.1) | non-HDF5 deliverable rung (owned by winning design) | STAGED consumers as steps land: engines write/clean via it (step 5, §7c's C); scorer reads (step 6); health peeks (step 8); cleanup (step 11). **Corrected by the frozen 05c design (§3 timing rule, §12): the row does NOT automatically complete at step 11.** Step 05c is a producer-side PROVISIONAL extraction leaving ownership OPEN; **Step 06 is the next MANDATORY ownership review** and must either CONFIRM final ownership or record exactly which consumer evidence is still missing; steps 08/11 may add later evidence but are **not** predetermined decision points | §14 row governs. Tie-break: §7c (step 5, first to need it) PROPOSES ownership; §10's design may counter-propose; if contested, the operator decides | 05c PROPOSES (provisional, MERGED `03e00944`); Step 06 confirms-or-says-why | **05c MERGED — the provisional producer-side extraction has LANDED; the row stays OPEN.** `execute_tools/deliverable_spec.py` now owns naming, cleanup matching, channel-group identity and the persisted storage representation across every migrated producer, reader, cleanup and reconstruction site. It does **not** own completeness, scoreability, instrument attrs or cleanup policy, and 05c claims **no** non-HDF5 deliverable format. **Step 06 is the next MANDATORY ownership review and must confirm-or-say-why** |
@@ -1846,9 +1847,17 @@ TIDMAD-profile-bound at M2.
 
 ### 15.1b Step 09.5 — Repository structural-debt & test-topology audit (operator sequencing, 2026-08-20)
 
-**Sequence: Step 09 COMPLETE → Step 09.5 NEXT → Step 10 NOT STARTED,
-BLOCKED on the 09.5 disposition.** This is an operator decision and lives
-here, in the top-level roadmap, not only in a child debt ledger.
+> **SUPERSEDED IN PART — see §15.1c for the OUTCOME.** This section records the
+> Step-09.5 mandate as it was frozen on 2026-08-20 *before* the audit ran; it is
+> preserved verbatim as the charter the audit was executed against. The audit is
+> now COMPLETE and returned gate outcome **B — STRUCTURAL PREREQUISITE
+> REQUIRED**, naming **Step 09.5a**. The live sequence is:
+> **Step 09 COMPLETE → Step 09.5 COMPLETE/FROZEN → Step 09.5a NEXT →
+> Step 10 BLOCKED until 09.5a merges.**
+
+**Sequence (as chartered): Step 09 COMPLETE → Step 09.5 NEXT → Step 10 NOT
+STARTED, BLOCKED on the 09.5 disposition.** This is an operator decision and
+lives here, in the top-level roadmap, not only in a child debt ledger.
 
 **Why.** Step 10 adds substantial workflow / resume / launcher /
 task-binding complexity. The standing anti-debt rule applies: *do not add
@@ -1923,6 +1932,75 @@ carry and proposer prediction-authoring grammar remain **Step 10**;
 proposer-side task-science prompt ownership is **Step 10/12**; the TIDMAD
 interpretation compatibility adapter, the tuner's regime-A task binding and
 the generic composition root remain **Step 12**.
+
+### 15.1c Step 09.5 OUTCOME and Step 09.5a (operator ruling, 2026-08-20 — FROZEN)
+
+**Step 09.5 is COMPLETE. The audit is `REVISION 2 — FROZEN` and returned
+gate outcome B — STRUCTURAL PREREQUISITE REQUIRED.** Full evidence:
+`docs/design/generic_framework_upgrade/step_09_5_structural_and_test_topology_audit.md`
+(audit anchor `85fa4b74`).
+
+**Verdict.** Structural class A = **2**; test-topology class A = **0**.
+
+* **A-1** — `run_workflow` is 1,572 lines / 130 branch nodes / **99
+  parameters**, with ~15 mutable accumulators inside an 813-line iteration
+  loop and at least five independent semantic owners. Step 10's three central
+  responsibilities (launcher-owned task binding, orchestration inputs to
+  resume, metric-handle comparisons) all land in its two least-separated
+  owners.
+* **A-2** — `core/resume.py` implements ONE committed-digest restoration
+  authority **four times**; Step 10's two new carried items would make six.
+* **Test topology does NOT block.** No broad test cleanup is justified before
+  Step 10, and none may be manufactured from a case count.
+
+**Prerequisite milestone: Step 09.5a — Workflow Run-State Structural
+Prerequisite.** Deliberately NOT named "Step 10a": it exists because Step 09.5
+blocks Step 10, and it owns no Step-10 semantics. Its semantic owner is
+*workflow run-scoped authorities + restored/carried/persisted exploration-chain
+state*.
+
+Three rules frozen with it:
+
+1. **The carrier is a SEMANTIC PARTITION, never a parameter bag.** Copying all
+   99 arguments into one dataclass is explicitly NOT a decomposition. The child
+   design must audit every current input and loop-carried local field by field
+   into immutable bindings / mutable chain state / launch controls / foreign
+   services / non-carrier locals, and must carry an executable
+   `FORBIDDEN_BINDING_FIELDS`-style guard so mutable state cannot leak back
+   into the immutable bindings.
+2. **`run_workflow`'s Python call signature IS ALLOWED TO CHANGE**, and every
+   internal caller migrates atomically. What stays stable is the entrypoint
+   **identity**, the operator-facing CLI, persisted artifacts and serialization
+   contracts, `run_invariants_lock.json`, the effective-config fingerprint,
+   iteration ordering, retry semantics and resume soft-fail policy. **No
+   99-argument compatibility wrapper may be kept** to satisfy a "public API
+   unchanged" clause — that would preserve the exact debt being removed.
+3. **Gates:** Gate 1 **NOT REQUIRED if exact LLM-facing parity is proven**
+   (prompt bytes · call labels · call order and count · structured inputs),
+   otherwise REQUIRED; **Gate 2 REQUIRED at ≥ 2 iterations**, because the
+   resume / cross-iteration lifecycle changes.
+
+**Out of scope for Step 09.5a** (operator ruling Q2 = B): the
+`core/resume.py:61` private import of
+`workflows.model_exploration._add_plugin_to_registries`. It is a real finding,
+but it belongs to the plugin/registry lifecycle owner and is a named **Step-12**
+composition/layering input. Also out of scope: every carried Step-10/12 semantic
+debt listed in the Boundary paragraph above.
+
+**Non-blocking follow-up (approved, not implemented): CI validation-topology
+maintenance.** One small CI-only PR may (a) exclude `allow_real_subprocess`
+from the deterministic unit job, (b) run that marker family as a **parallel**
+real-subprocess evidence job, and (c) emit preserved `--durations` artifacts on
+both lanes. **12 of 10,780 unit cases (0.11 %) run real training/scoring and
+take 382.66 s locally**, and CI's `-m "not real_run"` does not exclude them.
+Nothing is deleted, mocked, weakened or relabelled; fail-closed selective-CI
+behaviour is unchanged. This gates nothing and is NOT part of Step 09.5a.
+
+**Sequencing (frozen).** Step-10 *semantic implementation* is BLOCKED until
+Step 09.5a merges. Step-10 *parent*-level design MAY be drafted in parallel.
+Step-10 *implementation-owning child* designs MUST NOT freeze against the
+pre-09.5a source topology. Recommended operational order: freeze Step 09.5 →
+design Step 09.5a → implement/merge Step 09.5a → Step-10 detailed design.
 
 ## 16. Framework-level acceptance criteria (Rev 2 — two milestones)
 
@@ -2210,8 +2288,8 @@ the 2026-07-28 coupling ledger went stale (§0.A).
 **Non-step audit documents** use the same folder and a `step_NN_5_*`
 form when they sit BETWEEN two steps. The one currently required is
 `step_09_5_structural_and_test_topology_audit.md` (Step 09.5, §15.1b) —
-**written, DRAFT REVISION 1, awaiting operator review**; it gates Step-10
-entry.
+**REVISION 2, FROZEN 2026-08-20**; its verdict is STRUCTURAL PREREQUISITE
+REQUIRED, and the prerequisite it names is Step 09.5a (§15.1c).
 
 ## 20. Post-Step-05 addendum — training diagnostics, task diversity, and the data-path gap (2026-08-15)
 
