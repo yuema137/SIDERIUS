@@ -1,7 +1,25 @@
 # Step 09.5a — Workflow Run-State Structural Prerequisite
 
-**STATUS: DRAFT — REVISION 1 — READY FOR OPERATOR REVIEW. NOT FROZEN.
-IMPLEMENTATION NOT STARTED.**
+**STATUS: REVISION 2 — FROZEN. OPERATOR APPROVED FOR IMPLEMENTATION
+(2026-08-20).**
+
+**Implementation status at this freeze commit: NOT STARTED.**
+
+### Operator rulings recorded at freeze
+
+| ruling | disposition |
+|---|---|
+| three-carrier architecture | **APPROVED** — not forced back to two; the 99/99 census is load-bearing and may not be altered to reduce object count |
+| **Amendment A** — `RunBindings` may not become a service locator | **APPLIED** (§5.5): per-field audit; `require_probe_runner` reclassified to class C; D = 3, C = 72; no fourth carrier invented |
+| **Amendment B** — `WorkflowLaunchConfig` is transit config, not an authority | **APPLIED** (§10.3a) + census **G** |
+| **Amendment C** — single-writer invariant across C3/C4 | **APPLIED** (§23.1) + census **H** |
+| **Amendment D** — one open / one parse / one base soft-fail authority | **APPLIED** (§14.3) |
+| DS7 no-op parameters | **KEEP** — behaviour parity (§5.7) |
+| warning multiplicity | **PRESERVE**, without repeated I/O (§14.3) |
+| C0 → C6 decomposition | **APPROVED**, subject to §23.1 |
+| Gate 1 | **NOT REQUIRED** if exact six-dimension parity proven, else REQUIRED (§25) |
+| Gate 2 | **REQUIRED**, 2 iterations, autonomous within the frozen ≤ 90-min envelope; 120-min hard timeout (§26, §26.1) |
+| open operator questions | **0** |
 
 ---
 
@@ -288,11 +306,16 @@ a carrier field) · **F** legacy/compatibility debt.
 |---|---:|---|
 | **A** immutable run-scoped authorities | **12** | `WorkflowRunBindings` (§10) |
 | **B** mutable cross-iteration state seeds | **9** | `ChainState` (§11), via `RestoredState` |
-| **C** launch / execution configuration | **71** | `WorkflowLaunchConfig` (§10.3) |
-| **D** services / resources | **4** | `WorkflowRunBindings` services section (§10.2) |
+| **C** launch / execution configuration | **72** | `WorkflowLaunchConfig` (§10.3) |
+| **D** immutable capability references | **3** | `WorkflowRunBindings` capability section (§10.2) |
 | **E** local / derived only | **0 parameters** | derived locals stay locals (§5.6) |
 | **F** legacy / deprecated no-ops | **3** | remain plain deprecated parameters (§5.7) |
-| **total** | **12 + 9 + 71 + 4 + 0 + 3 = 99** | ✔ reconciles to the live signature |
+| **total** | **12 + 9 + 72 + 3 + 0 + 3 = 99** | ✔ reconciles to the live signature |
+
+> **Amendment A (operator, FROZEN) changed this table.** The per-field services
+> audit of §5.5 found that `require_probe_runner` is a **`bool` launch flag, not
+> a service**; it moved from class D to class C. D is therefore **3**, not 4, and
+> C is **72**. The reconciliation still holds exactly.
 
 Verified programmatically at `eb9f667e`: **no parameter is double-assigned and
 none is unassigned.** §33-A turns this into a permanent executable check so it
@@ -365,7 +388,7 @@ duplicating them into A would create two sources of truth (§48 of the kickoff).
 
 These nine are exactly the workflow-side face of `RestoredState` (§16).
 
-### 5.4 Class C — launch / execution configuration → `WorkflowLaunchConfig` (71)
+### 5.4 Class C — launch / execution configuration → `WorkflowLaunchConfig` (72)
 
 Grouped by the sink each parameter is actually consumed by (machine-derived from
 the load-site → innermost-enclosing-call map). **All 71 are frozen; the workflow
@@ -382,7 +405,8 @@ interprets only the seven noted.**
 | **C.7** | one node each | **2** — `human_advice_interpret` (`InterpretationInput`) · `human_advice_propose` (`local_full_context`) |
 | **C.8** | `ProposalOutput.model_validate` (`:2398`) | **1** — `validation_fixed_candidate_plan` |
 | **C.9** | `should_run_literature_review` (`:2217`) | **1** — `lit_review_enabled` |
-| | | **total 71** |
+| **C.10** | `run_launch_self_test` (`:1934`) — **added by Amendment A** | **1** — `require_probe_runner` (a `bool` launch flag, reclassified out of class D — §5.5) |
+| | | **total 72** |
 
 **Seven class-C values the workflow also reads for itself** — they stay in C
 because the workflow *consults* them, it does not *own* them:
@@ -398,15 +422,34 @@ invariants *and* forwarded configuration; duplicating them into
 `WorkflowRunBindings` would create two sources of truth for one value (§48 of
 the kickoff). `build_run_invariants` reads them from the launch config.
 
-### 5.5 Class D — services / resources (4)
+### 5.5 Class D — immutable capability references (3) — **per-field audit, Amendment A**
 
-`bridge_factory` (`:2195`, `:2232`, `:2408`, `:2490`, `:2748`) ·
-`sandbox_factory` (`:2750`) · `require_probe_runner` (`:1934`) ·
-`measurement_capability` (`:1935`)
+The operator's Amendment A requires each entry to be audited individually
+against source rather than accepted as a group. Result:
 
-Immutable for the run, injected by the caller, consumed as capabilities — the
-tuner precedent carries services on the bindings object
-(`contracts.py:93-98`) and that reading holds here.
+| field | actual type | referenced object mutable? | lifecycle owner | mutated *through this carrier*? | verdict |
+|---|---|---|---|---|---|
+| `bridge_factory` | `Callable \| None` (`:1614`) | **No** — a function reference | the caller (launcher / test harness) | **No** — only *called*, at `:2195`, `:2232`, `:2408`, `:2490`, `:2514`, `:2749`, to construct agents | **A — MAY remain** |
+| `sandbox_factory` | `Callable \| None` (`:1615`) | **No** — a function reference | the caller | **No** — only called, at `:2750` | **A — MAY remain** |
+| `measurement_capability` | `ResolvedMeasurementCapability \| None` (`:1630`) | **No — verified**: `model_config = ConfigDict(frozen=True, extra="forbid")` (`core/runtime_control/measurement_capability.py:48`) | `core/runtime_control/measurement_capability.py` | **No** — passed once to `run_launch_self_test` (`:1935`) | **A — MAY remain** |
+| ~~`require_probe_runner`~~ | **`bool`** (`:1625`) | n/a | the caller | n/a | **RECLASSIFIED → class C.** It is a launch flag, not a service: a plain boolean read once at `:1934`. Keeping it here would have been exactly the "compress the signature" reasoning Amendment A forbids. |
+
+**Disposition (frozen).** All three survivors are **immutable capability
+references whose own lifecycle is owned elsewhere and which
+`WorkflowRunBindings` never mutates**, so they satisfy Amendment A's option (A)
+and remain on the bindings carrier in an explicitly named *capability* section
+(§10.2).
+
+**No separate `WorkflowServices` carrier is introduced.** Amendment A permits one
+only if the services form a real coherent boundary; after the reclassification
+there are three unrelated immutable references, and a fourth carrier holding
+them would be a container invented to satisfy a shape, not a semantic owner.
+The ruling's instruction — *"do NOT force a fourth carrier merely because this
+ruling mentions it"* — is followed.
+
+**`WorkflowRunBindings` is therefore not a service locator**: it holds no object
+whose state it owns, and it exposes no lookup/registry API. §12's guard plus
+§10.1's membership rule keep it that way.
 
 ### 5.6 Class E — derived locals that must NOT become carrier fields (0 parameters)
 
@@ -599,6 +642,56 @@ It is **not** a bag: it has one membership rule, one construction site per
 caller, and a censusable boundary. Its fields are grouped by destination
 protocol in source, mirroring §5.4.
 
+#### 10.3a AMENDMENT B (operator, FROZEN) — transit configuration, NOT a second authority system
+
+The 72-field size is **approved and is not a defect**: launch configuration is
+inherently broad. What is frozen is its *semantic contract*.
+
+**`WorkflowLaunchConfig` IS:** immutable · launch/execution/transit
+configuration · constructed from the launcher/CLI-resolved values that exist
+today · passed through to current consumers · **never restored** · **never
+persisted as a new artifact** · **never cross-iteration mutable state**.
+
+**`WorkflowLaunchConfig` IS NOT** — and must never become — an authority for:
+
+| forbidden authority | who keeps it |
+|---|---|
+| CLI defaults | `run_one_iteration.py:build_parser`, `argparse` defaults |
+| task identity | task config / Step-12 composition root |
+| model semantics · `ModelIOContract` | `agent/schemas/model_io_contract.py` |
+| objective semantics | `ml_models/loss_models_sandbox.py`, `training_history.py` |
+| `MetricSpec` / direction | `execute_tools/evaluation_metric.py`, `metric_order.py` |
+| Health roster / thresholds | `configs/task_health/*`, `execute_tools/health_checks/*` |
+| `TaskDataPath` | `execute_tools/task_data_path.py` |
+| plugin discovery | `ml_models/plugin_loader.py`, `SIDERIUS_PLUGIN_DIRS` |
+| task-specific scientific behaviour | the task's own configuration |
+
+**Consequences that bind the implementation:**
+
+1. **It transports already-resolved values; it never re-derives them.** Where a
+   field has a default or a validation rule owned elsewhere, the carrier
+   **consumes** that value and **must not restate the default**. Duplicating a
+   default here would create the second source of truth §48 of the kickoff
+   forbids.
+2. **No validation is duplicated.** The receiving schemas
+   (`HyperparamTuningInput`, `InterpretationInput`, `ProposalInput`) already
+   validate these values; the carrier adds none.
+3. **No `ChainState` field may enter it** — enforced structurally by the same
+   derived guard as §12, applied in the other direction:
+   `set(WorkflowLaunchConfig fields) ∩ set(ChainState fields) == ∅`,
+   with a planted offender (§19-B of the ruling, census §33-G).
+4. **It is not a service locator** and holds no capability references — those
+   are the three class-D entries on the bindings carrier (§5.5).
+5. **"72 fields" is NOT claimed as a final generic public API.** It is the
+   honest current transport surface. Step 10/12 may reduce or replace how these
+   values are supplied once the unified launcher / composition architecture
+   exists; Step 09.5a only establishes coherent *current* transport ownership.
+
+**A renamed `WorkflowContext` is the failure mode this contract exists to
+prevent.** The distinguishing test at review time: *can every field be traced to
+a current caller-supplied value that the workflow forwards without
+interpreting?* If not, the field does not belong.
+
 ---
 
 ## 11. Mutable chain-state contract
@@ -728,18 +821,57 @@ malformed vocab entry; `fingerprint_history` and `prediction_memory` **raise**;
 introduced** — three latest-wins rules and one union rule that differ in their
 failure policy are not one rule.
 
-### 14.3 Diagnostics — §16 disposition, DECIDED
+### 14.3 Diagnostics — AMENDMENT D (operator, FROZEN)
 
-The projections, not the reader, emit the `warnings.warn` calls. Each projector
-maps a non-`ok` `DigestRead` to **its own current message text**.
+**Warning multiplicity is PRESERVED.** Step 09.5a is behaviour-preserving and
+there is no reason to spend semantic risk cleaning up log duplication here.
+But diagnostic compatibility must not recreate A-2 under another name, so the
+layers are frozen exactly:
 
-**Consequence: message text is preserved verbatim, warning multiplicity is
-preserved exactly (4 warnings for one corrupt digest), and no existing test
-changes** — while the file is still read and parsed once.
+**BASE DIGEST AUTHORITY — singular.** Per committed digest, per restoration
+pass, `read_committed_digests` performs exactly:
 
-This is the disposition the parent §16 asked to be frozen, and it needs **no
-operator question**: the evidence (§7.2/§7.3 — messages pinned, counts not) is
-unambiguous, and preserving both is strictly cheaper than choosing between them.
+```text
+one locate/open  →  one read  →  one JSON parse
+                 →  one classification {ok | missing | unreadable}
+                 →  one canonical DigestRead
+```
+
+**It alone owns the question "is this digest readable and parseable?".**
+
+**PROJECTION LAYER — plural, and genuinely different.** Each projector consumes
+the *same* `DigestRead` objects and:
+
+* **MAY** re-emit its own historical, projection-specific warning from the
+  `DigestRead` status/detail, so message text and multiplicity are unchanged;
+* **MAY** apply its own field-level policy — raise / warn-and-drop / ignore a
+  non-dict / latest-wins / union (§15);
+* **MUST NOT** reopen the file;
+* **MUST NOT** call `json.load` again;
+* **MUST NOT** independently decide whether the digest is parseable;
+* **MUST NOT** create a second I/O or soft-fail authority of any kind.
+
+```text
+duplicate diagnostic emission   ≠   duplicate state-loading authority
+```
+
+**Consequence:** message text verbatim, multiplicity exact (4 warnings for one
+corrupt digest), **zero existing resume tests change** — while the digest is
+opened and parsed **once**. Behaviour parity *and* A-2 genuinely solved.
+
+**STOP CONDITION (frozen).** If implementation finds that preserving exact
+warning multiplicity requires rebuilding duplicated I/O or parse logic, **STOP**.
+The single-authority goal is not sacrificed for log compatibility; the operator
+is asked instead.
+
+Required implementation evidence: one open + one parse per digest per pass
+(§33-B, Gate-2 criterion 4) · the four old reader skeletons removed · projection
+policies still differing where source requires (§15's six rows) · multiplicity
+unchanged (existing `pytest.warns` tests untouched, plus an explicit
+multiplicity test).
+
+The evidence that no operator question was needed here: §7.2/§7.3 — messages are
+pinned by existing tests, counts are not.
 
 ### 14.4 `load_latest_proposal` is untouched
 
@@ -906,10 +1038,44 @@ Seven semantic commits. Each owns a distinct failure class.
 adoption are different failure classes, and merging them would make a bisect
 useless on the largest diff in the PR.
 
-**Not split into 09.5b.** C1 (producer of restored values) and C4 (consumer)
-touch the same state authority; separating them into two PRs would put the
-producer and consumer of one carrier in different review units — the exact
-error the parent §20 warns against.
+### 23.1 AMENDMENT C (operator, FROZEN) — the single-writer invariant
+
+> **At NO committed executable milestone may both `ChainState.<field>` and the
+> corresponding old free local be independently writable authorities for the
+> same cross-iteration value.**
+
+Exactly **one** active writer per cross-iteration state value, at every commit —
+not merely at the end of the PR.
+
+**Staging pattern (A) — the planned one:**
+
+```text
+C3   migrates WorkflowRunBindings + WorkflowLaunchConfig + all callers.
+     ChainState is DEFINED (it landed in C2) but is NOT yet a writer:
+     the 11 accumulators remain the sole authority, untouched.
+C4   switches those 11 values to ChainState ATOMICALLY — the old locals are
+     removed in the same commit that makes ChainState the writer.
+```
+
+**Explicitly forbidden — the shape that would violate the invariant:**
+
+```python
+best_score_overall = ...        # old local still written
+state.best_score_overall = ...  # and the carrier written too
+# ...glue keeping the two "in agreement"
+```
+
+That is duplicate authority with synchronisation, i.e. A-1 reproduced inside the
+PR that exists to remove it.
+
+**Fallback (B).** If source topology makes pattern (A) unnatural for a
+particular value — e.g. a value whose writer sits inside code C3 must already
+rewrite — then **that value's C3 and C4 work merges into one semantic commit**.
+Commit-table tidiness never justifies a milestone with two writers.
+
+**Evidence required (C4):** a structural single-writer census (§33-H) plus a
+**planted offender** that introduces a second writable authority for one
+`ChainState` field and is proven to turn the owner RED.
 
 ---
 
@@ -1007,6 +1173,49 @@ on proven byte-identical LLM-facing rendering.
 **INCONCLUSIVE:** infrastructure abort (GPU unavailable, quota, watchdog kill)
 before iteration 2 begins — re-run once, per the standard, without changing the
 tested SHA.
+
+### 26.1 Frozen numeric resource envelope (operator-authorized autonomous budget)
+
+Every row is taken from `docs/gates/gate_testing_standard.md:397-415` (Regular
+Plan) unless marked. **Implementation may launch ONE Gate-2 attempt
+autonomously while every row below still holds.**
+
+| dimension | frozen value |
+|---|---|
+| entry command | `sdsc_submission_scripts/run_chain.sh --num_iterations 2` |
+| **LLM posture** | **REAL**, `--llm_config openai_tiered_pro.json` (mandatory, `:238`) |
+| **training / inference / scoring posture** | **REAL** subprocesses, GPU |
+| iterations (temporal depth) | **2** |
+| `--max_rounds` | 2 |
+| `--max_proposal_attempts` | 3 |
+| `--max_epochs` | 1 |
+| `--data_scope` | `4-9` (6 files) |
+| `--health_gate_files` | `4,5,6,7,8,9` (DS8-mandatory pairing) |
+| seeds | **NONE — cold-start** |
+| `--trial_portion / --train_portion / --eval_portion` | 0.02 / 1.0 / 0.01 |
+| `--formal_portion / --formal_train_portion / --formal_eval_portion` | 0.10 / 1.0 / 0.05 (→ ~15,000 steps; 60 eval PSD) |
+| `--trial_time_budget_minutes` | 5 |
+| `--formal_time_budget_minutes` | 45 |
+| `--trial_vram_budget_gb / --formal_vram_budget_gb` | 24 / 24 |
+| `--runtime_watchdog` | on |
+| guardrails | defaults (150k / batch ≥ 4) |
+| `force_formal_round` | default ON |
+| **expected wall time** | **45–90 min** (the standard's own Regular-Plan estimate) |
+| **expected cost** | **~$1.5–2.5** (the standard's own estimate) |
+| GPU | 1 device |
+| disk / workspace | one isolated, non-destructive Gate workspace under the operator's SIDEREIS data root; no reuse of a production chain workspace |
+| **HARD TIMEOUT (frozen)** | **120 minutes wall clock** on the whole two-iteration chain — the smallest bound that leaves ~33 % overhead above the 90-minute expected maximum. An outer bound only; a normal Gate never reaches it, and reaching it is classified as runtime/harness abnormality, never as a scientific result. |
+
+**Autonomous-launch precondition (all must hold immediately before launch):**
+frozen command/scenario unchanged · 2 iterations · data/training scope unchanged
+· projected wall time ≤ 90 min · resource posture within the rows above ·
+isolated workspace · **C5 deterministic evidence green**.
+
+**STOP** if the preflight projection exceeds 90 minutes, or if a materially
+larger compute / API / training envelope is required — report the revised
+projection instead of launching. A single same-spec rerun is permitted only for
+an INCONCLUSIVE attempt caused solely by infrastructure/provider failure. **A
+PASS is never rerun.**
 
 **No Gate is run during Phase 1.**
 
@@ -1161,6 +1370,8 @@ as engineering evidence).
 | **D** | all production `run_workflow` callers use the typed boundary | asserts caller count ≥ 3 |
 | **E** | `set(WorkflowRunBindings fields) ∩ set(ChainState fields) == ∅`, derived not hand-listed | planted offender: a `ChainState`-named field ⇒ `TypeError` |
 | **F** | no task-name literal (`tidmad`/`pets`/`davis`) in any new carrier or the digest authority | asserts a non-zero scanned-file count |
+| **G** | `set(WorkflowLaunchConfig fields) ∩ set(ChainState fields) == ∅`, derived not hand-listed *(Amendment B)* | planted offender: a `ChainState`-named field on the launch config ⇒ RED |
+| **H** | **single-writer**: for every `ChainState` field, exactly one writable authority exists — no surviving free local of the same name is assigned in `run_workflow` *(Amendment C)* | planted offender: reintroduce a second writable local for one field ⇒ RED |
 
 Each census names the defect only it can catch, per CLAUDE.md.
 
@@ -1215,6 +1426,36 @@ Each census names the defect only it can catch, per CLAUDE.md.
 Material contradictions: 0.** The review's most useful catch was its own:
 the revision-1 parameter table did not reconcile, and rather than annotate the
 gap it was rebuilt programmatically and the section rewritten.
+
+---
+
+### 34.1 Final pre-freeze adversarial pass (operator-mandated, 16 attacks)
+
+Run at freeze, against the amended document.
+
+| # | attack | outcome |
+|---|---|---|
+| 1 | Are any of the four service/resource entries mutable objects hidden inside immutable `RunBindings`? | **CORRECTED — and it found one.** The per-field audit (§5.5) verified `bridge_factory` / `sandbox_factory` are function references and `measurement_capability` is `ConfigDict(frozen=True, extra="forbid")`; **`require_probe_runner` was a `bool` launch flag misfiled as a service** and moved to class C. D = 3, C = 72, total still 99. |
+| 2 | Has `WorkflowLaunchConfig` become a 72-field semantic source of truth? | **PASS** — §10.3a freezes it as transit-only, with a table naming the nine authorities it may never assume |
+| 3 | Does it duplicate defaults/validation owned elsewhere? | **PASS** — §10.3a consequences 1–2: it consumes resolved values and restates no default; receiving schemas keep validation |
+| 4 | Can a `ChainState` field enter `WorkflowLaunchConfig`? | **PASS** — §10.3a consequence 3 + census **G**, derived and planted-offender-proven |
+| 5 | Can a mutable runtime service enter `WorkflowRunBindings`? | **PASS** — §5.5's audit is now per-field and mandatory; §10.1's membership rule and §12's guard hold the line |
+| 6 | Can C3/C4 temporarily create two writable authorities for one state value? | **CORRECTED** — §23.1 freezes the single-writer invariant at **every** milestone, shows the forbidden shape as code, permits merging C3/C4 for a value if topology demands it, and adds census **H** with a planted offender |
+| 7 | Does preserving warning multiplicity cause more than one open/parse? | **PASS** — §14.3: projections re-emit from the same `DigestRead`; reopening and re-parsing are explicitly forbidden |
+| 8 | Do projections independently redefine base digest readability? | **PASS** — §14.3: the base authority *alone* owns "is this digest readable and parseable?" |
+| 9 | Does the single reader genuinely parse each digest once per restore pass? | **PASS** — §14.1 returns the whole pass as `list[DigestRead]`; §3.4 proves all four calls already share one pass with identical arguments; census **B** + Gate-2 criterion 4 detect regression |
+| 10 | Are DS7 no-ops kept narrowly, not as a giant compatibility signature? | **PASS** — §5.7: three explicit deprecated parameters, in **no** carrier; §13 forbids any wrapper |
+| 11 | Is the Gate-1 waiver backed by exact six-dimension parity? | **PASS** — §20 lists all six; §25 auto-reverts to REQUIRED on any delta and treats a delta as a suspected regression first |
+| 12 | Does Gate 2 prove actual iteration-1 → iteration-2 consumption? | **PASS** — §26 criteria 2–4 assert a concrete value chain across **two different projection rules** (latest-wins + union); two exit-0s are explicitly insufficient |
+| 13 | Is the Gate-2 resource envelope numerically frozen and bounded? | **CORRECTED** — §26.1 adds the full numeric envelope: LLM/training posture, scope, rounds/attempts/epochs, portions, budgets, VRAM, GPU, workspace, ~$1.5–2.5, 45–90 min |
+| 14 | Can Gate 2 exceed 90 minutes without a STOP? | **CORRECTED** — §26.1 freezes a **120-minute hard timeout** and a STOP on any preflight projection > 90 min or any enlarged envelope |
+| 15 | Did a Step-10/12 future semantic field sneak into a carrier? | **PASS** — R13 plus §5's rule that no field may exist without a current production producer; §16 of the ruling's forbidden list is mirrored in §1 |
+| 16 | Can a fourth task reuse this architecture without a task-name edit? | **PASS** — §22's forward test: no task-name field, no central table, no new carrier type, no digest-reader change; census **F** pins it. Out-of-tree execution itself remains Step 12. |
+
+**16 attacks. PASS 12 · CORRECTED 4 (items 1, 6, 13, 14) · OPEN 0.
+NEW material contradictions: 0.** The most valuable catch was attack 1: the
+services group had been accepted wholesale in revision 1, and a per-field audit
+showed one of the four was not a service at all.
 
 ---
 
@@ -1305,4 +1546,6 @@ criterion.***
 
 ---
 
-*END — DRAFT REVISION 1. Not frozen. Implementation not started.*
+*END — **REVISION 2 — FROZEN**, operator approved for implementation
+(2026-08-20). Implementation status at the freeze commit: **NOT STARTED**.
+Zero open operator questions.*
