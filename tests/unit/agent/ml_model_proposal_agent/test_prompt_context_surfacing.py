@@ -156,70 +156,105 @@ def _pipeline_input(
 
 
 class TestBuildReasoningPromptTrackRecord:
-    """Phase E prediction track record appears iff scientific_accuracy or
-    cumulative_information_gain is present in the interpretation dict."""
+    """Phase E prediction track record — VERSION-AWARE since Step 09b C4.
 
-    def test_track_record_absent_when_neither_field_present(self, tmp_path):
+    The section is rendered by the ONE authority
+    (`agent.prompt_templates.interpretation.rendering.render_prediction_track_record`)
+    that the interpreter's synthesis prompt also uses, so the two consumers
+    cannot drift. These cells own the PROPOSER-side contract: the four
+    history shapes of design §9, and — the reason C4 exists — that a v2
+    fraction is never paired with the frozen legacy pool's denominator
+    (the Q-09a-3 consequence).
+
+    `_v2(...)` builds the live pool the way 09a writes it.
+    """
+
+    @staticmethod
+    def _v2(confirmed=0, partial=0, refuted=0, gain=0.0) -> dict:
+        return {
+            "prediction_outcomes_by_semantics": {
+                "metric_order_signsafe_v2": {
+                    "confirmed": confirmed,
+                    "partial": partial,
+                    "refuted": refuted,
+                }
+            },
+            "cumulative_information_gain_by_semantics": {"metric_order_signsafe_v2": gain},
+        }
+
+    def test_track_record_absent_when_no_prediction_state_exists(self, tmp_path):
         inp = _minimal_input(tmp_path, _minimal_interp())
         prompt = _build_reasoning_prompt(inp)
         assert "Prediction Track Record" not in prompt
 
-    def test_track_record_present_when_scientific_accuracy_set(self, tmp_path):
+    def test_an_empty_v2_pool_with_no_legacy_history_renders_nothing(self, tmp_path):
+        """Shape 4 (empty): an absent hit-rate is not a zero one — and a bare
+        `scientific_accuracy` with no pool behind it is not a track record."""
         interp = _minimal_interp(
-            scientific_accuracy={"confirmed": 0.6, "refuted": 0.3, "partial": 0.1}
+            scientific_accuracy={"confirmed": 0.0, "partial": 0.0, "refuted": 0.0},
+            **self._v2(),
+        )
+        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
+        assert "Prediction Track Record" not in prompt
+
+    def test_v2_only_history_renders_percentages_with_its_own_n(self, tmp_path):
+        """Shape 1 (v2-only). N comes from the V2 pool — 5, not the legacy 0."""
+        interp = _minimal_interp(
+            scientific_accuracy={"confirmed": 0.6, "partial": 0.2, "refuted": 0.2},
+            **self._v2(confirmed=3, partial=1, refuted=1, gain=1.23456),
         )
         prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
         assert "Prediction Track Record" in prompt
-
-    def test_track_record_present_when_only_cumulative_ig_set(self, tmp_path):
-        interp = _minimal_interp(cumulative_information_gain=0.42)
-        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
-        assert "Prediction Track Record" in prompt
-
-    def test_confirmed_percentage_rendered_correctly(self, tmp_path):
-        interp = _minimal_interp(
-            scientific_accuracy={"confirmed": 0.6, "refuted": 0.4, "partial": 0.0}
-        )
-        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
+        assert "Scientific accuracy (metric_order_signsafe_v2, N=5)" in prompt
         assert "confirmed=60%" in prompt
-        assert "refuted=40%" in prompt
+        assert "partial=20%" in prompt
+        assert "refuted=20%" in prompt
+        assert "Cumulative information gain (metric_order_signsafe_v2) : 1.235" in prompt
+        assert "legacy_v1" not in prompt
 
-    def test_partial_percentage_rendered(self, tmp_path):
+    def test_legacy_only_history_renders_no_percentages(self, tmp_path):
+        """Shape 2 (legacy-only): the pre-correction pool is stated and named
+        NOT comparable; no hit-rate is invented for it."""
         interp = _minimal_interp(
-            scientific_accuracy={"confirmed": 0.5, "partial": 0.3, "refuted": 0.2}
-        )
-        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
-        assert "partial=30%" in prompt
-
-    def test_cumulative_ig_formatted_to_three_decimals(self, tmp_path):
-        interp = _minimal_interp(cumulative_information_gain=1.23456)
-        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
-        assert "1.235" in prompt  # rounds to 3dp
-
-    def test_total_n_from_prediction_outcomes_history(self, tmp_path):
-        interp = _minimal_interp(
-            scientific_accuracy={"confirmed": 0.5, "refuted": 0.5, "partial": 0.0},
             prediction_outcomes_history={"confirmed": 3, "refuted": 3, "partial": 0},
-        )
-        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
-        assert "N=6" in prompt
-
-    def test_n_zero_when_history_absent(self, tmp_path):
-        interp = _minimal_interp(
-            scientific_accuracy={"confirmed": 1.0, "refuted": 0.0, "partial": 0.0},
-            # prediction_outcomes_history intentionally absent
-        )
-        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
-        assert "N=0" in prompt
-
-    def test_ig_line_absent_when_not_in_interp(self, tmp_path):
-        """scientific_accuracy present but no cumulative_information_gain → no IG line."""
-        interp = _minimal_interp(
-            scientific_accuracy={"confirmed": 0.8, "refuted": 0.2, "partial": 0.0}
+            cumulative_information_gain=0.42,
         )
         prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
         assert "Prediction Track Record" in prompt
-        assert "information gain" not in prompt.lower()
+        assert "Earlier predictions (legacy_v1) : 6 outcome(s)" in prompt
+        assert "NOT comparable" in prompt
+        assert "Cumulative information gain (legacy_v1) : 0.420" in prompt
+        assert "Scientific accuracy" not in prompt
+        assert "confirmed=" not in prompt
+
+    def test_mixed_history_labels_both_populations_and_pools_neither(self, tmp_path):
+        """Shape 3 (mixed) — the defect C4 fixes: v2 fractions must NOT be
+        rendered over the legacy denominator."""
+        interp = _minimal_interp(
+            scientific_accuracy={"confirmed": 1.0, "partial": 0.0, "refuted": 0.0},
+            prediction_outcomes_history={"confirmed": 0, "partial": 9, "refuted": 0},
+            **self._v2(confirmed=2, gain=0.5),
+        )
+        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
+        assert "Scientific accuracy (metric_order_signsafe_v2, N=2)" in prompt
+        assert "Earlier predictions (legacy_v1) : 9 outcome(s)" in prompt
+        # The pre-09b rendering said "N=9" beside these v2 fractions, and a
+        # naive pooling would say N=11. Neither may appear.
+        assert "N=9" not in prompt
+        assert "N=11" not in prompt
+
+    def test_an_unevaluated_outcome_cannot_inflate_the_n(self, tmp_path):
+        """09a keeps `unevaluated` out of both pools; the renderer therefore
+        needs no branch for it — pinned so a future writer cannot add one."""
+        pools = self._v2(confirmed=1, refuted=1)
+        pools["prediction_outcomes_by_semantics"]["metric_order_signsafe_v2"]["unevaluated"] = 7
+        interp = _minimal_interp(
+            scientific_accuracy={"confirmed": 0.5, "partial": 0.0, "refuted": 0.5}, **pools
+        )
+        prompt = _build_reasoning_prompt(_minimal_input(tmp_path, interp))
+        # The pool dict is summed as written by 09a (which never adds the key);
+        # this asserts the RENDERED N is the comparable count when it is absent.
+        assert "N=9" not in prompt
 
 
 class TestBuildReasoningPromptVocabHealth:

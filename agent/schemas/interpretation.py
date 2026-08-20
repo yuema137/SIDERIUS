@@ -229,6 +229,67 @@ class MetricIdentity(BaseModel):
     )
 
 
+class InterpretationTaskBlocks(BaseModel):
+    """Task-owned interpretation guidance — prose VALUES under framework keys.
+
+    Step 09b (parent §13 ¶3, Q-09-1 = B refined). The FRAMEWORK owns the key
+    set and where each section renders (``evidence_reading`` in BOTH phase
+    system prompts; ``per_model_guidance`` in Phase 1; ``synthesis_guidance``
+    and ``prediction_guidance`` in Phase 2); the TASK owns the prose. Each
+    field is optional: an absent section is a legal named absence and renders
+    NOTHING — no header, no bytes. The interpreter never reads task files;
+    the CALLER supplies this value (the workflow's bounded Regime-A adapter
+    today, the Step-12 composition root later). Key-set growth is a framework
+    protocol decision, never a per-task extension mechanism.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    evidence_reading: str | None = Field(
+        default=None,
+        description="How to read THIS task's evidence. Rendered in both phase system prompts.",
+    )
+    per_model_guidance: str | None = Field(
+        default=None,
+        description="Phase-1 per-model analysis guidance.",
+    )
+    synthesis_guidance: str | None = Field(
+        default=None,
+        description="Phase-2 cross-model synthesis guidance.",
+    )
+    prediction_guidance: str | None = Field(
+        default=None,
+        description=(
+            "Prediction-interpretation guidance (Phase 2). The reference "
+            "task's declaration supplies none today — absence is legal and "
+            "renders nothing."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def present_sections_are_non_empty(self) -> InterpretationTaskBlocks:
+        """A present section must carry prose.
+
+        An empty or whitespace-only string is a malformed declaration and is
+        refused — never silently treated as absence, because a task that
+        MEANT to supply guidance would otherwise render nothing without any
+        signal. No other normalisation happens: prose bytes are preserved
+        verbatim (the TIDMAD migration parity depends on it).
+        """
+        for name in (
+            "evidence_reading",
+            "per_model_guidance",
+            "synthesis_guidance",
+            "prediction_guidance",
+        ):
+            value = getattr(self, name)
+            if value is not None and not value.strip():
+                raise ValueError(
+                    f"InterpretationTaskBlocks.{name} is present but empty — supply prose or omit the section"
+                )
+        return self
+
+
 class RoundOrdering(BaseModel):
     """What data ordering one round actually ran, and where it came from.
 
@@ -750,6 +811,19 @@ class InterpretationInput(BaseModel):
             "here derives it: the tuner resolved it once and stamped it on its "
             "output. None is legal ONLY for a cold start or a genuinely "
             "scoreless input — see the validator below."
+        ),
+    )
+
+    # --- Task-owned interpretation guidance (Step 09b C2) ---
+    task_blocks: InterpretationTaskBlocks | None = Field(
+        default=None,
+        description=(
+            "Task-owned interpretation guidance, supplied by the CALLER "
+            "(the workflow's bounded Regime-A adapter today; the Step-12 "
+            "composition root later). None ⇒ every task-guidance section is "
+            "omitted from the prompts — legal for cold starts, scoreless "
+            "inputs, ad-hoc callers and tasks that supply no guidance. The "
+            "interpreter never discovers task files itself."
         ),
     )
 

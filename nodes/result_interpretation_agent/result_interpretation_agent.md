@@ -11,8 +11,10 @@ only inspects non-underscore modules), not public-API status.
 
 | module | visibility | owns |
 |---|---|---|
-| `result_interpretation_agent.py` | **PUBLIC** | `ResultInterpretationAgent`, the `run()` lifecycle, the CLI `main()`, the prompt constants and builders, `_dedup_promoted`, evolution-log I/O, output assembly and persistence |
+| `result_interpretation_agent.py` | **PUBLIC** | `ResultInterpretationAgent`, the `run()` lifecycle, the CLI `main()`, `_dedup_promoted`, evolution-log I/O, output assembly and persistence. Since Step 09b C1 it owns NO prompt byte: the prompt constants and builders live in `agent/prompt_templates/interpretation/rendering.py` (a byte-exact move), and this module imports exactly the builders its lifecycle calls |
 | `result_interpretation_agent.md` | **PUBLIC** | this contract |
+| `agent/prompt_templates/interpretation/rendering.py` | framework (outside the node) | the interpreter's ENTIRE prompt surface: the two system-prompt TEMPLATES (task-free since 09b C2 — they carry a `{TASK_GUIDANCE_SECTIONS}` slot, not task science), `DEDUP_SYSTEM_PROMPT`, `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS`, the user-prompt builders, the system-prompt assemblers, `_render_health_summary_section`, `_flatten_entry_for_prompt`, and the explicit evidence renderers (`render_metric_identity`, `render_interpretation_diagnosis_lines`, `render_secondary_metrics`, `render_failure_counts`, `render_prediction_track_record`). Layering rule: it imports schemas/framework authorities only and must never import the node package |
+| `agent/prompt_templates/interpretation/task_blocks.py` | framework (outside the node) | the BOUNDED Regime-A adapter: `load_interpretation_task_blocks(path=None)` + the ONE self-labelled default-path constant `LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG` (`configs/task_interpretation/tidmad.yaml`). Fail-closed on a missing / non-mapping / unknown-key / empty-section declaration. It is compatibility PACKAGING, never a registry or loader ecosystem: the constant feeds no branch, and Step 12's composition root replaces the CALL SITE, not the contract |
 | `evidence.py` | private | persisted evidence → typed projections: `tuning_output_to_model_run_summary`, `_round_ordering`, `_round_health`, `_collect_health_evidence`, `_required_denoising_score`, `reconcile_metric_spec`, `project_failure_counts`, `InterpretationContractError` |
 | `ordering.py` | private | the run-scoped deterministic boundary: `bind_run_order` → the ONE `MetricOrder`; `precompute_evidence` → `PrecomputedEvidence` (per-model/overall best, valid, worst, formal, configs, `total_experiments`, the summary index and the scientific-aggregation scope) and `collect_enriched_fields` → `EnrichedFields` (score tables, parameter counts, training volumes) |
 | `prediction.py` | private | prediction grammar and semantics: `evaluate_prediction`, `_compute_metric`, the FROZEN legacy alias table, and the versioned accumulators `accumulate_prediction_outcomes` / `accumulate_information_gain` / `prediction_pool_sizes`. It IMPLEMENTS the v2 rule but does not own its NAME: the semantics ids and the outcome vocabulary are declared once in `agent/schemas/interpretation.py` (the schema owning the fields they key) and re-exported here under the same names, so the schema, the helpers and `core/resume.py` all read one authority |
@@ -35,6 +37,44 @@ Rules, all executable:
   lazily-imported submodule would be unreachable afterwards. From a test, reach
   one with `importlib.import_module("nodes.result_interpretation_agent.<name>")`,
   and stub an internal on the module that CALLS it.
+
+## Task-owned interpretation guidance (Step 09b)
+
+The framework owns the prompt STRUCTURE; the task owns the interpretation
+SCIENCE. `InterpretationInput.task_blocks` carries a frozen
+`InterpretationTaskBlocks` VALUE with exactly four optional sections —
+`evidence_reading` (rendered in BOTH phase system prompts),
+`per_model_guidance` (Phase 1), `synthesis_guidance` and
+`prediction_guidance` (Phase 2). An absent section renders NOTHING: no
+header, no bytes. A present-but-empty section is refused.
+
+The interpreter never discovers task files. The CALLER supplies the value:
+today `workflows/model_exploration.py` and this node's CLI `main()` resolve
+TIDMAD's through the bounded adapter above; at Step 12 the composition root
+supplies the same typed value and the adapter call disappears. An external
+task supplies its own value — or its own YAML at any path — with no SIDERIUS
+edit.
+
+TIDMAD's declaration deliberately carries NO `prediction_guidance`: nothing
+existed in the pre-09b prompts to migrate there, and inventing guidance
+during a migration is not a migration.
+
+## Rendered evidence (Step 09b C3/C4)
+
+Each family has ONE renderer, and every section is presence-gated — an
+absent family emits no header rather than a fabricated "none observed":
+
+| section | source | absent ⇒ |
+|---|---|---|
+| `Metric               :` | `ModelRunSummary.metric_identity` (09a C2) | omitted (the run-level line still names the metric) |
+| `### Training dynamics` | `best_training_diagnosis` / `formal_training_diagnosis` (09a C6), rendered per ROLE through the 07b line grammar | omitted; a PRESENT but degenerate diagnosis still renders ("none recorded" / "invalid (non-finite)") |
+| `### Secondary metrics` | `secondary_metrics` (09a C6) — each with its OWN id and direction; `scored` / `not scoreable (<contract id>)` / `declared, not evaluated this run` | omitted (production is empty until Step 10 carries secondaries) |
+| `### Record outcomes` | `failure_counts` (09a C6) — keys from existing authority vocabularies only, zero counts omitted | omitted; a cached model with no stored counts is ABSENT, never "0 failures" |
+| `Prediction Track Record` (synthesis + the proposer) | the v1/v2 pools (09a C4/C5) rendered by ONE version-aware authority | omitted when no comparable prediction exists |
+
+The prediction track record never pools `legacy_v1` with
+`metric_order_signsafe_v2` and never renders one population's fraction over
+the other's denominator; both N's count the comparable outcomes only.
 
 ## Position in the pipeline
 
@@ -217,9 +257,9 @@ The constructor accepts `bridge_factory` (for test injection — defaults to `LL
 ## Dependencies
 
 - **LLM**: up to three call sites per run, all via `LLMBridge.generate()` (returns a parsed dict; validated with `model_validate`):
-  - **Phase 1 — per-model summarization** — one call per model in `summaries` that is NOT already in `model_knowledge_cache`. System prompt: `PER_MODEL_SYSTEM_PROMPT` (module-level constant).
-  - **Phase 2 — cross-model synthesis** — exactly one call per run. System prompt: `SYNTHESIS_SYSTEM_PROMPT` (module-level constant).
-  - **Phase 3 — vocab dedup** — one call when there are new candidate vocab entries that need consolidation against existing canonicals. System prompt: `DEDUP_SYSTEM_PROMPT` (module-level constant). Skipped (no LLM call) when no new candidates exist.
+  - **Phase 1 — per-model summarization** — one call per model in `summaries` that is NOT already in `model_knowledge_cache`. System prompt: `PER_MODEL_SYSTEM_PROMPT` (in `agent/prompt_templates/interpretation/rendering.py` since Step 09b C1).
+  - **Phase 2 — cross-model synthesis** — exactly one call per run. System prompt: `SYNTHESIS_SYSTEM_PROMPT` (in `agent/prompt_templates/interpretation/rendering.py` since Step 09b C1).
+  - **Phase 3 — vocab dedup** — one call when there are new candidate vocab entries that need consolidation against existing canonicals. System prompt: `DEDUP_SYSTEM_PROMPT` (in `agent/prompt_templates/interpretation/rendering.py` since Step 09b C1). Skipped (no LLM call) when no new candidates exist.
 - **GPU**: not required.
 - **External services**: none directly. Depends on the upstream tuning agent's experiment records (already on disk in `{workspace}/run_output_{run_name}.json`) and on `ml_models/{model_type}/description.md` for any model_type not carrying an inline description in its `ModelRunSummary`.
 

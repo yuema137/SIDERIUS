@@ -29,10 +29,8 @@ from __future__ import annotations
 
 import pytest
 
+from agent.prompt_templates.interpretation.rendering import _build_synthesis_prompt
 from nodes.interpretation_helpers import compress_model_summary
-from nodes.result_interpretation_agent.result_interpretation_agent import (
-    _build_synthesis_prompt,
-)
 
 #: Cache-entry shapes the producer genuinely accepts. Both `key_findings`
 #: forms are live: pre-6.3 wrote list[str], the consolidator writes

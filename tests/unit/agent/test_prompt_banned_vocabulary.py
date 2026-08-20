@@ -15,12 +15,12 @@ The runtime field name `denoising_score` and the literal word "denoising"
 
 import pytest
 
-from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
-from nodes.ml_model_proposal_agent import PROPOSAL_REASONING_PROMPT
-from nodes.result_interpretation_agent import (
+from agent.prompt_templates.interpretation.rendering import (
     PER_MODEL_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
 )
+from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
+from nodes.ml_model_proposal_agent import PROPOSAL_REASONING_PROMPT
 
 PRODUCTION_PROMPTS = {
     "PLANNER_PROMPT": PLANNER_PROMPT,
@@ -76,19 +76,58 @@ def test_banned_vocabulary_absent():
     )
 
 
-@pytest.mark.parametrize(
-    "prompt_name,prompt_text",
-    {
+# Step 09b C2 — the former `test_impact_aware_framing_present` cells are
+# REPLACED (superseded, not weakened): the Impact_Score / Linear_Weight /
+# Log-of-Mean science is TIDMAD's and now lives in its task blocks
+# (configs/task_interpretation/tidmad.yaml). The ownership is pinned in BOTH
+# directions by the C2 census — the framework templates must NOT contain it
+# (below) and the TIDMAD-ASSEMBLED prompts MUST
+# (tests/unit/agent/result_interpretation_agent/test_step09b_c2_task_blocks.py).
+
+#: TIDMAD science tokens banned from the FRAMEWORK interpretation prompt
+#: constants (Step 09b design §16 census 1). "denoising" stays sanctioned as
+#: D1 field-name vocabulary (this file's module docstring); the two check-id
+#: literals are the ruling-§0.4-amendment-1 removals.
+INTERPRETATION_FRAMEWORK_BANNED = [
+    "Log-of-Mean",
+    "Impact_Score",
+    "Linear_Weight",
+    "PSD",
+    "4000",
+    "segmentation_size",
+    "output_diversity_blocking",
+    "n_unique_int8_values",
+]
+
+
+def test_interpretation_framework_templates_are_task_free():
+    """One property: no TIDMAD science token appears in any framework-owned
+    interpretation prompt constant. The same whole-matrix single-assertion
+    form as the V9 guard above."""
+    from agent.prompt_templates.interpretation.rendering import (
+        DEDUP_SYSTEM_PROMPT,
+        HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS,
+    )
+
+    framework_constants = {
         "PER_MODEL_SYSTEM_PROMPT": PER_MODEL_SYSTEM_PROMPT,
         "SYNTHESIS_SYSTEM_PROMPT": SYNTHESIS_SYSTEM_PROMPT,
-    }.items(),
-)
-def test_impact_aware_framing_present(prompt_name, prompt_text):
-    """The two interpretation prompts must carry the Impact_Score / Linear_Weight
-    framing — guards against accidental deletion of the Log-of-Mean trap section."""
-    assert "Impact_Score" in prompt_text, f"{prompt_name} missing Impact_Score framing"
-    assert "Linear_Weight" in prompt_text, f"{prompt_name} missing Linear_Weight framing"
-    assert "Log-of-Mean" in prompt_text, f"{prompt_name} missing Log-of-Mean trap section"
+        "DEDUP_SYSTEM_PROMPT": DEDUP_SYSTEM_PROMPT,
+        "HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS": HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS,
+    }
+    violations = [
+        f"{name}: {token!r}"
+        for token in INTERPRETATION_FRAMEWORK_BANNED
+        for name, text in framework_constants.items()
+        if token in text
+    ]
+    assert not violations, (
+        "TIDMAD science found in framework interpretation prompt constants:\n  "
+        + "\n  ".join(violations)
+        + "\n\nStep 09b C2: task science lives in the task's "
+        "InterpretationTaskBlocks (configs/task_interpretation/tidmad.yaml), "
+        "never in framework templates."
+    )
 
 
 def test_planner_prompt_per_file_table_uses_impact_columns():

@@ -5,6 +5,13 @@ Best valid score     : None
 Worst denoising score: 0.7
 Formal round score   : 0.7
 
+### Record outcomes
+  records: 1
+  status: success=1
+  training diagnosis: diagnosis_missing=1
+  gate actions: none=1
+  health provenance: legacy=1
+
 ### Architecture Description
 A test architecture.
 

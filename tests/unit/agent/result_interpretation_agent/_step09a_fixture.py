@@ -59,6 +59,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.schemas.cache_entry import CacheEntry, ConsolidatedFinding, ConsolidatedNarrative
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from agent.schemas.interpretation import InterpretationInput, ModelRunSummary
@@ -671,6 +672,11 @@ def build_input(workspace: str) -> InterpretationInput:
         # input is score-bearing, so the contract REQUIRES it (Step 09a C2).
         metric_spec=reconcile_metric_spec(build_tuning_outputs()),
         task_description="Denoise SQUID magnetometer time series.",
+        # Step 09b C2 — production-faithful: the workflow supplies the task
+        # blocks through the ONE bounded Regime-A adapter, so the oracle's
+        # fixed input does too (declared oracle delta: the system-prompt
+        # digests moved when the science changed owner).
+        task_blocks=load_interpretation_task_blocks(),
         runtime_vocab=build_runtime_vocab(),
         previous_proposal=build_previous_proposal(),
         cumulative_information_gain=0.3,

@@ -1,15 +1,15 @@
 {
-  "_captured_at": "captured at a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e (Step-09a C1a base, UNMODIFIED production code); uncommitted at capture time: test-only files (tests/unit/agent/result_interpretation_agent/_step09a_fixture.py, tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py)",
+  "_captured_at": "captured at a325f33b9ce44f81f3ef688e2cf53a0bfdc6662e (Step-09a C1a base, UNMODIFIED production code); uncommitted at capture time: test-only files (tests/unit/agent/result_interpretation_agent/_step09a_fixture.py, tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py) | REGENERATED at Step 09b C2 (task blocks + TIDMAD science ownership migration), branch step09-pr09b-interpretation-prompts-task-blocks on frozen base 2bd9caf2. DECLARED DELTA (design ledger \u00a722.2): task science left the framework templates and re-enters through TIDMAD's InterpretationTaskBlocks sections; DW-1..DW-9 framework rewordings applied. Manifest delta: system_sha256 of the per-model and synthesis calls (task sections spliced into the system prompts); labels, order, markers and user prompts unchanged unless listed: [(0, 'interpretation.per_model', ['system_sha256', 'user_sha256']), (1, 'interpretation.per_model', ['system_sha256', 'user_sha256']), (4, 'interpretation.synthesis', ['system_sha256'])] | REGENERATED at Step 09b C3 (explicit evidence renderers). DECLARED DELTA: per-model USER prompts gain the presence-gated metric-identity line, '### Training dynamics', '### Secondary metrics' and '### Record outcomes' sections; the synthesis USER prompt gains the run-level 'Metric:' line. Digest delta: NONE (rendering only). Manifest delta: user_sha256 of [(0, 'interpretation.per_model', ['user_sha256']), (1, 'interpretation.per_model', ['user_sha256']), (4, 'interpretation.synthesis', ['user_sha256'])] | REGENERATED at Step 09b C4 (version-aware prediction track record). DECLARED DELTA: the synthesis USER prompt's gain line becomes the version-labelled track record. Digest delta: NONE (rendering only). Manifest delta: [(4, 'interpretation.synthesis', ['user_sha256'])] | C4 helper reword: DECLARED digest delta \u2014 keys new_discoveries, runtime_vocab carry the timing-discovery sentence, whose framework remedy no longer names a TIDMAD data-prep hyperparameter (design \u00a72.5/\u00a722.4). The discovery's identity, kind, tier and every other digest key are unchanged. Manifest delta: []",
   "calls": [
     {
       "label": "interpretation.per_model",
-      "system_sha256": "4416e487cb221c312a508763fb1e28f1ca8b3a8e90c963e38e9aa6a60891cf9e",
-      "user_sha256": "da591ff0825e895879ce570df097956688865a4d87673e2435331c75eda7c865"
+      "system_sha256": "74cfadd6f1377f4707e5743d4e8cb352136519f5d7d6ecedc417abfd9e64729d",
+      "user_sha256": "387a3fbea3d1048ef2a57898b18f23606418b4e65e47153f3385a1107e7bae6f"
     },
     {
       "label": "interpretation.per_model",
-      "system_sha256": "4416e487cb221c312a508763fb1e28f1ca8b3a8e90c963e38e9aa6a60891cf9e",
-      "user_sha256": "7a6fada23fab9f1925b31f7edca323618505e489be8d79bbf1a7828d5f086701"
+      "system_sha256": "74cfadd6f1377f4707e5743d4e8cb352136519f5d7d6ecedc417abfd9e64729d",
+      "user_sha256": "a939ac60677806f979a9159b83c5a90a25424a0f716ec86941c9c4a407fea9e8"
     },
     {
       "label": "cache_consolidator.list_merge",
@@ -23,8 +23,8 @@
     },
     {
       "label": "interpretation.synthesis",
-      "system_sha256": "94546e72a8a29f5f2b3e9911d43927982bb9758698e7d0e2ac2cd5feb8e28baf",
-      "user_sha256": "67842e75efe11fe14c6a5f1f87c889a37fbbc113126b2d5b7d3489899280f1d1"
+      "system_sha256": "6e0855af6648e7cd712f878a62bcb930cb127894b267fe7d99b3ce4fe2e36e41",
+      "user_sha256": "194a964951e7a70e2ce10a35d95067c2ea2e829862cd110bdbc3c070093a46dc"
     }
   ],
   "markers": [

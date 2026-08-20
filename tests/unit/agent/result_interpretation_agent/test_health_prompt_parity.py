@@ -14,13 +14,14 @@ the renderer (design §11-CB3 acceptance criteria).
 
 from pathlib import Path
 
-from agent.schemas.interpretation import InterpretationInput
-from execute_tools.metric_order import MetricOrder
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from nodes.result_interpretation_agent.result_interpretation_agent import (
+from agent.prompt_templates.interpretation.rendering import (
     _build_per_model_prompt,
     _build_per_model_system_prompt,
 )
+from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
+from agent.schemas.interpretation import InterpretationInput
+from execute_tools.metric_order import MetricOrder
+from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from tests.helpers.metric_fixtures import shipped_spec
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,
@@ -95,6 +96,16 @@ def test_per_model_prompt_parity_legacy_summary():
 
 
 def test_per_model_system_prompt_parity():
-    inp = InterpretationInput(model_types=["wavenet"], task_description="Denoise SQUID data.")
+    """Step 09b C2 SUPERSEDES the pre-PR3 provenance for THIS golden only:
+    the system prompt's science moved into TIDMAD's task blocks, so
+    ``per_model_system_prompt.txt`` now pins the CURRENT assembled bytes
+    (framework template + TIDMAD blocks; regenerated at C2 with the delta
+    declared in the 09b design §22.2). The USER-prompt parity tests above
+    keep their original pre-PR3 capture claim untouched."""
+    inp = InterpretationInput(
+        model_types=["wavenet"],
+        task_description="Denoise SQUID data.",
+        task_blocks=load_interpretation_task_blocks(),
+    )
     rendered = _build_per_model_system_prompt(inp)
     assert rendered == (GOLDENS / "per_model_system_prompt.txt").read_text()

@@ -272,7 +272,11 @@ def generate_discoveries(
         and prediction_eval.get("outcome") != OUTCOME_UNEVALUATED
     ):
         outcome = prediction_eval["outcome"]
-        metric = prediction_eval.get("metric", "denoising_score")
+        # Step 09b C4: the display fallback was one task's metric name acting
+        # as the framework default. It is also DEAD since 09a C4 — every
+        # evaluation record carries `metric` in its uniform key set — so the
+        # honest fallback is a named absence, never another task's name.
+        metric = prediction_eval.get("metric") or "the run's metric"
         predicted = prediction_eval.get("predicted_value")
         actual = prediction_eval.get("actual_value")
 
@@ -371,7 +375,14 @@ def generate_discoveries(
             desc = (
                 f"{model_type}: {total_s / 60:.1f} min/experiment "
                 f"(train={train_s / 60:.1f}, infer={infer_s / 60:.1f} min). "
-                f"High compute cost — reduce segmentation_size or complexity."
+                # Step 09b C4: this sentence used to name a TIDMAD data-prep
+                # hyperparameter as the remedy, from framework code that
+                # reaches the synthesis prompt and the carried vocabulary.
+                # The observation — high cost — is task-free; the specific
+                # remedy is the task's to name. (The removed token is not
+                # repeated here: the census that bans it is a text scan, and
+                # prose must not contain the thing being banned — F-09a-14.)
+                f"High compute cost — consider reducing model or input size."
             )
             discoveries.append(
                 VocabEntry(

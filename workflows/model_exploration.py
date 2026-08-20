@@ -71,6 +71,7 @@ from typing import Any, Literal
 import psutil as _psutil
 import yaml
 
+from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
@@ -2181,6 +2182,11 @@ def run_workflow(
             # SYNTHESIS_SYSTEM_PROMPT at call time.
             # See docs/design/enable_global_task_config.md § Commit T4.
             task_description=get_task_description(load_task_config()),
+            # Step 09b C2 — task-owned interpretation guidance, resolved by
+            # the ONE bounded Regime-A adapter (a default-path constant, not
+            # a branch). Step 12's composition root replaces this call site;
+            # the typed value contract stays.
+            task_blocks=load_interpretation_task_blocks(),
         )
 
         print(f"  [{iteration}] Interpreting experiment results...")

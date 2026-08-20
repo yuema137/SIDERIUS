@@ -29,6 +29,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
+from agent.prompt_templates.interpretation.rendering import render_prediction_track_record
 from agent.prompt_templates.proposal import live_loss_registry_names
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
@@ -1143,25 +1144,26 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
         "",
     ]
 
-    # Phase E — prediction track record (scientific accuracy + information gain)
-    sci_acc = interp.get("scientific_accuracy")
-    cum_ig = interp.get("cumulative_information_gain")
-    pred_hist = interp.get("prediction_outcomes_history") or {}
-    if sci_acc is not None or cum_ig is not None:
+    # Phase E — prediction track record.
+    #
+    # Step 09b C4: rendered by the ONE version-aware authority the
+    # interpreter's own synthesis prompt uses. The pre-09b block here read
+    # `scientific_accuracy` (v2-only since 09a) but computed its N from
+    # `prediction_outcomes_history` (the FROZEN legacy pool) — v2 fractions
+    # over a v1 denominator, the consequence Q-09a-3 declared and deferred to
+    # 09b. The renderer labels each population with its own semantics id and
+    # never pools them; the section is omitted entirely when no comparable
+    # prediction exists yet.
+    track_record = render_prediction_track_record(
+        legacy_history=interp.get("prediction_outcomes_history"),
+        outcomes_by_semantics=interp.get("prediction_outcomes_by_semantics"),
+        legacy_gain=interp.get("cumulative_information_gain"),
+        gain_by_semantics=interp.get("cumulative_information_gain_by_semantics"),
+        scientific_accuracy=interp.get("scientific_accuracy"),
+    )
+    if track_record:
         lines.append("### Prediction Track Record")
-        total = sum(pred_hist.values()) if pred_hist else 0
-        if cum_ig is not None:
-            lines.append(f"  Cumulative information gain : {cum_ig:.3f}")
-        if sci_acc is not None:
-            confirmed_pct = sci_acc.get("confirmed", 0.0) * 100
-            partial_pct = sci_acc.get("partial", 0.0) * 100
-            refuted_pct = sci_acc.get("refuted", 0.0) * 100
-            lines.append(
-                f"  Scientific accuracy (N={total}) : "
-                f"confirmed={confirmed_pct:.0f}%  "
-                f"partial={partial_pct:.0f}%  "
-                f"refuted={refuted_pct:.0f}%"
-            )
+        lines += track_record
         lines.append("")
 
     # Phase C — vocabulary health
@@ -1677,10 +1679,19 @@ class MLModelProposalAgent:
                     "per_model_best",
                     "per_model_worst",
                     "per_model_score_tables",
-                    # Phase E — prediction track record (surfaced to all stages)
+                    # Phase E — prediction track record (surfaced to all stages).
+                    # Step 09b C4: the four versioned fields ride ALONGSIDE the
+                    # legacy trio so a stage reading this JSON can tell the
+                    # frozen legacy_v1 pool from the live v2 one. Additive:
+                    # a digest that carries none of them (pre-09a) is unchanged
+                    # here, because the `is not None` filter below drops them.
                     "scientific_accuracy",
                     "cumulative_information_gain",
                     "prediction_outcomes_history",
+                    "prediction_outcomes_by_semantics",
+                    "cumulative_information_gain_by_semantics",
+                    "prediction_pool_sizes",
+                    "prediction_evaluation_semantics",
                     # Phase C — vocabulary health metric
                     "vocab_diversity_ratio",
                 )

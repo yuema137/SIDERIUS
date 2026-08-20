@@ -5,14 +5,14 @@ exactness, trajectory gate labels, legacy/disabled renderings, the
 no-empty-header rule, and no cross-model contamination.
 """
 
-from agent.schemas.interpretation import InterpretationInput
-from execute_tools.metric_order import MetricOrder
-from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
-from nodes.result_interpretation_agent.result_interpretation_agent import (
+from agent.prompt_templates.interpretation.rendering import (
     HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS,
     _build_per_model_prompt,
     _build_per_model_system_prompt,
 )
+from agent.schemas.interpretation import InterpretationInput
+from execute_tools.metric_order import MetricOrder
+from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from tests.helpers.metric_fixtures import shipped_spec
 from tests.unit.agent.result_interpretation_agent.test_round_health_summary import (
     _gate_result,

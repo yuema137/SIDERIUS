@@ -16,11 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agent.cache_consolidator import _LIST_MERGE_SYSTEM_PROMPT, consolidate
-from agent.schemas.cache_entry import CacheEntry, ConsolidatedFinding
-from agent.schemas.interpretation import InterpretationInput, VocabEntry
-from execute_tools.metric_order import MetricOrder
-from nodes.result_interpretation_agent import ResultInterpretationAgent
-from nodes.result_interpretation_agent.result_interpretation_agent import (
+from agent.prompt_templates.interpretation.rendering import (
     DEDUP_SYSTEM_PROMPT,
     HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS,
     _build_per_model_prompt,
@@ -28,6 +24,11 @@ from nodes.result_interpretation_agent.result_interpretation_agent import (
     _build_synthesis_prompt,
     _build_synthesis_system_prompt,
 )
+from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
+from agent.schemas.cache_entry import CacheEntry, ConsolidatedFinding
+from agent.schemas.interpretation import InterpretationInput, VocabEntry
+from execute_tools.metric_order import MetricOrder
+from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.helpers.golden import assert_golden
 from tests.helpers.llm_boundary_recorder import BoundaryRecorderBridge
 from tests.helpers.metric_fixtures import shipped_spec
@@ -65,6 +66,9 @@ class TestPB7PerModelFlagOn:
         inp = InterpretationInput(
             model_types=["wavenet"],
             task_description="Denoise SQUID data.",
+            # Step 09b C2 — production shape: TIDMAD's science reaches the
+            # system prompt through the task blocks, not the template.
+            task_blocks=load_interpretation_task_blocks(),
             enable_structured_health_feedback=True,
         )
         rendered = _build_per_model_system_prompt(inp)
@@ -107,7 +111,10 @@ class TestPB7Synthesis:
 
     def test_synthesis_system_prompt(self):
         inp = InterpretationInput(
-            model_types=["wavenet", "punet"], task_description="Denoise SQUID data."
+            model_types=["wavenet", "punet"],
+            task_description="Denoise SQUID data.",
+            # Step 09b C2 — production shape (see the flag-ON case above).
+            task_blocks=load_interpretation_task_blocks(),
         )
         assert_golden(
             _build_synthesis_system_prompt(inp),

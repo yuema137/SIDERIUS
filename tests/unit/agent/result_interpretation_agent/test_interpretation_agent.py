@@ -18,6 +18,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from agent.prompt_templates.interpretation.rendering import (
+    _build_per_model_prompt,
+    _build_synthesis_prompt,
+)
 from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
@@ -29,11 +33,7 @@ from agent.schemas.score_table import (
     ScoreComparisonTable,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from nodes.result_interpretation_agent import (
-    ResultInterpretationAgent,
-    _build_per_model_prompt,
-    _build_synthesis_prompt,
-)
+from nodes.result_interpretation_agent import ResultInterpretationAgent
 from tests.helpers.metric_fixtures import shipped_spec
 
 
@@ -565,9 +565,18 @@ class TestBuildPerModelPrompt:
         assert "55,000" in prompt
 
     def test_includes_training_psd_segments(self):
+        """The VOLUME renders; the baseline-comparison FACT does not.
+
+        Step 09b C2 (DW-8): "(baseline typically uses 4000)" was TIDMAD
+        science riding in a framework user-prompt line. The schema-derived
+        label and the run's actual segment count stay here; the baseline
+        reference now lives in the task's `evidence_reading` block, where the
+        C2 census owns the positive half (it must appear in the ASSEMBLED
+        TIDMAD system prompt).
+        """
         prompt = _build_per_model_prompt(ENRICHED_SUMMARY, "PUNet description")
-        assert "200" in prompt
-        assert "4000" in prompt  # baseline reference
+        assert "Training PSD segments: 200" in prompt
+        assert "4000" not in prompt
 
     def test_includes_trial_portion(self):
         prompt = _build_per_model_prompt(ENRICHED_SUMMARY, "PUNet description")

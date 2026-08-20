@@ -24,14 +24,14 @@ from __future__ import annotations
 
 import pytest
 
-from agent.schemas.interpretation import InterpretationInput
-from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from nodes.result_interpretation_agent.result_interpretation_agent import (
+from agent.prompt_templates.interpretation.rendering import (
     PER_MODEL_SYSTEM_PROMPT,
     SYNTHESIS_SYSTEM_PROMPT,
     _build_per_model_system_prompt,
     _build_synthesis_system_prompt,
 )
+from agent.schemas.interpretation import InterpretationInput
+from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 _SQUID_TD = (
     "full-spectrum 1-D time-series denoising of SQUID dark-matter detector data: "
@@ -75,16 +75,12 @@ class TestTemplatePlaceholders:
         assert "You are a senior ML research analyst." in PER_MODEL_SYSTEM_PROMPT
         assert "You are a senior ML research analyst." in SYNTHESIS_SYSTEM_PROMPT
 
-    def test_phase8_log_of_mean_section_preserved_in_per_model(self):
-        # Phase 8 — Log-of-Mean trap section must survive T4b.
-        assert "Log-of-Mean trap" in PER_MODEL_SYSTEM_PROMPT
-        assert "Linear_Weight" in PER_MODEL_SYSTEM_PROMPT
-        assert "Impact_Score" in PER_MODEL_SYSTEM_PROMPT
-
-    def test_phase8_log_of_mean_section_preserved_in_synthesis(self):
-        assert "Log-of-Mean trap" in SYNTHESIS_SYSTEM_PROMPT
-        assert "Linear_Weight" in SYNTHESIS_SYSTEM_PROMPT
-        assert "Impact_Score" in SYNTHESIS_SYSTEM_PROMPT
+    # Step 09b C2 — the former "Log-of-Mean section preserved" cells are
+    # SUPERSEDED, not weakened: that science now lives in TIDMAD's task
+    # blocks, and its ownership is pinned by the C2 census
+    # (tests/unit/agent/result_interpretation_agent/test_step09b_c2_task_blocks.py):
+    # the framework templates must NOT contain it, and the TIDMAD-ASSEMBLED
+    # prompts MUST.
 
 
 # ---------------------------------------------------------------------------
@@ -114,13 +110,10 @@ class TestPerModelSystemPromptHelper:
         assert "SQUID" in out
         assert "[B, T] integer signal" in out
 
-    def test_phase8_content_present_after_substitution(self):
-        """Even after substitution, Phase 8 Log-of-Mean trap section is
-        unchanged."""
-        out = _build_per_model_system_prompt(_make_input(task_description=_SQUID_TD))
-        assert "Log-of-Mean trap" in out
-        assert "Linear_Weight" in out
-        assert "Impact_Score" in out
+    # Step 09b C2 — the former phase8-content-after-substitution cell is
+    # SUPERSEDED by the C2 census (framework-negative + assembled-positive in
+    # test_step09b_c2_task_blocks.py); the substitution mechanics themselves
+    # stay owned by the cells above/below.
 
 
 class TestSynthesisSystemPromptHelper:
@@ -138,11 +131,7 @@ class TestSynthesisSystemPromptHelper:
         assert "SQUID" not in out
         assert "TIDMAD" not in out
 
-    def test_phase8_content_present_after_substitution(self):
-        out = _build_synthesis_system_prompt(_make_input(task_description=_SQUID_TD))
-        assert "Log-of-Mean trap" in out
-        assert "Linear_Weight" in out
-        assert "Impact_Score" in out
+    # Step 09b C2 — superseded exactly as in TestPerModelSystemPromptHelper.
 
 
 # ---------------------------------------------------------------------------

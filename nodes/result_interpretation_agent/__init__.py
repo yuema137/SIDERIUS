@@ -16,14 +16,10 @@ via the package path automatically.
 """
 
 from nodes.result_interpretation_agent.result_interpretation_agent import (
-    PER_MODEL_SYSTEM_PROMPT,
-    SYNTHESIS_SYSTEM_PROMPT,
     InterpretationContractError,
     LLMBridge,
     ResultInterpretationAgent,
     _append_evolution_log,
-    _build_per_model_prompt,
-    _build_synthesis_prompt,
     _compute_evolution_stats,
     _resolve_evolution_log_root,
     reconcile_metric_spec,
@@ -31,18 +27,20 @@ from nodes.result_interpretation_agent.result_interpretation_agent import (
 )
 
 __all__ = [
-    "PER_MODEL_SYSTEM_PROMPT",
-    "SYNTHESIS_SYSTEM_PROMPT",
     # Step 09a C2 — PUBLIC: the protocol, the workflow and the calibration
     # scripts import these from the package. The sys.modules rebind below makes
     # them reachable at runtime either way, but a type checker reads THIS list,
     # so omitting them is an unknown-import-symbol error at every caller.
+    #
+    # Step 09b C1 — the prompt constants/builders left this package: the
+    # interpreter's prompt surface lives in
+    # agent/prompt_templates/interpretation/rendering.py, and their only
+    # importers were tests (moved to the owning module). This list shrank;
+    # it must never re-grow a prompt symbol.
     "InterpretationContractError",
     "LLMBridge",
     "ResultInterpretationAgent",
     "_append_evolution_log",
-    "_build_per_model_prompt",
-    "_build_synthesis_prompt",
     "_compute_evolution_stats",
     "_resolve_evolution_log_root",
     "reconcile_metric_spec",

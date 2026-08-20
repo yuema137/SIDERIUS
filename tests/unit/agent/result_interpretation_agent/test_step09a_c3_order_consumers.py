@@ -38,6 +38,10 @@ from typing import ClassVar
 
 import pytest
 
+from agent.prompt_templates.interpretation.rendering import (
+    _build_per_model_prompt,
+    _render_health_summary_section,
+)
 from agent.schemas.hyperparam_tuning import ExperimentRecord, HyperparamTuningOutput
 from agent.schemas.interpretation import ModelRunSummary
 from execute_tools.metric_order import MetricOrder
@@ -400,21 +404,21 @@ class TestTheHealthSummaryBestRoundInverts:
 
     def test_the_rendered_diagnostics_come_from_opposite_rounds(self):
         summary = self._summary_with_rounds()
-        high = "\n".join(_node._render_health_summary_section(summary, order=HIGHER))
-        low = "\n".join(_node._render_health_summary_section(summary, order=LOWER))
+        high = "\n".join(_render_health_summary_section(summary, order=HIGHER))
+        low = "\n".join(_render_health_summary_section(summary, order=LOWER))
         assert "pearson=0.11" in high, "under `higher` the best round is -2.0 (round 1)"
         assert "pearson=0.99" in low, "under `lower` the best round is -3.0 (round 2)"
 
     def test_the_flag_on_prompt_refuses_without_an_order(self):
         with pytest.raises(ValueError, match="requires the run's MetricOrder"):
-            _node._build_per_model_prompt(
+            _build_per_model_prompt(
                 self._summary_with_rounds(),
                 "desc",
                 structured_health_feedback=True,
             )
 
     def test_the_flag_off_prompt_needs_no_order(self):
-        rendered = _node._build_per_model_prompt(
+        rendered = _build_per_model_prompt(
             self._summary_with_rounds(), "desc", structured_health_feedback=False
         )
         assert "HealthGate summary" not in rendered
@@ -529,12 +533,17 @@ SCORE_TOKEN = re.compile(r"denoising_score|best_score|worst_score|sota|_score\b"
 #: The interpreter surface C3 owns. `_cap_knowledge_cache` lives in the
 #: workflow file (semantic owner 09a, physical location unchanged — Q-09-3),
 #: so it is censused as a FUNCTION rather than by file.
+#: Step 09b C1 extended the list with the rendering module the SAME commit the
+#: prompt surface moved there: `_render_health_summary_section`'s best-round
+#: selection is an order consumer (09a row 13), and moving a censused file out
+#: of the scanned surface must never silently shrink coverage.
 INTERPRETER_FILES = [
     "nodes/result_interpretation_agent/result_interpretation_agent.py",
     "nodes/result_interpretation_agent/evidence.py",
     "nodes/result_interpretation_agent/ordering.py",
     "nodes/result_interpretation_agent/prediction.py",
     "nodes/interpretation_helpers.py",
+    "agent/prompt_templates/interpretation/rendering.py",
 ]
 
 #: Comparisons on the interpreter surface that are NOT metric-direction

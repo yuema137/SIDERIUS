@@ -23,19 +23,23 @@ from pydantic import ValidationError
 
 from agent.cache_consolidator import consolidate
 from agent.llm_bridge import LLMBridge
-from agent.schemas.cache_entry import CacheEntry
-from agent.schemas.health_feedback import (
-    CollapseFingerprint,
-    merge_fingerprint_history,
+from agent.prompt_templates.interpretation.rendering import (
+    DEDUP_SYSTEM_PROMPT,
+    _build_dedup_prompt,
+    _build_per_model_prompt,
+    _build_per_model_system_prompt,
+    _build_synthesis_prompt,
+    _build_synthesis_system_prompt,
+    _flatten_entry_for_prompt,
 )
+from agent.schemas.cache_entry import CacheEntry
+from agent.schemas.health_feedback import merge_fingerprint_history
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
     MetricIdentity,
-    ModelRunSummary,
 )
-from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.metric_order import MetricOrder
 from ml_models.model_descriptions import get_model_description
@@ -73,10 +77,6 @@ if TYPE_CHECKING:
     from agent.schemas.proposal import VocabEntry
 
 __all__ = [
-    "DEDUP_SYSTEM_PROMPT",
-    "HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS",
-    "PER_MODEL_SYSTEM_PROMPT",
-    "SYNTHESIS_SYSTEM_PROMPT",
     "InterpretationContractError",
     "ResultInterpretationAgent",
     "main",
@@ -109,759 +109,6 @@ _COMPATIBILITY_REEXPORTS = (
     evaluate_prediction,
     precompute_evidence,
 )
-
-# ---------------------------------------------------------------------------
-# Phase 1 — Per-model summarization
-# ---------------------------------------------------------------------------
-
-PER_MODEL_SYSTEM_PROMPT = """\
-You are a senior ML research analyst.
-
-Your task: analyse the tuning run summary for ONE model architecture and produce a
-structured analysis covering performance, per-file behaviour, data sensitivity,
-training dynamics, efficiency, and strategy assessment. The research context is:
-
-{TASK_DESCRIPTION}
-
-You will receive:
-- The model's architectural description (markdown + math)
-- Best and worst denoising scores (trial best and formal score if available)
-- Best configuration
-- Score trajectory across rounds (with trial portions and model sizes)
-- Per-round conclusions from the tuning agent's reflections
-- A per-file score table: one row per validation file with raw_baseline,
-  ground_truth, model, gain_vs_raw, headroom_vs_gt, Linear_Weight, and Impact_Score
-  columns, followed by a secondary block re-ranking the sampled rows by
-  Impact_Score descending
-- Data volume: how many PSD segments were used for training vs baseline
-
-### Reading the per-file score table — the Log-of-Mean trap
-
-The aggregate denoising scalar is the log of a *sum* of per-segment linear
-energies, not a mean of per-file log scores. Two columns describe each file's
-contribution to the next-iter improvement budget:
-
-- **`Linear_Weight`** — the file's current share of the scalar's linear
-  denominator. Tells you *where the scalar lives now*. Sums to 1 across
-  sampled files.
-- **`Impact_Score`** — the log-scalar gain you would obtain by lifting this
-  file's `model` to its `ground_truth`. Tells you *where the next-iter lever
-  is*. A high `Impact_Score` means a file with both meaningful weight and
-  remaining headroom; a near-zero `Impact_Score` means the file is either
-  already at its ceiling or its weight is too small for any improvement to
-  register.
-
-When you analyse bottlenecks for this model:
-
-1. Rank the files by `Impact_Score` descending — that is the per-iter
-   opportunity ranking. A multi-log-unit `headroom_vs_gt` does not by itself
-   indicate opportunity; only `Impact_Score` does.
-2. Read `Linear_Weight` for context. A high-weight file at its ceiling has
-   zero `Impact_Score` and is not actionable.
-3. Saturation is a relative reading. If the entire `Impact_Score` column is
-   small in magnitude relative to `model_scalar` and to the gains your
-   chain has been making per iter, this model has reached the dataset
-   ceiling — say so.
-4. No file is permanently irrelevant. A near-zero `Impact_Score` today may
-   rise next iter once higher-`Impact_Score` files are recovered. Do not
-   memorise file-index labels across iterations — re-read the column each
-   iter.
-
-Produce a JSON object with exactly these fields:
-
-{
-  "key_findings": [
-    "Most important finding — concrete, references actual scores and configs",
-    ...
-  ],
-  "bottlenecks": [
-    "Root cause preventing further improvement for this specific model",
-    ...
-  ],
-  "best_config_analysis": "Why the best config worked — what made it better than others",
-  "score_trend": "How scores evolved across rounds — improving, plateauing, or erratic",
-  "per_file_analysis": "Read the per-file table by Impact_Score descending. Cite specific files BY file_index together with their Impact_Score and Linear_Weight values for this iter. When a clear Impact_Score leader exists, you MUST name the leader's file_index explicitly as the primary remaining lever — do NOT declare this model saturated while a clear lever remains, even if model_scalar is close to its ceiling. Only call a file 'already saturated' when its Impact_Score is uniformly small with the rest of the column. Do not assert a file is permanently weak from a single iter's reading.",
-  "data_sensitivity": "How sensitive the model is to data volume. Did scores improve when trial_portion increased? How large is the trial-vs-formal gap?",
-  "efficiency_assessment": "Model parameter count vs performance. Is there a simpler config with similar score? Cost-performance tradeoff.",
-  "strategy_assessment": "Did the agent explore effectively? Did it increase data when needed? Did it follow screening→refinement→solidification phases?"
-}
-
-Rules:
-- key_findings: ranked by importance, evidence-based, reference actual values
-- bottlenecks: root causes (e.g. 'architecture capacity ceiling', 'all sampled files saturated against their ground_truth ceiling'), not symptoms
-- best_config_analysis: be specific about which hyperparameters mattered most
-- score_trend: identify whether the model has saturated or still has room to improve
-- per_file_analysis: rank by Impact_Score; cite Linear_Weight as context, not as a ranking metric on its own; never use fixed cutoffs
-- data_sensitivity: reference training_psd_segments, trial_portion changes across rounds
-- efficiency_assessment: reference model_params and training times if available
-- strategy_assessment: comment on whether the agent's exploration strategy was effective
-- Output only the JSON object — no preamble, no commentary, no markdown
-"""
-
-
-def _build_per_model_system_prompt(inp: "InterpretationInput") -> str:
-    """Substitute the ``{TASK_DESCRIPTION}`` placeholder in
-    ``PER_MODEL_SYSTEM_PROMPT`` from ``inp.task_description``.
-
-    Production callers always populate ``inp.task_description`` via the
-    workflow (T4b — see docs/design/enable_global_task_config.md § Commit T4);
-    test fixtures may leave it at the default ``""``, in which case the
-    placeholder collapses to ``""`` and the prompt's "The research context
-    is:" preamble has no payload (acceptable for tests, never reached in
-    production).
-    """
-    rendered = PER_MODEL_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
-    # V19 PR 3 §3.6 item 3 (flag-gated): instruction block for handling the
-    # structured HealthGate evidence. OFF ⇒ byte-identical to pre-PR3
-    # (golden-parity tested).
-    if inp.enable_structured_health_feedback:
-        rendered += HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS
-    return rendered
-
-
-HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS = """
-
-### Structured HealthGate evidence (additional rules)
-
-The user prompt may contain a "HealthGate summary" section and per-round
-GATE labels. These are DETERMINISTIC facts from the health-gate system,
-not opinions. Rules:
-
-- Preserve every collapse fingerprint VERBATIM in your findings — the
-  exact signature string with its numbers (e.g.
-  "output_diversity_blocking:n_unique_int8_values=1"). Never paraphrase
-  the numbers away.
-- A high raw score on a round with invalid gate evidence is an INVALID
-  result. Report it as a failure mode, never as an achievement.
-- Rounds marked "unknown" or with legacy/no gate evidence carry NO
-  health verdict. Do not describe them as healthy or collapsed.
-- Attribute each fingerprint to exactly the model and rounds it came
-  from. Never transfer evidence between models."""
-
-
-def _render_health_summary_section(summary: ModelRunSummary, *, order: MetricOrder) -> list[str]:
-    """Deterministic ``### HealthGate summary`` body (V19 PR 3 §3.6 item 2).
-
-    Reads ONLY the ``round_health`` data — never LLM prose. Returns [] when
-    every round is legacy/unknown with nothing to report, so the caller can
-    skip the header entirely.
-
-    ``order`` (Step 09a C3) picks the BEST-SCORING round whose recording
-    diagnostics are rendered. That selection is a direction question: under a
-    lower-is-better metric the old ``s > best_score`` literal would surface the
-    WORST round's diagnostics while calling them the best round's.
-    """
-    counts = {"valid": 0, "invalid": 0, "unknown": 0}
-    fingerprint_rounds: dict[str, list[int]] = {}
-    fingerprint_by_sig: dict[str, CollapseFingerprint] = {}
-    for i, health in enumerate(summary.round_health):
-        counts[str(health.health_validity)] += 1
-        if health.fingerprint is not None:
-            sig = health.fingerprint.signature
-            fingerprint_rounds.setdefault(sig, []).append(i + 1)
-            fingerprint_by_sig.setdefault(sig, health.fingerprint)
-
-    lines = [
-        f"Round validity: {counts['valid']} valid, {counts['invalid']} invalid, "
-        f"{counts['unknown']} unknown (of {len(summary.round_health)})"
-    ]
-    if fingerprint_rounds:
-        lines.append(
-            "Distinct collapse fingerprints (deterministic, from persisted gate evidence):"
-        )
-        for sig in sorted(fingerprint_rounds):
-            rounds = fingerprint_rounds[sig]
-            fp = fingerprint_by_sig[sig]
-            lines.append(
-                f"  - {sig}  (x{len(rounds)}, round{'s' if len(rounds) > 1 else ''} "
-                f"{', '.join(str(r) for r in rounds)}) — {fp.human_readable}"
-            )
-
-    # Recording-only diagnostics for the best-scoring round, if any round
-    # carries them (e.g. pearson_dispersion — the misleading-high-score
-    # discriminator, design §2.4).
-    best_idx = None
-    best_score = None
-    for i, s in enumerate(summary.round_scores):
-        if s is not None and (best_score is None or order.is_better(s, best_score)):
-            best_idx, best_score = i, s
-    if best_idx is not None and best_idx < len(summary.round_health):
-        recording = {
-            k: v
-            for outcome in summary.round_health[best_idx].gate_outcomes
-            if outcome.gate_name.endswith("_recording")
-            for k, v in outcome.key_metrics.items()
-        }
-        if recording:
-            rendered = ", ".join(f"{k}={v}" for k, v in sorted(recording.items()))
-            lines.append(f"Best-round recording diagnostics: {rendered}")
-
-    if counts["invalid"] == 0 and counts["valid"] == 0 and not fingerprint_rounds:
-        # All-unknown/legacy with no fingerprints: nothing informative.
-        return []
-    return lines
-
-
-def _build_per_model_prompt(
-    summary: ModelRunSummary,
-    description: str,
-    expert_advice_str: str = "",
-    human_advice: str | None = None,
-    *,
-    structured_health_feedback: bool = False,
-    order: MetricOrder | None = None,
-) -> str:
-    """Build the user prompt for a single model's summarization.
-
-    ``structured_health_feedback`` (V19 PR 3 §3.6) gates the structured
-    HealthGate additions — the trajectory gate labels and the
-    ``### HealthGate summary`` section. OFF (default): output is
-    byte-identical to the pre-PR3 prompt, proven by golden-file equality
-    in ``test_health_prompt_parity.py`` — every PR 3 addition below must
-    stay behind this flag.
-
-    ``order`` (Step 09a C3) is needed ONLY by that flag-ON section, which
-    picks a best-scoring round. It therefore keeps a ``None`` default so every
-    flag-OFF caller and every prompt golden is untouched — and raises when the
-    flag is ON without it, rather than rendering a round chosen by an assumed
-    direction.
-    """
-    if structured_health_feedback and order is None:
-        raise ValueError(
-            "structured_health_feedback=True renders the best-scoring round's "
-            "diagnostics, which requires the run's MetricOrder. Pass order=; the "
-            "direction is never assumed."
-        )
-    lines = [
-        f"## Model: {summary.model_type}",
-        f"Run: {summary.run_name} | Status: {summary.status} | Rounds: {summary.completed_rounds}",
-        f"Raw best score       : {summary.best_denoising_score} "
-        f"(health={summary.best_raw_health_validity})",
-        f"Best valid score     : {summary.best_valid_denoising_score}",
-        f"Worst denoising score: {summary.worst_denoising_score}",
-    ]
-
-    # Formal score (if available and distinct from best)
-    if summary.formal_score is not None:
-        lines.append(f"Formal round score   : {summary.formal_score}")
-
-    # Model efficiency
-    if summary.best_model_params is not None:
-        lines.append(f"Best model params    : {summary.best_model_params:,}")
-
-    # Data volume context
-    if summary.training_psd_segments is not None:
-        lines.append(
-            f"Training PSD segments: {summary.training_psd_segments} (baseline typically uses 4000)"
-        )
-    if summary.eval_psd_segments is not None:
-        lines.append(f"Eval PSD segments    : {summary.eval_psd_segments}")
-    if summary.trial_portion is not None:
-        lines.append(f"Trial portion (best) : {summary.trial_portion}")
-
-    lines += [
-        "",
-        "### Architecture Description",
-        description,
-        "",
-        "### Best Config",
-        json.dumps(summary.best_config, indent=2) if summary.best_config else "none",
-    ]
-
-    # Per-file performance — rendered as the full ScoreComparisonTable
-    # markdown (raw_baseline / ground_truth / model columns + subset-scoped
-    # aggregates + Recovery line). Single source of truth lives on the
-    # table.rendered_markdown field, produced by render_comparison_table.
-    if summary.best_score_table is not None:
-        lines += [
-            "",
-            "### Per-file performance (best experiment)",
-            summary.best_score_table.rendered_markdown,
-        ]
-
-    if summary.formal_score_table is not None:
-        lines += [
-            "",
-            "### Per-file performance (formal round — definitive)",
-            summary.formal_score_table.rendered_markdown,
-        ]
-
-    # Score trajectory with per-round trial portions and model params
-    lines += ["", "### Score Trajectory (chronological)"]
-
-    n_rounds = len(summary.round_scores)
-    for i in range(n_rounds):
-        score = summary.round_scores[i] if i < len(summary.round_scores) else None
-        conclusion = summary.round_conclusions[i] if i < len(summary.round_conclusions) else ""
-        trial_p = (
-            summary.round_trial_portions[i]
-            if summary.round_trial_portions and i < len(summary.round_trial_portions)
-            else None
-        )
-        params = (
-            summary.round_model_params[i]
-            if summary.round_model_params and i < len(summary.round_model_params)
-            else None
-        )
-
-        score_str = f"{score:.4f}" if score is not None else "skipped"
-        extras = []
-        if trial_p is not None:
-            extras.append(f"portion={trial_p}")
-        if params is not None:
-            extras.append(f"params={params:,}")
-        extra_str = f" [{', '.join(extras)}]" if extras else ""
-
-        # V19 PR 3 §3.6 item 1 (flag-gated): label gate-invalidated rounds
-        # with the resolved action and the deterministic collapse identity,
-        # instead of the ambiguous bare "skipped".
-        gate_str = ""
-        if structured_health_feedback and i < len(summary.round_health):
-            health = summary.round_health[i]
-            if health.gate_action is not None and health.gate_action != "continue":
-                cause = (
-                    health.fingerprint.signature
-                    if health.fingerprint is not None
-                    else (health.failure_reason or "no persisted gate detail")
-                )
-                if score is None:
-                    score_str = "invalidated"
-                gate_str = f" [GATE {health.gate_action} — {cause}]"
-
-        lines.append(f"  Round {i + 1}: score={score_str}{extra_str}{gate_str} — {conclusion}")
-
-    # V19 PR 3 §3.6 item 2 (flag-gated): per-model HealthGate summary —
-    # validity counts, distinct fingerprints with occurrence counts and
-    # round indices, and recording-only diagnostics for the best round.
-    # Rendered ONLY when there is something to say (no empty headers).
-    # `order is not None` is guaranteed by the guard at the top of this
-    # function whenever the flag is on; restating it here is what lets a type
-    # checker see the narrowing, and it can never change behaviour.
-    if structured_health_feedback and order is not None and summary.round_health:
-        health_lines = _render_health_summary_section(summary, order=order)
-        if health_lines:
-            lines += ["", "### HealthGate summary", *health_lines]
-
-    if expert_advice_str:
-        lines += [
-            "",
-            "---",
-            "## Expert Guidance",
-            expert_advice_str,
-        ]
-
-    if human_advice:
-        lines += [
-            "",
-            "---",
-            "## Human Guidance (highest priority — overrides expert advice)",
-            human_advice,
-        ]
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Phase 2 — Cross-model synthesis
-# ---------------------------------------------------------------------------
-
-SYNTHESIS_SYSTEM_PROMPT = """\
-You are a senior ML research analyst.
-
-Your task: read structured summaries of multiple model architectures and produce a
-cross-model interpretation that identifies the overall state of the research and
-motivates the next step. The research context is:
-
-{TASK_DESCRIPTION}
-
-You will receive:
-- Per-model summaries (key findings, bottlenecks, config analysis, score trends,
-  per-file analysis, data sensitivity, efficiency, strategy assessment)
-- Per-model best and worst scores
-- Per-model score tables — per-file `raw_baseline` / `ground_truth` / `model`
-  in log-space, alongside `Linear_Weight` (each file's share of the linear
-  denominator behind the aggregate scalar) and `Impact_Score` (the log-scalar
-  gain available if that file's `model` were lifted to its `ground_truth`)
-- Per-model parameter counts and training data volumes
-- Overall best score and the config that produced it
-- Established discoveries from previous iterations (if any) — empirical findings
-  already confirmed by past experiments. Build on these, confirm or contradict them.
-
-### Reading the score table — the Log-of-Mean trap
-
-The aggregate denoising scalar is the log of a *sum* of per-segment linear
-energies, not a mean of per-file log scores. Two columns describe each file's
-contribution to the next-iter improvement budget:
-
-- **`Linear_Weight`** — the file's current share of the scalar's linear
-  denominator. Tells you *where the scalar lives now*. Sums to 1 across
-  sampled files.
-- **`Impact_Score`** — the log-scalar gain you would obtain by lifting this
-  file's `model` to its `ground_truth`. Tells you *where the next-iter lever
-  is*. A high `Impact_Score` means a file with both meaningful weight and
-  remaining headroom; a near-zero `Impact_Score` means the file is either
-  already at its ceiling or its weight is too small for any improvement to
-  register.
-
-When you analyse bottlenecks across the candidate models:
-
-1. **Rank by `Impact_Score` descending** to identify each model's largest
-   remaining levers, then look across models for files that share a high
-   Impact_Score — those are the cross-model opportunities. A multi-log-unit
-   `headroom_vs_gt` does not by itself indicate opportunity; only
-   `Impact_Score` does.
-2. **Read `Linear_Weight` for context.** It is *not* a ranking metric on its
-   own — a high-weight file at its ceiling has zero `Impact_Score` and is
-   not actionable.
-3. **Saturation is a relative reading.** If the entire `Impact_Score` column
-   is small in magnitude relative to the current `model_scalar` and to the
-   per-iter gains the chain has been making, the chain has reached the
-   dataset ceiling on that model — declare it explicitly. There is no fixed
-   cutoff; you compare the distribution against the scale of progress.
-4. **No file is permanently irrelevant.** Today's near-zero `Impact_Score`
-   may rise next iter once higher-`Impact_Score` files are fully recovered.
-   Re-read the column each iter; do not memorise file-index labels across
-   iterations.
-
-Produce a JSON object with exactly these fields:
-
-{
-  "key_findings": [
-    "Cross-model finding #1 — most important, compares models, references scores",
-    ...
-  ],
-  "bottlenecks": [
-    "Cross-model root cause #1 — what is fundamentally limiting ALL current models",
-    ...
-  ],
-  "per_file_comparison": "Cite Impact_Score, Linear_Weight, and gain_vs_raw together when discussing per-file bottlenecks. Rank candidates for the next iter's improvement by Impact_Score descending across models. Do not assert a file is universally weak from headroom alone — a large headroom on a low-weight file implies a near-zero Impact_Score and is not actionable.",
-  "efficiency_comparison": "Compare model sizes (parameter counts) against scores. Identify the best score-per-parameter architecture.",
-  "take_home_message": "One sentence: the single most critical insight that motivates the next step. Read the Impact_Score column FIRST — never decide saturation from model_scalar alone. (a) If one or more files show an Impact_Score visibly larger than the rest (a clear leader, even when model_scalar is close to its ceiling), your take_home_message MUST explicitly identify the file_index with the largest Impact_Score as the primary objective for the next iteration; do NOT declare saturation while a clear performance lever remains. (b) Only when the entire Impact_Score column is uniformly small relative to model_scalar AND significantly smaller than the gains identified in previous iterations of this chain, declare ceiling reached rather than manufacture an architectural deficiency."
-}
-
-Rules:
-- key_findings: ranked by importance, MUST compare across models, reference actual scores
-- bottlenecks: focus on fundamental limitations shared across architectures, not per-model issues
-- per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels
-- efficiency_comparison: reference actual parameter counts and scores
-- take_home_message: exactly one sentence, grounded in the Impact_Score distribution. When a clear Impact_Score leader exists, you MUST cite that file's file_index explicitly (e.g. "file 17"); a high model_scalar does not override a remaining lever.
-- Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
-- Output only the JSON object — no preamble, no commentary, no markdown
-"""
-
-
-# Narrative fields that, post-Commit-6.3 consolidation, are stored as
-# ConsolidatedNarrative dicts `{"latest": str, "history": [...]}` instead of
-# bare strings. The synthesis prompt builder still expects bare strings.
-_NARRATIVE_FIELDS_FOR_PROMPT = (
-    "best_config_analysis",
-    "score_trend",
-    "per_file_analysis",
-    "data_sensitivity",
-    "efficiency_assessment",
-    "strategy_assessment",
-)
-# List fields that, post-Commit-6.3, are stored as list[ConsolidatedFinding]
-# dicts instead of list[str].
-_LIST_FIELDS_FOR_PROMPT = ("key_findings", "bottlenecks")
-
-
-def _flatten_entry_for_prompt(entry: dict[str, Any]) -> dict[str, Any]:
-    """Flatten a (possibly modern-shape) cache entry into the legacy display
-    shape the synthesis prompt builder expects.
-
-    Why: post-Commit-6.3 active cache entries hold ConsolidatedFinding dicts
-    and ConsolidatedNarrative dicts. The synthesis builder reads narratives
-    as bare strings and findings as list-of-strings. This helper bridges the
-    two shapes without touching the builder — cache-miss (legacy flat) entries
-    pass through unchanged.
-    """
-    flat: dict[str, Any] = {}
-    for k, v in entry.items():
-        if k == "_stats":
-            continue
-        if k in _LIST_FIELDS_FOR_PROMPT and isinstance(v, list):
-            flat[k] = [
-                item["statement"] if isinstance(item, dict) and "statement" in item else item
-                for item in v
-            ]
-        elif k in _NARRATIVE_FIELDS_FOR_PROMPT and isinstance(v, dict):
-            flat[k] = v.get("latest", "") or ""
-        else:
-            flat[k] = v
-    return flat
-
-
-def _build_synthesis_system_prompt(inp: "InterpretationInput") -> str:
-    """Substitute the ``{TASK_DESCRIPTION}`` placeholder in
-    ``SYNTHESIS_SYSTEM_PROMPT`` from ``inp.task_description``.
-
-    Mirrors :func:`_build_per_model_system_prompt` for the cross-model
-    synthesis call site. See docs/design/enable_global_task_config.md
-    § Commit T4 for the substitution contract.
-    """
-    return SYNTHESIS_SYSTEM_PROMPT.replace("{TASK_DESCRIPTION}", inp.task_description)
-
-
-def _build_synthesis_prompt(
-    per_model_summaries: dict[str, dict],
-    per_model_best: dict[str, float | None],
-    per_model_worst: dict[str, float | None],
-    overall_best_score: float | None,
-    overall_worst_score: float | None,
-    overall_best_config: dict | None,
-    per_model_best_valid: dict[str, float | None] | None = None,
-    per_model_raw_best_health_validity: dict[str, str] | None = None,
-    overall_best_valid_score: float | None = None,
-    per_model_score_tables: dict[str, ScoreComparisonTable] | None = None,
-    per_model_params: dict[str, int] | None = None,
-    per_model_training_segments: dict[str, int] | None = None,
-    expert_advice_str: str = "",
-    human_advice: str | None = None,
-    runtime_vocab: list | None = None,
-    per_model_formal: dict[str, float | None] | None = None,
-    vocab_diversity_ratio: float | None = None,
-    cumulative_information_gain: float | None = None,
-    compressed_model_types: set[str] | None = None,
-    workspace: str | None = None,
-) -> str:
-    """Build the user prompt for cross-model synthesis.
-
-    ``compressed_model_types`` (Commit 6.1 — Sliding Window) marks the
-    model_types whose ``per_model_summaries`` entry has been replaced
-    by a deterministic one-line takeaway (output of
-    ``compress_model_summary``). For those entries, this function emits
-    a short 3-line block (header + best/n_rounds + takeaway) instead of
-    the full multi-section LLM-text expansion, and prefixes the block
-    with a single header line that points the LLM to the on-disk
-    iteration record for full detail. Active models render unchanged.
-    """
-    per_model_best_valid = per_model_best_valid or {}
-    per_model_raw_best_health_validity = per_model_raw_best_health_validity or {}
-    compressed_model_types = compressed_model_types or set()
-
-    lines = [
-        "## Overall Performance",
-        f"Raw best across all models   : {overall_best_score}",
-        f"Best valid across all models : {overall_best_valid_score}",
-        f"Worst score across all models: {overall_worst_score}",
-        f"Config that produced overall best:\n{json.dumps(overall_best_config, indent=2) if overall_best_config else 'none'}",
-        "",
-    ]
-
-    # Render active models first (full block), then compressed models
-    # (short block) under a single header. Stable iteration order is
-    # preserved within each group via the dict's insertion order.
-    active_items = [
-        (mt, s) for mt, s in per_model_summaries.items() if mt not in compressed_model_types
-    ]
-    compressed_items = [
-        (mt, s) for mt, s in per_model_summaries.items() if mt in compressed_model_types
-    ]
-
-    for model_type, summary in active_items:
-        lines += [
-            "---",
-            f"## Model: {model_type}",
-            f"Raw best   : {per_model_best.get(model_type)} "
-            f"(health={per_model_raw_best_health_validity.get(model_type, 'unknown')})",
-            f"Best valid : {per_model_best_valid.get(model_type)}",
-            f"Worst score: {per_model_worst.get(model_type)}",
-        ]
-        if per_model_formal:
-            formal = per_model_formal.get(model_type)
-            if formal is not None and formal != per_model_best.get(model_type):
-                lines.append(
-                    f"Formal score: {formal}  (best_score above may be from a trial round)"
-                )
-        if per_model_params and model_type in per_model_params:
-            lines.append(f"Parameters : {per_model_params[model_type]:,}")
-        if per_model_training_segments and model_type in per_model_training_segments:
-            lines.append(f"Training PSD segments: {per_model_training_segments[model_type]}")
-
-        lines += ["", "### Key Findings"]
-        for f in summary.get("key_findings", []):
-            lines.append(f"  - {f}")
-        lines += ["", "### Bottlenecks"]
-        for b in summary.get("bottlenecks", []):
-            lines.append(f"  - {b}")
-        lines += [
-            "",
-            "### Best Config Analysis",
-            summary.get("best_config_analysis", "N/A"),
-            "",
-            "### Score Trend",
-            summary.get("score_trend", "N/A"),
-        ]
-        # New per-model analysis fields
-        for field in [
-            "per_file_analysis",
-            "data_sensitivity",
-            "efficiency_assessment",
-            "strategy_assessment",
-        ]:
-            val = summary.get(field)
-            if val:
-                lines += ["", f"### {field.replace('_', ' ').title()}", val]
-
-        # Per-file performance — the full ScoreComparisonTable markdown,
-        # which already includes the Impact_Score-ranked secondary block.
-        # No threshold-based attention cue: opportunity is read from the
-        # Impact_Score column directly.
-        if per_model_score_tables and model_type in per_model_score_tables:
-            table = per_model_score_tables[model_type]
-            lines += [
-                "",
-                "### Per-file performance (best experiment)",
-                table.rendered_markdown,
-            ]
-
-        lines.append("")
-
-    # Compressed (stable) models: single header + short blocks.
-    if compressed_items:
-        ws_hint = (
-            f"see {workspace}/iter_*/interpretation.json for full detail"
-            if workspace
-            else "see prior interpretation.json files for full detail"
-        )
-        lines += [
-            "---",
-            "## Stable Architectures (Compressed)",
-            f"[{len(compressed_items)} older architectures compressed for "
-            f"context budget — {ws_hint}]",
-            "",
-        ]
-        for model_type, summary in compressed_items:
-            # Read the field the producer actually emits.
-            #
-            # This was:
-            #     (A or B) if summary.get("key_findings") else "(no cached takeaway)"
-            # and `compress_model_summary` returns exactly
-            # {model_type, best_score, n_rounds, one_line_takeaway} -- never
-            # `key_findings`. The guard was therefore always falsy and EVERY
-            # compressed model rendered the placeholder, discarding a
-            # takeaway the producer had already computed and truncated to
-            # `max_takeaway_chars`. Both sides were tested and both were
-            # green; nothing tested the join.
-            #
-            # No legacy fallback: `compressed_items` is fed only by
-            # `compress_model_summary` (one call site, result.py:1301), and
-            # 40 persisted interpretation artifacts contain zero
-            # compressed-shaped entries carrying `key_findings`.
-            takeaway = summary.get("one_line_takeaway") or "(no cached takeaway)"
-            best = summary.get("best_score", per_model_best.get(model_type))
-            n_rounds = summary.get("n_rounds", 0)
-            lines += [
-                f"- **{model_type}** (best={best}, n_rounds={n_rounds}): {takeaway}",
-            ]
-        lines.append("")
-
-    # Established discoveries from previous iterations
-    if runtime_vocab:
-        discoveries = [
-            v
-            for v in runtime_vocab
-            if (v.get("kind") if isinstance(v, dict) else getattr(v, "kind", None)) == "discovery"
-        ]
-        if discoveries:
-            lines += [
-                "---",
-                "## Established Discoveries (from previous iterations)",
-                "These are empirically confirmed findings from past experiments.",
-                "Confirm, contradict, or build on them — do not simply repeat them verbatim.",
-            ]
-            for v in discoveries:
-                name = v.get("name") if isinstance(v, dict) else getattr(v, "name", "")
-                desc = (
-                    v.get("description") if isinstance(v, dict) else getattr(v, "description", "")
-                )
-                lines.append(f"  [{name}]: {desc}")
-            lines.append("")
-
-    if expert_advice_str:
-        lines += [
-            "---",
-            "## Expert Guidance",
-            expert_advice_str,
-            "",
-        ]
-
-    if human_advice:
-        lines += [
-            "---",
-            "## Human Guidance (highest priority — overrides expert advice)",
-            human_advice,
-            "",
-        ]
-
-    # Research health metrics (centrifugal forces)
-    if vocab_diversity_ratio is not None or cumulative_information_gain is not None:
-        lines += ["---", "## Research Health Metrics"]
-        if vocab_diversity_ratio is not None:
-            stagnation_note = " [LOW — explore new concepts]" if vocab_diversity_ratio < 0.1 else ""
-            lines.append(
-                f"Vocabulary diversity ratio: {vocab_diversity_ratio:.3f}"
-                f"  (fraction of feature/capability entries still in candidate tier){stagnation_note}"
-            )
-        if cumulative_information_gain is not None:
-            lines.append(
-                f"Cumulative information gain: {cumulative_information_gain:.4f}"
-                f"  (total boldness × confirmed across all iterations)"
-            )
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-# ---------------------------------------------------------------------------
-# Phase C — Semantic deduplication (C.6)
-# ---------------------------------------------------------------------------
-
-DEDUP_SYSTEM_PROMPT = """\
-You are a scientific vocabulary curator for an ML research system.
-
-Your task: determine whether a newly promoted vocabulary term is a near-duplicate
-or synonym of an existing canonical term of the same kind.
-
-Two terms ARE duplicates if they describe the same architectural concept using
-different wording — e.g. "gated_recurrence" and "gated_rnn" both describe
-hidden-state gating in recurrent networks.
-
-Two terms are NOT duplicates if they describe related but technically distinct
-concepts — e.g. "dilated_convolution" and "causal_convolution" are related but
-have different technical properties and should remain separate entries.
-
-Judge only on technical meaning, not superficial name similarity.
-
-Respond with a JSON object and nothing else:
-{
-  "is_duplicate": true or false,
-  "duplicate_of": "name_of_existing_term or null",
-  "rationale": "one sentence"
-}
-"""
-
-
-def _build_dedup_prompt(entry: "VocabEntry", existing_canonicals: list) -> str:
-    """Build the user prompt for one dedup judgment."""
-    lines = [
-        "## Candidate term (newly promoted)",
-        f"Name       : {entry.name}",
-        f"Kind       : {entry.kind}",
-        f"Description: {entry.description}",
-        "",
-        f"## Existing canonical terms (kind: {entry.kind})",
-    ]
-    for canon in existing_canonicals:
-        name = canon.name if hasattr(canon, "name") else canon.get("name", "")
-        desc = canon.description if hasattr(canon, "description") else canon.get("description", "")
-        lines.append(f"  - {name}: {desc}")
-    lines += [
-        "",
-        f'Is "{entry.name}" a near-duplicate or synonym of any of the existing terms above?',
-    ]
-    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -1439,6 +686,27 @@ class ResultInterpretationAgent:
                     vocab_diversity_ratio=prior_vocab_diversity_ratio,
                     cumulative_information_gain=prior_cumulative_info_gain,
                     compressed_model_types=compressed_set,
+                    # Step 09b C3 — the identity this iteration was ORDERED
+                    # under, already bound above (09a C2). Rendering only.
+                    metric_identity=run_metric_identity,
+                    # Step 09b C4 — the INCOMING prediction memory, rendered
+                    # version-labelled. Same values the pre-09b prompt read
+                    # (`prior_cumulative_info_gain`), now with their pools and
+                    # their semantics ids so v1 and v2 cannot read as one.
+                    prediction_outcomes_history=dict(inp.prediction_outcomes_history),
+                    prediction_outcomes_by_semantics={
+                        version: dict(counts)
+                        for version, counts in inp.prediction_outcomes_by_semantics.items()
+                    },
+                    cumulative_information_gain_by_semantics=dict(
+                        inp.cumulative_information_gain_by_semantics
+                    ),
+                    # The PRIOR accuracy, obtained from the 09a accumulator
+                    # itself with no new outcome (`evaluation=None`) rather
+                    # than from a second fraction computation living here.
+                    scientific_accuracy=accumulate_prediction_outcomes(
+                        inp.prediction_outcomes_by_semantics, None
+                    )[1],
                     # Cast is a pure type-system shim: at every caller of
                     # this synthesis branch, `storage.backend == "local"` and
                     # `storage.local` is populated. Avoids re-declaring the
@@ -1964,12 +1232,19 @@ def main():
         order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
     )
 
+    # Step 09b C2 — the ad-hoc CLI is a Regime-A entry point like the
+    # workflow: it resolves the task guidance through the ONE bounded adapter.
+    from agent.prompt_templates.interpretation.task_blocks import (
+        load_interpretation_task_blocks,
+    )
+
     agent_input = InterpretationInput(
         summaries=[summary],
         # Step 09a C2 — the spec comes FROM the loaded output; the CLI derives
         # nothing. A legacy/pre-09a output carries none, and the input contract
         # then refuses with a named error instead of ordering on a guess.
         metric_spec=run_metric_spec,
+        task_blocks=load_interpretation_task_blocks(),
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=args.workspace, run_name=args.run_name),

@@ -10,14 +10,25 @@ You will receive:
 - Per-model summaries (key findings, bottlenecks, config analysis, score trends,
   per-file analysis, data sensitivity, efficiency, strategy assessment)
 - Per-model best and worst scores
-- Per-model score tables — per-file `raw_baseline` / `ground_truth` / `model`
-  in log-space, alongside `Linear_Weight` (each file's share of the linear
-  denominator behind the aggregate scalar) and `Impact_Score` (the log-scalar
-  gain available if that file's `model` were lifted to its `ground_truth`)
 - Per-model parameter counts and training data volumes
 - Overall best score and the config that produced it
 - Established discoveries from previous iterations (if any) — empirical findings
   already confirmed by past experiments. Build on these, confirm or contradict them.
+
+### Task evidence guidance
+
+Task-specific evidence you will receive:
+
+- A per-file score table: one row per validation file with raw_baseline,
+  ground_truth, model, gain_vs_raw, headroom_vs_gt, Linear_Weight, and Impact_Score
+  columns, followed by a secondary block re-ranking the sampled rows by
+  Impact_Score descending
+- Per-model score tables — per-file `raw_baseline` / `ground_truth` / `model`
+  in log-space, alongside `Linear_Weight` (each file's share of the linear
+  denominator behind the aggregate scalar) and `Impact_Score` (the log-scalar
+  gain available if that file's `model` were lifted to its `ground_truth`)
+- Data volume: how many PSD segments were used for training vs baseline
+  (baseline typically uses 4000)
 
 ### Reading the score table — the Log-of-Mean trap
 
@@ -34,6 +45,8 @@ contribution to the next-iter improvement budget:
   remaining headroom; a near-zero `Impact_Score` means the file is either
   already at its ceiling or its weight is too small for any improvement to
   register.
+
+### Task synthesis guidance
 
 When you analyse bottlenecks across the candidate models:
 
@@ -55,6 +68,28 @@ When you analyse bottlenecks across the candidate models:
    Re-read the column each iter; do not memorise file-index labels across
    iterations.
 
+When filling `per_file_comparison`: Cite Impact_Score, Linear_Weight, and
+gain_vs_raw together when discussing per-file bottlenecks. Rank candidates
+for the next iter's improvement by Impact_Score descending across models.
+Do not assert a file is universally weak from headroom alone — a large
+headroom on a low-weight file implies a near-zero Impact_Score and is not
+actionable.
+
+When writing `take_home_message`: Read the Impact_Score column FIRST — never
+decide saturation from model_scalar alone. (a) If one or more files show an
+Impact_Score visibly larger than the rest (a clear leader, even when
+model_scalar is close to its ceiling), your take_home_message MUST explicitly
+identify the file_index with the largest Impact_Score as the primary
+objective for the next iteration; do NOT declare saturation while a clear
+performance lever remains. (b) Only when the entire Impact_Score column is
+uniformly small relative to model_scalar AND significantly smaller than the
+gains identified in previous iterations of this chain, declare ceiling
+reached rather than manufacture an architectural deficiency.
+
+Additional synthesis rules:
+- per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels
+- take_home_message: exactly one sentence, grounded in the Impact_Score distribution. When a clear Impact_Score leader exists, you MUST cite that file's file_index explicitly (e.g. "file 17"); a high model_scalar does not override a remaining lever.
+
 Produce a JSON object with exactly these fields:
 
 {
@@ -66,16 +101,16 @@ Produce a JSON object with exactly these fields:
     "Cross-model root cause #1 — what is fundamentally limiting ALL current models",
     ...
   ],
-  "per_file_comparison": "Cite Impact_Score, Linear_Weight, and gain_vs_raw together when discussing per-file bottlenecks. Rank candidates for the next iter's improvement by Impact_Score descending across models. Do not assert a file is universally weak from headroom alone — a large headroom on a low-weight file implies a near-zero Impact_Score and is not actionable.",
+  "per_file_comparison": "Per-sample comparison across models. When per-sample evidence is present, follow the task guidance; when it is not, state explicitly that no per-sample evidence is available — never invent per-sample claims.",
   "efficiency_comparison": "Compare model sizes (parameter counts) against scores. Identify the best score-per-parameter architecture.",
-  "take_home_message": "One sentence: the single most critical insight that motivates the next step. Read the Impact_Score column FIRST — never decide saturation from model_scalar alone. (a) If one or more files show an Impact_Score visibly larger than the rest (a clear leader, even when model_scalar is close to its ceiling), your take_home_message MUST explicitly identify the file_index with the largest Impact_Score as the primary objective for the next iteration; do NOT declare saturation while a clear performance lever remains. (b) Only when the entire Impact_Score column is uniformly small relative to model_scalar AND significantly smaller than the gains identified in previous iterations of this chain, declare ceiling reached rather than manufacture an architectural deficiency."
+  "take_home_message": "One sentence: the single most critical insight that motivates the next step."
 }
 
 Rules:
 - key_findings: ranked by importance, MUST compare across models, reference actual scores
 - bottlenecks: focus on fundamental limitations shared across architectures, not per-model issues
-- per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels
+- per_file_comparison: follow the task guidance when per-sample evidence is present; otherwise state its absence
 - efficiency_comparison: reference actual parameter counts and scores
-- take_home_message: exactly one sentence, grounded in the Impact_Score distribution. When a clear Impact_Score leader exists, you MUST cite that file's file_index explicitly (e.g. "file 17"); a high model_scalar does not override a remaining lever.
+- take_home_message: exactly one sentence
 - Do not repeat per-model findings verbatim — synthesise and draw cross-model conclusions
 - Output only the JSON object — no preamble, no commentary, no markdown

@@ -7,6 +7,13 @@ Formal round score   : 1.25
 Best model params    : 120,000
 Trial portion (best) : 0.05
 
+### Record outcomes
+  records: 2
+  status: failed_mode_collapse=1, success=1
+  training diagnosis: diagnosis_missing=2
+  gate actions: invalidate_round=1, none=1
+  health provenance: gated=2
+
 ### Architecture Description
 A test architecture.
 

@@ -19,9 +19,6 @@ Overall worst score : -0.4
 ### Take-home message
 Break the collapse mechanisms.
 
-### Prediction Track Record
-  Cumulative information gain : 0.000
-
 ## Existing Architecture Descriptions
 ### model_a
 Arch A.

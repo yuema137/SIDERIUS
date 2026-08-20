@@ -827,37 +827,57 @@ any label, `run()` behaviour, evolution-log helpers (STAY in main),
 Depends on nothing.
 
 **Implementation plan.**
-- [ ] Re-read `:75-111` (`__all__`/compat), `:113-864` (the full move set)
+- [x] Re-read `:75-111` (`__all__`/compat), `:113-864` (the full move set)
       and every §2.6 importing test at the implementation head; record the
       fresh import census (file:line per importer) in §22 BEFORE moving.
-- [ ] Create the package; move the thirteen symbols VERBATIM (docstrings,
+      — §22.1 census table: ZERO production imports outside the node
+      `__init__` shim; 8 test files.
+- [x] Create the package; move the thirteen symbols VERBATIM (docstrings,
       comments, order preserved); rendering module imports
       (`MetricOrder`, schemas, `ScoreComparisonTable`) added as needed.
-- [ ] Main module: import the builders it calls; re-export decision
+      — script-extracted lines 113-864; `diff` vs `git show HEAD` block:
+      BYTE-IDENTICAL (§22.1).
+- [x] Main module: import the builders it calls; re-export decision
       executed per the census (production importers → narrow re-export;
-      test-only importers → tests move).
-- [ ] Update the §2.6 test imports; no assertion changes.
-- [ ] Node `.md` "Module layout" section updated.
+      test-only importers → tests move). — main imports SEVEN names
+      (6 planned + `_flatten_entry_for_prompt`, called directly by
+      `run()`'s Phase-2 flattening loop — F-09b-2); the four constants
+      left `__all__` and the package `__init__` (test-only importers).
+- [x] Update the §2.6 test imports; no assertion changes. — 8 files;
+      the c3 census additionally gained the rendering module in
+      `INTERPRETER_FILES` (coverage continuity — F-09b-1).
+- [x] Node `.md` "Module layout" section updated. — rendering-module row
+      + three constant-location parentheticals.
 
 **Validation plan.**
-- [ ] Unit: the 09a differential oracle EXACT (digest + call manifest,
+- [x] Unit: the 09a differential oracle EXACT (digest + call manifest,
       byte-identical); ALL 13 prompt goldens EXACT (`git status` clean on
       `goldens/`); the whole `tests/unit/agent/result_interpretation_agent/`
       directory; `tests/unit/agent/test_prompt_banned_vocabulary.py`;
       `tests/unit/nodes/test_node_public_boundary.py`;
       `tests/unit/workflows/test_model_exploration.py` (patch targets).
-- [ ] Negative: a planted byte edit in one moved constant reds the golden
+      — rc=0, **538 passed in 26.27s** (`/tmp/09b_c1.log`); goldens/ 0
+      modified files.
+- [x] Negative: a planted byte edit in one moved constant reds the golden
       suite (proves the goldens still bind the moved bytes) — recorded,
-      reverted.
-- [ ] Backward-compat: every production importer resolves (fresh census);
+      reverted. — one byte in `PER_MODEL_SYSTEM_PROMPT` ⇒ rc=1, 2 FAILED
+      (`/tmp/09b_c1_probe.log`); reverted; block re-diffed BYTE-IDENTICAL;
+      goldens green again (6 passed).
+- [x] Backward-compat: every production importer resolves (fresh census);
       `mock.patch("nodes.result_interpretation_agent.LLMBridge")` still
-      intercepts; `main --help` sha256 identical.
+      intercepts; `main --help` sha256 identical. — pr3 preflight/runner +
+      protocol + workflow import cleanly; LLMBridge patch covered by the
+      green interpreter suite; `--help` BYTE-IDENTICAL vs HEAD (stash
+      diff; sha16 57ac08fb…, 1,092 bytes).
 
 **Acceptance criteria.**
-- [ ] Zero golden bytes changed; oracle byte-identical; the main file no
+- [x] Zero golden bytes changed; oracle byte-identical; the main file no
       longer defines any prompt constant/builder; the rendering module
       defines each exactly once (single-definition census extended);
-      main-file line count recorded before/after.
+      main-file line count recorded before/after. — main 2,005 → 1,252
+      lines; `rendering.py` 778 (26 header + 752 moved); the
+      single-definition rule is the existing parametrized boundary test,
+      green in the sweep.
 
 **Failure and edge cases.** The `sys.modules` rebind means the rendering
 module must NOT import the node package (would recreate the 09a inward
@@ -866,8 +886,8 @@ patching a moved symbol on the node path — the fresh census says none
 exists beyond `LLMBridge`/`open`; if one appears, patch the owning module.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/test_prompt_banned_vocabulary.py tests/unit/nodes/test_node_public_boundary.py tests/unit/workflows/test_model_exploration.py -q > /tmp/09b_c1.log 2>&1; rc=$?` — record counts + wall time.
-- [ ] `ruff check` + `ruff format --check`; pyright via the nodeenv node if run locally, else CI-owned (recorded either way).
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/test_prompt_banned_vocabulary.py tests/unit/nodes/test_node_public_boundary.py tests/unit/workflows/test_model_exploration.py -q > /tmp/09b_c1.log 2>&1; rc=$?` — **rc=0, 538 passed in 26.27s**.
+- [x] `ruff check` + `ruff format --check`; pyright via the nodeenv node if run locally, else CI-owned (recorded either way). — ruff check clean (after F-09b-2's missing import, caught as F821); format clean (30 files); **pyright 0 errors locally** (nodeenv node, `nodes/result_interpretation_agent/` + `agent/prompt_templates/interpretation/`).
 
 **Commit boundary.** Structural only; reviewable as "did every byte stay
 put while ownership moved?"; no semantic change, no new field, no golden
@@ -914,36 +934,49 @@ field; Health verdict/action semantics; `configs/task_config.yaml`.
 Depends on C1.
 
 **Implementation plan.**
-- [ ] Re-read the two constants + builders at the head; produce the
+- [x] Re-read the two constants + builders at the head; produce the
       sentence-accounting table (§5.3) in §22 BEFORE editing: every
       B sentence → its declaration section; every A sentence → kept; every
-      reworded framework line → before/after bytes listed.
-- [ ] Schema value type + input field (validator: present ⇒ non-empty).
-- [ ] Declaration file (verbatim B content per the accounting table) +
+      reworded framework line → before/after bytes listed. — §22.2 table
+      written first (DW-1..DW-9 + CONN inventory).
+- [x] Schema value type + input field (validator: present ⇒ non-empty).
+      — `InterpretationTaskBlocks` beside `MetricIdentity`;
+      `InterpretationInput.task_blocks` appended after `metric_spec`.
+- [x] Declaration file (verbatim B content per the accounting table) +
       adapter + default constant (fail-closed load).
-- [ ] Framework templates + splice rendering (absent ⇒ no header, no
-      bytes); builders' signatures gain `blocks` keyword.
-- [ ] Replace the health-instruction example with the framework-generic
+      — `configs/task_interpretation/tidmad.yaml` (08b header doctrine);
+      `task_blocks.py` with `LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG`.
+- [x] Framework templates + splice rendering (absent ⇒ no header, no
+      bytes); builders' signatures gain `blocks` keyword. — `blocks` read
+      from `inp.task_blocks` inside the two system assemblers (signatures
+      unchanged — `run()` needs no threading); ONE
+      `{TASK_GUIDANCE_SECTIONS}` slot per template; `_render_task_sections`
+      with framework headers.
+- [x] Replace the health-instruction example with the framework-generic
       signature example (one line; declared golden delta; no other byte of
-      that block changes).
-- [ ] Workflow + CLI supply the adapter value; pr3/protocol callers
-      unchanged (`None`).
-- [ ] Regenerate goldens + oracle with the declared-delta table; UPGRADE
+      that block changes). — DW-9.
+- [x] Workflow + CLI supply the adapter value; pr3/protocol callers
+      unchanged (`None`). — `model_exploration.py` input construction +
+      node `main()`.
+- [x] Regenerate goldens + oracle with the declared-delta table; UPGRADE
       the banned-vocab suite (framework-negative + assembled-positive
       halves, planted offenders both ways; the impact-framing cells
-      retired as superseded).
+      retired as superseded). — §22.2 evidence below.
 
 **Validation plan.**
-- [ ] Unit: TIDMAD-assembled system prompts contain every migrated science
+- [x] Unit: TIDMAD-assembled system prompts contain every migrated science
       sentence exactly once (the accounting table, executable); blocks
       absent ⇒ zero task sections and zero headers (byte-pinned golden for
       the block-less per-model + synthesis system prompts); adapter:
       default path loads the declaration; missing file / malformed YAML /
       unknown key / empty section each refuse with a named error; the
       value round-trips `model_validate(model_dump())`.
-- [ ] Unit (04b regression): `{TASK_DESCRIPTION}` substitution unchanged
+      — `test_step09b_c2_task_blocks.py`, 83 cases (inside the 593).
+- [x] Unit (04b regression): `{TASK_DESCRIPTION}` substitution unchanged
       (`test_interpreter_prompt_task_config.py` green with moved imports).
-- [ ] Census (§16 items 1, 3, 3b, 4, 6): framework rendering module free
+      — green; its two phase8-CONTENT cells retired as SUPERSEDED by the C2
+      census (the substitution-mechanics cells stay).
+- [x] Census (§16 items 1, 3, 3b, 4, 6): framework rendering module free
       of the enumerated science tokens AND the removed check-id literals
       (planted offender RED); GENERIC surfaces free of task-name tokens
       with the ONE `task_blocks.py` constant exemption; the 3b AST
@@ -951,20 +984,30 @@ Depends on C1.
       task constant; an `if "tidmad" in path:` branch); the blocks field
       set == the four keys; exactly ONE adapter reads the declaration path
       (AST census over production modules).
-- [ ] Backward-compat: the oracle's declared delta = system-prompt shas
+      — all green; M-C2-1/3/4 RED (§22.2); F-09b-5 records the two census
+      narrowings.
+- [x] Backward-compat: the oracle's declared delta = system-prompt shas
       ONLY (digest byte-identical — blocks change no deterministic field);
       dispatcher labels/call counts unchanged; pr3 preflight green
       (block-less inputs legal).
-- [ ] Mutation (recorded): drop one migrated sentence from the declaration
+      — digest delta NONE; manifest delta = system shas (calls 0/1/4) + user
+      shas (calls 0/1, DW-8); labels/order/markers identical; pr3 preflight
+      run from the clean commit (§22.2).
+- [x] Mutation (recorded): drop one migrated sentence from the declaration
       ⇒ the accounting test RED; render a header for an absent section ⇒
       the omission golden RED.
+      — M-C2-2 (RED at import: the adapter refuses the mutated declaration)
+      and M-C2-5 (RED, 2 failed), plus M-C2-1/3/4; all reverted; F-09b-4
+      records the revert-hygiene rule.
 
 **Acceptance criteria.**
-- [ ] `grep -c` of each enumerated science token over
+- [x] `grep -c` of each enumerated science token over
       `agent/prompt_templates/interpretation/` == 0 while the assembled
       TIDMAD prompt census == the accounting table; goldens regenerated
       once with the full delta table in §22; the declaration is the ONLY
       new YAML and `task_config.yaml` is untouched.
+      — census-1 source half asserts it with the THREE declared schema-label
+      exemptions; `configs/task_config.yaml` untouched.
 
 **Failure and edge cases.** A caller passing blocks with all-None sections
 (legal — renders nothing); the adapter's default path missing on a
@@ -974,10 +1017,13 @@ recorded in the accounting table (byte discipline); `.replace`-era JSON
 braces — templates keep `.replace`/assembly, never `str.format`.
 
 **Verification commands and evidence.**
-- [ ] Narrow owner + slice set (ruling §0.4 amendment 4 — NOT the whole
+- [x] Narrow owner + slice set (ruling §0.4 amendment 4 — NOT the whole
       interpreter directory):
       `.venv/bin/python -m pytest <new C2 owner test> tests/unit/agent/result_interpretation_agent/test_step00_prompt_goldens.py tests/unit/agent/result_interpretation_agent/test_health_prompt_parity.py tests/unit/agent/result_interpretation_agent/test_health_prompt_rendering.py tests/unit/agent/result_interpretation_agent/test_interpreter_prompt_task_config.py tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py tests/unit/agent/test_prompt_banned_vocabulary.py tests/unit/agent/schemas tests/unit/workflows/test_model_exploration.py tests/unit/scripts/test_pr3_l2p_preflight.py -q > /tmp/09b_c2.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`.
+      — **rc=0, 593 passed in 22.63s** (`/tmp/09b_c2.log`).
+- [x] `ruff check` + `ruff format --check`.
+      — clean; **pyright 0 errors** locally over the four touched production
+      surfaces.
 
 **Commit boundary.** Ownership migration only; reviewable as "did the
 science move verbatim, is the framework clean, and is every byte delta
@@ -1007,40 +1053,57 @@ call counts, system-prompt bytes (C2's state), the flag-gated health
 sections. Depends on C2.
 
 **Implementation plan.**
-- [ ] Re-read the two user-prompt builders + `run()`'s threading sites at
+- [x] Re-read the two user-prompt builders + `run()`'s threading sites at
       the head; confirm `ModelRunSummary` carries every input (§2.9).
-- [ ] Implement the three renderers per the §6 contracts (typed inputs,
+      — done; `ModelRunSummary` carries all four inputs (09a C2/C6 fields).
+- [x] Implement the three renderers per the §6 contracts (typed inputs,
       named absences, direction words via `MetricOrder`/`direction_words`
       only, zero-count omission).
-- [ ] Thread into the builders at fixed positions (identity beside the
+      — `render_metric_identity`, `render_interpretation_diagnosis_lines`,
+      `render_secondary_metrics`, `render_failure_counts` in `rendering.py`;
+      direction words + the diagnosis line grammar REUSED from 07b.
+- [x] Thread into the builders at fixed positions (identity beside the
       score header lines; diagnosis after the volume lines; secondaries +
       failures after the table sections); regenerate goldens/oracle with
       the delta table.
+      — identity after the Run line; diagnosis/secondaries/record-outcomes
+      after the volume lines, before Architecture Description; synthesis gains
+      `metric_identity=` fed from `run()`'s bound identity.
 
 **Validation plan.**
-- [ ] Unit (renderers, parameterized over `shipped_spec` /
+- [x] Unit (renderers, parameterized over `shipped_spec` /
       `accuracy_like_spec` / `error_like_spec`): identity line words per
       direction; diagnosis lines incl. both named-absence forms;
       secondary lines for scored/refused/unavailable (hand-owned literals);
       failure block for a hand-counted mixed `RecordFailureCounts` incl.
       an unknown future status key; every zero/None omission rule.
-- [ ] Unit (builders): a summary with NO diagnosis/secondaries/counts
+      — `test_step09b_c3_evidence_renderers.py`, 27 cases, hand-owned literals.
+- [x] Unit (builders): a summary with NO diagnosis/secondaries/counts
       renders a prompt containing NONE of the new headers (upgrade-safety
       for legacy-shaped summaries); a fully-evidenced summary renders all
       sections at the pinned positions (golden).
-- [ ] Census re-runs: secondaries-never-ordered (09a) green over the new
+      — `TestBuilderPresenceGating`: bare summary renders none of the four
+      headers; fully-evidenced summary renders all at the pinned order.
+- [x] Census re-runs: secondaries-never-ordered (09a) green over the new
       code; direction census green (no literal in renderers).
-- [ ] Backward-compat: oracle delta = exactly the declared user-prompt
+      — 09a C6 census + the C2/C3 censuses green in the 213.
+- [x] Backward-compat: oracle delta = exactly the declared user-prompt
       shas + zero digest changes; PB-0/flag-ON goldens' regeneration diff
       shows ONLY the declared added sections.
-- [ ] Mutation (recorded): flip a secondary's direction word source to a
+      — digest delta **NONE**; manifest delta = `user_sha256` on calls 0/1
+      (per-model) and 4 (synthesis) ONLY; labels/markers/system shas unchanged.
+- [x] Mutation (recorded): flip a secondary's direction word source to a
       literal ⇒ census RED; render a number for an `unavailable` secondary
       ⇒ named-absence test RED.
+      — M-C3-1 (number for a named absence) RED; M-C3-2 (direction literal)
+      RED ×4; M-C3-3 (roles folded) RED; M-C3-4 (invented zero counts) RED ×2.
+      All python-inverse reverted; 30 green after.
 
 **Acceptance criteria.**
-- [ ] Each §6 family has exactly ONE renderer authority (AST census: the
+- [x] Each §6 family has exactly ONE renderer authority (AST census: the
       builders contain no inline diagnosis/secondary/failure formatting);
       every golden delta line attributed to a named renderer in §22.
+      — `TestOneAuthorityPerFamily` (AST: builders inline no family formatting).
 
 **Failure and edge cases.** Cached models (no fresh summary) render from
 `_stats`-carried counts only when present (09a rule: absent, never
@@ -1049,9 +1112,11 @@ render no identity line (named absence covered by the run-level line);
 scalar-only summaries hit zero per-file sections (existing presence gates).
 
 **Verification commands and evidence.**
-- [ ] Narrow owner + slice set (ruling §0.4 amendment 4):
+- [x] Narrow owner + slice set (ruling §0.4 amendment 4):
       `.venv/bin/python -m pytest <new C3 renderer tests> tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py tests/unit/agent/result_interpretation_agent/test_step00_prompt_goldens.py tests/unit/agent/result_interpretation_agent/test_health_prompt_parity.py tests/unit/agent/result_interpretation_agent/test_health_prompt_rendering.py tests/unit/agent/test_prompt_banned_vocabulary.py -q > /tmp/09b_c3.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`.
+      — **rc=0, 213 passed in 1.72s** (`/tmp/09b_c3.log`).
+- [x] `ruff check` + `ruff format --check`.
+      — clean; **pyright 0 errors**.
 
 **Commit boundary.** Additive rendering only; reviewable as "does each
 evidence family have one renderer, typed inputs, and a declared golden
@@ -1089,44 +1154,71 @@ if regeneration shows movement, STOP: an undeclared consumer exists).
 Depends on C3.
 
 **Implementation plan.**
-- [ ] Re-read the three reader sites + the proposer test/golden pins at
+- [x] Re-read the three reader sites + the proposer test/golden pins at
       the head (fresh line numbers).
-- [ ] Renderer per §9 (four shapes, hand-owned literals in its tests).
-- [ ] Interpreter synthesis threading; proposer legacy section delegation;
+      — done at the head (interpreter `rendering.py:886-891`; proposer
+      `:1146-1165` + `:1667-1688`); the proposer's pins re-read too.
+- [x] Renderer per §9 (four shapes, hand-owned literals in its tests).
+      — `render_prediction_track_record`; N counted over COMPARABLE_OUTCOMES
+      by construction (F-09b-9).
+- [x] Interpreter synthesis threading; proposer legacy section delegation;
       whitelist +4 keys.
-- [ ] The two helper-string dispositions with their named tests.
-- [ ] Regenerate the three golden surfaces + oracle with the delta table.
+      — synthesis gains four pool kwargs (prior accuracy obtained from the 09a
+      accumulator with `evaluation=None`, not a second fraction computation);
+      the proposer section delegates; whitelist +4 versioned keys.
+- [x] The two helper-string dispositions with their named tests.
+      — dead `"denoising_score"` display default removed; timing advice
+      reworded task-free (declared digest delta, F-09b-10).
+- [x] Regenerate the three golden surfaces + oracle with the delta table.
+      — proposer byte golden, interpreter synthesis goldens, oracle (twice:
+      the second capture carries the helper-reword delta).
 
 **Validation plan.**
-- [ ] Unit (renderer): the §9 four-shape table verbatim as parameterized
+- [x] Unit (renderer): the §9 four-shape table verbatim as parameterized
       cases (v2-only / legacy-only / mixed / empty) + the `unevaluated`
       guard (a pool-less evaluation changes no rendered N) — hand-owned
       expected strings.
-- [ ] Unit (proposer): upgraded N-pins — history `{3,3,0}` legacy +
+      — `test_step09b_c4_prediction_rendering.py`, 13 cases.
+- [x] Unit (proposer): upgraded N-pins — history `{3,3,0}` legacy +
       empty v2 ⇒ the legacy line with `3 outcome(s)` and NO percentages;
       v2 pool `{3,1,1}` ⇒ `N=5` FROM THE V2 POOL with the version label;
       both-present ⇒ both lines; section-absent gate preserved.
-- [ ] Unit (whitelist): the 4 keys surface when present and drop when
+      — `TestBuildReasoningPromptTrackRecord` rewritten to the four shapes
+      (8 cases): v2-only N from the v2 pool, legacy-only with NO percentages,
+      mixed labelling both, and `N=9`/`N=11` both asserted absent.
+- [x] Unit (whitelist): the 4 keys surface when present and drop when
       None (the `:1687` filter) — one reachability case through
       `_run_pipeline`'s summary builder.
-- [ ] Unit (helpers): a fresh evaluation record always carries `metric`
+      — covered by the proposer suite (598 passed) with the `is not None`
+      filter leaving pre-09a digests unchanged.
+- [x] Unit (helpers): a fresh evaluation record always carries `metric`
       (the dead-default removal is safe — pinned); the timing advice
       contains no `segmentation_size` token (census gains the token,
       planted offender RED).
-- [ ] Backward-compat: pb3 goldens byte-identical; the interpreter digest
+      — `TestFrameworkTaskLiteralsRemoved`, incl. an anti-vacuity check that
+      the timing discovery actually fires.
+- [x] Backward-compat: pb3 goldens byte-identical; the interpreter digest
       byte-identical on the oracle (rendering-only); proposer byte golden
       regenerated once with the declared diff.
-- [ ] Mutation (recorded): make the renderer sum both pools into one N ⇒
+      — pb3 goldens untouched (their fixtures carry no prediction keys);
+      proposer byte golden regenerated once with the declared diff.
+- [x] Mutation (recorded): make the renderer sum both pools into one N ⇒
       the mixed-shape test RED; label the legacy line with the v2 id ⇒
       RED.
+      — M-C4-1 (N from the legacy pool) RED ×5; M-C4-2 (pooled N) RED ×7;
+      M-C4-3 (legacy labelled v2) RED ×4; M-C4-4 (unfiltered N) RED ×2.
+      All reverted; 41 green after.
 
 **Acceptance criteria.**
-- [ ] Grep census: `prediction_outcomes_history` is read in the proposer
+- [x] Grep census: `prediction_outcomes_history` is read in the proposer
       ONLY inside the renderer-delegating section and the whitelist (no
       third reader appears); no rendered string pairs a v2 fraction with a
       legacy denominator (the four-shape tests are the proof); the version
       ids appear in renderers ONLY via the schema constants (F-09a-17
       census extended to the rendering module).
+      — `TestOneAuthorityTwoConsumers` pins the delegation and asserts
+      `sum(pred_hist.values())` is gone; version ids only via the schema
+      constants (executable-literal scan).
 
 **Failure and edge cases.** A digest from a pre-09a chain (legacy-only
 shape) renders the honest legacy line — no percentages invented; a
@@ -1136,11 +1228,13 @@ entirely (oldest digests via the proposer path) ⇒ the legacy-only shape
 (`.get` defaults, tested).
 
 **Verification commands and evidence.**
-- [ ] Narrow owner + slice set (ruling §0.4 amendment 4; the proposer
+- [x] Narrow owner + slice set (ruling §0.4 amendment 4; the proposer
       directory runs WHOLE because the proposer is this commit's changed
       authority — that is its owner sweep, not a broad repeat):
       `.venv/bin/python -m pytest <new C4 tests> tests/unit/agent/ml_model_proposal_agent tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py tests/unit/agent/result_interpretation_agent/test_prediction_evaluation_join.py tests/unit/agent/result_interpretation_agent/test_step00_prompt_goldens.py tests/unit/agent/test_prompt_banned_vocabulary.py -q > /tmp/09b_c4.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`.
+      — **rc=0, 701 passed in 5.91s** (`/tmp/09b_c4.log`).
+- [x] `ruff check` + `ruff format --check`.
+      — clean (80 files); **pyright 0 errors**.
 
 **Commit boundary.** One evidence family across its two consumer nodes;
 reviewable as "is every rendered prediction statistic version-labelled and
@@ -1169,40 +1263,63 @@ production code beyond what census fixes demand (a census finding here is
 a STOP if it implies a production defect). Depends on C4.
 
 **Implementation plan.**
-- [ ] Re-read the 09a C7 fixtures + pack governance guards; build the
+- [x] Re-read the 09a C7 fixtures + pack governance guards; build the
       three-task prompt cases on the REAL `_build_per_model_prompt` /
       `_build_synthesis_prompt` with blocks = TIDMAD declaration / None /
       None.
-- [ ] Hand-own the expected fragments: DAVIS "lower is better" identity
+      — pack `expected/` fixtures drive the REAL builders; TIDMAD blocks from
+      the adapter, Pets/DAVIS with `task_blocks=None`.
+- [x] Hand-own the expected fragments: DAVIS "lower is better" identity
       line; `psnr`-scored + `mae`-named-absence lines; NO
       Impact_Score/Log-of-Mean/PSD/per-file section for Pets/DAVIS; TIDMAD
       science present via blocks only.
-- [ ] The 11-A / 11-B rung tests per §8 (line-level diff against
+      — DAVIS lower-is-better identity, `psnr` scored + `mae` named absence,
+      no per-file section for either scalar-only task, TIDMAD science present
+      only where its blocks are supplied.
+- [x] The 11-A / 11-B rung tests per §8 (line-level diff against
       hand-owned delta sets).
-- [ ] Census re-runs + the consolidated census evidence table in §22;
+      — 11-A delta == exactly the two identity lines; 11-B delta == table
+      bytes only, with an anti-vacuity guard and a no-injected-assumption case.
+- [x] Census re-runs + the consolidated census evidence table in §22;
       docs.
+      — C2 (1/3/3b/4/6), C3 (one-authority, inertness), C4 (single version
+      authority), 09a (direction, secondaries-never-ordered, Step-06 C5
+      boundary), pack governance and the node public boundary: all green in
+      the sweep.
 
 **Validation plan.**
-- [ ] Unit: the two new suites; `tests/unit/examples` (pack pins
+- [x] Unit: the two new suites; `tests/unit/examples` (pack pins
       untouched); the full interpreter directory.
-- [ ] Anti-vacuity: the DAVIS expected fragment asserts the direction WORD
+      — `test_step09b_c5_three_task_rendering.py` **15 passed**;
+      `tests/unit/examples` green (pack pins untouched).
+- [x] Anti-vacuity: the DAVIS expected fragment asserts the direction WORD
       (a TIDMAD-computed twin would fail — the 09a
       hand-computed-smallest-value guard pattern).
-- [ ] Backward-compat: zero golden changes (C5 is test/docs only).
+      — plus `test_davis_best_is_the_smallest_score_and_the_prompt_says_so`
+      (best == min(scores) AND != max(scores)).
+- [x] Backward-compat: zero golden changes (C5 is test/docs only).
+      — confirmed: `git status` showed no golden under `goldens/` modified by
+      C5; the only non-test file touched is the node `.md`.
 
 **Acceptance criteria.**
-- [ ] Every §8 row has a named assertion; 11-A's diff set contains ONLY
+- [x] Every §8 row has a named assertion; 11-A's diff set contains ONLY
       identity/direction lines; 11-B's diff set contains ONLY table bytes;
       every §16 item green with its planted-offender evidence recorded;
       node `.md` quotes each documented behaviour against merged source.
+      — §22.5 table; the node `.md` gained the task-blocks and rendered-evidence
+      sections quoted against the merged source.
 
 **Failure and edge cases.** Pack fixtures are JSON under `expected/` only
 (governance); machine-independent (no absolute paths); the rung inputs
 share one builder so the one-axis claim is structural.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/examples -q > /tmp/09b_c5.log 2>&1; rc=$?`
-- [ ] `ruff check` + `ruff format --check`.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/examples -q > /tmp/09b_c5.log 2>&1; rc=$?`
+      — widened to the full closure set (interpreter + proposer + banned-vocab
+      + examples + nodes + schemas + workflows + pr3 + Step-06 C5):
+      **rc=0, 2,045 passed in 38.00s** (`/tmp/09b_c5.log`).
+- [x] `ruff check` + `ruff format --check`.
+      — clean.
 
 **Commit boundary.** Evidence + docs only; reviewable as "do three
 materially different tasks render correctly through one surface?".
@@ -1228,37 +1345,53 @@ exact-head CI (no local full suite, no manual dispatch — the standing
 validation-economy rules). Depends on C5.
 
 **Implementation plan.**
-- [ ] Re-read the §13 spec + the gate standard (`:9-29`, `:127-148`,
+- [x] Re-read the §13 spec + the gate standard (`:9-29`, `:127-148`,
       `:444-454`) immediately before launch (roadmap §17.0 item 4);
       confirm the DAVIS fixture names/values (§13.2-B dominance) in the
       spec confirmation.
-- [ ] Build the two Gate inputs (§13.2); run the PSEUDO dry-run; commit
+      — re-read; config `openai_tiered_pro.json` unchanged, artifact present
+      and read-only, evidence destination writable, projection still 5 calls.
+- [x] Build the two Gate inputs (§13.2); run the PSEUDO dry-run; commit
       the manifest (labels, counts) as the harness's pseudo expectation.
-- [ ] Rehearse the behavioural probes against the planted
+      — pseudo rc=0; the manifest is EMPIRICALLY confirmed against production
+      code paths: TIDMAD 2 (btcn call + wavenet24 stability skip), DAVIS 3.
+- [x] Rehearse the behavioural probes against the planted
       inverted/correct/fabricated synthetic outputs (§13.4
       probe-of-the-probe) — all REDs observed and recorded BEFORE launch.
-- [ ] Launch real mode ONCE per approved spec; persist prompts, responses,
+      — 12 rehearsal cells: correct output GREEN, inverted RED, silence RED,
+      invented file index RED, named absence GREEN, leak RED, decimal-safe
+      splitter, and the score-clause loophole check.
+- [x] Launch real mode ONCE per approved spec; persist prompts, responses,
       digests, manifest, config, cost.
-- [ ] Render the Gate-A digest through the C4 track-record renderer + the
+      — ONE launch, **5 real calls in 94.34s**, ~$0 cost band (<$1); prompts,
+      responses, both digests, manifests and config persisted.
+- [x] Render the Gate-A digest through the C4 track-record renderer + the
       pipeline summary builder (deterministic, zero calls) and persist the
       rendered section (the §13.3 proposer leg).
-- [ ] Decide PASS/FAIL/INCONCLUSIVE from artifacts (§13.4), never exit
+      — the Gate-A digest carries an EMPTY comparable pool (its prediction was
+      `unevaluated`), so §9's empty shape renders no section — the honest
+      outcome, recorded rather than forced.
+- [x] Decide PASS/FAIL/INCONCLUSIVE from artifacts (§13.4), never exit
       codes; record in §22 + the PR body.
+      — **PASS**, 13/13 checks, from `gate1_result.json`.
 
 **Validation plan.**
-- [ ] The Gate itself (§13.4 criteria), preceded by the mandatory
+- [x] The Gate itself (§13.4 criteria), preceded by the mandatory
       probe-of-the-probe rehearsal.
-- [ ] Post-Gate: ONLY narrow changed-surface checks (ruling §0.4
+      — PASS (§22.6 table).
+- [x] Post-Gate: ONLY narrow changed-surface checks (ruling §0.4
       amendment 4) — the harness's pseudo mode + `ruff check` /
       `ruff format --check` on the files the harness/docs commit touched;
       NO repeat of the C5 consolidated closure, NO broad local sweep, NO
       local full suite. Repository-wide regression is owned by the ONE
       exact-final-head PR CI.
+      — pseudo harness + ruff only; no broad sweep repeated.
 
 **Acceptance criteria.**
-- [ ] Gate 1 = PASS per §13.4 with persisted evidence at the named
+- [x] Gate 1 = PASS per §13.4 with persisted evidence at the named
       destination; the §22 ledger complete; the PR opened with the CI run
       id recorded at the exact final head.
+      — `/home/klz/Data/SIDEREIS_DATA/step09b_gate1_evidence_20260820/`.
 
 **Failure and edge cases.** Provider outage ⇒ INCONCLUSIVE (relaunch per
 spec); artifact path absent on the machine ⇒ the harness SKIPS with the
@@ -1267,8 +1400,11 @@ a label-sequence mismatch vs the dry-run manifest ⇒ FAIL (framework
 behaviour drifted, not an LLM-quality question).
 
 **Verification commands and evidence.**
-- [ ] Pseudo: `.venv/bin/python -m pytest tests/integration/nodes/test_step09b_interpretation_prompts.py -q > /tmp/09b_gate1_pseudo.log 2>&1; rc=$?` (manual; recorded).
-- [ ] Real: the same file with `--real-api-call` (operator-approved launch) `> /tmp/09b_gate1_real.log 2>&1; rc=$?` — verdict from artifacts.
+- [x] Pseudo: `.venv/bin/python -m pytest tests/integration/nodes/test_step09b_interpretation_prompts.py -q > /tmp/09b_gate1_pseudo.log 2>&1; rc=$?` (manual; recorded).
+      — rc=0, 12 passed, 1 skipped (`/tmp/09b_gate1_pseudo.log`).
+- [x] Real: the same file with `--real-api-call` (operator-approved launch) `> /tmp/09b_gate1_real.log 2>&1; rc=$?` — verdict from artifacts.
+      — 5 calls; verdict read from artifacts, NOT the exit code (the first
+      run's exit code was 1 on two PROBE defects — F-09b-13/14/15).
 
 **Commit boundary.** Gate harness + evidence + docs; no production change.
 
@@ -1765,26 +1901,415 @@ freeze; nothing below may be written before the corresponding work ran,
 and every entry carries test counts, wall time and log paths)*
 
 ### 22.0 Implementation-context provenance
-*(branch, base SHA, design-confirmation record — at implementation start)*
+
+Branch `step09-pr09b-interpretation-prompts-task-blocks`, created from the
+frozen master `2bd9caf22e4180dd406384227854f36c7651c6b5` (== local master ==
+`origin/master` after fetch; clean tree). Design confirmed at that SHA:
+REVISION 2 — FROZEN, 72 `[ ]` / 0 `[x]`, 0 open operator questions.
+`before_end_memory.md` initialized FRESH for this PR
+(`tools/claude_hooks/init_pr_handoff.py --force`; fingerprint
+`bd3e625c…ebf1`). The operator's 09b Implementation Working Rules supersede
+§11.0's design-time per-commit pause: commits, targeted tests, the frozen
+Gate-1 launch, push, PR and routine CI repair are AUTONOMOUS; every other
+§11.0 clause (bounded re-read first, `[x]` only with recorded evidence,
+verdicts from complete log files, undeclared prompt delta = STOP) stands.
 
 ### 22.1 C1 — structural move
-*(import census; before/after line counts; oracle/golden parity evidence)*
+
+**Commit.** `Step 09b C1: move the interpreter prompt surface into
+agent/prompt_templates/interpretation (byte-exact)`.
+
+**Fresh import census (at the implementation head, BEFORE moving).**
+Production imports of the 13 symbols: exactly ONE module — the node's own
+`__init__.py` informational shim (constants `:19-20`, builders `:25-26`,
+`__all__` `:34-35,:44-45`). Every OTHER production hit is a
+docstring/comment: `workflows/model_exploration.py:2180-2181`,
+`agent/llm_bridge.py:2178,:2183,:2198,:2216`,
+`agent/schemas/interpretation.py:566-567`, `agent/cache_consolidator.py:385`,
+`agent/schemas/cache_entry.py:15`. Test importers (8 files, all MOVED to the
+owning module): `test_prompt_banned_vocabulary.py`,
+`test_interpreter_prompt_task_config.py`, `test_step00_prompt_goldens.py`,
+`test_health_prompt_parity.py`, `test_health_prompt_rendering.py`,
+`test_interpretation_agent.py`, `test_compressed_summary_contract.py`,
+`test_step09a_c3_order_consumers.py` (which reached two symbols via the
+`_node` module attribute — now direct imports). `mock.patch` targets on the
+node path remain exactly `LLMBridge`/`open` (09a census re-confirmed by the
+green suites).
+
+**Re-export disposition (per the census).** No production importer exists
+for any prompt symbol ⇒ the four constants left the main module's `__all__`
+and the package `__init__` import/`__all__` (with a "must never re-grow a
+prompt symbol" note); the main module imports the SEVEN names its lifecycle
+calls: `DEDUP_SYSTEM_PROMPT`, `_build_dedup_prompt`, `_build_per_model_prompt`,
+`_build_per_model_system_prompt`, `_build_synthesis_prompt`,
+`_build_synthesis_system_prompt`, `_flatten_entry_for_prompt`.
+
+**Byte-exactness proof.** The moved block was script-extracted from
+1-indexed lines 113-864 with boundary assertions;
+`diff <(git show HEAD:...| sed -n '113,864p') <(tail -n +27 rendering.py)`
+returned EMPTY — the moved content is byte-identical (re-verified after the
+planted-probe revert). `ruff format` reformatted only the main file's seam
+blank-lines; `rendering.py` untouched by format (idempotent on
+already-formatted code).
+
+**LOC.** main 2,005 → 1,252; `rendering.py` 778 (26-line header + the 752
+moved lines); node `__init__.py` 62 → 58-ish (4 names dropped);
+`interpretation_helpers.py` untouched.
+
+| finding | disposition |
+|---|---|
+| **F-09b-1** — the 09a direction census (`test_step09a_c3_order_consumers.py::INTERPRETER_FILES`) scans the node package + helpers by FILE; moving `_render_health_summary_section` (09a row 13, an `order.is_better` consumer) out of the node would have silently shrunk censused coverage until C5 | BOUNDED deviation: the file list gained `agent/prompt_templates/interpretation/rendering.py` IN THE SAME COMMIT the surface moved, with a comment naming the rule (a censused file moving out of the scanned surface must never silently shrink coverage). §16 item 2's C5 re-run stands unchanged |
+| **F-09b-2** — the design's C1 main-import list (six names) missed `_flatten_entry_for_prompt`, which `run()` calls DIRECTLY in the Phase-2 flattening loop (`:634` post-move) | BOUNDED deviation caught by ruff F821 before any test ran; main imports seven names. The §2.2 inventory's "home after 09b" table was right; only the §11.1 enumeration was short |
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| C1 broad sweep (frozen command: interpreter dir + banned-vocab + node boundary + workflow) | **rc=0 — 538 passed in 26.27s** (`/tmp/09b_c1.log`) — includes the 09a differential oracle and all golden suites |
+| `git status` on `goldens/` | 0 modified files |
+| moved-block diff vs `git show HEAD` lines 113-864 | BYTE-IDENTICAL (twice: post-move and post-probe-revert) |
+| planted one-byte mutation in `PER_MODEL_SYSTEM_PROMPT` | rc=1 — **2 FAILED** (`/tmp/09b_c1_probe.log`); reverted; goldens green again (6 passed) |
+| `main --help` | BYTE-IDENTICAL vs HEAD (git-stash diff; 1,092 bytes) |
+| production importers (`scripts/pr3_l2_calibration/{preflight,runner}`, tune→interp protocol, workflow) | import cleanly |
+| `ruff check` / `ruff format --check` | clean (F-09b-2's F821 fixed first; 30 files format-clean) |
+| pyright (local, nodeenv node) | **0 errors, 0 warnings** on `nodes/result_interpretation_agent/` + `agent/prompt_templates/interpretation/` |
+
+**Deviations.** F-09b-1, F-09b-2 — both bounded, recorded above. None
+material; the oracle and every golden are byte-identical, so no behaviour
+moved.
 
 ### 22.2 C2 — task blocks + TIDMAD migration
-*(sentence-accounting table; declared golden deltas; census 1/3/4/6 evidence)*
+
+**Sentence-accounting table (written BEFORE editing prompt science —
+standing C2 rule).** Line references are the C1-verified rendering.py bytes
+(= the frozen-anchor main-file lines 113-864, byte-identical). Classes:
+A = framework, stays; B = TIDMAD science, moves VERBATIM into the named
+declaration section; DW-n = a declared framework rewording (old → new bytes
+listed); CONN = new connective prose inside the declaration (enumerated —
+nothing else is new prose).
+
+*PER_MODEL_SYSTEM_PROMPT:*
+
+| fragment (anchor bytes) | class | disposition |
+|---|---|---|
+| "You are a senior ML research analyst." | A | stays |
+| task statement "…covering performance, **per-file behaviour**, data sensitivity…" | **DW-1** | "per-file behaviour" → "per-sample behaviour where per-sample evidence exists" |
+| `{TASK_DESCRIPTION}` slot + "The research context is:" | A | stays |
+| "You will receive:" + items: architecture description / best config / score trajectory / per-round conclusions | A | stay |
+| "- Best and worst denoising scores (trial best and formal score if available)" | **DW-2** | → "- Best and worst golden-metric scores (trial best and formal score if available)" |
+| "- A per-file score table: one row per validation file with raw_baseline, ground_truth, model, gain_vs_raw, headroom_vs_gt, Linear_Weight, and Impact_Score columns, followed by a secondary block re-ranking the sampled rows by Impact_Score descending" | B | → `evidence_reading` (inventory bullet, verbatim) |
+| "- Data volume: how many PSD segments were used for training vs baseline" | B | → `evidence_reading` inventory bullet, verbatim, MERGED with the builder parenthetical "(baseline typically uses 4000)" |
+| "### Reading the per-file score table — the Log-of-Mean trap" (header) | B | collapsed with the synthesis copy's header into ONE shared heading "### Reading the score table — the Log-of-Mean trap" inside `evidence_reading` (the parent-sanctioned two-prompts-to-one-authority collapse; the dropped qualifier is exactly "per-file ") |
+| the Log-of-Mean intro paragraph + the `Linear_Weight` and `Impact_Score` definition bullets (byte-shared between both prompts) | B | → `evidence_reading`, verbatim, ONCE |
+| "When you analyse bottlenecks for this model:" + per-model rules 1-4 | B | → `per_model_guidance`, verbatim |
+| JSON schema skeleton + key_findings/bottlenecks/best_config_analysis/score_trend/data_sensitivity/efficiency_assessment/strategy_assessment instructions | A | stays (data_sensitivity's "trial_portion"/"trial-vs-formal gap" are framework tuning vocabulary) |
+| `per_file_analysis` schema instruction ("Read the per-file table by Impact_Score descending. Cite specific files BY file_index … single iter's reading.") | B + **DW-3** | text → `per_model_guidance` verbatim (CONN prefix "When filling `per_file_analysis`:"); framework instruction replaced by the task-free named-absence rule: "Per-sample behaviour analysis. When the summary includes per-sample evidence (a score table), analyse it following the task guidance; when it does not, state explicitly that no per-sample evidence is available — never invent per-sample claims." |
+| Rules: key_findings / best_config_analysis / score_trend / efficiency_assessment / strategy_assessment / output-only | A | stay |
+| Rules: bottlenecks example "'all sampled files saturated against their ground_truth ceiling'" | B + **DW-4** | fragment → `per_model_guidance` (CONN "bottlenecks may name per-file saturation (e.g. …)"); framework rule keeps only the generic example: "- bottlenecks: root causes (e.g. 'architecture capacity ceiling'), not symptoms" |
+| Rules: "- per_file_analysis: rank by Impact_Score; cite Linear_Weight as context, not as a ranking metric on its own; never use fixed cutoffs" | B + **DW-5a** | line → `per_model_guidance` verbatim (under CONN "Additional per-model rules:"); framework keeps the task-free "- per_file_analysis: follow the task guidance when per-sample evidence is present; otherwise state its absence" |
+| Rules: "- data_sensitivity: reference training_psd_segments, trial_portion changes across rounds" | B + **DW-5b** | line → `per_model_guidance` verbatim; framework keeps "- data_sensitivity: reference the training data volume and trial_portion changes across rounds" |
+
+*SYNTHESIS_SYSTEM_PROMPT:*
+
+| fragment | class | disposition |
+|---|---|---|
+| role/task statement/{TASK_DESCRIPTION} | A | stays |
+| receive items: per-model summaries / parameter counts + volumes / overall best / established discoveries | A | stay |
+| "- Per-model score tables — per-file `raw_baseline` / `ground_truth` / `model` in log-space, alongside `Linear_Weight` (…) and `Impact_Score` (…)" | B | → `evidence_reading` inventory bullet, verbatim (its column parentheticals restate the shared definitions; kept verbatim inside the bullet — zero science loss over de-duplication) |
+| "### Reading the score table — the Log-of-Mean trap" + shared intro + column definitions (2nd copy) | B | the SAME `evidence_reading` value (§5.1 collapse) |
+| "When you analyse bottlenecks across the candidate models:" + cross-model rules 1-4 | B | → `synthesis_guidance`, verbatim |
+| `per_file_comparison` schema instruction | B + **DW-6** | text → `synthesis_guidance` verbatim (CONN "When filling `per_file_comparison`:"); framework replacement: "Per-sample comparison across models. When per-sample evidence is present, follow the task guidance; when it is not, state explicitly that no per-sample evidence is available — never invent per-sample claims." |
+| `take_home_message` schema instruction: first sentence "One sentence: the single most critical insight that motivates the next step." | A | stays (verbatim, alone) |
+| `take_home_message` instruction remainder ("Read the Impact_Score column FIRST … manufacture an architectural deficiency.") | B | → `synthesis_guidance` verbatim (CONN "When writing `take_home_message`:") |
+| Rules: key_findings / bottlenecks / efficiency_comparison / no-verbatim-repeat / output-only | A | stay |
+| Rules: "- per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels" | B + **DW-7a** | line → `synthesis_guidance` verbatim (under CONN "Additional synthesis rules:"); framework keeps "- per_file_comparison: follow the task guidance when per-sample evidence is present; otherwise state its absence" |
+| Rules: "- take_home_message: exactly one sentence, grounded in the Impact_Score distribution. When a clear Impact_Score leader exists, you MUST cite that file's file_index explicitly (e.g. \"file 17\"); a high model_scalar does not override a remaining lever." | B + **DW-7b** | line → `synthesis_guidance` verbatim; framework keeps "- take_home_message: exactly one sentence" |
+
+*Builders + health instructions:*
+
+| fragment | class | disposition |
+|---|---|---|
+| user-prompt volume line "(baseline typically uses 4000)" | B + **DW-8** | parenthetical fact merged into the `evidence_reading` data-volume bullet; framework line becomes `f"Training PSD segments: {…}"` (the schema-derived label stays — the §5.4/F-09b-3 exemption) |
+| `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` example `"output_diversity_blocking:n_unique_int8_values=1"` | **DW-9** (ruling §0.4 amendment 1) | → `"sample_dispersion_floor_blocking:dispersion=0.0"` (existing 08c generic-check vocabulary); no other byte of the block changes |
+| `DEDUP_SYSTEM_PROMPT`, `_render_health_summary_section`, trajectory/gate labels, expert/human advice sections, compressed blocks, discoveries section, "Research Health Metrics" block | A | untouched in C2 (the gain line is C4's) |
+
+CONN inventory (the ONLY new prose in the declaration): "Task-specific
+evidence you will receive:", "When filling `per_file_analysis`:",
+"Additional per-model rules:", "bottlenecks may name per-file saturation
+(e.g. …)", "When filling `per_file_comparison`:", "When writing
+`take_home_message`:", "Additional synthesis rules:".
+
+Layout rule (declared): the long single-line JSON-instruction strings are
+re-wrapped at ~78 cols inside the YAML block scalars; content is
+whitespace-normalized-identical, enforced by the executable accounting
+census (every comparison in it normalizes whitespace).
+
+**Implementation evidence (appended after the work ran).**
+
+**Commit.** `Step 09b C2: InterpretationTaskBlocks + the TIDMAD declaration;
+framework interpretation templates go task-free`.
+
+**What landed.** `InterpretationTaskBlocks` (frozen, four keys,
+present⇒non-empty validator) + `InterpretationInput.task_blocks` (appended;
+REC-3 does not pin the input model — no golden regen);
+`configs/task_interpretation/tidmad.yaml` (the migrated science, §5.3/§22.2
+accounting); `agent/prompt_templates/interpretation/task_blocks.py` (the
+bounded adapter: ONE default-path constant, fail-closed on missing/
+malformed/unknown-key/empty-section); the two framework templates re-owned
+task-free with ONE `{TASK_GUIDANCE_SECTIONS}` slot each and the
+`_render_task_sections` splice (evidence_reading → both phases;
+per_model_guidance → Phase 1; synthesis + prediction guidance → Phase 2;
+absent ⇒ no header, no bytes); DW-1..DW-9 applied; workflow + node CLI
+supply the adapter value; the oracle fixture supplies it too
+(production-faithful).
+
+**Declared golden deltas (regenerated by explicit capture, same commit).**
+
+| golden | delta |
+|---|---|
+| `per_model_system_prompt.txt` / `_flag_on.txt` | task-free template + `### Task evidence guidance` + `### Task analysis guidance (per-model)` sections from the declaration; DW-1..DW-5; flag-ON still == flag-OFF + the health constant (asserted at capture); DW-9 in the flag-ON tail |
+| `pb7_synthesis_system.txt` | task-free template + evidence/synthesis sections; DW-6/DW-7 |
+| `step09a_differential_digest.json` | **byte-identical digest** — blocks change NO deterministic field (delta: NONE; provenance appended) |
+| `step09a_differential_llm_calls.json` | labels/order/markers UNCHANGED; `system_sha256` moved on calls 0/1 (per-model) + 4 (synthesis) — the splice; `user_sha256` moved on calls 0/1 — DW-8 (the fixture's summaries carry `training_psd_segments`, so the volume line lost its parenthetical) |
+| NEW `per_model_system_prompt_blockless.txt` / `synthesis_system_prompt_blockless.txt` | pin the omission rule: `task_blocks=None` ⇒ the bare task-free template, no section, no header |
+| `per_model_prompt_{legacy,collapse}[_flag_on].txt`, `pb7_synthesis_user.txt`, dedup + pb8 goldens | **byte-identical** (their fixtures carry no `training_psd_segments`; user prompts untouched by C2) |
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| C2 narrow owner+slice suite (frozen §11.2 command minus the pr3 guard, which requires a clean tree) | **rc=0 — 593 passed in 22.63s** (`/tmp/09b_c2.log`) |
+| `test_pr3_l2p_preflight` | deferred to the CLEAN C2 commit per the F-09a-11 precedent (the guard correctly reddens on a work-in-progress tree); run post-commit — result recorded below |
+| sentence-accounting census (23 B-fragments × phase placement + absence-from-framework; 11 A-anchors; 9 DW pairs; health example) | green (in the 593) |
+| splice/omission (block-less goldens, phase placement, partial values, placeholder-leak, flag-ON identity, TIDMAD `prediction_guidance` absent) | green |
+| value contract + adapter fail-closed (unknown key, empty section, missing file, non-mapping, external-path extension case) | green |
+| censuses 3 / 3b / 6 / census-1 source half (exempt labels = the THREE schema-derived `PSD` label literals, exact count asserted) | green |
+| pyright (local, nodeenv node) | **0 errors, 0 warnings** over `agent/prompt_templates/interpretation/`, `agent/schemas/interpretation.py`, the node package and `workflows/model_exploration.py` |
+| ruff check / format | clean |
+
+**Mutations (all RED, all reverted; caches cleared around every run).**
+
+| # | mutation | observed |
+|---|---|---|
+| M-C2-1 | science token planted in the framework template | RED — `test_interpretation_framework_templates_are_task_free` (1 failed) |
+| M-C2-2 | `evidence_reading` key dropped from the declaration | RED at IMPORT — the adapter's fail-closed contract refuses the unknown replacement key before any test body runs (collection error rc=2); the declaration cannot even load without its science |
+| M-C2-3 | a second task constant (`PETS_DEFAULT…`) in the adapter | RED — census 3b (1 failed) |
+| M-C2-4 | `if "tidmad" in resolved:` branch in the adapter | RED — census 3b (2 failed) |
+| M-C2-5 | splice renders a header for an ABSENT section | RED — `TestSpliceAndOmission` (2 failed: block-less goldens + no-header rule); reverted python-inverse; 7 passed after |
+
+**F-09b-4 (hygiene finding).** The first M-C2-1/M-C2-5 revert used
+`git checkout <file>` on `rendering.py`, which restored the C1 COMMIT and
+silently wiped the uncommitted C2 template edits — the restore-verification
+run caught it (39 failed), and the C2 edits were re-applied and re-proven
+against the already-captured goldens (593 green + byte-identical golden
+assertions = the re-application is faithful). Rule recorded: a mutation
+revert on a file carrying UNCOMMITTED work must be a python-inverse edit,
+never `git checkout` (the 09a mutation-hygiene rule's uncommitted-tree
+corollary).
+
+**F-09b-5.** Census 3's only initial offender in the generic surfaces was
+this PR's OWN `prediction_guidance` field description naming the task —
+reworded (the census stays strict: `Field(description=…)` strings are NOT
+exempted). Census 3b initially counted the adapter's doctrine DOCSTRINGS —
+narrowed to executable literals (the same docstring exclusion census 3
+uses), keeping "exactly ONE executable task-token literal" as the claim.
+Census-1's exemption was widened from one label to the THREE real
+schema-derived `PSD` label literals (`Training PSD segments` ×2 across both
+builders, `Eval PSD segments` ×1) with the exact count asserted
+(anti-vacuity).
 
 ### 22.3 C3 — evidence renderers
-*(renderer test counts; declared user-prompt deltas)*
+
+**Commit.** `Step 09b C3: explicit evidence renderers reach the interpreter
+prompts`.
+
+**What landed.** Four renderers in `rendering.py`, one per evidence family:
+`render_metric_identity` (identity + direction words), 
+`render_interpretation_diagnosis_lines` (both 09a C6 roles, separately),
+`render_secondary_metrics` (scored / refused / NAMED-ABSENT), 
+`render_failure_counts` (existing authority vocabularies, zero-omitting,
+open future keys). Threaded at fixed positions in `_build_per_model_prompt`
+and — for the run-level identity only — in `_build_synthesis_prompt` via a
+new `metric_identity=` kwarg fed from `run()`'s already-bound
+`run_metric_identity`. **No new computation**: every value was already on
+`ModelRunSummary` (09a C2/C6) or already bound in `run()`.
+
+**Reuse, not re-implementation.** Direction words come from 07b's
+`render_metric_direction_words` (which asks `MetricOrder`); the
+diagnosis line grammar IS 07b's `render_training_dynamics_line`, including
+its explicit degenerate renderings. `test_the_line_grammar_is_the_07b_authority`
+and the direction-literal census pin both.
+
+**Declared golden deltas (regenerated this commit).**
+
+| golden | delta |
+|---|---|
+| `per_model_prompt_collapse.txt` / `_legacy.txt` / `_collapse_flag_on.txt` | ADDITIVE `### Record outcomes` block only (records / status / training diagnosis / gate actions / health provenance). No identity, diagnosis or secondary section: those fixtures' records carry no `metric_result`, no diagnosis and no secondaries — the presence gating renders nothing, which is itself the evidence |
+| `step09a_differential_digest.json` | **byte-identical (delta NONE)** — C3 is rendering-only |
+| `step09a_differential_llm_calls.json` | `user_sha256` on calls 0/1 (per-model) and 4 (synthesis); labels, order, markers and every `system_sha256` UNCHANGED |
+| every system-prompt golden, dedup, pb8 | untouched |
+
+| finding | disposition |
+|---|---|
+| **F-09b-6** — `test_interpretation_agent.py::test_includes_training_psd_segments` asserted `"4000" in prompt`, i.e. it PINNED C2's DW-8 task-science parenthetical in the framework user prompt. The C2 narrow slice did not include that file, so C2 left it red until the C3 run | UPGRADED (not weakened): it now asserts `"Training PSD segments: 200" in prompt` AND `"4000" not in prompt`, with the positive half owned by the C2 census on the ASSEMBLED prompt. **Rule for the remaining commits**: a narrow slice must include every file that asserts a byte the commit moves — grep the changed literal, do not reason from directory names |
+| **F-09b-7** — the first `render_metric_identity` passed a `MetricIdentity` to 07b's `render_metric_identity_line`, which reads `spec.id`; `MetricIdentity` names it `metric_id`. `run()` swallowed the `AttributeError` into the DEGRADED path, so the oracle's call manifest went EMPTY rather than raising | Fixed by composing the sentence around the shared direction words instead of adapting carriers. Recorded because the degraded path is designed to hide exactly this class of interpreter defect: the oracle's label-sequence assertion is what surfaced it, not a traceback |
+| **F-09b-8** — a shell mutation helper quoted two test paths as ONE argument; pytest reported `rc=4, no tests ran`, which a careless read would have logged as "mutation RED" | Re-run correctly (RED ×2, then reverted). Recorded as the hygiene twin of 09a's C4-1 "mutation that does not apply proves the opposite of what it claims" |
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09b_c3_evidence_renderers.py` | **27 passed** — identity (both directions, verbatim id, absence), diagnosis (both roles, absent role, both degenerate states, 07b-grammar identity), secondaries (scored / lower-is-better / named absence with a no-digit assertion / refusal contract id / declaration order / empty), failure counts (hand-computed 7-line expectation, zero-omission, absent-vs-zero, unknown future key), builder presence gating (bare vs fully-evidenced with ordering), synthesis identity line present/absent, one-authority AST census, secondary inertness (with anti-vacuity) |
+| C3 narrow owner+slice suite | **rc=0 — 213 passed in 1.72s** (`/tmp/09b_c3.log`) |
+| pyright (local, nodeenv) | **0 errors, 0 warnings** |
+| ruff check / format | clean (37 files) |
+
+**Mutations (all RED, all python-inverse reverted).**
+
+| # | mutation | observed |
+|---|---|---|
+| M-C3-1 | an `unavailable` secondary renders `0.0` | RED — the named-absence case |
+| M-C3-2 | identity line hardcodes "higher is better" | RED ×4 — lower-direction cases + the direction-literal census |
+| M-C3-3 | the two diagnosis roles folded into one (`best or formal`) | RED — the role-separation case |
+| M-C3-4 | absent failure counts render `records: 0` | RED ×2 — the absent-vs-zero case and the bare-summary gating case |
 
 ### 22.4 C4 — version-aware track record
-*(four-shape evidence; proposer pin upgrades; declared deltas)*
+
+**Commit.** `Step 09b C4: one version-aware prediction track record for both
+consumer nodes`.
+
+**What landed.** `render_prediction_track_record` — the ONE authority the
+interpreter's synthesis prompt and the proposer's reasoning prompt both
+render through. Four shapes exactly as frozen (§9). The proposer's
+`### Prediction Track Record` body delegates to it; its pipeline whitelist
+gains the four versioned keys (additive — the `is not None` filter keeps a
+pre-09a digest's JSON unchanged); the interpreter's stale
+"Cumulative information gain … (total boldness × confirmed)" line is gone
+with the false explanation 09a had already invalidated. The prior accuracy
+fed to the synthesis prompt comes from the 09a accumulator itself
+(`accumulate_prediction_outcomes(pools, None)`), not a second fraction
+computation. Q-09b-1's bound: nothing else in proposer semantics moved.
+
+**Declared deltas.**
+
+| surface | delta |
+|---|---|
+| proposer `reasoning_prompt_structured_evidence.txt` | the section DISAPPEARS for that fixture — it carries only `cumulative_information_gain = 0.0` and no pools, which is §9's **empty** shape. The old rendering emitted a header plus an unlabelled `0.000` |
+| interpreter synthesis goldens + oracle `user_sha256` (call 4) | the gain line becomes the version-labelled track record |
+| oracle DIGEST `new_discoveries` + `runtime_vocab` | **a real content delta, declared**: the timing-discovery sentence's remedy no longer names a TIDMAD data-prep hyperparameter. Discovery identity/kind/tier and every other digest key unchanged |
+| pb3 pipeline goldens | byte-identical (their fixtures carry no prediction keys) |
+
+| finding | disposition |
+|---|---|
+| **F-09b-9** — the first renderer computed N as `sum(pool.values())`, inheriting the exact latent hazard §2.4 recorded in the code it replaces: a non-comparable key appearing in a pool would silently inflate a hit-rate's denominator. Caught by the `unevaluated` case | Fixed in production, not in the test: both N's now count `COMPARABLE_OUTCOMES` by construction. M-C4-4 pins it |
+| **F-09b-10** — the timing-advice reword changes a PERSISTED digest value (the discovery sentence rides `new_discoveries`/`runtime_vocab`), so C4 is not purely rendering-only. My first oracle capture predated the reword and its provenance said "digest delta NONE" | Re-captured with the delta declared key-by-key. Recorded because a provenance line written before the last edit is a stale claim, not evidence |
+| **F-09b-11** — two test-side scoping repeats of known 09a hygiene rules: the banned token survived in my own explanatory COMMENT (F-09a-14: a text scan cannot tell code from prose), and `ast.get_docstring` DEDENTS, so comparing its result against the raw `Constant` left the docstring inside a "no version literal" scan | Comment reworded; the scan uses `clean=False`. Both are test/comment fixes; no production behaviour involved |
+
+**Validation.**
+
+| command / probe | result |
+|---|---|
+| NEW `test_step09b_c4_prediction_rendering.py` | **13 passed** — the four shapes with hand-owned strings, `unevaluated` cannot inflate either N, zero-gain omission, accuracy-without-a-pool renders nothing, version ids only from the schema authority, both consumers on one renderer, and the two removed framework literals (with an anti-vacuity check that the timing discovery fires) |
+| UPGRADED `TestBuildReasoningPromptTrackRecord` (proposer) | **8 cases** replacing the pre-09b N-pins: v2-only takes its N from the v2 pool; legacy-only renders NO percentages; mixed labels both and asserts `N=9` (the old defect) and `N=11` (naive pooling) are both absent |
+| C4 narrow owner+slice suite | **rc=0 — 701 passed in 5.91s** (`/tmp/09b_c4.log`) |
+| whole proposer + interpreter directories (during triage) | 1,123 passed |
+| pyright (local, nodeenv) | **0 errors** | 
+| ruff check / format | clean (80 files) |
+
+**Mutations (all RED, all reverted; 41 green after).**
+
+| # | mutation | observed |
+|---|---|---|
+| M-C4-1 | N taken from the legacy pool (the pre-09b defect restored) | RED ×5 |
+| M-C4-2 | the two populations summed into one N | RED ×7 |
+| M-C4-3 | the legacy pool rendered under the v2 semantics id | RED ×4 |
+| M-C4-4 | N unfiltered (`sum(pool.values())`) | RED ×2 |
 
 ### 22.5 C5 — three-task rungs + censuses + docs
-*(rung evidence; consolidated census table)*
+
+**Commit.** `Step 09b C5: three-task rendering contrast, roadmap rungs
+11-A/11-B, and node docs` (`c42ed28e`). Test + docs only; ZERO golden bytes
+and zero production behaviour changed.
+
+**§8 contrast, as executed** (`test_step09b_c5_three_task_rendering.py`,
+15 cases, all hand-owned literals):
+
+| axis | TIDMAD | Pets | DAVIS |
+|---|---|---|---|
+| identity line | `` `tidmad_denoising_score` (higher is better)`` | `` `accuracy` (higher is better)`` | ``` `mse` (lower is better)``` |
+| per-sample section | renders | ABSENT | ABSENT |
+| task science | present (via its blocks) | none — asserted absent in BOTH prompts | none — asserted absent in BOTH prompts |
+| secondaries | none declared ⇒ no section | `macro_f1` scored | `psnr` scored + `mae` **named absence** |
+| anti-vacuity | — | — | best == `min(scores)` AND `!= max(scores)`, and that value is the one on the "Raw best score" line |
+
+**Rungs (roadmap `:1233-1235`), one axis each.** 11-A varies the metric
+identity ONLY: the rendered delta is asserted EQUAL to exactly the two
+identity lines (a list equality, not a containment check). 11-B varies table
+INDEXING only (same carrier, sample-labelled rows): every moved line belongs
+to the table's own markdown, no `golden metric` line moves, and the framework
+injects no per-file assumption around the per-sample carrier.
+
+| finding | disposition |
+|---|---|
+| **F-09b-12** — the rung fixture first built a 3-row `ScoreComparisonTable`; the carrier requires one row per declared validation file (20 for TIDMAD) and a non-negative `headroom_vs_gt` | Fixture corrected to the declared topology. Recorded because the schema, not the test, defines what a table IS — the rung varies row LABELLING, never row count |
+
+**Validation.** `test_step09b_c5_three_task_rendering.py` 15 passed;
+consolidated closure sweep (the SECOND and last planned broad local run):
+**rc=0, 2,045 passed in 38.00s** (`/tmp/09b_c5.log`) over the interpreter,
+proposer, banned-vocabulary, examples, nodes, schemas, workflows, pr3
+preflight and Step-06 C5 boundary suites. All C2/C3/C4/09a censuses and the
+pack-governance guards green inside it. ruff clean.
+
+**Docs.** `result_interpretation_agent.md` gained the adapter row, a
+"Task-owned interpretation guidance" section (four keys, placement, absence
+rule, caller-supplies rule, the deliberate TIDMAD `prediction_guidance`
+absence) and a "Rendered evidence" table naming each family's source and its
+absent-⇒ behaviour.
 
 ### 22.6 C6 — Gate 1 + closure
-*(dry-run manifest; launch approval; artifacts; PASS/FAIL/INCONCLUSIVE;
-PR + exact-head CI id)*
+
+**Commit.** `Step 09b C6: Gate 1 — real-LLM interpretation under the re-owned
+prompts (PASS)`.
+
+**GATE 1 — RESULT: PASS.** ONE launch, **exactly the 5 frozen calls**
+(TIDMAD 2 + DAVIS 3), `openai_tiered_pro.json` (gpt-5.5), 94.34s wall,
+cost well inside the <$1 budget. Evidence:
+`/home/klz/Data/SIDEREIS_DATA/step09b_gate1_evidence_20260820/`
+(both digests, both full transcripts, `gate1_result.json`). The preserved
+`step07b_gate1_postrefactor` inputs were read ONLY.
+
+| check | A — TIDMAD | B — DAVIS |
+|---|---|---|
+| call manifest == frozen | PASS | PASS |
+| `is_degraded == False` | PASS | PASS |
+| **P-A1 / P-B1 designation** | PASS — 2 designating sentences, none designating the weaker model | PASS — designates the dominant `davis_temporal_unet_small` |
+| **P-A2 / P-B2** | PASS — no fabricated file-index designation | PASS — no TIDMAD science leak |
+| prompt construction | PASS — the migrated science reached the REAL prompt via TIDMAD's blocks; identity says higher | PASS — block-less prompt carries NO TIDMAD science; `mse` lower identity; `psnr` scored + `mae` named absence |
+
+**What the real model actually did** (the reason the Gate is worth its
+budget). TIDMAD: *"The best observed score is from bidirectional_gated_tcn
+at -2.3322708898096955, outperforming the best
+wavenet24_fullspectrum_ce_coldstart score of -2.4310203852971433"* — correct
+designation in the NEGATIVE-valued higher-is-better regime, the sign case
+where a magnitude reader inverts. It also wrote *"There is no per-file
+Impact_Score evidence for either model"* and *"Because no Impact_Score
+distribution is available, the next step is not to declare saturation…"* —
+i.e. it USED the migrated TIDMAD guidance and reported the evidence's
+ABSENCE instead of inventing a lever. DAVIS: designated the dominant
+lower-mse model with no per-file or Impact_Score framing anywhere.
+
+| finding | disposition |
+|---|---|
+| **F-09b-13** — the first probe run reported an INVERSION on a sentence that was correct. `_sentences()` split on every `.`, and every score here is a decimal (`-2.3322708898096955`), so the model NAME was orphaned from its verdict | Splitter made decimal-safe (`(?<!\d)\.(?:\s|$)`), with a rehearsal case built from the exact real sentence |
+| **F-09b-14** — the first run also flagged `impact_score` as "fabrication" in case A. That contradicted the FROZEN §13.4 split: P-A2 is a FILE-INDEX test (A's input has no table), and P-B2 is the leak test (B supplies no blocks). My implementation had applied one shared token list to both | Probes separated exactly as frozen. Naming the absence of per-file evidence is the behaviour the migrated guidance ASKS for and is now explicitly accepted |
+| **F-09b-15** — one real sentence referenced the winner by its SCORE, not its name (*"even the better cross-model score of -2.3322708898096955…"*), which the name-only matcher read as designating the other model | The inversion test is now evidence-grounded: a sentence counts as an inversion only if it names the loser AND references the winner in NO form — neither name nor score, the score being read from the digest's own `per_model_best` map. Rehearsed BOTH ways: a planted inversion stays RED even when a winner score is supplied |
+
+**Honest note on the verdict path.** The first launch's pytest exit code was
+1. The verdict above comes from the persisted artifacts re-evaluated with the
+corrected probes — **zero additional LLM calls** — which is precisely the
+standing rule that a Gate verdict is read from evidence, never from an exit
+status. All three findings were defects in the EVALUATION function, not in
+the framework or the model; no production code changed at C6.
 
 ### 22.7 Findings (F-09b-*)
 *(numbered, with dispositions — the 09a pattern)*
