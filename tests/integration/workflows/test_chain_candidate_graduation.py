@@ -345,11 +345,7 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
                 workspace=chain_root,
                 run_name=run_name,
                 llm_config=_llm_config_pseudo(),
-                restored_runtime_vocab=state.runtime_vocab,
-                accumulated_key_findings=state.accumulated_key_findings,
-                accumulated_physical_rejections=state.accumulated_physical_rejections,
-                accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
-                restored_previous_proposal=state.previous_proposal_data,
+                restored_state=state,
             )
 
         _write_chain_iter_artifacts(chain_root, iteration, tune_output)

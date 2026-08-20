@@ -65,7 +65,7 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import psutil as _psutil
 import yaml
@@ -100,8 +100,7 @@ from core.run_invariants import (
 )
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
-from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
-from execute_tools.dataset_config import DataScope
+from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -121,6 +120,15 @@ from workflows.strategy_modes import (
     FormalRoundStrategy,
     StrategyMode,
 )
+from workflows.task_composition import (
+    RunTaskComposition,
+    bind_run_task_composition,
+    compose_run_task_bindings,
+    verify_composition_is_bound,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from core.resume import RestoredState
 from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1391,16 +1399,22 @@ def run_workflow(
     bridge_factory: Callable | None = None,
     sandbox_factory: Callable | None = None,
     measurement_capability: ResolvedMeasurementCapability | None = None,
-    # --- restored chain-state seeds (C4 moves these onto ChainState) ------
-    restored_runtime_vocab: list | None = None,
-    accumulated_key_findings: list[str] | None = None,
-    restored_model_knowledge_cache: dict | None = None,
-    accumulated_physical_rejections: list | None = None,
-    accumulated_gate_exhaustions: list | None = None,
-    restored_previous_proposal: dict | None = None,
-    restored_chain_incumbent_score: float | None = None,
-    restored_collapse_fingerprint_history: dict | None = None,
-    restored_prediction_memory: PredictionMemory | None = None,
+    # --- restored chain state: ONE typed parameter (Step 10 P1 C5) --------
+    # Step 09.5a's C4b hand-off. The launcher used to unpack `RestoredState`
+    # into nine separate kwargs and this signature had to declare all nine —
+    # a transport shape that grew by one every time resume learned to carry
+    # another value. `RestoredState` is resume's OWN type and is allowed
+    # across the launcher edge (09.5a §16); `ChainState` still never crosses
+    # a process boundary. `None` is cold start.
+    # Quoted: `core.resume` imports THIS module at module level
+    # (`_add_plugin_to_registries`), so importing it back eagerly would be a
+    # cycle. The name is resolved under TYPE_CHECKING for the type checker
+    # and never evaluated at runtime — this module has no
+    # `from __future__ import annotations`, so an unquoted annotation would
+    # be evaluated when the function is defined.
+    restored_state: "RestoredState | None" = None,
+    # --- run-scoped TASK composition (Step 10 P1) -------------------------
+    task_composition: RunTaskComposition | None = None,
     # --- DS7 deprecated no-ops, kept for behaviour parity (FU-2) ----------
     trial_strategy: StrategyMode = "snapshot",
     target_files: list[int] | None = None,
@@ -1497,6 +1511,22 @@ def run_workflow(
 
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
+
+    # Step 10 / P1 — a composed run must arrive with its authorities ACTIVE.
+    #
+    # This workflow CONSUMES the composition; it does not establish it. The
+    # binding is entered at the composition edge (the launcher, or this
+    # module's CLI) so that its lifetime is the composition's lifetime and it
+    # covers the startup pre-flight below as well as the iteration loop —
+    # scope resolution and the Health materialisation both read the run's
+    # profile before iteration 1.
+    #
+    # The refusal is what makes that split safe: a run holding a composition
+    # whose bindings are NOT active would read the composed interpretation
+    # blocks and Health family while resolving the profile, metric and task
+    # description from the legacy defaults, and would look completely normal
+    # doing it. An un-composed run is a no-op here.
+    verify_composition_is_bound(task_composition)
 
     # DS7 — deprecated no-op strategy params (removal tracked as FU-2).
     for _name, _val, _default in (
@@ -1653,8 +1683,16 @@ def run_workflow(
     # input via validate_runtime_config; this pre-flight mirrors only the
     # subset needed to fail fast.
     _run_scope = data_scope if data_scope is not None else DataScope.default()
-    _resolved_scope = _run_scope.resolve(_DATASET_CONFIG)
-    _scope_is_partial = _resolved_scope != list(range(_DATASET_CONFIG.num_files))
+    # Step 10 / P1 (S1) — the run's OWN dataset topology, not the module-level
+    # TIDMAD import this file used to resolve scope against. Un-composed this
+    # is byte-identical: `resolve_dataset_profile()` returns `TIDMAD_PROFILE`
+    # and `TIDMAD_PROFILE.dataset` IS the `TIDMAD` singleton (same object).
+    # Composed, it is the composed profile — without this a composed 4-file
+    # task would have had its scope resolved against TIDMAD's 20 files and
+    # its `scope_is_partial` computed from somebody else's topology.
+    _run_dataset = resolve_dataset_profile().dataset
+    _resolved_scope = _run_scope.resolve(_run_dataset)
+    _scope_is_partial = _resolved_scope != list(range(_run_dataset.num_files))
     if _scope_is_partial and launch.formal_strategy != "snapshot":
         raise ValueError(
             f"partial data_scope requires formal_strategy='snapshot' "
@@ -1686,6 +1724,17 @@ def run_workflow(
         health_feedback_history_max_entries_per_model=(
             launch.health_feedback_history_max_entries_per_model
         ),
+        # Step 10 / P1 — the composed task Health binding and the composed
+        # run's semantic identity. Both are `None` for an un-composed run,
+        # which keeps 08b's `LEGACY_OMITTED` resolution and leaves the
+        # workspace lock byte-identical (the fingerprint key is OMITTED, not
+        # serialized as null — design §5.9).
+        task_health_binding=(
+            task_composition.task_health_binding if task_composition is not None else None
+        ),
+        task_composition_fingerprint=(
+            task_composition.semantic_fingerprint if task_composition is not None else None
+        ),
     )
     for _output in tuning_outputs:
         validate_stamped_invariants(
@@ -1695,7 +1744,7 @@ def run_workflow(
                 "health_config_sha256": getattr(_output, "health_config_sha256", None),
             },
             _run_invariants,
-            full_scope=list(range(_DATASET_CONFIG.num_files)),
+            full_scope=list(range(_run_dataset.num_files)),
             source=f"seed/restored output '{_output.run_name}' ({_output.model_type})",
         )
     # C9d — runtime-control launch guard. Runs BEFORE any LLM call or
@@ -1792,6 +1841,7 @@ def run_workflow(
         ),
         enable_structured_health_feedback=enable_structured_health_feedback,
         run_invariants=_run_invariants,
+        task_composition=task_composition,
         llm_config=llm_config,
         seed_metric_spec=seed_metric_spec,
         hardware_context=hardware_ctx,
@@ -1802,6 +1852,34 @@ def run_workflow(
         sandbox_factory=sandbox_factory,
         measurement_capability=measurement_capability,
     )
+
+    # Step 10 / P1 C5 — unpack the restored transport ONCE.
+    #
+    # Every rule below is the one the launcher applied when it did this
+    # unpacking itself; nothing is reinterpreted here. Cold start (`None`)
+    # yields the same values the nine parameters defaulted to, and a restored
+    # chain yields the same values the launcher passed — `RestoredState`'s own
+    # container defaults are empty, which every consumer below already treats
+    # identically to `None` (each tests truthiness).
+    restored_runtime_vocab = restored_state.runtime_vocab if restored_state else None
+    accumulated_key_findings = restored_state.accumulated_key_findings if restored_state else None
+    restored_model_knowledge_cache = (
+        restored_state.model_knowledge_cache if restored_state else None
+    )
+    accumulated_physical_rejections = (
+        restored_state.accumulated_physical_rejections if restored_state else None
+    )
+    accumulated_gate_exhaustions = (
+        restored_state.accumulated_gate_exhaustions if restored_state else None
+    )
+    restored_previous_proposal = restored_state.previous_proposal_data if restored_state else None
+    restored_chain_incumbent_score = (
+        restored_state.chain_best_valid_formal_score if restored_state else None
+    )
+    restored_collapse_fingerprint_history = (
+        restored_state.collapse_fingerprint_history if restored_state else None
+    )
+    restored_prediction_memory = restored_state.prediction_memory if restored_state else None
 
     # Step 09.5a C4 — the eleven cross-iteration accumulators are ONE typed
     # carrier now. Every seeding rule below is the one this function already
@@ -1975,7 +2053,16 @@ def run_workflow(
             # the ONE bounded Regime-A adapter (a default-path constant, not
             # a branch). Step 12's composition root replaces this call site;
             # the typed value contract stays.
-            task_blocks=load_interpretation_task_blocks(),
+            # Step 10 / P1 — a composed run supplies its OWN blocks, including
+            # the legal `None` of a task that declares no interpretation
+            # prose (09b: absent ⇒ no header, no bytes). The zero-arg loader
+            # below remains the UN-COMPOSED branch and the bounded Regime-A
+            # adapter Step 12 removes.
+            task_blocks=(
+                bindings.task_composition.interpretation_blocks
+                if bindings.task_composition is not None
+                else load_interpretation_task_blocks()
+            ),
         )
 
         print(f"  [{iteration}] Interpreting experiment results...")
@@ -2907,6 +2994,15 @@ def main():
         default=None,
         help="Human guidance for tuning steps (e.g. 'keep epochs <= 3 for quick testing').",
     )
+    parser.add_argument(
+        "--task_composition",
+        type=str,
+        default=None,
+        help=(
+            "Path to a YAML task-composition manifest. Omitted = the legacy "
+            "un-composed run. See the chain launcher's flag of the same name."
+        ),
+    )
     args = parser.parse_args()
 
     if args.data_dir is None:
@@ -2924,26 +3020,35 @@ def main():
     else:
         wf_llm_config = None  # each node uses its own default
 
-    run_workflow(
-        launch=WorkflowLaunchConfig(
-            data_dir=args.data_dir,
-            model_types=args.models,
-            source_run_name=args.source_run_name,
-            max_iterations=args.max_iterations,
-            max_rounds=args.max_rounds,
-            max_proposal_attempts=args.max_proposal_attempts,
-            target_score=args.target_score,
-            file_index=args.file_index,
-            human_advice_interpret=args.advice_interpret,
-            human_advice_propose=args.advice_propose,
-            human_advice_implement=args.advice_implement,
-            human_advice_validate=args.advice_validate,
-            human_advice_tune=args.advice_tune,
-        ),
-        workspace=args.workspace,
-        run_name=args.run_name,
-        llm_config=wf_llm_config,
+    # Step 10 / P1 — the module CLI is a composition edge too, and it owns
+    # the binding for exactly the same reason the chain launcher does.
+    # `--task_composition` omitted ⇒ `None` ⇒ a no-op context and the legacy
+    # un-composed run.
+    run_composition = (
+        compose_run_task_bindings(args.task_composition) if args.task_composition else None
     )
+    with bind_run_task_composition(run_composition):
+        run_workflow(
+            launch=WorkflowLaunchConfig(
+                data_dir=args.data_dir,
+                model_types=args.models,
+                source_run_name=args.source_run_name,
+                max_iterations=args.max_iterations,
+                max_rounds=args.max_rounds,
+                max_proposal_attempts=args.max_proposal_attempts,
+                target_score=args.target_score,
+                file_index=args.file_index,
+                human_advice_interpret=args.advice_interpret,
+                human_advice_propose=args.advice_propose,
+                human_advice_implement=args.advice_implement,
+                human_advice_validate=args.advice_validate,
+                human_advice_tune=args.advice_tune,
+            ),
+            workspace=args.workspace,
+            run_name=args.run_name,
+            llm_config=wf_llm_config,
+            task_composition=run_composition,
+        )
 
 
 if __name__ == "__main__":

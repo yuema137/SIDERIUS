@@ -1,0 +1,28 @@
+# DAVIS 2017 future-frame prediction — the third track, and the one whose
+# metric is LOWER-is-better. Same six sections, same loader; the direction is
+# a value the declaration carries, never a branch the framework takes.
+#
+# Scope note: as with Pets, the profile and task config are COMPOSITION
+# fixtures. P6 owns the executable loop.
+
+task_data_path:
+  module: execute_tools.davis_data_path
+  symbol: DavisTaskDataPath
+
+dataset_profile:
+  config: dataset_profile.json
+
+metric:
+  declaration: ../../../../examples/davis_future_prediction/declared/metric_mse.json
+  implementation:
+    module: execute_tools.evaluation_metric
+    symbol: GlobalMseMetric
+
+task_health:
+  config: ../../../../examples/davis_future_prediction/declared/task_health.yaml
+
+interpretation_blocks:
+  none: true
+
+task_config:
+  config: task_config.yaml

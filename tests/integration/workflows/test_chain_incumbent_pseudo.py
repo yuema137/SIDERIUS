@@ -285,13 +285,7 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
             ),
             workspace=workspace,
             run_name="iter_002",
-            restored_runtime_vocab=state.runtime_vocab,
-            accumulated_key_findings=state.accumulated_key_findings,
-            restored_model_knowledge_cache=state.model_knowledge_cache,
-            accumulated_physical_rejections=state.accumulated_physical_rejections,
-            accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
-            restored_previous_proposal=state.previous_proposal_data,
-            restored_chain_incumbent_score=state.chain_best_valid_formal_score,
+            restored_state=state,
         )
     tune_input = captured_tune_inputs[0]
     # Mirror production: the tuner writes its run_output to disk before

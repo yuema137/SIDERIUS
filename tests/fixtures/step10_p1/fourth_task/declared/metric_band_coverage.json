@@ -1,0 +1,11 @@
+{
+  "aggregation": "mean_absolute_band_coverage_error",
+  "direction": "lower",
+  "id": "band_coverage_error",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

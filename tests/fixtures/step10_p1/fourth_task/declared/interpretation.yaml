@@ -1,0 +1,5 @@
+evidence_reading: >-
+  Band-coverage error is reported in coverage units and is LOWER-is-better.
+  Compare models only within one declared band set.
+synthesis_guidance: >-
+  Prefer an explanation that names which band the model lost coverage in.

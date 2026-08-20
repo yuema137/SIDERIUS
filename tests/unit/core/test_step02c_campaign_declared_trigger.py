@@ -32,7 +32,11 @@ contrast declaration reveals.
 from __future__ import annotations
 
 from core.campaign_artifacts import validate_experiment_completeness
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    resolve_dataset_profile,
+)
 
 GATE_ID = "output_diversity_blocking"
 _CONTRAST_PEEK = [2, 8, 14, 18]
@@ -62,7 +66,16 @@ def _record(files_requested: list[int], per_file: dict) -> dict:
 
 
 def _errors(record: dict) -> list[str]:
-    return validate_experiment_completeness(record, configured_gate_ids=[GATE_ID])
+    # Step 10 / P1 (S7): the declared peek set is now the caller's explicit
+    # argument rather than something the validator pulls from the ambient
+    # profile. The value under test is unchanged — what changed is that this
+    # fixture now STATES it instead of depending on which profile happened to
+    # be resolvable in-process.
+    return validate_experiment_completeness(
+        record,
+        configured_gate_ids=[GATE_ID],
+        declared_health_peek=list(resolve_dataset_profile().health_peek_files),
+    )
 
 
 def _enforced(errors: list[str]) -> bool:

@@ -54,7 +54,9 @@ from __future__ import annotations
 import os
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Annotated, Any, Literal
 
 import h5py
@@ -743,3 +745,47 @@ def derive_tidmad_metric(
 ) -> TidmadDenoisingMetric:
     """The TIDMAD handle, bound to the spec :func:`derive_tidmad_metric_spec` derives."""
     return TidmadDenoisingMetric(derive_tidmad_metric_spec(dataset_profile, deliverable_spec))
+
+
+# ---------------------------------------------------------------------------
+# Run-scoped metric binding (Step 10 / P1 C2)
+# ---------------------------------------------------------------------------
+
+_ACTIVE_RUN_METRIC: ContextVar[EvaluationMetric | None] = ContextVar(
+    "siderius_active_run_metric", default=None
+)
+
+
+@contextmanager
+def bind_run_metric(metric: EvaluationMetric) -> Iterator[EvaluationMetric]:
+    """Bind the run's PRIMARY metric handle for the duration of the block.
+
+    Exactly the ``bind_dataset_profile`` idiom (``dataset_config.py``): a
+    ContextVar reset through a token, never module state, so a contrast run
+    cannot leak its metric into the next one and nested scopes restore
+    correctly even on an exception.
+
+    This is a **seam, not a registry**. It stores an ``EvaluationMetric``
+    instance that some other authority already produced — the composition
+    edge builds it from a declaration through
+    :func:`metric_spec_from_declaration` — so no second way for a metric
+    identity to come into existence is introduced here. There is no id, no
+    lookup and no table.
+    """
+    token = _ACTIVE_RUN_METRIC.set(metric)
+    try:
+        yield metric
+    finally:
+        _ACTIVE_RUN_METRIC.reset(token)
+
+
+def resolve_bound_run_metric() -> EvaluationMetric | None:
+    """The run's bound primary metric, or ``None`` when nothing is bound.
+
+    Deliberately returns ``None`` rather than falling back to the TIDMAD
+    derivation: the caller (the tuner's single run-scoped acquisition site)
+    keeps its legacy derivation visible as the un-composed branch, so what
+    an un-composed run does stays readable at the site that does it rather
+    than hidden behind a helper that silently picks a task.
+    """
+    return _ACTIVE_RUN_METRIC.get()

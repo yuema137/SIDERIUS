@@ -1,0 +1,12 @@
+task_description: |
+  Spectrogram band-coverage segmentation. A model receives a 512-bin
+  spectrogram window and predicts, per frequency band, the fraction of the
+  window that band covers. The metric is mean absolute band-coverage error
+  and LOWER is better.
+forward_contract:
+  input_shape: "[B, T] int"
+  input_description: "one quantised spectrogram window"
+  output_shape: "[B, 256, T] float"
+  output_description: "per-bin band logits"
+  task_type: "segmentation"
+  num_classes: 256

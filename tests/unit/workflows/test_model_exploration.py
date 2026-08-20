@@ -55,6 +55,7 @@ from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalOutput
 from agent.schemas.validator import ValidatorOutput
+from core.resume import RestoredState
 from execute_tools.metric_order import MetricOrder
 from tests.helpers.metric_fixtures import shipped_spec
 
@@ -664,13 +665,15 @@ class TestRunWorkflowMultiIteration:
             ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            restored_prediction_memory=PredictionMemory(
-                prediction_outcomes_history={"confirmed": 4, "partial": 0, "refuted": 1},
-                prediction_outcomes_by_semantics={
-                    "metric_order_signsafe_v2": {"confirmed": 3, "partial": 0, "refuted": 0}
-                },
-                cumulative_information_gain=1.25,
-                cumulative_information_gain_by_semantics={"metric_order_signsafe_v2": 0.9},
+            restored_state=RestoredState(
+                prediction_memory=PredictionMemory(
+                    prediction_outcomes_history={"confirmed": 4, "partial": 0, "refuted": 1},
+                    prediction_outcomes_by_semantics={
+                        "metric_order_signsafe_v2": {"confirmed": 3, "partial": 0, "refuted": 0}
+                    },
+                    cumulative_information_gain=1.25,
+                    cumulative_information_gain_by_semantics={"metric_order_signsafe_v2": 0.9},
+                )
             ),
         )
         inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
@@ -714,7 +717,7 @@ class TestRunWorkflowMultiIteration:
             ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            restored_model_knowledge_cache=prior_cache,
+            restored_state=RestoredState(model_knowledge_cache=prior_cache),
         )
         iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
         # Cache must be seeded before per_model loop; verbatim round-trip.
@@ -745,7 +748,7 @@ class TestRunWorkflowMultiIteration:
             ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            restored_model_knowledge_cache=caller_cache,
+            restored_state=RestoredState(model_knowledge_cache=caller_cache),
         )
         # Caller's dict must still have exactly the one entry it started with —
         # the workflow's cache-miss path may have written model_a, but only
@@ -863,7 +866,7 @@ class TestChainIncumbentThreading:
             ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            restored_chain_incumbent_score=5.0,
+            restored_state=RestoredState(chain_best_valid_formal_score=5.0),
         )
         tune_input = workflow_env["tune"].return_value.run.call_args_list[0][0][0]
         assert tune_input.current_run_best_formal_score == 5.0

@@ -244,6 +244,8 @@ class TestRealCampaignDecision:
             expected_training_files=["/data/t.h5"],
             configured_gate_ids=[BLOCKING_GATE],
             expected_output_paths=outputs,
+            declared_health_peek=list(DECLARED_PEEK),
+            full_scope_num_files=TIDMAD_PROFILE.dataset.num_files,
         )
 
     def test_an_incomplete_declared_peek_forces_a_retrain(self, tmp_path):

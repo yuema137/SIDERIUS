@@ -52,7 +52,7 @@ from core.run_invariants import (
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
-from execute_tools.dataset_config import TIDMAD, DataScope
+from execute_tools.dataset_config import TIDMAD, DataScope, resolve_dataset_profile
 from execute_tools.deliverable_spec import default_deliverable_naming
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
@@ -1304,6 +1304,11 @@ def main():
                     ),
                     configured_gate_ids=gate_ids,
                     expected_output_paths=expected_outputs,
+                    # Step 10 / P1 (S7) — the campaign script supplies the two
+                    # task-semantic values; generic campaign code no longer
+                    # resolves a profile or imports a dataset singleton.
+                    declared_health_peek=resolve_dataset_profile().health_peek_files,
+                    full_scope_num_files=TIDMAD.num_files,
                     expected_resolved_data_scope=resolved_data_scope,
                 )
                 validation = decision.validation
@@ -1415,7 +1420,14 @@ def main():
             ),
             configured_gate_ids=gate_ids,
             expected_output_paths=expected_outputs,
-            expected_resolved_data_scope=resolved_data_scope,
+            # Step 10 / P1 (S7) — the campaign SCRIPT knows which task it is
+            # running and supplies the two task-semantic values explicitly.
+            # Generic campaign code no longer reaches for a profile or a
+            # dataset singleton of its own; this is the same "callers that
+            # know the task supply those" contract the launcher already
+            # follows for the measurement capability.
+            declared_health_peek=resolve_dataset_profile().health_peek_files,
+            full_scope_num_files=TIDMAD.num_files,
         )
         if not validation.valid or validation.missing_inference_outputs:
             problems = [

@@ -91,6 +91,17 @@ class WorkflowRunBindings:
 
     # --- resolved run authorities --------------------------------------------
 
+    #: The run's TASK composition, when the launcher composed one (Step 10 P1).
+    #:
+    #: The single most literal instance of this carrier's membership rule: an
+    #: authority settled once, at the composition edge, before the run starts,
+    #: whose identity does not change for its duration. ``None`` is the
+    #: un-composed legacy run, which resolves each family from its own bounded
+    #: default exactly as it did before P1.
+    #:
+    #: The workflow CONSUMES this; it does not resolve it, and it never turns
+    #: the carried ``task_data_path_id`` back into an implementation.
+    task_composition: Any = None
     #: The run's LLM authority, normalised once at entry.
     llm_config: WorkflowLLMConfig | None = None
     #: The metric spec reconciled from the seed tuning outputs.

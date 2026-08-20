@@ -1,0 +1,28 @@
+# Oxford-IIIT Pet — the SAME six sections, different supplied values.
+#
+# Scope note, deliberate: the dataset profile and task config here are
+# COMPOSITION fixtures, not a claim that Pets is loop-executable. P1 proves
+# the composition contract on three materially different tasks; P6 owns
+# driving Pets through the exploration loop (design §7 non-goal 1).
+
+task_data_path:
+  module: execute_tools.pets_data_path
+  symbol: PetsTaskDataPath
+
+dataset_profile:
+  config: dataset_profile.json
+
+metric:
+  declaration: ../../../../examples/oxford_iiit_pet/declared/metric_accuracy.json
+  implementation:
+    module: execute_tools.evaluation_metric
+    symbol: AccuracyMetric
+
+task_health:
+  config: ../../../../examples/oxford_iiit_pet/declared/task_health.yaml
+
+interpretation_blocks:
+  none: true
+
+task_config:
+  config: task_config.yaml

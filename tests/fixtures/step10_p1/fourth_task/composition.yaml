@@ -1,0 +1,33 @@
+# The adversarial case: a task SIDERIUS has never heard of.
+#
+# Everything it needs is here or beside it — a data-path plugin FILE, a metric
+# implementation plugin FILE, its own declaration JSON, its own Health family,
+# its own interpretation prose, its own task config. No SIDERIUS source file
+# mentions "spectro_segmentation_v0"; no central table gained an entry; no
+# workflow, resume path or prompt router learned a new name.
+#
+# If composing this ever requires editing a framework file, the extension
+# claim is false and C4's census says so.
+
+task_data_path:
+  file: plugins/spectro_data_path.py
+  symbol: SpectroTaskDataPath
+  id: spectro_segmentation_v0
+
+dataset_profile:
+  config: declared/dataset_profile.json
+
+metric:
+  declaration: declared/metric_band_coverage.json
+  implementation:
+    file: plugins/band_coverage_metric.py
+    symbol: BandCoverageMetric
+
+task_health:
+  config: declared/task_health.yaml
+
+interpretation_blocks:
+  config: declared/interpretation.yaml
+
+task_config:
+  config: declared/task_config.yaml

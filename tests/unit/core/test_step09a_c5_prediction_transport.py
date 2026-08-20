@@ -194,14 +194,22 @@ class TestTheRestoreReadsTheCanonicalDigest:
 class TestTheChainSubprocessForwardsIt:
     """Mutation C5-2 exposed that this hop had NO test at all.
 
-    Deleting `restored_prediction_memory=state.prediction_memory` from
-    `run_one_iteration.py` leaves the restore loading state that nothing
-    consumes: every core/ test still passes, every workflow test still passes,
-    and the carry silently stops at the process boundary — which is precisely
-    the pre-09a defect this commit exists to fix.
+    Deleting the prediction-memory forward from `run_one_iteration.py` leaves
+    the restore loading state that nothing consumes: every core/ test still
+    passes, every workflow test still passes, and the carry silently stops at
+    the process boundary — which is precisely the pre-09a defect 09a exists
+    to fix.
 
-    Asserted by parsing the call rather than scanning for a substring: a
-    substring can be satisfied by a comment (see ledger F-09a-14).
+    UPGRADED at Step 10 / P1 C5, same property, new transport shape. The
+    launcher used to unpack `RestoredState` into nine kwargs, one of which was
+    `restored_prediction_memory=state.prediction_memory`; it now forwards the
+    carrier itself. The hop is therefore followed to its CONSUMER instead of
+    to the signature — a strictly stronger statement than the one this class
+    made before, and one that survives the next transport change too.
+
+    Source parsing (never substring scanning — ledger F-09a-14) still guards
+    the launcher half, because "the launcher forwards it at all" is not
+    observable from inside the workflow.
     """
 
     def _run_workflow_keywords(self) -> dict[str, str]:
@@ -219,27 +227,53 @@ class TestTheChainSubprocessForwardsIt:
                 return {kw.arg: ast.unparse(kw.value) for kw in node.keywords if kw.arg}
         raise AssertionError("no run_workflow(...) call found in run_one_iteration.py")
 
-    def test_the_restored_memory_is_passed_to_run_workflow(self):
+    def test_the_restored_state_is_passed_to_run_workflow(self):
+        """The launcher half. The restored state must reach the workflow as
+        the WHOLE carrier — forwarding a reconstructed subset would drop
+        whatever resume learns to carry next, silently."""
         keywords = self._run_workflow_keywords()
-        assert keywords.get("restored_prediction_memory") == "state.prediction_memory"
+        assert keywords.get("restored_state") == "state"
 
-    def test_it_is_forwarded_beside_its_sibling(self):
-        """Anti-vacuity: proves the parse found the REAL call, by checking the
-        hop this one was modelled on is in the same dict."""
-        keywords = self._run_workflow_keywords()
-        assert (
-            keywords.get("restored_collapse_fingerprint_history")
-            == "state.collapse_fingerprint_history"
-        )
+    def test_the_carrier_declares_the_memory_and_its_sibling(self):
+        """Anti-vacuity: the carrier actually holds the value in question,
+        beside the hop this one was modelled on."""
+        import dataclasses
 
-    def test_run_workflow_accepts_the_keyword(self):
-        """The other half: a forwarded kwarg the callee does not declare is a
-        TypeError at runtime, not a silent no-op."""
+        names = {f.name for f in dataclasses.fields(RestoredState)}
+        assert "prediction_memory" in names
+        assert "collapse_fingerprint_history" in names
+
+    def test_run_workflow_accepts_the_carrier(self):
+        """A forwarded kwarg the callee does not declare is a TypeError at
+        runtime, not a silent no-op."""
         import inspect
 
         from workflows.model_exploration import run_workflow
 
-        assert "restored_prediction_memory" in inspect.signature(run_workflow).parameters
+        assert "restored_state" in inspect.signature(run_workflow).parameters
+
+    def test_the_memory_inside_the_carrier_reaches_the_chain_state(self):
+        """The hop that actually matters, followed to its consumer.
+
+        Under the old nine-kwarg shape this could only be asserted at the
+        signature. Now the workflow unpacks the carrier itself, so the carry
+        can be executed: a `RestoredState` carrying a distinctive memory must
+        produce a `ChainState` holding that same memory. Deleting the unpack
+        line, or unpacking the wrong field, turns this RED — which the source
+        parse above cannot see.
+        """
+        from core.chain_state import ChainState
+
+        memory = PredictionMemory(
+            prediction_outcomes_history={"confirmed": 7, "partial": 1, "refuted": 2},
+            cumulative_information_gain=3.5,
+        )
+        restored = RestoredState(prediction_memory=memory)
+
+        state = ChainState.from_restored(
+            restored_prediction_memory=restored.prediction_memory,
+        )
+        assert state.current_prediction_memory is memory
 
 
 class TestTheScopeStayedNarrow:

@@ -116,11 +116,17 @@ class TestChainCli:
 class TestRunWorkflowForwarding:
     def test_policy_and_typed_history_forwarded(self):
         src = LOCK_SITES["chain"].read_text()
-        call = re.search(r"results = run_workflow\((.*?)\n        \)", src, re.DOTALL).group(1)
+        # Step 10 / P1 C5 indented this call one level: it is now wrapped in
+        # `with bind_run_task_composition(...)`, so the closing paren sits at
+        # 12 spaces rather than 8.
+        call = re.search(r"results = run_workflow\((.*?)\n            \)", src, re.DOTALL).group(1)
         assert "enable_structured_health_feedback=args.enable_structured_health_feedback" in call
         assert "health_feedback_history_window_iterations=" in call
         assert "health_feedback_history_max_entries_per_model=" in call
-        assert "restored_collapse_fingerprint_history=state.collapse_fingerprint_history" in call
+        # The restored fingerprint history now travels inside the ONE
+        # `RestoredState` carrier (09.5a's C4b hand-off, closed by P1 C5)
+        # rather than as its own kwarg. Same value, same source object.
+        assert "restored_state=state" in call
 
 
 class TestManifestPolicyStamp:

@@ -33,10 +33,33 @@ class Phase1ReuseDecision:
 
 
 def validate_experiment_completeness(
-    record: dict[str, Any], *, configured_gate_ids: list[str]
+    record: dict[str, Any],
+    *,
+    configured_gate_ids: list[str],
+    declared_health_peek: list[int],
+    scalar_score_key: str = "denoising_score",
 ) -> list[str]:
+    """Check one experiment record for completeness.
+
+    Step 10 / P1 (S7). The two task-semantic values this needs are now
+    PARAMETERS supplied by the caller that knows the run, rather than things
+    generic campaign code rediscovers for itself:
+
+    Args:
+        record: the persisted experiment record.
+        configured_gate_ids: the gates this campaign configured.
+        declared_health_peek: the task's DECLARED health-peek file set — the
+            same declaration the blocking checks resolve. Previously pulled
+            ambiently from ``resolve_dataset_profile()`` inside this function,
+            which meant generic core reached for whichever profile happened to
+            be resolvable at call time.
+        scalar_score_key: the record key holding the aggregate scalar. Its
+            DEFAULT is the frozen ``denoising_score`` name (D1) and the name
+            is deliberately NOT renamed; parameterizing it is what stops this
+            module from asserting that every task's scalar is called that.
+    """
     errors: list[str] = []
-    if record.get("denoising_score") is None and not record.get("invalid_score_reason"):
+    if record.get(scalar_score_key) is None and not record.get("invalid_score_reason"):
         errors.append("missing scalar score and invalid_score_reason")
     if record.get("file_vector") is None and not record.get("file_vector_absence_reason"):
         errors.append("missing file_vector and file_vector_absence_reason")
@@ -45,12 +68,6 @@ def validate_experiment_completeness(
     missing = [gate_id for gate_id in configured_gate_ids if gate_id not in by_name]
     if missing:
         errors.append(f"missing HealthGate results: {missing}")
-    # Imported here, and read at CALL time, so a bound task is honoured and
-    # nothing freezes a topology at import. Local import mirrors the
-    # existing convention in `validate_phase1_baseline` below.
-    from execute_tools.dataset_config import resolve_dataset_profile
-
-    declared_health_peek = resolve_dataset_profile().health_peek_files
     for gate_id, result in by_name.items():
         status = result.get("execution_status")
         if status not in {"passed", "failed", "not_run", "error"}:
@@ -93,9 +110,23 @@ def validate_phase1_baseline(
     expected_training_files: list[str],
     configured_gate_ids: list[str],
     expected_output_paths: list[str],
+    declared_health_peek: list[int],
+    full_scope_num_files: int,
     expected_resolved_data_scope: list[int] | None = None,
+    scalar_score_key: str = "denoising_score",
 ) -> ValidationReport:
-    errors = validate_experiment_completeness(record, configured_gate_ids=configured_gate_ids)
+    """Validate a reusable Phase-1 baseline record.
+
+    Step 10 / P1 (S7): ``declared_health_peek`` and ``full_scope_num_files``
+    are supplied by the caller — the campaign script, which resolves the run's
+    profile already — instead of being imported from a task singleton here.
+    """
+    errors = validate_experiment_completeness(
+        record,
+        configured_gate_ids=configured_gate_ids,
+        declared_health_peek=declared_health_peek,
+        scalar_score_key=scalar_score_key,
+    )
     if record.get("campaign_run_name") != campaign_name:
         errors.append("campaign_run_name mismatch")
     # DS6d — functional campaign identity: reuse never crosses a DataScope
@@ -103,11 +134,13 @@ def validate_phase1_baseline(
     # necessarily produced under the full scope. None skips the check
     # (legacy callers).
     if expected_resolved_data_scope is not None:
-        from execute_tools.dataset_config import TIDMAD
-
         record_scope = record.get("resolved_data_scope")
+        # A record with no stamp predates the feature and was necessarily
+        # produced under the FULL scope — of the run's own dataset, which the
+        # caller declares. Generic campaign code no longer imports a task
+        # singleton to answer "how many files does a full scope have".
         effective_scope = (
-            list(range(TIDMAD.num_files)) if record_scope is None else sorted(record_scope)
+            list(range(full_scope_num_files)) if record_scope is None else sorted(record_scope)
         )
         if effective_scope != sorted(expected_resolved_data_scope):
             errors.append("data_scope mismatch")
@@ -143,7 +176,10 @@ def decide_phase1_reuse(
     expected_training_files: list[str],
     configured_gate_ids: list[str],
     expected_output_paths: list[str],
+    declared_health_peek: list[int],
+    full_scope_num_files: int,
     expected_resolved_data_scope: list[int] | None = None,
+    scalar_score_key: str = "denoising_score",
 ) -> Phase1ReuseDecision:
     """Choose training, reuse, or inference regeneration without side effects."""
     if record is None:
@@ -156,7 +192,10 @@ def decide_phase1_reuse(
         expected_training_files=expected_training_files,
         configured_gate_ids=configured_gate_ids,
         expected_output_paths=expected_output_paths,
+        declared_health_peek=declared_health_peek,
+        full_scope_num_files=full_scope_num_files,
         expected_resolved_data_scope=expected_resolved_data_scope,
+        scalar_score_key=scalar_score_key,
     )
     if not report.valid:
         return Phase1ReuseDecision(action="train", validation=report)

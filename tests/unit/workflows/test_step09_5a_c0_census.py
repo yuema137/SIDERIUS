@@ -47,10 +47,25 @@ CLASS_A_AUTHORITIES = frozenset(
         "file_order_override",
         "enable_structured_health_feedback",
         "llm_config",
+        # Step 10 / P1 C5: the run's TASK composition — the most literal
+        # class-A value there is (an authority settled once, at the
+        # composition edge, whose identity does not change for the run).
+        "task_composition",
     }
 )
 
-CLASS_B_CHAIN_STATE_SEEDS = frozenset(
+#: Step 10 / P1 C5 closes 09.5a's own C4b hand-off: the NINE restored seeds
+#: are ONE typed parameter. The class does not disappear — the values still
+#: seed `ChainState` and are still class B — it is the TRANSPORT that
+#: collapsed. `RestoredState` is resume's own type and is allowed across the
+#: launcher edge (09.5a §16); `ChainState` still never crosses one.
+CLASS_B_CHAIN_STATE_SEEDS = frozenset({"restored_state"})
+
+#: The nine kwargs this replaced, kept so the census can prove they are GONE
+#: rather than merely absent from the class table. Re-adding any one of them
+#: is the first step back toward a signature that grows with every value
+#: resume learns to carry.
+RETIRED_RESTORED_KWARGS = frozenset(
     {
         "restored_runtime_vocab",
         "accumulated_key_findings",
@@ -118,6 +133,10 @@ class TestParameterOwnershipCensus:
         """A + B + C + D + F == len(signature), with C the complement.
 
         MEASURED at the design anchor: 12 + 9 + 72 + 3 + 3 = 99.
+        After 09.5a C3 the 72 transit values became one `launch` carrier;
+        after Step 10 / P1 C5 the 9 restored seeds became one `restored_state`
+        and one `task_composition` authority joined class A: 13 + 1 + 1 + 3 +
+        3 = 21.
         """
         params = _run_workflow_parameters()
         class_c = [p for p in params if p not in _EXPLICIT]
@@ -141,14 +160,34 @@ class TestParameterOwnershipCensus:
         capability references, 3 DS7 no-ops and `launch` — 28. Deleting the
         guard instead of re-deriving it is how a partition check becomes
         decoration.
+
+        RE-DERIVED at Step 10 / P1 C5, following that instruction rather than
+        deleting the guard: 13 class-A authorities (the original 12 plus
+        `task_composition`), 1 restored-state carrier, 3 capability
+        references, 3 DS7 no-ops and `launch` — **21**, the count the P1
+        design freezes.
         """
         params = _run_workflow_parameters()
-        assert len(params) >= 27, (
-            f"run_workflow has only {len(params)} parameters — if a later "
-            "migration legitimately shrank it further, re-derive this floor "
-            "from the new signature rather than deleting the guard."
+        assert len(params) == 21, (
+            f"run_workflow has {len(params)} parameters, not the 21 the Step-10 "
+            "P1 design freezes. If a later migration legitimately changes it, "
+            "re-derive this count from the new signature rather than deleting "
+            "the guard."
         )
         assert CLASS_A_AUTHORITIES and CLASS_B_CHAIN_STATE_SEEDS and CLASS_D_CAPABILITIES
+
+    def test_the_nine_restored_kwargs_really_left_the_signature(self):
+        """C5's whole point, stated the way C3's transit check is stated.
+
+        Defect this catches: a restored value quietly re-added as its own
+        parameter — the shape that grew by one every time resume learned to
+        carry something new."""
+        params = set(_run_workflow_parameters())
+        leaked = sorted(RETIRED_RESTORED_KWARGS & params)
+        assert not leaked, (
+            f"restored chain state is back on the signature as individual "
+            f"parameters: {leaked}. It belongs inside RestoredState."
+        )
 
     def test_the_transit_configuration_left_the_signature(self):
         """C3's whole point: the 72 pass-through values are ONE carrier now.

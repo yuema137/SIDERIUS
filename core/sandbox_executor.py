@@ -836,6 +836,32 @@ def _with_gpu_evidence(result: dict, observer: Any) -> dict:
     return result
 
 
+def _task_data_path_argv() -> list[str]:
+    """The task-binding transport fragment — empty unless the run is BOUND.
+
+    Step 10 / P1 C3. ``transport_argv`` and the three children's parsers were
+    built together and then joined by nothing: the flag was parsed by every
+    child and emitted by nobody, so every child took its regime-A branch. This
+    is the emitter.
+
+    The condition is :func:`active_task_data_path`, deliberately NOT
+    ``resolve_bound_task_data_path``. The latter falls back to the
+    compatibility implementation when nothing is bound, so using it here would
+    put ``--task_data_path_id <compatibility id>`` into the argv of every
+    legacy child — changing a command line that predates task binding, for
+    runs that never composed anything. An un-composed run emits nothing and
+    its children keep resolving through ``nullcontext``.
+
+    The fragment is built from the RESOLVED implementation, so the id can only
+    ever be the bound binding's own declared identity (the ``transport_argv``
+    signature enforces that by taking the implementation, not a string).
+    """
+    from execute_tools.task_data_path import active_task_data_path, transport_argv
+
+    bound = active_task_data_path()
+    return transport_argv(bound) if bound is not None else []
+
+
 def _run_observed_subprocess(
     cmd: list[str],
     *,
@@ -1391,6 +1417,7 @@ class TidmadSandbox:
                 self.base_dir,
                 "--file_index",
                 str(self.file_index),
+                *_task_data_path_argv(),
             ]
 
             # SampleSet boundary contract — this is ONE of exactly TWO
@@ -1731,6 +1758,7 @@ class TidmadSandbox:
             model_type,
             "--dataset_profile_json",
             self._write_dataset_profile_config(exp_id),
+            *_task_data_path_argv(),
             "--model_cfg",
             m_path,
             "--loss_cfg",
@@ -2047,6 +2075,7 @@ class TidmadSandbox:
                     model_type,
                     "--dataset_profile_json",
                     self._write_dataset_profile_config(exp_id),
+                    *_task_data_path_argv(),
                     "--exp_id",
                     exp_id,
                     "--run_name",

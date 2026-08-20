@@ -23,15 +23,24 @@ class TestRunWorkflowSignature:
 
         `enable_structured_health_feedback` is a LOCKED RUN INVARIANT and stays
         an explicit authority on the signature; the two retention bounds are
-        transit configuration and moved to the launch carrier; the restored
-        fingerprint history is a chain-state seed and stays explicit until C4.
-        The defaults are unchanged — that is what this test is for.
+        transit configuration and moved to the launch carrier.
+
+        The restored fingerprint history was "a chain-state seed that stays
+        explicit until C4" — Step 10 / P1 C5 is where it moved, into the ONE
+        `restored_state` carrier (09.5a's C4b hand-off). The assertion follows
+        it there rather than being deleted: what this test is for is that the
+        DEFAULTS are unchanged, and an absent restored state must still mean
+        an empty history exactly as `None` did.
         """
+        from core.resume import RestoredState
         from workflows.run_config import WorkflowLaunchConfig
 
         sig = inspect.signature(run_workflow)
         assert sig.parameters["enable_structured_health_feedback"].default is False
-        assert sig.parameters["restored_collapse_fingerprint_history"].default is None
+        assert sig.parameters["restored_state"].default is None
+        # Cold start and "restored nothing" must remain indistinguishable to
+        # every consumer: both are falsy, which is what the consumers test.
+        assert RestoredState().collapse_fingerprint_history == {}
 
         launch = WorkflowLaunchConfig()
         assert launch.health_feedback_history_window_iterations == 3

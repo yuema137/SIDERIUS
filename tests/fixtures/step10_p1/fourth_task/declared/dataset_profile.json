@@ -1,0 +1,22 @@
+{
+  "dataset": {
+    "psd_segment_length": 512,
+    "segments_per_file": 16,
+    "num_files": 5,
+    "sampling_frequency": 2048.0,
+    "training_file_pattern": "spectro_train_{file_index:04d}.h5",
+    "validation_file_pattern": "spectro_val_{file_index:04d}.h5"
+  },
+  "channels": {
+    "input_channel": "spectrogram",
+    "target_channel": "band_mask"
+  },
+  "encoding": {
+    "storage_dtype": "int8",
+    "compute_dtype": "int16",
+    "value_offset": 128,
+    "num_classes": 256
+  },
+  "anchor_selection_files": [0, 4],
+  "health_peek_files": [2]
+}

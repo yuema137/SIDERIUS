@@ -132,8 +132,15 @@ def _campaign_enforces(profile, files_requested: list[int]) -> bool:
         ],
     }
     with bind_dataset_profile(profile):
+        # Step 10 / P1 (S7): the declared peek set is the caller's explicit
+        # argument now. It comes from the SAME contrast profile this case
+        # binds, so what the test asserts is unchanged — the declaration
+        # drives the trigger — while the validator no longer reaches for a
+        # profile of its own.
         errors = validate_experiment_completeness(
-            record, configured_gate_ids=["output_diversity_blocking"]
+            record,
+            configured_gate_ids=["output_diversity_blocking"],
+            declared_health_peek=list(profile.health_peek_files),
         )
     return any(_PER_FILE_ERROR_MARKER in error for error in errors)
 

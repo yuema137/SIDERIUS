@@ -61,6 +61,7 @@ from execute_tools.health_checks.launch_policy import (
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
 from workflows.run_config import WorkflowLaunchConfig
+from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
@@ -1053,6 +1054,23 @@ def build_parser() -> argparse.ArgumentParser:
             "None preserves the shipped default configuration."
         ),
     )
+    # --- Run-scoped task composition (Step 10 P1) ---
+    parser.add_argument(
+        "--task_composition",
+        type=str,
+        default=None,
+        help=(
+            "Path to a YAML task-composition manifest. Omitted = the legacy "
+            "un-composed run, byte-identical to its pre-Step-10 behaviour. "
+            "Supplied, it binds this run's task data path, dataset profile, "
+            "metric, Health family, interpretation blocks and task "
+            "description/forward contract EXPLICITLY, and every unresolvable "
+            "reference fails closed before any LLM call. See "
+            "docs/design/generic_framework_upgrade/"
+            "step_10_orchestration_task_binding/"
+            "pr_10_p1_run_scoped_task_composition.md."
+        ),
+    )
     # --- DataScope + HealthGate subsystem (DS6c) ---
     parser.add_argument(
         "--data_scope",
@@ -1943,99 +1961,119 @@ def main():
         # name a task resolver itself.
         from execute_tools.data_paths import resolve_tidmad_measurement_capability
 
-        results = run_workflow(
-            launch=WorkflowLaunchConfig(
-                source_paths=resolved_paths,
-                require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
-                healthgate_mode=args.healthgate_mode,
-                result_authority=args.result_authority,
-                max_iterations=1,
-                start_iteration=args.start_iteration,
-                max_rounds=args.max_rounds,
-                max_proposal_attempts=args.max_proposal_attempts,
-                is_trial=args.is_trial,
-                trial_portion=args.trial_portion,
-                train_portion=args.train_portion,
-                eval_portion=args.eval_portion,
-                sampling_seed=args.sampling_seed,
-                formal_strategy=args.formal_strategy,
-                formal_portion=args.formal_portion,
-                formal_train_portion=args.formal_train_portion,
-                formal_eval_portion=args.formal_eval_portion,
-                force_formal_round=args.force_formal_round,
-                formal_round_strategy=args.formal_round_strategy,
-                degenerate_penalty_score=args.degenerate_penalty_score,
-                cleanup_denoised=args.cleanup_denoised,
-                max_epochs=args.max_epochs,
-                validation_max_portion=args.validation_max_portion,
-                validation_max_train_samples=args.validation_max_train_samples,
-                validation_max_samples=args.validation_max_samples,
-                validation_max_phase_seconds=args.validation_max_phase_seconds,
-                skip_formal_min_delta=args.skip_formal_min_delta,
-                bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
-                trial_time_budget_minutes=args.trial_time_budget_minutes,
-                formal_time_budget_minutes=args.formal_time_budget_minutes,
-                data_dir=args.data_dir,
-                gpu_admission_measurement_source=args.gpu_admission_measurement_source,
-                gpu_admission_enforcement=args.gpu_admission_enforcement,
-                gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
-                trial_vram_budget_gb=args.trial_vram_budget_gb,
-                formal_vram_budget_gb=args.formal_vram_budget_gb,
-                attempts_per_round=args.attempts_per_round,
-                attempts_per_formal_round=args.attempts_per_formal_round,
-                max_fail_rounds=args.max_fail_rounds,
-                max_steps_per_attempt=args.max_steps_per_attempt or None,
-                min_formal_batch_size=args.min_formal_batch_size or None,
-                allow_extreme_steps=args.allow_extreme_steps,
-                runtime_watchdog_enabled=args.runtime_watchdog,
-                runtime_safety_factor=args.runtime_safety_factor,
-                runtime_trial_safety_factor=args.runtime_trial_safety_factor,
-                runtime_formal_safety_factor=args.runtime_formal_safety_factor,
-                runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
-                runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
-                human_advice_interpret=args.human_advice_interpret,
-                human_advice_propose=args.human_advice_propose,
-                human_advice_implement=args.human_advice_implement,
-                human_advice_validate=args.human_advice_validate,
-                human_advice_tune=args.human_advice_tune,
-                human_advice_mindset=args.human_advice_mindset,
-                plan_overrides=args.plan_overrides,
-                exploration_mode=args.exploration_mode,
-                minimum_boldness=args.minimum_boldness,
-                max_impl_attempts=args.max_impl_attempts,
-                debug_dump_prompts=args.debug_dump_prompts,
-                validation_fixed_candidate_plan=fixed_candidate_plan,
-                enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
-                health_feedback_history_window_iterations=args.health_feedback_history_window_iterations,
-                health_feedback_history_max_entries_per_model=args.health_feedback_history_max_entries_per_model,
-                lit_review_enabled=ml_lit_review_enabled_resolved,
-                lit_review_config_path=args.ml_lit_review_config,
-            ),
-            measurement_capability=resolve_tidmad_measurement_capability(),
-            workspace=args.workspace,
-            run_name=run_name,
-            chain_run_name=chain_run_name,
-            run_id=run_id,
-            llm_config=llm_config,
-            health_checks_config=args.health_checks_config,
-            data_scope=args.data_scope,
-            health_gate_enabled=args.health_gate_enabled,
-            health_gate_files=args.health_gate_files,
-            restored_runtime_vocab=state.runtime_vocab,
-            accumulated_key_findings=state.accumulated_key_findings,
-            restored_model_knowledge_cache=state.model_knowledge_cache,
-            accumulated_physical_rejections=state.accumulated_physical_rejections,
-            accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
-            restored_previous_proposal=state.previous_proposal_data,
-            restored_chain_incumbent_score=state.chain_best_valid_formal_score,
-            order_strategy_override=args.order_strategy_override,
-            file_order_override=args.file_order_override,
-            enable_structured_health_feedback=args.enable_structured_health_feedback,
-            restored_collapse_fingerprint_history=state.collapse_fingerprint_history,
-            restored_prediction_memory=state.prediction_memory,
-            bridge_factory=bridge_factory,
-            sandbox_factory=sandbox_factory,
+        # Step 10 / P1 — the composition EDGE.
+        #
+        # Resolved here, before the workflow, for the same reason the
+        # measurement capability is: the launcher is the layer that knows the
+        # task. The workflow receives the resolved VALUE and never a path, so
+        # it performs no YAML or plugin I/O and rediscovers nothing.
+        #
+        # The binding is entered HERE too, not inside the workflow, so the
+        # binding's lifetime is the composition's lifetime and the region
+        # covers the workflow's startup pre-flight as well as its iteration
+        # loop — scope resolution and Health materialisation both read the
+        # run's profile before iteration 1. `run_workflow` refuses a
+        # composition whose authorities are not active, so the split cannot
+        # silently produce a half-composed run.
+        #
+        # `--task_composition` omitted ⇒ `None` ⇒ the context manager is a
+        # no-op and the run is byte-identical to its pre-Step-10 behaviour.
+        run_composition = (
+            compose_run_task_bindings(args.task_composition) if args.task_composition else None
         )
+        with bind_run_task_composition(run_composition):
+            results = run_workflow(
+                launch=WorkflowLaunchConfig(
+                    source_paths=resolved_paths,
+                    require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
+                    healthgate_mode=args.healthgate_mode,
+                    result_authority=args.result_authority,
+                    max_iterations=1,
+                    start_iteration=args.start_iteration,
+                    max_rounds=args.max_rounds,
+                    max_proposal_attempts=args.max_proposal_attempts,
+                    is_trial=args.is_trial,
+                    trial_portion=args.trial_portion,
+                    train_portion=args.train_portion,
+                    eval_portion=args.eval_portion,
+                    sampling_seed=args.sampling_seed,
+                    formal_strategy=args.formal_strategy,
+                    formal_portion=args.formal_portion,
+                    formal_train_portion=args.formal_train_portion,
+                    formal_eval_portion=args.formal_eval_portion,
+                    force_formal_round=args.force_formal_round,
+                    formal_round_strategy=args.formal_round_strategy,
+                    degenerate_penalty_score=args.degenerate_penalty_score,
+                    cleanup_denoised=args.cleanup_denoised,
+                    max_epochs=args.max_epochs,
+                    validation_max_portion=args.validation_max_portion,
+                    validation_max_train_samples=args.validation_max_train_samples,
+                    validation_max_samples=args.validation_max_samples,
+                    validation_max_phase_seconds=args.validation_max_phase_seconds,
+                    skip_formal_min_delta=args.skip_formal_min_delta,
+                    bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
+                    trial_time_budget_minutes=args.trial_time_budget_minutes,
+                    formal_time_budget_minutes=args.formal_time_budget_minutes,
+                    data_dir=args.data_dir,
+                    gpu_admission_measurement_source=args.gpu_admission_measurement_source,
+                    gpu_admission_enforcement=args.gpu_admission_enforcement,
+                    gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
+                    trial_vram_budget_gb=args.trial_vram_budget_gb,
+                    formal_vram_budget_gb=args.formal_vram_budget_gb,
+                    attempts_per_round=args.attempts_per_round,
+                    attempts_per_formal_round=args.attempts_per_formal_round,
+                    max_fail_rounds=args.max_fail_rounds,
+                    max_steps_per_attempt=args.max_steps_per_attempt or None,
+                    min_formal_batch_size=args.min_formal_batch_size or None,
+                    allow_extreme_steps=args.allow_extreme_steps,
+                    runtime_watchdog_enabled=args.runtime_watchdog,
+                    runtime_safety_factor=args.runtime_safety_factor,
+                    runtime_trial_safety_factor=args.runtime_trial_safety_factor,
+                    runtime_formal_safety_factor=args.runtime_formal_safety_factor,
+                    runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
+                    runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
+                    human_advice_interpret=args.human_advice_interpret,
+                    human_advice_propose=args.human_advice_propose,
+                    human_advice_implement=args.human_advice_implement,
+                    human_advice_validate=args.human_advice_validate,
+                    human_advice_tune=args.human_advice_tune,
+                    human_advice_mindset=args.human_advice_mindset,
+                    plan_overrides=args.plan_overrides,
+                    exploration_mode=args.exploration_mode,
+                    minimum_boldness=args.minimum_boldness,
+                    max_impl_attempts=args.max_impl_attempts,
+                    debug_dump_prompts=args.debug_dump_prompts,
+                    validation_fixed_candidate_plan=fixed_candidate_plan,
+                    enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
+                    health_feedback_history_window_iterations=args.health_feedback_history_window_iterations,
+                    health_feedback_history_max_entries_per_model=args.health_feedback_history_max_entries_per_model,
+                    lit_review_enabled=ml_lit_review_enabled_resolved,
+                    lit_review_config_path=args.ml_lit_review_config,
+                ),
+                measurement_capability=resolve_tidmad_measurement_capability(),
+                workspace=args.workspace,
+                run_name=run_name,
+                chain_run_name=chain_run_name,
+                run_id=run_id,
+                llm_config=llm_config,
+                health_checks_config=args.health_checks_config,
+                data_scope=args.data_scope,
+                health_gate_enabled=args.health_gate_enabled,
+                health_gate_files=args.health_gate_files,
+                # Step 10 / P1 C5 — Step 09.5a's C4b hand-off, closed. The nine
+                # unpacked kwargs are ONE typed parameter: `RestoredState` is
+                # resume's own type and crosses the launcher edge by design
+                # (09.5a §16), while `ChainState` still never crosses a process
+                # boundary. The workflow unpacks it once, applying the same rules
+                # this call site used to apply here.
+                restored_state=state,
+                order_strategy_override=args.order_strategy_override,
+                file_order_override=args.file_order_override,
+                enable_structured_health_feedback=args.enable_structured_health_feedback,
+                bridge_factory=bridge_factory,
+                sandbox_factory=sandbox_factory,
+                task_composition=run_composition,
+            )
     except LLMBridgeContextError as e:
         # §1.4.2 fail-fast contract. Telemetry-internal corruption (run_id
         # mismatch, backwards iter) means the audit log can no longer be

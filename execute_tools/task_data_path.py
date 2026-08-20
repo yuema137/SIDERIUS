@@ -336,6 +336,23 @@ def resolve_bound_task_data_path() -> TaskDataPath:
     return resolve_task_data_path(None)
 
 
+def active_task_data_path() -> TaskDataPath | None:
+    """The bound implementation, or ``None`` — WITHOUT the legacy fallback.
+
+    The distinction from :func:`resolve_bound_task_data_path` is the whole
+    point, and it is what the subprocess transport needs (Step 10 / P1 C3).
+    A caller asking *"which implementation should I use?"* wants the
+    fallback. A caller asking *"is this run explicitly bound?"* must not get
+    it: emitting the transport flag on the strength of a fallback would put
+    ``--task_data_path_id <compatibility id>`` into every legacy child's
+    argv, changing the un-composed command line that predates task binding.
+
+    Returns:
+        the bound implementation, or ``None`` when the run is un-composed.
+    """
+    return _ACTIVE_TASK_DATA_PATH.get()
+
+
 #: Internal subprocess transport flag. NOT an operator surface: it is emitted
 #: by :func:`transport_argv` from an already-resolved binding, consumed by the
 #: child to look up the same registered implementation, and forbidden as an

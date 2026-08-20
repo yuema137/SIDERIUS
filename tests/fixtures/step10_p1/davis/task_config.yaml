@@ -1,0 +1,10 @@
+task_description: |
+  DAVIS 2017 future-frame prediction: given 8 context RGB frames of a clip,
+  predict the next 4. The metric is the global mean squared error over
+  clips x C x T x H x W, and LOWER is better.
+forward_contract:
+  input_shape: "[B, 3, 8, H, W] float"
+  input_description: "eight context frames"
+  output_shape: "[B, 3, 4, H, W] float"
+  output_description: "four predicted future frames"
+  task_type: "dense regression"

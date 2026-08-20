@@ -68,6 +68,13 @@ def _decision(record: dict | None, outputs: list[str]):
         expected_training_files=TRAINING_FILES,
         configured_gate_ids=GATE_IDS,
         expected_output_paths=outputs,
+        # Step 10 / P1 (S7): the caller declares the task's peek set and full
+        # scope. Previously these were pulled ambiently inside the validator,
+        # so these tests silently depended on whichever dataset profile
+        # happened to be resolvable — passing them explicitly is what makes
+        # the fixture's `_DEFAULT_HEALTH_PEEK` the actual contract under test.
+        declared_health_peek=list(_DEFAULT_HEALTH_PEEK),
+        full_scope_num_files=20,
     )
 
 
@@ -129,7 +136,11 @@ def test_completeness_rejects_non_continue_observe_action():
             {**_gate_result(GATE_IDS[0]), "resolved_action": "invalidate_round"}
         ],
     }
-    errors = validate_experiment_completeness(record, configured_gate_ids=[GATE_IDS[0]])
+    errors = validate_experiment_completeness(
+        record,
+        configured_gate_ids=[GATE_IDS[0]],
+        declared_health_peek=list(_DEFAULT_HEALTH_PEEK),
+    )
     assert errors == [f"gate {GATE_IDS[0]}: observe action is not continue"]
 
 
@@ -150,6 +161,10 @@ def _scoped_decision(record, outputs, expected_scope):
         expected_training_files=TRAINING_FILES,
         configured_gate_ids=GATE_IDS,
         expected_output_paths=outputs,
+        declared_health_peek=list(_DEFAULT_HEALTH_PEEK),
+        # The full scope this fixture's unstamped-record cases mean; it used
+        # to come from the TIDMAD singleton imported inside the validator.
+        full_scope_num_files=len(_FULL_SCOPE),
         expected_resolved_data_scope=expected_scope,
     )
 
@@ -262,7 +277,11 @@ def _peek_record(**kwargs) -> dict:
 
 
 def _errors(record: dict) -> list[str]:
-    return validate_experiment_completeness(record, configured_gate_ids=[GATE_IDS[0]])
+    return validate_experiment_completeness(
+        record,
+        configured_gate_ids=[GATE_IDS[0]],
+        declared_health_peek=list(_DEFAULT_HEALTH_PEEK),
+    )
 
 
 def _complete_per_file(indices: list[int]) -> dict:

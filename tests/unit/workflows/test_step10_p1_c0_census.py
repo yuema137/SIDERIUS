@@ -1,0 +1,605 @@
+"""Step 10 / P1 C0 — the pre-implementation census of the composition surface.
+
+Every later P1 commit is measured against this module. It records, executably,
+the state of the five implicit TIDMAD defaults (P1 design §2.1) and of the
+subprocess transport BEFORE any composition exists, so that "the un-composed
+path is unchanged" is a comparison rather than an assertion.
+
+Defects only this module catches:
+
+* **census A — the five default mechanisms.** Each family resolves TIDMAD
+  today through a *specific* mechanism (a registry compatibility id, an
+  ``or`` fallback, an omitted keyword, an unconditional derivation, a
+  default-path constant). C1/C2 make each explicit on a COMPOSED run while
+  leaving the un-composed mechanism intact. If a migration silently changes
+  which mechanism the legacy path uses, no behavioural test fails — both the
+  old and the new mechanism produce TIDMAD — but the bounded legacy adapter
+  the design promises Step 12 would already be gone.
+
+* **census B — transport non-emission.** ``transport_argv``
+  (``execute_tools/task_data_path.py``) has zero production callers at C0,
+  so every child takes its regime-A branch. C3 gives it its first emitters.
+  Pinning zero here is what makes C3's "exactly these sites" meaningful; a
+  census written only after the change cannot distinguish a new emitter from
+  one that was always there.
+
+* **census C — legacy child argv.** The three sandbox children receive no
+  ``--task_data_path_id`` today. This is captured as the real argv vector,
+  not as source text, because C3 must prove the un-composed vectors are
+  byte-identical afterwards.
+
+* **census D — the legacy lock key set.** ``run_invariants_lock.json``'s
+  serialized key set is pinned so §5.9's "the composition key is ABSENT for
+  an un-composed run, never ``null``" is checkable. A new optional Pydantic
+  field would otherwise serialize as ``null`` and change the legacy bytes,
+  which is exactly the failure the design forbids.
+
+**Planted-offender evidence (P1 design C0, recorded 2026-08-20).** Census B
+was proven load-bearing by adding ``transport_argv(impl)`` to the training
+argv in ``core/sandbox_executor.py``: census B and census C both went RED
+(B reported 1 emitter where 0 were expected; C reported the flag in the
+training vector). The plant was reverted; both are green here.
+"""
+
+from __future__ import annotations
+
+import ast
+import inspect
+import json
+import os
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+#: The repository's own production directory set (the definition the Step-10
+#: parent census uses, §3.8), so this census and the parent's speak about the
+#: same tree.
+PRODUCTION_DIRS = (
+    "nodes",
+    "agent",
+    "core",
+    "execute_tools",
+    "ml_models",
+    "workflows",
+    "scripts",
+    "dashboard",
+    "sdsc_submission_scripts",
+)
+
+
+def _production_py_files() -> list[Path]:
+    files: list[Path] = []
+    for rel in PRODUCTION_DIRS:
+        root = REPO_ROOT / rel
+        if root.is_dir():
+            files.extend(p for p in root.rglob("*.py") if "__pycache__" not in p.parts)
+    return sorted(files)
+
+
+# ---------------------------------------------------------------------------
+# Census A — the five implicit defaults, one mechanism each
+# ---------------------------------------------------------------------------
+
+
+class TestCensusAFiveDefaultMechanisms:
+    """P1 design §2.1, one test per family. These pin the UN-COMPOSED
+    mechanism; they must still hold at C6, because the legacy path is what
+    P1 preserves and Step 12 later removes."""
+
+    def test_default_1_task_data_path_resolves_the_compatibility_id_when_unbound(self):
+        """Registration is an IMPORT side-effect of the implementation module
+        (``tidmad_data_path.py`` ends in ``register_task_data_path(...)``), and
+        the compatibility id is what an absent binding resolves to. Both halves
+        are the mechanism: a composition registers its own plugin the same way,
+        so the fact that no central table is consulted is the property."""
+        import execute_tools.tidmad_data_path  # registers on import
+        from execute_tools.task_data_path import (
+            TIDMAD_COMPATIBILITY_ID,
+            registered_task_data_path_ids,
+            resolve_task_data_path,
+        )
+
+        assert TIDMAD_COMPATIBILITY_ID in registered_task_data_path_ids()
+        impl = resolve_task_data_path(None)
+        assert impl.task_data_path_id == TIDMAD_COMPATIBILITY_ID
+
+    def test_default_2_dataset_profile_falls_back_to_the_shipped_tidmad_profile(self):
+        from execute_tools.dataset_config import TIDMAD_PROFILE, resolve_dataset_profile
+
+        assert resolve_dataset_profile() is TIDMAD_PROFILE
+
+    def test_default_3_run_invariants_omits_the_task_health_binding_keyword(self):
+        """``materialize_effective_config`` HAS the parameter (08b) and
+        ``build_run_invariants`` does not pass it, so the run resolves
+        ``LEGACY_OMITTED``. C2 makes it a pass-through; the un-composed call
+        must keep omitting it."""
+        import core.run_invariants as ri
+        from execute_tools.health_checks.config import materialize_effective_config
+
+        assert "task_health_binding" in inspect.signature(materialize_effective_config).parameters
+
+        tree = ast.parse(inspect.getsource(ri.build_run_invariants))
+        calls = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "materialize_effective_config"
+        ]
+        assert len(calls) == 1, "one materialization call site expected"
+        assert "task_health_binding" not in {kw.arg for kw in calls[0].keywords}
+
+    def test_default_4_the_tuner_has_exactly_one_metric_acquisition_site(self):
+        """ONE acquisition, and the legacy derivation is its FALLBACK.
+
+        At C0 this was a bare `derive_tidmad_metric(...)` call. C2 turned it
+        into `resolve_bound_run_metric() or derive_tidmad_metric(...)` — the
+        shape asserted here — which is the whole of P1's metric change.
+
+        Two things this catches that no behavioural test does. A SECOND
+        acquisition site: the run's metric identity, direction and acceptance
+        contract would then have two sources that agree until the day they do
+        not. And the fallback being dropped or reordered: putting the
+        derivation first would make every composed run execute TIDMAD's
+        arithmetic while the composed metric sat unused, and an un-composed
+        TIDMAD run — the only kind the suite exercises end to end — would look
+        perfectly healthy.
+        """
+        source = (
+            REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "ml_hyperparameter_tune_agent.py"
+        ).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        assignments = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign | ast.Assign)
+            and any(
+                isinstance(t, ast.Name) and t.id == "run_metric"
+                for t in ([node.target] if isinstance(node, ast.AnnAssign) else list(node.targets))
+            )
+        ]
+        assert len(assignments) == 1, "exactly one run-scoped metric acquisition expected"
+        value = assignments[0].value
+        assert isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or), (
+            "the acquisition must be `bound or legacy-derivation`"
+        )
+        first, second = value.values
+        assert isinstance(first, ast.Call) and isinstance(first.func, ast.Name)
+        assert first.func.id == "resolve_bound_run_metric", (
+            "the BOUND metric must be consulted first, or a composed run would "
+            "execute the legacy derivation"
+        )
+        assert isinstance(second, ast.Call) and isinstance(second.func, ast.Name)
+        assert second.func.id == "derive_tidmad_metric", (
+            "the legacy derivation must remain the un-composed fallback"
+        )
+
+    def test_default_5_both_interpretation_callers_pass_no_path(self):
+        """Zero-arg ⇒ ``LEGACY_DEFAULT_TASK_INTERPRETATION_CONFIG``. The
+        workflow caller becomes composition-aware in C2; the standalone node
+        CLI deliberately stays legacy (Q-P1-1)."""
+        expected = {
+            "workflows/model_exploration.py": 1,
+            "nodes/result_interpretation_agent/result_interpretation_agent.py": 1,
+        }
+        found: dict[str, int] = {}
+        for rel in expected:
+            tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))
+            zero_arg = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "load_interpretation_task_blocks"
+                and not node.args
+                and not node.keywords
+            ]
+            found[rel] = len(zero_arg)
+        assert found == expected
+
+
+# ---------------------------------------------------------------------------
+# Census B — transport_argv has no production emitter at C0
+# ---------------------------------------------------------------------------
+
+
+class TestCensusBTransportEmissionSites:
+    def test_transport_argv_is_called_from_exactly_one_production_module(self):
+        """At C0 this pinned ZERO emitters: the parent end was built, the
+        child end was built and waiting, and nothing joined them (parent
+        design §3.8). C3 joined them, and the census changed in the same
+        commit as the behaviour — which is what makes the number evidence
+        rather than decoration.
+
+        What it pins now is EXACTLY ONE emitting module. A second emitter
+        elsewhere would mean two answers to "which binding does this child
+        get", reachable from different call paths, agreeing until they do
+        not — and no behavioural test would see it, because each one alone
+        produces a correct-looking argv."""
+        offenders: dict[str, int] = {}
+        for path in _production_py_files():
+            if path.name == "task_data_path.py":
+                continue  # its own definition site
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            calls = [
+                node
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call)
+                and (
+                    (isinstance(node.func, ast.Name) and node.func.id == "transport_argv")
+                    or (isinstance(node.func, ast.Attribute) and node.func.attr == "transport_argv")
+                )
+            ]
+            if calls:
+                offenders[str(path.relative_to(REPO_ROOT))] = len(calls)
+        assert offenders == {"core/sandbox_executor.py": 1}, (
+            "transport_argv must be emitted from exactly ONE production module "
+            f"(the sandbox executor's single argv helper); found {offenders}."
+        )
+
+    def test_the_measured_binding_topology_of_the_parent_process(self):
+        """The asymmetry C2/C3 must respect, measured rather than assumed.
+
+        MEASURED at C0 — and NOT what a first reading of the design suggests.
+        Besides the three CHILDREN and the two hand-written Gate runners,
+        exactly ONE parent-side production consumer of the binding already
+        exists: the GPU warmup probe in
+        ``agent/skills/evaluate_time_skill/wrapper.py``, which *resolves*
+        (``resolve_bound_task_data_path()``, D14-1 C5) and therefore already
+        honours a binding when one is active. What does NOT exist anywhere in
+        the parent is a ``bind_task_data_path`` call — the workflow never
+        establishes one, which is why every parent-side resolve falls through
+        to the compatibility implementation today.
+
+        The consequence for C3: emission must be conditional on an ACTIVE
+        binding, never on ``resolve_bound_task_data_path()``, because that
+        helper falls back — an unconditional parent emission would put
+        ``--task_data_path_id tidmad`` into every legacy child argv and break
+        the un-composed byte parity P1 must preserve.
+
+        UPDATED AT C1, deliberately and with the reason recorded: the
+        composition EDGE (``workflows/task_composition.py``) resolves through
+        the registry when an id is already registered, so that re-composing a
+        task in one process returns the REGISTERED object rather than a second
+        instance of the same class. That is part of the single resolution
+        §5.2a mandates, not a second one — which is why the invariant is
+        expressed below as a per-site allowlist plus the sharp rule that
+        ``model_exploration.py`` resolves NOTHING.
+        """
+        child_or_runner = {
+            "execute_tools/train_engine_sandbox.py",
+            "execute_tools/inference_single.py",
+            "execute_tools/denoising_score_single.py",
+            "scripts/run_pets_gate2.py",
+            "scripts/run_davis_gate2.py",
+        }
+        binds: dict[str, int] = {}
+        resolves: dict[str, int] = {}
+        for path in _production_py_files():
+            rel = str(path.relative_to(REPO_ROOT))
+            if rel in child_or_runner or path.name == "task_data_path.py":
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                    continue
+                if node.func.id == "bind_task_data_path":
+                    binds[rel] = binds.get(rel, 0) + 1
+                elif node.func.id in {
+                    "resolve_task_data_path",
+                    "resolve_bound_task_data_path",
+                }:
+                    resolves[rel] = resolves.get(rel, 0) + 1
+
+        assert binds == {
+            # C2: the composition edge's ExitStack — the ONE place a composed
+            # run's authorities are activated. A second bind site anywhere
+            # else would mean two answers to "what is this run bound to".
+            "workflows/task_composition.py": 1
+        }, f"an unexpected parent-side bind site appeared; found {binds}"
+        assert resolves == {
+            # Pre-existing (D14-1 C5), and already binding-aware.
+            "agent/skills/evaluate_time_skill/wrapper.py": 1,
+            # C1: the composition edge's own idempotent re-resolution.
+            "workflows/task_composition.py": 1,
+        }, f"an unexpected parent-side resolve appeared; found {resolves}"
+
+    def test_the_workflow_itself_resolves_no_task_data_path(self):
+        """§5.2a's sharp edge, stated where it can fail.
+
+        ``run_workflow`` must CONSUME the resolved implementation the
+        composition carries. The moment it turns an id back into an
+        implementation, the composition has stopped being the single
+        resolution and the object the parent binds can differ from the one
+        the child resolves — a divergence every id comparison would still
+        report as fine.
+        """
+        tree = ast.parse(
+            (REPO_ROOT / "workflows" / "model_exploration.py").read_text(encoding="utf-8")
+        )
+        offenders = [
+            node.func.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"resolve_task_data_path", "resolve_bound_task_data_path"}
+        ]
+        assert offenders == [], (
+            f"model_exploration.py resolves a task data path ({offenders}); it "
+            "must consume RunTaskComposition.task_data_path instead."
+        )
+
+    def test_all_three_children_already_parse_the_flag(self):
+        """The consumer side that the emission will land against. If a child
+        stopped parsing it, C3's reachability proof would silently degrade
+        into 'the parent emits into the void'."""
+        from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
+
+        for rel in (
+            "execute_tools/train_engine_sandbox.py",
+            "execute_tools/inference_single.py",
+            "execute_tools/denoising_score_single.py",
+        ):
+            text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            assert f'"{TASK_DATA_PATH_ARGV_FLAG}"' in text, f"{rel} stopped parsing the flag"
+
+
+# ---------------------------------------------------------------------------
+# Census C — the un-composed child argv vectors
+# ---------------------------------------------------------------------------
+
+EXP_ID = "c0exp"
+RUN_NAME = "c0run"
+MODEL_TYPE = "fcnet"
+MODEL_CFG = {"model_type": "fcnet", "segmentation_size": 10000, "latent_dims": [100, 10]}
+TRAIN_CFG = {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"}
+LOSS_CFG = {"loss_type": "ce"}
+
+
+def _mock_result(returncode: int = 0):
+    mock = MagicMock()
+    mock.returncode = returncode
+    mock.stdout = "done\n"
+    mock.stderr = ""
+    return mock
+
+
+@pytest.fixture
+def sandbox(tmp_path):
+    from core.sandbox_executor import TidmadSandbox
+
+    return TidmadSandbox(run_name=RUN_NAME, workspace=str(tmp_path), progress_bar=False)
+
+
+def _launch_ok(sandbox):
+    def _side_effect(*_args, **_kwargs):
+        os.makedirs(sandbox.dirs["models"], exist_ok=True)
+        with open(os.path.join(sandbox.dirs["models"], f"_OK_{EXP_ID}"), "wb"):
+            pass
+        return _mock_result(), None
+
+    return _side_effect
+
+
+def capture_uncomposed_child_argv(sandbox, tmp_path) -> dict[str, list[str]]:
+    """The three real argv vectors, normalized for machine-local paths.
+
+    Shared with C3, which asserts these exact vectors are unchanged on the
+    un-composed path after the emission lands.
+    """
+    root = os.path.abspath(str(tmp_path))
+
+    def _norm(cmd: list[str]) -> list[str]:
+        return [
+            "<PYTHON>" if tok == sys.executable else str(tok).replace(root, "<WS>") for tok in cmd
+        ]
+
+    vectors: dict[str, list[str]] = {}
+
+    with patch("core.sandbox_executor._run_observed_subprocess") as mock_run:
+        mock_run.side_effect = _launch_ok(sandbox)
+        sandbox.execute_training(EXP_ID, RUN_NAME, MODEL_TYPE, MODEL_CFG, TRAIN_CFG, LOSS_CFG)
+        (cmd,), _ = mock_run.call_args
+        vectors["training"] = _norm(cmd)
+
+    with patch("core.sandbox_executor._run_observed_subprocess") as mock_run:
+        mock_run.side_effect = _launch_ok(sandbox)
+        sandbox.execute_inference(EXP_ID, RUN_NAME, MODEL_TYPE, MODEL_CFG, LOSS_CFG)
+        (cmd,), _ = mock_run.call_args
+        vectors["inference"] = _norm(cmd)
+
+    with patch("core.sandbox_executor.subprocess.run") as mock_run:
+        mock_run.return_value = _mock_result()
+        sandbox.execute_scoring(EXP_ID, RUN_NAME, MODEL_TYPE, MODEL_CFG, TRAIN_CFG, LOSS_CFG)
+        (cmd,), _ = mock_run.call_args
+        vectors["scoring"] = _norm(cmd)
+
+    return vectors
+
+
+class TestCensusCLegacyChildArgv:
+    def test_no_child_receives_the_transport_flag_today(self, sandbox, tmp_path):
+        from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
+
+        vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
+        assert set(vectors) == {"training", "inference", "scoring"}
+        for phase, cmd in vectors.items():
+            assert TASK_DATA_PATH_ARGV_FLAG not in cmd, (
+                f"the un-composed {phase} child received {TASK_DATA_PATH_ARGV_FLAG}; "
+                "the legacy path must emit nothing"
+            )
+
+    def test_every_child_still_receives_the_dataset_profile(self, sandbox, tmp_path):
+        """The sibling transport the emission will sit beside. If this moved,
+        the 'append beside --dataset_profile_json' plan (design §5.4) no
+        longer describes the code."""
+        vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
+        for phase, cmd in vectors.items():
+            assert "--dataset_profile_json" in cmd, f"{phase} lost the profile transport"
+
+
+# ---------------------------------------------------------------------------
+# The parity instrument itself must be discriminative
+# ---------------------------------------------------------------------------
+
+
+class TestParityManifestIsDiscriminative:
+    """The mandatory parity evidence is only as strong as its reducer.
+
+    A reducer that dropped a dimension would report PASS for a real
+    LLM-facing change — the exact failure the design forbids being papered
+    over. So each of the seven dimensions is mutated in turn and must be
+    reported. This is the counterfactual for the C6 acceptance criterion,
+    not decoration.
+    """
+
+    @staticmethod
+    def _capture() -> dict:
+        return {
+            "terminated_with": None,
+            "captures": [
+                {
+                    "method": "generate",
+                    "label": "proposer.proposing",
+                    "system": "SYSTEM-A",
+                    "user": "USER-A",
+                    "kwargs": {"schema": {"k": 1}},
+                },
+                {
+                    "method": "generate_text",
+                    "label": "interpretation.per_model",
+                    "system": "SYSTEM-B",
+                    "user": "USER-B",
+                    "kwargs": {},
+                },
+            ],
+        }
+
+    def test_an_identical_capture_reports_no_differences(self):
+        from tests.helpers.step10_p1_parity_manifest import build_manifest, diff_manifests
+
+        base = build_manifest(self._capture())
+        head = build_manifest(self._capture())
+        assert diff_manifests(base, head) == []
+        assert base["manifest_sha256"] == head["manifest_sha256"]
+
+    @pytest.mark.parametrize(
+        ("mutate", "dimension"),
+        [
+            (lambda c: c["captures"].append(dict(c["captures"][0])), "call count"),
+            (lambda c: c["captures"][0].update(method="tool_call"), "method"),
+            (lambda c: c["captures"][0].update(label="proposer.comparison"), "label"),
+            (lambda c: c["captures"][0].update(system="SYSTEM-A "), "system_bytes"),
+            (lambda c: c["captures"][0].update(system="SYSTEM-B"), "system_sha256"),
+            (lambda c: c["captures"][0].update(user="USER-A!"), "user_bytes"),
+            (lambda c: c["captures"][0].update(user="USER-Z"), "user_sha256"),
+            (lambda c: c["captures"][0]["kwargs"].update(schema={"k": 2}), "kwargs_sha256"),
+            (lambda c: c.update(terminated_with="RuntimeError"), "termination"),
+            (
+                lambda c: c["captures"].reverse(),
+                "label",
+            ),
+        ],
+    )
+    def test_every_dimension_change_is_reported(self, mutate, dimension):
+        from tests.helpers.step10_p1_parity_manifest import build_manifest, diff_manifests
+
+        base = build_manifest(self._capture())
+        mutated = self._capture()
+        mutate(mutated)
+        head = build_manifest(mutated)
+
+        problems = diff_manifests(base, head)
+        assert problems, f"a {dimension} change went unreported by the parity reducer"
+        assert any(dimension in problem for problem in problems), (
+            f"the reducer noticed a change but not as {dimension}: {problems}"
+        )
+        assert base["manifest_sha256"] != head["manifest_sha256"]
+
+
+class TestParityBaselineArtifact:
+    def test_the_committed_baseline_is_self_consistent(self):
+        """The committed manifest's recorded sha256 is the digest of its own
+        canonical content — so a hand-edited baseline cannot silently become
+        the thing C6 compares against."""
+        from tests.helpers.step10_p1_parity_manifest import _canonical, _sha
+
+        payload = json.loads(
+            (
+                REPO_ROOT
+                / "tests"
+                / "unit"
+                / "workflows"
+                / "goldens"
+                / "step10_p1_c0_llm_parity_baseline.json"
+            ).read_text(encoding="utf-8")
+        )
+        recorded = payload.pop("manifest_sha256")
+        assert _sha(_canonical(payload)) == recorded
+        assert payload["call_count"] == 16
+
+
+# ---------------------------------------------------------------------------
+# Census D — the legacy run-invariants lock key set
+# ---------------------------------------------------------------------------
+
+
+class TestCensusDLegacyLockKeySet:
+    def test_the_serialized_legacy_lock_has_exactly_these_keys(self, tmp_path):
+        """§5.9's absent-key contract is about SERIALIZED BYTES. Recording the
+        key set here is what makes 'the composition key is absent, never
+        null' provable at C5 rather than merely intended."""
+        from core.run_invariants import RunInvariants, write_run_invariants
+
+        invariants = RunInvariants(
+            resolved_data_scope=[0, 1],
+            health_gate_enabled=False,
+            health_config_sha256=None,
+            runtime_estimator_identity="est-1",
+            runtime_policy_identity="pol-1",
+        )
+        path = write_run_invariants(str(tmp_path / "ws"), invariants)
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+
+        assert set(payload) == {
+            "resolved_data_scope",
+            "health_gate_enabled",
+            "health_config_sha256",
+            "ordering_override_strategy",
+            "ordering_override_file_order",
+            "structured_health_feedback_enabled",
+            "health_feedback_history_window_iterations",
+            "health_feedback_history_max_entries_per_model",
+            "runtime_estimator_identity",
+            "runtime_policy_identity",
+            "created_at",
+        }
+
+    def test_the_canonical_equality_set_is_pinned(self):
+        """A composed run's fingerprint joins this set. Pinning the set is what
+        makes that addition visible as a deliberate change rather than an
+        incidental one — and the census DID fire when C2 added it, which is
+        the census working.
+
+        Membership here is what makes a composed resume fail closed on a
+        changed fingerprint: ``validate_run_invariants`` compares exactly
+        these fields."""
+        from core.run_invariants import RunInvariants
+
+        assert RunInvariants._CANONICAL == (
+            "resolved_data_scope",
+            "health_gate_enabled",
+            "health_config_sha256",
+            "ordering_override_strategy",
+            "ordering_override_file_order",
+            "structured_health_feedback_enabled",
+            "health_feedback_history_window_iterations",
+            "health_feedback_history_max_entries_per_model",
+            "runtime_estimator_identity",
+            "runtime_policy_identity",
+            "task_composition_fingerprint",
+        )

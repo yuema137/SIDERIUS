@@ -1,0 +1,22 @@
+{
+  "dataset": {
+    "psd_segment_length": 8,
+    "segments_per_file": 12,
+    "num_files": 3,
+    "sampling_frequency": 24.0,
+    "training_file_pattern": "davis_train_clip_{file_index:04d}.h5",
+    "validation_file_pattern": "davis_val_clip_{file_index:04d}.h5"
+  },
+  "channels": {
+    "input_channel": "context_frames",
+    "target_channel": "future_frames"
+  },
+  "encoding": {
+    "storage_dtype": "uint8",
+    "compute_dtype": "int16",
+    "value_offset": 0,
+    "num_classes": 256
+  },
+  "anchor_selection_files": [0],
+  "health_peek_files": [1, 2]
+}

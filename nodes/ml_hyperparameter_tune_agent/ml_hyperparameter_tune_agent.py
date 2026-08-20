@@ -53,6 +53,7 @@ from execute_tools.deliverable_spec import (
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
     derive_tidmad_metric,
+    resolve_bound_run_metric,
 )
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.schemas import (
@@ -528,17 +529,25 @@ class HyperparamTuningAgent:
         # Option A).
         run_deliverable_spec = derive_tidmad_deliverable_spec(run_profile)
 
-        # --- The run's ONE evaluation metric (Step 06) ---
-        # Bound here, once, from the two authorities above: the frozen TIDMAD
-        # instance derived under Regime A (no task declares a metric until
-        # Step 12), with its scoreability contract declared AGAINST the run's
-        # deliverable spec. PRODUCTION SCORING below invokes the scorer
-        # THROUGH this handle (`sandbox.evaluate_metric(run_metric, …)`), so
-        # identity, direction and the acceptance contract have exactly one
-        # source for the whole run — a resumed run re-derives the same value
-        # from the same profile. Not serialized; crosses no process boundary
-        # (the scoring subprocess re-derives it from `--dataset_profile_json`).
-        run_metric: EvaluationMetric = derive_tidmad_metric(run_profile, run_deliverable_spec)
+        # --- The run's ONE evaluation metric (Step 06; bound seam Step 10 P1) ---
+        # Still exactly one acquisition site, and still the run's single
+        # source for identity, direction and the acceptance contract:
+        # PRODUCTION SCORING below invokes the scorer THROUGH this handle
+        # (`sandbox.evaluate_metric(run_metric, …)`). Not serialized; crosses
+        # no process boundary (the scoring subprocess re-derives it from
+        # `--dataset_profile_json`).
+        #
+        # A COMPOSED run supplies the metric its declaration named, resolved
+        # once at the composition edge — so a composed classification or
+        # regression run never executes TIDMAD's derivation. An UN-COMPOSED
+        # run finds nothing bound and takes the byte-identical legacy branch:
+        # the frozen TIDMAD instance derived under Regime A, with its
+        # scoreability contract declared AGAINST the run's deliverable spec.
+        # `derive_tidmad_metric` is therefore the bounded legacy adapter from
+        # here on; removing it belongs to Step 12 with the composition root.
+        run_metric: EvaluationMetric = resolve_bound_run_metric() or derive_tidmad_metric(
+            run_profile, run_deliverable_spec
+        )
 
         # --- The run's ONE order authority (Step 07 PR 07b) ---
         # Every ordering decision this tuner makes about the golden metric —

@@ -1,0 +1,11 @@
+task_description: |
+  37-way fine-grained classification of Oxford-IIIT Pet RGB images. A model
+  receives one image and predicts one breed label; the metric is accuracy
+  over the final-eval scope, and HIGHER is better.
+forward_contract:
+  input_shape: "[B, 3, H, W] float"
+  input_description: "a batch of RGB images"
+  output_shape: "[B, 37] float"
+  output_description: "per-class logits"
+  task_type: "classification"
+  num_classes: 37

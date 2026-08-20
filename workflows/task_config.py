@@ -27,6 +27,9 @@ tripping through the filesystem.
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import yaml
@@ -76,6 +79,51 @@ def _dataset_num_classes() -> int | None:
     return resolve_dataset_profile().encoding.num_classes
 
 
+_BOUND_TASK_CONFIG: ContextVar[dict[str, Any] | None] = ContextVar(
+    "siderius_bound_task_config", default=None
+)
+"""The COMPOSED run's task configuration, when one is bound (Step 10 / P1).
+
+Why an override here rather than a value threaded to each consumer: the
+task description reaches five consumer families — planner, literature
+review, proposer, implementor, interpreter — and every one of them calls
+``load_task_config()`` itself, at its own depth (a bridge, a renderer, a
+node). There is no single injection point to thread a string through, so
+the authority moves to the composition at the ONE place all five already
+funnel through.
+
+This is what demotes the module-level YAML cache below from *the* authority
+to a legacy compatibility adapter: still the way an un-composed run obtains
+its values, never the authority for a composed one. Step 12 supplies the
+same bound value from an external package without touching any consumer.
+"""
+
+
+@contextmanager
+def bind_task_config(values: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Bind a composed run's task configuration for the duration of the block.
+
+    ContextVar + token reset, the ``bind_dataset_profile`` idiom: sequential
+    and nested runs in one process never observe each other's values, and an
+    exception cannot strand a composed task description where the next run
+    would read it.
+
+    The bound mapping is the SAME shape ``load_task_config`` returns
+    (``task_description`` + a dumped ``forward_contract`` + any extra keys),
+    so no consumer needs to know whether the run was composed.
+    """
+    token = _BOUND_TASK_CONFIG.set(values)
+    try:
+        yield values
+    finally:
+        _BOUND_TASK_CONFIG.reset(token)
+
+
+def resolve_bound_task_config() -> dict[str, Any] | None:
+    """The composed run's task configuration, or ``None`` when un-composed."""
+    return _BOUND_TASK_CONFIG.get()
+
+
 def _clear_cache_for_tests() -> None:
     """Test-only helper. Drop the module-level cache so a test can swap the
     fixture file under a single path without seeing stale parsed data.
@@ -118,6 +166,15 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
             ``ForwardContract(**fc_dict)`` when a required forward-contract
             key is missing or a value violates a field constraint.
     """
+    # Step 10 / P1: a composed run's values win, and they win for every
+    # consumer at once. An EXPLICIT ``path`` still reads that file — the
+    # composition edge itself loads the task's config this way, and a caller
+    # naming a file is asking for that file, not for the run's binding.
+    if path is None:
+        bound = _BOUND_TASK_CONFIG.get()
+        if bound is not None:
+            return bound
+
     resolved = os.path.abspath(path or _DEFAULT_CONFIG_PATH)
 
     if resolved in _CACHE:

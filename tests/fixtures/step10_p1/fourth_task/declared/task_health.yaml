@@ -1,0 +1,20 @@
+# A fourth task's Health family, using ONLY generic framework capabilities.
+#
+# It declares the framework's own `sample_dispersion_floor` check against the
+# standard `continuous_samples` capability — no plugin of its own is needed
+# because nothing here is a new CAPABILITY, only a new task INSTANCE. That
+# distinction is the one Step 08's §7.2 draws and P1 inherits: a new instance
+# costs config; a genuinely new backend costs framework work, legitimately.
+
+facts:
+  encoding_family: continuous_scalar
+
+roster:
+  - gate_id: spectro_dispersion_blocking
+    check: sample_dispersion_floor
+    disposition: blocking
+    parameters:
+      min_std: 0.02
+    reason: >-
+      A band-coverage predictor whose outputs stop varying has collapsed to a
+      constant, which the aggregate error can hide.

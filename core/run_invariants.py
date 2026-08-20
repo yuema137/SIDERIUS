@@ -36,7 +36,7 @@ import json
 import os
 import tempfile
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
@@ -127,6 +127,14 @@ class RunInvariants(BaseModel):
     # can be PARSED well enough to produce that explicit error.
     runtime_estimator_identity: str | None = None
     runtime_policy_identity: str | None = None
+    # Step 10 / P1 — the COMPOSED run's canonical semantic task-composition
+    # fingerprint, or None for an un-composed (legacy) run. `None` is not a
+    # compatible default here: it means "this workspace was not composed",
+    # and a composed run meeting an un-composed lock is a genuine mismatch
+    # that the canonical comparison below must refuse. The key is OMITTED
+    # from the serialized lock when None (see `write_run_invariants`), so a
+    # legacy lock file stays byte-identical to its pre-P1 form.
+    task_composition_fingerprint: str | None = None
     created_at: str | None = None
 
     # Fields participating in lock equality. created_at (and any future
@@ -142,6 +150,7 @@ class RunInvariants(BaseModel):
         "health_feedback_history_max_entries_per_model",
         "runtime_estimator_identity",
         "runtime_policy_identity",
+        "task_composition_fingerprint",
     )
 
     #: C9d fields that a legacy lock cannot supply. Their absence is a
@@ -211,10 +220,19 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
         else invariants.model_copy(update={"created_at": datetime.now(UTC).isoformat()})
     )
     path = _lock_path(workspace)
+    payload = stamped.model_dump()
+    # Step 10 / P1 §5.9: an UN-COMPOSED run's lock must be byte-identical to
+    # its pre-P1 form, so the composition key is ABSENT rather than `null`.
+    # Serializing it as null would change every legacy lock's bytes for a
+    # feature those runs do not use — and "absent" is also the honest
+    # encoding: the workspace predates composition rather than having been
+    # composed with nothing. Pydantic's default makes it parse back to None.
+    if payload.get("task_composition_fingerprint") is None:
+        payload.pop("task_composition_fingerprint", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(stamped.model_dump(), f, indent=2)
+            json.dump(payload, f, indent=2)
             f.write("\n")
         os.link(tmp_path, path)
     finally:
@@ -334,6 +352,8 @@ def build_run_invariants(
     health_feedback_history_window_iterations: int = 3,
     health_feedback_history_max_entries_per_model: int = 8,
     include_runtime_identities: bool = True,
+    task_health_binding: Any = None,
+    task_composition_fingerprint: str | None = None,
 ) -> tuple[RunInvariants, str | None]:
     """Compute a run's invariants — the ONE shared path for every entry point.
 
@@ -377,11 +397,20 @@ def build_run_invariants(
     from execute_tools.health_checks.config import materialize_effective_config
 
     if health_gate_enabled:
+        # Step 10 / P1: the composed task Health binding is PASSED THROUGH to
+        # 08b's existing keyword. Omitting it (the un-composed default) is
+        # what resolves `LEGACY_OMITTED`, so a legacy run materializes the
+        # byte-identical effective config it always did — the call shape is
+        # the branch, and there is no task name on either side of it.
+        health_kwargs = (
+            {} if task_health_binding is None else {"task_health_binding": task_health_binding}
+        )
         effective_path, sha = materialize_effective_config(
             health_checks_config,
             health_gate_files,
             workspace,
             resolved_scope=resolved_data_scope,
+            **health_kwargs,
         )
     else:
         effective_path, sha = None, None
@@ -404,6 +433,7 @@ def build_run_invariants(
             # C9d: stamped HERE so every entry point (workflow, chain
             # runner, standalone tuner) locks the same identities — the
             # builder is the one shared path by contract.
+            task_composition_fingerprint=task_composition_fingerprint,
             **_runtime_identity_fields(include_runtime_identities),
         ),
         effective_path,
