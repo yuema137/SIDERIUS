@@ -3,7 +3,30 @@
 ## 0. Status, provenance and source anchor
 
 **REVISION 2 — FROZEN. OPERATOR APPROVED — PARENT SEMANTICS ONLY.
-IMPLEMENTATION NOT STARTED.**
+IMPLEMENTATION IN PROGRESS — 1 of 7 children merged.**
+
+**P1 (S1 + S7) — COMPLETE / MERGED 2026-08-20.** PR #241, squash
+**`bcb17e45`**; final PR head `ffad7029`; exact-head CI **32415952195
+SUCCESS**; landed master byte-identical to the validated head. A run is now
+handed one explicit, typed, fail-closed `RunTaskComposition` resolved ONCE at
+the launcher edge and carried on `WorkflowRunBindings` (24 → 25 fields);
+`run_workflow` is 28 → **21** parameters (the nine restored kwargs collapsed
+into one `RestoredState`, closing 09.5a's C4b hand-off). The subprocess
+transport has its first emitter; the composed semantic fingerprint pins the
+run-invariants lock (ABSENT, never null, for legacy runs); `campaign_artifacts`
+takes its task semantics as parameters. **Exact un-composed LLM parity PROVEN**
+(16 calls, manifest sha256 `476d5d7c…778a` on both sides, zero differences) —
+so **Gate 1 and Gate 2 were both NOT REQUIRED and neither was run**. Four
+tasks compose through one loader, and an AST census over 307 production files
+still finds **zero** task-identity dispatch — class (b) = 0 HELD.
+
+**NEXT = P2a**, which must first reconcile its `PROVISIONAL(P1)` items
+against merged master in a FRESH session. **P2a is DRAFT rev 2 and is
+BLOCKED on a new operator question, Q-P2a-3**: `reconcile_metric_spec` lives
+inside the interpreter node (`nodes/result_interpretation_agent/evidence.py`),
+while P2a's §4.1/C1 plan has `workflows/model_exploration.py` calling it —
+which the repository's node-public-boundary rule forbids. That is a
+layer-ownership decision and it blocks P2a's C1.
 
 **POST-STEP-09.5a-MERGE RECONCILIATION — PASS (2026-08-20).
 Merged-master anchor `2393aacc`. Semantic contradictions: 0.
@@ -2251,7 +2274,7 @@ is not Step-10 scope.
 | | |
 |---|---|
 | revision | **2 — FROZEN**, post-merge reconciliation **PASS** (§0.3); **three targeted corrections R-1/R-2/R-3 applied 2026-08-20 (operator-authorized; acceptance/wording only — §22.1 P1 parity obligation, §3.8 default-4 ownership split, §8 order-acquisition precedence). Freeze unchanged; NOT Revision 3** |
-| child designs status | **P1 REVISION 2 FROZEN (2026-08-20)** · P2a DRAFT (reconcile after P1 merges) · P2b DRAFT (reconcile after P1 + P2a merge) — `step_10_orchestration_task_binding/` |
+| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a DRAFT rev 2** — commit plans now in the 8-section shape, all twelve ordering surfaces re-verified, and **BLOCKED on the NEW Q-P2a-3** (spec-reconciliation authority lives inside a node) · P2b DRAFT (reconcile after P1 + P2a merge) — `step_10_orchestration_task_binding/` |
 | source anchor | **merged master `2393aacc`** |
 | Step-10 implementation | **NOT STARTED** |
 | prerequisite | Step 09.5a **MERGED** (PR #240) — the §15.1b/§15.1c block is **LIFTED** |

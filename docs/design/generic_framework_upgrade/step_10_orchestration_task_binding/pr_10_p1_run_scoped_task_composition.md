@@ -3,8 +3,16 @@
 ## 0. Status
 
 **REVISION 2 — FROZEN. OPERATOR APPROVED (2026-08-20).
-IMPLEMENTATION COMPLETE — READY FOR OPERATOR REVIEW. DO NOT MERGE.
+IMPLEMENTATION COMPLETE — MERGED 2026-08-20.
 Open operator questions: 0. Material deviations: 0.**
+
+**MERGED**: PR #241, squash **`bcb17e45`** on `master`; final PR head
+`ffad7029793e365843ba67e083ccdc2dd84679c4`; exact-head CI **32415952195
+SUCCESS** (ruff check · ruff format · pyright · unit). Landed master verified
+**byte-identical** to the validated head — `git diff ffad7029 bcb17e45` is
+empty. Merge authorized by the operator; performed with the repository's
+recorded per-command approval prefix so the transcript names the specific
+mutation.
 
 ### 0.0 Implementation summary (2026-08-20)
 
@@ -1394,7 +1402,12 @@ evidence.
       ledger recorded as a limitation rather than claiming a local pass.
       This is that limitation cashing out exactly as predicted — the
       exact-head CI is the type checker's only real environment here.
-- [ ] Exact-head CI SUCCESS id recorded (run 2, after the fix above).
+- [x] Exact-head CI SUCCESS id recorded: **run `32415952195`**, tested SHA
+      **`ffad7029793e365843ba67e083ccdc2dd84679c4`** (== the final PR head),
+      conclusion **SUCCESS**, every step green. Recorded post-merge in this
+      status sync rather than in a trailing docs-only push on the PR branch,
+      which would have moved the head and invalidated the very run it
+      records (`feedback_no_docs_only_ci_pushes.md`).
 
 **6.–8.** Docs-only risks: none; boundary: docs + evidence only; one push
 at the genuine final head (no trailing docs-only pushes).
@@ -1518,4 +1531,6 @@ Implementation COMPLETE 2026-08-20 on `step10-p1-run-scoped-task-composition`;
 final executable head `821ea469`; C0–C6 all ticked with recorded evidence;
 mandatory un-composed LLM parity EXACT; Gate 1 and Gate 2 both NOT REQUIRED
 and neither was run; zero material deviations; zero open operator questions.
-**READY FOR OPERATOR REVIEW — DO NOT MERGE.***
+**MERGED 2026-08-20 — PR #241, squash `bcb17e45`, exact-head CI
+32415952195 SUCCESS on `ffad7029`; landed master byte-identical to the
+validated head.***
