@@ -58,6 +58,7 @@ from execute_tools.metric_order import MetricOrder
 from sdsc_submission_scripts.run_one_iteration import write_manifest
 from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 # ---------------------------------------------------------------------------
 # Fixture helpers — mocked node outputs + a chain-runner-shaped disk seed
@@ -273,14 +274,17 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
-            data_dir="/tmp/data",
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir="/tmp/data",
+                model_types=["punet"],
+                source_run_name="v1",
+                start_iteration=2,
+                max_iterations=1,
+                source_paths=state.resolved_source_paths,
+                enable_chain_incumbent_formal_gates=enable_gates,
+            ),
             workspace=workspace,
             run_name="iter_002",
-            start_iteration=2,
-            max_iterations=1,
-            source_paths=state.resolved_source_paths,
             restored_runtime_vocab=state.runtime_vocab,
             accumulated_key_findings=state.accumulated_key_findings,
             restored_model_knowledge_cache=state.model_knowledge_cache,
@@ -288,7 +292,6 @@ def _run_iter_2(workspace: str, iter2_tune_output, *, enable_gates: bool):
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
             restored_previous_proposal=state.previous_proposal_data,
             restored_chain_incumbent_score=state.chain_best_valid_formal_score,
-            enable_chain_incumbent_formal_gates=enable_gates,
         )
     tune_input = captured_tune_inputs[0]
     # Mirror production: the tuner writes its run_output to disk before

@@ -160,8 +160,13 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
 NOT_REACHED_DIRECTION_CONSUMERS = (
     # D1 — chain / resume / artifacts / dashboard
     (
+        # Step 09.5a C4a moved the accumulator onto the ChainState carrier, so
+        # the SPELLING changed. The consumer itself is UNMIGRATED — it is still
+        # a raw `>` that assumes higher-is-better, and it is still owed to D1 /
+        # Step 10. Updating the literal keeps this guard live; deleting the row
+        # would have silently retired the debt it exists to track.
         "workflows/model_exploration.py",
-        "tune_output.best_formal_denoising_score > best_score_overall",
+        "tune_output.best_formal_denoising_score > state.best_score_overall",
     ),
     ("core/resume.py", "if score > best_score or ("),
     ("execute_tools/per_file_best.py", "return new.best_linear > current.best_linear"),

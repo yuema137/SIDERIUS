@@ -25,6 +25,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.launcher_bindings import workflow_call_bindings
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RUNNER = REPO_ROOT / "sdsc_submission_scripts" / "v19_gate0_pair_runner.sh"
 CHAIN_LIB = REPO_ROOT / "sdsc_submission_scripts" / "_chain_common.sh"
@@ -217,17 +219,11 @@ class TestCliToWorkflowBinding:
     substitutes a constant or a different attribute."""
 
     def test_call_site_bindings(self):
-        tree = ast.parse(RUN_ONE_ITERATION.read_text())
-        bindings: dict[str, str] = {}
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and isinstance(node.func, ast.Name)
-                and node.func.id == "run_workflow"
-            ):
-                for kw in node.keywords:
-                    if kw.arg is not None:
-                        bindings[kw.arg] = ast.unparse(kw.value)
+        # Step 09.5a C3: transit configuration is bound one level deeper, in
+        # the WorkflowLaunchConfig the launcher constructs. The binding
+        # invariant is unchanged; the shared extractor flattens both levels so
+        # this census keeps testing the binding rather than the spelling.
+        bindings = workflow_call_bindings(RUN_ONE_ITERATION)
         assert bindings, "run_workflow call site not found"
         for kwarg, expected in EXPECTED_BINDINGS.items():
             assert kwarg in bindings, f"call site no longer passes {kwarg}"

@@ -40,6 +40,7 @@ from agent.schemas.proposal import ExpertAdvice, ProposalOutput
 from agent.schemas.validator import ValidatorOutput
 from execute_tools.dataset_config import DataScope
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 # --------------------------------------------------------------------------
 # Sentinels — one distinctive value per launch-critical setting. None of
@@ -191,22 +192,24 @@ def _run_with_sentinels(workspace: str):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
-            data_dir="/tmp/data",
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir="/tmp/data",
+                model_types=["punet"],
+                source_run_name="v1",
+                start_iteration=1,
+                max_iterations=1,
+                source_paths=[],
+                human_advice_tune=ADVICE_TUNE_SENTINEL,
+                human_advice_interpret=ADVICE_INTERP_SENTINEL,
+                human_advice_propose=ADVICE_PROPOSE_SENTINEL,
+            ),
             workspace=workspace,
             run_name="iter_001",
-            start_iteration=1,
-            max_iterations=1,
-            source_paths=[],
             data_scope=DataScope.from_cli(SCOPE_SENTINEL),
             health_gate_files=list(HEALTH_FILES_SENTINEL),
             health_gate_enabled=True,
             order_strategy_override="sequential",
             file_order_override=list(ORDER_SENTINEL),
-            human_advice_tune=ADVICE_TUNE_SENTINEL,
-            human_advice_interpret=ADVICE_INTERP_SENTINEL,
-            human_advice_propose=ADVICE_PROPOSE_SENTINEL,
             **SENTINELS,
         )
         interp_input = MockInterp.return_value.run.call_args[0][0]
@@ -314,14 +317,16 @@ def test_off_default_parity_no_silent_activation(tmp_path):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
-            data_dir="/tmp/data",
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir="/tmp/data",
+                model_types=["punet"],
+                source_run_name="v1",
+                start_iteration=1,
+                max_iterations=1,
+                source_paths=[],
+            ),
             workspace=ws,
             run_name="iter_001",
-            start_iteration=1,
-            max_iterations=1,
-            source_paths=[],
         )
     (tune_input,) = captured
     assert tune_input.enable_structured_health_feedback is False

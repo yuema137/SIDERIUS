@@ -231,8 +231,8 @@ class TestOnlyTheProposerIsBypassed:
         wrapped more than the proposer it would skip real work.
         """
         src = self._workflow_source()
-        assert "if validation_fixed_candidate_plan is not None:" in src
-        block = src[src.index("if validation_fixed_candidate_plan is not None:") :][:1400]
+        assert "if launch.validation_fixed_candidate_plan is not None:" in src
+        block = src[src.index("if launch.validation_fixed_candidate_plan is not None:") :][:1400]
         assert "ProposalOutput.model_validate(" in block
         assert 'candidate_source = "fixed_validation_plan"' in block
         # The proposer still exists, on the other branch.
@@ -269,16 +269,11 @@ class TestOnlyTheProposerIsBypassed:
         launcher = (
             Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
         )
-        tree = ast.parse(launcher.read_text(encoding="utf-8"))
-        forwarded = False
-        for node in ast.walk(tree):
-            if not isinstance(node, ast.Call):
-                continue
-            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-            if name != "run_workflow":
-                continue
-            if "validation_fixed_candidate_plan" in {kw.arg for kw in node.keywords}:
-                forwarded = True
+        # Step 09.5a C3: the launcher binds it one level deeper, inside the
+        # WorkflowLaunchConfig it constructs. Same forwarding invariant.
+        from tests.helpers.launcher_bindings import workflow_call_bindings
+
+        forwarded = "validation_fixed_candidate_plan" in workflow_call_bindings(launcher)
         assert forwarded, (
             "run_workflow is called without validation_fixed_candidate_plan, so "
             "the flag would be accepted and silently ignored"

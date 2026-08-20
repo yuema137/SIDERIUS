@@ -50,6 +50,7 @@ from tests.unit.agent.ml_model_implementor.test_implementor_agent import (
 from tests.unit.agent.ml_model_implementor.test_implementor_agent import (
     FAKE_REASONING as IMPL_REASONING,
 )
+from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
 
@@ -292,24 +293,25 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
         )
 
         run_workflow(
-            data_dir=str(tmp_path / "data"),
-            model_types=["punet"],
-            source_run_name="v0",
+            launch=WorkflowLaunchConfig(
+                data_dir=str(tmp_path / "data"),
+                model_types=["punet"],
+                source_run_name="v0",
+                max_iterations=1,
+                max_proposal_attempts=1,
+                max_impl_attempts=1,
+                max_rounds=2,
+                is_trial=True,
+                trial_portion=0.05,
+                train_portion=0.1,
+                eval_portion=0.05,
+                trial_vram_budget_gb=0.3,
+                trial_time_budget_minutes=None,
+            ),
             workspace=workspace,
             run_name=run_name,
-            max_iterations=1,
-            max_proposal_attempts=1,
-            max_impl_attempts=1,
-            # K.9 choreography knobs (see that module for the derivation):
-            max_rounds=2,
-            is_trial=True,
             trial_strategy="snapshot",
-            trial_portion=0.05,
-            train_portion=0.1,
             eval_strategy="snapshot",
-            eval_portion=0.05,
-            trial_vram_budget_gb=0.3,
-            trial_time_budget_minutes=None,
             health_gate_enabled=False,
         )
 

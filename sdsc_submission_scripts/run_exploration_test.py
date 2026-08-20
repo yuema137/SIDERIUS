@@ -27,6 +27,7 @@ from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
 from execute_tools.workflow_validation import validate_workflow_outputs
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
@@ -149,38 +150,27 @@ def main():
 
     try:
         results = run_workflow(
-            data_dir=SIDERIUS_DATA_DIR,
-            model_types=args.source_models,
-            source_run_name=args.source_run_name,
+            launch=WorkflowLaunchConfig(
+                data_dir=SIDERIUS_DATA_DIR,
+                model_types=args.source_models,
+                source_run_name=args.source_run_name,
+                max_iterations=1,
+                max_rounds=args.max_rounds,
+                max_proposal_attempts=args.max_proposal_attempts,
+                is_trial=True,
+                trial_portion=0.02,
+                train_portion=1.0,
+                eval_portion=0.02,
+                cleanup_denoised=True,
+                max_epochs=args.max_epochs,
+                human_advice_propose="Propose a VERY simple architecture — no more than 3 layers, fewer than 10K parameters. Use only basic PyTorch modules (nn.Embedding, nn.Conv1d, nn.Linear, nn.ReLU). Do NOT use attention, transformers, or complex gating. The model must train and infer in under 30 seconds on a single GPU. Use segmentation_size=10000 in baseline_config.train_config.",
+                human_advice_tune="CRITICAL: Use exactly 1 epoch, batch_size=1, lr=1e-4, device=cuda. Keep the model as small as possible — under 10K parameters. This is an integration test — speed matters more than score. You MUST use segmentation_size from the model_config as-is.",
+            ),
             workspace=args.workspace,
             run_name=args.run_name,
             llm_config=llm_config,
-            max_iterations=1,
-            max_rounds=args.max_rounds,
-            max_proposal_attempts=args.max_proposal_attempts,
-            # Full data mode with minimal data
-            is_trial=True,
             trial_strategy="snapshot",
-            trial_portion=0.02,
-            train_portion=1.0,
             eval_strategy="snapshot",
-            eval_portion=0.02,
-            cleanup_denoised=True,
-            max_epochs=args.max_epochs,
-            human_advice_propose=(
-                "Propose a VERY simple architecture — no more than 3 layers, "
-                "fewer than 10K parameters. Use only basic PyTorch modules "
-                "(nn.Embedding, nn.Conv1d, nn.Linear, nn.ReLU). "
-                "Do NOT use attention, transformers, or complex gating. "
-                "The model must train and infer in under 30 seconds on a single GPU. "
-                "Use segmentation_size=10000 in baseline_config.train_config."
-            ),
-            human_advice_tune=(
-                "CRITICAL: Use exactly 1 epoch, batch_size=1, lr=1e-4, device=cuda. "
-                "Keep the model as small as possible — under 10K parameters. "
-                "This is an integration test — speed matters more than score. "
-                "You MUST use segmentation_size from the model_config as-is."
-            ),
         )
     except Exception as e:
         print(f"FAIL: Workflow raised exception: {type(e).__name__}: {e}")

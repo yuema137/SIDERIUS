@@ -18,11 +18,24 @@ _SRC = (Path(__file__).resolve().parents[3] / "workflows/model_exploration.py").
 
 class TestRunWorkflowSignature:
     def test_policy_params_with_locked_defaults(self):
+        """Step 09.5a C3 split these across two owners, so the assertion follows
+        them rather than the old flat signature.
+
+        `enable_structured_health_feedback` is a LOCKED RUN INVARIANT and stays
+        an explicit authority on the signature; the two retention bounds are
+        transit configuration and moved to the launch carrier; the restored
+        fingerprint history is a chain-state seed and stays explicit until C4.
+        The defaults are unchanged — that is what this test is for.
+        """
+        from workflows.run_config import WorkflowLaunchConfig
+
         sig = inspect.signature(run_workflow)
         assert sig.parameters["enable_structured_health_feedback"].default is False
-        assert sig.parameters["health_feedback_history_window_iterations"].default == 3
-        assert sig.parameters["health_feedback_history_max_entries_per_model"].default == 8
         assert sig.parameters["restored_collapse_fingerprint_history"].default is None
+
+        launch = WorkflowLaunchConfig()
+        assert launch.health_feedback_history_window_iterations == 3
+        assert launch.health_feedback_history_max_entries_per_model == 8
 
 
 class TestLockCall:
@@ -43,10 +56,20 @@ class TestThreading:
         block = re.search(
             r"interp_input = InterpretationInput\((.*?)\n        \)", _SRC, re.DOTALL
         ).group(1)
-        assert "enable_structured_health_feedback=enable_structured_health_feedback" in block
+        # Step 09.5a C3: the VALUE now comes from the run-binding carrier.
+        # The invariant this pin owns is unchanged — the workflow passes the
+        # RUN'S policy, never a literal and never a renamed attribute — so
+        # the pattern accepts the carrier spelling and rejects everything
+        # else, exactly as C5d did for `launch.<field>`.
+        assert re.search(
+            r"enable_structured_health_feedback=\(?\s*(bindings\.)?"
+            r"enable_structured_health_feedback\s*\)?",
+            block,
+        ), block
         assert "health_feedback_history_window_iterations=" in block
         assert "health_feedback_history_max_entries_per_model=" in block
-        assert "collapse_fingerprint_history=current_collapse_fingerprint_history" in block
+        # Step 09.5a C4: the carry lives on ChainState; the wiring is the same.
+        assert "collapse_fingerprint_history=state.current_collapse_fingerprint_history" in block
 
     def test_proposer_protocol_receives_flag(self):
         call = re.search(
@@ -58,21 +81,40 @@ class TestThreading:
         """The loop variable is seeded from the restored history and
         REPLACED by the interpreter's merged output — never merged in the
         workflow, never read from proposer output or prompts."""
+        # Step 09.5a C4 split SEED from REPLACE across two files, so the
+        # assertion follows them. The invariant is unchanged and is still the
+        # one that matters: exactly one seed, exactly one replacement, and no
+        # reverse construction anywhere.
+        from pathlib import Path as _P
+
+        chain_state_src = (_P(__file__).resolve().parents[3] / "core/chain_state.py").read_text()
+        flat_state = re.sub(r"\s+", " ", chain_state_src)
+        assert (
+            "state.current_collapse_fingerprint_history = dict( "
+            "restored_collapse_fingerprint_history or {} )"
+            in flat_state
+            or "state.current_collapse_fingerprint_history = "
+            "dict(restored_collapse_fingerprint_history or {})"
+            in flat_state
+        ), "ChainState no longer seeds the history from the restored value"
+
         flat = re.sub(r"\s+", " ", _SRC)
         assert (
-            "current_collapse_fingerprint_history: dict = dict( "
-            "restored_collapse_fingerprint_history or {} )"
+            "state.current_collapse_fingerprint_history = "
+            "dict(interpretation.collapse_fingerprint_history)"
             in flat
-            or "current_collapse_fingerprint_history: dict = "
-            "dict(restored_collapse_fingerprint_history or {})"
+            or "state.current_collapse_fingerprint_history = dict( "
+            "interpretation.collapse_fingerprint_history )"
             in flat
+        ), "the interpreter's output no longer REPLACES the carried history"
+
+        # Exactly ONE write site in the workflow (the replacement) and ONE in
+        # the carrier (the seed) — a second write in either would be a merge,
+        # which is what this one-directional carry forbids.
+        workflow_writes = re.findall(r"state\.current_collapse_fingerprint_history\s*=(?!=)", _SRC)
+        assert len(workflow_writes) == 1, workflow_writes
+        carrier_writes = re.findall(
+            r"state\.current_collapse_fingerprint_history\s*=(?!=)", chain_state_src
         )
-        assert (
-            "current_collapse_fingerprint_history = "
-            "dict(interpretation.collapse_fingerprint_history)" in flat
-        )
-        # Exactly the seed (annotated) + the replacement assignment — no
-        # other write site, i.e. no reverse construction anywhere.
-        assignments = re.findall(r"current_collapse_fingerprint_history(?::\s*dict)?\s*=", _SRC)
-        assert len(assignments) == 2
+        assert len(carrier_writes) == 1, carrier_writes
         assert "propose_output.collapse_fingerprint" not in _SRC

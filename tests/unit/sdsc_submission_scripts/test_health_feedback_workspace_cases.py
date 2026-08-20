@@ -25,7 +25,8 @@ import pytest
 from agent.schemas.interpretation import InterpretationInput
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
-from core.resume import load_latest_fingerprint_history
+from core.committed_digests import read_committed_digests
+from core.resume import project_fingerprint_history
 from core.run_invariants import (
     RunInvariants,
     RunInvariantsViolation,
@@ -46,6 +47,17 @@ from tests.unit.agent.result_interpretation_agent.test_round_health_summary impo
     _output,
     _record,
 )
+
+
+# Step 09.5a C1 — the four carried-state loaders became PURE projections over
+# one shared committed-digest read (core/committed_digests.py). These shims keep
+# every assertion below unchanged while exercising the real production
+# composition: one read, then the projection under test.
+def load_latest_fingerprint_history(workspace, current_iter, committed_iters):
+    return project_fingerprint_history(
+        read_committed_digests(workspace, current_iter, committed_iters)
+    )
+
 
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
 #: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in

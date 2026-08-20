@@ -240,14 +240,22 @@ class TestTheLauncherCallSite:
             / "sdsc_submission_scripts"
             / "run_one_iteration.py"
         ).read_text(encoding="utf-8")
+        # Step 09.5a C3: transit configuration is bound inside the
+        # WorkflowLaunchConfig the launcher constructs, one level below the
+        # run_workflow call. Both levels are collected, so this stays an AST
+        # walk of the call sites that matter — never a substring search, which
+        # is what mutations M-D1/M-D2 survived against.
+        found: dict[str, object] = {}
         for node in ast.walk(ast.parse(source)):
             if (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Name)
-                and node.func.id == "run_workflow"
+                and node.func.id in ("run_workflow", "WorkflowLaunchConfig")
             ):
-                return {kw.arg: kw.value for kw in node.keywords if kw.arg}
-        raise AssertionError("no run_workflow(...) call found in run_one_iteration.py")
+                found.update({kw.arg: kw.value for kw in node.keywords if kw.arg})
+        if not found:
+            raise AssertionError("no run_workflow(...) call found in run_one_iteration.py")
+        return found
 
     @pytest.mark.parametrize("field", ["healthgate_mode", "result_authority"])
     def test_the_launcher_forwards_the_declaration_to_run_workflow(self, field):
@@ -277,18 +285,27 @@ class TestTheLauncherCallSite:
         version of this guard; this narrower one names the two fields so a
         failure points straight at PR D.
         """
+        # Step 09.5a C3: both are transit configuration, so the accepting
+        # surface is WorkflowLaunchConfig rather than run_workflow's own
+        # signature. What this guards — the workflow layer ACCEPTS what the
+        # launcher sends, and neither field acquires a non-None default — is
+        # unchanged.
+        import dataclasses
         import inspect
 
         from workflows.model_exploration import run_workflow
+        from workflows.run_config import WorkflowLaunchConfig
 
         params = inspect.signature(run_workflow).parameters
-        assert "healthgate_mode" in params
-        assert "result_authority" in params
-        assert params["healthgate_mode"].default is None, (
+        assert "launch" in params
+        fields = {f.name: f for f in dataclasses.fields(WorkflowLaunchConfig)}
+        assert "healthgate_mode" in fields
+        assert "result_authority" in fields
+        assert fields["healthgate_mode"].default is None, (
             "a non-None default would let an undeclared launcher acquire a "
             "posture it never declared"
         )
-        assert params["result_authority"].default is None
+        assert fields["result_authority"].default is None
 
     def test_the_protocol_accepts_what_run_workflow_forwards(self):
         import inspect
@@ -336,8 +353,21 @@ class TestTheLauncherCallSite:
                     "stamp legacy_authority_unknown again"
                 )
                 value = kwargs[field]
-                assert isinstance(value, ast.Name) and value.id == field, (
+                # Step 09.5a C3: the value now arrives on the transit carrier,
+                # so the forwarded expression is `launch.<field>` rather than a
+                # bare `<field>`. The property being guarded is unchanged and
+                # still the one that matters: the SAME-NAMED value is passed
+                # through, so a literal or a renamed attribute still fails.
+                same_named_parameter = isinstance(value, ast.Name) and value.id == field
+                same_named_carrier_field = (
+                    isinstance(value, ast.Attribute)
+                    and value.attr == field
+                    and isinstance(value.value, ast.Name)
+                    and value.value.id == "launch"
+                )
+                assert same_named_parameter or same_named_carrier_field, (
                     f"{field} is forwarded as {ast.dump(value)} rather than the "
-                    f"parameter `{field}` — a literal or renamed value here would "
-                    "silently substitute a posture the caller never declared"
+                    f"same-named value (`{field}` or `launch.{field}`) — a literal "
+                    "or renamed value here would silently substitute a posture the "
+                    "caller never declared"
                 )

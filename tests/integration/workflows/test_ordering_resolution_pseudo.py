@@ -51,6 +51,7 @@ from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from sdsc_submission_scripts.run_one_iteration import write_manifest
 from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 #: Step 09a C3 — the migrated ordering consumers take the run's MetricOrder as a
 #: REQUIRED keyword. The shipped TIDMAD spec is `higher`, so every expectation in
@@ -206,12 +207,14 @@ def _run_iteration(workspace: str, tune_output, **override_kwargs):
         MockTune.return_value.run.side_effect = _capture
 
         run_workflow(
-            data_dir=_seed_source_run(workspace),
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=_seed_source_run(workspace),
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+            ),
             workspace=workspace,
             run_name="iter_001",
-            max_iterations=1,
             **override_kwargs,
         )
 

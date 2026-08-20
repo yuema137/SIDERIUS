@@ -1,0 +1,1443 @@
+{
+  "artifacts": {
+    "c0_oracle/task_config_snapshot.yaml": {
+      "<bytes>": 3366
+    },
+    "c0_oracle/workflow_c0_oracle.json": {
+      "best_score_overall": 1.8,
+      "finished_at": "<VOLATILE>",
+      "iterations": [
+        {
+          "best_score": 1.8,
+          "completed_rounds": 3,
+          "model_type": "gated_tcn",
+          "status": "completed"
+        }
+      ],
+      "run_name": "c0_oracle",
+      "started_at": "<VOLATILE>",
+      "status": "completed",
+      "total_iterations": 1,
+      "workflow": "model_exploration"
+    },
+    "c0_oracle_hardware.json": {
+      "<hardware_context_fields>": [
+        "active_device_uuid",
+        "collection_errors",
+        "compute_capability",
+        "cuda_runtime_version",
+        "cuda_visible_devices",
+        "device_available",
+        "device_name",
+        "devices",
+        "discovered_at",
+        "driver_version",
+        "hardware_fingerprint_version",
+        "hostname",
+        "multiprocessor_count",
+        "platform",
+        "python_version",
+        "repo_commit",
+        "torch_version",
+        "total_memory_bytes",
+        "visible_device_count"
+      ]
+    },
+    "health_checks_effective.yaml": {
+      "<bytes>": 4884
+    },
+    "memory_trace.jsonl": {
+      "<probe_events>": [
+        [
+          "workflow",
+          1,
+          "start"
+        ],
+        [
+          "workflow",
+          1,
+          "end"
+        ],
+        [
+          "workflow",
+          1,
+          "post_gc"
+        ]
+      ]
+    },
+    "run_invariants_lock.json": {
+      "created_at": "<VOLATILE>",
+      "health_config_sha256": "7a4debd66f65e33fbe830e7f310f401a3184ab2d934d738c04a9d8e4eaf1dc5a",
+      "health_feedback_history_max_entries_per_model": 8,
+      "health_feedback_history_window_iterations": 3,
+      "health_gate_enabled": true,
+      "ordering_override_file_order": null,
+      "ordering_override_strategy": null,
+      "resolved_data_scope": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19
+      ],
+      "runtime_estimator_identity": "runtime_estimator@1.0.0+7b74a26d6843",
+      "runtime_policy_identity": "runtime_decision_policy@1.0.0+78bba7be3a2b",
+      "structured_health_feedback_enabled": false
+    }
+  },
+  "node_calls": {
+    "implementor": {
+      "constructed": true,
+      "ctor_kwargs": [
+        "bridge_factory"
+      ],
+      "label": "implementor",
+      "run_count": 1,
+      "run_inputs": [
+        {
+          "baseline_config": {
+            "loss_config": {
+              "loss_type": "focal"
+            },
+            "model_config": {
+              "n_layers": 4
+            },
+            "train_config": {
+              "epochs": 10
+            }
+          },
+          "candidate_id": null,
+          "custom_loss_spec": null,
+          "expert_advice": "",
+          "forward_contract": {
+            "embedding_note": "Input values are integer class indices \u2014 use nn.Embedding(num_classes, embed_dim) to convert [B, T] int64 \u2192 [B, T, embed_dim], then transpose to [B, embed_dim, T] for Conv1d layers.\n",
+            "input_description": "raw signal, integer class indices 0-255",
+            "input_shape": "[B, T] int64",
+            "model_io": {
+              "input": {
+                "axes": [
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "B"
+                    },
+                    "role": "batch"
+                  },
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "T"
+                    },
+                    "role": "temporal"
+                  }
+                ],
+                "dtype": {
+                  "admissible": [
+                    "int64",
+                    "int32"
+                  ]
+                }
+              },
+              "output": {
+                "axes": [
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "B"
+                    },
+                    "role": "batch"
+                  },
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": 256,
+                      "symbolic": null
+                    },
+                    "role": "class"
+                  },
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "T"
+                    },
+                    "role": "temporal"
+                  }
+                ],
+                "dtype": {
+                  "admissible": [
+                    "float32"
+                  ]
+                }
+              }
+            },
+            "num_classes": 256,
+            "output_description": "per-timestep logits over 256 denoising classes",
+            "output_head_note": "Output must be exactly [output_shape] \u2014 use a final Conv1d(channels, num_classes, 1) or Linear + transpose.\n",
+            "output_shape": "[B, 256, T] float32",
+            "preset": "sequence",
+            "task_note": "Offline denoising \u2014 output at position t may depend on all positions. Causal constraints are not required.\n",
+            "task_type": "classification"
+          },
+          "hardware_context": {
+            "<hardware_context_fields>": [
+              "active_device_uuid",
+              "collection_errors",
+              "compute_capability",
+              "cuda_runtime_version",
+              "cuda_visible_devices",
+              "device_available",
+              "device_name",
+              "devices",
+              "discovered_at",
+              "driver_version",
+              "hardware_fingerprint_version",
+              "hostname",
+              "multiprocessor_count",
+              "platform",
+              "python_version",
+              "repo_commit",
+              "torch_version",
+              "total_memory_bytes",
+              "visible_device_count"
+            ]
+          },
+          "human_advice": null,
+          "loss_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/losses",
+          "mathematical_definition": "Dilated causal convolutions with gating.",
+          "max_retries": 2,
+          "model_description": "A gated TCN for signal denoising.",
+          "model_name": "gated_tcn",
+          "output_type": "classifier",
+          "plugin_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/models",
+          "previous_validation_failure": null,
+          "reference_code": {},
+          "storage": {
+            "backend": "local",
+            "local": {
+              "run_name": "c0_oracle",
+              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn"
+            },
+            "postgres": null
+          },
+          "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
+          "test_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/tests",
+          "vram_budget_gb": null
+        }
+      ]
+    },
+    "interpretation": {
+      "constructed": true,
+      "ctor_kwargs": [
+        "bridge_factory"
+      ],
+      "label": "interpretation",
+      "run_count": 1,
+      "run_inputs": [
+        {
+          "active_model_last_n": 2,
+          "active_model_score_delta": 0.05,
+          "active_model_top_k": 3,
+          "cold_start": false,
+          "collapse_fingerprint_history": {},
+          "cumulative_information_gain": 0.0,
+          "cumulative_information_gain_by_semantics": {},
+          "enable_structured_health_feedback": false,
+          "expert_advice": "",
+          "health_feedback_history_max_entries_per_model": 8,
+          "health_feedback_history_window_iterations": 3,
+          "human_advice": null,
+          "iteration": 1,
+          "metric_spec": {
+            "aggregation": "tidmad_anchor_normalised_linear_grand_mean",
+            "direction": "higher",
+            "id": "tidmad_denoising_score",
+            "references": [
+              "anchor_map",
+              "raw_baseline",
+              "ground_truth"
+            ],
+            "scoreability": {
+              "contract_id": "tidmad_denoised_h5",
+              "input_channel_group": "channel0001",
+              "required_attrs": [
+                "voltage_range_mV",
+                "sampling_frequency"
+              ],
+              "required_storage_dtype": "int8"
+            },
+            "transform": "log",
+            "transform_params": {
+              "log_base": 5.27
+            }
+          },
+          "model_knowledge_cache": {},
+          "model_types": null,
+          "prediction_outcomes_by_semantics": {},
+          "prediction_outcomes_history": {},
+          "previous_proposal": null,
+          "runtime_vocab": [
+            {
+              "aliases": [],
+              "description": "Causal convolution with exponentially increasing dilation factors (2^i), giving O(log T) receptive field growth per layer.",
+              "kind": "feature",
+              "name": "dilated_causal_conv",
+              "origin": null,
+              "pattern": "dilation",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Sigmoid-gated element-wise multiplication of two conv branches (tanh * sigmoid), enabling selective signal modulation.",
+              "kind": "feature",
+              "name": "gated_activation",
+              "origin": null,
+              "pattern": "sigmoid.*tanh|tanh.*sigmoid",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Additive residual path bypassing one or more layers, preserving gradient flow and enabling multi-scale feature aggregation.",
+              "kind": "feature",
+              "name": "skip_connection",
+              "origin": null,
+              "pattern": "skip|residual|\\+.*out",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Sinusoidal or learned position embeddings injected into the representation to encode temporal order.",
+              "kind": "feature",
+              "name": "positional_encoding",
+              "origin": null,
+              "pattern": "positional|pos_enc|sin.*cos",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Parallel self-attention heads computing global pairwise token interactions. O(T^2) memory.",
+              "kind": "feature",
+              "name": "multi_head_attention",
+              "origin": null,
+              "pattern": "MultiheadAttention|self_attention|attention|TransformerEncoder|transformer",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Symmetric architecture that compresses input to a bottleneck representation then reconstructs, with skip connections between matched levels.",
+              "kind": "feature",
+              "name": "encoder_decoder",
+              "origin": null,
+              "pattern": "encoder|decoder|upsample|downsample",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Long Short-Term Memory recurrent cell with forget/input/output gates for sequential state compression.",
+              "kind": "feature",
+              "name": "lstm_cell",
+              "origin": null,
+              "pattern": "LSTM|lstm",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Learnable complex-valued weights applied in Fourier domain (RFFT), processing all frequency bins directly.",
+              "kind": "feature",
+              "name": "spectral_conv",
+              "origin": null,
+              "pattern": "rfft|fft|spectral|fourier",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "User-controlled per-frequency gate vector (v_k in [0,1]) that blends spectral and bypass paths, encoding domain knowledge about signal bands.",
+              "kind": "feature",
+              "name": "static_v_gate",
+              "origin": null,
+              "pattern": "static_v|v_gate|gate_vector",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Narrow hidden layer that forces the network to learn a compressed representation of the full input segment.",
+              "kind": "feature",
+              "name": "bottleneck_compression",
+              "origin": null,
+              "pattern": "latent|bottleneck",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Lookup table mapping discrete integer ADC values (0-255) to dense vector representations.",
+              "kind": "feature",
+              "name": "embedding_layer",
+              "origin": null,
+              "pattern": "Embedding|nn\\.Embedding",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "How far back in time the model can see per layer stack \u2014 wider receptive field enables capture of long-timescale signal structure.",
+              "kind": "capability",
+              "name": "receptive_field",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "The model's ability to distinguish and process different spectral components in the signal independently.",
+              "kind": "capability",
+              "name": "frequency_resolution",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Ability to attenuate or amplify specific spectral components independently, rather than treating the spectrum uniformly.",
+              "kind": "capability",
+              "name": "selective_frequency_processing",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Ease of gradient propagation during backpropagation \u2014 skip connections and residual paths prevent vanishing gradients in deep architectures.",
+              "kind": "capability",
+              "name": "gradient_flow",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Achieving comparable denoising performance with fewer trainable parameters \u2014 important for VRAM budget and generalization.",
+              "kind": "capability",
+              "name": "parameter_efficiency",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Model's capacity to capture correlations across distant timesteps \u2014 critical for recovering slowly-varying signal structure.",
+              "kind": "capability",
+              "name": "long_range_dependency",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Combining features from multiple temporal resolutions \u2014 coarse features capture trends, fine features capture transients.",
+              "kind": "capability",
+              "name": "multi_scale_aggregation",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Encoding known physics or signal properties directly into the architecture, rather than learning them from data alone.",
+              "kind": "capability",
+              "name": "domain_knowledge_injection",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Maintaining phase-coherent correspondence between input and output timesteps across all processing stages.",
+              "kind": "capability",
+              "name": "temporal_alignment",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Processing the signal strictly left-to-right with hidden state accumulation \u2014 enables streaming but limits parallelism.",
+              "kind": "capability",
+              "name": "sequential_processing",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            }
+          ],
+          "storage": {
+            "backend": "local",
+            "local": {
+              "run_name": "c0_oracle",
+              "workspace": "<WS>/c0_oracle/iteration_001"
+            },
+            "postgres": null
+          },
+          "summaries": [
+            {
+              "best_config": {
+                "loss_config": {},
+                "model_config": {},
+                "train_config": {}
+              },
+              "best_denoising_score": 1.5,
+              "best_file_vector": null,
+              "best_model_params": null,
+              "best_raw_health_validity": "unknown",
+              "best_score_table": null,
+              "best_timing": null,
+              "best_training_diagnosis": null,
+              "best_valid_config": null,
+              "best_valid_denoising_score": null,
+              "best_valid_formal_score": null,
+              "best_valid_score_table": null,
+              "completed_rounds": 3,
+              "eval_psd_segments": null,
+              "failure_counts": {
+                "diagnosis_state_counts": {
+                  "diagnosis_missing": 1
+                },
+                "gate_action_counts": {
+                  "none": 1
+                },
+                "health_provenance_counts": {
+                  "gated": 1
+                },
+                "metric_refusal_count": 0,
+                "records_total": 1,
+                "refusal_contract_ids": {},
+                "status_counts": {
+                  "success": 1
+                },
+                "validation_state_counts": {}
+              },
+              "formal_file_vector": null,
+              "formal_score": 1.5,
+              "formal_score_table": null,
+              "formal_training_diagnosis": null,
+              "metric_identity": null,
+              "model_description": null,
+              "model_type": "punet",
+              "round_conclusions": [
+                ""
+              ],
+              "round_health": [
+                {
+                  "exp_id": "punet_v1_001",
+                  "failure_reason": null,
+                  "fingerprint": null,
+                  "gate_action": null,
+                  "gate_outcomes": [],
+                  "health_validity": "unknown",
+                  "provenance": "gated",
+                  "status": "success"
+                }
+              ],
+              "round_model_params": [
+                null
+              ],
+              "round_ordering": [
+                {
+                  "exp_id": "punet_v1_001",
+                  "proposal_rejected": false,
+                  "proposal_rejection_reason": null,
+                  "proposed_order_strategy": null,
+                  "resolution_source": "legacy_default",
+                  "resolved_file_order": null,
+                  "resolved_order_strategy": "shuffle"
+                }
+              ],
+              "round_scores": [
+                1.5
+              ],
+              "round_trial_portions": [
+                null
+              ],
+              "run_name": "v1",
+              "scientific_authority": null,
+              "secondary_metrics": [],
+              "status": "completed",
+              "training_psd_segments": null,
+              "trial_portion": null,
+              "worst_denoising_score": 1.5
+            }
+          ],
+          "task_blocks": {
+            "evidence_reading": "Task-specific evidence you will receive:\n\n- A per-file score table: one row per validation file with raw_baseline,\n  ground_truth, model, gain_vs_raw, headroom_vs_gt, Linear_Weight, and Impact_Score\n  columns, followed by a secondary block re-ranking the sampled rows by\n  Impact_Score descending\n- Per-model score tables \u2014 per-file `raw_baseline` / `ground_truth` / `model`\n  in log-space, alongside `Linear_Weight` (each file's share of the linear\n  denominator behind the aggregate scalar) and `Impact_Score` (the log-scalar\n  gain available if that file's `model` were lifted to its `ground_truth`)\n- Data volume: how many PSD segments were used for training vs baseline\n  (baseline typically uses 4000)\n\n### Reading the score table \u2014 the Log-of-Mean trap\n\nThe aggregate denoising scalar is the log of a *sum* of per-segment linear\nenergies, not a mean of per-file log scores. Two columns describe each file's\ncontribution to the next-iter improvement budget:\n\n- **`Linear_Weight`** \u2014 the file's current share of the scalar's linear\n  denominator. Tells you *where the scalar lives now*. Sums to 1 across\n  sampled files.\n- **`Impact_Score`** \u2014 the log-scalar gain you would obtain by lifting this\n  file's `model` to its `ground_truth`. Tells you *where the next-iter lever\n  is*. A high `Impact_Score` means a file with both meaningful weight and\n  remaining headroom; a near-zero `Impact_Score` means the file is either\n  already at its ceiling or its weight is too small for any improvement to\n  register.\n",
+            "per_model_guidance": "When you analyse bottlenecks for this model:\n\n1. Rank the files by `Impact_Score` descending \u2014 that is the per-iter\n   opportunity ranking. A multi-log-unit `headroom_vs_gt` does not by itself\n   indicate opportunity; only `Impact_Score` does.\n2. Read `Linear_Weight` for context. A high-weight file at its ceiling has\n   zero `Impact_Score` and is not actionable.\n3. Saturation is a relative reading. If the entire `Impact_Score` column is\n   small in magnitude relative to `model_scalar` and to the gains your\n   chain has been making per iter, this model has reached the dataset\n   ceiling \u2014 say so.\n4. No file is permanently irrelevant. A near-zero `Impact_Score` today may\n   rise next iter once higher-`Impact_Score` files are recovered. Do not\n   memorise file-index labels across iterations \u2014 re-read the column each\n   iter.\n\nWhen filling `per_file_analysis`: Read the per-file table by Impact_Score\ndescending. Cite specific files BY file_index together with their\nImpact_Score and Linear_Weight values for this iter. When a clear\nImpact_Score leader exists, you MUST name the leader's file_index explicitly\nas the primary remaining lever \u2014 do NOT declare this model saturated while a\nclear lever remains, even if model_scalar is close to its ceiling. Only call\na file 'already saturated' when its Impact_Score is uniformly small with the\nrest of the column. Do not assert a file is permanently weak from a single\niter's reading.\n\nAdditional per-model rules:\n- per_file_analysis: rank by Impact_Score; cite Linear_Weight as context, not as a ranking metric on its own; never use fixed cutoffs\n- data_sensitivity: reference training_psd_segments, trial_portion changes across rounds\n- bottlenecks may name per-file saturation (e.g. 'all sampled files saturated against their ground_truth ceiling')\n",
+            "prediction_guidance": null,
+            "synthesis_guidance": "When you analyse bottlenecks across the candidate models:\n\n1. **Rank by `Impact_Score` descending** to identify each model's largest\n   remaining levers, then look across models for files that share a high\n   Impact_Score \u2014 those are the cross-model opportunities. A multi-log-unit\n   `headroom_vs_gt` does not by itself indicate opportunity; only\n   `Impact_Score` does.\n2. **Read `Linear_Weight` for context.** It is *not* a ranking metric on its\n   own \u2014 a high-weight file at its ceiling has zero `Impact_Score` and is\n   not actionable.\n3. **Saturation is a relative reading.** If the entire `Impact_Score` column\n   is small in magnitude relative to the current `model_scalar` and to the\n   per-iter gains the chain has been making, the chain has reached the\n   dataset ceiling on that model \u2014 declare it explicitly. There is no fixed\n   cutoff; you compare the distribution against the scale of progress.\n4. **No file is permanently irrelevant.** Today's near-zero `Impact_Score`\n   may rise next iter once higher-`Impact_Score` files are fully recovered.\n   Re-read the column each iter; do not memorise file-index labels across\n   iterations.\n\nWhen filling `per_file_comparison`: Cite Impact_Score, Linear_Weight, and\ngain_vs_raw together when discussing per-file bottlenecks. Rank candidates\nfor the next iter's improvement by Impact_Score descending across models.\nDo not assert a file is universally weak from headroom alone \u2014 a large\nheadroom on a low-weight file implies a near-zero Impact_Score and is not\nactionable.\n\nWhen writing `take_home_message`: Read the Impact_Score column FIRST \u2014 never\ndecide saturation from model_scalar alone. (a) If one or more files show an\nImpact_Score visibly larger than the rest (a clear leader, even when\nmodel_scalar is close to its ceiling), your take_home_message MUST explicitly\nidentify the file_index with the largest Impact_Score as the primary\nobjective for the next iteration; do NOT declare saturation while a clear\nperformance lever remains. (b) Only when the entire Impact_Score column is\nuniformly small relative to model_scalar AND significantly smaller than the\ngains identified in previous iterations of this chain, declare ceiling\nreached rather than manufacture an architectural deficiency.\n\nAdditional synthesis rules:\n- per_file_comparison: rank by Impact_Score descending; cite Linear_Weight as context, not as a ranking metric on its own; do not use fixed cutoffs or fixed file-index labels\n- take_home_message: exactly one sentence, grounded in the Impact_Score distribution. When a clear Impact_Score leader exists, you MUST cite that file's file_index explicitly (e.g. \"file 17\"); a high model_scalar does not override a remaining lever.\n"
+          },
+          "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
+          "vocab_link_confirmations": {}
+        }
+      ]
+    },
+    "proposal": {
+      "constructed": true,
+      "ctor_kwargs": [
+        "bridge_factory"
+      ],
+      "label": "proposal",
+      "run_count": 1,
+      "run_inputs": [
+        {
+          "agent_cards": [],
+          "cold_start": false,
+          "constraints": [],
+          "data_dir": "<DATA>",
+          "data_scope": {
+            "file_indices": null
+          },
+          "debug_dump_proposing_prompt_path": null,
+          "enable_structured_health_feedback": false,
+          "existing_model_types": [
+            "punet"
+          ],
+          "expert_context": [],
+          "formal_time_budget_minutes": null,
+          "forward_contract": {
+            "embedding_note": "Input values are integer class indices \u2014 use nn.Embedding(num_classes, embed_dim) to convert [B, T] int64 \u2192 [B, T, embed_dim], then transpose to [B, embed_dim, T] for Conv1d layers.\n",
+            "input_description": "raw signal, integer class indices 0-255",
+            "input_shape": "[B, T] int64",
+            "model_io": {
+              "input": {
+                "axes": [
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "B"
+                    },
+                    "role": "batch"
+                  },
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "T"
+                    },
+                    "role": "temporal"
+                  }
+                ],
+                "dtype": {
+                  "admissible": [
+                    "int64",
+                    "int32"
+                  ]
+                }
+              },
+              "output": {
+                "axes": [
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "B"
+                    },
+                    "role": "batch"
+                  },
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": 256,
+                      "symbolic": null
+                    },
+                    "role": "class"
+                  },
+                  {
+                    "dimension": {
+                      "dynamic": false,
+                      "fixed": null,
+                      "symbolic": "T"
+                    },
+                    "role": "temporal"
+                  }
+                ],
+                "dtype": {
+                  "admissible": [
+                    "float32"
+                  ]
+                }
+              }
+            },
+            "num_classes": 256,
+            "output_description": "per-timestep logits over 256 denoising classes",
+            "output_head_note": "Output must be exactly [output_shape] \u2014 use a final Conv1d(channels, num_classes, 1) or Linear + transpose.\n",
+            "output_shape": "[B, 256, T] float32",
+            "preset": "sequence",
+            "task_note": "Offline denoising \u2014 output at position t may depend on all positions. Causal constraints are not required.\n",
+            "task_type": "classification"
+          },
+          "hardware_context": {
+            "<hardware_context_fields>": [
+              "active_device_uuid",
+              "collection_errors",
+              "compute_capability",
+              "cuda_runtime_version",
+              "cuda_visible_devices",
+              "device_available",
+              "device_name",
+              "devices",
+              "discovered_at",
+              "driver_version",
+              "hardware_fingerprint_version",
+              "hostname",
+              "multiprocessor_count",
+              "platform",
+              "python_version",
+              "repo_commit",
+              "torch_version",
+              "total_memory_bytes",
+              "visible_device_count"
+            ]
+          },
+          "human_advice": null,
+          "interpretation": {
+            "best_config": {
+              "model_config": {}
+            },
+            "best_denoising_score": 1.5,
+            "best_valid_config": null,
+            "best_valid_denoising_score": null,
+            "bottlenecks": [
+              "Bottleneck 1"
+            ],
+            "cold_start": false,
+            "collapse_fingerprint_history": {},
+            "cumulative_information_gain": 0.0,
+            "cumulative_information_gain_by_semantics": {},
+            "evolution_stats": {},
+            "is_degraded": false,
+            "key_findings": [
+              "Finding 1"
+            ],
+            "metric_identity": null,
+            "model_descriptions": {
+              "punet": "A positional U-Net."
+            },
+            "model_knowledge_cache": {
+              "punet": {
+                "_stats": {
+                  "best_denoising_score": 1.5,
+                  "completed_rounds": 3
+                },
+                "bottlenecks": [
+                  "Bottleneck 1"
+                ],
+                "key_findings": [
+                  "Finding 1"
+                ]
+              }
+            },
+            "model_types": [
+              "punet"
+            ],
+            "new_discoveries": [],
+            "per_model_best": {
+              "punet": 1.5
+            },
+            "per_model_best_valid": {},
+            "per_model_collapse_fingerprints": {},
+            "per_model_failure_counts": {},
+            "per_model_params": null,
+            "per_model_raw_best_health_validity": {},
+            "per_model_round_health_counts": {},
+            "per_model_score_tables": null,
+            "per_model_secondary_metrics": {},
+            "per_model_training_segments": null,
+            "per_model_worst": {
+              "punet": 1.2
+            },
+            "prediction_evaluation": null,
+            "prediction_evaluation_semantics": "legacy_v1",
+            "prediction_outcomes_by_semantics": {},
+            "prediction_outcomes_history": {
+              "confirmed": 0,
+              "partial": 0,
+              "refuted": 0
+            },
+            "prediction_pool_sizes": {},
+            "runtime_vocab": [],
+            "scientific_accuracy": null,
+            "scientific_aggregation": null,
+            "take_home_message": "Need a new architecture.",
+            "total_experiments": 3,
+            "vocab_changes": [],
+            "vocab_diversity_ratio": null,
+            "vocab_link_confirmations": {},
+            "worst_denoising_score": 1.2
+          },
+          "is_trial": false,
+          "mindset": null,
+          "per_model_score_tables": null,
+          "previous_failures": [],
+          "reasoning_pipeline": {
+            "exploration_mode": "auto",
+            "model_selection": {
+              "method": "top_n",
+              "params": {
+                "n": 5
+              }
+            },
+            "policy": {
+              "comparative_analysis_top_k": 5,
+              "max_citations": 5,
+              "min_runs_for_promotion": 3,
+              "minimum_boldness": 0.05,
+              "prior_stage_max_chars": 4000,
+              "require_positive_delta": true,
+              "vocab_stagnation_threshold": 0.1
+            },
+            "stages": []
+          },
+          "recent_gate_exhaustions": [],
+          "recent_trial_validity": [],
+          "sampling_seed": null,
+          "storage": {
+            "backend": "local",
+            "local": {
+              "run_name": "c0_oracle",
+              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001"
+            },
+            "postgres": null
+          },
+          "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
+          "train_portion": 0.1,
+          "trial_portion": 0.1,
+          "trial_time_budget_minutes": null,
+          "vocab_seed": [
+            {
+              "aliases": [],
+              "description": "Causal convolution with exponentially increasing dilation factors (2^i), giving O(log T) receptive field growth per layer.",
+              "kind": "feature",
+              "name": "dilated_causal_conv",
+              "origin": null,
+              "pattern": "dilation",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Sigmoid-gated element-wise multiplication of two conv branches (tanh * sigmoid), enabling selective signal modulation.",
+              "kind": "feature",
+              "name": "gated_activation",
+              "origin": null,
+              "pattern": "sigmoid.*tanh|tanh.*sigmoid",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Additive residual path bypassing one or more layers, preserving gradient flow and enabling multi-scale feature aggregation.",
+              "kind": "feature",
+              "name": "skip_connection",
+              "origin": null,
+              "pattern": "skip|residual|\\+.*out",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Sinusoidal or learned position embeddings injected into the representation to encode temporal order.",
+              "kind": "feature",
+              "name": "positional_encoding",
+              "origin": null,
+              "pattern": "positional|pos_enc|sin.*cos",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Parallel self-attention heads computing global pairwise token interactions. O(T^2) memory.",
+              "kind": "feature",
+              "name": "multi_head_attention",
+              "origin": null,
+              "pattern": "MultiheadAttention|self_attention|attention|TransformerEncoder|transformer",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Symmetric architecture that compresses input to a bottleneck representation then reconstructs, with skip connections between matched levels.",
+              "kind": "feature",
+              "name": "encoder_decoder",
+              "origin": null,
+              "pattern": "encoder|decoder|upsample|downsample",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Long Short-Term Memory recurrent cell with forget/input/output gates for sequential state compression.",
+              "kind": "feature",
+              "name": "lstm_cell",
+              "origin": null,
+              "pattern": "LSTM|lstm",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Learnable complex-valued weights applied in Fourier domain (RFFT), processing all frequency bins directly.",
+              "kind": "feature",
+              "name": "spectral_conv",
+              "origin": null,
+              "pattern": "rfft|fft|spectral|fourier",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "User-controlled per-frequency gate vector (v_k in [0,1]) that blends spectral and bypass paths, encoding domain knowledge about signal bands.",
+              "kind": "feature",
+              "name": "static_v_gate",
+              "origin": null,
+              "pattern": "static_v|v_gate|gate_vector",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Narrow hidden layer that forces the network to learn a compressed representation of the full input segment.",
+              "kind": "feature",
+              "name": "bottleneck_compression",
+              "origin": null,
+              "pattern": "latent|bottleneck",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Lookup table mapping discrete integer ADC values (0-255) to dense vector representations.",
+              "kind": "feature",
+              "name": "embedding_layer",
+              "origin": null,
+              "pattern": "Embedding|nn\\.Embedding",
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "How far back in time the model can see per layer stack \u2014 wider receptive field enables capture of long-timescale signal structure.",
+              "kind": "capability",
+              "name": "receptive_field",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "The model's ability to distinguish and process different spectral components in the signal independently.",
+              "kind": "capability",
+              "name": "frequency_resolution",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Ability to attenuate or amplify specific spectral components independently, rather than treating the spectrum uniformly.",
+              "kind": "capability",
+              "name": "selective_frequency_processing",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Ease of gradient propagation during backpropagation \u2014 skip connections and residual paths prevent vanishing gradients in deep architectures.",
+              "kind": "capability",
+              "name": "gradient_flow",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Achieving comparable denoising performance with fewer trainable parameters \u2014 important for VRAM budget and generalization.",
+              "kind": "capability",
+              "name": "parameter_efficiency",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Model's capacity to capture correlations across distant timesteps \u2014 critical for recovering slowly-varying signal structure.",
+              "kind": "capability",
+              "name": "long_range_dependency",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Combining features from multiple temporal resolutions \u2014 coarse features capture trends, fine features capture transients.",
+              "kind": "capability",
+              "name": "multi_scale_aggregation",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Encoding known physics or signal properties directly into the architecture, rather than learning them from data alone.",
+              "kind": "capability",
+              "name": "domain_knowledge_injection",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Maintaining phase-coherent correspondence between input and output timesteps across all processing stages.",
+              "kind": "capability",
+              "name": "temporal_alignment",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            },
+            {
+              "aliases": [],
+              "description": "Processing the signal strictly left-to-right with hidden state accumulation \u2014 enables streaming but limits parallelism.",
+              "kind": "capability",
+              "name": "sequential_processing",
+              "origin": null,
+              "pattern": null,
+              "proposed_by_run": null,
+              "related_to": [],
+              "seen_in_runs": [],
+              "tier": "canonical"
+            }
+          ],
+          "vram_budget_gb": null
+        }
+      ]
+    },
+    "tuner": {
+      "constructed": true,
+      "ctor_kwargs": [
+        "bridge_factory",
+        "sandbox_factory"
+      ],
+      "label": "tuner",
+      "run_count": 1,
+      "run_inputs": [
+        {
+          "allow_extreme_steps": false,
+          "attempts_per_formal_round": 5,
+          "attempts_per_round": 3,
+          "bypass_formal_time_budget_min_delta": 0.0,
+          "candidate_id": null,
+          "cleanup_denoised": false,
+          "current_run_best_formal_score": null,
+          "data_dir": "<DATA>",
+          "data_scope": {
+            "file_indices": null
+          },
+          "degenerate_penalty_score": null,
+          "enable_chain_incumbent_formal_gates": false,
+          "enable_structured_health_feedback": false,
+          "eval_portion": 0.1,
+          "expert_advice": {
+            "constraints": [
+              "VRAM < 8 GB"
+            ],
+            "focus_areas": [
+              "receptive field"
+            ],
+            "freeform_notes": null,
+            "known_failures": [],
+            "rationale": "",
+            "suggested_directions": []
+          },
+          "file_index": 6,
+          "file_order_override": null,
+          "force_formal_round": true,
+          "formal_eval_portion": 1.0,
+          "formal_portion": 0.1,
+          "formal_round_strategy": "full_clone",
+          "formal_strategy": "snapshot",
+          "formal_time_budget_minutes": null,
+          "formal_train_portion": 1.0,
+          "formal_vram_budget_gb": null,
+          "gpu_admission_enforcement": "observe_only",
+          "gpu_admission_measurement_source": null,
+          "gpu_pair_ceiling_gib": null,
+          "health_checks_config": null,
+          "health_feedback_history_max_entries_per_model": 8,
+          "health_feedback_history_window_iterations": 3,
+          "health_gate_enabled": true,
+          "health_gate_files": null,
+          "healthgate_mode": null,
+          "human_advice": null,
+          "is_trial": false,
+          "llm_model_id": "gemini-3.1-flash-lite-preview",
+          "llm_provider": "gemini",
+          "max_epochs": null,
+          "max_fail_rounds": 3,
+          "max_retries": null,
+          "max_rounds": 10,
+          "max_steps_per_attempt": null,
+          "min_formal_batch_size": null,
+          "model_type": "gated_tcn",
+          "order_strategy_override": null,
+          "plan_overrides": {},
+          "progress_bar": false,
+          "reflect_model_id": null,
+          "reflect_provider": null,
+          "result_authority": null,
+          "resume": false,
+          "runtime_formal_safety_factor": null,
+          "runtime_safety_factor": 1.0,
+          "runtime_trial_safety_factor": null,
+          "runtime_watchdog_enabled": false,
+          "runtime_watchdog_floor_seconds": "<VOLATILE>",
+          "runtime_watchdog_safety_factor": null,
+          "sampling_seed": null,
+          "seed_plugin_path": null,
+          "skip_formal_min_delta": -1.0,
+          "storage": {
+            "backend": "local",
+            "local": {
+              "run_name": "c0_oracle",
+              "workspace": "<WS>/c0_oracle/iteration_001/gated_tcn"
+            },
+            "postgres": null
+          },
+          "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
+          "train_base_seed": null,
+          "train_portion": 0.1,
+          "train_validation_align": true,
+          "trial_portion": 0.1,
+          "trial_time_budget_minutes": null,
+          "trial_vram_budget_gb": null,
+          "validation_max_phase_seconds": null,
+          "validation_max_portion": null,
+          "validation_max_samples": null,
+          "validation_max_train_samples": null
+        }
+      ]
+    },
+    "validator": {
+      "constructed": true,
+      "ctor_kwargs": [
+        "bridge_factory"
+      ],
+      "label": "validator",
+      "run_count": 1,
+      "run_inputs": [
+        {
+          "candidate_id": null,
+          "config_fields": {
+            "hidden_dim": 64,
+            "n_layers": 4
+          },
+          "description_file_path": "/tmp/agent_generated/models/gated_tcn/description.md",
+          "expert_advice": "",
+          "human_advice": null,
+          "inherited_components": [],
+          "llm_model_id": "gemini-3.1-flash-lite-preview",
+          "llm_provider": "gemini",
+          "mathematical_definition": "Dilated causal convolutions with gating.",
+          "model_description": "A gated TCN for signal denoising.",
+          "model_file_path": "/tmp/agent_generated/models/gated_tcn.py",
+          "model_io_contract": null,
+          "model_type": "gated_tcn",
+          "storage": {
+            "backend": "local",
+            "local": {
+              "run_name": "c0_oracle",
+              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn"
+            },
+            "postgres": null
+          },
+          "test_file_path": "/tmp/agent_generated/tests/test_gated_tcn.py"
+        }
+      ]
+    }
+  },
+  "results": [
+    {
+      "all_records": [
+        {
+          "attempt_index": null,
+          "candidate_id": null,
+          "counts_toward_attempt_budget": true,
+          "counts_toward_completed_rounds": null,
+          "denoising_score": 1.8,
+          "eval_portion": null,
+          "eval_psd_segments": null,
+          "eval_strategy": null,
+          "exp_id": "gated_tcn_explore_v1_001",
+          "failure_attribution": null,
+          "failure_reason": null,
+          "failure_stage": null,
+          "failure_type": null,
+          "file_index": 6,
+          "file_vector": null,
+          "final_loss": null,
+          "gate_action": null,
+          "gpu_evidence": null,
+          "health_gate_enabled": null,
+          "health_gate_results": [],
+          "is_trial": false,
+          "logical_round": null,
+          "loss_history": null,
+          "memory": null,
+          "metric_refusal": null,
+          "metric_result": null,
+          "model_params": null,
+          "model_type": "gated_tcn",
+          "ordering_proposal_rejected": false,
+          "ordering_proposal_rejection_reason": null,
+          "ordering_resolution_source": null,
+          "override_file_order": null,
+          "override_order_strategy": null,
+          "params": {
+            "loss_config": {},
+            "model_config": {},
+            "train_config": {}
+          },
+          "planned_eval_strategy": null,
+          "planned_trial_strategy": null,
+          "proposed_config": null,
+          "proposed_file_order": null,
+          "proposed_order_strategy": null,
+          "record_type": "experiment",
+          "resolved_data_scope": null,
+          "resolved_file_order": null,
+          "resolved_order_strategy": null,
+          "scientific_authority": null,
+          "score_table": null,
+          "status": "success",
+          "strategy_normalization_reason": null,
+          "target_files": null,
+          "timestamp": "<VOLATILE>",
+          "timing": null,
+          "traceback_summary": null,
+          "train_portion": null,
+          "training_diagnosis": null,
+          "training_history": null,
+          "training_psd_segments": null,
+          "trial_portion": null,
+          "trial_strategy": null,
+          "validation_workload_ceiling": null
+        }
+      ],
+      "attempts_per_formal_round": 5,
+      "attempts_per_round": 3,
+      "best_config": {
+        "loss_config": {},
+        "model_config": {},
+        "train_config": {}
+      },
+      "best_denoising_score": 1.8,
+      "best_exp_id": "gated_tcn_explore_v1_001",
+      "best_file_vector": null,
+      "best_formal_denoising_score": 1.8,
+      "best_score_table": null,
+      "best_valid_config": null,
+      "best_valid_denoising_score": null,
+      "best_valid_exp_id": null,
+      "best_valid_file_vector": null,
+      "best_valid_formal_denoising_score": null,
+      "best_valid_formal_exp_id": null,
+      "best_valid_formal_score_table": null,
+      "best_valid_score_table": null,
+      "best_valid_trial_denoising_score": null,
+      "best_valid_trial_exp_id": null,
+      "candidate_id": null,
+      "completed_rounds": 3,
+      "consecutive_fail_rounds_at_exit": 0,
+      "file_index": 6,
+      "finished_at": "<VOLATILE>",
+      "formal_comparison_reference_source": null,
+      "formal_reference_score": null,
+      "formal_score_table": null,
+      "gate_exhaustion": null,
+      "health_checks_config": null,
+      "health_checks_config_source": null,
+      "health_config_sha256": null,
+      "health_gate_enabled": null,
+      "healthgate_mode": null,
+      "max_fail_rounds": 3,
+      "metric_spec": {
+        "aggregation": "tidmad_anchor_normalised_linear_grand_mean",
+        "direction": "higher",
+        "id": "tidmad_denoising_score",
+        "references": [
+          "anchor_map",
+          "raw_baseline",
+          "ground_truth"
+        ],
+        "scoreability": {
+          "contract_id": "tidmad_denoised_h5",
+          "input_channel_group": "channel0001",
+          "required_attrs": [
+            "voltage_range_mV",
+            "sampling_frequency"
+          ],
+          "required_storage_dtype": "int8"
+        },
+        "transform": "log",
+        "transform_params": {
+          "log_base": 5.27
+        }
+      },
+      "model_type": "gated_tcn",
+      "physical_rejections": [],
+      "resolved_bypass_formal_threshold": null,
+      "resolved_data_scope": null,
+      "resolved_skip_formal_threshold": null,
+      "result_authority": null,
+      "run_name": "explore_v1",
+      "started_at": "<VOLATILE>",
+      "status": "completed",
+      "termination_reason": "completed",
+      "total_attempts": 3,
+      "trial_validity_feedback": null
+    }
+  ],
+  "startup_side_effect_order": [
+    "_snapshot_task_config",
+    "get_or_create_hardware_context",
+    "build_run_invariants",
+    "run_launch_self_test",
+    "ensure_run_invariants",
+    "_get_reasoning_pipeline"
+  ]
+}

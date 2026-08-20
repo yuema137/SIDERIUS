@@ -135,19 +135,20 @@ class TestEndToEndPlumbing:
     defect class this PR family has hit four times."""
 
     def test_the_launcher_forwards_it_to_the_workflow(self):
-        import ast
         from pathlib import Path
 
         launcher = (
             Path(__file__).resolve().parents[4] / "sdsc_submission_scripts" / "run_one_iteration.py"
         )
-        tree = ast.parse(launcher.read_text(encoding="utf-8"))
-        assert any(
-            isinstance(n, ast.Call)
-            and (getattr(n.func, "id", None) or getattr(n.func, "attr", None)) == "run_workflow"
-            and "validation_max_portion" in {kw.arg for kw in n.keywords}
-            for n in ast.walk(tree)
-        ), "run_workflow is called without validation_max_portion"
+        # Step 09.5a C3: the launcher binds transit configuration inside the
+        # WorkflowLaunchConfig it constructs, one level below the run_workflow
+        # call. The shared extractor flattens both levels; the forwarding
+        # invariant is unchanged.
+        from tests.helpers.launcher_bindings import workflow_call_bindings
+
+        assert "validation_max_portion" in workflow_call_bindings(launcher), (
+            "run_workflow is called without validation_max_portion"
+        )
 
     def test_the_workflow_forwards_it_through_the_protocol(self):
         """MUTATION TARGET: the workflow accepting the ceiling and dropping it.

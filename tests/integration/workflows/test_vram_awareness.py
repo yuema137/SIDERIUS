@@ -64,6 +64,7 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
 
@@ -473,22 +474,24 @@ def test_vram_awareness_e2e_physical_rejection_reaches_iter2_proposer(
         )
 
         iteration_results = run_workflow(
-            data_dir=data_dir,
-            model_types=["punet"],
-            source_run_name=source_run_name_arg,
-            source_paths=source_paths,
+            launch=WorkflowLaunchConfig(
+                data_dir=data_dir,
+                model_types=["punet"],
+                source_run_name=source_run_name_arg,
+                source_paths=source_paths,
+                max_iterations=2,
+                max_rounds=2,
+                is_trial=True,
+                trial_vram_budget_gb=vram_budget_gb,
+                formal_vram_budget_gb=vram_budget_gb,
+                trial_time_budget_minutes=trial_time_budget_min,
+                formal_time_budget_minutes=_FORMAL_TIME_BUDGET_MIN,
+                human_advice_propose=_PHASE_B_PROPOSE_ADVICE if real_training else None,
+                debug_dump_prompts=True,
+            ),
             workspace=workspace,
             run_name=run_name,
             llm_config=llm_config,
-            max_iterations=2,
-            max_rounds=2,
-            is_trial=True,
-            trial_vram_budget_gb=vram_budget_gb,
-            formal_vram_budget_gb=vram_budget_gb,
-            trial_time_budget_minutes=trial_time_budget_min,
-            formal_time_budget_minutes=_FORMAL_TIME_BUDGET_MIN,
-            human_advice_propose=(_PHASE_B_PROPOSE_ADVICE if real_training else None),
-            debug_dump_prompts=True,
         )
 
     # ------------------------------------------------------------------

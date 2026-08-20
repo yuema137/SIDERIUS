@@ -63,10 +63,9 @@ import os
 import shutil
 import time
 import warnings
-from collections import deque
 from collections.abc import Callable
 from contextlib import suppress
-from typing import Any, Literal
+from typing import Any
 
 import psutil as _psutil
 import yaml
@@ -75,10 +74,8 @@ from agent.prompt_templates.interpretation.task_blocks import load_interpretatio
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
-    HealthGateMode,
     HyperparamTuningOutput,
     PhysicalRejection,
-    ResultAuthority,
 )
 from agent.schemas.interpretation import (
     InterpretationInput,
@@ -94,13 +91,13 @@ from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_valida
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from core.chain_state import ChainState
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 from core.run_invariants import (
     build_run_invariants,
     ensure_run_invariants,
     validate_stamped_invariants,
 )
-from core.runtime_control.admission import AdmissionEnforcement
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import TIDMAD as _DATASET_CONFIG
@@ -117,6 +114,13 @@ from nodes.result_interpretation_agent import (
     tuning_output_to_model_run_summary,
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
+from workflows.run_bindings import WorkflowRunBindings
+from workflows.run_config import WorkflowLaunchConfig
+from workflows.strategy_modes import (
+    ExplorationMode,
+    FormalRoundStrategy,
+    StrategyMode,
+)
 from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -147,15 +151,13 @@ def _log_rss(step: str) -> None:
 # consumers (``ReasoningPipelineConfig.exploration_mode``,
 # ``local_validated_model.{formal,formal_round}_strategy``) without
 # per-call casts. (DS7 removed the trial/eval strategy threading.)
-ExplorationMode = Literal["auto", "explore", "exploit"]
-StrategyMode = Literal["snapshot", "anchors", "target"]
-FormalRoundStrategy = Literal[
-    "full_clone",
-    "hybrid_params",
-    "independent",
-    "inherit_best_trial",
-    "llm_propose",
-]
+# Step 09.5a C2 — the three aliases moved to `workflows/strategy_modes.py` so
+# `workflows/run_config.py` can type its fields without importing this module
+# (which imports it). Re-exported here: same objects, one definition, every
+# existing `from workflows.model_exploration import StrategyMode` still works.
+ExplorationMode = ExplorationMode
+StrategyMode = StrategyMode
+FormalRoundStrategy = FormalRoundStrategy
 
 
 def _load_vocab_seed() -> list:
@@ -1368,266 +1370,41 @@ def _cleanup_stale_registry_entries(registry) -> tuple[int, list[str]]:
 
 
 def run_workflow(
+    *,
+    # --- transit configuration (Step 09.5a C3; the 72 values this run
+    # forwards to its nodes and never interprets as an authority) ---------
+    launch: WorkflowLaunchConfig | None = None,
+    # --- run-scoped authorities: what this run establishes at startup -----
     workspace: str,
     run_name: str,
-    # --- Source data: provide either source_paths OR (data_dir + model_types + source_run_name) ---
-    source_paths: list[str] | None = None,
-    data_dir: str | None = None,
-    model_types: list[str] | None = None,
-    source_run_name: str | None = None,
-    max_iterations: int = 1,
-    start_iteration: int = 1,
-    max_rounds: int = 10,
-    max_proposal_attempts: int = 3,
-    target_score: float | None = None,
-    file_index: int = 6,
-    llm_config: WorkflowLLMConfig | None = None,
-    health_checks_config: str | None = None,
-    # --- DataScope + HealthGate subsystem (DS6b) — defaults preserve
-    #     full-scope, gates-enabled behavior ---
+    chain_run_name: str | None = None,
+    run_id: str | None = None,
     data_scope: DataScope | None = None,
     health_gate_enabled: bool = True,
     health_gate_files: list[int] | None = None,
-    # V21 PR D — the launcher's DECLARED scientific posture, forwarded to
-    # the tuner input so the existing authority rule can see it. `None`
-    # means "this caller declared nothing" and is the correct value for
-    # every dev/test/diagnostic entry point (design §0.C.1). No default:
-    # defaulting would let silence become a declaration (§0.E).
-    healthgate_mode: HealthGateMode | None = None,
-    result_authority: ResultAuthority | None = None,
-    human_advice_interpret: str | None = None,
-    human_advice_propose: str | None = None,
-    human_advice_implement: str | None = None,
-    human_advice_validate: str | None = None,
-    human_advice_tune: str | None = None,
-    human_advice_mindset: str | None = None,
-    # --- Trial mode (optional — defaults preserve single-file behavior) ---
-    is_trial: bool = False,
-    # DS7 — trial_strategy / target_files / eval_strategy are DEPRECATED
-    # no-ops: the input fields they fed were dead at both ends and deleted.
-    # Accepted so existing callers don't break; a non-default value warns
-    # and is ignored (removal tracked as FU-2). Use data_scope to restrict
-    # data; per-round strategy is the LLM plan's (normalized under a
-    # partial scope).
-    trial_strategy: StrategyMode = "snapshot",
-    trial_portion: float = 0.1,
-    target_files: list[int] | None = None,
-    train_portion: float = 0.1,
-    eval_strategy: StrategyMode = "snapshot",
-    eval_portion: float = 0.1,
-    train_validation_align: bool = True,
-    sampling_seed: int | None = None,
-    train_base_seed: int | None = None,
-    cleanup_denoised: bool = False,
-    max_epochs: int | None = None,
-    # Tuner delta-gate parameters (added in commit 8f1cf52). Defaults
-    # match the HyperparamTuningInput schema defaults so omitting them
-    # at the CLI surface reproduces pre-v16 behaviour.
-    skip_formal_min_delta: float = -1.0,
-    bypass_formal_time_budget_min_delta: float = 0.0,
-    plan_overrides: dict | None = None,
-    # --- Time-budget gate (evaluate_time_skill, docs/resource_estimator_implement.md §2.7.2 / Phase I) ---
-    trial_time_budget_minutes: float | None = None,
-    formal_time_budget_minutes: float | None = None,
-    # --- VRAM-budget gate (evaluate_vram_skill, docs/resource_estimator_implement.md §10.9 / Phase K) ---
-    # Tuner-only fan-out; no proposer-side gate in Phase K (§10.17).
-    gpu_admission_measurement_source: str | None = None,
-    gpu_admission_enforcement: AdmissionEnforcement = "observe_only",
-    gpu_pair_ceiling_gib: float | None = None,
-    trial_vram_budget_gb: float | None = None,
-    formal_vram_budget_gb: float | None = None,
-    # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
-    # Training-side knobs applied on any round promoted to formal. Formal eval
-    # strategy is locked to ``snapshot``; ``formal_eval_portion`` defaults to
-    # 1.0 (production full-clone, §12.2) and is operator-controllable for
-    # smoke / CI runs that need to fit a tight formal_time_budget_minutes.
-    formal_strategy: StrategyMode = "snapshot",
-    formal_portion: float = 0.1,
-    formal_train_portion: float = 1.0,
-    formal_eval_portion: float = 1.0,
-    force_formal_round: bool = True,
-    formal_round_strategy: FormalRoundStrategy = "full_clone",
-    # --- Degenerate-output reaction policy (paired with tuner-side HealthGate evaluation) ---
-    degenerate_penalty_score: float | None = None,
-    # --- Per-round attempt budget (Phase L, docs/resource_estimator_implement.md §11) ---
-    # Tuner-only fan-out (no proposer-side equivalent). Defaults mirror the
-    # schema/protocol defaults so omitting them at the workflow surface yields
-    # the documented Phase L behaviour.
-    attempts_per_round: int = 3,
-    attempts_per_formal_round: int = 5,
-    max_fail_rounds: int = 3,
-    # --- Runtime-control operator surface (RT5/RT6, runtime design §4/§5) ---
-    max_steps_per_attempt: int | None = None,
-    min_formal_batch_size: int | None = None,
-    allow_extreme_steps: bool = False,
-    runtime_watchdog_enabled: bool = False,
-    runtime_safety_factor: float = 1.0,
-    runtime_trial_safety_factor: float | None = None,
-    runtime_formal_safety_factor: float | None = None,
-    runtime_watchdog_safety_factor: float | None = None,
-    runtime_watchdog_floor_seconds: float = 60.0,
-    # --- Reasoning pipeline ---
-    exploration_mode: ExplorationMode = "auto",
-    minimum_boldness: float = 0.05,
-    n_candidates: int | None = None,
-    # --- Implementation retry ---
-    max_impl_attempts: int = 3,
-    # --- Phase K.8 debug instrumentation ---
-    debug_dump_prompts: bool = False,
-    # --- Cross-iter knowledge carry-over (forwarded by chain runner) ---
-    # Default None preserves the legacy in-process / first-iter behaviour
-    # (static seed init, no accumulated findings). The chain runner
-    # (sdsc_submission_scripts/run_one_iteration.py) populates both from
-    # RestoredState. See docs/Consistent_growing_vocab_list.md.
-    restored_runtime_vocab: list | None = None,
-    accumulated_key_findings: list[str] | None = None,
-    # --- Cross-iter knowledge-cache carry-over (Commit 6.1.a precondition) ---
-    # Latest committed iter's per-model summarisation cache. Default None
-    # preserves the in-process / first-iter contract (start with an empty
-    # cache; build up across the in-process loop). The chain runner
-    # populates this from state.model_knowledge_cache so the Stability
-    # Filter at nodes/result_interpretation_agent.py:687-693 can fire in
-    # production. See docs/audit_and_optimize_token_usage_and_growth.md
-    # Rev 8.3 changelog (Commit 6.1.a).
-    restored_model_knowledge_cache: dict | None = None,
-    # --- Cross-iter negative-feedback carry-over (V8 hardening Domain 1) ---
-    # Same shape as the knowledge carry-over above: chain runner populates
-    # both from RestoredState; in-process / first-iter callers leave both at
-    # None. The lists are already capped (K=10 each) by core.resume.
-    # See docs/V8_Gap_Report.md Domain 1.
-    accumulated_physical_rejections: list | None = None,
-    accumulated_gate_exhaustions: list | None = None,
-    # --- Cross-iter proposal carry-over (G1 bridge, Phase 1 Commit 1.2) ---
-    # Latest committed iter's full proposal_iter_NNN.json dict. Chain runner
-    # populates this from state.previous_proposal_data so that the local
-    # `previous_proposal_data` seed is non-None on the very first round of
-    # this iteration — closing the candidate channel that the chain
-    # subprocess boundary was darkening. In-process / first-iter callers
-    # leave this at None and behaviour is bit-for-bit unchanged.
-    # See docs/Consistent_growing_vocab_list.md §10.3.3.
-    restored_previous_proposal: dict | None = None,
-    # --- Validation-only: a fixed candidate PLAN, replacing the proposer ---
-    #
-    # V20 FU-D-11. Supplies the typed `ProposalOutput` directly instead of
-    # asking the LLM for one, so an acceptance run stops depending on which
-    # architecture a planner happens to invent. It bypasses the PROPOSER and
-    # nothing else: implement, validate, trial, HealthGate, winner selection,
-    # formal launch, authority, resume and aggregation all run unchanged on
-    # the real path.
-    #
-    # It cannot carry results by construction — `ProposalOutput` has no field
-    # for a score, record, gate verdict, authority verdict or incumbent — and
-    # the loader rejects unknown keys rather than dropping them, so a file
-    # containing one fails loudly at startup instead of being silently
-    # ignored.
-    validation_fixed_candidate_plan: dict | None = None,
-    # VALIDATION POSTURE ONLY (FU-D-12) — hard ceiling on the resolved
-    # portions, for EVERY round mode. `None` leaves ordinary campaigns
-    # unchanged.
-    validation_max_portion: float | None = None,
-    # VALIDATION POSTURE ONLY — the Gate workload envelope and its
-    # emergency wall-clock fuse. Both `None` in every campaign; see the
-    # HyperparamTuningInput field docstrings and
-    # docs/gates/gate_testing_standard.md.
-    validation_max_train_samples: int | None = None,
-    validation_max_samples: int | None = None,
-    validation_max_phase_seconds: float | None = None,
-    # --- V19 PR 1 (P1-C3) — chain formal-incumbent carry-over ---
-    # Two-state design (design doc §3.4): the restored chain incumbent
-    # seeds ONLY the local ``chain_formal_incumbent_reference`` (consumed
-    # by the tune protocol's named parameter) — NEVER
-    # ``best_score_overall`` (current-workflow raw-formal progress only)
-    # and never any iteration-local best_* field (Invariant II).
-    # Provenance stays with the chain runner (manifest stamps).
-    # Default None preserves legacy/in-process first-iter behaviour.
-    restored_chain_incumbent_score: float | None = None,
-    # Gate-coupling switch (default OFF; consumption only — see the
-    # HyperparamTuningInput field docstring).
-    enable_chain_incumbent_formal_gates: bool = False,
-    # --- Data-ordering OVERRIDE (V19 PR 2) ---
-    # Operator control, stable for the chain. Must reach BOTH the invariant
-    # lock built below and the tuner input: the tuner locks the override
-    # too, so a workflow that built a no-override lock in the same
-    # workspace would collide with it and abort the run.
+    health_checks_config: str | None = None,
     order_strategy_override: OrderStrategy | None = None,
     file_order_override: list[int] | None = None,
-    # --- Structured HealthGate feedback policy (V19 PR 3 §3.7/§3.9) ---
-    # Chain behavioral policy, run-invariants-locked. The flag gates the
-    # interpreter + proposer PROMPT rendering only (deterministic evidence
-    # is recorded regardless); the retention pair parameterizes the
-    # interpreter's history merge. Defaults preserve pre-PR3 behavior and
-    # the OFF/3/8 lock. restored_collapse_fingerprint_history is the
-    # chain runner's typed digest carry-over (RestoredState) — the ONLY
-    # history source; never rebuilt from proposer output or prompts.
     enable_structured_health_feedback: bool = False,
-    health_feedback_history_window_iterations: int = 3,
-    health_feedback_history_max_entries_per_model: int = 8,
-    restored_collapse_fingerprint_history: dict | None = None,
-    # Step 09a C5 — the interpreter's prediction memory, restored by
-    # core.resume from the latest committed digest (Q-09a-1 = A narrow).
-    # None for in-process / first-iter callers, exactly like its siblings.
-    restored_prediction_memory: PredictionMemory | None = None,
-    # --- Token-usage audit context (Phase 1 Commit 4 — design doc §1.4) ---
-    # When both are non-None, every agent constructed inside the iter loop
-    # has its bridge bound to (workspace, iter, chain_run_name, run_id) so
-    # ``LLMBridge._record_usage`` can append a row to
-    # ``{workspace}/token_usage.jsonl``. When either is None, the bind is
-    # skipped — bridges keep their default no-op behaviour and no audit
-    # rows are written. Legacy / pseudo-mode tests pass None; the
-    # production runner (``sdsc_submission_scripts/run_one_iteration.py``
-    # via ``run_chain.sh``) generates a ``run_id`` once at startup (or
-    # restores it from the ``{workspace}/.token_run_id`` sidecar on iter
-    # ≥ 2) and threads both through. See §1.4.1 for the immutability +
-    # forward-only contract enforced by the bridge.
-    chain_run_name: str | None = None,
-    run_id: str | None = None,
-    # --- External agents (Commit 6) ---
-    # When True, the per-iteration loop fires ``MLLiteratureReviewAgent``
-    # between interpretation and proposal, threading its findings +
-    # agent_card + suggested_mindset into the proposer via the four
-    # external-agent channels (``expert_context`` / ``vocab_seed`` /
-    # ``agent_cards`` / ``mindset``). When False (default), the
-    # per-iteration loop runs identically to pre-Commit-6 — no
-    # ``MLLiteratureReviewAgent`` instantiation, no lit-review LLM
-    # calls.
-    # The runner ``sdsc_submission_scripts/run_one_iteration.py``
-    # resolves ``lit_review_enabled`` from ``--ml_lit_review_enabled``
-    # / ``--no-ml_lit_review_enabled`` (CLI) > YAML ``enabled`` >
-    # default ``False``. ``lit_review_config_path`` is the YAML to
-    # open + parse internally (Design Decision 2, 2026-06-11); defaults
-    # to the canonical config, operators can pass
-    # ``--ml_lit_review_config /path/to/other.yaml``. The workflow
-    # only opens the file when ``lit_review_enabled=True`` — an unused
-    # path never hits the filesystem.
-    lit_review_enabled: bool = False,
-    lit_review_config_path: str = "configs/lit_review_config.yaml",
-    # --- Pseudo-mode factories (Stage 3, Commit 4.5) ---
-    # Optional class/factory swaps for the LLM bridge and the sandbox.
-    # When None (default), each agent uses its built-in production class
-    # (``LLMBridge`` and ``TidmadSandbox``). The chain runner sets these
-    # to ``StubLLMBridge`` / ``StubSandbox`` when ``--is_pseudo_llm`` /
-    # ``--is_pseudo_training`` are passed, enabling a $0-cost wiring smoke
-    # without touching the agent code paths. ``bridge_factory`` is
-    # threaded into all 5 agents; ``sandbox_factory`` is threaded only
-    # into ``HyperparamTuningAgent`` (the only agent that runs training).
-    # See ``docs/audit_and_optimize_token_usage_and_growth.md`` Commit 4.5.
+    llm_config: WorkflowLLMConfig | None = None,
+    # --- immutable capability references (Amendment A) --------------------
     bridge_factory: Callable | None = None,
     sandbox_factory: Callable | None = None,
-    # C9d — does this launch REQUIRE a buildable bounded-probe runner?
-    # True only for a real training launch: a formal runtime decision
-    # there must resolve to measured evidence, so a machine that cannot
-    # probe must not start one. Default False keeps CPU boxes, dry runs
-    # and unit tests working — the guard still runs every behavioral
-    # check, it just does not demand a device. Deriving this from the
-    # factory arguments was wrong: factory identity says nothing about
-    # whether GPU training will happen, and it made workflow startup
-    # silently GPU-dependent.
-    require_probe_runner: bool = False,
-    #: Resolved by the CALLER, which knows the task. Generic
-    #: orchestration must not choose a task's dataset, so this is
-    #: threaded in rather than looked up here. None keeps the guard
-    #: fail-closed: it refuses a real launch and says why.
     measurement_capability: ResolvedMeasurementCapability | None = None,
+    # --- restored chain-state seeds (C4 moves these onto ChainState) ------
+    restored_runtime_vocab: list | None = None,
+    accumulated_key_findings: list[str] | None = None,
+    restored_model_knowledge_cache: dict | None = None,
+    accumulated_physical_rejections: list | None = None,
+    accumulated_gate_exhaustions: list | None = None,
+    restored_previous_proposal: dict | None = None,
+    restored_chain_incumbent_score: float | None = None,
+    restored_collapse_fingerprint_history: dict | None = None,
+    restored_prediction_memory: PredictionMemory | None = None,
+    # --- DS7 deprecated no-ops, kept for behaviour parity (FU-2) ----------
+    trial_strategy: StrategyMode = "snapshot",
+    target_files: list[int] | None = None,
+    eval_strategy: StrategyMode = "snapshot",
 ) -> list[HyperparamTuningOutput]:
     """
     Execute the model exploration workflow for one or more iterations.
@@ -1712,6 +1489,12 @@ def run_workflow(
     Returns:
         List of HyperparamTuningOutput objects, one per successful iteration.
     """
+    # Step 09.5a C3 — the transit configuration is one value now. A caller
+    # that supplies none gets exactly the defaults the 72 individual
+    # parameters carried before; the carrier restates none of them.
+    if launch is None:
+        launch = WorkflowLaunchConfig()
+
     if llm_config is None:
         llm_config = WorkflowLLMConfig()
 
@@ -1790,21 +1573,21 @@ def run_workflow(
             f"{sorted(_preloaded_models)}"
         )
     print(f"  Started       : {started_at}")
-    if source_paths is not None:
-        print(f"  Source paths  : {len(source_paths)} files")
-        for p in source_paths:
+    if launch.source_paths is not None:
+        print(f"  Source paths  : {len(launch.source_paths)} files")
+        for p in launch.source_paths:
             print(f"    - {p}")
     else:
-        print(f"  Source run    : {source_run_name}")
-        print(f"  Models        : {model_types}")
+        print(f"  Source run    : {launch.source_run_name}")
+        print(f"  Models        : {launch.model_types}")
     print(f"  Workspace     : {workspace}")
     print(f"  Run name      : {run_name}")
     print(f"  LLM config    : {llm_config.model_dump(exclude_none=True)}")
-    print(f"  Iterations    : {max_iterations} (starting at {start_iteration})")
-    print(f"  Tune rounds   : {max_rounds} per iteration")
-    print(f"  Proposal tries: {max_proposal_attempts} per iteration")
-    if target_score is not None:
-        print(f"  Target score  : {target_score}")
+    print(f"  Iterations    : {launch.max_iterations} (starting at {launch.start_iteration})")
+    print(f"  Tune rounds   : {launch.max_rounds} per iteration")
+    print(f"  Proposal tries: {launch.max_proposal_attempts} per iteration")
+    if launch.target_score is not None:
+        print(f"  Target score  : {launch.target_score}")
     print(f"{'=' * 60}\n")
 
     # --- Phase 6.6 WS-B (B.1) — hardware context for the Proposer ---
@@ -1824,7 +1607,9 @@ def run_workflow(
     # Proposer's baseline is almost always trial-sized), fall back to
     # formal, else None (→ PHYSICAL regime rendered from the physical cap).
     active_vram_budget_gb: float | None = (
-        trial_vram_budget_gb if trial_vram_budget_gb is not None else formal_vram_budget_gb
+        launch.trial_vram_budget_gb
+        if launch.trial_vram_budget_gb is not None
+        else launch.formal_vram_budget_gb
     )
     print(
         f"  Hardware      : {hardware_ctx.device_name} "
@@ -1835,10 +1620,12 @@ def run_workflow(
 
     # --- Step 0: Load existing tuning outputs ---
     print("Step 0: Loading existing tuning outputs...")
-    if source_paths is not None:
-        tuning_outputs = load_tuning_outputs_from_paths(source_paths)
-    elif data_dir and model_types and source_run_name:
-        tuning_outputs = load_tuning_outputs(data_dir, model_types, source_run_name)
+    if launch.source_paths is not None:
+        tuning_outputs = load_tuning_outputs_from_paths(launch.source_paths)
+    elif launch.data_dir and launch.model_types and launch.source_run_name:
+        tuning_outputs = load_tuning_outputs(
+            launch.data_dir, launch.model_types, launch.source_run_name
+        )
     else:
         raise ValueError(
             "Must provide either source_paths OR (data_dir + model_types + source_run_name)."
@@ -1868,10 +1655,10 @@ def run_workflow(
     _run_scope = data_scope if data_scope is not None else DataScope.default()
     _resolved_scope = _run_scope.resolve(_DATASET_CONFIG)
     _scope_is_partial = _resolved_scope != list(range(_DATASET_CONFIG.num_files))
-    if _scope_is_partial and formal_strategy != "snapshot":
+    if _scope_is_partial and launch.formal_strategy != "snapshot":
         raise ValueError(
             f"partial data_scope requires formal_strategy='snapshot' "
-            f"(got {formal_strategy!r}). Operator configuration is a "
+            f"(got {launch.formal_strategy!r}). Operator configuration is a "
             f"contract — it is never normalized."
         )
     if health_gate_enabled and _scope_is_partial and health_gate_files is None:
@@ -1893,9 +1680,11 @@ def run_workflow(
         ordering_override_file_order=file_order_override,
         # V19 PR 3 — same rule for the structured-health-feedback policy.
         structured_health_feedback_enabled=enable_structured_health_feedback,
-        health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
+        health_feedback_history_window_iterations=(
+            launch.health_feedback_history_window_iterations
+        ),
         health_feedback_history_max_entries_per_model=(
-            health_feedback_history_max_entries_per_model
+            launch.health_feedback_history_max_entries_per_model
         ),
     )
     for _output in tuning_outputs:
@@ -1931,7 +1720,7 @@ def run_workflow(
     # its reachability test did not cover. Fail-closed is preserved: a
     # genuinely unavailable capability still refuses, with its reason.
     _launch_report = run_launch_self_test(
-        require_probe_runner=require_probe_runner,
+        require_probe_runner=launch.require_probe_runner,
         capability=measurement_capability,
     )
     print(
@@ -1949,16 +1738,13 @@ def run_workflow(
             f"| monitored={health_gate_files}"
         )
 
-    # Track all model types seen (for duplicate name guard)
-    all_model_types = list({o.model_type for o in tuning_outputs})
-
     # --- Load vocabulary seed + reasoning pipeline config ---
     vocab_seed = _load_vocab_seed()
     reasoning_pipeline = _get_reasoning_pipeline(
         llm_config,
-        exploration_mode=exploration_mode,
-        minimum_boldness=minimum_boldness,
-        n_candidates=n_candidates,
+        exploration_mode=launch.exploration_mode,
+        minimum_boldness=launch.minimum_boldness,
+        n_candidates=launch.n_candidates,
     )
     if vocab_seed:
         print(f"  Vocab seed: {len(vocab_seed)} entries loaded.")
@@ -1970,101 +1756,96 @@ def run_workflow(
     else:
         print("  Reasoning pipeline: legacy 2-call mode (no stages configured).")
 
-    # Collect results across iterations
-    iteration_results: list[HyperparamTuningOutput] = []
-    # Current-workflow RAW-formal progress tracker (print + workflow
-    # summary ONLY — derived solely from this execution's own formal
-    # results; never seeded from restored chain state and never fed to
-    # the tuner: V19 PR 1 two-state design, design doc §3.4).
-    best_score_overall: float | None = None
-    # V19 PR 1 — the chain formal-incumbent reference (decision state).
-    # Seeded from RestoredState; updated after each in-process iteration
-    # commit from that iteration's committed VALID formal (max, §3.3 tie
-    # rules) so in-process multi-iteration runs are equivalent to N
-    # chained subprocesses. Consumed only by the tune protocol.
-    # (Provenance for the restored incumbent is stamped into the manifest
-    # by the chain runner from RestoredState; in-process mode writes no
-    # manifests, so only the score travels here.)
-    chain_formal_incumbent_reference: float | None = restored_chain_incumbent_score
-
-    # Long-term memory: variables carried forward across iterations.
-    # Chain mode: seed from `restored_previous_proposal` (forwarded by
-    # `sdsc_submission_scripts/run_one_iteration.py` from
-    # `RestoredState.previous_proposal_data`) so the candidate channel
-    # survives the subprocess boundary. In-process / first-iter callers
-    # pass None and the local update at line ~1217 takes over after iter 1.
-    # See docs/Consistent_growing_vocab_list.md §10.3.3.
-    previous_proposal_data: dict | None = (
-        restored_previous_proposal  # serialized ProposalOutput from iter N-1
+    # Step 09.5a C3 — the run's immutable authorities become ONE typed
+    # carrier, constructed HERE and nowhere else.
+    #
+    # Here, and not at the launcher, because three of these fields can only
+    # exist after the startup side-effects above: the run invariants are
+    # built by `build_run_invariants`, the hardware context by
+    # `get_or_create_hardware_context`, and the resolved scope by
+    # `DataScope.resolve` — all of which must run inside this function, in
+    # this order (design §3.8). Moving construction to the launcher is
+    # Step-10/12 work (design §22), not this milestone's.
+    #
+    # The parameters above stay explicit rather than becoming a "bindings
+    # input" bag — design §13: a bag of inputs is still a bag. What changes
+    # is the SOURCE OF TRUTH: from this line on, every read of a run-scoped
+    # authority goes through the carrier, so no free local can drift away
+    # from it. `__post_init__` refuses any `ChainState` field name, deriving
+    # the forbidden set from `ChainState.__dataclass_fields__` rather than a
+    # hand-written list.
+    bindings = WorkflowRunBindings(
+        workspace=workspace,
+        run_name=run_name,
+        run_dir=run_dir,
+        chain_run_name=chain_run_name,
+        run_id=run_id,
+        data_scope=data_scope,
+        resolved_data_scope=tuple(_resolved_scope),
+        scope_is_partial=_scope_is_partial,
+        health_gate_enabled=health_gate_enabled,
+        health_gate_files=(tuple(health_gate_files) if health_gate_files is not None else None),
+        health_checks_config=health_checks_config,
+        order_strategy_override=order_strategy_override,
+        file_order_override=(
+            tuple(file_order_override) if file_order_override is not None else None
+        ),
+        enable_structured_health_feedback=enable_structured_health_feedback,
+        run_invariants=_run_invariants,
+        llm_config=llm_config,
+        seed_metric_spec=seed_metric_spec,
+        hardware_context=hardware_ctx,
+        active_vram_budget_gb=active_vram_budget_gb,
+        reasoning_pipeline=reasoning_pipeline,
+        vocab_seed=tuple(vocab_seed),
+        bridge_factory=bridge_factory,
+        sandbox_factory=sandbox_factory,
+        measurement_capability=measurement_capability,
     )
-    # Priority: chain-restored runtime_vocab > static seed. The static seed
-    # is the first-iter bootstrap; once any iter has run, the latest
-    # committed iter's runtime_vocab is the source of truth (already merged
-    # with the seed via build_runtime_vocab on each prior iter). Without
-    # this priority check, every chain iter resets to the 21-entry seed —
-    # see docs/Consistent_growing_vocab_list.md §1.2 for the empirical bug.
+
+    # Step 09.5a C4 — the eleven cross-iteration accumulators are ONE typed
+    # carrier now. Every seeding rule below is the one this function already
+    # applied (restored vocabulary beats the static seed; the knowledge cache
+    # is copied because the loop mutates it in place; best_score_overall is
+    # deliberately NOT restored, being this execution's own raw-formal tracker
+    # rather than the chain's decision state) — they moved to
+    # `ChainState.from_restored`, they did not change.
+    state = ChainState.from_restored(
+        vocab_seed=list(bindings.vocab_seed),
+        restored_runtime_vocab=restored_runtime_vocab,
+        restored_model_knowledge_cache=restored_model_knowledge_cache,
+        restored_previous_proposal=restored_previous_proposal,
+        restored_chain_incumbent_score=restored_chain_incumbent_score,
+        restored_collapse_fingerprint_history=restored_collapse_fingerprint_history,
+        restored_prediction_memory=restored_prediction_memory,
+        all_model_types=list({o.model_type for o in tuning_outputs}),
+    )
     if restored_runtime_vocab:
-        current_runtime_vocab = [
-            v if hasattr(v, "name") else VocabEntry.model_validate(v)
-            for v in restored_runtime_vocab
-        ]
         print(
-            f"  Vocab restored from prior chain iters: "
-            f"{len(current_runtime_vocab)} entries "
-            f"({sum(1 for v in current_runtime_vocab if v.kind == 'discovery')} discoveries)"
+            f"  [chain] Restored runtime_vocab: {len(state.current_runtime_vocab)} entries "
+            f"(seed had {len(bindings.vocab_seed)})."
         )
-    else:
-        current_runtime_vocab = list(vocab_seed)  # first iter or in-process run
-    # V19 PR 3 — fingerprint-history carry (digest-only, one direction:
-    # restored typed history seeds the loop variable; each iteration's
-    # interpreter output REPLACES it — the interpreter is the only merge
-    # point). Empty for in-process / first-iter callers.
-    current_collapse_fingerprint_history: dict = dict(restored_collapse_fingerprint_history or {})
-    # Step 09a C5 — same one-direction shape as the fingerprint history:
-    # the restored value seeds the loop variable, and each iteration's
-    # interpreter output REPLACES it. The interpreter is the only place
-    # prediction state is accumulated; nothing here merges or re-bases.
-    current_prediction_memory: PredictionMemory = restored_prediction_memory or PredictionMemory()
-    # Per-model Phase 1 cache (grows once per model). Commit 6.1.a — chain
-    # mode forwards the latest committed iter's cache via
-    # restored_model_knowledge_cache so the cache-hit branch at
-    # nodes/result_interpretation_agent.py:687-693 can fire across the
-    # subprocess boundary. In-process / first-iter callers pass None and
-    # behaviour is unchanged. Defensive copy: the workflow mutates the dict
-    # in place at iter end; we don't want to alias the caller's reference.
-    model_knowledge_cache: dict = (
-        dict(restored_model_knowledge_cache) if restored_model_knowledge_cache else {}
-    )
-    if model_knowledge_cache:
-        _cache_keys_preview = sorted(model_knowledge_cache)[:5]
+    if state.model_knowledge_cache:
+        _cache_keys_preview = sorted(state.model_knowledge_cache)[:5]
         print(
-            f"  Knowledge cache restored from prior chain iter: "
-            f"{len(model_knowledge_cache)} entries "
-            f"({_cache_keys_preview}"
-            f"{'...' if len(model_knowledge_cache) > 5 else ''})"
+            f"  [chain] Restored model_knowledge_cache: "
+            f"{len(state.model_knowledge_cache)} model(s) {_cache_keys_preview}."
         )
-    latest_new_summary = None  # ModelRunSummary from the most recent tune
-    # Phase N (§14.N) — bounded FIFO of the last 3 tuner outputs so the
-    # interp→propose protocol can surface their gate_exhaustion summaries
-    # (oldest-first) to the next proposer as the aggregate-window
-    # [RECENT GATE EXHAUSTIONS] block. Empty on iteration 1; each iter-end
-    # append auto-evicts the oldest when len > 3.
-    recent_tune_outputs: deque[HyperparamTuningOutput] = deque(maxlen=3)
 
-    # V8 Domain 1 — pre-populate the deque with synthetic HyperparamTuningOutput
-    # wrappers carrying ONLY the prior chain iters' gate_exhaustions. Without
-    # this, every chain-mode subprocess starts with an empty deque (max_iterations=1
-    # means the in-process append at iter-end never feeds the same-subprocess
-    # proposer). The protocol reads only `.gate_exhaustion` from each entry,
-    # so placeholder values for the other required fields are safe.
+    # V8 Domain 1 — pre-seed the bounded window with synthetic wrappers carrying
+    # ONLY the prior chain iters' gate_exhaustions. Without this, every
+    # chain-mode subprocess starts with an empty deque (max_iterations=1 means
+    # the in-process append at iter-end never feeds the same-subprocess
+    # proposer). The protocol reads only `.gate_exhaustion` from each entry, so
+    # placeholder values for the other required fields are safe.
     # See docs/V8_Gap_Report.md Domain 1.
     if accumulated_gate_exhaustions:
         for _ge in accumulated_gate_exhaustions:
-            recent_tune_outputs.append(_synthetic_prior_iter_tune_output(_ge))
+            state.recent_tune_outputs.append(_synthetic_prior_iter_tune_output(_ge))
         print(
             f"  [chain] Pre-seeded recent_tune_outputs with "
-            f"{len(recent_tune_outputs)} cross-iter gate-exhaustion summary"
-            f"{'y' if len(recent_tune_outputs) == 1 else 'ies'} "
+            f"{len(state.recent_tune_outputs)} cross-iter gate-exhaustion summary"
+            f"{'y' if len(state.recent_tune_outputs) == 1 else 'ies'} "
             f"(deque maxlen=3 keeps the latest)."
         )
 
@@ -2084,13 +1865,13 @@ def run_workflow(
     #   * the tuner exposes its own ``set_run_context`` that stashes the
     #     args until ``run()`` builds ``brain``.
     def _bind_iter_context(agent) -> None:
-        if chain_run_name is None or run_id is None:
+        if bindings.chain_run_name is None or bindings.run_id is None:
             return
         kwargs = dict(
-            workspace=_Path(workspace),
+            workspace=_Path(bindings.workspace),
             iter=iteration,
-            run_name=chain_run_name,
-            run_id=run_id,
+            run_name=bindings.chain_run_name,
+            run_id=bindings.run_id,
         )
         if hasattr(agent, "set_run_context") and not hasattr(agent, "bridge"):
             agent.set_run_context(**kwargs)
@@ -2103,19 +1884,21 @@ def run_workflow(
     # carries (line below) and therefore what the evolution_log.jsonl writer
     # in nodes.result_interpretation_agent stamps on every row. Without this
     # offset, every chain iter would log iteration=1 (V8 Domain 3 bug).
-    for iteration in range(start_iteration, start_iteration + max_iterations):
-        iter_dir = os.path.join(run_dir, f"iteration_{iteration:03d}")
+    for iteration in range(launch.start_iteration, launch.start_iteration + launch.max_iterations):
+        iter_dir = os.path.join(bindings.run_dir, f"iteration_{iteration:03d}")
         os.makedirs(iter_dir, exist_ok=True)
 
-        loop_pos = iteration - start_iteration + 1
+        loop_pos = iteration - launch.start_iteration + 1
         print(f"\n{'=' * 60}")
-        print(f"  ITERATION {iteration} ({loop_pos}/{max_iterations})")
+        print(f"  ITERATION {iteration} ({loop_pos}/{launch.max_iterations})")
         print(f"  Directory: {iter_dir}")
         print(f"{'=' * 60}\n")
 
         # Fix 4 — parent-process memory probe at iteration entry.
         # See docs/optimize_inference_and_scoring.md §3 Fix 4.
-        probe_memory(iter_idx=iteration, phase="start", workspace=workspace, scope="workflow")
+        probe_memory(
+            iter_idx=iteration, phase="start", workspace=bindings.workspace, scope="workflow"
+        )
 
         # --- Interpret (once per iteration) ---
         # First iter in this subprocess: all seeds are new (cache is empty).
@@ -2124,10 +1907,12 @@ def run_workflow(
         # — chain-mode subprocesses run with ``start_iteration > 1``, but the
         # local "first iter in this subprocess" semantics still hold because
         # the seeds are loaded fresh per subprocess.
-        if iteration == start_iteration:
+        if iteration == launch.start_iteration:
             new_summaries = seed_summaries
         else:
-            new_summaries = [latest_new_summary] if latest_new_summary is not None else []
+            new_summaries = (
+                [state.latest_new_summary] if state.latest_new_summary is not None else []
+            )
 
         # Cold start (explicit workflow state): no prior experimental evidence to
         # interpret — no seed/restored summaries AND an empty knowledge cache.
@@ -2135,9 +1920,9 @@ def run_workflow(
         # rather than inferring it from empty prompt text. Becomes False as soon
         # as iteration 1 commits a real output (restored into new_summaries for
         # iteration 2). Never fabricates history.
-        is_cold_start = (not new_summaries) and (not model_knowledge_cache)
+        is_cold_start = (not new_summaries) and (not state.model_knowledge_cache)
 
-        interp_storage = _make_storage(iter_dir, run_name)
+        interp_storage = _make_storage(iter_dir, bindings.run_name)
         # Step 09a C2 — reconcile the run's bound MetricSpec across EVERY
         # tuning output this process has fed or will feed the interpreter:
         # the seeds/committed outputs loaded at Step 0 plus everything tuned
@@ -2145,38 +1930,42 @@ def run_workflow(
         # this refuses; nothing here derives a spec. The synthetic
         # gate-exhaustion placeholders are deliberately NOT included — they
         # never reach the interpreter.
-        run_metric_spec = reconcile_metric_spec([*tuning_outputs, *iteration_results])
+        run_metric_spec = reconcile_metric_spec([*tuning_outputs, *state.iteration_results])
         interp_input = InterpretationInput(
             summaries=new_summaries,
-            model_knowledge_cache=model_knowledge_cache,
+            model_knowledge_cache=state.model_knowledge_cache,
             metric_spec=run_metric_spec,
             # Step 09a C5 — the four carried prediction-memory fields.
-            prediction_outcomes_history=dict(current_prediction_memory.prediction_outcomes_history),
+            prediction_outcomes_history=dict(
+                state.current_prediction_memory.prediction_outcomes_history
+            ),
             prediction_outcomes_by_semantics={
                 version: dict(counts)
                 for version, counts in (
-                    current_prediction_memory.prediction_outcomes_by_semantics.items()
+                    state.current_prediction_memory.prediction_outcomes_by_semantics.items()
                 )
             },
-            cumulative_information_gain=current_prediction_memory.cumulative_information_gain,
+            cumulative_information_gain=state.current_prediction_memory.cumulative_information_gain,
             cumulative_information_gain_by_semantics=dict(
-                current_prediction_memory.cumulative_information_gain_by_semantics
+                state.current_prediction_memory.cumulative_information_gain_by_semantics
             ),
             cold_start=is_cold_start,
-            human_advice=human_advice_interpret,
-            runtime_vocab=current_runtime_vocab,
-            previous_proposal=previous_proposal_data,
+            human_advice=launch.human_advice_interpret,
+            runtime_vocab=state.current_runtime_vocab,
+            previous_proposal=state.previous_proposal_data,
             storage=interp_storage,
             iteration=iteration,
             # V19 PR 3 — structured-health-feedback policy + carried
             # typed history (the interpreter runs the deterministic
             # merge; output replaces the loop variable below).
-            enable_structured_health_feedback=enable_structured_health_feedback,
-            health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
-            health_feedback_history_max_entries_per_model=(
-                health_feedback_history_max_entries_per_model
+            enable_structured_health_feedback=bindings.enable_structured_health_feedback,
+            health_feedback_history_window_iterations=(
+                launch.health_feedback_history_window_iterations
             ),
-            collapse_fingerprint_history=current_collapse_fingerprint_history,
+            health_feedback_history_max_entries_per_model=(
+                launch.health_feedback_history_max_entries_per_model
+            ),
+            collapse_fingerprint_history=state.current_collapse_fingerprint_history,
             # T4b — task config injection. Substituted into the
             # {TASK_DESCRIPTION} placeholder in PER_MODEL_SYSTEM_PROMPT +
             # SYNTHESIS_SYSTEM_PROMPT at call time.
@@ -2191,7 +1980,7 @@ def run_workflow(
 
         print(f"  [{iteration}] Interpreting experiment results...")
         _interp_agent = ResultInterpretationAgent(
-            **llm_config.get("interpret"),
+            **bindings.llm_config.get("interpret"),
             bridge_factory=bridge_factory,
         )
         _bind_iter_context(_interp_agent)
@@ -2199,7 +1988,9 @@ def run_workflow(
         # V19 PR 3 — one-directional carry: the interpreter's merged
         # history REPLACES the loop variable (never merged again here,
         # never read back from proposer output or prompts).
-        current_collapse_fingerprint_history = dict(interpretation.collapse_fingerprint_history)
+        state.current_collapse_fingerprint_history = dict(
+            interpretation.collapse_fingerprint_history
+        )
         print(f"    Take-home: {interpretation.take_home_message}")
         print(f"    Best score: {interpretation.best_denoising_score}")
         print(f"    Models: {interpretation.model_types}\n")
@@ -2214,20 +2005,20 @@ def run_workflow(
         # is a no-op and the proposer's behaviour is bit-identical to
         # pre-Commit-6.
         external_outputs: list[ExternalAgentOutput] = []
-        if should_run_literature_review(interpretation, enabled=lit_review_enabled):
-            yaml_path = lit_review_config_path
+        if should_run_literature_review(interpretation, enabled=launch.lit_review_enabled):
+            yaml_path = launch.lit_review_config_path
             if not os.path.isabs(yaml_path):
                 yaml_path = os.path.join(SIDERIUS_ROOT, yaml_path)
             print(f"  [{iteration}] Running lit-review (config: {yaml_path})...")
             with open(yaml_path, encoding="utf-8") as _f:
                 lit_review_config = yaml.safe_load(_f)
-            lit_storage = _make_storage(iter_dir, run_name)
+            lit_storage = _make_storage(iter_dir, bindings.run_name)
             lit_input = _build_lit_review_input(
                 lit_review_config,
                 interpretation,
-                llm_kwargs=llm_config.get("lit_review"),
+                llm_kwargs=bindings.llm_config.get("lit_review"),
                 storage=lit_storage,
-                run_name=run_name,
+                run_name=bindings.run_name,
             )
             lit_agent = MLLiteratureReviewAgent(bridge_factory=bridge_factory)
             _bind_iter_context(lit_agent)
@@ -2258,7 +2049,7 @@ def run_workflow(
         # count when max_iterations > 1 (in-process mode). The Hop-4 block
         # below already covers that path via iteration_results[-1].
         # See docs/V8_Gap_Report.md Domain 1.
-        if iteration == start_iteration and accumulated_physical_rejections:
+        if iteration == launch.start_iteration and accumulated_physical_rejections:
             _cross_iter_aggregated = _aggregate_worst_offender_rejections(
                 list(accumulated_physical_rejections)
             )
@@ -2280,8 +2071,8 @@ def run_workflow(
         # iteration 1 (no prior tuner output) and on iterations whose
         # prior tuner had zero infeasible attempts.
         # See docs/phase66_ws_b_proposer_hardening.md §4.3 / §6.2.
-        if iteration_results:
-            _prior = iteration_results[-1]
+        if state.iteration_results:
+            _prior = state.iteration_results[-1]
             _aggregated = _aggregate_worst_offender_rejections(
                 _prior.physical_rejections,
             )
@@ -2295,15 +2086,15 @@ def run_workflow(
                     f"previous_failures from iteration {iteration - 1}'s tuner."
                 )
 
-        for attempt in range(1, max_proposal_attempts + 1):
+        for attempt in range(1, launch.max_proposal_attempts + 1):
             print(
-                f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{max_proposal_attempts})..."
+                f"  [{iteration}.{attempt}] Proposing new model (attempt {attempt}/{launch.max_proposal_attempts})..."
             )
 
             # Create a temporary attempt dir; renamed after model name is known
             attempt_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}")
             os.makedirs(attempt_dir, exist_ok=True)
-            attempt_storage = _make_storage(attempt_dir, run_name)
+            attempt_storage = _make_storage(attempt_dir, bindings.run_name)
 
             # Surface ALL prior iters' key_findings to the proposer as a
             # single ExpertContextItem. Without this, the proposer sees only
@@ -2347,25 +2138,25 @@ def run_workflow(
                     interpretation,
                     attempt_storage,
                     expert_context=expert_context_for_propose + external_channels["expert_context"],
-                    vocab_seed=vocab_seed + external_channels["vocab_seed"],
+                    vocab_seed=list(bindings.vocab_seed) + external_channels["vocab_seed"],
                     agent_cards=external_channels["agent_cards"],
                     mindset=external_channels["mindset"],
-                    reasoning_pipeline=reasoning_pipeline,
-                    human_advice=human_advice_propose,
-                    is_trial=is_trial,
-                    data_scope=data_scope,
-                    trial_portion=trial_portion,
-                    train_portion=train_portion,
-                    sampling_seed=sampling_seed,
-                    trial_time_budget_minutes=trial_time_budget_minutes,
-                    formal_time_budget_minutes=formal_time_budget_minutes,
-                    data_dir=data_dir,
-                    recent_tune_outputs=list(recent_tune_outputs),
+                    reasoning_pipeline=bindings.reasoning_pipeline,
+                    human_advice=launch.human_advice_propose,
+                    is_trial=launch.is_trial,
+                    data_scope=bindings.data_scope,
+                    trial_portion=launch.trial_portion,
+                    train_portion=launch.train_portion,
+                    sampling_seed=launch.sampling_seed,
+                    trial_time_budget_minutes=launch.trial_time_budget_minutes,
+                    formal_time_budget_minutes=launch.formal_time_budget_minutes,
+                    data_dir=launch.data_dir,
+                    recent_tune_outputs=list(state.recent_tune_outputs),
                     # V19 PR 3 — proposer prompt flag (evidence itself
                     # travels inside the interpretation dump regardless).
-                    enable_structured_health_feedback=(enable_structured_health_feedback),
+                    enable_structured_health_feedback=(bindings.enable_structured_health_feedback),
                 )
-                propose_input.existing_model_types = list(all_model_types)
+                propose_input.existing_model_types = list(state.all_model_types)
                 # Task config injection (T3) — same pattern as T2's implementor
                 # injection. The loader is cached per-process so this is a dict
                 # lookup after the first iter. See
@@ -2375,27 +2166,27 @@ def run_workflow(
                 propose_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
-                if human_advice_mindset is not None:
-                    propose_input.mindset = human_advice_mindset
+                if launch.human_advice_mindset is not None:
+                    propose_input.mindset = launch.human_advice_mindset
                 # WS-B B.1 — hardware-context plumb-through. Both fields
                 # always set (None is a valid value for vram_budget_gb);
                 # the Proposer renderer decides whether to emit the block.
-                propose_input.hardware_context = hardware_ctx
-                propose_input.vram_budget_gb = active_vram_budget_gb
+                propose_input.hardware_context = bindings.hardware_context
+                propose_input.vram_budget_gb = bindings.active_vram_budget_gb
 
                 # Phase K.8 debug — dump rendered proposing-stage system
                 # prompt under {run_dir}/debug/ when the flag is on.
-                if debug_dump_prompts:
+                if launch.debug_dump_prompts:
                     propose_input.debug_dump_proposing_prompt_path = os.path.join(
-                        run_dir,
+                        bindings.run_dir,
                         "debug",
                         f"iter{iteration:03d}_attempt{attempt:03d}_proposing_system_prompt.md",
                     )
 
-                if validation_fixed_candidate_plan is not None:
+                if launch.validation_fixed_candidate_plan is not None:
                     # VALIDATION POSTURE ONLY. The proposer is skipped; every
                     # downstream stage still runs for real.
-                    proposal = ProposalOutput.model_validate(validation_fixed_candidate_plan)
+                    proposal = ProposalOutput.model_validate(launch.validation_fixed_candidate_plan)
                     candidate_source = "fixed_validation_plan"
                     print(
                         f"    [FIXED PLAN] proposer bypassed — candidate "
@@ -2404,7 +2195,7 @@ def run_workflow(
                     )
                 else:
                     _propose_agent = MLModelProposalAgent(
-                        **llm_config.get("propose"),
+                        **bindings.llm_config.get("propose"),
                         bridge_factory=bridge_factory,
                     )
                     _bind_iter_context(_propose_agent)
@@ -2417,7 +2208,7 @@ def run_workflow(
                 named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
                 os.rename(attempt_dir, named_dir)
                 attempt_dir = named_dir
-                attempt_storage = _make_storage(attempt_dir, run_name)
+                attempt_storage = _make_storage(attempt_dir, bindings.run_name)
 
                 # --- Implement → Validate (inner retry loop per proposal) ---
                 # Load reference code once (shared across impl attempts for this proposal)
@@ -2446,13 +2237,13 @@ def run_workflow(
                             f"({sum(len(v.split(chr(10))) for v in ref_code.values())} lines)"
                         )
 
-                valid_llm = llm_config.get("validate")
+                valid_llm = bindings.llm_config.get("validate")
                 previous_validation_failure: str | None = None
 
-                for impl_attempt in range(1, max_impl_attempts + 1):
+                for impl_attempt in range(1, launch.max_impl_attempts + 1):
                     impl_suffix = (
-                        f" (impl {impl_attempt}/{max_impl_attempts})"
-                        if max_impl_attempts > 1
+                        f" (impl {impl_attempt}/{launch.max_impl_attempts})"
+                        if launch.max_impl_attempts > 1
                         else ""
                     )
                     print(f"  [{iteration}.{attempt}] Implementing{impl_suffix}...")
@@ -2476,17 +2267,17 @@ def run_workflow(
                     # Step 04a (OD-S4-1): the same live manifest and budget
                     # the proposer receives, so the implementor's capacity
                     # prose quotes this machine instead of a stale literal.
-                    impl_input.hardware_context = hardware_ctx
-                    impl_input.vram_budget_gb = active_vram_budget_gb
-                    if human_advice_implement is not None:
-                        impl_input.human_advice = human_advice_implement
+                    impl_input.hardware_context = bindings.hardware_context
+                    impl_input.vram_budget_gb = bindings.active_vram_budget_gb
+                    if launch.human_advice_implement is not None:
+                        impl_input.human_advice = launch.human_advice_implement
                     if ref_code:
                         impl_input.reference_code = ref_code
                     if previous_validation_failure is not None:
                         impl_input.previous_validation_failure = previous_validation_failure
 
                     _impl_agent = MLModelImplementor(
-                        **llm_config.get("implement"),
+                        **bindings.llm_config.get("implement"),
                         bridge_factory=bridge_factory,
                     )
                     _bind_iter_context(_impl_agent)
@@ -2504,8 +2295,8 @@ def run_workflow(
                         llm_provider=valid_llm.get("provider", "gemini"),
                         llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
                     )
-                    if human_advice_validate is not None:
-                        valid_input.human_advice = human_advice_validate
+                    if launch.human_advice_validate is not None:
+                        valid_input.human_advice = launch.human_advice_validate
                     if hasattr(proposal, "inherited_components") and proposal.inherited_components:
                         valid_input.inherited_components = proposal.inherited_components
 
@@ -2557,7 +2348,7 @@ def run_workflow(
                         validation.error_message or "Unknown validation error"
                     )
                     print(f"    Validation FAILED: {previous_validation_failure}")
-                    if impl_attempt < max_impl_attempts:
+                    if impl_attempt < launch.max_impl_attempts:
                         print("    Retrying implementation with validator feedback...\n")
 
                 if validation and validation.passed:
@@ -2565,19 +2356,19 @@ def run_workflow(
 
                 # All impl attempts for this proposal exhausted
                 previous_failures.append(previous_validation_failure or "Unknown error")
-                if attempt < max_proposal_attempts:
+                if attempt < launch.max_proposal_attempts:
                     print("    Retrying with a new proposal...\n")
 
             except Exception as e:
                 error_msg = f"Node error: {type(e).__name__}: {e}"
                 print(f"    ERROR: {error_msg}")
                 previous_failures.append(error_msg)
-                if attempt < max_proposal_attempts:
+                if attempt < launch.max_proposal_attempts:
                     print("    Retrying with failure feedback...\n")
 
         if not validation or not validation.passed:
             print(
-                f"\n  Iteration {iteration}: exhausted {max_proposal_attempts} proposal "
+                f"\n  Iteration {iteration}: exhausted {launch.max_proposal_attempts} proposal "
                 f"attempts without passing validation. Skipping to next iteration."
             )
             continue
@@ -2593,7 +2384,7 @@ def run_workflow(
         # --- Tune (set up storage + run-scoped plugin dir up front) ---
         tuning_dir = os.path.join(iter_dir, proposal.model_name)
         os.makedirs(tuning_dir, exist_ok=True)
-        tuning_storage = _make_storage(tuning_dir, run_name)
+        tuning_storage = _make_storage(tuning_dir, bindings.run_name)
 
         # --- Register validated plugin into TWO dirs:
         #
@@ -2613,16 +2404,16 @@ def run_workflow(
         #        across iterations. Phase 6.8 §3.3.
         from core.sandbox_executor import get_loss_dir, get_plugin_dir
 
-        tuner_plugin_dir = get_plugin_dir(tuning_dir, run_name)
-        chain_plugin_dir = get_plugin_dir(workspace, run_name)
+        tuner_plugin_dir = get_plugin_dir(tuning_dir, bindings.run_name)
+        chain_plugin_dir = get_plugin_dir(bindings.workspace, bindings.run_name)
         # L6a — loss-plugin propagation mirrors the model-plugin pattern.
         # Tuner-scoped dir must match ``TidmadSandbox.loss_dir`` (computed
         # from the sandbox's own workspace ≈ ``tuning_dir``) so the
         # subprocess's ``SIDERIUS_LOSS_DIRS`` resolves the plugin.
         # Chain-canonical dir preserves the file for resume / future-iter
         # Branch B lookups. See docs/design/enable_loss_inventory.md § L6.
-        tuner_loss_dir = get_loss_dir(tuning_dir, run_name)
-        chain_loss_dir = get_loss_dir(workspace, run_name)
+        tuner_loss_dir = get_loss_dir(tuning_dir, bindings.run_name)
+        chain_loss_dir = get_loss_dir(bindings.workspace, bindings.run_name)
         _register_plugin(
             impl_output,
             proposal.model_name,
@@ -2653,69 +2444,71 @@ def run_workflow(
         # plugin to promote). See ``_promote_model_to_global`` docstring.
         _promote_model_to_global(impl_output)
 
-        print(f"  [{iteration}] Tuning '{proposal.model_name}' for {max_rounds} rounds...")
-        tune_llm = llm_config.get("tune")
+        print(f"  [{iteration}] Tuning '{proposal.model_name}' for {launch.max_rounds} rounds...")
+        tune_llm = bindings.llm_config.get("tune")
         tune_input = local_validated_model(
             validation,
             proposal,
             tuning_storage,
-            max_rounds=max_rounds,
-            health_checks_config=health_checks_config,
-            data_scope=data_scope,
-            health_gate_enabled=health_gate_enabled,
-            health_gate_files=health_gate_files,
+            max_rounds=launch.max_rounds,
+            health_checks_config=bindings.health_checks_config,
+            data_scope=bindings.data_scope,
+            health_gate_enabled=bindings.health_gate_enabled,
+            health_gate_files=(
+                list(bindings.health_gate_files) if bindings.health_gate_files is not None else None
+            ),
             # V21 PR D — hop 7 -> hop 8, unchanged including `None`.
-            healthgate_mode=healthgate_mode,
-            result_authority=result_authority,
-            file_index=file_index,
+            healthgate_mode=launch.healthgate_mode,
+            result_authority=launch.result_authority,
+            file_index=launch.file_index,
             llm_provider=tune_llm.get("provider", "gemini"),
             llm_model_id=tune_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
-            is_trial=is_trial,
-            trial_portion=trial_portion,
-            train_portion=train_portion,
-            eval_portion=eval_portion,
-            train_validation_align=train_validation_align,
-            sampling_seed=sampling_seed,
-            train_base_seed=train_base_seed,
-            cleanup_denoised=cleanup_denoised,
-            max_epochs=max_epochs,
-            validation_max_portion=validation_max_portion,
-            validation_max_train_samples=validation_max_train_samples,
-            validation_max_samples=validation_max_samples,
-            validation_max_phase_seconds=validation_max_phase_seconds,
-            skip_formal_min_delta=skip_formal_min_delta,
-            bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
+            is_trial=launch.is_trial,
+            trial_portion=launch.trial_portion,
+            train_portion=launch.train_portion,
+            eval_portion=launch.eval_portion,
+            train_validation_align=launch.train_validation_align,
+            sampling_seed=launch.sampling_seed,
+            train_base_seed=launch.train_base_seed,
+            cleanup_denoised=launch.cleanup_denoised,
+            max_epochs=launch.max_epochs,
+            validation_max_portion=launch.validation_max_portion,
+            validation_max_train_samples=launch.validation_max_train_samples,
+            validation_max_samples=launch.validation_max_samples,
+            validation_max_phase_seconds=launch.validation_max_phase_seconds,
+            skip_formal_min_delta=launch.skip_formal_min_delta,
+            bypass_formal_time_budget_min_delta=launch.bypass_formal_time_budget_min_delta,
             max_retries=tune_llm.get("max_retries"),
-            plan_overrides=plan_overrides,
-            trial_time_budget_minutes=trial_time_budget_minutes,
-            formal_time_budget_minutes=formal_time_budget_minutes,
-            data_dir=data_dir,
-            gpu_admission_measurement_source=gpu_admission_measurement_source,
-            gpu_admission_enforcement=gpu_admission_enforcement,
-            gpu_pair_ceiling_gib=gpu_pair_ceiling_gib,
-            trial_vram_budget_gb=trial_vram_budget_gb,
-            formal_vram_budget_gb=formal_vram_budget_gb,
-            formal_strategy=formal_strategy,
-            formal_portion=formal_portion,
-            formal_train_portion=formal_train_portion,
-            formal_eval_portion=formal_eval_portion,
-            force_formal_round=force_formal_round,
-            formal_round_strategy=formal_round_strategy,
-            degenerate_penalty_score=degenerate_penalty_score,
-            attempts_per_round=attempts_per_round,
-            attempts_per_formal_round=attempts_per_formal_round,
-            max_fail_rounds=max_fail_rounds,
-            max_steps_per_attempt=max_steps_per_attempt,
-            min_formal_batch_size=min_formal_batch_size,
-            allow_extreme_steps=allow_extreme_steps,
-            runtime_watchdog_enabled=runtime_watchdog_enabled,
-            runtime_safety_factor=runtime_safety_factor,
-            runtime_trial_safety_factor=runtime_trial_safety_factor,
-            runtime_formal_safety_factor=runtime_formal_safety_factor,
-            runtime_watchdog_safety_factor=runtime_watchdog_safety_factor,
-            runtime_watchdog_floor_seconds=runtime_watchdog_floor_seconds,
+            plan_overrides=launch.plan_overrides,
+            trial_time_budget_minutes=launch.trial_time_budget_minutes,
+            formal_time_budget_minutes=launch.formal_time_budget_minutes,
+            data_dir=launch.data_dir,
+            gpu_admission_measurement_source=launch.gpu_admission_measurement_source,
+            gpu_admission_enforcement=launch.gpu_admission_enforcement,
+            gpu_pair_ceiling_gib=launch.gpu_pair_ceiling_gib,
+            trial_vram_budget_gb=launch.trial_vram_budget_gb,
+            formal_vram_budget_gb=launch.formal_vram_budget_gb,
+            formal_strategy=launch.formal_strategy,
+            formal_portion=launch.formal_portion,
+            formal_train_portion=launch.formal_train_portion,
+            formal_eval_portion=launch.formal_eval_portion,
+            force_formal_round=launch.force_formal_round,
+            formal_round_strategy=launch.formal_round_strategy,
+            degenerate_penalty_score=launch.degenerate_penalty_score,
+            attempts_per_round=launch.attempts_per_round,
+            attempts_per_formal_round=launch.attempts_per_formal_round,
+            max_fail_rounds=launch.max_fail_rounds,
+            max_steps_per_attempt=launch.max_steps_per_attempt,
+            min_formal_batch_size=launch.min_formal_batch_size,
+            allow_extreme_steps=launch.allow_extreme_steps,
+            runtime_watchdog_enabled=launch.runtime_watchdog_enabled,
+            runtime_safety_factor=launch.runtime_safety_factor,
+            runtime_trial_safety_factor=launch.runtime_trial_safety_factor,
+            runtime_formal_safety_factor=launch.runtime_formal_safety_factor,
+            runtime_watchdog_safety_factor=launch.runtime_watchdog_safety_factor,
+            runtime_watchdog_floor_seconds=launch.runtime_watchdog_floor_seconds,
             # V19 PR 1 (P1-C3) — the chain incumbent travels as a NAMED
             # protocol parameter (two-state design, design doc §3.4).
             # ``chain_formal_incumbent_reference`` is decision state:
@@ -2723,23 +2516,29 @@ def run_workflow(
             # VALID formals. ``best_score_overall`` (raw progress) is
             # deliberately NOT used here — the pre-V19 post-hoc mutation
             # that fed it to the tuner is removed.
-            current_run_best_formal_score=chain_formal_incumbent_reference,
-            enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
+            current_run_best_formal_score=state.chain_formal_incumbent_reference,
+            enable_chain_incumbent_formal_gates=launch.enable_chain_incumbent_formal_gates,
             # V19 PR 2 — operator ordering override for every round of this
             # iteration. The agent's per-round proposal is resolved against
             # it inside the tuner; the workflow never resolves ordering.
-            order_strategy_override=order_strategy_override,
-            file_order_override=file_order_override,
+            order_strategy_override=bindings.order_strategy_override,
+            file_order_override=(
+                list(bindings.file_order_override)
+                if bindings.file_order_override is not None
+                else None
+            ),
             # V19 PR 3 — policy pass-through so the TUNER's lock matches
             # the workflow's (contradictory locks abort the run).
-            enable_structured_health_feedback=enable_structured_health_feedback,
-            health_feedback_history_window_iterations=(health_feedback_history_window_iterations),
+            enable_structured_health_feedback=bindings.enable_structured_health_feedback,
+            health_feedback_history_window_iterations=(
+                launch.health_feedback_history_window_iterations
+            ),
             health_feedback_history_max_entries_per_model=(
-                health_feedback_history_max_entries_per_model
+                launch.health_feedback_history_max_entries_per_model
             ),
         )
-        if human_advice_tune is not None:
-            tune_input.human_advice = human_advice_tune
+        if launch.human_advice_tune is not None:
+            tune_input.human_advice = launch.human_advice_tune
         # Task config injection (T4a) — substituted into the {TASK_DESCRIPTION}
         # placeholder in PLANNER_PROMPT via brain.plan(task_description=...).
         # See docs/design/enable_global_task_config.md § Commit T4a.
@@ -2755,7 +2554,7 @@ def run_workflow(
         # to subtract from in the dmesg dump.
         _log_rss(f"pre-vram-probe (iter {iteration}, before tuner.run)")
         tune_output = _tune_agent.run(tune_input)
-        iteration_results.append(tune_output)
+        state.iteration_results.append(tune_output)
 
         # Issue #92 safety net — the primary promotion fires earlier
         # (right after ``_register_plugin``) so the loss is globally
@@ -2777,10 +2576,10 @@ def run_workflow(
         # Phase N (§14.N) — append to the bounded FIFO; deque(maxlen=3)
         # auto-evicts the oldest entry so the next iteration's
         # local_full_context call sees only the most recent 3.
-        recent_tune_outputs.append(tune_output)
+        state.recent_tune_outputs.append(tune_output)
 
         # --- Update long-term memory for next iteration ---
-        all_model_types.append(proposal.model_name)
+        state.all_model_types.append(proposal.model_name)
 
         # Build ModelRunSummary for the newly tuned model (fed to iter N+1 as new_summaries)
         new_model_summaries = tuning_outputs_to_summaries(
@@ -2795,31 +2594,33 @@ def run_workflow(
             # Attach description so iter N+1 interpretation agent can find it
             # without filesystem access to the attempt directory
             s.model_description = proposal.model_description
-        latest_new_summary = new_model_summaries[0]
+        state.latest_new_summary = new_model_summaries[0]
 
         # Update knowledge cache from interpretation output
         if (
             hasattr(interpretation, "model_knowledge_cache")
             and interpretation.model_knowledge_cache
         ):
-            model_knowledge_cache = dict(interpretation.model_knowledge_cache)
-            model_knowledge_cache, evicted = _cap_knowledge_cache(
-                model_knowledge_cache,
+            state.model_knowledge_cache = dict(interpretation.model_knowledge_cache)
+            state.model_knowledge_cache, evicted = _cap_knowledge_cache(
+                state.model_knowledge_cache,
                 current_model=proposal.model_name,
                 order=MetricOrder(run_metric_spec) if run_metric_spec is not None else None,
             )
             if evicted:
                 print(
                     f"  [{iteration}] Cache capped: evicted {sorted(evicted)}, "
-                    f"kept {len(model_knowledge_cache)} entries."
+                    f"kept {len(state.model_knowledge_cache)} entries."
                 )
-            print(f"  [{iteration}] Knowledge cache: {len(model_knowledge_cache)} models cached.")
+            print(
+                f"  [{iteration}] Knowledge cache: {len(state.model_knowledge_cache)} models cached."
+            )
 
         # Step 09a C5 — carry the interpreter's prediction memory to the next
         # iteration. Read straight off the digest the interpreter just wrote,
         # so the in-process loop and the chain-subprocess restore agree by
         # construction rather than by two independent accumulations.
-        current_prediction_memory = PredictionMemory(
+        state.current_prediction_memory = PredictionMemory(
             prediction_outcomes_history=dict(interpretation.prediction_outcomes_history),
             prediction_outcomes_by_semantics={
                 version: dict(counts)
@@ -2832,15 +2633,15 @@ def run_workflow(
         )
 
         # Update runtime vocab from interpretation output
-        previous_proposal_data = proposal.model_dump()
+        state.previous_proposal_data = proposal.model_dump()
         if hasattr(interpretation, "runtime_vocab") and interpretation.runtime_vocab:
-            current_runtime_vocab = [
+            state.current_runtime_vocab = [
                 v if hasattr(v, "name") else VocabEntry.model_validate(v)
                 for v in interpretation.runtime_vocab
             ]
             print(
-                f"  [{iteration}] Vocab updated: {len(current_runtime_vocab)} entries "
-                f"({sum(1 for v in current_runtime_vocab if v.kind == 'discovery')} discoveries)"
+                f"  [{iteration}] Vocab updated: {len(state.current_runtime_vocab)} entries "
+                f"({sum(1 for v in state.current_runtime_vocab if v.kind == 'discovery')} discoveries)"
             )
 
         # --- Check score target ---
@@ -2852,10 +2653,10 @@ def run_workflow(
         # (Historical context: v15's mamba_multirate_fuser trial 7.65 /
         # dualpath_spectral_router trial 7.77 motivated formal-only.)
         if tune_output.best_formal_denoising_score is not None and (
-            best_score_overall is None
-            or tune_output.best_formal_denoising_score > best_score_overall
+            state.best_score_overall is None
+            or tune_output.best_formal_denoising_score > state.best_score_overall
         ):
-            best_score_overall = tune_output.best_formal_denoising_score
+            state.best_score_overall = tune_output.best_formal_denoising_score
 
         # V19 PR 1 — DECISION-STATE incumbent update (in-process
         # multi-iteration equivalence with N chained subprocesses,
@@ -2864,10 +2665,10 @@ def run_workflow(
         # keeps the earliest holder on ties (§3.3).
         _iter_valid_formal = tune_output.best_valid_formal_denoising_score
         if _iter_valid_formal is not None and (
-            chain_formal_incumbent_reference is None
-            or _iter_valid_formal > chain_formal_incumbent_reference
+            state.chain_formal_incumbent_reference is None
+            or _iter_valid_formal > state.chain_formal_incumbent_reference
         ):
-            chain_formal_incumbent_reference = _iter_valid_formal
+            state.chain_formal_incumbent_reference = _iter_valid_formal
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "
@@ -2878,7 +2679,9 @@ def run_workflow(
         # even on the iteration that triggers the target-score break
         # (placed before the break check) so the last iteration's
         # terminal RSS is always logged.
-        probe_memory(iter_idx=iteration, phase="end", workspace=workspace, scope="workflow")
+        probe_memory(
+            iter_idx=iteration, phase="end", workspace=bindings.workspace, scope="workflow"
+        )
 
         # Phase 6.8 §2 Layer B (Commit 3) — per-iteration cleanup. Drop
         # local refs to per-iter agent outputs, force a GC cycle, then
@@ -2904,16 +2707,18 @@ def run_workflow(
         with suppress(NameError):
             del tune_output
         gc.collect()
-        probe_memory(iter_idx=iteration, phase="post_gc", workspace=workspace, scope="workflow")
+        probe_memory(
+            iter_idx=iteration, phase="post_gc", workspace=bindings.workspace, scope="workflow"
+        )
 
         if (
-            target_score is not None
-            and best_score_overall is not None
-            and best_score_overall >= target_score
+            launch.target_score is not None
+            and state.best_score_overall is not None
+            and state.best_score_overall >= launch.target_score
         ):
             print(
-                f"\n  Target score {target_score} reached "
-                f"(best={best_score_overall}). Stopping early."
+                f"\n  Target score {launch.target_score} reached "
+                f"(best={state.best_score_overall}). Stopping early."
             )
             break
 
@@ -2923,22 +2728,22 @@ def run_workflow(
     print("  Workflow Complete")
     print(f"  Started     : {started_at}")
     print(f"  Finished    : {finished_at}")
-    print(f"  Iterations  : {len(iteration_results)}/{max_iterations}")
-    print(f"  Best overall: {best_score_overall}")
-    for i, result in enumerate(iteration_results, 1):
+    print(f"  Iterations  : {len(state.iteration_results)}/{launch.max_iterations}")
+    print(f"  Best overall: {state.best_score_overall}")
+    for i, result in enumerate(state.iteration_results, 1):
         print(f"    Iteration {i}: {result.model_type} score={result.best_denoising_score}")
     print(f"{'=' * 60}\n")
 
     _save_workflow_summary(
-        run_dir,
-        run_name,
+        bindings.run_dir,
+        bindings.run_name,
         started_at,
         finished_at,
-        iteration_results,
-        best_score_overall,
+        state.iteration_results,
+        state.best_score_overall,
     )
 
-    return iteration_results
+    return state.iteration_results
 
 
 def _save_workflow_summary(
@@ -3120,22 +2925,24 @@ def main():
         wf_llm_config = None  # each node uses its own default
 
     run_workflow(
-        data_dir=args.data_dir,
-        model_types=args.models,
-        source_run_name=args.source_run_name,
+        launch=WorkflowLaunchConfig(
+            data_dir=args.data_dir,
+            model_types=args.models,
+            source_run_name=args.source_run_name,
+            max_iterations=args.max_iterations,
+            max_rounds=args.max_rounds,
+            max_proposal_attempts=args.max_proposal_attempts,
+            target_score=args.target_score,
+            file_index=args.file_index,
+            human_advice_interpret=args.advice_interpret,
+            human_advice_propose=args.advice_propose,
+            human_advice_implement=args.advice_implement,
+            human_advice_validate=args.advice_validate,
+            human_advice_tune=args.advice_tune,
+        ),
         workspace=args.workspace,
         run_name=args.run_name,
-        max_iterations=args.max_iterations,
-        max_rounds=args.max_rounds,
-        max_proposal_attempts=args.max_proposal_attempts,
-        target_score=args.target_score,
-        file_index=args.file_index,
         llm_config=wf_llm_config,
-        human_advice_interpret=args.advice_interpret,
-        human_advice_propose=args.advice_propose,
-        human_advice_implement=args.advice_implement,
-        human_advice_validate=args.advice_validate,
-        human_advice_tune=args.advice_tune,
     )
 
 

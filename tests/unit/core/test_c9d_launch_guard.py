@@ -395,11 +395,18 @@ class TestProbeRequirementIsExplicit:
     """
 
     def test_run_workflow_defaults_to_not_requiring_a_device(self):
+        # Step 09.5a C3 / Amendment A: `require_probe_runner` is a bool launch
+        # flag, so it lives on WorkflowLaunchConfig. Its default — and the
+        # fail-open-by-default posture this guards — is unchanged.
+        import dataclasses
         import inspect
 
         from workflows.model_exploration import run_workflow
+        from workflows.run_config import WorkflowLaunchConfig
 
-        parameter = inspect.signature(run_workflow).parameters["require_probe_runner"]
+        parameter = next(
+            f for f in dataclasses.fields(WorkflowLaunchConfig) if f.name == "require_probe_runner"
+        )
         assert parameter.default is False
 
     def test_the_real_launch_path_opts_in_explicitly(self):

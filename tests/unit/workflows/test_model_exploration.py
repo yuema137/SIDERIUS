@@ -72,6 +72,7 @@ from workflows.model_exploration import (
     run_workflow,
     tuning_outputs_to_summaries,
 )
+from workflows.run_config import WorkflowLaunchConfig, launch_config_field_names
 
 # ---------------------------------------------------------------------------
 # Fixtures — synthetic data
@@ -361,9 +362,11 @@ def workflow_env(tmp_path):
 class TestRunWorkflowSingleIteration:
     def test_returns_list_with_one_output(self, workflow_env):
         results = run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -374,7 +377,9 @@ class TestRunWorkflowSingleIteration:
         """New API: pass explicit source_paths instead of data_dir+model_types+source_run_name."""
         path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
         results = run_workflow(
-            source_paths=[path],
+            launch=WorkflowLaunchConfig(
+                source_paths=[path],
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -400,7 +405,9 @@ class TestRunWorkflowSingleIteration:
 
         # --- Iteration 1: just the seed ---
         results_1 = run_workflow(
-            source_paths=[seed_path],
+            launch=WorkflowLaunchConfig(
+                source_paths=[seed_path],
+            ),
             workspace=workspace,
             run_name="iter_001",
         )
@@ -423,7 +430,9 @@ class TestRunWorkflowSingleIteration:
 
         # --- Iteration 2: seed + iteration 1's output ---
         results_2 = run_workflow(
-            source_paths=[seed_path, iter_1_output_path],
+            launch=WorkflowLaunchConfig(
+                source_paths=[seed_path, iter_1_output_path],
+            ),
             workspace=workspace,
             run_name="iter_002",
         )
@@ -438,9 +447,11 @@ class TestRunWorkflowSingleIteration:
 
     def test_all_five_nodes_called(self, workflow_env):
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -457,9 +468,11 @@ class TestRunWorkflowSingleIteration:
         from agent.schemas.validator import ValidatorInput
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -475,9 +488,11 @@ class TestRunWorkflowSingleIteration:
 
     def test_fan_in_expert_advice(self, workflow_env):
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -487,9 +502,11 @@ class TestRunWorkflowSingleIteration:
 
     def test_workflow_summary_saved(self, workflow_env):
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -503,9 +520,11 @@ class TestRunWorkflowSingleIteration:
 
     def test_iteration_directory_created(self, workflow_env):
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -535,12 +554,14 @@ class TestRunWorkflowMultiIteration:
         )
 
         results = run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=3,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=3,
         )
         assert len(results) == 3
 
@@ -556,12 +577,14 @@ class TestRunWorkflowMultiIteration:
         )
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         interp_calls = workflow_env["interp"].return_value.run.call_args_list
         iter1_inp = interp_calls[0][0][0]
@@ -595,12 +618,14 @@ class TestRunWorkflowMultiIteration:
         workflow_env["interp"].return_value.run.return_value = digest
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         interp_calls = workflow_env["interp"].return_value.run.call_args_list
         iter1_inp, iter2_inp = interp_calls[0][0][0], interp_calls[1][0][0]
@@ -631,12 +656,14 @@ class TestRunWorkflowMultiIteration:
         from agent.schemas.interpretation import PredictionMemory
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=1,
             restored_prediction_memory=PredictionMemory(
                 prediction_outcomes_history={"confirmed": 4, "partial": 0, "refuted": 1},
                 prediction_outcomes_by_semantics={
@@ -679,12 +706,14 @@ class TestRunWorkflowMultiIteration:
         )
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=1,
             restored_model_knowledge_cache=prior_cache,
         )
         iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
@@ -708,12 +737,14 @@ class TestRunWorkflowMultiIteration:
         )
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=1,
             restored_model_knowledge_cache=caller_cache,
         )
         # Caller's dict must still have exactly the one entry it started with —
@@ -731,13 +762,14 @@ class TestRunWorkflowMultiIteration:
             score=1.6,
         )
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=1,
-            # restored_model_knowledge_cache omitted — defaults to None.
         )
         iter1_inp = workflow_env["interp"].return_value.run.call_args_list[0][0][0]
         assert iter1_inp.model_knowledge_cache == {}
@@ -752,13 +784,15 @@ class TestRunWorkflowMultiIteration:
         )
 
         results = run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=5,
+                target_score=2.0,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=5,
-            target_score=2.0,
         )
         # Should stop after first iteration since score 2.5 >= 2.0
         assert len(results) == 1
@@ -796,12 +830,14 @@ class TestRunWorkflowMultiIteration:
         workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         iter2_tune_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
         # Schema default = None (V19 PR 1: no incumbent). Must NOT be the
@@ -819,13 +855,15 @@ class TestChainIncumbentThreading:
 
     def test_restored_incumbent_initializes_reference_only(self, workflow_env):
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                enable_chain_incumbent_formal_gates=True,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
             restored_chain_incumbent_score=5.0,
-            enable_chain_incumbent_formal_gates=True,
         )
         tune_input = workflow_env["tune"].return_value.run.call_args_list[0][0][0]
         assert tune_input.current_run_best_formal_score == 5.0
@@ -855,12 +893,14 @@ class TestChainIncumbentThreading:
         workflow_env["tune"].return_value.run.side_effect = [iter1, iter2]
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         iter2_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
         # The VALUE always travels (reconstruction is unconditional)…
@@ -881,12 +921,14 @@ class TestChainIncumbentThreading:
         workflow_env["tune"].return_value.run.side_effect = [iter1, iter2]
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         iter2_input = workflow_env["tune"].return_value.run.call_args_list[1][0][0]
         assert iter2_input.current_run_best_formal_score is None
@@ -912,9 +954,11 @@ class TestRunWorkflowStartIteration:
     def test_default_start_iteration_unchanged(self, workflow_env):
         """start_iteration omitted → first iter stamps iteration=1 (legacy)."""
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
         )
@@ -924,13 +968,15 @@ class TestRunWorkflowStartIteration:
     def test_start_iteration_offsets_loop(self, workflow_env):
         """start_iteration=5, max_iterations=1 → exactly one iter stamped 5."""
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                start_iteration=5,
+                max_iterations=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            start_iteration=5,
-            max_iterations=1,
         )
         calls = workflow_env["interp"].return_value.run.call_args_list
         assert len(calls) == 1
@@ -950,13 +996,15 @@ class TestRunWorkflowStartIteration:
             model_type=inp.model_type, score=1.6
         )
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                start_iteration=3,
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            start_iteration=3,
-            max_iterations=2,
         )
         calls = workflow_env["interp"].return_value.run.call_args_list
         assert [c[0][0].iteration for c in calls] == [3, 4]
@@ -991,12 +1039,14 @@ class TestRunWorkflowValidationRetry:
             _make_validator_output(passed=True),
         ]
         results = run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_impl_attempts=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_impl_attempts=1,
         )
         assert len(results) == 1
         assert workflow_env["propose"].return_value.run.call_count == 2
@@ -1008,12 +1058,14 @@ class TestRunWorkflowValidationRetry:
             _make_validator_output(passed=True),
         ]
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_impl_attempts=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_impl_attempts=1,
         )
         # Second proposal call should have previous_failures
         second_call_input = workflow_env["propose"].return_value.run.call_args_list[1][0][0]
@@ -1025,12 +1077,14 @@ class TestRunWorkflowValidationRetry:
         # = 6 validator calls. Only the OUTER count matters here.
         workflow_env["valid"].return_value.run.return_value = _make_validator_output(passed=False)
         results = run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_proposal_attempts=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_proposal_attempts=2,
         )
         assert len(results) == 0
         assert workflow_env["propose"].return_value.run.call_count == 2
@@ -1042,12 +1096,14 @@ class TestRunWorkflowValidationRetry:
             _make_validator_output(passed=True),
         ]
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_impl_attempts=1,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_impl_attempts=1,
         )
         run_dir = os.path.join(workflow_env["workspace"], "test_run")
         iter_dir = os.path.join(run_dir, "iteration_001")
@@ -1106,12 +1162,14 @@ class TestRunWorkflowGateExhaustionPropagation:
             _make_tune_output(model_type="model_b", score=1.7),
         ]
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         iter1_propose_input = workflow_env["propose"].return_value.run.call_args_list[0][0][0]
         assert iter1_propose_input.recent_gate_exhaustions == []
@@ -1133,12 +1191,14 @@ class TestRunWorkflowGateExhaustionPropagation:
         workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         iter2_propose_input = workflow_env["propose"].return_value.run.call_args_list[1][0][0]
         surfaced = iter2_propose_input.recent_gate_exhaustions
@@ -1164,12 +1224,14 @@ class TestRunWorkflowGateExhaustionPropagation:
         workflow_env["tune"].return_value.run.side_effect = [iter1_tune, iter2_tune]
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=2,
         )
         iter2_propose_input = workflow_env["propose"].return_value.run.call_args_list[1][0][0]
         assert iter2_propose_input.recent_gate_exhaustions == []
@@ -1218,12 +1280,14 @@ class TestRunWorkflowGateExhaustionPropagation:
         workflow_env["tune"].return_value.run.side_effect = tunes
 
         run_workflow(
-            data_dir=workflow_env["data_dir"],
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=workflow_env["data_dir"],
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=5,
+            ),
             workspace=workflow_env["workspace"],
             run_name="test_run",
-            max_iterations=5,
         )
 
         call_args = workflow_env["propose"].return_value.run.call_args_list
@@ -1770,14 +1834,18 @@ class TestRegisterPluginUsesHelper:
 
 def _tune_input_from_workflow(workflow_env, tmp_path, **workflow_kwargs):
     """Run the workflow with a single source path and return the
-    HyperparamTuningInput that reached HyperparamTuningAgent.run()."""
+    HyperparamTuningInput that reached HyperparamTuningAgent.run().
+
+    Step 09.5a C3: the caller's flat kwargs are split by ownership, so every
+    test below still reads as ``_tune_input_from_workflow(env, tmp, foo=bar)``.
+    """
     path = str(tmp_path / "data" / "punet" / "v1" / "agent" / "run_output_v1_agent.json")
-    run_workflow(
-        source_paths=[path],
-        workspace=workflow_env["workspace"],
-        run_name="test_run",
-        **workflow_kwargs,
-    )
+    launch_fields = launch_config_field_names()
+    launch_kwargs = {"source_paths": [path]}
+    run_kwargs = {"workspace": workflow_env["workspace"], "run_name": "test_run"}
+    for key, value in workflow_kwargs.items():
+        (launch_kwargs if key in launch_fields else run_kwargs)[key] = value
+    run_workflow(launch=WorkflowLaunchConfig(**launch_kwargs), **run_kwargs)
     mock_tune_run = workflow_env["tune"].return_value.run
     assert mock_tune_run.called, "tuning agent was never invoked"
     tune_input = mock_tune_run.call_args[0][0]
@@ -1806,10 +1874,14 @@ class TestOrchestrationParamForwarding:
         assert tune_input.health_checks_config is None
 
     def test_signature_accepts_formal_round_strategy(self):
-        import inspect
+        """Step 09.5a C3: it is transit configuration, so it lives on the
+        launch carrier. The invariant — the orchestration surface accepts it —
+        is unchanged; only where it is declared moved."""
+        import dataclasses
 
-        sig = inspect.signature(run_workflow)
-        assert "formal_round_strategy" in sig.parameters
+        from workflows.run_config import WorkflowLaunchConfig
+
+        assert "formal_round_strategy" in {f.name for f in dataclasses.fields(WorkflowLaunchConfig)}
 
     def test_formal_round_strategy_default_full_clone(self, workflow_env, tmp_path):
         """Phase 1 of refactor_formal_round_strategy.md flipped the
@@ -1865,11 +1937,18 @@ class TestOrchestrationParamForwarding:
         assert tune_input.formal_round_strategy == "full_clone"
 
     def test_signature_accepts_degenerate_penalty_score(self):
-        import inspect
+        """Step 09.5a C3: transit configuration, so it lives on the launch
+        carrier with its default unchanged."""
+        import dataclasses
 
-        sig = inspect.signature(run_workflow)
-        assert "degenerate_penalty_score" in sig.parameters
-        assert sig.parameters["degenerate_penalty_score"].default is None
+        from workflows.run_config import WorkflowLaunchConfig
+
+        field = next(
+            f
+            for f in dataclasses.fields(WorkflowLaunchConfig)
+            if f.name == "degenerate_penalty_score"
+        )
+        assert field.default is None
 
     def test_degenerate_penalty_score_default_is_none(self, workflow_env, tmp_path):
         tune_input = _tune_input_from_workflow(workflow_env, tmp_path)

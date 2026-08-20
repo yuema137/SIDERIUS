@@ -63,6 +63,7 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 # ---------------------------------------------------------------------------
 # Canned bridge output for the real proposer's 3-stage pipeline
@@ -238,14 +239,16 @@ def test_iter3_prompt_carries_iter1_summary_through_succeeding_iter2(tmp_path):
         )
 
         run_workflow(
-            data_dir=data_dir,
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=data_dir,
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=3,
+                debug_dump_prompts=True,
+            ),
             workspace=workspace,
             run_name=run_name,
             llm_config=llm_config,
-            max_iterations=3,
-            debug_dump_prompts=True,
         )
 
     # --- Validate the dumped iter 3 proposing-stage system prompt ---
@@ -506,16 +509,18 @@ def test_iter2_triple_guard_blacklist_and_preflight(tmp_path):
         )
 
         run_workflow(
-            data_dir=data_dir,
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=data_dir,
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=2,
+                debug_dump_prompts=True,
+                is_trial=True,
+                trial_time_budget_minutes=_PREFLIGHT_TRIAL_BUDGET_MIN,
+            ),
             workspace=workspace,
             run_name=run_name,
             llm_config=llm_config,
-            max_iterations=2,
-            debug_dump_prompts=True,
-            is_trial=True,
-            trial_time_budget_minutes=_PREFLIGHT_TRIAL_BUDGET_MIN,
         )
 
     # === Guard 1 — Narrative channel (regression guard) ===

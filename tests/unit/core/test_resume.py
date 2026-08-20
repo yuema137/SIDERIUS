@@ -599,7 +599,16 @@ class TestPseudoIntegrationTwoIterChain:
 # See docs/Consistent_growing_vocab_list.md.
 # ===========================================================================
 
-from core.resume import _interpretation_path, load_latest_knowledge
+from core.committed_digests import read_committed_digests
+from core.resume import _interpretation_path, project_knowledge
+
+
+# Step 09.5a C1 — the four carried-state loaders became PURE projections over
+# one shared committed-digest read (core/committed_digests.py). These shims keep
+# every assertion below unchanged while exercising the real production
+# composition: one read, then the projection under test.
+def load_latest_knowledge(workspace, current_iter, committed_iters):
+    return project_knowledge(read_committed_digests(workspace, current_iter, committed_iters))
 
 
 def _write_interp_digest(
@@ -810,7 +819,15 @@ class TestRestorePriorStateKnowledgeCarryOver:
 # See docs/audit_and_optimize_token_usage_and_growth.md Rev 8.3 changelog.
 # ===========================================================================
 
-from core.resume import load_latest_knowledge_cache
+from core.resume import project_knowledge_cache
+
+
+# Step 09.5a C1 — the four carried-state loaders became PURE projections over
+# one shared committed-digest read (core/committed_digests.py). These shims keep
+# every assertion below unchanged while exercising the real production
+# composition: one read, then the projection under test.
+def load_latest_knowledge_cache(workspace, current_iter, committed_iters):
+    return project_knowledge_cache(read_committed_digests(workspace, current_iter, committed_iters))
 
 
 def _write_interp_digest_with_cache(

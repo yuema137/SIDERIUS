@@ -37,12 +37,19 @@ import pytest
 from agent.schemas.hyperparam_tuning import HyperparamTuningInput
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
 from sdsc_submission_scripts.run_one_iteration import build_parser, main
-from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
-#: Every callable between the CLI and the tuner input that declares its
-#: parameters EXPLICITLY, so an unknown keyword is a TypeError at launch.
-#: Both entries were added by a real Gate failure, in this order.
-FORWARDING_HOPS = (run_workflow, local_validated_model)
+#: Every hop between the CLI and the tuner input that declares its parameters
+#: EXPLICITLY, so an unknown keyword is a TypeError at launch. Both entries
+#: were added by a real Gate failure, in this order.
+#:
+#: Step 09.5a C3: the workflow hop is now the typed carrier rather than
+#: ``run_workflow``'s own signature — the validation flags are transit
+#: configuration and live on ``WorkflowLaunchConfig``. The invariant is
+#: unchanged and still the one the Gate failure taught: every hop must DECLARE
+#: the flag, so a dropped one is a launch-time error rather than a silently
+#: ignored bound.
+FORWARDING_HOPS = (WorkflowLaunchConfig, local_validated_model)
 
 #: Every CLI flag whose job is to bound validation work. Derived from the
 #: parser rather than listed, so a NEW validation flag is covered the
@@ -111,7 +118,25 @@ def test_no_validation_flag_is_accepted_and_then_dropped(flag):
     least twice in the function source (its declaration and its use),
     a dropped one exactly once.
     """
+    import dataclasses
+
+    # The workflow hop: Step 09.5a C3 split DECLARATION (the carrier field)
+    # from USE (`launch.<flag>` inside run_workflow), so occurrence counting
+    # inside one object no longer expresses the invariant. Declared-then-used
+    # still does, across the two.
+    if flag in {f.name for f in dataclasses.fields(WorkflowLaunchConfig)}:
+        from workflows.model_exploration import run_workflow
+
+        workflow_source = inspect.getsource(run_workflow)
+        assert f"launch.{flag}" in workflow_source, (
+            f"WorkflowLaunchConfig declares {flag} but run_workflow never reads "
+            f"it; the bound would be silently discarded rather than failing loudly"
+        )
+
+    # Every other hop still declares and uses the flag in one place.
     for hop in FORWARDING_HOPS:
+        if not callable(hop) or dataclasses.is_dataclass(hop):
+            continue
         if flag not in inspect.signature(hop).parameters:
             continue  # a flag whose path stops before this hop
         source = inspect.getsource(hop)

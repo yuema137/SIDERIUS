@@ -51,6 +51,8 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
+from workflows.run_config import WorkflowLaunchConfig
+
 load_dotenv(dotenv_path=Path(__file__).resolve().parents[3] / ".env")
 
 pytestmark = pytest.mark.real_run
@@ -359,35 +361,28 @@ class TestScoreTableRealSmoke:
             t0 = time.perf_counter()
 
             results_1 = run_workflow(
-                source_paths=seed_paths,
+                launch=WorkflowLaunchConfig(
+                    source_paths=seed_paths,
+                    max_iterations=1,
+                    max_rounds=2,
+                    max_proposal_attempts=3,
+                    is_trial=True,
+                    trial_portion=0.02,
+                    train_portion=1.0,
+                    eval_portion=0.02,
+                    cleanup_denoised=True,
+                    max_epochs=1,
+                    trial_time_budget_minutes=TRIAL_BUDGET_MIN,
+                    formal_time_budget_minutes=FORMAL_BUDGET_MIN,
+                    trial_vram_budget_gb=2.0,
+                    formal_vram_budget_gb=2.0,
+                    formal_eval_portion=0.05,
+                ),
                 workspace=workspace,
                 run_name="stage2_iter_001",
                 llm_config=llm_config,
-                max_iterations=1,
-                max_rounds=2,  # 1 trial + 1 forced formal
-                max_proposal_attempts=3,
-                is_trial=True,
                 trial_strategy="snapshot",
-                trial_portion=0.02,
-                train_portion=1.0,
                 eval_strategy="snapshot",
-                eval_portion=0.02,
-                cleanup_denoised=True,
-                max_epochs=1,
-                trial_time_budget_minutes=TRIAL_BUDGET_MIN,
-                formal_time_budget_minutes=FORMAL_BUDGET_MIN,
-                trial_vram_budget_gb=2.0,
-                formal_vram_budget_gb=2.0,
-                # Phase R (§13) — formal eval scope tightened for the smoke
-                # test so the forced formal round fits inside FORMAL_BUDGET_MIN.
-                # Production runs keep the 1.0 default; lowering this here
-                # reflects a scope decision, not a calibration fix. The V9
-                # audit (§13) showed the inference estimator under-projects
-                # by ~8x on 5090 hardware, so silencing the formula by
-                # touching its constants would defeat the gate. Matching
-                # the trial eval_portion=0.02 keeps cross-architecture
-                # comparability at smoke-test scope.
-                formal_eval_portion=0.05,
                 **{f"human_advice_{k}": v for k, v in advice.items()},
             )
 
@@ -452,35 +447,28 @@ class TestScoreTableRealSmoke:
             t0 = time.perf_counter()
 
             results_2 = run_workflow(
-                source_paths=iter2_sources,
+                launch=WorkflowLaunchConfig(
+                    source_paths=iter2_sources,
+                    max_iterations=1,
+                    max_rounds=2,
+                    max_proposal_attempts=3,
+                    is_trial=True,
+                    trial_portion=0.02,
+                    train_portion=1.0,
+                    eval_portion=0.02,
+                    cleanup_denoised=True,
+                    max_epochs=1,
+                    trial_time_budget_minutes=TRIAL_BUDGET_MIN,
+                    formal_time_budget_minutes=FORMAL_BUDGET_MIN,
+                    trial_vram_budget_gb=2.0,
+                    formal_vram_budget_gb=2.0,
+                    formal_eval_portion=0.05,
+                ),
                 workspace=workspace,
                 run_name="stage2_iter_002",
                 llm_config=llm_config,
-                max_iterations=1,
-                max_rounds=2,
-                max_proposal_attempts=3,
-                is_trial=True,
                 trial_strategy="snapshot",
-                trial_portion=0.02,
-                train_portion=1.0,
                 eval_strategy="snapshot",
-                eval_portion=0.02,
-                cleanup_denoised=True,
-                max_epochs=1,
-                trial_time_budget_minutes=TRIAL_BUDGET_MIN,
-                formal_time_budget_minutes=FORMAL_BUDGET_MIN,
-                trial_vram_budget_gb=2.0,
-                formal_vram_budget_gb=2.0,
-                # Phase R (§13) — formal eval scope tightened for the smoke
-                # test so the forced formal round fits inside FORMAL_BUDGET_MIN.
-                # Production runs keep the 1.0 default; lowering this here
-                # reflects a scope decision, not a calibration fix. The V9
-                # audit (§13) showed the inference estimator under-projects
-                # by ~8x on 5090 hardware, so silencing the formula by
-                # touching its constants would defeat the gate. Matching
-                # the trial eval_portion=0.02 keeps cross-architecture
-                # comparability at smoke-test scope.
-                formal_eval_portion=0.05,
                 **{f"human_advice_{k}": v for k, v in advice.items()},
             )
 

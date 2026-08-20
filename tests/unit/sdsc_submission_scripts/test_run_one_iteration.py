@@ -33,6 +33,7 @@ from unittest.mock import patch
 import pytest
 
 from sdsc_submission_scripts import run_one_iteration as runner
+from tests.helpers.launcher_bindings import effective_workflow_kwargs
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -461,7 +462,7 @@ class TestRestoreWiring:
                 )
         assert code == 0
         # The workflow received the seed list verbatim — no extra prior iters.
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         assert kwargs["source_paths"] == [str(seed_file)]
         assert kwargs["run_name"] == "iter_001"
 
@@ -522,7 +523,7 @@ class TestRestoreWiring:
                 )
 
         assert code == 0
-        assert mock_wf.call_args.kwargs["health_checks_config"] == health_path
+        assert effective_workflow_kwargs(mock_wf.call_args)["health_checks_config"] == health_path
 
     def test_start_iteration_2_restores_iter_1_plugin_and_prepends_path(
         self,
@@ -583,7 +584,7 @@ class TestRestoreWiring:
         # restore_prior_state should have re-registered the iter-1 plugin.
         assert "c8_test_arch_a" in MODEL_REGISTRY
         # source_paths the workflow saw = [seed, iter_001 output] in order.
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         assert kwargs["source_paths"] == [str(seed_file), iter1_output]
         assert kwargs["run_name"] == "iter_002"
 
@@ -704,7 +705,7 @@ class TestRestoreWiring:
 
         assert code == 0
         # Workflow still ran with the prior iter's run_output in source_paths.
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         assert iter1_output in kwargs["source_paths"]
         # Warning was emitted somewhere in the call chain.
         plugin_warnings = [w for w in caught if "plugin file not found" in str(w.message)]
@@ -756,7 +757,7 @@ class TestRestoreWiring:
         assert "c8_test_arch_a" in MODEL_REGISTRY
         assert "c8_test_arch_b" in MODEL_REGISTRY
         # source_paths in chronological order.
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         assert kwargs["source_paths"] == [str(seed), iter1, iter2]
         # Iter dir name reflects the start_iteration (no auto-detection
         # silently shifted us elsewhere).
@@ -1072,7 +1073,7 @@ class TestNoRecordsExit:
         assert code == 0
         # run_workflow was actually invoked — restore did not raise on no_records.
         mock_wf.assert_called_once()
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         # source_paths = seeds only (no iter_001 output to absorb).
         assert kwargs["source_paths"] == [str(seed)]
         assert kwargs["run_name"] == "iter_002"
@@ -1141,7 +1142,7 @@ class TestPseudoModeFactoryWiring:
                     *extra_flags,
                 ]
             )
-        return code, mock_wf.call_args.kwargs
+        return code, effective_workflow_kwargs(mock_wf.call_args)
 
     def test_default_args_pass_no_factories(self, tmp_path, isolated_registries):
         code, kwargs = self._invoke(tmp_path)
@@ -1339,7 +1340,7 @@ class TestDataScopeChainWiring:
     def test_scope_and_gates_reach_workflow(self, tmp_path):
         code, mock_wf = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
         assert code == 0
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         assert kwargs["data_scope"] == DataScope(file_indices=[4, 5, 6, 7, 8, 9])
         assert kwargs["health_gate_enabled"] is True
         assert kwargs["health_gate_files"] == [4, 7, 9]
@@ -1404,7 +1405,7 @@ class TestDeprecatedStrategyFlags:
             with pytest.warns(DeprecationWarning):
                 code = _run_main(argv)
         assert code == 0
-        kwargs = mock_wf.call_args.kwargs
+        kwargs = effective_workflow_kwargs(mock_wf.call_args)
         assert "trial_strategy" not in kwargs
         assert "target_files" not in kwargs
         assert "eval_strategy" not in kwargs

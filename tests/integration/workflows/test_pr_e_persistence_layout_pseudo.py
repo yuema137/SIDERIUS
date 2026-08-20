@@ -59,6 +59,7 @@ from tests.unit.agent.ml_model_proposal_agent.test_proposal_agent import (
     FAKE_INTERPRETATION,
     FAKE_REASONING,
 )
+from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
 
@@ -321,14 +322,16 @@ class TestAttemptDirectoryLayout:
             MockTune.return_value.run.return_value = tune_out
 
             run_workflow(
-                data_dir=str(tmp_path / "data"),
-                model_types=["punet"],
-                source_run_name="v0",
+                launch=WorkflowLaunchConfig(
+                    data_dir=str(tmp_path / "data"),
+                    model_types=["punet"],
+                    source_run_name="v0",
+                    max_iterations=1,
+                    max_proposal_attempts=2,
+                    max_impl_attempts=1,
+                ),
                 workspace=workspace,
                 run_name="e1_layout",
-                max_iterations=1,
-                max_proposal_attempts=2,
-                max_impl_attempts=1,
             )
 
         iter_dir = os.path.join(workspace, "e1_layout", "iteration_001")

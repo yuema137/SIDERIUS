@@ -91,6 +91,7 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
 
@@ -336,12 +337,14 @@ def test_chain_bridge_promotes_foo_after_four_iters(tmp_path):
             )
 
             run_workflow(
-                source_paths=state.resolved_source_paths,
+                launch=WorkflowLaunchConfig(
+                    source_paths=state.resolved_source_paths,
+                    max_iterations=1,
+                    start_iteration=iteration,
+                ),
                 workspace=chain_root,
                 run_name=run_name,
                 llm_config=_llm_config_pseudo(),
-                max_iterations=1,
-                start_iteration=iteration,
                 restored_runtime_vocab=state.runtime_vocab,
                 accumulated_key_findings=state.accumulated_key_findings,
                 accumulated_physical_rejections=state.accumulated_physical_rejections,
@@ -503,11 +506,13 @@ def test_in_process_run_workflow_promotes_foo_after_four_iters(tmp_path):
         )
 
         run_workflow(
-            source_paths=[seed_path],
+            launch=WorkflowLaunchConfig(
+                source_paths=[seed_path],
+                max_iterations=4,
+            ),
             workspace=workspace,
             run_name="in_process",
             llm_config=_llm_config_pseudo(),
-            max_iterations=4,
         )
 
     # Same headline contract as Test 1

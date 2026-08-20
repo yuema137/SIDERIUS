@@ -40,6 +40,12 @@ from agent.schemas.interpretation import (
     PredictionMemory,
 )
 from agent.schemas.proposal import VocabEntry
+from core.committed_digests import (
+    DigestRead,
+    digest_unusable_message,
+    interpretation_digest_path,
+    read_committed_digests,
+)
 from core.run_invariants import (
     RunInvariants,
     load_run_invariants,
@@ -760,89 +766,53 @@ def _build_provenance(
 def _interpretation_path(workspace: str, iter_idx: int) -> str:
     """Path convention for the chain-mode interpretation digest.
 
-    Mirrors ``workflows.model_exploration.run_workflow``: the interp agent's
-    storage is rooted at ``{iter_dir}/`` with run_name ``iter_NNN``, and
-    ``ResultInterpretationAgent.run`` writes
-    ``interpretation_{run_name}.json`` under that workspace. Post-cc198ad
-    (V8 Domain 3 fix), the workflow's iter loop runs
-    ``range(start_iteration, start_iteration + max_iterations)`` and the
-    iter dir name encodes the chain-wide iter index, so for chain mode this
-    resolves to::
-
-        {workspace}/iter_NNN/iteration_NNN/interpretation_iter_NNN.json
-
-    Both NNN segments carry the same chain-wide iter index because in chain
-    mode each subprocess sets ``run_name = f"iter_{start_iteration:03d}"``
-    AND the workflow's loop variable is also ``start_iteration``. (Pre-fix,
-    the loop ran from 1 so the inner segment was always ``iteration_001``;
-    that legacy is what older V8 workspaces on disk still show.)
+    Step 09.5a C1: the convention itself now lives with the committed-digest
+    authority, so the reader and any caller resolving a digest path cannot
+    disagree. This name is kept because it is the established one and several
+    tests import it.
     """
-    run_name = _iter_run_name(iter_idx)
-    return os.path.join(
-        workspace,
-        run_name,
-        f"iteration_{iter_idx:03d}",
-        f"interpretation_{run_name}.json",
-    )
+    return interpretation_digest_path(workspace, iter_idx)
 
 
-def load_latest_knowledge(
-    workspace: str,
-    current_iter: int,
-    committed_iters: Sequence[int],
+def project_knowledge(
+    reads: Sequence[DigestRead],
 ) -> tuple[list[VocabEntry], list[str]]:
-    """Read prior iters' interpretation digests; return knowledge carry-over.
+    """Project knowledge carry-over from already-read committed digests.
+
+    Step 09.5a C1: this was ``load_latest_knowledge``, which did its own I/O.
+    It is now a PURE projection over :func:`core.committed_digests.read_committed_digests`
+    output — one of four, each keeping its own merge rule and failure policy.
 
     Args:
-        workspace: chain workspace root (absolute path preferred).
-        current_iter: iter the runner is about to launch. ``<= 1`` short-circuits
-            to ``([], [])``.
-        committed_iters: ascending list of iter indices known to be committed
-            (i.e. their manifests parsed cleanly via ``_read_manifest``).
+        reads: every committed digest of this restoration pass, ascending, each
+            already classified ok / missing / unreadable. An empty sequence
+            (nothing committed, or ``current_iter <= 1``) yields ``([], [])``.
 
     Returns:
         ``(runtime_vocab, accumulated_key_findings)``:
-          * ``runtime_vocab`` — the LATEST parseable digest's
-            ``runtime_vocab`` (already merged with seed via
-            ``build_runtime_vocab`` on the prior iter). Per-entry validation
-            failure → that entry is dropped + warning emitted; the rest of
-            the digest survives.
+          * ``runtime_vocab`` — the LATEST parseable digest's ``runtime_vocab``.
+            Per-entry validation failure drops that entry with a warning; the
+            rest of the digest survives.
           * ``accumulated_key_findings`` — chronological union across every
             parseable digest, dedup by string, first-occurrence wins.
 
-    Soft-fail policy: a missing or malformed digest emits a ``UserWarning``
-    and is skipped; the loader continues with the remaining iters. This
-    mirrors how plugin restoration tolerates a missing ``.py`` file —
-    knowledge carry-over is best-effort, not a hard prerequisite.
+    Soft-fail policy: a missing or malformed digest warns and is skipped, and
+    the warning names THIS carry-over so an operator can tell which value was
+    affected — unchanged from before the consolidation.
     """
-    if current_iter <= 1 or not committed_iters:
-        return [], []
-
     runtime_vocab: list[VocabEntry] = []
     findings: list[str] = []
     seen: set[str] = set()
 
-    for iter_idx in committed_iters:  # already ascending per restore_prior_state
-        path = _interpretation_path(workspace, iter_idx)
-        if not os.path.isfile(path):
+    for read in reads:
+        if not read.ok:
             warnings.warn(
-                f"[resume] iter {iter_idx:03d}: interpretation digest not "
-                f"found at {path}. Skipping for knowledge carry-over.",
+                digest_unusable_message(read, "knowledge"),
                 UserWarning,
                 stacklevel=2,
             )
             continue
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            warnings.warn(
-                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
-                f"digest {path}: {e}. Skipping for knowledge carry-over.",
-                UserWarning,
-                stacklevel=2,
-            )
-            continue
+        data = read.payload or {}
 
         for kf in data.get("key_findings") or []:
             if isinstance(kf, str) and kf and kf not in seen:
@@ -858,7 +828,7 @@ def load_latest_knowledge(
                 validated.append(VocabEntry.model_validate(entry))
             except Exception as e:
                 warnings.warn(
-                    f"[resume] iter {iter_idx:03d}: dropped malformed "
+                    f"[resume] iter {read.iter_idx:03d}: dropped malformed "
                     f"runtime_vocab entry {entry!r}: {e}",
                     UserWarning,
                     stacklevel=2,
@@ -869,62 +839,35 @@ def load_latest_knowledge(
     return runtime_vocab, findings
 
 
-def load_latest_fingerprint_history(
-    workspace: str,
-    current_iter: int,
-    committed_iters: Sequence[int],
+def project_fingerprint_history(
+    reads: Sequence[DigestRead],
 ) -> dict[str, list[CollapseFingerprintHistoryEntry]]:
-    """Read prior iters' digests; return the latest TYPED fingerprint history.
+    """Project the latest TYPED fingerprint history from committed digests.
 
-    V19 PR 3 (pr3_healthgate_feedback.md §3.8/§11-CB5). Latest-wins,
-    matching ``load_latest_knowledge_cache``: each digest's
-    ``collapse_fingerprint_history`` is already the merged, retention-
-    trimmed history AFTER that iteration, so concatenating across iters
-    would double-merge and resurrect expired buckets.
+    V19 PR 3 (pr3_healthgate_feedback.md §3.8/§11-CB5). Latest-wins, matching
+    :func:`project_knowledge_cache`: each digest's
+    ``collapse_fingerprint_history`` is already the merged, retention-trimmed
+    history AFTER that iteration, so concatenating across iters would
+    double-merge and resurrect expired buckets.
 
-    Failure policy — a deliberate split of the family's soft-fail rule:
+    Step 09.5a C1: formerly ``load_latest_fingerprint_history``; the I/O moved
+    to the shared committed-digest authority, the semantics did not.
 
-    * FILE-level problems (digest missing / unreadable JSON) → warn +
-      skip, like every sibling loader (availability is best-effort).
-    * DATA-level corruption inside a parseable digest (a history entry
-      that fails typed validation) → diagnostic ``ValueError`` naming
-      the iter and model (design §11-CB5 failure contract: "validation
-      error at restore naming the entry, not silent drop"). The history
-      is deterministic POLICY data — unlike LLM-derived vocab, a
-      corrupt entry means real gate evidence would be silently lost or
-      misattributed, so the restore refuses to guess.
-
-    Legacy digests without the field (pre-PR3) resolve to ``{}`` via
-    ``.get`` — no error, no invented history.
+    A malformed entry RAISES rather than being dropped — deterministic gate
+    evidence must not disappear silently. That is this projection's own policy
+    and deliberately differs from :func:`project_knowledge`.
     """
-    if current_iter <= 1 or not committed_iters:
-        return {}
-
     history: dict[str, list[CollapseFingerprintHistoryEntry]] = {}
 
-    for iter_idx in committed_iters:  # ascending per restore_prior_state
-        path = _interpretation_path(workspace, iter_idx)
-        if not os.path.isfile(path):
+    for read in reads:
+        if not read.ok:
             warnings.warn(
-                f"[resume] iter {iter_idx:03d}: interpretation digest not "
-                f"found at {path}. Skipping for fingerprint-history "
-                f"carry-over.",
+                digest_unusable_message(read, "fingerprint-history"),
                 UserWarning,
                 stacklevel=2,
             )
             continue
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            warnings.warn(
-                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
-                f"digest {path}: {e}. Skipping for fingerprint-history "
-                f"carry-over.",
-                UserWarning,
-                stacklevel=2,
-            )
-            continue
+        data = read.payload or {}
 
         raw = data.get("collapse_fingerprint_history") or {}
         if not raw:
@@ -937,9 +880,9 @@ def load_latest_fingerprint_history(
                     validated.append(CollapseFingerprintHistoryEntry.model_validate(entry))
                 except Exception as e:
                     raise ValueError(
-                        f"[resume] iter {iter_idx:03d}: corrupted "
+                        f"[resume] iter {read.iter_idx:03d}: corrupted "
                         f"collapse_fingerprint_history entry for model "
-                        f"{model_type!r} in {path}: {e}. Refusing to drop "
+                        f"{model_type!r} in {read.path}: {e}. Refusing to drop "
                         f"deterministic gate evidence silently — fix or "
                         f"remove the digest."
                     ) from e
@@ -949,56 +892,28 @@ def load_latest_fingerprint_history(
     return history
 
 
-def load_latest_prediction_memory(
-    workspace: str,
-    current_iter: int,
-    committed_iters: Sequence[int],
-) -> PredictionMemory:
-    """Read prior iters' digests; return the latest interpreter prediction state.
+def project_prediction_memory(reads: Sequence[DigestRead]) -> PredictionMemory:
+    """Project the latest interpreter prediction state from committed digests.
 
-    Step 09a C5 (operator ruling Q-09a-1 = A, NARROW). A sibling of
-    :func:`load_latest_fingerprint_history` in every respect that matters:
-    same digest source, same ascending scan, same LATEST-WINS overwrite, same
-    FILE-level soft-fail (missing or unreadable digest -> warn and skip), and
-    the same DATA-level refusal to guess (a digest whose prediction state
-    fails typed validation raises rather than silently restoring a partial
-    pool, because an accuracy statistic assembled from half a record is worse
-    than none).
+    Step 09a C5 (operator ruling Q-09a-1 = A, NARROW), Step 09.5a C1 (the I/O
+    moved to the shared authority). A sibling of
+    :func:`project_fingerprint_history` in every respect that matters:
+    latest-wins, digest-only, one direction.
 
-    Latest-wins is correct for the same reason it is correct there: each
-    digest already holds the pool AFTER that iteration, so concatenating
-    across iters would double-count every outcome.
-
-    A legacy digest carrying only the pre-09a fields yields those fields with
-    EMPTY versioned pools — which is exactly right: it has a v1 history and no
-    v2 history, and nothing is invented for it.
+    A corrupted record RAISES: an accuracy statistic assembled from half a pool
+    is worse than none. This projection's own policy.
     """
-    if current_iter <= 1 or not committed_iters:
-        return PredictionMemory()
-
     memory = PredictionMemory()
 
-    for iter_idx in committed_iters:  # ascending per restore_prior_state
-        path = _interpretation_path(workspace, iter_idx)
-        if not os.path.isfile(path):
+    for read in reads:
+        if not read.ok:
             warnings.warn(
-                f"[resume] iter {iter_idx:03d}: interpretation digest not "
-                f"found at {path}. Skipping for prediction-memory carry-over.",
+                digest_unusable_message(read, "prediction-memory"),
                 UserWarning,
                 stacklevel=2,
             )
             continue
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            warnings.warn(
-                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
-                f"digest {path}: {e}. Skipping for prediction-memory carry-over.",
-                UserWarning,
-                stacklevel=2,
-            )
-            continue
+        data = read.payload or {}
 
         fields = {
             "prediction_outcomes_history": data.get("prediction_outcomes_history") or {},
@@ -1016,8 +931,8 @@ def load_latest_prediction_memory(
             memory = PredictionMemory.model_validate(fields)  # overwrite: LATEST wins
         except Exception as e:
             raise ValueError(
-                f"[resume] iter {iter_idx:03d}: corrupted prediction memory in "
-                f"{path}: {e}. Refusing to restore a partial prediction record — "
+                f"[resume] iter {read.iter_idx:03d}: corrupted prediction memory in "
+                f"{read.path}: {e}. Refusing to restore a partial prediction record — "
                 f"an accuracy statistic assembled from half a pool is worse than "
                 f"none. Fix or remove the digest."
             ) from e
@@ -1025,78 +940,32 @@ def load_latest_prediction_memory(
     return memory
 
 
-def load_latest_knowledge_cache(
-    workspace: str,
-    current_iter: int,
-    committed_iters: Sequence[int],
-) -> dict[str, dict]:
-    """Read prior iters' interpretation digests; return the latest committed
-    iter's ``model_knowledge_cache`` for cross-subprocess restoration.
+def project_knowledge_cache(reads: Sequence[DigestRead]) -> dict[str, dict]:
+    """Project the latest committed iter's ``model_knowledge_cache``.
 
-    This is the sibling of :func:`load_latest_knowledge` for the per-model
-    Phase-1 summarisation cache. Walking the same digests as the vocab
-    loader (one disk read per iter) is intentional — both reads share the
-    same soft-fail policy and warning surface, so an operator who sees one
-    iter skipped for vocab also sees it skipped for the cache.
+    Commit 6.1.a — cross-subprocess restoration of the per-model Phase 1 cache,
+    so the interpreter's cache-hit branch is reachable in chain mode. Step 09.5a
+    C1 moved the I/O to the shared committed-digest authority.
 
-    Args:
-        workspace: chain workspace root (absolute path preferred).
-        current_iter: iter the runner is about to launch. ``<= 1``
-            short-circuits to ``{}``.
-        committed_iters: ascending list of iter indices known to be
-            committed (i.e. their manifests parsed cleanly).
-
-    Returns:
-        ``Dict[model_type, cache_entry]`` from the latest parseable
-        digest. Empty dict on any of:
-          * ``current_iter <= 1``
-          * empty ``committed_iters``
-          * no committed iter has a parseable digest
-          * the latest parseable digest has no ``model_knowledge_cache``
-            key (older digests written before Commit 6.1.a may lack it)
-
-    Latest-wins semantics, matching ``load_latest_knowledge``'s
-    ``runtime_vocab`` channel. Concatenation across iters is incorrect
-    because each digest already carries the rolling
-    ``_cap_knowledge_cache(max_entries=5)`` window; merging would leak
-    evicted entries back in.
-
-    Soft-fail policy: missing or malformed digest emits a ``UserWarning``
-    and is skipped; the loader continues with the remaining iters.
-    Mirrors :func:`load_latest_knowledge`.
-
-    See docs/audit_and_optimize_token_usage_and_growth.md Rev 8.3
-    changelog (Commit 6.1.a) for the gap this closes.
+    Latest-wins. This projection has NO validator: an absent or non-dict value
+    leaves the running cache untouched, while an *empty dict* on disk is a valid
+    latest snapshot and overwrites — that is how an operator's eviction is
+    honoured. Deliberately weaker than the two projections that raise.
     """
-    if current_iter <= 1 or not committed_iters:
-        return {}
-
     cache: dict[str, dict] = {}
 
-    for iter_idx in committed_iters:  # ascending per restore_prior_state
-        path = _interpretation_path(workspace, iter_idx)
-        if not os.path.isfile(path):
+    for read in reads:
+        if not read.ok:
             warnings.warn(
-                f"[resume] iter {iter_idx:03d}: interpretation digest not "
-                f"found at {path}. Skipping for knowledge-cache carry-over.",
+                digest_unusable_message(read, "knowledge-cache"),
                 UserWarning,
                 stacklevel=2,
             )
             continue
-        try:
-            with open(path) as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            warnings.warn(
-                f"[resume] iter {iter_idx:03d}: cannot read interpretation "
-                f"digest {path}: {e}. Skipping for knowledge-cache carry-over.",
-                UserWarning,
-                stacklevel=2,
-            )
-            continue
+        data = read.payload or {}
 
         raw_cache = data.get("model_knowledge_cache")
-        # `None` / missing key (legacy digest) → leave the running `cache`
+        # `None` / missing key (legacy digest) -> leave the running `cache`
         # untouched and continue. An *empty dict* on disk is still a valid
         # latest snapshot — overwrite to reflect the operator's eviction.
         if isinstance(raw_cache, dict):
@@ -1475,11 +1344,15 @@ def restore_prior_state(
     # interp node sees only the static seed (empirically: 5 iters × 21
     # entries on the V7 explore workspace before this patch landed). See
     # docs/Consistent_growing_vocab_list.md §1.2 for the bug evidence.
-    state.runtime_vocab, state.accumulated_key_findings = load_latest_knowledge(
-        abs_workspace,
-        current_iter,
-        state.committed_iters,
-    )
+    # Step 09.5a C1 — ONE open + ONE json.load per committed digest for this
+    # whole restoration pass. Before, four loaders each re-read every digest
+    # (4N reads for N committed iters) and each re-implemented the same
+    # missing/corrupt policy. The four projections below still differ in
+    # validator, merge rule and failure policy — that is real semantics, and it
+    # is preserved; only the I/O was duplicated.
+    digest_reads = read_committed_digests(abs_workspace, current_iter, state.committed_iters)
+
+    state.runtime_vocab, state.accumulated_key_findings = project_knowledge(digest_reads)
     if state.runtime_vocab or state.accumulated_key_findings:
         print(
             f"[resume] knowledge carry-over: "
@@ -1493,26 +1366,14 @@ def restore_prior_state(
     # per_model LLM call for stable architectures. Without this, the
     # cache-hit branch at nodes/result_interpretation_agent.py:687-693 is
     # unreachable in chain mode. See Rev 8.3 changelog.
-    state.model_knowledge_cache = load_latest_knowledge_cache(
-        abs_workspace,
-        current_iter,
-        state.committed_iters,
-    )
+    state.model_knowledge_cache = project_knowledge_cache(digest_reads)
     # V19 PR 3 — typed fingerprint-history carry-over (digest-only, one
     # direction: digest -> typed restore -> workflow input -> interpreter
     # merge -> next digest). Never rebuilt from proposer output or prompts.
-    state.collapse_fingerprint_history = load_latest_fingerprint_history(
-        abs_workspace,
-        current_iter,
-        state.committed_iters,
-    )
+    state.collapse_fingerprint_history = project_fingerprint_history(digest_reads)
     # Step 09a C5 — the interpreter's prediction memory rides the SAME
     # canonical path, one line below the fingerprint history it mirrors.
-    state.prediction_memory = load_latest_prediction_memory(
-        abs_workspace,
-        current_iter,
-        state.committed_iters,
-    )
+    state.prediction_memory = project_prediction_memory(digest_reads)
     _v2_pool = state.prediction_memory.prediction_outcomes_by_semantics.get(
         PREDICTION_SEMANTICS_SIGNSAFE_V2, {}
     )

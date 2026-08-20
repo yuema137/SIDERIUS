@@ -35,7 +35,19 @@ import pytest
 from pydantic import ValidationError
 
 from agent.schemas.interpretation import PredictionMemory
-from core.resume import RestoredState, load_latest_prediction_memory
+from core.committed_digests import read_committed_digests
+from core.resume import RestoredState, project_prediction_memory
+
+
+# Step 09.5a C1 — the four carried-state loaders became PURE projections over
+# one shared committed-digest read (core/committed_digests.py). These shims keep
+# every assertion below unchanged while exercising the real production
+# composition: one read, then the projection under test.
+def load_latest_prediction_memory(workspace, current_iter, committed_iters):
+    return project_prediction_memory(
+        read_committed_digests(workspace, current_iter, committed_iters)
+    )
+
 
 V2 = "metric_order_signsafe_v2"
 
@@ -260,16 +272,22 @@ class TestTheScopeStayedNarrow:
             "cumulative_information_gain_by_semantics",
         }
 
-    def test_there_is_exactly_one_prediction_memory_loader(self):
-        """No second restore path (the ruling's words). A loader is the shape a
-        second path would take."""
+    def test_there_is_exactly_one_prediction_memory_restore_path(self):
+        """No second restore path (the Step-09a ruling's words).
+
+        Step 09.5a C1 renamed the loader to a projection and moved its I/O to
+        the shared committed-digest authority, so the pattern now matches both
+        spellings — the INVARIANT is "exactly one", not "named load_*". Widening
+        the regex rather than pinning the new name keeps the test able to catch
+        a second path reintroduced under either convention.
+        """
         import re
 
         source = (Path(__file__).resolve().parents[3] / "core/resume.py").read_text(
             encoding="utf-8"
         )
-        loaders = re.findall(r"^def (load_[a-z_]*prediction[a-z_]*)\(", source, re.M)
-        assert loaders == ["load_latest_prediction_memory"], loaders
+        restorers = re.findall(r"^def ((?:load|project)_[a-z_]*prediction[a-z_]*)\(", source, re.M)
+        assert restorers == ["project_prediction_memory"], restorers
 
     def test_the_digest_remains_the_only_store(self):
         """The carrier is a shape, not a persistence layer: it must not know
@@ -279,9 +297,20 @@ class TestTheScopeStayedNarrow:
         source = (Path(__file__).resolve().parents[3] / "core/resume.py").read_text(
             encoding="utf-8"
         )
-        loader = source[source.index("def load_latest_prediction_memory") :]
-        loader = loader[: loader.index("\ndef ")]
-        assert "open(" in loader and 'w"' not in loader, "the loader must only READ"
+        projection = source[source.index("def project_prediction_memory") :]
+        projection = projection[: projection.index("\ndef ")]
+        # Step 09.5a C1 makes this STRONGER than "the loader must only READ":
+        # the projection performs no I/O at all, so it cannot write by
+        # construction. The single read lives in the shared authority, which
+        # opens in the default read mode and never takes a write mode.
+        assert "open(" not in projection, "the projection must do no I/O of its own"
+        authority = (Path(__file__).resolve().parents[3] / "core/committed_digests.py").read_text(
+            encoding="utf-8"
+        )
+        assert "open(path)" in authority, "the shared authority is the one reader"
+        assert '"w"' not in authority and "'w'" not in authority, (
+            "the committed-digest authority must never write"
+        )
 
     def test_the_carrier_is_frozen(self):
         """Restored state that a caller can mutate is a second source of truth

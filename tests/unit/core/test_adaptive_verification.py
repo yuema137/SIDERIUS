@@ -215,6 +215,45 @@ class TestLifecycleContracts:
         assert v.finalize() == "failed_no_steady_state"
         assert v.failure_reason is not None and "insufficient_stability" in v.failure_reason
 
+    def test_insufficient_reason_names_the_minimum_that_actually_failed(self):
+        """Step 09.5a Gate-2 forensics (2026-08-20).
+
+        Defect only this test catches: a diagnostic that reports a SATISFIED
+        condition as the failure. The Gate's validation phase reported
+        "26 steady observations, required 5" — which reads as a contradiction
+        — while the real violation was the steady TIME floor. A reader who
+        trusts that message investigates the wrong subsystem, and nothing else
+        in the suite compares the message against which condition failed.
+
+        Fails when the message stops distinguishing the two minimums: the
+        count is deliberately satisfied here and the time floor deliberately
+        is not.
+        """
+        cfg = _config(min_timed_steps=5, min_timed_ms=500.0, max_steps=30)
+        v = AdaptiveUnitVerification("validation_sample", cfg)
+        for t in [3.0] * 30:  # 30 x 3 ms = 90 ms total — far under 500 ms
+            v.feed(t)
+        assert v.finalize() == "failed_no_steady_state"
+        reason = v.failure_reason
+        assert reason is not None
+        assert "unmet: steady_time" in reason, reason
+        assert "steady_count" not in reason.split("unmet:")[1].split(";")[0], reason
+        assert "required 500.0 ms" in reason, reason
+
+    def test_insufficient_reason_names_the_count_when_that_is_what_failed(self):
+        """The other side of the same discrimination — anti-vacuity for the
+        test above, which would pass a message that always said
+        ``steady_time``."""
+        cfg = _config(min_timed_steps=50, min_timed_ms=0.0)
+        v = AdaptiveUnitVerification("optimizer_step", cfg)
+        for t in [10.0] * 20:
+            v.feed(t)
+        assert v.finalize() == "failed_no_steady_state"
+        reason = v.failure_reason
+        assert reason is not None
+        assert "unmet: steady_count" in reason, reason
+        assert "steady_time" not in reason.split("unmet:")[1].split(";")[0], reason
+
     def test_finalize_empty_trace(self):
         v = AdaptiveUnitVerification("optimizer_step", _config())
         assert v.finalize() == "failed_no_steady_state"

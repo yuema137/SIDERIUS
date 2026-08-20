@@ -25,6 +25,7 @@ from core.run_invariants import (
 from execute_tools.dataset_config import DataScope
 from tests.helpers.metric_fixtures import shipped_spec
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig, launch_config_field_names
 
 PARTIAL = DataScope(file_indices=[4, 5, 6, 7, 8, 9])
 
@@ -50,15 +51,20 @@ def _seed_json(tmp_path, name="seed_full_scope", **overrides) -> str:
 
 
 def _run(tmp_path, **kwargs):
-    defaults = dict(
-        workspace=str(tmp_path / "ws"),
-        run_name="preflight_test",
-        source_paths=[],
-        max_iterations=1,
-        max_rounds=1,
-    )
-    defaults.update(kwargs)
-    return run_workflow(**defaults)
+    """Call ``run_workflow`` with this module's defaults.
+
+    Step 09.5a C3: the transit configuration is one carrier now, so this
+    helper splits the caller's kwargs by ownership before dispatching. The
+    tests below are unchanged — they still pass a flat kwargs bag.
+    """
+    launch_defaults = dict(source_paths=[], max_iterations=1, max_rounds=1)
+    run_defaults = dict(workspace=str(tmp_path / "ws"), run_name="preflight_test")
+
+    launch_fields = launch_config_field_names()
+    for key, value in kwargs.items():
+        (launch_defaults if key in launch_fields else run_defaults)[key] = value
+
+    return run_workflow(launch=WorkflowLaunchConfig(**launch_defaults), **run_defaults)
 
 
 class TestPreflightFailures:

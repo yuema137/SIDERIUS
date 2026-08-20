@@ -297,9 +297,15 @@ def _run_workflow_call_kwargs() -> set[str]:
     script — it is not a package)."""
     import ast
 
+    # Step 09.5a C3: transit configuration is bound one level deeper, inside
+    # the WorkflowLaunchConfig the launcher constructs. The shared extractor
+    # flattens both levels so this parity guard keeps testing the binding.
+    from tests.helpers.launcher_bindings import workflow_call_bindings
+
     source_path = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
+    flattened = set(workflow_call_bindings(source_path))
     tree = ast.parse(source_path.read_text())
-    kwargs: set[str] = set()
+    kwargs: set[str] = set(flattened)
     found_call = False
     for node in ast.walk(tree):
         if (
@@ -335,7 +341,15 @@ class TestWorkflowKwargParity:
         assert not any(p.kind == p.VAR_KEYWORD for p in sig.parameters.values()), (
             "run_workflow grew **kwargs; this parity guard is now vacuous"
         )
-        unknown = _run_workflow_call_kwargs() - set(sig.parameters)
+        # Step 09.5a C3: the launcher binds transit configuration inside the
+        # WorkflowLaunchConfig it constructs, so the accepted surface is the
+        # signature PLUS the carrier's fields. The Gate-0 failure this guards
+        # — the launcher passing something the workflow layer cannot accept —
+        # is unchanged.
+        from workflows.run_config import launch_config_field_names
+
+        accepted = set(sig.parameters) | launch_config_field_names()
+        unknown = _run_workflow_call_kwargs() - accepted
         assert not unknown, (
             f"run_one_iteration.py passes kwargs run_workflow() does not "
             f"accept (this is the exact Gate 0 attempt-1 failure): {sorted(unknown)}"
@@ -353,7 +367,11 @@ class TestWorkflowKwargParity:
         from workflows.model_exploration import run_workflow
 
         call_kwargs = _run_workflow_call_kwargs()
-        workflow_params = set(inspect.signature(run_workflow).parameters)
+        from workflows.run_config import launch_config_field_names
+
+        workflow_params = set(inspect.signature(run_workflow).parameters) | (
+            launch_config_field_names()
+        )
         protocol_params = set(inspect.signature(local_validated_model).parameters)
         schema_fields = set(HyperparamTuningInput.model_fields)
         for name in sorted(RUNTIME_SURFACE_KWARGS):
@@ -377,10 +395,14 @@ class TestWorkflowKwargParity:
             ):
                 for kw in node.keywords:
                     if kw.arg == "runtime_watchdog_safety_factor":
-                        assert (
-                            isinstance(kw.value, ast.Name)
-                            and kw.value.id == "runtime_watchdog_safety_factor"
-                        )
+                        # Step 09.5a C3: forwarded as `launch.<name>` now. The
+                        # invariant — the workflow passes ITS value straight
+                        # through, unrenamed and unmodified — is unchanged.
+                        forwarded = ast.unparse(kw.value)
+                        assert forwarded in (
+                            "runtime_watchdog_safety_factor",
+                            "launch.runtime_watchdog_safety_factor",
+                        ), forwarded
                         return
         raise AssertionError(
             "local_validated_model(...) call does not forward runtime_watchdog_safety_factor"

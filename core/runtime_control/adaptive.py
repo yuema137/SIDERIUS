@@ -272,10 +272,34 @@ class AdaptiveUnitVerification:
 
     def _fail_insufficient(self) -> None:
         if self._detector.detected:
+            # Step 09.5a Gate-2 forensics (2026-08-20). `verified` requires
+            # BOTH minimums — a steady COUNT and a steady TIME:
+            #
+            #     len(steady) >= _required_steady_steps()
+            #     sum(steady) >= config.min_timed_ms
+            #
+            # The message used to report only the first, so a trace that
+            # satisfied it read as self-contradictory — the Gate's validation
+            # phase failed with "26 steady observations, required 5" while the
+            # real violation was 84 ms of steady time against a 500 ms floor.
+            # A diagnostic that names a satisfied condition sends the reader to
+            # the wrong subsystem, which is exactly what it did. Both are now
+            # reported with their actual values, and the unmet one is named.
+            steady = self._detector.steady_times_ms()
+            steady_ms = sum(steady)
+            unmet = []
+            if len(steady) < self._required_steady_steps():
+                unmet.append("steady_count")
+            if steady_ms < self.config.min_timed_ms:
+                unmet.append("steady_time")
             self._failure_reason = (
                 "insufficient_stability: steady state declared but evidence "
-                f"minimums not met within caps ({len(self._detector.steady_times_ms())} steady "
-                f"observations, required {self._required_steady_steps()})"
+                f"minimums not met within caps (unmet: {'+'.join(unmet) or 'none'}; "
+                f"steady observations {len(steady)}, required "
+                f"{self._required_steady_steps()}; steady time {steady_ms:.1f} ms, "
+                f"required {self.config.min_timed_ms:.1f} ms; "
+                f"{len(self._all_times_ms)} units observed within caps "
+                f"max_steps={self.config.max_steps})"
             )
             if self._prior_agreement is None:
                 self._prior_agreement = "insufficient_stability"

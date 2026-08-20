@@ -37,6 +37,7 @@ import pytest
 from dotenv import load_dotenv
 
 from execute_tools.workflow_validation import validate_workflow_outputs
+from workflows.run_config import WorkflowLaunchConfig
 
 # Shared human-advice file used by both lilab and SDSC chain tests.
 # Single source of truth — edit one file to retune both environments.
@@ -170,25 +171,25 @@ class TestFullExplorationLoop:
         print(f"{'=' * 60}\n")
 
         results = run_workflow(
-            data_dir=SIDERIUS_DATA_DIR,
-            model_types=SOURCE_MODELS,
-            source_run_name=SOURCE_RUN_NAME,
+            launch=WorkflowLaunchConfig(
+                data_dir=SIDERIUS_DATA_DIR,
+                model_types=SOURCE_MODELS,
+                source_run_name=SOURCE_RUN_NAME,
+                max_iterations=1,
+                max_rounds=2,
+                max_proposal_attempts=3,
+                is_trial=True,
+                trial_portion=0.02,
+                train_portion=1.0,
+                eval_portion=0.02,
+                cleanup_denoised=True,
+                max_epochs=1,
+            ),
             workspace=workspace,
             run_name=run_name,
             llm_config=llm_config,
-            max_iterations=1,
-            max_rounds=2,
-            max_proposal_attempts=3,
-            # Full data mode with minimal data
-            is_trial=True,
             trial_strategy="snapshot",
-            trial_portion=0.02,
-            train_portion=1.0,
             eval_strategy="snapshot",
-            eval_portion=0.02,
-            cleanup_denoised=True,
-            max_epochs=1,
-            # Shared advice file (same one used by SDSC chain orchestrator)
             **{f"human_advice_{k}": v for k, v in _load_shared_advice().items()},
         )
 
@@ -250,21 +251,23 @@ class TestFullExplorationLoop:
             print(f"{'=' * 60}\n")
 
             results_1 = run_workflow(
-                source_paths=seed_paths,
+                launch=WorkflowLaunchConfig(
+                    source_paths=seed_paths,
+                    max_iterations=1,
+                    max_rounds=2,
+                    max_proposal_attempts=3,
+                    is_trial=True,
+                    trial_portion=0.02,
+                    train_portion=1.0,
+                    eval_portion=0.02,
+                    cleanup_denoised=True,
+                    max_epochs=1,
+                ),
                 workspace=workspace,
                 run_name="iter_001",
                 llm_config=llm_config,
-                max_iterations=1,
-                max_rounds=2,
-                max_proposal_attempts=3,
-                is_trial=True,
                 trial_strategy="snapshot",
-                trial_portion=0.02,
-                train_portion=1.0,
                 eval_strategy="snapshot",
-                eval_portion=0.02,
-                cleanup_denoised=True,
-                max_epochs=1,
                 **{f"human_advice_{k}": v for k, v in shared_advice.items()},
             )
 
@@ -287,21 +290,23 @@ class TestFullExplorationLoop:
             print(f"{'=' * 60}\n")
 
             results_2 = run_workflow(
-                source_paths=iter2_sources,
+                launch=WorkflowLaunchConfig(
+                    source_paths=iter2_sources,
+                    max_iterations=1,
+                    max_rounds=2,
+                    max_proposal_attempts=3,
+                    is_trial=True,
+                    trial_portion=0.02,
+                    train_portion=1.0,
+                    eval_portion=0.02,
+                    cleanup_denoised=True,
+                    max_epochs=1,
+                ),
                 workspace=workspace,
                 run_name="iter_002",
                 llm_config=llm_config,
-                max_iterations=1,
-                max_rounds=2,
-                max_proposal_attempts=3,
-                is_trial=True,
                 trial_strategy="snapshot",
-                trial_portion=0.02,
-                train_portion=1.0,
                 eval_strategy="snapshot",
-                eval_portion=0.02,
-                cleanup_denoised=True,
-                max_epochs=1,
                 **{f"human_advice_{k}": v for k, v in shared_advice.items()},
             )
 

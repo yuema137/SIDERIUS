@@ -60,6 +60,7 @@ from execute_tools.health_checks.launch_policy import (
 )
 from workflows.llm_config import WorkflowLLMConfig
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
@@ -1943,13 +1944,76 @@ def main():
         from execute_tools.data_paths import resolve_tidmad_measurement_capability
 
         results = run_workflow(
+            launch=WorkflowLaunchConfig(
+                source_paths=resolved_paths,
+                require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
+                healthgate_mode=args.healthgate_mode,
+                result_authority=args.result_authority,
+                max_iterations=1,
+                start_iteration=args.start_iteration,
+                max_rounds=args.max_rounds,
+                max_proposal_attempts=args.max_proposal_attempts,
+                is_trial=args.is_trial,
+                trial_portion=args.trial_portion,
+                train_portion=args.train_portion,
+                eval_portion=args.eval_portion,
+                sampling_seed=args.sampling_seed,
+                formal_strategy=args.formal_strategy,
+                formal_portion=args.formal_portion,
+                formal_train_portion=args.formal_train_portion,
+                formal_eval_portion=args.formal_eval_portion,
+                force_formal_round=args.force_formal_round,
+                formal_round_strategy=args.formal_round_strategy,
+                degenerate_penalty_score=args.degenerate_penalty_score,
+                cleanup_denoised=args.cleanup_denoised,
+                max_epochs=args.max_epochs,
+                validation_max_portion=args.validation_max_portion,
+                validation_max_train_samples=args.validation_max_train_samples,
+                validation_max_samples=args.validation_max_samples,
+                validation_max_phase_seconds=args.validation_max_phase_seconds,
+                skip_formal_min_delta=args.skip_formal_min_delta,
+                bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
+                trial_time_budget_minutes=args.trial_time_budget_minutes,
+                formal_time_budget_minutes=args.formal_time_budget_minutes,
+                data_dir=args.data_dir,
+                gpu_admission_measurement_source=args.gpu_admission_measurement_source,
+                gpu_admission_enforcement=args.gpu_admission_enforcement,
+                gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
+                trial_vram_budget_gb=args.trial_vram_budget_gb,
+                formal_vram_budget_gb=args.formal_vram_budget_gb,
+                attempts_per_round=args.attempts_per_round,
+                attempts_per_formal_round=args.attempts_per_formal_round,
+                max_fail_rounds=args.max_fail_rounds,
+                max_steps_per_attempt=args.max_steps_per_attempt or None,
+                min_formal_batch_size=args.min_formal_batch_size or None,
+                allow_extreme_steps=args.allow_extreme_steps,
+                runtime_watchdog_enabled=args.runtime_watchdog,
+                runtime_safety_factor=args.runtime_safety_factor,
+                runtime_trial_safety_factor=args.runtime_trial_safety_factor,
+                runtime_formal_safety_factor=args.runtime_formal_safety_factor,
+                runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
+                runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
+                human_advice_interpret=args.human_advice_interpret,
+                human_advice_propose=args.human_advice_propose,
+                human_advice_implement=args.human_advice_implement,
+                human_advice_validate=args.human_advice_validate,
+                human_advice_tune=args.human_advice_tune,
+                human_advice_mindset=args.human_advice_mindset,
+                plan_overrides=args.plan_overrides,
+                exploration_mode=args.exploration_mode,
+                minimum_boldness=args.minimum_boldness,
+                max_impl_attempts=args.max_impl_attempts,
+                debug_dump_prompts=args.debug_dump_prompts,
+                validation_fixed_candidate_plan=fixed_candidate_plan,
+                enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
+                health_feedback_history_window_iterations=args.health_feedback_history_window_iterations,
+                health_feedback_history_max_entries_per_model=args.health_feedback_history_max_entries_per_model,
+                lit_review_enabled=ml_lit_review_enabled_resolved,
+                lit_review_config_path=args.ml_lit_review_config,
+            ),
             measurement_capability=resolve_tidmad_measurement_capability(),
-            source_paths=resolved_paths,
             workspace=args.workspace,
             run_name=run_name,
-            # C9d: a real training launch must be able to take a bounded
-            # live measurement; a pseudo run must not require a device.
-            require_probe_runner=not (args.is_pseudo_training or args.is_pseudo_llm),
             chain_run_name=chain_run_name,
             run_id=run_id,
             llm_config=llm_config,
@@ -1957,123 +2021,18 @@ def main():
             data_scope=args.data_scope,
             health_gate_enabled=args.health_gate_enabled,
             health_gate_files=args.health_gate_files,
-            # V21 PR D — the declared posture, already validated above by
-            # validate_formal_launch and already written to the manifest.
-            # Before this it stopped at the manifest and never reached the
-            # tuner, so every formal record stamped
-            # `legacy_authority_unknown` and could neither become the chain
-            # incumbent nor enter the scientific aggregate.
-            healthgate_mode=args.healthgate_mode,
-            result_authority=args.result_authority,
-            max_iterations=1,
-            start_iteration=args.start_iteration,
-            max_rounds=args.max_rounds,
-            max_proposal_attempts=args.max_proposal_attempts,
-            is_trial=args.is_trial,  # BooleanOptionalAction, default True
-            trial_portion=args.trial_portion,
-            train_portion=args.train_portion,
-            eval_portion=args.eval_portion,
-            sampling_seed=args.sampling_seed,
-            # Phase M — formal-mode training levers; Phase R — eval scope.
-            formal_strategy=args.formal_strategy,
-            formal_portion=args.formal_portion,
-            formal_train_portion=args.formal_train_portion,
-            formal_eval_portion=args.formal_eval_portion,
-            force_formal_round=args.force_formal_round,
-            formal_round_strategy=args.formal_round_strategy,
-            degenerate_penalty_score=args.degenerate_penalty_score,
-            cleanup_denoised=args.cleanup_denoised,
-            max_epochs=args.max_epochs,
-            validation_max_portion=args.validation_max_portion,
-            validation_max_train_samples=args.validation_max_train_samples,
-            validation_max_samples=args.validation_max_samples,
-            validation_max_phase_seconds=args.validation_max_phase_seconds,
-            skip_formal_min_delta=args.skip_formal_min_delta,
-            bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
-            # Time/VRAM budget gates
-            trial_time_budget_minutes=args.trial_time_budget_minutes,
-            formal_time_budget_minutes=args.formal_time_budget_minutes,
-            data_dir=args.data_dir,
-            gpu_admission_measurement_source=args.gpu_admission_measurement_source,
-            gpu_admission_enforcement=args.gpu_admission_enforcement,
-            gpu_pair_ceiling_gib=args.gpu_pair_ceiling_gib,
-            trial_vram_budget_gb=args.trial_vram_budget_gb,
-            formal_vram_budget_gb=args.formal_vram_budget_gb,
-            # Per-round attempt budget (Phase L)
-            attempts_per_round=args.attempts_per_round,
-            attempts_per_formal_round=args.attempts_per_formal_round,
-            max_fail_rounds=args.max_fail_rounds,
-            # Runtime-control operator surface (RT6). 0 → None (disabled).
-            max_steps_per_attempt=args.max_steps_per_attempt or None,
-            min_formal_batch_size=args.min_formal_batch_size or None,
-            allow_extreme_steps=args.allow_extreme_steps,
-            runtime_watchdog_enabled=args.runtime_watchdog,
-            runtime_safety_factor=args.runtime_safety_factor,
-            runtime_trial_safety_factor=args.runtime_trial_safety_factor,
-            runtime_formal_safety_factor=args.runtime_formal_safety_factor,
-            runtime_watchdog_safety_factor=args.runtime_watchdog_safety_factor,
-            runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
-            # Advice
-            human_advice_interpret=args.human_advice_interpret,
-            human_advice_propose=args.human_advice_propose,
-            human_advice_implement=args.human_advice_implement,
-            human_advice_validate=args.human_advice_validate,
-            human_advice_tune=args.human_advice_tune,
-            human_advice_mindset=args.human_advice_mindset,
-            plan_overrides=args.plan_overrides,
-            # Reasoning pipeline
-            exploration_mode=args.exploration_mode,
-            minimum_boldness=args.minimum_boldness,
-            max_impl_attempts=args.max_impl_attempts,
-            debug_dump_prompts=args.debug_dump_prompts,
-            # Cross-iter knowledge carry-over (docs/Consistent_growing_vocab_list.md)
             restored_runtime_vocab=state.runtime_vocab,
             accumulated_key_findings=state.accumulated_key_findings,
-            # Cross-iter knowledge-cache carry-over — Commit 6.1.a precondition for the
-            # Stability Filter (docs/audit_and_optimize_token_usage_and_growth.md Rev 8.3).
-            # Without this, every chain subprocess starts on an empty model_knowledge_cache,
-            # forcing a fresh interpretation.per_model LLM call per model per iter.
             restored_model_knowledge_cache=state.model_knowledge_cache,
-            # Cross-iter negative-feedback carry-over (docs/V8_Gap_Report.md Domain 1)
             accumulated_physical_rejections=state.accumulated_physical_rejections,
             accumulated_gate_exhaustions=state.accumulated_gate_exhaustions,
-            # Cross-iter proposal carry-over — G1 bridge (docs/Consistent_growing_vocab_list.md §10.3.4)
             restored_previous_proposal=state.previous_proposal_data,
-            validation_fixed_candidate_plan=fixed_candidate_plan,
-            # V19 PR 1 (P1-C3) — chain formal-incumbent carry-over.
-            # Reconstruction is unconditional; the flag controls only
-            # whether the tuner's formal gates consume the reference.
             restored_chain_incumbent_score=state.chain_best_valid_formal_score,
-            enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
-            # V19 PR 2 — operator ordering override for this chain.
             order_strategy_override=args.order_strategy_override,
             file_order_override=args.file_order_override,
-            # V19 PR 3 — structured-health-feedback policy + typed
-            # fingerprint-history carry-over (digest-only source via
-            # RestoredState; the interpreter is the only merge point).
             enable_structured_health_feedback=args.enable_structured_health_feedback,
-            health_feedback_history_window_iterations=(
-                args.health_feedback_history_window_iterations
-            ),
-            health_feedback_history_max_entries_per_model=(
-                args.health_feedback_history_max_entries_per_model
-            ),
             restored_collapse_fingerprint_history=state.collapse_fingerprint_history,
-            # Step 09a C5 — the interpreter's prediction memory crosses the
-            # chain-subprocess boundary the same way, one line below its
-            # sibling. Without this forward the restore would load it and
-            # then drop it on the floor.
             restored_prediction_memory=state.prediction_memory,
-            # External agents (Commit 6) — see Design Decisions 1 + 2 in
-            # docs/commit_plan_ml_literature_review.md. The enable flag is
-            # resolved above (CLI > YAML > False); the config path
-            # passes through unchanged (workflow resolves relative paths
-            # against SIDERIUS_ROOT internally).
-            lit_review_enabled=ml_lit_review_enabled_resolved,
-            lit_review_config_path=args.ml_lit_review_config,
-            # Pseudo-mode factories (Stage 3 / Commit 4.5). None preserves the
-            # production code path; non-None swaps the bridge / sandbox class
-            # for every agent constructed inside ``run_workflow``.
             bridge_factory=bridge_factory,
             sandbox_factory=sandbox_factory,
         )

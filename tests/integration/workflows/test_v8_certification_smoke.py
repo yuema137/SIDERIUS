@@ -100,6 +100,7 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -346,13 +347,15 @@ def test_iter003_inherits_iter002_scoring_crash_evidence(monkeypatch):
         )
 
         run_workflow(
-            data_dir=str(seed_root / "data"),
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=str(seed_root / "data"),
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=3,
+            ),
             workspace=str(Path(workspace_root) / RUN_NAME / "workflow_output"),
             run_name=RUN_NAME,
             llm_config=llm_config,
-            max_iterations=3,
         )
 
     # ============================================================

@@ -14,7 +14,19 @@ import os
 import pytest
 
 from agent.schemas.health_feedback import CollapseFingerprintHistoryEntry
-from core.resume import load_latest_fingerprint_history
+from core.committed_digests import read_committed_digests
+from core.resume import project_fingerprint_history
+
+
+# Step 09.5a C1 — the four carried-state loaders became PURE projections over
+# one shared committed-digest read (core/committed_digests.py). These shims keep
+# every assertion below unchanged while exercising the real production
+# composition: one read, then the projection under test.
+def load_latest_fingerprint_history(workspace, current_iter, committed_iters):
+    return project_fingerprint_history(
+        read_committed_digests(workspace, current_iter, committed_iters)
+    )
+
 
 SIG = "output_diversity_blocking:n_unique_int8_values=1"
 

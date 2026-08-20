@@ -38,6 +38,7 @@ from execute_tools.data_paths import (
     DatasetDirectoryUnavailable,
     resolve_dataset_dir,
 )
+from tests.helpers.launcher_bindings import effective_workflow_kwargs
 
 # ---------------------------------------------------------------------------
 # A. RESOLUTION — the authority answers when no override is given
@@ -228,7 +229,7 @@ class TestTheLaunchBoundary:
             self._main(self._argv(tmp_path))
 
         assert spy.call_count == 1
-        assert spy.call_args.kwargs["data_dir"] == str(configured)
+        assert effective_workflow_kwargs(spy.call_args)["data_dir"] == str(configured)
 
     def test_an_explicit_override_reaches_the_tuner_unchanged(self, tmp_path):
         configured = tmp_path / "configured"
@@ -243,7 +244,7 @@ class TestTheLaunchBoundary:
         ):
             self._main(self._argv(tmp_path, "--data_dir", str(override)))
 
-        assert spy.call_args.kwargs["data_dir"] == str(override)
+        assert effective_workflow_kwargs(spy.call_args)["data_dir"] == str(override)
 
 
 # ---------------------------------------------------------------------------

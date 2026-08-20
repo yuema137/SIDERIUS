@@ -44,6 +44,7 @@ from workflows.llm_config import (
     WorkflowLLMConfig,
 )
 from workflows.model_exploration import run_workflow
+from workflows.run_config import WorkflowLaunchConfig
 
 pytestmark = pytest.mark.dual_mode
 
@@ -195,15 +196,17 @@ def test_lit_review_enabled_threads_operator_yaml_channels_to_proposer(tmp_path)
         )
 
         run_workflow(
-            data_dir=data_dir,
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=data_dir,
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+                lit_review_enabled=True,
+                lit_review_config_path=str(operator_yaml),
+            ),
             workspace=workspace,
             run_name=run_name,
             llm_config=_make_llm_config(),
-            max_iterations=1,
-            lit_review_enabled=True,
-            lit_review_config_path=str(operator_yaml),
         )
 
     # --- Assertion 1: lit-review was invoked once, with the operator
@@ -310,15 +313,17 @@ def test_lit_review_disabled_tolerates_missing_yaml_path(tmp_path):
         # No FileNotFoundError should be raised — the non-existent path
         # must never be opened when lit_review_enabled=False.
         run_workflow(
-            data_dir=data_dir,
-            model_types=["punet"],
-            source_run_name="v1",
+            launch=WorkflowLaunchConfig(
+                data_dir=data_dir,
+                model_types=["punet"],
+                source_run_name="v1",
+                max_iterations=1,
+                lit_review_enabled=False,
+                lit_review_config_path=non_existent_path,
+            ),
             workspace=workspace,
             run_name=run_name,
             llm_config=_make_llm_config(),
-            max_iterations=1,
-            lit_review_enabled=False,
-            lit_review_config_path=non_existent_path,
         )
 
     # --- Assertion 1: MLLiteratureReviewAgent.run was NEVER called.
