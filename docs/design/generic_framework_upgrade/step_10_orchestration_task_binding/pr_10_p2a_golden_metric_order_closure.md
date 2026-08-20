@@ -2,10 +2,44 @@
 
 ## 0. Status
 
-**DRAFT rev 2 — FOR OPERATOR REVIEW. NOT FROZEN. IMPLEMENTATION NOT
-STARTED.** Parent semantics complete; **implementation details subject to
-post-P1-merge reconciliation** (upstream-sensitive items are labelled
-`PROVISIONAL(P1)` throughout).
+**REVISION 3 — FROZEN. OPERATOR APPROVED (2026-08-20).
+IMPLEMENTATION NOT STARTED. Open operator questions: 0.
+Material contradictions: 0.**
+
+Revision 3 is the POST-P1-MERGE reconciliation + freeze (operator mandate
+2026-08-20). It contains real semantic clarification beyond line
+reconciliation, which is why it is a revision and not an erratum:
+
+* **the frozen metric contract** (§4.0): every primary metric used for
+  selection/ranking/early-stop carries `metric_id` + `direction`; direction
+  is NEVER inferred from name, sign, range, task or TIDMAD history; and
+  **identity ≠ direction** — same direction never proves two artifacts
+  comparable;
+* **acquisition is RECONCILIATION, not precedence** (§4.1): all AVAILABLE
+  identities (bound + stamped) are reconciled to exactly ONE compatible
+  identity; a bound spec is an authoritative INPUT, never permission to
+  ignore a conflicting artifact stamp;
+* **Q-P2a-3 RESOLVED — PROMOTE**: metric-spec reconciliation moves from the
+  interpreter node to a shared owner beside the metric-identity semantics in
+  `execute_tools/evaluation_metric.py`; exactly ONE implementation remains,
+  and it is deliberately NOT placed in `MetricOrder` ("are these the same
+  metric?" and "which value is better?" are different responsibilities);
+* **per-artifact unrankable semantics** (§4.2): one missing-identity
+  artifact never poisons a compatible corpus; four frozen cases (all-known ·
+  known+missing · all-missing · conflicting-known);
+* **Q-P2a-1 RESOLVED**: proposer `top_n` with no usable identity falls back
+  to the EXISTING order-free `all` semantics — no new "first-N" selection
+  policy is invented, and the result is never labelled top/best;
+* **Q-P2a-2 RESOLVED**: one canonical metric-identity-unavailable
+  message/formatter, owned beside the reconciliation authority (not inside
+  `MetricOrder`);
+* **site 5 ruled on source truth** (§4.3): the ranked values ARE the
+  persisted per-file evidence; the CURRENT transform's monotonicity is
+  documented and tested as a TIDMAD fact, not faked as a generic framework
+  contract.
+
+Post-P1 reconciliation verdict: **all discrepancies class A/B (mechanical /
+source-shape); class C (semantic contradiction) = 0.** See §10.2/§10.3.
 
 **Rev 2 (2026-08-20) changes the PLAN's form, not its semantics.** §7's
 commit decomposition was six terse bullet lists; it is now six full
@@ -34,10 +68,10 @@ unchanged from rev 1.
 | field | value |
 |---|---|
 | parent | Step-10 parent REVISION 2 (frozen), §3.3 / §8 / §8.1; owns scope item **S2** |
-| source anchor | merged `master` = **`2393aacc`**. Line anchors are facts of this anchor and are expected to move under P1 — they are evidence, not implementation authority |
-| depends on | **P1 merged** (the run's bound `MetricSpec` must exist to be consumed). P2b depends on this child, not vice versa |
-| Gate disposition | proposed: NO Gate — direction is deterministic; three-task hand-computed fixtures + the structural scanner are the owners (parent §22.1). Quoted against the gate standard at freeze |
-| open operator questions | **3** (§11) — Q-P2a-3 is NEW in rev 2 and BLOCKS C1 |
+| source anchor | merged `master` = **`bcb17e45`** (the P1 squash). All twelve surfaces re-verified at this anchor (§10.3); line numbers are evidence, not implementation authority |
+| depends on | **P1 MERGED 2026-08-20** (PR #241, squash `bcb17e45`) — the bound metric exists as `bindings.task_composition.metric` and via `resolve_bound_run_metric()`. P2b depends on this child, not vice versa |
+| Gate disposition | **FROZEN: Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED** (operator ruling 2026-08-20). Direction is deterministic; hand-computed `MetricOrder` fixtures, comparison-SEQUENCE parity, persisted-identity fixtures, mixed/missing-identity cases, the AST scanner and plant-and-catch are the authoritative owners — real LLM/GPU evidence is LESS direct than these. A newly discovered non-deterministic failure class during implementation is a MATERIAL DEVIATION, never an autonomously invented Gate |
+| open operator questions | **0** — Q-P2a-1 / Q-P2a-2 / Q-P2a-3 all RESOLVED by operator ruling 2026-08-20 (§11) |
 
 **Frozen in this draft regardless of P1's final shape** (operator §10):
 P2a does **NOT** derive metric identity anywhere; it consumes the P1-bound
@@ -64,15 +98,21 @@ metric authority (or an artifact's own persisted identity), and introduces
 
 ---
 
-## 2. Current source audit — the complete ordering surface (at `2393aacc`)
+## 2. Current source audit — the complete ordering surface (audited at `2393aacc`; RE-VERIFIED at merged `bcb17e45`, §10.3)
 
 ### 2.1 The ten code sites + two prose sites
 
+**Re-verified at merged master `bcb17e45` (post-P1, §10.3): the surface is
+EXACTLY these twelve — no site appeared, none disappeared; only the three
+workflow line numbers moved (P1 inserted ~89 lines above them). P1's own new
+code (`workflows/task_composition.py` included) contains ZERO golden-score
+ordering shapes.**
+
 | # | site (current line) | what it decides | order source after P2a |
 |---|---|---|---|
-| 1 | `workflows/model_exploration.py:2655-2659` (`>` at `:2657`) | raw-formal progress → `state.best_score_overall` | in-run spec — `PROVISIONAL(P1)`: composed ⇒ `bindings.task_composition.metric.spec`; legacy ⇒ the compared `tune_output.metric_spec` (09a stamp); both absent ⇒ refusal (§4.2) |
-| 2 | `workflows/model_exploration.py:2666-2671` (`>` at `:2669`) | **chain formal incumbent advance** | same |
-| 3 | `workflows/model_exploration.py:2714-2718` (`>=` at `:2717`) | early-stop `target_score` | same; `is_at_least` |
+| 1 | `workflows/model_exploration.py` (`>` at `:2744` @ `bcb17e45`) | raw-formal progress → `state.best_score_overall` | §4.1 RECONCILIATION over the available identities: bound `bindings.task_composition.metric.spec` (composed) + the compared `tune_output.metric_spec` stamp; conflict ⇒ fail closed; none ⇒ §4.2 |
+| 2 | `workflows/model_exploration.py` (`>` at `:2756` @ `bcb17e45`) | **chain formal incumbent advance** | same |
+| 3 | `workflows/model_exploration.py` (`>=` at `:2804` @ `bcb17e45`) | early-stop `target_score` | same; `is_at_least` |
 | 4 | `core/resume.py:441-455` `_pick_best` (`>` at `:451`) | within-iteration incumbent on resume | the restoring run's spec; recordless-spec ⇒ named refusal (never re-derivation) |
 | 5 | `execute_tools/per_file_best.py:481-490` `_row_beats` (`>` at `:483`) | per-file best row, **linear space** | the metric identity the module already imports; §4.3 monotonicity note |
 | 6 | `dashboard/data_sources/local_json.py:245` (`reverse=True`) | top-N ranking | persisted identity (§4.4); absent ⇒ Q-10-2 refusal |
@@ -126,58 +166,201 @@ if one proves necessary it is a named framework-capability change per parent
 
 ## 4. Design
 
-### 4.1 Order acquisition precedence (the one genuinely new rule)
+### 4.0 The frozen metric contract (FROZEN, framework-wide)
 
-For a consumer inside a live run:
+The rule the single-task TIDMAD era kept implicit, now explicit:
+
+> Every PRIMARY metric used for model selection, incumbent tracking,
+> best-model tracking, ranking, early stopping or top-N selection MUST carry
+> enough metadata to determine **metric identity** and **optimization
+> direction** — minimally `metric_id` + `direction ∈ {higher, lower}`.
+> Direction is NEVER inferred from the metric's name, the score's sign, its
+> numeric range, the current task, or historical TIDMAD defaults. Every
+> generic "which score is better?" decision asks `MetricOrder` constructed
+> from the declared direction; no raw task-dependent `>`/`<`/`max`/`min`/
+> `reverse=True` may independently encode primary-metric preference.
+
+Anchor examples: TIDMAD is higher-is-better with negative values (−1 beats
+−3); Pets accuracy is higher; DAVIS MSE is lower (0.0172 beats 0.0174).
+
+**Identity and direction are NOT the same thing — this distinction is
+binding.** Direction answers "higher or lower?"; identity answers "what
+metric is this?". Accuracy, PSNR and the TIDMAD score are all `higher`, and
+none is comparable to the others. Therefore `direction == "higher"` is NEVER
+sufficient proof that two persisted artifacts are comparable: **ranking
+across artifacts requires a compatible reconciled metric identity, not
+merely matching direction.**
+
+**Persisted identity — measured source truth at `bcb17e45`, no schema
+addition required** (§4.4 details): `HyperparamTuningOutput.metric_spec`
+carries the FULL `MetricSpec` (09a stamp; `None` on legacy outputs), and
+`ExperimentRecord.metric_result` carries `metric_id` + `direction` (Step 06;
+`None` on legacy/unscored records). The dashboard/diagnostic summary files
+persist FULL record dicts, so they carry `metric_result` too. The existing
+fields ARE the identity source; P2a adds none and invents no second metric
+schema.
+
+### 4.1 Order acquisition is RECONCILIATION, not precedence (FROZEN)
+
+Rev 2 said "composed → bound spec; legacy → artifact spec". That reads as
+permission for a bound spec to shadow a conflicting artifact stamp, which is
+exactly the silent inconsistency this child exists to kill. Frozen instead:
 
 ```text
-composed run        → MetricOrder(bindings.task_composition.metric.spec)   PROVISIONAL(P1)
-legacy run          → MetricOrder(spec stamped on the compared artifact(s))
-                      (HyperparamTuningOutput.metric_spec, 09a; reconciled
-                       across artifacts by the existing reconcile_metric_spec)
-no spec anywhere    → REFUSAL: the comparison does not happen; the consumer
-                      takes its Q-10-2 branch (§4.2)
+collect all AVAILABLE metric identities relevant to the comparison
+    (composed run: the bound MetricSpec is one authoritative INPUT,
+     plus artifact-stamped specs where present;
+     legacy run: artifact-stamped specs only)
+        →
+shared reconciliation (ONE implementation, §4.1a)
+        →
+exactly one compatible MetricSpec / identity
+        →
+MetricOrder(spec)
 ```
 
-Mixed specs across compared artifacts fail closed through
-`reconcile_metric_spec`'s existing behaviour — P2a adds no second
-reconciliation.
+The complete truth table:
 
-### 4.2 Q-10-2 refusal shapes, per consumer
+| bound | artifact stamps | outcome |
+|---|---|---|
+| A | A | A |
+| A | absent | A |
+| A | **B** | **FAIL CLOSED** for that ranking operation — a bound spec is never permission to ignore a conflicting persisted stamp |
+| none | all A | A |
+| none | all absent | **no ranking** — the consumer takes its §4.2 unrankable state |
+| none | **A and B** | **FAIL CLOSED** for that ranking operation |
 
-| consumer | refusal behaviour |
+### 4.1a Q-P2a-3 RESOLVED — reconciliation is PROMOTED to a shared owner
+
+`reconcile_metric_spec` currently lives in
+`nodes/result_interpretation_agent/evidence.py:58` — node-private by
+ownership, and generic workflow code may not import node internals
+(`tests/unit/nodes/test_node_public_boundary.py`). **Operator ruling:
+PROMOTE.** The rejected alternative — "a composed run trusts the bound spec
+and skips reconciliation" — is rejected because bound-A/artifact-B is a real
+inconsistency that must fail closed, not go unobserved.
+
+* **New owner: `execute_tools/evaluation_metric.py`** — beside `MetricSpec`
+  and `metric_spec_from_declaration`, the module that already owns metric
+  identity semantics. Deliberately NOT `MetricOrder`: reconciliation asks
+  "are these the SAME metric?"; `MetricOrder` asks "for this already-known
+  metric, which value is better?" — separate responsibilities.
+* The promoted function generalizes the existing one: it accepts the
+  available identities (a bound spec and/or stamped specs) and returns one
+  compatible identity or raises the fail-closed refusal.
+* The interpreter node IMPORTS the shared authority after the promotion; its
+  existing contract-error semantics (partial stamping is a refusal; mixed
+  specs are a refusal) are PRESERVED, not weakened. **Exactly ONE
+  reconciliation implementation exists afterwards** — pinned by census.
+
+Mixed specs across compared artifacts fail closed through this ONE
+reconciliation — P2a adds no second.
+
+### 4.2 Q-10-2 — per-ARTIFACT unrankable semantics (FROZEN)
+
+An artifact without sufficient metric identity **remains inspectable, may
+display its raw scalar, and may appear in non-ranking views** — but it must
+NOT be called best, must NOT receive a metric-based rank, and must NOT
+participate in metric-based selection.
+
+**One missing-identity artifact never poisons a compatible corpus.** The
+four frozen cases, applied consistently to resume, dashboard, diagnostic
+scripts and every other artifact consumer:
+
+| case | corpus | behaviour |
+|---|---|---|
+| **A** all known, compatible | A:MSE · B:MSE · C:MSE | rank normally |
+| **B** known + missing | A:MSE · B:absent · C:MSE | A and C are ranked against each other; B stays inspectable but UNRANKED, with the visible named metric-identity-unavailable state |
+| **C** all missing | A:absent · B:absent | no rankable artifact; raw values may still be shown; named state visible |
+| **D** conflicting known | A:MSE · B:accuracy | REFUSE that cross-artifact ranking operation — fail closed with a named diagnostic; never pretend they share a metric |
+
+Per consumer:
+
+| consumer | behaviour |
 |---|---|
-| workflow sites 1–3 | a legacy record with no spec cannot advance the incumbent/best tracker: the update is skipped with a printed named notice (once per run), never an assumed direction. (In practice unreachable post-09a — every scored output is stamped — but the branch must exist and be tested) |
-| resume `_pick_best` | records without spec ⇒ that iteration restores **no incumbent** (named notice); restore continues otherwise — never hard-fails |
-| dashboard | unranked listing + the literal *"metric direction unavailable (`metric_spec` absent)"* string; raw scalars still displayed |
-| diagnostic scripts | same string to stderr; summary marks `best: unavailable` |
-| proposer `top_n` | no spec in the evidence ⇒ **NO metric-based ranking is performed.** Whether the proposer then continues with a bounded, score-order-INDEPENDENT candidate set or refuses to propose is Q-P2a-1 (OPEN); whatever the disposition, the result is never labelled "best"/"top N", and the named notice always fires — never a silently inverted cut |
+| workflow sites 1–3 | reconciliation per §4.1 over the bound spec + the compared output's stamp. Case-B/C inputs (a spec-less record) cannot advance the incumbent/best tracker: the update is skipped with a printed named notice (once per run), never an assumed direction. Case D fails closed. (In practice unreachable post-09a — every scored output is stamped — but the branches must exist and be tested) |
+| resume `_pick_best` | **per-record, not per-iteration** (§4.2a) — rank the compatible-identity subset; missing-identity records are individually excluded with the named state; no rankable records ⇒ no incumbent + named notice; conflicting KNOWN identities ⇒ fail closed per the existing restore soft-failure policy, never a silent pick |
+| dashboard | rank the compatible subset; each missing-identity row shows the canonical unavailable state and no rank; raw scalars still displayed; conflicting known identities ⇒ the ranking view refuses with the named diagnostic |
+| diagnostic scripts | same four-case rule; the canonical message to stderr; `best: unavailable` only when case C/D leaves nothing rankable |
+| proposer `top_n` | **Q-P2a-1 RESOLVED (operator ruling 2026-08-20): fall back to the EXISTING order-free `all` semantics.** No usable identity ⇒ the named unavailable notice fires, NO metric-based ranking happens, and the candidate set is produced by the existing `all` path under whatever independent safety/token bounds that path already owns. A new "first N by declaration order" policy is explicitly REJECTED — it would be a new selection policy owned by P2a for no scientific reason. The result is never described as "top N"/"best N"/"best candidates", because no metric ranking happened |
 
-### 4.3 Site 5 monotonicity note (recorded, not silently assumed)
+### 4.2a Resume semantics, restated precisely (supersedes rev 2's wording)
 
-`per_file_best` compares **linear-space** values derived from the golden
-score. Ordering by `MetricOrder` on linear values is valid iff the
-linearization is monotone increasing (TIDMAD's is: log base > 1). P2a states
-this as an executable assumption beside the site (assert/comment + test),
-so a future metric with a non-monotone transform fails loudly rather than
-ranking wrongly.
+Rev 2 said "records without spec ⇒ that iteration restores no incumbent" —
+too broad when only SOME records lack identity. Frozen:
 
-### 4.4 Persisted-identity source for artifact consumers
+* rank only the subset carrying a compatible metric identity;
+* missing-identity records are INDIVIDUALLY excluded from metric ranking;
+* no rankable records remaining ⇒ restore no incumbent + named notice;
+* compatible known records remaining ⇒ the incumbent is chosen among them;
+* multiple conflicting KNOWN identities ⇒ fail closed per the existing
+  restore soft-failure policy — never silently choose one;
+* every direction-independent tie-break is preserved byte-for-byte.
 
-Dashboard/scripts read persisted records. Post-06/09a records carry
-`metric_result.direction` (`evaluation_metric.py:404-406`) and outputs carry
-`metric_spec` — the consumers read what is persisted, never re-derive.
+### 4.3 Site 5 — RULED on source truth (no fake generic contract)
+
+Measured at `bcb17e45`: `_RowCandidate.best_linear` is populated directly
+from the persisted `file_vector` entries (`per_file_best.py:306-343`) — the
+per-file values ARE stored in linear space, and the log form is a DERIVED
+display (`"best_log_score": _log(self.best_linear)`, `:453`). There is no
+separate "canonical per-file golden value" to prefer: the metric's
+`per_sample` is a pointer to this same `file_vector`. So the PREFERRED
+option ("compare in canonical space") and the current code coincide — the
+ranked values are the persisted per-file evidence itself.
+
+**Frozen ruling**: `_row_beats` migrates its score comparison to
+`MetricOrder`; the validity of ranking these values rests on the CURRENT
+transform's deterministic monotonicity (log base 5.27 > 1 ⇒ strictly
+increasing ⇒ linear order == log order), which is **documented and TESTED as
+a property of THIS transform** — a hand-computed fixture pinning that the
+linear ranking equals the log ranking on TIDMAD-shaped values. P2a does
+**NOT** claim a generic framework capability to assert arbitrary future
+transform monotonicity: no such contract exists in source, and pretending
+one does would be a fake guard. A future metric whose per-sample values need
+a non-monotone display transform is recorded as a **future capability
+requirement** (a new declaration on the metric, owned by the metric
+interface), not guarded here.
+
+### 4.4 Persisted-identity source — EXACT fields (measured at `bcb17e45`)
+
+| consumer | what it reads | identity available | completeness |
+|---|---|---|---|
+| resume `_pick_best` | `parsed.all_records` of a VALIDATED `HyperparamTuningOutput` (`core/resume.py:634-643`) | the OUTPUT's `metric_spec` (full spec, 09a) is in scope at the pool-construction site; records also carry `metric_result` (`metric_id` + `direction`, Step 06) | FULL identity present post-09a; `None` on legacy |
+| dashboard / diagnostic scripts | summary JSON = FULL record dicts (`LocalRecorder.save_record` appends `safe_record` verbatim, `sandbox_executor.py:344-366`) | `metric_result.metric_id` + `metric_result.direction` per record | comparison identity (id+direction) present post-06; absent on legacy/unscored records |
+| workflow sites 1–3 | the live `tune_output` + the bound composition | `tune_output.metric_spec` (full) + `bindings.task_composition.metric.spec` (full) | FULL |
+| proposer `top_n` | interpretation evidence | `InterpretationOutput.metric_identity` (id + direction; confirmed present) | comparison identity |
+| `per_file_best` | records + the module's imported metric id | `metric_result` per record; `TIDMAD_METRIC_ID` import | comparison identity |
+
+**Conclusion (frozen)**: `metric_id` + `direction` is the minimum comparison
+identity, it is ALREADY persisted everywhere a P2a consumer ranks, and
+consumers read what is persisted — never re-derive. **No schema addition is
+required and no second metric schema is invented.** Reconciliation (§4.1)
+operates on these existing fields; the full-spec sources (output stamp,
+bound composition) reconcile as full specs, and record-level consumers
+reconcile on `(metric_id, direction)`.
+
 The forward half of Q-10-2 (every newly persisted artifact carries enough
-identity to rank) is **already satisfied** by `metric_result`; P2a adds a
-test pinning it, not a new field.
+identity to rank) is **already satisfied**; P2a adds tests pinning it, not a
+new field.
 
-### 4.5 PROVISIONAL(P1) items — to reconcile before freeze
+### 4.5 PROVISIONAL(P1) items — RESOLVED at `bcb17e45`
 
-Exact spelling of the workflow acquisition (`bindings.task_composition…`);
-whether `restore_prior_state` receives the spec as a parameter or reads the
-launcher's composed value; module placement of the shared refusal-notice
-helper (candidate: `execute_tools/metric_order.py` as a small function — NOT
-a new module). None of these changes the semantics above.
+* **Workflow acquisition spelling**: the composed bound spec is
+  `bindings.task_composition.metric.spec` (the workflow holds `bindings`;
+  `RunTaskComposition.metric: EvaluationMetric` is P1-landed). The
+  run-scoped seam `resolve_bound_run_metric()` also exists and is active for
+  the whole composed region; the workflow uses the bindings spelling because
+  it already holds the carrier, and either resolves to the SAME object.
+* **Resume**: `restore_prior_state` needs NO new parameter — the pool is
+  built from a validated `HyperparamTuningOutput` whose own `metric_spec`
+  stamp is in scope at the ranking site (§4.4). Reconciliation happens over
+  those stamps.
+* **Q-P2a-2 RESOLVED (operator ruling 2026-08-20)**: ONE canonical
+  metric-identity-unavailable message/formatter, owned **beside the shared
+  reconciliation authority in `execute_tools/evaluation_metric.py`** —
+  identity reconciliation and identity-unavailable representation belong
+  together. Deliberately NOT in `MetricOrder`, which stays focused on
+  ordering a known metric.
 
 ---
 
@@ -203,9 +386,27 @@ bans of all `>`):
   set) are enumerated with reasons; the allowlist is the ONLY suppression
   mechanism, and an entry without a reason fails the scanner's own
   self-check.
-* **Anti-vacuity**: a planted raw `>` on `denoising_score` in a scratch
-  production module must turn the scanner RED (recorded plant-and-catch);
-  the migrated sites' absence keeps it green.
+* **Anti-vacuity, TWO plants required** (operator ruling 2026-08-20): a
+  direct known-score-name offender (`if x["denoising_score"] > y: …`) AND a
+  local alias/dataflow offender —
+
+  ```python
+  primary_score = record["denoising_score"]
+  if primary_score > incumbent:
+      ...
+  ```
+
+  — both must turn the scanner RED (recorded plant-and-catch). The alias
+  plant is what proves the same-function assignment tracking is real rather
+  than string matching. No cross-function dataflow is built or claimed.
+* **Standing-guard claim, narrowed (frozen)**: the scanner is exhaustive for
+  the CURRENT known primary-score carrier shapes (the golden-score name set
+  + same-function aliases of a record's `denoising_score`) over the
+  production surfaces P2a owns — including `workflows/task_composition.py`,
+  which P1 added to the production set. It is NOT a guarantee over carrier
+  shapes that do not yet exist: **introducing a future primary-score carrier
+  shape REQUIRES extending the scanner's vocabulary/shape rules in the same
+  change**, and the scanner module states this contract at its top.
 * The old `NOT_REACHED_DIRECTION_CONSUMERS` rows are retired **by** the
   migration commits that empty them (each row's removal cites the commit),
   never deleted ahead of it.
@@ -226,7 +427,7 @@ Every expectation is a hand-computed literal in the test file.
 
 ---
 
-## 7. Commit decomposition (provisional pending P1 reconciliation)
+## 7. Commit decomposition (SIX commits — RECONCILED against merged P1 and FROZEN; distinct failure classes, kept per operator ruling)
 
 **Per-commit rules** (corrected 2026-08-20 — per-commit operator approval was
 a process error): **semantic commits are autonomous** — before each commit,
@@ -246,13 +447,12 @@ winner alone. A wrong comparator can pick the right winner on a fixture whose
 maximum is also its first element, and the TIDMAD-parity claim is worth
 nothing if it only checks the endpoint.
 
-**Line anchors**: re-verified at the P1 implementation head `0f1e41d0`
-(2026-08-20). Sites 4–10 and both prose sites are at the exact lines §2.1
-records. The three workflow sites MOVED under P1 (which inserted ~89 lines
-above them): site 1 `:2657 → :2744`, site 2 `:2669 → :2756`, site 3
-`:2717 → :2804`. `InterpretationOutput.metric_identity` (site 10's order
-source) is confirmed present. **These are evidence at a pre-merge head, not
-implementation authority — re-verify at the true P2a base.**
+**Line anchors**: verified at the P1 head `0f1e41d0` and RE-CONFIRMED at the
+merged anchor **`bcb17e45`** (byte-identical production tree, §10.3). Sites
+4–10 and both prose sites are at the exact lines §2.1 records; the three
+workflow sites are at `:2744` / `:2756` / `:2804`.
+`InterpretationOutput.metric_identity` (site 10's order source) is confirmed
+present. Line numbers remain evidence, not implementation authority.
 
 ---
 
@@ -279,9 +479,12 @@ one that was never found.
 * Depends on: nothing (first commit).
 
 **3. Implementation plan.**
-- [ ] Enumerate the production file set the scanner walks; state whether it
-      includes `workflows/task_composition.py` (P1-added) and `dashboard/`,
-      and record the count.
+- [ ] Enumerate the production file set the scanner walks — it MUST include
+      `workflows/task_composition.py` (P1-added, verified zero ordering
+      shapes at `bcb17e45`) and `dashboard/` — and record the count.
+- [ ] State the standing-guard contract at the scanner module's top: it is
+      exhaustive for the CURRENT known carrier shapes only, and a future
+      primary-score carrier shape must extend it in the same change (§5).
 - [ ] Implement the flagged shapes: `Compare(Gt|GtE|Lt|LtE)`,
       `sorted`/`list.sort(reverse=True)`, and `max()`/`min()` whose operand
       mentions a golden-score name (`denoising_score`, `best_score`,
@@ -295,8 +498,11 @@ one that was never found.
       base. Record the byte-exact output in this ledger.
 - [ ] Capture pre-migration goldens: for each of sites 1–5, a fixture
       sequence and the ordered list of pairwise decisions it produces.
-- [ ] Plant-and-catch: a raw `>` on `denoising_score` in a scratch
-      production module turns the scanner RED. Revert; record.
+- [ ] Plant-and-catch, TWO plants (§5): a direct raw `>` on
+      `denoising_score` in a scratch production module, AND the local-alias
+      offender (`primary_score = record["denoising_score"]` then
+      `primary_score > incumbent`). Both RED; revert; record. The alias
+      plant proves same-function assignment tracking is real.
 
 **4. Validation plan.**
 * Unit: one precision fixture per §2.2 class the scanner must NOT flag —
@@ -344,7 +550,7 @@ staged file list, test counts, and any deviation from this plan.
 
 ---
 
-### C1 — in-run sites (1, 2, 3) + the order-acquisition precedence
+### C1 — reconciliation authority promotion + in-run sites (1, 2, 3)
 
 **1. Goal.** The three decisions a LIVE run makes about the golden metric —
 raw-formal best tracking, chain formal incumbent advance, and the
@@ -368,9 +574,21 @@ and stops early by another.
 **3. Implementation plan.**
 - [ ] Re-verify the three line anchors and read each comparison in full
       before editing.
-- [ ] Implement §4.1 precedence: composed run ⇒ the P1-bound spec
-      (`PROVISIONAL(P1)` spelling); legacy ⇒ the artifact-stamped spec via
-      the existing `reconcile_metric_spec`; neither ⇒ refusal.
+- [ ] **PROMOTE the reconciliation authority first (Q-P2a-3)**: move
+      `reconcile_metric_spec`'s semantics from
+      `nodes/result_interpretation_agent/evidence.py:58` to
+      `execute_tools/evaluation_metric.py`, generalized to accept the
+      available identities (bound spec and/or stamped specs); the
+      interpreter node imports the shared authority; its refusal semantics
+      (partial stamping ⇒ refuse, mixed ⇒ refuse) preserved EXACTLY; a
+      census pins exactly ONE reconciliation implementation.
+- [ ] Implement §4.1 reconciliation at sites 1–3: collect bound
+      (`bindings.task_composition.metric.spec`) + the compared output's
+      stamp → reconcile → `MetricOrder`; bound-vs-stamp CONFLICT fails
+      closed; nothing available ⇒ §4.2 unrankable branch.
+- [ ] Implement the canonical metric-identity-unavailable message/formatter
+      beside the reconciliation authority (Q-P2a-2); every consumer renders
+      THIS formatter's output.
 - [ ] Migrate site 1 and site 2 to `order.is_better`, site 3 to
       `order.is_at_least`.
 - [ ] Implement the workflow refusal branch: skip the update, print the
@@ -380,9 +598,13 @@ and stops early by another.
       empty, each citing this commit.
 
 **4. Validation plan.**
-* Unit: acquisition precedence — composed, legacy-stamped, and
-  neither — one test each, asserting WHICH spec was used, not merely that a
-  comparison happened.
+* Unit: the §4.1 truth table — all SIX rows (bound+same, bound+absent,
+  bound+CONFLICT, unbound+all-same, unbound+all-absent,
+  unbound+conflicting), asserting WHICH spec was used or WHICH refusal
+  fired, not merely that a comparison happened.
+* Unit: single-authority census — the promoted function is the only
+  reconciliation implementation; the node imports it; a planted second
+  implementation turns the census RED.
 * Integration/pseudo: a pseudo-mode loop segment driven by the three-task
   fixtures (§6), asserting the incumbent trajectory.
 * Negative/invalid: spec-less record beside spec-carrying ones ⇒ the refusal
@@ -448,11 +670,20 @@ behaviour while looking like a one-line change.
       the score comparison.
 - [ ] Migrate ONLY the score comparison in each; leave every tie branch
       textually untouched.
-- [ ] Site 4: records without a spec ⇒ that iteration restores NO incumbent
-      + named notice; the restore continues.
-- [ ] Site 5: record the linear-space monotonicity assumption (§4.3) as an
-      executable assertion beside the comparison, so a future non-monotone
-      transform fails loudly rather than ranking wrongly.
+- [ ] Site 4, per §4.2a (PER-RECORD, not per-iteration): rank the
+      compatible-identity subset; missing-identity records individually
+      excluded with the named state; no rankable records ⇒ no incumbent +
+      named notice, restore continues; conflicting KNOWN identities ⇒ fail
+      closed per the existing restore soft-failure policy. The identity
+      inputs are the output's own `metric_spec` stamp + per-record
+      `metric_result`, reconciled through the SHARED authority.
+- [ ] Site 5, per the §4.3 ruling: migrate the score comparison to
+      `MetricOrder`; document the CURRENT transform's monotonicity beside
+      the site and pin it with a hand-computed fixture (linear ranking ==
+      log ranking for `_log` base 5.27 on TIDMAD-shaped values). NO generic
+      monotonicity assertion is added — a future non-monotone display
+      transform is a named future capability requirement of the metric
+      interface, recorded, not faked here.
 - [ ] Retire the census rows these two sites empty, citing this commit.
 
 **4. Validation plan.**
@@ -470,14 +701,21 @@ behaviour while looking like a one-line change.
       prefers the smaller `best_linear`.
 - [ ] Every tie fixture's outcome is byte-equal to its C0 golden, asserted
       per tie class so a regression names which rule broke.
-- [ ] A spec-less iteration restores NO incumbent, emits the named notice,
-      and does not abort the restore.
-- [ ] The monotonicity assertion fires on a synthetic non-monotone transform.
+- [ ] Resume four-case matrix (§4.2a): all-known ranks; known+missing ranks
+      the known subset and excludes the missing rows INDIVIDUALLY;
+      all-missing restores no incumbent with the named notice and the
+      restore continues; conflicting-known fails closed per the existing
+      soft-failure policy — each case asserted on the restored incumbent,
+      not on stdout alone.
+- [ ] The site-5 monotonicity fixture pins linear-order == log-order for the
+      CURRENT transform with hand-computed literals.
 
 **6. Failure and edge cases.**
 | case | required behaviour |
 |---|---|
 | all records spec-less | no incumbent restored; named notice; restore continues (never a hard failure) |
+| SOME records spec-less | the compatible subset is ranked; missing rows are individually unranked — one legacy row never poisons the corpus (§4.2 case B) |
+| conflicting KNOWN identities in one pool | fail closed per the existing restore soft-failure policy; never a silent pick (§4.2 case D) |
 | equal scores | existing tie-break, unchanged and asserted |
 | legacy rows with no round provenance | existing persisted-over-legacy rule, unchanged |
 | non-monotone linearization | the site-5 assertion FAILS LOUDLY rather than ranking on a transformed value |
@@ -517,9 +755,12 @@ are one commit.
       `metric_spec` on outputs — §4.4).
 - [ ] Migrate ranking/extrema to `MetricOrder` built from persisted
       identity.
-- [ ] Implement the Q-10-2 display state: unranked listing + the verbatim
-      *"metric direction unavailable (`metric_spec` absent)"* string; raw
-      scalars still shown.
+- [ ] Implement the §4.2 four-case display semantics PER ARTIFACT: the
+      compatible subset ranks; each missing-identity row shows the canonical
+      unavailable state (Q-P2a-2 formatter) and no rank, raw scalar still
+      shown; all-missing shows no ranking; conflicting-known refuses the
+      ranking view with the named diagnostic. One legacy row never poisons
+      the corpus.
 - [ ] Replace both prose sites with `direction_words`-derived text.
 - [ ] Retire the census rows these sites empty, citing this commit.
 
@@ -536,8 +777,13 @@ are one commit.
 
 **5. Acceptance criteria.**
 - [ ] `lower` corpus ranks ASCENDING and `best_agent_score` is the MINIMUM.
-- [ ] Absent-identity corpus renders the verbatim unavailable string, shows
-      NO rank, and still displays raw scalars.
+- [ ] Mixed corpus (case B): the known-identity rows rank; the absent row is
+      individually unranked with the canonical state; the ranked rows'
+      order is unaffected by the absent row's scalar.
+- [ ] All-absent corpus (case C) renders the canonical unavailable state,
+      shows NO rank, and still displays raw scalars.
+- [ ] Conflicting corpus (case D) refuses with the named diagnostic and
+      ranks nothing across the conflict.
 - [ ] TIDMAD corpus: ranking order and prose byte-identical to pre-migration.
 - [ ] No prompt template or LLM-facing byte changes (pinned by grep — these
       are dashboard/API strings, not prompts).
@@ -545,7 +791,8 @@ are one commit.
 **6. Failure and edge cases.**
 | case | required behaviour |
 |---|---|
-| corpus mixing two metric identities | fail closed with a named diagnostic; never rank across incomparable metrics |
+| corpus mixing two KNOWN metric identities | fail closed with a named diagnostic; never rank across incomparable metrics (§4.2 case D) |
+| corpus mixing known + ABSENT identity | rank the known subset; the absent rows are individually unranked (§4.2 case B) — absence is not a conflict |
 | record with identity, score `None` | existing filter; not a refusal case |
 | empty corpus | current behaviour preserved |
 | legacy pre-06 records (no `metric_result`) | Q-10-2 refusal path, not an exception |
@@ -574,9 +821,16 @@ carries the one open question (Q-P2a-1).
 * Order source: the interpretation evidence's metric identity
   (`InterpretationOutput.metric_identity` — **confirmed present**), which the
   proposer today never reads.
-* UNCHANGED: the `all` method; the reader architecture (that is P3 — this
-  commit changes ONE helper's comparison); every prompt template.
-* Depends on: C1's refusal helper; **Q-P2a-1 dispositioned** (see §11).
+* UNCHANGED: the `all` method (which the fallback REUSES); the reader
+  architecture (that is P3 — this commit changes ONE helper's comparison);
+  every prompt template.
+* Depends on: C1's promoted reconciliation + canonical formatter.
+* **Q-P2a-1 RESOLVED (operator ruling 2026-08-20)**: identity unavailable ⇒
+  the named notice fires and the helper takes the EXISTING order-free `all`
+  path, under whatever independent safety/token bounds that path already
+  owns. No new "first N by declaration order" policy — that would be a new
+  selection policy owned by P2a for no scientific reason. The result is
+  never labelled "top N"/"best N"/"best candidates".
 
 **3. Implementation plan.**
 - [ ] Read the full strategy helper, including the `all` branch and every
@@ -585,9 +839,10 @@ carries the one open question (Q-P2a-1).
       typed reader (P3's scope) — record exactly how, so P3 can replace the
       mechanism without re-litigating the semantics.
 - [ ] Migrate the cut to `MetricOrder`.
-- [ ] Implement the absent-identity branch per the Q-P2a-1 disposition. What
-      is already frozen: NO metric-based ranking happens, the result is never
-      labelled "best"/"top N", and the named notice always fires.
+- [ ] Implement the absent-identity branch per the RESOLVED Q-P2a-1: named
+      notice → the existing `all` semantics. NO metric-based ranking
+      happens; the result is never labelled "best"/"top N"; no new
+      selection policy is introduced.
 - [ ] Retire the census row this site empties, citing this commit.
 
 **4. Validation plan.**
@@ -607,13 +862,15 @@ carries the one open question (Q-P2a-1).
       `{0.0172, 0.0174}` — the inversion this commit exists to fix.
 - [ ] Pets `[0.027, 0.61, 0.33]`, `top_n(2)` returns exactly `{0.61, 0.33}`.
 - [ ] TIDMAD fixture: returned list byte-equal to pre-migration, in order.
-- [ ] Absent identity: no ranking is performed, the named notice fires, and
-      the result is not labelled "best"/"top N" anywhere it is rendered.
+- [ ] Absent identity: the named notice fires, the returned candidate set
+      IS the existing `all` path's result (asserted equal against a direct
+      `all` invocation on the same fixture), and nothing labels it
+      "best"/"top N" anywhere it is rendered.
 
 **6. Failure and edge cases.**
 | case | required behaviour |
 |---|---|
-| absent metric identity | Q-P2a-1 branch; never a silently inverted cut; never a first-N cut wearing a top-N name |
+| absent metric identity | named notice + the EXISTING `all` semantics (Q-P2a-1 RESOLVED); never a silently inverted cut; never a first-N cut wearing a top-N name |
 | `n` larger than the candidate count | current behaviour preserved |
 | all `best_score` values `None` | existing filter (`scored` is empty); current behaviour preserved |
 | identity present but unknown direction value | fail closed via `MetricSpec`'s own vocabulary; no default |
@@ -695,19 +952,24 @@ surfaces — pinned); NaN/None scores (existing validity filters run BEFORE
 ordering and are not weakened); empty candidate sets (current behaviour
 preserved); a future non-monotone linearization (site-5 assertion fires).
 
-## 10. Upstream-sensitive assumptions (re-audit after P1 merge)
+## 10. Upstream-sensitive assumptions — RECONCILED at merged `bcb17e45`
 
-1. `PROVISIONAL(P1)` — the composed-spec spelling and whether resume receives
-   the spec by parameter.
-2. Workflow site line numbers (P1 edits `model_exploration.py`).
-3. The scanner's production-file set (P1 adds `workflows/task_composition.py`).
+1. `PROVISIONAL(P1)` composed-spec spelling — **RESOLVED**:
+   `bindings.task_composition.metric.spec` (§4.5); resume needs no new
+   parameter (the output stamp is in scope at the ranking site).
+2. Workflow site line numbers — **RESOLVED**: `:2744` / `:2756` / `:2804`
+   at `bcb17e45` (§10.3).
+3. The scanner's production-file set — **RESOLVED**: includes
+   `workflows/task_composition.py`, which carries zero ordering shapes.
 
 ### 10.1 Anchor re-verification at the P1 implementation head (2026-08-20)
 
 Performed while P1 awaited review, so the §7 commit plans were written
-against inspected code rather than remembered code. **Head inspected:
-`0f1e41d0` (P1 branch, NOT merged) — this is evidence at a pre-merge head and
-is re-verified again at the true P2a base.**
+against inspected code rather than remembered code. Head inspected:
+`0f1e41d0` (then the P1 branch). **P1 has since MERGED as squash `bcb17e45`
+with a production tree byte-identical to that head's, and §10.3 re-verified
+the surface at the merged anchor — this table's verdicts HOLD at
+`bcb17e45`.**
 
 | site | §2.1 anchor (`2393aacc`) | at `0f1e41d0` | verdict |
 |---|---|---|---|
@@ -733,48 +995,89 @@ method the §7 plans name — `is_better`, `is_at_least`, `best`, `worst`,
 The audit's shape holds: twelve surfaces, ten of them code, and the six the
 presence list cannot see are still invisible to it.
 
-### 10.2 ONE ambiguity the inspection DID surface — Q-P2a-3 (NEW, OPEN)
+### 10.2 The rev-2 ambiguity — RESOLVED (Q-P2a-3 = PROMOTE)
 
-**`reconcile_metric_spec` lives inside a NODE, not a shared module.**
-Measured: `nodes/result_interpretation_agent/evidence.py:58`. §4.1 and C1's
-plan both say the legacy branch reconciles artifact-stamped specs "via the
-existing `reconcile_metric_spec`" — but that would have
-`workflows/model_exploration.py` import a function from the interpreter
-node's internals.
+Rev 2 measured that `reconcile_metric_spec` lives inside the interpreter
+node (`nodes/result_interpretation_agent/evidence.py:58`) while §4.1 needed
+it from generic workflow code, which the node-public-boundary rule forbids —
+and held that open as a layer-ownership decision. **Operator ruling
+2026-08-20: PROMOTE** the reconciliation to a shared owner beside the metric
+identity semantics in `execute_tools/evaluation_metric.py` (§4.1a). The
+"composed run trusts the bound spec and skips reconciliation" alternative is
+REJECTED: bound-A/artifact-B must fail closed, not go unobserved. The node
+imports the shared authority afterwards; exactly ONE implementation remains.
 
-Why this is not a detail to settle during implementation: the repository has
-an executable rule that a node's private modules are never imported from
-outside it (`tests/unit/nodes/test_node_public_boundary.py`, established by
-07b's C7). Whether `evidence.py` is inside that boundary — and if it is,
-whether the right move is to promote the reconciliation to a shared authority
-or to have the workflow acquire its spec another way — is a **layer-ownership
-decision**, which is exactly the class §7's rules say to stop on rather than
-resolve silently.
+### 10.3 Post-P1-merge reconciliation record (2026-08-20)
 
-**Q-P2a-3 (OPEN, for freeze):** where does the shared spec-reconciliation
-authority live once a non-node consumer needs it? Options: (a) the workflow
-reads only the composed/bound spec and never reconciles, leaving
-reconciliation to the interpreter (smallest change; needs a check that sites
-1–3 never compare artifacts from different runs); (b) promote
-`reconcile_metric_spec` beside `MetricOrder` in `execute_tools/`, with the
-node importing it from there (one authority, one move, touches a merged
-node); (c) something else. **Do not implement C1 until this is dispositioned
-— the §4.1 precedence text depends on the answer.**
+**Anchor: merged `master` = `bcb17e45` (the P1 squash; production tree
+byte-identical to the CI-validated PR head `ffad7029`).** Every §2
+upstream-sensitive item re-audited:
 
-## 11. Open operator questions
-
-| id | question | proposal |
+| item | verdict at `bcb17e45` | class |
 |---|---|---|
-| **Q-P2a-1** | Site 10's refusal fallback shape | **OPEN / PROVISIONAL (operator ruling 2026-08-20: do NOT disposition until post-P1 reconciliation).** What is already frozen semantically: **absent metric identity means NO metric-based ranking happens at all.** If the proposer continues with a bounded candidate set, any cap must be **independent of score ordering** (e.g. declaration order / stable identity order) and must **never be described or labelled as "best"/"top N"** — a first-N cut must not wear a top-N name. The exact fallback (order-free cap vs refuse-to-propose) is dispositioned at freeze |
-| **Q-P2a-2** | Should the refusal notice string be one shared constant (one authority for the Q-10-2 wording) or per-consumer text? | one shared constant beside `MetricOrder` |
-| **Q-P2a-3** | Where does the shared spec-reconciliation authority live, now that a non-node consumer (the workflow, sites 1–3) needs it? `reconcile_metric_spec` is measured at `nodes/result_interpretation_agent/evidence.py:58`, and the repository forbids importing a node's private modules from outside it | **OPEN — raised by the rev-2 code inspection (§10.2), not by rev 1.** Blocks C1. Proposal offered but NOT selected: prefer (a) — the workflow reads only the bound/stamped spec and never reconciles — IF it can be shown that sites 1–3 never compare artifacts from different runs; otherwise (b), promote the function beside `MetricOrder` |
+| composed primary `MetricSpec` location | `RunTaskComposition.metric: EvaluationMetric` → spec at `bindings.task_composition.metric.spec`; run-scoped seam `resolve_bound_run_metric()` active for the composed region | B |
+| workflow access to it | the workflow holds `bindings` (25 fields incl. `task_composition`) | B |
+| resume access to metric identity | `_pick_best`'s pool is built from a VALIDATED `HyperparamTuningOutput` (`core/resume.py:634-643`) whose `metric_spec` stamp is in scope; records carry `metric_result` | B |
+| `WorkflowRunBindings` / `RunTaskComposition` spelling | as above; no further change | A |
+| `model_exploration.py` ordering sites | moved to `:2744` / `:2756` / `:2804`; semantics unchanged | A |
+| `task_composition.py` in the scanner surface | YES — new production file, zero ordering shapes | B |
+| new P1 primary-score comparison | **NONE** — AST re-scan over the 9 production dirs returns exactly the known 10 code sites | A |
+| any old site disappeared | NO — all 10 present | A |
+| stale P2a anchors | only the three workflow line numbers; corrected in §2.1 | A |
 
-## 12. Adversarial self-review (draft-stage)
+**Class C (semantic contradiction): 0.** The re-scan instrument: an AST walk
+matching `Compare(Gt|GtE|Lt|LtE)` / `sort|sorted(reverse=True)` / `max|min`
+whose operand mentions a golden-score name, over
+`nodes agent core execute_tools ml_models workflows scripts dashboard
+sdsc_submission_scripts` — 10 hits, byte-listed in §2.1.
 
-| attack | answer |
-|---|---|
-| Second direction authority? | none — every migration calls `MetricOrder`; the scanner + §8.1 item 6 census |
-| Does P2a re-derive metric identity? | no — §4.1 consumes bound/stamped specs only |
-| Does the scanner ban legitimate `max`? | precision fixtures for every §2.2 class are part of its own test suite |
-| Can P2a merge with P2b absent? | yes — nothing here touches secondaries; master stays coherent (parent §21) |
-| Did P2a touch the proposer's reader architecture? | no — one helper's comparison only; the reader is P3 |
+## 11. Operator questions — ALL RESOLVED (rulings 2026-08-20)
+
+**Open: 0.**
+
+| id | question | RULING |
+|---|---|---|
+| **Q-P2a-1** | Site 10's refusal fallback shape | **RESOLVED: fall back to the EXISTING order-free `all` semantics.** Identity unavailable ⇒ named notice ⇒ the existing `all` candidate path, under whatever independent safety/token bounds it already owns. A new "first N by declaration order" policy is REJECTED (a new selection policy for no scientific reason). Never labelled "top N"/"best N"/"best candidates" — no metric ranking happened |
+| **Q-P2a-2** | One shared refusal-notice authority or per-consumer text? | **RESOLVED: ONE canonical metric-identity-unavailable message/formatter**, owned beside the shared reconciliation authority in `execute_tools/evaluation_metric.py` — identity reconciliation and identity-unavailable representation belong together. NOT in `MetricOrder`, which stays focused on ordering a known metric |
+| **Q-P2a-3** | Where does shared spec reconciliation live? | **RESOLVED: PROMOTE** to `execute_tools/evaluation_metric.py` beside `MetricSpec` (§4.1a). The "trust the bound spec, skip reconciliation" option is REJECTED — bound-A/artifact-B fails closed. NOT placed in `MetricOrder` ("same metric?" vs "which is better?" are separate responsibilities). The interpreter imports the shared authority; exactly ONE implementation remains |
+
+## 12. Adversarial review — 25 attacks (freeze-stage, operator §17), all closed
+
+| # | attack | verdict |
+|---|---|---|
+| 1 | Can any primary metric be ranked without an explicit direction? | **CLOSED** — §4.0: every ranking goes through `MetricOrder(spec)`; a consumer with no reconciled identity takes the §4.2 unrankable state |
+| 2 | Can direction be inferred from metric name / task identity? | **CLOSED** — §4.0 forbids inference from name, sign, range, task or TIDMAD history; no such derivation exists in the plan and the scanner census guards the sites |
+| 3 | Can two different metrics with the same direction be treated as comparable? | **CLOSED** — §4.0 identity≠direction; ranking requires a reconciled IDENTITY; case D fails closed |
+| 4 | Does any consumer use only `direction` where complete identity is required? | **CLOSED** — §4.4 maps every consumer to an identity source carrying `metric_id`+`direction` at minimum; record-level reconciliation is on the pair, never direction alone |
+| 5 | Exactly ONE shared reconciliation authority? | **CLOSED** — §4.1a promotion + a C1 census with a planted second implementation turning RED |
+| 6 | Does any generic module import a node-private reconciliation helper? | **CLOSED** — after promotion the node imports the shared owner; the existing node-public-boundary test keeps guarding the reverse direction |
+| 7 | Can a bound MetricSpec silently override a conflicting artifact stamp? | **CLOSED** — §4.1 truth table row bound-A/artifact-B = FAIL CLOSED; a C1 truth-table test row pins it |
+| 8 | Can one missing-identity artifact poison valid compatible artifacts? | **CLOSED** — §4.2 case B: the compatible subset ranks; the absent row is INDIVIDUALLY unranked; pinned per consumer in C2/C3 |
+| 9 | Can a missing-identity artifact receive a best/rank label? | **CLOSED** — §4.2: inspectable, raw scalar visible, NEVER ranked/best |
+| 10 | Can conflicting metric identities be ranked together? | **CLOSED** — case D refuses per operation with a named diagnostic |
+| 11 | Does resume handle all-known / known+missing / all-missing / conflicting-known? | **CLOSED** — §4.2a four-case matrix is C2 acceptance, asserted on the restored incumbent |
+| 12 | Does proposer top_n fall back to the existing order-free `all` semantics, not a new first-N rule? | **CLOSED** — Q-P2a-1 ruling; C4 asserts the fallback result EQUALS a direct `all` invocation on the same fixture |
+| 13 | Does any raw `>`/`<`/`max`/`min`/`reverse=True` remain on a primary metric? | **CLOSED** — the ten sites migrate C1–C4; the scanner is the standing guard with zero unallowlisted sites at C5 |
+| 14 | Can DAVIS lower-is-better select the worst candidate anywhere? | **CLOSED** — the §6 DAVIS fixtures (incl. the top-N inversion literal) run at every consumer family |
+| 15 | Are TIDMAD negative higher-is-better values handled correctly? | **CLOSED** — §6 TIDMAD literals (−1.4 best of [−3.2, −1.4, −7.9]) + decision-sequence parity against C0 goldens |
+| 16 | Are all tie-breaks direction-independent and preserved? | **CLOSED** — §2.1 note + per-tie-class byte-equality against C0 goldens (C2) |
+| 17 | Did P2a absorb P3's proposer-reader architecture? | **CLOSED** — §3 non-goal; C4 changes ONE helper's comparison and records the threading for P3 to replace |
+| 18 | Did P2a touch secondary metrics? | **CLOSED** — §3 non-goal; no secondary field, evaluator or transport appears anywhere in the plan |
+| 19 | Did P2a create another metric-order enum/helper/comparator? | **CLOSED** — `MetricOrder` unchanged; the scanner + the §8.1 census forbid a second interpreter |
+| 20 | Did P2a put reconciliation inside MetricOrder incorrectly? | **CLOSED** — §4.1a places it beside `MetricSpec` in `evaluation_metric.py`, with the responsibility split stated |
+| 21 | Does the site-5 monotonicity claim match actual executable capability? | **CLOSED** — §4.3: the ranked values ARE the persisted per-file evidence; only the CURRENT transform's monotonicity is documented+tested; no generic assertion is faked; future non-monotone transforms are a named capability requirement |
+| 22 | Can the scanner detect at least one alias-shaped offender? | **CLOSED** — §5 requires TWO plants, direct + local alias, both RED |
+| 23 | Are future new score-carrier shapes required to extend the scanner? | **CLOSED** — §5's narrowed standing-guard contract, stated at the scanner module's top |
+| 24 | Did the P1 merge introduce any new ordering surface? | **CLOSED** — §10.3 re-scan: exactly the known 10 code sites; `task_composition.py` carries zero ordering shapes |
+| 25 | Can P2a merge with P2b absent and leave master coherent? | **CLOSED** — nothing here touches secondaries; every commit leaves the un-migrated remainder on its legacy behaviour (parent §21) |
+
+**Open operator questions: 0. Material contradictions: 0.**
+
+---
+
+*END — REVISION 3 — FROZEN, operator approved 2026-08-20 (post-P1-merge
+reconciliation + semantic rulings applied). Source anchor `bcb17e45`.
+Implementation status at the freeze commit: NOT STARTED. Gate 1 NOT
+REQUIRED; Gate 2 NOT REQUIRED. P2a implementation begins in a FRESH session
+from a newly filled Implementation Working Rules contract; P2b remains DRAFT
+and reconciles after P2a merges.*
