@@ -2,9 +2,17 @@
 
 ## 0. Status and provenance
 
-**DRAFT — REVISION 1 (NOT FROZEN). Implementation has NOT started; every
-checkbox in §11 is `[ ]` and the §22 ledger is empty. Do not implement, do
-not run Gate 1, and do not freeze before operator review.**
+**REVISION 2 — FROZEN (operator final ruling 2026-08-19: "APPROVED WITH
+FOUR MINOR FINAL AMENDMENTS" — freeze authority granted in the ruling and
+exercised after the four amendments were applied and the §21a adversarial
+pass closed without a new material contradiction). The SEMANTIC design is
+frozen and is not reopened by implementation. Implementation has NOT
+started; every checkbox in §11 is `[ ]` and the §22 ledger is empty.**
+
+*(Rev 1, DRAFT, was committed at `68cad53c` and reviewed by the operator
+the same day; the C1→C6 decomposition and the overall architecture were
+APPROVED, Q-09b-1..3 were all ruled YES, and four bounded amendments were
+mandated — §0.4. No 09c; the Step-09 parent is not redesigned.)*
 
 Child of the FROZEN Step-09 parent
 (`docs/design/generic_framework_upgrade/step_09_interpretation_task_blocks.md`,
@@ -80,13 +88,26 @@ ordering or workflow policy.
 
 | id | parent/roadmap text | merged source at `fd5557ee` | consequence for 09b |
 |---|---|---|---|
-| **D1** | roadmap `:1230-1231` "prompts split framework/module/task blocks (**golden-equal for TIDMAD**…)"; roadmap `:1540` "3 existing interpreter goldens + new ones EXACT-equal"; §22.12 `:3310` "3 interpreter goldens EXACT-equal + owned additions" | the frozen parent (which OUTRANKS the roadmap in this child's authority order, as in 09a) deliberately weakened this: parent §13 "every prompt byte-delta is DECLARED, attributed to an authority, and landed as regenerated goldens in the same commit; TIDMAD's rendered content stays **semantically identical**"; parent §16 09b "every golden delta declared + attributed" | C1 (the physical move) is BYTE-EXACT — the roadmap's golden-equal claim holds there; C2–C4 (re-owning + owned additions) regenerate goldens with every delta DECLARED and attributed, per the parent. Q-09b-3 asks the operator to confirm this reading |
+| **D1** | roadmap `:1230-1231` "prompts split framework/module/task blocks (**golden-equal for TIDMAD**…)"; roadmap `:1540` "3 existing interpreter goldens + new ones EXACT-equal"; §22.12 `:3310` "3 interpreter goldens EXACT-equal + owned additions" | the frozen parent (which OUTRANKS the roadmap in this child's authority order, as in 09a) deliberately weakened this: parent §13 "every prompt byte-delta is DECLARED, attributed to an authority, and landed as regenerated goldens in the same commit; TIDMAD's rendered content stays **semantically identical**"; parent §16 09b "every golden delta declared + attributed" | C1 (the physical move) is BYTE-EXACT — the roadmap's golden-equal claim holds there; C2–C4 (re-owning + owned additions) regenerate goldens with every delta DECLARED and attributed, per the parent. **CONFIRMED — Q-09b-3 = YES (§0.4)** |
 | **D2** | parent §17 Gate-1 call projection: "at most 2 per-model + 1 synthesis = **3 calls**" for the preserved TIDMAD artifact; "the DAVIS fixture, built as ONE new model with an empty cache ⇒ 1 + 1 = **2 calls**" | THREE source facts contradict it: (a) `run()` SKIPS Phase-2 synthesis entirely when `len(effective_types) == 1` (`result_interpretation_agent.py:1408-1419`) — a single-model DAVIS input would never render the synthesis prompt at all; (b) `should_recall_per_model` returns `False` for a cache-hit model with no current summary (`nodes/interpretation_helpers.py:905-906`), so the artifact's cached `wavenet24…` model is a Stability-Filter SKIP (marker, no call), never a second per-model call; (c) consolidator `cache_consolidator.list_merge` calls (fired on active cache hits, `result_interpretation_agent.py:1323-1330`) were not counted — they are 0 for the chosen inputs but the projection method must count them | §13 re-derives the exact counts from merged source: TIDMAD = 2 calls (1 per-model + 1 synthesis; wavenet24 = skip marker), DAVIS = 3 calls (TWO fixture models so synthesis fires: 2 per-model + 1 synthesis), dedup = 0 (input-deterministic, §2.3). Total **5** — numerically equal to the parent's total by coincidence, composition corrected |
-| **D3** | parent §15 09b surface list does not name the proposer | the operator-approved 09a closeout assigns the debt to 09b: CLAUDE.md Current State ("the proposer's 'Prediction Track Record' rendering, which pairs v2 FRACTIONS with the v1 DENOMINATOR — the consequence Q-09a-3 explicitly declares and freezes, **owned by 09b's rendering surface**") and the 09a ledger §10.5 ("the proposer's rendering surface is 09b's… Carried forward as a named 09b item"). The earlier parent §20 R-09a-5 note said "09b/Step-10" | C4 includes the proposer's TWO reader sites (legacy renderer `:1146-1165` + pipeline whitelist `:1667-1688`), bounded to the track-record family only. Q-09b-1 asks the operator to confirm the inclusion |
+| **D3** | parent §15 09b surface list does not name the proposer | the operator-approved 09a closeout assigns the debt to 09b: CLAUDE.md Current State ("the proposer's 'Prediction Track Record' rendering, which pairs v2 FRACTIONS with the v1 DENOMINATOR — the consequence Q-09a-3 explicitly declares and freezes, **owned by 09b's rendering surface**") and the 09a ledger §10.5 ("the proposer's rendering surface is 09b's… Carried forward as a named 09b item"). The earlier parent §20 R-09a-5 note said "09b/Step-10" | C4 includes the proposer's TWO reader sites (legacy renderer `:1146-1165` + pipeline whitelist `:1667-1688`), bounded to the track-record family only. **CONFIRMED — Q-09b-1 = YES (§0.4)** |
 
 None of these reopens the parent's frozen architecture; D2 is a factual
 source correction of an evidence-plan number, exactly the class the parent
 §0.3 mechanism exists for.
+
+### 0.4 Operator final ruling (2026-08-19) — questions RESOLVED, four amendments applied
+
+| item | ruling | landed at |
+|---|---|---|
+| **Q-09b-1** | **YES** — C4 owns exactly the proposer's legacy track-record rendering section and the production pipeline interpretation-summary whitelist, and NOTHING else in proposer semantics (prediction-authoring grammar, `PROPOSAL_REASONING_PROMPT`/`PROPOSAL_COMMIT_PROMPT` task science, proposer policy all remain later debt) | §11.4, §19.2 |
+| **Q-09b-2** | **YES** — the Gate harness stamps the authoritative TIDMAD `MetricSpec` as TEST-FIXTURE CONSTRUCTION (the Q-09a-7 precedent): production outputs unmodified, no production derivation site added, record-borne identity/direction must still agree with the stamped spec, disagreement still fails closed; no GPU re-production of the artifact | §13.2 |
+| **Q-09b-3** | **YES** — the frozen parent governs: C1 byte-exact; C2–C4 prompt bytes change ONLY through declared, attributed semantic migrations/additions, each golden regenerated in the owning commit with its exact rule + before/after delta; an UNDECLARED delta remains a STOP; full prompt byte identity is not claimed after C1 | §0.3-D1, §11 |
+| amendment 1 (ruling §2) | the illustrative TIDMAD check-id example in `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` is REMOVED NOW — replaced in C2 with a framework-generic example (existing 08c generic-check vocabulary), a declared C2 golden delta; after 09b NO known task-specific check-id literal remains in the generic interpretation prompt templates | §2.2, §5.4, §11.2, §16, §19.2 |
+| amendment 2 (ruling §3) | the census-#3 / bounded-adapter contradiction is FIXED: generic surfaces carry zero task identity; the ONE allowed task-token occurrence is the self-labelled default-path constant in `task_blocks.py`, proven CONFINED by a new executable AST guard (no branch/dispatch/parsing/inference; a second task constant/table/branch turns it RED) | §15, §16 (items 3/3b) |
+| amendment 3 (ruling §4) | Gate 1 gains hard OUTPUT-SIDE behavioural probes for both cases (P-A1/P-A2/P-B1/P-B2, §13.4), the DAVIS fixture is strictly dominance-ordered, the probes are rehearsed against planted inverted/correct outputs before launch, and §13.1's claim is aligned to exactly what the probes measure — the one sub-claim the frozen artifact cannot support (table-pedagogy USE on a real table: the artifact carries NO score table, §2.8) is weakened honestly and its correctness class is owned deterministically (three-task fixtures + rung 11-B) | §13 |
+| amendment 4 (ruling §6) | per-commit execution tightened: broad interpreter-owner sweeps run exactly TWICE locally (C1 structural move; C5 consolidated closure); C2–C4 run new owning tests + narrow legacy golden/compatibility slices; C6 runs only narrow post-Gate changed-surface checks; repository-wide regression is owned by the ONE exact-final-head PR CI; the inverted `test_impact_aware_framing_present` cells are REPLACED (superseded), not retained | §11.1-§11.6, §17 |
+| rendering-module structure (ruling §7) | NO 09c, NO pre-emptive split of `rendering.py`; coherent single responsibility > LOC; the ledger records the final responsibility inventory + LOC; clearly MIXED ownership emerging at implementation ⇒ STOP and disposition | §7 |
 
 ## 1. Mandate (frozen parent §15 / §16 09b — quoted obligations)
 
@@ -176,7 +197,7 @@ TIDMAD blocks); "C" = legacy/dead/contradictory (explicit disposition).
 |---|---|---|---|---|---|
 | `PER_MODEL_SYSTEM_PROMPT` (`result_interpretation_agent.py:117-199`) | constant; `{TASK_DESCRIPTION}` slot | framework hardcodes TIDMAD science | MIXED — split table §5.1 | LLM instruction | framework TEMPLATE in `agent/prompt_templates/interpretation/rendering.py`; B-parts → TIDMAD declaration |
 | `_build_per_model_system_prompt` (`:202-219`) | `InterpretationInput` | 04b `{TASK_DESCRIPTION}` substitution (`.replace`, `:213`) + flag-gated health-instruction append (`:217-218`) | A | deterministic assembler | rendering module (gains `task_blocks` splices in C2) |
-| `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` (`:222-239`) | constant | Step-08 generic health-evidence rules | A (one illustrative TIDMAD check-id example at `:234` — recorded residual, §19.2, NOT touched) | LLM instruction | rendering module |
+| `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` (`:222-239`) | constant | Step-08 generic health-evidence rules | A, except one illustrative TIDMAD check-id example at `:234` (`"output_diversity_blocking:n_unique_int8_values=1"`) — class B/C residue REPLACED in C2 with a framework-generic example (operator ruling §0.4 amendment 1) | LLM instruction | rendering module |
 | `_render_health_summary_section` (`:242-302`) | `ModelRunSummary`, `order` (keyword, 09a C3) | deterministic RoundHealth rendering; no task literals | A | deterministic renderer | rendering module |
 | `_build_per_model_prompt` (`:305-461`) | summary, description, advice, flag, `order` | deterministic user-prompt assembly; D1-name labels (`:338-341`); **`(baseline typically uses 4000)` `:355`**; presence-gated table sections `:375-387`; trajectory + gate labels `:390-431` | A except the `:355` parenthetical (B) | deterministic builder | rendering module |
 | `SYNTHESIS_SYSTEM_PROMPT` (`:468-550`) | constant; `{TASK_DESCRIPTION}` slot | framework hardcodes TIDMAD science (2nd copy of the pedagogy) | MIXED — split table §5.2 | LLM instruction | framework TEMPLATE; B-parts → TIDMAD declaration |
@@ -358,6 +379,23 @@ anchor):
   synthesis fires (2 types). Machine-local: the Gate harness declares the
   path requirement and SKIPS with a named reason when absent (CLAUDE.md
   portability rules).
+* **Probe-grounding facts (verified read-only at the anchor, §13):** the
+  artifact carries NO score table anywhere — `best_score_table` /
+  `formal_score_table` / `best_valid_score_table` are `null` on BOTH run
+  outputs, the wavenet24 cache `_stats.best_score_table` is `null`, and
+  the digest's `per_model_score_tables` is `{}` — so the frozen TIDMAD
+  Gate input contains ZERO per-file evidence. Scores: btcn
+  `best_denoising_score = -2.3322708898096955` vs wavenet24 cached
+  `-2.4310203852971433` — btcn is unambiguously better under
+  higher-is-better on NEGATIVE values (a magnitude-reader inverts this).
+  The carried prediction's metric string ("mean denoising_score over
+  validation files [4,5,6,7,8,9]") is `unrecognized` under 09a ⇒ the Gate
+  run's evaluation is `unevaluated` (live evidence for the §9 guard). The
+  proposal carries 2 `proposed_vocab_candidates` (each seen once) ⇒ 0
+  promotions ⇒ 0 dedup calls. A file-token regex over every carried prose
+  field (cache narrative fields, digest take-home, all 23 vocab entries)
+  finds ZERO file-index tokens — so ANY file-index designation in the Gate
+  outputs is fabricated, grounding probe P-A2.
 
 ### 2.9 Authorities consumed (all landed; none modified)
 
@@ -559,9 +597,17 @@ line is listed with before/after bytes).
   is optional; the 07b Q-07b-3 precedent adds the metric-identity line
   BESIDE them (§6.1) rather than renaming them. Scalar-only tasks never
   render the table/volume lines (presence-gated already).
-* `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` — generic Step-08 evidence rules;
-  its one illustrative TIDMAD check-id example (`:234`) is a recorded
-  residual (§19.2), untouched.
+* `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` — generic Step-08 evidence rules.
+  Its one illustrative TIDMAD check-id example (`:234`) does NOT stay: C2
+  replaces it with a framework-generic example drawn from EXISTING 08c
+  generic-check vocabulary —
+  `"sample_dispersion_floor_blocking:dispersion=0.0"` — preserving the
+  instruction's point (an exact signature string with its numbers) while
+  removing the last known task-specific check-id literal from the generic
+  interpretation prompt templates (operator ruling §0.4 amendment 1; a
+  declared C2 golden delta; Health verdict/action semantics untouched; the
+  example is NOT moved into TIDMAD blocks and no new task-specific example
+  is invented).
 * `DEDUP_SYSTEM_PROMPT` — generic vocabulary-curator protocol.
 * The compressed-model, discoveries, expert/human-advice, trajectory and
   gate-label rendering in the user-prompt builders — task-free evidence
@@ -624,6 +670,13 @@ configs/task_interpretation/tidmad.yaml   the TIDMAD science declaration (C2)
   only", parent §13a); rendering module = every prompt byte; declaration =
   every TIDMAD science byte; no `utils.py`, no second public node, no new
   private node module.
+* **No pre-emptive split; STOP on mixed ownership (operator ruling §0.4)**:
+  `rendering.py` is NOT split to hit a line target — coherent single
+  responsibility outranks LOC. The §22 ledger records its FINAL
+  responsibility inventory and LOC. If implementation reveals genuinely
+  MIXED semantic ownership inside it (not mere length), STOP and
+  disposition the boundary; otherwise the scheduled post-09b /
+  pre-Step-10 structural audit re-inspects it with real code in hand.
 * The node-public-boundary rule is unaffected (`agent/prompt_templates/…`
   is a framework package, not a node-private module — the tuner precedent);
   the banned-vocab / golden tests move their imports to the owning module
@@ -839,18 +892,26 @@ task-free FRAMEWORK TEMPLATES with the §4.1 section splice points; the
 builders take `blocks: InterpretationTaskBlocks | None` and render
 present sections under framework headers; the `(baseline typically uses
 4000)` parenthetical (`:355`-moved) deleted from the volume line (its
-sentence now lives in the declaration); `workflows/model_exploration.py`
+sentence now lives in the declaration); the
+`HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS` illustrative example replaced with
+the framework-generic `"sample_dispersion_floor_blocking:dispersion=0.0"`
+(§5.4 — ruling §0.4 amendment 1; instruction semantics unchanged);
+`workflows/model_exploration.py`
 (+ the node CLI `main()`) supply
 `task_blocks=load_interpretation_task_blocks()`; run() threads
 `inp.task_blocks` to the two system-prompt builders; goldens REGENERATED
 with every delta declared + attributed (per_model system ×2 variants,
-synthesis system, the affected user-prompt goldens for the volume line);
+synthesis system, the health-example line in the flag-ON system golden,
+the affected user-prompt goldens for the volume line);
 the 09a oracle regenerated (prompt shas — declared); banned-vocab test
 UPGRADED (§16 census item 1: framework templates must NOT contain the
-science tokens; the TIDMAD-ASSEMBLED prompts MUST — anti-vacuity
-inversion of `test_impact_aware_framing_present`). Must NOT change: JSON
+science tokens or the removed check-id literals; the TIDMAD-ASSEMBLED
+prompts MUST carry the migrated science — the
+`test_impact_aware_framing_present` cells are REPLACED by this ownership,
+not retained). Must NOT change: JSON
 output field sets; labels; call labels/count; any deterministic digest
-field; `configs/task_config.yaml`. Depends on C1.
+field; Health verdict/action semantics; `configs/task_config.yaml`.
+Depends on C1.
 
 **Implementation plan.**
 - [ ] Re-read the two constants + builders at the head; produce the
@@ -862,11 +923,15 @@ field; `configs/task_config.yaml`. Depends on C1.
       adapter + default constant (fail-closed load).
 - [ ] Framework templates + splice rendering (absent ⇒ no header, no
       bytes); builders' signatures gain `blocks` keyword.
+- [ ] Replace the health-instruction example with the framework-generic
+      signature example (one line; declared golden delta; no other byte of
+      that block changes).
 - [ ] Workflow + CLI supply the adapter value; pr3/protocol callers
       unchanged (`None`).
 - [ ] Regenerate goldens + oracle with the declared-delta table; UPGRADE
       the banned-vocab suite (framework-negative + assembled-positive
-      halves, planted offenders both ways).
+      halves, planted offenders both ways; the impact-framing cells
+      retired as superseded).
 
 **Validation plan.**
 - [ ] Unit: TIDMAD-assembled system prompts contain every migrated science
@@ -878,11 +943,14 @@ field; `configs/task_config.yaml`. Depends on C1.
       value round-trips `model_validate(model_dump())`.
 - [ ] Unit (04b regression): `{TASK_DESCRIPTION}` substitution unchanged
       (`test_interpreter_prompt_task_config.py` green with moved imports).
-- [ ] Census (§16 items 1, 3, 4, 6): framework rendering module free of the
-      enumerated science tokens (planted offender RED); no
-      `tidmad|pets|davis` token in interpreter/renderer code; the blocks
-      field set == the four keys; exactly ONE adapter reads the
-      declaration path (AST census over production modules).
+- [ ] Census (§16 items 1, 3, 3b, 4, 6): framework rendering module free
+      of the enumerated science tokens AND the removed check-id literals
+      (planted offender RED); GENERIC surfaces free of task-name tokens
+      with the ONE `task_blocks.py` constant exemption; the 3b AST
+      confinement guard green with BOTH planted offenders RED (a second
+      task constant; an `if "tidmad" in path:` branch); the blocks field
+      set == the four keys; exactly ONE adapter reads the declaration path
+      (AST census over production modules).
 - [ ] Backward-compat: the oracle's declared delta = system-prompt shas
       ONLY (digest byte-identical — blocks change no deterministic field);
       dispatcher labels/call counts unchanged; pr3 preflight green
@@ -906,7 +974,9 @@ recorded in the accounting table (byte discipline); `.replace`-era JSON
 braces — templates keep `.replace`/assembly, never `str.format`.
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/test_prompt_banned_vocabulary.py tests/unit/agent/schemas tests/unit/workflows/test_model_exploration.py tests/unit/scripts/test_pr3_l2p_preflight.py -q > /tmp/09b_c2.log 2>&1; rc=$?`
+- [ ] Narrow owner + slice set (ruling §0.4 amendment 4 — NOT the whole
+      interpreter directory):
+      `.venv/bin/python -m pytest <new C2 owner test> tests/unit/agent/result_interpretation_agent/test_step00_prompt_goldens.py tests/unit/agent/result_interpretation_agent/test_health_prompt_parity.py tests/unit/agent/result_interpretation_agent/test_health_prompt_rendering.py tests/unit/agent/result_interpretation_agent/test_interpreter_prompt_task_config.py tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py tests/unit/agent/test_prompt_banned_vocabulary.py tests/unit/agent/schemas tests/unit/workflows/test_model_exploration.py tests/unit/scripts/test_pr3_l2p_preflight.py -q > /tmp/09b_c2.log 2>&1; rc=$?`
 - [ ] `ruff check` + `ruff format --check`.
 
 **Commit boundary.** Ownership migration only; reviewable as "did the
@@ -979,7 +1049,8 @@ render no identity line (named absence covered by the run-level line);
 scalar-only summaries hit zero per-file sections (existing presence gates).
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/test_prompt_banned_vocabulary.py -q > /tmp/09b_c3.log 2>&1; rc=$?`
+- [ ] Narrow owner + slice set (ruling §0.4 amendment 4):
+      `.venv/bin/python -m pytest <new C3 renderer tests> tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py tests/unit/agent/result_interpretation_agent/test_step00_prompt_goldens.py tests/unit/agent/result_interpretation_agent/test_health_prompt_parity.py tests/unit/agent/result_interpretation_agent/test_health_prompt_rendering.py tests/unit/agent/test_prompt_banned_vocabulary.py -q > /tmp/09b_c3.log 2>&1; rc=$?`
 - [ ] `ruff check` + `ruff format --check`.
 
 **Commit boundary.** Additive rendering only; reviewable as "does each
@@ -1065,7 +1136,10 @@ entirely (oldest digests via the proposer path) ⇒ the legacy-only shape
 (`.get` defaults, tested).
 
 **Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/agent/ml_model_proposal_agent tests/unit/agent/test_prompt_banned_vocabulary.py -q > /tmp/09b_c4.log 2>&1; rc=$?`
+- [ ] Narrow owner + slice set (ruling §0.4 amendment 4; the proposer
+      directory runs WHOLE because the proposer is this commit's changed
+      authority — that is its owner sweep, not a broad repeat):
+      `.venv/bin/python -m pytest <new C4 tests> tests/unit/agent/ml_model_proposal_agent tests/unit/agent/result_interpretation_agent/test_step09a_c1a_differential_oracle.py tests/unit/agent/result_interpretation_agent/test_vocab_feedback.py tests/unit/agent/result_interpretation_agent/test_prediction_evaluation_join.py tests/unit/agent/result_interpretation_agent/test_step00_prompt_goldens.py tests/unit/agent/test_prompt_banned_vocabulary.py -q > /tmp/09b_c4.log 2>&1; rc=$?`
 - [ ] `ruff check` + `ruff format --check`.
 
 **Commit boundary.** One evidence family across its two consumer nodes;
@@ -1155,19 +1229,31 @@ validation-economy rules). Depends on C5.
 
 **Implementation plan.**
 - [ ] Re-read the §13 spec + the gate standard (`:9-29`, `:127-148`,
-      `:444-454`) immediately before launch (roadmap §17.0 item 4).
+      `:444-454`) immediately before launch (roadmap §17.0 item 4);
+      confirm the DAVIS fixture names/values (§13.2-B dominance) in the
+      spec confirmation.
 - [ ] Build the two Gate inputs (§13.2); run the PSEUDO dry-run; commit
       the manifest (labels, counts) as the harness's pseudo expectation.
+- [ ] Rehearse the behavioural probes against the planted
+      inverted/correct/fabricated synthetic outputs (§13.4
+      probe-of-the-probe) — all REDs observed and recorded BEFORE launch.
 - [ ] Launch real mode ONCE per approved spec; persist prompts, responses,
       digests, manifest, config, cost.
+- [ ] Render the Gate-A digest through the C4 track-record renderer + the
+      pipeline summary builder (deterministic, zero calls) and persist the
+      rendered section (the §13.3 proposer leg).
 - [ ] Decide PASS/FAIL/INCONCLUSIVE from artifacts (§13.4), never exit
       codes; record in §22 + the PR body.
 
 **Validation plan.**
-- [ ] The Gate itself (§13.4 criteria).
-- [ ] Terminal targeted suite at the final executable head (the
-      interpreter + proposer + examples + workflows directories touched by
-      09b) — counts + wall time recorded; NO local full suite.
+- [ ] The Gate itself (§13.4 criteria), preceded by the mandatory
+      probe-of-the-probe rehearsal.
+- [ ] Post-Gate: ONLY narrow changed-surface checks (ruling §0.4
+      amendment 4) — the harness's pseudo mode + `ruff check` /
+      `ruff format --check` on the files the harness/docs commit touched;
+      NO repeat of the C5 consolidated closure, NO broad local sweep, NO
+      local full suite. Repository-wide regression is owned by the ONE
+      exact-final-head PR CI.
 
 **Acceptance criteria.**
 - [ ] Gate 1 = PASS per §13.4 with persisted evidence at the named
@@ -1210,17 +1296,33 @@ Config: `:16` "real-LLM Gate config = openai_tiered_pro.json" (binding,
 (real LLM cost)." The 4-GiB/advice interlock (`:33-83`) is inapplicable —
 no training subprocess exists in this Gate (LLM-only; no GPU).
 
-**13.1 Claim (parent §17, verbatim obligations).** With the re-owned
-prompts, a REAL LLM produces schema-valid Phase-1/Phase-2 interpretation
-that (A) on a REAL preserved TIDMAD interpretation input still carries and
-uses the task-owned TIDMAD science (no prompt-ownership regression), and
-(B) on the DAVIS-shaped lower-is-better scalar-only fixture uses correct
-direction words, renders scalar-only evidence honestly, renders supplied
-secondaries in their own directions with `mae` a named absence, and leaks
-no denoising/Impact_Score/PSD assumption. Deterministic tests cannot prove
-the LLM-behaviour half (does the model still produce valid, science-using,
-non-hallucinating structured output under the recomposed prompts) — that
-is the entire residual claim, and only it.
+**13.1 Claim (aligned to exactly what §13.4 measures — ruling §0.4
+amendment 3).** With the re-owned prompts, a REAL LLM produces
+schema-valid, non-degraded Phase-1/Phase-2 interpretation such that:
+
+* **(A — TIDMAD, real preserved input)** the task-owned science reaches
+  the assembled prompts (construction checks), the structured outputs
+  designate the correct best model in TIDMAD's NEGATIVE-score
+  higher-is-better regime (btcn −2.3323 over wavenet24 −2.4310 — the sign
+  regime where a magnitude-reader inverts; probe P-A1), and the model
+  fabricates NO per-file evidence on an input that contains none (probe
+  P-A2). **Honest weakening (ruling §4 fallback clause)**: "uses the
+  migrated table pedagogy on a real per-file table" is NOT claimable on
+  this artifact — it carries no score table anywhere (§2.8) — and that
+  correctness class is owned deterministically by the three-task rendering
+  fixtures and rung 11-B, not by this Gate.
+* **(B — DAVIS, L1 two-model fixture)** the structured outputs designate
+  the strictly-dominant lower-mse model as best — lower-is-better actually
+  USED, not merely shown (probe P-B1) — with no TIDMAD/per-file leakage in
+  either prompts or outputs (probe P-B2); the correct direction words,
+  secondary lines (`psnr` higher scored; `mae` a named absence) and
+  scalar-only honesty in the PROMPTS are construction checks whose
+  deterministic twins live in C5.
+
+The residual real-LLM behaviour — valid structured output, correct
+best-model designation under both direction/sign regimes, and
+non-fabrication under recomposed prompts — is what deterministic tests
+cannot prove, and it is exactly what P-A1/P-A2/P-B1/P-B2 gate.
 
 **13.2 Frozen inputs.**
 
@@ -1237,11 +1339,21 @@ is the entire residual claim, and only it.
   `metric_result.direction/metric_id` must AGREE with the stamped spec or
   the input contract refuses (§2.8) — the fail-closed clause stays live,
   Q-09b-2. Flag state mirrors the artifact's run.
-* **B — DAVIS (L1, fixture-shaped)**: TWO regression-model summaries
-  (model 1 = the 09a C7 pack fixture's tuning output through the real
-  builder; model 2 = a second fixture-authored DAVIS-shaped summary in the
-  harness) — two models so Phase-2 synthesis FIRES (§0.3-D2a); `mse` lower
-  primary; secondaries `psnr` scored + `mae` declared-unavailable;
+* **B — DAVIS (L1, fixture-shaped, STRICTLY DOMINANCE-ORDERED)**: TWO
+  regression-model summaries (model 1 = the 09a C7 pack fixture's tuning
+  output through the real builder; model 2 = a second fixture-authored
+  DAVIS-shaped summary in the harness) — two models so Phase-2 synthesis
+  FIRES (§0.3-D2a). The fixture is constructed so model 1 is
+  UNAMBIGUOUSLY better under `mse` lower: every model-1 round mse is
+  strictly lower than every model-2 round mse (total separation, e.g.
+  0.0172→0.0170 vs 0.0185→0.0190 — model 2's trajectory also WORSENS,
+  so a direction-blind reading calls the wrong model improving), and
+  model 1 also has strictly fewer parameters (dominance on the efficiency
+  axis too, so ANY best-designation of model 2 is an inversion regardless
+  of which axis the LLM reasons on). The two model names are distinct
+  tokens chosen for the P-B1 matcher; exact names + values frozen in the
+  C6 spec confirmation from the pack fixture. `mse` lower primary;
+  secondaries `psnr` scored + `mae` declared-unavailable;
   dispersion-shaped RoundHealth, flag ON; a DAVIS-shaped
   `previous_proposal` predicting `mse` (exercises lower-direction band
   wording in discoveries); empty carried vocab (0 promotions ⇒ 0 dedup);
@@ -1283,23 +1395,66 @@ independent behavioural class.
 
 **13.4 PASS / FAIL / INCONCLUSIVE (from artifacts, never exit codes).**
 
-* PASS requires ALL: (1) real label sequence == the committed dry-run
-  manifest; (2) both digests validate as `InterpretationOutput` with
-  `is_degraded == False`; (3) prompt-side hard probes on the persisted
-  transcripts — A: both system prompts contain the migrated science
-  markers (`Impact_Score`, `Linear_Weight`, `Log-of-Mean`) and the
-  identity line says "higher is better"; B: prompts contain "lower is
-  better", the `psnr` (higher)/`mae` named-absence secondary lines and the
-  diagnosis lines, and contain NONE of
-  `Impact_Score|Linear_Weight|Log-of-Mean|PSD|per-file score table|file_index`;
-  (4) output-side hard probes — A: per-model + synthesis JSON parse with
-  the required fields, non-empty `take_home_message`; B: the digest's
-  `key_findings`/`bottlenecks`/`take_home_message` contain no
-  `Impact_Score`/`file_index`/`file <N>` token (per-file-lever
-  hallucination screen). A qualitative reading of both outputs is RECORDED
-  as evidence but does not gate PASS.
-* FAIL: any hard probe fails, a call errors past the bridge envelope with
-  the framework at fault, or the label sequence deviates.
+PASS requires ALL of the following, each read from the persisted evidence:
+
+* **Framework checks**: (1) real label sequence == the committed dry-run
+  manifest (call counts are input-deterministic, §2.3 — deviation is a
+  framework regression); (2) both digests validate as
+  `InterpretationOutput` with `is_degraded == False`.
+* **Construction checks (prompt-side, on the persisted transcripts)**:
+  (3) A: both assembled system prompts contain the migrated science
+  markers (`Impact_Score`, `Linear_Weight`, `Log-of-Mean` — block-sourced)
+  and the identity line says "higher is better"; B: prompts contain
+  "lower is better", the `psnr` (higher) / `mae` named-absence secondary
+  lines and the diagnosis lines, and contain NONE of
+  `Impact_Score|Linear_Weight|Log-of-Mean|PSD|per-file score table|file_index`.
+  These verify prompt CONSTRUCTION on the real inputs (their deterministic
+  twins live in C2/C5) — they support the Gate but are not its residual
+  claim.
+* **Behavioural probes (output-side, hard — the residual claim; ruling
+  §0.4 amendment 3)**:
+  * **P-A1 (TIDMAD designation, negative-score higher regime)**: the
+    shared deterministic designation matcher over the synthesis-derived
+    LLM fields (`take_home_message`, `key_findings`,
+    `efficiency_comparison`): every sentence that designates a best/
+    better/leading model BY NAME (hand-listed superlative set; sentence =
+    newline/period split) must designate `bidirectional_gated_tcn`
+    (−2.3323) and NEVER `wavenet24_fullspectrum_ce_coldstart` (−2.4310);
+    at least ONE designating sentence must exist (the synthesis schema
+    REQUIRES cross-model comparison referencing actual scores — silence
+    means the instruction was not followed).
+  * **P-A2 (TIDMAD non-fabrication)**: the btcn per-model response's
+    `per_file_analysis` and the synthesis `per_file_comparison` contain NO
+    file-index designation (regex `file[\s_\-]*(?:index)?[\s#]*\d+`,
+    case-insensitive) — the frozen input contains ZERO per-file evidence
+    and ZERO file-index tokens in any carried prose (§2.8), so any file
+    citation is fabricated.
+  * **P-B1 (DAVIS designation, lower-is-better USED)**: the same matcher
+    over the same three fields: every best-designating sentence names the
+    strictly-dominant lower-mse model and NEVER the dominated one; at
+    least ONE designating sentence must exist (the `efficiency_comparison`
+    instruction mandates identifying the best architecture, and the
+    dominance construction makes any dominated-model designation an
+    unambiguous inversion on either axis).
+  * **P-B2 (DAVIS output no-leakage)**: the digest's LLM-authored fields
+    (`key_findings`, `bottlenecks`, `take_home_message`,
+    `per_file_comparison`, `efficiency_comparison`) contain no
+    `Impact_Score` / `file_index` / `file <N>` token (per-file-lever
+    hallucination screen on a scalar-only task).
+  * **Probe-of-the-probe (pre-launch, mandatory)**: the matcher and both
+    regex probes are rehearsed against planted synthetic outputs — an
+    INVERTED designation (RED), a CORRECT designation (GREEN), a
+    fabricated file citation (RED) — committed with the harness, so the
+    probes are proven to bite before any real call is spent. No brittle
+    free-text exact-phrase gating; the model is never required to repeat
+    a specific token (e.g. "Impact_Score") to pass.
+
+A qualitative reading of both outputs is RECORDED as evidence but gates
+nothing.
+
+* FAIL: any hard probe or framework/construction check fails, a call
+  errors past the bridge envelope with the framework at fault, or the
+  label sequence deviates.
 * INCONCLUSIVE: provider outage / quota / infrastructure failure before
   evidence lands — relaunch per the same frozen spec.
 * Evidence destination:
@@ -1348,16 +1503,22 @@ the same typed value to the same `InterpretationInput.task_blocks` field —
 met)**; unknown/missing semantics fail closed (malformed declaration
 refused; spec-less score-bearing inputs already refused by 09a) or render
 as NAMED absences (absent blocks/sections/secondaries/diagnosis); no id
-spelling is ever parsed for meaning. Verdict: **PASS** (every §0.2 zero
-holds by construction + census).
+spelling is ever parsed for meaning. The ONE task-identity occurrence in
+the whole interpreter surface is the self-labelled adapter default-path
+constant, and census 3b proves it is a constant, not a branch: it
+participates in no conditional, no dispatch, no inference, and a second
+task constant/table/branch is RED (ruling §0.4 amendment 2 — the census
+and the parent-approved adapter no longer contradict). Verdict: **PASS**
+(every §0.2 zero holds by construction + census).
 
 ## 16. Structural census plan (parent §18, instantiated — each with a planted offender)
 
 | # | census | owner commit | mechanism |
 |---|---|---|---|
-| 1 | framework interpreter prompt constants/renderers contain no TIDMAD science tokens (enumerated: `Log-of-Mean`, `Impact_Score`, `Linear_Weight`, `PSD`, the 4000-volume anchor, `segmentation_size`; "denoising" stays sanctioned as D1 field-name vocabulary per the existing suite's doctrine) — AND the assembled TIDMAD prompts DO contain the migrated set (anti-vacuity inversion of `test_impact_aware_framing_present`) | C2 (+C4 token) | UPGRADED `test_prompt_banned_vocabulary.py` halves; planted offenders both directions |
+| 1 | framework interpreter prompt constants/renderers contain no TIDMAD science tokens (enumerated: `Log-of-Mean`, `Impact_Score`, `Linear_Weight`, `PSD`, the 4000-volume anchor, `segmentation_size`, and the TIDMAD check-id literals removed by amendment 1: `output_diversity_blocking`, `n_unique_int8_values`; "denoising" stays sanctioned as D1 field-name vocabulary per the existing suite's doctrine) — AND the assembled TIDMAD prompts DO contain the migrated set (the `test_impact_aware_framing_present` cells are REPLACED by this framework-negative / TIDMAD-assembled-positive ownership, not retained) | C2 (+C4 token) | UPGRADED `test_prompt_banned_vocabulary.py` halves; planted offenders both directions |
 | 2 | direction interpreted only via `MetricOrder` across the interpreter surface INCLUDING `agent/prompt_templates/interpretation/` | C3/C5 re-run | the 09a C3 AST census extended to the new package |
-| 3 | no `tidmad`/`pets`/`davis` token and no metric-id/check-id parsing in interpreter/renderer code | C2 | AST/token census, planted offender |
+| 3 | GENERIC surfaces (the node package, `rendering.py`, the interpretation schemas) carry ZERO task-name tokens (`tidmad`/`pets`/`davis`), zero task-id parsing, zero task-specific semantic dispatch; the ONE allowed task-token occurrence in the interpreter surface is the self-labelled default-path constant in `task_blocks.py` (the parent-approved bounded adapter — the census must not reject the approved implementation, and the exception is never satisfied by lexical tricks) | C2 | token census with the single named exemption, planted offender in a generic surface |
+| 3b | the allowed occurrence is CONFINED: AST guard over `task_blocks.py` proving the task token appears only in ONE module-level string-constant assignment; that constant is referenced by no `If`/`Compare`/`Match`/mapping node and participates in no dispatch, task-id inference or semantic selection; a SECOND task-token constant, a task table, or a branch on the token turns the guard RED | C2 | executable AST/structural guard; two planted offenders (second constant; `if "tidmad" in path:` branch) |
 | 4 | task-block section keys == the fixed four | C2 | schema field-list assertion |
 | 5 | digest consumers unchanged — no production code branches on the 09b-touched fields to steer workflow behaviour | C5 | grep/AST census over `workflows/ core/ nodes/` (reachability pin) |
 | 6 | the TIDMAD declaration is read by exactly ONE adapter; the interpreter imports no task-file discovery | C2 | production-module AST census of the path constant + `yaml` reads |
@@ -1385,12 +1546,26 @@ Explicitly NOT added: no second golden family duplicating the oracle; no
 integration test in CI (the C6 harness is manual, ledger-recorded); no
 per-token × per-prompt assertion matrices (the existing single-property
 scan pattern is kept); no full-suite runs (ONE exact-final-head PR CI).
+
+**Per-commit execution principle (FROZEN — ruling §0.4 amendment 4):** the
+broad interpreter-owner sweep runs locally exactly TWICE — C1 (the whole
+prompt surface physically moves, so the move's blast radius justifies it)
+and C5 (the ONE consolidated deterministic closure: three-task rendering,
+rungs, censuses, interpreter + examples compatibility). C2–C4 run their
+NEW owning tests plus the narrow legacy golden/compatibility slices whose
+failure class each commit can affect (commands frozen in §11.2-§11.4; the
+C4 proposer directory is that commit's changed-authority owner sweep, not
+a broad repeat). C6 runs only narrow post-Gate changed-surface checks.
+Repository-wide regression = the ONE exact-final-head formal PR CI; no
+local full suite; no manual CI dispatch.
+
 Runtime impact estimate, recorded now and measured in §22: ≈+90-130 unit
 cases (renderers ≈45, blocks/adapter ≈20, three-task+rungs ≈35, proposer
-upgrades ≈10, censuses ≈10) and 6-8 regenerated golden files ⇒ roughly
-+60-120 s on the interpreter directory's current ≈420-test/≈200-590 s
-baseline; the banned-vocab restructuring retires the inverted
-`test_impact_aware_framing_present` cells rather than stacking new ones.
+upgrades ≈10, censuses ≈10) and 6-8 regenerated golden files. Superseded
+cells are RETIRED, not stacked: the inverted
+`test_impact_aware_framing_present` cells are REPLACED by the C2
+framework-negative / TIDMAD-assembled-positive ownership; no independent
+failure class is deleted to buy count.
 
 ## 18. Risks
 
@@ -1440,7 +1615,7 @@ a blocker.)
 | scale-naive `boldness` | Step 10+ (unchanged) |
 | the TIDMAD interpretation declaration + adapter (created HERE, self-labelled compatibility packaging) + the tuner's regime-A metric binding | Step 12 |
 | D1/cache display vocabulary (`per_file_analysis`, `per_file_comparison`, "Worst denoising score" labels, `training_psd_segments` schema names) — rendered-beside-identity per the 07b precedent, renaming is not rendering work | post-Step-12 vocabulary cleanup, if ever |
-| `HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS`'s illustrative TIDMAD check-id example (`:234`) | whenever that block next changes semantically |
+| ~~`HEALTH_FEEDBACK_SYSTEM_INSTRUCTIONS`'s illustrative TIDMAD check-id example~~ — **FIXED in 09b C2** (operator ruling §0.4 amendment 1: replaced with a framework-generic example; no known task-specific check-id literal remains in the generic interpretation prompt templates after 09b) | 09b C2 |
 
 ### 19.3 C — later cleanup + hotspots recorded for the post-09b repo-wide audit
 
@@ -1474,19 +1649,120 @@ key on typed evidence and universal direction words. **Does Step 12 merely
 SUPPLY `InterpretationTaskBlocks`? YES. Would it need to replace a Step-09b
 public contract? NO.**
 
-## 21. Open operator questions
+## 21. Operator questions — ALL RESOLVED (final ruling 2026-08-19)
 
-| id | question | recommended default |
+| id | question (as posed at rev 1) | RULING |
 |---|---|---|
-| **Q-09b-1** | Confirm the proposer track-record scope (§0.3-D3): C4 edits BOTH proposer reader sites (legacy renderer section + pipeline whitelist, bounded to the prediction family) per the 09a closeout assignment ("owned by 09b's rendering surface"), despite the parent §15 surface list not naming the proposer. | **YES — include, bounded as specified** (the alternative — deferring to Step 10 — leaves the production pipeline rendering v2 fractions over a v1 denominator for the whole of Step 10's runway) |
-| **Q-09b-2** | Confirm the Gate-1 input construction: the harness stamps `metric_spec` on the PRE-09a preserved outputs via the Q-09a-7 fixture-stamping precedent (`tests/` module, `shipped_spec()`, identity-agreement clause left live), rather than re-producing the artifact under 09a (hours of GPU) or weakening Q-09a-6. | **YES — stamp via the precedent** |
-| **Q-09b-3** | Confirm the D1 golden reading (§0.3-D1): C1 byte-exact; C2–C4 regenerate goldens with declared+attributed deltas under the parent's "semantically identical" rule — the roadmap's "golden-equal for TIDMAD" is satisfied at C1 and superseded thereafter by the frozen parent. | **YES — parent governs** |
+| **Q-09b-1** | proposer track-record scope (§0.3-D3): does C4 edit BOTH proposer reader sites per the 09a closeout assignment? | **YES — RESOLVED**: C4 owns exactly the legacy track-record section + the pipeline interpretation-summary whitelist and NOTHING else in proposer semantics; prediction-authoring grammar, `PROPOSAL_REASONING_PROMPT`/`PROPOSAL_COMMIT_PROMPT` task science and proposer policy remain later debt (§0.4) |
+| **Q-09b-2** | Gate-1 input construction: stamp `metric_spec` on the PRE-09a preserved outputs via the Q-09a-7 fixture-stamping precedent? | **YES — RESOLVED**: test-fixture construction; production outputs unmodified; no production derivation site; record-borne identity must still agree; disagreement still fails closed; no GPU re-production (§0.4) |
+| **Q-09b-3** | golden reading (§0.3-D1): C1 byte-exact, C2–C4 declared+attributed deltas under the frozen parent? | **YES — RESOLVED**: the frozen parent governs; every changed golden carries its owning rule + before/after delta + same-commit regeneration; an undeclared delta is a STOP; no full-byte-identity claim after C1 (§0.4) |
 
-## 22. Live implementation ledger (scaffold — empty at DRAFT)
+Open operator questions: **0**.
+
+## 21a. Final adversarial consistency pass and freeze record (operator ruling §8 — 22 attacks)
+
+Each attack re-read against the FULL amended design at freeze; verdicts:
+PASS (the design already holds), CORRECTED (fixed by a §0.4 amendment), or
+FINDING (recorded with owner).
+
+1. *TIDMAD science remaining in generic framework prompts?* PASS after
+   C2 — census 1 (enumerated science tokens + the removed check-id
+   literals) with planted offenders; the last known task-specific
+   check-id literal is removed by amendment 1 (CORRECTED — rev 1 had kept
+   it as a residual).
+2. *Task science moved into a central framework task table instead of
+   blocks?* PASS — one task-owned YAML with path-identity (08b doctrine);
+   `task_config.yaml` untouched; census 6.
+3. *Any task-name semantic branch?* PASS — census 3 (generic surfaces
+   zero task tokens) + 3b (no `If`/`Compare`/`Match`/mapping touches the
+   one constant).
+4. *The one bounded adapter becoming a hidden central task catalog?*
+   PASS (CORRECTED wording by amendment 2) — census 3b turns RED on a
+   second task constant, a task table, or a branch; the constant resolves
+   a default path and nothing else.
+5. *Task-block keys growing per task?* PASS — census 4 pins the four
+   fields; growth is a framework decision (parent §9-F).
+6. *Renderers re-deriving metric / diagnosis / Health semantics?* PASS —
+   typed authorities in; the diagnosis line is IMPORTED from the 07b
+   authority; direction words only via `MetricOrder` (census 2); health
+   rendering retained verbatim.
+7. *Secondary evidence reaching ordering?* PASS — the 09a
+   secondaries-never-ordered census re-runs plus the C3 behavioural
+   inertness probe.
+8. *Scalar-only Pets/DAVIS receiving per-file instructions?* PASS — the
+   pedagogy is block-owned (absent for both), table sections are
+   presence-gated, the framework field instruction carries the
+   named-absence rule; C5 fixtures + Gate P-B2/P-A2.
+9. *Lower-is-better DAVIS rendered or interpreted backwards?* PASS —
+   rendering owned by C5 fixtures + rung 11-A (deterministic);
+   INTERPRETATION owned by Gate P-B1 on the strictly-dominant fixture
+   (CORRECTED — rev 1 had only prompt-presence checks).
+10. *TIDMAD v1/v2 prediction history pooled or mislabeled?* PASS — the §9
+    four-shape contract with hand-owned literals; C4 mutations (one-N
+    pooling RED; v2-label-on-legacy RED); version ids only via the schema
+    constants (census 8).
+11. *`unevaluated` rendered as partial?* PASS — structurally in neither
+    pool (09a); the §9 guard test; the Gate-A input's own prediction is
+    genuinely `unevaluated` (the artifact's unparseable metric string,
+    §2.8) — live evidence at the Gate.
+12. *Proposer C4 edit leaking beyond the two approved reader surfaces?*
+    PASS — scope pins: pb3 goldens byte-identical tripwire; the grep
+    census (the prediction-field reader set stays exactly the renderer
+    delegation + the whitelist); movement = STOP.
+13. *Proposer prediction-AUTHORING semantics entering 09b?* PASS — §0.2
+    exclusion + §19.2 row (Step 10); Q-09b-1 ruling restates it.
+14. *Gate-1 PASS criteria proving only prompt construction?* CORRECTED by
+    amendment 3 — P-A1/P-A2/P-B1/P-B2 are hard OUTPUT-side behavioural
+    probes with pre-launch planted-output rehearsal; construction checks
+    remain but no longer carry the claim; the unclaimable table-USE clause
+    is weakened honestly in §13.1 with its deterministic owner named.
+15. *Gate call count drifting from the input-deterministic five-call
+    manifest?* PASS — §2.3 (no LLM response feeds call-count decisions);
+    the committed dry-run manifest; deviation = FAIL; `list_merge = 0`
+    and `dedup = 0` frozen for the inputs (2 carried candidates, each
+    seen once — §2.8).
+16. *Production importing `examples/`?* PASS — pack-governance census
+    re-runs at C5; the Gate harness lives under `tests/`.
+17. *Another `derive_tidmad_metric*` site appearing?* PASS — the 09a
+    production census re-runs at C6; the harness stamps via
+    `tests.helpers.metric_fixtures` (Q-09b-2).
+18. *A new interpreter-specific plugin/registry/loader ecosystem?* PASS —
+    one adapter function + one constant; no discovery, no registry; the
+    interpreter never reads task files.
+19. *`rendering.py` acquiring mixed ownership rather than one coherent
+    responsibility?* GUARDED — single responsibility (prompt
+    construction); the ledger records the final inventory + LOC; mixed
+    ownership at implementation = STOP (§7, ruling §7); re-inspected by
+    the scheduled post-09b audit.
+20. *Duplicated tests proving the same failure class at multiple layers?*
+    CORRECTED by amendment 4 — broad sweep exactly twice (C1/C5);
+    C2–C4 narrow owner+slice commands frozen; superseded
+    `test_impact_aware_framing_present` cells REPLACED; no independent
+    failure class deleted.
+21. *Step-10 secondary/evaluation/resume work leaking into 09b?* PASS —
+    Q-09-7 pins re-run (no evaluator/loader/binding/persistence/
+    transport); the whitelist additions surface PREDICTION fields the
+    protocol already transports; resume untouched.
+22. *Step 12 needing to REPLACE rather than SUPPLY the
+    `InterpretationTaskBlocks` contract?* PASS — §20: the composition
+    root supplies the same typed value; required answer NO, met.
+
+**Freeze record.** Q-09b-1..3 = YES, RESOLVED (§0.4); strong-extensibility
+verdict PASS (§15); A blockers NONE (§19.1); implementation shape = ONE
+09b child PR, C1→C2→C3→C4→C5→C6 (§11); Gate 1 REQUIRED (one bounded
+five-call launch, §13), Gate 2 NOT REQUIRED (§14); the four ruling
+amendments applied (§0.4); per-commit validation economy frozen (§17);
+the repo-wide structural/test-topology audit remains scheduled AFTER 09b
+merge / BEFORE Step 10 and is NOT performed here (§19.3 records its
+inputs). Zero `SOURCE-INSPECTION REQUIRED` markers; zero unresolved
+`Q-09b-*`; zero material contradictions; every implementation box `[ ]`;
+the §22 ledger empty. **Implementation has NOT started.**
+
+## 22. Live implementation ledger (scaffold — empty at REVISION 2 — FROZEN)
 
 *(filled per commit during implementation; every §11 box is `[ ]` at
-draft/freeze; nothing below may be written before the corresponding work
-ran, and every entry carries test counts, wall time and log paths)*
+freeze; nothing below may be written before the corresponding work ran,
+and every entry carries test counts, wall time and log paths)*
 
 ### 22.0 Implementation-context provenance
 *(branch, base SHA, design-confirmation record — at implementation start)*

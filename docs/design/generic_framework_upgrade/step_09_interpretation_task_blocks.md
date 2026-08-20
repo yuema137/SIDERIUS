@@ -8,8 +8,11 @@ without a new material contradiction).**
 
 **IMPLEMENTATION STATUS: 09a COMPLETE / MERGED (2026-08-19) — PR #238,
 squash `4cf38dec0934cf22c59c80cc69711d7c2bd0401b`, exact-head CI 32313798097
-SUCCESS on `9d85f67b`. 09b is NEXT and NOT IMPLEMENTED (its child design is
-not yet written).** The 09a evidence, ledger and findings live in
+SUCCESS on `9d85f67b`. 09b is NEXT and NOT IMPLEMENTED; its child design
+(`step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`)
+is REVISION 2 — FROZEN (operator final ruling 2026-08-19: approved with
+four minor final amendments; Q-09b-1..3 all RESOLVED = YES).** The 09a
+evidence, ledger and findings live in
 `step_09_interpretation_task_blocks/pr_09a_interpreter_evidence_ordering.md`
 §10 (104 `[x]` / 0 `[ ]`). Nothing in this parent's architecture changed
 during 09a implementation.
@@ -119,8 +122,10 @@ canonical path (Q-09a-1 = A narrow), exact per-field v1/v2 spellings in
 the child §3.4 (Q-09a-2); (c) §15 09a surfaces + §19 rows updated
 accordingly. The 09a child design (`step_09_interpretation_task_blocks/
 pr_09a_interpreter_evidence_ordering.md`) is **REVISION 2 — FROZEN**
-(2026-08-19); 09b's child design is not yet written; Step 09
-implementation has NOT started.
+(2026-08-19) and MERGED; the 09b child design
+(`step_09_interpretation_task_blocks/pr_09b_interpretation_prompts_task_blocks.md`)
+is **REVISION 2 — FROZEN** (2026-08-19); 09b implementation has NOT
+started.
 
 ## 1. Step-09 mandate (roadmap, verbatim obligations)
 
