@@ -2,13 +2,27 @@
 
 ## 0. Status
 
-**REVISION 3 — FROZEN. OPERATOR APPROVED (2026-08-20).
-IMPLEMENTATION IN PROGRESS — see the live ledger in §19.**
+**REVISION 3 — FROZEN. IMPLEMENTED. MERGED 2026-08-20.
+CONTEXT CLOSED.**
 
-Implementation branch `step10-p4-health-evidence-declaration-migration-impl`,
-cut from this document's freeze commit `d44f6f6a`. The frozen semantics below
-are NOT re-litigated during implementation; §19 records what was built against
-them.
+| field | value |
+|---|---|
+| PR | **#243** (squash) |
+| final executable head | `d57d2482` |
+| final PR head | `d73e39e3` |
+| exact-head CI | **32426702255 — SUCCESS** (lint · ruff-format · pyright · 11,072 passed / 32 skipped / 0 failed, read from the log) |
+| squash SHA | **`79833db8`** |
+| resulting `origin/master` | `79833db8` — verified **byte-identical** to the validated head |
+| independent final review | **PASS**, no corrections required (operator-authorized, 2026-08-20) |
+
+Implemented on `step10-p4-health-evidence-declaration-migration-impl`, cut
+from this document's freeze commit `d44f6f6a`. The frozen semantics were NOT
+re-litigated during implementation; §19 records what was built against them.
+
+**Carried forward, unimplemented by design (Q-P4-3):** **HD-T5** (Health
+representative-evidence declaration capability) and **HD-T6** (Health
+LLM-advice declaration capability) — named post-Step-10 Health-capability
+debt, explicitly NOT P6's and NOT assumed to be Step 12's.
 
 Rev 1 (DRAFT, architecture review PASSED 2026-08-20) was written against the
 parent's §3.5 table and reproduced its boundary: *three name-keyed tables in
@@ -1280,3 +1294,31 @@ so, and CI owned the check. The process worked as designed — the gap was
 declared rather than discovered.
 
 Fix commit: **`d57d2482`** — the final executable head.
+
+### 19.8 Post-merge closure and the P2a interaction
+
+**Merged**: PR #243, squash `79833db8`, `origin/master` verified
+byte-identical to the validated head `d73e39e3`. Independent final review
+before merge: **PASS**, no corrections required — every review point checked
+against source and executable probes rather than the implementation session's
+self-report, including a fresh anti-vacuity mutation (a *differently named*
+central direction map and a task-name branch in generic evidence code; both
+caught, by different guards).
+
+**P2a interaction, measured — not assumed.** P2a
+(`step10-p2a-golden-metric-order-closure`, PR #242, head `0ea3d238`) was
+reconciled against P4 in a THROWAWAY worktree; its live branch and worktree
+were not touched, and PR #242 was not updated.
+
+| | result |
+|---|---|
+| shared changed files (production AND test) | **0** |
+| merge of P4 into P2a | **clean, no conflicts** |
+| combined-tree targeted tests | 1,441 passed + 3,114 passed |
+| semantic classification | **A — no overlap** |
+
+The one adjacency the frozen §16 predicted holds and composes: P2a edits
+`nodes/result_interpretation_agent/evidence.py`, the CALLER of
+`agent/schemas/health_feedback.py` which P4 edits. Adjacent, not competing.
+**P2a owns its own terminal reconciliation against the now-P4-bearing master**;
+it should be mechanical.
