@@ -877,6 +877,104 @@ class TaskHealthFacts(BaseModel):
         return getattr(self, axis, None)
 
 
+class EvidenceUnit(BaseModel):
+    """Where the unit of one evidence metric comes from (Step 10 / P4, R-2).
+
+    Units have exactly TWO kinds and conflating them is how a millivolt
+    threshold silently becomes a volt threshold:
+
+    * ``literal`` — CHECK-owned. ``count``, ``fraction``, ``correlation``,
+      ``ratio``: dimensionless labels that follow from the check's own
+      arithmetic and are the same for every task.
+    * ``config_key`` — TASK-owned. A physical scale, read at render time from
+      the run's composed check config (``value_scale_unit``, injected from
+      the task's declared ``value_scale`` by ``_composition.py``). The
+      declaration names the SOURCE, never the string, so a task whose scale
+      is µV renders µV. Copying the resolved string onto a framework check
+      would be a THIRD declaration of one number's unit.
+
+    A ``config_key`` that the run does not supply renders NO unit rather than
+    a defaulted one — absence of a task scale is a real state, not an
+    occasion to invent one.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    literal: str | None = Field(
+        default=None,
+        description="Check-owned dimensionless unit, used verbatim.",
+    )
+    config_key: str | None = Field(
+        default=None,
+        description=(
+            "Check-config key carrying a TASK-owned unit, resolved at render "
+            "time. Absent from the run's config ⇒ no unit is rendered."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _exactly_one_source(self) -> EvidenceUnit:
+        """Fail closed at authoring time: a unit has one source or none is meant."""
+        if (self.literal is None) == (self.config_key is None):
+            raise ValueError(
+                "EvidenceUnit needs exactly one of `literal` (check-owned, "
+                "dimensionless) or `config_key` (task-owned scale); got "
+                f"literal={self.literal!r}, config_key={self.config_key!r}. "
+                f"Declaring both is two authorities for one unit; declaring "
+                f"neither is an unnamed unit."
+            )
+        return self
+
+
+class ThresholdDeclaration(BaseModel):
+    """One threshold a check evaluates, declared as DATA (Step 10 / P4).
+
+    Everything the framework used to hold in a per-check-NAME table lives
+    here, on the check that knows it: the evidence metric's name, the
+    comparison operator, the config key the VALUE is read from, the check's
+    own authoring default, and the unit's source.
+
+    ``operator`` is load-bearing beyond rendering. It is the single
+    declaration from which the worst-case statistic is DERIVED — a FLOOR
+    (``>`` / ``>=``) makes the minimum the worst case, a CEILING (``<`` /
+    ``<=``) makes the maximum — which is what let Step 10 / P4 delete
+    ``_WORST_STAT_BY_METRIC`` rather than relocate it.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    metric: str = Field(
+        description=(
+            "Evidence metric name. For a per-file check this names the "
+            "per-file metric; for a scalar check it must be the key the "
+            "check publishes the value under in its own ``metrics``."
+        ),
+    )
+    operator: Literal[">", ">=", "<", "<="] = Field(
+        description=(
+            "Comparison the check applies: value OPERATOR threshold. Closed "
+            "vocabulary — the worst-statistic derivation reads it, so an "
+            "unknown symbol must never reach the renderer."
+        ),
+    )
+    config_key: str = Field(
+        description="Check-config key the threshold VALUE is read from (task-owned).",
+    )
+    default: int | float = Field(
+        description=(
+            "The check's OWN authoring default — the value ``run`` uses when "
+            "the config omits the key. Declared here so ``run`` and the "
+            "evidence renderer read ONE number instead of two copies that "
+            "happen to agree (Step 10 / P4, R-3).\n\n"
+            "The union is NOT decoration: a count threshold is an ``int`` and "
+            "must persist as one. Coercing every default to ``float`` would "
+            "render ``5.0`` where the evidence has always said ``5``, and the "
+            "fingerprint's integer rendering keys off exactly that."
+        ),
+    )
+    unit: EvidenceUnit = Field(description="Where this metric's unit comes from (R-2).")
+
+
 class CheckInputDeclaration(BaseModel):
     """What one check needs, as DATA rather than as in-check control flow.
 
@@ -884,6 +982,12 @@ class CheckInputDeclaration(BaseModel):
     consume (child design §3.2) — no mega-schema. A check declares this as a
     ``ClassVar``; the engine reads it before deciding to invoke the check at
     all.
+
+    **Step 10 / P4** extends it ONCE (the §13-sanctioned framework change)
+    with the evidence metadata the persistence adapter used to hold in
+    per-check-NAME tables: ``evidence_thresholds``, ``per_file_metric_name``,
+    ``per_file_metric_unit`` and ``sampling_method_label``. A check that
+    declares none of them persists the same honest absences it does today.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -929,9 +1033,102 @@ class CheckInputDeclaration(BaseModel):
         description=(
             "Config keys that are TASK thresholds rather than framework "
             "policy. Pure metadata in 08a; 08b consumes it for the "
-            "ownership migration."
+            "ownership migration.\n\n"
+            "Step 10 / P4: when `evidence_thresholds` is declared this is "
+            "DERIVED from it and must not be hand-authored to something "
+            "else. It stays a settable field so a pre-P4 or out-of-tree "
+            "check that declares only this keeps working unchanged — the "
+            "plugin ABI does not break."
         ),
     )
+
+    # --- Step 10 / P4: evidence declaration (was per-check-NAME tables) ----
+
+    evidence_thresholds: tuple[ThresholdDeclaration, ...] = Field(
+        default=(),
+        description=(
+            "Thresholds this check evaluates, with their evidence identity. "
+            "Empty means the check persists NO threshold row — the honest "
+            "shape for a recording-only check, not a gap to fill."
+        ),
+    )
+    per_file_metric_name: str | None = Field(
+        default=None,
+        description=(
+            "Metric name for this check's per-file evidence rows. None means "
+            "the check has no per-file dimension (it emits scalars), and no "
+            "name is fabricated for it."
+        ),
+    )
+    per_file_metrics_key: str = Field(
+        default="per_file",
+        description=(
+            "Which key of this check's own ``metrics`` holds its per-file "
+            "values. Most checks use ``per_file``; a check that publishes them "
+            "elsewhere names that key here.\n\n"
+            "It exists because the key is NOT the evidence metric name — "
+            "`pearson_dispersion` publishes `pearson_per_file` but reports "
+            "`pearson_correlation` — so the two cannot be collapsed. The "
+            "generic evidence builder used to try three TIDMAD keys in an "
+            "`or` cascade; the check is what knows where it put its data."
+        ),
+    )
+    per_file_metric_unit: EvidenceUnit | None = Field(
+        default=None,
+        description="Unit source for the per-file metric; None when there is no per-file metric.",
+    )
+    sampling_method_label: str | None = Field(
+        default=None,
+        description=(
+            "What this check states about how it sampled, recorded on each "
+            "per-file row. Declared by the check because the check is what "
+            "knows it; None when the check emits no per-file rows."
+        ),
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_threshold_parameter_names(cls, data: Any) -> Any:
+        """ONE authority for 'which config keys are thresholds' (R-5).
+
+        ``evidence_thresholds`` is the richer declaration, so its config keys
+        ARE ``threshold_parameter_names``. Deriving rather than requiring both
+        removes the duplicate-authority shape this child exists to delete,
+        while leaving the field settable so the plugin ABI is unchanged.
+        """
+        if not isinstance(data, dict):
+            return data
+        declared = data.get("evidence_thresholds")
+        if declared and "threshold_parameter_names" not in data:
+            data = {
+                **data,
+                "threshold_parameter_names": tuple(
+                    t.config_key if isinstance(t, ThresholdDeclaration) else t["config_key"]
+                    for t in declared
+                ),
+            }
+        return data
+
+    @model_validator(mode="after")
+    def _threshold_declarations_agree(self) -> CheckInputDeclaration:
+        """If both were authored, they must say the same thing (R-5).
+
+        Two hand-authored tuples that must agree is exactly the shape P4
+        removes; disagreement fails closed at import time rather than
+        producing evidence that contradicts the check.
+        """
+        if not self.evidence_thresholds:
+            return self
+        derived = tuple(t.config_key for t in self.evidence_thresholds)
+        if self.threshold_parameter_names != derived:
+            raise ValueError(
+                f"threshold_parameter_names={self.threshold_parameter_names!r} "
+                f"disagrees with the config keys declared by "
+                f"evidence_thresholds ({derived!r}). `evidence_thresholds` is "
+                f"the authority; omit threshold_parameter_names and let it be "
+                f"derived."
+            )
+        return self
 
     @field_validator("required_context_inputs")
     @classmethod

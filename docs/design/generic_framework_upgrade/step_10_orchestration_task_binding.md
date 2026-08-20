@@ -960,7 +960,7 @@ no disappearing authority is an *activation*, and is marked as such.
 | **S3** | **Production secondary-metric transport** — declaration → run-scoped binding → evaluation → record → interpretation, including the cache-carry symmetry fix | `SecondaryMetricEvidence`, unchanged; a record-level carrier; the existing metric handle | *activation* — nothing disappears, but the `secondary_metrics=[]` hardcode and the asymmetric `_stats` carry both go |
 | **S4** | **Proposer evidence + direction ownership** — one typed reader of interpretation evidence; direction-aware comparison and prediction-authoring grammar | one proposer-side typed evidence reader; `MetricOrder` | the second, independently drifting untyped reader (see §11 for the deprecate-vs-isolate decision) |
 | **S5** | **Interpretation-derived carried state** — `vocab_link_confirmations` **ACTIVATED** end-to-end (Q-10-3 = A) **and** `accumulated_key_findings` normalized into `ChainState` (Q-10-6 = A) | the ONE committed-digest read authority + typed projections + `ChainState` ownership | *activation + normalization*: the inert transport gap goes; the last bare cross-iteration `run_workflow` parameter goes |
-| **S6** | **Health `evaluation.py` declaration migration** (§3.5) | the check's own `CheckInputDeclaration` | the three per-check-NAME tables and their duplicated default constants |
+| **S6** | **Health evidence declaration migration** (§3.5) — *scope-completeness correction, operator 2026-08-20: the boundary is SEMANTIC, not an implementation enumeration. Residual framework-owned per-check Health evidence metadata **that is derivable from the task/check declaration** becomes declaration-derived. It does NOT automatically include surfaces requiring new declaration capabilities* | the check's own `CheckInputDeclaration` | the per-check-NAME tables and duplicated defaults in `evaluation.py`, **plus `agent/schemas/health_feedback.py`'s `_WORST_STAT_BY_METRIC` and its `unit == "count"` exactness literal** |
 | **S7** | **Task-coupling residue in generic-core campaign functionality** — where `core/campaign_artifacts.py` needs metric, task-data or scope semantics it consumes the **run-supplied bound authority** instead of rediscovering TIDMAD (§3.7: `:39` requires a `denoising_score` key, `:53` resolves the declared health-peek set via `resolve_dataset_profile()`, `:106-111` imports the `TIDMAD` singleton) | the run's bound authorities | the ambient TIDMAD pulls inside generic core |
 | **S8** | **Three-task executable closure** — Pets and DAVIS initialize and run the exploration loop through the S1 composition, with correct direction, metric transport and persistence | the same generic path TIDMAD uses | the two hand-written per-task Gate runner scripts as the *only* way a contrast task executes |
 
@@ -1474,9 +1474,44 @@ siblings; the union merge rule stays unique and documented.
 
 ## 13. Health / `evaluation.py` residual debt
 
-Scope: §3.5's three per-check-NAME tables plus the `channel0001_prefix_peek`
-sampling-method literal at `evaluation.py:158` and the stale duplicated default
-at `:89`.
+Scope **(corrected for completeness, operator 2026-08-20 — see
+`pr_10_p4_health_evidence_declaration.md` §12, C-P4-1)**: residual
+framework-owned per-check Health evidence metadata **that is derivable from the
+task/check declaration** becomes declaration-derived.
+
+Explicitly included:
+
+* §3.5's three per-check-NAME tables in `evaluation.py`, plus the
+  `channel0001_prefix_peek` sampling-method literal at `:158` and the stale
+  duplicated defaults at `:89`/`:96`/`:103`;
+* `agent/schemas/health_feedback.py:110-117` `_WORST_STAT_BY_METRIC` — the
+  already-declared per-check comparison operator hard-coded a second time,
+  reached on the live path via `nodes/result_interpretation_agent/evidence.py:267-268`;
+* `agent/schemas/health_feedback.py:417`'s `unit == "count"` exactness literal.
+
+Explicitly **excluded** — surfaces that would require a NEW declaration
+capability rather than a derivation from declarations already present. Two are
+named, with owners frozen (Q-P4-3 = defer both):
+
+* **HD-T5** — `_RECORDING_KEY_METRICS` (`health_feedback.py:124-133`): a Health
+  *representative-evidence* declaration capability (which recorded observation
+  scalars a check exposes as `key_metrics`);
+* **HD-T6** — `_COLLAPSE_ADVICE_BY_CHECK` (`agent/prompts.py:24-32`) and its
+  call sites (`agent/llm_bridge.py:1005`/`:1009`): a Health *LLM-advice*
+  declaration capability, with its own Gate-1 and prompt-parity disposition.
+
+Owner for both: **named post-Step-10 Health-capability debt / a future
+dedicated Health-extensibility PR.** NOT P6 — its contract is final executable
+closure and it adds no new scientific semantics; it may verify the generic path
+and report these as a remaining optional limitation, nothing more. NOT assumed
+to be Step 12 — Step 12 externalizes a task package's SOURCE, and may only do so
+once an interface exists.
+
+This is a completeness correction to the existing S6 owner. It does not change
+the P4 semantic owner, the seven-child decomposition, scientific Health
+semantics, the public result schema, P4/P2a parallelism, or any frozen parent
+ruling. §4.1's ownership map row already read "Health evidence declaration
+migration" and is unchanged.
 
 **Target: declaration-driven.** The check already declares
 `threshold_parameter_names`; what the tables add — the comparison operator, the
@@ -1495,6 +1530,16 @@ is what knows them.
   *capability*, not a new *task*.
 * The `:89` / `tidmad.yaml:43` disagreement (5 vs 25) is repaired **as part of
   removing the duplicate**, never by editing one of the two to match.
+
+**RESOLVED (operator, 2026-08-20).** The P4 post-P1 reconciliation found that
+the failure class this section defines is not contained by `evaluation.py`:
+after the migration a Pets or DAVIS failure would persist a complete threshold
+row and STILL produce no collapse fingerprint, because its metric name is
+absent from `_WORST_STAT_BY_METRIC` — the same silence, one hop later. Per §4.1
+("if the post-merge reconciliation changes it, it is revised **before** any
+child freezes") the operator applied the scope-completeness correction recorded
+above, and **P4 is FROZEN at REVISION 3**. Evidence and rulings:
+`pr_10_p4_health_evidence_declaration.md` §2.2 / §12.
 
 ---
 
@@ -2283,7 +2328,7 @@ is not Step-10 scope.
 | | |
 |---|---|
 | revision | **2 — FROZEN**, post-merge reconciliation **PASS** (§0.3); **three targeted corrections R-1/R-2/R-3 applied 2026-08-20 (operator-authorized; acceptance/wording only — §22.1 P1 parity obligation, §3.8 default-4 ownership split, §8 order-acquisition precedence). Freeze unchanged; NOT Revision 3** |
-| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a REVISION 3 FROZEN 2026-08-20** (post-P1 reconciliation PASS at `bcb17e45`; Q-P2a-1/2/3 all RESOLVED — `all`-semantics fallback · one canonical unavailable formatter · reconciliation PROMOTED to `execute_tools/evaluation_metric.py`; adversarial 25/25; implementation NOT STARTED) · P2b DRAFT (reconcile after P1 + P2a merge) · **P3 / P4 / P5 DRAFT rev 1 (2026-08-20, anchor `d7d94740`)** — P3 `pr_10_p3_proposer_typed_evidence.md` (one typed proposer evidence value produced by the protocol; direction-safe prediction-authoring grammar as the declared intentional LLM delta; reconciles after P2a+P2b) · P4 `pr_10_p4_health_evidence_declaration.md` (the three `evaluation.py` name-keyed tables + duplicated default + sampling literal become per-check declarations; least upstream-sensitive, likely early-freeze candidate) · P5 `pr_10_p5_interpretation_carried_state.md` (both parent-assigned values ride the sibling lifecycle; confirmations aggregation SOURCE-derived: producer-side keyed union ⇒ latest-wins projection; freezes after P3) · **P6 SKELETON ONLY** `pr_10_p6_three_task_closure_skeleton.md` (detailed design BLOCKED until P1/P2a/P2b/P3/P4/P5 merge) — `step_10_orchestration_task_binding/` |
+| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a REVISION 3 FROZEN 2026-08-20** (post-P1 reconciliation PASS at `bcb17e45`; Q-P2a-1/2/3 all RESOLVED — `all`-semantics fallback · one canonical unavailable formatter · reconciliation PROMOTED to `execute_tools/evaluation_metric.py`; adversarial 25/25; implementation NOT STARTED) · P2b DRAFT (reconcile after P1 + P2a merge) · **P3 / P5 DRAFT rev 1 (2026-08-20, anchor `d7d94740`)** — P3 `pr_10_p3_proposer_typed_evidence.md` (one typed proposer evidence value produced by the protocol; direction-safe prediction-authoring grammar as the declared intentional LLM delta; reconciles after P2a+P2b) · **P4 REVISION 3 — FROZEN, OPERATOR APPROVED 2026-08-20 (anchor `64446b2b`; implementation NOT STARTED)** `pr_10_p4_health_evidence_declaration.md` (post-P1 reconciliation at `64446b2b`; `evaluation.py`'s name-keyed tables + duplicated defaults + sampling literal become per-check declarations, and `evaluation.py` moves into the health-core census's GENERIC partition as the executable acceptance. Rulings: **Q-P4-1 = (a) fallback-only `check_default` label**, shipped TIDMAD rows byte-identical; **Q-P4-2 = YES**, `_WORST_STAT_BY_METRIC` + the unit-exactness literal absorbed as DERIVATIONS from the declared operator/unit — a table deleted, no field added, never a relocated map (R-7); **Q-P4-3 = DEFER BOTH**, HD-T5 / HD-T6 named post-Step-10 Health-capability debt, explicitly NOT P6 and NOT assumed Step 12; **C-P4-1 resolved** by the §13 scope-completeness correction — semantic owner, child decomposition, scientific Health semantics, public schema and P4/P2a parallelism all UNCHANGED. Adversarial 23 CLOSED / 2 CORRECTED / 0 open; 0 contradictions; Gate 1 + Gate 2 NOT REQUIRED; **SAFE TO IMPLEMENT IN PARALLEL WITH P2a**, competing semantic owners = 0) · P5 `pr_10_p5_interpretation_carried_state.md` (both parent-assigned values ride the sibling lifecycle; confirmations aggregation SOURCE-derived: producer-side keyed union ⇒ latest-wins projection; freezes after P3) · **P6 SKELETON ONLY** `pr_10_p6_three_task_closure_skeleton.md` (detailed design BLOCKED until P1/P2a/P2b/P3/P4/P5 merge) — `step_10_orchestration_task_binding/` |
 | source anchor | **merged master `2393aacc`** |
 | Step-10 implementation | **NOT STARTED** |
 | prerequisite | Step 09.5a **MERGED** (PR #240) — the §15.1b/§15.1c block is **LIFTED** |

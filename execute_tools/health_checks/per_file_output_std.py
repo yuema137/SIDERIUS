@@ -25,12 +25,16 @@ import numpy as np
 
 from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.deliverable_spec import default_deliverable_storage
-from execute_tools.health_checks._composition import VALUE_SCALE_PARAMETER
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks._peek import peek_int8_at_channel
 from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
@@ -69,6 +73,8 @@ class PerFileOutputStdCheck:
 
     name: ClassVar[str] = "per_file_output_std"
 
+    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         # Per-FILE dispersion diagnostics: it needs the denoised stream, an
         # int8 alphabet, and a task whose deliverable is split across a
@@ -92,10 +98,13 @@ class PerFileOutputStdCheck:
         # fails only when every file failed I/O. `peek_samples` is a
         # config parameter it reads, not a threshold, and declaring it
         # here would hand 08b a mis-classified ownership migration.
+        # Recording-only: NO threshold row, today's honest shape (R-4).
         threshold_parameter_names=(),
+        per_file_metric_name="output_std_mv",
+        per_file_metrics_key="std_mv_per_file",
+        per_file_metric_unit=EvidenceUnit(config_key=VALUE_SCALE_UNIT_PARAMETER),
+        sampling_method_label="channel0001_prefix_peek",
     )
-
-    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
 
     def run(
         self,

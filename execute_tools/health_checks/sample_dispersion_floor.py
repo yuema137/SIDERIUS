@@ -32,12 +32,15 @@ from typing import Any, ClassVar
 
 import numpy as np
 
+from execute_tools.health_checks._composition import VALUE_SCALE_UNIT_PARAMETER
 from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     HealthCheckContext,
     HealthCheckResult,
+    ThresholdDeclaration,
 )
 from execute_tools.health_checks.standard_views import (
     CONTINUOUS_SAMPLES,
@@ -49,6 +52,8 @@ class SampleDispersionFloorCheck:
     """Flag a continuous output whose samples barely vary."""
 
     name: ClassVar[str] = "sample_dispersion_floor"
+
+    _DEFAULT_MIN_DISPERSION: ClassVar[float] = 0.5
 
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         consumes_view=CONTINUOUS_SAMPLES,
@@ -62,10 +67,19 @@ class SampleDispersionFloorCheck:
         # to make incompatible int8 checks honestly inapplicable, not to
         # gate this one.
         required_facts=(),
-        threshold_parameter_names=("min_dispersion",),
+        evidence_thresholds=(
+            ThresholdDeclaration(
+                metric="dispersion",
+                operator=">=",
+                config_key="min_dispersion",
+                default=_DEFAULT_MIN_DISPERSION,
+                # The deliverable's NATIVE units. DAVIS declares no
+                # value_scale, so no unit is rendered (R-2) — a task that
+                # does declare one renders its own.
+                unit=EvidenceUnit(config_key=VALUE_SCALE_UNIT_PARAMETER),
+            ),
+        ),
     )
-
-    _DEFAULT_MIN_DISPERSION: ClassVar[float] = 0.5
 
     def run(
         self,

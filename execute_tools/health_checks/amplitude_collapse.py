@@ -45,9 +45,11 @@ from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
 from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
+    ThresholdDeclaration,
     classify_verdict,
 )
 
@@ -69,6 +71,11 @@ class AmplitudeCollapseCheck:
 
     name: ClassVar[str] = "amplitude_collapse"
 
+    _DEFAULT_COLLAPSE_THRESHOLD: ClassVar[float] = 0.95
+    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
+    _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
+    _DEFAULT_AGGREGATION: ClassVar[str] = "any_pass"
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         # Dominant-symbol fraction over a prefix of the denoised CH1
         # stream. The MECHANISM is family-generic (parent design §4 class
@@ -77,13 +84,19 @@ class AmplitudeCollapseCheck:
         consumes_view="tidmad.int8_prefix_peek",
         required_context_inputs=("denoised_source",),
         required_facts=(FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),),
-        threshold_parameter_names=("collapse_threshold",),
+        evidence_thresholds=(
+            ThresholdDeclaration(
+                metric="dominant_mode_fraction",
+                operator="<=",
+                config_key="collapse_threshold",
+                default=_DEFAULT_COLLAPSE_THRESHOLD,
+                unit=EvidenceUnit(literal="fraction"),
+            ),
+        ),
+        per_file_metric_name="dominant_mode_fraction",
+        per_file_metric_unit=EvidenceUnit(literal="fraction"),
+        sampling_method_label="channel0001_prefix_peek",
     )
-
-    _DEFAULT_COLLAPSE_THRESHOLD: ClassVar[float] = 0.95
-    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
-    _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
-    _DEFAULT_AGGREGATION: ClassVar[str] = "any_pass"
 
     def run(
         self,

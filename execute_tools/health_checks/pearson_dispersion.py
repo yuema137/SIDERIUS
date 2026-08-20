@@ -35,6 +35,7 @@ from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
@@ -73,6 +74,8 @@ class PearsonDispersionCheck:
 
     name: ClassVar[str] = "pearson_dispersion"
 
+    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 1_000_000
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         # The only check that reads BOTH channels: denoised CH1 against
         # target CH2, per file, then reports the dispersion of the per-file
@@ -92,10 +95,13 @@ class PearsonDispersionCheck:
             FactRequirement(axis="value_scale_unit"),
         ),
         # EMPTY — recording-only, no threshold. See per_file_output_std.
+        # Recording-only: NO threshold row, today's honest shape (R-4).
         threshold_parameter_names=(),
+        per_file_metric_name="pearson_correlation",
+        per_file_metrics_key="pearson_per_file",
+        per_file_metric_unit=EvidenceUnit(literal="correlation"),
+        sampling_method_label="channel0001_prefix_peek",
     )
-
-    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 1_000_000
 
     def run(
         self,

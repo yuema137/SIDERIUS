@@ -38,9 +38,11 @@ from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
 from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
+    ThresholdDeclaration,
     classify_verdict,
 )
 
@@ -49,6 +51,13 @@ class OutputDiversityCheck:
     """Reject denoised outputs with too few unique int8 values."""
 
     name: ClassVar[str] = "output_diversity"
+
+    _DEFAULT_MIN_UNIQUE: ClassVar[int] = (
+        5  # class-default backward compat; production YAML overrides to 25 (M8)
+    )
+    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
+    _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
+    _DEFAULT_AGGREGATION: ClassVar[str] = "any_pass"
 
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         # Counts distinct int8 symbols in a prefix of the denoised CH1
@@ -61,15 +70,22 @@ class OutputDiversityCheck:
         # ONLY the key that decides the pass/fail boundary. `peek_samples`
         # is sampling width and `peek_file_indices`/`aggregation` are
         # framework policy — none of them is a threshold.
-        threshold_parameter_names=("min_unique_int8_values",),
+        # Step 10 / P4: the evidence identity the framework used to hold in
+        # a per-check-NAME table. `threshold_parameter_names` is DERIVED
+        # from these config keys (R-5) and is no longer authored here.
+        evidence_thresholds=(
+            ThresholdDeclaration(
+                metric="n_unique_int8_values",
+                operator=">",
+                config_key="min_unique_int8_values",
+                default=_DEFAULT_MIN_UNIQUE,
+                unit=EvidenceUnit(literal="count"),
+            ),
+        ),
+        per_file_metric_name="n_unique_int8_values",
+        per_file_metric_unit=EvidenceUnit(literal="count"),
+        sampling_method_label="channel0001_prefix_peek",
     )
-
-    _DEFAULT_MIN_UNIQUE: ClassVar[int] = (
-        5  # class-default backward compat; production YAML overrides to 25 (M8)
-    )
-    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
-    _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
-    _DEFAULT_AGGREGATION: ClassVar[str] = "any_pass"
 
     def run(
         self,

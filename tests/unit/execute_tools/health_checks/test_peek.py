@@ -250,10 +250,20 @@ class TestNoChannelLiteralsSurviveInHealthCode:
     point the peek reads the wrong group and every verdict is computed from
     the wrong signal while looking entirely healthy.
 
-    Exactly one occurrence is whitelisted, by file AND exact string: the
-    persisted record label ``sampling_method``. That is a recorded VALUE in
-    historical artifacts, not a lookup — changing it would rewrite what old
-    records claim about themselves, which 08a explicitly does not do.
+    The persisted record label ``sampling_method`` is whitelisted. That is a
+    recorded VALUE in historical artifacts, not a lookup — changing it would
+    rewrite what old records claim about themselves, which 08a explicitly
+    does not do.
+
+    **Step 10 / P4 narrowed the exemption rather than widening it.** The label
+    moved from a single central literal in ``evaluation.py`` onto each check's
+    ``sampling_method_label`` declaration (each check states how IT sampled),
+    so the exemption now has to reach the check modules. Instead of exempting
+    those files, it is exempted by SYNTACTIC POSITION: the literal is legal
+    only on a ``sampling_method_label=`` declaration line. Anywhere else in
+    the same file — in particular any use as a lookup key — is still an
+    offender, which is a stricter rule than the file-level whitelist it
+    replaces.
     """
 
     PRODUCTION_FILES = (
@@ -266,13 +276,26 @@ class TestNoChannelLiteralsSurviveInHealthCode:
         "spectral_peak_ratio.py",
         "pearson_dispersion.py",
     )
-    WHITELIST: ClassVar[frozenset[tuple[str, str]]] = frozenset(
-        {("evaluation.py", '"channel0001_prefix_peek"')}
+    #: The check modules that declare the persisted label. Step 10 / P4 (C2)
+    #: moved it here from a single central literal in ``evaluation.py`` — each
+    #: check now states how IT sampled — so the anchor moved with it.
+    LABEL_DECLARED_BY: ClassVar[frozenset[str]] = frozenset(
+        {
+            "output_diversity.py",
+            "output_std.py",
+            "amplitude_collapse.py",
+            "per_file_output_std.py",
+            "spectral_peak_ratio.py",
+            "pearson_dispersion.py",
+        }
     )
 
     @staticmethod
     def _health_checks_dir() -> Path:
         return Path(__file__).resolve().parents[4] / "execute_tools" / "health_checks"
+
+    #: The ONE syntactic position where the persisted label may appear.
+    LABEL_DECLARATION: ClassVar[str] = "sampling_method_label="
 
     def test_the_peek_path_names_no_channel(self):
         offenders: list[str] = []
@@ -280,19 +303,46 @@ class TestNoChannelLiteralsSurviveInHealthCode:
             for lineno, line in enumerate(
                 (self._health_checks_dir() / name).read_text().splitlines(), start=1
             ):
-                if "channel0001" in line or "channel0002" in line:
-                    offenders.append(f"{name}:{lineno}: {line.strip()}")
+                if "channel0001" not in line and "channel0002" not in line:
+                    continue
+                if line.strip().startswith(self.LABEL_DECLARATION):
+                    continue  # persisted record label, declared by its owner
+                offenders.append(f"{name}:{lineno}: {line.strip()}")
         assert not offenders, "channel literals survive in the peek path:\n  " + "\n  ".join(
             offenders
         )
 
-    def test_the_one_whitelisted_literal_is_a_persisted_label_and_still_there(self):
-        """Guards the whitelist: if the label vanished, the exemption is stale.
+    def test_the_label_exemption_does_not_cover_a_lookup(self):
+        """Anti-widening: the exemption is positional, not per-file.
+
+        A channel literal used as a LOOKUP inside an exempted check module is
+        still an offender — that is the hazard the class exists to catch, and
+        moving the label must not have bought an amnesty for it.
+        """
+        legal = '        sampling_method_label="channel0001_prefix_peek",'
+        illegal = '        data = f["timeseries"]["channel0001"]'
+        assert legal.strip().startswith(self.LABEL_DECLARATION)
+        assert not illegal.strip().startswith(self.LABEL_DECLARATION)
+        assert "channel0001" in illegal
+
+    def test_the_exempted_label_is_real_and_the_scanner_can_see_it(self):
+        """Guards the exemption: if the label vanished, it is stale.
 
         It also proves this scanner finds literals at all — without it, a
-        broken reader would make the test above pass vacuously.
+        broken reader would make the test above pass vacuously. Step 10 / P4
+        moved the anchor from ``evaluation.py`` to the checks that declare the
+        label; both properties are unchanged, and the exemption now has to
+        describe something real in SIX files rather than one.
         """
+        for name in sorted(self.LABEL_DECLARED_BY):
+            source = (self._health_checks_dir() / name).read_text()
+            assert f'{self.LABEL_DECLARATION}"channel0001_prefix_peek"' in source, name
+            assert name in self.PRODUCTION_FILES, name
+
+    def test_the_central_literal_is_gone_from_the_persistence_adapter(self):
+        """Step 10 / P4 (C2): one TIDMAD-shaped label applied to EVERY check's
+        rows is exactly the per-check-name coupling this child removes, and
+        `evaluation.py` joining the generic census partition depends on it."""
         source = (self._health_checks_dir() / "evaluation.py").read_text()
-        assert '"channel0001_prefix_peek"' in source
-        assert ("evaluation.py", '"channel0001_prefix_peek"') in self.WHITELIST
-        assert "evaluation.py" not in self.PRODUCTION_FILES
+        assert "channel0001" not in source
+        assert "channel0002" not in source

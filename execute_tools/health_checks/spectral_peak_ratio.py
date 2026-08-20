@@ -36,6 +36,7 @@ from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
@@ -78,6 +79,8 @@ class SpectralPeakRatioCheck:
 
     name: ClassVar[str] = "spectral_peak_ratio"
 
+    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 1_000_000
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         # Reads ONLY the denoised CH1 stream and computes a PSD; despite
         # being a "comparison-flavoured" recording check it never touches
@@ -99,10 +102,13 @@ class SpectralPeakRatioCheck:
             FactRequirement(axis="value_scale_unit"),
         ),
         # EMPTY — recording-only, no threshold. See per_file_output_std.
+        # Recording-only: NO threshold row, today's honest shape (R-4).
         threshold_parameter_names=(),
+        per_file_metric_name="spectral_peak_ratio",
+        per_file_metrics_key="ratio_per_file",
+        per_file_metric_unit=EvidenceUnit(literal="ratio"),
+        sampling_method_label="channel0001_prefix_peek",
     )
-
-    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 1_000_000
 
     def run(
         self,

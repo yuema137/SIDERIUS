@@ -418,6 +418,70 @@ The in-check "not applicable" returns that remain in the shipped checks
 are **defensive only** — reachable by a direct caller, never through a
 gate.
 
+### 6.1 The declaration also owns the check's EVIDENCE (Step 10 / P4)
+
+Until Step 10, the persistence adapter `evaluation.py` held three tables
+keyed on TIDMAD's check NAMES — a threshold row per name, a per-file metric
+name per name, a unit per name — plus one `channel0001_prefix_peek` sampling
+label applied to every check's rows and its own copies of three checks'
+default thresholds. **The failure mode was silence.** A task-owned check
+whose name was absent from those tables persisted no threshold, no metric
+name and no unit; the gate still fired and still blocked correctly, and its
+evidence was quietly poorer than TIDMAD's.
+
+`CheckInputDeclaration` now carries that content, because the check is what
+knows it:
+
+```python
+    evidence_thresholds: tuple[ThresholdDeclaration, ...]
+    per_file_metric_name: str | None
+    per_file_metric_unit: EvidenceUnit | None
+    per_file_metrics_key: str          # default "per_file"
+    sampling_method_label: str | None
+```
+
+Four rules make it work for any task rather than for TIDMAD-shaped checks:
+
+* **Units have two kinds.** `EvidenceUnit(literal=...)` is CHECK-owned and
+  dimensionless (`count`, `fraction`, `correlation`, `ratio`) — it follows
+  from the arithmetic and is the same for every task.
+  `EvidenceUnit(config_key=...)` is TASK-owned: the declaration names the
+  SOURCE (`value_scale_unit`, injected from the task's declared
+  `value_scale`) and the renderer resolves it, so a task whose scale is µV
+  renders µV. A task that declares no scale renders NO unit rather than a
+  defaulted one.
+* **The comparison operator is load-bearing.** It renders into the threshold
+  row AND the worst-case statistic is derived from it — a FLOOR (`>` / `>=`)
+  is breached downward so the worst observation is the `minimum`; a CEILING
+  (`<` / `<=`) is breached upward so it is the `maximum`. That derivation
+  replaced a second per-metric-name map in
+  `agent/schemas/health_feedback.py`; reintroducing such a map anywhere is a
+  guarded regression.
+* **Threshold provenance is honest and fallback-only.** When the config
+  supplies the value it is persisted exactly as before, unlabelled. When the
+  key is absent the check did not threshold on nothing — `run` fell back to
+  its own declared default — so that default is persisted with
+  `source: "check_default"`. It is never rendered as absent, and evidence
+  construction never fails for a check that legally executed.
+* **Absence is declared, not guessed.** A check with no
+  `evidence_thresholds` persists no threshold row — the honest shape for a
+  recording-only check, which is why TIDMAD's three recording gates carry
+  none. A check with no `per_file_metric_name` has no per-file dimension and
+  gets no fabricated rows.
+
+`threshold_parameter_names` (08a) is DERIVED from `evidence_thresholds` when
+omitted and must agree when both are authored, so there is one authority.
+The field stays settable, so a pre-P4 or out-of-tree check that declares only
+it keeps working: the plugin ABI is unchanged.
+
+**Adding an ordinary task-specific check therefore costs no framework edit.**
+Its declaration renders its evidence, its persisted threshold row and its
+collapse fingerprint through the same generic path TIDMAD uses. What still
+requires framework work is a genuinely new *capability* — for example the two
+recorded as post-Step-10 Health debt: a declaration channel for which
+recorded scalars are representative (`HD-T5`), and one for task-specific
+LLM-facing collapse advice (`HD-T6`).
+
 ---
 
 ## 7. Registry

@@ -28,9 +28,11 @@ from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
+    ThresholdDeclaration,
 )
 from execute_tools.health_checks.standard_views import CATEGORICAL_PREDICTIONS
 
@@ -40,6 +42,11 @@ class CategoricalDistinctSymbolsCheck:
 
     name: ClassVar[str] = "categorical_distinct_symbols"
 
+    #: Authoring safety net only — real tasks author their own floor
+    #: (task-owned threshold, §3.4). 2 is the weakest meaningful floor:
+    #: below it the deliverable is a literal constant.
+    _DEFAULT_MIN_DISTINCT_SYMBOLS: ClassVar[int] = 2
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         consumes_view=CATEGORICAL_PREDICTIONS,
         requires_view=True,
@@ -48,13 +55,19 @@ class CategoricalDistinctSymbolsCheck:
         # A task declaring no cardinality makes this check honestly
         # INAPPLICABLE (axis named) before any I/O — never an error.
         required_facts=(FactRequirement(axis="symbol_cardinality"),),
-        threshold_parameter_names=("min_distinct_symbols",),
+        # Step 10 / P4: this check emits SCALARS and has no per-file
+        # dimension, so it declares no per-file name, unit or sampling
+        # label — and gains the threshold row it never had.
+        evidence_thresholds=(
+            ThresholdDeclaration(
+                metric="distinct_symbols",
+                operator=">=",
+                config_key="min_distinct_symbols",
+                default=_DEFAULT_MIN_DISTINCT_SYMBOLS,
+                unit=EvidenceUnit(literal="count"),
+            ),
+        ),
     )
-
-    #: Authoring safety net only — real tasks author their own floor
-    #: (task-owned threshold, §3.4). 2 is the weakest meaningful floor:
-    #: below it the deliverable is a literal constant.
-    _DEFAULT_MIN_DISTINCT_SYMBOLS: ClassVar[int] = 2
 
     def run(
         self,

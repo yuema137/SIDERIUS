@@ -38,6 +38,7 @@ def _gate(
     unit="count",
     worst_stat="minimum",
     worst=1.0,
+    operator=">",
     *,
     execution_status="failed",
     check_passed=False,
@@ -56,7 +57,11 @@ def _gate(
         "would_invalidate_under_production_policy": would_invalidate,
         "resolved_action": resolved_action,
         "failure_reason": failure_reason,
-        "threshold": {"metric": metric, "operator": ">", "value": 25, "unit": unit},
+        # Step 10 / P4: the operator is now LOAD-BEARING — the worst-case
+        # direction is derived from it instead of from a per-metric-name map.
+        # It must match the check this fixture claims to reproduce, which is
+        # what the real persisted row carries.
+        "threshold": {"metric": metric, "operator": operator, "value": 25, "unit": unit},
         "aggregation": {},
         "metrics": {"aggregate_statistics": agg},
         "gate_runtime_seconds": 0.5,
@@ -70,6 +75,7 @@ def _amplitude_gate(dominant=0.9612, **kw):
         unit="fraction",
         worst_stat="maximum",
         worst=dominant,
+        operator="<=",  # amplitude_collapse is a CEILING; the real row says so
         failure_reason=f"amplitude_collapse: dominant_mode_fraction={dominant}",
         **kw,
     )

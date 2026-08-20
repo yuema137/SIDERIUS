@@ -107,19 +107,41 @@ future error shape that DOES persist results."""
 # Fingerprint metric allowlists — authored from REAL V17 payloads (§2.5)
 # ---------------------------------------------------------------------------
 
-_WORST_STAT_BY_METRIC: dict[str, str] = {
-    # threshold.metric → which aggregate_statistics entry is "worst".
-    # Diversity and std collapse DOWNWARD (worst = minimum over peeked
-    # files); dominance collapses UPWARD (worst = maximum).
-    "n_unique_int8_values": "minimum",
-    "output_std_mv": "minimum",
-    "dominant_mode_fraction": "maximum",
-}
-"""Blocking-check discriminating metrics, keyed by the PERSISTED
-``threshold.metric`` name (self-describing evidence — no gate-id mapping
-table to drift). Values verified against the real V17 payload:
-``metrics.aggregate_statistics.{minimum,maximum,mean}`` +
-``per_file.{idx}.metrics.{metric}.value`` (design §2.5)."""
+#: Operators that make a threshold a FLOOR (breached downward).
+_FLOOR_OPERATORS: frozenset[str] = frozenset({">", ">="})
+
+#: Operators that make it a CEILING (breached upward).
+_CEILING_OPERATORS: frozenset[str] = frozenset({"<", "<="})
+
+#: Units whose values are cardinal counts and therefore render exactly.
+_INTEGRAL_UNITS: frozenset[str] = frozenset({"count"})
+
+
+def _worst_statistic(operator: str | None) -> str | None:
+    """Which ``aggregate_statistics`` entry is the worst case (Step 10 / P4).
+
+    DERIVED from the persisted comparison operator, which the check declares:
+    a FLOOR (``>`` / ``>=``) is breached downward, so the worst observation is
+    the ``minimum``; a CEILING (``<`` / ``<=``) is breached upward, so it is
+    the ``maximum``.
+
+    This replaced ``_WORST_STAT_BY_METRIC``, a per-metric-NAME map listing
+    TIDMAD's three blocking metrics. That map held the SAME information the
+    operator already carried, hard-coded a second time — and while it stood, a
+    task-owned check with a correctly persisted threshold row still produced
+    NO fingerprint, because its metric name was not in it. A derivation has no
+    such gap: it works for any check that declares an operator, and it
+    reproduces the old map's three answers exactly.
+
+    An unrecognised or absent operator yields ``None`` rather than a guess —
+    an evidence reader must not invent a direction it was not told.
+    """
+    if operator in _FLOOR_OPERATORS:
+        return "minimum"
+    if operator in _CEILING_OPERATORS:
+        return "maximum"
+    return None
+
 
 _RECORDING_KEY_METRICS: frozenset[str] = frozenset(
     {
@@ -397,24 +419,50 @@ def select_primary_gate_outcome(
 def _extract_discriminating_metrics(
     result: dict[str, Any],
 ) -> tuple[dict[str, float | int], dict[str, bool]]:
-    """Pull the allowlisted worst-case metric(s) from one gate result.
+    """Pull the worst-case metric from one gate result (Step 10 / P4).
 
-    Returns ``(raw_metrics, exactness_by_metric)``. Keyed off the
-    PERSISTED ``threshold.metric`` name; the worst-case direction comes
-    from ``_WORST_STAT_BY_METRIC``; exactness from
-    ``threshold.unit == "count"``. Anything not allowlisted stays in the
-    full ExperimentRecord — a documented drop (design §3.4).
+    Returns ``(raw_metrics, exactness_by_metric)``, both keyed by the
+    PERSISTED ``threshold.metric`` name. Everything that used to come from a
+    central per-metric-name table is now DERIVED from the threshold row the
+    check declared:
+
+    * the worst-case direction, from ``threshold.operator``;
+    * exactness, from ``threshold.unit`` being a cardinal-count unit.
+
+    **Where the value lives depends on the check's shape, not its name.** A
+    per-file check reports the worst observation ACROSS files, so it comes
+    from ``aggregate_statistics``. A scalar check has no per-file dimension at
+    all — its ``aggregate_statistics`` is empty by construction — so the
+    single value it published under the declared metric name IS the worst
+    observation. Both are "the worst observed value of the declared evidence
+    metric"; only the arity differs, and the check's own metrics say which.
+
+    Without that second branch the derivation would still have produced no
+    fingerprint for a scalar task-owned check — the defect would have moved
+    rather than gone.
+
+    A gate with no threshold row yields nothing, which is why the three
+    recording-only TIDMAD gates carry no fingerprint.
     """
     threshold = result.get("threshold") or {}
     metric_name = threshold.get("metric")
-    stat = _WORST_STAT_BY_METRIC.get(metric_name or "")
-    if metric_name is None or stat is None:
+    if metric_name is None:
         return {}, {}
-    agg = (result.get("metrics") or {}).get("aggregate_statistics") or {}
-    value = agg.get(stat)
+    stat = _worst_statistic(threshold.get("operator"))
+    if stat is None:
+        return {}, {}
+
+    metrics = result.get("metrics") or {}
+    aggregate = metrics.get("aggregate_statistics") or {}
+    value = aggregate.get(stat)
     if value is None:
+        # Scalar check: no per-file dimension, so the published value is the
+        # worst observation. Read under the DECLARED metric name — no table.
+        value = metrics.get(metric_name)
+    if not isinstance(value, int | float) or isinstance(value, bool):
         return {}, {}
-    exact = threshold.get("unit") == "count"
+
+    exact = threshold.get("unit") in _INTEGRAL_UNITS
     return {metric_name: int(value) if exact else float(value)}, {metric_name: exact}
 
 

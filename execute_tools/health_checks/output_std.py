@@ -31,14 +31,19 @@ from typing import Any, ClassVar
 import numpy as np
 
 from execute_tools.deliverable_spec import default_deliverable_storage
-from execute_tools.health_checks._composition import VALUE_SCALE_PARAMETER
+from execute_tools.health_checks._composition import (
+    VALUE_SCALE_PARAMETER,
+    VALUE_SCALE_UNIT_PARAMETER,
+)
 from execute_tools.health_checks._multi_file_peek import peek_and_aggregate
 from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
+    ThresholdDeclaration,
     classify_verdict,
 )
 
@@ -74,6 +79,11 @@ class OutputStdCheck:
 
     name: ClassVar[str] = "output_std"
 
+    _DEFAULT_MIN_STD_MV: ClassVar[float] = 1.0
+    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
+    _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
+    _DEFAULT_AGGREGATION: ClassVar[str] = "any_pass"
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         # Dispersion floor over a prefix of the denoised CH1 stream.
         # Step 08b C5: the millivolt scale is now TASK-owned — declared
@@ -88,13 +98,22 @@ class OutputStdCheck:
             FactRequirement(axis="encoding_family", equals="int8_symbol_stream"),
             FactRequirement(axis="value_scale_unit"),
         ),
-        threshold_parameter_names=("min_std_mv",),
+        evidence_thresholds=(
+            ThresholdDeclaration(
+                metric="output_std_mv",
+                operator=">=",
+                config_key="min_std_mv",
+                default=_DEFAULT_MIN_STD_MV,
+                # TASK-owned scale (R-2): the declaration names the SOURCE,
+                # never "mV". This check already REQUIRES the
+                # value_scale_unit axis, so composition injects the key.
+                unit=EvidenceUnit(config_key=VALUE_SCALE_UNIT_PARAMETER),
+            ),
+        ),
+        per_file_metric_name="output_std_mv",
+        per_file_metric_unit=EvidenceUnit(config_key=VALUE_SCALE_UNIT_PARAMETER),
+        sampling_method_label="channel0001_prefix_peek",
     )
-
-    _DEFAULT_MIN_STD_MV: ClassVar[float] = 1.0
-    _DEFAULT_PEEK_SAMPLES: ClassVar[int] = 100_000
-    _DEFAULT_PEEK_FILE_INDICES: ClassVar[list[int]] = []  # empty → single-file fallback
-    _DEFAULT_AGGREGATION: ClassVar[str] = "any_pass"
 
     def run(
         self,

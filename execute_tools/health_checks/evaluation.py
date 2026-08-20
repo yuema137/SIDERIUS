@@ -16,9 +16,12 @@ from typing import Any, Literal
 import numpy as np
 
 from execute_tools.health_checks.config import GateConfig, load_health_gates_config
+from execute_tools.health_checks.registry import get as registry_get
 from execute_tools.health_checks.runner import evaluate_gate, resolve_action
 from execute_tools.health_checks.schemas import (
+    CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     GateAction,
     GateResult,
     HealthCheckContext,
@@ -81,54 +84,107 @@ def _summary(values: list[float]) -> dict[str, float | int]:
     }
 
 
-def _threshold(check_name: str, config: dict[str, Any]) -> dict[str, Any] | None:
-    if check_name == "output_diversity":
-        return {
-            "metric": "n_unique_int8_values",
-            "operator": ">",
-            "value": int(config.get("min_unique_int8_values", 5)),
-            "unit": "count",
-        }
-    if check_name == "output_std":
-        return {
-            "metric": "output_std_mv",
-            "operator": ">=",
-            "value": float(config.get("min_std_mv", 1.0)),
-            "unit": "mV",
-        }
-    if check_name == "amplitude_collapse":
-        return {
-            "metric": "dominant_mode_fraction",
-            "operator": "<=",
-            "value": float(config.get("collapse_threshold", 0.95)),
-            "unit": "fraction",
-        }
-    return None
+def _declaration_for(check_name: str) -> CheckInputDeclaration | None:
+    """The registered check's declaration, or None if it has none.
+
+    Step 10 / P4. This is a LOOKUP of data the check owns, not a decision:
+    nothing here interprets the check's name. ``None`` covers two states that
+    behave identically and identically to pre-P4 behaviour — a pre-08a or
+    externally supplied check that publishes no declaration, and (per §10,
+    unreachable in production because ``runner.evaluate_gate`` already
+    resolved the check through the same registry) a name that is not
+    registered. Neither invents a declaration, and neither turns evidence
+    rendering into a crash for a check that legally executed.
+    """
+    try:
+        skill = registry_get(check_name)
+    except KeyError:
+        return None
+    declaration = getattr(skill, "declaration", None)
+    return declaration if isinstance(declaration, CheckInputDeclaration) else None
+
+
+def _resolve_unit(unit: EvidenceUnit | None, config: dict[str, Any]) -> str | None:
+    """A unit's resolved string, or None (R-2).
+
+    A ``literal`` is check-owned and used verbatim. A ``config_key`` is
+    TASK-owned (the value scale) and read from the run's composed check
+    config; when the task declares no scale the key is absent and NO unit is
+    rendered, rather than a default being invented.
+    """
+    if unit is None:
+        return None
+    if unit.literal is not None:
+        return unit.literal
+    if unit.config_key is None:
+        # Unreachable: EvidenceUnit validates exactly-one-of at construction.
+        # Narrowed explicitly rather than asserted, because a type guarantee
+        # enforced in another layer's validator is not one a reader — or a
+        # type checker — can see here.
+        return None
+    return config.get(unit.config_key)
+
+
+def _threshold(
+    declaration: CheckInputDeclaration | None, config: dict[str, Any]
+) -> dict[str, Any] | None:
+    """The persisted threshold row, rendered from the check's declaration.
+
+    A check declaring no threshold persists no row — the honest shape for a
+    recording-only check, unchanged from pre-P4.
+
+    ``PersistedHealthGateResult.threshold`` holds ONE row, so the first
+    declared threshold is the one rendered; no shipped check declares more
+    than one, and widening the persisted schema is out of scope.
+
+    **Provenance (Step 10 / P4, Q-P4-1).** When the config supplies the value
+    it is persisted exactly as today, with NO source label. When the key is
+    absent the check did not threshold on nothing — ``run`` fell back to its
+    own declared default — so that default is persisted and labelled
+    ``source: "check_default"``. Rendering it as absent would misreport a gate
+    that ran; failing here would crash on a check that legally executed.
+
+    The value is cast to the type of the declared default, which reproduces
+    the per-branch ``int()`` / ``float()`` casts the removed table applied —
+    derived from the declaration instead of hardcoded per check name.
+    """
+    if declaration is None or not declaration.evidence_thresholds:
+        return None
+    threshold = declaration.evidence_thresholds[0]
+    configured = config.get(threshold.config_key)
+    if configured is None:
+        value: Any = threshold.default
+        source: str | None = "check_default"
+    else:
+        value = type(threshold.default)(configured)
+        source = None
+    row: dict[str, Any] = {
+        "metric": threshold.metric,
+        "operator": threshold.operator,
+        "value": value,
+        "unit": _resolve_unit(threshold.unit, config),
+    }
+    if source is not None:
+        row["source"] = source
+    return row
 
 
 def _per_file_metrics(
-    check_name: str,
+    declaration: CheckInputDeclaration | None,
     metrics: dict[str, Any],
     ctx: HealthCheckContext,
     checkpoint_sha256: str | None,
+    config: dict[str, Any],
 ) -> dict[str, Any]:
-    raw: Any = metrics.get("per_file")
-    metric_name = {
-        "output_diversity": "n_unique_int8_values",
-        "output_std": "output_std_mv",
-        "amplitude_collapse": "dominant_mode_fraction",
-        "pearson_dispersion": "pearson_correlation",
-        "spectral_peak_ratio": "spectral_peak_ratio",
-        "per_file_output_std": "output_std_mv",
-    }.get(check_name)
-    unit = {
-        "output_diversity": "count",
-        "output_std": "mV",
-        "amplitude_collapse": "fraction",
-        "pearson_dispersion": "correlation",
-        "spectral_peak_ratio": "ratio",
-        "per_file_output_std": "mV",
-    }.get(check_name)
+    # Step 10 / P4: the check declares WHERE its per-file values live. Was an
+    # `or` cascade over three TIDMAD metrics keys in generic code.
+    per_file_key = declaration.per_file_metrics_key if declaration is not None else "per_file"
+    raw: Any = metrics.get(per_file_key)
+    metric_name = declaration.per_file_metric_name if declaration is not None else None
+    unit = _resolve_unit(
+        declaration.per_file_metric_unit if declaration is not None else None, config
+    )
+    sampling_method = declaration.sampling_method_label if declaration is not None else None
 
     rows: dict[str, Any] = {}
     if isinstance(raw, list):
@@ -136,13 +192,9 @@ def _per_file_metrics(
     elif isinstance(raw, dict):
         iterable = ((str(key), {"metric_value": value}) for key, value in raw.items())
     else:
-        named = (
-            metrics.get("pearson_per_file")
-            or metrics.get("ratio_per_file")
-            or metrics.get("std_mv_per_file")
-            or {}
-        )
-        iterable = ((str(key), {"metric_value": value}) for key, value in named.items())
+        # No per-file values under the declared key: the check has no per-file
+        # dimension (it emits scalars), so no rows are fabricated for it.
+        iterable = iter(())
 
     for key, item in iterable:
         index = int(key)
@@ -155,7 +207,9 @@ def _per_file_metrics(
             "passed": item.get("passed"),
             "execution_status": "not_run" if io_warning else "passed",
             "sample_count_inspected": metrics.get("peek_samples_requested"),
-            "sampling_method": "channel0001_prefix_peek",
+            # Each check states how IT sampled (Step 10 / P4). Was one
+            # TIDMAD-shaped literal applied to every check's rows.
+            "sampling_method": sampling_method,
             "metrics": ({metric_name: {"value": value, "unit": unit}} if metric_name else {}),
             "checkpoint_sha256": checkpoint_sha256,
             "io_warning": io_warning,
@@ -213,7 +267,11 @@ def _persist(
     check = result.check_results[0] if result.check_results else None
     metrics = _decode_json_metrics(check.metrics if check else {})
     check_name = check.check_name if check else gate_config.checks[0].name
-    per_file = _per_file_metrics(check_name, metrics, ctx, checkpoint_sha256)
+    # Step 10 / P4: the check's own declaration is the evidence authority,
+    # resolved once here through the SAME registry the runner already used.
+    declaration = _declaration_for(check_name)
+    check_config = gate_config.checks[0].config
+    per_file = _per_file_metrics(declaration, metrics, ctx, checkpoint_sha256, check_config)
 
     values: list[float] = []
     for row in per_file.values():
@@ -224,12 +282,12 @@ def _persist(
     metrics["per_file"] = per_file
     metrics["aggregate_statistics"] = _summary(values)
 
-    requested = list(gate_config.checks[0].config.get("peek_file_indices", []))
+    requested = list(check_config.get("peek_file_indices", []))
     completed = [int(key) for key, row in per_file.items() if row["execution_status"] == "passed"]
     passed = [int(key) for key, row in per_file.items() if row.get("passed") is True]
     failed = [int(key) for key, row in per_file.items() if row.get("passed") is False]
     aggregation = {
-        "aggregation_rule": gate_config.checks[0].config.get("aggregation", "recording"),
+        "aggregation_rule": check_config.get("aggregation", "recording"),
         "files_requested": requested or sorted(int(key) for key in per_file),
         "files_completed": completed,
         "files_passed": passed,
@@ -260,7 +318,7 @@ def _persist(
         would_invalidate_under_production_policy=would_invalidate,
         resolved_action=result.action,
         failure_reason=result.failure_reason or None,
-        threshold=_threshold(check_name, gate_config.checks[0].config),
+        threshold=_threshold(declaration, check_config),
         aggregation=aggregation,
         metrics=metrics,
         gate_runtime_seconds=runtime_seconds,

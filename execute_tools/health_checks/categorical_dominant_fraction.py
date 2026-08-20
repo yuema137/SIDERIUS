@@ -29,9 +29,11 @@ from execute_tools.health_checks._view_provider import HealthView
 from execute_tools.health_checks.schemas import (
     CheckInputDeclaration,
     CheckVerdict,
+    EvidenceUnit,
     FactRequirement,
     HealthCheckContext,
     HealthCheckResult,
+    ThresholdDeclaration,
 )
 from execute_tools.health_checks.standard_views import CATEGORICAL_PREDICTIONS
 
@@ -41,6 +43,10 @@ class CategoricalDominantFractionCheck:
 
     name: ClassVar[str] = "categorical_dominant_fraction"
 
+    #: Authoring safety net only — real tasks author their own ceiling
+    #: (task-owned threshold, §3.4).
+    _DEFAULT_MAX_DOMINANT_FRACTION: ClassVar[float] = 0.95
+
     declaration: ClassVar[CheckInputDeclaration] = CheckInputDeclaration(
         consumes_view=CATEGORICAL_PREDICTIONS,
         requires_view=True,
@@ -49,12 +55,16 @@ class CategoricalDominantFractionCheck:
         # outside [0, cardinality) is FAILED, and the range needs the
         # declared alphabet size. Presence-only, injected by composition.
         required_facts=(FactRequirement(axis="symbol_cardinality"),),
-        threshold_parameter_names=("max_dominant_fraction",),
+        evidence_thresholds=(
+            ThresholdDeclaration(
+                metric="dominant_fraction",
+                operator="<=",
+                config_key="max_dominant_fraction",
+                default=_DEFAULT_MAX_DOMINANT_FRACTION,
+                unit=EvidenceUnit(literal="fraction"),
+            ),
+        ),
     )
-
-    #: Authoring safety net only — real tasks author their own ceiling
-    #: (task-owned threshold, §3.4).
-    _DEFAULT_MAX_DOMINANT_FRACTION: ClassVar[float] = 0.95
 
     def run(
         self,

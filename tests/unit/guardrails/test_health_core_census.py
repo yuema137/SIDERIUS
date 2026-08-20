@@ -45,10 +45,17 @@ HEALTH_CORE = REPO_ROOT / "execute_tools" / "health_checks"
 
 #: TIDMAD-family surfaces, excluded from the GENERIC census BY LISTED NAME.
 #: The six check modules + the peek/regime-A readers own TIDMAD's science
-#: (int8 keys, mV thresholds, profile derivation) by design;
-#: ``evaluation.py`` is the pre-08a campaign-persistence adapter whose
-#: per-check-name threshold tables predate declarations — recorded 08c
-#: out-of-scope finding, owner Step 9/10, NOT silently generic.
+#: (int8 keys, mV thresholds, profile derivation) by design.
+#:
+#: **``evaluation.py`` was removed from this set by Step 10 / P4 (C2).** It was
+#: excluded as "the pre-08a campaign-persistence adapter whose per-check-name
+#: threshold tables predate declarations — recorded 08c out-of-scope finding,
+#: owner Step 9/10, NOT silently generic". P4 is that owner: the tables, the
+#: duplicated defaults and the TIDMAD sampling literal are gone, the evidence
+#: is rendered from each check's own declaration, and the module now passes
+#: this census unchanged. That promotion IS P4's structural acceptance — a
+#: regression puts a check name or an `mV` back into generic code and turns
+#: the census RED without anyone having to remember why.
 TIDMAD_FAMILY_MODULES = frozenset(
     {
         "amplitude_collapse.py",
@@ -60,7 +67,6 @@ TIDMAD_FAMILY_MODULES = frozenset(
         "_peek.py",
         "_multi_file_peek.py",
         "_regime_a_facts.py",
-        "evaluation.py",
     }
 )
 
