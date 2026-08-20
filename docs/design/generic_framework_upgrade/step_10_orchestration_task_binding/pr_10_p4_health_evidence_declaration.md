@@ -2,11 +2,19 @@
 
 ## 0. Status
 
-**DRAFT rev 1 — FOR OPERATOR REVIEW. NOT FROZEN. IMPLEMENTATION NOT
-STARTED.** Semantic design complete; the least upstream-sensitive Step-10
-child — **likely candidate for early freeze after source reconciliation**
-(no dependency on P2a/P2b/P3/P5; P1 is already merged). Not frozen in this
-session by mandate.
+**DRAFT rev 1 — ARCHITECTURE REVIEW PASSED (operator, 2026-08-20).
+NOT FROZEN. IMPLEMENTATION NOT STARTED.** Semantic design complete; the
+least upstream-sensitive Step-10 child — **likely candidate for early freeze
+after source reconciliation** (no dependency on P2a/P2b/P3/P5; P1 is already
+merged).
+
+**Operator architecture-review verdict (2026-08-20), recorded verbatim**:
+architecture coherent; **likely independent Health lane** confirmed
+(P1 → P4 → P6, parallel to the main semantic lane); **no fake central
+registry** — the per-check-declaration + registry-resolution shape passed
+the review's anti-pattern check. The verdict is a direction confirmation,
+NOT a freeze: Q-P4-1 remains OPEN and the freeze happens in its own session
+against a fresh source reconciliation.
 
 | field | value |
 |---|---|

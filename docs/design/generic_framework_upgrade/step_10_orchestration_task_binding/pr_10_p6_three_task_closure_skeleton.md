@@ -4,10 +4,16 @@
 
 **SKELETON ONLY — NOT A DETAILED DESIGN. NOT FROZEN. IMPLEMENTATION NOT
 STARTED. DETAILED DESIGN DEFERRED UNTIL P1 / P2a / P2b / P3 / P4 / P5 ARE
-MERGED** (or otherwise at the parent-required final topology). Parent:
-Step-10 parent REVISION 2 (frozen), scope item **S8**, §20.3 (depends on
-"all of them"), §20.8 ("P6 is last, unconditionally"), §22.1 (P6 is the ONE
-child whose primary evidence owner is a real Gate), §22.2 (Q-10-5 = B).
+MERGED** (or otherwise at the parent-required final topology).
+
+**Operator review (2026-08-20)**: skeleton status confirmed — no premature
+detailed implementation plan; this document stays a landing place for
+hand-offs until the semantic children merge.
+
+Parent: Step-10 parent REVISION 2 (frozen), scope item **S8**, §20.3
+(depends on "all of them"), §20.8 ("P6 is last, unconditionally"), §22.1
+(P6 is the ONE child whose primary evidence owner is a real Gate), §22.2
+(Q-10-5 = B).
 
 This skeleton exists so the other children's hand-offs have a named landing
 place. It deliberately contains **no source audit, no commit decomposition,

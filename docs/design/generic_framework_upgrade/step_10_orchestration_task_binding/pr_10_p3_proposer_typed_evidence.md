@@ -2,10 +2,18 @@
 
 ## 0. Status
 
-**DRAFT rev 1 — FOR OPERATOR REVIEW. NOT FROZEN. IMPLEMENTATION NOT
-STARTED.** Semantic design complete; **implementation topology subject to
-post-P2a-merge AND post-P2b-merge reconciliation** (upstream-sensitive items
-labelled `PROVISIONAL(P2a)` / `PROVISIONAL(P2b)`).
+**DRAFT rev 1 — ARCHITECTURE REVIEW PASSED (operator, 2026-08-20).
+NOT FROZEN. IMPLEMENTATION NOT STARTED.** Semantic design complete;
+**implementation topology subject to post-P2a-merge AND post-P2b-merge
+reconciliation** (upstream-sensitive items labelled `PROVISIONAL(P2a)` /
+`PROVISIONAL(P2b)`).
+
+**Operator architecture-review verdict (2026-08-20), recorded verbatim**:
+architecture coherent; open questions explicitly listed (Q-P3-1 / Q-P3-2
+remain OPEN for freeze); **reconcile after P2b** (the binding gate — P2b
+merging implies P2a merged under the frozen sequencing). The verdict is a
+direction confirmation, NOT a freeze: the freeze happens in its own session
+after the P2b-merge reconciliation, with the open questions dispositioned.
 
 | field | value |
 |---|---|

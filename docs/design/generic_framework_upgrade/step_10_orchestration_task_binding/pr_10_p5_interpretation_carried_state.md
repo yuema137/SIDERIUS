@@ -2,10 +2,18 @@
 
 ## 0. Status
 
-**DRAFT rev 1 — FOR OPERATOR REVIEW. NOT FROZEN. IMPLEMENTATION NOT
-STARTED.** Lifecycle semantics are STABLE in this draft; the proposer
-consumer wiring is **`PROVISIONAL(P3)`** and the draft **must reconcile
-after P3 merges** before freeze.
+**DRAFT rev 1 — ARCHITECTURE REVIEW PASSED (operator, 2026-08-20).
+NOT FROZEN. IMPLEMENTATION NOT STARTED.** Lifecycle semantics are STABLE in
+this draft; the proposer consumer wiring is **`PROVISIONAL(P3)`** and the
+draft **must reconcile after P3 merges** before freeze.
+
+**Operator architecture-review verdict (2026-08-20), recorded verbatim**:
+lifecycle coherent; the P3 consumer wiring being explicitly provisional is
+confirmed as the intended shape; **no second digest/state authority** — the
+one-projection-over-the-existing-reader + existing-carrier-fields design
+passed the review's duplicate-authority check. The verdict is a direction
+confirmation, NOT a freeze: Q-P5-1 remains OPEN and the freeze happens after
+the P3-merge reconciliation.
 
 | field | value |
 |---|---|
