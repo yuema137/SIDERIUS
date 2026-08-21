@@ -2,8 +2,24 @@
 
 ## 0. Status
 
-**DRAFT rev 1 of the CONSOLIDATED child — READY FOR OPERATOR FREEZE.
-IMPLEMENTATION NOT STARTED. One required operator question (§19, Q-P56-1).**
+**REVISION 2 — FROZEN. OPERATOR APPROVED (final freeze review, 2026-08-21).
+IMPLEMENTATION NOT STARTED. Open operator questions: 0.**
+
+Revision 2 applies the operator's final freeze review of DRAFT rev 1
+(architecture / consolidation / lifecycle / validation-topology all PASS; no
+redesign, no re-split) — the rulings and seven bounded corrections, recorded
+verbatim in §19:
+
+| ruling / correction | disposition |
+|---|---|
+| **Q-P56-1** | **B — roadmap-depth Step-10 closure.** CAP-SCOPE becomes an explicit REQUIRED prerequisite for contrast-track L4 (§10.2); parent §16.1/§17.1/§26.O amended |
+| **Q-P5-1** | **APPROVED — malformed ⇒ RAISE** (§8.2); no longer overturnable, question count 0 |
+| **C-P56-1** | **W4 must NOT branch on `TIDMAD_METRIC_ID`** in generic composed mode — the rule is composition-presence, never metric identity: legacy/un-composed byte-for-byte; ANY composed run carries NO implicit legacy reference science (§10.5) |
+| Gate 1 | **NOT REQUIRED**, flip condition frozen (§15.1) |
+| Gate 2 | **REQUIRED** — composed TIDMAD, 2 iterations × 1 round, **AUTONOMOUS launch inside the pre-authorized ≤ ~1 h envelope** (the pre-Gate operator stop is DELETED), with the **non-vacuous two-layer restore-evidence contract** (§15.2) |
+| retained Pets/DAVIS L3 evidence | **freshness contract** — provenance + semantic dependency diff, bounded rerun only if a semantics-bearing dependency changed (§10.6, C7) |
+| C6 honesty | Pets/DAVIS closure is **ORCHESTRATION closure**, never contrast L4; the pseudo fixture's training/data-selection content is NOT evidence of task-correct contrast training scope (§10.3, C6) |
+| structure | ruling accepted (no proactive decomposition) + the **implementation tripwire** frozen (§12.1) |
 
 This document is the ONE authoritative design for the remaining Step-10
 implementation work. It supersedes and replaces BOTH prior drafts:
@@ -22,13 +38,13 @@ definitions and now share one owning implementation child).
 
 | field | value |
 |---|---|
-| parent | Step-10 parent REVISION 2 (frozen) + the 2026-08-21 consolidation amendment; owns scope items **S5** (interpretation-derived carried state) and **S8** (three-task executable closure) |
-| source anchor | merged `master` = **`ec6257fb`** (== `origin/master`; production tree == P3 squash `254cbaa1` + the docs-only sync). Every §2 measurement was taken at this anchor |
+| parent | Step-10 parent REVISION 2 (frozen) + the 2026-08-21 consolidation amendment (§20.9) + the Q-P56-1 = B acceptance amendment (parent §16.1/§17.1/§26.O); owns scope items **S5** (interpretation-derived carried state) and **S8** (three-task executable closure, delivered at the §10.2 depth) |
+| source anchor | merged `master` = **`ec6257fb`** (== `origin/master` at audit time; production tree == P3 squash `254cbaa1` + the docs-only sync). Every §2 measurement was taken at this anchor; the rev-2 freeze corrections are docs-only, so the anchor is unchanged |
 | depends on | P1 `bcb17e45` · P2a `e094fa26` · P2b `5a2ecfd1` · P3 `254cbaa1` · P4 `79833db8` — **ALL MERGED**; nothing else |
-| downstream | Step 11 (physical data root, argv-builder reshaping); Step 12 (out-of-tree packages, composition root, contrast L4 per the roadmap ladder); the named capability debt of §10.2 |
-| Gate disposition | **Gate 1 NOT REQUIRED · Gate 2 REQUIRED (one bounded composed-TIDMAD chain, ≥ 2 iterations)** — assignment rows quoted in §15 |
-| open operator questions | **1** — Q-P56-1 (§19): the contrast-task loop-training capability gap and the parent-acceptance alignment it forces. Q-P5-1 (the old P5 draft's single open question) is RESOLVED autonomously in §8.2 with a named precedent, flagged for cheap overturn at freeze |
-| freeze blockers | Q-P56-1 only. Everything else in this document is source-grounded and internally contradiction-free (§20) |
+| downstream | Step 11 (physical data root, argv-builder reshaping); Step 12 (out-of-tree packages, composition root, contrast L4 — **gated on CAP-SCOPE, §10.2**); a future generic reference-evidence capability seam if any composed task ever needs declared reference/SOTA context (§10.5, C-P56-1) |
+| Gate disposition | **Gate 1 NOT REQUIRED · Gate 2 REQUIRED** (one bounded composed-TIDMAD chain, 2 iterations × 1 round, autonomous inside the pre-authorized envelope, non-vacuous restore evidence) — rows quoted and the execution contract frozen in §15 |
+| open operator questions | **0** — Q-P56-1 RESOLVED = B and Q-P5-1 APPROVED (raise), both by the operator's final freeze review 2026-08-21 (§19) |
+| freeze blockers | **none** — REVISION 2 is FROZEN |
 
 ### 0.1 What "consolidated" means here, precisely
 
@@ -550,18 +566,20 @@ the digest key outside the interpreter (censused, C4), and each ChainState
 field has exactly two write sites (seed + closure — the single-writer census
 extended automatically).
 
-### 8.2 Q-P5-1 — RESOLVED: malformed confirmations ⇒ raise
+### 8.2 Q-P5-1 — RESOLVED and OPERATOR-APPROVED (freeze review 2026-08-21): malformed confirmations ⇒ RAISE
 
-The old draft's single open question, resolved with the named precedent
-rather than held for the freeze: the projection **raises** on a
+The old draft's single open question, resolved with the named precedent and
+**approved by the operator at the final freeze review** — no longer
+overturnable prose, a frozen ruling: the projection **raises** on a
 present-but-malformed value, `project_prediction_memory`'s policy
-(`resume.py:1039-1047`) — promotion state assembled from a stale mapping
-silently DELAYS or mislabels scientific graduation; "an accuracy statistic
-assembled from half a pool is worse than none" is the same argument one level
-up. The alternative (warn-and-keep-older, `knowledge_cache`'s policy) would
-silently change WHEN a relationship graduates. Flagged here so the freeze
-review can overturn it in one line; the parent's §10 rule 2 requires exactly
-this statement ("which of those it is, and why"), which this section is.
+(`resume.py:1039-1047`) — this is PROMOTION state, and silently keeping an
+older partial mapping can change WHEN a scientific vocabulary relationship
+graduates; "an accuracy statistic assembled from half a pool is worse than
+none" is the same argument one level up. Frozen alongside it: a missing
+pre-activation key ⇒ `{}`; an unreadable/corrupt digest ⇒ the existing
+digest-unusable handling; the latest valid present mapping wins whole-dict.
+The parent's §10 rule 2 requires exactly this statement ("which of those it
+is, and why"), which this section is.
 
 ---
 
@@ -626,23 +644,41 @@ point at which Tracks B and C MUST demonstrate full declared composition +
 end-to-end execution (L3→L4)" — while the roadmap's Step-10 contrast rung is
 "a second bound task **initializes** the loop". The frozen parent's
 §16.1/§17.1 wording ("initializes and executes the exploration loop")
-overreached the roadmap's own ladder; reconciling that wording is Q-P56-1
-(§19), the one operator decision this design needs.
+overreached the roadmap's own ladder. **Q-P56-1 = B — RULED by the operator
+at the final freeze review (2026-08-21, §19)**: Step 10 closes at the
+roadmap's actual maturity depth, and the parent's §16.1/§17.1/§26.O wording
+is amended accordingly (applied to the parent in the same freeze commit).
 
-**Named debt (under the recommended ruling)**:
-`CAP-SCOPE — task-owned scope construction & loop-executable contrast
-training` — covering §2.5 (a)–(f) as one capability family with one future
-design; owner: the data-path/dataset family (a dedicated post-Step-10
-capability PR or Step 12's L3→L4 climb, whichever the operator schedules);
-explicitly NOT silently Step 12, and NOT this child.
+**The delivered Step-10 contrast depth (frozen wording, per the ruling)**:
+composition resolves; generic `run_workflow` orchestration
+initializes/traverses under pseudo execution; direction / secondaries /
+Health binding / P3 typed boundary / carried lifecycle are exercised;
+retained L3 runners own real task-data execution; real task-correct loop
+training remains CAP-SCOPE.
 
-### 10.3 The closure matrix (under Q-P56-1 = B, the recommendation)
+**CAP-SCOPE — NOT a vague optional debt (operator constraint, frozen)**:
+
+```text
+CAP-SCOPE
+= task-owned scope construction + loop-executable contrast training
+= the REQUIRED enabling capability before Pets/DAVIS may be declared
+  L4 / full-agent-workflow complete
+```
+
+It covers §2.5 (a)–(f) as one capability family with one future design;
+owner: the data-path/dataset family. It may be implemented by a dedicated
+post-Step-10 capability PR **or** by Step 12's L3→L4 work — but **Step 12
+MUST NOT claim contrast-track L4 completion while CAP-SCOPE remains open**
+(recorded as an explicit prerequisite on the roadmap's Step-12 row in the
+same freeze commit). Explicitly NOT this child's, and never silently moved.
+
+### 10.3 The closure matrix (Q-P56-1 = B, RULED)
 
 | task | binding | orchestration closure (this child, deterministic) | real execution | carried state |
 |---|---|---|---|---|
-| **TIDMAD** | the SHIPPED manifest (W2) through `run_chain.sh` (W1) | full-loop drive (C6): composed run ≡ legacy behaviour, zero secondary bytes, reference scores still load (its metric IS TIDMAD) | **Gate 2 (§15): the FIRST real composed chain run** — ≥ 2 iterations, real LLM/training/inference/scoring, carried state through a REAL restore | live in both |
-| **Pets** | its manifest (fixture-derived), health family state C | full-loop drive: loop initializes and runs interpret → propose → implement → validate → plan under `accuracy`/higher with exactly `macro_f1` observational; reference scores DO NOT load (W4); binding reaches the tuner; no `LEGACY_OMITTED` | L3 real-execution evidence stays with its runner (retained per §10.4); loop training = CAP-SCOPE | the same task-free contract (nothing task-shaped can enter the carriers) |
-| **DAVIS** | its manifest, health family state C | full-loop drive **≥ 2 iterations with carried state live** — the direction falsifier: a `lower` primary end-to-end with confirmations/findings carried, proving the lifecycle encodes no higher-is-better assumption | same as Pets | the discriminating case |
+| **TIDMAD** | the SHIPPED manifest (W2) through `run_chain.sh` (W1) | full-loop drive (C6): composed run ≡ legacy on the **composition invariants** (metric/scorer semantics, binding, Health declaration, zero-secondary semantics, lifecycle); per **C-P56-1** the legacy-only implicit reference table is NOT part of composed-mode parity — a composed run carries the named absence | **Gate 2 (§15): the FIRST real composed chain run** — 2 iterations, real LLM/training/inference/scoring, carried state through a REAL restore with the §15.2 non-vacuous evidence contract | live in both |
+| **Pets** | its manifest (fixture-derived), health family state C | full-loop drive: loop initializes and runs interpret → propose → implement → validate → plan under `accuracy`/higher with exactly `macro_f1` observational; NO implicit legacy reference science (C-P56-1); binding reaches the tuner; no `LEGACY_OMITTED` | L3 real-execution evidence stays with its runner (retained per §10.4, freshness-audited per §10.6); loop training = CAP-SCOPE | the same task-free contract (nothing task-shaped can enter the carriers) |
+| **DAVIS** | its manifest, health family state C | full-loop drive **≥ 2 iterations with carried state live** — the direction falsifier: a `lower` primary end-to-end with confirmations/findings carried, proving the lifecycle encodes no higher-is-better assumption; deliberate wrong-direction anti-vacuity probe | same as Pets | the discriminating case |
 
 The drives go through **`run_workflow` itself** (pseudo LLM responses, the
 stub sandbox — the pseudo-full-loop tier), never through a per-task
@@ -650,6 +686,32 @@ hand-written driver and never through the bounded-iteration helper — which is
 what makes "same framework path" a fact rather than a fixture arrangement,
 and forces the P3 typed boundary (the protocol constructs `ProposalInput`)
 on every task.
+
+**The orthogonal coverage is FROZEN as designed (operator ruling §19) — do
+NOT require three identical expensive runs:**
+
+```text
+TIDMAD   preservation / mature-track control — composed orchestration,
+         real Gate 2, 2 real iterations, real restore  (deepest REAL evidence)
+Pets     classification / higher / observational-secondary contrast —
+         composed pseudo orchestration + retained L3 real evidence
+DAVIS    strongest discriminating track — lower primary, mixed-direction
+         secondaries, ≥ 2 pseudo iterations with carried state live,
+         wrong-direction anti-vacuity probe + retained L3 real evidence
+```
+
+Pets is deliberately NOT required to run ≥ 2 iterations: temporal carry is
+already owned three times over (the deterministic ≥ 3-iteration lifecycle
+tests, DAVIS's ≥ 2 pseudo iterations, TIDMAD's 2 real Gate iterations).
+Requiring it of Pets would duplicate owners, not add information.
+
+**C6 honesty rule (frozen verbatim)**: *C6 MUST NOT label its Pets/DAVIS
+pseudo sandbox inputs as task-correct training scope. It proves
+orchestration semantics only.* The pseudo fixture's training/data-selection
+content is NOT evidence of task-correct contrast training scope — that is
+CAP-SCOPE's, and every claim surface (§10, §13 C6, §14, §17, §21, parent,
+roadmap, CLAUDE.md) says "orchestration closure", never "contrast L4" or
+"real three-task full training closure".
 
 ### 10.4 Runner claims — enumeration and disposition (Q-10-5 = B)
 
@@ -683,21 +745,82 @@ task-data execution) and is no longer an alternate ORCHESTRATION path.
   TIDMAD assets (`configs/task_health/tidmad.yaml`,
   `configs/task_interpretation/tidmad.yaml`, the resolved profile/metric).
   Composed-TIDMAD ≡ legacy-TIDMAD is asserted deterministically (C5) before
-  the Gate runs on it.
+  the Gate runs on it — **on the composition invariants only**: metric/scorer
+  semantics, task binding, Health declaration, zero-secondary semantics,
+  lifecycle behaviour and the other frozen generic invariants. Per C-P56-1
+  the legacy-only implicit reference table is explicitly NOT part of
+  composed-mode parity.
 * **W3**: the three subprocess children import all three in-tree data-path
   built-ins (the Step-08 "built-ins' bootstrap, NOT the extension path"
   pattern, verbatim); out-of-tree plugin availability in children stays
   Step 12's (P1 hand-off (b) split).
-* **W4**: `load_reference_scores()` becomes conditional on the run's bound
-  metric identity being TIDMAD's (`TIDMAD_METRIC_ID`) or the run being
-  legacy/un-composed; a composed non-TIDMAD run gets an EMPTY reference
-  block and a named log line, never TIDMAD numbers. Legacy and
-  composed-TIDMAD behaviour byte-identical (pinned).
+* **W4 — as corrected by C-P56-1 (operator freeze correction, 2026-08-21)**.
+  DRAFT rev 1 proposed conditioning `load_reference_scores()` on the bound
+  metric identity being `TIDMAD_METRIC_ID`. **That shape is REJECTED and must
+  not be implemented**: a metric-id check guarding a TIDMAD-only legacy
+  science table is still a task/science identity branch inside generic
+  orchestration — one the existing task-name census cannot even see. The
+  frozen rule keys on **composition PRESENCE only**:
+
+  ```text
+  LEGACY / UN-COMPOSED RUN:
+      preserve the existing TIDMAD reference-score behaviour byte-for-byte.
+
+  ANY COMPOSED RUN (TIDMAD, Pets, DAVIS, any future task):
+      do NOT implicitly load the legacy TIDMAD reference-score table —
+      a named absence and a log line, never implicit legacy science.
+  ```
+
+  No generic-core branch on a task name, on `TIDMAD_METRIC_ID`, on a
+  TIDMAD-specific score sign/range, or on any other task-identity surrogate.
+  If a future composed task genuinely needs reference/SOTA evidence, that is
+  a **generic declared reference-evidence capability** (config/plugin seam)
+  owned by a future design — NOT invented in this child, and never inferred
+  by core from a metric id. **Declared consequence, not a regression**: a
+  composed run's tuner/interpreter/proposer prompts carry the named absence
+  where legacy runs carry the 42-file reference table — there is no prior
+  composed baseline to regress against (this Gate is the first composed
+  run), prompt TEMPLATES are unchanged, and the legacy path is byte-for-byte
+  preserved, so the Gate-1 flip condition is NOT triggered.
+  **Recorded as C-P56-1 — implicit legacy reference science is forbidden in
+  composed mode.**
 * **W5**: a pin, not a fix — a test proving the chain scoring route consumes
   `resolve_bound_run_metric()` under a composed binding (mutation: rebind a
   different metric, the scored value moves), plus a standing note that the
   subprocess re-derivation at `denoising_score_single.py:180` is legacy-path
   only.
+
+### 10.6 Retained Pets/DAVIS L3 evidence — the freshness contract (operator correction, frozen)
+
+The retained real-execution evidence (08c runners) may be reused, but **not
+timelessly by assumption**. Before terminal closure (owned by C7, recorded in
+the ledger and the §14 matrix), for EACH retained real-execution track:
+
+```text
+record the last successful real-evidence provenance:
+    commit SHA · artifact/run location · the relevant result
+
+audit the semantic dependency diff from that evidence SHA to the final
+implementation candidate, over the runner's real-execution surface:
+    task data path · decode · training · inference · deliverable codec ·
+    metric · Health declarations/stage · the runner itself
+
+if NO semantics-bearing dependency changed:
+    the prior L3 evidence remains authoritative — DO NOT rerun merely
+    for reassurance
+
+if a semantics-bearing production dependency DID change:
+    rerun ONLY the affected bounded real runner before claiming current
+    L3 evidence
+```
+
+This is an evidence-freshness audit, not an automatic expensive rerun.
+Known starting provenance (verified this session): Pets
+`/home/klz/Data/SIDEREIS_DATA/step08c_pets_gate2_20260818/gate_evidence.json`
+(train 3.75 s) · DAVIS
+`/home/klz/Data/SIDEREIS_DATA/step08c_davis_gate2_20260818/gate_evidence.json`
+(train 7.33 s, dispersion `0.2156402715035823`), both at the 08c head
+`ede11fd5` — C7 re-verifies and records the diff verdict.
 
 ---
 
@@ -712,8 +835,9 @@ task-data execution) and is no longer an alternate ORCHESTRATION path.
   and closures never see task identity; the census set (dispatch census +
   the new-file scope extension) is the executable form.
 * **Step 12 owns**: the out-of-tree task PACKAGE as the source of the whole
-  binding set; the unified composition root; contrast L4 (with CAP-SCOPE as
-  its enabling capability unless scheduled earlier); child-side out-of-tree
+  binding set; the unified composition root; contrast L4 — **gated on
+  CAP-SCOPE, which Step 12 MUST close (or find closed) before claiming
+  contrast-track L4 (§10.2, frozen prerequisite)**; child-side out-of-tree
   plugin registration. This child must remain extendable-not-replaceable by
   Step 12 (§24's freeze-time question): every interface it touches is either
   an existing family's seam or a value on the existing composition — nothing
@@ -741,6 +865,33 @@ it, and its branch count stays far under the measured ceiling. **No
 structural decomposition is performed in this child** — doing one "while
 here" would violate the bounded in-passing rule.
 
+### 12.1 Implementation tripwire (operator-frozen, 2026-08-21)
+
+The no-proactive-decomposition ruling is ACCEPTED — and it is paired with a
+binding tripwire on the implementation session:
+
+```text
+run_workflow's delta remains SIBLING-SHAPED:
+    seed · input pass · state closure · consumer read
+
+no new workflow phase;
+no new branch family;
+no task-specific dispatch;
+no new mutable local accumulator;
+no new semantic owner.
+
+record PRE and POST:  run_workflow LOC · branch-ish AST count
+                      (baseline: 1,489 LOC · 130 nodes, §12)
+
+if implementation requires MATERIALLY more logic/branching than the frozen
+shape:
+    STOP adding inline complexity;
+    re-run the §19.3 structure preflight;
+    choose a responsibility-preserving workflow-local extraction if needed.
+
+no unrelated cleanup.
+```
+
 ---
 
 ## 13. Commit decomposition — NINE commits (C0–C8), full plans
@@ -753,9 +904,8 @@ before the final head; **ONE exact-head CI at the end**. Every commit runs
 the guards it is KNOWN to move — explicitly including the Step-09.5a
 workflow oracle and the single-writer/reachability censuses whenever
 `RestoredState`/`ChainState`/`model_exploration.py` are touched (the P3 C3
-lesson). Commits C5–C8 implement the Q-P56-1 = B shape; if the operator rules
-A or C, §19 records exactly which of them re-scope (C0–C4 are
-ruling-independent).
+lesson). Commits C5–C8 implement the **Q-P56-1 = B shape as RULED** (§19);
+the whole plan is now ruling-complete — no contingent scope remains.
 
 ---
 
@@ -1175,22 +1325,32 @@ composed-metric chain scoring route is pinned.
 - [ ] W2: the shipped manifest, mirroring
       `tests/fixtures/step10_p1/tidmad/composition.yaml` against the shipped
       TIDMAD assets; a deterministic test asserts composed-TIDMAD ≡
-      legacy-TIDMAD on the invariants the P1 parity framework already
-      measures (binding identity, fingerprint stability, zero secondary
-      bytes).
+      legacy-TIDMAD on the COMPOSITION INVARIANTS only (binding identity,
+      fingerprint stability, zero secondary bytes, metric/scorer semantics,
+      Health declaration, lifecycle) — per C-P56-1 the legacy-only implicit
+      reference table is NOT in the parity set.
 - [ ] W3: the two missing built-in imports per child, in the declared
       "built-ins' bootstrap" comment shape; a test resolves all three
       transported ids in a child-shaped process.
-- [ ] W4: the condition (bound metric is TIDMAD's id, or legacy/un-composed
-      run) + the named log line for the skip; before-picture flipped from
-      C0's leak baseline.
+- [ ] W4 per the frozen C-P56-1 rule: the guard keys on **composition
+      PRESENCE only** — an ACTIVE composition ⇒ NO implicit legacy
+      reference-score loading (named absence + log line); legacy/un-composed
+      ⇒ byte-for-byte unchanged. Five required tests:
+      (1) legacy/un-composed preserves the existing 42-reference behaviour
+      exactly; (2) composed TIDMAD has NO implicit legacy reference table;
+      (3) composed Pets has none; (4) composed DAVIS has none;
+      (5) **no TIDMAD metric-identity conditional is introduced into generic
+      core** — an executable assertion over the diff (no new
+      `TIDMAD_METRIC_ID` / task-name / score-sign conditional in
+      orchestration/tuner core). C0's leak baseline flips here.
 - [ ] W5: the mutation-backed pin (§10.5).
 - [ ] Negative: a misspelled manifest path through the CHAIN surface fails
       closed before any LLM spend, with the composing error surfaced.
 
 **4. Validation plan.**
-* Unit: W2 equivalence; W4 condition (both directions — TIDMAD keeps
-  references, composed-Pets gets the empty block); W3 resolution; W5 pin.
+* Unit: W2 invariant-set equivalence; W4's five C-P56-1 tests (legacy
+  byte-for-byte; composed TIDMAD/Pets/DAVIS each reference-free; no
+  metric-identity conditional in generic core); W3 resolution; W5 pin.
 * Shell: a `bash -n` + an args-construction test in the existing
   launch-surface-parity family for W1.
 * Negative/invalid: unknown manifest, unreadable manifest, manifest naming an
@@ -1204,16 +1364,18 @@ composed-metric chain scoring route is pinned.
       `run_chain.sh` (args-construction evidence, no real spend).
 - [ ] Legacy chain argv byte-identical (test).
 - [ ] All three in-tree ids resolve in child-shaped processes.
-- [ ] The W4 leak baseline flipped; TIDMAD reference behaviour byte-identical
-      for legacy and composed-TIDMAD runs.
+- [ ] The W4 leak baseline flipped; LEGACY reference behaviour byte-identical;
+      ALL composed runs (TIDMAD included) carry the named absence, per
+      C-P56-1.
 
 **6. Failure and edge cases.**
 * An SDSC submission path that silently drops the flag — both paths tested.
 * A manifest referencing a missing shipped asset — fail-closed at compose
   time (existing behaviour, asserted from the new surface).
-* W4 must not consult task NAMES — the condition reads metric identity /
-  composition presence only (census-compatible; the dispatch census stays
-  green over the diff).
+* W4 must not consult task identity in ANY form — not task names, not
+  `TIDMAD_METRIC_ID`, not score sign/range (C-P56-1). The guard reads
+  composition PRESENCE only; the dispatch census stays green over the diff
+  and test (5) pins the surrogate-branch forms the census cannot see.
 
 **7. Verification commands and evidence.**
 ```text
@@ -1237,7 +1399,10 @@ compositions drive the ONE `run_workflow` (pseudo LLM, stub sandbox), with
 direction, secondaries, Health binding, typed proposer evidence and carried
 state asserted per task — DAVIS at ≥ 2 iterations with carried state live as
 the lower-is-better falsifier — and the genericity censuses extended over
-every file this PR touched.
+every file this PR touched. **Frozen honesty rule (§10.3): C6 MUST NOT label
+its Pets/DAVIS pseudo sandbox inputs as task-correct training scope — it
+proves ORCHESTRATION semantics only; task-correct contrast training is
+CAP-SCOPE.**
 
 **2. Scope.**
 Tests + fixture-honesty docs. Production: none expected; any gap the drives
@@ -1247,12 +1412,13 @@ Depends on C2–C5.
 
 **3. Implementation plan.**
 - [ ] The TIDMAD composed drive: composed ≡ legacy on the loop's observable
-      lifecycle (statuses, per-iteration artifacts, zero secondary bytes,
-      reference block present).
+      lifecycle COMPOSITION INVARIANTS (statuses, per-iteration artifacts,
+      zero secondary bytes); the implicit legacy reference block ABSENT with
+      the named absence, per C-P56-1.
 - [ ] The Pets drive: loop initializes and traverses interpret → propose →
       implement → validate → plan under `accuracy`/higher; exactly
-      `macro_f1` observational in evidence; reference block ABSENT (W4);
-      Health binding state C reaches the tuner context (no
+      `macro_f1` observational in evidence; implicit legacy reference block
+      ABSENT (C-P56-1); Health binding state C reaches the tuner context (no
       `LEGACY_OMITTED`); real verdict evidence stays runner-owned (§10.4) —
       asserted as BINDING, not verdicts.
 - [ ] The DAVIS drive, ≥ 2 iterations: `mse`/lower live end-to-end;
@@ -1330,6 +1496,13 @@ CAP-SCOPE per §10.4); changing runner behaviour. Depends on C6.
 **3. Implementation plan.**
 - [ ] Line-by-line claims audit of both runners against §10.4's table;
       corrections recorded here if the table missed a claim.
+- [ ] **The §10.6 freshness audit, per retained track**: record the evidence
+      provenance (SHA · artifact · result), compute the semantic dependency
+      diff from the evidence SHA to the implementation candidate over the
+      runner's real-execution surface, and record the verdict — evidence
+      REMAINS AUTHORITATIVE (no rerun) or the affected bounded runner is
+      rerun BEFORE the retained-evidence claim is made. No rerun for
+      reassurance; no timeless reuse by assumption.
 - [ ] Docstring relabel: "L3 real-execution evidence harness; orchestration
       claims owned by the generic-loop closure tests (named); full
       retirement blocked on CAP-SCOPE (named)".
@@ -1339,10 +1512,16 @@ CAP-SCOPE per §10.4); changing runner behaviour. Depends on C6.
 
 **4. Validation plan.**
 * Unit: the existing runner-adjacent tests still green (no behaviour change).
+* Real execution: ONLY a §10.6-triggered bounded runner rerun, if the
+  dependency diff demands one (~25 s per runner on the 5090; not a Gate — no
+  LLM involved). The verdict either way is recorded with the diff evidence.
 * Gate: **NONE.**
 
 **5. Acceptance criteria.**
 - [ ] Every §10.4 row verified or corrected against source, recorded.
+- [ ] The §10.6 freshness verdict recorded per track, with the dependency
+      diff as evidence (and the bounded rerun's result, if one was
+      triggered).
 - [ ] No repository text still describes the runners as the way a contrast
       task executes its lifecycle (grep recorded).
 
@@ -1379,12 +1558,20 @@ status sync; this ledger; the PR. Depends on C0–C7.
 **3. Implementation plan.**
 - [ ] Re-read the gate standard and re-audit flag parsing from source
       immediately before launch (the §15 rulings' own rule 4).
-- [ ] Gate 2 readiness packet written BEFORE launch (command, bounds, PASS
-      criteria, abort criteria) — §15.2's exact shape.
-- [ ] **Launch only with operator approval** (real LLM + training cost —
-      never autonomous).
+- [ ] Gate 2 readiness packet written BEFORE launch — §15.2's exact shape:
+      command · bounds · candidate SHA · clean-tree proof · deterministic
+      prerequisites green · exact workload · projected runtime and cost ·
+      the PASS / FAIL / INCONCLUSIVE taxonomy incl. the §15.2 non-vacuous
+      evidence contract and its non-discriminating-workload FAIL rule.
+- [ ] **Launch AUTONOMOUSLY** — the Gate is pre-authorized by this frozen
+      design (§15.2's execution contract): if non-destructive AND projected
+      total wall time ≤ ~1 h AND inside the normal GPU/API/cost envelope,
+      launch without a further operator stop. Return to the operator ONLY if
+      the projection materially exceeds that envelope or a frozen-contract
+      change would be needed.
 - [ ] Execute; verdict read from persisted artifacts and the log, never a
-      wrapper exit code.
+      wrapper exit code; the §15.2 two-layer restore evidence extracted from
+      the persisted iteration artifacts and recorded here.
 - [ ] Node/skill doc sync with each documented flag/default QUOTED against
       merged source (the pre-merge doc rule).
 - [ ] Ledger closed: all checklists `[x]` with evidence or explicitly
@@ -1394,16 +1581,29 @@ status sync; this ledger; the PR. Depends on C0–C7.
       verdict from the log.
 
 **4. Validation plan.**
-* Gate 2 per §15 (REQUIRED, bounded, ≥ 2 iterations, composed TIDMAD).
+* Gate 2 per §15 (REQUIRED, bounded, exactly 2 iterations × 1 round,
+  composed TIDMAD — NOT expanded to 3: the ≥ 3-iteration property is
+  deterministic-owned and must not be duplicated by the Gate).
 * All prior targeted suites green at head, recorded per commit, not re-run
   wholesale.
-* Gate 1: **NOT REQUIRED** (§15.1) — not launched.
+* Gate 1: **NOT REQUIRED** (§15.1) — not launched unless its flip condition
+  was triggered.
 
 **5. Acceptance criteria.**
 - [ ] Gate 2 PASS per the standard's functional criteria + the child's
-      boundary evidence: the run was COMPOSED (fingerprint in the lock), and
-      iteration 2's interpreter input carried iteration 1's confirmations
-      through a REAL restore (asserted from persisted artifacts).
+      boundary evidence, ALL from persisted artifacts: the run was COMPOSED
+      (fingerprint in the lock) **and** the §15.2 two-layer restore evidence
+      holds — (A) iteration 1 produced ≥ 1 usable key finding, present in
+      its committed interpretation artifact, and iteration 2's proposer
+      `expert_context` contains those exact prior finding(s) through the
+      `accumulated_key_findings` lifecycle (**if iteration 1 produced no
+      usable finding, the Gate MUST NOT PASS** — a non-discriminating
+      workload, not evidence); (B) iteration 1's output confirmations
+      mapping deep-equals iteration 2's restored `InterpretationInput`
+      mapping, provenance artifact-visible — recorded as stronger evidence
+      if non-empty, and if `{}`, recorded WITHOUT any claim that the Gate
+      proved non-empty confirmations reachability (that owner stays the
+      deterministic ≥ 3-iteration test + four severing mutations).
 - [ ] `CI tested SHA == final PR HEAD`; working tree clean.
 - [ ] STOP at **READY FOR OPERATOR REVIEW — DO NOT MERGE**.
 
@@ -1436,12 +1636,13 @@ Closure only.
 | single writer / single reader | planted-offender censuses | C4 |
 | chain launches a composed run; legacy argv byte-identical | args-construction + parity tests | C5 |
 | children resolve all in-tree bindings | child-shaped resolution test | C5 |
-| no TIDMAD reference science in a composed non-TIDMAD run | W4 flip pair | C5 |
+| no implicit legacy reference science in ANY composed run; legacy path byte-for-byte; no metric-identity conditional in generic core (C-P56-1) | the five W4 tests | C5 |
 | chain scoring consumes the bound metric | W5 mutation pin | C5 |
 | three tasks traverse ONE `run_workflow`; direction/secondaries/health-binding/carried-state per task | parametrized pseudo drives (incl. the DAVIS ≥ 2-iteration falsifier + anti-vacuity inversion probe) | C6 |
 | zero task-identity branches, extended scope | AST census + plants | C6 |
 | runner claims each have a named owner | the C7 audit record | C7 |
-| the real composed chain lifecycle (real LLM/training/restore) | **Gate 2** — the only claim nothing cheaper owns | C8 |
+| retained Pets/DAVIS L3 evidence is FRESH | the §10.6 provenance + dependency-diff audit (bounded rerun only if a semantics-bearing dependency changed) | C7 |
+| the real composed chain lifecycle (real LLM/training/restore, with the NON-VACUOUS §15.2 two-layer restore witness) | **Gate 2** — the only claim nothing cheaper owns | C8 |
 | repository-wide regression at the final head | ONE exact-head CI | C8 |
 
 No claim has two expensive owners; no Gate duplicates a deterministic owner.
@@ -1469,10 +1670,13 @@ wiring | Gate 1"*.
   or a proposal-affecting schema, Gate 1 becomes REQUIRED (per the standard's
   row) before C8.
 
-### 15.2 Gate 2 — REQUIRED: one bounded composed-TIDMAD chain, ≥ 2 iterations
+### 15.2 Gate 2 — REQUIRED: one bounded composed-TIDMAD chain, 2 iterations × 1 round
 
 Assignment row (quoted): *"Checkpoint (end of feature) | Gate 2"*. Depth row
-(quoted): *"cross-iteration behaviour or resume | ≥ 2 iterations"*.
+(quoted): *"cross-iteration behaviour or resume | ≥ 2 iterations"* —
+instantiated at exactly **2 iterations, 1 round**, and deliberately NOT 3:
+the ≥ 3-iteration promotion property is deterministic-owned (§14) and a
+3-iteration real Gate would duplicate that owner, not add evidence.
 
 **What it uniquely proves** (nothing cheaper can): the COMPOSED production
 path has never executed for real (§2.5) — this Gate is its first real
@@ -1481,9 +1685,52 @@ an explicit composition, across a REAL chain restore that carries the new
 state. Shape: the canonical bounded command (cold-start, no `--seed_paths`,
 partial-scope pairing, `openai_tiered_pro.json` + the 4 GiB advice file, no
 `tee`) with `--num_iterations 2 --max_rounds 1` and
-`--task_composition configs/task_composition/tidmad.yaml`. PASS = the
-standard's functional criteria + the §13-C8 boundary evidence. Operator
-approval required before launch.
+`--task_composition configs/task_composition/tidmad.yaml`. Per C-P56-1 the
+run's prompts carry the named absence of the legacy reference table — the
+rule working, not a regression. PASS = the standard's functional criteria +
+the two-layer evidence contract below.
+
+**Execution contract (operator-frozen, 2026-08-21) — the Gate is
+PRE-AUTHORIZED by this frozen design; there is NO separate pre-launch
+operator stop.** Before launch the implementation session MUST: re-read the
+current gate standard; re-read the actual current CLI/flags from source;
+write the Gate-readiness packet; record the candidate SHA; prove the working
+tree clean; record the deterministic prerequisites green; record the exact
+workload; project runtime and cost; record the PASS / FAIL / INCONCLUSIVE
+taxonomy. Then:
+
+```text
+non-destructive
+AND projected total wall time <= ~1 hour
+AND inside the normal GPU/API/cost envelope
+    -> LAUNCH AUTONOMOUSLY. Do NOT stop for another approval.
+
+materially exceeding that envelope, a new GPU allocation, unusual API
+spend, or a frozen-contract change needed
+    -> operator stop (the only one).
+```
+
+**The two-layer restore-evidence contract (non-vacuous by construction).**
+`{} == {}` proves nothing; the Gate must inspect BOTH carried values from
+persisted artifacts:
+
+* **A — `accumulated_key_findings` is the REQUIRED non-vacuous witness.**
+  Iteration 1 must produce at least one usable key finding, present in its
+  committed interpretation artifact; after the REAL chain restore, iteration
+  2's proposer `expert_context` must contain the exact prior finding(s) —
+  the discriminating `real LLM → digest → restore → ChainState → proposer`
+  proof. **If iteration 1 produces no usable finding, the Gate did NOT
+  exercise the required carried-context boundary and MUST NOT PASS** — a
+  non-discriminating workload / Gate failure, never "inconclusive evidence".
+* **B — `vocab_link_confirmations` proves the exact restore MECHANISM.**
+  Iteration 1's output mapping must deep-equal iteration 2's restored
+  `InterpretationInput` mapping, with artifact-visible provenance. Non-empty
+  ⇒ record the stronger evidence; `{}` ⇒ record the equality but claim NO
+  non-empty-reachability — that scientific property's owner stays the
+  deterministic ≥ 3-iteration test + the four independent severing
+  mutations. The Gate proves the REAL restore mechanism; deterministic
+  evidence proves non-empty promotion reachability. The owners stay
+  separate.
 
 **Corpus ruling under the FROZEN multi-track governance** (roadmap §22.13 /
 §17.0.2, quoted): *"When a Gate IS required, its corpus MUST cover every
@@ -1501,9 +1748,10 @@ owners are the censuses and the three-task drives (§14), keeping the
 parent's "no TIDMAD-only Gate may support a genericity claim" satisfied by
 assignment, not by hope.
 
-**Flip conditions**: Q-P56-1 = C (capability child first) adds a real
-contrast-task chain to the corpus when that seam becomes executable;
-Q-P56-1 = A moves that Gate inside this child.
+**Forward note (ruling B applied)**: when CAP-SCOPE lands and the contrast
+tracks become loop-executable, the real contrast-task chain Gate belongs to
+THAT work (a dedicated capability PR or Step 12's L3→L4 climb) — never
+retro-fitted into this child.
 
 ## 16. Failure / edge cases (cross-commit view)
 
@@ -1518,7 +1766,8 @@ Q-P56-1 = A moves that Gate inside this child.
 | feature absent from vocab at promotion time | producer skips (existing) |
 | empty mapping vs missing key | distinct: `{}` is a legitimate cleared state and OVERWRITES on latest-wins |
 | chain launch with a bad manifest | fail-closed at compose time, before LLM spend, from the operator surface |
-| composed non-TIDMAD run | no TIDMAD reference numbers (W4); binding resolution in children (W3); the tune phase's REAL training refusal is CAP-SCOPE's documented boundary |
+| ANY composed run (TIDMAD included) | no implicit legacy reference science — named absence (C-P56-1); binding resolution in children (W3); the tune phase's REAL contrast training refusal is CAP-SCOPE's documented boundary |
+| legacy / un-composed run | reference-score behaviour byte-for-byte unchanged (C-P56-1's other half) |
 | resume of a pre-P5 workspace | restores with defaults; the invariants lock is untouched by this child (no new lock key) |
 
 ## 17. Risk register
@@ -1530,7 +1779,7 @@ Q-P56-1 = A moves that Gate inside this child.
 | R3 | the in-process delta (DD-1) surprises a consumer | declared in §5; the equality test pins the new agreed behaviour |
 | R4 | the three-task drives pass by avoiding the real path | one parametrized driver over `run_workflow` itself; protocol-only proposer input; anti-vacuity inversion probe |
 | R5 | C5's chain-surface change breaks legacy launches | byte-identical legacy argv test + `bash -n` + launch-surface-parity family |
-| R6 | W4 hides a TIDMAD regression | condition tested in BOTH directions; legacy + composed-TIDMAD byte-identical |
+| R6 | W4 hides a legacy-TIDMAD regression, or smuggles a task-identity surrogate branch | the five C-P56-1 tests: legacy byte-for-byte; every composed run reference-free; an executable no-metric-identity-conditional assertion over the diff (the census-invisible surrogate form the operator's review caught) |
 | R7 | the Gate discovers a composed-path defect late | C5's deterministic composed≡legacy equivalence runs long before C8; the Gate is confirmation, not discovery |
 | R8 | scope creep toward CAP-SCOPE ("just make Pets train") | §10.2's boundary is explicit; C6's plan forbids task-logic patches; any gap is diagnosed → W-item or CAP-SCOPE |
 | R9 | the census extension misses a newly-added module | C6 requires a RED plant in at least one newly-touched file |
@@ -1589,42 +1838,84 @@ phrasing (they are one object, two branches); the P5 draft's expectation that
 `tests/integration/workflows/test_vocab_accumulation.py` might be "flipped"
 wholesale (its H.4 keeps node-level ownership; §13-C4 dispositions it).
 
-## 19. Open operator questions
+## 19. Operator freeze rulings (final freeze review, 2026-08-21) — QUESTIONS: 0
 
-**Q-P56-1 — contrast-task loop training is a missing capability; align the
-parent's S8 acceptance wording.**
+The operator reviewed DRAFT rev 1 in full (C0–C8, the validation matrix,
+both Gate rulings, the three tracks, Q-P56-1, CAP-SCOPE, the structure
+preflight) and returned: **architecture PASS · consolidation PASS ·
+lifecycle PASS · validation topology PASS — no redesign, no re-split** —
+plus the rulings and seven bounded corrections below, all applied in this
+Revision 2.
 
-*Evidence*: §2.5 (a)–(f), §10.2 — the frozen caller-built-scope seam
-(`task_data_path.py:100-103`), the TIDMAD-only tuner sample-set construction
-(`planning.py:397-413`), the missing scope argv
-(`train_engine_sandbox.py:1976-1991`), the TIDMAD-shaped `DatasetProfile`
-(`dataset_config.py:45-63`) with self-declared fabricated contrast fixtures,
-the trial anchor-map requirement (`:777-785`), the TIDMAD peek literal
-(`execution.py:1043-1044`), and the governance census that forbids production
-from reading pack manifests. The roadmap ladder already places contrast L4 at
-Step 12; the parent's §16.1/§17.1 "initializes and **executes** the
-exploration loop" and §26.O demand it at Step 10.
+### 19.1 Q-P56-1 — RESOLVED: **B — roadmap-depth Step-10 closure**
 
-| option | consequence |
-|---|---|
-| **A — absorb the capability into this child** | full S8 as worded; but a new declared capability (task-owned scope construction) is designed inside the terminal closure child, extending a FROZEN D14 contract, across ≥ 4 upstream families (profile topology, tuner data selection, argv transport, trial anchoring, health peek) — the exact "hidden as P6 runner logic" the skeleton forbids; child roughly doubles; highest risk |
-| **B — RECOMMENDED: close at the roadmap's own ladder depth** | this design as written: lifecycle closure + all Step-10-owned wiring (W1–W5) + three-task ORCHESTRATION closure (the roadmap rung "a second bound task initializes the loop") + the first real composed-chain Gate + runner claims dispositioned; **CAP-SCOPE named as post-Step-10 capability debt** (owner scheduled by the operator: a dedicated capability PR or Step 12's L3→L4 climb, which the roadmap already mandates); parent §16.1/§17.1/§26.O amended to the delivered depth with the debt named — the same minimum-correction shape as C-P4-1 |
-| **C — insert a prerequisite capability child** | CAP-SCOPE gets its own designed child BEFORE this child's C6–C8; full S8 preserved inside Step 10; Step 10 grows by one child and one design cycle; this child's C0–C5 could proceed meanwhile |
+The measured capability gap is REAL (§2.5 (a)–(f): the frozen
+caller-built-scope seam `task_data_path.py:100-103`; TIDMAD-only tuner
+sample-set construction `planning.py:397-413`; no scope argv
+`train_engine_sandbox.py:1976-1991`; the TIDMAD-shaped `DatasetProfile`
+`dataset_config.py:45-63` with self-declared fabricated contrast fixtures;
+the trial anchor-map requirement; the TIDMAD peek literal; the governance
+census forbidding production from reading pack manifests). Options A (absorb
+— extends a frozen D14 contract inside the terminal closure child across
+≥ 4 upstream families) and C (a new prerequisite capability child) were
+considered and rejected; **B is the ruling**: Step 10 delivers at the
+roadmap's actual maturity depth (§10.2's frozen wording), the parent's
+§16.1/§17.1/§26.O overclaim is amended, and **CAP-SCOPE is frozen as the
+REQUIRED enabling capability before Pets/DAVIS may be declared L4 complete —
+Step 12 MUST NOT claim contrast-track L4 while CAP-SCOPE remains open**
+(§10.2; recorded on the roadmap's Step-12 row). Never silently moved.
 
-*Recommendation*: **B** — it is the only option consistent simultaneously
-with the skeleton's own upstream-debt rule, §7.2's capability distinction,
-the frozen D14 contract, and the roadmap ladder that already scheduled
-contrast L4 later; and the capability genuinely deserves its own design (it
-owns exact-materialization, split identity and per-task portioning failure
-classes this closure child must not improvise).
+### 19.2 Q-P5-1 — RESOLVED / APPROVED: malformed confirmations ⇒ RAISE
 
-*Freeze effect*: B or C can be ruled and frozen directly (C re-scopes
-§13 C6–C8 trivially: they wait). A requires this document to grow a
-capability design section before freeze.
+§8.2's ruling approved as frozen: promotion state fails closed; missing
+pre-activation key ⇒ `{}`; unreadable digest ⇒ existing unusable handling;
+latest valid mapping wins whole-dict.
 
-**Everything else: 0 open.** Q-P5-1 resolved (§8.2, overturnable at freeze in
-one line); the Gate posture is derived from frozen governance with quoted
-rows (§15) and carries its own flip conditions.
+### 19.3 C-P56-1 — implicit legacy reference science is FORBIDDEN in composed mode
+
+The operator's load-bearing catch on DRAFT rev 1: W4's proposed
+`TIDMAD_METRIC_ID` condition was a task/science identity branch in generic
+core — invisible to the task-name census — and is REJECTED. The frozen rule
+(§10.5): legacy/un-composed byte-for-byte; ANY composed run carries the
+named absence; no generic-core branch on task name, `TIDMAD_METRIC_ID`,
+score sign/range or any identity surrogate; a future composed task needing
+reference/SOTA evidence requires a future GENERIC declared capability seam,
+not invented here. Composed-mode parity claims narrowed to the composition
+invariants (§10.5 W2, §13 C5/C6).
+
+### 19.4 Gate rulings
+
+* **Gate 1 NOT REQUIRED** (§15.1), flip condition frozen; never run for
+  reassurance.
+* **Gate 2 REQUIRED** (§15.2): composed TIDMAD, real LLM + real
+  training/inference/scoring, exactly 2 iterations × 1 round (never 3 — the
+  ≥ 3-iteration property is deterministic-owned); **pre-authorized
+  AUTONOMOUS launch** inside the ≤ ~1 h / normal-budget envelope (the
+  pre-Gate operator stop is DELETED as contradicting the standing
+  Implementation Working Rules); the **non-vacuous two-layer
+  restore-evidence contract** (findings = the required real witness, with
+  the no-usable-finding ⇒ MUST NOT PASS rule; confirmations = exact-restore
+  mechanism proof, never a non-empty-reachability claim when `{}`).
+
+### 19.5 Three-task topology, freshness, honesty, structure
+
+* The **orthogonal coverage is frozen** (§10.3): TIDMAD deepest-real ·
+  Pets classification/higher/secondary contrast · DAVIS strongest
+  discriminating falsifier; Pets deliberately NOT required to run
+  ≥ 2 iterations; ONE parametrized C6 driver, composition the only
+  variable.
+* The retained Pets/DAVIS L3 evidence carries the **freshness contract**
+  (§10.6, C7) — provenance + semantic dependency diff; bounded rerun only
+  when a semantics-bearing dependency changed; never a rerun for
+  reassurance, never timeless reuse.
+* **C6 honesty rule** frozen verbatim (§10.3): orchestration closure only,
+  never contrast L4.
+* The C0–C4 lifecycle validation set is **APPROVED AS DESIGNED** and must
+  not be weakened or duplicated by a real Gate.
+* The structure ruling is accepted with the **§12.1 tripwire** frozen.
+
+**Open required operator questions: 0. Material contradictions: 0.
+Unresolved PROVISIONAL semantics: 0.**
 
 ## 20. Adversarial self-review
 
@@ -1650,7 +1941,10 @@ this document's):
 | Does any step grow `model_exploration.py`/`resume.py` into a worse mixed structure? | §12: sibling-shaped additions only, measured branch headroom, no new phase, no new owner; the structure preflight is the binding record |
 | Can the consolidation itself hide an unreviewable mega-PR? | 9 commits, each with the 8-section plan and its own boundary; review decomposition preserved; ONE CI per the validation-economy rule |
 | Can C0's baselines go stale before C6 flips them? | Each baseline names the commit that flips it (the guard-disposition table); an unflipped baseline at C8 is a ledger error, checked in C8's closure list |
-| Can the Gate pass while the composition silently didn't bind? | C8's PASS criteria include the composed fingerprint in the run-invariants lock and the restored-mapping evidence in iteration 2's persisted input — artifact-verified, not assumed |
+| Can the Gate pass while the composition silently didn't bind? | C8's PASS criteria include the composed fingerprint in the run-invariants lock and the §15.2 two-layer restore evidence — artifact-verified, not assumed |
+| Can the Gate's restore evidence pass VACUOUSLY on empty carried state? | Not anymore — **CORRECTED by the operator's freeze review**: `{} == {}` is excluded by contract; findings are the required non-vacuous witness (no usable iteration-1 finding ⇒ the Gate MUST NOT PASS), and an empty confirmations equality is recorded without any reachability claim (§15.2) |
+| Can generic core keep a task-science identity branch the census cannot see? | The one proposed instance (W4's `TIDMAD_METRIC_ID` condition) was **caught by the operator's review and REJECTED (C-P56-1)**: the guard keys on composition presence only, and C5's test (5) pins that no metric-identity/surrogate conditional enters generic core — covering exactly the shape the AST task-name census is blind to |
+| Can retained L3 evidence silently go stale under this PR's own changes? | No — the §10.6 freshness contract: provenance recorded, semantic dependency diff computed, bounded rerun triggered iff a semantics-bearing dependency changed (C7 acceptance) |
 
 ## 21. Definition of done
 
@@ -1664,17 +1958,28 @@ this document's):
 * [ ] Three-task orchestration closure green through ONE parametrized
       `run_workflow` path; class (b) = 0 with extended scope; DAVIS
       ≥ 2-iteration carried-state falsifier green.
-* [ ] W1–W5 each closed with their paired negative/parity evidence.
+* [ ] W1–W5 each closed with their paired negative/parity evidence — W4 per
+      the C-P56-1 rule with all FIVE tests (legacy byte-for-byte; composed
+      TIDMAD/Pets/DAVIS reference-free; no metric-identity conditional in
+      generic core).
 * [ ] Runner claims enumerated; orchestration claims transferred; retained
-      claims named with their failure classes; relabels landed.
-* [ ] Gate 2 PASS on the composed chain with the boundary evidence; Gate 1
-      not run (or its flip condition documented as triggered and PASS).
+      claims named with their failure classes; relabels landed; **the §10.6
+      freshness verdict recorded per retained track** (bounded rerun result
+      included if one was triggered).
+* [ ] Gate 2 PASS on the composed chain with the **§15.2 two-layer
+      non-vacuous restore evidence** (findings witness mandatory;
+      confirmations exact-restore provenance recorded); launched
+      autonomously inside the pre-authorized envelope; Gate 1 not run (or
+      its flip condition documented as triggered and PASS).
+* [ ] The §12.1 structure tripwire held: pre/post `run_workflow` LOC +
+      branch counts recorded; delta sibling-shaped.
 * [ ] ONE exact-head CI SUCCESS on the final PR head; tree clean.
-* [ ] Carried debt recorded, not hidden: CAP-SCOPE (§10.2), F-P56-1 (§2.2),
-      the H.4 out-of-CI note (C4), HD-T5/HD-T6 (unchanged, P4's), and the
-      C0 residual-debt check's recorded hits for the roadmap's
-      "resume/dashboard direction literals" line (owner outside this child
-      unless a touched line repaired one in passing).
+* [ ] Carried debt recorded, not hidden: **CAP-SCOPE (§10.2 — the REQUIRED
+      prerequisite for contrast-track L4; Step 12 may not claim L4 past
+      it)**, F-P56-1 (§2.2), the H.4 out-of-CI note (C4), HD-T5/HD-T6
+      (unchanged, P4's), and the C0 residual-debt check's recorded hits for
+      the roadmap's "resume/dashboard direction literals" line (owner
+      outside this child unless a touched line repaired one in passing).
 * [ ] Parent §20 amendment, §4.1 map, roadmap Step-10 row and CLAUDE.md all
       reflect the consolidated topology and this child's outcome.
 * [ ] STOP at **READY FOR OPERATOR REVIEW — DO NOT MERGE**.

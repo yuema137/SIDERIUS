@@ -7,8 +7,10 @@ IMPLEMENTATION IN PROGRESS — 5 of 7 semantic children merged (P1 · P4 · P2a 
 P2b · P3). TOPOLOGY AMENDMENT (operator, 2026-08-21): the two REMAINING
 children P5 and P6 are CONSOLIDATED into ONE implementation child — §20.9;
 authoritative design
-`pr_10_p5_6_lifecycle_and_three_task_closure.md` (the separate P5 draft and
-P6 skeleton are superseded and removed).**
+`pr_10_p5_6_lifecycle_and_three_task_closure.md`, now **REVISION 2 — FROZEN,
+OPERATOR APPROVED (2026-08-21; Q-P56-1 = B, Q-P5-1 = raise, C-P56-1;
+§16.1/§17.1/§26.O amended accordingly)** — implementation NOT STARTED (the
+separate P5 draft and P6 skeleton are superseded and removed).**
 
 **P3 (S4) — COMPLETE / MERGED 2026-08-21.** PR #245, squash
 **`254cbaa1466125873d6c7a72f59a7d25fd2c5619`**; final head `31cdabaa3d720c1b796bb20202700bd309664eb9`, exact-head CI **32457848717 SUCCESS**
@@ -1744,8 +1746,18 @@ genuinely frozen):
 
 ## 16. Pets acceptance (classification, higher-is-better)
 
-1. A Pets run **initializes and executes the exploration loop** through the same
-   generic composition TIDMAD uses — not through `scripts/run_pets_gate2.py`.
+1. *[AMENDED — operator ruling Q-P56-1 = B, 2026-08-21 (P5+P6 freeze; §20.9).
+   The original wording "initializes and executes the exploration loop"
+   overclaimed relative to the roadmap maturity ladder (§22.10 places
+   contrast L4 at Step 12) and to the measured capability gap (task-owned
+   scope construction — CAP-SCOPE).]* A Pets run **binds through the same
+   generic composition TIDMAD uses and initializes/traverses the exploration
+   loop's ORCHESTRATION** (interpret → propose → implement → validate →
+   plan; direction, secondaries, Health binding, typed proposer evidence,
+   carried lifecycle) — not through `scripts/run_pets_gate2.py`. Real
+   task-correct loop TRAINING for Pets remains **CAP-SCOPE**, the required
+   prerequisite for its L4 claim; its real task-data execution evidence
+   stays with the retained, freshness-audited L3 runner.
 2. `accuracy` higher-is-better is correct at every migrated ordering site.
 3. `macro_f1` — **and only `macro_f1`** — is transported as a **secondary**, is
    present in the interpreter's evidence, and provably **cannot** affect winner
@@ -1768,7 +1780,12 @@ genuinely frozen):
 DAVIS is the **discriminating** track: under a direction defect it does not
 degrade, it inverts.
 
-1. Loop execution through the same generic composition.
+1. *[AMENDED — Q-P56-1 = B, same ruling and rationale as §16 item 1.]*
+   Loop ORCHESTRATION through the same generic composition, at ≥ 2 pseudo
+   iterations with carried state live (the lower-is-better carried-state
+   falsifier); real task-correct loop TRAINING remains CAP-SCOPE; real
+   task-data execution evidence stays with the retained, freshness-audited
+   L3 runner.
 2. `mse` **lower**-is-better correct at every migrated site — with
    `nodes/proposal_helpers.py`'s `top_n` cut named explicitly, since it
    currently selects the worst N.
@@ -2057,14 +2074,18 @@ unchanged and this is **NOT Revision 3**.
   one child's internal commit order (lifecycle commits C0–C4 before closure
   commits C5–C8). "Depends on all of them" is preserved: the consolidated
   child depends on P1 · P2a · P2b · P3 · P4 — all merged.
-* **One discovery is routed to the operator, not absorbed**: the consolidated
-  design's source audit found that contrast-task loop TRAINING is a missing
-  declared capability (task-owned scope construction), not wiring — its
-  Q-P56-1 proposes aligning §16.1/§17.1/§26.O's "executes the exploration
-  loop" wording with the roadmap's own maturity ladder (contrast L4 at
-  Step 12) and naming the capability as post-Step-10 debt. That ruling is
-  made at the consolidated child's freeze, per §4.1's own rule that scope
-  corrections are applied before a child freezes.
+* **One discovery was routed to the operator, not absorbed — and is now
+  RULED**: the consolidated design's source audit found that contrast-task
+  loop TRAINING is a missing declared capability (task-owned scope
+  construction), not wiring. **Q-P56-1 = B (operator final freeze review,
+  2026-08-21)**: Step 10 delivers at the roadmap ladder's own depth;
+  §16.1/§17.1/§26.O are amended in place (marked *[AMENDED]*); and
+  **CAP-SCOPE** is frozen as the REQUIRED enabling capability before
+  Pets/DAVIS may be declared L4 complete — implementable by a dedicated
+  post-Step-10 capability PR or by Step 12's L3→L4 work, but **Step 12 MUST
+  NOT claim contrast-track L4 while CAP-SCOPE remains open** (recorded on
+  the roadmap's Step-12 row). The consolidated child is **REVISION 2 —
+  FROZEN** under this ruling.
 
 ---
 
@@ -2139,7 +2160,7 @@ implementation; **ONE** exact-head CI per final child head.
 | **P3** | typed-contract tests on **both** entrypoints + prompt-byte parity for the legacy adapter | Gate 1 **only if** parity cannot be proven — this is the child most likely to need it |
 | **P4** | completeness contract test on a **non-TIDMAD** check name + a TIDMAD verdict-manifest comparison | a Gate |
 | **P5** | **deterministic lifecycle test with temporal depth ≥ 3** — the primary owner | **a 3-iteration real Gate is NOT automatically required** (Q-10-3); only if the gate standard names a unique failure class deterministic evidence cannot prove |
-| **P6** | **Gate 2** — the final real multi-task executable evidence | — |
+| **P6** | **Gate 2** — the final real multi-task executable evidence *(instantiated by the consolidated P5+P6 child under §22.13's own maturity qualifier: the composed-TIDMAD chain is the real Gate; the contrast tracks are not loop-executable at that seam — Q-P56-1 = B, §20.9 — and contribute their highest honest lower-level evidence: the deterministic three-task drives + the retained, freshness-audited L3 runner evidence)* | — |
 
 **Two rules that bind every child:**
 
@@ -2300,10 +2321,16 @@ not, why not — in writing.
   central table edit**, and TIDMAD's verdicts are bit-identical.
 * **N.** The task binding reaches subprocesses: a reachability test fails when
   the parent stops emitting it.
-* **O.** Pets and DAVIS each initialize and execute the exploration loop through
-  the same generic composition, with correct binding, execution, direction,
-  metric transport, persistence and resume. **No model-quality threshold is an
-  acceptance criterion anywhere.**
+* **O.** *[AMENDED — Q-P56-1 = B, operator 2026-08-21 (§20.9): the delivered
+  Step-10 contrast depth.]* Pets and DAVIS each bind through the same generic
+  composition and **initialize/traverse the exploration loop's
+  ORCHESTRATION** with correct binding, direction, metric transport,
+  persistence and carried-state lifecycle; their real task-data execution
+  evidence is the retained, freshness-audited L3 runner evidence; real
+  task-correct loop TRAINING is **CAP-SCOPE** — the REQUIRED prerequisite
+  before either may be declared L4 complete (Step 12 may not claim
+  contrast-track L4 past it). **No model-quality threshold is an acceptance
+  criterion anywhere.**
 
 * **Q.** A persisted artifact carrying no `metric_spec` stays **inspectable**
   and is **never ranked**, with a visible named explanation and no assumed
@@ -2506,17 +2533,17 @@ is not Step-10 scope.
 | | |
 |---|---|
 | revision | **2 — FROZEN**, post-merge reconciliation **PASS** (§0.3); **three targeted corrections R-1/R-2/R-3 applied 2026-08-20 (operator-authorized; acceptance/wording only — §22.1 P1 parity obligation, §3.8 default-4 ownership split, §8 order-acquisition precedence). Freeze unchanged; NOT Revision 3** |
-| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #242, squash `e094fa26`, exact-head CI 32431989276 SUCCESS on `b50bec6a`; merged master byte-identical to the validated head; final operator review PASS)** — the golden-metric ordering surface went **12 measured sites → 0** (the C0 AST scanner found 2 chain-fold sites in `core/resume.py` invisible to every prior audit); `reconcile_metric_spec` PROMOTED to `execute_tools/evaluation_metric.py` as the ONE reconciliation authority (one engine, spec-level + record-level `(metric_id, direction)` entry points); four-case unrankable semantics at every persisted-artifact consumer; proposer `top_n` direction-aware with the Q-P2a-1 order-free `all` fallback; scanner = standing guard, direct + alias plants RED at the final head. **D-P2a-4 ACCEPTED/BOUNDED** (`MetricOrder` body unchanged; only the accepted declaration annotation widened to the §4.4 minimum identity); **F-P2a-4 RESOLVED** (zero TIDMAD derivation sites added — CI caught the attempt, the derivation was deleted, never census-widened); five test-fixture generations upgraded to carry persisted identity. Post-P4 reconciliation MERGE-BASED (merge `553bd66c`, 0 conflicts, force push NOT used, honoring the repo guardrail); Gate 1/2 NOT REQUIRED, not run · **P2b REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #244, squash `5a2ecfd1`; final executable head `f6a73afd` CI 32439134908 SUCCESS, final PR head `41eeff60` CI 32444963507 SUCCESS with 11,318 passed / 33 skipped; merged master byte-identical to the validated head; operator final review PASS)** `pr_10_p2b_secondary_metric_transport.md` — architecture review PASS on rev 2 (post-P2a/P4 reconciliation: PROVISIONALs resolved; the record/output carrier adopts the THREE names the 09a receiving side itself reserves — `secondary_metric_results` / `secondary_metric_refusals` / `secondary_metric_specs`; eight-section all-`[ ]` commit plans C0–C4). Rulings: **Q-P2b-1 = WHEREVER_PRIMARY_EVALUATES** (no round-type branch); **Q-P2b-2 RESOLVED with the scope-violation correction** — NotScoreableError → typed refusal · ScopeViolationError → RE-RAISE to the existing outer handler, never downgraded · other Exception → `secondary_metric_errors` dict (diagnostic provenance, no new model, stderr/log surface only, projects `unavailable`), 'observational' explicitly bounded to ordinary secondary outcomes; **Q-P2b-3 = _STATS_SUFFICIENT** — digest NOT widened, and the false 'P5 territory' default-ownership wording removed; **C-P2b-1**: zero-secondary serialization audited (output `model_dump()` serializes empty defaults) ⇒ SEMANTIC emptiness frozen, no cosmetic byte-identity machinery. Gate 1 + Gate 2 NOT REQUIRED (frozen), and neither was run. Open questions 0; contradictions 0. **DELIVERED**: the composition/binding/evaluation/transport/projection/carry/render lifecycle end-to-end, six IR-P2b rulings, two ACCEPTED bounded deviations (G5 re-pointed to the commit that trips it; four out-of-scope baselines carried the frozen §4.7 additive-empty serialization delta, applied key-by-key and never regenerated), and findings F-P2b-1..4 — of which **F-P2b-4** (anchored-symbol censuses blind to a name prefix) is carried forward as separate test-infrastructure debt, deliberately NOT swept repo-wide** · **P3 REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #245, squash `254cbaa1`, exact-head CI 32457848717 SUCCESS on `31cdabaa`; merged master byte-identical to the validated head)** `pr_10_p3_proposer_typed_evidence.md` (ONE typed proposer evidence value consumed by BOTH entrypoints; raw interpretation reads 40 + 12 → 0; the raw `interpretation` carrier and `per_model_score_tables` REMOVED; D1/D2/D3 the only LLM-facing deltas; F-P3-1 clamp direction-aware; Gate 1 PASS after a genuine FAIL; full record in §0) · **P4 REVISION 3 — FROZEN → IMPLEMENTED → MERGED 2026-08-20 (PR #243, squash `79833db8`, exact-head CI 32426702255 SUCCESS on `d73e39e3`; merged master byte-identical to the validated head; independent final review PASS)** `pr_10_p4_health_evidence_declaration.md` (post-P1 reconciliation at `64446b2b`; `evaluation.py`'s name-keyed tables + duplicated defaults + sampling literal become per-check declarations, and `evaluation.py` moves into the health-core census's GENERIC partition as the executable acceptance. Rulings: **Q-P4-1 = (a) fallback-only `check_default` label**, shipped TIDMAD rows byte-identical; **Q-P4-2 = YES**, `_WORST_STAT_BY_METRIC` + the unit-exactness literal absorbed as DERIVATIONS from the declared operator/unit — a table deleted, no field added, never a relocated map (R-7); **Q-P4-3 = DEFER BOTH**, HD-T5 / HD-T6 named post-Step-10 Health-capability debt, explicitly NOT P6 and NOT assumed Step 12; **C-P4-1 resolved** by the §13 scope-completeness correction — semantic owner, child decomposition, scientific Health semantics, public schema and P4/P2a parallelism all UNCHANGED. Adversarial 23 CLOSED / 2 CORRECTED / 0 open; 0 contradictions; Gate 1 + Gate 2 NOT REQUIRED; **SAFE TO IMPLEMENT IN PARALLEL WITH P2a**, competing semantic owners = 0) · **P5+P6 CONSOLIDATED (operator amendment 2026-08-21, §20.9)** `pr_10_p5_6_lifecycle_and_three_task_closure.md` — **DRAFT rev 1, READY FOR OPERATOR FREEZE (source anchor `ec6257fb`)**: both carried values ride the sibling lifecycle (confirmations latest-wins projection with raise-on-malformed; findings normalized onto `ChainState`; producer cold-start carry-through DD-2; ≥ 3-iteration deterministic reachability + per-link severing); composed-chain operator surface (`run_chain.sh --task_composition` + shipped `configs/task_composition/tidmad.yaml`); wiring closures W1–W5 (child built-in bootstrap, reference-score guard, composed-metric pin); three-task ORCHESTRATION closure through ONE `run_workflow` path with the DAVIS ≥ 2-iteration lower-is-better carried-state falsifier; runner claims enumerated per Q-10-5 = B with real-execution claims retained; **Gate 1 NOT REQUIRED · Gate 2 REQUIRED (first-ever real COMPOSED chain, 2 iterations)**; ONE open operator question **Q-P56-1** — contrast-task loop TRAINING is a missing declared capability (task-owned scope construction; the frozen four-method seam takes caller-built scopes), recommendation = close at the roadmap ladder's own depth and name **CAP-SCOPE** as post-Step-10 capability debt, amending §16.1/§17.1/§26.O wording at freeze. The superseded `pr_10_p5_interpretation_carried_state.md` (DRAFT rev 1) and `pr_10_p6_three_task_closure_skeleton.md` are REMOVED, reconciled section-by-section in the new doc's §18 — `step_10_orchestration_task_binding/` |
+| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #242, squash `e094fa26`, exact-head CI 32431989276 SUCCESS on `b50bec6a`; merged master byte-identical to the validated head; final operator review PASS)** — the golden-metric ordering surface went **12 measured sites → 0** (the C0 AST scanner found 2 chain-fold sites in `core/resume.py` invisible to every prior audit); `reconcile_metric_spec` PROMOTED to `execute_tools/evaluation_metric.py` as the ONE reconciliation authority (one engine, spec-level + record-level `(metric_id, direction)` entry points); four-case unrankable semantics at every persisted-artifact consumer; proposer `top_n` direction-aware with the Q-P2a-1 order-free `all` fallback; scanner = standing guard, direct + alias plants RED at the final head. **D-P2a-4 ACCEPTED/BOUNDED** (`MetricOrder` body unchanged; only the accepted declaration annotation widened to the §4.4 minimum identity); **F-P2a-4 RESOLVED** (zero TIDMAD derivation sites added — CI caught the attempt, the derivation was deleted, never census-widened); five test-fixture generations upgraded to carry persisted identity. Post-P4 reconciliation MERGE-BASED (merge `553bd66c`, 0 conflicts, force push NOT used, honoring the repo guardrail); Gate 1/2 NOT REQUIRED, not run · **P2b REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #244, squash `5a2ecfd1`; final executable head `f6a73afd` CI 32439134908 SUCCESS, final PR head `41eeff60` CI 32444963507 SUCCESS with 11,318 passed / 33 skipped; merged master byte-identical to the validated head; operator final review PASS)** `pr_10_p2b_secondary_metric_transport.md` — architecture review PASS on rev 2 (post-P2a/P4 reconciliation: PROVISIONALs resolved; the record/output carrier adopts the THREE names the 09a receiving side itself reserves — `secondary_metric_results` / `secondary_metric_refusals` / `secondary_metric_specs`; eight-section all-`[ ]` commit plans C0–C4). Rulings: **Q-P2b-1 = WHEREVER_PRIMARY_EVALUATES** (no round-type branch); **Q-P2b-2 RESOLVED with the scope-violation correction** — NotScoreableError → typed refusal · ScopeViolationError → RE-RAISE to the existing outer handler, never downgraded · other Exception → `secondary_metric_errors` dict (diagnostic provenance, no new model, stderr/log surface only, projects `unavailable`), 'observational' explicitly bounded to ordinary secondary outcomes; **Q-P2b-3 = _STATS_SUFFICIENT** — digest NOT widened, and the false 'P5 territory' default-ownership wording removed; **C-P2b-1**: zero-secondary serialization audited (output `model_dump()` serializes empty defaults) ⇒ SEMANTIC emptiness frozen, no cosmetic byte-identity machinery. Gate 1 + Gate 2 NOT REQUIRED (frozen), and neither was run. Open questions 0; contradictions 0. **DELIVERED**: the composition/binding/evaluation/transport/projection/carry/render lifecycle end-to-end, six IR-P2b rulings, two ACCEPTED bounded deviations (G5 re-pointed to the commit that trips it; four out-of-scope baselines carried the frozen §4.7 additive-empty serialization delta, applied key-by-key and never regenerated), and findings F-P2b-1..4 — of which **F-P2b-4** (anchored-symbol censuses blind to a name prefix) is carried forward as separate test-infrastructure debt, deliberately NOT swept repo-wide** · **P3 REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #245, squash `254cbaa1`, exact-head CI 32457848717 SUCCESS on `31cdabaa`; merged master byte-identical to the validated head)** `pr_10_p3_proposer_typed_evidence.md` (ONE typed proposer evidence value consumed by BOTH entrypoints; raw interpretation reads 40 + 12 → 0; the raw `interpretation` carrier and `per_model_score_tables` REMOVED; D1/D2/D3 the only LLM-facing deltas; F-P3-1 clamp direction-aware; Gate 1 PASS after a genuine FAIL; full record in §0) · **P4 REVISION 3 — FROZEN → IMPLEMENTED → MERGED 2026-08-20 (PR #243, squash `79833db8`, exact-head CI 32426702255 SUCCESS on `d73e39e3`; merged master byte-identical to the validated head; independent final review PASS)** `pr_10_p4_health_evidence_declaration.md` (post-P1 reconciliation at `64446b2b`; `evaluation.py`'s name-keyed tables + duplicated defaults + sampling literal become per-check declarations, and `evaluation.py` moves into the health-core census's GENERIC partition as the executable acceptance. Rulings: **Q-P4-1 = (a) fallback-only `check_default` label**, shipped TIDMAD rows byte-identical; **Q-P4-2 = YES**, `_WORST_STAT_BY_METRIC` + the unit-exactness literal absorbed as DERIVATIONS from the declared operator/unit — a table deleted, no field added, never a relocated map (R-7); **Q-P4-3 = DEFER BOTH**, HD-T5 / HD-T6 named post-Step-10 Health-capability debt, explicitly NOT P6 and NOT assumed Step 12; **C-P4-1 resolved** by the §13 scope-completeness correction — semantic owner, child decomposition, scientific Health semantics, public schema and P4/P2a parallelism all UNCHANGED. Adversarial 23 CLOSED / 2 CORRECTED / 0 open; 0 contradictions; Gate 1 + Gate 2 NOT REQUIRED; **SAFE TO IMPLEMENT IN PARALLEL WITH P2a**, competing semantic owners = 0) · **P5+P6 CONSOLIDATED (operator amendment 2026-08-21, §20.9)** `pr_10_p5_6_lifecycle_and_three_task_closure.md` — **REVISION 2 FROZEN, OPERATOR APPROVED (final freeze review 2026-08-21; source anchor `ec6257fb`; implementation NOT STARTED)**: both carried values ride the sibling lifecycle (confirmations latest-wins projection with raise-on-malformed — **Q-P5-1 = RAISE, approved**; findings normalized onto `ChainState`; producer cold-start carry-through DD-2; ≥ 3-iteration deterministic reachability + per-link severing; resume deep-equality); composed-chain operator surface (`run_chain.sh --task_composition` + shipped `configs/task_composition/tidmad.yaml`); wiring closures W1–W5, with **C-P56-1** (operator catch): NO implicit legacy TIDMAD reference science in ANY composed run, guard keyed on composition PRESENCE never `TIDMAD_METRIC_ID` — legacy path byte-for-byte, composed-mode parity narrowed to the composition invariants; three-task ORCHESTRATION closure through ONE `run_workflow` path (frozen orthogonal roles: TIDMAD deepest-real · Pets classification contrast · DAVIS ≥ 2-iteration lower-is-better carried-state falsifier; C6 honesty rule — orchestration semantics only, never contrast L4); runner claims enumerated per Q-10-5 = B with real-execution claims retained under the §10.6 **freshness contract** (provenance + dependency diff; bounded rerun only if semantics changed); **Gate 1 NOT REQUIRED · Gate 2 REQUIRED — first-ever real COMPOSED chain, exactly 2 iterations × 1 round, AUTONOMOUS launch inside the pre-authorized ≤ ~1 h envelope, non-vacuous two-layer restore evidence (findings = mandatory witness; confirmations = exact-restore provenance)**; **Q-P56-1 = B** — contrast-task loop TRAINING is a missing declared capability (task-owned scope construction), so Step 10 closes at the roadmap ladder's depth, §16.1/§17.1/§26.O amended, and **CAP-SCOPE frozen as the REQUIRED prerequisite for contrast-track L4 (Step 12 may not claim L4 past it)**; the §12.1 `run_workflow` structure tripwire frozen. Open questions 0. The superseded `pr_10_p5_interpretation_carried_state.md` (DRAFT rev 1) and `pr_10_p6_three_task_closure_skeleton.md` are REMOVED, reconciled section-by-section in the new doc's §18 — `step_10_orchestration_task_binding/` |
 | source anchor | reconciliation anchor **`2393aacc`** (historical); current status anchor **`ec6257fb`** |
 | Step-10 implementation | **IN PROGRESS — 5 of 7 semantic children MERGED** (P1 · P4 · P2a · P2b · P3) |
 | prerequisite | Step 09.5a **MERGED** (PR #240) — the §15.1b/§15.1c block is **LIFTED** |
-| child designs | P1/P2a/P2b/P3/P4 **FROZEN → MERGED**; the consolidated **P5+P6** child (§20.9) is **DRAFT rev 1 — READY FOR OPERATOR FREEZE** |
-| open operator questions | **0 parent-level**; the consolidated P5+P6 child carries **ONE** (its Q-P56-1), whose ruling amends §16.1/§17.1/§26.O wording at that child's freeze |
+| child designs | P1/P2a/P2b/P3/P4 **FROZEN → MERGED**; the consolidated **P5+P6** child (§20.9) is **REVISION 2 — FROZEN, OPERATOR APPROVED 2026-08-21** (Q-P56-1 = B · Q-P5-1 = raise · C-P56-1; implementation NOT STARTED) |
+| open operator questions | **0** — parent-level AND child-level (Q-P56-1 and Q-P5-1 both RULED at the P5+P6 freeze; the §16.1/§17.1/§26.O amendments are applied in place, marked *[AMENDED]*) |
 | material contradictions | **0** |
 | adversarial review | **33/33** (rev 2) **+ 28/28** (post-merge, §27.4) = **61 challenges, 0 contradictions** |
 | children | **7 semantic → 6 implementation vehicles** — P1 · P2a · P2b · P3 · P4 · **P5+P6 consolidated** (operator amendment 2026-08-21, §20.9) |
 | scope items | **8**, each with exactly one owning child (§4.1), zero orphans — S5 and S8 now share the ONE consolidated child |
-| **next action** | **operator freeze ruling on the consolidated P5+P6 child (Q-P56-1)**, then its implementation in a fresh session read from merged state |
+| **next action** | **P5+P6 IMPLEMENTATION in a fresh session** read from merged state (fresh Implementation Working Rules contract; C0 first; Gate 2 pre-authorized per the child's §15.2) |
 
 **What this freeze covers**: parent semantic scope, ownership, acceptance, and
 the parent-level seven-child SEMANTIC decomposition with its sequencing — as

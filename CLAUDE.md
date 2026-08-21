@@ -643,38 +643,44 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 - **STEP 10 — IN PROGRESS (2026-08-21). 5 of 7 semantic children MERGED: P1
   `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1` ·
-  P3 `254cbaa1`. NEXT = the operator's freeze ruling on the CONSOLIDATED
-  P5+P6 child.**
-  **TOPOLOGY CONSOLIDATION (operator, 2026-08-21; parent §20.9)**: the two
-  REMAINING children P5 (S5) + P6 (S8) are ONE implementation child —
-  authoritative design
-  `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding/pr_10_p5_6_lifecycle_and_three_task_closure.md`,
-  **DRAFT rev 1 READY FOR OPERATOR FREEZE** (the old P5 draft and P6
-  skeleton are REMOVED, reconciled section-by-section in its §18).
-  Implementation starts only after the freeze, in a fresh session read
-  from merged state. **Q-P56-1** (its ONE open operator question): the
-  source audit proved contrast-task loop TRAINING is a missing declared
-  capability — task-owned scope construction (the frozen D14 seam takes
-  CALLER-built scopes and deliberately excludes task vocabulary; the
-  tuner builds TIDMAD `SampleSet`s unconditionally; no scope argv;
-  `DatasetProfile` cannot describe Pets/DAVIS; production is
-  census-forbidden from reading pack manifests) — recommendation: close
-  Step 10 at the roadmap ladder's own depth (contrast L4 is scheduled at
-  Step 12 by §22.10 and the Step-12 row), name **CAP-SCOPE** as
-  post-Step-10 capability debt, amend parent §16.1/§17.1/§26.O wording at
-  freeze. The consolidated child's shape: carried-state lifecycle closure
-  (C0–C4: confirmations activation with latest-wins/raise-on-malformed
-  projection + producer cold-start carry-through DD-2; findings onto
-  `ChainState`; ≥ 3-iteration deterministic reachability + per-link
-  severing; resume deep-equality) → composed-chain operator surface +
-  wiring closures W1–W5 (C5: `run_chain.sh --task_composition`, shipped
-  `configs/task_composition/tidmad.yaml`, child built-in bootstrap,
-  reference-score guard, composed-metric pin) → three-task ORCHESTRATION
-  closure through ONE `run_workflow` path with a DAVIS ≥ 2-iteration
-  lower-is-better carried-state falsifier (C6) → runner-claims
-  disposition per Q-10-5 = B, real-execution claims retained (C7) →
-  **Gate 1 NOT REQUIRED · Gate 2 REQUIRED = the FIRST real COMPOSED chain
-  run, 2 iterations** (C8).
+  P3 `254cbaa1`. The remaining P5+P6 are CONSOLIDATED into ONE
+  implementation child (parent §20.9), whose design is REVISION 2 —
+  FROZEN, OPERATOR APPROVED 2026-08-21. NEXT = P5+P6 IMPLEMENTATION in a
+  fresh session.**
+  Authoritative design:
+  `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding/pr_10_p5_6_lifecycle_and_three_task_closure.md`
+  (the old P5 draft and P6 skeleton are REMOVED, reconciled in its §18;
+  open operator questions 0). **Frozen rulings**: **Q-P56-1 = B** —
+  contrast-task loop TRAINING is a missing declared capability
+  (task-owned scope construction: the frozen D14 seam takes CALLER-built
+  scopes; the tuner builds TIDMAD `SampleSet`s unconditionally; no scope
+  argv; `DatasetProfile` cannot describe Pets/DAVIS), so Step 10 closes
+  at the roadmap ladder's depth, parent §16.1/§17.1/§26.O are AMENDED,
+  and **CAP-SCOPE is the REQUIRED prerequisite for contrast-track L4 —
+  Step 12 may not claim L4 past it** (recorded on the roadmap Step-12
+  row). **Q-P5-1 = RAISE** (malformed confirmations fail closed).
+  **C-P56-1** (operator catch): NO implicit legacy TIDMAD reference
+  science in ANY composed run — the W4 guard keys on composition
+  PRESENCE, never `TIDMAD_METRIC_ID` or any task-identity surrogate;
+  legacy path byte-for-byte; composed-mode parity = the composition
+  invariants only. The frozen shape: C0–C4 carried-state lifecycle
+  (confirmations activation + DD-2 cold-start carry-through; findings
+  onto `ChainState`; ≥ 3-iteration deterministic reachability + per-link
+  severing; resume deep-equality) → C5 composed-chain operator surface +
+  wiring W1–W5 → C6 three-task ORCHESTRATION closure through ONE
+  `run_workflow` path (frozen orthogonal roles; DAVIS ≥ 2-iteration
+  lower-is-better falsifier; C6 honesty rule: orchestration semantics
+  only, never contrast L4; Pets deliberately NOT ≥ 2 iterations) → C7
+  runner claims per Q-10-5 = B + the §10.6 L3-evidence freshness contract
+  (provenance + dependency diff; bounded rerun only if semantics changed)
+  → C8 **Gate 1 NOT REQUIRED (flip = template/schema bytes) · Gate 2
+  REQUIRED = the FIRST real COMPOSED chain, exactly 2 iterations ×
+  1 round, AUTONOMOUS inside the pre-authorized ≤ ~1 h envelope, with the
+  non-vacuous two-layer restore evidence (findings = mandatory witness,
+  no-usable-finding ⇒ MUST NOT PASS; confirmations = exact-restore
+  provenance, no reachability claim when `{}`)**. The §12.1
+  `run_workflow` tripwire binds implementation (sibling-shaped delta
+  only; pre/post LOC + branch counts recorded).
   **P3 — Proposer Typed Evidence + Prediction Authoring — COMPLETE / MERGED
   2026-08-21**: PR #245, squash `254cbaa1`; final head `31cdabaa`,
   exact-head CI **32457848717 SUCCESS**. **The proposer has ONE declared
