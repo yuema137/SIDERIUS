@@ -3,7 +3,15 @@
 # a value the declaration carries, never a branch the framework takes.
 #
 # Scope note: as with Pets, the profile and task config are COMPOSITION
-# fixtures. P6 owns the executable loop.
+# fixtures.
+#
+# Step 10 / P5+P6 C6 UPDATE: ORCHESTRATION closure is DONE — DAVIS is the
+# lower-is-better falsifier, driven for >= 2 iterations through the one
+# generic `run_workflow` with both carried values live. REAL task-correct
+# TRAINING through the loop is NOT delivered here and requires **CAP-SCOPE**
+# (design §10.2); real DAVIS execution evidence stays with
+# `scripts/run_davis_gate2.py`. Step 12 MUST NOT claim contrast-track L4
+# while CAP-SCOPE is open.
 
 task_data_path:
   module: execute_tools.davis_data_path

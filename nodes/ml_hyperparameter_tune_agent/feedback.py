@@ -57,12 +57,52 @@ def _collect_disallowed_patterns(
     Non-gate failures (code bugs, schema violations) are skipped regardless of
     factor — their failure mode is not resource-structural.
 
+    **F-RC-6**: an ACTUAL watchdog kill (``failure_type ==
+    "wall_clock_timeout"``) also qualifies, and does so CATEGORICALLY rather
+    than through the factor test — see the inline note. Predicted skips and
+    real timeouts are the two ways a candidate can be shown time-infeasible;
+    only the first was consulted before.
+
     Returns a deterministic sorted list (empty if no attempt qualifies).
     """
     tags: set = set()
     for r in records:
-        if r.get("status") not in {"skipped_oom_risk", "skipped_time_risk"}:
+        # F-RC-6 — an ACTUAL watchdog kill is time-infeasibility evidence too.
+        #
+        # Before this, only PREDICTED gate skips were considered, so a run that
+        # was admitted, executed and then killed by the watchdog produced no
+        # architectural feedback at all: it is recorded with `status="error"`
+        # (`ml_hyperparameter_tune_agent.py:1404`), which this filter excluded.
+        # The one structured signal designed to tell the next proposer "this
+        # shape is too slow" was therefore unavailable for the very failure
+        # that proves it.
+        #
+        # Discriminated by the EXISTING typed `failure_type`, never by
+        # `status == "error"`: a code bug, a schema violation and an OOM are
+        # all `"error"` too, and none of them is evidence about architecture.
+        # `_classify_attempt_failure` (`runtime.py:518`) already emits
+        # `"wall_clock_timeout"` for exactly this, and its docstring states
+        # that downstream feedback keys off the name.
+        is_predicted_gate_skip = r.get("status") in {
+            "skipped_oom_risk",
+            "skipped_time_risk",
+        }
+        is_actual_timeout = r.get("failure_type") == "wall_clock_timeout"
+        if not (is_predicted_gate_skip or is_actual_timeout):
             continue
+
+        if is_actual_timeout:
+            # CATEGORICAL, not a magnitude — and it must be, because the
+            # factor test below cannot express it. The watchdog kills AT the
+            # deadline, so `elapsed / deadline` is ~1.003 by construction
+            # (60.166 s against 60.0 s in the run that found this) and could
+            # never clear TIME_FACTOR_THRESHOLD = 5.0. That threshold exists
+            # to separate a marginal PREDICTION overshoot from a structural
+            # one; for a real kill there is nothing to separate — the attempt
+            # demonstrably did not finish, which is the qualifying evidence.
+            tags.update(tag_architecture(r.get("model_type") or "", r.get("model_config") or {}))
+            continue
+
         mem = r.get("memory") or {}
 
         vram_factor = None

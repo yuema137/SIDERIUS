@@ -1,0 +1,46 @@
+# TIDMAD's SHIPPED task composition — Step 10 / P5+P6 W2.
+#
+# The canonical manifest an operator points `--task_composition` at:
+#
+#     run_chain.sh ... --task_composition configs/task_composition/tidmad.yaml
+#
+# Until this file existed, the ONLY compositions in the repository were test
+# fixtures under `tests/fixtures/step10_p1/`, so no composed run had ever been
+# launchable from the operator surface — and none had ever executed.
+#
+# Nothing here is special-cased. The compatibility id `tidmad` is an ordinary
+# declared id, the shipped configs are ordinary refs, and the framework's
+# built-in metric class is reached by the same `module:`/`symbol:` mechanism an
+# out-of-tree task uses for its own file. If composing TIDMAD needed one extra
+# affordance, the claim "a fourth task needs zero framework edits" would be
+# untestable.
+#
+# Paths resolve against THIS file's directory (`workflows/task_composition.py`
+# resolves refs relative to the manifest), which is why they are `../`-rooted.
+#
+# TIDMAD declares NO `secondary_metrics:` section. That is a semantic emptiness,
+# not an omission: a run that declares none writes no secondary record key and
+# renders zero bytes (P2b §4.7).
+
+task_data_path:
+  module: execute_tools.tidmad_data_path
+  symbol: TidmadTaskDataPath
+  id: tidmad
+
+dataset_profile:
+  config: ../../examples/tidmad/resolved/dataset_profile.json
+
+metric:
+  declaration: ../../examples/tidmad/resolved/metric_spec.json
+  implementation:
+    module: execute_tools.evaluation_metric
+    symbol: TidmadDenoisingMetric
+
+task_health:
+  config: ../task_health/tidmad.yaml
+
+interpretation_blocks:
+  config: ../task_interpretation/tidmad.yaml
+
+task_config:
+  config: ../task_config.yaml

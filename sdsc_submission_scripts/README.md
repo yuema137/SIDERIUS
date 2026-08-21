@@ -151,6 +151,37 @@ canonical/derived contract — is in `docs/running_chain_test.md`.
      resolution error, restore error). Counts toward the consecutive-
      failure brake (`--max_failed_iterations`, default 3).
 
+5. **`--task_composition <manifest>` binds a run to ONE declared task**
+   (Step 10 / P5+P6, W1). Without it the chain launches an un-composed
+   (legacy TIDMAD) run whose argv is byte-identical to before the flag
+   existed — the flag is forwarded to `run_one_iteration.py` only when
+   non-empty. With it, the manifest's data path, dataset profile, metric,
+   optional secondary metrics, Health family and task config are all
+   resolved ONCE at the launcher edge and bound for the run.
+
+   * shipped manifest: `configs/task_composition/tidmad.yaml`
+   * the resolved `task_composition_fingerprint` is pinned into
+     `{workspace}/run_invariants_lock.json`, so a resume under a DIFFERENT
+     composition fails closed
+   * a composed run does **not** load TIDMAD's legacy per-file reference
+     table — that is task-specific science and its absence is deliberate
+     and named (ruling C-P56-1), not a regression
+   * a malformed or unreadable manifest refuses the launch and writes a
+     `failed` manifest, so the consecutive-failure brake can still see it
+
+6. **Cross-iteration carried state.** `accumulated_key_findings` (union)
+   and `vocab_link_confirmations` (latest-wins) are restored from the
+   prior iters' committed digests and handed to the workflow. The
+   `iter_NNN/accumulated_findings_iter_NNN.json` sidecar records what was
+   carried (`source_iters`, `count`) — it is a **log for auditing, not the
+   transport channel**. Note that under cold start iteration 1 produces no
+   findings, so a carried finding first reaches a proposer at iteration 3.
+
+7. **`--start_iter N` when auto-resume mis-parses.** The auto-resume
+   inspector's stdout can be polluted by plugin-loader prints, which makes
+   the computed `START_ITER` non-numeric and aborts the launch. Passing
+   `--start_iter N` explicitly is the workaround.
+
 ---
 
 ## Where to look next

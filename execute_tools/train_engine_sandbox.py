@@ -15,6 +15,21 @@ import torch
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+# Step 10 / P5+P6 W3 — the BUILT-INS' BOOTSTRAP, not the extension path.
+#
+# A composed run transports its data-path id to this child
+# (`--task_data_path_id`), and `resolve_task_data_path` fails closed on an id
+# the child's registry does not hold. Before this, every child imported ONLY
+# the TIDMAD implementation, so a transported `oxford_iiit_pet` or
+# `davis_future_prediction` id could not resolve here even though all three
+# implementations are in-tree production modules and the parent-side emitter
+# already existed. Side-effect imports: each module's tail self-registers.
+#
+# Out-of-tree plugin availability in children is deliberately NOT solved here
+# (Step 12 owns it) — this list is the built-ins' convenience bootstrap, the
+# same pattern `execute_tools/health_checks/__init__.py` documents.
+import execute_tools.davis_data_path
+import execute_tools.pets_data_path  # noqa: F401
 from agent.schemas.model_io_contract import ModelIOContract, load_model_io_contract
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from core.runtime_control.provenance import capture_storage_provenance

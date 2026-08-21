@@ -17,6 +17,12 @@ dependencies = [
     "openai>=2.26.0",
     "pandas>=3.0.1",
     "pdfplumber>=0.11.0",
+    # Direct dependency: the Pets and DAVIS data paths decode images with PIL
+    # at module scope, and those modules are imported by the training,
+    # inference and scoring subprocess entrypoints. Previously satisfied only
+    # transitively (matplotlib, pdfplumber), so dropping either would have
+    # broken the execution path.
+    "pillow>=11.0.0",
     "pydantic>=2.12.5",
     "pylatexenc>=2.10,<3",
     "python-dotenv>=1.2.2",

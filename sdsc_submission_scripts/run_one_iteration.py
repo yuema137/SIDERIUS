@@ -872,7 +872,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.1,
         help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).",
     )
-    parser.add_argument("--train_portion", type=float, default=0.1)
+    # F-RC-1: the shared parser floor (see `_portion_floor`); its target
+    # `HyperparamTuningInput.train_portion` declares ge=0.01.
+    parser.add_argument("--train_portion", type=_portion_floor, default=0.1)
     parser.add_argument(
         "--eval_portion",
         type=_portion_floor,
@@ -893,19 +895,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--formal_portion",
-        type=float,
+        # F-RC-1: the shared parser floor (see `_portion_floor`).
+        type=_portion_floor,
         default=0.1,
         help="Fraction of segments per file for formal training scope (default 0.1).",
     )
     parser.add_argument(
         "--formal_train_portion",
-        type=float,
+        # F-RC-1: the shared parser floor (see `_portion_floor`).
+        type=_portion_floor,
         default=1.0,
         help="Per-epoch iteration fraction for formal training (default 1.0).",
     )
     parser.add_argument(
         "--formal_eval_portion",
-        type=float,
+        # F-RC-1: the shared parser floor (see `_portion_floor`).
+        type=_portion_floor,
         default=1.0,
         help=(
             "Fraction of segments per file for the formal-mode eval scope "
@@ -1113,7 +1118,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--validation_max_portion",
-        type=float,
+        # F-RC-1: the SAME `_portion_floor` authority `--trial_portion` and
+        # `--eval_portion` already use. This ceiling is clamped onto those
+        # very fields, so a value below their 0.01 floor is refused at argv
+        # time — before any LLM or GPU spend — instead of failing inside the
+        # tuner's retry budget.
+        type=_portion_floor,
         default=None,
         help="VALIDATION POSTURE ONLY (V20 FU-D-12). Hard ceiling on the "
         "RESOLVED trial-mode data portions (trial/train/eval), applied as "
@@ -1451,7 +1461,11 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
+def compute_expected_invariants(
+    args: argparse.Namespace,
+    *,
+    run_composition: object | None = None,
+) -> RunInvariants:
     """DS6c — compute this run's invariants via the ONE shared path.
 
     Materializes + hashes the effective HealthGate config into the chain
@@ -1459,6 +1473,27 @@ def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
     the identical body sha) and returns the ``RunInvariants`` used for
     both ``restore_prior_state`` validation and, transitively, the
     workspace lock. Called BEFORE any resume mutation or LLM work.
+
+    Step 10 / P5+P6 **W7**: that idempotence claim is only true when BOTH
+    materializations resolve the SAME Health binding. P1 gave ``run_workflow``
+    a ``task_health_binding`` but not this earlier pre-flight, so a COMPOSED
+    run materialized ``task_health_binding: legacy_default`` here and then
+    ``explicit`` in ``run_workflow`` — two different documents, two different
+    body shas, and the workspace-immutability check (correctly) refused the
+    run. Found by the FIRST real composed chain run; no test caught it because
+    none drove the real chain runner under a composition.
+
+    It takes the **composition object**, not individual derived values, and
+    derives every composition-dependent invariant here. That is deliberate: a
+    first cut of W7 threaded ``task_health_binding`` alone and forgot its
+    sibling ``task_composition_fingerprint``, so iteration 2's pre-flight
+    computed ``None`` against a lock that already held the fingerprint and the
+    chain refused itself. Passing the composition makes the two call sites
+    structurally incapable of diverging, and
+    ``test_step10_p56_c5_wiring_closures.py`` censuses that they agree.
+
+    ``None`` reproduces the pre-W7 behaviour exactly, which is what every
+    un-composed run gets.
     """
     run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
     resolved_scope = run_scope.resolve(TIDMAD)
@@ -1478,6 +1513,15 @@ def compute_expected_invariants(args: argparse.Namespace) -> RunInvariants:
         health_feedback_history_window_iterations=(args.health_feedback_history_window_iterations),
         health_feedback_history_max_entries_per_model=(
             args.health_feedback_history_max_entries_per_model
+        ),
+        # W7 — EVERY composition-derived invariant `run_workflow` passes, so
+        # the pre-flight and the workflow agree on both the materialized
+        # document AND the workspace lock.
+        task_health_binding=(
+            run_composition.task_health_binding if run_composition is not None else None
+        ),
+        task_composition_fingerprint=(
+            run_composition.semantic_fingerprint if run_composition is not None else None
         ),
     )
     return invariants
@@ -1855,8 +1899,42 @@ def main():
     # DS6c — compute the run's invariants (materialize + hash the effective
     # HealthGate config) BEFORE restore, so a contradicting workspace lock
     # or incompatible restored history fails with zero resume mutation.
+    #
+    # Step 10 / P5+P6 W7 — the composition is resolved HERE, before the
+    # pre-flight, because the pre-flight materializes the effective Health
+    # config and must resolve the SAME binding `run_workflow` will. Composing
+    # is pure resolution; ACTIVATION is still `bind_run_task_composition`
+    # below, at the same point P1 put it. Re-composition is idempotent, but the
+    # object is resolved once and reused rather than composed twice.
+    # The crashed manifest is NOT optional here. Before W7 this composition
+    # happened inside the workflow `try` whose handler writes
+    # `write_manifest(..., crashed=True)`; resolving it earlier moved it out
+    # from under that handler. That matters because the consecutive-failure
+    # brake is deliberately fail-OPEN — `_check_consecutive_failure_brake`
+    # treats a missing manifest as "not failed" and breaks the streak — and a
+    # malformed `--task_composition` is DETERMINISTIC. Without this handler
+    # every iteration would crash identically, write nothing, never form a
+    # failure streak, and the chain would keep launching iterations that
+    # cannot possibly succeed.
     try:
-        expected_invariants = compute_expected_invariants(args)
+        run_composition = (
+            compose_run_task_bindings(args.task_composition) if args.task_composition else None
+        )
+    except Exception as e:
+        print(f"FAIL: could not resolve --task_composition {args.task_composition!r}: {e}")
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
+        sys.exit(1)
+
+    try:
+        expected_invariants = compute_expected_invariants(args, run_composition=run_composition)
     except ValueError as e:
         print(f"FAIL: run-invariants computation refused to start: {e}")
         write_manifest(
@@ -1978,9 +2056,8 @@ def main():
         #
         # `--task_composition` omitted ⇒ `None` ⇒ the context manager is a
         # no-op and the run is byte-identical to its pre-Step-10 behaviour.
-        run_composition = (
-            compose_run_task_bindings(args.task_composition) if args.task_composition else None
-        )
+        # W7 — resolved once, above, before the invariants pre-flight.
+        # ACTIVATION stays exactly where P1 put it.
         with bind_run_task_composition(run_composition):
             results = run_workflow(
                 launch=WorkflowLaunchConfig(

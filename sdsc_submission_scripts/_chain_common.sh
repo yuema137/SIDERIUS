@@ -71,6 +71,12 @@ BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA=0.0
 LLM_MODEL="gemini-3.1-pro-preview"  # §3.2: matches run_one_iteration.py default
 LLM_CONFIG=""
 HEALTH_CHECKS_CONFIG=""             # optional; empty preserves tuner's shipped default
+# Step 10 / P5+P6 W1 — the operator's only way to launch a COMPOSED run.
+# Empty == omitted == Python None == the legacy un-composed run, whose child
+# argv stays byte-identical. Until this flag existed the chain could not
+# launch a composed run at all, even though run_one_iteration.py has parsed
+# --task_composition since P1.
+TASK_COMPOSITION=""                 # optional; empty == omit == un-composed (legacy)
 DATA_SCOPE=""                       # DS6c: '4-9' / '4,5,6,7,8,9' / mixed; empty = complete dataset
 HEALTH_GATE_ENABLED=1               # DS6c: --no-health_gate_enabled disables the subsystem
 HEALTH_GATE_FILES=""                # DS6c: shared monitored-file list; empty = YAML defaults
@@ -302,6 +308,7 @@ parse_chain_args() {
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
         --health_checks_config)   HEALTH_CHECKS_CONFIG="$2"; shift 2 ;;
+        --task_composition)       TASK_COMPOSITION="$2"; shift 2 ;;
         --data_scope)             DATA_SCOPE="$2"; shift 2 ;;
         --health_gate_enabled)    HEALTH_GATE_ENABLED=1; shift ;;
         --no-health_gate_enabled) HEALTH_GATE_ENABLED=0; shift ;;
@@ -499,6 +506,11 @@ build_app_args() {
     if [ -n "$HEALTH_CHECKS_CONFIG" ]; then
         APP_ARGS+=(--health_checks_config "$HEALTH_CHECKS_CONFIG")
     fi
+    # W1 — forwarded only when set, so an un-composed launch emits no new
+    # token and its child argv is byte-identical to pre-Step-10.
+    if [ -n "$TASK_COMPOSITION" ]; then
+        APP_ARGS+=(--task_composition "$TASK_COMPOSITION")
+    fi
     # DS6c — DataScope + HealthGate subsystem. HEALTH_GATE_ENABLED default 1
     # matches the Python default; only the disabling form is forwarded
     # (mirrors FORCE_FORMAL_ROUND).
@@ -635,6 +647,7 @@ print_chain_header() {
         echo "  LLM config       : $LLM_CONFIG"
     fi
     echo "  HealthGate config: ${HEALTH_CHECKS_CONFIG:-(shipped default)}"
+    echo "  Task composition : ${TASK_COMPOSITION:-(none — un-composed legacy run)}"
     echo "  Data scope       : ${DATA_SCOPE:-(complete dataset)}"
     echo "  HealthGate       : enabled=$HEALTH_GATE_ENABLED monitored=${HEALTH_GATE_FILES:-(YAML defaults)}"
     if [ -n "$MODE" ]; then

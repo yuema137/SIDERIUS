@@ -266,6 +266,34 @@ when the change under test needs it:
 | cross-iteration behaviour or resume | ≥ 2 iterations |
 | trial→formal promotion semantics | exercise promotion explicitly |
 
+**The table gives FLOORS, and SEMANTIC LATENCY can raise them (binding,
+operator decision 2026-08-21).** A depth is only adequate if the Gate's own
+witness is OBSERVABLE at that depth. Trace where the witnessed value is
+produced, persisted, restored and finally CONSUMED — count the boundaries,
+do not assume the floor suffices:
+
+```text
+produced at iteration N
+persisted after N
+restored at N+1
+consumed only at N+2
+    -> 3 iterations are REQUIRED, not an expansion
+```
+
+This is not scope growth: it is what makes an already-required property
+actually observable. Raising depth for **latency** is legitimate; raising
+it to give a model more chances to succeed is the scope expansion the
+section above forbids.
+
+**Check the harness precondition too.** A deterministic test may satisfy
+the witness only because its fixture SEEDS prior state that a real
+cold-start Gate does not have (real-training Gates are cold-start by
+mandatory rule — no `--seed_paths`). Where a Gate's witness depends on
+prior-iteration state, confirm the real run can produce it at the chosen
+depth; a seeded unit test proves nothing about a cold-start chain. Step 10
+P5+P6 froze 2 iterations on exactly that mistaken premise and the
+requirement was unsatisfiable — its witness needed 3.
+
 This governs HOW a required Gate runs. It does not let a PR reason its
 way out of a Gate the assignment table requires.
 
@@ -306,6 +334,90 @@ Gate correctly proves the real path executed. Only a PR that changes
 those semantics may require them.
 
 **Needs user approval**: yes (real LLM + real training cost and time).
+
+#### Gate scope ownership — DO NOT BLINDLY EXPAND (binding, operator decision 2026-08-21)
+
+The "PASS criteria — functional, not scientific" rule above is necessary
+but was **not sufficient**, and a real run proved it. This subsection is
+the part that was missing.
+
+**The rule.** A Gate validates the real execution path owned by the
+**changed failure class**. Encountering a subsystem during the run does
+**not** enrol that subsystem's success into the acceptance contract.
+
+Before adding ANY new Gate acceptance requirement, answer all five:
+
+1. Is this property owned by the code changed in this PR?
+2. Is failure of it evidence that the *changed feature* is broken?
+3. Is it already owned by another unit / integration / Gate test?
+4. Does adding it introduce model-quality or stochastic dependence?
+5. Does it increase iterations, rounds, depth or workload beyond the
+   smallest faithful proof?
+
+If these do not justify expansion, **do not add the requirement**. A
+neighbouring subsystem may be *observed and recorded* without becoming a
+PASS condition.
+
+**Test isolation when a neighbour BLOCKS the path.** The PASS criteria
+above already permit a collapsed model and an `INVALIDATE_ROUND`. What
+they did not cover — and what actually bit — is a PR whose own evidence
+contract needs a **committed record**, while a quality subsystem
+invalidates the round and prevents one. Then the Gate's outcome is decided
+by whether a tiny model happened to train well, which is not the failure
+class under test.
+
+```text
+subsystem A is under test
+subsystem B can block A's path on a criterion unrelated to A's correctness
+    -> isolate A from B, using an EXISTING production-supported control
+    -> never by changing B's production semantics, thresholds or tests
+```
+
+This is test isolation, not weakening. B keeps its own evidence owners.
+
+**Never tune the science to make an infrastructure Gate green.** Rerunning
+a Gate with progressively more specific model/loss/epoch advice until a
+random candidate clears an unrelated threshold turns the Gate into a
+miniature tuning campaign and destroys its meaning. If a Gate's outcome
+starts depending on LLM luck, fix the Gate *contract*, not the model. A
+Gate failure caused solely by unrelated stochastic model quality is **not**
+evidence that the feature under test is broken.
+
+**Negative scientific evidence is still real evidence.** "The candidate
+trained and scored, but produced low-diversity outputs" is a valid,
+usable finding. Where a PR requires a "usable" artifact, usable means
+*structurally valid, genuinely produced by the completed real run, and
+substantive enough to exercise the boundary* — never *scientifically
+good*.
+
+**Where the line actually falls** (the distinction the rule must make):
+
+| PR changes | model quality in scope? |
+|---|---|
+| lifecycle / persistence / restore / orchestration | **no** — poor score, collapse and negative findings are all acceptable |
+| resume semantics | **no** — a correct restore with a poor benchmark score passes |
+| metric ORDER / direction semantics | **no** — selection correctness is the failure class, not the score |
+| HealthGate behaviour itself | **yes** — Health verdicts ARE the changed failure class |
+| a training algorithm whose convergence IS the feature | **yes** — convergence is legitimately in scope |
+
+**Per-PR Gate sections must state this explicitly** — see "Gate section
+required fields" below.
+
+#### Gate section required fields (every child design that specifies a Gate)
+
+State these, so scope cannot expand silently later:
+
+* **FAILURE CLASS UNDER TEST** — the exact changed real-system property.
+* **REQUIRED REAL COMPONENTS** — only those needed to exercise it.
+* **NON-REQUIRED SCIENTIFIC QUALITY** — name the neighbouring quality
+  criteria that are explicitly NOT conditions, wherever ambiguity is
+  possible (HealthGate PASS, convergence, score thresholds, collapse
+  absence).
+* **MAXIMUM TEMPORAL DEPTH** — default 1 iteration × 1 round; see
+  "Temporal depth is failure-class driven".
+* **EXTRA DEPTH JUSTIFICATION** — required before adding iterations/rounds.
+* **ISOLATION** — any unrelated blocking subsystem disabled, and the
+  existing production-supported control used to do it.
 
 ---
 

@@ -224,6 +224,16 @@ class ResultInterpretationAgent:
                     "over prior runs; none exist."
                 ),
                 runtime_vocab=inp.runtime_vocab,
+                # Step 10 / P5+P6 C2, DD-2 — carry the confirmation map through,
+                # exactly as the degraded branch below does. Without this the
+                # cold-start branch omits the field, the schema default `{}`
+                # wins, and the workflow's loop closure (which reads the output
+                # unconditionally) would CLOBBER a restored non-empty mapping.
+                # Whether that state is reachable depends on a distant workflow
+                # condition; making the three branches symmetric makes the
+                # closure safe by LOCAL construction instead. Digest bytes are
+                # unchanged for every pre-P5 caller, whose input is always `{}`.
+                vocab_link_confirmations=dict(inp.vocab_link_confirmations),
                 cold_start=True,
                 # V19 PR 3 — the deterministic merge runs on every path
                 # (a cold start has no summaries, so this is retention

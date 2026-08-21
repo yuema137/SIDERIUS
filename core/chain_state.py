@@ -99,6 +99,27 @@ class ChainState:
     #: fingerprint history (Step 09a C5).
     current_prediction_memory: PredictionMemory = field(default_factory=PredictionMemory)
 
+    #: The vocab-link confirmation map, ``{"feature:capability": [run_name...]}``
+    #: — the counter the interpreter measures against ``min_runs`` before
+    #: promoting a pair into ``VocabEntry.related_to``. Same one-direction shape
+    #: as the two above (Step 10 / P5+P6 C2): the restored value seeds this, the
+    #: workflow hands it to the interpreter, and the interpreter's output
+    #: REPLACES it whole. Accumulation lives in the producer, so nothing here
+    #: merges — a workflow-side union would be a second accumulation authority.
+    current_vocab_link_confirmations: dict[str, list[str]] = field(default_factory=dict)
+
+    #: The chronological union of every iteration's synthesized
+    #: ``key_findings`` — dedup by exact string, first occurrence wins, order
+    #: preserved. Step 10 / P5+P6 C3 (Q-10-6 = A): this was the LAST bare
+    #: cross-iteration local in ``run_workflow``, seeded once from
+    #: ``RestoredState`` and never updated in the loop, so an in-process
+    #: multi-iteration run's proposer saw only what iteration 1 saw. Unlike its
+    #: two one-direction siblings above this one ACCUMULATES, applying the same
+    #: rule ``core.resume.project_knowledge`` applies — so an uninterrupted
+    #: in-process trajectory and a per-iteration chain restore agree by
+    #: construction rather than by two independent implementations.
+    accumulated_key_findings: list[str] = field(default_factory=list)
+
     #: Per-model Phase 1 cache, so the interpreter's cache-hit branch is
     #: reachable across the subprocess boundary. Mutated in place at iteration
     #: end, which is why :meth:`from_restored` copies defensively.
@@ -135,6 +156,8 @@ class ChainState:
         restored_chain_incumbent_score: float | None = None,
         restored_collapse_fingerprint_history: dict | None = None,
         restored_prediction_memory: PredictionMemory | None = None,
+        restored_vocab_link_confirmations: dict[str, list[str]] | None = None,
+        restored_accumulated_key_findings: list[str] | None = None,
         all_model_types: list[str] | None = None,
         recent_tune_outputs: deque | None = None,
     ) -> ChainState:
@@ -161,6 +184,13 @@ class ChainState:
             restored_collapse_fingerprint_history or {}
         )
         state.current_prediction_memory = restored_prediction_memory or PredictionMemory()
+        # Defensive copy, like the knowledge cache: the loop replaces this whole
+        # mapping each iteration, and the restored value must not be aliased.
+        state.current_vocab_link_confirmations = {
+            key: list(runs) for key, runs in (restored_vocab_link_confirmations or {}).items()
+        }
+        # Copied, not aliased: the loop APPENDS to this one.
+        state.accumulated_key_findings = list(restored_accumulated_key_findings or [])
         if all_model_types is not None:
             state.all_model_types = list(all_model_types)
         if recent_tune_outputs is not None:

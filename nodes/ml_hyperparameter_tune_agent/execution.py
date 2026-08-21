@@ -1214,7 +1214,16 @@ def run_inference_scoring_health(
         score_table: ScoreComparisonTable | None = None
         _sc_fv = score_results.get("file_vector")
         _sc_scalar = score_results.get("denoising_score")
-        if _sc_fv is not None and _sc_scalar is not None and not _is_degenerate_formal:
+        # Step 10 / P5+P6 W4 — `reference_scores is None` is the COMPOSED run's
+        # named absence (C-P56-1), not a failure. Skipping explicitly keeps the
+        # `except` below for real build errors instead of logging one every
+        # round for a state that is by design.
+        if (
+            reference_scores is not None
+            and _sc_fv is not None
+            and _sc_scalar is not None
+            and not _is_degenerate_formal
+        ):
             try:
                 _sc_fv_log = file_vector_to_log_space(_sc_fv)
                 score_table = build_score_table(

@@ -42,6 +42,11 @@
 #   --auto_resume        pick up where a partial chain left off (default ON)
 #   --no_auto_resume     force fresh start regardless of workspace state
 #   --start_iter N       manual pin (overrides auto-resume)
+#   --task_composition F  YAML task-composition manifest. Omitted = the legacy
+#                        un-composed run (byte-identical child argv). Supplying
+#                        it binds the task's data path, dataset profile, metric,
+#                        declared secondaries, Health family and task config for
+#                        the whole run. Shipped: configs/task_composition/tidmad.yaml
 #
 # Usage examples:
 #
@@ -57,6 +62,13 @@
 #       --num_iterations 5 \
 #       --seed_paths /scratch/.../seed.json \
 #       --partition gpu-shared --time 06:00:00
+#
+#   # A COMPOSED run — the task is bound once, at the launcher edge:
+#   bash sdsc_submission_scripts/run_chain.sh --mode lilab \
+#       --workspace /home/klz/Data/SIDEREIS_DATA/composed_tidmad_v1 \
+#       --run_name composed_tidmad_v1 \
+#       --num_iterations 2 \
+#       --task_composition configs/task_composition/tidmad.yaml
 #
 # History: introduced in Phase 6.8 Commit 13 to consolidate the legacy
 # run_iteration_chain.sh (SDSC) and run_iteration_chain_lilab.sh (lilab)

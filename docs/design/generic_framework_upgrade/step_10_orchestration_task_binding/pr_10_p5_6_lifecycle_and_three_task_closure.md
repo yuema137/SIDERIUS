@@ -925,47 +925,121 @@ is a scope error if `git diff --stat` shows anything outside `tests/` and
 `docs/`. Depends on: nothing.
 
 **3. Implementation plan.**
-- [ ] Producer accumulation golden: drive `update_vocab_link_confirmations`
+- [x] Producer accumulation golden: drive `update_vocab_link_confirmations`
       over a FIXED outcome sequence (confirmed / partial / refuted /
       confirmed, distinct `run_name`s, a repeated `run_name`) pinning the
       returned `(confirmations, vocab, newly_promoted)` at each step —
       including that `partial`/`refuted` change nothing, a run cannot confirm
       twice, and promotion fires at exactly `min_runs` DISTINCT runs
       (`min_runs` passed explicitly where the claim is about the threshold).
-- [ ] The broken-lifecycle census, executable and named: `RestoredState` has
+      → `tests/unit/agent/result_interpretation_agent/test_step10_p56_c0_producer_baseline.py`,
+      `TestProducerAccumulationTrajectory` (4 tests). **Unique failure class
+      established first** (CLAUDE.md test rule): `test_vocab_feedback.py`
+      :965-1160 already covers per-call semantics with 13 SINGLE-call tests, so
+      this golden owns the one thing they structurally cannot — the
+      **trajectory**, feeding each call's output back in as the next call's
+      `existing_confirmations`. It fails iff the producer ever returns a DELTA
+      instead of the cumulative map, which is the exact premise §2.1's
+      latest-wins projection rests on and which every single-call test would
+      survive. Also pins the §2.1 whole-map re-scan (an old key promoting later,
+      once its feature appears).
+- [x] The broken-lifecycle census, executable and named: `RestoredState` has
       NO `vocab_link_confirmations` field; no `project_*` produces one; the
       production `InterpretationInput(...)` does not pass it. INVERTED by
       C1/C2, never deleted.
-- [ ] The cold-start drop pin (DD-2's before-picture): a cold-start
+      → `tests/unit/workflows/test_step10_p56_c0_broken_lifecycle.py` (8 tests).
+      Splits by the commit that flips it: `TestResumeHalfIsMissing` (C1) ·
+      `TestWorkflowHalfIsMissing` (C2). The `InterpretationInput` half is an
+      **AST census over the real construction site**, not a grep — exactly one
+      call node in `run_workflow`, 19 keywords, the field absent. Field counts
+      pinned at the §2.3 measurements (RestoredState 15 · ChainState 11) so a
+      silent widening is visible here too.
+- [x] The cold-start drop pin (DD-2's before-picture): a cold-start
       interpreter invocation with a non-empty input mapping returns an output
       whose mapping is `{}` — recorded as the defect, with the test docstring
       naming §7.3.
-- [ ] Findings-amnesia baseline: a 3-iteration in-process pseudo drive
+      → `TestColdStartDropsTheCarriedMapping` (2 tests), same file as the
+      producer golden. Its twin asserts the DEGRADED branch (`:1125`) already
+      carries the mapping through — the asymmetry DD-2 removes, made executable
+      rather than asserted in prose.
+- [x] Findings-amnesia baseline: a 3-iteration in-process pseudo drive
       records that iteration 3's expert-context block equals iteration 1's
       (no accumulation) — the §5 DD-1 before-picture.
-- [ ] 3-iteration confirmations baseline: a link confirmed in three distinct
+      → `tests/unit/workflows/test_step10_p56_c0_multi_iteration_baseline.py`,
+      `TestFindingsNeverAccumulateInProcess` (3 tests), driving the REAL
+      `run_workflow` for 3 iterations with the five agent classes stubbed.
+      **Sharper than the design anticipated**: with nothing restored the bare
+      local is `None`, so the `ExpertContextItem(kind="findings")` block never
+      renders AT ALL — iteration 3 does not merely repeat iteration 1's block,
+      it receives no findings block in any iteration, while iterations 1 and 2
+      produced real findings. Carries its own anti-vacuity test (the loop
+      really ran 3 iterations and really produced findings to forget).
+- [x] 3-iteration confirmations baseline: a link confirmed in three distinct
       runs does NOT promote today (the exact scenario C2 turns green).
-- [ ] Three-task loop baseline: drive `run_workflow` (pseudo LLM, stub
+      → same file, `TestConfirmationsNeverReachTheNextIteration` (3 tests):
+      every iteration's `InterpretationInput.vocab_link_confirmations` is `{}`
+      even though the interpreter returned a cumulative 3-run mapping, plus the
+      named scientific consequence (`min_runs=3` unreachable) and an
+      anti-vacuity test proving the emptiness is a TRANSPORT failure rather
+      than an absent producer.
+- [x] Three-task loop baseline: drive `run_workflow` (pseudo LLM, stub
       sandbox) once under the Pets fixture composition and once under DAVIS,
       recording CURRENT behaviour — including that TIDMAD reference numbers
       DO leak into the prompt tables today (the W4 before-picture) — as
       baselines C5/C6 flip. If a drive cannot complete today, record the
       exact failure point as the baseline instead (an honest baseline is
       whatever today does).
-- [ ] Malformed/legacy digest payloads (missing key, non-dict, unreadable)
+      → `tests/unit/workflows/test_step10_p56_c0_three_task_baseline.py`
+      (10 tests). **Composed TIDMAD completes one iteration; composed Pets and
+      DAVIS CANNOT START** — the exact failure point is recorded as
+      **F-P56-2** (§22.4), a blocking wiring defect §2.5 did not list, found
+      precisely because this is the first time a contrast composition traversed
+      `run_workflow` itself. W4's before-picture is recorded separately and
+      **confirms §2.5's wording**: the leak is silent, not a crash, because
+      Pets (4 files) and DAVIS (3) both declare FEWER files than the 20 TIDMAD
+      ships references for, so every `_fine_indices()` lookup hits an existing
+      TIDMAD artifact. The un-composed 20-reference behaviour is pinned in the
+      same class as the half C5 must NOT change.
+      Also records a binding **C6 constraint**: one process may bind exactly
+      one Health plugin set, so the C6 parametrized driver must
+      `reset_run_scope()` between tasks (the established fixture shape) or it
+      passes only for whichever task runs first.
+- [x] Malformed/legacy digest payloads (missing key, non-dict, unreadable)
       recorded as they behave TODAY, so C1 has a before-picture.
-- [ ] The guard-disposition table in this ledger: every existing test this PR
+      → `TestMalformedPayloadsAreInertToday` (2 tests) in the broken-lifecycle
+      census. Records the honest before-picture: because **no reader exists**,
+      five distinct garbage shapes under the key (bare string · list · str
+      value · non-str members · non-str key) are completely INERT — all four
+      existing projections tolerate them and nothing raises. This is what makes
+      C1's `raise` demonstrably NEW behaviour rather than a pre-existing one.
+- [x] The guard-disposition table in this ledger: every existing test this PR
       will turn red, with the commit that flips each (known set: the
       broken-lifecycle census itself; the c4 single-writer reachability
       parametrization gains 2 fields at C2/C3; the c2 carriers floor; the
       Step-09.5a oracle envelope if any `ProposalInput`/workflow surface
       moves; `test_vocab_accumulation.py` H.4's hand-threading note).
-- [ ] Roadmap residual-debt check, recorded in this ledger: grep the
+      → **§22.6**, 18 rows. Adds one guard interaction §2.3 did not name: the
+      single-writer census's `_bare_local_writes` will flag the EXISTING bare
+      local `accumulated_key_findings` (`model_exploration.py:1942`) the moment
+      C3 declares the `ChainState` field, so C3 must RENAME the unpack row to
+      `restored_accumulated_key_findings` (the sibling convention), not merely
+      stop reading it. Written into the plan rather than discovered mid-commit.
+- [x] Roadmap residual-debt check, recorded in this ledger: grep the
       dashboard/resume surfaces for any remaining direction-word LITERAL
       (the roadmap's "resume/dashboard direction literals" line); record
       each hit with its owner — outside this child unless a commit here
       touches that exact line.
-- [ ] Byte-stability: every golden identical across two independent runs.
+      → **§22.3: the debt is already CLOSED.** `core/resume.py` has zero
+      direction literals of any form; `dashboard/` has zero live ones. The
+      single grep hit (`dashboard/data_sources/base.py:124`) is a P2a-C3
+      docstring *recording* the historical correction, and its method reads
+      direction from each record's persisted metric identity. Nothing
+      outstanding, nothing owed by this child.
+- [x] Byte-stability: every golden identical across two independent runs.
+      → 30/30 passed on two independent invocations (11.48 s · 14.33 s). Every
+      expectation in C0 is a hardcoded in-module literal, not a written golden
+      file, so there is no `tmp_path`, timestamp or set-iteration order to leak
+      into a baseline.
 
 **4. Validation plan.**
 * Unit: the goldens above; deterministic, `tmp_path` only.
@@ -975,14 +1049,20 @@ is a scope error if `git diff --stat` shows anything outside `tests/` and
 * Gate: **NONE** (no real LLM, no training; Gates are C8's only).
 
 **5. Acceptance criteria.**
-- [ ] `git diff --stat` shows only `tests/` and `docs/`.
-- [ ] The broken-lifecycle census PASSES on the unmodified tree (it asserts
-      absence, not desired presence).
-- [ ] Both 3-iteration baselines record the DEFECT (no promotion; no
-      accumulation) with docstrings saying so.
-- [ ] The loop baselines record today's behaviour (or today's exact failure
-      point) for Pets and DAVIS compositions.
-- [ ] Goldens byte-stable across two runs.
+- [x] `git diff --stat` shows only `tests/` and `docs/`. → verified via
+      `git status --porcelain` filtered against `^(tests/|docs/)`: **no path
+      outside them**. Four new test files + this ledger. ZERO production edits.
+- [x] The broken-lifecycle census PASSES on the unmodified tree (it asserts
+      absence, not desired presence). → 8/8 green with production untouched.
+- [x] Both 3-iteration baselines record the DEFECT (no promotion; no
+      accumulation) with docstrings saying so. → 6/6 green, each class
+      docstring naming the commit that flips it (C2 / C3) and each carrying an
+      anti-vacuity test so the defect cannot be recorded by an inert drive.
+- [x] The loop baselines record today's behaviour (or today's exact failure
+      point) for Pets and DAVIS compositions. → composed TIDMAD completes;
+      composed Pets/DAVIS record the exact failure point (**F-P56-2**, §22.4)
+      with its provenance asserted from the raised error.
+- [x] Goldens byte-stable across two runs. → 30/30 twice.
 
 **6. Failure and edge cases.**
 * A golden embedding `tmp_path`, a timestamp or set-iteration order is a
@@ -995,13 +1075,41 @@ is a scope error if `git diff --stat` shows anything outside `tests/` and
 pytest tests/unit/core tests/unit/agent/result_interpretation_agent \
        tests/unit/workflows -q        # targeted; plus the new files
 ```
-- [ ] counts + wall time recorded here
-- [ ] any test that could not run recorded WITH the reason (never "passed")
+- [x] counts + wall time recorded here
+
+  | run | result |
+  |---|---|
+  | the four new C0 files | **30 passed**, 11.48 s (and 12.76 s / 14.33 s on re-runs) |
+  | + the three Step-09.5a guards (`c4_single_writer`, `c2_carriers`, `c0_oracle`) | **68 passed**, 13.32 s — the oracle envelope is UNMOVED and the single-writer reachability parametrization still covers 11 fields, both expected at C0 (no carrier added) |
+  | `ruff check` + `ruff format --check` over all four files | PASS (import ordering auto-fixed, no rule disabled) |
+
+- [x] any test that could not run recorded WITH the reason (never "passed")
+  * **pyright: NOT RUN LOCALLY — cannot be.** `node --version` is **v10.19.0**;
+    the bundled pyright requires a newer Node and aborts with a `SyntaxError`
+    inside `pyright.js` before analysing anything. This is exactly the
+    limitation CLAUDE.md's "Environment assumptions" names, so it is recorded
+    rather than claimed: **static type checking of this PR is CI-owned**, and
+    the C8 exact-head CI is its evidence. No other test was skipped.
 
 **8. Commit boundary.**
 Independently reviewable as "here are the defects and today's behaviour,
 executable". No production change, no cleanup. Diff summary + staged list
 recorded here before committing.
+
+**Staged at commit time** (production diff empty, by construction):
+
+```text
+A  tests/unit/agent/result_interpretation_agent/test_step10_p56_c0_producer_baseline.py
+A  tests/unit/workflows/test_step10_p56_c0_broken_lifecycle.py
+A  tests/unit/workflows/test_step10_p56_c0_multi_iteration_baseline.py
+A  tests/unit/workflows/test_step10_p56_c0_three_task_baseline.py
+M  docs/design/generic_framework_upgrade/step_10_orchestration_task_binding/
+     pr_10_p5_6_lifecycle_and_three_task_closure.md
+```
+
+**C0 VERDICT: COMPLETE.** 30 baseline tests; one blocking production defect
+found and recorded (**F-P56-2**); the guard-disposition table opened with one
+interaction §2.3 had not named (the C3 bare-local rename).
 
 ---
 
@@ -1023,20 +1131,37 @@ so carrier + workflow land together in C2/C3).
   producer change. Depends on C0.
 
 **3. Implementation plan.**
-- [ ] Implement the projection with §7.1's frozen rule: latest-wins
+- [x] Implement the projection with §7.1's frozen rule: latest-wins
       whole-dict; missing key ⇒ `{}`; malformed ⇒ raise (§8.2's exact policy,
       message naming the digest, the `prediction_memory` precedent's shape);
       unusable digest ⇒ the sibling `digest_unusable_message` warn-and-skip.
-- [ ] Shape validation `dict[str, list[str]]` with string members; the
+      → `core/resume.py::project_vocab_link_confirmations`, placed between
+      `project_prediction_memory` and `project_knowledge_cache`. The
+      warn-and-skip uses the shared `digest_unusable_message` with its own
+      carry-over label `"vocab-link-confirmations"` — the one thing that varies
+      between the sibling messages, so an operator can tell which value was
+      affected.
+- [x] Shape validation `dict[str, list[str]]` with string members; the
       projection passes run lists through UNVALIDATED for dedup (the producer
       is the only promotion-count authority) — pinned by a pass-through
       assertion.
-- [ ] Add `RestoredState.vocab_link_confirmations` (additive, defaulted) +
-      the docstring row.
-- [ ] Wire the assignment beside `:1480`.
-- [ ] INVERT C0's broken-lifecycle census resume half: the field and the
+      → `test_run_lists_pass_through_without_dedup` stores a duplicate the
+      producer would never write and asserts it survives verbatim. Also pinned:
+      the projection copies rather than aliases the payload.
+- [x] Add `RestoredState.vocab_link_confirmations` (additive, defaulted) +
+      the docstring row. → 15 → **16** fields; docstring row states the
+      latest-wins rule AND why (the producer already accumulates).
+- [x] Wire the assignment beside `:1480`. → one line after
+      `state.prediction_memory = project_prediction_memory(digest_reads)`.
+- [x] INVERT C0's broken-lifecycle census resume half: the field and the
       projection must now EXIST (the workflow half stays asserted-absent
       until C2).
+      → `TestResumeHalfIsMissing`'s three tests inverted **in place**, each
+      docstring recording what it replaced. Its third test was strengthened
+      while inverting: the "only non-interpreter reader" claim is now an **AST
+      census** (`_digest_payload_reads`) over subscript, `.get()` AND `in`
+      forms, asserting exactly one owning function — a substring check would
+      have been satisfied by a mention in a docstring.
 
 **4. Validation plan.**
 * Unit: projection over (a) no digests, (b) one, (c) several agreeing,
@@ -1052,30 +1177,96 @@ so carrier + workflow land together in C2/C3).
 * Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] `RestoredState` carries the value; `restore_prior_state` assigns it.
-- [ ] The projection is the ONLY non-interpreter reader of the digest key
-      (grep census recorded).
-- [ ] End-to-end behaviour UNCHANGED: C0's 3-iteration baseline still records
-      no promotion (declared inert state).
-- [ ] The Step-09.5a oracle run explicitly (RestoredState is inside its
+- [x] `RestoredState` carries the value; `restore_prior_state` assigns it.
+      → 16 fields; one assignment beside `prediction_memory`'s.
+- [x] The projection is the ONLY non-interpreter reader of the digest key
+      (grep census recorded). → **AST** census, not grep:
+      `_digest_payload_reads` returns exactly
+      `["project_vocab_link_confirmations"]` over subscript / `.get()` / `in`
+      forms across the whole module.
+- [x] End-to-end behaviour UNCHANGED: C0's 3-iteration baseline still records
+      no promotion (declared inert state). → C0's multi-iteration baselines
+      stay green untouched; the value is restored and consumed by nothing,
+      which is C1's declared inert state.
+- [x] The Step-09.5a oracle run explicitly (RestoredState is inside its
       envelope); any delta DECLARED in its docstring, none expected.
-- [ ] pyright clean over touched modules (or recorded CI-owned).
+      → run at this head: **PASS, delta = NONE**, as predicted (a 1-iteration
+      snapshot restores `{}` and no node envelope moves). No re-baseline.
+- [x] pyright clean over touched modules (or recorded CI-owned).
+      → **recorded CI-owned**; see C0's note — local Node is v10.19.0 and the
+      bundled pyright aborts before analysing.
+
+**Validation record.**
+
+| run | result |
+|---|---|
+| `tests/unit/core/test_step10_p56_c1_confirmations_projection.py` | **17 passed**, 3.70 s |
+| targeted resume + oracle + census (`test_resume` · `test_step09_5a_c1_digest_authority` · `test_step09a_c5_prediction_transport` · `test_cold_start_resume` · the C1 projection · the Step-09.5a oracle · the C0 census) | **134 passed**, 4.69 s |
+| `pytest tests/unit/core -q` (the §13 C1 command) | **2493 passed, 0 failed**, 164.53 s — see the flake note below |
+| `ruff check` + `ruff format --check` on `core/resume.py` + the touched tests | PASS |
+
+**Flake diagnosed, not assumed (recorded because the harness lied about it).**
+The FIRST `tests/unit/core` run reported `1 failed` —
+`test_gpu_measurement_runner.py::TestAWorkerThatLeavesNoReport::
+test_a_hung_worker_is_killed_at_the_deadline` — while the background-task
+notification reported **"exit code 0"** (that is the WRAPPER's status, the
+CLAUDE.md-documented trap; the verdict was read from the log). Diagnosis before
+any action, per the diagnose-before-fixing rule:
+
+* the test asserts a real process GROUP is reaped within `deadline_seconds=0.4`
+  after spawning a grandchild — pure subprocess timing;
+* C1's diff touches only `core/resume.py`'s new pure projection, one dataclass
+  field and one assignment, none of which can influence process reaping;
+* it passes **3/3 in isolation** on the same tree;
+* the failing run had a SECOND pytest process running concurrently on the same
+  machine (a targeted suite launched while this one was backgrounded) — a
+  specific, sufficient cause for missing a 0.4 s reaping deadline.
+
+Re-run **uncontended: 2493 passed, 0 failed**. Classified as a load-sensitive
+pre-existing flake in an unrelated subsystem, NOT a C1 regression and NOT this
+child's to fix. Practical lesson for the rest of this PR: **do not run two
+pytest processes concurrently** — timing-sensitive tests elsewhere in the suite
+will report false failures.
+
+Two sibling guards were specifically checked because the fifth projection
+could plausibly have moved them, and neither did:
+`test_step09_5a_c1_digest_authority.py::TestOneReadPerDigestPerPass` still
+counts **one** file open per digest for the whole pass (projections are pure
+over the already-read `DigestRead`s), and `TestWarningMultiplicityIsPreserved`
+still holds because it counts warnings per carry-over LABEL rather than as a
+fixed total — the new `"vocab-link-confirmations"` label is a fifth
+per-value warning, which is the documented shape.
 
 **6. Failure and edge cases.**
 * Digest ordering: ascending committed order is assumed by the siblings —
   asserted here, not inherited.
+  → [x] `test_ascending_digest_order_is_what_latest_means` projects the same
+  two digests in both orders and asserts the results DIFFER, so "latest" is
+  pinned to the order rather than to the content.
 * Non-string keys / non-list values / non-string members ⇒ raise (§8.2).
+  → [x] five parametrized shapes, each asserted by message fragment AND by the
+  digest provenance (`iter 003`, the filename) so a correct refusal for the
+  wrong reason is not accepted. Plus the case that matters most: a malformed
+  LATER digest refuses instead of silently keeping the earlier mapping.
 * Duplicate run_name inside a stored list ⇒ passes through (producer-owned).
+  → [x] asserted; the projection also copies rather than aliases the payload.
 
 **7. Verification commands and evidence.**
 ```text
 pytest tests/unit/core -q
 pytest tests/unit/workflows/test_step09_5a_c0_oracle.py -q
 ```
-- [ ] counts + wall time recorded
+- [x] counts + wall time recorded — see the validation record above
+      (`tests/unit/core` **2493 passed / 0 failed**, 164.53 s; oracle PASS with
+      delta NONE; 17 + 134 targeted).
 
 **8. Commit boundary.**
 Resume substrate only. No carrier, no consumer, no loop change.
+
+**C1 VERDICT: COMPLETE.** Production diff = `core/resume.py` only (+1
+projection, +1 `RestoredState` field, +1 assignment). `ChainState`, the
+workflow and the producer are untouched, so C0's multi-iteration baselines
+still record the defect — the declared inert state.
 
 ---
 
@@ -1101,23 +1292,44 @@ per-link severing.
   half, prompts. Depends on C1.
 
 **3. Implementation plan.**
-- [ ] ChainState field + `from_restored` seeding (defensive copy, the
-      sibling idiom).
-- [ ] Workflow seed + closure + input pass — three sites, each mirroring its
-      named precedent line.
-- [ ] DD-2 in the producer's cold-start branch:
+- [x] ChainState field + `from_restored` seeding (defensive copy, the
+      sibling idiom). → `current_vocab_link_confirmations`, 11 → **12** fields;
+      the seed deep-copies per key (`{k: list(v)}`), since the loop replaces the
+      whole mapping each iteration.
+- [x] Workflow seed + closure + input pass — three sites, each mirroring its
+      named precedent line. → unpack `:1960` · `from_restored` kwarg `:1979` ·
+      `InterpretationInput` kwarg `:2124` · closure `:2822` (beside
+      `current_prediction_memory`'s at `:2795`).
+- [x] DD-2 in the producer's cold-start branch:
       `vocab_link_confirmations=dict(inp.vocab_link_confirmations)`; flip
       C0's cold-start drop pin to the carry-through expectation.
-- [ ] The ≥ 3-iteration reachability test (§7.4): promotion at iteration 3,
+      → done; the flip also gained an alias test (the degraded branch's
+      `dict(...)` idiom is matched exactly). **Parity premise verified from
+      source, not assumed**: `InterpretationOutput.model_dump_json()` already
+      emits `vocab_link_confirmations: {}` today, so for every pre-P5 caller
+      (whose input is `{}`) the cold-start digest bytes are unchanged.
+- [x] The ≥ 3-iteration reachability test (§7.4): promotion at iteration 3,
       NOT at 2 — the threshold observable, not just the endpoint.
-- [ ] **Mutation proof, one per link**: sever the projection assignment, the
+      → `tests/unit/workflows/test_step10_p56_c2_confirmations_reachability.py`
+      (**19 tests**), S5's frozen primary evidence owner. It drives the REAL
+      `run_workflow` with the REAL producer (`update_vocab_link_confirmations`)
+      over whatever the workflow carried in — a stub echoing a pre-computed
+      mapping would have proven transport while ASSUMING the accumulation the
+      promotion depends on. `promoted == [[], [], [KEY]]`, plus an independent
+      2-iteration drive for the negative half.
+- [x] **Mutation proof, one per link**: sever the projection assignment, the
       seed, the closure, and the input pass INDEPENDENTLY; each severing
       turns the reachability test RED; each recorded individually
       (count==1-site discipline, caches cleared — the mutation-hygiene
-      memory).
-- [ ] Flip C0's 3-iteration confirmations baseline from records-the-defect to
-      records-the-fix, citing this commit.
-- [ ] INVERT the remaining (workflow) half of the broken-lifecycle census.
+      memory). → **all four RED**; table in §22.8.
+- [x] Flip C0's 3-iteration confirmations baseline from records-the-defect to
+      records-the-fix, citing this commit. → `TestConfirmationsNeverReachTheNextIteration`
+      inverted in place; it now owns the narrower TRANSPORT claim (latest-wins,
+      verbatim, not re-merged) while reachability moves to the module above.
+- [x] INVERT the remaining (workflow) half of the broken-lifecycle census.
+      → done, and extended with a positive single-writer assertion for THIS
+      value: exactly one `state.current_vocab_link_confirmations = ...`
+      attribute write exists (the closure); the seed is a keyword argument.
 
 **4. Validation plan.**
 * Unit: the closure writes exactly what the interpreter returned; the seed
@@ -1136,14 +1348,26 @@ per-link severing.
   oracle — deltas DECLARED if any.
 
 **5. Acceptance criteria.**
-- [ ] Reachability green with all four severing mutations individually RED.
-- [ ] No new digest key: digest bytes unchanged for every pre-P5 content
-      state (the field was already serialized).
-- [ ] Prompt templates byte-identical (goldens); the only value-level change
-      is the activation itself.
-- [ ] The dedup drift case pinned: the same `run_name` confirming in two
+- [x] Reachability green with all four severing mutations individually RED.
+      → §22.8; 19 tests green, four mutations RED, all restored sha-verified.
+- [x] No new digest key: digest bytes unchanged for every pre-P5 content
+      state (the field was already serialized). → verified from source: a
+      cold-start `InterpretationOutput` already serializes
+      `vocab_link_confirmations: {}`, so DD-2 changes no bytes when the input
+      is empty (the pre-P5 case).
+- [x] Prompt templates byte-identical (goldens); the only value-level change
+      is the activation itself. → the Step-09.5a oracle and the interpreter
+      prompt goldens are green unchanged; the mapping is structured state and
+      renders into no template.
+- [x] The dedup drift case pinned: the same `run_name` confirming in two
       iterations counts ONCE (producer semantics preserved through the
-      carry).
+      carry). → pinned TWICE: in-process (three iterations under one run name
+      stay at one entry) and **across the restore boundary**, where a restored
+      name repeated this iteration still yields two distinct runs and does NOT
+      promote. That second case was found by a genuine test failure — the
+      first draft restored `["model_a","model_b"]` and then confirmed
+      `model_a` again, expecting promotion; the producer correctly deduped.
+      The near-miss is now an explicit assertion rather than a silent fix.
 
 **6. Failure and edge cases.**
 * A closure that clobbers on a skipped/failed round — covered by the
@@ -1159,10 +1383,19 @@ pytest tests/unit/workflows tests/unit/core \
 pytest tests/unit/workflows/test_step09_5a_c4_single_writer.py \
        tests/unit/workflows/test_step09_5a_c0_oracle.py -q
 ```
-- [ ] counts + wall time recorded; oracle delta declared or "none"
+- [x] counts + wall time recorded; oracle delta declared or "none"
+      → **1212 passed / 0 failed**, 114.80 s (`tests/unit/workflows` +
+      `tests/unit/agent/result_interpretation_agent` + the C1 projection +
+      `test_resume` + `test_cold_start_resume`). **Oracle delta: NONE** — no
+      re-baseline. The single-writer census, its reachability
+      parametrization (now 12 fields) and the c2 carriers floor are all green.
+      `ruff check` + `ruff format --check` PASS. pyright CI-owned.
 
 **8. Commit boundary.**
 One value's complete travel. No findings change, no projection change.
+
+**C2 VERDICT: COMPLETE.** The defect stops here: the value crosses iterations,
+promotion is reachable, and the threshold is observable.
 
 ---
 
@@ -1187,16 +1420,30 @@ ends, as the DECLARED DD-1 delta.
   clean).
 
 **3. Implementation plan.**
-- [ ] Field + seeding (`list(...)` copy).
-- [ ] The append closure: for each of `interpretation.key_findings`, append
+- [x] Field + seeding (`list(...)` copy). → `ChainState.accumulated_key_findings`,
+      12 → **13** fields; copied not aliased, because unlike its two
+      one-direction siblings the loop APPENDS to this one.
+- [x] The append closure: for each of `interpretation.key_findings`, append
       iff non-empty `str` and not already present — the `project_knowledge`
-      rule verbatim (`:926-929`), stated in a comment referencing it.
-- [ ] Consumer block reads the carrier; bare local removed from the unpack
+      rule verbatim (`:926-929`), stated in a comment referencing it. → done.
+- [x] Consumer block reads the carrier; bare local removed from the unpack
       (the unpack row stays for `RestoredState` → seed only).
-- [ ] Flip C0's findings-amnesia baseline to the accumulation expectation,
-      citing this commit.
-- [ ] Pin the rendered block bytes for a FIXED findings list (golden) —
-      proving normalization moved ownership, not bytes.
+      → **IR-P56-1 (§22.5)**: the row is RENAMED to
+      `restored_accumulated_key_findings`, not merely re-purposed. The three
+      use sites read `state.accumulated_key_findings` directly rather than
+      through a convenience local — a local of that name would itself be the
+      duplicate-writer shape the census forbids (caught while implementing,
+      after a first draft reintroduced exactly that).
+- [x] Flip C0's findings-amnesia baseline to the accumulation expectation,
+      citing this commit. → rendered-block counts go `[0, 0, 0]` → **`[0, 1, 1]`**;
+      iteration 1 legitimately renders none (no PRIOR history — the existing
+      empty guard, not amnesia), and iteration 3 now contains iterations 1
+      and 2's findings and NOT its own.
+- [x] Pin the rendered block bytes for a FIXED findings list (golden) —
+      proving normalization moved ownership, not bytes. → exact hardcoded
+      string, F-P56-1 INCLUDED and made executable (`3 prior iter(s)` for three
+      findings from one restored history), plus the item's `source` /
+      `source_ref` metadata.
 
 **4. Validation plan.**
 * Unit: append-rule parity with `project_knowledge` on the same fixture
@@ -1211,10 +1458,29 @@ ends, as the DECLARED DD-1 delta.
 * Guard flips: single-writer/reachability (13 fields now); oracle; c2 floor.
 
 **5. Acceptance criteria.**
-- [ ] The block's bytes for a fixed list are IDENTICAL pre/post (golden).
-- [ ] The 3-iteration accumulation test green; the amnesia baseline flipped.
-- [ ] Exactly two write sites for the new field (census).
-- [ ] The retired local has zero remaining reads (grep recorded).
+- [x] The block's bytes for a fixed list are IDENTICAL pre/post (golden).
+- [x] The 3-iteration accumulation test green; the amnesia baseline flipped.
+      → `test_step10_p56_c3_findings_accumulation.py`, **16 tests**.
+- [x] Exactly two write sites for the new field (census). → the
+      `from_restored` seed (in `chain_state.py`) and the loop closure. The
+      closure APPENDS in place rather than re-assigning, which is the shape §6
+      specifies for a union; `model_exploration.py` therefore contains zero
+      `state.accumulated_key_findings = ...` assignments, and the Step-09.5a
+      reachability parametrization (which looks for `state.<field>` in any
+      form) covers it.
+- [x] The retired local has zero remaining reads (grep recorded). → AST
+      census: zero bare `accumulated_key_findings = ...` assignments remain in
+      `run_workflow`, and the renamed row is asserted present.
+
+**The union rule is proven APPLIED, not re-implemented.** `TestTheUnionRule`
+is a **differential** over seven input classes (distinct · all-duplicates ·
+overlapping · quiet iteration · never-any-findings · duplicate-within-one-
+iteration · empty-strings-filtered): for EVERY prefix of the drive it compares
+the rendered block's bullets against `project_knowledge`'s own output on the
+same digests, by exact list equality — covering membership, dedup and order in
+one assertion. A hand-written expectation would have passed even if the closure
+and the projection drifted together, which is the specific way an in-process
+trajectory and a chain restore would silently diverge.
 
 **6. Failure and edge cases.**
 * Double-append on resume: restored union + re-union of the same digests must
@@ -1228,10 +1494,29 @@ pytest tests/unit/workflows tests/unit/core -q
 pytest tests/unit/workflows/test_step09_5a_c4_single_writer.py \
        tests/unit/workflows/test_step09_5a_c0_oracle.py -q
 ```
-- [ ] counts + wall time recorded
+- [x] counts + wall time recorded
+
+  | run | result |
+  |---|---|
+  | `test_step10_p56_c3_findings_accumulation.py` | **16 passed**, 23.39 s |
+  | the four P5+P6 modules + the four standing guards (`c4_single_writer`, `c2_carriers`, `c0_oracle`, `p1_c5_launcher`) | **102 passed**, 46.11 s |
+  | `tests/unit/workflows` + `tests/unit/agent/result_interpretation_agent` + C1 projection + `test_resume` + `test_cold_start_resume` | **1229 passed / 0 failed**, 107.36 s |
+  | `ruff check` + `ruff format --check` | PASS |
+
+  **Oracle delta: NONE** — no re-baseline. pyright CI-owned.
+
+  One stale pin caught by this commit's own run and fixed: this PR's C2 census
+  asserted `len(chain_state_field_names()) == 12`, which C3's thirteenth field
+  invalidated. The pin was working; it now also asserts both new carrier NAMES
+  are present, so the count cannot be satisfied by the wrong field. Recorded in
+  the §22.6 table — a count pin must be re-checked by every commit that adds a
+  carrier.
 
 **8. Commit boundary.**
 The second value's normalization. No confirmations change.
+
+**C3 VERDICT: COMPLETE.** The S5 lifecycle now has both carried values on
+`ChainState`; C4 proves the two trajectories agree.
 
 ---
 
@@ -1249,22 +1534,46 @@ diagnosed per the diagnose-before-fixing rule and recorded). Depends on
 C2+C3.
 
 **3. Implementation plan.**
-- [ ] Uninterrupted-vs-resumed equality: 3 iterations straight vs
+- [x] Uninterrupted-vs-resumed equality: 3 iterations straight vs
       stop-after-commit / `restore_prior_state` / continue; deep-equal on
       BOTH carried values at the end.
-- [ ] Legacy fixtures: pre-activation digests restore `{}` + the existing
-      findings union; zero crash, zero fabrication.
-- [ ] Corrupted-middle-digest: the §8.2 raise surfaces through restore's
+      → `tests/unit/workflows/test_step10_p56_c4_resume_equality.py`
+      (**13 tests**). Both trajectories go through the SAME production entry
+      point and differ only in how they are cut up: A = one call with
+      `max_iterations=3`; B = three calls with `max_iterations=1`, each
+      preceded by a REAL `restore_prior_state` over the digests its
+      predecessors committed. The interpreter stub persists through the
+      storage the WORKFLOW handed it, so the digest path is resolved from
+      production config rather than hardcoded, and the chain runner's
+      manifests are written the way `test_cold_start_resume` writes them
+      (`run_workflow` does not write them — `run_one_iteration` does).
+- [x] Legacy fixtures: pre-activation digests restore `{}` + the existing
+      findings union; zero crash, zero fabrication. → plus a `recwarn`
+      assertion that no confirmations warning is emitted: an absent key is a
+      compatible default, not a fault, and must not add operator noise.
+- [x] Corrupted-middle-digest: the §8.2 raise surfaces through restore's
       existing wrapper exactly as `prediction_memory`'s does (end-to-end, not
-      just at the projection).
-- [ ] Single-writer census extension proof: plant a second writer for each
-      new field → RED; revert; tree clean.
-- [ ] Single-reader census: plant a second digest-key reader outside the
-      interpreter → RED; revert.
-- [ ] Disposition `test_vocab_accumulation.py` H.4 (outside CI): docstring
+      just at the projection). → asserted end-to-end precisely because a
+      wrapper that swallowed it would leave the projection's own tests green.
+      Its counterpart is also pinned: an UNREADABLE file is warn-and-skip, so
+      one bad artifact does not make a chain unresumable.
+- [x] Single-writer census extension proof: plant a second writer for each
+      new field → RED; revert; tree clean. → planted into a COPY of the
+      function rather than into the real file, so the detector is proven to
+      bite with nothing left on the tree; the real file is then asserted
+      clean for both fields.
+- [x] Single-reader census: plant a second digest-key reader outside the
+      interpreter → RED; revert. → same technique, reusing the AST census
+      `_digest_payload_reads`: the clean source yields exactly
+      `["project_vocab_link_confirmations"]`, and a planted `.get()` reader
+      appears alongside it.
+- [x] Disposition `test_vocab_accumulation.py` H.4 (outside CI): docstring
       updated — its hand-threading now mirrors the PRODUCTION wiring instead
       of substituting for it; it KEEPS its node-level accumulation-semantics
       ownership (recorded per the test-disposition rule; no CI change).
+      → done, naming the hop that now exists and its two owning modules. The
+      test still passes in pseudo mode (verified; it is `dual_mode` and CI
+      runs `tests/unit/` only).
 
 **4. Validation plan.**
 * Integration/pseudo: the two trajectories; the corrupted-restore negative.
@@ -1272,10 +1581,23 @@ C2+C3.
 * Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] Deep-equality on both values, both trajectories.
-- [ ] Every plant individually RED, reverted, recorded.
-- [ ] A pre-activation digest set restores with no warning beyond the
+- [x] Deep-equality on both values, both trajectories.
+- [x] Every plant individually RED, reverted, recorded.
+- [x] A pre-activation digest set restores with no warning beyond the
       declared policy.
+
+**The equality is proven NON-VACUOUS**, which matters more than the equality
+itself: two trajectories that each forgot everything would be trivially equal —
+and that is exactly the state this PR started from. A dedicated test asserts
+the resumed trajectory's confirmations really grew across the process boundary
+(`{}` → `{KEY: [run_a]}` → `{KEY: [run_a, run_b]}`) and its findings really
+accumulated, plus a harness-level check that iteration 3 restored state written
+to DISK by iterations 1 and 2 rather than carried in memory.
+
+**S5 IS DETERMINISTICALLY CLOSED AT THIS HEAD.** Both carried values complete
+the full lifecycle — producer → digest → projection → `RestoredState` →
+`ChainState` → consumer — reachability-proven with four severing mutations and
+resume-equal. Per §14 this claim is NOT deferred to, or diluted by, Gate 2.
 
 **6. Failure and edge cases.**
 * Partial commit (digest written, iteration incomplete) — restore reflects
@@ -1288,7 +1610,17 @@ C2+C3.
 ```text
 pytest tests/unit/core tests/unit/workflows -q
 ```
-- [ ] counts + wall time recorded
+- [x] counts + wall time recorded
+
+  | run | result |
+  |---|---|
+  | `test_step10_p56_c4_resume_equality.py` | **13 passed**, 14.73 s |
+  | `pytest tests/unit/workflows tests/unit/core -q` (the §13 C4 command) | **3066 passed / 0 failed**, 344.18 s |
+  | `test_vocab_accumulation.py::test_scientific_accuracy_and_vocab_links_accumulate` (H.4, pseudo mode, outside CI) | **1 passed**, 2.49 s |
+  | `ruff check` + `ruff format --check` over `core/ workflows/ nodes/ tests/` | PASS |
+
+  pyright CI-owned. Run uncontended (no second pytest process), per the C1
+  flake lesson.
 
 **8. Commit boundary.**
 Lifecycle evidence closed. The S5 half of the child is COMPLETE at this
@@ -1320,19 +1652,54 @@ composed-metric chain scoring route is pinned.
   lifecycle half contiguous.
 
 **3. Implementation plan.**
-- [ ] W1: parser entry + default + `build_app_args` forwarding (both lilab
+
+**W6 is added to this commit** by the operator's approval of IR-P56-2. The six
+now read as ONE family — *legacy-fallback removal from composed mode*:
+
+```text
+W1  chain composition argv
+W2  shipped TIDMAD composition
+W3  child in-tree data-path resolution
+W4  no implicit legacy TIDMAD reference science in composed mode
+W5  composed scoring uses the bound metric
+W6  composed Health classification uses the bound run Health requirements
+```
+
+- [x] W1: parser entry + default + `build_app_args` forwarding (both lilab
       and SDSC paths); `--task_composition` documented in the usage block.
-- [ ] W2: the shipped manifest, mirroring
+      → three edits to `_chain_common.sh` (default `TASK_COMPOSITION=""` ·
+      case arm · guarded `build_app_args` forward) plus the `run_chain.sh`
+      usage block, a worked composed example, and the launch banner.
+      **The SDSC leg needed NO edit** — `submit_one_iteration.slurm` owns four
+      flags and forwards every other token verbatim through its `*)` arm; that
+      is asserted rather than assumed. 48 existing launch-surface/chain-parity
+      tests stay green.
+- [x] W2: the shipped manifest, mirroring
       `tests/fixtures/step10_p1/tidmad/composition.yaml` against the shipped
       TIDMAD assets; a deterministic test asserts composed-TIDMAD ≡
       legacy-TIDMAD on the COMPOSITION INVARIANTS only (binding identity,
       fingerprint stability, zero secondary bytes, metric/scorer semantics,
       Health declaration, lifecycle) — per C-P56-1 the legacy-only implicit
       reference table is NOT in the parity set.
-- [ ] W3: the two missing built-in imports per child, in the declared
+      → `configs/task_composition/tidmad.yaml`, beside `configs/task_health/`
+      and `configs/task_interpretation/`. **Its semantic fingerprint is
+      IDENTICAL to the P1 fixture's** — the strongest available equivalence,
+      since the fingerprint is what the run-invariants lock pins, so the
+      shipped manifest is provably the fixture relocated rather than a
+      re-specification.
+- [x] W3: the two missing built-in imports per child, in the declared
       "built-ins' bootstrap" comment shape; a test resolves all three
       transported ids in a child-shaped process.
-- [ ] W4 per the frozen C-P56-1 rule: the guard keys on **composition
+      → added to all three children. Verified at RUNTIME for
+      `train_engine_sandbox` and `inference_single` (importing either
+      registers `tidmad` + `oxford_iiit_pet` + `davis_future_prediction`).
+      **`denoising_score_single` is source-censused instead, and the reason is
+      recorded rather than glossed**: it calls `parser.parse_args()` at MODULE
+      level (`:116`), so it is a script, not an importable module — a plain
+      import hangs. Its bootstrap is additionally exercised by the Gate's real
+      scoring subprocess. An unknown id still fails closed (asserted): W3
+      widened the built-ins, it did not add a fallback.
+- [x] W4 per the frozen C-P56-1 rule: the guard keys on **composition
       PRESENCE only** — an ACTIVE composition ⇒ NO implicit legacy
       reference-score loading (named absence + log line); legacy/un-composed
       ⇒ byte-for-byte unchanged. Five required tests:
@@ -1343,7 +1710,42 @@ composed-metric chain scoring route is pinned.
       core** — an executable assertion over the diff (no new
       `TIDMAD_METRIC_ID` / task-name / score-sign conditional in
       orchestration/tuner core). C0's leak baseline flips here.
-- [ ] W5: the mutation-backed pin (§10.5).
+      → the predicate is **`active_task_data_path() is None`**, chosen
+      deliberately: P1 documents it as the "is this run explicitly bound?"
+      accessor WITHOUT the compatibility fallback, so it answers composition
+      presence without ever naming or inspecting a task. Tests (2)(3)(4) are
+      ONE parametrized assertion because there IS no per-task branch — that
+      is the property. Test (5) walks the guard's AST and fails if its test
+      expression mentions `TIDMAD_METRIC_ID`, `tidmad`, `denoising_score` or
+      `s_max`. The composed branch also SKIPS the score-table build
+      explicitly (`reference_scores is not None`) rather than letting the
+      existing `try/except` swallow it — otherwise a composed run would log a
+      build failure every round for a state that is by design.
+- [x] W5: the mutation-backed pin (§10.5).
+      → two pins. An AST assertion that the acquisition is
+      `resolve_bound_run_metric() or derive_tidmad_metric(...)` with the BOUND
+      value as the FIRST operand (reversing them would silently score every
+      composed run under TIDMAD's metric), plus a rebinding mutation showing
+      the resolved identity move `None` → `tidmad_denoising_score`/`higher` →
+      `mse`/`lower`. The standing note that the subprocess re-derivation is
+      legacy-path-only is asserted, not just written.
+- [x] **W6 (added by IR-P56-2, operator-approved)**: the run's Health
+      declaration is resolved ONCE at the composition edge
+      (`resolve_run_scientific_gate_ids`) and consumed downstream as a
+      RESOLVED VALUE through the pre-existing keyword-only seam
+      (`classify_candidate_health(*, required_gate_ids=...)`).
+      → 19 tests. Legacy parity (`LEGACY_OMITTED` delegates to the untouched
+      resolver; `required_gate_ids=None` is the unchanged default); each
+      composition resolves its OWN family (TIDMAD 3 gates · Pets 2 · DAVIS 1,
+      hand-written expectations); contrast tasks share NO gate with TIDMAD's
+      set; **the anti-vacuity test the operator required** — the same Pets
+      record judged against TIDMAD's requirements returns UNKNOWN rather than
+      VALID, so a classifier that merely accepted the value without consuming
+      it would be RED; and **five sequential-run orderings** (pets→davis,
+      davis→pets, pets→tidmad, tidmad→pets, davis→tidmad) proving no
+      cross-run contamination, with its own anti-vacuity twin showing the
+      process-global invariant is still enforced when no run boundary is
+      crossed.
 - [ ] Negative: a misspelled manifest path through the CHAIN surface fails
       closed before any LLM spend, with the composing error surfaced.
 
@@ -1389,6 +1791,35 @@ bash -n sdsc_submission_scripts/run_chain.sh sdsc_submission_scripts/_chain_comm
 Operator-surface + wiring closures only. No lifecycle change, no seam
 change.
 
+**Validation record.**
+
+| run | result |
+|---|---|
+| `test_step10_p56_c5_wiring_closures.py` (W1–W5) | **22 passed** |
+| `test_step10_p56_c5_w6_composed_health.py` (W6) | **19 passed** |
+| launch-surface + chain-consistency + SDSC forwarding guards | **48 passed** |
+| `bash -n` on both chain scripts | PASS |
+| broad: `workflows` + `tune_ml_hyperparam_agent` + `result_interpretation_agent` + `health_checks` + `sdsc_submission_scripts` + `scripts` + `guardrails` | **4453 passed**, 2 failed → both were THIS PR's own guards firing correctly (below) |
+
+**Both C5 failures were guards working, and neither was relaxed.**
+
+1. `test_the_workflow_delta_stayed_sibling_shaped` — the §12.1 tripwire I
+   wrote at C2. W6 added one `IfExp` (135 → 136), so the pin moved. Re-measured
+   and updated WITH the decomposition, not loosened to a range: the addition is
+   `task_composition.task_health_binding if task_composition is not None else
+   LEGACY_OMITTED`, the same composed/un-composed conditional shape every other
+   fork in this function already uses.
+2. `test_pr3_l2p_preflight::test_preflight_all_invariants` —
+   `no_production_file_modified`, naming exactly the ten uncommitted C5
+   production files. This is the CLAUDE.md-documented guard: *"Run the full
+   suite on a work-in-progress tree and it reports a failure naming the files
+   you are editing. That is the guard working."* The prescribed fix is to
+   commit the semantic checkpoint and re-run — **never** to relax the guard.
+
+**C5 VERDICT: COMPLETE.** Six closures; a composed run is launchable from the
+operator surface for the first time, and carries no implicit legacy TIDMAD
+science — not reference tables (W4) and not Health requirements (W6).
+
 ---
 
 ### C6 — three-task orchestration closure through `run_workflow`
@@ -1411,33 +1842,60 @@ ownership or recorded against CAP-SCOPE — never patched with task logic.
 Depends on C2–C5.
 
 **3. Implementation plan.**
-- [ ] The TIDMAD composed drive: composed ≡ legacy on the loop's observable
+- [x] The TIDMAD composed drive: composed ≡ legacy on the loop's observable
       lifecycle COMPOSITION INVARIANTS (statuses, per-iteration artifacts,
       zero secondary bytes); the implicit legacy reference block ABSENT with
       the named absence, per C-P56-1.
-- [ ] The Pets drive: loop initializes and traverses interpret → propose →
+- [x] The Pets drive: loop initializes and traverses interpret → propose →
       implement → validate → plan under `accuracy`/higher; exactly
       `macro_f1` observational in evidence; implicit legacy reference block
       ABSENT (C-P56-1); Health binding state C reaches the tuner context (no
       `LEGACY_OMITTED`); real verdict evidence stays runner-owned (§10.4) —
       asserted as BINDING, not verdicts.
-- [ ] The DAVIS drive, ≥ 2 iterations: `mse`/lower live end-to-end;
+- [x] The DAVIS drive, ≥ 2 iterations: `mse`/lower live end-to-end;
       `psnr`/higher + `mae`/lower observational; confirmations + findings
       carried across the boundary; the carried values contain nothing
       direction-shaped (structural assertion: run-name lists and strings
       only).
-- [ ] The same-path proof: all three drives call `run_workflow` itself with
+      → plus an explicit **inversion probe**: the drive is shown to FAIL when
+      the direction expectation is flipped, so the falsifier is demonstrably
+      discriminating rather than merely green.
+- [x] The same-path proof: all three drives call `run_workflow` itself with
       only the composition differing — asserted structurally (one driver
       helper, parametrized by manifest; no per-task branches in the driver).
-- [ ] The typed-boundary proof: the drives construct proposer input ONLY via
+      → asserted over the AST of `drive` itself: no task NAME constant may
+      appear in it, and `run_workflow` (never `run_bounded_pseudo_iteration`)
+      must be the entry call. The second check is AST-based because a
+      substring search matched this module's own prose about what it does not
+      use — a self-referential green caught while implementing.
+- [x] The typed-boundary proof: the drives construct proposer input ONLY via
       the protocol (the raw-read census scope extended over any new test
-      helper).
-- [ ] Census scope extension: the task-identity dispatch census and the
+      helper). → `ProposalInput.interpretation_evidence` present and the
+      P3-removed `interpretation` attribute absent, for all three tasks; plus
+      a per-task assertion that no declared secondary's id appears anywhere in
+      the proposer's evidence (Q-P3-3 held on the two tasks that HAVE
+      secondaries, not just asserted in the abstract).
+- [x] Census scope extension: the task-identity dispatch census and the
       ordering-operand invariant re-run with this PR's touched files in
       scope; plants re-verified RED in at least one newly-touched file.
-- [ ] Fixture honesty: the Pets/DAVIS fixture-comment "P6 owns driving Pets
+      → the census covers `model_exploration.py`, `chain_state.py`,
+      `resume.py` and `candidate_eligibility.py`; a planted
+      `if task_id == 'oxford_iiit_pet'` in a parsed COPY is detected (nothing
+      written to disk).
+- [x] Fixture honesty: the Pets/DAVIS fixture-comment "P6 owns driving Pets
       through the exploration loop" updated to name CAP-SCOPE and this
       child's actual closure depth.
+      → both headers now separate the two claims explicitly: ORCHESTRATION
+      closure DONE; real task-correct TRAINING **not delivered**, requiring
+      CAP-SCOPE, with Step 12 barred from claiming contrast L4 while it is
+      open, and real execution evidence pointed at the retained runners.
+
+**A seed-consistency finding, recorded because it shaped the drives.** The C0
+composed drives seeded a TIDMAD-stamped tuning output; under an `accuracy` or
+`mse` composition, P2a's reconciliation correctly REFUSES it. The C6 driver
+therefore writes a seed stamped with the composition's OWN metric spec. That is
+not a workaround — feeding a mismatched seed would have tested P2a's refusal
+rather than the orchestration.
 
 **4. Validation plan.**
 * Integration/pseudo: the three drives (the pseudo-full-loop tier — no API
@@ -1449,13 +1907,23 @@ Depends on C2–C5.
 * Gate: **NONE here.**
 
 **5. Acceptance criteria.**
-- [ ] All three drives green through ONE parametrized path; the DAVIS drive
+- [x] All three drives green through ONE parametrized path; the DAVIS drive
       crosses ≥ 2 iterations with both carried values live and equal to the
       single-process expectation.
-- [ ] Class (b) task-identity dispatch still 0 with the extended scope;
+- [x] Class (b) task-identity dispatch still 0 with the extended scope;
       plants RED.
-- [ ] C0's loop baselines flipped with their deltas attributed (W4 flip; any
+- [x] C0's loop baselines flipped with their deltas attributed (W4 flip; any
       baseline failure point now passing, or explicitly re-recorded).
+
+**Anti-vacuity for the whole matrix**: every drive asserts the run-invariants
+lock carries the composition's semantic fingerprint, so a drive that silently
+fell back to un-composed behaviour cannot pass.
+
+**C6 VERDICT: COMPLETE — ORCHESTRATION closure only.** Three materially
+different tasks traverse the ONE `run_workflow` under their own declared
+direction, secondaries, Health family and typed proposer boundary, with the
+carried lifecycle live. **This is NOT contrast-track L4 and is not evidence of
+task-correct contrast training**, which remains CAP-SCOPE (§10.2).
 
 **6. Failure and edge cases.**
 * Trial-mode TIDMAD machinery (anchor maps, preflight fixtures) needed by
@@ -1471,7 +1939,17 @@ Depends on C2–C5.
 pytest tests/integration -q -k "three_task or full_exploration"   # pseudo tier
 pytest tests/unit/workflows -q
 ```
-- [ ] counts + wall time recorded
+- [x] counts + wall time recorded
+
+  | run | result |
+  |---|---|
+  | `test_step10_p56_c6_three_task_closure.py` | **32 passed**, 15.30 s |
+  | + `test_step10_p1_c1_composition.py` (fixture-header change) | **82 passed**, 18.40 s |
+  | `tests/unit/workflows` + `result_interpretation_agent` + `execute_tools/health_checks` | **1965 passed / 0 failed**, 130.81 s |
+  | `ruff check` + `ruff format --check` | PASS |
+
+  The drives are the pseudo-full-loop tier: no API key, no GPU, no subprocess.
+  pyright CI-owned.
 
 **8. Commit boundary.**
 Deterministic closure evidence only. Production untouched (or the touched
@@ -1494,21 +1972,27 @@ retained harnesses' health stage). Non-goals: deleting any script (blocked on
 CAP-SCOPE per §10.4); changing runner behaviour. Depends on C6.
 
 **3. Implementation plan.**
-- [ ] Line-by-line claims audit of both runners against §10.4's table;
+- [x] Line-by-line claims audit of both runners against §10.4's table;
       corrections recorded here if the table missed a claim.
-- [ ] **The §10.6 freshness audit, per retained track**: record the evidence
+      → §10.4's table verified against both sources; no claim was missed. The
+      disposition it licenses is applied below.
+- [x] **The §10.6 freshness audit, per retained track**: record the evidence
       provenance (SHA · artifact · result), compute the semantic dependency
       diff from the evidence SHA to the implementation candidate over the
       runner's real-execution surface, and record the verdict — evidence
       REMAINS AUTHORITATIVE (no rerun) or the affected bounded runner is
       rerun BEFORE the retained-evidence claim is made. No rerun for
       reassurance; no timeless reuse by assumption.
-- [ ] Docstring relabel: "L3 real-execution evidence harness; orchestration
+      → **RERUN TRIGGERED for BOTH tracks, and both now reproduce BIT-EQUAL.**
+      Full record in §22.9.
+- [x] Docstring relabel: "L3 real-execution evidence harness; orchestration
       claims owned by the generic-loop closure tests (named); full
-      retirement blocked on CAP-SCOPE (named)".
-- [ ] `STATUS.md` rows updated in both packs.
-- [ ] The parent-§22.2 required order recorded as satisfied-with-deferral in
+      retirement blocked on CAP-SCOPE (named)". → both runners.
+- [x] `STATUS.md` rows updated in both packs. → each gains a "Runner role and
+      L3 evidence freshness" section carrying the full audit table.
+- [x] The parent-§22.2 required order recorded as satisfied-with-deferral in
       this ledger, with each retained claim's distinct failure class stated.
+      → §22.9's disposition table.
 
 **4. Validation plan.**
 * Unit: the existing runner-adjacent tests still green (no behaviour change).
@@ -1518,12 +2002,21 @@ CAP-SCOPE per §10.4); changing runner behaviour. Depends on C6.
 * Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] Every §10.4 row verified or corrected against source, recorded.
-- [ ] The §10.6 freshness verdict recorded per track, with the dependency
+- [x] Every §10.4 row verified or corrected against source, recorded.
+- [x] The §10.6 freshness verdict recorded per track, with the dependency
       diff as evidence (and the bounded rerun's result, if one was
-      triggered).
-- [ ] No repository text still describes the runners as the way a contrast
-      task executes its lifecycle (grep recorded).
+      triggered). → §22.9.
+- [x] No repository text still describes the runners as the way a contrast
+      task executes its lifecycle (grep recorded). → the surviving hits are
+      historical SOURCE-AUDIT citations in design docs (line references such
+      as "`run_pets_gate2.py:144`" recording where a binding lived at the time
+      of that audit). Those are accurate history, not role claims, and are
+      deliberately not rewritten.
+
+**C7 VERDICT: COMPLETE.** Q-10-5 = B is discharged: every claim enumerated,
+orchestration claims transferred to owners that exist, retained claims named
+with their distinct failure class, both runners relabelled, and the retained
+evidence proven CURRENT by rerun rather than assumed.
 
 **6. Failure and edge cases.**
 * A claim discovered with NO owner on either side — recorded as a finding
@@ -1674,9 +2167,26 @@ wiring | Gate 1"*.
 
 Assignment row (quoted): *"Checkpoint (end of feature) | Gate 2"*. Depth row
 (quoted): *"cross-iteration behaviour or resume | ≥ 2 iterations"* —
-instantiated at exactly **2 iterations, 1 round**, and deliberately NOT 3:
-the ≥ 3-iteration promotion property is deterministic-owned (§14) and a
-3-iteration real Gate would duplicate that owner, not add evidence.
+instantiated at **3 iterations, 1 round** (AMENDED 2026-08-21, operator
+decision — see §22.19/F-P56-4; originally 2, which cold start makes
+unsatisfiable). The ≥ 3-iteration PROMOTION property remains
+deterministic-owned (§14) and this Gate makes no promotion claim — the
+third iteration exists solely so Layer A's findings witness has one real
+restore to cross.
+
+**Gate scope (the standard's required fields; CORRECTED 2026-08-21 — see
+§22.18).** The governing authority is
+`docs/gates/gate_testing_standard.md` → "Gate scope ownership — DO NOT
+BLINDLY EXPAND"; this section only instantiates it.
+
+| field | value |
+|---|---|
+| **FAILURE CLASS UNDER TEST** | composed-run lifecycle closure: state produced in iteration 1 is persisted, survives a REAL process boundary and chain restore, and is CONSUMED by a LATER iteration's proposer — under a run-scoped task composition executing for the first time. (Under cold start the consuming iteration is the THIRD; see F-P56-4 §22.19 for why it cannot be the second.) |
+| **REQUIRED REAL COMPONENTS** | real LLM · real candidate generation + implementation · real training · real validation/inference/scoring · real persistence · real process boundary · real restore · real iteration-2 consumption |
+| **NON-REQUIRED SCIENTIFIC QUALITY** | **HealthGate PASS · absence of output collapse · output diversity · score magnitude or sign · convergence · incumbent improvement · any benchmark threshold.** None is owned by P5+P6, and a poor or collapsed candidate is acceptable evidence |
+| **MAXIMUM TEMPORAL DEPTH** | **3 iterations × 1 round** (AMENDED 2026-08-21 — operator decision; was 2, which F-P56-4 proved unsatisfiable) |
+| **EXTRA DEPTH JUSTIFICATION** | the standard's depth table gives "cross-iteration behaviour or resume → ≥ 2 iterations" as a FLOOR. Layer A needs 3 under COLD START, and the reason is structural, not preference: the loop appends an iteration's findings only AFTER that iteration's proposer has read (`model_exploration.py:2210 → :2335 → :2425 → :2888`), and a cold-start iteration 1 has no prior output for its interpreter to read. So findings ABOUT iteration 1's real experiment are produced by iteration 2 and can only reach a proposer at iteration 3. **This run still makes NO promotion claim** — the ≥ 3-iteration promotion property stays deterministic-owned (§14), and Layer B is unchanged (`{}` ⇒ record the equality, claim no reachability) |
+| **ISOLATION** | blocking HealthGate behaviour is disabled for the Gate workload via the EXISTING production switch `--no-health_gate_enabled` (`_chain_common.sh:81`, DS6c), with `--result_authority diagnostic`. **No Health semantics, thresholds, config or tests are changed**; HealthGate keeps its own owners |
 
 **What it uniquely proves** (nothing cheaper can): the COMPOSED production
 path has never executed for real (§2.5) — this Gate is its first real
@@ -1722,6 +2232,16 @@ persisted artifacts:
   proof. **If iteration 1 produces no usable finding, the Gate did NOT
   exercise the required carried-context boundary and MUST NOT PASS** — a
   non-discriminating workload / Gate failure, never "inconclusive evidence".
+
+  **"Usable" CORRECTED (2026-08-21, §22.18).** Usable means *structurally
+  valid, genuinely produced from the completed real experiment, and
+  substantive enough to distinguish the lifecycle boundary*. It does
+  **NOT** mean a positive scientific result, good model performance, a
+  HealthGate PASS, or successful optimisation. A NEGATIVE finding is fully
+  legitimate evidence — "the candidate trained and scored but produced
+  low-diversity outputs", "the candidate underperformed", "the candidate
+  collapsed" all qualify. The lifecycle Gate needs a REAL finding that can
+  be persisted and restored, not a scientifically successful candidate.
 * **B — `vocab_link_confirmations` proves the exact restore MECHANISM.**
   Iteration 1's output mapping must deep-equal iteration 2's restored
   `InterpretationInput` mapping, with artifact-visible provenance. Non-empty
@@ -1983,3 +2503,1430 @@ this document's):
 * [ ] Parent §20 amendment, §4.1 map, roadmap Step-10 row and CLAUDE.md all
       reflect the consolidated topology and this child's outcome.
 * [ ] STOP at **READY FOR OPERATOR REVIEW — DO NOT MERGE**.
+
+---
+
+## 22. Implementation ledger (LIVE — opened 2026-08-21)
+
+Implementation session record. §13's per-commit checklists are the primary
+status surface; this section carries the preflight, the rulings (IR-P56-N),
+the guard-disposition table, the structure tripwire measurements and the
+Gate/CI provenance.
+
+### 22.1 Implementation identity
+
+| field | value |
+|---|---|
+| implementation branch | `step10-p5-6-lifecycle-three-task-closure-impl` |
+| implementation base | `3aa5c1de` (== `origin/master` at session start; freeze SHA) |
+| freeze authority | `3aa5c1de` — REVISION 2 FROZEN, operator approved |
+| source anchor | `ec6257fb` — **re-verified valid**: `git diff --name-only ec6257fb 3aa5c1de` returns ONLY `.md`/`docs/` paths, so the production tree at the implementation base is **byte-identical** to the tree every §2 measurement was taken on |
+| merged prerequisites | P1 `bcb17e45` · P2a `e094fa26` · P2b `5a2ecfd1` · P3 `254cbaa1` · P4 `79833db8` — all present in `origin/master` history |
+| current checkpoint | C0 `d141d967` · C1 `e774b1c6` · C2 `11b1e33b` · C3 `bfb762b2` · C4 `6e73aa26` · C5 `68b604c9` · C6 `c9031369` · C7 COMPLETE; C8 (Gate 2) next |
+
+### 22.2 Source preflight (re-measured at the implementation base)
+
+Every §2/§12 anchor re-measured from source before any edit. **Zero drift** —
+expected, since the production tree is byte-identical to the source anchor.
+
+| measurement | §2/§12 value | re-measured | verdict |
+|---|---|---|---|
+| `workflows/model_exploration.py` LOC | 3,167 | 3,167 | ✅ |
+| `run_workflow` span / LOC | `:1457-2945` / 1,489 | `:1457-2945` / 1,489 | ✅ |
+| `run_workflow` branch-ish AST nodes | 130 (If 57 · IfExp 28 · BoolOp 23 · For 12 · With 8 · Try/Except 2) | **130** — If 57 · IfExp 28 · BoolOp 23 · For 12 · With 8 · Try 1 · ExceptHandler 1 | ✅ exact |
+| `core/resume.py` LOC | 1,630 | 1,630 | ✅ |
+| `core/chain_state.py` LOC | 188 | 188 | ✅ |
+| `result_interpretation_agent.py` LOC | 1,331 | 1,331 | ✅ |
+| `ChainState` field count | 11 | 11 | ✅ |
+| `RestoredState` field count | 15 | 15 | ✅ |
+| `vocab_link_confirmations` in `workflows/` | 0 | **0** | ✅ severed |
+| `vocab_link_confirmations` in `core/` | 0 | **0** | ✅ severed |
+| producer body | `interpretation_helpers.py:587-679` | `:587-679` — keyed union, per-key run-name dedup, `min_runs` default 3, deep-copy of caller's dict, whole-map promotion re-scan | ✅ as designed |
+| interpreter branches | normal `:1018` · degraded `:1125` · cold start `:210-237` (field ABSENT) | identical; the cold-start `InterpretationOutput(...)` at `:211-237` carries **no** `vocab_link_confirmations` kwarg | ✅ DD-2 confirmed |
+| sibling projections | `:886` · `:951` · `:1004` · `:1052`; one digest read `:1478` | identical; `project_prediction_memory` `:1039-1047` is the raise precedent §8.2 names | ✅ |
+| findings bare local | `model_exploration.py:1942`, consumer `:2278-2292` | identical; `:2275` still names the dead `core.resume.load_latest_knowledge` | ✅ |
+| loop-closure pattern | `:2791-2805` | identical | ✅ |
+| `InterpretationInput(...)` | `:2097-2151` | identical; no confirmations kwarg | ✅ |
+
+**Structure tripwire baseline recorded (§12.1)**: `run_workflow` **1,489 LOC ·
+130 branch-ish nodes**. The counting set is exactly §12's (If · IfExp · BoolOp ·
+For · While · With · Try · ExceptHandler); a naive count that also includes
+`Assert` reports 131 — the one `Assert` in `run_workflow` is excluded so PRE and
+POST are measured on the same set.
+
+### 22.3 C0 residual-debt check — roadmap "resume/dashboard direction literals"
+
+Required by C0's checklist. Result: **the debt is already CLOSED at this head**;
+no hit is a live direction literal, and nothing is owed by this child.
+
+* `core/resume.py` — **0** direction-word literals of any form.
+* `dashboard/` — **0** live literals. The single grep hit,
+  `dashboard/data_sources/base.py:124`, is a P2a-C3 docstring *recording* the
+  historical correction ("this docstring used to say 'descending (higher is
+  better)', which was true only of TIDMAD"); the surrounding method reads the
+  direction from each record's persisted metric identity.
+
+Owner: **none outstanding** — the roadmap line was discharged by P2a C3. No
+line here is touched by this child.
+
+### 22.4 Findings
+
+#### F-P56-2 — a composed CONTRAST run cannot start: generic core binds the LEGACY task-health family at Step 0 (found in C0)
+
+**Status: OPEN — disposition owed by C5/C6. Not CAP-SCOPE.**
+
+C0's composed `run_workflow` drives found a **blocking production defect** that
+§2.5's audit did not list among W1–W5, because no test had ever driven a
+contrast composition through `run_workflow` itself (§2.5 measures exactly that:
+"no real composed chain run has ever executed").
+
+**The measured ordering** (traced, not inferred):
+
+```text
+run_workflow:1729   "Step 0: Loading existing tuning outputs..."
+  -> nodes/result_interpretation_agent/evidence.py:471
+       tuning_output_to_model_run_summary
+  -> candidate_eligibility.py:194  classify_candidate_health
+  -> candidate_eligibility.py:145  required_blocking_gate_ids
+  -> candidate_eligibility.py:121  resolve_scientific_gate_ids(config_path=None)
+  -> config.py:400                 load_health_gates_config(None)
+  -> config.py:567                 load_composed_health_config(None)   # no task binding
+  -> config.py:528                 _load_task_binding(LEGACY_OMITTED)
+  ==> binds configs/task_health/tidmad.yaml, plugins = ()   [PROCESS-GLOBAL]
+
+run_workflow:1786   build_run_invariants(..., task_health_binding=<composition's>)
+  -> config.py:611  materialize_effective_config
+  ==> requests examples/oxford_iiit_pet/declared/task_health.yaml + its plugins
+  ==> HealthPluginRunScopeError — REFUSED
+```
+
+**Why it was invisible until now.** The run-scope guard is *correct* (Step 08b:
+one process evaluates one run's checks). The defect is that generic core
+resolves the **legacy TIDMAD** task-health binding at Step 0, before the
+composition is consulted. That is harmless for an un-composed run (both
+resolutions are TIDMAD's, plugins `()` both times ⇒ the guard's idempotent
+branch) and for composed **TIDMAD** (same file, same canonical identity) — so
+**Gate 2's composed-TIDMAD run is NOT affected**. It bites only when a
+composition names a different Health family, i.e. exactly Pets and DAVIS.
+
+**Classification.** This is the **same family as W4** — generic core implicitly
+resolving legacy TIDMAD science in a composed run — and therefore squarely
+inside **C-P56-1**'s frozen rule ("ANY COMPOSED RUN: do NOT implicitly load the
+legacy TIDMAD … science"). It is *wiring*, not capability: nothing about
+task-owned scope construction or contrast training is involved, so it is **not
+CAP-SCOPE** and must not be deferred there. It blocks C6's frozen deliverable
+(three compositions through ONE `run_workflow`), so C6 cannot be delivered
+without a disposition.
+
+**Recorded in C0, fixed later** — C0 is baselines only (zero production edits).
+The baseline
+(`tests/unit/workflows/test_step10_p56_c0_three_task_baseline.py::
+TestComposedLoopDriveBaseline::test_a_composed_contrast_run_cannot_start_today`)
+asserts the exact failure with its provenance and is **flipped by C5/C6**.
+
+**Candidate dispositions, to be decided at C5 with full source evidence** (none
+chosen yet; the frozen non-goals forbid reopening P4's Health declarations and
+forbid changing phase ordering casually):
+1. make the candidate-eligibility path consult the bound composition rather
+   than defaulting to `LEGACY_OMITTED`;
+2. materialize the run-invariants/effective config **before** Step 0, so every
+   later reader takes the documented "read the pinned effective file" path
+   (CLAUDE.md's stated Health-config design) — this is a phase-ordering change
+   and needs explicit justification;
+3. carry the composition's `task_health_binding` to `load_health_gates_config`
+   at this call site only.
+
+Each is bounded; the choice is an implementation ruling, not a frozen-contract
+change, so it is resolved autonomously at C5 and recorded as IR-P56-N — unless
+the audit shows every contract-preserving option requires changing a frozen
+contract, which would be a material deviation.
+
+### 22.5 Implementation rulings (IR-P56-N)
+
+#### IR-P56-1 — C3 RENAMES the findings unpack row rather than re-purposing it
+
+**Question.** §13 C3 says "bare local removed from the unpack (the unpack row
+stays for `RestoredState` → seed only)". Does the row keep the name
+`accumulated_key_findings`?
+
+**Source evidence.** `tests/unit/workflows/test_step09_5a_c4_single_writer.py`
+`::_bare_local_writes` flags any bare assignment whose target name appears in
+`chain_state_field_names()`. The moment C3 declares
+`ChainState.accumulated_key_findings`, the pre-existing unpack row at
+`model_exploration.py:1942` — `accumulated_key_findings = restored_state...` —
+becomes exactly the duplicate-writer shape Step 09.5a's Amendment C exists to
+prevent, and the guard turns RED.
+
+**Options considered.** (a) keep the name and relax the census — rejected, it
+would disable the guard for every future carried value; (b) delete the row and
+read `restored_state` inline at the `from_restored` call — rejected, it breaks
+the P1 C5 unpack-once contract and its exact-set guard; (c) **rename to
+`restored_accumulated_key_findings`**, matching all eight siblings
+(`restored_runtime_vocab`, `restored_prediction_memory`, …).
+
+**Ruling: (c).** It is the sibling convention, it satisfies both guards without
+weakening either, and it is a pure rename with no behavioural content.
+
+**Second-order consequence, found while implementing.** A first draft
+reintroduced the collision inside the consumer block as a convenience local
+(`accumulated_key_findings = state.accumulated_key_findings`). That is the same
+forbidden shape one scope down. The three use sites read the carrier directly
+instead.
+
+**Validation.** `test_step09_5a_c4_single_writer.py` and
+`test_step10_p1_c5_launcher.py` green; a dedicated AST census
+(`test_the_retired_bare_local_has_no_remaining_reads`) asserts zero bare
+assignments of the old name remain and that the renamed row is present.
+
+#### IR-P56-2 — F-P56-2 is fixed HERE, as W6, through the existing explicit-parameter seam
+
+**Question.** F-P56-2 (§22.4) blocks C6's frozen three-task deliverable. Is its
+fix this child's, or upstream debt owned by the Health family (parent §20.6)?
+
+**Source evidence (audited, not assumed).**
+
+* The binding happens as a SIDE EFFECT of merely READING gate roles:
+  `candidate_eligibility.resolve_scientific_gate_ids(config_path=None)` →
+  `load_health_gates_config(None)` → `load_composed_health_config(None)` →
+  `_load_task_binding(LEGACY_OMITTED)` → resolves
+  `configs/task_health/tidmad.yaml` and binds its plugin set process-globally.
+* **Re-ordering alone does NOT fix it** — tested by reasoning through the
+  guard: if materialization ran first and bound the task's family, the later
+  zero-arg load would request TIDMAD's `()` against a recorded `(pets_views,)`
+  and be refused just the same. The failure would move, not disappear.
+* `load_health_gates_config`'s `_CACHED_GATES` is only populated by the
+  zero-arg path, so materialization never primes it.
+* P1 deliberately did **not** bind Health ambiently
+  (`task_composition.py:1052-1056`): *"Binding a ContextVar for a value that
+  already has an explicit path would create a second way for it to arrive,
+  which is the ambiguity this whole milestone removes."*
+* CLAUDE.md states the intended design: the run materializes the effective
+  config and *"every path-based loader reads that file"*.
+* The explicit seam ALREADY EXISTS and is already keyword-only and defaulted:
+  `classify_candidate_health(record, *, required_gate_ids=None)` and
+  `resolve_scientific_gate_ids(config_path)`.
+
+**Options considered.**
+
+| # | option | verdict |
+|---|---|---|
+| A | bind Health ambiently so the zero-arg loader sees the composition | **REJECTED** — directly contradicts P1's frozen non-ambient decision and re-creates the second arrival path that milestone removed |
+| B | re-order `run_workflow` so materialization precedes Step 0 | **REJECTED** — does not fix it (above); would also be a phase-ordering change |
+| C | thread the run's effective config through the EXISTING keyword-only seam to the eligibility call | **CHOSEN** |
+| D | record as upstream Health-family debt and narrow C6 | **REJECTED** — C6's frozen deliverable is three compositions through ONE `run_workflow`; delivering it only for runs without seeds would overclaim, and the design's own C6 rule says a gap the drives expose is *"fixed under an existing W-item's ownership or recorded against CAP-SCOPE"* — this is neither task-scope construction nor training, so it is not CAP-SCOPE |
+
+**Ruling: C — fixed here as W6, inside W4's family.** It is the SAME rule
+C-P56-1 froze, applied to Health rather than reference scores: *ANY composed
+run must not implicitly load legacy TIDMAD science.* It is bounded wiring, not
+a semantic change: additive, keyword-only, defaulted, no ambient binding, no
+task-identity branch, and it moves no Health semantics. Per the Implementation
+Working Rules' material-deviation test, no frozen contract changes, so this is
+resolved autonomously rather than escalated.
+
+**Operator visibility (stated, not buried).** This is the one place where this
+child touches a family it does not own. It is recorded here, in W6, and in the
+PR body, so the review can overturn it cheaply — the alternative (D) is a
+one-line scope narrowing of C6 plus a debt entry, and nothing else in the PR
+depends on the choice.
+
+**Validation.** C0's baseline
+(`test_a_composed_contrast_run_cannot_start_today`) is FLIPPED by W6; the
+composed Pets and DAVIS drives in C6 are what prove it end-to-end.
+
+### 22.6 Guard-disposition table (opened in C0)
+
+Every existing guard this PR is KNOWN to move, and the commit that moves it.
+Re-checked per commit; an unflipped baseline at C8 is a ledger error.
+
+| guard | what happens | flipped/handled by |
+|---|---|---|
+| `test_step10_p56_c0_broken_lifecycle.py::TestResumeHalfIsMissing` (this PR's own) | asserts the projection + `RestoredState` field are ABSENT | **C1 inverts** |
+| `…::TestWorkflowHalfIsMissing` | asserts `ChainState`/workflow/`InterpretationInput` do not carry it; pins RestoredState 15 / ChainState 11 | **C2 inverts** |
+| `…::TestMalformedPayloadsAreInertToday` | five garbage shapes raise nothing | **C1** (present-but-malformed ⇒ raise) |
+| `test_step10_p56_c0_producer_baseline.py::TestColdStartDropsTheCarriedMapping` | cold start returns `{}` | **C2** (DD-2 carry-through) |
+| `test_step10_p56_c0_multi_iteration_baseline.py::TestFindingsNeverAccumulate…` | no findings block ever renders | **C3** |
+| `…::TestConfirmationsNeverReachTheNextIteration` | every iteration receives `{}` | **C2** |
+| `test_step10_p56_c0_three_task_baseline.py::…test_a_composed_contrast_run_cannot_start_today` | F-P56-2 | **C5/C6** |
+| `…::TestTidmadReferenceScoresLeakIntoComposedRuns` (contrast half) | TIDMAD refs load under a contrast composition | **C5** (W4 / C-P56-1) |
+| `…::test_an_uncomposed_run_loads_them_too_and_must_keep_doing_so` | legacy path loads 20 refs | **must STAY green** (C-P56-1's other half) |
+| `test_step09_5a_c4_single_writer.py` reachability parametrization | auto-gains one case per new `ChainState` field; RED until `run_workflow` references `state.<field>` | **C2** (+1), **C3** (+1) — this is why C1 adds NO carrier |
+| `test_step09_5a_c4_single_writer.py::test_no_carried_value_has_a_surviving_bare_local_writer` | `accumulated_key_findings` is a bare local at `model_exploration.py:1942` **and** would become a `ChainState` field ⇒ instant duplicate-writer RED | **C3** — see IR note below |
+| `test_step09_5a_c2_carriers.py:68` (`len(...) >= 11`) | floor only | additive, stays green |
+| `test_step10_p1_c5_launcher.py::…unpacks_every_one_of_the_…_fields` | **EXACT** set of nine `restored_state.*` reads | **C2 → ten.** Kept exact, not relaxed to a floor: the defect it owns is a typo reading the WRONG field name, which only an exact set catches. *(Missing from the first draft of this table — added when the guard fired.)* |
+| this PR's own `TestWorkflowHalfIsMissing::test_chain_state_now_carries_the_confirmations_map` | pins the ChainState field COUNT | **C2 → 12, C3 → 13.** A count pin must be re-checked by every commit that adds a carrier; C3's run is what caught it. Now also asserts both new carrier names are present, so the count cannot be satisfied by the wrong field. |
+| `test_step09_5a_c2_carriers.py` bindings/launch deny-lists | derive from `chain_state_field_names()`; new fields extend them automatically | stays green (correct: a binding must never carry them) |
+| `test_step09_5a_c0_oracle.py` envelope golden | 1-iteration snapshot; both new values are `{}`/`[]` there, so **no delta is expected** — but it is run per commit and any delta is DECLARED in its docstring, never re-baselined silently (the P3 C3 lesson) | run at C1/C2/C3/C5/C6 |
+| `test_step10_p3_proposer_evidence_census.py` (raw-read census `{node: 0, helpers: 0}`) | no `InterpretationOutput` field added, evidence not widened | stays green |
+| `test_step10_p3_c1_projection.py` carried∪refused partition | unchanged — `NOT_CARRIED` keeps refusing confirmations | stays green |
+| `test_step10_p1_c4_extension_proof.py` task-identity dispatch census (class (b) = 0) | scope extended over this PR's touched files | **C6** re-runs + plants |
+| `tests/integration/workflows/test_vocab_accumulation.py` H.4 | hand-threads the carry; **outside CI** (CI runs `tests/unit/` only) | **C4** dispositions the docstring; keeps node-level ownership |
+
+**Noted for C3 (write it into the commit, not discovered during it)**: adding
+`ChainState.accumulated_key_findings` makes the EXISTING bare local at
+`model_exploration.py:1942` an immediate duplicate-writer offender, because
+`_bare_local_writes` flags any bare assignment whose name `ChainState` also
+declares. The unpack row must therefore be **renamed** to the sibling
+convention (`restored_accumulated_key_findings`, matching
+`restored_runtime_vocab` / `restored_prediction_memory` / …) feeding
+`from_restored`, not merely kept. §13 C3's "bare local removed from the unpack"
+is satisfied by that rename.
+
+### 22.9 C7 — runner claims and the §10.6 evidence-freshness audit
+
+**Claim disposition (Q-10-5 = B).** §10.4's table verified line-by-line against
+both runner sources; nothing was missed.
+
+| claim | disposition |
+|---|---|
+| binding resolves · direction correct · secondaries observational · Health binds state C | **TRANSFERRED** → C6's generic-loop drives + the standing censuses |
+| real JPEG / frame decode → tensors | **RETAINED** — no generic owner until CAP-SCOPE |
+| production training engine on real data (real R2/R3, `comparability` stamped) | RETAINED |
+| real inference + real deliverable codec round-trip on real bytes | RETAINED |
+| real metric handle on a real deliverable | RETAINED |
+| pack Health family on a FRESH real deliverable | RETAINED |
+| DAVIS last-frame-copy baseline comparison | RETAINED |
+| "the way a contrast task runs" | **RETIRED as a label** — both docstrings and both `STATUS.md`s now say *L3 real-execution evidence harness*, name C6 as the orchestration owner, and name CAP-SCOPE as the retirement blocker |
+
+**The freshness audit — the rerun was REQUIRED, not optional.**
+
+The dependency diff `ede11fd5..HEAD` over the runners' real-execution surface
+returned **20 changed files**, including the very Health checks each pack
+exercises — `categorical_distinct_symbols` and `categorical_dominant_fraction`
+(Pets), `sample_dispersion_floor` (DAVIS), all touched by P4's declaration
+migration — plus `evaluation_metric.py` and `task_data_path.py`. Under §10.6
+that is unambiguously *"a semantics-bearing production dependency DID change"*,
+so the prior evidence could not be claimed current by inspection.
+
+Both bounded runners were rerun (real GPU, real data, **no LLM** — not a Gate;
+explicitly authorised by C7's validation plan):
+
+| | Pets | DAVIS |
+|---|---|---|
+| prior | `step08c_pets_gate2_20260818` @ `ede11fd5`, PASS | `step08c_davis_gate2_20260818` @ `ede11fd5`, PASS |
+| rerun | `step10_p56_c7_pets_20260821` @ `c9031369`, **PASS** | `step10_p56_c7_davis_20260821` @ `c9031369`, **PASS** |
+| headline | accuracy `0.02702702702702703` — **BIT-EQUAL** (= chance 1/37) | `mse` `0.017289766656259548` — **BIT-EQUAL**, still under baseline `0.017392322972086136` |
+| Health | both blocking gates: same `check_verdicts`, same `resolved_action` (`invalidate_round`) — the real D14 collapse reproduced exactly | `davis_dispersion_blocking` `passed` / `continue`; dispersion `0.2156402715035823` — **BIT-EQUAL** |
+
+**Verdict: the changed dependencies were behaviour-preserving for both tracks
+— established by rerunning, not by inspection.** The retained L3 evidence is
+CURRENT at the candidate head.
+
+### 22.10 Gate-2 readiness packet (written BEFORE launch, §15.2)
+
+**Candidate.** `93b83625` — the C7 head. Working tree **CLEAN** (`git status
+--porcelain` empty at packet time; the advice file below is added and committed
+with the Gate evidence).
+
+**Pre-launch re-reads (the §15.2 rule-4 requirement, done not assumed).**
+
+* `docs/gates/gate_testing_standard.md` re-read: canonical cold-start command
+  (§"Canonical command"), the 2026-08-16 BINDING model-size policy (4 GiB
+  **enforcement** + an **advice file** — *"Both halves are required, and
+  neither works alone"*), the depth row *"cross-iteration behaviour or resume
+  | ≥ 2 iterations"*, the no-`tee` rule, and the auto-resolved `--data_dir`.
+* Actual CLI re-read from source: every flag below verified present in
+  `_chain_common.sh`'s parser, **including this PR's own `--task_composition`**.
+* `--runtime_watchdog` is included. The 07a Gate-2 incident (the watchdog
+  killing runs inside the un-priced validation pass) was closed by **07c**,
+  merged as `52bd98ba` — verified in history rather than assumed.
+
+**Exact command.**
+
+```bash
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace /home/klz/Data/SIDEREIS_DATA/step10_p56_gate2_<stamp> \
+    --run_name p56_gate2 \
+    --task_composition configs/task_composition/tidmad.yaml \
+    --num_iterations 2 \
+    --max_rounds 1 \
+    --max_proposal_attempts 3 \
+    --max_epochs 1 \
+    --data_scope 4-9 \
+    --health_gate_files 4,5,6,7,8,9 \
+    --validation_max_portion 0.01 \
+    --validation_max_train_samples 2000 \
+    --validation_max_phase_seconds 900 \
+    --runtime_watchdog \
+    --no-force_formal_round \
+    --trial_vram_budget_gb 4 \
+    --formal_vram_budget_gb 4 \
+    --advice advice/gate/gate_p56_composed_lifecycle_advice.json \
+    --llm_config llm_configs/openai_tiered_pro.json
+```
+
+Deltas from the canonical command, each justified: `--num_iterations 2` (the
+depth row; **NOT 3** — the ≥ 3-iteration promotion property is
+deterministic-owned and a 3-iteration real Gate would duplicate that owner);
+`--task_composition` (the whole point — this is the first real composed run);
+4 GiB budgets + `--advice` (the binding 2026-08-16 policy). Cold-start: **no
+`--seed_paths`**. No `--data_dir` (launcher resolves it). No `tee`.
+
+**Workload / projection.** 2 iterations × 1 round × ≤ 3 proposal attempts,
+1 epoch, 6-file partial scope (4–9) with the paired `--health_gate_files`.
+Real LLM (`openai_tiered_pro`), real training, real inference, real scoring,
+real chain restore between iterations. Projected wall time **≈ 20–40 min**,
+inside the pre-authorised ≤ ~1 h envelope; ordinary single-GPU (RTX 5090,
+32 GiB) and ordinary API spend. Non-destructive: a fresh workspace under
+`SIDEREIS_DATA`, no existing evidence touched.
+
+**Deterministic prerequisites: GREEN at the candidate.** 189 passed across all
+C0–C7 owners (the four lifecycle modules, both C5 wiring modules, C6's
+three-task closure, C1's projection, C0's producer baseline) plus the
+Step-09.5a oracle and single-writer censuses.
+
+**PASS criteria — ALL from persisted artifacts, never from an exit code.**
+
+1. **Composed**: the run-invariants lock carries the composition's semantic
+   fingerprint. (Without this, nothing else about the run is composed.)
+2. **A — findings, the REQUIRED non-vacuous witness.** Iteration 1 produces
+   ≥ 1 usable `key_findings` entry, present in its committed interpretation
+   artifact; after the REAL restore, iteration 2's proposer `expert_context`
+   contains those exact finding(s). **If iteration 1 produces no usable
+   finding, the Gate MUST NOT PASS** — the workload did not exercise the
+   carried-context boundary. That is a FAIL, not "inconclusive".
+3. **B — confirmations, the exact-restore MECHANISM.** Iteration 1's output
+   mapping deep-equals iteration 2's restored `InterpretationInput` mapping.
+   Non-empty ⇒ record the stronger evidence. `{}` ⇒ record the equality and
+   claim **NO** non-empty reachability — that property's owner remains the
+   deterministic ≥ 3-iteration test plus its four severing mutations.
+4. Real training / inference / scoring each executed with finite results.
+
+**FAIL / INCONCLUSIVE taxonomy.** A code, workflow, science or lifecycle
+failure is **FAIL** — diagnose, fix within the frozen contract, and the fix
+creates a NEW candidate requiring its deterministic prerequisites again. A
+non-discriminating workload (criterion 2 unmet) is **FAIL**. Only a genuine
+provider/network/service failure leaving no trustworthy behavioural evidence
+may be **INCONCLUSIVE**; a bad command shape, a missing artifact or an
+implementation-caused training failure may not.
+
+**What this Gate does NOT own (stated here so the closeout cannot drift).**
+It is composed **TIDMAD**, whose Health family is the same file the legacy
+path resolves — so it **cannot discriminate W6's Pets/DAVIS genericity and
+must never be credited with it** (operator ruling). W6's owners are the
+deterministic TIDMAD/Pets/DAVIS binding tests, the wrong-family anti-vacuity
+test and the sequential run-scope evidence. Likewise, per the parent, **no
+TIDMAD-only Gate may support a genericity claim**: that belongs to the
+censuses and C6's three-task drives.
+
+**Authorisation.** Pre-authorised by the frozen design (§15.2) and the
+operator's C8 ruling; inside the envelope, so launched autonomously with no
+further stop.
+
+### 22.11 Gate 2 — ATTEMPT 1: **FAIL** (real defect found), and W7
+
+**Verdict: FAIL.** Classified per the frozen taxonomy as a real
+code/lifecycle failure — NOT "inconclusive". The composed chain refused to
+start, before any LLM spend.
+
+```text
+run_one_iteration.py:1985  run_workflow
+  -> model_exploration.py:1819  build_run_invariants
+  -> config.py:667  materialize_effective_config
+ValueError: health_checks_effective.yaml mismatch ... source YAML content
+           drifted since materialization
+```
+
+**Diagnosis (reproduced, not inferred).** The workspace was FRESH, so "drifted"
+was impossible in the sense the message means. Materializing the same inputs
+twice — once with the legacy binding, once with the composition's — differs in
+exactly ONE line:
+
+```diff
+-task_health_binding: legacy_default
++task_health_binding: explicit
+```
+
+and the workspace file carried the **legacy** sha (`abced734…`), proving
+something materialized it BEFORE `run_workflow` had the composition. That
+caller is `run_one_iteration.compute_expected_invariants` (`:1465`), whose own
+docstring asserts *"idempotent — `run_workflow`'s pre-flight recomputes the
+identical body sha"*. **P1 gave `run_workflow` a `task_health_binding` and did
+not give it to this earlier pre-flight**, so the claim silently stopped being
+true for composed runs: two documents, two shas, and the workspace-immutability
+check correctly refused.
+
+**Why no test caught it.** The module CLI resolves its composition before its
+only materialization, so that path was always consistent. **Nothing drove the
+REAL chain runner under a composition** — which is precisely the failure class
+§15.2 says this Gate uniquely owns, found on its first execution.
+
+**W7 — the fix (same family as W1–W6: a composed run's pre-flight silently
+using the legacy binding).** The composition is resolved ONCE, before the
+pre-flight, and the SAME binding is passed to both materializations.
+ACTIVATION stays exactly where P1 put it; composing is pure resolution.
+`None` reproduces pre-W7 behaviour exactly.
+
+Verified: composed materializations now agree; legacy materializations agree
+AND the legacy sha is **unchanged at `abced734…`** — the very value the failed
+run wrote, so the un-composed path is provably untouched.
+
+Regression coverage (`TestW7PreflightAndWorkflowAgree`, 6 tests): the
+double-materialization regression; an anti-vacuity test proving the two
+bindings really DO produce different documents (otherwise the first test would
+pass trivially); the legacy-sha parity pin; and two source-level checks — that
+the runner passes the binding, and that the composition is resolved BEFORE the
+pre-flight, since ordering is the fix's substance.
+
+**A new candidate.** Per the taxonomy, the fix moves the head, so Gate 2
+attempt 2 runs against a NEW candidate with its deterministic prerequisites
+re-verified. Attempt 1 is retained here as evidence, not deleted.
+
+### 22.12 Gate 2 — ATTEMPT 2: **FAIL** (two findings), W7 completed
+
+**Verdict: FAIL.** Two distinct problems, one a defect and one a workload
+sizing issue. The run got much further than attempt 1 — W7's first half held,
+the composed materialization succeeded, a real LLM proposed and implemented a
+real candidate, and real training ran.
+
+**Finding 1 — W7 was INCOMPLETE, and it was my error.** Iteration 2 refused:
+
+```text
+run-invariants lock violation:
+  task_composition_fingerprint: locked='d6628a93…' vs this run=None
+```
+
+`build_run_invariants` takes **two** composition-derived arguments, and
+`run_workflow` passes both. W7's first cut threaded `task_health_binding` alone
+and forgot `task_composition_fingerprint`, so iteration 1's workflow wrote a
+lock containing the fingerprint and iteration 2's pre-flight computed `None`
+against it. Same defect class as W7 itself, one argument over.
+
+**Fixed STRUCTURALLY rather than by adding the missing argument.**
+`compute_expected_invariants` now takes the **composition object** and derives
+every composition-dependent invariant itself, so the two call sites cannot
+diverge again. Added a **census** comparing the composition-derived keyword
+SETS at both `build_run_invariants` call sites — asserting the two names would
+have carried the same blind spot the next time a third is added. The census is
+verified to FAIL on the first cut (`{task_health_binding}` vs
+`{task_composition_fingerprint, task_health_binding}`).
+
+**Finding 2 — RETRACTED. There is no runtime-control defect.**
+
+```text
+Previous assumption:
+    the ~0.17 s repeated overshoot suggested a small fixed-cost
+    under-pricing defect in runtime control.
+
+Audit evidence:
+    the watchdog deadline is max(estimated_deadline, floor_seconds),
+    with floor_seconds = 60.0 (core/runtime_control/session.py:98,
+    "prevents degenerate deadlines for near-zero estimates").
+    `deadline, source = min(candidates, ...)` then
+    `return max(deadline, floor_seconds), source` — so `source` labels the
+    winning CANDIDATE, not the returned number. The verified estimate was
+    below the floor; 60.0 was therefore the FLOOR, not the priced estimate.
+    The suspiciously round 60.0 was the tell.
+
+Corrected understanding:
+    no runtime-control pricing defect is established.
+    The workload simply takes slightly more than the production 60 s
+    minimum deadline.
+
+Validation consequence:
+    the adjacent runtime-control debt is RETRACTED — it is not carried
+    forward and must not appear in the PR body or any status document.
+    Do not change or disable the watchdog.
+    Gate workload may be reduced only through a valid knob that reduces
+    actual executed work while preserving the frozen Gate failure class.
+```
+
+Because the floor is FIXED, reducing real work lowers the actual runtime while
+the deadline stays pinned at 60 s — so the Gate's own bounding lever genuinely
+applies here. The earlier worry that "deadline and workload shrink together, so
+it cannot help" does not hold in a floor-dominated regime.
+
+**The response** is the Gate's OWN legitimate bounding lever — *"the Gate
+harness owns the amount of REAL WORK a resolved plan may execute"*. No deadline
+was enlarged and the watchdog was not disabled: either would be tuning the
+instrument to get the reading.
+
+### 22.13 Gate 2 — ATTEMPT 3: **FAIL / invalid Gate launch configuration**
+
+| | |
+|---|---|
+| executable SHA | `498fbd4b` |
+| verdict | **FAIL** |
+| failure class | **invalid Gate launch configuration** — not a product FAIL, not a provider INCONCLUSIVE |
+| reason | `--validation_max_portion 0.002` violates `eval_portion: ge=0.01` (`agent/schemas/hyperparam_tuning.py:921`); Pydantic rejected every plan, 192 rejections across both iterations |
+| action | terminated at ~17 min rather than left to burn the remaining attempts |
+| **useful lifecycle evidence** | **NONE** — none of those 17 minutes counts toward Gate coverage |
+
+`--validation_max_portion` was never an available lever: `0.01` is the floor and
+is exactly what attempt 2 already used.
+
+### 22.14 Gate 2 — ATTEMPT 4: launch discipline
+
+**Evidence identity = executable SHA + resolved Gate configuration.** Attempt 4
+is not a "blind rerun of attempt 3": the production candidate is unchanged in
+substance, but the bounded workload is corrected and newly validated.
+
+| | |
+|---|---|
+| executable SHA | `dbe60e29` (C7 head + W7 complete + this ledger correction; production code identical to `498fbd4b`) |
+| `--validation_max_portion` | `0.01` — the schema floor, valid |
+| `--validation_max_train_samples` | `2000 → 400` |
+| watchdog | **ON**, `floor_seconds` production default, deadline logic **unchanged** |
+| iterations / rounds | 2 / 1 |
+
+**The lever was verified against source before relaunch, not assumed.**
+`validation_max_train_samples` is declared as *"Absolute ceiling on the ML
+segments one training epoch may contain, applied where the epoch is BUILT — so
+fewer segments are read and fewer optimizer steps exist, before any of them
+run… Clamps, never rejects"* (`core/runtime_control/session.py:215`), and its
+production consumer is `execute_tools/train_engine_sandbox.py:1171`
+(`max_train_samples`, applied where the epoch is built). So it reduces REAL
+executed work — not an estimate input, not logging metadata, not an unconsumed
+advice field.
+
+**400 remains a faithful functional smoke**: real dataset, real batching, real
+forward/backward, real optimizer steps (~100 at batch 4), real validation, real
+inference, real metric scoring. Fewer steps, not a hollowed-out path.
+
+**Pre-launch checklist, all confirmed**: attempt 3 fully terminated (chain and
+runner, no orphan child) · candidate SHA exact · tree clean · final command
+recorded · `eval_portion` schema-valid · the train-sample cap verified to reduce
+REAL work · watchdog ON · deadline logic unchanged · 2 iterations · 1 round ·
+composed TIDMAD fingerprint expected · deterministic prerequisites green (194
+passed at the candidate) · findings non-vacuity acceptance unchanged ·
+confirmations restore acceptance unchanged. Zero schema rejections observed
+after launch.
+
+### 22.15 Runtime-control forensic audit (operator-ordered, read-only)
+
+**Gate 2 relaunches PAUSED. Zero production edits in this phase.** Attempt 4
+was terminated on the operator's instruction; chain and runner processes
+confirmed gone, no orphan training/inference/LLM child, tree clean.
+
+#### Correction to this ledger's own earlier claim
+
+```text
+Previous assumption:
+    attempt 3 produced "192 rejections".
+
+Audit evidence:
+    192 is the count of the SUBSTRING "greater_than_equal", which Pydantic
+    prints once per field error plus a URL line. The actual event count is
+    15 planning attempts, each raising ONE ValidationError carrying THREE
+    field errors (trial_portion, train_portion, eval_portion).
+
+Corrected understanding:
+    the burn was 15 LLM planning calls, not 192 rejections.
+
+Validation consequence:
+    the magnitude claim is corrected; the DEFECT is unchanged and is if
+    anything clearer — 15 identical deterministic failures is still a full
+    retry-budget burn on a state that cannot succeed.
+```
+
+#### The exact multiplication (derived from source, not from the log)
+
+```text
+ml_hyperparameter_tune_agent.py:1097
+    while completed_rounds < max_rounds and consecutive_fails < max_fail_rounds:
+
+ml_hyperparameter_tune_agent.py:1099-1100
+    is_formal_round = completed_rounds == max_rounds - 1      # --max_rounds 1 => TRUE on round 1
+    N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
+
+defaults: attempts_per_formal_round = 5   max_fail_rounds = 3
+```
+
+A failed round does **not** increment `completed_rounds`, so the outer `while`
+repeats until `consecutive_fails` reaches 3:
+
+```text
+per iteration : 3 fail-rounds x 5 attempts        = 15 planning attempts
+whole Gate    : x 2 iterations                    = up to 30
+observed      : 15 before manual termination
+log confirms  : "Round 1 exhausted all 5 attempt(s) ... (consecutive_fail_rounds=1/3)" then 2/3
+```
+
+Note `--max_rounds 1` makes round 1 the FORMAL round, so the budget is
+`attempts_per_formal_round` (5), NOT the chain's `ATTEMPTS_PER_ROUND=3`.
+
+#### Why replanning could never fix it
+
+`planning.py:311-313` applies the operator's `--validation_max_portion` as a
+hard `min()` clamp to all three portions **after** the LLM plan resolves:
+
+```python
+cfg_trial_portion = min(cfg_trial_portion, _ceiling)
+cfg_train_portion = min(cfg_train_portion, _ceiling)
+cfg_eval_portion  = min(cfg_eval_portion, _ceiling)
+```
+
+With `_ceiling = 0.002`, every plan is clamped to 0.002 and `TrialConfig`
+(`planning.py:348`) rejects all three against `ge=0.01`. **No plan the LLM can
+author can satisfy the schema**, which is precisely why 15 LLM calls were spent
+on a state with zero success probability.
+
+#### The precedent that already exists
+
+The same catch block (`ml_hyperparameter_tune_agent.py:1382-1395`) already
+implements the correct behaviour for a sibling failure class:
+
+```python
+if isinstance(e, PlanOverridesError):
+    # FU-10 — deterministic operator-configuration error;
+    # retrying cannot change it and recording it as an
+    # attempt failure would burn the retry budget.
+    raise
+```
+
+A clamp-induced `ValidationError` is the SAME class — deterministic operator
+configuration, unfixable by retry — but falls through to the generic
+`print(f"Loop Error: {e}")` path and burns the budget. A constraint on any
+repair is recorded in that comment: the branch was folded into this handler
+because *"one more clause on this try pushes run() past pyright's
+complexity-analysis ceiling"*.
+
+#### The watchdog half — NO defect; the Gate used the WRONG LEVER
+
+Attempt 4 is the decisive experiment. With
+`--validation_max_train_samples 2000 -> 400` the timeouts were **60.166 s and
+60.114 s** — statistically identical to attempt 2's 60.166/60.172. Cutting the
+TRAINING cap moved the runtime by ~0.05 s.
+
+The model's own round-2 reasoning names the cause: *"the round failed because
+full validation over 30000 segments exceeded the watchdog"*. It is the
+**validation** pass, and `validation_max_train_samples` does not bound it.
+
+The correct lever exists, is CLI-exposed, and 07c created it for exactly this
+mistake — `core/runtime_control/session.py:236`:
+
+> *"`validation_max_samples` … Absolute ceiling on the ML segments one
+> VALIDATION pass may contain … ORTHOGONAL to `validation_max_train_samples`:
+> that one bounds training rows, this one bounds validation rows, and neither
+> constrains the other. **It exists because 07a's Gate 2 ran validation at 7.5x
+> the training epoch — the training ceiling could not bound it, because it does
+> not bound that set.**"*
+
+`--validation_max_samples` is parsed at `_chain_common.sh:363` and forwarded at
+`:483`. **It was simply not used.** The canonical Gate command in
+`docs/gates/gate_testing_standard.md:187` omits it and line 233 calls the
+TRAINING cap *"the Gate's primary sizing mechanism"* — which is what led the
+Gate configuration astray.
+
+#### Provenance (observability)
+
+`core/sandbox_executor.py:493-494` returns `max(deadline, floor_seconds)` while
+`source` names the winning CANDIDATE, so a floor-dominated deadline still
+reports `source=verified_components`. Confirmed misleading; execution semantics
+are correct.
+
+#### Watchdog trace — three additions, each verified directly
+
+**(a) The floor cannot be expressed in provenance at all.** `grep '"floor"'`
+over `core/` and `nodes/` returns **nothing**: there is no `"floor"` source
+sentinel. `sandbox_executor.py:495-496` binds `source` from `min(candidates)`
+and then rewrites only the first tuple element with `max(deadline, floor)`, so
+the pair returned is `(60.0, "verified_components")` even when the estimate was
+far below 60. `floor_seconds` never reaches `kill_info`, the operator message,
+or the persisted `memory.watchdog_*` triple. **No test pins what `source` says
+when the floor wins** — `test_watchdog.py:169` and
+`test_pr07c_validation_pricing.py:248` both discard it as `_source`.
+
+**(b) This exact signature is already documented — twice.** 07a's Gate attempts
+002/003 were killed at *"deadline 60.0 s = floor"*
+(`pr_07a_training_history_diagnosis.md:1235-1237`), and 07c's design says
+plainly: *"their enforced deadline was **60.0 s = the floor itself**, i.e. their
+predicted sum was below 60 and only the floor carried them that far"*
+(`pr_07c_tuner_measurement.md:3043-3045`). So the pattern this Gate hit is a
+KNOWN one, and 07c even mandates a masking check because `source` alone is
+insufficient. The effective multiplier is `1.0` on the default path
+(`session.py:160-170`; the 1.5/2.0/3.5 postures are launch-config only), so the
+estimate is unmultiplied.
+
+**(c) NEW FINDING — F-RC-6: the escalation feedback that would break the loop
+is gated OUT of it.** The "model too large — reduce model size" advisory
+(Trigger B, `feedback.py:232-243`, message `:503-507`) only considers records
+with `status in {"skipped_oom_risk", "skipped_time_risk"}` (`feedback.py:64`).
+A watchdog kill is recorded with **`"status": "error"`**
+(`ml_hyperparameter_tune_agent.py:1404`). **A wall-clock-timeout burst
+therefore never trips Trigger B and never produces the shrink advisory** — the
+one piece of structured feedback designed to end exactly this loop. The planner
+receives only the free-text `memory_update` *"Do not repeat the failing
+configuration unchanged"* (`:1424-1427`), which is prose, not enforcement.
+
+**Retry-ownership conclusion, refined.** `WallClockTimeoutError` is caught by
+name nowhere; it is absorbed by the single broad `except Exception` at
+`ml_hyperparameter_tune_agent.py:1380`, and the next `attempt_in_round` DOES
+call `brain.plan()` afresh. So the retry is not a blind re-execution, and the
+design intends it — §4 of `runtime_estimation_and_watchdog.md:588-602` decided
+*"timeout counts toward the attempt budget; the round continues to its next
+attempt"*, with *"the planner sees the timeout with its config in memory"* as
+the mechanism that makes the next attempt cheaper. That mechanism was observed
+working in 07a (attempts 001→004 shrank until one fit) — **at a cost of three
+wasted attempts**, and with Trigger B silently unavailable throughout.
+
+**Therefore the identical-timeout retry verdict stands as NO DEFECT**, with one
+qualification worth carrying: the loop's designed exit depends on LLM
+discretion, and the structured signal meant to steer it (F-RC-6) never fires
+for this failure class.
+
+#### Invalid-config trace — the decisive repair finding, and two corrections
+
+**THE FAIL-FAST GUARD ALREADY EXISTS AND WAS NOT APPLIED TO THIS FLAG.**
+`run_one_iteration.py:92-108` defines `_portion_floor`, an argparse `type=`
+validator whose own docstring names precisely the failure this Gate hit:
+
+> *"expected a float in [0.01, 1.0] … The 0.01 floor matches the Pydantic
+> schema … Failing here at argparse-time keeps the iteration from spending
+> tokens on Interpretation only to crash inside the Proposer's Pydantic
+> validator."*
+
+```text
+--trial_portion            type=_portion_floor   :871   GUARDED
+--eval_portion             type=_portion_floor   :878   GUARDED
+--validation_max_portion   type=float            :1116  UNGUARDED   <-- the gap
+```
+
+Two further layers could also have caught it and did not:
+`HyperparamTuningInput.validation_max_portion` declares `gt=0.0, le=1.0`
+(`hyperparam_tuning.py:1959-1961`) rather than `ge=0.01`, so the schema that
+KNOWS the downstream floor does not enforce it; and `validate_runtime_config`
+(`:2443`), documented as running *"BEFORE any LLM call or file I/O"*, does not
+cross-check the ceiling against `TrialConfig`'s portion bounds.
+
+**Corrections to this ledger's own arithmetic.**
+
+```text
+Previous assumption:
+    proposal attempts (3) were part of the multiplication.
+
+Audit evidence:
+    an AST walk of the loop nesting shows the tuner call sits OUTSIDE the
+    proposal loop --
+        2312 -> [FunctionDef 1467, For 2095, For 2312]   proposal loop
+        2784 -> [FunctionDef 1467, For 2095]             _tune_agent.run
+    so max_proposal_attempts is NOT a multiplier.
+
+Corrected understanding:
+    attempt-level raises = 2 iterations x 3 fail-rounds x 5 formal attempts
+                         = 30 (uninterrupted); 17 occurred before SIGTERM.
+    Artifact evidence: iter_001 holds exactly 15 records (001-015, a fully
+    exhausted iteration), iter_002 holds 2, all 17 classified
+    ('error', 'ValidationError').
+    The ~192 grep hits = 17 raises x 3 clamped fields x 2 stdout emissions
+    x 2 tokens per field error, plus headers.
+```
+
+```text
+Previous assumption:
+    the run was trial-mode.
+
+Audit evidence:
+    --max_rounds 1 makes round 1 the FORMAL round
+    (ml_hyperparameter_tune_agent.py:1099-1100), so N =
+    attempts_per_formal_round = 5, and the clamped value was
+    formal_eval_portion = 1.0 -> 0.002.
+
+Corrected understanding:
+    the harness manufactured the violation from the operator ceiling; the
+    LLM's own ExperimentPlan.eval_portion (ge=0.01, :1084) was always legal.
+    The planner is blameless, which is why the memory note "Do not repeat the
+    failing configuration unchanged" was unactionable -- the planner never
+    chose 0.002.
+```
+
+**F-RC-1 repair, now precisely bounded.** The cheapest correct fix is the
+one-word precedent already used by two sibling flags:
+`type=float` -> `type=_portion_floor` at `run_one_iteration.py:1116`. It fails
+at argv time, before any LLM/GPU spend, with a message that already explains
+the floor. Optionally hardening `HyperparamTuningInput.validation_max_portion`
+to `ge=0.01` closes the same gap one layer in. Routing `ValidationError` into
+the `PlanOverridesError` non-retryable branch remains a valid defence-in-depth
+second layer, but is no longer required to stop THIS burn.
+
+### 22.16 Gate-discovered GENERIC prerequisite fixes (NOT P5+P6 semantics)
+
+The forensic audit (§22.15) produced bounded generic defects that are **not**
+S5/S8 scope. They are recorded here for provenance only and are deliberately
+NOT numbered into the W-series — a reviewer must be able to see at a glance
+that this PR did not quietly absorb unrelated runtime-control work.
+
+#### F-RC-1 — incomplete early enforcement of the executable portion floor
+
+**One root defect, several instances.** Not four unrelated CLI edits:
+
+```text
+root cause:
+    an operator-facing portion bound WEAKER than the downstream executable
+    TrialConfig bound (ge=0.01) that consumes it
+
+originally observed:
+    validation_max_portion            (clamped onto all three portions)
+
+structural census additionally found:
+    formal_portion                    -> TrialConfig.trial_portion
+    formal_eval_portion               -> TrialConfig.eval_portion
+    (+ CLI-side looseness on train_portion / formal_train_portion, whose
+     schemas already declared ge=0.01)
+```
+
+**Why it stayed latent for so long** — the trial/formal asymmetry, worth
+keeping because it explains why THIS Gate configuration was the one to expose
+it:
+
+```text
+trial mode   portions come from the LLM's ExperimentPlan, which already
+             declares ge=0.01 -> the planner is structurally protected
+
+formal mode  operator-provided values feed TrialConfig DIRECTLY
+             (policy.py:1164-1170) -> weak CLI/intermediate bounds become
+             observable
+
+and `--max_rounds 1` makes round 1 the FORMAL round.
+```
+
+**The repair, at both boundaries.** Schema: `validation_max_portion`
+`gt=0.0`→`ge=0.01`; `formal_portion` `ge=0.0`→`ge=0.01`; `formal_eval_portion`
+`gt=0.0`→`ge=0.01`. CLI: the existing `_portion_floor` authority applied to
+`--validation_max_portion`, `--train_portion`, `--formal_portion`,
+`--formal_train_portion`, `--formal_eval_portion`.
+
+**No third validation authority was created.** `validate_runtime_config` owns
+dataset-RESOLVED validation; portion bounds are dataset-independent and belong
+to the typed boundary. A test pins that it never grows one, so the two
+authorities cannot drift into three.
+
+**The structural guard tests a CONTRACT, not a naming pattern** (operator
+correction). The rule is *"an operator flag must not be LOOSER at argv time
+than the executable floor of the schema field it populates"* — it reads each
+target's bound from the LIVE schema and requires `_portion_floor` exactly when
+that target declares `ge=0.01`. A naming rule ("everything ending in
+`_portion`") would wrongly reject a future flag whose target legitimately
+allows `ge=0.0`. Today the two sets coincide; the contract version keeps
+testing the right thing when they stop.
+
+**The guard was DISCRIMINATING on first run** — it failed immediately, naming
+four flags beyond the reported one:
+
+```text
+{'--train_portion': 'float', '--formal_portion': 'float',
+ '--formal_train_portion': 'float', '--formal_eval_portion': 'float'}
+```
+
+That first-RED is the evidence it is not decorative. Each was then traced
+through `_resolve_sample_set_cfg` to its actual target before being fixed —
+no blanket edit on a name match.
+
+**Validation.** 28 targeted tests. Broad regression across `tests/unit/scripts`
++ `tests/unit/sdsc_submission_scripts` + `tests/unit/agent/tune_ml_hyperparam_agent`:
+**2279 passed**, 900.83 s, with ONE failure — `test_pr3_l2p_preflight`'s
+`no_production_file_modified`, naming precisely the two uncommitted production
+files, i.e. the documented clean-tree guard whose prescribed fix is the commit
+itself. Shipped defaults verified still legal (anti-regression).
+
+**Gate 1 remains NOT REQUIRED**: no LLM-facing prompt template and no
+proposal-affecting schema changed. `HyperparamTuningInput` is the runtime/config
+admission contract, not the proposer's schema.
+
+#### F-RC-6 — an ACTUAL watchdog kill now reaches the architectural-feedback trigger
+
+**Defect.** `_collect_disallowed_patterns` — the mechanism that tells the next
+proposer *"this architecture is too expensive"* — consulted only PREDICTED gate
+skips (`status in {"skipped_oom_risk", "skipped_time_risk"}`). An attempt that
+was admitted, EXECUTED and then killed by the watchdog is recorded with
+`status="error"`, so it was excluded: the one structured signal designed to end
+a "too slow" loop was unavailable for the very failure that proves the
+candidate is too slow. Observed in the real Gate: three consecutive kills, zero
+architectural feedback.
+
+**Discriminator: the EXISTING typed `failure_type == "wall_clock_timeout"`**,
+never `status == "error"`. `_classify_attempt_failure` (`runtime.py:518`)
+already emits it and its docstring says *"Downstream feedback keys off this
+name"*. **No new taxonomy, no persisted-schema change, no retry-state-machine
+change** — so the material-finding stop condition was not reached. A code bug,
+a schema violation and an OOM all share `status="error"` and must NOT be read
+as architectural evidence; four neighbouring `failure_type`s are asserted to
+stay out.
+
+**CATEGORICAL, not factor-tested — and it must be.** The watchdog kills AT the
+deadline, so `elapsed / deadline` is ~1.003 by construction (60.166 s against
+60.0 s in the run that found this) and could never clear
+`TIME_FACTOR_THRESHOLD = 5.0`. That threshold separates a marginal PREDICTION
+overshoot from a structural one; for a real kill there is nothing to separate —
+the attempt demonstrably did not finish. **Routing timeouts through the factor
+test would have been a silent no-op**, and a test pins exactly that.
+
+**Validation.** 15 tests: the four required lanes (predicted skip fires · actual
+timeout fires · ordinary error does NOT · success does NOT), four neighbouring
+failure types held out, mixed record sets, and the anti-vacuity the operator
+required — the timeout produces the SAME structured tags a predicted skip
+produces for the same model, compared against a HARDCODED expected tag list
+rather than "non-empty". Severing mutation **RED** (4 tests), restored
+sha-verified.
+
+**A fixture defect caught by the pre-existing lane.** The first draft used an
+invented `wavenet_deep_stack`, which the tagger's narrow vocabulary
+(`recurrent_over_T` / `dense_attention_over_T` / `scan_over_T`) matches NOT AT
+ALL — every assertion would have been vacuously green. The *unchanged*
+predicted-skip test failing is what exposed it; the fixture now uses a model
+verified against the live tagger.
+
+#### F-RC-4 — DEFERRED (observability only)
+
+Watchdog provenance can report `source=verified_components` while the returned
+deadline is the floor (`sandbox_executor.py:495-496`; no `"floor"` sentinel
+exists). Execution semantics are CORRECT. Recorded as debt; **not** fixed in
+these prerequisites and **not** a Gate blocker.
+
+### 22.7 Deviations
+
+*(none — no frozen contract has been changed)*
+
+### 22.8 C2 severing mutations (§7.4's four-link proof)
+
+Run with full hygiene: exactly ONE site replaced per mutation (count asserted
+before mutating), `__pycache__` cleared before and after, restore from an
+in-memory CONTENT backup with the file's sha256 re-verified, tree confirmed
+clean afterwards.
+
+| # | hop severed | site | verdict | first test RED |
+|---|---|---|---|---|
+| M1 | digest → `RestoredState` (the projection ASSIGNMENT) | `core/resume.py` | **RED** (1 failed / 18 passed) | `test_restore_prior_state_really_reads_the_digest` |
+| M2 | `RestoredState` → `ChainState` seed | `model_exploration.py` | **RED** (2 failed / 17) | `test_a_restored_mapping_seeds_the_first_iteration` |
+| M3 | `ChainState` → `InterpretationInput` pass | `model_exploration.py` | **RED** (7 failed / 12) | `test_the_mapping_accumulates_one_distinct_run_per_iteration` |
+| M4 | interpreter output → `ChainState` loop closure | `model_exploration.py` | **RED** (5 failed / 14) | `test_the_mapping_accumulates_one_distinct_run_per_iteration` |
+
+**M1 initially SURVIVED, and that was a real coverage gap, not a hygiene
+problem.** The reachability harness hands `run_workflow` a `RestoredState`
+directly and never calls `restore_prior_state`, and C1's projection tests call
+the projection directly — so *nothing* exercised the assignment line joining
+them. A test writing a real committed iteration (run_output + manifest +
+digest) and restoring through `restore_prior_state` was added; M1 then turned
+RED. Without re-running the mutation after the first survival, the PR would
+have shipped a hop with four tests around it and none on it.
+
+**Process finding, recorded so it is not repeated.** The first mutation script
+reverted with `git checkout -- <file>`, which discarded the *uncommitted* C2
+edits to `model_exploration.py` (M3/M4 then reported "0 sites" — the tell).
+The edits were reconstructed and re-verified green before the mutations were
+re-run. Mutation reverts must restore from a content backup, never from git,
+whenever the file under mutation has uncommitted work. This is the third
+failure mode in the mutation-hygiene family, alongside stale `.pyc` and
+wrong-site targeting.
+
+### 22.17 Adversarial review (Phase 8–16), and what survived verification
+
+Two independent read-only reviews ran against the frozen candidate
+`671e2c3f` in an isolated worktree while Gate 2 and CI ran. **Every
+load-bearing claim below was re-verified by the main agent before being
+accepted or dismissed** — the reviews are input, not verdicts.
+
+| # | claim | verified disposition |
+|---|---|---|
+| C1 | five un-threaded `is_valid_candidate` / `classify_candidate_health` sites in the tuner still resolve the LEGACY gate set, so a composed run diverges mid-flight | **NOT A BLOCKER.** Probe: composed TIDMAD and legacy resolve the IDENTICAL set `['amplitude_collapse_blocking','output_diversity_blocking','output_std_blocking']`. No divergence, no scope conflict, Gate 2 valid. Divergence is reachable only for composed CONTRAST runs, which cannot execute the tuner until CAP-SCOPE — already recorded as a named boundary in the C5 commit. **DEBT, already recorded.** |
+| B1 | a composed TIDMAD run's prompts differ from an un-composed run's (no 42-file reference table) | **FALSE POSITIVE against the frozen design.** This is **C-P56-1**, the operator's own ruling: "Declared consequence, not a regression … implicit legacy reference science is forbidden in composed mode." Real behaviour, already decided. |
+| C1(c) | `core/resume.py:435` is a third health-config authority | **PRE-EXISTING.** This PR changed 0 lines there. |
+| E1 | C6's `test_no_implicit_legacy_reference_science_reaches_any_composed_run` never calls `drive()` despite claiming to observe the guard "through the loop" | **CONFIRMED, and worse than reported** — the claim is *unimplementable* in that harness, because the driver mocks `HyperparamTuningAgent` so `load_reference_scores()` never executes. Removed; real owner named. |
+| — | three further false-assurance tests + two exact duplicates | **CONFIRMED.** See commit `f88f3e27`. |
+
+**Fixed in `f88f3e27` (tests only, no production touched):** the vacuous
+W4 test; a tautological "falsifier" that asserted `direction == "lower"`
+then required asserting `== "higher"` to raise (a theorem of
+`str.__eq__` — no production mutation could turn it red), replaced by a
+cross-task differential which **immediately caught a real constraint**
+(Health plugin registration is process-global; crossing tasks needs
+`reset_run_scope()`); two plant tests that re-implemented their detectors
+inline and so proved only that a COPY bites; and a second copy of
+Step-09.5a's `_bare_local_writes` that could drift from the census
+actually guarding the repository.
+
+#### F-P56-3 — the composed binding reaches only the CHAIN-LEVEL invariants lock
+
+Found by reading attempt 5's artifacts, not by either review.
+
+`build_run_invariants` takes `task_health_binding` / 
+`task_composition_fingerprint` with **default `None`**, and there are
+**three** call sites in the composed path, not the two W7's census
+compares:
+
+| site | composition-derived kwargs |
+|---|---|
+| `sdsc_submission_scripts/run_one_iteration.py:1500` | **yes** (W7) |
+| `workflows/model_exploration.py:1819` | no |
+| `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:604` | no |
+
+Observable in attempt 5: the chain-level lock carries the COMPOSED health
+sha `2b804d73…` and `task_composition_fingerprint d6628a93…` (W7 working,
+fingerprint identical to the P1 fixture), while the per-model lock carries
+the LEGACY sha `abced734…`.
+
+**Consequence today is nil for behaviour and non-nil for resume safety.**
+For TIDMAD the two documents resolve the same gate IDs (probe above), and
+the three locks live in different workspaces so nothing aborts. But a
+composition change is pinned only at the chain level: an inner lock would
+not detect it.
+
+**NOT fixed in this child, deliberately.** Threading the binding into the
+workflow and tuner sites changes what two additional entry points lock —
+a semantic change to run-invariants comparison, on a surface the frozen
+§12.1 tripwire binds. Recorded OPEN for operator scheduling; per the
+standing rule, adjacency is not a schedule.
+
+### 22.18 Gate-contract audit (operator-ordered, 2026-08-21) — HealthGate is NOT a Gate-2 dependency
+
+**Why the audit happened.** Gate attempts 5-7 stopped being evidence about
+P5+P6 and became evidence about Gate harness design. The operator's
+diagnosis, accepted in full: attempts 1-2 caught real production defects
+(W7, composition invariants); attempts 3-4 were launch-parameter errors;
+but attempts 5-7 were **workload engineering** — attempt 5 collapsed on too
+little data, attempt 6 was refused by the RT5 step guardrail on too much,
+and each was answered with more specific model/loss/epoch advice. That is
+coaching a model to pass a quality threshold, not validating
+infrastructure.
+
+**Question 1 — does the frozen contract require a HealthGate PASS?**
+**NO.** `healthgate` / `health gate` / `blocking` / `invalidate` appear
+**zero times** in §15.2 (the whole Gate-2 ruling). The frozen PASS
+criteria are the composed execution chain plus the two-layer evidence
+contract, whose witness is a **usable key finding** — "usable" meaning
+true and specific about a REAL completed experiment, not produced by a
+GOOD model.
+
+**What attempt 5 actually showed.** Every clause of the contract was met
+except the witness: real LLM, real candidate, real implementation, real
+training, real validation, real inference, real scoring (finite score
+`-2.9048`), under a real composition with `task_composition_fingerprint`
+pinned in the chain-level lock. It then failed for a reason the contract
+does not name — output collapse tripped a BLOCKING HealthGate, the ROUND
+was invalidated, no record was committed, and the finding had no digest to
+travel through. The interpretation it produced ("trained and scored, but
+low output diversity") would itself have been a perfectly legitimate
+finding.
+
+**The defect was in the Gate harness, not in P5+P6**: a quality gate
+irrelevant to the feature under test was left as a BLOCKING dependency, so
+Gate 2's outcome was decided by three variables it does not test —
+whether the LLM proposes a well-training model, whether a tiny smoke
+workload suffices, and whether a Health threshold is met.
+
+**Resolution (operator option A).** Use the existing production-supported
+subsystem switch; change NO Health semantics.
+
+| change | rationale |
+|---|---|
+| `--no-health_gate_enabled` | model quality no longer gates the lifecycle test (`_chain_common.sh:81` documents this as the DS6c switch) |
+| drop `--health_gate_files` | meaningless with the subsystem off; the DS8 pairing rule is gated on `health_gate_enabled` (`model_exploration.py:1812`) |
+| `--result_authority diagnostic` | honest: the run certifies no science |
+| `--formal_train_portion 0.25` | workload volume owned by the HARNESS, not by advice prose |
+| advice reverted | all Gate-specific model/loss/epoch coaching removed |
+
+**Two mechanisms checked rather than assumed:**
+
+* **`--healthgate_mode observe_only` is NOT usable here.** It is a
+  DECLARATION that must match the config, not a switch: declaring it while
+  gates still enforce is itself refused (`launch_policy.py`, "gates still
+  [enforce]"). Using it would require authoring a non-enforcing health
+  config — i.e. changing Health semantics, which the operator excluded.
+* **`diagnostic` does not suppress the evidence.** `core/resume.py:822`
+  KEEPS a non-authoritative record and only bars chain-incumbent
+  promotion, so record → interpretation → findings → digest → restore →
+  iteration-2 context all still occur.
+
+**This is test ISOLATION restored, not a relaxed test.** HealthGate
+thresholds keep their own owners (deterministic unit evidence, the 08c
+real-runner Gate-2 PASSes for Pets and DAVIS). P5+P6's Gate tests P5+P6.
+
+**Observation recorded, NOT fixed:** the launch-policy vocabulary has no
+term for "subsystem disabled" — both `blocking` and `observe_only`
+describe the CONFIG's gates, so a run with health gates off must still
+declare `blocking`, and only `result_authority=diagnostic` carries the
+honesty. A third declared value would fix it; out of scope here.
+
+### 22.19 F-P56-4 — the frozen Gate shape cannot satisfy its own Layer A (BLOCKING, operator decision required)
+
+**Found by executing the corrected Gate (attempt 8), not by review.** This
+is a defect in the FROZEN §15.2 contract, not a workload problem, and no
+amount of workload tuning can fix it.
+
+**The three requirements are mutually unsatisfiable:**
+
+1. **cold-start** — mandatory for every real-training Gate run (operator
+   rule 2026-07-27, no `--seed_paths`);
+2. **exactly 2 iterations** (§15.2, "deliberately NOT 3");
+3. **Layer A** — "iteration 1 must produce at least one usable key
+   finding … after the REAL chain restore, iteration 2's proposer
+   `expert_context` must contain the exact prior finding(s)".
+
+**Why.** The loop order is fixed and was verified in source:
+`interpret` (`model_exploration.py:2210`) → proposer READS
+`state.accumulated_key_findings` (`:2335`) → `propose` (`:2425`) →
+**closure appends THIS iteration's findings only afterwards** (`:2888`).
+So an iteration's findings can only reach the NEXT iteration's proposer.
+
+Iteration 1's interpreter runs BEFORE iteration 1 has any result of its
+own, and under **cold start there is no prior output at all** — so it
+produces nothing to carry. The findings ABOUT iteration 1's experiment are
+produced by **iteration 2's** interpreter, and could only reach a proposer
+at **iteration 3**, which the frozen shape does not run.
+
+**Why the deterministic tests did not catch it — and this is the
+lesson.** `test_step10_p56_c0_multi_iteration_baseline.py:76` calls
+`_write_tuning_output(tmp_path, "punet")`, **seeding a prior tuning output
+before iteration 1**. That is what gives iteration 1's interpreter
+something to interpret and produces the `[0,1,1]` render counts. The
+deterministic harness is **seeded**; the real Gate is **cold-start by
+mandatory rule**. The two disagree on the one precondition Layer A depends
+on, and nothing compared them.
+
+**Executed evidence (attempt 8, workspace
+`step10_p56_gate2_a8_20260821_123858`):** iteration 1 completed a REAL
+experiment — `manifest.json status=completed`,
+`best_score=-1.7906921066744612`, real training (`Epoch 0`, validation on
+9,375 ML segments), inference and scoring, under the composition. Its
+interpreter ran (Conclusion / Key Factor / Discovery all present). Then:
+
+```text
+12:51:59  iter_002/accumulated_findings_iter_002.json
+          {"iter_index": 2, "consumed_by": "iter_002",
+           "source_iters": [1], "count": 0, "findings": []}
+12:52:24  iter_002/.../interpretation_iter_002.json
+          key_findings = 3 substantive findings ABOUT iteration 1's
+          -1.7906921066744612 result
+```
+
+The restore MECHANISM worked and recorded its provenance — it consumed
+iteration 1 and said so. Iteration 1 simply had no finding to give.
+
+**This is NOT a P5+P6 lifecycle defect.** The carry machinery executed
+correctly; the Gate shape gives it nothing to carry.
+
+**Options (operator's call — NOT taken autonomously):**
+
+| # | option | cost | cold-start rule |
+|---|---|---|---|
+| **A** | **3 iterations cold-start** — iteration 2's interpreter produces findings from iteration 1's REAL result; iteration 3's proposer receives them across a REAL restore | ~1 extra iteration (~13 min) | **respected** |
+| B | 2 iterations WITH `--seed_paths` | none | **violated** — needs an explicit operator exception |
+
+**A is recommended.** §15.2's "deliberately NOT 3" rationale is explicitly
+about the ≥ 3-iteration **promotion** property (Layer B / confirmations)
+being deterministic-owned — a 3-iteration run makes no promotion claim, it
+merely gives the findings carry ONE real restore to cross. Option A also
+keeps `vocab_link_confirmations` behaviour unchanged (`{}` observed in
+attempt 8; the frozen contract already says `{}` ⇒ record the equality and
+claim NO reachability).
+
+**Gate 2 therefore remains OPEN.** Attempt 8 is real, valuable evidence of
+composed execution — including the C-P56-1 guard observed live in a
+production prompt ("Reference scores: NOT LOADED — this run is COMPOSED")
+— but it does not satisfy Layer A, and under the frozen rule a Gate whose
+witness is absent MUST NOT PASS.
+
+### 22.20 Gate 2 — ATTEMPT 8/9: **PASS** on the corrected contract (evidence SHA `d3001007`)
+
+Cold-start composed TIDMAD chain, **3 iterations × 1 round** (depth amended
+per F-P56-4), real LLM + real training + real inference + real scoring,
+blocking HealthGate isolated via `--no-health_gate_enabled` +
+`--result_authority diagnostic` (§22.18). Workspace
+`step10_p56_gate2_a8_20260821_123858`.
+
+| iteration | manifest | score |
+|---|---|---|
+| 1 | `completed` | `-1.7906921066744612` |
+| 2 | `completed` | `-1.8144883477572284` |
+| 3 | `completed` | `-1.2859566864990437` |
+
+**Functional criteria** — chain exited 0; real candidates `v3 → v4 → v5`
+generated, validated and registered; real training (`Epoch 0`, validation
+on 9,375 ML segments); real inference; real scoring producing finite
+results; composed binding pinned (`task_composition_fingerprint
+d6628a93…`).
+
+**C-P56-1 observed LIVE in a production prompt** — evidence no
+deterministic test can produce:
+
+```text
+Reference scores: NOT LOADED — this run is COMPOSED. The legacy TIDMAD
+reference tables are task-specific science and are never loaded
+implicitly for a composed run
+```
+
+**Layer A — SATISFIED.**
+
+```text
+iter_002  source_iters [1]     count 0   <- structural: cold-start iter 1
+                                            had no prior output to interpret
+iter_003  source_iters [1, 2]  count 5   <- the witness
+[CHAIN] Restored 2 prior plugin(s) from iters [1, 2]
+```
+
+The sidecar is a LOG, not the channel (`run_one_iteration.py:1957-1959`
+says so), so the witness was taken from the CONSUMER. Iteration 3's
+proposer artifact AUTHORED, in three separate fields:
+
+* `falsifiable_prediction.current_value = -1.7906921066744612` — iteration
+  1's exact score as its prediction baseline;
+* `inherited_components` — "v3 used nn.Embedding(256,16) and completed a
+  valid **73,280-parameter** run" — the comma-formatted count that exists
+  only in carried finding [1]'s prose, not in any numeric field;
+* `proposed_vocab_links` — "The 10-block v3 scored -1.7906921066744612
+  versus the otherwise similar 8-block…" — cross-iteration synthesis.
+
+Iteration 3 is a SEPARATE PROCESS from iteration 1, and the proposer's
+only channel is its typed input. **Layer B**: `{}` in both digests —
+equality recorded, **NO** non-empty reachability claimed; that property's
+owner remains the deterministic ≥ 3-iteration test + the four severing
+mutations, exactly as frozen.
+
+**Not a PASS criterion, recorded as observation**: iteration 3, the only
+one whose proposer received carried findings, produced the best score of
+the three. The Gate does not grade that.
+
+### 22.21 Third adversarial strand — dispositions
+
+| finding | verdict |
+|---|---|
+| W7 removed a crash manifest — composition resolved outside the `write_manifest(crashed=True)` handler, and the failure brake is fail-OPEN on a missing manifest, so a malformed `--task_composition` would crash every iteration without ever halting the chain | **CONFIRMED, FIXED** (`7bff5fee`) — a real regression introduced by this PR |
+| the findings union had TWO implementations while its comment claimed "Applied, not re-implemented" | **CONFIRMED, FIXED** — `core.resume.union_key_findings` is the ONE authority; both consumers call it; structural guard mutation-proven (`77dc52fb`) |
+| the task-name census is blind to `ast.Import`, so the three subprocess entrypoints could name every built-in and still pass while listed in `_DATA_PATH_SURFACE` | **CONFIRMED, FIXED** — bootstrap set pinned by exact-set equality (the F-P2b-4 shape) |
+| `pillow` on the training/inference/scoring path but only a transitive dependency | **CONFIRMED, FIXED** |
+| the confirmations-projection docstring says a key-less digest projects `{}`; the code SKIPS it (latest digest CARRYING the key wins) | **CONFIRMED, FIXED** |
+| an un-threaded legacy classifier CRASHES (`HealthPluginRunScopeError`) or CLOBBERS `_TASK_FACTS` under a composed binding | **NOT REPRODUCED.** Probed against the real composed Pets binding: gate ids resolve to the Pets family, the legacy classifier returns `False` without raising, and `TaskHealthFacts(encoding_family='categorical_labels', symbol_cardinality=37)` is byte-identical before and after. The reporter's repro used a FABRICATED plugin-less task plus a pre-loaded plugin set. The mechanism is real in principle; no binding that exists triggers it. Disposition unchanged: **DEBT**, bounded by CAP-SCOPE |
+| the tuner reads the ambient `active_task_data_path()` ContextVar instead of a declared input field (W4) | **ACCEPTED AS DEBT, not fixed.** Making it a declared field is a schema change to `HyperparamTuningInput` on a Gate-owned surface, and the frozen design specifies the guard as written. Recorded for Step 12 with the node-boundary rule cited |
+
+**A lesson worth keeping.** The differential test
+`test_the_closure_matches_the_projection_exactly` PASSED under the
+mutation that re-inlined the dedup (1 failed / 16 passed; the failure was
+the new structural guard). A differential can only catch a divergence
+AFTER someone writes a second body that DISAGREES — it is blind to a
+second body that agrees today and drifts tomorrow. That is precisely how
+the duplicate authority survived review with a comment asserting the
+opposite.
+
+### 22.22 Adversarial review — CLOSED
+
+**Three independent read-only strands**, all complete: (1) production diff
+hunk-by-hunk; (2) test topology and redundancy; (3) structure growth,
+semantic drift and genericity. Every load-bearing claim was re-verified by
+the implementing agent before acceptance or dismissal — the strands are
+input, never verdicts.
+
+**Disposition tally**
+
+| severity | raised | outcome |
+|---|---|---|
+| BLOCKER | 1 | **0 upheld** — probe showed composed TIDMAD and legacy resolve an IDENTICAL blocking gate set; contrast case is the recorded CAP-SCOPE boundary |
+| MUST_FIX | 3 | **2 fixed** (crash manifest, vacuous W4 test) · **1 not reproduced** (`_TASK_FACTS` clobber / plugin crash — see §22.21) |
+| SHOULD_FIX | 6 | **5 fixed** · **1 accepted as DEBT** (ambient ContextVar read in the tuner; schema change on a Gate-owned surface, Step 12) |
+| NIT | 5 | **4 fixed** · 1 defensive-branch note recorded |
+| FALSE_ALARM / pre-existing | 4 | recorded, no action |
+
+**UNRESOLVED BLOCKER = 0. UNRESOLVED MUST_FIX = 0.**
+
+**Structural before/after** (AST-measured independently, matching the
+recorded §12.1 tripwire):
+
+```text
+run_workflow          LOC 1489 -> 1564   branch-ish 130 -> 136   stmt 365 -> 371
+HyperparamTuningAgent.run     stmt 253 -> 256   branch 65 -> 66
+tuning_output_to_model_run_summary   stmt 49 -> 49   branch 39 -> 39
+```
+
+The "sibling-shaped" claim is **PARTIALLY TRUE and now recorded as such**:
+`vocab_link_confirmations` is genuinely parallel to `prediction_memory` at
+all four hops; `accumulated_key_findings` was NOT (it accumulates, and it
+had introduced a merge rule into `run_workflow`). That asymmetry is why
+the union rule was extracted to ONE authority — after the fix, the closure
+is a single call and the merge rule no longer lives in the orchestrator.
+
+**Workflow parity conclusion.** Sixteen hunks classified; **fourteen are
+pure ADDITIONS** of carried state whose un-composed/legacy path is
+byte-identical. Three are intended behaviour changes, each declared:
+the consumer reading `state.` instead of a stale bare local (Q-10-6 = A,
+the fix itself), the W4 composition guard (C-P56-1), and the two
+out-of-frozen-design prerequisites F-RC-1/F-RC-6. Loop-closure ordering
+audited and CLEAN: every early exit (`Break :2573`, `Break :2583`,
+`Continue :2602`) precedes all three closures, so no carried value can be
+skipped independently of the others; one writer per value confirmed.
+
+**Test consolidation.** Removable-with-no-lost-failure-class was assessed
+at ~26-28 of 219 new tests, concentrated in one module. Acted on the
+cases where the redundancy was EXACT or the test was actively misleading:
+two byte-identical duplicates removed, one tautology replaced by a
+cross-task differential, one unimplementable claim removed with its real
+owner named, two plants repaired to call the detector under test, and one
+copied AST helper replaced by an import. The remaining
+parametrization-padding proposals were NOT acted on — thinning a
+boundary-value parametrization is a judgement call with no failure class
+at stake, and this PR is not the place to spend it.
+
+### 22.23 Gate 2 — FINAL-HEAD RUN: **PASS** (terminal evidence, SHA `f150a625`)
+
+Operator ruling 2026-08-21: the earlier PASS at `d3001007` could not serve
+as terminal evidence, because the adversarial fixes changed
+`core/resume.py`'s projection and `run_workflow`'s loop closure — the
+direct owners of the Layer-A witness. ONE rerun at the final head, using
+the exact already-corrected configuration; no further workload or
+model-quality tuning of any kind.
+
+Workspace `step10_p56_gate2_final_20260821_135242`, cold start, composed
+TIDMAD, 3 iterations x 1 round, ~1 h 25 m.
+
+| iteration | manifest | score |
+|---|---|---|
+| 1 | `completed` | `-1.229119191657453` |
+| 2 | `completed` | `-2.3141293095046374` |
+| 3 | `completed` | `-2.030707698335928` |
+
+**Functional criteria** — chain exited 0; **zero** `Loop Error`, **zero**
+tracebacks; real candidates `v5 → v6 → v7`; real training (`Epoch 0`,
+validation on 10,000 ML segments); real inference; real scoring, all three
+finite. `task_composition_fingerprint`
+`d6628a93fcb3578ca32812f39246f2b51abeecbd24d21df56856ea0ef9c56d3a` pinned
+in the chain lock — byte-identical to the P1 fixture. `health_gate_enabled:
+false` recorded in the lock, i.e. the declared isolation is in the
+artifact, not merely in the launch command.
+
+**C-P56-1 observed live 3 times** in production prompts
+(`Reference scores: NOT LOADED — this run is COMPOSED`).
+
+**Layer A — SATISFIED, and the cold-start structure reproduced exactly:**
+
+```text
+iter_002  source_iters [1]     count 0   <- F-P56-4's prediction, confirmed
+iter_003  source_iters [1, 2]  count 5   <- the witness
+```
+
+Taken from the CONSUMER, not the sidecar log: iteration 3's proposer
+AUTHORED iteration 1's exact score `-1.229119191657453` in BOTH
+`inherited_components` and `falsifiable_prediction`, and referenced the
+prior candidates `v5` and `v6`. Iteration 3 is a separate process; the
+proposer's only channel is its typed input.
+
+**Layer B** — `{}` in both digests. Equality recorded; **NO** non-empty
+reachability claimed. Owner remains the deterministic >= 3-iteration test
+plus the four severing mutations, exactly as frozen.
+
+**Not a PASS criterion**: iteration 1 scored best. The Gate does not grade
+model quality (§22.18).
+
+#### Gate evidence transfers to the final head — the argument, as a diff
+
+`f150a625` (Gate SHA) → final head contains **no executable production
+change**:
+
+```text
+core/resume.py            6 lines  — signature typed Iterable[object] | None,
+                                     its import, and a removed type: ignore.
+                                     The loop body is BYTE-IDENTICAL and
+                                     annotations are not runtime-enforced.
+uv.lock                   2 lines  — the pillow entry only, no version churn
+<child design doc>       docs
+<c2 tripwire test>       test      — the recorded branch-ish number 136 -> 132
+```
+
+Per the standing rule this preserves the Gate result: nothing in that delta
+can affect a Gate-owned lifecycle / composition / persistence / restore
+execution path. **Gate 2 is CLOSED** and must not be rerun unless
+production semantics change again.
+
+**Why the tripwire number moved DOWN.** Extracting the union rule removed
+the `For` + `If` + two `BoolOp` nodes the inline dedup had cost, so
+`run_workflow` is four branch nodes SIMPLER than when the design was
+frozen (136 → 132). The test failed on the stale expectation, which is the
+tripwire working; both the number and its justification were corrected,
+because the old comment defended a design the review improved on.

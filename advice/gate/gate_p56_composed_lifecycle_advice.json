@@ -1,0 +1,28 @@
+{
+  "mindset": [
+    "# Step 10 P5+P6 Gate 2 — FIRST REAL COMPOSED CHAIN + carried-state validation fixture (NOT a scientific campaign)",
+    "This run validates two things at once, and neither is scientific quality. FIRST: the COMPOSED production path executes for real. Until this run, no composed chain had ever executed — the task's data path, dataset profile, metric, Health family and task config are all bound once at the launcher edge from configs/task_composition/tidmad.yaml, and this is the first time real training, inference and scoring have run underneath that binding. SECOND: state produced in iteration 1 is still CONSUMED by iteration 2, across a real process restore.",
+    "Propose ONE small, conservative, obviously-trainable model, and stay in that family across both iterations. Do not optimise for accuracy, novelty, or spectral coverage. Prefer the smallest architecture that honestly implements the task contract.",
+    "TWO outcomes waste this run, and both are avoidable. (1) A candidate that does not FIT: a pre-flight VRAM refusal burns an attempt without exercising any plumbing — this Gate runs under a HARD 4 GiB per-model VRAM allowance (operator decision, 2026-08-16). (2) An attempt refused before training by a runtime guardrail — a refused attempt trains nothing and produces no record, so keep the requested workload modest and accept the portions the launcher supplies rather than reaching for the full data scope.",
+    "THIS GATE'S DISTINCTIVE REQUIREMENT: iteration 1 must produce at least one USABLE KEY FINDING. The whole point of the run is to prove that a finding synthesised by a real LLM in iteration 1 survives the committed digest, a real chain restore, and reaches iteration 2's proposer as prior context. A finding is 'usable' when it says something true and specific about a REAL completed experiment. It does NOT require the model to be good: 'the candidate trained and scored successfully but produced low-diversity outputs' is a perfectly legitimate finding. Report honestly what happened.",
+    "Model QUALITY is explicitly NOT graded here, and you should not optimise for it. HealthGate verdicts do not gate this run's lifecycle, and a weak score is not a failure. What is being validated is that a real experiment completes and that its interpretation survives a real process restart. Do not chase output diversity, loss-function tricks, or score improvements — propose the smallest honest model that trains, and report what it did."
+  ],
+  "propose": [
+    "HARD CONSTRAINT: the model must train and run inference within a 4 GiB GPU VRAM allowance. This is enforced by the production pre-flight — a candidate that exceeds it is refused and the Gate attempt is wasted.",
+    "Keep the model small: roughly 10k-500k parameters is appropriate for this validation. Do not exceed ~1M parameters.",
+    "Activation memory, not parameter count, is what refuses candidates: at a given segmentation_size, memory scales with depth x channel width. Prefer few layers and modest channel widths, and keep segmentation_size modest.",
+    "Concretely, prefer a shallow convolutional denoiser: on the order of 8-16 residual/dilated blocks with small channel counts. Do NOT propose 24+ block stacks, wide transformers, FNO/spectral pyramids, or multi-branch architectures.",
+    "Reuse a known-good compact baseline shape rather than inventing a new family. Novelty is explicitly not wanted in this run, and iteration 2 should stay in the same family as iteration 1.",
+    "Batch size must be at least 4.",
+    "Avoid initialization or gating schemes that bias the output toward a constant: conservative near-zero residual scales and strongly negative gate biases have produced amplitude collapse on this budget. A plain residual convolutional stack is preferred over a gated/spectral one here."
+  ],
+  "implement": [
+    "Implement exactly the proposed architecture, minimally and vectorised. No Python loops over the time dimension.",
+    "Honour the declared forward contract exactly."
+  ],
+  "tune": [
+    "Use conservative, obviously-safe hyperparameters. This is a wiring validation, not a tuning study.",
+    "The 4 GiB VRAM allowance is hard. Do not increase segmentation_size, channel width, depth, or batch size beyond what was proposed. If an attempt is refused for memory, REDUCE capacity rather than retrying the same shape.",
+    "Accept the data portions the launcher supplies. Do not set trial, eval or train portions to 1.0 and do not request the full data scope: an attempt whose resolved optimizer-step count exceeds the runtime guardrail is refused before training and produces no record at all. The workload for this run is owned by the launcher, not by the plan."
+  ]
+}

@@ -108,7 +108,7 @@ the other's denominator; both N's count the comparable outcomes only.
 | `previous_proposal` | `dict[str, Any] \| None` | No | `None` | Serialized `ProposalOutput` from the previous iteration. Contains `falsifiable_prediction`, `proposed_vocab_links`, `inherited_components`. Drives the prediction-evaluation step (was the previous round's bold prediction confirmed, partial, or refuted?). |
 | `cumulative_information_gain` | `float` | No | `0.0` | Sum of `information_gain` from all previous iterations — running history of how many bold predictions were confirmed. |
 | `prediction_outcomes_history` | `dict[str, int]` | No | `{}` | Running count of each prediction outcome across all past iterations. Carry-forward from previous `InterpretationOutput`. |
-| `vocab_link_confirmations` | `dict[str, list[str]]` | No | `{}` | Carry-forward mapping `"feature:capability"` → list of run_names where that vocab link was confirmed. |
+| `vocab_link_confirmations` | `dict[str, list[str]]` | No | `{}` | Carry-forward mapping `"feature:capability"` → list of run_names where that vocab link was confirmed. **Step 10 / P5+P6: this is now genuinely carried across iterations** — before it, the field existed on both schemas but nothing transported it, so every production digest's mapping held at most one run and promotion (`min_runs=3`) was unreachable in a real chain. See "Carried lifecycle" below. |
 | `enable_structured_health_feedback` | `bool` | No | `False` | V19 PR 3 prompt flag. **OFF (default): prompts are byte-identical to pre-PR3** (golden-parity tested) even when structured evidence is present; the deterministic output fields below are populated regardless (recording-only). ON: the per-model prompt gains `[GATE ...]` trajectory labels, a `### HealthGate summary` section, and a system-prompt instruction block. Part of the run-invariants lock — flipping it mid-workspace is rejected at startup. |
 | `health_feedback_history_window_iterations` | `int` (`>= 1`) | No | `3` | Fingerprint-history retention window: the TOTAL number of iterations retained INCLUDING the current one (`minimum_retained_iter = current_iter - window + 1`; e.g. window 3 at iteration 5 retains 3, 4, 5). Locked. |
 | `health_feedback_history_max_entries_per_model` | `int` (`>= 1`) | No | `8` | Deterministic trim bound on retained fingerprint-history entries per model (ordering: last-retained-iteration desc, windowed count desc, signature asc). Locked. |
@@ -253,6 +253,43 @@ The constructor accepts `bridge_factory` (for test injection — defaults to `LL
   - A **`resolved_order_strategy` of `None`** means no ordering ran at all — the attempt was rejected at pre-flight (`resolution_source="not_executed"`). Do not describe such a round as having executed any ordering, and do not read the `None` as a default.
 
   Ordering is kept per round, not per run, because it may legitimately differ between rounds of one iteration when no operator override is in force. Absence of an executed ordering has two distinct readings, both produced by `ResolvedOrdering.from_record` and never guessed at: `legacy_default` (a **pre-PR2 artifact** that predates the feature — reconstructed as `shuffle` for compatibility) and `not_executed` (a **current-code attempt** that never reached training — `resolved_order_strategy=None`). Conflating them would report a current run as partly produced by old code. See `docs/design/v19_priorities/pr2_data_ordering.md` §3.7.
+
+## Carried lifecycle (Step 10 / P5+P6)
+
+Two values this node PRODUCES are now transported to the next iteration
+and back into this node's own input, across a REAL process boundary.
+
+| value | rule | authority |
+|---|---|---|
+| `vocab_link_confirmations` | **latest-wins on the WHOLE dict** — the newest digest that CARRIES the key wins; a digest missing the key is SKIPPED (not a reset); `{}` is a legitimate cleared state and DOES overwrite | `core.resume.project_vocab_link_confirmations` |
+| `key_findings` | **chronological UNION** — non-empty `str` only, dedup by exact string, first occurrence wins, order preserved | `core.resume.union_key_findings` (the ONE authority; the workflow's loop closure and `project_knowledge` both CALL it) |
+
+**A malformed confirmations value RAISES** (frozen Q-P5-1) rather than
+projecting `{}`: a mapping that is not `dict[str, list[str]]` is a
+corrupted lifecycle, and silently substituting an empty mapping would
+restart a promotion counter without saying so.
+
+**Cold start carries through (DD-2).** The cold-start branch copies
+`inp.vocab_link_confirmations` into its output rather than emitting `{}`.
+For every pre-P5 caller the input IS `{}`, so the digest bytes are
+unchanged; what it prevents is a cold-start iteration in a RESUMED chain
+silently discarding a mapping the restore just handed it.
+
+**Temporal reachability.** Under cold start this node's first invocation
+has no prior output to interpret, so it produces no findings. Findings
+ABOUT iteration *N*'s experiment are produced by iteration *N+1* and reach
+a proposer at *N+2* — which is why the Step-10 Gate runs three iterations
+(F-P56-4), not two.
+
+## Health eligibility inputs (Step 10 / P5+P6 W6)
+
+`evidence.tuning_output_to_model_run_summary` and `_round_health` take a
+keyword-only `required_gate_ids: frozenset[str] | None`. It is an
+ALREADY-RESOLVED value, resolved ONCE at the composition edge by
+`execute_tools.health_checks.candidate_eligibility.resolve_run_scientific_gate_ids`
+and threaded in. This node never re-loads a Health config and never learns
+which task it is looking at. `None` preserves pre-W6 behaviour (the legacy
+default set).
 
 ## Dependencies
 

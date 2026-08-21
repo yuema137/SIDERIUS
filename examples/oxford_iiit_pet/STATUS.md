@@ -39,3 +39,30 @@ No images and no archives in the TREE — `images.tar.gz` (SHA-pinned in
 `PROVENANCE.md`) lives machine-local via
 `tools/example_packs/fetch_oxford_iiit_pet.py`; the framework receives the
 root as the data-path seam's `data_dir`. No cache, no launcher.
+
+
+## Runner role and L3 evidence freshness (Step 10 / P5+P6 C7)
+
+**`scripts/run_pets_gate2.py` is an L3 REAL-EXECUTION EVIDENCE HARNESS**,
+not an alternate way this task "runs". Its ORCHESTRATION claims (binding
+resolves · direction correct · secondaries observational · Health binds
+state C) were TRANSFERRED to the generic-loop closure tests
+(`tests/unit/workflows/test_step10_p56_c6_three_task_closure.py`), which drive
+all three tasks through the ONE production `run_workflow`. What survives here
+is the distinct real-execution failure class nothing cheaper owns. Full
+retirement is blocked on **CAP-SCOPE** (design §10.2): until task-owned scope
+construction exists, the generic loop cannot execute real contrast-task
+training, so those claims have no generic owner to move to.
+
+**§10.6 freshness audit — RERUN TRIGGERED, evidence now CURRENT.**
+
+| | |
+|---|---|
+| prior evidence | `/home/klz/Data/SIDEREIS_DATA/step08c_pets_gate2_20260818/gate_evidence.json` at `ede11fd5` — verdict PASS |
+| dependency diff | `ede11fd5..HEAD` over the runner's real-execution surface changed **semantics-bearing** files, including the very Health checks this pack exercises (`categorical_distinct_symbols`, `categorical_dominant_fraction`), plus `evaluation_metric.py` and `task_data_path.py` |
+| verdict | prior evidence NOT assumed current → bounded rerun REQUIRED (no LLM, GPU only) |
+| rerun | `/home/klz/Data/SIDEREIS_DATA/step10_p56_c7_pets_20260821/gate_evidence.json` at `c9031369` — verdict **PASS** |
+| comparison | accuracy **BIT-EQUAL** (`0.02702702702702703`, = chance 1/37); both blocking gates same `check_verdicts` and same `resolved_action` (`invalidate_round`) — the real collapse reproduced exactly |
+
+The changed dependencies were therefore behaviour-preserving for this track —
+established by rerunning, not by inspection.

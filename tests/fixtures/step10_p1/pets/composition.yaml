@@ -2,8 +2,20 @@
 #
 # Scope note, deliberate: the dataset profile and task config here are
 # COMPOSITION fixtures, not a claim that Pets is loop-executable. P1 proves
-# the composition contract on three materially different tasks; P6 owns
-# driving Pets through the exploration loop (design §7 non-goal 1).
+# the composition contract on three materially different tasks.
+#
+# Step 10 / P5+P6 C6 UPDATE — what "the loop" now means, precisely:
+#   * ORCHESTRATION closure is DONE. Pets traverses the one generic
+#     `run_workflow` under its own declared direction, secondaries, Health
+#     family and typed proposer boundary, with the carried lifecycle live
+#     (`tests/unit/workflows/test_step10_p56_c6_three_task_closure.py`).
+#   * REAL task-correct TRAINING through the loop is NOT delivered and is not
+#     claimed by anything here. It requires **CAP-SCOPE** — task-owned scope
+#     construction — a declared missing capability (design §10.2). Step 12
+#     MUST NOT claim contrast-track L4 while CAP-SCOPE is open.
+#   * The values below are therefore still composition fixtures. They are NOT
+#     evidence of task-correct training scope; real Pets execution evidence
+#     stays with `scripts/run_pets_gate2.py` (design §10.4).
 
 task_data_path:
   module: execute_tools.pets_data_path

@@ -1447,7 +1447,10 @@ class HyperparamTuningInput(BaseModel):
     )
     formal_portion: float = Field(
         default=0.1,
-        ge=0.0,
+        # F-RC-1: this becomes TrialConfig.trial_portion in FORMAL mode
+        # (policy.py:1167), which declares ge=0.01. Accepting a lower
+        # operator value admitted a config that could only fail later.
+        ge=0.01,
         le=1.0,
         description="Fraction of segments per file for training scope in formal mode.",
     )
@@ -1459,7 +1462,10 @@ class HyperparamTuningInput(BaseModel):
     )
     formal_eval_portion: float = Field(
         default=1.0,
-        gt=0.0,
+        # F-RC-1: this becomes TrialConfig.eval_portion in FORMAL mode
+        # (policy.py:1169), which declares ge=0.01 — the same mismatch
+        # `validation_max_portion` had.
+        ge=0.01,
         le=1.0,
         description=(
             "Fraction of segments per file used for the formal-mode eval "
@@ -1958,7 +1964,19 @@ class HyperparamTuningInput(BaseModel):
     )
     validation_max_portion: float | None = Field(
         default=None,
-        gt=0.0,
+        # F-RC-1: `ge=0.01`, NOT `gt=0.0`. This ceiling is applied as
+        # `min(planned, ceiling)` to trial_portion / train_portion /
+        # eval_portion, every one of which declares `ge=0.01`. A ceiling below
+        # that floor therefore cannot produce a legal `TrialConfig` for ANY
+        # plan — the clamp manufactures a schema violation the planner cannot
+        # avoid, because the planner never chose the value. Accepting
+        # 0.0 < x < 0.01 here was a contract mismatch between the boundary
+        # that ADMITS the value and the boundary that CONSUMES it.
+        #
+        # Found by a real Gate run: `--validation_max_portion 0.002` was
+        # accepted here and then rejected 17 times inside the retry budget,
+        # each rejection costing a real LLM planning call.
+        ge=0.01,
         le=1.0,
         description=(
             "VALIDATION POSTURE ONLY (V20 FU-D-12). Hard ceiling on the "
@@ -1984,7 +2002,10 @@ class HyperparamTuningInput(BaseModel):
             "Gate does not have to control which mode the planner elects, "
             "only how much real work that election may execute. (Formal's "
             "``formal_eval_portion`` default of 1.0 is exactly the value "
-            "this must be able to reduce.)"
+            "this must be able to reduce.)\n\n"
+            "Floor: ``ge=0.01``, the SAME executable floor its three targets "
+            "declare. A ceiling below it can only produce an invalid "
+            "``TrialConfig``, so it is refused here rather than at the clamp."
         ),
     )
     validation_max_train_samples: int | None = Field(

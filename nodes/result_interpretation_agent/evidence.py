@@ -274,7 +274,7 @@ def _round_ordering(record) -> RoundOrdering:
     )
 
 
-def _round_health(record) -> RoundHealth:
+def _round_health(record, *, required_gate_ids: frozenset[str] | None = None) -> RoundHealth:
     """Condense one record's HealthGate evidence for the interpreter.
 
     Deterministic — never reads LLM output (V19 PR 3,
@@ -301,7 +301,7 @@ def _round_health(record) -> RoundHealth:
     return RoundHealth(
         exp_id=record.exp_id,
         status=record.status,
-        health_validity=classify_candidate_health(record),
+        health_validity=classify_candidate_health(record, required_gate_ids=required_gate_ids),
         gate_action=record.gate_action,
         failure_reason=record.failure_reason,
         gate_outcomes=build_gate_outcomes(gate_results),
@@ -346,7 +346,16 @@ def tuning_output_to_model_run_summary(
     output: HyperparamTuningOutput,
     *,
     order: MetricOrder | None,
+    required_gate_ids: frozenset[str] | None = None,
 ) -> ModelRunSummary:
+    # ``required_gate_ids`` is the RUN's scientific gate set, already resolved
+    # from its own Health declaration at the composition edge (Step 10 /
+    # P5+P6 W6). It is threaded as a RESOLVED VALUE, never as a config path:
+    # a classifier that re-loaded the config would have to know which task it
+    # is looking at, and — before W6 — resolved the LEGACY TIDMAD default,
+    # binding that family process-globally for every composed run (F-P56-2).
+    # ``None`` keeps the pre-W6 behaviour exactly, which is what every
+    # un-composed caller gets.
     """
     Convert a HyperparamTuningOutput to a condensed ModelRunSummary.
 
@@ -391,7 +400,7 @@ def tuning_output_to_model_run_summary(
         else:
             round_conclusions.append(r.memory.conclusion or "")
         round_ordering.append(_round_ordering(r))
-        round_health.append(_round_health(r))
+        round_health.append(_round_health(r, required_gate_ids=required_gate_ids))
 
     from execute_tools.health_checks.candidate_eligibility import (
         CandidateHealthValidity,
@@ -409,7 +418,9 @@ def tuning_output_to_model_run_summary(
         if success
         else None
     )
-    valid_records = [r for r in success if is_valid_candidate(r)]
+    valid_records = [
+        r for r in success if is_valid_candidate(r, required_gate_ids=required_gate_ids)
+    ]
     valid_best_rec = (
         _authority("the best VALID record").best(valid_records, key=_required_denoising_score)
         if valid_records
@@ -468,7 +479,7 @@ def tuning_output_to_model_run_summary(
         best_denoising_score=output.best_denoising_score,
         best_valid_denoising_score=(valid_best_rec.denoising_score if valid_best_rec else None),
         best_raw_health_validity=(
-            classify_candidate_health(best_rec).value
+            classify_candidate_health(best_rec, required_gate_ids=required_gate_ids).value
             if best_rec
             else CandidateHealthValidity.UNKNOWN.value
         ),

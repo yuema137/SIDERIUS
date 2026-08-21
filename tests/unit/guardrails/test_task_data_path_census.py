@@ -183,3 +183,53 @@ class TestTaskIdentityGuardrail:
         assert not violations, (
             f"task-name spelling must never be branched on (parent §3.1): {violations}"
         )
+
+    def test_task_implementation_imports_on_the_surface_are_the_declared_set(self):
+        """A task identity can enter a generic module as an IMPORT, and the
+        comparison census above cannot see one.
+
+        `ast.Compare`/`ast.MatchValue` walking is blind to `ast.Import`, so
+        the three subprocess entrypoints could name every built-in task
+        implementation and still pass the test above — while every file
+        involved is listed in `_DATA_PATH_SURFACE`, which makes a reader
+        believe the area is covered. That is the F-P2b-4 shape: a census
+        green for the wrong reason.
+
+        The built-ins' BOOTSTRAP is legitimate and deliberate (a subprocess
+        must register the built-in data paths before resolving one; the
+        `health_checks/__init__.py` precedent is the same). What must not
+        happen silently is a FOURTH built-in appearing, or one leaking onto a
+        surface that has no bootstrap role. So the set is pinned: adding one
+        is a visible, deliberate edit here.
+        """
+        expected = {
+            "execute_tools/train_engine_sandbox.py",
+            "execute_tools/inference_single.py",
+            "execute_tools/denoising_score_single.py",
+        }
+        found: dict[str, set[str]] = {}
+        for rel in _DATA_PATH_SURFACE:
+            tree = ast.parse((_REPO_ROOT / rel).read_text(encoding="utf-8"))
+            names: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    names.update(a.name for a in node.names if a.name.endswith("_data_path"))
+                elif isinstance(node, ast.ImportFrom) and (node.module or "").endswith(
+                    "_data_path"
+                ):
+                    names.add(node.module or "")
+            # The seam module itself is not a task implementation.
+            names = {n for n in names if not n.endswith("execute_tools.task_data_path")}
+            if names:
+                found[rel] = names
+
+        assert set(found) == expected, (
+            "task-implementation imports appeared on a data-path surface that "
+            f"has no bootstrap role, or a bootstrap disappeared: {sorted(found)}"
+        )
+        for rel, names in found.items():
+            assert names == {
+                "execute_tools.davis_data_path",
+                "execute_tools.pets_data_path",
+                "execute_tools.tidmad_data_path",
+            }, f"{rel} bootstraps an unexpected built-in set: {sorted(names)}"

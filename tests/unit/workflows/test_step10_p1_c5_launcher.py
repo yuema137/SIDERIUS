@@ -39,9 +39,13 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 FOURTH_MANIFEST = FIXTURES / "fourth_task" / "composition.yaml"
 
 
-#: A restored state in which every one of the nine carried values is
-#: DISTINCTIVE, so a dropped field cannot be masked by a default that happens
-#: to look right.
+#: A restored state in which every one of the carried values is DISTINCTIVE,
+#: so a dropped field cannot be masked by a default that happens to look right.
+#:
+#: Step 10 / P5+P6 C2 grew the set from NINE to TEN: `vocab_link_confirmations`
+#: joined as the fifth projected carry-over. The set below stays EXACT rather
+#: than becoming a floor — the defect this guard exists for is a typo that
+#: reads the wrong field name, and only an exact set catches that.
 def _distinctive_restored_state() -> RestoredState:
     from agent.schemas.interpretation import PredictionMemory
     from agent.schemas.proposal import VocabEntry
@@ -62,7 +66,7 @@ def _distinctive_restored_state() -> RestoredState:
     )
 
 
-class TestTheNineValuesStillReachTheirConsumers:
+class TestTheCarriedValuesStillReachTheirConsumers:
     """Per-value equality, observed where the value is USED."""
 
     def test_the_six_chain_state_seeds_arrive_unchanged(self):
@@ -89,7 +93,7 @@ class TestTheNineValuesStillReachTheirConsumers:
         assert state.current_collapse_fingerprint_history == {"punet": [{"iteration": 1}]}
         assert state.current_prediction_memory is restored.prediction_memory
 
-    def test_the_workflow_unpacks_every_one_of_the_nine_fields(self):
+    def test_the_workflow_unpacks_every_one_of_the_carried_fields(self):
         """The unpacking block reads each carried value exactly once, and
         reads the RIGHT field name for each.
 
@@ -120,6 +124,8 @@ class TestTheNineValuesStillReachTheirConsumers:
             "chain_best_valid_formal_score",
             "collapse_fingerprint_history",
             "prediction_memory",
+            # Step 10 / P5+P6 C2.
+            "vocab_link_confirmations",
         }, f"the unpacking reads {sorted(read_fields)}"
 
     def test_cold_start_and_restored_nothing_stay_indistinguishable(self):
@@ -149,7 +155,7 @@ class TestSignatureAndCallers:
 
         assert len(inspect.signature(run_workflow).parameters) == 21
 
-    def test_no_compatibility_wrapper_re_exposes_the_nine(self):
+    def test_no_compatibility_wrapper_re_exposes_the_carried_values(self):
         """09.5a rule 2, unchanged: the old surface must not survive beside
         the new one, or the transport this closed would still be reachable."""
         retired = {

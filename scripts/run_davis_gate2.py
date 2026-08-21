@@ -29,6 +29,31 @@ Usage::
     SIDERIUS_ALLOW_LAUNCH=1 .venv/bin/python scripts/run_davis_gate2.py \
         --data_dir /home/klz/Data/DAVIS_2017 \
         --workspace /home/klz/Data/SIDEREIS_DATA/d14_davis_gate2_<date>
+
+ROLE, as of Step 10 / P5+P6 C7 (Q-10-5 = B discharge)
+-----------------------------------------------------
+This script is an **L3 REAL-EXECUTION EVIDENCE HARNESS**. It is NOT an
+alternate way a DAVIS task "runs", and no document should describe it that
+way any more.
+
+Its ORCHESTRATION claims — that a binding resolves, that the direction is
+correct, that secondaries are observational, that Health binds state C —
+were TRANSFERRED to the generic-loop closure tests
+(``tests/unit/workflows/test_step10_p56_c6_three_task_closure.py``), which
+drive all three tasks through the ONE production ``run_workflow``.
+
+What SURVIVES here is what nothing cheaper owns: a distinct real-execution
+failure class — real frame decode to tensors, the production training
+engine on real data, real inference, the real deliverable codec, the real
+metric handle, and the pack's Health family evaluated on a FRESH real
+deliverable. For DAVIS that also includes the
+last-frame-copy baseline comparison.
+
+FULL RETIREMENT IS BLOCKED ON **CAP-SCOPE** (design §10.2): until
+task-owned scope construction exists, the generic loop cannot execute real
+contrast-task training, so these claims have no generic owner to move to.
+Step 12 must not claim contrast-track L4 while CAP-SCOPE is open.
+
 """
 
 from __future__ import annotations

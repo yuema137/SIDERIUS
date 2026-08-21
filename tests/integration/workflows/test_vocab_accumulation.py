@@ -1059,6 +1059,24 @@ def test_scientific_accuracy_and_vocab_links_accumulate(tmp_path, request):
         runtime_vocab=iter1_output.runtime_vocab,
         # Carry forward Phase E state — BOTH pools, exactly as the workflow
         # loop and the resume path carry them (Step 09a C5).
+        #
+        # Step 10 / P5+P6 C4 — disposition. This hand-threading now MIRRORS the
+        # production wiring instead of SUBSTITUTING for it. Until P5+P6,
+        # `vocab_link_confirmations` was carried by nothing in production
+        # (`workflows/` contained zero occurrences), so this line certified a
+        # hop the real chain did not have — and it lives outside CI, which runs
+        # `tests/unit/` only. The hop now exists:
+        #     digest -> project_vocab_link_confirmations -> RestoredState
+        #           -> ChainState.current_vocab_link_confirmations
+        #           -> InterpretationInput
+        # owned by `tests/unit/workflows/test_step10_p56_c2_confirmations_reachability.py`
+        # (>= 3-iteration promotion + four severing mutations) and
+        # `..._c4_resume_equality.py` (uninterrupted == resumed).
+        #
+        # This test KEEPS its own distinct ownership: node-level accumulation
+        # SEMANTICS against a real (or pseudo) LLM across two iterations —
+        # what the producer does with real model output, not whether the
+        # workflow transports it.
         prediction_outcomes_history=iter1_output.prediction_outcomes_history,
         prediction_outcomes_by_semantics=iter1_output.prediction_outcomes_by_semantics,
         cumulative_information_gain_by_semantics=(

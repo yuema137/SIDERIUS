@@ -25,7 +25,7 @@ import math
 import os
 import re
 import warnings
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -148,6 +148,17 @@ class RestoredState:
             ``InterpretationOutput.key_findings``. Forwarded to the next
             proposer as a single ``ExpertContextItem`` so the LLM sees the
             full chain history, not just iter N-1's take-homes.
+        vocab_link_confirmations: latest committed iter's
+            ``InterpretationOutput.vocab_link_confirmations`` — the map
+            ``{"feature:capability": [confirming run_name, ...]}`` the
+            interpreter accumulates and counts against ``min_runs`` before
+            promoting a pair into ``VocabEntry.related_to``. Latest-wins
+            whole-dict, because the producer already returns the FULL
+            cumulative map every call; unioning here would be a second
+            accumulation authority. ``{}`` when ``current_iter == 1`` or no
+            committed digest carries the key (pre-activation digests). A
+            present-but-malformed value raises — see
+            :func:`project_vocab_link_confirmations`.
         accumulated_physical_rejections: VRAM-gate rejections collected
             from every committed iter's ``HyperparamTuningOutput.physical_rejections``,
             in chronological order, capped to the last
@@ -217,6 +228,12 @@ class RestoredState:
     #: scope: no other restored value, no restore-precedence change, and no
     #: second store — the digest remains the canonical record.
     prediction_memory: PredictionMemory = field(default_factory=PredictionMemory)
+
+    #: Step 10 / P5+P6 C1 — the vocab-link confirmation map, restored so the
+    #: producer's ``min_runs`` promotion counter survives the subprocess
+    #: boundary. Latest-wins whole-dict (the producer already accumulates);
+    #: ``{}`` for a fresh chain or a pre-activation digest set.
+    vocab_link_confirmations: dict[str, list[str]] = field(default_factory=dict)
 
     # --- V19 PR 1 chain incumbents (design doc §3.3) -----------------------
     # ``chain_best_valid_formal_*`` is the DECISION-STATE incumbent: the best
@@ -883,6 +900,35 @@ def _interpretation_path(workspace: str, iter_idx: int) -> str:
     return interpretation_digest_path(workspace, iter_idx)
 
 
+def union_key_findings(existing: list[str], incoming: Iterable[object] | None) -> list[str]:
+    """THE union rule for accumulated key findings — ONE authority.
+
+    Non-empty ``str`` only, dedup by exact string, FIRST occurrence wins,
+    order preserved. Mutates and returns ``existing``.
+
+    Both consumers call this rather than re-implementing it: the digest
+    projection (`project_knowledge`, which unions across restored digests)
+    and `run_workflow`'s loop closure (which unions the current iteration's
+    findings into the carried history). That is what makes an uninterrupted
+    in-process trajectory and a per-iteration chain restore produce EQUAL
+    state BY CONSTRUCTION rather than by two implementations that happen to
+    agree today — if this rule ever normalises (strip, casefold), both paths
+    move together. An earlier revision had two bodies whose comment claimed
+    the rule was "applied, not re-implemented"; it was re-implemented, and
+    only the C4 equality test stood between that and a silently divergent
+    chain history.
+
+    First-wins also makes the union IDEMPOTENT, which is what lets a resume
+    re-union the same digests without duplicating.
+    """
+    seen = set(existing)
+    for finding in incoming or []:
+        if isinstance(finding, str) and finding and finding not in seen:
+            existing.append(finding)
+            seen.add(finding)
+    return existing
+
+
 def project_knowledge(
     reads: Sequence[DigestRead],
 ) -> tuple[list[VocabEntry], list[str]]:
@@ -911,7 +957,6 @@ def project_knowledge(
     """
     runtime_vocab: list[VocabEntry] = []
     findings: list[str] = []
-    seen: set[str] = set()
 
     for read in reads:
         if not read.ok:
@@ -923,10 +968,7 @@ def project_knowledge(
             continue
         data = read.payload or {}
 
-        for kf in data.get("key_findings") or []:
-            if isinstance(kf, str) and kf and kf not in seen:
-                findings.append(kf)
-                seen.add(kf)
+        union_key_findings(findings, data.get("key_findings"))
 
         # Latest parseable digest wins for runtime_vocab. Validate each entry
         # individually to drop malformed records without losing the rest.
@@ -1047,6 +1089,102 @@ def project_prediction_memory(reads: Sequence[DigestRead]) -> PredictionMemory:
             ) from e
 
     return memory
+
+
+def project_vocab_link_confirmations(
+    reads: Sequence[DigestRead],
+) -> dict[str, list[str]]:
+    """Project the latest committed iter's vocab-link confirmation map.
+
+    Step 10 / P5+P6 C1. The fifth projection, and a sibling of
+    :func:`project_prediction_memory` in the two ways that matter: latest-wins,
+    and a corrupted record RAISES.
+
+    **Latest-wins on the WHOLE dict**, and the reason is a property of the
+    producer, not a preference. ``update_vocab_link_confirmations``
+    (``nodes/interpretation_helpers.py:587``) deep-copies the incoming mapping
+    and returns the FULL cumulative map every call, so each normal digest
+    already carries the complete history. A union across digests would be a
+    SECOND accumulation authority: it would resurrect pairs a later iteration
+    legitimately dropped, and it would let the workflow disagree with the
+    producer about the promotion count. The producer owns the count; this
+    projection only transports it.
+
+    Consequences that follow, each deliberate:
+
+    * a digest MISSING the key is SKIPPED, not treated as a reset: the latest
+      digest that CARRIES the key wins, and when no digest carries it the
+      result is ``{}``. Pre-activation digests predate this lifecycle, so an
+      absent key is a compatible default, never fabricated history — and
+      never a silent erasure of a mapping a newer key-less digest happens to
+      sit in front of. (Unreachable once the producer is active, since it
+      then always emits the key; stated because the code says it.)
+    * an EMPTY mapping in the latest digest OVERWRITES an earlier non-empty
+      one — ``{}`` is a legitimate cleared state, distinct from an absent key;
+    * run lists pass through UNVALIDATED for duplicates. The producer is the
+      only authority on the promotion count, so de-duplicating here could
+      silently change WHEN a vocabulary relationship graduates.
+
+    A present-but-malformed value RAISES (design §8.2, operator-approved):
+    this is PROMOTION state, and silently keeping an older partial mapping can
+    change when a scientific relationship graduates — the same argument
+    :func:`project_prediction_memory` makes one level down ("an accuracy
+    statistic assembled from half a pool is worse than none").
+
+    Args:
+        reads: every committed digest of this restoration pass, ascending, each
+            already classified ok / missing / unreadable.
+
+    Returns:
+        ``{"feature:capability": [run_name, ...]}`` — the latest parseable
+        digest's mapping, or ``{}`` when nothing committed carries one.
+
+    Raises:
+        ValueError: a digest carries the key with a value that is not a
+            ``dict[str, list[str]]``.
+    """
+    confirmations: dict[str, list[str]] = {}
+
+    for read in reads:
+        if not read.ok:
+            warnings.warn(
+                digest_unusable_message(read, "vocab-link-confirmations"),
+                UserWarning,
+                stacklevel=2,
+            )
+            continue
+        data = read.payload or {}
+
+        if "vocab_link_confirmations" not in data:
+            # Pre-activation digest: compatible default, no warning noise.
+            continue
+        raw = data["vocab_link_confirmations"]
+
+        def _refuse(detail: str, *, _read: DigestRead = read) -> ValueError:
+            return ValueError(
+                f"[resume] iter {_read.iter_idx:03d}: corrupted "
+                f"vocab_link_confirmations in {_read.path}: {detail}. Refusing "
+                f"to restore a partial confirmation map — this is promotion "
+                f"state, and silently keeping an older mapping can change WHEN "
+                f"a vocabulary relationship graduates. Fix or remove the digest."
+            )
+
+        if not isinstance(raw, dict):
+            raise _refuse(f"expected a mapping, got {type(raw).__name__}")
+        validated: dict[str, list[str]] = {}
+        for key, run_names in raw.items():
+            if not isinstance(key, str):
+                raise _refuse(f"non-string key {key!r}")
+            if not isinstance(run_names, list):
+                raise _refuse(f"key {key!r} maps to {type(run_names).__name__}, expected a list")
+            for run_name in run_names:
+                if not isinstance(run_name, str):
+                    raise _refuse(f"key {key!r} contains non-string run name {run_name!r}")
+            # Pass the list through as-is: no dedup, no reordering.
+            validated[key] = list(run_names)
+        confirmations = validated  # overwrite: only the LATEST iter's wins
+
+    return confirmations
 
 
 def project_knowledge_cache(reads: Sequence[DigestRead]) -> dict[str, dict]:
@@ -1499,6 +1637,10 @@ def restore_prior_state(
     # Step 09a C5 — the interpreter's prediction memory rides the SAME
     # canonical path, one line below the fingerprint history it mirrors.
     state.prediction_memory = project_prediction_memory(digest_reads)
+    # Step 10 / P5+P6 C1 — the vocab-link confirmation map rides it too. Same
+    # digest reads, same latest-wins shape, same fail-closed policy; the only
+    # reader of this digest key outside the interpreter.
+    state.vocab_link_confirmations = project_vocab_link_confirmations(digest_reads)
     _v2_pool = state.prediction_memory.prediction_outcomes_by_semantics.get(
         PREDICTION_SEMANTICS_SIGNSAFE_V2, {}
     )

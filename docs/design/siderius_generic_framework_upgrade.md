@@ -2149,7 +2149,22 @@ Concretely, every design that names a Gate must:
    proposal-affecting schema);
 4. re-read the standard and re-audit the current flag parsing from
    source immediately BEFORE any Gate launch, because command shapes
-   drift.
+   drift;
+5. **state the standard's "Gate section required fields"** — FAILURE
+   CLASS UNDER TEST · REQUIRED REAL COMPONENTS · NON-REQUIRED SCIENTIFIC
+   QUALITY · MAXIMUM TEMPORAL DEPTH · EXTRA DEPTH JUSTIFICATION ·
+   ISOLATION — so Gate scope cannot expand silently later (binding,
+   operator decision 2026-08-21; the policy itself lives ONLY in the
+   standard's "Gate scope ownership — DO NOT BLINDLY EXPAND", never
+   duplicated here).
+
+**A Gate does not acquire acceptance criteria by proximity.** Encountering
+a subsystem during a real run does not enrol that subsystem's scientific
+success into the Gate contract. Where a neighbouring blocking subsystem
+would decide the outcome on a criterion the PR does not own, isolate it
+through an existing production-supported control — never by changing that
+subsystem's semantics, thresholds or tests. Full rule + the in-scope /
+out-of-scope table: the standard.
 
 **The tiers are defined by REAL vs PSEUDO LLM**: Gate 1 = real LLM +
 pseudo training; Gate 2 = real LLM + real training.

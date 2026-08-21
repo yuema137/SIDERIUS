@@ -1026,6 +1026,53 @@ all retry / round / attempt semantics.
 
 ---
 
+## Reference science is not implicit in a composed run (Step 10 / P5+P6, C-P56-1)
+
+`load_reference_scores()` supplies TIDMAD's per-file legacy reference
+table. It is **task-specific science**, so it is loaded ONLY when the run
+is un-composed:
+
+```python
+if active_task_data_path() is None:
+    reference_scores = load_reference_scores()
+else:
+    reference_scores = None      # composed run: named absence
+```
+
+The guard keys on **composition PRESENCE**, never on `TIDMAD_METRIC_ID`, a
+task name, or any other task-identity surrogate — a surrogate would answer
+"is this TIDMAD?" when the question is "did this run declare its own
+science?".
+
+**Declared consequence, not a regression** (frozen ruling **C-P56-1**): a
+composed run's tuner/interpreter/proposer prompts carry the named absence
+where a legacy run carries the 42-file reference table, and the record's
+`formal_comparison_reference_source` says so. Observed live in the Step-10
+Gate: `Reference scores: NOT LOADED — this run is COMPOSED`. The legacy
+(un-composed) path is byte-for-byte unchanged.
+
+Downstream, `reference_scores` may therefore be `None`, and the score-table
+guard in `execution.py` tests for it. Carried debt: `contracts.py` still
+declares the field as `Any`, so that `None` is invisible to pyright.
+
+## Watchdog kills reach the architectural-feedback trigger (F-RC-6)
+
+`_collect_disallowed_patterns` tells the next proposer "this architecture
+is too expensive". It considered only PREDICTED admission skips
+(`status in {"skipped_oom_risk", "skipped_time_risk"}`). An attempt that
+was admitted, ran, and was then killed by the watchdog is recorded with
+`status="error"`, so the one structured signal designed to end a
+"too slow" loop was unavailable for the very failure that proves the
+candidate is too slow.
+
+The discriminator is the **typed `failure_type == "wall_clock_timeout"`**,
+never `status == "error"`: a code bug, a schema violation and an OOM all
+carry that same status, and reading them as architectural evidence would
+teach the proposer to shrink a model over a `ValueError`. The timeout path
+is categorical rather than factor-tested, because the watchdog kills AT
+the deadline — the observed `elapsed / deadline` ratio is ~1.003 and could
+never clear `TIME_FACTOR_THRESHOLD = 5.0`.
+
 ## Node structure and public boundary (Step 07 PR 07b, C7 / C7d, 2026-08)
 
 ### The public interface is exactly two files

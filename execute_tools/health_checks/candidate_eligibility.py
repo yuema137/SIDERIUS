@@ -16,7 +16,11 @@ from typing import Any, Literal
 
 import yaml
 
-from execute_tools.health_checks.config import load_health_gates_config
+from execute_tools.health_checks._composition import HealthBindingState, TaskHealthBinding
+from execute_tools.health_checks.config import (
+    load_composed_health_config,
+    load_health_gates_config,
+)
 
 # CandidateHealthValidity moved to schemas.py (V19 PR 3 CB1 — the enum is
 # pure vocabulary needed by schema-level consumers; the classifier
@@ -93,6 +97,55 @@ def legacy_config_body_sha(config_path: str | None = None) -> str | None:
         if isinstance(gate, dict):
             gate.pop("gate_role", None)
     return hashlib.sha256(yaml.safe_dump(body, sort_keys=True).encode()).hexdigest()
+
+
+def resolve_run_scientific_gate_ids(
+    task_health_binding: TaskHealthBinding = HealthBindingState.LEGACY_OMITTED,
+) -> frozenset[str] | None:
+    """The scientific gate set for a RUN, resolved from its own Health declaration.
+
+    Step 10 / P5+P6 **W6**. The zero-argument
+    :func:`resolve_scientific_gate_ids` resolves through
+    ``load_health_gates_config(None)``, which composes with
+    ``LEGACY_OMITTED`` — the LEGACY TIDMAD task-health config. That default is
+    correct for an un-composed run and WRONG for a composed one: it makes a
+    composed contrast run bind TIDMAD's Health family process-globally, and the
+    Step-08b run-scope guard then (correctly) refuses the run's own family.
+    Finding F-P56-2.
+
+    This is the composition-aware resolver. It exists so the run's Health
+    declaration is resolved **ONCE, at the composition edge**, and consumed
+    downstream as a RESOLVED VALUE — never re-loaded by a classifier that
+    would have to know which task it is looking at.
+
+    Nothing here branches on task identity: the argument is a
+    ``TaskHealthBinding``, i.e. one of the three declared binding STATES
+    (``LEGACY_OMITTED`` / ``EXPLICIT_NONE`` / an explicit path). A run supplies
+    whichever its composition declared.
+
+    Args:
+        task_health_binding: the run's declared Health binding. The default
+            reproduces the pre-W6 behaviour exactly, so every un-composed
+            caller is unaffected.
+
+    Returns:
+        The blocking-role gate ids, or ``None`` when the roles cannot be
+        established — ``None`` means UNKNOWN, exactly as
+        :func:`resolve_scientific_gate_ids` defines it.
+    """
+    if task_health_binding is HealthBindingState.LEGACY_OMITTED:
+        # Byte-for-byte the legacy path, cache included.
+        return resolve_scientific_gate_ids(None)
+
+    config, _task_config, _plugins = load_composed_health_config(None, task_health_binding)
+    declared = {gate.id: gate.gate_role for gate in config.health_gates}
+    if declared and all(role is not None for role in declared.values()):
+        return frozenset(gid for gid, role in declared.items() if role == "blocking")
+    if not declared:
+        # A task that declares no gates has an empty scientific set — a
+        # DECLARED absence, not an unknown one.
+        return frozenset()
+    return None
 
 
 def resolve_scientific_gate_ids(config_path: str | None = None) -> frozenset[str] | None:

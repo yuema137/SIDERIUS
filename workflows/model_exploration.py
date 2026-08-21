@@ -106,6 +106,8 @@ from execute_tools.evaluation_metric import (
     metric_identity_unavailable_notice,
     reconcile_metric_specs,
 )
+from execute_tools.health_checks._composition import HealthBindingState
+from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -330,6 +332,7 @@ def tuning_outputs_to_summaries(
     outputs: list[HyperparamTuningOutput],
     *,
     order: MetricOrder | None,
+    required_gate_ids: frozenset[str] | None = None,
 ) -> list[ModelRunSummary]:
     """
     Convert a list of HyperparamTuningOutput objects into condensed
@@ -337,8 +340,15 @@ def tuning_outputs_to_summaries(
 
     Raw experiment records are NOT carried forward — only aggregates
     and per-round scores/conclusions are extracted.
+
+    ``required_gate_ids`` is the run's scientific gate set, resolved ONCE from
+    its own Health declaration (Step 10 / P5+P6 W6) and passed down as a
+    resolved value. ``None`` = the legacy default, unchanged.
     """
-    return [tuning_output_to_model_run_summary(o, order=order) for o in outputs]
+    return [
+        tuning_output_to_model_run_summary(o, order=order, required_gate_ids=required_gate_ids)
+        for o in outputs
+    ]
 
 
 def _make_storage(workspace: str, run_name: str) -> StorageConfig:
@@ -1725,6 +1735,28 @@ def run_workflow(
         f"budget={active_vram_budget_gb} GB\n"
     )
 
+    # Step 10 / P5+P6 W6 — resolve the run's scientific gate set ONCE, from
+    # the run's OWN Health declaration, before anything classifies a record.
+    #
+    # Finding F-P56-2: every downstream classifier used to reach
+    # `resolve_scientific_gate_ids(None)`, which composes with
+    # `LEGACY_OMITTED` — the legacy TIDMAD task-health config. Reading gate
+    # roles therefore BOUND TIDMAD's Health family process-globally, and a
+    # composed run's own family was then refused by the Step-08b run-scope
+    # guard: a composed contrast run could not start at all. Resolving here,
+    # with the composition's declared binding, makes the run's OWN family the
+    # first (and only) one bound, so the later `build_run_invariants`
+    # materialisation is idempotent.
+    #
+    # An un-composed run passes the default binding and is byte-for-byte
+    # unchanged. Nothing here inspects a task NAME: the argument is one of the
+    # three declared binding STATES.
+    _run_required_gate_ids = resolve_run_scientific_gate_ids(
+        task_composition.task_health_binding
+        if task_composition is not None
+        else HealthBindingState.LEGACY_OMITTED
+    )
+
     # --- Step 0: Load existing tuning outputs ---
     print("Step 0: Loading existing tuning outputs...")
     if launch.source_paths is not None:
@@ -1742,6 +1774,7 @@ def run_workflow(
     seed_summaries = tuning_outputs_to_summaries(
         tuning_outputs,
         order=MetricOrder(seed_metric_spec) if seed_metric_spec is not None else None,
+        required_gate_ids=_run_required_gate_ids,
     )
     print(
         f"  Loaded {len(tuning_outputs)} tuning outputs "
@@ -1939,7 +1972,14 @@ def run_workflow(
     # container defaults are empty, which every consumer below already treats
     # identically to `None` (each tests truthiness).
     restored_runtime_vocab = restored_state.runtime_vocab if restored_state else None
-    accumulated_key_findings = restored_state.accumulated_key_findings if restored_state else None
+    # Step 10 / P5+P6 C3 — named `restored_*` like its eight siblings now that
+    # `ChainState` declares `accumulated_key_findings`. The old spelling shared
+    # the carrier's field name, which the single-writer census reads as a bare
+    # local twin of `state.accumulated_key_findings` — the duplicate-authority
+    # shape Step 09.5a's Amendment C exists to prevent.
+    restored_accumulated_key_findings = (
+        restored_state.accumulated_key_findings if restored_state else None
+    )
     restored_model_knowledge_cache = (
         restored_state.model_knowledge_cache if restored_state else None
     )
@@ -1957,6 +1997,9 @@ def run_workflow(
         restored_state.collapse_fingerprint_history if restored_state else None
     )
     restored_prediction_memory = restored_state.prediction_memory if restored_state else None
+    restored_vocab_link_confirmations = (
+        restored_state.vocab_link_confirmations if restored_state else None
+    )
 
     # Step 09.5a C4 — the eleven cross-iteration accumulators are ONE typed
     # carrier now. Every seeding rule below is the one this function already
@@ -1973,6 +2016,8 @@ def run_workflow(
         restored_chain_incumbent_score=restored_chain_incumbent_score,
         restored_collapse_fingerprint_history=restored_collapse_fingerprint_history,
         restored_prediction_memory=restored_prediction_memory,
+        restored_vocab_link_confirmations=restored_vocab_link_confirmations,
+        restored_accumulated_key_findings=restored_accumulated_key_findings,
         all_model_types=list({o.model_type for o in tuning_outputs}),
     )
     if restored_runtime_vocab:
@@ -2112,6 +2157,12 @@ def run_workflow(
             cumulative_information_gain_by_semantics=dict(
                 state.current_prediction_memory.cumulative_information_gain_by_semantics
             ),
+            # Step 10 / P5+P6 C2 — the vocab-link confirmation map. Before this,
+            # the workflow never passed it, so the interpreter always received
+            # the schema default `{}`: one iteration could append at most one
+            # run_name and `VocabEntry.related_to` promotion (min_runs=3
+            # DISTINCT runs) was unreachable in production.
+            vocab_link_confirmations=dict(state.current_vocab_link_confirmations),
             cold_start=is_cold_start,
             human_advice=launch.human_advice_interpret,
             runtime_vocab=state.current_runtime_vocab,
@@ -2271,20 +2322,25 @@ def run_workflow(
             # Surface ALL prior iters' key_findings to the proposer as a
             # single ExpertContextItem. Without this, the proposer sees only
             # the current iter's interpretation.key_findings; chain-mode
-            # amnesia drops everything before iter N-1. The accumulated
-            # union is built once by core.resume.load_latest_knowledge and
-            # forwarded by the chain runner. See
+            # amnesia drops everything before iter N-1. See
             # docs/Consistent_growing_vocab_list.md §3.3.4.
+            #
+            # Step 10 / P5+P6 C3 — reads the ChainState carrier. In chain mode
+            # the union arrives restored (`core.resume.project_knowledge`); it
+            # now also grows IN-PROCESS, so a multi-iteration run no longer
+            # shows iteration 3 only what iteration 1 saw. (The comment here
+            # previously cited `core.resume.load_latest_knowledge`, a function
+            # Step 09.5a C1 replaced with `project_knowledge`.)
             expert_context_for_propose: list[ExpertContextItem] = []
-            if accumulated_key_findings:
-                bullet_block = "\n".join(f"- {kf}" for kf in accumulated_key_findings)
+            if state.accumulated_key_findings:
+                bullet_block = "\n".join(f"- {kf}" for kf in state.accumulated_key_findings)
                 expert_context_for_propose.append(
                     ExpertContextItem(
                         source="prior_iters",
                         kind="findings",
                         content=(
                             f"Accumulated key findings from "
-                            f"{len(accumulated_key_findings)} prior iter(s):\n"
+                            f"{len(state.accumulated_key_findings)} prior iter(s):\n"
                             f"{bullet_block}"
                         ),
                         source_ref="prior_iters_key_findings",
@@ -2761,6 +2817,10 @@ def run_workflow(
                 if tune_output.metric_spec is not None
                 else None
             ),
+            # W6 — the same resolved set the seeds were classified against,
+            # so an in-run summary and a restored one cannot disagree about
+            # which gates decide validity.
+            required_gate_ids=_run_required_gate_ids,
         )
         for s in new_model_summaries:
             # Attach description so iter N+1 interpretation agent can find it
@@ -2803,6 +2863,30 @@ def run_workflow(
                 interpretation.cumulative_information_gain_by_semantics
             ),
         )
+
+        # Step 10 / P5+P6 C2 — carry the vocab-link confirmation map, the same
+        # way and for the same reason. LATEST-WINS on the whole mapping:
+        # `update_vocab_link_confirmations` already returned the FULL cumulative
+        # map, so re-merging here would be a second accumulation authority and
+        # could disagree with the producer about the promotion count.
+        state.current_vocab_link_confirmations = {
+            key: list(runs) for key, runs in interpretation.vocab_link_confirmations.items()
+        }
+
+        # Step 10 / P5+P6 C3 — union THIS iteration's findings into the carried
+        # history by CALLING the one authority (`core.resume.union_key_findings`),
+        # which the digest projection also calls. Genuinely applied, not
+        # re-implemented: an uninterrupted in-process trajectory and a
+        # per-iteration chain restore produce EQUAL state by construction, and
+        # the merge rule does not live in this already-large function.
+        #
+        # Imported locally: `core.resume` imports `_add_plugin_to_registries`
+        # from THIS module (`resume.py:74`), so a module-level import here
+        # would close that cycle. The same reason `RestoredState` above is
+        # under `TYPE_CHECKING`.
+        from core.resume import union_key_findings
+
+        union_key_findings(state.accumulated_key_findings, interpretation.key_findings)
 
         # Update runtime vocab from interpretation output
         state.previous_proposal_data = proposal.model_dump()
