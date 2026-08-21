@@ -641,12 +641,48 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
-- **STEP 10 — IN PROGRESS (2026-08-21). 5 of 7 semantic children MERGED: P1
+- **STEP 10 — COMPLETE (2026-08-21). ALL 7 semantic children MERGED: P1
   `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1` ·
-  P3 `254cbaa1`. The remaining P5+P6 are CONSOLIDATED into ONE
-  implementation child (parent §20.9), whose design is REVISION 2 —
-  FROZEN, OPERATOR APPROVED 2026-08-21. NEXT = P5+P6 IMPLEMENTATION in a
-  fresh session.**
+  P3 `254cbaa1` · **P5+P6 `b54623b2`** (PR #246, squash; exact-head CI
+  **32532482260 SUCCESS** on `8450fd27`; merged master byte-identical to
+  the validated head apart from three node/operator `.md` files).**
+
+  **P5+P6 — Lifecycle Closure + Three-Task Orchestration Closure.** Two
+  values the chain produced and then threw away now survive a REAL process
+  restart, and the composed production path executed for the first time.
+  `vocab_link_confirmations` (latest-wins on the WHOLE dict; a key-less
+  digest is SKIPPED, not a reset; malformed RAISES per Q-P5-1) and
+  `accumulated_key_findings` (chronological union) became `ChainState`
+  fields carried through `run_workflow`'s closures. Before this both
+  fields existed on the schemas while NOTHING transported them, so
+  promotion (`min_runs=3`) was unreachable in any real chain.
+  `run_chain.sh` gained `--task_composition` (the operator's chain could
+  not launch a composed run at all) and `configs/task_composition/tidmad.yaml`
+  ships as the first real manifest. **C-P56-1 held**: no implicit legacy
+  TIDMAD reference science reaches a composed run, the guard keying on
+  composition PRESENCE — observed live in production prompts.
+  **Things future work must not re-break**: the findings-union rule has
+  ONE authority (`core.resume.union_key_findings`) that BOTH the digest
+  projection and the loop closure CALL — a mutation-proven structural
+  guard enforces it, because the differential test that used to guard it
+  PASSES when the rule is re-inlined; and the sidecar
+  `accumulated_findings_*.json` is a LOG, never the transport channel.
+  **Gate-2 governance corrections promoted to the canonical standard**: a
+  Gate tests the CHANGED failure class and never acquires acceptance
+  criteria by proximity (model quality, HealthGate PASS and convergence
+  are NOT implicit criteria); and **semantic latency sets the minimum
+  depth** — the frozen "2 iterations" was UNSATISFIABLE under cold start,
+  because a seeded unit test proves nothing about a cold-start chain.
+  **Carried debt, none blocking**: F-P56-3 (composition kwargs reach only
+  the chain-level invariants lock) · **CAP-SCOPE** still gates composed
+  CONTRAST runs and the five un-threaded tuner eligibility sites ·
+  the tuner's ambient `active_task_data_path()` read → Step 12 ·
+  auto-resume's `START_ITER` capture is corrupted by plugin-loader stdout
+  (`--start_iter N` is the workaround).
+  **NEXT = Step 11**, to be re-confirmed from the merged roadmap in a
+  fresh session, never from the conversation that produced P5+P6.
+
+  Historical (pre-merge) context for the consolidated child:
   Authoritative design:
   `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding/pr_10_p5_6_lifecycle_and_three_task_closure.md`
   (the old P5 draft and P6 skeleton are REMOVED, reconciled in its §18;
