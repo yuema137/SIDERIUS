@@ -14,14 +14,21 @@ failure, and had no way to report what went wrong across a model's records.
 Step 07a computes the diagnosis and Step 06 computes the identity and the
 refusal; both stopped at the tuner's records.
 
-What C6 deliberately does NOT do
---------------------------------
-Q-09-7 = B: the interpreter-side CONTRACT for secondary metrics is Step 09's,
-but the upstream half — tuner-side evaluation, `ExperimentRecord` persistence,
-workflow transport — is Step 10's. So the production builder leaves
+What C6 deliberately did NOT do — and what Step 10 / P2b then did
+-----------------------------------------------------------------
+Q-09-7 = B: the interpreter-side CONTRACT for secondary metrics was Step 09's,
+while the upstream half — tuner-side evaluation, `ExperimentRecord`
+persistence, workflow transport — was Step 10's. C6 therefore left
 ``secondary_metrics`` EMPTY rather than inventing values or reading undeclared
-record keys, and the tests below pin that emptiness as a POSITIVE claim with a
-pointer to its owner.
+record keys.
+
+**Step 10 / P2b landed that upstream half**, so the guards below were INVERTED
+rather than deleted: the reserved schema names must now exist (exactly those),
+the evaluator and the binder must exist in exactly one owner each, and the
+projection is empty precisely when the output carries no DECLARED secondary
+set. Each inversion is the same claim seen from the other side — the same
+defect falsifies both readings. The positive projection matrix lives in
+``test_step10_p2b_c3_secondary_projection.py``.
 
 The other standing rule: secondaries are OBSERVATIONAL. They must be unable
 to reach any ordering decision, which is asserted structurally (no reference
@@ -347,41 +354,64 @@ class TestSecondaryMetricEvidence:
         ],
         ids=["bare-record", "fully-scored-record"],
     )
-    def test_the_production_builder_leaves_it_EMPTY(self, record_kwargs):
-        """Q-09-7 = B, stated as a positive claim.
+    def test_an_output_with_no_DECLARED_set_projects_nothing(self, record_kwargs):
+        """Q-09-7 = B's claim, REWRITTEN for the world where Step 10 landed.
 
-        There is no record-level carrier until Step 10, so the honest
-        projection is an empty collection. Inventing a placeholder would be a
-        fabricated measurement.
+        Until P2b this said "the builder always leaves it empty, because no
+        record carrier exists". The carrier exists now, so that sentence would
+        assert the opposite of the shipped contract. What survives — and what
+        was the real content all along — is that evidence appears ONLY under a
+        DECLARED set: an output carrying no `secondary_metric_specs` stamp
+        projects nothing, no matter what its records hold. That covers both a
+        legacy output and a run of a task with no secondaries, and it is what
+        keeps TIDMAD's rendered bytes at zero.
 
         The FULLY-SCORED case is the one that matters and was missing at
         first: mutation C6-3 fabricated a secondary only for records carrying
         a `metric_result`, and the original bare-record fixture never reached
-        that branch. A "leaves it empty" claim has to be made on the record
-        shape production actually produces.
+        that branch. The claim has to be made on the record shape production
+        actually produces.
+
+        The positive half — that a STAMPED output projects scored / refused /
+        unavailable correctly — is owned by
+        `test_step10_p2b_c3_secondary_projection.py`.
         """
         summary = tuning_output_to_model_run_summary(
             _output(_record("r", **record_kwargs)), order=ORDER
         )
+        assert _output(_record("r")).secondary_metric_specs is None
         assert summary.secondary_metrics == []
 
     def test_the_builder_does_not_read_undeclared_record_keys(self):
-        """MUTATION TARGET: reading a key Step 10 has not defined yet.
+        """MUTATION TARGET: reading a key no schema has defined.
 
         `ExperimentRecord` ignores extra keys, so a builder that speculatively
-        read `secondary_metric_results` would appear to work on a hand-made
-        fixture and silently do nothing in production — a hidden contract.
+        read one would appear to work on a hand-made fixture and silently do
+        nothing in production — a hidden contract.
+
+        Step 10 / P2b KEPT this mutation and moved its payload. The original
+        fabricated `secondary_metric_results`, which P2b C2 turned into a real
+        declared carrier the projection is now SUPPOSED to read; continuing to
+        use it would assert the opposite of the shipped contract. The claim
+        being pinned is unchanged — evidence reaches the summary through a
+        DECLARED carrier or not at all — so the payload moves to a key that
+        remains undeclared and always will.
         """
+        undeclared = "tertiary_metric_results"
+        assert undeclared not in ExperimentRecord.model_fields, (
+            f"{undeclared!r} became a real field; pick another undeclared key "
+            "rather than weakening this mutation"
+        )
         record = _record("r")
         object.__setattr__(
             record,
             "__dict__",
-            {**record.__dict__, "secondary_metric_results": [{"metric_id": "sneaky"}]},
+            {**record.__dict__, undeclared: [{"metric_id": "sneaky"}]},
         )
         summary = tuning_output_to_model_run_summary(_output(record), order=ORDER)
         assert summary.secondary_metrics == [], (
-            "the builder read a record key that Step 10 owns; secondaries reach "
-            "the summary through the Step-10 carrier or not at all"
+            "the builder read a record key no schema declares; evidence reaches "
+            "the summary through a declared carrier or not at all"
         )
 
 
@@ -391,6 +421,22 @@ class TestSecondaryMetricEvidence:
 
 
 class TestSecondariesCannotReachOrdering:
+    """The observational invariant, over EVERY surface that handles secondaries.
+
+    Step 10 / P2b C0 extends the scanned set. Until P2b, secondaries existed
+    only on the interpreter side, so scanning the interpreter was the whole
+    surface. P2b gives them a production lifecycle — declared at composition,
+    bound for the run, evaluated at the tuner's scoring point, carried on the
+    record and the output — and every one of those files is a place where a
+    "helpful" ordering line could give a secondary a vote.
+
+    An invariant whose scope is extended AFTER the code exists cannot prove the
+    extension found anything, which is why the extension lands in C0, green at
+    base, with `test_the_scope_extension_is_live` planting an offender in a
+    NEWLY-scanned file and requiring it to be caught.
+    """
+
+    #: The Step-09a surface: where secondary EVIDENCE is projected and ranked.
     INTERPRETER_FILES: ClassVar[list[str]] = [
         "nodes/result_interpretation_agent/result_interpretation_agent.py",
         "nodes/result_interpretation_agent/evidence.py",
@@ -398,6 +444,25 @@ class TestSecondariesCannotReachOrdering:
         "nodes/result_interpretation_agent/prediction.py",
         "nodes/interpretation_helpers.py",
     ]
+
+    #: The Step-10 / P2b production surface: declaration, binding, evaluation
+    #: and transport. Named from the child design's measured touch set (§2.7);
+    #: files P2b ends up not modifying stay listed deliberately — the claim is
+    #: about the whole lifecycle, not about one diff.
+    PRODUCTION_FILES: ClassVar[list[str]] = [
+        "workflows/task_composition.py",
+        "execute_tools/evaluation_metric.py",
+        "nodes/ml_hyperparameter_tune_agent/execution.py",
+        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
+        "nodes/ml_hyperparameter_tune_agent/contracts.py",
+        "nodes/ml_hyperparameter_tune_agent/records.py",
+        "nodes/ml_hyperparameter_tune_agent/policy.py",
+        "agent/schemas/hyperparam_tuning.py",
+        "agent/schemas/interpretation.py",
+        "agent/prompt_templates/interpretation/rendering.py",
+    ]
+
+    SCANNED_FILES: ClassVar[list[str]] = INTERPRETER_FILES + PRODUCTION_FILES
 
     @staticmethod
     def _secondaries_in_ordering_expressions(source: str) -> list[str]:
@@ -411,15 +476,37 @@ class TestSecondariesCannotReachOrdering:
         a test, which is the tail wagging the dog.
 
         The rule as actually claimed is narrower and checkable: a secondary
-        metric may not appear as an operand of a comparison, as an argument to
-        a `MetricOrder` method, or as a sort key.
+        metric may not appear as an operand of an ORDER comparison, as an
+        argument to a `MetricOrder` method, or as a sort key.
+
+        "ORDER comparison" — `<`, `<=`, `>`, `>=` — is a Step 10 / P2b C1
+        refinement (IR-P2b-3), made against evidence rather than to make a
+        test green. Until P2b, no production line touched a secondary at all,
+        so flagging EVERY comparison cost nothing. P2b gives secondaries a
+        production lifecycle, and the first thing it produced was
+        `resolve_bound_run_secondary_metrics() != composition.secondary_metrics`
+        in `verify_composition_is_bound` — a binding-integrity check written in
+        the same `!=` idiom the line directly below it uses for `task_config`.
+        That is not an ordering decision, and rewriting it into a helper purely
+        to dodge an AST rule is the tail wagging the dog this docstring already
+        warns about.
+
+        Equality and membership are not thereby unguarded. A ranking has to
+        produce an ORDER somewhere — an order comparison, an extremum call, a
+        sort key or a `MetricOrder` method — and all four remain flagged; an
+        `==` tie-break that changed a ranking would still have to pass through
+        one of them, and `test_flipping_every_secondary_value_changes_no_
+        ordering_output` is the behavioural backstop for whatever the AST
+        cannot see.
         """
+        _ORDER_OPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE)
         offenders: list[str] = []
         tree = ast.parse(source)
         for node in ast.walk(tree):
             expression = None
             if isinstance(node, ast.Compare):
-                expression = node
+                if any(isinstance(op, _ORDER_OPS) for op in node.ops):
+                    expression = node
             elif isinstance(node, ast.Call):
                 fn = node.func
                 is_order_call = isinstance(fn, ast.Attribute) and re.search(
@@ -439,10 +526,14 @@ class TestSecondariesCannotReachOrdering:
 
     def test_no_ordering_expression_mentions_a_secondary_metric(self):
         offenders: dict[str, list[str]] = {}
-        for rel in self.INTERPRETER_FILES:
-            hits = self._secondaries_in_ordering_expressions(
-                (REPO_ROOT / rel).read_text(encoding="utf-8")
+        for rel in self.SCANNED_FILES:
+            path = REPO_ROOT / rel
+            assert path.is_file(), (
+                f"the invariant names {rel!r}, which does not exist. A scanned "
+                "file that silently disappears turns this census into a test "
+                "that passes because it looked at nothing."
             )
+            hits = self._secondaries_in_ordering_expressions(path.read_text(encoding="utf-8"))
             if hits:
                 offenders[rel] = hits
         assert offenders == {}, (
@@ -451,17 +542,64 @@ class TestSecondariesCannotReachOrdering:
             f"{offenders}"
         )
 
+    def test_the_scope_extension_is_live(self):
+        """The P2b scope extension, proven rather than declared.
+
+        `test_a_planted_offender_is_caught` proves the DETECTOR works on a
+        string. This proves the detector is actually pointed at the Step-10
+        production files: it reads each newly-scanned file from disk, appends
+        an offending expression, and requires a hit. A scope list that named a
+        file the census never opened would pass the former and fail this.
+        """
+        plants = {
+            "order-method": (
+                "\n\ndef _p2b_scope_probe(models, order):\n"
+                "    return order.best(models, key=lambda m: m.secondary_metric_results[0].scalar)\n"
+            ),
+            # The narrowed Compare branch (IR-P2b-3), proven live on disk too.
+            "order-comparison": (
+                "\n\ndef _p2b_scope_probe(a, b):\n"
+                "    return a.secondary_metric_results[0].scalar > b.secondary_metric_results[0].scalar\n"
+            ),
+        }
+        for rel in self.PRODUCTION_FILES:
+            source = (REPO_ROOT / rel).read_text(encoding="utf-8")
+            for shape, planted in plants.items():
+                assert self._secondaries_in_ordering_expressions(source + planted), (
+                    f"{rel} is listed as scanned, but a planted {shape} over a "
+                    "secondary metric is not detected in it"
+                )
+
     @pytest.mark.parametrize(
         "planted",
         [
             "def f(models, order):\n    return order.best(models, key=lambda m: m.secondary_metrics[0].result.scalar)\n",
             "def f(a, b):\n    return a.secondary_metrics[0].result.scalar > b.secondary_metrics[0].result.scalar\n",
+            "def f(a, b):\n    return a.secondary_metrics[0].result.scalar < b.secondary_metrics[0].result.scalar\n",
+            "def f(a, b):\n    return a.secondary_metrics[0].result.scalar >= b.secondary_metrics[0].result.scalar\n",
+            "def f(a, b):\n    return a.secondary_metrics[0].result.scalar <= b.secondary_metrics[0].result.scalar\n",
             "def f(models):\n    models.sort(key=lambda m: m.secondary_metrics[0].result.scalar)\n",
+            "def f(models):\n    return max(models, key=lambda m: m.secondary_metric_results[0].scalar)\n",
+            "def f(models):\n    return sorted(models, key=lambda m: m.secondary_metric_results[0].scalar)\n",
         ],
-        ids=["order-method", "comparison", "sort-key"],
+        ids=["order-method", "gt", "lt", "ge", "le", "sort-key", "max", "sorted"],
     )
     def test_a_planted_offender_is_caught(self, planted):
         assert self._secondaries_in_ordering_expressions(planted) != []
+
+    def test_a_binding_integrity_check_is_deliberately_not_an_offender(self):
+        """IR-P2b-3, pinned so the narrowing is a decision and not a drift.
+
+        This is the exact shape P2b's `verify_composition_is_bound` uses, and
+        the exact shape the pre-P2b `task_config` check beside it already used.
+        Equality against a bound family decides SAMENESS, never an order.
+        """
+        legitimate = (
+            "def verify(composition):\n"
+            "    if resolve_bound_run_secondary_metrics() != composition.secondary_metrics:\n"
+            "        unbound.append('secondary_metrics')\n"
+        )
+        assert self._secondaries_in_ordering_expressions(legitimate) == []
 
     def test_the_projection_itself_is_not_flagged(self):
         """Anti-over-reach: assigning secondaries in a scope that also ranks is
@@ -505,28 +643,95 @@ class TestSecondariesCannotReachOrdering:
 
 
 class TestQ097StaysBinding:
-    """The upstream half is Step 10's. These pin that C6 did not drift into it."""
+    """Q-09-7 = B's upstream half — INVERTED by Step 10 / P2b, not deleted.
 
-    def test_no_secondary_field_was_added_to_the_record_schema(self):
-        assert not [name for name in ExperimentRecord.model_fields if name.startswith("secondary_")]
+    Until P2b these asserted that the record schema, the tuning output and
+    production evaluation carried NO secondary anything: Step 09a deliberately
+    built the receiving side empty, and a field appearing early would have meant
+    C6 had drifted into Step 10's territory. P2b C2 is that territory, so each
+    guard now asserts the POSITIVE claim it was holding the place for: the
+    reserved names exist, EXACTLY those names, in exactly one owner each.
 
-    def test_no_secondary_field_was_added_to_the_tuning_output(self):
-        assert not [
-            name for name in HyperparamTuningOutput.model_fields if name.startswith("secondary_")
+    The inversion is what keeps the original claim testable. "No secondary
+    field" and "exactly the three reserved secondary fields" are both falsified
+    by the same defect — a fourth field, a differently-spelled field, or a
+    speculative reader elsewhere in the tree.
+    """
+
+    def test_the_record_carries_EXACTLY_the_three_reserved_names(self):
+        """The names come from `SecondaryMetricEvidence`'s own docstring, which
+        reserved them verbatim in Step 09a. A fourth carrier here would be the
+        fourth scientific state Q-P2b-2 explicitly forbids."""
+        assert sorted(
+            name for name in ExperimentRecord.model_fields if name.startswith("secondary_")
+        ) == [
+            "secondary_metric_errors",
+            "secondary_metric_refusals",
+            "secondary_metric_results",
         ]
 
-    def test_no_production_module_evaluates_a_secondary_metric(self):
-        """A loader or an evaluator is the shape Step 10's work would take."""
+    def test_the_tuning_output_carries_EXACTLY_the_declared_spec_stamp(self):
+        assert [
+            name for name in HyperparamTuningOutput.model_fields if name.startswith("secondary_")
+        ] == ["secondary_metric_specs"]
+
+    @staticmethod
+    def _secondary_evaluators_in(source: str) -> list[str]:
+        """Every `def` whose NAME says it evaluates/scores/loads a secondary.
+
+        One predicate over the whole name, used by both the census and its
+        probe — a probe that restated the rule would be testing a copy.
+        `secondar` rather than `secondary` so a plural (`_score_secondaries`)
+        cannot slip past, and no anchoring so a prefix cannot either (F-P2b-4).
+        """
+        return [
+            name
+            for name in re.findall(r"def (\w+)\(", source)
+            if "secondar" in name.lower() and re.search(r"evaluat|scor|load", name, re.I)
+        ]
+
+    def test_the_secondary_evaluator_has_exactly_one_owner(self):
+        """The C2 half of the inversion (C1 inverted the binder half into
+        `tests/unit/workflows/test_step10_p2b_c1_secondary_declaration.py`).
+
+        A SECOND evaluator would be a second place a secondary outcome could
+        come into existence — and the whole frozen exception taxonomy lives
+        inside this one function, so a second one would silently not have it.
+
+        F-P2b-4: the Step-09a census used two anchored alternations, one of
+        which required the name to BEGIN with `evaluat`/`load`. The real
+        evaluator is `_evaluate_secondary_metrics`, and a single leading
+        underscore made the guard blind to it — so the census would have
+        reported "no production module evaluates a secondary metric" while one
+        did. The predicate below is stated once, over the whole name, with no
+        anchoring and no assumption about which half comes first.
+        """
         offenders: dict[str, list[str]] = {}
         for root in ("nodes", "agent", "core", "execute_tools", "workflows"):
             for path in sorted((REPO_ROOT / root).rglob("*.py")):
-                source = path.read_text(encoding="utf-8")
-                hits = re.findall(
-                    r"def (\w*secondary\w*(?:evaluat|scor|load|bind)\w*)\(", source, re.I
-                )
-                hits += re.findall(r"def ((?:evaluat|load|bind)\w*secondary\w*)\(", source, re.I)
+                hits = self._secondary_evaluators_in(path.read_text(encoding="utf-8"))
                 if hits:
-                    offenders[path.relative_to(REPO_ROOT).as_posix()] = hits
-        assert offenders == {}, (
-            f"secondary-metric evaluation/binding is Step 10's, not Step 09a's: {offenders}"
-        )
+                    offenders[path.relative_to(REPO_ROOT).as_posix()] = sorted(hits)
+        assert offenders == {
+            "nodes/ml_hyperparameter_tune_agent/execution.py": ["_evaluate_secondary_metrics"]
+        }, f"secondary-metric evaluation must have exactly one owner: {offenders}"
+
+    @pytest.mark.parametrize(
+        "planted",
+        [
+            "def _evaluate_secondary_metrics(x):\n    pass\n",
+            "def evaluate_secondary(x):\n    pass\n",
+            "def _secondary_metric_scoring(x):\n    pass\n",
+            "def load_secondary_metrics(x):\n    pass\n",
+            "def __score_secondaries(x):\n    pass\n",
+        ],
+        ids=["private-evaluator", "public-evaluator", "scorer", "loader", "plural-dunder"],
+    )
+    def test_the_evaluator_census_sees_through_a_name_prefix(self, planted, tmp_path):
+        """F-P2b-4's anti-vacuity half.
+
+        The defect the old regex had was invisible precisely because the census
+        was green. Each shape below is a second evaluator a future commit could
+        plausibly add; all five must be seen.
+        """
+        assert self._secondary_evaluators_in(planted), f"the census would not have seen {planted!r}"

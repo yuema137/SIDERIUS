@@ -937,6 +937,17 @@ def finalize_run_output(
         # second one. Passed as the instance: the field's validator accepts
         # a MetricSpec unchanged and rebinds only a mapping.
         "metric_spec": bindings.run_metric.spec,
+        # Step 10 / P2b — the run's DECLARED secondary set, stamped from the
+        # same bound authorities and by the same single writer as `metric_spec`
+        # above. This is what lets the interpreter report a declared secondary
+        # that produced nothing as a NAMED ABSENCE rather than silently
+        # omitting it. `None` when the run declared none, which reads
+        # identically to a legacy output that has no stamp at all.
+        "secondary_metric_specs": (
+            [metric.spec for metric in bindings.run_secondary_metrics]
+            if bindings.run_secondary_metrics
+            else None
+        ),
     }
 
     output_path = os.path.join(workspace, f"run_output_{run_name}.json")
@@ -998,6 +1009,16 @@ def finalize_run_output(
             # than passed as an instance because this dict is written with
             # `json.dump(..., default=str)`, which would stringify the model.
             "metric_spec": bindings.run_metric.spec.model_dump(),
+            # Step 10 / P2b — the same rule, for the same reason: which
+            # secondaries this run DECLARED is a launch fact and does not stop
+            # existing because the tuner later failed. Dumped rather than
+            # passed as instances because this dict is written with
+            # `json.dump(..., default=str)`, which would stringify the models.
+            "secondary_metric_specs": (
+                [metric.spec.model_dump() for metric in bindings.run_secondary_metrics]
+                if bindings.run_secondary_metrics
+                else None
+            ),
             "_partial_reason": f"{type(e).__name__}: {e}",
         }
         with open(output_path, "w", encoding="utf-8") as f:
@@ -1085,6 +1106,9 @@ def build_attempt_record(
     inference_time = executed.inference_time
     is_degenerate = executed.is_degenerate
     metric_payload = executed.metric_payload
+    secondary_metric_results = executed.secondary_metric_results
+    secondary_metric_refusals = executed.secondary_metric_refusals
+    secondary_metric_errors = executed.secondary_metric_errors
     score_results = executed.score_results
     score_table = executed.score_table
     scoring_time = executed.scoring_time
@@ -1153,6 +1177,25 @@ def build_attempt_record(
             "memory_update": reflection.get("memory_update"),
         },
     }
+    # Step 10 / P2b — the observational secondaries' three outcomes, written
+    # only when non-empty. This builder controls the record dict key-by-key
+    # (`LocalRecorder.save_record` is a pass-through), so a run that declared
+    # no secondary produces a record byte-identical to its pre-P2b self rather
+    # than three empty containers. Where they ARE written they are dumped in
+    # json mode, exactly as `metric_result` above is, so the persisted record
+    # re-validates. `per_sample` is NOT excluded here as it is for the primary:
+    # a secondary has no `file_vector` twin on the record to point at, so
+    # dropping it would lose the evidence outright instead of deduplicating it.
+    if secondary_metric_results:
+        final_record["secondary_metric_results"] = [
+            result.model_dump(mode="json") for result in secondary_metric_results
+        ]
+    if secondary_metric_refusals:
+        final_record["secondary_metric_refusals"] = [
+            refusal.model_dump(mode="json") for refusal in secondary_metric_refusals
+        ]
+    if secondary_metric_errors:
+        final_record["secondary_metric_errors"] = dict(secondary_metric_errors)
     # Phase J — surface pre-flight time-estimator context to the
     # planner via the next round's experiment_history. Only added
     # when the gate actually ran (chosen_time_budget was set);

@@ -50,7 +50,8 @@
     "termination_reason",
     "started_at",
     "finished_at",
-    "metric_spec"
+    "metric_spec",
+    "secondary_metric_specs"
   ],
   "interpretation_output": [
     "model_types",

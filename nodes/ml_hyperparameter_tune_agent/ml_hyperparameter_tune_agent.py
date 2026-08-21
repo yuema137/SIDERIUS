@@ -54,6 +54,7 @@ from execute_tools.evaluation_metric import (
     EvaluationMetric,
     derive_tidmad_metric,
     resolve_bound_run_metric,
+    resolve_bound_run_secondary_metrics,
 )
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.schemas import (
@@ -549,6 +550,19 @@ class HyperparamTuningAgent:
             run_profile, run_deliverable_spec
         )
 
+        # --- The run's DECLARED observational secondaries (Step 10 / P2b) ---
+        # Acquired at the SAME site as the primary, from the same composition,
+        # and — unlike the primary — with no legacy branch: there is nothing to
+        # fall back to, because "this run declared no secondary" is the answer
+        # rather than a default. An un-composed run therefore gets `()`, and
+        # NOTHING anywhere derives a secondary from task identity.
+        #
+        # These are OBSERVATIONAL. They are evaluated wherever the primary is
+        # (Q-P2b-1) and transported onto the record and the output, but no
+        # ordering decision may read them: `run_order` below is the run's ONE
+        # order authority and it interprets the PRIMARY spec only.
+        run_secondary_metrics = resolve_bound_run_secondary_metrics()
+
         # --- The run's ONE order authority (Step 07 PR 07b) ---
         # Every ordering decision this tuner makes about the golden metric —
         # trial winner, skip/bypass orientation and their disabled sentinels,
@@ -1006,6 +1020,7 @@ class HyperparamTuningAgent:
             run_model_io=run_model_io,
             run_deliverable_spec=run_deliverable_spec,
             run_metric=run_metric,
+            run_secondary_metrics=run_secondary_metrics,
             run_order=run_order,
             run_task_render=run_task_render,
             run_name=run_name,

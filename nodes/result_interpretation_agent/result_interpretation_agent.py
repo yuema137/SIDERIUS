@@ -39,6 +39,7 @@ from agent.schemas.interpretation import (
     InterpretationInput,
     InterpretationOutput,
     MetricIdentity,
+    SecondaryMetricEvidence,
 )
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from execute_tools.metric_order import MetricOrder
@@ -356,13 +357,47 @@ class ResultInterpretationAgent:
             _cached_counts = (_entry.get("_stats") or {}).get("failure_counts")
             if _cached_counts is not None:
                 per_model_failure_counts[_mt] = _cached_counts
-        # Present-when-present. Empty in production until Step 10 carries
-        # secondaries upstream (Q-09-7 = B); L1 fixtures supply them directly.
+        # Present-when-present, and — Step 10 / P2b C3 — now with the cache
+        # half `failure_counts` above has always had (audit B-6). Before P2b
+        # this projection had NEITHER half, so the Stability-Filter reuse path
+        # (a model that goes quiet for an iteration, no fresh LLM call) was
+        # precisely the path that lost the evidence.
         per_model_secondary_metrics: dict[str, Any] = {
             s_.model_type: list(s_.secondary_metrics)
             for s_ in inp.summaries
             if s_.secondary_metrics
         }
+        for _mt, _entry in inp.model_knowledge_cache.items():
+            if _mt in per_model_secondary_metrics:
+                continue
+            _cached_secondaries = (_entry.get("_stats") or {}).get("secondary_metrics")
+            if not _cached_secondaries:
+                # Missing is ABSENT, never fabricated: a cache entry predating
+                # this key, or a run that declared no secondary, both correctly
+                # contribute nothing.
+                continue
+            try:
+                per_model_secondary_metrics[_mt] = [
+                    SecondaryMetricEvidence.model_validate(entry) for entry in _cached_secondaries
+                ]
+            except Exception as exc:
+                # A corrupt cached payload degrades to absence rather than
+                # crashing the interpretation — and says so, because silently
+                # dropping evidence is how a carry asymmetry hides.
+                #
+                # Deliberately broad (IR-P2b-6). The narrow
+                # `(ValidationError, TypeError)` written first was WRONG, and a
+                # test caught it: `MetricSpecField`'s validator reaches
+                # `metric_spec_from_declaration`, which raises a bare `KeyError`
+                # on a spec dict missing `scoreability`. This parses untrusted
+                # JSON from a previous iteration's cache file, where the
+                # requirement is "never a crash" — enumerating the exception
+                # types a nested declaration parser may raise is a promise this
+                # call site cannot keep.
+                print(
+                    f"  [interpretation] discarding unreadable cached secondary "
+                    f"metrics for {_mt!r}: {type(exc).__name__}: {exc}"
+                )
 
         # Serialize expert advice (soft edge input)
         expert_advice_str = serialize_expert_advice(inp.expert_advice) if inp.expert_advice else ""
@@ -532,6 +567,22 @@ class ResultInterpretationAgent:
                         fp.model_dump() for fp in per_model_collapse_fingerprints.get(mt, [])
                     ],
                 }
+                # Step 10 / P2b C3 — the SAME write beside `failure_counts`, for
+                # the same reason (audit B-6): a model that goes quiet keeps its
+                # secondary evidence across iterations without a fresh LLM call.
+                # Deliberately the `failure_counts` idiom — typed model_dump
+                # here, validated read-back on the reuse path — and NOT a third
+                # carry representation.
+                #
+                # Written only when there IS evidence, unlike `failure_counts`,
+                # which records `None` as a meaningful "no counts". That is the
+                # frozen zero-secondary invariant (design §4.7): a run that
+                # declared no secondary creates no `_stats` secondary key at
+                # all, so its cache entry is byte-identical to its pre-P2b self.
+                if summary.secondary_metrics:
+                    new_stats["secondary_metrics"] = [
+                        evidence.model_dump() for evidence in summary.secondary_metrics
+                    ]
 
                 if cache_entry is None:
                     # Cache miss: build initial entry from the LLM response.

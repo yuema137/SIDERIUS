@@ -18,6 +18,16 @@ metric:
     module: execute_tools.evaluation_metric
     symbol: AccuracyMetric
 
+# Step 10 / P2b — the observational secondary. EXACTLY macro_f1: log_loss
+# stays D16 / Step-06 territory and is deliberately not declarable here
+# (Q-10-4 = A). Same {declaration, implementation} shape as `metric` above,
+# resolved by the same authority.
+secondary_metrics:
+  - declaration: ../../../../examples/oxford_iiit_pet/declared/metric_macro_f1.json
+    implementation:
+      module: execute_tools.evaluation_metric
+      symbol: AccuracyMetric
+
 task_health:
   config: ../../../../examples/oxford_iiit_pet/declared/task_health.yaml
 

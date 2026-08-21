@@ -1355,7 +1355,10 @@
           "training_psd_segments": null,
           "trial_portion": null,
           "trial_strategy": null,
-          "validation_workload_ceiling": null
+          "validation_workload_ceiling": null,
+          "secondary_metric_results": [],
+          "secondary_metric_refusals": [],
+          "secondary_metric_errors": {}
         }
       ],
       "attempts_per_formal_round": 5,
@@ -1429,7 +1432,8 @@
       "status": "completed",
       "termination_reason": "completed",
       "total_attempts": 3,
-      "trial_validity_feedback": null
+      "trial_validity_feedback": null,
+      "secondary_metric_specs": null
     }
   ],
   "startup_side_effect_order": [

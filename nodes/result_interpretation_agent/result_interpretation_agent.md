@@ -68,7 +68,7 @@ absent family emits no header rather than a fabricated "none observed":
 |---|---|---|
 | `Metric               :` | `ModelRunSummary.metric_identity` (09a C2) | omitted (the run-level line still names the metric) |
 | `### Training dynamics` | `best_training_diagnosis` / `formal_training_diagnosis` (09a C6), rendered per ROLE through the 07b line grammar | omitted; a PRESENT but degenerate diagnosis still renders ("none recorded" / "invalid (non-finite)") |
-| `### Secondary metrics` | `secondary_metrics` (09a C6) — each with its OWN id and direction; `scored` / `not scoreable (<contract id>)` / `declared, not evaluated this run` | omitted (production is empty until Step 10 carries secondaries) |
+| `### Secondary metrics` | `secondary_metrics` (09a C6, populated by Step 10 / P2b) — each with its OWN id and direction; `scored` / `not scoreable (<contract id>)` / `declared, not evaluated this run` | omitted when the run declared no secondary (TIDMAD): no stamp ⇒ no rows ⇒ no header and no bytes |
 | `### Record outcomes` | `failure_counts` (09a C6) — keys from existing authority vocabularies only, zero counts omitted | omitted; a cached model with no stored counts is ABSENT, never "0 failures" |
 | `Prediction Track Record` (synthesis + the proposer) | the v1/v2 pools (09a C4/C5) rendered by ONE version-aware authority | omitted when no comparable prediction exists |
 
@@ -426,10 +426,11 @@ refusal — both stopped at the tuner's records.
 | `ModelRunSummary.best_training_diagnosis` | the BEST record's `training_diagnosis`, verbatim | one per ROLE: a best trial round and the formal round are different experiments |
 | `ModelRunSummary.formal_training_diagnosis` | the FORMAL record's, verbatim | the interpreter never re-derives a diagnosis (parent §7) |
 | `ModelRunSummary.failure_counts` | `RecordFailureCounts` over the model's records | counted by EXISTING vocabularies only |
-| `ModelRunSummary.secondary_metrics` | — | EMPTY in production (see below) |
+| `ModelRunSummary.secondary_metrics` | the run's DECLARED secondaries (the output's `secondary_metric_specs` stamp) joined against the BEST record's carriers | live since Step 10 / P2b (see below) |
 | `InterpretationOutput.per_model_failure_counts` | the above, per model | threaded into BOTH digest paths |
-| `InterpretationOutput.per_model_secondary_metrics` | the above, per model | empty until Step 10 |
+| `InterpretationOutput.per_model_secondary_metrics` | the above, per model | fresh from the summaries, plus a `_stats` restore for models that go quiet |
 | `_stats["failure_counts"]` | the cache | so a model that goes quiet keeps its counts, exactly as `round_health_counts` does |
+| `_stats["secondary_metrics"]` | the cache | Step 10 / P2b — the SAME write, for the same reason (audit B-6). Written only when there IS evidence: a run that declared no secondary creates no key at all |
 
 **No new failure taxonomy.** `RecordFailureCounts` counts `status`,
 `TrainingDiagnosis.state`, `ValidationState`, `NotScoreableResult`'s OPAQUE
@@ -440,15 +441,45 @@ without a SIDERIUS source change. `diagnosis_missing` is counted separately
 from `absent`: "no diagnosis object" and "the diagnosis says the history was
 absent" are different facts about different records.
 
-**Secondary metrics are observational, and empty in production.** Q-09-7 = B:
-Step 09 owns the interpreter-side CONTRACT; the upstream half — tuner-side
-evaluation, `ExperimentRecord` persistence, workflow transport — is Step 10's.
-There is therefore no record-level carrier to read, and the builder leaves the
-collection EMPTY rather than inventing values or speculatively reading keys
-Step 10 has not defined. `SecondaryMetricEvidence` distinguishes `scored`,
-`refused` and `unavailable`, because a declared-but-unavailable secondary is a
-NAMED absence and never a fabricated number. Each carries its OWN direction —
-DAVIS declares `psnr` (higher) beside `mse` (lower).
+**Secondary metrics are observational, and live since Step 10 / P2b.**
+Q-09-7 = B gave Step 09 the interpreter-side CONTRACT and Step 10 the upstream
+half — tuner-side evaluation, `ExperimentRecord` persistence, transport. P2b
+landed it, so the builder now PROJECTS rather than leaving the collection
+empty.
+
+The projection is `_project_secondary_metrics(output, best_rec)`: the DECLARED
+set comes from the output's `secondary_metric_specs` stamp, and the outcomes
+from the record the summary's headline `best_denoising_score` came from — so a
+secondary number always describes the same experiment as the score beside it.
+Four states result:
+
+| record state, under a stamp | projects |
+|---|---|
+| a matching `secondary_metric_results` entry | `scored` |
+| a matching `secondary_metric_refusals` entry | `refused` |
+| neither | `unavailable` — a NAMED absence |
+| the secondary CRASHED (`secondary_metric_errors`) | `unavailable`; the diagnostic stays on the record and never becomes a fourth scientific state |
+
+An output with **no stamp** — a legacy output, or a run of a task that
+declares none — projects `[]` and therefore renders zero bytes, even when its
+records carry secondary evidence. Reading the record anyway would resurrect
+the hidden contract Q-09-7 = B forbade, and it is what keeps TIDMAD's prompt
+bytes unchanged.
+
+`SecondaryMetricEvidence` still distinguishes exactly `scored`, `refused` and
+`unavailable`. Each carries its OWN direction — DAVIS declares `psnr` (higher)
+and `mae` (lower) beside a `mse` primary that is lower-is-better, and each is
+rendered with its own direction words.
+
+**The quiet-iteration carry (audit B-6, closed by P2b).** Before P2b,
+`per_model_secondary_metrics` was built from the summaries only, with no
+`_stats` restore — so the Stability-Filter reuse path (a model that goes quiet
+for an iteration and gets no fresh LLM call) was precisely the path that lost
+the evidence, while `failure_counts` beside it survived. Both now ride the
+same mechanism: typed `model_dump` on write, VALIDATED read-back on the reuse
+path. A cache predating the key contributes absence, never zero; a corrupt
+payload degrades to absence with a printed warning rather than crashing the
+interpretation.
 
 Secondaries can never reach a ranking. Enforced structurally (an AST census:
 no secondary may be an operand of a comparison, an argument to a `MetricOrder`

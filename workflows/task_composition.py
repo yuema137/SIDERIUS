@@ -95,6 +95,7 @@ _MANIFEST_KEYS = frozenset(
         "task_data_path",
         "dataset_profile",
         "metric",
+        "secondary_metrics",
         "task_health",
         "interpretation_blocks",
         "task_config",
@@ -109,6 +110,13 @@ _MANIFEST_KEYS = frozenset(
 _REQUIRED_KEYS = frozenset(
     {"task_data_path", "dataset_profile", "metric", "task_health", "task_config"}
 )
+"""``secondary_metrics`` is deliberately NOT here (Step 10 / P2b §4.1).
+
+Health is required-as-a-STATEMENT because saying nothing about it resolves
+TIDMAD's family. Secondaries have no such default: the absence of the section
+means the run has none, which is a first-class state (TIDMAD's own), and
+requiring every manifest to write ``secondary_metrics: []`` would be ceremony
+that buys no safety."""
 
 
 class TaskCompositionError(ValueError):
@@ -187,6 +195,19 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+    secondary_metrics: tuple[EvaluationMetric, ...] = ()
+    """The run's DECLARED observational secondary metrics, in manifest order.
+
+    Step 10 / P2b. Each is an ordinary :class:`EvaluationMetric` resolved by
+    the SAME :func:`_compose_metric` authority the primary uses, carrying its
+    OWN direction — DAVIS declares ``psnr`` (higher) beside a ``mse`` primary
+    that is lower-is-better, and neither inherits from the other.
+
+    Defaulted to ``()`` so a manifest that declares none composes exactly as
+    it did before P2b, and so this carrier's existing nine fields keep their
+    positions. Secondaries are OBSERVATIONAL: nothing in this tuple may ever
+    become an operand of an ordering expression.
+    """
 
     def __post_init__(self) -> None:
         """Refuse mutable cross-iteration state, by DERIVED name set.
@@ -535,17 +556,24 @@ def _looks_like_instance(candidate: Any) -> bool:
 
 
 def _compose_metric(
-    section: dict[str, Any], manifest_dir: str
+    section: dict[str, Any], manifest_dir: str, where: str = "metric"
 ) -> tuple[EvaluationMetric, dict[str, Any], ResolvedPluginRef | None]:
     """Declaration JSON → ``MetricSpec`` → the declared implementation.
 
     The spec comes from ``metric_spec_from_declaration`` — the ONE
     spec-from-declaration authority (Step 06) — so this module adds no second
     way for a metric identity to come into existence.
+
+    ``where`` names the ROLE being composed in every fail-closed message.
+    It defaults to ``"metric"``, so the primary's messages are byte-identical
+    to their pre-P2b text; :func:`_compose_secondary_metrics` passes
+    ``"secondary_metrics[i]"`` so an operator reading a refusal is told which
+    declaration failed rather than being sent to the primary section. This
+    parameter is the whole reason P2b needs no second copy of the five
+    fail-closed branches below (Step 10 / P2b §3.1: reuse or STOP).
     """
     from execute_tools.evaluation_metric import EvaluationMetric, metric_spec_from_declaration
 
-    where = "metric"
     declaration_ref = _require(section, "declaration", where)
     declaration_path = _resolve_path(declaration_ref, manifest_dir)
     payload = _read_json(declaration_path, f"{where} declaration")
@@ -590,6 +618,86 @@ def _compose_metric(
             "that rewrites its own spec breaks the declaration's authority."
         )
     return metric, payload, plugin_ref
+
+
+def _compose_secondary_metrics(
+    raw: dict[str, Any], manifest_dir: str, primary_id: str
+) -> tuple[tuple[EvaluationMetric, ...], list[dict[str, Any]], list[ResolvedPluginRef], list[str]]:
+    """The OPTIONAL ``secondary_metrics`` list → resolved observational metrics.
+
+    Step 10 / P2b §4.1. Every entry has the same ``{declaration,
+    implementation}`` shape the ``metric`` section already uses and is
+    resolved by :func:`_compose_metric` ITSELF, so all five of its
+    fail-closed branches — unreadable or non-object declaration, invalid
+    spec, missing implementation mapping, non-``EvaluationMetric``
+    implementation, implementation that rewrites its own spec id — are
+    INHERITED rather than re-implemented. The only rules that are new here
+    are the two this list can violate and a single metric cannot: an id
+    declared twice, and an id that is already the primary's.
+
+    An absent section and an empty list are the same state: a task with no
+    secondaries, composing byte-identically to its pre-P2b self.
+
+    Returns ``(metrics, declarations, plugins, declaration_paths)`` in
+    manifest order — manifest order is SEMANTIC (it is what the fingerprint
+    and the output stamp preserve), so nothing here sorts.
+
+    Raises:
+        TaskCompositionError: the section is not a list, an entry is not a
+            mapping, an entry fails any inherited branch, an id repeats, or
+            an id collides with the primary's.
+    """
+    section = raw.get("secondary_metrics")
+    if section is None:
+        return (), [], [], []
+    if not isinstance(section, list):
+        raise TaskCompositionError(
+            f"section 'secondary_metrics' must be a LIST of "
+            f"{{declaration, implementation}} entries; got "
+            f"{type(section).__name__}. Order is semantic, which a mapping "
+            "cannot express."
+        )
+
+    metrics: list[EvaluationMetric] = []
+    declarations: list[dict[str, Any]] = []
+    plugins: list[ResolvedPluginRef] = []
+    declaration_paths: list[str] = []
+    seen: dict[str, int] = {}
+
+    for index, entry in enumerate(section):
+        where = f"secondary_metrics[{index}]"
+        if not isinstance(entry, dict):
+            raise TaskCompositionError(
+                f"{where} must be a mapping declaring 'declaration' and "
+                f"'implementation'; got {type(entry).__name__}."
+            )
+        metric, declaration, plugin_ref = _compose_metric(entry, manifest_dir, where)
+        metric_id = metric.spec.id
+        if metric_id == primary_id:
+            raise TaskCompositionError(
+                f"{where} declares metric id {metric_id!r}, which is already "
+                "this run's PRIMARY metric. A metric is either the quantity "
+                "the run is optimised against or an observational secondary "
+                "beside it — never both, because the same id would then reach "
+                "ordering through one role while claiming to be excluded from "
+                "it through the other."
+            )
+        if metric_id in seen:
+            raise TaskCompositionError(
+                f"{where} declares metric id {metric_id!r}, already declared "
+                f"by secondary_metrics[{seen[metric_id]}]. Secondary ids are "
+                "the keys every downstream carrier joins on — the record's "
+                "results/refusals/errors and the output's declared stamp — so "
+                "a duplicate would make 'which one is this' unanswerable."
+            )
+        seen[metric_id] = index
+        metrics.append(metric)
+        declarations.append(declaration)
+        if plugin_ref is not None:
+            plugins.append(plugin_ref)
+        declaration_paths.append(_resolve_path(_require(entry, "declaration", where), manifest_dir))
+
+    return tuple(metrics), declarations, plugins, declaration_paths
 
 
 def _compose_task_health(section: dict[str, Any], manifest_dir: str) -> TaskHealthBinding:
@@ -720,6 +828,7 @@ def compute_semantic_fingerprint(
     task_description: str,
     forward_contract: ForwardContract,
     plugins: tuple[ResolvedPluginRef, ...],
+    secondary_metric_declarations: list[dict[str, Any]] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -761,6 +870,16 @@ def compute_semantic_fingerprint(
             key=lambda identity: (identity["configured_ref"], identity["symbol"]),
         ),
     }
+    # Step 10 / P2b (delta D3) — ADDITIVE WHEN NON-EMPTY, never always-present.
+    # An unconditional key would move the fingerprint of EVERY composed run
+    # that exists today and fail their resumes for a reason with no scientific
+    # content — precisely what Q-P1-2's exclusion rule exists to prevent, and
+    # the same idiom as the run-invariants lock's "key ABSENT for legacy".
+    # Manifest ORDER is preserved: the declared set is what the output stamps
+    # and what the interpreter's absence rows are keyed on, so re-ordering two
+    # secondaries is a different declaration, not the same one shuffled.
+    if secondary_metric_declarations:
+        payload["secondary_metric_declarations"] = secondary_metric_declarations
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -825,6 +944,20 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     if metric_plugin is not None:
         plugins.append(metric_plugin)
 
+    # Step 10 / P2b — the OPTIONAL observational secondaries, resolved through
+    # the same `_compose_metric` authority immediately beside the primary so
+    # the collision check has the primary's id and nothing later can reorder
+    # the two.
+    (
+        secondary_metrics,
+        secondary_declarations,
+        secondary_plugins,
+        secondary_declaration_paths,
+    ) = _compose_secondary_metrics(raw, manifest_dir, metric.spec.id)
+    plugins.extend(secondary_plugins)
+    for _index, _path in enumerate(secondary_declaration_paths):
+        source_paths[f"secondary_metric_declaration[{_index}]"] = _path
+
     task_health_binding = _compose_task_health(
         _section(raw, "task_health", resolved_manifest), manifest_dir
     )
@@ -855,6 +988,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         task_description=description,
         forward_contract=contract,
         plugins=tuple(plugins),
+        secondary_metric_declarations=secondary_declarations,
     )
 
     return RunTaskComposition(
@@ -871,6 +1005,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
             source_paths=source_paths,
             plugins=tuple(plugins),
         ),
+        secondary_metrics=secondary_metrics,
     )
 
 
@@ -924,7 +1059,7 @@ def bind_run_task_composition(
         return
 
     from execute_tools.dataset_config import bind_dataset_profile
-    from execute_tools.evaluation_metric import bind_run_metric
+    from execute_tools.evaluation_metric import bind_run_metric, bind_run_secondary_metrics
     from execute_tools.task_data_path import bind_task_data_path
     from workflows.task_config import bind_task_config
 
@@ -932,6 +1067,11 @@ def bind_run_task_composition(
         stack.enter_context(bind_task_data_path(composition.task_data_path))
         stack.enter_context(bind_dataset_profile(composition.dataset_profile))
         stack.enter_context(bind_run_metric(composition.metric))
+        # Step 10 / P2b — the declared observational secondaries ride the SAME
+        # stack as the primary, so they unwind together on every path
+        # including an exception. A composed task with none binds `()`, which
+        # is the same value an un-composed run resolves.
+        stack.enter_context(bind_run_secondary_metrics(composition.secondary_metrics))
         stack.enter_context(bind_task_config(composition.task_config_values()))
         yield composition
 
@@ -955,7 +1095,10 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
         return
 
     from execute_tools.dataset_config import resolve_dataset_profile
-    from execute_tools.evaluation_metric import resolve_bound_run_metric
+    from execute_tools.evaluation_metric import (
+        resolve_bound_run_metric,
+        resolve_bound_run_secondary_metrics,
+    )
     from execute_tools.task_data_path import active_task_data_path
     from workflows.task_config import resolve_bound_task_config
 
@@ -966,6 +1109,13 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
         unbound.append("dataset_profile")
     if resolve_bound_run_metric() is not composition.metric:
         unbound.append("metric")
+    # Step 10 / P2b — identity per entry, in order. A composed run whose
+    # secondaries are NOT active would evaluate none of them and then stamp a
+    # declared set the records cannot possibly satisfy, projecting the whole
+    # declared family as a named absence: silent, and indistinguishable from a
+    # task that genuinely declared nothing.
+    if resolve_bound_run_secondary_metrics() != composition.secondary_metrics:
+        unbound.append("secondary_metrics")
     bound_config = resolve_bound_task_config()
     if bound_config is None or bound_config.get("task_description") != (
         composition.task_description

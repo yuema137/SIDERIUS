@@ -43,6 +43,12 @@ from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import (
     ScopeViolationError,
 )
+from execute_tools.evaluation_metric import (
+    EvaluationMetric,
+    MetricResult,
+    NotScoreableError,
+    NotScoreableResult,
+)
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
 from execute_tools.health_checks.runner import get_gates_for_position
 from execute_tools.health_checks.schemas import (
@@ -736,6 +742,89 @@ def run_training(
     )
 
 
+def _evaluate_secondary_metrics(
+    sandbox: Any,
+    secondaries: tuple[EvaluationMetric, ...],
+    *,
+    sample_set: Any,
+    anchor_map: dict,
+    s_max: float,
+    denoised_filename_fn: Any,
+) -> tuple[list[MetricResult], list[NotScoreableResult], dict[str, str]]:
+    """Evaluate the run's DECLARED OBSERVATIONAL secondaries. Step 10 / P2b C2.
+
+    A typed boundary rather than thirty more lines inside the scoring block:
+    it has explicit inputs, a typed three-part result, bounded side effects
+    (one diagnostic line per crash) and no access to the attempt's control
+    flow. That is what lets the attempt-parity claim be tested at all — the
+    caller can run the identical fixture with ``()`` and compare outcomes.
+
+    Called ONLY after a SUCCESSFUL primary result, so an ``error_scoring``
+    attempt carries no secondary entries by construction. Each secondary
+    evaluates the SAME deliverables through the SAME
+    ``sandbox.evaluate_metric`` route and the SAME ``denoised_filename_fn``
+    the primary just used — scoreability contract first, then arithmetic.
+
+    The per-secondary catch order is FROZEN (design §4.2, operator ruling
+    Q-P2b-2) and the ORDER is the contract:
+
+    ``NotScoreableError``
+        a scientific refusal by THAT metric's contract. Recorded as a typed
+        refusal; the attempt remains successful, because the primary already
+        produced its result.
+    ``ScopeViolationError``
+        **RE-RAISED**. DataScope validation runs inside every
+        ``evaluate_metric`` call, so a secondary CAN raise it, and the
+        existing outer handler owns it (terminate the run, non-retryable).
+        "Observational" bounds ordinary secondary outcomes; it never means a
+        framework-integrity failure gets swallowed. It must therefore be
+        caught BEFORE the generic clause, exactly as the primary's own
+        handlers are ordered.
+    any other ``Exception``
+        an implementation crash. Recorded as diagnostic PROVENANCE keyed by
+        metric id and printed, never coerced into a ``NotScoreableResult`` —
+        that would report a contract verdict nothing produced — and never
+        raised onward.
+
+    Returns:
+        ``(results, refusals, errors)``, keyed consistently by metric id so
+        no id can appear in two of them (the record's validator enforces it).
+
+    Raises:
+        ScopeViolationError: re-raised from a secondary call, unchanged.
+    """
+    results: list[MetricResult] = []
+    refusals: list[NotScoreableResult] = []
+    errors: dict[str, str] = {}
+
+    for secondary in secondaries:
+        metric_id = secondary.spec.id
+        try:
+            results.append(
+                sandbox.evaluate_metric(
+                    secondary,
+                    sample_set=sample_set,
+                    anchor_map=anchor_map,
+                    s_max=s_max,
+                    denoised_filename_fn=denoised_filename_fn,
+                )
+            )
+        except NotScoreableError as refusal:
+            refusals.append(refusal.result)
+            print(f"  [secondary] {metric_id}: not scoreable — {refusal}")
+        except ScopeViolationError:
+            raise
+        except Exception as exc:
+            errors[metric_id] = f"{type(exc).__name__}: {exc}"
+            # The diagnostic surface, never a machine-readable stdout
+            # contract and never a planner/reflector payload: a secondary
+            # crash is an operator-facing fact about the implementation, not
+            # evidence the model gets to reason from.
+            print(f"  [secondary] {metric_id}: evaluation crashed — {errors[metric_id]}")
+
+    return results, refusals, errors
+
+
 def run_inference_scoring_health(
     bindings: RunBindings,
     prepared: PreparedAttempt,
@@ -753,6 +842,7 @@ def run_inference_scoring_health(
     reference_scores = bindings.reference_scores
     run_deliverable_spec = bindings.run_deliverable_spec
     run_metric = bindings.run_metric
+    run_secondary_metrics = bindings.run_secondary_metrics
     run_name = bindings.run_name
     sandbox = bindings.sandbox
     workspace = bindings.workspace
@@ -832,6 +922,13 @@ def run_inference_scoring_health(
         )
         t0 = time.time()
         metric_payload: dict[str, Any] | None = None
+        # Step 10 / P2b — empty unless the primary scores AND the run declared
+        # secondaries. Initialised here, beside `metric_payload`, so every exit
+        # from the scoring block (including the two error paths below) carries
+        # the honest empty state rather than an unbound name.
+        secondary_results: list[MetricResult] = []
+        secondary_refusals: list[NotScoreableResult] = []
+        secondary_errors: dict[str, str] = {}
         # V8 hardening Domain 2a — wrap the entire scoring block.
         # Pre-V8, an exception in score_vector / denoising_score_skill
         # bubbled past the loop without writing a record, so the
@@ -913,6 +1010,25 @@ def run_inference_scoring_health(
                 # Per-sample evidence is a POINTER — `file_vector`
                 # on the same record — not a second copy (§5).
                 metric_payload = metric_result.model_dump(mode="json", exclude={"per_sample"})
+
+                # Step 10 / P2b — the DECLARED observational secondaries,
+                # evaluated wherever the primary evaluates (Q-P2b-1). This
+                # block runs for BOTH trial and formal modes, so no
+                # round-type branch is added here or anywhere else. It sits
+                # after the primary result on purpose: an attempt that never
+                # produced one carries no secondary entries at all.
+                (
+                    secondary_results,
+                    secondary_refusals,
+                    secondary_errors,
+                ) = _evaluate_secondary_metrics(
+                    sandbox,
+                    run_secondary_metrics,
+                    sample_set=eval_sample_set,
+                    anchor_map=anchor_map_data["anchors"],
+                    s_max=anchor_map_data["s_max"],
+                    denoised_filename_fn=_denoised_fn,
+                )
 
                 # Tuner-side gate evaluation (commit-5b).
                 # score_vector is pure scoring post-5a; the HealthGate
@@ -1164,6 +1280,9 @@ def run_inference_scoring_health(
         inference_time=inference_time,
         is_degenerate=is_degenerate,
         metric_payload=metric_payload,
+        secondary_metric_results=secondary_results,
+        secondary_metric_refusals=secondary_refusals,
+        secondary_metric_errors=secondary_errors,
         score_results=score_results,
         score_table=score_table,
         scoring_time=scoring_time,

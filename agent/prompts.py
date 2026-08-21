@@ -942,7 +942,22 @@ _CONDENSED_MEMORY_KEYS = frozenset(
 #   them for the interpreter. Do not widen or narrow this set casually — a
 #   change here is an LLM-visible byte change (Gate 1).
 _PLANNER_HIDDEN_RECORD_KEYS = frozenset(
-    {"metric_result", "metric_refusal", "training_history", "training_diagnosis"}
+    {
+        "metric_result",
+        "metric_refusal",
+        "training_history",
+        "training_diagnosis",
+        # Step 10 / P2b — secondary metrics are OBSERVATIONAL evidence for the
+        # INTERPRETER, persisted for it to project and render. They are not
+        # planner input: showing the planner a second, differently-directed
+        # number beside the one it is optimising invites it to trade the two
+        # off, which is exactly the vote secondaries must never get. The crash
+        # carrier is hidden for a further reason — it is an operator-facing
+        # diagnostic about the implementation, not a fact about the science.
+        "secondary_metric_results",
+        "secondary_metric_refusals",
+        "secondary_metric_errors",
+    }
 )
 
 

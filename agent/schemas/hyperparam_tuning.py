@@ -682,6 +682,80 @@ class ExperimentRecord(BaseModel):
         ),
     )
 
+    # --- Step 10 / P2b: the OBSERVATIONAL secondary metrics (ADDITIVE) ---
+    # The names are the ones the receiving side reserved for them verbatim
+    # (`SecondaryMetricEvidence`'s docstring, `agent/schemas/interpretation.py`),
+    # and the results/refusals pair deliberately mirrors the primary's
+    # `metric_result`/`metric_refusal` split above rather than inventing a
+    # third shape. Secondaries are OBSERVATIONAL: nothing below may ever
+    # become an operand of an ordering decision.
+    secondary_metric_results: list[MetricResult] = Field(
+        default_factory=list,
+        description=(
+            "Step 10 — one entry per DECLARED secondary metric that produced a value "
+            "for this attempt, each carrying its OWN id and direction (DAVIS declares "
+            "`psnr` higher beside a `mse` primary that is lower-is-better). Evaluated "
+            "wherever the primary evaluates and only AFTER a successful primary "
+            "result, so an error record carries none by construction. Empty on every "
+            "record of a run that declared no secondary, and on every record written "
+            "before Step 10."
+        ),
+    )
+    secondary_metric_refusals: list[NotScoreableResult] = Field(
+        default_factory=list,
+        description=(
+            "Step 10 — one entry per declared secondary whose deliverable failed THAT "
+            "metric's scoreability contract: a scientific refusal, structured exactly "
+            "as the primary's `metric_refusal` is. A refused secondary leaves the "
+            "attempt successful — the primary already produced its result."
+        ),
+    )
+    secondary_metric_errors: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Step 10 — diagnostic PROVENANCE for a declared secondary whose evaluation "
+            "CRASHED: metric id -> a concise one-line diagnostic. Deliberately NOT a "
+            "scientific state: a crash is an implementation failure and must never be "
+            "dressed as a `NotScoreableResult`, which would report a contract verdict "
+            "nothing produced. The interpreter projects such a secondary as "
+            "`unavailable` while this field keeps the reason. `ScopeViolationError` is "
+            "never recorded here — it is re-raised so the run terminates, because "
+            "'observational' bounds ordinary secondary outcomes, not framework-"
+            "integrity failures."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _each_secondary_metric_id_appears_in_exactly_one_carrier(self) -> ExperimentRecord:
+        """Per-id exclusivity, the primary pair's rule applied per secondary.
+
+        One evaluation of one metric has ONE outcome: it produced a value, it
+        refused, or it crashed. An id in two carriers would make "what happened
+        to `psnr` on this attempt" unanswerable, and an id repeated within one
+        carrier would make the interpreter's join ambiguous — which matters
+        because the projection keys absence rows on exactly these ids.
+        """
+        seen: dict[str, str] = {}
+        for carrier, ids in (
+            ("secondary_metric_results", [r.metric_id for r in self.secondary_metric_results]),
+            ("secondary_metric_refusals", [r.metric_id for r in self.secondary_metric_refusals]),
+            ("secondary_metric_errors", list(self.secondary_metric_errors)),
+        ):
+            for metric_id in ids:
+                if metric_id in seen:
+                    where = (
+                        f"twice in {carrier}"
+                        if seen[metric_id] == carrier
+                        else f"in both {seen[metric_id]} and {carrier}"
+                    )
+                    raise ValueError(
+                        f"secondary metric {metric_id!r} appears {where}; one evaluation "
+                        "of one metric has exactly one outcome — a value, a refusal, or "
+                        "a crash."
+                    )
+                seen[metric_id] = carrier
+        return self
+
     @model_validator(mode="after")
     def _metric_payload_agrees_with_the_score_fields(self) -> ExperimentRecord:
         """One value, two names — they must agree (design §19 C4).
@@ -3031,5 +3105,22 @@ class HyperparamTuningOutput(BaseModel):
             "it. None on outputs predating this field — a legacy output therefore "
             "fails closed at score-bearing interpretation rather than falling back "
             "to a guessed direction (child design §3.2, Q-09a-4/Q-09a-6)."
+        ),
+    )
+
+    # --- The run's DECLARED observational secondaries (Step 10 / P2b C2) ---
+    secondary_metric_specs: list[MetricSpecField] | None = Field(
+        default=None,
+        description=(
+            "Step 10 — the run's DECLARED secondary metrics, in manifest order, "
+            "stamped once by finalize_run_output from the bound tuple exactly as "
+            "`metric_spec` is stamped from the bound primary. This is what makes a "
+            "NAMED ABSENCE possible: a secondary present here but carrying neither a "
+            "result nor a refusal on a record is reported as `unavailable` rather "
+            "than silently omitted. Artifact-borne on purpose, so it survives the "
+            "chain-subprocess restore and mixed legacy/new corpora — consumers read "
+            "what is persisted and never re-derive it. Absent, `null` and `[]` are "
+            "EQUIVALENT on read: all three mean this run declared no secondary, and "
+            "an output with no stamp fabricates no absence rows."
         ),
     )

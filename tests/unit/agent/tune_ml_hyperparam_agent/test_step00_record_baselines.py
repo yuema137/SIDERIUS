@@ -51,7 +51,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_58 = [
+EXPERIMENT_RECORD_FIELDS_61 = [
     "record_type",
     "exp_id",
     "status",
@@ -116,6 +116,15 @@ EXPERIMENT_RECORD_FIELDS_58 = [
     # interface's record-facing payload. 54 → 56; every earlier position unchanged.
     "metric_result",
     "metric_refusal",
+    # Step 10 / P2b C2 — ADDITIVE (design pr_10_p2b §4.3 / ledger §15.6): the
+    # DECLARED observational secondaries' three outcomes — value, scientific
+    # refusal, and crash provenance. 58 -> 61; positioned beside the primary
+    # pair they mirror, every earlier position unchanged. All three default
+    # EMPTY, so every record of a run that declares no secondary carries the
+    # same values these baselines pin.
+    "secondary_metric_results",
+    "secondary_metric_refusals",
+    "secondary_metric_errors",
 ]
 
 
@@ -177,7 +186,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_58
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_61
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

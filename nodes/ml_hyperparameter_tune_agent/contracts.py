@@ -29,7 +29,7 @@ good carrier   = the data boundary of ONE real lifecycle concept
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from typing import Any
 
@@ -115,6 +115,15 @@ class RunBindings:
 
     run_metric: Any
     """The bound ``EvaluationMetric`` handle (Step 06)."""
+
+    run_secondary_metrics: Any
+    """The run's DECLARED observational secondary metrics (Step 10 / P2b).
+
+    A tuple, empty for an un-composed run and for a composed task that
+    declares none. Resolved once at the same startup site as ``run_metric``
+    and never re-derived — and never an operand of an ordering decision:
+    ``run_order`` below is the ONE authority, and it reads the PRIMARY spec.
+    """
 
     run_order: Any
     """The ONE ``MetricOrder`` derived from ``run_metric.spec`` (Step 07 07b)."""
@@ -341,6 +350,13 @@ class AttemptExecution(_PhaseOutcome):
     inference_time: Any = None
     is_degenerate: Any = None
     metric_payload: Any = None
+    # Step 10 / P2b — the observational secondaries' three outcomes, carried
+    # beside `metric_payload` for the record builder. Defaulted empty so every
+    # phase outcome constructed elsewhere (and every pre-P2b caller) states the
+    # honest "no secondary evidence" rather than None-meaning-unknown.
+    secondary_metric_results: Any = ()
+    secondary_metric_refusals: Any = ()
+    secondary_metric_errors: Any = field(default_factory=dict)
     score_results: Any = None
     score_table: Any = None
     scoring_time: Any = None

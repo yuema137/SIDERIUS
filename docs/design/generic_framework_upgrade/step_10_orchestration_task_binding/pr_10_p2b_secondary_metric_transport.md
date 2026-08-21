@@ -3,8 +3,15 @@
 ## 0. Status
 
 **REVISION 3 — FROZEN. OPERATOR APPROVED (2026-08-21).
-IMPLEMENTATION NOT STARTED. Open operator questions: 0.
-Material contradictions: 0.**
+Open operator questions: 0. Material contradictions: 0.**
+
+**IMPLEMENTATION COMPLETE — C0-C4 landed; READY FOR OPERATOR REVIEW, DO NOT
+MERGE.** The frozen semantic rulings below are UNCHANGED; the live
+implementation ledger is **§15**, which records the source preflight, the
+guard-disposition closure, per-commit evidence, four IR-P2b rulings, two
+bounded deviations, four findings and the CI provenance. Gate 1 and Gate 2
+were NOT REQUIRED and were NOT RUN; no real LLM, training or GPU work was
+performed.
 
 Revision 3 is rev 2 (the post-P2a/P4 reconciliation, architecture review
 verdict **PASS**) plus the operator's freeze rulings and two bounded
@@ -564,18 +571,18 @@ code exists cannot prove the extension found anything.
 * Depends on: nothing (first commit).
 
 **3. Implementation plan.**
-- [ ] Record the §2.8 disposition table in the ledger with each guard's
+- [x] Record the §2.8 disposition table in the ledger with each guard's
       current line anchor re-verified and its flipping commit named
       (C1/C2/C3 per §2.8).
-- [ ] Extend the invariant's scanned-file declaration to the three P2b
+- [x] Extend the invariant's scanned-file declaration to the three P2b
       surfaces; run it green at base over the extended surface.
-- [ ] Plant-and-catch on the EXTENDED scope: a synthetic secondary-operand
+- [x] Plant-and-catch on the EXTENDED scope: a synthetic secondary-operand
       ordering expression planted in one newly-scanned production file turns
       the invariant RED; revert; record verbatim output.
-- [ ] Record the three Q097 guards green at base (they must be green NOW —
+- [x] Record the three Q097 guards green at base (they must be green NOW —
       if any is already red, STOP: the baseline is not what this design
       measured).
-- [ ] Record TIDMAD prompt-parity baseline: the rendered-prompt sha256 of
+- [x] Record TIDMAD prompt-parity baseline: the rendered-prompt sha256 of
       the existing interpretation golden(s) that C3 must reproduce
       byte-identically.
 
@@ -588,13 +595,13 @@ code exists cannot prove the extension found anything.
 * Real-training Gate: **NONE. Not required and must not be launched.**
 
 **5. Acceptance criteria.**
-- [ ] Disposition table lists EVERY §2.8 guard with a named flipping commit;
+- [x] Disposition table lists EVERY §2.8 guard with a named flipping commit;
       zero guards unaccounted.
-- [ ] Invariant green over the extended surface at base; plant transcript
+- [x] Invariant green over the extended surface at base; plant transcript
       (RED → revert → green) recorded verbatim.
-- [ ] Q097 guards measured green at base.
-- [ ] TIDMAD prompt-parity sha recorded.
-- [ ] Zero production files changed (`git diff --stat` recorded).
+- [x] Q097 guards measured green at base. (32 passed, 1.25 s, pre-edit)
+- [x] TIDMAD prompt-parity sha recorded. (§15.3 — both goldens)
+- [x] Zero production files changed (`git diff --stat` recorded).
 
 **6. Failure and edge cases.**
 | case | required behaviour |
@@ -604,10 +611,10 @@ code exists cannot prove the extension found anything.
 | the plant is caught but names two sites | fix the plant to name exactly one; a multi-hit plant proves less |
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent/test_step09a_c6_evidence_projection.py -q` — record count + wall time.
-- [ ] Plant transcript — record verbatim.
-- [ ] `git diff --stat` — record (must show tests + this doc only).
-- [ ] `ruff check` + `ruff format --check` on touched files.
+- [x] `.venv/bin/python -m pytest .../test_step09a_c6_evidence_projection.py -q` — **25 passed, 1.31 s** over the extended surface (32 passed / 1.25 s with the C1a oracle at base; 33 passed / 1.36 s with the oracle after).
+- [x] Plant transcript — recorded verbatim in §15.3.
+- [x] `git status --porcelain` — exactly `M tests/unit/agent/result_interpretation_agent/test_step09a_c6_evidence_projection.py` plus this doc. Zero production paths.
+- [x] `ruff check` + `ruff format --check` on touched files — clean.
 
 **8. Commit boundary.** Test/docs-only; independently reviewable as "the
 dispositions and the baseline". No production change, no guard flips, no
@@ -641,22 +648,24 @@ exists that no run can activate.
   Q097 evaluator/binder guard — §2.8 row 3 names it).
 
 **3. Implementation plan.**
-- [ ] Re-read `_compose_metric` and `_read_manifest` at head before
-      editing; extend `_MANIFEST_KEYS` (NOT `_REQUIRED_KEYS`).
-- [ ] Implement `_compose_secondary_metrics`: list-shaped section
+- [x] Re-read `_compose_metric` and `_read_manifest` at head before
+      editing; extended `_MANIFEST_KEYS` (7 keys). `_REQUIRED_KEYS`
+      unchanged, with the reason recorded at its declaration.
+- [x] Implement `_compose_secondary_metrics`: list-shaped section
       validation, per-entry `_compose_metric` call, duplicate-id and
       primary-id-collision refusals (`TaskCompositionError`, message naming
       the colliding id and both roles), plugin + source-path collection.
-- [ ] `RunTaskComposition.secondary_metrics: tuple[EvaluationMetric, ...] = ()`
+- [x] `RunTaskComposition.secondary_metrics: tuple[EvaluationMetric, ...] = ()`
       (verify the `__post_init__` derived-name guard needs no change).
-- [ ] Fingerprint: append `secondary_metric_declarations` (manifest-order
+- [x] Fingerprint: append `secondary_metric_declarations` (manifest-order
       list of raw declaration dicts) to the payload ONLY when non-empty;
       secondary plugins join `plugins`.
-- [ ] ContextVar pair in `evaluation_metric.py`, mirroring
+- [x] ContextVar pair in `evaluation_metric.py`, mirroring
       `bind_run_metric`'s shape; enter it in `bind_run_task_composition`'s
       `ExitStack`; `resolve_...` returns `()` when unbound.
-- [ ] Update the Pets/DAVIS fixture manifests; TIDMAD untouched.
-- [ ] Flip the Q097 binder guard per the C0 table: the binder now EXISTS in
+- [x] Update the Pets/DAVIS fixture manifests; TIDMAD untouched (and
+      `fourth_task` untouched — a second zero-secondary control).
+- [x] Flip the Q097 binder guard per the C0 table: the binder now EXISTS in
       its named owner and nowhere else (inverted assertion), citing this
       commit.
 
@@ -682,16 +691,18 @@ exists that no run can activate.
 * Real-training Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] DAVIS composition carries exactly `("psnr", "mae")` with directions
+- [x] DAVIS composition carries exactly `("psnr", "mae")` with directions
       `("higher", "lower")` — opposite each other AND the `lower` primary —
       asserted as literals.
-- [ ] TIDMAD/zero-secondary fingerprint byte-identical to the recorded
+- [x] TIDMAD/zero-secondary fingerprint byte-identical to the recorded
       pre-P2b sha; the identity is asserted against the FROZEN recorded
       value, not recomputed on both sides of one run.
-- [ ] Both refusal constraints fire with messages naming the offending id.
-- [ ] The Q097 binder guard is inverted and green; the other two Q097
+- [x] Both refusal constraints fire with messages naming the offending id.
+- [x] The Q097 binder guard is inverted and green; the other two Q097
       guards remain green (record schema and evaluator untouched here).
-- [ ] `run_workflow` and the tuner are untouched (`git diff` shows neither).
+- [x] `run_workflow` and the tuner are untouched — the C1 diff is exactly
+      `workflows/task_composition.py`, `execute_tools/evaluation_metric.py`,
+      the two fixture manifests and two test modules.
 
 **6. Failure and edge cases.**
 | case | required behaviour |
@@ -704,10 +715,10 @@ exists that no run can activate.
 | un-composed run | no binding entered; `resolve_...` yields `()` |
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/workflows -q -k "composition or task_composition"` — count + wall time.
-- [ ] The fingerprint identity/change/reorder literals — record.
-- [ ] `ruff check` + `ruff format --check`; pyright note if locally
-      unrunnable (CI-owned, never claimed).
+- [x] `.venv/bin/python -m pytest tests/unit/workflows tests/unit/agent/result_interpretation_agent -q` — **1,034 passed, 28.48 s** (the whole owning area, not a `-k` slice); the new module alone **28 passed, 1.07 s**.
+- [x] The fingerprint identity/change/reorder literals — recorded in §15.4.
+- [x] `ruff check` clean; `ruff format` applied to `task_composition.py`.
+      pyright is NOT runnable locally (Node v10.19.0) — CI-owned, not claimed.
 
 **8. Commit boundary.** Composition + binding + their fixtures + the ONE
 guard flip this commit causes. No tuner change, no schema-record change, no
@@ -744,29 +755,30 @@ when both exist.
   flips the two schema guards and the evaluator third of the Q097 guard).
 
 **3. Implementation plan.**
-- [ ] Re-read the scoring block and the record/output build sites at head;
+- [x] Re-read the scoring block and the record/output build sites at head;
       verify where `metric_payload` enters the record and where
       `metric_spec` is stamped, and mirror both.
-- [ ] Schema first: the three additive fields + crash carrier + validator;
-      round-trip test before any tuner change.
-- [ ] `_evaluate_secondary_metrics(sandbox, secondaries, sample_set,
+- [x] Schema first: the three additive fields + crash carrier + per-id
+      exclusivity validator; round-trip verified before any tuner change.
+- [x] `_evaluate_secondary_metrics(sandbox, secondaries, sample_set,
       anchor_map, s_max, denoised_fn) -> (results, refusals, errors)` —
       per-secondary catch in the FROZEN §4.2 order: `NotScoreableError` →
       refusal entry; `ScopeViolationError` → RE-RAISE (the outer handler
       owns it); any other `Exception` → error entry, emitted on the
       diagnostic surface, never raised onward. Returns typed lists.
-- [ ] Call it ONLY on the primary-success path; populate the record payload
+- [x] Call it ONLY on the primary-success path; populate the record payload
       beside `metric_payload`; stamp `secondary_metric_specs` from the bound
       tuple beside the `metric_spec` stamp.
-- [ ] Verify the planner/reflector prompt serializations exclude the new
+- [x] Verify the planner/reflector prompt serializations exclude the new
       keys (inspect the actual hidden-keys mechanism; add the keys to it if
       it is enumerated, and TEST the exclusion either way).
-- [ ] StubSandbox route: confirm `StubSandbox.evaluate_metric` synthesises
+- [x] StubSandbox route: confirmed `StubSandbox.evaluate_metric` synthesises
       per-secondary results under each secondary's identity (it takes the
       metric argument — verify, and extend the stub minimally ONLY if
       measurement shows it collapses identities).
-- [ ] Flip the two Q097 schema guards + the evaluator guard per the C0
-      table, citing this commit.
+- [x] Flip the two Q097 schema guards + the evaluator guard per the C0
+      table, citing this commit. G5 was also re-pointed here rather than in
+      C3 — see the deviation note in §15.9.
 
 **4. Validation plan.**
 * Unit: schema round-trip (record with results+refusals+errors persists and
@@ -786,20 +798,20 @@ when both exist.
 * Real-training Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] Primary result/status/retry byte-identical with and without
+- [x] Primary result/status/retry byte-identical with and without
       secondaries on the same fixture (asserted on the attempt outcome
       tuple, not on prints).
-- [ ] A refused secondary yields exactly one `secondary_metric_refusals`
+- [x] A refused secondary yields exactly one `secondary_metric_refusals`
       entry and zero attempt-lifecycle deltas; a crashing secondary yields
       exactly one error entry and zero attempt-lifecycle deltas.
-- [ ] A `ScopeViolationError` raised from INSIDE a secondary call terminates
+- [x] A `ScopeViolationError` raised from INSIDE a secondary call terminates
       the run through the existing outer handler (asserted on the run
       outcome), and no `secondary_metric_errors` entry exists for it.
-- [ ] The output stamp equals the bound declared set, in order; legacy
+- [x] The output stamp equals the bound declared set, in order; legacy
       outputs re-validate with the fields absent.
-- [ ] Planner/reflector serializations proven not to carry the new keys
+- [x] Planner/reflector serializations proven not to carry the new keys
       (test asserts on the serialized text, not the mechanism's docstring).
-- [ ] All three Q097 guards now inverted and green.
+- [x] All three Q097 guards now inverted and green.
 
 **6. Failure and edge cases.**
 | case | required behaviour |
@@ -812,9 +824,9 @@ when both exist.
 | zero bound secondaries | the §4.7 frozen invariant holds: carriers semantically empty, no `_stats` key, prompts/fingerprint byte-identical; persisted default-empty fields MAY serialize and are equivalent to absence |
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q -k "secondary or scoring"` plus the new module — count + wall time. (Directory name MEASURED: the tuner's unit tree is `tests/unit/agent/tune_ml_hyperparam_agent/`, not the node's own name.)
-- [ ] Attempt-parity byte-comparison output — record.
-- [ ] `ruff` clean; pyright CI-owned note if applicable.
+- [x] `tests/unit/agent/tune_ml_hyperparam_agent` **1,230 passed + 4 declared-delta baseline failures, since fixed** (458 s — the tuner suite is expensive; run once). New module **21 passed, 2.6 s**. `tests/unit/agent/{schemas,prompt_templates,llm_bridge}` + planner-prompt + `tests/unit/workflows` **1,222 passed, 27.5 s**. `tests/unit/agent/result_interpretation_agent` **572 passed, 4.9 s**.
+- [x] Attempt-parity byte-comparison output — recorded in §15.5.
+- [x] `ruff check` + `ruff format --check` clean over the whole tree. pyright NOT runnable locally (Node v10.19.0) — CI-owned, never claimed.
 
 **8. Commit boundary.** Evaluation + transport + the guard flips they cause.
 No interpreter change, no `_stats` change, no rendering change. Diff
@@ -847,17 +859,17 @@ with all three present.
 * Depends on: C2 (real fields to project); C0 (disposition table).
 
 **3. Implementation plan.**
-- [ ] Re-read the summary-build path in `evidence.py` and both `_stats`
+- [x] Re-read the summary-build path in `evidence.py` and both `_stats`
       sites at head before editing.
-- [ ] Implement the projection: declared stamp × record carriers →
+- [x] Implement the projection: declared stamp × record carriers →
       scored/refused/unavailable per §4.4/§4.5; no stamp → `[]`.
-- [ ] `_stats["secondary_metrics"]`: typed model_dump on write, validated
+- [x] `_stats["secondary_metrics"]`: typed model_dump on write, validated
       read-back on the quiet path — the `failure_counts` idiom, asserted
       to be the SAME mechanism (one test touches both keys).
-- [ ] Apply the C0 test dispositions; the upgraded tests land HERE, in the
+- [x] Apply the C0 test dispositions; the upgraded tests land HERE, in the
       same commit as the behaviour they now assert.
-- [ ] TIDMAD prompt parity: re-render the C0-recorded golden(s); sha256
-      byte-identical.
+- [x] TIDMAD prompt parity: the C1a oracle re-rendered green with NO golden
+      regeneration; both shas byte-identical to the C0 baseline.
 
 **4. Validation plan.**
 * Unit: projection matrix — scored / refused / unavailable / no-stamp-`[]`,
@@ -878,17 +890,17 @@ with all three present.
 * Real-training Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] The quiet-iteration fixture shows secondaries surviving EXACTLY as
+- [x] The quiet-iteration fixture shows secondaries surviving EXACTLY as
       long as failure counts — one fixture, both keys, one assertion block.
-- [ ] All four projection states asserted with hand-written expected
+- [x] All four projection states asserted with hand-written expected
       literals (spec ids + statuses per model), not values read back from
       the projection.
-- [ ] Rendered DAVIS text contains each secondary's OWN direction words;
+- [x] Rendered DAVIS text contains each secondary's OWN direction words;
       an explicit assertion shows the primary's direction words absent from
       the secondary lines.
-- [ ] TIDMAD prompt sha byte-identical to the C0 baseline.
-- [ ] The rewritten C6 tests fail if the projection is reverted to `[]`
-      (mutation recorded).
+- [x] TIDMAD prompt sha byte-identical to the C0 baseline (`376f289e…` / `aa676b69…`).
+- [x] The rewritten C6 tests fail if the projection is reverted to `[]` —
+      mutation M7, 10 failures. Recorded in §15.6.
 
 **6. Failure and edge cases.**
 | case | required behaviour |
@@ -900,9 +912,9 @@ with all three present.
 | corrupt cached payload | validated read-back → absence + warning, no crash |
 
 **7. Verification commands and evidence.**
-- [ ] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent -q` — count + wall time.
-- [ ] Quiet-iteration symmetry output — record.
-- [ ] TIDMAD parity shas (C0 baseline vs C3) — record both.
+- [x] `.venv/bin/python -m pytest tests/unit/agent/result_interpretation_agent tests/unit/workflows -q` — **1,058 passed, 28.3 s**; the new module alone 18 passed / 1.2 s.
+- [x] Quiet-iteration symmetry output — recorded in §15.6.
+- [x] TIDMAD parity shas (C0 baseline vs C3) — IDENTICAL, both recorded in §15.6.
 
 **8. Commit boundary.** Projection + carry + upgraded tests + parity. No
 tuner change, no schema change, no renderer modification. Diff summary,
@@ -926,17 +938,18 @@ likewise for projection); this ledger; PR; ONE exact-head CI. No production
 source beyond doc-driven comment corrections.
 
 **3. Implementation plan.**
-- [ ] Three-task lifecycle fixtures per §5, each asserting the full state
+- [x] Three-task lifecycle fixtures per §5, each asserting the full state
       sequence (composed set → bound set → record carriers → stamp →
       projection statuses → rendered bytes/zero-bytes).
-- [ ] Re-run the ordering-operand invariant over the final surface; final
-      plant-and-catch (RED → revert → green) recorded.
-- [ ] Confirm all §2.8 guards reached their dispositioned end-state; any
+- [x] Re-run the ordering-operand invariant over the final surface; the C4
+      plant is EXECUTABLE (five parametrised files P2b actually changed)
+      rather than a manual transcript — recorded in §15.7.
+- [x] Confirm all §2.8 guards reached their dispositioned end-state; any
       row without a citing commit ⇒ STOP (a lifecycle stage was skipped).
-- [ ] Docs sync with each documented behaviour quoted against merged
+- [x] Docs sync with each documented behaviour quoted against merged
       source; tick every checklist item in this doc with evidence or an
       explicit not-run reason.
-- [ ] Push ONCE at the final head; open/update the PR; ONE automatic
+- [x] Push ONCE at the final head; open/update the PR; ONE automatic
       exact-final-head CI; record run id + tested SHA (in the PR body if a
       trailing docs commit would otherwise chase its own SHA — the P2a
       precedent).
@@ -949,21 +962,24 @@ source beyond doc-driven comment corrections.
 * Real-training Gate: **NONE.**
 
 **5. Acceptance criteria.**
-- [ ] All three §5 rows green with state-sequence evidence.
-- [ ] Invariant green over the final surface; final plant RED then green,
-      recorded.
-- [ ] Every §2.8 row closed with its citing commit.
-- [ ] Exact-head CI SUCCESS with tested SHA == final PR head, both
-      recorded.
-- [ ] Working tree clean; READY FOR OPERATOR REVIEW; **DO NOT MERGE**.
+- [x] All three §5 rows green with state-sequence evidence.
+- [x] Invariant green over the final surface; the plant is caught in every
+      one of the five files P2b changed, and the un-planted source is
+      asserted clean in the same test.
+- [x] Every §2.8 row closed with its citing commit (§15.2 — six of six).
+- [x] Exact-head CI SUCCESS with tested SHA == final PR head, both
+      recorded — run **32439134908**, tested `f6a73afd…`, PR head identical
+      (§15.11).
+- [x] Working tree clean; READY FOR OPERATOR REVIEW; **DO NOT MERGE**.
 
 **6. Failure and edge cases.** A guard row with no citing commit ⇒ STOP. CI
 failure ⇒ diagnose from the log, fix autonomously, push, let CI re-run
 (routine, not an operator stop).
 
 **7. Verification commands and evidence.**
-- [ ] The fixture + invariant modules — counts + wall time.
-- [ ] CI run id + `headSha` — record both.
+- [x] The fixture + invariant modules — **10 passed, 2.4 s**; consolidated targeted run **1,871 passed, 33.9 s**.
+- [x] CI run id + `headSha` — both in §15.11 and in the PR's CI-provenance
+      comment.
 
 **8. Commit boundary.** Fixtures + docs + ledger close. The last commit
 before READY FOR OPERATOR REVIEW.
@@ -1161,6 +1177,618 @@ remaining occurrence is historical text (rev-1/rev-2 quotes in §0.1's delta
 table and §9's resolution table) or the frozen contract itself. Required
 final state holds: **open operator questions 0 · material contradictions 0 ·
 unresolved PROVISIONAL semantics 0.**
+
+---
+
+## 15. Implementation ledger (LIVE — opened at implementation start)
+
+**Numbering note (IR-P2b-1).** C0 §2 says the disposition table lives "in
+THIS document, §13 when it opens". At freeze, §13 is *Adversarial
+self-review* and §14 is *Freeze dispositions*, both frozen. Renumbering a
+frozen section would rewrite frozen history, so the ledger opens at **§15**
+and every C0-§2 reference to "§13" reads as §15. No semantic change.
+
+| field | value |
+|---|---|
+| freeze SHA | `3dc298f11a92f1a3de5820a6e436b86c41028c12` (subject: *docs(step10/p2b): REVISION 3 — FROZEN; operator freeze rulings + two boundary corrections*; parent `77b19389`) |
+| implementation base | `3dc298f1` — **identical to `origin/master`** at implementation start, so post-freeze drift is ZERO. Contains P1 `bcb17e45`, P2a `e094fa26`, P4 `79833db8` |
+| implementation branch | `step10-p2b-secondary-metric-production-transport-impl` |
+| tracked design path | `pr_10_p2b_secondary_metric_transport.md` (the kickoff's `..._production_transport.md` does not exist; repository truth used) |
+| Gate disposition | Gate 1 NOT REQUIRED / NOT RUN · Gate 2 NOT REQUIRED / NOT RUN · real LLM, training, GPU NOT RUN (frozen §14.5) |
+
+### 15.1 Source preflight (performed BEFORE any edit, at `3dc298f1`)
+
+Every §2 / §3.1 anchor re-measured. **Line counts identical to §3.1**
+(`task_composition.py` 982 · `execution.py` 1,172 · `evidence.py` 481), so
+the design's measurements describe the tree being edited.
+
+Confirmed at head: `_MANIFEST_KEYS` :93-102 (six keys, unknown refused
+:275-282) · `_REQUIRED_KEYS` :109-111 · `_compose_metric` :537-592 (note: it
+hardcodes `where = "metric"`) · `compute_semantic_fingerprint` :712-764 ·
+`compose_run_task_bindings` metric section :820-826 ·
+`bind_run_task_composition` ExitStack :931-936 ·
+`verify_composition_is_bound` :939-982 · `bind_run_metric` /
+`resolve_bound_run_metric` `evaluation_metric.py:1079/:1102` · tuner
+acquisition `ml_hyperparameter_tune_agent.py:548`, `run_order` :561 ·
+`RunBindings.run_metric` `contracts.py:116` ·
+`AttemptExecution.metric_payload` `contracts.py:343` · scoring `try`
+`execution.py:843`, `evaluate_metric` :882-888, `metric_payload` :915,
+`ScopeViolationError` handler :1016-1022, generic handler :1023-1049 ·
+record `"metric_result"` `records.py:1122` · output stamp `records.py:939`
+(and the DEGRADED partial stamp :1000) · healthy output path
+`model_validate` → `model_dump()` with no exclude flags :952-957 ·
+`ExperimentRecord.metric_result` / `.metric_refusal`
+`hyperparam_tuning.py:659/:674` · `HyperparamTuningOutput.metric_spec` :3022
+· `SecondaryMetricEvidence` `interpretation.py:114-165` · the `[]` hardcode
+`evidence.py:479` · `_stats` write `result_interpretation_agent.py:526-530`
+and read-back :353-358, `per_model_secondary_metrics` :361-365.
+
+Three preflight findings, all bounded:
+
+* **F-P2b-1** — `_PLANNER_HIDDEN_RECORD_KEYS` (`agent/prompts.py:944-946`)
+  is an **enumerated** frozenset. C2 must add the three secondary record
+  keys to it, and test on the SERIALIZED text. The reflector surface leaks
+  nothing by construction: it receives `{**train_results, **score_results}`
+  (`ml_hyperparameter_tune_agent.py:1227`) and secondaries never enter
+  `score_res["results"]` — which C2 also asserts rather than assumes.
+* **F-P2b-2** — `StubSandbox.evaluate_metric` (`sandbox_executor.py:2366`)
+  already reads `metric.spec.id` / `.direction` from the handle it is
+  PASSED, so each secondary keeps its real identity with no stub change.
+  Its synthesised scalar comes from `self._rng`, so two secondaries in one
+  attempt get distinct values — which is what makes a per-id assertion
+  meaningful.
+* **F-P2b-3** — `_compose_metric` hardcodes `where = "metric"` inside its
+  five fail-closed messages. Reusing it verbatim per secondary would emit
+  messages naming the wrong role. See IR-P2b-2.
+
+Measured anchor corrections to §2.8 (drift in the TEST file only, ±1 line):
+the record-schema guard is at **:510** (§2.8 said :509) and the tuning-output
+guard at **:513** (§2.8 said :514); the evaluator/binder guard is at :518 as
+stated. The builder-emptiness assertions are :350-366 and the
+fabricated-key mutation :368-385 (§2.8 said :372-379).
+
+### 15.2 Guard disposition table (C0 — every §2.8 guard, with its flipping commit)
+
+| # | guard (file `tests/unit/agent/result_interpretation_agent/test_step09a_c6_evidence_projection.py`) | anchor at base | disposition | flipping commit | status |
+|---|---|---|---|---|---|
+| G1 | `TestQ097StaysBinding::test_no_secondary_field_was_added_to_the_record_schema` | :510 | **INVERT** — the record MUST carry exactly `secondary_metric_results`, `secondary_metric_refusals`, `secondary_metric_errors` | **C2** | `[x]` |
+| G2 | `TestQ097StaysBinding::test_no_secondary_field_was_added_to_the_tuning_output` | :513 | **INVERT** — the output MUST carry exactly `secondary_metric_specs` | **C2** | `[x]` |
+| G3 | `TestQ097StaysBinding::test_no_production_module_evaluates_a_secondary_metric` | :518-532 | **INVERT in two halves**: the BINDER must exist in its named owner (C1) and the EVALUATOR in its named owner (C2), and nowhere else | **C1** (binder) + **C2** (evaluator) | `[x]` both halves inverted (C1 `f9d6ea53`, C2) |
+| G4 | `TestSecondaryMetricEvidence::test_the_production_builder_leaves_it_EMPTY` (both params) | :350-366 | **REWRITE** into projection-correctness | **C3** | `[x]` |
+| G5 | `TestSecondaryMetricEvidence::test_the_builder_does_not_read_undeclared_record_keys` | :368-385 | **KEEP** — the fabricated payload moves to a key that REMAINS undeclared | **C2** (re-pointed from C3 — D-P2b-1: C2 is the commit that trips it) | `[x]` |
+| G6 | `TestSecondariesCannotReachOrdering` — ordering-operand invariant + plant + behavioural flip | :440-504 | **KEEP, scope EXTENDED** over P2b's production surfaces | **C0** declares/proves · **C4** re-proves at the final head | `[x]` both halves done |
+
+C4 STOPS on any row still `[ ]` without a citing commit.
+
+### 15.3 C0 — guard dispositions + invariant scope baseline — **COMPLETE**
+
+Commit: see §15.11. Test/docs only; **zero production files changed**
+(`git status --porcelain` showed exactly one modified path, the guard test).
+
+- [x] §2.8 disposition table recorded with re-verified anchors and named
+      flipping commits — §15.2 above (six rows, zero unaccounted).
+- [x] Scanned-surface extension. `INTERPRETER_FILES` (the 09a five) is kept
+      as its own named list; `PRODUCTION_FILES` adds P2b's measured touch
+      set — `workflows/task_composition.py`,
+      `execute_tools/evaluation_metric.py`, the four tuner modules
+      (`execution.py`, `ml_hyperparameter_tune_agent.py`, `contracts.py`,
+      `records.py`) plus `policy.py` (the tuner's ordering authority — the
+      single most likely home for an accidental secondary vote),
+      `agent/schemas/hyperparam_tuning.py`,
+      `agent/schemas/interpretation.py` and
+      `agent/prompt_templates/interpretation/rendering.py`.
+      `SCANNED_FILES` is their union and is what the census iterates.
+      **GREEN at base over the extended surface**: 25 passed, 1.31 s.
+- [x] The census now also FAILS when a scanned file does not exist (a
+      vanished path would otherwise make the census pass by looking at
+      nothing), and a new `test_the_scope_extension_is_live` reads each
+      newly-scanned file from disk, appends an offending expression and
+      requires a hit — so a name in the list that the census never opens is
+      RED.
+- [x] **Plant-and-catch on the EXTENDED scope**, verbatim transcript. A
+      synthetic offender appended to `nodes/ml_hyperparameter_tune_agent/
+      execution.py` (a NEWLY-scanned file):
+
+      ```python
+      def _p2b_c0_plant(models, order):
+          return order.best(models, key=lambda m: m.secondary_metric_results[0].scalar)
+      ```
+
+      RED, naming **exactly one** site (the §6 edge-case requirement):
+
+      ```text
+      E  AssertionError: a secondary metric is an operand of an ordering
+      E  expression — secondaries are OBSERVATIONAL and must never affect a
+      E  ranking: {'nodes/ml_hyperparameter_tune_agent/execution.py':
+      E  ['1176: order.best(models, key=lambda m:
+      E  m.secondary_metric_results[0].scalar)']}
+      1 failed, 24 deselected in 1.15s
+      ```
+
+      Reverted from a pre-plant copy; `git diff -- execution.py` EMPTY;
+      `__pycache__` cleared before and after; re-run **33 passed, 1.36 s**
+      (guard module + the C1a differential oracle).
+- [x] The three Q097 guards measured **GREEN at base** — 32 passed, 1.25 s
+      before any edit. None was already red, so the design's baseline is the
+      tree being edited.
+- [x] **TIDMAD prompt-parity baseline recorded.** The owner is the Step-09a
+      C1a differential oracle, whose goldens hold the sha256 of every
+      rendered system/user prompt in the fixed-input call sequence — and
+      which already covers 09b C3's `### Secondary metrics` section:
+
+      | golden | sha256 at base |
+      |---|---|
+      | `goldens/step09a_differential_llm_calls.json` | `376f289e5caff1d1522ef6c4e63a4abb9115189692e1e1789af7921cfb30b352` |
+      | `goldens/step09a_differential_digest.json` | `aa676b69fa9ff364077785aa54663b7e1c15299a9f8246195a6303038b96b664` |
+
+      TIDMAD declares no secondary, so C3/C4 must leave BOTH byte-identical
+      and the oracle green with no regeneration. A regenerated golden here
+      is a P2b failure, not a declared delta.
+
+**C0 acceptance**: all five criteria met — table complete with named
+flipping commits · invariant green over the extended surface · plant
+transcript recorded verbatim (RED → revert → green) · Q097 guards green at
+base · parity shas recorded · zero production files changed.
+
+### 15.4 C1 — declaration + composition + run-scoped binding — **COMPLETE**
+
+Commit: see §15.11.
+
+**Production surface.** `workflows/task_composition.py`: `_MANIFEST_KEYS`
+gains `secondary_metrics` (7 keys; `_REQUIRED_KEYS` unchanged, with the
+reason recorded at its declaration); `_compose_metric` gains a `where: str =
+"metric"` ROLE parameter (IR-P2b-2); the new `_compose_secondary_metrics`
+resolves the optional list through `_compose_metric` ITSELF and adds only
+the two rules a single metric cannot violate; `RunTaskComposition
+.secondary_metrics: tuple[EvaluationMetric, ...] = ()` is appended so the
+existing nine fields keep their positions; `compute_semantic_fingerprint`
+gains the ADDITIVE-WHEN-NON-EMPTY `secondary_metric_declarations` key;
+`compose_run_task_bindings` resolves the secondaries immediately beside the
+primary (so the collision check has the primary id), extends `plugins` and
+writes one `secondary_metric_declaration[i]` provenance entry per entry;
+`bind_run_task_composition` enters the new binding on the SAME `ExitStack`;
+`verify_composition_is_bound` gains the per-entry identity check.
+`execute_tools/evaluation_metric.py` gains `bind_run_secondary_metrics` /
+`resolve_bound_run_secondary_metrics` beside the primary pair, resolving to
+`()` when unbound.
+
+**Fingerprint evidence** — literals captured at the freeze commit `3dc298f1`
+BEFORE any production line existed, and pinned in the test as frozen
+evidence (never recomputed on both sides of one run):
+
+| task | pre-P2b sha | after C1 | verdict |
+|---|---|---|---|
+| tidmad | `d6628a93fcb3578ca32812f39246f2b51abeecbd24d21df56856ea0ef9c56d3a` | **identical** | zero-secondary byte identity HELD |
+| fourth_task | `fe00fd076153c847da65c71c72df5520bec902d6d17b43b9c7b1bb80e2ab099a` | **identical** | second zero-secondary control |
+| pets | `52a422b030bb896cc22862b687855101ed302f2e59792b523d353b7dc67d6086` | `2b3b5383…` | CHANGED — it now declares `macro_f1` |
+| davis | `9980a7a955c689a8f94ab048eee9c4715ce9a25fdaac7bf3a510197cf2e0ac26` | `c59342f8…` | CHANGED — it now declares `psnr`, `mae` |
+
+Also pinned: an explicit `secondary_metrics: []` composes and hashes
+identically to the section being ABSENT; reordering DAVIS's two entries
+CHANGES the sha (manifest order is semantic); the same declared family at two
+absolute paths yields ONE sha (Q-P1-2 held).
+
+**Composed sets, as literals**: TIDMAD `()` · Pets `[("macro_f1","higher")]`
+· DAVIS `[("psnr","higher"), ("mae","lower")]` — two directions opposing each
+other AND the `lower` `mse` primary.
+
+**Reuse proven, not asserted**: deleting `implementation` from
+`secondary_metrics[1]` raises `_compose_metric`'s OWN branch with the message
+naming `secondary_metrics[1]`; deleting it from `metric` still raises the
+byte-identical pre-P2b `metric requires an 'implementation' mapping`.
+
+**Guard flip (G3, binder half)**: the 09a evaluator/binder census is NARROWED
+to the evaluator half (`evaluat|scor|load`, C2 flips it) and the binder half
+INVERTS into `tests/unit/workflows/test_step10_p2b_c1_secondary_declaration.py
+::TestTheBinderHasExactlyOneOwner`, which asserts the pair exists in
+`execute_tools/evaluation_metric.py` and **nowhere else** — an equality
+against an exact `{owner: [names]}` mapping, so a second binder anywhere in
+`nodes|agent|core|execute_tools|workflows` is RED.
+
+**The extended invariant did its job in this commit.** It flagged a REAL hit
+on the first production edit — see IR-P2b-3. That is the C0 §6 edge case
+("the extended invariant flags an EXISTING expression ⇒ STOP and audit")
+firing on the very commit it was built for, and it was resolved by fixing the
+detector's precision, never by an allowlist.
+
+### 15.5 C2 — evaluation + record/output transport — **COMPLETE**
+
+Commit: see §15.11.
+
+**Production surface.** `agent/schemas/hyperparam_tuning.py`: the three
+reserved record carriers (`secondary_metric_results: list[MetricResult]`,
+`secondary_metric_refusals: list[NotScoreableResult]`,
+`secondary_metric_errors: dict[str, str]` — a PLAIN dict, no new Pydantic
+model, per Q-P2b-2) plus a per-id exclusivity validator, and
+`HyperparamTuningOutput.secondary_metric_specs: list[MetricSpecField] | None`.
+`nodes/ml_hyperparameter_tune_agent/execution.py`: the extracted
+`_evaluate_secondary_metrics` boundary (typed inputs, a typed three-part
+result, one diagnostic print per crash, no access to attempt control flow),
+called once after the primary result inside the existing `try`.
+`ml_hyperparameter_tune_agent.py`: `resolve_bound_run_secondary_metrics()`
+beside the primary acquisition, with NO legacy branch — there is nothing to
+fall back to. `contracts.py`: `RunBindings.run_secondary_metrics` and three
+`AttemptExecution` carriers. `records.py`: record keys written only when
+non-empty (the builder controls the dict key-by-key), the output stamp beside
+`metric_spec`, and the SAME stamp on the DEGRADED partial-output branch — the
+declared set is a launch fact and does not stop existing because the tuner
+later failed. `agent/prompts.py`: the three keys join
+`_PLANNER_HIDDEN_RECORD_KEYS`.
+
+**The frozen taxonomy, per secondary, in catch order** — implemented exactly
+as §4.2 froze it, and the ORDER is load-bearing: `ScopeViolationError`
+subclasses `ValueError`, so a generic-first arrangement would silently convert
+a non-retryable run termination into a dictionary entry.
+
+**Attempt-parity evidence.** The IDENTICAL bounded pseudo iteration was run
+twice — once with `()` bound, once with DAVIS's pair bound and one of them
+CRASHING — and compared on nine lifecycle surfaces (status,
+termination_reason, completed_rounds, total_attempts, per-record status
+sequence, per-record scores, every primary `metric_result` payload,
+best_denoising_score, and the ordered LLM call-label sequence). Deep-equal.
+The comparison deliberately excludes the three new record keys and the stamp:
+those ARE the declared delta.
+
+**State-sequence evidence** (the lifecycle-evidence rule, not "the field is
+populated"): on a DAVIS-bound run every primary-scored record carries
+`[("psnr","higher",31.5), ("mae","lower",0.017)]` in manifest order, empty
+refusals and empty errors; the sandbox saw exactly `("psnr","mae")` once per
+scored record; the scored set spans BOTH a trial and a formal round, which is
+what makes Q-P2b-1's "no round-type branch" claim testable rather than
+asserted. On a mixed run, `psnr` lands in refusals and `mae` in errors, both
+stay on the stamp, and results is empty.
+
+**Mutation proofs** (each planted, caught, reverted, baseline re-proven green
+at 21 passed):
+
+| # | mutation | caught by |
+|---|---|---|
+| M1 | `except ScopeViolationError: raise` deleted, so the generic clause swallows it | `test_a_scope_violation_is_RE_RAISED_not_downgraded` |
+| M2 | the crash never writes `errors[metric_id]` | 5 tests, incl. attempt parity |
+| M3 | every secondary evaluated under `secondaries[0]`'s identity | 8 tests |
+| M4 | the record builder never writes `secondary_metric_results` | `test_the_declared_family_is_evaluated_and_lands_on_every_scored_record` |
+| M5 | the output stamp is always `None` | 2 tests |
+| M6 | the three keys removed from `_PLANNER_HIDDEN_RECORD_KEYS` | `test_the_planner_prompt_carries_none_of_the_three_keys` |
+
+**Prompt boundary, proven on serialized text.** The planner prompt is built by
+the REAL `get_planner_user_prompt` over a record carrying all three keys: none
+of the key names, neither secondary value, and the crash text are present —
+while the record's own `exp_id` still is, so it is an exclusion test and not
+an empty-prompt test. The reflector needs no filter: its payload is
+`{**train_results, **score_results}` and secondaries never enter
+`score_res["results"]` — pinned by a source assertion over that literal.
+
+**Guards.** G1/G2 inverted to EXACT name sets (a fourth record carrier or a
+differently-spelled stamp is RED). G3's evaluator half inverted to an exact
+one-owner census. See F-P2b-4 for the defect the inversion exposed.
+
+**Declared golden deltas** (§4.7: the output path is `model_dump()` with no
+exclude flags, so additive default-empty fields DO serialize; the frozen
+contract is semantic emptiness, and building omission machinery for cosmetic
+byte identity is explicitly forbidden):
+
+| golden | delta |
+|---|---|
+| `rec3_schema_field_lists.json` | `hyperparam_tuning_output` gains `secondary_metric_specs` (47 → 48) |
+| `rec2_formal_success_projection.json`, `rec2_oom_skip_projection.json` | each gains the three EMPTY record carriers |
+| `EXPERIMENT_RECORD_FIELDS_58` → `_61` | three names appended after the primary pair; every earlier position unchanged |
+| `step09_5a_pre_refactor_oracle.json` | the result gains `secondary_metric_specs: None`, its record the three empty carriers |
+
+Every delta is the EMPTY state and nothing pre-existing moved — each was
+applied surgically key-by-key and then verified, never regenerated to green.
+
+### 15.6 C3 — interpreter projection + quiet-iteration carry + rendering — **COMPLETE**
+
+Commit: see §15.11.
+
+**Production surface.** `nodes/result_interpretation_agent/evidence.py`:
+`_project_secondary_metrics(output, record)` replaces the `[]` hardcode —
+declared stamp × the record the HEADLINE score came from (`best_rec`), which
+is what keeps a secondary number describing the same experiment as the score
+printed beside it (IR-P2b-5). `result_interpretation_agent.py`: the `_stats`
+write beside `failure_counts` and the read-back beside it, closing the B-6
+asymmetry.
+
+**Projection matrix**, asserted as hand-written literals on the projected
+STATE SEQUENCE `(id, its OWN direction, status)` — never read back from the
+projection:
+
+| record state under a stamp | projects |
+|---|---|
+| a matching result | `scored` |
+| a matching refusal | `refused` |
+| neither | `unavailable` — a NAMED absence |
+| a crash (`secondary_metric_errors`) | `unavailable`, with the diagnostic kept separately — NEVER a fourth scientific state |
+| **no stamp** (legacy or a task with none) | `[]` — zero rows, zero rendered bytes, even when the record DOES carry evidence |
+
+DAVIS's discriminating case holds: `[("psnr","higher",…), ("mae","lower",…)]`
+beside a `lower` primary, in declared order, with the declared literals pinned
+against the REAL DAVIS composition so the matrix cannot drift onto a metric
+nobody runs.
+
+**B-6 symmetry.** One fixture, both keys, one assertion block: a model that
+contributes no summary this iteration gets BOTH `failure_counts` AND
+`secondary_metrics` back from `_stats`. A cache predating the key contributes
+ABSENCE, never zero. A corrupt payload degrades to absence with a printed
+warning. §4.7 held: a zero-secondary run writes NO `_stats` secondary key at
+all (verified on the HEALTHY path — the degraded path writes no `_stats`, so
+the degraded harness could not have seen it).
+
+**Rendering.** The 09b renderer is REUSED UNCHANGED (`git diff` over
+`rendering.py` is empty). Its per-line direction words are asserted textually:
+the `psnr` line says `higher`, the `mae` line says `lower`, and neither
+carries the other's word — inheritance disproven on the bytes rather than
+inferred. A refusal renders its contract id verbatim. No declared secondary
+renders NO line at all, not an empty section.
+
+**TIDMAD prompt parity — byte-identical, no regeneration.** The C1a
+differential oracle is green and both goldens still hash to their C0 baseline
+values (`376f289e5caff1d1522ef6c4e63a4abb9115189692e1e1789af7921cfb30b352`
+calls, `aa676b69fa9ff364077785aa54663b7e1c15299a9f8246195a6303038b96b664`
+digest). `git diff 3dc298f1 -- .../goldens/` over that directory is EMPTY.
+
+**Mutation proofs** (each planted, reverted, baseline re-proven at 55 passed):
+
+| # | mutation | outcome |
+|---|---|---|
+| M7 | the projection reverted to `[]` | CAUGHT — 10 failures |
+| M8 | a refusal silently collapsed into `unavailable` | CAUGHT — 3 failures |
+| M9 | the `if not declared: return []` early return removed | **SURVIVED — EQUIVALENT.** Iterating an empty declared list yields `[]` either way, so the mutation changes no behaviour. Replaced by M9′ |
+| M9′ | the projection ignores the stamp and synthesises specs from the RECORD's own carriers (the real failure mode) | CAUGHT — both `no-stamp` cases |
+| M10 | the `_stats` READ-BACK half deleted (B-6 reopened) | CAUGHT — 3 failures |
+| M11 | the `_stats` WRITE half deleted | **SURVIVED at first — a REAL GAP.** The carry fixture hand-built its cache, so the producer half was untested. Closed by `test_the_write_and_the_read_back_are_ONE_round_trip`, which runs a healthy interpretation, takes the cache IT produced and feeds that into a second quiet-model run. Re-run: CAUGHT |
+
+**Guard dispositions applied.** G4 REWRITTEN — "the builder always leaves it
+empty" would now assert the opposite of the shipped contract, so it states the
+claim that actually survives: evidence appears ONLY under a declared set. Both
+original parametrisations (bare record / fully-scored record) are preserved,
+and the fully-scored one is now load-bearing, since a projection falling back
+to the record's carriers is exactly what M9′ plants. The module docstring
+records the inversion rather than pretending Q-09-7 = B never said otherwise.
+
+### 15.7 C4 — three-task closure + final invariant + docs — **COMPLETE**
+
+Commit: see §15.11.
+
+**Three-task lifecycle, driven through the REAL chain.** Every earlier commit
+proved one hop with the others stubbed; C4 drives each task once, end to end,
+with nothing hand-assembled in between —
+compose the task's OWN manifest → bind for the run → the real tuner (pseudo
+mode) evaluates and records → the real output stamp → the real interpreter
+projection → the real 09b renderer — and asserts the STATE SEQUENCE the whole
+chain produced.
+
+| task | composed | record carriers | stamp | projection | rendered |
+|---|---|---|---|---|---|
+| **TIDMAD** | `[]` | **no secondary key written at all** | `None` | `[]` | `[]` — ZERO lines |
+| **Pets** | `[("macro_f1","higher")]` | `secondary_metric_results` only | `[("macro_f1","higher")]` | `scored` | 1 line; `log_loss` absent from the ENTIRE observed state (Q-10-4 = A) |
+| **DAVIS** (scored) | `[("psnr","higher"), ("mae","lower")]` | both results, in order | both | `scored`, `scored` | the psnr line says `higher` and not `lower`; the mae line the reverse |
+| **DAVIS** (mixed) | same | `secondary_metric_refusals` + `secondary_metric_errors`, results EMPTY | both still stamped | `refused`, `unavailable` | the refusal renders its contract id; the crash text `boom` is ABSENT from the render |
+
+The DAVIS rows are the discriminating ones: two opposing secondary directions
+beside a `lower` primary, so nothing observed can have been produced by
+inheriting a single direction from anywhere.
+
+**Final observational invariant + anti-vacuity.** The census is re-run over
+the finished surface and is green. The C4 plant is EXECUTABLE rather than a
+manual transcript: for each of the FIVE files P2b actually changed
+(`task_composition.py`, `evaluation_metric.py`, tuner `execution.py`,
+`evidence.py`, `result_interpretation_agent.py`) it appends a probe containing
+an order comparison, a `MetricOrder` call and a sort key, requires a hit, and
+asserts the UN-planted source is clean in the same test. Aiming it at the
+changed files rather than at the whole declared scope is deliberate: a census
+green because it read a file P2b never touched would prove nothing about P2b.
+
+**Guard closure.** All six §2.8 rows reached their dispositioned end state
+with a citing commit — G1/G2/G5 in C2, G3 across C1+C2, G4 in C3, G6 declared
+and proven in C0 and re-proven here. Zero rows uncited, so C4's STOP condition
+does not fire.
+
+**Docs sync**, each claim quoted against merged source:
+
+* `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md` — the
+  three record carriers in the record-payload table (including the
+  `ScopeViolationError` carve-out), the run-scope acquisition bullet (no
+  legacy branch, the stamp on BOTH output branches, `run_order` reads the
+  primary only), and the hidden-payload section extended with why the
+  widening moved no existing prompt byte.
+* `nodes/result_interpretation_agent/result_interpretation_agent.md` — the
+  projection table (four states + the no-stamp row), the `_stats` carry row,
+  the rewritten "observational, and live since Step 10 / P2b" section
+  including the closed B-6 asymmetry, and the rendered-section row.
+* **Measured, not assumed**: there is no `--task_composition` CLI flag and no
+  operator-facing composition doc (P1's edge is programmatic — `grep` over
+  `docs/`, `scripts/` and the workflow argument parsers found none), so the
+  two node docs are the complete doc surface. The manifest key itself is
+  documented at its declaration in `task_composition.py`.
+
+### 15.8 Local implementation rulings (IR-P2b-N)
+
+**IR-P2b-1 — the ledger opens at §15, not §13.**
+*Question*: C0 §2 says the disposition table lives in "§13 when it opens".
+*Source*: at the freeze SHA, §13 is *Adversarial self-review* and §14 is
+*Freeze dispositions*. *Options*: renumber the frozen sections; append the
+table with no section; open a new section. *Ruling*: open **§15** and read
+every "§13" reference in C0 as §15. Renumbering frozen sections would
+rewrite frozen history for a cosmetic reason. *Validation*: none needed —
+documentation numbering, zero semantic content.
+
+**IR-P2b-2 — `_compose_metric` gains a `where` role parameter.**
+*Question*: §3.1 requires the secondary loop to CALL `_compose_metric` with
+NO duplicated fail-closed branches ("if reuse proves impossible, STOP"), but
+the function hardcodes `where = "metric"` inside all five of its messages, so
+verbatim reuse would tell an operator that `metric` failed when
+`secondary_metrics[1]` did. *Source*: `task_composition.py:537-592` at head;
+the five branches at :553, :560, :567, :580, :587 all interpolate `where`.
+*Options*: (a) copy the function — forbidden by §3.1 and the exact drift the
+rule exists to prevent; (b) reuse verbatim and accept misleading messages —
+a composition error's whole job is to name what failed; (c) post-process the
+message text — fragile string surgery over a contract; (d) add a `where`
+parameter defaulting to `"metric"`. *Ruling*: **(d)**. It is the smallest
+change, it keeps the primary's messages BYTE-identical (the default), and it
+makes the role explicit at the one call site that is not the primary.
+*Validation*: `test_an_inherited_branch_fires_with_the_SECONDARY_s_role_named`
+(the inherited branch fires for a secondary, naming `secondary_metrics[1]`)
+and `test_the_primary_s_own_messages_are_unchanged` (anchored `^metric
+requires an 'implementation' mapping`).
+
+**IR-P2b-3 — the ordering-operand invariant flags ORDER comparisons, not all
+comparisons.**
+*Question*: C1's first production edit turned the C0-extended invariant RED
+on `resolve_bound_run_secondary_metrics() != composition.secondary_metrics`
+(`task_composition.py`, inside `verify_composition_is_bound`). C0 §6 requires
+a STOP-and-audit: real latent offender, or precision defect?
+*Source*: the flagged node is an `ast.Compare` with `NotEq`, inside a
+binding-integrity check, written in the SAME `!=` idiom as the pre-P2b
+`task_config` check on the line directly below it (`bound_config.get
+("task_description") != composition.task_description`). It decides SAMENESS
+of a bound family, and reaches no ranking. Verdict: **precision defect in the
+detector**, not an offender. *Options*: (a) allowlist the file — explicitly
+forbidden by C0 §6; (b) drop the `verify_composition_is_bound` check — it is
+the only thing that catches a run which stamps a declared family it never
+bound, whose failure mode is a silent all-`unavailable` projection; (c)
+rewrite the check into a helper call so no `Compare` names a secondary — the
+detector's own docstring calls contorting production to satisfy the census
+"the tail wagging the dog"; (d) narrow the `Compare` branch to ORDER
+operators (`Lt`, `LtE`, `Gt`, `GtE`). *Ruling*: **(d)**. Before P2b no
+production line touched a secondary, so flagging every comparison was free;
+P2b makes legitimate equality comparisons unavoidable. The CLASS claim is
+"secondaries cannot reach an ordering decision", and a ranking must produce
+an order through an order comparison, an extremum call, a sort key or a
+`MetricOrder` method — all four still flagged. *Validation*: the plant
+family grew from 3 to 8 shapes covering `>`, `<`, `>=`, `<=`, `max`,
+`sorted`, `.sort` and `order.best`; `test_a_binding_integrity_check_is_
+deliberately_not_an_offender` pins the narrowing as a decision rather than a
+drift; `test_the_scope_extension_is_live` now plants BOTH an order-method and
+an order-comparison shape into every newly-scanned file's real source; and
+`test_flipping_every_secondary_value_changes_no_ordering_output` remains the
+behavioural backstop for whatever the AST cannot see.
+
+**IR-P2b-4 — `per_sample` is NOT excluded from a secondary's record payload.**
+*Question*: the primary dumps its result with `exclude={"per_sample"}`
+(`execution.py:915`); should the secondary carriers mirror that?
+*Source*: the primary's exclusion is DEDUPLICATION — the same values are on the
+record as `file_vector`, and the Step-06 comment says so in as many words. A
+secondary has no `file_vector` twin on the record. *Options*: (a) mirror the
+exclusion — would silently DROP per-sample evidence rather than deduplicate it;
+(b) dump in full. *Ruling*: **(b)**, with the reason recorded at the write site
+so the asymmetry does not read as an oversight. *Validation*: the round-trip
+test persists and re-validates a full secondary payload; today's three declared
+secondaries are scalar-only, so this is a contract choice with no current
+byte impact.
+
+**IR-P2b-5 — the projection follows the record the HEADLINE score came from.**
+*Question*: §4.4 says "find its result or refusal on the record" without
+naming which record, and a tuning output holds many.
+*Source*: `ModelRunSummary.secondary_metrics` is ONE list with no role field,
+and `SecondaryMetricEvidence` (frozen, 09a) has none either — so the shape
+cannot express two roles the way `best_/formal_training_diagnosis` does.
+Meanwhile `evidence.py` already computes four role records
+(`best_rec`, `valid_best_rec`, `valid_formal_rec`, `formal_rec`).
+*Options*: (a) `best_rec` — the record `best_denoising_score` came from;
+(b) `formal_rec`; (c) the last record; (d) widen the frozen carrier with a
+role. *Ruling*: **(a)**. 09a's per-role lesson is that evidence and the score
+printed beside it must describe the SAME experiment; the summary's headline
+number is `best_*`, so anything else would pair a secondary with a different
+run. (d) would redesign a frozen receiving model, which is out of scope.
+*Validation*: `test_the_projection_follows_the_record_the_headline_score_came_
+FROM` — two records with different secondary values, and only the best
+record's reaches the summary.
+
+**IR-P2b-6 — the `_stats` read-back catches `Exception`, not a narrow tuple.**
+*Question*: which exceptions should the corrupt-cache branch absorb?
+*Source*: written first as `(ValidationError, TypeError)`; a test drove a spec
+dict missing `scoreability` through it and got an uncaught **`KeyError`** from
+`metric_spec_from_declaration` (`evaluation_metric.py:670`) via
+`MetricSpecField`'s BeforeValidator. *Options*: (a) add `KeyError`;
+(b) enumerate every type the declaration parser might raise; (c) catch
+`Exception`. *Ruling*: **(c)**. This parses untrusted JSON written by a
+PREVIOUS iteration, and the design's requirement is "never a crash" — (a)
+fixes one instance of a class, and (b) is a promise about a nested parser's
+internals that this call site cannot keep. The absorbed error is PRINTED, so
+the branch is loud rather than silent. *Validation*:
+`test_a_corrupt_cached_payload_degrades_to_absence_without_crashing`, plus
+mutation M10 proving the branch is reached at all.
+
+### 15.9 Deviations from the frozen design
+
+None material. Two BOUNDED deviations, both from §2.8's assignment of a guard
+to a commit rather than from any frozen semantic:
+
+**D-P2b-1 — guard G5 was re-pointed from C3 to C2.** §2.8 assigns the
+ignore-undeclared-keys mutation to C3. It breaks in **C2**, because C2 is what
+turns its fabricated `secondary_metric_results` into a real declared field:
+the payload then reaches a validator through `object.__setattr__` and raises.
+C0's own rule is that each guard is flipped by the commit that TRIPS it, so
+holding it for C3 would have meant committing a red tree. The disposition
+itself is unchanged — KEEP the mutation, move the payload to a key that
+remains undeclared — and the test now asserts that key is undeclared rather
+than assuming it.
+
+**D-P2b-2 — four baselines outside §2.8 carried the declared delta.** The
+Step-00 record baselines (2 goldens + the ordered field list) and the
+Step-09.5a workflow envelope oracle pin serialized shapes that §4.7 predicts
+will change. Each was updated surgically with the delta recorded in its own
+module, per those baselines' stated update policy; none was regenerated.
+
+IR-P2b-2, IR-P2b-3 and IR-P2b-4 are bounded implementation rulings inside the
+frozen contract, not deviations: none changes a frozen semantic, and all three
+STRENGTHEN the surfaces the design names.
+
+### 15.10 Findings
+
+**F-P2b-1**, **F-P2b-2**, **F-P2b-3** — recorded in §15.1.
+
+**F-P2b-4 — the Step-09a evaluator census was blind to a leading underscore.**
+Inverting G3 in C2 produced `{}` where the real evaluator sits. The cause: the
+09a census used two ANCHORED alternations, one requiring the name to BEGIN
+with `evaluat`/`load`. `_evaluate_secondary_metrics` begins with `_`, so the
+guard would have reported "no production module evaluates a secondary metric"
+while one did — a guard green for the wrong reason, which is the only kind
+that is worse than absent. It also missed the plural (`_score_secondaries`).
+Fixed by stating the predicate ONCE over the whole name with no anchoring
+(`"secondar" in name` AND `evaluat|scor|load`), shared by the census and its
+probe so the probe cannot test a copy, with five plant shapes pinning it.
+Severity: the defect was latent — nothing evaluated a secondary before P2b —
+but the SAME shape guards other censuses and is worth a look when one is next
+touched.
+
+### 15.11 Commits
+
+| commit | milestone | subject |
+|---|---|---|
+| `9250343e` | C0 | test(step10/p2b): C0 — guard dispositions, extended ordering-operand scope, parity baseline |
+| `f9d6ea53` | C1 | feat(step10/p2b): C1 — declare secondary metrics in the manifest and bind them for the run |
+| `ec05f3a2` | C2 | feat(step10/p2b): C2 — evaluate the declared secondaries and transport their outcomes |
+| `ab5a3da4` | C3 | feat(step10/p2b): C3 — project secondary evidence, carry it across quiet iterations, render it |
+| `5b77742d` | C4 | test(step10/p2b): C4 — three-task lifecycle closure, final invariant plant, docs |
+| `f6a73afd` | — | docs(step10/p2b): ledger numbering — sequential §15 sections, ordered IR entries (docs only) |
+
+**Exact-head CI.** Run
+[**32439134908**](https://github.com/Galileo-Sandbox/SIDERIUS/actions/runs/32439134908)
+— **SUCCESS** — tested `f6a73afdc4bcfca3800ecac6d641c8d570be24d1`, identical
+to the PR head at the time of the run. Scope: **FULL SUITE** (the selector
+does not narrow on `pull_request` — "runs everything by policy"). Steps: ruff
+check · ruff format · **pyright** · unit, all success. Verdict read from the
+JOB LOG rather than a wrapper's exit status:
+
+```text
+11318 passed, 33 skipped, 516 warnings in 993.60s (0:16:33)
+```
+
+pyright could not be run locally (Node `v10.19.0`), so this run is its ONLY
+evidence — and it is green on the exact head.
+
+**Superseded run, recorded so the canonical one is unambiguous**: run
+`32438162347` ran on `5b77742d` and was AUTO-CANCELLED by GitHub's concurrency
+group when `f6a73afd` was pushed. It is NOT acceptance evidence; its lint,
+ruff-format and pyright steps had all reported success before cancellation.
+Exactly one full CI produced this PR's evidence.
+
+Any commit after `f6a73afd` is documentation-only provenance synchronisation
+and names the executable head it describes rather than its own SHA — the
+self-reference the C4 plan warns about is avoided by recording ANOTHER
+commit's run, not by skipping the record.
 
 ---
 

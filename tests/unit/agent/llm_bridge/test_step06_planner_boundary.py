@@ -217,13 +217,63 @@ def test_a_collapsed_formal_record_renders_only_the_policy_adjusted_score():
     assert "metric_result" not in rendered
 
 
-def test_the_hidden_key_set_is_exactly_the_step06_and_step07a_payloads():
-    """A guard on scope: the set holds Step 06's two metric keys and Step 07a's
-    two training-evidence keys — 07a HIDES, 07b RENDERS selected facts, Step
-    09 INTERPRETS. Widening it (hiding other record data from the planner) or
-    narrowing it (leaking a payload) is a Gate-1-visible byte change owned by
-    those steps, not a tidy-up — the set is pinned so either move is a
-    visible diff."""
+def test_the_hidden_key_set_is_exactly_the_step06_step07a_and_step10_payloads():
+    """A guard on scope: Step 06's two metric keys, Step 07a's two
+    training-evidence keys, and Step 10 / P2b's three secondary-metric keys —
+    07a HIDES, 07b RENDERS selected facts, Step 09 INTERPRETS, P2b transports.
+    Widening it (hiding other record data from the planner) or narrowing it
+    (leaking a payload) is a byte change owned by those steps, not a tidy-up —
+    the set is pinned so either move is a visible diff.
+
+    P2b's widening is byte-neutral on every EXISTING prompt, which is why it
+    needs no Gate-1 evidence and why `test_widening_the_set_moved_no_existing_
+    prompt_byte` below is the load-bearing half of this pin: the three keys are
+    written onto a record only when a run DECLARED secondaries, TIDMAD declares
+    none, and a record without them takes `_planner_visible`'s identity branch.
+    """
     assert _PLANNER_HIDDEN_RECORD_KEYS == frozenset(
-        {"metric_result", "metric_refusal", "training_history", "training_diagnosis"}
+        {
+            "metric_result",
+            "metric_refusal",
+            "training_history",
+            "training_diagnosis",
+            "secondary_metric_results",
+            "secondary_metric_refusals",
+            "secondary_metric_errors",
+        }
     )
+
+
+def test_widening_the_set_moved_no_existing_prompt_byte():
+    """Step 10 / P2b: hiding keys that a pre-P2b record cannot carry changes
+    nothing for any run that does not declare a secondary.
+
+    The claim is stated as an equivalence against the PRE-P2b key set rather
+    than as "the output looks right": for any record that carries none of the
+    three new keys, filtering with the widened set must produce exactly what
+    filtering with the old set produced — same keys, same ORDER, same values.
+    Key order matters because the filtered dict is `json.dumps`ed into the
+    prompt, so a reordering is a byte change even when the content is equal.
+    """
+    from agent.prompts import _planner_visible
+
+    pre_p2b_keys = {"metric_result", "metric_refusal", "training_history", "training_diagnosis"}
+    assert pre_p2b_keys < set(_PLANNER_HIDDEN_RECORD_KEYS), "P2b only WIDENS the set"
+
+    history = copy.deepcopy(_HISTORY_3)
+    assert not any(k.startswith("secondary_") for rec in history for k in rec), (
+        "these fixtures predate P2b — that is the point of using them here"
+    )
+    for rec in history:
+        as_before = {k: v for k, v in rec.items() if k not in pre_p2b_keys}
+        after = _planner_visible(rec)
+        assert list(after.items()) == list(as_before.items())
+
+    # A record with NO hidden key at all still takes the identity branch, so
+    # nothing is rebuilt and no key can be reordered.
+    bare = {k: v for k, v in history[-1].items() if k not in _PLANNER_HIDDEN_RECORD_KEYS}
+    assert _planner_visible(bare) is bare
+
+    rendered = _render(history)
+    for key in _PLANNER_HIDDEN_RECORD_KEYS:
+        assert key not in rendered

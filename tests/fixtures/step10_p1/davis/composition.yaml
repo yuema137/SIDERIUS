@@ -18,6 +18,21 @@ metric:
     module: execute_tools.evaluation_metric
     symbol: GlobalMseMetric
 
+# Step 10 / P2b — the mixed-direction control. The primary `mse` is
+# LOWER-is-better; `psnr` is HIGHER and `mae` is LOWER, so a carrier that
+# inherited the primary's direction would render psnr backwards and a
+# carrier that inherited a single secondary direction would render mae
+# backwards. Manifest order is semantic and is what the output stamps.
+secondary_metrics:
+  - declaration: ../../../../examples/davis_future_prediction/declared/metric_psnr.json
+    implementation:
+      module: execute_tools.evaluation_metric
+      symbol: GlobalMseMetric
+  - declaration: ../../../../examples/davis_future_prediction/declared/metric_mae.json
+    implementation:
+      module: execute_tools.evaluation_metric
+      symbol: GlobalMseMetric
+
 task_health:
   config: ../../../../examples/davis_future_prediction/declared/task_health.yaml
 

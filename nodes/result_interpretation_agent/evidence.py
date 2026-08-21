@@ -36,6 +36,7 @@ from agent.schemas.interpretation import (
     ModelRunSummary,
     RecordFailureCounts,
     RoundOrdering,
+    SecondaryMetricEvidence,
 )
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
@@ -102,6 +103,52 @@ def reconcile_metric_spec(
         # is what the interpreter's callers catch, and the promotion must not
         # change that contract. The message is the shared authority's, unchanged.
         raise InterpretationContractError(str(exc)) from exc
+
+
+def _project_secondary_metrics(
+    output: HyperparamTuningOutput, record: ExperimentRecord | None
+) -> list[SecondaryMetricEvidence]:
+    """The run's DECLARED secondaries, joined against ONE record's outcomes.
+
+    Step 10 / P2b C3 (design §4.4, §4.5). The declared set comes from the
+    output's ``secondary_metric_specs`` stamp and the outcomes from the record
+    the summary's headline score came from, so a secondary number always
+    describes the SAME experiment as the score beside it — the per-role
+    reasoning Step 09a applied to the training diagnosis.
+
+    The stamp is what makes an absence honest. Three states result, and the
+    fourth possibility is deliberately absent:
+
+    * a matching entry in ``secondary_metric_results`` -> ``scored``;
+    * a matching entry in ``secondary_metric_refusals`` -> ``refused``;
+    * declared but neither -> ``unavailable``, a NAMED absence. This also
+      covers a secondary whose evaluation CRASHED: the crash keeps its
+      separate diagnostic provenance on ``record.secondary_metric_errors``,
+      but it is not a scientific state and never becomes a fourth one.
+
+    NO stamp -> ``[]``. An output that never declared a secondary set — a
+    legacy output, or a run of a task that has none — gets zero absence rows
+    and therefore zero rendered bytes. Fabricating "unavailable" rows for a
+    run that declared nothing would report a silence as a measurement.
+
+    Each entry carries its OWN ``spec``, so a secondary is rendered with its
+    own direction words. DAVIS declares ``psnr`` (higher) beside a ``mse``
+    primary that is lower-is-better; an inherited direction would render it
+    backwards.
+    """
+    declared = output.secondary_metric_specs
+    if not declared:
+        return []
+    results = {r.metric_id: r for r in record.secondary_metric_results} if record else {}
+    refusals = {r.metric_id: r for r in record.secondary_metric_refusals} if record else {}
+    return [
+        SecondaryMetricEvidence(
+            spec=spec,
+            result=results.get(spec.id),
+            refusal=refusals.get(spec.id) if spec.id not in results else None,
+        )
+        for spec in declared
+    ]
 
 
 def _project_metric_identity(records: list[ExperimentRecord]) -> MetricIdentity | None:
@@ -470,12 +517,10 @@ def tuning_output_to_model_run_summary(
         # trial round and the formal round are different experiments.
         best_training_diagnosis=(best_rec.training_diagnosis if best_rec else None),
         formal_training_diagnosis=(formal_rec.training_diagnosis if formal_rec else None),
-        # Step 09a C6 — DELIBERATELY not populated (Q-09-7 = B). No
-        # record-level carrier exists until Step 10 lands
-        # `ExperimentRecord.secondary_metric_results` and the tuner-side
-        # evaluation; reading undeclared keys off a record would be a hidden
-        # contract, and inventing values would be worse. L1 fixtures attach
-        # carrier-shaped evidence directly.
-        secondary_metrics=[],
+        # Step 10 / P2b C3 — the declared secondaries, joined against the SAME
+        # record `best_denoising_score` came from. Empty for a run that
+        # declared none and for every output predating the stamp; a declared
+        # secondary with no outcome is a NAMED absence, never an omission.
+        secondary_metrics=_project_secondary_metrics(output, best_rec),
         failure_counts=project_failure_counts(records),
     )

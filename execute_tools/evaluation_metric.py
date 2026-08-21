@@ -1109,3 +1109,56 @@ def resolve_bound_run_metric() -> EvaluationMetric | None:
     than hidden behind a helper that silently picks a task.
     """
     return _ACTIVE_RUN_METRIC.get()
+
+
+# ---------------------------------------------------------------------------
+# Run-scoped SECONDARY metric binding (Step 10 / P2b C1)
+# ---------------------------------------------------------------------------
+
+_ACTIVE_RUN_SECONDARY_METRICS: ContextVar[tuple[EvaluationMetric, ...]] = ContextVar(
+    "siderius_active_run_secondary_metrics", default=()
+)
+
+
+@contextmanager
+def bind_run_secondary_metrics(
+    metrics: tuple[EvaluationMetric, ...],
+) -> Iterator[tuple[EvaluationMetric, ...]]:
+    """Bind the run's DECLARED OBSERVATIONAL secondary metrics for the block.
+
+    The primary's idiom (:func:`bind_run_metric`), in the same module, for the
+    same reasons: a token-reset ContextVar rather than module state, so nested
+    and sequential runs in one process never observe each other's declared
+    set. It lives beside the primary's pair because the tuner acquires both at
+    ONE site, and the composition module's own placement rule is that a value
+    consumed through an ambient acquisition is bound ambiently.
+
+    Like the primary's, this is a **seam, not a registry**: the composition
+    edge already resolved these instances through
+    :func:`metric_spec_from_declaration`, so no second way for a metric
+    identity to come into existence is introduced. There is no id, no lookup
+    and no table — and emphatically no ordering: a secondary is observational
+    evidence and never an operand of a ranking decision.
+
+    The bound value is a TUPLE and may legitimately be empty: a task that
+    declares no secondary binds ``()``, which is indistinguishable from an
+    un-composed run by design (§4.7's zero-secondary invariant).
+    """
+    token = _ACTIVE_RUN_SECONDARY_METRICS.set(tuple(metrics))
+    try:
+        yield tuple(metrics)
+    finally:
+        _ACTIVE_RUN_SECONDARY_METRICS.reset(token)
+
+
+def resolve_bound_run_secondary_metrics() -> tuple[EvaluationMetric, ...]:
+    """The run's declared secondaries, or ``()`` when nothing is bound.
+
+    Returns the EMPTY TUPLE rather than ``None``, which is the difference
+    between this and :func:`resolve_bound_run_metric`: an un-composed run has
+    no primary to fall back to and must keep its legacy derivation visible at
+    the acquisition site, whereas "no declared secondaries" is not a fallback
+    at all — it is the answer, and it is the same answer a composed
+    zero-secondary task gives.
+    """
+    return _ACTIVE_RUN_SECONDARY_METRICS.get()

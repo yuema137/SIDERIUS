@@ -9,6 +9,17 @@ changed something observable** — a node received a different input, an artifac
 changed, the returned results changed, or a startup side effect moved relative
 to the run-invariants lock. Unit tests for the new carriers cannot catch it,
 because they test the new shape; only a comparison against the old behaviour can.
+
+Declared deltas to the golden (never a re-baseline to make a test green):
+
+* **Step 10 / P2b C2** — the envelope gained `secondary_metric_specs` (`None`)
+  on the result and the three empty `secondary_metric_*` carriers on each
+  record. This is the ADDITIVE-field serialization the P2b design audited and
+  froze in its §4.7: the output path is `model_dump()` with no exclude flags,
+  so default-empty additive fields DO serialize, and the frozen contract there
+  is SEMANTIC emptiness rather than persisted-JSON byte identity — explicitly
+  so that no omission machinery gets built for cosmetic parity. Every value in
+  the delta is the empty state, and nothing pre-existing moved.
 """
 
 from __future__ import annotations
