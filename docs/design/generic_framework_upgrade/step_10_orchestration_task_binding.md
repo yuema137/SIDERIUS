@@ -3,7 +3,44 @@
 ## 0. Status, provenance and source anchor
 
 **REVISION 2 — FROZEN. OPERATOR APPROVED — PARENT SEMANTICS ONLY.
-IMPLEMENTATION IN PROGRESS — 1 of 7 children merged.**
+IMPLEMENTATION IN PROGRESS — 4 of 7 children merged (P1 · P4 · P2a · P2b).**
+
+**P2b (S3) — COMPLETE / MERGED 2026-08-21.** PR #244, squash **`5a2ecfd1`**;
+final executable head `f6a73afd` (exact-head CI **32439134908 SUCCESS**), final
+PR head `41eeff60` (docs-only provenance sync, its own exact-head CI
+**32444963507 SUCCESS** — full suite 11,318 passed / 33 skipped, ruff +
+ruff-format + pyright + unit all green); merged master byte-identical to the
+validated head. **A task's declared OBSERVATIONAL secondary metrics now travel
+the whole lifecycle** — optional manifest `secondary_metrics:` resolved by the
+SAME `_compose_metric` authority (no duplicated fail-closed branch) → a
+ContextVar bound on `bind_run_task_composition`'s existing ExitStack →
+evaluated by the extracted `_evaluate_secondary_metrics` boundary wherever the
+PRIMARY evaluates (Q-P2b-1: no round-type branch anywhere) → the three record
+carriers the 09a receiving side itself reserved, plus `secondary_metric_specs`
+stamped on BOTH the healthy and degraded output branches → projected against
+the declared stamp → carried across a quiet iteration → rendered by the 09b
+renderer, reused with an EMPTY diff. The frozen exception taxonomy holds with
+its ORDER load-bearing (`ScopeViolationError` subclasses `ValueError`, so it is
+caught first and RE-RAISED; a crash is diagnostic provenance and never a
+fourth scientific state). **Attempt parity deep-equal on nine lifecycle
+surfaces** with and without secondaries bound, one of them crashing.
+**Three-task closure through the real chain**: TIDMAD writes no secondary
+record key at all and renders zero lines (fingerprint byte-identical to its
+pre-P2b sha); Pets carries exactly `macro_f1`; DAVIS carries `psnr` (higher)
+and `mae` (lower) beside a `lower` `mse` primary, scored and refused/crashed.
+Gate 1 and Gate 2 both NOT REQUIRED and neither was run.
+
+**Two findings future work must not lose.** **F-P2b-4** — the Step-09a
+evaluator census used ANCHORED symbol regexes and was blind to a leading
+underscore, so it would have reported "no production module evaluates a
+secondary metric" while `_evaluate_secondary_metrics` did: a guard green for
+the wrong reason. Fixed in P2b by stating the predicate once over the whole
+name and sharing it with its probe. **The same anchored-census pattern may
+exist elsewhere and is recorded as separate test-infrastructure debt — audit
+each census when its area is next touched, never as a repo-wide sweep.**
+**M11** — a mutation survived P2b's first pass because the carry fixture
+hand-built its own cache, leaving the `_stats` WRITE untested; closed by a
+healthy-run → produced-cache → quiet-run round-trip.
 
 **P1 (S1 + S7) — COMPLETE / MERGED 2026-08-20.** PR #241, squash
 **`bcb17e45`**; final PR head `ffad7029`; exact-head CI **32415952195
@@ -1296,6 +1333,19 @@ mixed-direction discrimination that matters.
 
 ### 9.4 P2b acceptance (FROZEN)
 
+**CLOSED — P2b MERGED 2026-08-21 (PR #244, squash `5a2ecfd1`).** S3 is
+delivered: all eight criteria below are met at the merged head, with the
+evidence recorded in the child ledger §15 (76 checked, 0 open). Criterion 5's
+cache-carry symmetry (audit B-6) is closed in this same child as required —
+`_stats` write AND validated read-back, asserted on ONE fixture that checks
+`failure_counts` and `secondary_metrics` in a single block. Criterion 7 is
+proven by the Step-09a ordering-operand invariant staying green after the
+values became real, with its scanned surface EXTENDED over P2b's production
+lifecycle in C0 (before any behaviour changed) and executable plants in each
+of the five files P2b actually modified. Criterion 8 holds: zero P2a sites
+re-migrated, no second order authority, and `metric_order.py` has an empty
+diff since the freeze commit.
+
 P2b — **Secondary Metric Production Transport** — owns declaration, run
 binding, evaluation, record transport, persistence and cache carry,
 interpretation availability, and the named refused/unavailable states.
@@ -2358,7 +2408,7 @@ is not Step-10 scope.
 | | |
 |---|---|
 | revision | **2 — FROZEN**, post-merge reconciliation **PASS** (§0.3); **three targeted corrections R-1/R-2/R-3 applied 2026-08-20 (operator-authorized; acceptance/wording only — §22.1 P1 parity obligation, §3.8 default-4 ownership split, §8 order-acquisition precedence). Freeze unchanged; NOT Revision 3** |
-| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #242, squash `e094fa26`, exact-head CI 32431989276 SUCCESS on `b50bec6a`; merged master byte-identical to the validated head; final operator review PASS)** — the golden-metric ordering surface went **12 measured sites → 0** (the C0 AST scanner found 2 chain-fold sites in `core/resume.py` invisible to every prior audit); `reconcile_metric_spec` PROMOTED to `execute_tools/evaluation_metric.py` as the ONE reconciliation authority (one engine, spec-level + record-level `(metric_id, direction)` entry points); four-case unrankable semantics at every persisted-artifact consumer; proposer `top_n` direction-aware with the Q-P2a-1 order-free `all` fallback; scanner = standing guard, direct + alias plants RED at the final head. **D-P2a-4 ACCEPTED/BOUNDED** (`MetricOrder` body unchanged; only the accepted declaration annotation widened to the §4.4 minimum identity); **F-P2a-4 RESOLVED** (zero TIDMAD derivation sites added — CI caught the attempt, the derivation was deleted, never census-widened); five test-fixture generations upgraded to carry persisted identity. Post-P4 reconciliation MERGE-BASED (merge `553bd66c`, 0 conflicts, force push NOT used, honoring the repo guardrail); Gate 1/2 NOT REQUIRED, not run · **P2b REVISION 3 — FROZEN, OPERATOR APPROVED 2026-08-21 (anchor `96dc1327`; implementation NOT STARTED)** `pr_10_p2b_secondary_metric_transport.md` — architecture review PASS on rev 2 (post-P2a/P4 reconciliation: PROVISIONALs resolved; the record/output carrier adopts the THREE names the 09a receiving side itself reserves — `secondary_metric_results` / `secondary_metric_refusals` / `secondary_metric_specs`; eight-section all-`[ ]` commit plans C0–C4). Rulings: **Q-P2b-1 = WHEREVER_PRIMARY_EVALUATES** (no round-type branch); **Q-P2b-2 RESOLVED with the scope-violation correction** — NotScoreableError → typed refusal · ScopeViolationError → RE-RAISE to the existing outer handler, never downgraded · other Exception → `secondary_metric_errors` dict (diagnostic provenance, no new model, stderr/log surface only, projects `unavailable`), 'observational' explicitly bounded to ordinary secondary outcomes; **Q-P2b-3 = _STATS_SUFFICIENT** — digest NOT widened, and the false 'P5 territory' default-ownership wording removed; **C-P2b-1**: zero-secondary serialization audited (output `model_dump()` serializes empty defaults) ⇒ SEMANTIC emptiness frozen, no cosmetic byte-identity machinery. Gate 1 + Gate 2 NOT REQUIRED (frozen). Open questions 0; contradictions 0. Implementation begins in a fresh session from a filled Implementation Working Rules contract** · **P3 / P5 DRAFT rev 1 (2026-08-20, anchor `d7d94740`)** — P3 `pr_10_p3_proposer_typed_evidence.md` (one typed proposer evidence value produced by the protocol; direction-safe prediction-authoring grammar as the declared intentional LLM delta; reconciles after P2a+P2b) · **P4 REVISION 3 — FROZEN → IMPLEMENTED → MERGED 2026-08-20 (PR #243, squash `79833db8`, exact-head CI 32426702255 SUCCESS on `d73e39e3`; merged master byte-identical to the validated head; independent final review PASS)** `pr_10_p4_health_evidence_declaration.md` (post-P1 reconciliation at `64446b2b`; `evaluation.py`'s name-keyed tables + duplicated defaults + sampling literal become per-check declarations, and `evaluation.py` moves into the health-core census's GENERIC partition as the executable acceptance. Rulings: **Q-P4-1 = (a) fallback-only `check_default` label**, shipped TIDMAD rows byte-identical; **Q-P4-2 = YES**, `_WORST_STAT_BY_METRIC` + the unit-exactness literal absorbed as DERIVATIONS from the declared operator/unit — a table deleted, no field added, never a relocated map (R-7); **Q-P4-3 = DEFER BOTH**, HD-T5 / HD-T6 named post-Step-10 Health-capability debt, explicitly NOT P6 and NOT assumed Step 12; **C-P4-1 resolved** by the §13 scope-completeness correction — semantic owner, child decomposition, scientific Health semantics, public schema and P4/P2a parallelism all UNCHANGED. Adversarial 23 CLOSED / 2 CORRECTED / 0 open; 0 contradictions; Gate 1 + Gate 2 NOT REQUIRED; **SAFE TO IMPLEMENT IN PARALLEL WITH P2a**, competing semantic owners = 0) · P5 `pr_10_p5_interpretation_carried_state.md` (both parent-assigned values ride the sibling lifecycle; confirmations aggregation SOURCE-derived: producer-side keyed union ⇒ latest-wins projection; freezes after P3) · **P6 SKELETON ONLY** `pr_10_p6_three_task_closure_skeleton.md` (detailed design BLOCKED until P1/P2a/P2b/P3/P4/P5 merge) — `step_10_orchestration_task_binding/` |
+| child designs status | **P1 REVISION 2 FROZEN → IMPLEMENTED → MERGED 2026-08-20 (squash `bcb17e45`, PR #241, CI 32415952195)** · **P2a REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #242, squash `e094fa26`, exact-head CI 32431989276 SUCCESS on `b50bec6a`; merged master byte-identical to the validated head; final operator review PASS)** — the golden-metric ordering surface went **12 measured sites → 0** (the C0 AST scanner found 2 chain-fold sites in `core/resume.py` invisible to every prior audit); `reconcile_metric_spec` PROMOTED to `execute_tools/evaluation_metric.py` as the ONE reconciliation authority (one engine, spec-level + record-level `(metric_id, direction)` entry points); four-case unrankable semantics at every persisted-artifact consumer; proposer `top_n` direction-aware with the Q-P2a-1 order-free `all` fallback; scanner = standing guard, direct + alias plants RED at the final head. **D-P2a-4 ACCEPTED/BOUNDED** (`MetricOrder` body unchanged; only the accepted declaration annotation widened to the §4.4 minimum identity); **F-P2a-4 RESOLVED** (zero TIDMAD derivation sites added — CI caught the attempt, the derivation was deleted, never census-widened); five test-fixture generations upgraded to carry persisted identity. Post-P4 reconciliation MERGE-BASED (merge `553bd66c`, 0 conflicts, force push NOT used, honoring the repo guardrail); Gate 1/2 NOT REQUIRED, not run · **P2b REVISION 3 FROZEN → IMPLEMENTED → MERGED 2026-08-21 (PR #244, squash `5a2ecfd1`; final executable head `f6a73afd` CI 32439134908 SUCCESS, final PR head `41eeff60` CI 32444963507 SUCCESS with 11,318 passed / 33 skipped; merged master byte-identical to the validated head; operator final review PASS)** `pr_10_p2b_secondary_metric_transport.md` — architecture review PASS on rev 2 (post-P2a/P4 reconciliation: PROVISIONALs resolved; the record/output carrier adopts the THREE names the 09a receiving side itself reserves — `secondary_metric_results` / `secondary_metric_refusals` / `secondary_metric_specs`; eight-section all-`[ ]` commit plans C0–C4). Rulings: **Q-P2b-1 = WHEREVER_PRIMARY_EVALUATES** (no round-type branch); **Q-P2b-2 RESOLVED with the scope-violation correction** — NotScoreableError → typed refusal · ScopeViolationError → RE-RAISE to the existing outer handler, never downgraded · other Exception → `secondary_metric_errors` dict (diagnostic provenance, no new model, stderr/log surface only, projects `unavailable`), 'observational' explicitly bounded to ordinary secondary outcomes; **Q-P2b-3 = _STATS_SUFFICIENT** — digest NOT widened, and the false 'P5 territory' default-ownership wording removed; **C-P2b-1**: zero-secondary serialization audited (output `model_dump()` serializes empty defaults) ⇒ SEMANTIC emptiness frozen, no cosmetic byte-identity machinery. Gate 1 + Gate 2 NOT REQUIRED (frozen), and neither was run. Open questions 0; contradictions 0. **DELIVERED**: the composition/binding/evaluation/transport/projection/carry/render lifecycle end-to-end, six IR-P2b rulings, two ACCEPTED bounded deviations (G5 re-pointed to the commit that trips it; four out-of-scope baselines carried the frozen §4.7 additive-empty serialization delta, applied key-by-key and never regenerated), and findings F-P2b-1..4 — of which **F-P2b-4** (anchored-symbol censuses blind to a name prefix) is carried forward as separate test-infrastructure debt, deliberately NOT swept repo-wide** · **P3 / P5 DRAFT rev 1 (2026-08-20, anchor `d7d94740`)** — P3 `pr_10_p3_proposer_typed_evidence.md` (one typed proposer evidence value produced by the protocol; direction-safe prediction-authoring grammar as the declared intentional LLM delta; reconciles after P2a+P2b) · **P4 REVISION 3 — FROZEN → IMPLEMENTED → MERGED 2026-08-20 (PR #243, squash `79833db8`, exact-head CI 32426702255 SUCCESS on `d73e39e3`; merged master byte-identical to the validated head; independent final review PASS)** `pr_10_p4_health_evidence_declaration.md` (post-P1 reconciliation at `64446b2b`; `evaluation.py`'s name-keyed tables + duplicated defaults + sampling literal become per-check declarations, and `evaluation.py` moves into the health-core census's GENERIC partition as the executable acceptance. Rulings: **Q-P4-1 = (a) fallback-only `check_default` label**, shipped TIDMAD rows byte-identical; **Q-P4-2 = YES**, `_WORST_STAT_BY_METRIC` + the unit-exactness literal absorbed as DERIVATIONS from the declared operator/unit — a table deleted, no field added, never a relocated map (R-7); **Q-P4-3 = DEFER BOTH**, HD-T5 / HD-T6 named post-Step-10 Health-capability debt, explicitly NOT P6 and NOT assumed Step 12; **C-P4-1 resolved** by the §13 scope-completeness correction — semantic owner, child decomposition, scientific Health semantics, public schema and P4/P2a parallelism all UNCHANGED. Adversarial 23 CLOSED / 2 CORRECTED / 0 open; 0 contradictions; Gate 1 + Gate 2 NOT REQUIRED; **SAFE TO IMPLEMENT IN PARALLEL WITH P2a**, competing semantic owners = 0) · P5 `pr_10_p5_interpretation_carried_state.md` (both parent-assigned values ride the sibling lifecycle; confirmations aggregation SOURCE-derived: producer-side keyed union ⇒ latest-wins projection; freezes after P3) · **P6 SKELETON ONLY** `pr_10_p6_three_task_closure_skeleton.md` (detailed design BLOCKED until P1/P2a/P2b/P3/P4/P5 merge) — `step_10_orchestration_task_binding/` |
 | source anchor | **merged master `2393aacc`** |
 | Step-10 implementation | **NOT STARTED** |
 | prerequisite | Step 09.5a **MERGED** (PR #240) — the §15.1b/§15.1c block is **LIFTED** |

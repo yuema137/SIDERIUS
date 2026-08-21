@@ -5,8 +5,12 @@
 **REVISION 3 — FROZEN. OPERATOR APPROVED (2026-08-21).
 Open operator questions: 0. Material contradictions: 0.**
 
-**IMPLEMENTATION COMPLETE — C0-C4 landed; READY FOR OPERATOR REVIEW, DO NOT
-MERGE.** The frozen semantic rulings below are UNCHANGED; the live
+**IMPLEMENTATION COMPLETE — C0-C4 landed. MERGED 2026-08-21: PR #244, squash
+`5a2ecfd1`; executable head `f6a73afd` (exact-head CI 32439134908 SUCCESS),
+final PR head `41eeff60` (CI 32444963507 SUCCESS, 11,318 passed / 33 skipped);
+merged master byte-identical to the validated head. Operator final review
+PASS — architecture, C0-C4, IR-P2b-1..6, D-P2b-1/2 ACCEPTED, F-P2b-4 and M11
+resolutions, three-task closure and the Gate disposition all approved.** The frozen semantic rulings below are UNCHANGED; the live
 implementation ledger is **§15**, which records the source preflight, the
 guard-disposition closure, per-commit evidence, four IR-P2b rulings, two
 bounded deviations, four findings and the CI provenance. Gate 1 and Gate 2

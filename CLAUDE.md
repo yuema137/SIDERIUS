@@ -641,7 +641,47 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
-- **STEP 09 — COMPLETE (2026-08-20). NEXT = STEP 09.5, *not* Step 10.**
+- **STEP 10 — IN PROGRESS (2026-08-21). 4 of 7 children MERGED: P1
+  `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1`. NEXT = P3.**
+  Parent `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding.md`
+  (REVISION 2 FROZEN) is the status authority; the roadmap's Step-10 row
+  carries the per-child evidence. Step 09.5a merged first (PR #240, squash
+  `2393aacc`), which is why the STEP-09 entry below still saying "NEXT =
+  STEP 09.5" is history, not an instruction.
+  **P2b — Secondary Metric Production Transport — COMPLETE / MERGED
+  2026-08-21**: PR #244, squash `5a2ecfd1`; executable head `f6a73afd`
+  (exact-head CI **32439134908 SUCCESS**), final PR head `41eeff60` (CI
+  **32444963507 SUCCESS**, 11,318 passed / 33 skipped); merged master
+  byte-identical to the validated head. **A task now declares OBSERVATIONAL
+  secondary metrics and the whole lifecycle carries them** — an OPTIONAL
+  manifest `secondary_metrics:` section resolved by the SAME `_compose_metric`
+  authority (no duplicated fail-closed branch), bound on
+  `bind_run_task_composition`'s existing ExitStack, evaluated by
+  `_evaluate_secondary_metrics` **wherever the PRIMARY evaluates** (no
+  round-type branch exists), transported on
+  `ExperimentRecord.secondary_metric_{results,refusals,errors}` +
+  `HyperparamTuningOutput.secondary_metric_specs` (stamped on BOTH the healthy
+  and degraded output branches), projected against that declared stamp,
+  carried across a quiet iteration via `_stats` (closing audit B-6
+  symmetrically with `failure_counts`), and rendered by the Step-09b renderer
+  **reused unchanged**. Things future work must not re-break: the per-secondary
+  catch ORDER is load-bearing — `ScopeViolationError` subclasses `ValueError`,
+  so it is caught FIRST and **re-raised** to the existing outer handler, and an
+  ordinary crash is diagnostic provenance that projects `unavailable`, never a
+  fourth scientific state; secondaries are OBSERVATIONAL and an AST census over
+  the whole lifecycle keeps them out of every ordering expression; a run that
+  declares none writes NO secondary record key, NO `_stats` key, renders ZERO
+  bytes and keeps its composition fingerprint byte-identical (§4.7 freezes
+  SEMANTIC emptiness, NOT persisted-JSON byte identity — do not build omission
+  machinery for cosmetic parity). Gate 1 / Gate 2 NOT REQUIRED, neither run.
+  **F-P2b-4 — carried debt**: the Step-09a evaluator census used ANCHORED
+  symbol regexes and was blind to a leading underscore, so it would have
+  reported "no production module evaluates a secondary metric" while one did —
+  a guard green for the wrong reason. Fixed there; **the same anchored-census
+  pattern may exist elsewhere and must be audited per-census when its area is
+  next touched, never as a repo-wide sweep.**
+
+- **STEP 09 — COMPLETE (2026-08-20).**
   09b merged: PR #239, squash `e9a1f9fbb1c2e882be5b017756e2552a6b9f8d7c`,
   exact-head CI **32324124087 SUCCESS** on `ce3b971d`; merged master
   byte-identical to the validated head. **The interpreter's prompts no longer
