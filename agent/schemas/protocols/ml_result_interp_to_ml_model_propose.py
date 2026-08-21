@@ -36,6 +36,7 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     VocabEntry,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import StorageConfig
 from execute_tools.dataset_config import DataScope
 
@@ -117,7 +118,8 @@ def local_full_context(
                                 and the prompt block is suppressed.
 
     Populates in ml-model-propose (ProposalInput):
-      - interpretation       : full serialised InterpretationOutput (all fields above)
+      - interpretation_evidence : the proposer's TYPED view of the interpretation,
+                                  projected by ``build_proposer_evidence``
       - existing_model_types : output.model_types (names the proposal must not reuse)
       - expert_context       : merged list of ExpertContextItems
       - vocab_seed           : runtime vocabulary entries
@@ -168,8 +170,15 @@ def local_full_context(
                 )
             )
 
+    # Step 10 / P3 — the typed proposer evidence is built HERE, from the dump,
+    # by the ONE projection authority. The node's standalone CLI calls the SAME
+    # function on the persisted artifact (which is exactly this dump's
+    # ``model_dump_json``), so both entrypoints hand the node an identical value
+    # and neither mines the mapping itself (parent §11.2). C3 removed the raw
+    # dump that used to ride alongside, so there is no second carrier left to
+    # disagree with this one.
     result = {
-        "interpretation": output.model_dump(),
+        "interpretation_evidence": build_proposer_evidence(output.model_dump()),
         "existing_model_types": list(output.model_types),
         # Propagate the explicit cold-start state so the proposer renders a
         # "no prior evidence" prompt instead of implying an empty history is a
@@ -178,14 +187,6 @@ def local_full_context(
         "expert_context": [c.model_dump() for c in merged_context],
         "storage": storage.model_dump(),
     }
-
-    # Typed mirror of interpretation.per_model_score_tables. Populated only
-    # when upstream has tables — None keeps the ProposalInput default for
-    # back-compat with interpretation outputs from pre-score_table runs.
-    if output.per_model_score_tables:
-        result["per_model_score_tables"] = {
-            mt: st.model_dump() for mt, st in output.per_model_score_tables.items()
-        }
 
     # Prefer runtime_vocab from interpretation output (accumulated memory)
     # over the static seed. Falls back to static seed if interpretation
@@ -286,7 +287,7 @@ def database_full_context(
       - run_name (via storage): used to query the correct interpretation record
 
     Populates in ml-model-propose (ProposalInput):
-      - interpretation       : fully populated by fetching the interpretation from the DB
+      - interpretation_evidence : projected from the interpretation fetched from the DB
       - existing_model_types : output.model_types passed through
       - storage              : passed through from the orchestrator
     """

@@ -29,9 +29,17 @@ GOLDEN = Path(__file__).parent / "goldens" / "reasoning_prompt_structured_eviden
 
 def test_flag_off_reasoning_prompt_byte_identical(tmp_path):
     inp = strong_proposal_input("/tmp/cb4_golden_ws")
-    # The structured fields ARE in the payload (strong form)…
-    assert inp.interpretation["per_model_collapse_fingerprints"]["model_a"]
-    assert inp.interpretation["collapse_fingerprint_history"]["model_b"]
+    # The structured fields ARE in the evidence (strong form)…
+    #
+    # Step 10 / P3 C3 (guard disposition G9): these two probes used to subscript
+    # ``inp.interpretation`` as a raw dict. That field no longer exists — the
+    # evidence is typed — so they now read the typed carriers. The CLAIM is
+    # unchanged and is the load-bearing half of this test: the golden below
+    # would pass vacuously on a payload that simply had no health evidence to
+    # leak, so the probes exist to prove there IS evidence and the flag alone
+    # is what suppresses it.
+    assert (inp.interpretation_evidence.per_model_collapse_fingerprints or {})["model_a"]
+    assert (inp.interpretation_evidence.collapse_fingerprint_history or {})["model_b"]
     # …and the flag is OFF by default.
     prompt = _build_reasoning_prompt(inp)
     assert prompt == GOLDEN.read_text()

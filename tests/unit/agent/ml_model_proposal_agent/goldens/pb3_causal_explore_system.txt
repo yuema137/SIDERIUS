@@ -7,6 +7,17 @@ HYPOTHESIS about what to try next.
 Background on the task:
 - Step-00 fixture task: denoise a synthetic 1-D int8 series.
 
+## Metric context
+
+This run's metric identity is UNAVAILABLE (metric direction unavailable / metric_spec absent).
+
+- Do NOT assume which direction is better. Use no directional
+  language about the scores you are shown.
+- Do NOT claim any model is best, strongest, state-of-the-art or
+  worst: without a declared direction nothing has been ranked.
+- Read the raw values, and say plainly when a comparison cannot be
+  made on this evidence.
+
 ## Your task
 
 Based on the comparisons, propose what to try next and articulate WHY it
@@ -122,11 +133,11 @@ A JSON object with these fields:
   "proposed_change": "What the new model tries. Can be a targeted delta on the SOTA ('add Z', 'replace X with Y') or a novel architecture ('design from scratch using mechanism M'). Be specific and architecturally concrete.",
   "causal_hypothesis": "WHY this should improve the score. Must reference: (a) the bottleneck being addressed, (b) the mechanism that addresses it, (c) why existing models fail to address it. Max 600 chars.",
   "falsifiable_prediction": {
-    "metric": "What to measure, e.g. 'mean(file_vector[0:5])' or 'denoising_score'",
-    "current_value": 1.5,
-    "predicted_value": 2.5,
-    "threshold_for_refutation": 1.2,
-    "rationale": "Why this specific predicted value."
+    "metric": "What to measure, e.g. 'mean(file_vector[0:5])'",
+    "current_value": "REPLACE WITH A NUMBER (not a string): the SOTA's current value",
+    "predicted_value": "REPLACE WITH A NUMBER (not a string): what the new model should achieve. This run declares no metric direction, so do not assume which way is better — state the direction you intend in `rationale`",
+    "threshold_for_refutation": "REPLACE WITH A NUMBER (not a string): the value on the REFUTED side of current_value",
+    "rationale": "Why this specific predicted value, and in which direction."
   },
   "predicted_failure_modes": [
     "At least one way the proposal could fail. E.g. 'FNO layer may exceed VRAM budget at segmentation_size > 20000'.",

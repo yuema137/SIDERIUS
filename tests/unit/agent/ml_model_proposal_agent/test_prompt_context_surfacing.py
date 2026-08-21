@@ -29,6 +29,7 @@ from agent.schemas.proposal import (
     ReasoningStage,
     VocabEntry,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _build_reasoning_prompt
 
@@ -54,7 +55,7 @@ def _minimal_interp(**extra) -> dict:
 
 def _minimal_input(tmp_path, interp: dict, vocab_seed=None) -> ProposalInput:
     return ProposalInput(
-        interpretation=interp,
+        interpretation_evidence=build_proposer_evidence(interp),
         existing_model_types=["wavenet"],
         vocab_seed=vocab_seed or [],
         storage=StorageConfig(
@@ -133,7 +134,7 @@ def _pipeline_input(
 ) -> ProposalInput:
     """Input wired with a 2-stage pipeline and explicit exploration mode."""
     return ProposalInput(
-        interpretation=interp,
+        interpretation_evidence=build_proposer_evidence(interp),
         existing_model_types=["wavenet"],
         vocab_seed=vocab_seed or [],
         reasoning_pipeline=ReasoningPipelineConfig(

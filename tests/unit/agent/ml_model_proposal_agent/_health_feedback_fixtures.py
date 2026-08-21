@@ -25,6 +25,7 @@ from agent.schemas.health_feedback import (
 from agent.schemas.hyperparam_tuning import GateExhaustionInfo
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 
 SIG_A = "output_diversity_blocking:n_unique_int8_values=1"
@@ -110,11 +111,18 @@ def gate_exhaustion() -> GateExhaustionInfo:
 
 
 def strong_proposal_input(workspace: str, **overrides) -> ProposalInput:
-    """ProposalInput whose interpretation is the REAL model_dump of the
-    typed structured output, plus §14.N data. Flag not set here — tests
-    choose it explicitly."""
+    """ProposalInput carrying the proposer's TYPED evidence, plus §14.N data.
+
+    The evidence is projected from the REAL ``model_dump`` of the typed
+    structured output by the same ``build_proposer_evidence`` authority
+    production uses, so these fixtures exercise the shape the protocol and the
+    CLI actually produce. Step 10 / P3 C3 removed the raw ``interpretation``
+    dict from ``ProposalInput`` entirely; there is no second carrier to keep in
+    sync any more. The health flag is not set here — tests choose it.
+    """
+    dump = structured_interpretation_output().model_dump(mode="json")
     base = dict(
-        interpretation=structured_interpretation_output().model_dump(mode="json"),
+        interpretation_evidence=build_proposer_evidence(dump),
         existing_model_types=["model_a", "model_b"],
         recent_gate_exhaustions=[gate_exhaustion()],
         storage=StorageConfig(

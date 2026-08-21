@@ -462,7 +462,26 @@ class TestSecondariesCannotReachOrdering:
         "agent/prompt_templates/interpretation/rendering.py",
     ]
 
-    SCANNED_FILES: ClassVar[list[str]] = INTERPRETER_FILES + PRODUCTION_FILES
+    #: The Step-10 / P3 PROPOSER surface: the typed evidence boundary and every
+    #: module that consumes it. Q-P3-3 froze `NO_RAW_SECONDARY_CONSUMPTION`, so
+    #: no secondary value is projected here at all — which is exactly why the
+    #: scope is extended BEFORE any value could arrive (the P2b precedent). A
+    #: future ruling that ever exposes secondaries to the proposer would land on
+    #: an already-guarded surface instead of an unscanned one.
+    #:
+    #: `agent/schemas/proposer_evidence.py` joined in C1 and
+    #: `nodes/ml_model_proposal_agent/evidence_rendering.py` joins in C2 — the
+    #: commits that create them, because the census asserts every scanned file
+    #: EXISTS.
+    PROPOSER_FILES: ClassVar[list[str]] = [
+        "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py",
+        "nodes/proposal_helpers.py",
+        "agent/schemas/proposal.py",
+        "agent/schemas/proposer_evidence.py",
+        "agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py",
+    ]
+
+    SCANNED_FILES: ClassVar[list[str]] = INTERPRETER_FILES + PRODUCTION_FILES + PROPOSER_FILES
 
     @staticmethod
     def _secondaries_in_ordering_expressions(source: str) -> list[str]:
@@ -543,13 +562,17 @@ class TestSecondariesCannotReachOrdering:
         )
 
     def test_the_scope_extension_is_live(self):
-        """The P2b scope extension, proven rather than declared.
+        """The P2b + P3 scope extensions, proven rather than declared.
 
         `test_a_planted_offender_is_caught` proves the DETECTOR works on a
         string. This proves the detector is actually pointed at the Step-10
         production files: it reads each newly-scanned file from disk, appends
         an offending expression, and requires a hit. A scope list that named a
         file the census never opened would pass the former and fail this.
+
+        Step 10 / P3 C0 extends the probe to the proposer files for the same
+        reason it extended the scanned set: a list is not a guard until
+        something planted in it has actually been caught.
         """
         plants = {
             "order-method": (
@@ -562,7 +585,7 @@ class TestSecondariesCannotReachOrdering:
                 "    return a.secondary_metric_results[0].scalar > b.secondary_metric_results[0].scalar\n"
             ),
         }
-        for rel in self.PRODUCTION_FILES:
+        for rel in self.PRODUCTION_FILES + self.PROPOSER_FILES:
             source = (REPO_ROOT / rel).read_text(encoding="utf-8")
             for shape, planted in plants.items():
                 assert self._secondaries_in_ordering_expressions(source + planted), (

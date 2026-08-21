@@ -13,6 +13,9 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ResearchPolicy,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
+from execute_tools.evaluation_metric import MetricIdentityKey
+from execute_tools.metric_order import MetricOrder
 from nodes.proposal_helpers import resolve_exploration_mode, select_candidate_models
 
 # ---------------------------------------------------------------------------
@@ -47,12 +50,12 @@ class TestManualOverride:
     def test_explicit_explore_bypasses_all_signals(self):
         interp = _interp(vocab_diversity_ratio=0.0)
         pipeline = _pipeline(mode="explore")
-        assert resolve_exploration_mode(interp, pipeline) == "explore"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "explore"
 
     def test_explicit_exploit_bypasses_all_signals(self):
         interp = _interp(model_types=[f"m{i}" for i in range(10)])
         pipeline = _pipeline(mode="exploit")
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
 
 # ---------------------------------------------------------------------------
@@ -65,12 +68,12 @@ class TestEvidenceDepth:
         # 3 built-in + 2 proposed = 2 agent-proposed → explore
         interp = _interp(model_types=["punet", "wavenet", "fcnet", "model_a", "model_b"])
         pipeline = _pipeline()
-        assert resolve_exploration_mode(interp, pipeline) == "explore"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "explore"
 
     def test_exactly_5_proposed_models_triggers_exploit(self):
         interp = _interp(model_types=[f"proposed_{i}" for i in range(5)])
         pipeline = _pipeline()
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
     def test_many_proposed_models_triggers_exploit(self):
         """Well above the threshold, not just at it.
@@ -82,7 +85,7 @@ class TestEvidenceDepth:
         """
         interp = _interp(model_types=[f"m{i}" for i in range(10)])
         pipeline = _pipeline()
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
 
 def test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best():
@@ -103,7 +106,8 @@ def test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best():
         "metric_identity": {"metric_id": "tidmad_denoising_score", "direction": "higher"},
     }
     selected = select_candidate_models(
-        interpretation, ModelSelectionStrategy(method="top_n", params={"n": 2})
+        build_proposer_evidence(interpretation),
+        ModelSelectionStrategy(method="top_n", params={"n": 2}),
     )
     assert [candidate["model_type"] for candidate in selected] == ["punet"]
     assert selected[0]["best_score"] == -1.77
@@ -122,7 +126,7 @@ class TestVocabStagnation:
             vocab_diversity_ratio=0.05,  # below default threshold 0.1
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
-        assert resolve_exploration_mode(interp, pipeline) == "explore"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "explore"
 
     def test_healthy_vocab_does_not_override(self):
         """Ratio above threshold → stagnation check passes, evidence depth decides."""
@@ -131,7 +135,7 @@ class TestVocabStagnation:
             vocab_diversity_ratio=0.3,  # healthy — above threshold
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
     def test_ratio_at_threshold_boundary(self):
         """Ratio exactly at threshold → NOT stagnating (stagnation requires < threshold)."""
@@ -141,7 +145,7 @@ class TestVocabStagnation:
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
         # 0.1 is not < 0.1 → no stagnation trigger → exploit (evidence depth)
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
     def test_stagnation_checked_before_evidence_depth(self):
         """Stagnation is Priority 1 — it fires even when evidence depth would say explore."""
@@ -151,13 +155,13 @@ class TestVocabStagnation:
         )
         # Both signals agree here, but the stagnation check runs first
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
-        assert resolve_exploration_mode(interp, pipeline) == "explore"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "explore"
 
     def test_missing_diversity_ratio_falls_back_to_evidence_depth(self):
         """If vocab_diversity_ratio is absent (legacy / first iteration), skip stagnation check."""
         interp = {"model_types": [f"m{i}" for i in range(10)]}  # no vocab_diversity_ratio
         pipeline = _pipeline(vocab_stagnation_threshold=0.1)
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
     def test_custom_threshold(self):
         """Policy threshold is configurable."""
@@ -166,7 +170,7 @@ class TestVocabStagnation:
             vocab_diversity_ratio=0.25,  # above default (0.1) but below custom (0.3)
         )
         pipeline = _pipeline(vocab_stagnation_threshold=0.3)
-        assert resolve_exploration_mode(interp, pipeline) == "explore"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "explore"
 
 
 # ---------------------------------------------------------------------------
@@ -239,21 +243,36 @@ class TestIterIndexFromSource:
         assert _iter_index_from_source("Xproposed_iter_5") == -1
 
 
+#: The regime every pre-P3 clamp expectation in this module was written under.
+HIGHER_ORDER = MetricOrder(MetricIdentityKey(id="fixture_higher", direction="higher"))
+
+
 class TestClampComparativeAnalysis:
-    """The 3-best + 2-recent hybrid clamp on DiscoveryMemo.comparative_analysis."""
+    """The 3-best + 2-recent hybrid clamp on DiscoveryMemo.comparative_analysis.
+
+    Step 10 / P3 C2 (F-P3-1) made ``order`` a REQUIRED keyword-only argument,
+    because Draw A is a primary-score preference decision and it used to encode
+    higher-is-better in a bare ``-score`` sort. Every case below passes
+    ``HIGHER_ORDER``, which is the regime these expectations were written under
+    — so they must all still pass UNCHANGED. That is the parity half of the
+    migration: the direction handling was fixed without moving the behaviour
+    anyone had already pinned. The ``lower`` and absent-identity regimes, which
+    had no coverage at all before, are owned by the C2 module's hand-computed
+    retention fixtures.
+    """
 
     def test_no_op_when_under_cap(self):
         entries = [
             _entry("a", "proposed_iter_1", 0.5),
             _entry("b", "proposed_iter_2", 0.6),
         ]
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         assert len(out) == 2
         assert [e["model_type"] for e in out] == ["a", "b"]
 
     def test_no_op_exact_cap(self):
         entries = [_entry(f"m{i}", f"proposed_iter_{i}", 0.1 * i) for i in range(5)]
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         assert len(out) == 5
 
     def test_iter13_envelope_ratio_3_best_plus_2_recent(self):
@@ -268,7 +287,7 @@ class TestClampComparativeAnalysis:
             # Older iter -> higher best_score. So top-3-by-score = iters 0,1,2,
             # top-2-by-recency = iters 12,11.
             entries.append(_entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01))
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         out_mts = [e["model_type"] for e in out]
         assert len(out) == 5
         # Top-3-by-score (iters 0,1,2)
@@ -283,7 +302,7 @@ class TestClampComparativeAnalysis:
         entries = []
         for i in range(8):
             entries.append(_entry(f"m{i}", f"proposed_iter_{i}", 1.0 - i * 0.01))
-        out = clamp_comparative_analysis(entries, top_k=3)
+        out = clamp_comparative_analysis(entries, top_k=3, order=HIGHER_ORDER)
         assert len(out) == 3
         # m0/m1/m2 have the top best_scores.
         assert {e["model_type"] for e in out} == {"m0", "m1", "m2"}
@@ -293,7 +312,7 @@ class TestClampComparativeAnalysis:
         entries = []
         for i in range(13):
             entries.append(_entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01))
-        out = clamp_comparative_analysis(entries, top_k=10)
+        out = clamp_comparative_analysis(entries, top_k=10, order=HIGHER_ORDER)
         assert len(out) == 10
         out_mts = {e["model_type"] for e in out}
         # 3 best-score (m00/m01/m02) + 2 recent (m12/m11) all present.
@@ -309,7 +328,7 @@ class TestClampComparativeAnalysis:
             _entry("delta", "proposed_iter_4", 0.7),
             _entry("epsilon", "proposed_iter_5", 0.3),
         ]
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         assert len(out) == 5
         # Exactly one 'alpha' entry, and it's the higher-score one.
         alpha_entries = [e for e in out if e["model_type"] == "alpha"]
@@ -322,7 +341,7 @@ class TestClampComparativeAnalysis:
             _entry("seed_a", "seed", 0.1),
             _entry("seed_b", "seed", 0.2),
         ] + [_entry(f"p{i}", f"proposed_iter_{i}", 0.05) for i in range(1, 10)]
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         out_mts = [e["model_type"] for e in out]
         # Recency draws come from p9, p8 (highest iter indices), not from seeds.
         assert "p9" in out_mts
@@ -339,7 +358,7 @@ class TestClampComparativeAnalysis:
             _entry("good4", "proposed_iter_2", 0.01),
             _entry("good5", "proposed_iter_1", 0.001),
         ]
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         out_mts = [e["model_type"] for e in out]
         # 'good' (iter=5) is the most recent and must survive the recency draw.
         assert "good" in out_mts
@@ -348,14 +367,14 @@ class TestClampComparativeAnalysis:
         """Input list is not modified — caller's data is safe."""
         entries = [_entry(f"m{i}", f"proposed_iter_{i}", float(i)) for i in range(10)]
         snapshot = copy.deepcopy(entries)
-        _ = clamp_comparative_analysis(entries, top_k=3)
+        _ = clamp_comparative_analysis(entries, top_k=3, order=HIGHER_ORDER)
         assert entries == snapshot
 
     def test_independent_top_k_alters_density(self):
         """Knob sweep: top_k ∈ {2,5,10} produces the expected output sizes."""
         entries = [_entry(f"m{i:02d}", f"proposed_iter_{i}", 1.0 - i * 0.01) for i in range(13)]
         for k in (2, 3, 5, 7, 10):
-            out = clamp_comparative_analysis(entries, top_k=k)
+            out = clamp_comparative_analysis(entries, top_k=k, order=HIGHER_ORDER)
             assert len(out) == k, f"top_k={k} expected {k} entries, got {len(out)}"
 
     def test_missing_best_score_treated_as_negative_infinity(self):
@@ -364,7 +383,7 @@ class TestClampComparativeAnalysis:
             {"model_type": "noscore", "source": "proposed_iter_99"},  # no best_score
             _entry("filler", "seed", 0.5),
         ]
-        out = clamp_comparative_analysis(entries, top_k=5)
+        out = clamp_comparative_analysis(entries, top_k=5, order=HIGHER_ORDER)
         # No exception, output is well-formed and capped at 5.
         assert len(out) == 5
 

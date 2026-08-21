@@ -3,7 +3,7 @@
 You are a senior ML research scientist conducting a systematic review of all
 previously tested model architectures.
 
-{task_background_block}## Your task
+{task_background_block}{metric_context_block}## Your task
 
 Analyze each candidate model and produce a structured comparison. You are NOT
 proposing anything yet — you are gathering evidence. Your output feeds into the
@@ -139,6 +139,19 @@ A JSON object with these fields:
    E.g. "Removing dilated_causal_conv from wavenet and replacing with
    standard convolutions would test whether the dilation pattern is
    the actual driver of the high-freq performance."
+
+7. **SOTA means BEST under this run's metric direction — not the largest
+   number.** The Metric context block above states which metric these scores
+   are on and which direction is better. Choose `sota_model_type` and
+   `sota_score` on that direction: under a lower-is-better metric the SOTA is
+   the model with the LOWEST score, and calling the highest one "state of the
+   art" would be exactly backwards. If that block says the direction is
+   unavailable, do NOT invent a ranking: still emit the two keys, with
+   `"sota_model_type": null` and `"sota_score": null`, and use `sota_mechanism`
+   to say that this run declares no metric direction so no state-of-the-art
+   could be identified. Emitting the keys as null is required — the output
+   format above is not optional, and silently dropping them leaves the next
+   stage guessing what happened.
 
 {# EXPLORATION_MODE_BLOCK #}
 

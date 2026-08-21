@@ -20,6 +20,34 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   is SEMANTIC emptiness rather than persisted-JSON byte identity — explicitly
   so that no omission machinery gets built for cosmetic parity. Every value in
   the delta is the empty state, and nothing pre-existing moved.
+
+* **Step 10 / P3 C1** — the proposer's run input gained
+  `interpretation_evidence`: the typed projection of the interpretation the
+  protocol now builds through `build_proposer_evidence`, so that production and
+  the node's standalone CLI stop being two independent readers of one raw dict
+  (parent §11.2; child design §4.2). The delta was measured before
+  re-baselining and is **exactly one ADDED key** — no pre-existing value moved,
+  nothing was removed, and the raw `interpretation` field is untouched here
+  because P3 removes it in C3, not C1. That the oracle caught this at all is
+  the point: an additive change to a node's input envelope is exactly the class
+  of thing that should be declared rather than discovered.
+
+* **Step 10 / P3 C3** — the promised other half: the proposer's run input LOST
+  `interpretation` (the raw upstream dump) and `per_model_score_tables` (a typed
+  mirror with zero readers). The typed `interpretation_evidence` added above is
+  now the ONE carrier, so nothing left the envelope that is not still there —
+  one carrier replaced three. Measured before re-baselining: **exactly two
+  REMOVED keys**, zero changed and zero added.
+
+  Worth recording HOW this was found, because the process failed before the
+  guard did. C3's own validation ran the proposer, nodes and protocol suites
+  only — not `tests/unit/workflows/` — so this file stayed RED on the branch
+  through three later commits, and was caught by a broad local sweep and an
+  adversarial review rather than by the commit that broke it. A declared delta
+  that the breaking commit never declares is indistinguishable from a
+  regression until somebody runs the test. Targeted validation must include the
+  guards a change is KNOWN to move — and this one is named in the paragraph
+  directly above.
 """
 
 from __future__ import annotations

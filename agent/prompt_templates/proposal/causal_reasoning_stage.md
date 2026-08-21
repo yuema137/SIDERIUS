@@ -4,7 +4,7 @@ You are a senior ML research scientist. You have just reviewed a systematic
 comparison of all candidate models (Stage 1 output). Now form a CAUSAL
 HYPOTHESIS about what to try next.
 
-{task_background_block}## Your task
+{task_background_block}{metric_context_block}## Your task
 
 Based on the comparisons, propose what to try next and articulate WHY it
 should improve performance. Your output is the core of the DiscoveryMemo —
@@ -103,13 +103,7 @@ A JSON object with these fields:
 {
   "proposed_change": "What the new model tries. Can be a targeted delta on the SOTA ('add Z', 'replace X with Y') or a novel architecture ('design from scratch using mechanism M'). Be specific and architecturally concrete.",
   "causal_hypothesis": "WHY this should improve the score. Must reference: (a) the bottleneck being addressed, (b) the mechanism that addresses it, (c) why existing models fail to address it. Max 600 chars.",
-  "falsifiable_prediction": {
-    "metric": "What to measure, e.g. 'mean(file_vector[0:5])' or 'denoising_score'",
-    "current_value": 1.5,
-    "predicted_value": 2.5,
-    "threshold_for_refutation": 1.2,
-    "rationale": "Why this specific predicted value."
-  },
+{falsifiable_prediction_example}
   "predicted_failure_modes": [
     "At least one way the proposal could fail. E.g. 'FNO layer may exceed VRAM budget at segmentation_size > 20000'.",
     "A second failure mode (optional but encouraged)."

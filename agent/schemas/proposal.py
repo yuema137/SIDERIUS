@@ -20,9 +20,10 @@ from agent.schemas.hyperparam_tuning import (
     ExpertAdviceInput,
     GateExhaustionInfo,
 )
-from agent.schemas.score_table import ScoreComparisonTable
+from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent.schemas.vocab import VocabEntry
 from core.hardware_context import HardwareContext
 from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
 from execute_tools.dataset_config import DataScope
@@ -55,9 +56,16 @@ class FalsifiablePrediction(BaseModel):
     current_value: float = Field(description="The SOTA's current value for this metric.")
     predicted_value: float = Field(description="What the new model should achieve.")
     threshold_for_refutation: float = Field(
-        description="Below this value, the hypothesis is considered refuted. "
-        "Must be on the same side of current_value as predicted_value "
-        "(i.e. if predicting improvement, threshold < current)."
+        description="The value on the REFUTED side of ``current_value`` for "
+        "this run's metric direction: a result that reaches it means the "
+        "hypothesis was wrong. Under a higher-is-better metric that is BELOW "
+        "``current_value``; under a lower-is-better metric it is ABOVE it. "
+        "The old wording said 'below this value ... threshold < current', "
+        "which is only correct in the higher regime and inverted in the other "
+        "(Step 10 / P3 C4). This description is NOT sent to the model — "
+        "``LLMBridge.generate`` attaches no schema — so the direction-correct "
+        "authoring guidance lives in the causal stage template; this is a "
+        "documentation correction for the humans reading the schema."
     )
     rationale: str = Field(description="One sentence: why this specific predicted value.")
 
@@ -596,42 +604,13 @@ class ReasoningPipelineConfig(BaseModel):
     )
 
 
-# B.6a — Unified vocabulary entry (features + concepts)
-class VocabEntry(BaseModel):
-    """A single vocabulary entry — feature or capability.
-
-    Adding a new kind (e.g. 'failure_pattern') requires NO code changes —
-    just add entries with the new kind value. See §2B composability principle.
-    """
-
-    name: str = Field(description="Canonical snake_case name.")
-    kind: str = Field(
-        description="'feature' (concrete architectural building block, e.g. "
-        "'dilated_causal_conv') or 'capability' (measurable "
-        "architectural property the feature provides, e.g. "
-        "'receptive_field'). New kinds can be added freely."
-    )
-    description: str = Field(max_length=1000)
-    related_to: list[str] = Field(
-        default_factory=list,
-        description="Names of connected VocabEntry items. "
-        "Feature→concept and concept→feature links.",
-    )
-    tier: Literal["canonical", "candidate"] = "candidate"
-    pattern: str | None = Field(
-        default=None, description="AST/regex for features. None for concepts."
-    )
-    proposed_by_run: str | None = None
-    seen_in_runs: list[str] = Field(default_factory=list)
-    aliases: list[str] = Field(default_factory=list)
-    origin: str | None = Field(
-        default=None,
-        description="Source agent for externally-contributed entries. "
-        "E.g. 'ml_literature_review', 'physics_literature_review'. "
-        "None = proposed during an experiment run (proposed_by_run carries the run name). "
-        "When set, proposed_by_run must be None — external contributions do not "
-        "count toward seen_in_runs and cannot be promoted via the run-count criterion.",
-    )
+# B.6a — Unified vocabulary entry (features + concepts).
+#
+# RELOCATED to ``agent/schemas/vocab.py`` by Step 10 / P3 C1 (design §4.2) and
+# re-exported here so every existing importer keeps working. The entry belongs
+# to neither node — the interpreter mints entries, the proposer reads them —
+# and declaring it in the DOWNSTREAM node's schema made the UPSTREAM schema
+# import backwards across the graph. See ``agent/schemas/vocab.py``.
 
 
 # ---------------------------------------------------------------------------
@@ -647,9 +626,20 @@ class ProposalInput(BaseModel):
     which maps InterpretationOutput → ProposalInput.
     """
 
-    interpretation: dict[str, Any] = Field(
-        description="Serialised InterpretationOutput — key findings, bottlenecks, "
-        "and take-home message from result_interpretation_agent.",
+    interpretation_evidence: ProposerInterpretationEvidence = Field(
+        description="The proposer's TYPED view of the interpretation — the ONE "
+        "declared contract for what this node may reason from, produced by "
+        "``build_proposer_evidence`` at both entrypoints (the protocol and the "
+        "node's standalone CLI).\n\n"
+        "REQUIRED, and that is the point (Step 10 / P3 C3, parent §11.2). It "
+        "replaced ``interpretation: dict[str, Any]`` — the upstream node's "
+        "ENTIRE ``model_dump()``, which two independent readers mined with "
+        "``.get()`` and which therefore let each of them drift onto fields the "
+        "other never saw. With the raw dump gone there is nothing left to "
+        "bypass the projection with, and a caller that skipped it cannot "
+        "construct an input at all. It also replaced the dead typed mirror "
+        "``per_model_score_tables``, which had zero readers anywhere: the "
+        "evidence now carries the tables as the ONE carrier.",
     )
     existing_model_types: list[str] = Field(
         default_factory=list,
@@ -688,14 +678,13 @@ class ProposalInput(BaseModel):
         "empty) is for test fixtures only; production callers always populate "
         'via ``ForwardContract(**load_task_config()["forward_contract"])``.',
     )
-    per_model_score_tables: dict[str, ScoreComparisonTable] | None = Field(
-        default=None,
-        description="model_type → best ScoreComparisonTable, carried forward from "
-        "InterpretationOutput.per_model_score_tables. Typed mirror of the "
-        "`interpretation['per_model_score_tables']` dict-carry payload — "
-        "consumers may read either. Replaces the old per_model_file_vectors "
-        "per §7.3 / Decision 6. None when no upstream tables are available.",
-    )
+    # ``per_model_score_tables`` REMOVED by Step 10 / P3 C3. It was a typed
+    # mirror of ``interpretation['per_model_score_tables']`` documented as
+    # "consumers may read either" — a choice no consumer ever made: it had
+    # ZERO readers repository-wide, while the node read the dict copy
+    # exclusively. One value had three carriers (dump + mirror + nothing);
+    # ``interpretation_evidence.per_model_score_tables`` is now the one.
+
     # --- Run-level data + time-budget context (workflow-supplied) ---
     # See docs/resource_estimator_implement.md §2.7.2. These fields originate at the
     # workflow/CLI entry point and fan out to both this node and the tuner so

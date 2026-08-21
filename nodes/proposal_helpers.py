@@ -15,39 +15,34 @@ from agent.schemas.proposal import (
     ModelSelectionStrategy,
     ReasoningPipelineConfig,
 )
-from execute_tools.evaluation_metric import (
-    metric_identity_from_mapping,
-    metric_identity_unavailable_notice,
-)
+from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
+from execute_tools.evaluation_metric import metric_identity_unavailable_notice
 from execute_tools.metric_order import MetricOrder
 
 # Root of the SIDERIUS project
 _SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def _interpretation_order(interpretation: dict[str, Any]) -> MetricOrder | None:
+def evidence_order(evidence: ProposerInterpretationEvidence) -> MetricOrder | None:
     """The order the interpretation evidence was actually produced under.
 
-    Step 10 P2a C4. ``InterpretationOutput.metric_identity`` is Step 09a's
-    ordering PROVENANCE — the identity the digest was ordered under, echoed
-    from the run's bound ``MetricSpec``. It has always been present in the
-    dict this helper receives; the proposer simply never read it.
+    Step 10 / P3 C2. This REPLACES P2a C4's ``_interpretation_order``, which
+    read ``metric_identity`` out of the raw dict and carried an explicit note
+    to P3: *"supply this same identity through that reader and delete this
+    function — the semantics to preserve are 'read the declared identity,
+    never assume a direction, and fall back to order-free `all` when it is
+    absent'"*. Those semantics are preserved exactly; only the carrier changed.
 
-    **Note for P3** (recorded so the mechanism can be replaced without
-    re-litigating the semantics): no threading was required. The helper
-    already takes the whole serialized interpretation, so C4 adds a READ, not
-    a new parameter, a new call-site argument or a typed reader. When P3
-    builds the proposer's typed evidence reader it should supply this same
-    identity through that reader and delete this function — the semantics to
-    preserve are "read the declared identity, never assume a direction, and
-    fall back to order-free `all` when it is absent".
+    The identity has already been validated by the ONE transported-identity
+    validator when the evidence was projected, so there is nothing to re-derive
+    and no second place a direction could be decided.
 
     Returns:
-        The order, or ``None`` when the digest carries no usable identity —
-        a NAMED absence (cold start, a scoreless input, or a pre-09a digest),
+        The order, or ``None`` when the run carries no usable identity — a
+        NAMED absence (cold start, a scoreless input, or a pre-09a digest),
         never a default direction.
     """
-    identity = metric_identity_from_mapping(interpretation.get("metric_identity"))
+    identity = evidence.metric_identity
     return MetricOrder(identity) if identity is not None else None
 
 
@@ -57,7 +52,7 @@ def _interpretation_order(interpretation: dict[str, Any]) -> MetricOrder | None:
 
 
 def select_candidate_models(
-    interpretation: dict[str, Any],
+    evidence: ProposerInterpretationEvidence,
     strategy: ModelSelectionStrategy,
 ) -> list[dict[str, Any]]:
     """
@@ -67,41 +62,48 @@ def select_candidate_models(
     set based on the strategy. Controls token cost (fewer models = cheaper
     comparison call) while expert_context controls focus (what to emphasize).
 
+    Step 10 / P3 C2: takes the TYPED proposer evidence instead of the raw
+    interpretation dump. The comparison semantics below are P2a's and are
+    deliberately unchanged — only the carrier moved.
+
     Args:
-        interpretation: Serialized InterpretationOutput dict.
+        evidence: the proposer's typed view of the interpretation.
         strategy: ModelSelectionStrategy from the pipeline config.
 
     Returns:
         List of per-model summary dicts, each containing model_type,
         best_score, and any available metadata (score_table, params, etc.).
-        The ``score_table`` entry carries the serialized
+        The ``score_table`` entry carries the SERIALIZED
         ``ScoreComparisonTable`` dict (``rendered_markdown`` + scalars + rows)
-        straight through — downstream stages render from its fields directly.
+        — dict-shaped on purpose: ``build_candidate_markdown_block`` dispatches
+        on ``isinstance(table, dict)``, so handing it the typed object would
+        silently render "_Score table unavailable._" instead.
     """
-    model_types = interpretation.get("model_types", [])
-    per_raw_best = interpretation.get("per_model_best") or {}
-    per_best = interpretation.get("per_model_best_valid") or {}
-    per_raw_health = interpretation.get("per_model_raw_best_health_validity") or {}
-    per_worst = interpretation.get("per_model_worst") or {}
-    score_tables = interpretation.get("per_model_score_tables") or {}
-    model_params = interpretation.get("per_model_params") or {}
-    descriptions = interpretation.get("model_descriptions") or {}
-    training_segs = interpretation.get("per_model_training_segments") or {}
+    model_types = evidence.model_types
+    per_raw_best = evidence.per_model_best or {}
+    per_best = evidence.per_model_best_valid or {}
+    per_raw_health = evidence.per_model_raw_best_health_validity or {}
+    per_worst = evidence.per_model_worst or {}
+    score_tables = evidence.per_model_score_tables or {}
+    model_params = evidence.per_model_params or {}
+    descriptions = evidence.model_descriptions or {}
+    training_segs = evidence.per_model_training_segments or {}
 
     # Build a summary for each model
     all_models = []
     for mt in model_types:
+        table = score_tables.get(mt)
         summary = {
             "model_type": mt,
             "best_score": per_best.get(mt),
             "raw_best_score": per_raw_best.get(mt),
             "raw_best_health_validity": per_raw_health.get(mt, "unknown"),
             "worst_score": per_worst.get(mt),
-            "score_table": score_tables.get(mt),
+            "score_table": table.model_dump() if table is not None else None,
             "model_params": model_params.get(mt),
             "description": descriptions.get(mt),
             "training_segments": training_segs.get(mt),
-            "source": "seed" if mt in _BUILTIN_MODELS else _guess_source(mt, interpretation),
+            "source": "seed" if mt in _BUILTIN_MODELS else _guess_source(mt),
         }
         all_models.append(summary)
 
@@ -119,7 +121,7 @@ def select_candidate_models(
         # the SYSTEM DOES rather than what it displays. `reverse=True` on a
         # minimised metric handed the proposer the WORST N candidates and
         # called them the best.
-        order = _interpretation_order(interpretation)
+        order = evidence_order(evidence)
         if order is None:
             # Q-P2a-1 (operator ruling): no usable metric identity means NO
             # metric ranking happened, so this falls back to the EXISTING
@@ -157,8 +159,13 @@ def select_candidate_models(
 _BUILTIN_MODELS = {"punet", "wavenet", "fcnet", "transformer", "rnn", "gated_fno"}
 
 
-def _guess_source(model_type: str, interpretation: dict[str, Any]) -> str:
-    """Guess whether a model was agent-proposed based on available data."""
+def _guess_source(model_type: str) -> str:
+    """Guess whether a model was agent-proposed based on available data.
+
+    Step 10 / P3 C2 dropped an unused ``interpretation`` parameter in passing:
+    the body never read it, and keeping it would have forced the typed
+    migration to thread evidence into a function that does not consume it.
+    """
     # Simple heuristic: if it's not a built-in, it's agent-proposed
     return "proposed"
 
@@ -379,7 +386,7 @@ def strip_heavy_fields_for_json(
 
 
 def resolve_exploration_mode(
-    interpretation: dict[str, Any],
+    evidence: ProposerInterpretationEvidence,
     pipeline: ReasoningPipelineConfig,
 ) -> str:
     """
@@ -395,8 +402,11 @@ def resolve_exploration_mode(
     2. Evidence depth: fewer than 5 agent-proposed models → explore to
        build up experimental evidence before switching to exploitation.
 
+    Step 10 / P3 C2: takes the TYPED proposer evidence. Both signals below
+    are direction-free and unchanged — only the carrier moved.
+
     Args:
-        interpretation: Serialized InterpretationOutput.
+        evidence: the proposer's typed view of the interpretation.
         pipeline: The reasoning pipeline config (carries exploration_mode and policy).
 
     Returns:
@@ -406,7 +416,7 @@ def resolve_exploration_mode(
         return pipeline.exploration_mode
 
     # Signal 1: vocabulary stagnation
-    vocab_diversity_ratio = interpretation.get("vocab_diversity_ratio")
+    vocab_diversity_ratio = evidence.vocab_diversity_ratio
     if (
         vocab_diversity_ratio is not None
         and vocab_diversity_ratio < pipeline.policy.vocab_stagnation_threshold
@@ -414,8 +424,7 @@ def resolve_exploration_mode(
         return "explore"
 
     # Signal 2: evidence depth
-    model_types = interpretation.get("model_types", [])
-    agent_proposed = [mt for mt in model_types if mt not in _BUILTIN_MODELS]
+    agent_proposed = [mt for mt in evidence.model_types if mt not in _BUILTIN_MODELS]
 
     if len(agent_proposed) < 5:
         return "explore"
@@ -463,9 +472,44 @@ def _iter_index_from_source(source: Any) -> int:
     return int(match.group(1))
 
 
+def _ranks_by_order(
+    indexed: list[tuple],
+    order: MetricOrder | None,
+) -> dict[int, int] | None:
+    """1-based rank of each entry's ``best_score`` under ``order`` — 1 is BEST.
+
+    Returns ``None`` when there is no order, which is the caller's signal that
+    no metric ranking may happen at all (Q-P2a-1). Returning ``None`` rather
+    than an empty mapping keeps "we did not rank" distinguishable from "we
+    ranked and everything tied".
+
+    A missing or non-numeric ``best_score`` takes ``order.worst_sentinel``, so
+    "missing sorts as worst" stays true under BOTH directions. The pre-P3 code
+    hardcoded ``-inf`` for that, which is "worst" only under ``higher``; under
+    ``lower`` it is the BEST possible value, and a missing score would have been
+    promoted ahead of every real measurement.
+
+    Ranks are computed ONCE here rather than inside a sort key. Two reasons:
+    the same mapping serves Draw A and the final truncation, so they cannot
+    disagree; and ``MetricOrder.rank`` is O(n) per call, which inside a
+    comparator made the clamp O(n^2 log n) in the size of the comparison pool.
+    """
+    if order is None:
+        return None
+
+    def _score(item: tuple) -> float:
+        score = item[1].get("best_score")
+        return score if isinstance(score, int | float) else order.worst_sentinel
+
+    scores = [_score(it) for it in indexed]
+    return {it[0]: order.rank(scores, _score(it)) for it in indexed}
+
+
 def clamp_comparative_analysis(
     comparative_analysis: list[dict[str, Any]],
     top_k: int = 5,
+    *,
+    order: MetricOrder | None,
 ) -> list[dict[str, Any]]:
     """Clamp the comparative_analysis list with a 3-best + 2-recent hybrid.
 
@@ -475,29 +519,61 @@ def clamp_comparative_analysis(
     chars each); the list itself was unbounded until this commit.
 
     Algorithm (Rev 8.6 Point 3 ruling):
-      - **Draw A**: top 3 entries by ``best_score`` descending.
+      - **Draw A**: the 3 BEST entries under ``order``.
       - **Draw B**: top 2 most-recent (by ``_iter_index_from_source(source)``
         descending) from the *remainder* (entries not in Draw A).
       - **Union**: deduplicate by ``model_type`` — first-seen wins, so
-        ``best_score`` winners take precedence over recency on collision.
+        Draw-A winners take precedence over recency on collision.
       - **Backfill**: if ``len(union) < top_k``, pull more entries from
         the still-remaining pool sorted by recency descending until length
         reaches ``top_k`` (or the pool is exhausted).
       - **Truncate**: if ``len(union) > top_k`` (possible when ``top_k < 5``),
-        keep ``best_score`` winners first, then most-recent, until length
-        equals ``top_k``.
+        keep Draw-A winners first, then most-recent, until length equals
+        ``top_k``.
+
+    **Direction (F-P3-1, Step 10 / P3 C2 — Q-P3-4 = INCLUDE / BOUNDED).**
+    Draw A used to be ``sorted(key=lambda it: (-_score(it), it[0]))``: raw
+    ``best_score`` DESCENDING, with a missing score sorting as ``-inf``. Both
+    halves silently assume higher-is-better, and the values are the run's
+    PRIMARY scores copied out of ``ModelComparison.best_score``. Under a
+    ``lower`` metric the draw therefore curated the three WORST models'
+    comparison entries into every later-stage prompt.
+
+    The fix consults the SAME ``MetricOrder`` authority every other primary-score
+    decision uses. No new comparator, no new direction derivation, no new
+    ordering semantics — the preference decision already existed here; only its
+    direction handling was wrong. Under ``higher`` the resulting order is
+    identical to the old ``-score`` sort (both are best-first with ties broken
+    by original index), which is what keeps TIDMAD and Pets byte-stable.
+
+    This site is invisible to the P2a AST scanner by construction — the golden
+    name is read inside ``_score`` and the sort key's own text carries no
+    golden token — and that scanner is deliberately NOT widened to catch it
+    (its one-hop precision contract was measured at 22 false positives against
+    12 real sites). The standing guard here is behavioural: the hand-computed
+    retention fixtures in the C2 test module.
 
     Parameters
     ----------
     comparative_analysis
         The list value of ``DiscoveryMemo.comparative_analysis`` — a list
         of dicts with at least ``model_type``, ``source``, and ``best_score``
-        keys. Missing keys are tolerated by the sort fallbacks
-        (``best_score`` missing -> treated as ``-inf``).
+        keys. Missing keys are tolerated by the sort fallbacks (a missing
+        ``best_score`` is treated as ``order.worst_sentinel``, so "missing
+        sorts as worst" stays true under BOTH directions).
     top_k
         Maximum number of entries to retain. Independent knob, no relation
         to the fixed 3+2 draw constants — those are the initial allocation;
         ``top_k`` is the final cap and backfill target.
+    order
+        The run's declared metric order, or ``None`` when the run carries no
+        usable metric identity. Keyword-only and REQUIRED with no default:
+        every caller must state which it has, because a silently-defaulted
+        ``None`` would quietly drop the score draw. ``None`` takes the
+        Q-P2a-1 shape — the score-based draw is SKIPPED entirely and retention
+        falls back to the existing direction-independent recency behaviour,
+        claiming nothing about which entries are "best", because without an
+        identity nothing was ranked.
 
     Returns
     -------
@@ -511,15 +587,19 @@ def clamp_comparative_analysis(
 
     indexed = list(enumerate(comparative_analysis))
 
-    def _score(item: tuple) -> float:
-        score = item[1].get("best_score")
-        return score if isinstance(score, (int, float)) else float("-inf")
-
     def _recency(item: tuple) -> int:
         return _iter_index_from_source(item[1].get("source"))
 
-    by_score = sorted(indexed, key=lambda it: (-_score(it), it[0]))
-    draw_a = by_score[:3]
+    # ``None`` when the run declares no usable identity: no metric ranking
+    # happened, so Draw A is SKIPPED rather than reordered. Inventing a
+    # direction here is precisely what the Q-10-2 named absence forbids.
+    ranks = _ranks_by_order(indexed, order)
+
+    if ranks is None:
+        draw_a: list[tuple] = []
+    else:
+        draw_a = sorted(indexed, key=lambda it: (ranks[it[0]], it[0]))[:3]
+
     draw_a_indices = {it[0] for it in draw_a}
 
     remainder_after_a = [it for it in indexed if it[0] not in draw_a_indices]
@@ -552,7 +632,13 @@ def clamp_comparative_analysis(
                 seen_model_types.add(mt)
 
     if len(union) > top_k:
-        union.sort(key=lambda it: (-_score(it), -_recency(it), it[0]))
+        # Same order authority as Draw A, for the same reason. Without an
+        # identity the truncation is recency-only — the direction-independent
+        # half of the existing behaviour, kept intact.
+        if ranks is None:
+            union.sort(key=lambda it: (-_recency(it), it[0]))
+        else:
+            union.sort(key=lambda it: (ranks[it[0]], -_recency(it), it[0]))
         union = union[:top_k]
 
     return [it[1] for it in union]
@@ -692,6 +778,7 @@ def clamp_and_backstop_accumulated(
     top_k: int,
     max_chars: int,
     input_keys: Iterable[str],
+    order: MetricOrder | None,
 ) -> dict[str, Any]:
     """Build a clamped + backstopped copy of ``accumulated`` for prompt assembly.
 
@@ -740,6 +827,12 @@ def clamp_and_backstop_accumulated(
         ``policy.prior_stage_max_chars`` (default 4000). Must be
         ``>= 40``; violations raise from the leaf truncator (see
         :func:`safe_stage_string_truncator`).
+    order
+        The run's declared metric order, or ``None`` for a run with no usable
+        metric identity. Forwarded verbatim to
+        :func:`clamp_comparative_analysis` (F-P3-1, Step 10 / P3 C2).
+        Keyword-only and REQUIRED with no default, so a caller cannot silently
+        drop the score draw by forgetting it.
     input_keys
         Iterable of key names that should bypass both clamp and backstop
         (input-side context that this layer is not responsible for).
@@ -768,6 +861,7 @@ def clamp_and_backstop_accumulated(
                 new_comparison["comparative_analysis"] = clamp_comparative_analysis(
                     inner_list,
                     top_k=top_k,
+                    order=order,
                 )
             result[key] = apply_string_backstop(new_comparison, max_chars=max_chars)
             continue

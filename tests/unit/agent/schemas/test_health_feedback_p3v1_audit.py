@@ -15,9 +15,10 @@ from agent.schemas.health_feedback import (
     HealthFeedbackRetentionPolicy,
     merge_fingerprint_history,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from execute_tools.metric_order import MetricOrder
-from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
-    _format_healthgate_evidence_block,
+from nodes.ml_model_proposal_agent.evidence_rendering import (
+    render_healthgate_evidence_block,
 )
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
 from tests.helpers.metric_fixtures import shipped_spec
@@ -114,13 +115,17 @@ class TestWindowedNotLifetimeEndToEnd:
             ]
         }
         merged = merge_fingerprint_history(prior, {}, 5, HealthFeedbackRetentionPolicy())
-        block = _format_healthgate_evidence_block(
-            {
-                "model_types": ["wavenet"],
-                "collapse_fingerprint_history": {
-                    m: [e.model_dump() for e in v] for m, v in merged.items()
-                },
-            }
+        # Step 10 / P3 C2: the renderer consumes the TYPED proposer evidence,
+        # so the payload goes through the same projection production uses.
+        block = render_healthgate_evidence_block(
+            build_proposer_evidence(
+                {
+                    "model_types": ["wavenet"],
+                    "collapse_fingerprint_history": {
+                        m: [e.model_dump() for e in v] for m, v in merged.items()
+                    },
+                }
+            )
         )
         assert f"- {SIG}: 1 occurrence(s) across iteration(s) 5" in block
         assert "4 occurrence" not in block  # the lifetime total never renders

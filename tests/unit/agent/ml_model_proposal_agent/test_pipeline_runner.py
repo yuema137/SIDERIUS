@@ -21,10 +21,14 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ReasoningStage,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.proposal_helpers import resolve_exploration_mode, select_candidate_models
+from tests.unit.agent.ml_model_proposal_agent.test_step00_prompt_goldens import (
+    fixture_score_table,
+)
 
 from ._prompt_utils import extract_accumulated_json
 
@@ -104,7 +108,7 @@ FAKE_INTERPRETATION = {
 class TestModelSelection:
     def test_top_n_default(self):
         strategy = ModelSelectionStrategy()  # default: top_n, n=5
-        result = select_candidate_models(FAKE_INTERPRETATION, strategy)
+        result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
         # All 4 models fit in top 5
         assert len(result) == 4
         # Sorted by score descending
@@ -113,14 +117,14 @@ class TestModelSelection:
 
     def test_top_n_limited(self):
         strategy = ModelSelectionStrategy(method="top_n", params={"n": 2})
-        result = select_candidate_models(FAKE_INTERPRETATION, strategy)
+        result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
         assert len(result) == 2
         assert result[0]["model_type"] == "wavenet"
         assert result[1]["model_type"] == "gated_fno"
 
     def test_all(self):
         strategy = ModelSelectionStrategy(method="all")
-        result = select_candidate_models(FAKE_INTERPRETATION, strategy)
+        result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
         assert len(result) == 4
 
     def test_human_specified(self):
@@ -128,7 +132,7 @@ class TestModelSelection:
             method="human_specified",
             params={"models": ["wavenet", "gated_fno"]},
         )
-        result = select_candidate_models(FAKE_INTERPRETATION, strategy)
+        result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
         types = {m["model_type"] for m in result}
         assert types == {"wavenet", "gated_fno"}
 
@@ -137,14 +141,14 @@ class TestModelSelection:
             method="feature_match",
             params={"feature": "dilated_causal_conv"},
         )
-        result = select_candidate_models(FAKE_INTERPRETATION, strategy)
+        result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
         # Only wavenet's description contains "dilated_causal_conv"
         assert len(result) == 1
         assert result[0]["model_type"] == "wavenet"
 
     def test_source_field_seed_vs_proposed(self):
         strategy = ModelSelectionStrategy(method="all")
-        result = select_candidate_models(FAKE_INTERPRETATION, strategy)
+        result = select_candidate_models(build_proposer_evidence(FAKE_INTERPRETATION), strategy)
         sources = {m["model_type"]: m["source"] for m in result}
         assert sources["wavenet"] == "seed"
         assert sources["punet"] == "seed"
@@ -153,29 +157,42 @@ class TestModelSelection:
 
     def test_empty_interpretation(self):
         strategy = ModelSelectionStrategy()
-        result = select_candidate_models({"model_types": []}, strategy)
+        result = select_candidate_models(build_proposer_evidence({"model_types": []}), strategy)
         assert result == []
 
     def test_score_table_passthrough(self):
-        # Phase 5 B: candidate summary exposes "score_table" (raw serialized
-        # ScoreComparisonTable dict) instead of the old "file_vector" key.
+        """The candidate summary carries the SERIALIZED table, not the object.
+
+        Phase 5 B introduced ``score_table`` in place of the old
+        ``file_vector`` key. Step 10 / P3 C2 kept the shape and moved the
+        source: the table now arrives typed on the proposer evidence and is
+        re-serialized here, because ``build_candidate_markdown_block``
+        dispatches on ``isinstance(table, dict)`` and would silently render
+        "_Score table unavailable._" for a typed object.
+
+        The fixture was also repaired: it previously used
+        ``rows=[{"model": 0.5}] * 20`` and a one-key aggregate, a shape the
+        producer cannot emit and which only survived because the old path
+        mined the dump with ``.get()``. The expectation is now stated against
+        the schema's own serialization rather than against a partial literal,
+        so it cannot drift from what production carries.
+        """
+        from agent.schemas.score_table import ScoreComparisonTable
+
+        table = fixture_score_table()
         interp = {
             "model_types": ["punet"],
             "per_model_best": {"punet": 1.8},
             "per_model_worst": {"punet": 1.2},
-            "per_model_score_tables": {
-                "punet": {
-                    "rows": [{"model": 0.5}] * 20,
-                    "aggregate": {"num_sampled_files": 20},
-                    "rendered_markdown": "| test |",
-                }
-            },
+            "per_model_score_tables": {"punet": table},
         }
-        result = select_candidate_models(interp, ModelSelectionStrategy(method="all"))
+        result = select_candidate_models(
+            build_proposer_evidence(interp), ModelSelectionStrategy(method="all")
+        )
         assert len(result) == 1
         summary = result[0]
-        # New key is the raw dict — untouched passthrough.
-        assert summary["score_table"] == interp["per_model_score_tables"]["punet"]
+        assert summary["score_table"] == ScoreComparisonTable.model_validate(table).model_dump()
+        assert summary["score_table"]["rendered_markdown"] == table["rendered_markdown"]
         # Old key must be gone — guards against silent dual-write drift.
         assert "file_vector" not in summary
 
@@ -186,7 +203,9 @@ class TestModelSelection:
             "model_types": ["punet"],
             "per_model_best": {"punet": None},
         }
-        result = select_candidate_models(interp, ModelSelectionStrategy(method="all"))
+        result = select_candidate_models(
+            build_proposer_evidence(interp), ModelSelectionStrategy(method="all")
+        )
         assert result[0]["score_table"] is None
 
 
@@ -198,17 +217,23 @@ class TestModelSelection:
 class TestExplorationModeResolver:
     def test_explicit_explore(self):
         pipeline = ReasoningPipelineConfig(exploration_mode="explore")
-        assert resolve_exploration_mode(FAKE_INTERPRETATION, pipeline) == "explore"
+        assert (
+            resolve_exploration_mode(build_proposer_evidence(FAKE_INTERPRETATION), pipeline)
+            == "explore"
+        )
 
     def test_explicit_exploit(self):
         pipeline = ReasoningPipelineConfig(exploration_mode="exploit")
-        assert resolve_exploration_mode(FAKE_INTERPRETATION, pipeline) == "exploit"
+        assert (
+            resolve_exploration_mode(build_proposer_evidence(FAKE_INTERPRETATION), pipeline)
+            == "exploit"
+        )
 
     def test_auto_few_models_explore(self):
         """Only built-in models → explore mode."""
         pipeline = ReasoningPipelineConfig(exploration_mode="auto")
         interp = {"model_types": ["punet", "wavenet"]}
-        assert resolve_exploration_mode(interp, pipeline) == "explore"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "explore"
 
     def test_auto_many_agent_proposed_exploit(self):
         """5+ agent-proposed models → exploit mode."""
@@ -224,7 +249,7 @@ class TestExplorationModeResolver:
                 "model_e",  # agent-proposed
             ]
         }
-        assert resolve_exploration_mode(interp, pipeline) == "exploit"
+        assert resolve_exploration_mode(build_proposer_evidence(interp), pipeline) == "exploit"
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +338,7 @@ FAKE_PROPOSING_OUTPUT = {
 class TestPipelineRunner:
     def _make_pipeline_input(self, tmp_path):
         return ProposalInput(
-            interpretation=FAKE_INTERPRETATION,
+            interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
             existing_model_types=["punet", "wavenet", "fcnet", "gated_fno"],
             reasoning_pipeline=ReasoningPipelineConfig(
                 stages=[
@@ -389,7 +414,7 @@ class TestPipelineRunner:
             bridge_factory=lambda **kw: mock_bridge,
         )
         inp = ProposalInput(
-            interpretation=FAKE_INTERPRETATION,
+            interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
             # PR 01a: legacy path renders the commit prompt from the
             # declaration and is fail-closed when it is empty (rule 6.2-6).
             forward_contract=ForwardContract(
@@ -539,7 +564,7 @@ class TestProposingRetry:
 
     def _make_pipeline_input(self, tmp_path):
         return ProposalInput(
-            interpretation=FAKE_INTERPRETATION,
+            interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
             existing_model_types=["punet", "wavenet", "fcnet", "gated_fno"],
             reasoning_pipeline=ReasoningPipelineConfig(
                 stages=[
@@ -666,7 +691,7 @@ class TestSegmentationSizeRetryIntegration:
 
     def _make_pipeline_input(self, tmp_path):
         return ProposalInput(
-            interpretation=FAKE_INTERPRETATION,
+            interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
             existing_model_types=["punet", "wavenet", "fcnet", "gated_fno"],
             reasoning_pipeline=ReasoningPipelineConfig(
                 stages=[

@@ -8,9 +8,12 @@ serialization shape.
 
 import pytest
 
+from agent.schemas.proposer_evidence import build_proposer_evidence
+from nodes.ml_model_proposal_agent.evidence_rendering import (
+    render_healthgate_evidence_block,
+)
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _build_reasoning_prompt,
-    _format_healthgate_evidence_block,
     _format_recent_gate_exhaustions_block,
 )
 from tests.unit.agent.ml_model_proposal_agent._health_feedback_fixtures import (
@@ -22,6 +25,18 @@ from tests.unit.agent.ml_model_proposal_agent._health_feedback_fixtures import (
 )
 
 WS = "/tmp/cb4_golden_ws"
+
+
+def _block(interpretation: dict) -> str:
+    """Render the health block from a dump, THROUGH the typed projection.
+
+    Step 10 / P3 C2 (guard disposition G8). These cases used to call the
+    renderer with a raw dict. The renderer now consumes the typed evidence, so
+    each case goes through ``build_proposer_evidence`` first — which is what
+    production does, and what makes these assertions describe a reachable path
+    rather than a dict shape nobody constructs any more.
+    """
+    return render_healthgate_evidence_block(build_proposer_evidence(interpretation))
 
 
 def _prompt_on():
@@ -67,9 +82,7 @@ class TestFlagOnBlock:
         assert "concrete mechanism expected to break it" in prompt
         assert "not merely the explanation text" in prompt
         assert "invalid round is a failure, not a success" in prompt
-        block = _format_healthgate_evidence_block(
-            structured_interpretation_output().model_dump(mode="json")
-        )
+        block = _block(structured_interpretation_output().model_dump(mode="json"))
         assert len(block.splitlines()) < 45  # bounded, not a second system prompt
 
     def test_rendered_after_and_separate_from_gate_exhaustions(self):
@@ -84,9 +97,7 @@ class TestModelAttribution:
     def test_no_cross_model_contamination(self):
         """Adversarial two-model check: each model's section carries ONLY
         its own signatures, counts, tags, and source ids."""
-        block = _format_healthgate_evidence_block(
-            structured_interpretation_output().model_dump(mode="json")
-        )
+        block = _block(structured_interpretation_output().model_dump(mode="json"))
         a_section = block.split("### model_a")[1].split("### model_b")[0]
         b_section = block.split("### model_b")[1]
         assert SIG_A in a_section and SIG_B not in a_section
@@ -103,14 +114,14 @@ class TestModelAttribution:
 class TestLegacyEmptyPartial:
     def test_legacy_dict_renders_nothing(self):
         legacy = {"model_types": ["wavenet"], "total_experiments": 3}
-        assert _format_healthgate_evidence_block(legacy) == ""
+        assert _block(legacy) == ""
 
     def test_empty_evidence_renders_no_header(self):
         interp = structured_interpretation_output().model_dump(mode="json")
         interp["per_model_round_health_counts"] = {}
         interp["per_model_collapse_fingerprints"] = {}
         interp["collapse_fingerprint_history"] = {}
-        assert _format_healthgate_evidence_block(interp) == ""
+        assert _block(interp) == ""
 
     def test_counts_without_fingerprints_render_counts_only(self):
         """Validity counts but no deterministic fingerprint: render only
@@ -118,16 +129,45 @@ class TestLegacyEmptyPartial:
         interp = structured_interpretation_output().model_dump(mode="json")
         interp["per_model_collapse_fingerprints"] = {}
         interp["collapse_fingerprint_history"] = {}
-        block = _format_healthgate_evidence_block(interp)
+        block = _block(interp)
         assert "Round validity (this iteration)" in block
         assert "collapse fingerprints" not in block
         assert "Retained history" not in block
 
     def test_malformed_history_entry_fails_diagnostically(self):
+        """The SAME defect, caught EARLIER — the declared P3 C2 delta.
+
+        A malformed history entry used to reach the renderer and raise there.
+        It now fails at the projection boundary through typed validation, so
+        the value can never be half-valid while in flight. Fail-closed moved
+        upstream; it did not weaken. The diagnostic still names the offending
+        field, which is what made the original error useful.
+
+        ``ValidationError`` subclasses ``ValueError``, so the failure CLASS a
+        caller sees is unchanged.
+        """
         interp = structured_interpretation_output().model_dump(mode="json")
         interp["collapse_fingerprint_history"]["model_a"] = [{"not_signature": True}]
-        with pytest.raises(ValueError, match="model 'model_a'"):
-            _format_healthgate_evidence_block(interp)
+        with pytest.raises(ValueError, match="collapse_fingerprint_history"):
+            _block(interp)
+
+    def test_the_malformed_entry_never_reaches_the_renderer(self):
+        """Reachability for the delta above: the guard is the projection now.
+
+        Without this, moving the check upstream and ALSO leaving a silent
+        render-time fallback would look identical from the test above.
+        """
+        from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
+
+        assert "collapse_fingerprint_history" in ProposerInterpretationEvidence.model_fields
+        evidence = build_proposer_evidence(
+            structured_interpretation_output().model_dump(mode="json")
+        )
+        history = evidence.collapse_fingerprint_history or {}
+        assert history["model_a"][0].signature == SIG_A, (
+            "the projection must produce TYPED history entries — if these were "
+            "still dicts, the renderer would be guarding malformed input again"
+        )
 
 
 class TestGateExhaustionUnchanged:

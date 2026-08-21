@@ -20,6 +20,7 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ReasoningStage,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent, _check_citation_discipline
 
@@ -124,15 +125,17 @@ class TestCheckCitationDiscipline:
 
 def _make_pipeline_input(tmp_path, reasoning_output: dict) -> ProposalInput:
     return ProposalInput(
-        interpretation={
-            "model_types": ["wavenet"],
-            "total_experiments": 3,
-            "best_denoising_score": 5.5,
-            "worst_denoising_score": 1.0,
-            "key_findings": ["wavenet wins"],
-            "bottlenecks": ["low-freq gap"],
-            "take_home_message": "Wavenet dominates.",
-        },
+        interpretation_evidence=build_proposer_evidence(
+            {
+                "model_types": ["wavenet"],
+                "total_experiments": 3,
+                "best_denoising_score": 5.5,
+                "worst_denoising_score": 1.0,
+                "key_findings": ["wavenet wins"],
+                "bottlenecks": ["low-freq gap"],
+                "take_home_message": "Wavenet dominates.",
+            }
+        ),
         existing_model_types=["wavenet"],
         reasoning_pipeline=ReasoningPipelineConfig(
             exploration_mode="exploit",

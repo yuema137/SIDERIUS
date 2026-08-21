@@ -24,6 +24,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.proposal import ProposalInput, ProposalOutput, VocabEntry
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.score_table import (
     AggregateScalars,
     PerFileRow,
@@ -159,7 +160,7 @@ def make_input(
     workspace, run_name="r1", existing_model_types=None, constraints=None, human_advice=None
 ):
     return ProposalInput(
-        interpretation=FAKE_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
         forward_contract=_legacy_test_contract(),
         existing_model_types=existing_model_types or [],
         constraints=constraints or [],
@@ -384,7 +385,7 @@ class TestBuildReasoningPromptEnriched:
         }
         interp.update(extra_interp)
         return ProposalInput(
-            interpretation=interp,
+            interpretation_evidence=build_proposer_evidence(interp),
             forward_contract=_legacy_test_contract(),
             existing_model_types=["punet"],
             storage={"backend": "local", "local": {"workspace": "/tmp/test", "run_name": "r1"}},
@@ -420,18 +421,21 @@ class TestBuildReasoningPromptEnriched:
                 ["200", "Training Data Volume"],
                 id="training_segments",
             ),
-            pytest.param(
-                "per_file_comparison",
-                "Cross-model Impact_Score concentrates on the highest-index rows.",
-                ["Per-File Comparison", "Impact_Score"],
-                id="per_file_comparison",
-            ),
-            pytest.param(
-                "efficiency_comparison",
-                "PUNet has best score-per-parameter.",
-                ["Efficiency Comparison"],
-                id="efficiency_comparison",
-            ),
+            # ``per_file_comparison`` and ``efficiency_comparison`` were
+            # REMOVED here by Step 10 / P3 C3, together with the two reads they
+            # exercised. ``InterpretationOutput`` has never declared either
+            # field (checked at head, and no commit ever added one), so the
+            # legacy renderer's branches for them could not fire in production:
+            # the only thing that ever populated them was this parametrization,
+            # feeding them straight into a ``dict[str, Any]``.
+            #
+            # That is how the dead reads survived — they had a test. It passed
+            # for the input it invented rather than for anything the producer
+            # can emit, so it made two unreachable branches look maintained.
+            # The typed evidence cannot carry an undeclared name, which is
+            # precisely why the deletion is safe and why the branches are gone.
+            # `test_step10_p3_c1_projection.py` keeps the fact executable by
+            # asserting both names are still absent from the producer schema.
         ],
     )
     def test_prompt_includes_enriched_interpretation_fields(
@@ -441,9 +445,9 @@ class TestBuildReasoningPromptEnriched:
         expected_substrings,
     ):
         """Enriched interpretation fields each surface in the reasoning prompt
-        under their documented heading. Replaces four flat tests
-        (includes_model_params, includes_training_segments,
-        includes_per_file_comparison, includes_efficiency_comparison)."""
+        under their documented heading. Replaces two flat tests
+        (includes_model_params, includes_training_segments); the two
+        comparison cases were removed with the dead reads (see above)."""
         inp = self._make_enriched_input(**{interp_field: value})
         prompt = _build_reasoning_prompt(inp)
         for substr in expected_substrings:

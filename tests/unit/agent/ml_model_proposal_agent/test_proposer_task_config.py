@@ -28,6 +28,7 @@ from pathlib import Path
 
 from agent.prompt_templates.proposal import load_stage_prompt
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     PROPOSAL_REASONING_PROMPT,
@@ -43,7 +44,9 @@ def _make_input(
 ) -> ProposalInput:
     """Minimal ProposalInput with the two T3 fields injectable."""
     return ProposalInput(
-        interpretation={"model_types": [], "key_findings": [], "bottlenecks": []},
+        interpretation_evidence=build_proposer_evidence(
+            {"model_types": [], "key_findings": [], "bottlenecks": []}
+        ),
         existing_model_types=[],
         task_description=task_description,
         forward_contract=fc if fc is not None else ForwardContract(),
@@ -269,13 +272,16 @@ class TestLitReviewSearchDecisionPersona:
 
 class TestProposalInputTaskConfigFields:
     def test_defaults_are_empty(self):
-        inp = ProposalInput(interpretation={}, existing_model_types=[])
+        inp = ProposalInput(
+            interpretation_evidence=build_proposer_evidence({}),
+            existing_model_types=[],
+        )
         assert inp.task_description == ""
         assert inp.forward_contract.is_empty()
 
     def test_fields_round_trip_through_pydantic(self):
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             existing_model_types=[],
             task_description="hello",
             forward_contract=_squid_fc(),

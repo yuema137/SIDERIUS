@@ -22,8 +22,16 @@ import json
 from typing import Any
 
 from agent.schemas.proposal import ResearchPolicy
+from execute_tools.evaluation_metric import MetricIdentityKey
+from execute_tools.metric_order import MetricOrder
 from nodes.ml_model_proposal_agent import _PROPOSER_INPUT_KEYS
 from nodes.proposal_helpers import clamp_and_backstop_accumulated
+
+#: Step 10 / P3 C2 (F-P3-1) made ``order`` a REQUIRED keyword-only argument of
+#: the clamp. Every expectation in this module was written under higher-is-
+#: better, so it passes that regime explicitly and must stay green unchanged —
+#: the migration fixed the direction handling without moving pinned behaviour.
+HIGHER_ORDER = MetricOrder(MetricIdentityKey(id="fixture_higher", direction="higher"))
 
 # String long enough to trip the 4000-char backstop floor with margin —
 # 5000 chars > default ``ResearchPolicy.prior_stage_max_chars`` (4000).
@@ -151,6 +159,7 @@ class TestIterEnvelopeClampDrop:
             top_k=policy.comparative_analysis_top_k,
             max_chars=policy.prior_stage_max_chars,
             input_keys=_PROPOSER_INPUT_KEYS,
+            order=HIGHER_ORDER,
         )
 
         assert (
@@ -178,6 +187,7 @@ class TestIterEnvelopeClampDrop:
             top_k=policy.comparative_analysis_top_k,
             max_chars=policy.prior_stage_max_chars,
             input_keys=_PROPOSER_INPUT_KEYS,
+            order=HIGHER_ORDER,
         )
 
         selected_types = {
@@ -207,6 +217,7 @@ class TestIterEnvelopeClampDrop:
             top_k=policy.comparative_analysis_top_k,
             max_chars=policy.prior_stage_max_chars,
             input_keys=_PROPOSER_INPUT_KEYS,
+            order=HIGHER_ORDER,
         )
 
         raw_chars = len(json.dumps(accumulated, default=str))
@@ -238,6 +249,7 @@ class TestIterEnvelopeClampDrop:
             top_k=policy.comparative_analysis_top_k,
             max_chars=policy.prior_stage_max_chars,
             input_keys=_PROPOSER_INPUT_KEYS,
+            order=HIGHER_ORDER,
         )
 
         # Every input-side key should be the same object as in the raw
@@ -272,6 +284,7 @@ class TestIterEnvelopeClampDrop:
             top_k=policy.comparative_analysis_top_k,
             max_chars=policy.prior_stage_max_chars,
             input_keys=_PROPOSER_INPUT_KEYS,
+            order=HIGHER_ORDER,
         )
 
         assert accumulated == snapshot, (

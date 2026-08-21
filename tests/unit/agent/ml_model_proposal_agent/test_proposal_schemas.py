@@ -7,18 +7,21 @@ from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice, GateExhaustionInfo
 from agent.schemas.proposal import CustomLossSpec, ProposalInput, ProposalOutput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 
 
 class TestProposalInput:
     def test_valid_minimal(self):
-        inp = ProposalInput(interpretation={"take_home_message": "need new arch"})
+        inp = ProposalInput(
+            interpretation_evidence=build_proposer_evidence({"take_home_message": "need new arch"}),
+        )
         assert inp.existing_model_types == []
         assert inp.constraints == []
         assert inp.storage.backend == "local"
 
     def test_valid_with_all_fields(self):
         inp = ProposalInput(
-            interpretation={"take_home_message": "need new arch"},
+            interpretation_evidence=build_proposer_evidence({"take_home_message": "need new arch"}),
             existing_model_types=["punet", "fcnet"],
             constraints=["VRAM < 10 GB"],
         )
@@ -32,14 +35,14 @@ class TestProposalInput:
 
     def test_storage_custom(self):
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             storage={"backend": "local", "local": {"workspace": "/runs", "run_name": "r1"}},
         )
         assert inp.storage.local.run_name == "r1"
 
     def test_human_advice_accepts_plain_string(self):
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             human_advice="Focus on reducing parameter count.",
         )
         assert inp.human_advice == "Focus on reducing parameter count."
@@ -52,7 +55,7 @@ class TestProposalInput:
             suggested_directions=["try dilation_base=3"],
             rationale="prior runs show width saturation",
         )
-        inp = ProposalInput(interpretation={}, human_advice=adv)
+        inp = ProposalInput(interpretation_evidence=build_proposer_evidence({}), human_advice=adv)
         assert isinstance(inp.human_advice, ExpertAdvice)
         assert inp.human_advice.rationale == "prior runs show width saturation"
 
@@ -64,7 +67,10 @@ class TestProposalInput:
             "suggested_directions": [],
             "rationale": "test",
         }
-        inp = ProposalInput(interpretation={}, human_advice=adv_dict)
+        inp = ProposalInput(
+            interpretation_evidence=build_proposer_evidence({}),
+            human_advice=adv_dict,
+        )
         assert isinstance(inp.human_advice, ExpertAdvice)
 
 
@@ -124,7 +130,7 @@ class TestProposalInputRecentGateExhaustions:
 
     def test_accepts_single_entry_list(self, gate_exhaustion):
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             recent_gate_exhaustions=[gate_exhaustion],
         )
         assert len(inp.recent_gate_exhaustions) == 1
@@ -135,7 +141,7 @@ class TestProposalInputRecentGateExhaustions:
         older = gate_exhaustion
         newer = self._second_gate_exhaustion()
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             recent_gate_exhaustions=[older, newer],
         )
         assert len(inp.recent_gate_exhaustions) == 2
@@ -148,7 +154,7 @@ class TestProposalInputRecentGateExhaustions:
         objects — mirrors the protocol's output which serialises each entry
         via ``model_dump()`` before handing it to ``ProposalInput``."""
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             recent_gate_exhaustions=[gate_exhaustion.model_dump()],
         )
         assert isinstance(inp.recent_gate_exhaustions[0], GateExhaustionInfo)
@@ -158,7 +164,7 @@ class TestProposalInputRecentGateExhaustions:
         """JSON round-trip must preserve every entry verbatim — the protocol
         layer serialises ProposalInput across the workflow boundary."""
         inp = ProposalInput(
-            interpretation={},
+            interpretation_evidence=build_proposer_evidence({}),
             recent_gate_exhaustions=[gate_exhaustion, self._second_gate_exhaustion()],
         )
         round_tripped = ProposalInput.model_validate_json(inp.model_dump_json())
@@ -182,7 +188,7 @@ class TestProposalInputRecentGateExhaustions:
         }
         with pytest.raises(ValidationError):
             ProposalInput(
-                interpretation={},
+                interpretation_evidence=build_proposer_evidence({}),
                 recent_gate_exhaustions=[bad_dict],
             )
 
@@ -192,7 +198,7 @@ class TestProposalInputRecentGateExhaustions:
         an unbounded caller. See §14.N.1."""
         with pytest.raises(ValidationError) as exc:
             ProposalInput(
-                interpretation={},
+                interpretation_evidence=build_proposer_evidence({}),
                 recent_gate_exhaustions=[gate_exhaustion] * 11,
             )
         assert "maximum allowed is 10" in str(exc.value)

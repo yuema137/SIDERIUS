@@ -43,6 +43,34 @@ it.** A future field that holds a golden score under a name this module does
 not know is a silent hole, and the person who introduces it is the only person
 positioned to close it.
 
+A MEASURED instance of the first bullet (F-P3-1, recorded per the F-P2b-4
+per-census rule)
+-----------------------------------------------------------------------
+Step 10 / P3's source audit found a real direction site this scanner cannot
+see, and it is worth naming concretely so nobody re-derives the limitation from
+a green run: ``clamp_comparative_analysis`` (``nodes/proposal_helpers.py``)
+selected which comparison entries survive prompt clamping with
+``sorted(indexed, key=lambda it: (-_score(it), it[0]))``, where the local
+helper ``_score`` reads ``item[1].get("best_score")`` — a name that IS in
+:data:`GOLDEN_SCORE_NAMES`. The read and the ordering sit in different
+functions, so the sort key's own text carries no golden token and the one-hop
+alias rule (:func:`_golden_aliases`, assignment-shaped and same-scope by
+design) does not bridge the call. The site was invisible here while being a
+genuine primary-score preference decision.
+
+**The deliberate disposition (operator freeze ruling Q-P3-4): the site was
+MIGRATED onto ``MetricOrder``, and this scanner was NOT widened to catch it.**
+Transitive taint was measured on this repository at 22 false positives against
+12 real sites; buying this one site with that noise would trade a precise guard
+for one nobody keeps green. The migrated site's standing guard is therefore
+BEHAVIOURAL — the hand-computed retention fixtures (DAVIS lower / higher
+regime / absent identity) in the P3 clamp test module — not this AST census.
+
+The general lesson, which outlives the specific site: **a census can be green
+for a reason narrower than the claim it appears to make.** When a primary-score
+comparison is reached through a function call rather than a name, this module
+is silent, and only a behavioural fixture can own it.
+
 Precision, not volume
 ---------------------
 A scanner that banned every ``>``/``<``/``max``/``min``/``reverse=True`` would

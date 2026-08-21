@@ -4,8 +4,8 @@
 
 ## Position in the pipeline
 
-- **Node type**: **standalone-capable** — `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` exposes a CLI `main()` that reads `interpretation_{run_name}.json` from the workspace, builds a minimal `ProposalInput` (legacy-mode only — no `reasoning_pipeline`), runs the agent, and writes `proposal_{run_name}.json` back to the same workspace. For pipeline mode + external-agent contributions (`expert_context`, `agent_cards`, `mindset`), drive the node via `workflows/model_exploration.py`.
-- **Upstream**: `result_interpretation_agent` (provides the serialized `InterpretationOutput` as the `interpretation` field). When external agents are active in the workflow, `ml_literature_review` also contributes via the proposer's `expert_context` / `agent_cards` / `mindset` / `vocab_seed` channels (mapped by `local_full_context`).
+- **Node type**: **standalone-capable** — `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` exposes a CLI `main()` that reads `interpretation_{run_name}.json` from the workspace, projects it through `build_proposer_evidence` — the SAME authority the production protocol uses — builds a minimal `ProposalInput` (legacy-mode only — no `reasoning_pipeline`), runs the agent, and writes `proposal_{run_name}.json` back to the same workspace. For pipeline mode + external-agent contributions (`expert_context`, `agent_cards`, `mindset`), drive the node via `workflows/model_exploration.py`.
+- **Upstream**: `result_interpretation_agent` (its `InterpretationOutput` is projected into the `interpretation_evidence` field by `build_proposer_evidence`). When external agents are active in the workflow, `ml_literature_review` also contributes via the proposer's `expert_context` / `agent_cards` / `mindset` / `vocab_seed` channels (mapped by `local_full_context`).
 - **Downstream**: two downstream consumers via separate protocols:
   - `ml_model_implementor` — consumes `model_description`, `mathematical_definition`, `motivation`, `baseline_config` via `proposal_to_implementor_v1`.
   - `ml_hyperparameter_tune_agent` — consumes `expert_advice`, `baseline_config`, `parameter_count_estimate` via `proposal_to_hyperparam_seeded_v1`.
@@ -17,7 +17,7 @@
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `interpretation` | `dict[str, Any]` | Yes | — | Serialized `InterpretationOutput` from the upstream interpretation node. Carries `key_findings`, `bottlenecks`, `take_home_message`, `model_types`, `model_descriptions`, per-model best/worst scores. |
+| `interpretation_evidence` | `ProposerInterpretationEvidence` | Yes | — | **The node's ONE interpretation contract** (Step 10 / P3). A typed CONSUMER VIEW of the upstream interpretation — 30 declared fields, the measured union of what this node actually reads: `key_findings`, `bottlenecks`, `take_home_message`, `model_types`, `model_descriptions`, per-model best/valid/worst scores, score tables, params, training segments, the prediction track record, vocabulary health, the deterministic HealthGate evidence, and `metric_identity` (the run's metric id + direction). Built by the ONE projection authority `build_proposer_evidence(mapping)` (`agent/schemas/proposer_evidence.py`) at BOTH entrypoints — the protocol `local_full_context` from `InterpretationOutput.model_dump()`, and the standalone CLI from the persisted `interpretation_{run_name}.json`, which is the same shape. Absent keys take documented per-field absence semantics (a legacy artifact still renders); a present-but-malformed value fails closed at the boundary; a malformed `metric_identity` becomes `None`, a NAMED absence, never a guessed direction. It REPLACED `interpretation: dict[str, Any]`, the raw upstream dump that two independent readers mined with `.get()` — see Key behavioral notes. |
 | `existing_model_types` | `list[str]` | No | `[]` | Model type keys already registered in `MODEL_REGISTRY`. The proposer MUST NOT reuse any of these names; the run aborts if the LLM proposes a duplicate. |
 | `constraints` | `list[str]` | No | `[]` | Hard limits the proposed architecture must respect (e.g. `"VRAM < 10 GB"`, `"params < 50M"`, `"no external dependencies"`). |
 | `enable_structured_health_feedback` | `bool` | No | `False` | V19 PR 3 prompt flag. **OFF (default): the reasoning prompt is byte-identical to pre-PR3** (golden-parity tested) even when the interpretation dump carries the structured fields. ON: one `[HEALTHGATE EVIDENCE]` block renders (see Key behavioral notes). Informational only — never routes or rejects proposals. Threaded by `local_full_context`; part of the run-invariants lock. |
@@ -47,7 +47,6 @@
 | `hardware_context` | `HardwareContext \| None` | No | `None` | Live hardware manifest from `core.hardware_context.get_or_create()`. Populated by the workflow on GPU-enabled hosts; `None` for CPU-only / test stubs and falls back to deterministic priors in `evaluate_time_skill`. |
 | `task_description` | `str` | No | `""` | Plain-English task description, authored in `configs/task_config.yaml`. Populated by the workflow via `get_task_description(load_task_config())` and by the standalone CLI in `main()`. Rendered into the `{TASK_BACKGROUND}` block of the legacy reasoning prompt AND — since PR 01b — into the `{task_background_block}` placeholder of all three pipeline stage system prompts. The `""` default is for test fixtures only; empty or whitespace-only collapses the block. |
 | `forward_contract` | `ForwardContract` | No | `ForwardContract()` | Typed forward-pass contract from the same YAML. Rendered into the legacy `{TASK_BACKGROUND}` block and into `proposing_stage.md`'s `{forward_contract}` placeholder. Deliberately NOT expanded into the comparison or causal stages. All-empty default is for test fixtures only. |
-| `per_model_score_tables` | `dict[str, ScoreComparisonTable] \| None` | No | `None` | `model_type` → best `ScoreComparisonTable`, carried forward from `InterpretationOutput.per_model_score_tables`. Typed mirror of the `interpretation["per_model_score_tables"]` dict for tables the proposer renders. |
 | `previous_failures` | `list[str]` | No | `[]` | Validation error messages from previous failed attempts in this iteration. The workflow populates this when retrying after a downstream validation failure, so the proposer can self-correct. |
 | `recent_gate_exhaustions` | `list[GateExhaustionInfo]` | No | `[]` | Gate-exhaustion summaries from the most recent up-to-3 tuner iterations, oldest first. Iterations whose tuner produced no gate exhaustions are skipped. Lets the proposer learn from prior tuner-side gate failures. |
 | `recent_trial_validity` | `list[TrialValidityFeedback]` | No | `[]` | **V20 PR D (D-C6)** — up to the last K iterations that produced NO HealthGate-valid trial winner, oldest first. Sparse: iterations with a valid winner contribute nothing, so a healthy chain leaves this empty and the prompt block is suppressed. Distinct from `recent_gate_exhaustions` (budget exhaustion) — these trials RAN and then failed their scientific gates. |
@@ -108,10 +107,13 @@ The CLI reads `{workspace}/interpretation_{run_name}.json` (the upstream interpr
 ```python
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import MLModelProposalAgent
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import StorageConfig, LocalStorageConfig
 
 inp = ProposalInput(
-    interpretation=interp_output.model_dump(),  # from upstream
+    # The ONE projection authority. Production callers get this from the
+    # protocol; a direct caller builds it the same way, from the same shape.
+    interpretation_evidence=build_proposer_evidence(interp_output.model_dump()),
     existing_model_types=["punet", "wavenet", "fcnet"],
     constraints=["VRAM < 10 GB", "params < 50M"],
     storage=StorageConfig(
@@ -145,7 +147,52 @@ The constructor accepts `bridge_factory` (test injection — defaults to `LLMBri
 
 ## Key behavioral notes
 
-- **`[HEALTHGATE EVIDENCE]` block (V19 PR 3, flag-gated).** When `enable_structured_health_feedback=True`, `_format_healthgate_evidence_block()` renders ONE bounded block — delivered on BOTH execution modes: in legacy 2-call mode it is spliced into `_build_reasoning_prompt`; in the production 3-stage pipeline it renders through the `healthgate_evidence_block` template variable into `proposing_stage.md` (the JSON-emitting final stage — the same mechanism and placement as the §14.N `recent_gate_exhaustions_block` variable; the earlier stages deliberately do not receive it, avoiding duplicated context). The block is built from the deterministic interpretation fields (`per_model_round_health_counts`, `per_model_collapse_fingerprints`, `collapse_fingerprint_history`) — never from `key_findings` or any LLM prose. Per model (grouped exactly as the interpreter grouped them, nothing unlabelled): this-iteration validity counts and fingerprints, then retained history with retained-window occurrence counts (stored history is post-retention, so bucket sums ARE window counts — lifetime totals never render), absolute iteration tags, a "Representative observation:" line for the entry-level raw metrics, and bounded source experiment ids. Ends with six behavioral rules (no fingerprinted repeat without a named mechanism; the mechanism must change actual configuration; invalid high score = failure; no inappropriate avoidance; no cross-model transfer; no unsupported use-claims). Legacy interpretation dicts (fields absent) and empty evidence render NOTHING — no empty heading; a malformed hand-built history entry raises a diagnostic `ValueError` naming the model. The block renders AFTER and visibly separate from `[RECENT GATE EXHAUSTIONS]` — a different failure family (abort-class resource failures), whose rendering is byte-identical pre/post PR 3.
+- **One interpretation reader, and it is typed (Step 10 / P3).** The node used
+  to receive `ProposalInput.interpretation: dict[str, Any]` — the upstream
+  node's ENTIRE `model_dump()` — and mine it with `.get()` in two independent
+  readers: the production pipeline and the legacy/standalone renderer. Nothing
+  declared what the proposer consumed, so the two drifted onto fields the other
+  never saw, and every new evidence field had to be wired into both. Now a
+  single `build_proposer_evidence(mapping)` projection produces
+  `ProposerInterpretationEvidence`, and the pipeline, the legacy adapter and the
+  helpers all read that one value. The raw dict field and the dead
+  `per_model_score_tables` typed mirror (which had zero readers) are REMOVED, so
+  a bypass has no input to read. An executable census keeps the count of raw
+  interpretation reads in the proposer's modules at **zero**.
+- **The node is decomposed.** `ml_model_proposal_agent.py` + `.md` are the
+  PUBLIC surface; `evidence_rendering.py` is PRIVATE and owns proposer
+  prompt-evidence rendering — the 18-key `interpretation_summary` serializer,
+  the HealthGate block, the legacy interpretation section, and the D1/D2
+  grammar renderers. Production code outside the node must not import it;
+  `_COMPATIBILITY_REEXPORTS` in the main module is scaffolding for existing
+  importers and `mock.patch` targets, not contract.
+- **The prompts state the run's metric direction (Step 10 / P3, D1/D2/D3).**
+  The comparison and causal stage templates carry a `{metric_context_block}`
+  that names the run's golden metric and which direction is better, rendered
+  from the DECLARED `metric_identity` through the one direction authority
+  (`MetricOrder.direction_words`) — never inferred from a metric name, a sign or
+  a task. The causal stage's `falsifiable_prediction` example is rendered on
+  that direction: under `higher` it reproduces the historical literal exactly
+  (`1.5 → 2.5`, threshold `1.2`); under `lower` it inverts (`1.5 → 0.5`,
+  threshold `1.8` — ABOVE current, the refuted side). The block also states what
+  `threshold_for_refutation` MEANS in this run's direction, which Gate 1 showed
+  is not inferable from the numbers alone. `comparison_stage.md` rule 7 defines
+  SOTA as BEST under the stated direction, not the largest number. When the run
+  declares NO usable identity, all three surfaces render the canonical
+  `metric direction unavailable / metric_spec absent` absence: no direction
+  words, no numeric example, and an explicit instruction to make no ranking
+  claim. The proposing stage declares neither placeholder — it neither ranks nor
+  authors a prediction. **The legacy path carries none of this**: it authors no
+  prediction at all, and its prompt bytes are preserved.
+- **Secondary metrics are NOT proposer evidence.** A task's observational
+  secondary metrics (Step 10 / P2b) are deliberately absent from the typed
+  evidence and from every proposer prompt — no raw values, no refusals, no
+  runtime diagnostics. A second, differently-directed number beside the one
+  being optimised invites a trade-off that observational metrics must never get.
+  Secondary science reaches the proposer only through the interpreter's
+  synthesized `key_findings` / `take_home_message`.
+
+- **`[HEALTHGATE EVIDENCE]` block (V19 PR 3, flag-gated).** When `enable_structured_health_feedback=True`, `evidence_rendering.render_healthgate_evidence_block()` renders ONE bounded block — delivered on BOTH execution modes: in legacy 2-call mode it is spliced into `_build_reasoning_prompt`; in the production 3-stage pipeline it renders through the `healthgate_evidence_block` template variable into `proposing_stage.md` (the JSON-emitting final stage — the same mechanism and placement as the §14.N `recent_gate_exhaustions_block` variable; the earlier stages deliberately do not receive it, avoiding duplicated context). The block is built from the deterministic interpretation fields (`per_model_round_health_counts`, `per_model_collapse_fingerprints`, `collapse_fingerprint_history`) — never from `key_findings` or any LLM prose. Per model (grouped exactly as the interpreter grouped them, nothing unlabelled): this-iteration validity counts and fingerprints, then retained history with retained-window occurrence counts (stored history is post-retention, so bucket sums ARE window counts — lifetime totals never render), absolute iteration tags, a "Representative observation:" line for the entry-level raw metrics, and bounded source experiment ids. Ends with six behavioral rules (no fingerprinted repeat without a named mechanism; the mechanism must change actual configuration; invalid high score = failure; no inappropriate avoidance; no cross-model transfer; no unsupported use-claims). Legacy interpretations (fields absent) and empty evidence render NOTHING — no empty heading. A malformed history entry now fails EARLIER, at the typed projection boundary rather than at render time (Step 10 / P3); `ValidationError` subclasses `ValueError`, so the caller-visible failure class is unchanged. The block renders AFTER and visibly separate from `[RECENT GATE EXHAUSTIONS]` — a different failure family (abort-class resource failures), whose rendering is byte-identical pre/post PR 3.
 
 > **Experimental status (V19 PR 3, final).** This optional feature is
 > fully implemented and operationally validated, but no universal

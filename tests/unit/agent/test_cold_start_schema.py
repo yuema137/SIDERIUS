@@ -9,6 +9,7 @@ import pytest
 
 from agent.schemas.interpretation import InterpretationInput, InterpretationOutput
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 
 
 def _output(**over):
@@ -51,7 +52,15 @@ class TestColdStartPropagationFields:
         assert _output(cold_start=True).cold_start is True
 
     def test_proposal_input_cold_start_defaults_false(self):
-        assert ProposalInput(interpretation={}).cold_start is False
+        assert (
+            ProposalInput(interpretation_evidence=build_proposer_evidence({})).cold_start is False
+        )
 
     def test_proposal_input_cold_start_settable(self):
-        assert ProposalInput(interpretation={}, cold_start=True).cold_start is True
+        assert (
+            ProposalInput(
+                interpretation_evidence=build_proposer_evidence({}),
+                cold_start=True,
+            ).cold_start
+            is True
+        )

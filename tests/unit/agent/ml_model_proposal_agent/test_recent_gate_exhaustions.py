@@ -33,6 +33,7 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ReasoningStage,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from nodes.ml_model_proposal_agent import (
@@ -82,7 +83,7 @@ def _minimal_interp() -> dict:
 
 def _proposal_input(tmp_path, gate_infos=None) -> ProposalInput:
     return ProposalInput(
-        interpretation=_minimal_interp(),
+        interpretation_evidence=build_proposer_evidence(_minimal_interp()),
         existing_model_types=["wavenet"],
         recent_gate_exhaustions=list(gate_infos) if gate_infos else [],
         storage=StorageConfig(
@@ -94,7 +95,7 @@ def _proposal_input(tmp_path, gate_infos=None) -> ProposalInput:
 
 def _pipeline_input(tmp_path, gate_infos=None) -> ProposalInput:
     return ProposalInput(
-        interpretation=_minimal_interp(),
+        interpretation_evidence=build_proposer_evidence(_minimal_interp()),
         existing_model_types=["wavenet"],
         recent_gate_exhaustions=list(gate_infos) if gate_infos else [],
         reasoning_pipeline=ReasoningPipelineConfig(

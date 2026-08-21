@@ -29,10 +29,10 @@ from agent.schemas.health_feedback import (
     RoundHealth,
 )
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
-from agent.schemas.proposal import VocabEntry
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.training_diagnosis import TrainingDiagnosis
+from agent.schemas.vocab import VocabEntry
 from execute_tools.evaluation_metric import (
     MetricDirection,
     MetricResult,

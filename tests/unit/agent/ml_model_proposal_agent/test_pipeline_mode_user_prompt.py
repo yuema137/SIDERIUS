@@ -29,6 +29,7 @@ from agent.schemas.proposal import (
     ResearchPolicy,
     VocabEntry,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from core.hardware_context import HardwareContext
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
@@ -108,7 +109,7 @@ def _make_input(
         policy=ResearchPolicy(minimum_boldness=0.05),
     )
     return ProposalInput(
-        interpretation=_make_interpretation(),
+        interpretation_evidence=build_proposer_evidence(_make_interpretation()),
         existing_model_types=["punet"],
         constraints=constraints or [],
         agent_cards=agent_cards or [],
@@ -306,7 +307,7 @@ class TestPipelineModeOptionalBlocksOmitted:
         ## Constraints block is omitted entirely."""
         captured, bridge_factory = captured_prompts
         inp = ProposalInput(
-            interpretation=_make_interpretation(),
+            interpretation_evidence=build_proposer_evidence(_make_interpretation()),
             existing_model_types=[],  # explicitly empty
             constraints=[],
             reasoning_pipeline=ReasoningPipelineConfig(

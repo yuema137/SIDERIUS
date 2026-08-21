@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 from agent.schemas.hyperparam_tuning import ExpertAdvice
 from agent.schemas.proposal import ProposalInput, ProposalOutput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 
@@ -92,7 +93,7 @@ SYNTHETIC_INTERPRETATION = {
 
 def _make_input(tmp_path) -> ProposalInput:
     return ProposalInput(
-        interpretation=SYNTHETIC_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(SYNTHETIC_INTERPRETATION),
         existing_model_types=["punet", "fcnet"],
         constraints=["VRAM < 10 GB", "params < 100M"],
         storage=StorageConfig(
@@ -212,7 +213,7 @@ def test_proposal_pipeline_dual_mode(tmp_path, request):
         ],
     )
     inp = ProposalInput(
-        interpretation=SYNTHETIC_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(SYNTHETIC_INTERPRETATION),
         existing_model_types=["punet", "wavenet", "fcnet"],
         constraints=["VRAM < 10 GB", "params < 50M"],
         reasoning_pipeline=pipeline,

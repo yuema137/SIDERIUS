@@ -22,6 +22,7 @@ import pytest
 
 from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import ProposerInterpretationEvidence
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import (
     database_full_context,
     local_full_context,
@@ -73,29 +74,34 @@ def interp_output():
 class TestLocalFullContext:
     def test_baseline_serialisation_and_storage_pass_through(self, storage):
         """Single multi-assertion baseline: every documented field of the
-        InterpretationOutput must be present in the serialised
-        ``interpretation`` dict, ``existing_model_types`` mirrors
+        InterpretationOutput must be present on the TYPED
+        ``interpretation_evidence``, ``existing_model_types`` mirrors
         ``output.model_types``, and storage round-trips intact. Replaces
-        eight flat single-assertion tests that each touched one key."""
+        eight flat single-assertion tests that each touched one key.
+
+        Step 10 / P3 C3: the protocol no longer hands the node the upstream
+        dump. It hands it the projection, so the round-trip claim is now read
+        off declared fields instead of dict keys — which is what makes "this
+        field reaches the proposer" a checked contract rather than a property
+        of whatever happened to be in a mapping."""
         output = make_interpretation_output(["punet", "fcnet"])
         result = local_full_context(output, storage)
 
         assert isinstance(result, ProposalInput)
-        assert isinstance(result.interpretation, dict)
+        assert isinstance(result.interpretation_evidence, ProposerInterpretationEvidence)
 
         # existing_model_types mirrors output.model_types
         assert set(result.existing_model_types) == {"punet", "fcnet"}
 
         # Every documented InterpretationOutput field round-trips.
-        interp = result.interpretation
-        assert interp["model_types"] == ["punet", "fcnet"]
-        assert interp["take_home_message"] == ("A new architecture is needed to break the plateau.")
-        assert "model_descriptions" in interp
-        assert "punet" in interp["model_descriptions"]
-        assert interp["best_denoising_score"] == 1.5
-        assert interp["worst_denoising_score"] == 0.8
-        assert interp["key_findings"] == ["focal loss outperforms ce"]
-        assert interp["bottlenecks"] == ["architecture capacity ceiling"]
+        evidence = result.interpretation_evidence
+        assert evidence.model_types == ["punet", "fcnet"]
+        assert evidence.take_home_message == ("A new architecture is needed to break the plateau.")
+        assert "punet" in evidence.model_descriptions
+        assert evidence.best_denoising_score == 1.5
+        assert evidence.worst_denoising_score == 0.8
+        assert evidence.key_findings == ["focal loss outperforms ce"]
+        assert evidence.bottlenecks == ["architecture capacity ceiling"]
 
         # Storage passthrough.
         assert result.storage.backend == "local"

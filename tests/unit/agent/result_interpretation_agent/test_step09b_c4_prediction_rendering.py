@@ -167,12 +167,26 @@ class TestOneAuthorityTwoConsumers:
         assert "total boldness × confirmed across all iterations" not in rendered
 
     def test_the_proposer_calls_the_same_renderer(self):
-        source = (
-            REPO_ROOT / "nodes/ml_model_proposal_agent/ml_model_proposal_agent.py"
-        ).read_text()
-        assert "render_prediction_track_record" in source
-        # …and no longer computes an N of its own from the legacy pool.
-        assert "sum(pred_hist.values())" not in source
+        """ONE track-record authority, shared by both consumers.
+
+        Scanned over the proposer NODE PACKAGE rather than its main module.
+        Step 10 / P3 C3 relocated the legacy interpretation renderer — and with
+        it this call — into the node-private `evidence_rendering.py`. The claim
+        is unchanged and is about the node: it renders the track record through
+        the interpreter's authority instead of computing its own N from the
+        frozen legacy pool. Pinning the FILE rather than the node would have
+        made a pure relocation look like a regression, which is what it did
+        until this guard was re-pointed.
+        """
+        node = REPO_ROOT / "nodes/ml_model_proposal_agent"
+        sources = {p.name: p.read_text(encoding="utf-8") for p in node.glob("*.py")}
+        assert any("render_prediction_track_record" in src for src in sources.values()), (
+            "no module in the proposer node calls the shared track-record "
+            f"renderer; scanned {sorted(sources)}"
+        )
+        # …and no module computes an N of its own from the legacy pool.
+        for name, src in sources.items():
+            assert "sum(pred_hist.values())" not in src, name
 
 
 class TestFrameworkTaskLiteralsRemoved:

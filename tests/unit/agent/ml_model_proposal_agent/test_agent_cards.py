@@ -13,6 +13,7 @@ from pydantic import ValidationError
 
 from agent.prompt_templates.proposal import render_agent_cards, render_expert_context
 from agent.schemas.proposal import AgentCard, ProposalInput, VocabEntry
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 
 # ---------------------------------------------------------------------------
@@ -103,7 +104,7 @@ class TestAgentCard:
 class TestProposalInputAgentCards:
     def test_defaults_to_empty_list(self):
         inp = ProposalInput(
-            interpretation={"model_types": ["wavenet"]},
+            interpretation_evidence=build_proposer_evidence({"model_types": ["wavenet"]}),
             storage={"backend": "local", "local": {"workspace": "/tmp", "run_name": "test"}},
         )
         assert inp.agent_cards == []
@@ -111,7 +112,7 @@ class TestProposalInputAgentCards:
     def test_accepts_agent_cards(self):
         card = _make_card()
         inp = ProposalInput(
-            interpretation={"model_types": ["wavenet"]},
+            interpretation_evidence=build_proposer_evidence({"model_types": ["wavenet"]}),
             agent_cards=[card],
             storage={"backend": "local", "local": {"workspace": "/tmp", "run_name": "test"}},
         )
@@ -120,7 +121,7 @@ class TestProposalInputAgentCards:
 
     def test_accepts_agent_cards_as_dicts(self):
         inp = ProposalInput(
-            interpretation={"model_types": ["wavenet"]},
+            interpretation_evidence=build_proposer_evidence({"model_types": ["wavenet"]}),
             agent_cards=[_make_card().model_dump()],
             storage={"backend": "local", "local": {"workspace": "/tmp", "run_name": "test"}},
         )

@@ -1,0 +1,33 @@
+[HARDWARE CONTEXT]
+Device:            NVIDIA RTX 3090
+Total VRAM:        24.00 GB
+Usable cap (80%):  19.20 GB
+Host:              step00-fixture-host
+Regime:            PHYSICAL — no operator budget set; cap = 19.20 GB.
+
+Your baseline_config must fit within the **effective cap** shown above. The VRAM engine will reject any architecture whose predicted peak exceeds this ceiling; a rejection consumes a tuner attempt with no scored round. Size your baseline to stay comfortably below the cap (target ≤ 80% of the effective cap at baseline) so the tuner has headroom to vary batch_size and segmentation_size upward.
+
+## Interpretation Summary
+Models analysed     : ['step00_alpha_net', 'step00_beta_net']
+Total experiments   : 2
+Overall raw best    : None
+Overall best valid  : None
+Overall worst score : None
+
+### Take-home message
+
+
+## Existing Architecture Descriptions
+### step00_alpha_net
+Fixture alpha.
+
+### step00_beta_net
+Fixture beta.
+
+## Constraints
+Existing model type keys (your model_name must NOT be any of these): ['step00_alpha_net', 'step00_beta_net']
+  - VRAM < 10 GB
+  - params < 50M
+
+## Previous Failed Proposals (DO NOT repeat these mistakes)
+  1. step00_gamma_net: diverged at lr=1e-3.

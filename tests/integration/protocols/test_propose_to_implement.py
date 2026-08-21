@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 
 from agent.schemas.implementor import ImplementorOutput
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from ml_models.plugin_loader import _load_plugin
@@ -59,7 +60,7 @@ def _skip_if_no_key(provider: str):
 
 def _run_proposal(provider: str, model_id: str, tmp_path):
     inp = ProposalInput(
-        interpretation=SYNTHETIC_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(SYNTHETIC_INTERPRETATION),
         existing_model_types=["punet", "fcnet"],
         constraints=["VRAM < 10 GB", "params < 100M"],
         storage=StorageConfig(

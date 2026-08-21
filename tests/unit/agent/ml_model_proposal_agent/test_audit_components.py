@@ -28,6 +28,7 @@ import json
 from typing import Any
 
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from nodes.ml_model_proposal_agent import _audit_proposer_components
 
 _EXPECTED_KEYS = {
@@ -55,7 +56,7 @@ def _make_input(**overrides: Any) -> ProposalInput:
     they care about.
     """
     base: dict[str, Any] = {
-        "interpretation": {"unused_by_audit": True},
+        "interpretation_evidence": build_proposer_evidence({"model_types": []}),
         "existing_model_types": ["existing_a", "existing_b"],
         "previous_failures": [],
         "recent_gate_exhaustions": [],

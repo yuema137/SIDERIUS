@@ -46,6 +46,7 @@ from agent.schemas.proposal import (
     ResearchPolicy,
     VocabEntry,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.hardware_context import HardwareContext
@@ -77,6 +78,60 @@ _FIXTURE_MODEL_SOURCE = (
 )
 
 _SCORE_TABLE_MD = "| file | score |\n|---|---|\n| 0 | **-2.9100** |\n"
+
+
+def fixture_score_table() -> dict:
+    """A COMPLETE, production-shaped ``ScoreComparisonTable`` dump.
+
+    Step 10 / P3 C2 (fixture rot, triaged per the Step-00 §19.3 ladder). This
+    fixture used to carry ``{"rendered_markdown": ...}`` alone. That shape is
+    not one the producer can emit — ``ScoreComparisonTable`` requires ``rows``
+    (exactly one per file in the declared topology), ``aggregate``,
+    ``s_max_global`` and ``reference_source`` — and it survived only because
+    the proposer mined the raw dump with ``.get()`` and read
+    ``rendered_markdown`` alone.
+
+    P3's typed projection validates the table, so the abbreviated shape now
+    fails closed at the boundary. That is the declared fail-closed upgrade
+    working, and the fixture is what was wrong: a golden captured through a
+    shape production cannot produce pins bytes nobody will ever see.
+
+    Completing it does NOT move any golden. The rendered bytes depend on
+    ``rendered_markdown`` (via ``build_candidate_markdown_block``), while
+    ``per_model_score_tables`` is dropped from the JSON region by
+    ``_render_stage_user_prompt`` and ``score_table`` is stripped from
+    candidates by ``strip_heavy_fields_for_json``. The PB-3 goldens are
+    asserted UNCHANGED across this fixture repair, which is the evidence that
+    the repair is a repair and not a re-baseline.
+
+    ``linear_weight`` is deliberately omitted: the Sigma-weight validator skips
+    when no sampled row declares one, so the fixture stays minimal.
+    """
+    from execute_tools.dataset_config import resolve_dataset_profile
+
+    return {
+        "rows": [
+            {
+                "file_index": i,
+                "raw_baseline": -3.2,
+                "ground_truth": 0.0,
+                "model": -2.91,
+                "gain_vs_raw": 0.29,
+                "headroom_vs_gt": 2.91,
+            }
+            for i in range(resolve_dataset_profile().dataset.num_files)
+        ],
+        "aggregate": {
+            "raw_baseline_scalar": -3.2,
+            "ground_truth_scalar": 0.0,
+            "model_scalar": -2.91,
+            "percent_of_ceiling_log": 9.06,
+            "num_sampled_files": 1,
+        },
+        "s_max_global": 3.2,
+        "reference_source": "step00_fixture",
+        "rendered_markdown": _SCORE_TABLE_MD,
+    }
 
 
 def pin_environment(tmp_path, monkeypatch) -> str:
@@ -155,13 +210,13 @@ def fixture_interpretation() -> dict:
         # the goldens (caught at first capture: "Candidates: []").
         "per_model_best_valid": {"step00_alpha_net": -2.55, "step00_beta_net": -3.10},
         "per_model_worst": {"step00_alpha_net": -2.91, "step00_beta_net": -3.40},
-        "per_model_score_tables": {"step00_alpha_net": {"rendered_markdown": _SCORE_TABLE_MD}},
+        "per_model_score_tables": {"step00_alpha_net": fixture_score_table()},
     }
 
 
 def fixture_proposal_input(tmp_path, *, mode: str) -> ProposalInput:
     return ProposalInput(
-        interpretation=fixture_interpretation(),
+        interpretation_evidence=build_proposer_evidence(fixture_interpretation()),
         existing_model_types=["step00_alpha_net", "step00_beta_net"],
         cold_start=False,
         task_description="Step-00 fixture task: denoise a synthetic 1-D int8 series.",

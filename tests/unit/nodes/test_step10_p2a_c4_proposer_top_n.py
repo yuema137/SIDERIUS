@@ -21,6 +21,10 @@ from __future__ import annotations
 from typing import Any, ClassVar
 
 from agent.schemas.proposal import ModelSelectionStrategy
+from agent.schemas.proposer_evidence import (
+    ProposerInterpretationEvidence,
+    build_proposer_evidence,
+)
 from execute_tools.evaluation_metric import METRIC_IDENTITY_UNAVAILABLE
 from nodes.proposal_helpers import select_candidate_models
 
@@ -42,9 +46,22 @@ def _interpretation(
     return payload
 
 
+def _evidence(scores, identity) -> ProposerInterpretationEvidence:
+    """The same fixture payload, through the P3 typed projection.
+
+    Step 10 / P3 C2 changed the helper's INPUT CARRIER from the raw dump to
+    the typed evidence. The fixture DATA below is deliberately untouched — the
+    scores, the identities and every expectation in this module are P2a's, and
+    they must stay green across the mechanism swap. That is the whole point of
+    leaving them alone: if a P2a expectation had to be edited to survive P3,
+    the comparison semantics would have moved, which P3 is not allowed to do.
+    """
+    return build_proposer_evidence(_interpretation(scores, identity))
+
+
 def _top_n(scores, identity, n: int) -> list[str]:
     selected = select_candidate_models(
-        _interpretation(scores, identity),
+        _evidence(scores, identity),
         ModelSelectionStrategy(method="top_n", params={"n": n}),
     )
     return [m["model_type"] for m in selected]
@@ -52,7 +69,7 @@ def _top_n(scores, identity, n: int) -> list[str]:
 
 def _all(scores, identity) -> list[str]:
     selected = select_candidate_models(
-        _interpretation(scores, identity), ModelSelectionStrategy(method="all", params={})
+        _evidence(scores, identity), ModelSelectionStrategy(method="all", params={})
     )
     return [m["model_type"] for m in selected]
 
@@ -155,7 +172,7 @@ class TestQP2a1TheUnavailableIdentityFallback:
     def test_the_fallback_never_calls_itself_best_or_top(self):
         """Nothing about the returned structure claims a ranking happened."""
         selected = select_candidate_models(
-            _interpretation(self.SCORES, None),
+            _evidence(self.SCORES, None),
             ModelSelectionStrategy(method="top_n", params={"n": 2}),
         )
         for model in selected:
@@ -191,21 +208,39 @@ class TestEdgeCasesPreserved:
 class TestP3sArchitectureIsUntouched:
     """C4 changes ONE helper's comparison, not the proposer's reader."""
 
-    def test_the_helper_signature_did_not_change(self):
-        """No new parameter was threaded: the identity was ALREADY in the
-        interpretation dict this helper receives. Recorded because P3 will
-        replace the mechanism and should not re-litigate the semantics."""
+    def test_the_helper_reads_the_typed_evidence(self):
+        """P3 C2 replaced the mechanism this guard used to freeze.
+
+        Its predecessor asserted ``select_candidate_models(interpretation,
+        strategy)`` — recorded at P2a time "because P3 will replace the
+        mechanism and should not re-litigate the semantics". P3 has replaced
+        it: the identity now arrives on the typed evidence instead of being
+        mined out of a raw dump.
+
+        The SEMANTICS the old guard protected are not dropped — they are the
+        entire rest of this module, which still passes on P2a's untouched
+        fixtures. What this test pins is the successor mechanism: one
+        parameter, and it is the typed evidence, so nobody can quietly
+        reintroduce a raw-dict path beside it.
+        """
         import inspect
 
         signature = inspect.signature(select_candidate_models)
-        assert list(signature.parameters) == ["interpretation", "strategy"]
-
-    def test_no_typed_evidence_reader_was_introduced(self):
-        import ast
-        from pathlib import Path
-
-        source = (Path(__file__).resolve().parents[3] / "nodes/proposal_helpers.py").read_text(
-            encoding="utf-8"
+        assert list(signature.parameters) == ["evidence", "strategy"]
+        assert (
+            signature.parameters["evidence"].annotation is ProposerInterpretationEvidence
+            or signature.parameters["evidence"].annotation == "ProposerInterpretationEvidence"
         )
-        classes = [n.name for n in ast.walk(ast.parse(source)) if isinstance(n, ast.ClassDef)]
-        assert classes == [], f"C4 introduced a reader type, which is P3's scope: {classes}"
+
+    # ``test_no_typed_evidence_reader_was_introduced`` was RETIRED by Step 10 /
+    # P3 C1, which is the event it was written to wait for: it asserted that
+    # P2a's C4 had introduced no reader TYPE, "which is P3's scope". P3 has now
+    # introduced exactly one, in its declared owner.
+    #
+    # Its purpose — the proposer must not grow a SECOND semantic reader — is
+    # inherited, not dropped, by the successor census
+    # ``tests/unit/agent/ml_model_proposal_agent/test_step10_p3_c1_projection.py::
+    # TestTheProjectionHasExactlyOneAuthority``, which survives the type
+    # actually existing: it asserts ``build_proposer_evidence`` and
+    # ``ProposerInterpretationEvidence`` are each defined exactly once across
+    # every production directory, with a plant proving the scan can report two.

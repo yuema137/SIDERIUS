@@ -12,6 +12,7 @@ NOT accepted for the production-pipeline claim; nothing here touches it.
 from unittest.mock import MagicMock
 
 from agent.schemas.proposal import ProposalInput, ReasoningPipelineConfig, ReasoningStage
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import MLModelProposalAgent
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
@@ -31,12 +32,11 @@ from tests.unit.agent.ml_model_proposal_agent.test_prompt_context_surfacing impo
 
 
 def _pipeline_input(tmp_path, *, on: bool, interp: dict | None = None) -> ProposalInput:
+    dump = (
+        interp if interp is not None else structured_interpretation_output().model_dump(mode="json")
+    )
     return ProposalInput(
-        interpretation=(
-            interp
-            if interp is not None
-            else structured_interpretation_output().model_dump(mode="json")
-        ),
+        interpretation_evidence=build_proposer_evidence(dump),
         existing_model_types=["model_a", "model_b"],
         recent_gate_exhaustions=[gate_exhaustion()],
         enable_structured_health_feedback=on,

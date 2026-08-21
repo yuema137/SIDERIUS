@@ -776,22 +776,18 @@
             ]
           },
           "human_advice": null,
-          "interpretation": {
+          "interpretation_evidence": {
             "best_config": {
               "model_config": {}
             },
             "best_denoising_score": 1.5,
-            "best_valid_config": null,
             "best_valid_denoising_score": null,
             "bottlenecks": [
               "Bottleneck 1"
             ],
-            "cold_start": false,
             "collapse_fingerprint_history": {},
             "cumulative_information_gain": 0.0,
             "cumulative_information_gain_by_semantics": {},
-            "evolution_stats": {},
-            "is_degraded": false,
             "key_findings": [
               "Finding 1"
             ],
@@ -816,23 +812,19 @@
             "model_types": [
               "punet"
             ],
-            "new_discoveries": [],
             "per_model_best": {
               "punet": 1.5
             },
             "per_model_best_valid": {},
             "per_model_collapse_fingerprints": {},
-            "per_model_failure_counts": {},
             "per_model_params": null,
             "per_model_raw_best_health_validity": {},
             "per_model_round_health_counts": {},
             "per_model_score_tables": null,
-            "per_model_secondary_metrics": {},
             "per_model_training_segments": null,
             "per_model_worst": {
               "punet": 1.2
             },
-            "prediction_evaluation": null,
             "prediction_evaluation_semantics": "legacy_v1",
             "prediction_outcomes_by_semantics": {},
             "prediction_outcomes_history": {
@@ -841,19 +833,14 @@
               "refuted": 0
             },
             "prediction_pool_sizes": {},
-            "runtime_vocab": [],
             "scientific_accuracy": null,
-            "scientific_aggregation": null,
             "take_home_message": "Need a new architecture.",
             "total_experiments": 3,
-            "vocab_changes": [],
             "vocab_diversity_ratio": null,
-            "vocab_link_confirmations": {},
             "worst_denoising_score": 1.2
           },
           "is_trial": false,
           "mindset": null,
-          "per_model_score_tables": null,
           "previous_failures": [],
           "reasoning_pipeline": {
             "exploration_mode": "auto",
@@ -1343,6 +1330,9 @@
           "resolved_order_strategy": null,
           "scientific_authority": null,
           "score_table": null,
+          "secondary_metric_errors": {},
+          "secondary_metric_refusals": [],
+          "secondary_metric_results": [],
           "status": "success",
           "strategy_normalization_reason": null,
           "target_files": null,
@@ -1355,10 +1345,7 @@
           "training_psd_segments": null,
           "trial_portion": null,
           "trial_strategy": null,
-          "validation_workload_ceiling": null,
-          "secondary_metric_results": [],
-          "secondary_metric_refusals": [],
-          "secondary_metric_errors": {}
+          "validation_workload_ceiling": null
         }
       ],
       "attempts_per_formal_round": 5,
@@ -1428,12 +1415,12 @@
       "resolved_skip_formal_threshold": null,
       "result_authority": null,
       "run_name": "explore_v1",
+      "secondary_metric_specs": null,
       "started_at": "<VOLATILE>",
       "status": "completed",
       "termination_reason": "completed",
       "total_attempts": 3,
-      "trial_validity_feedback": null,
-      "secondary_metric_specs": null
+      "trial_validity_feedback": null
     }
   ],
   "startup_side_effect_order": [

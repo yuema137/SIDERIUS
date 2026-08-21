@@ -323,10 +323,12 @@ class TestBothPromptPathsCarryTheBlock:
     @staticmethod
     def _input(with_feedback: bool):
         from agent.schemas.proposal import ProposalInput
+        from agent.schemas.proposer_evidence import build_proposer_evidence
 
         entry = _build([_trial("t", passed=False)], skipped=True)
+        dump = {"model_types": ["a"], "best_denoising_score": 1.0}
         return ProposalInput(
-            interpretation={"model_types": ["a"], "best_denoising_score": 1.0},
+            interpretation_evidence=build_proposer_evidence(dump),
             recent_trial_validity=[entry] if with_feedback else [],
         )
 

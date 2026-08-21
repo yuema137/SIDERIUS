@@ -37,6 +37,7 @@ import pytest
 
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput
 from agent.schemas.proposal import ExpertAdvice, ProposalInput, ProposalOutput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.validator import ValidatorOutput
 from nodes.ml_model_implementor import MLModelImplementor
@@ -78,7 +79,7 @@ class TestNodePersistence:
             agent.bridge = MockBridge.return_value
             out = agent.run(
                 ProposalInput(
-                    interpretation=FAKE_INTERPRETATION,
+                    interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
                     existing_model_types=[],
                     constraints=[],
                     storage={

@@ -31,6 +31,7 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ReasoningStage,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from nodes.ml_model_proposal_agent import (
     _MAX_CAUSAL_CORRECTION_RETRIES,
@@ -76,7 +77,7 @@ MALFORMED_PREDICTION_REASONING = dict(
 
 def _pipeline_input(tmp_path):
     return ProposalInput(
-        interpretation=FAKE_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
         existing_model_types=["punet", "wavenet", "fcnet", "gated_fno"],
         reasoning_pipeline=ReasoningPipelineConfig(
             stages=[

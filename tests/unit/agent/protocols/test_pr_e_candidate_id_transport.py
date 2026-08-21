@@ -37,6 +37,7 @@ import pytest
 from agent.schemas.hyperparam_tuning import ExperimentRecord
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.proposal import ProposalInput
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import local_all_fields
 from agent.schemas.protocols.ml_model_propose_to_ml_model_impl import local_full_spec
 from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_validated_model
@@ -79,7 +80,7 @@ def _run_proposer(tmp_path, commit_response=None, run_name="e2"):
         agent.bridge = MockBridge.return_value
         return agent.run(
             ProposalInput(
-                interpretation=FAKE_INTERPRETATION,
+                interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
                 # PR 01a: the legacy commit render is fail-closed on an empty
                 # contract (design rule 6.2-6); production always declares one.
                 forward_contract=ForwardContract(

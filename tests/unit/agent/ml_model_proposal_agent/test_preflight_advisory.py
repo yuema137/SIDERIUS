@@ -33,6 +33,7 @@ from agent.schemas.proposal import (
     ReasoningPipelineConfig,
     ReasoningStage,
 )
+from agent.schemas.proposer_evidence import build_proposer_evidence
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import (
@@ -181,7 +182,7 @@ def _pipeline_input(
     formal_budget: float | None = None,
 ) -> ProposalInput:
     return ProposalInput(
-        interpretation=FAKE_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
         forward_contract=_legacy_test_contract(),
         existing_model_types=["wavenet"],
         reasoning_pipeline=ReasoningPipelineConfig(
@@ -214,7 +215,7 @@ def _legacy_input(
     formal_budget: float | None = None,
 ) -> ProposalInput:
     return ProposalInput(
-        interpretation=FAKE_INTERPRETATION,
+        interpretation_evidence=build_proposer_evidence(FAKE_INTERPRETATION),
         forward_contract=_legacy_test_contract(),
         existing_model_types=["wavenet"],
         is_trial=is_trial,

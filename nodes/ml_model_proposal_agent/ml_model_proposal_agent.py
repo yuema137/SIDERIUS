@@ -29,7 +29,6 @@ from typing import Any
 from pydantic import ValidationError
 
 from agent.llm_bridge import LLMBridge
-from agent.prompt_templates.interpretation.rendering import render_prediction_track_record
 from agent.prompt_templates.proposal import live_loss_registry_names
 from agent.prompts import _format_known_constraints_block
 from agent.schemas.health_feedback import TrialValidityFeedback
@@ -39,6 +38,9 @@ from agent.schemas.proposal import (
     FalsifiablePrediction,
     ProposalInput,
     ProposalOutput,
+)
+from agent.schemas.proposer_evidence import (
+    build_proposer_evidence,
 )
 from agent.schemas.task_config import ForwardContract
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
@@ -50,11 +52,60 @@ from ml_models.models_format_sandbox import (
     CLASSIFICATION_LOSSES,
     REGRESSION_LOSSES,
 )
+from nodes.ml_model_proposal_agent.evidence_rendering import (
+    build_interpretation_summary,
+    render_falsifiable_prediction_example,
+    render_healthgate_evidence_block,
+    render_legacy_interpretation_section,
+    render_metric_context_block,
+    truncate_description,
+)
+from nodes.proposal_helpers import evidence_order
 from workflows.task_config import (
     get_task_description,
     load_task_config,
     render_forward_contract,
 )
+
+__all__ = [
+    "MLModelProposalAgent",
+    "ProposalContractRenderError",
+    "main",
+]
+
+#: COMPATIBILITY ONLY — not part of the node's contract.
+#:
+#: Step 10 / P3 C2 gave this node its first PRIVATE submodule
+#: (``evidence_rendering.py``), which brings it under the decomposed-node rules
+#: in ``tests/unit/nodes/test_node_public_boundary.py``. Those rules exist to
+#: keep "what is this node's public API" answerable once a decomposition starts
+#: re-exporting moved helpers, and the interpreter node established the shape.
+#:
+#: The names below are re-exported from the moved rendering module because the
+#: package ``__init__`` and a body of tests reach them at this path, and because
+#: ``mock.patch("nodes.ml_model_proposal_agent.X")`` must keep resolving to the
+#: object production actually calls.
+#:
+#: They are NOT documented in ml_model_proposal_agent.md, they are NOT a promise
+#: to callers, and NO new production consumer may be added: import
+#: ``evidence_rendering`` directly from inside the node instead. The list is
+#: expected to shrink, never grow.
+#:
+#: Listing them here also KEEPS them alive: without a reference the linter
+#: prunes the re-export.
+_COMPATIBILITY_REEXPORTS = (
+    build_interpretation_summary,
+    render_falsifiable_prediction_example,
+    render_healthgate_evidence_block,
+    render_legacy_interpretation_section,
+    render_metric_context_block,
+    truncate_description,
+)
+
+#: The pre-P3 name for the relocated truncator, kept so existing importers and
+#: ``mock.patch`` targets resolve. Compatibility scaffolding, not contract.
+_truncate_description = truncate_description
+
 
 # Maximum number of retries when the proposing stage produces invalid output.
 # Total attempts = _MAX_PROPOSING_RETRIES + 1.
@@ -786,116 +837,6 @@ def _format_recent_gate_exhaustions_block(
     return "\n".join(lines)
 
 
-def _format_healthgate_evidence_block(interp: dict[str, Any]) -> str:
-    """Render the flag-gated ``[HEALTHGATE EVIDENCE]`` block (V19 PR 3 §3.7).
-
-    Source of truth is EXCLUSIVELY the deterministic interpretation fields
-    (``per_model_round_health_counts``, ``per_model_collapse_fingerprints``,
-    ``collapse_fingerprint_history``) — never ``key_findings`` or any other
-    LLM prose. Distinct from the §14.N gate-exhaustion block (abort-class
-    resource failures), which is untouched and rendered separately.
-
-    Semantics:
-
-    * Legacy interpretation dicts (all three fields absent) and empty
-      evidence → ``""`` (no header — callers splice unconditionally).
-    * Evidence is grouped by model exactly as CB3 grouped it; nothing is
-      aggregated across models and nothing is rendered unlabelled.
-    * History entries are POST-retention (merge-time expiry, design §3.8),
-      so every occurrence bucket shown is inside the retained window —
-      counts here are retained-window counts by construction, never
-      lifetime totals; iteration tags are the buckets' absolute
-      iterations.
-    * Entry-level raw metrics follow the representative-observation rule
-      (§3.8) and are labelled as such — one representative value, not a
-      summary of every occurrence.
-    * A malformed hand-built history entry (missing required keys) raises
-      a diagnostic ``ValueError`` naming the model — never silent
-      evidence loss or cross-model misattribution.
-    """
-    counts_by_model = interp.get("per_model_round_health_counts") or {}
-    fps_by_model = interp.get("per_model_collapse_fingerprints") or {}
-    history_by_model = interp.get("collapse_fingerprint_history") or {}
-    if not counts_by_model and not fps_by_model and not history_by_model:
-        return ""
-
-    # Model order: interpretation's model_types first (matches the
-    # per-model scores section), then any evidence-only models — nothing
-    # silently dropped.
-    ordered = list(interp.get("model_types") or [])
-    for extra in sorted(set(counts_by_model) | set(fps_by_model) | set(history_by_model)):
-        if extra not in ordered:
-            ordered.append(extra)
-
-    lines = [
-        "[HEALTHGATE EVIDENCE] (deterministic, from the health-gate system — "
-        "distinct from the resource-gate report above)"
-    ]
-    rendered_any = False
-    for mt in ordered:
-        counts = counts_by_model.get(mt)
-        fps = fps_by_model.get(mt) or []
-        history = history_by_model.get(mt) or []
-        if not counts and not fps and not history:
-            continue
-        rendered_any = True
-        lines += ["", f"### {mt}"]
-        if counts:
-            lines.append(
-                f"Round validity (this iteration): {counts.get('valid', 0)} valid, "
-                f"{counts.get('invalid', 0)} invalid, {counts.get('unknown', 0)} unknown"
-            )
-        if fps:
-            lines.append("This iteration's collapse fingerprints:")
-            for fp in fps:
-                lines.append(f"  - {fp['signature']} — {fp.get('human_readable', '')}")
-        if history:
-            lines.append(
-                "Retained history (bounded window; counts are retained-window "
-                "occurrences, not lifetime totals):"
-            )
-            for entry in history:
-                try:
-                    signature = entry["signature"]
-                    occurrences = entry["occurrences"]
-                except (KeyError, TypeError) as e:
-                    raise ValueError(
-                        f"Malformed collapse_fingerprint_history entry for model "
-                        f"{mt!r}: missing {e} — refusing to render partial "
-                        f"evidence (silent loss / misattribution risk)"
-                    ) from e
-                total = sum(o["count"] for o in occurrences)
-                iters = ", ".join(str(o["iteration"]) for o in occurrences)
-                lines.append(f"  - {signature}: {total} occurrence(s) across iteration(s) {iters}")
-                metrics = entry.get("metrics") or {}
-                if metrics:
-                    rendered = "; ".join(f"{k}={v}" for k, v in sorted(metrics.items()))
-                    lines.append(f"      Representative observation: {rendered}")
-                source_ids = [i for o in occurrences for i in o.get("source_exp_ids", [])]
-                if source_ids:
-                    lines.append(
-                        f"      Source experiments (recent, bounded): {', '.join(source_ids)}"
-                    )
-    if not rendered_any:
-        return ""
-
-    lines += [
-        "",
-        "Rules for using this evidence:",
-        "  - Do not repeat a fingerprinted failure mode without naming a "
-        "concrete mechanism expected to break it.",
-        "  - The mechanism must change the actual relevant configuration "
-        "(architecture family, output activation, normalization, loss, "
-        "optimizer/training policy) — not merely the explanation text.",
-        "  - A high raw score from an invalid round is a failure, not a success.",
-        "  - Do not avoid unrelated healthy strategies merely because another model failed.",
-        "  - Do not transfer one model's failure evidence to another model without justification.",
-        "  - Do not claim this feedback was used unless the proposal actually "
-        "changes a relevant mechanism.",
-    ]
-    return "\n".join(lines)
-
-
 def _render_stage_user_prompt(accumulated: dict[str, Any]) -> str:
     """Render a pipeline-stage user prompt: native markdown + clean JSON.
 
@@ -1076,16 +1017,15 @@ def _audit_proposer_components(
     }
 
 
-def _truncate_description(text: str, max_chars: int = 1500) -> str:
-    """Truncate a model description for prompt injection."""
-    if len(text) <= max_chars:
-        return text
-    return text[:max_chars] + "\n[...truncated]"
-
-
 def _build_reasoning_prompt(inp: ProposalInput) -> str:
-    """Build the user prompt for the reasoning call."""
-    interp = inp.interpretation
+    """Build the user prompt for the legacy reasoning call.
+
+    Step 10 / P3 C3: the interpretation region is rendered by the ONE typed
+    adapter in ``evidence_rendering``; everything else here is
+    ``ProposalInput`` context that was never interpretation evidence. The bytes
+    are unchanged — PB-4 / S1-E and the C0 legacy goldens pin them on both a
+    full-coverage fixture and a legacy artifact with absent keys.
+    """
     lines = []
 
     # Phase 6.6 WS-B (B.2 bleed-over, landed with B.1 for Level-2 validation):
@@ -1100,137 +1040,7 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     if scope_block:
         lines += [scope_block, ""]
 
-    lines += [
-        "## Interpretation Summary",
-        f"Models analysed     : {interp.get('model_types', [])}",
-        f"Total experiments   : {interp.get('total_experiments', 'unknown')}",
-        f"Overall raw best    : {interp.get('best_denoising_score')}",
-        f"Overall best valid  : {interp.get('best_valid_denoising_score')}",
-        f"Overall worst score : {interp.get('worst_denoising_score')}",
-        "",
-    ]
-
-    per_best = interp.get("per_model_best", {})
-    per_best_valid = interp.get("per_model_best_valid", {})
-    per_raw_health = interp.get("per_model_raw_best_health_validity", {})
-    per_worst = interp.get("per_model_worst", {})
-    if per_best:
-        lines.append("### Per-model scores")
-        for mt in interp.get("model_types", []):
-            lines.append(
-                f"  {mt}: raw_best={per_best.get(mt)} "
-                f"(health={per_raw_health.get(mt, 'unknown')}) "
-                f"best_valid={per_best_valid.get(mt)} worst={per_worst.get(mt)}"
-            )
-        lines.append("")
-
-    findings = interp.get("key_findings", [])
-    if findings:
-        lines.append("### Key Findings")
-        for f in findings:
-            lines.append(f"  - {f}")
-        lines.append("")
-
-    bottlenecks = interp.get("bottlenecks", [])
-    if bottlenecks:
-        lines.append("### Bottlenecks")
-        for b in bottlenecks:
-            lines.append(f"  - {b}")
-        lines.append("")
-
-    lines += [
-        "### Take-home message",
-        interp.get("take_home_message", ""),
-        "",
-    ]
-
-    # Phase E — prediction track record.
-    #
-    # Step 09b C4: rendered by the ONE version-aware authority the
-    # interpreter's own synthesis prompt uses. The pre-09b block here read
-    # `scientific_accuracy` (v2-only since 09a) but computed its N from
-    # `prediction_outcomes_history` (the FROZEN legacy pool) — v2 fractions
-    # over a v1 denominator, the consequence Q-09a-3 declared and deferred to
-    # 09b. The renderer labels each population with its own semantics id and
-    # never pools them; the section is omitted entirely when no comparable
-    # prediction exists yet.
-    track_record = render_prediction_track_record(
-        legacy_history=interp.get("prediction_outcomes_history"),
-        outcomes_by_semantics=interp.get("prediction_outcomes_by_semantics"),
-        legacy_gain=interp.get("cumulative_information_gain"),
-        gain_by_semantics=interp.get("cumulative_information_gain_by_semantics"),
-        scientific_accuracy=interp.get("scientific_accuracy"),
-    )
-    if track_record:
-        lines.append("### Prediction Track Record")
-        lines += track_record
-        lines.append("")
-
-    # Phase C — vocabulary health
-    vdr = interp.get("vocab_diversity_ratio")
-    if vdr is not None:
-        lines += [
-            "### Vocabulary Health",
-            f"  Diversity ratio : {vdr:.2f}  "
-            f"({'LOW — consider proposing new vocabulary entries' if vdr < 0.1 else 'OK'})",
-            "",
-        ]
-
-    # Per-file analysis (from enriched interpretation)
-    per_file_comp = interp.get("per_file_comparison")
-    if per_file_comp:
-        lines += ["### Per-File Comparison (cross-model)", per_file_comp, ""]
-
-    eff_comp = interp.get("efficiency_comparison")
-    if eff_comp:
-        lines += ["### Efficiency Comparison (cross-model)", eff_comp, ""]
-
-    # Per-model score tables — full rendered_markdown per model (Phase 5 C).
-    # Legacy path has no ModelSelectionStrategy to split on, so every model
-    # gets the complete 3-column table (raw_baseline / ground_truth / model)
-    # plus the subset-scoped aggregate scalars.
-    score_tables = interp.get("per_model_score_tables")
-    if score_tables:
-        lines.append("### Per-model score tables")
-        lines.append("")
-        for mt, table in score_tables.items():
-            rendered = table.get("rendered_markdown") if isinstance(table, dict) else None
-            if not rendered:
-                continue
-            lines.append(f"#### {mt}")
-            lines.append(rendered)
-            lines.append("")
-
-    # Per-model efficiency
-    model_params = interp.get("per_model_params")
-    if model_params:
-        lines.append("### Model Parameters")
-        for mt, params in model_params.items():
-            score = per_best.get(mt)
-            lines.append(f"  {mt}: {params:,} params → score {score}")
-        lines.append("")
-
-    # Per-model training data volume
-    training_segs = interp.get("per_model_training_segments")
-    if training_segs:
-        lines.append("### Training Data Volume (PSD segments)")
-        for mt, segs in training_segs.items():
-            lines.append(f"  {mt}: {segs} segments (baseline=4000)")
-        lines.append("")
-
-    descriptions = interp.get("model_descriptions", {})
-    if descriptions:
-        lines.append("## Existing Architecture Descriptions")
-        for mt, desc in descriptions.items():
-            lines += [f"### {mt}", _truncate_description(desc), ""]
-
-    best_config = interp.get("best_config")
-    if best_config:
-        lines += [
-            "## Best Config So Far",
-            json.dumps(best_config, indent=2),
-            "",
-        ]
+    lines += render_legacy_interpretation_section(inp.interpretation_evidence)
 
     lines += [
         "## Constraints",
@@ -1271,7 +1081,7 @@ def _build_reasoning_prompt(inp: ProposalInput) -> str:
     # prompt stays byte-identical to pre-PR3 (golden-parity tested) even
     # when the structured fields are present in the interpretation dump.
     if inp.enable_structured_health_feedback:
-        health_block = _format_healthgate_evidence_block(interp)
+        health_block = render_healthgate_evidence_block(inp.interpretation_evidence)
         if health_block:
             lines += [health_block, ""]
 
@@ -1462,10 +1272,8 @@ class MLModelProposalAgent:
         self._registry = CapabilityRegistry(index_path=capability_index_path)
 
     def run(self, inp: ProposalInput) -> ProposalOutput:
-        print(
-            f"Proposing new architecture based on interpretation of "
-            f"{inp.interpretation.get('model_types', [])} ..."
-        )
+        evidence = inp.interpretation_evidence
+        print(f"Proposing new architecture based on interpretation of {evidence.model_types} ...")
 
         # Decide: pipeline mode or legacy mode
         has_pipeline = (
@@ -1593,13 +1401,15 @@ class MLModelProposalAgent:
         policy = pipeline.policy
 
         # B.16a — resolve exploration mode
-        mode = resolve_exploration_mode(inp.interpretation, pipeline)
+        evidence = inp.interpretation_evidence
+        order = evidence_order(evidence)
+        mode = resolve_exploration_mode(evidence, pipeline)
         print(
             f"   Pipeline mode: {mode} | stages: {[s.name for s in pipeline.stages if s.enabled]}"
         )
 
         # B.10 — pre-filter models
-        candidates = select_candidate_models(inp.interpretation, pipeline.model_selection)
+        candidates = select_candidate_models(evidence, pipeline.model_selection)
         # Enrich with source code + descriptions for the comparison stage
         candidates = enrich_candidates_with_source(candidates)
         source_counts = sum(1 for c in candidates if c.get("source_code"))
@@ -1617,13 +1427,13 @@ class MLModelProposalAgent:
             "strategy_assessment",
         )
         candidate_names = {c["model_type"] for c in candidates}
-        cache = inp.interpretation.get("model_knowledge_cache") or {}
-        descriptions = inp.interpretation.get("model_descriptions") or {}
-        per_best = inp.interpretation.get("per_model_best_valid") or {}
-        score_tables = inp.interpretation.get("per_model_score_tables") or {}
+        cache = evidence.model_knowledge_cache or {}
+        descriptions = evidence.model_descriptions or {}
+        per_best = evidence.per_model_best_valid or {}
+        score_tables = evidence.per_model_score_tables or {}
 
         non_candidates_overview = []
-        for mt in inp.interpretation.get("model_types", []):
+        for mt in evidence.model_types:
             if mt in candidate_names:
                 continue
             entry = cache.get(mt) or {}
@@ -1634,7 +1444,8 @@ class MLModelProposalAgent:
             }
             # Phase 5 C: compact score-table summary so the LLM sees the
             # per-file recovery context without the 20-row markdown weight.
-            summary_line = build_score_summary_line(score_tables.get(mt))
+            table = score_tables.get(mt)
+            summary_line = build_score_summary_line(table.model_dump() if table else None)
             if summary_line:
                 overview["score_summary"] = summary_line
             for field in _CACHE_TEXT_FIELDS:
@@ -1666,37 +1477,7 @@ class MLModelProposalAgent:
         accumulated = {
             "candidates": candidates,
             "non_candidates_overview": non_candidates_overview,
-            "interpretation_summary": {
-                k: inp.interpretation.get(k)
-                for k in (
-                    "model_types",
-                    "total_experiments",
-                    "best_denoising_score",
-                    "worst_denoising_score",
-                    "key_findings",
-                    "bottlenecks",
-                    "take_home_message",
-                    "per_model_best",
-                    "per_model_worst",
-                    "per_model_score_tables",
-                    # Phase E — prediction track record (surfaced to all stages).
-                    # Step 09b C4: the four versioned fields ride ALONGSIDE the
-                    # legacy trio so a stage reading this JSON can tell the
-                    # frozen legacy_v1 pool from the live v2 one. Additive:
-                    # a digest that carries none of them (pre-09a) is unchanged
-                    # here, because the `is not None` filter below drops them.
-                    "scientific_accuracy",
-                    "cumulative_information_gain",
-                    "prediction_outcomes_history",
-                    "prediction_outcomes_by_semantics",
-                    "cumulative_information_gain_by_semantics",
-                    "prediction_pool_sizes",
-                    "prediction_evaluation_semantics",
-                    # Phase C — vocabulary health metric
-                    "vocab_diversity_ratio",
-                )
-                if inp.interpretation.get(k) is not None
-            },
+            "interpretation_summary": build_interpretation_summary(evidence),
             "existing_model_types": inp.existing_model_types,
             "previous_failures": inp.previous_failures,
         }
@@ -1745,7 +1526,7 @@ class MLModelProposalAgent:
             # when the flag is OFF or no supported evidence exists, so
             # the placeholder collapses and the OFF prompt is unchanged.
             "healthgate_evidence_block": (
-                _format_healthgate_evidence_block(inp.interpretation)
+                render_healthgate_evidence_block(evidence)
                 if inp.enable_structured_health_feedback
                 else ""
             ),
@@ -1768,6 +1549,15 @@ class MLModelProposalAgent:
             # docs/design/generic_framework_upgrade/
             # step_01_proposer_hypothesis_space/pr_01b_task_description_join.md
             # § 4.1.
+            # D1 / D2 (Step 10 / P3 C4) — the ONLY intentional LLM-facing
+            # semantic deltas this PR makes, beside D3's static rewrite in
+            # comparison_stage.md. Both render from the run's DECLARED metric
+            # identity through the existing direction authority; neither
+            # decides a direction here. The proposing stage declares neither
+            # placeholder, so both are no-ops there — it neither ranks nor
+            # authors a prediction (design §4.5).
+            "metric_context_block": render_metric_context_block(evidence),
+            "falsifiable_prediction_example": render_falsifiable_prediction_example(evidence),
             "task_background_block": _render_pipeline_task_background(inp.task_description),
             "forward_contract": render_forward_contract(inp.forward_contract),
             # L5b — loss-registry awareness. Rendered once per run() so all
@@ -1824,6 +1614,7 @@ class MLModelProposalAgent:
                 top_k=policy.comparative_analysis_top_k,
                 max_chars=policy.prior_stage_max_chars,
                 input_keys=_PROPOSER_INPUT_KEYS,
+                order=order,
             )
             user_prompt_parts: list[str] = []
             if cold_start_block:
@@ -1916,6 +1707,7 @@ class MLModelProposalAgent:
                                 top_k=policy.comparative_analysis_top_k,
                                 max_chars=policy.prior_stage_max_chars,
                                 input_keys=_PROPOSER_INPUT_KEYS,
+                                order=order,
                             )
                             # P-d order: hardware → constraints → cards →
                             # context → accumulated → vocab (matches the main
@@ -2011,6 +1803,7 @@ class MLModelProposalAgent:
                     top_k=policy.comparative_analysis_top_k,
                     max_chars=policy.prior_stage_max_chars,
                     input_keys=_PROPOSER_INPUT_KEYS,
+                    order=order,
                 )
                 # P-d order — mirrors the boldness-retry assembly above.
                 correction_parts: list[str] = []
@@ -2113,6 +1906,7 @@ class MLModelProposalAgent:
                 top_k=policy.comparative_analysis_top_k,
                 max_chars=policy.prior_stage_max_chars,
                 input_keys=_PROPOSER_INPUT_KEYS,
+                order=order,
             )
             # Proposing-stage user prompt — P-d order matches the reasoning
             # stages above except the vocab block is intentionally omitted
@@ -2344,9 +2138,17 @@ def main():
     # caller uses (workflows/model_exploration.py, scripts/...): no second
     # config path is introduced.
     _task_cfg = load_task_config()
+    # Step 10 / P3 C1 — the standalone entrypoint builds its evidence through the
+    # SAME projection the protocol uses, on the SAME shape: the interpreter
+    # persists exactly ``model_dump_json``, so the file loaded above and the
+    # in-memory dump the workflow passes are one input shape with two sources.
+    # This is what makes "one authority, two entrypoints" true rather than
+    # aspirational — before it, the CLI was a second reader of the raw mapping
+    # that had already drifted from production (parent §3.6).
+    evidence = build_proposer_evidence(interpretation)
     agent_input = ProposalInput.model_validate(
         {
-            "interpretation": interpretation,
+            "interpretation_evidence": evidence,
             "task_description": get_task_description(_task_cfg),
             "forward_contract": _task_cfg["forward_contract"],
             "storage": {
@@ -2356,8 +2158,8 @@ def main():
         }
     )
     print(
-        f"✅ Input validated: models={interpretation.get('model_types')} | "
-        f"experiments={interpretation.get('total_experiments')}"
+        f"✅ Input validated: models={evidence.model_types} | "
+        f"experiments={evidence.total_experiments}"
     )
 
     agent = MLModelProposalAgent(provider=args.provider, model_id=args.model_id)
