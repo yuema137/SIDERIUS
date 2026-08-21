@@ -2,14 +2,26 @@
 
 ## 0. Status
 
-**REVISION 2 — POST-P2a/P2b RECONCILIATION COMPLETE. NOT FROZEN.
-READY FOR OPERATOR FREEZE. IMPLEMENTATION NOT STARTED.**
+**REVISION 3 — FROZEN. OPERATOR APPROVED (freeze rulings 2026-08-20).
+IMPLEMENTATION NOT STARTED.**
 
-Revision 2 supersedes DRAFT rev 1 (`2b59235f`, architecture-review PASSED
+Revision 3 applies the operator freeze rulings to the PASSED Revision 2
+(`79f300a6`; architecture verdict PASS, no redesign): **Q-P3-2 =
+GATE_1_REQUIRED** (≤ 3 real calls, coverage CORRECTED to BOTH
+comparison/SOTA interpretation AND causal prediction authoring under the
+lower-is-better control), **Q-P3-3 = NO_RAW_SECONDARY_CONSUMPTION**,
+**Q-P3-4 = INCLUDE / BOUNDED** (the F-P3-1 clamp migration is a mandatory
+C2 item), plus two bounded freeze corrections — **C-P3-1** (Gate-surface
+consistency: no wording may imply causal-only Gate coverage) and **C-P3-2**
+(ordering-wording precision: P3 adds zero NEW ordering semantics/authorities
+and MIGRATES the existing F-P3-1 site). Full rulings: §14/§14.1. Open
+operator questions: **0**.
+
+Revision 2 superseded DRAFT rev 1 (`2b59235f`, architecture-review PASSED
 2026-08-20). Every `PROVISIONAL(P2a)` / `PROVISIONAL(P2b)` marker is resolved
 against merged source; §13 is the full reconciliation table. Three findings
-of this reconciliation changed the design materially and are flagged here so
-the freeze review reads them first:
+of that reconciliation changed the design materially and were flagged for
+the freeze review (all three now dispositioned):
 
 1. **Q-P3-1 (rev 1) is DISSOLVED BY SOURCE, not ruled.** The legacy path has
    NO prediction-authoring surface at all — `_run_legacy` never extracts a
@@ -28,8 +40,9 @@ the freeze review reads them first:
    which comparison entries survive prompt clamping by `best_score`
    DESCENDING, through a `_score` helper indirection that the P2a scanner's
    deliberate one-hop alias rule cannot see (§2.7.1). Under DAVIS it curates
-   the WORST models' evidence into later-stage prompts. Disposition is
-   operator question Q-P3-4.
+   the WORST models' evidence into later-stage prompts. **Dispositioned:
+   Q-P3-4 = INCLUDE / BOUNDED — a correctness closure, not scope creep
+   (operator freeze ruling, §14.1).**
 
 | field | value |
 |---|---|
@@ -37,8 +50,8 @@ the freeze review reads them first:
 | source anchor | merged `master` = **`06291e5f`** (post-P2b status sync; production tree == the P2b squash `5a2ecfd1`). Every §2 line anchor was measured here in this session. Line anchors are evidence, not implementation authority |
 | depends on | **P2a MERGED** (`e094fa26` — ordering closed; the C4 threading note addressed to P3 is in source at `proposal_helpers.py:36-43`) and **P2b MERGED** (`5a2ecfd1` — secondaries real; **its diff touches ZERO proposer files**, verified §2.4) — **both satisfied** |
 | downstream | **P5** consumes the typed boundary this child creates (its consumer wiring is `PROVISIONAL(P3)` on its side; P5 freezes AFTER P3 merges); **P6** runs the loop through it |
-| Gate disposition | **Gate 1 REQUIRED — ONE bounded run (≤ 3 real calls)** on the intentional authoring-grammar delta, standard row quoted in §8.2. **Gate 2 NOT REQUIRED** (§8.3). Both rulings source-grounded in this revision; confirmed at freeze |
-| open operator questions | **3** (§14): Q-P3-2 Gate-1 confirmation · Q-P3-3 secondary consumption · Q-P3-4 F-P3-1 inclusion — each with a measured recommendation. Q-P3-1 is RESOLVED BY SOURCE |
+| Gate disposition | **FROZEN (Q-P3-2): Gate 1 REQUIRED — ONE bounded run, ≤ 3 real calls, covering BOTH comparison/SOTA interpretation AND causal prediction authoring under a DAVIS-shaped LOWER-is-better fixture** (§8.2, C-P3-1); verdict from persisted stage artifacts, never from prompt inspection alone. **Gate 2 NOT REQUIRED — FROZEN** (§8.3) |
+| open operator questions | **0** — Q-P3-2 / Q-P3-3 / Q-P3-4 RESOLVED by operator freeze rulings (§14, dispositions §14.1). Q-P3-1 was RESOLVED BY SOURCE in rev 2 |
 
 **Frozen by the parent regardless of this revision's fate** (§11.2, operator
 ruling 2026-08-20): both entrypoints survive; both consume ONE typed
@@ -270,13 +283,17 @@ prompt whenever the pool exceeds `top_k` (default 5).
   sees), not a ranking output — smaller than the `top_n` inversion, but the
   same scientific sign error feeding every post-clamp stage.
 
-Disposition: **Q-P3-4** (§14) — recommended INCLUDE in P3, bounded, because
-the fix's mechanism IS P3's typed evidence (the same identity, through the
-same reader, with the Q-P2a-1 absence rule), and the file is P3's own
-primary surface. The scanner itself is NOT extended (its one-hop precision
-contract is deliberate and stays); the site's standing guard is a
-DAVIS-lower behavioral fixture (§7 C2), and the blind-spot class is recorded
-in the scanner's docstring per the F-P2b-4 rule (per-census, when touched).
+Disposition: **Q-P3-4 = INCLUDE / BOUNDED (operator freeze ruling, §14.1)**
+— a bounded correctness closure, not scope creep: the fix's mechanism IS
+P3's typed evidence (the same identity, through the same reader, with the
+Q-P2a-1 absence rule), the file is P3's own primary surface, and parent
+acceptance criterion J cannot close for Step 10 with a known unmigrated
+direction site left as debt. The scanner itself is NOT extended (its
+one-hop precision contract is deliberate and stays — the ruling forbids
+widening its transitive-taint behavior for this site); the site's standing
+guard is the set of hand-computed behavioral fixtures (§7 C2), and the
+blind-spot class is recorded in the scanner's docstring per the F-P2b-4
+rule (per-census, when touched).
 
 #### 2.7.2 The dead typed mirror
 
@@ -341,7 +358,7 @@ author (comparison + causal).
 | `ProposalInput.interpretation` `:650` | `dict[str, Any]` | REMOVED (not deprecated), replaced by `interpretation_evidence` | REMOVE (C3) |
 | authoring grammar: causal example block; comparison sota wording; absent direction statement | static template text | D1/D2/D3 rendered/rewritten surfaces (§4.5) | REWRITE (C4, declared LLM-facing delta) |
 | `threshold_for_refutation` description `:57-61` | inverted prose | direction-neutral prose (non-LLM-facing doc fix) | REWRITE (C4) |
-| clamp draw `:521,:555` | `best_score` descending | order-aware retention from the typed identity; absent ⇒ recency-only (Q-P2a-1 shape) | Q-P3-4 (C2 if approved) |
+| clamp draw `:521,:555` | `best_score` descending | order-aware retention from the typed identity; absent ⇒ recency-only (Q-P2a-1 shape) | MIGRATE (C2 — Q-P3-4 = INCLUDE, frozen) |
 
 ---
 
@@ -367,7 +384,7 @@ reader turns a census RED.
 | prediction-authoring grammar (direction-safe, identity-stated) | **P3** | creates (parent §11.3) |
 | primary ranking semantics, `MetricOrder`, reconciliation, unavailable formatter | **P2a (merged)** | consumes verbatim; adds NO authority |
 | the `top_n` comparison | **P2a (merged)** | mechanism swap only (identity via the typed value); behavior pinned unchanged |
-| secondary production/evaluation/persistence/rendering | **P2b (merged) / 09b** | consumes at most (Q-P3-3: recommended NOT consumed) |
+| secondary production/evaluation/persistence/rendering | **P2b (merged) / 09b** | NOT consumed (Q-P3-3 = NO_RAW_SECONDARY_CONSUMPTION, frozen §14.1) |
 | secondary ordering | **FORBIDDEN** (09a invariant) | scope-extends the invariant to its own files |
 | cross-iteration carry / restore / `accumulated_key_findings` / vocab confirmations | **P5** | none — the value is built per invocation; P5 consumes the typed boundary later |
 | proposer task-science prompt content (persona, TIDMAD nouns, `DATASET_CONFIG` constraints block, wavenet/5.57 examples) | **Step 10/12 — unassigned** (roadmap §15.1b) | non-goal; byte-preserved; ONE exception: D2 re-renders the `'denoising_score'` literal inside the grammar example it owns |
@@ -438,10 +455,11 @@ CLI path feeds legacy artifacts where the difference is real.
 
 **Explicitly NOT fields** (each with the reason, so the review can check the
 boundary): `per_model_failure_counts` (no demonstrated proposer consumer);
-`per_model_secondary_metrics` (Q-P3-3 — a RESERVED name documented in the
-model's docstring, the 09a reserved-names precedent P2b itself consumed;
-adding it later is one field + one renderer behind the single reader, which
-is §11.2 rule 4 working as designed); `is_degraded`, `evolution_stats`,
+`per_model_secondary_metrics` (**Q-P3-3 = NO_RAW_SECONDARY_CONSUMPTION,
+FROZEN** — a RESERVED name documented in the model's docstring, the 09a
+reserved-names precedent P2b itself consumed; a future exposure decision
+requires its own explicit semantic ruling and must NOT be introduced
+incidentally by P5 or any other child); `is_degraded`, `evolution_stats`,
 `vocab_link_confirmations` (P5's), `runtime_vocab` / `cold_start` (already
 typed `ProposalInput` channels via the protocol), `scientific_aggregation`,
 `best_valid_config`, `prediction_evaluation`, `new_discoveries`,
@@ -589,58 +607,75 @@ ledger, with everything outside them at exact parity (PB-3/PB-4/S1-E +
 C0 full-coverage goldens). Legacy prompts carry NONE of them (§11.2's
 compatibility value; and legacy authors no predictions, §2.5).
 
-### 4.6 Secondary evidence — the explicit decision (Q-P3-3)
+### 4.6 Secondary evidence — Q-P3-3 = NO_RAW_SECONDARY_CONSUMPTION (FROZEN)
 
-**Recommended: the proposer does NOT consume secondary evidence in P3; the
-typed value documents `per_model_secondary_metrics` as a RESERVED name.**
-Grounds, all measured:
+**Operator ruling (2026-08-20): P3 does NOT consume raw secondary metric
+evidence.** The frozen live contract:
+
+* `ProposerInterpretationEvidence` carries NO `per_model_secondary_metrics`
+  field; the name is documented in the model's docstring as RESERVED only.
+* Proposer prompts contain no raw `macro_f1` / `psnr` / `mae` values, no
+  secondary refusal entries, and no secondary runtime diagnostics;
+  `secondary_metric_errors` / crash strings are NEVER proposer evidence.
+* A future decision to expose raw secondary observations to the proposer
+  requires an explicit semantic owner/ruling of its own — it must not be
+  introduced incidentally by P5 or another child.
+
+Grounds (measured, accepted by the ruling):
 
 * P2b's operator-approved planner rationale (§2.4) names the exact hazard —
   a second, differently-directed number beside the optimised one invites a
   trade-off, "exactly the vote secondaries must never get" — and the
   comparison stage (which picks the SOTA to build on) is the
-  optimization-adjacent surface where that temptation would land.
-* The interpreter ALREADY synthesizes secondary observations into
-  `key_findings` / `take_home_message` (it renders all three secondary
-  states since 09b/P2b), and those channels ARE projected — the proposer
-  receives secondary-informed science without raw differently-directed
-  numbers.
-* Every typed field requires a demonstrated consumer; today there is none,
-  and inventing a rendering to justify a field is the producer-copy failure
-  mode this design's own §3 forbids.
+  optimization-adjacent surface where that temptation would land. P2b's
+  observational-only boundary stays explicit.
+* The interpreter ALREADY synthesizes scientifically relevant secondary
+  observations into `key_findings` / `take_home_message` (it renders all
+  three secondary states since 09b/P2b), and those channels ARE projected —
+  the proposer legitimately consumes secondary-informed science without raw
+  differently-directed numbers.
+* Every typed field requires a demonstrated consumer; there is none.
 
-If the operator rules CONSUME instead, the frozen shape is pre-declared so
-the ruling is cheap: the field `per_model_secondary_metrics:
-dict[str, list[SecondaryMetricEvidence]]` (default `{}`), projected only
-when the dump carries entries; rendered ONLY by 09b's
-`render_secondary_metrics` (all three states, each metric's OWN direction,
-never the primary's); crash diagnostics stay excluded (they project as
-`unavailable` upstream and P3 adds no crash channel); zero ordering
-participation, guarded by the C0-extended invariant either way.
+**Required negative test (frozen)**: a DAVIS fixture whose upstream dump
+contains REAL `psnr` + `mae` secondary evidence, asserting that
+`ProposerInterpretationEvidence` contains none of it AND the proposer
+prompt bytes contain none of it. The ordering-operand invariant remains
+scope-extended over the proposer files regardless (§7 C0).
 
-**Either way, the invariant scope-extension and the DAVIS negative
-assertion (§5) land**: under the recommendation, the three-task fixture
-asserts secondaries EXIST upstream and appear NOWHERE in proposer evidence
-or prompt bytes.
+*Historical note (rejected alternative, recorded per the freeze-cleanup
+rule)*: rev 2 pre-declared a CONSUME shape (field default `{}`, rendering
+ONLY via 09b's `render_secondary_metrics` with each metric's own direction,
+crash carriers excluded) so a CONSUME ruling would have been cheap. The
+ruling was NO; that shape is NOT part of P3's contract and survives only in
+this note as the record of what was considered.
 
-### 4.7 F-P3-1 — the clamp fix (Q-P3-4, recommended IN)
+### 4.7 F-P3-1 — the clamp migration (Q-P3-4 = INCLUDE / BOUNDED, FROZEN)
 
-If included: `clamp_and_backstop_accumulated` and
-`clamp_comparative_analysis` gain a keyword-only `order: MetricOrder | None`
-supplied by `_run_pipeline` from the typed evidence (the same identity the
-`top_n` cut reads). Draw A becomes "the 3 BEST by `order`"; `_score`'s
-missing-value sentinel becomes `order.worst_sentinel`; the final-truncation
-sort keys follow the same order. `order is None` (absent identity) ⇒ the
-score draw is SKIPPED and retention is recency-only — the Q-P2a-1 shape:
-no metric ranking happens without identity, and nothing is labelled "best".
-Ties and the recency draw are direction-independent and preserved
-byte-for-byte. Standing guard: hand-computed DAVIS-lower and TIDMAD-higher
-retention fixtures plus an absent-identity fixture (§7 C2); the P2a scanner
-is deliberately NOT extended (§2.7.1).
+**Operator ruling (2026-08-20): included in P3 as a BOUNDED correctness
+closure, not scope creep.** Mandatory in C2:
+`clamp_and_backstop_accumulated` and `clamp_comparative_analysis` gain a
+keyword-only `order: MetricOrder | None` supplied by `_run_pipeline` from
+the SAME typed metric identity the proposer already uses (no new ordering
+authority, no new metric derivation). Draw A becomes "the 3 BEST by
+`order`"; `_score`'s missing-value sentinel becomes `order.worst_sentinel`;
+the final-truncation sort keys follow the same order. `order is None`
+(absent identity) ⇒ the score-based draw is SKIPPED and retention falls to
+the existing direction-independent recency behavior, with no "best" claim —
+the Q-P2a-1 shape: no metric ranking happens without identity. Ties and the
+recency draw are direction-independent and preserved byte-for-byte.
 
-If excluded by ruling: the site is recorded as named Step-10 direction debt
-in the parent's §0 debt list at P3's post-merge sync, with this section as
-the audit of record.
+Required deterministic fixtures (frozen): DAVIS lower — lowest mse
+retained, the known worst model clamped out; TIDMAD/Pets higher — highest
+retained; absent identity — no metric ordering, recency-only. The P2a
+scanner's transitive-taint behavior is deliberately NOT widened to catch
+this site (its precision contract stands); the helper-indirection blind
+spot is recorded in that census's docstring when touched, and the
+hand-computed behavioral fixtures own the migrated site's direction
+semantics (§2.7.1).
+
+*Historical note (rejected alternative)*: rev 2 carried an else-branch —
+record the site as named Step-10 direction debt at the post-merge sync —
+kept here only as the record of the alternative the ruling rejected.
 
 ### 4.8 Convergence (the §11.2 executable rule, restated as code paths)
 
@@ -670,9 +705,9 @@ a bypass has no input — plus the standing census (§8.1).
 | identity in evidence | `tidmad_denoising_score` / higher (negative values) | `accuracy` / higher | `mse` / **lower** | YES — a value, not a branch |
 | D1 statement renders | "higher is better" | "higher is better" | **"lower is better"** | YES — one renderer |
 | D2 example renders | upward, threshold below current | upward | **downward, threshold ABOVE current** | YES |
-| clamp retention (if Q-P3-4 IN) | best-3 = highest | highest | **best-3 = LOWEST mse; the worst model's entry is clamped OUT — hand-computed** | YES |
+| clamp retention (F-P3-1, migrated) | best-3 = highest | highest | **best-3 = LOWEST mse; the worst model's entry is clamped OUT — hand-computed** | YES |
 | `top_n` cut (P2a, pinned) | unchanged bytes | unchanged | unchanged (already direction-aware) | YES |
-| secondaries upstream (P2b) | none | `macro_f1` | `psnr` (higher) + `mae` (lower) | evidence + prompt bytes contain ZERO of them (Q-P3-3 recommendation) — the NEGATIVE assertion, asserted on the DAVIS fixture where the temptation is real |
+| secondaries upstream (P2b) | none | `macro_f1` | `psnr` (higher) + `mae` (lower) | evidence + prompt bytes contain ZERO of them (Q-P3-3 ruling) — the required NEGATIVE assertion, asserted on the DAVIS fixture where the temptation is real |
 | absent identity (legacy artifact) | named absence: D1 renders the canonical phrase, NO direction words, no numeric example; `top_n` → order-free `all`; clamp → recency-only | same | same | YES |
 
 The DAVIS column is the falsification case: a sign mistake in D1/D2/clamp
@@ -817,17 +852,19 @@ the dump had no key (the None rule test); `VocabEntry` importers breaking
 **8. Commit boundary.** Schema layer + protocol only; no reader migrated;
 no prompt byte moves.
 
-### C2 — pipeline reader onto the typed value (+ helpers, + health block, + Q-P3-4)
+### C2 — pipeline reader onto the typed value (+ helpers, + health block, + the F-P3-1 clamp migration)
 
 **1. Goal.** The production path consumes the typed value; the whitelist
 finally gets its pin; the P2a threading is replaced by the mechanism its
-docstring requested.
+docstring requested; the F-P3-1 direction site is migrated onto the
+existing order authority.
 
 **2. Scope.** `_run_pipeline`'s evidence assembly; the new private rendering
 module (serializer + health block move); `proposal_helpers.py`
 (`select_candidate_models`, `resolve_exploration_mode` typed;
 `_interpretation_order` DELETED; `_guess_source` drops its unused parameter
-in passing; clamp per Q-P3-4's ruling); `run()`'s print. Depends on C1.
+in passing; the §4.7 clamp migration — MANDATORY, Q-P3-4 = INCLUDE);
+`run()`'s print. Depends on C1.
 
 **3. Implementation plan.**
 - [ ] Whitelist serializer in the private module: 18 keys, tuple order,
@@ -842,7 +879,8 @@ in passing; clamp per Q-P3-4's ruling); `run()`'s print. Depends on C1.
 - [ ] `_format_healthgate_evidence_block` over typed fields, relocated;
       malformed-history failure moves to projection (C1's validation);
       rendering parity vs C0 health goldens.
-- [ ] Q-P3-4 (if IN): the clamp order-parameter per §4.7 with the
+- [ ] The F-P3-1 clamp migration per §4.7 (Q-P3-4 = INCLUDE, frozen): the
+      keyword-only order parameter, the recency-only absence path, and the
       three hand-computed retention fixtures.
 - [ ] Raw-reader census count drops to the legacy-reader remainder;
       recorded.
@@ -855,9 +893,9 @@ malformed test (UPGRADE disposition recorded).
 
 **5. Acceptance criteria.** Pipeline prompt bytes IDENTICAL to C0 goldens on
 every unchanged surface; census shows zero pipeline-side raw reads; the
-DAVIS clamp fixture proves the worst model's entry is clamped OUT (if
-Q-P3-4 IN); `_run_pipeline` LOC/branch count did not grow (measured, in the
-ledger).
+DAVIS clamp fixture proves the worst model's entry is clamped OUT and the
+absence fixture proves recency-only retention with no metric ordering;
+`_run_pipeline` LOC/branch count did not grow (measured, in the ledger).
 
 **6. Failure/edge cases.** Typed-object leakage into `accumulated`
 (`json.dumps(default=str)` would silently change bytes — the parity goldens
@@ -976,13 +1014,28 @@ Depends on C0–C4.
       `build_proposer_evidence`-shaped constructor or a raw-dict reader
       plants RED); zero raw reads; ordering-operand invariant over the
       extended scope; the P2a scanner untouched and green.
-- [ ] **Gate 1 (operator-approved before launch)**: ONE bounded run, ≤ 3
-      real calls — the causal stage on a DAVIS-shaped `lower` fixture and a
-      TIDMAD-shaped `higher` fixture (+ one absence call if budget allows).
-      PASS = schema-valid `FalsifiablePrediction` whose `predicted_value`
-      lies toward-better of `current_value` under the fixture's direction
-      and whose threshold lies on the refuted side; the absence call uses no
-      direction language. Verdict read from persisted artifacts.
+- [ ] **Gate 1 (operator-approved before launch; Q-P3-2 frozen coverage)**:
+      ≤ 3 real calls, covering BOTH affected behavioral responsibilities
+      under a DAVIS-shaped LOWER-is-better primary fixture. **Preferred
+      shape**: ONE production-shaped proposer run through the normal real
+      stage path — comparison → causal → proposing is exactly 3 calls when
+      no retry fires — with every stage output persisted. **Fallback** (if
+      the harness can only exercise stages independently): call 1 =
+      comparison/DAVIS-lower; call 2 = causal/DAVIS-lower; call 3 =
+      optional higher-regime control if useful.
+      **Acceptance A (comparison/SOTA)**: given unambiguous candidate
+      scores, the persisted stage output identifies the LOWER score as the
+      SOTA/better candidate under the stated direction
+      (`sota_model_type`/`sota_score`).
+      **Acceptance B (causal/authoring)**: schema-valid
+      `FalsifiablePrediction`; `predicted_value` moves toward BETTER =
+      LOWER; `threshold_for_refutation` lies on the REFUTED side; no
+      upward/higher-is-better inversion.
+      NO real call is spent on absent metric identity — that state is
+      deterministic (canonical unavailable statement, zero direction
+      language, zero numeric example, no ranking) and unit/golden tests own
+      it. The verdict is read from the actual produced/persisted stage
+      artifacts, never from inspecting the prompt alone.
 - [ ] Node `.md` sync quoting each documented flag/default against merged
       source; ledger closed (all checklists evidenced).
 - [ ] Push ONCE; the formal PR's automatic CI on the final head is the ONE
@@ -992,9 +1045,11 @@ Depends on C0–C4.
 at head (recorded per commit, not re-run wholesale); Gate 1 PASS recorded
 with call count and artifact paths; CI run id + SHA in the ledger.
 
-**6. Failure/edge cases.** A Gate model that ignores the grammar under
-`lower` is a REAL finding (prompt insufficiency), not a test flake — the
-disposition is a grammar revision + re-run, recorded, never a pass-by-rerun.
+**6. Failure/edge cases.** A model that follows the prompt incorrectly
+under lower-is-better — on EITHER surface (SOTA choice or authoring) — is a
+REAL Gate failure, never a test flake, and is never passed by blind rerun.
+The disposition is a grammar/code correction, which produces a NEW candidate
+that may then receive its own bounded Gate; every attempt is recorded.
 
 **7-8.** Standard: diff summary + staged list + deviations before the
 commit; STOP at READY FOR OPERATOR REVIEW — DO NOT MERGE.
@@ -1018,24 +1073,44 @@ commit; STOP at READY FOR OPERATOR REVIEW — DO NOT MERGE.
 | clamp direction (Q-P3-4) | hand-computed retention fixtures |
 | structural boundary | node public-boundary test + preflight LOC/branch measurements in the ledger |
 
-### 8.2 Gate 1 — REQUIRED (ONE bounded run; Q-P3-2 confirms at freeze)
+### 8.2 Gate 1 — REQUIRED (Q-P3-2 = GATE_1_REQUIRED, FROZEN 2026-08-20)
 
 The standard's assignment rows
 (`docs/gates/gate_testing_standard.md` "Gate assignment by commit type"):
 *"Prompt placeholder substitution → Unit only + optional Gate 1"* and *"New
 LLM-facing system prompt → Gate 1"*. C4 is between the rows: not a new
-system prompt, but more than mechanical substitution — it changes the
-INSTRUCTIONAL semantics that steer prediction authoring, and the failure
-class "a real model follows lower-is-better authoring instructions" is
-LLM-behavioral: deterministic fixtures prove the instructions are correct,
-not that a model obeys them. No prior proposer Gate has ever run a `lower`
-regime; the parent pre-named P3 "the child most likely to require Gate 1"
-(§22, §22.1), and 09b's five-call Gate on the interpreter's
-direction-correct reading is the precedent on the consuming side. Ruling:
-**the optional Gate is EXERCISED — ONE bounded run, ≤ 3 calls, C5's plan.**
-Everything outside D1/D2/D3 is parity-owned and gets no Gate.
+system prompt, but more than mechanical substitution — D1/D2/D3
+intentionally change real LLM-facing INSTRUCTIONAL semantics, and the
+failure class is LLM-behavioral: deterministic fixtures prove the prompt is
+correct, not that a real model obeys lower-is-better instructions. No prior
+proposer Gate has ever run a `lower` regime; the parent pre-named P3 "the
+child most likely to require Gate 1" (§22, §22.1), and 09b's five-call Gate
+on the interpreter's direction-correct reading is the precedent on the
+consuming side.
 
-### 8.3 Gate 2 — NOT REQUIRED
+**Frozen coverage (operator correction C-P3-1): the Gate must exercise BOTH
+affected behavioral responsibilities, because D3 is a COMPARISON-stage
+change and D1/D2 are causal-stage changes** —
+
+* **A. comparison/SOTA interpretation** under a DAVIS-shaped
+  lower-is-better primary: given unambiguous candidate scores, the real
+  model identifies the LOWER score as the SOTA/better candidate under the
+  stated direction;
+* **B. causal/prediction authoring** under the same fixture: schema-valid
+  `FalsifiablePrediction`, `predicted_value` toward BETTER = LOWER,
+  threshold on the REFUTED side, no upward inversion.
+
+Budget **≤ 3 real calls**; preferred execution is ONE production-shaped
+proposer run (comparison → causal → proposing) on the DAVIS/lower fixture,
+per-stage fallback allowed (C5's plan). Evidence comes from the persisted
+stage artifacts, never from prompt inspection alone. Absent-identity gets
+NO real call — it is deterministic and unit/golden-owned. A wrong model
+behavior is a REAL failure: no blind rerun; a grammar/code correction is a
+new candidate with its own bounded Gate. Everything outside D1/D2/D3 is
+parity-owned and gets no Gate. The deterministic D1/D2/D3 diff-surface
+tests remain required regardless of the Gate.
+
+### 8.3 Gate 2 — NOT REQUIRED (FROZEN 2026-08-20)
 
 No real-data / GPU / training / scoring semantics change anywhere in P3's
 diff: the tuner, sandbox, metric arithmetic and record lifecycle are
@@ -1076,9 +1151,15 @@ draw), `_render_stage_user_prompt`, `_audit_proposer_components` (WF-3)
 unchanged; proposal OUTPUT schema untouched except the
 `threshold_for_refutation` description PROSE; the v2 evaluator, its pools
 and `render_prediction_track_record` untouched; `top_n`'s comparison and
-its P2a fixtures untouched; `MetricOrder` and the reconciliation authority
-untouched (P3 adds ZERO ordering/derivation sites — the P2a scanner stays
-green over P3's whole diff); the frozen D1 record names untouched; no
+its P2a fixtures untouched; **ordering semantics stated precisely (C-P3-2):
+P3 adds ZERO NEW ordering semantics, ZERO NEW ordering authorities and ZERO
+metric-direction derivation authorities; it MIGRATES the already-existing
+F-P3-1 clamp preference site from raw descending `best_score` logic onto
+the existing P2a `MetricOrder` authority — the semantic decision already
+existed, P3 fixes its direction handling. The `MetricOrder` implementation,
+the reconciliation authority and the P2a scanner's precision contract are
+all unchanged, and the scanner stays green over P3's whole diff**; the
+frozen D1 record names untouched; no
 ordering expression gains a secondary operand (invariant, scope-extended);
 the boldness check, retry loops, causal-correction loop, candidate-id mint
 and persistence untouched; legacy CLI behavior identical except that its
@@ -1094,7 +1175,7 @@ evidence now arrives typed.
 | present-but-malformed evidence value | projection raises with the field named — fail-closed at the boundary instead of garbage prompt text (declared delta) |
 | malformed / unknown-direction `metric_identity` | `None` — the P2a named absence; D1 renders the canonical phrase; `top_n` → order-free `all`; clamp → recency-only; NO example numbers |
 | cold start | evidence mostly-None/empty; existing cold-start banner unchanged; D1 renders the absence state if no identity |
-| dump with secondaries present | projected NOWHERE (Q-P3-3 rec.); prompt bytes free of them — asserted |
+| dump with secondaries present | projected NOWHERE (Q-P3-3 ruling); prompt bytes free of them — the required negative assertion |
 | mindset override active | D1/D2 live in the BASE template and survive the mode-block replacement — tested |
 | identity present, all scores None | `top_n`'s existing empty-`scored` path preserved; D1 still states the direction (identity is provenance, not a score) |
 | a future field added to `InterpretationOutput` | invisible to the proposer until DECLARED on the typed value — §11.2 rule 4's exact intent; the census makes a bypass RED |
@@ -1110,9 +1191,9 @@ evidence now arrives typed.
 | a third reader appears mid-migration | C0 census precedes any migration; C3 removes the input it would read; standing plant |
 | the authoring delta leaks beyond D1/D2/D3 | the C4 diff-surface enumeration test |
 | the VocabEntry relocation breaks an importer | verbatim move + re-export; the seven sites grep-pinned; import-cycle probe |
-| Gate-1 model disobeys the lower grammar | a real finding → grammar revision + re-run, recorded (C5); never re-run-to-green |
+| Gate-1 model behaves wrongly under `lower` on EITHER surface (SOTA choice or authoring) | a REAL Gate failure, recorded (C5); never a blind rerun — a grammar/code correction produces a NEW candidate with its own bounded Gate |
 | P5 lands a competing consumer path | freeze ordering (P5 after P3) + §9's mirror statement |
-| F-P3-1 ruled OUT and forgotten | §4.7's else-branch: named debt in the parent §0 at the post-merge sync, with §2.7.1 as the audit of record |
+| raw secondaries arrive later through a side door (P5 or another child) | §4.6's frozen rule: a future exposure needs its own explicit ruling; the field is absent, the negative fixture and the scope-extended invariant stand guard |
 
 ---
 
@@ -1134,18 +1215,35 @@ evidence now arrives typed.
 | structure preflight (§6 rev 1) | re-measured: `_run_pipeline` 666 LOC/83 branch nodes; extraction plan made concrete (ONE private rendering module) | REVISED |
 | not known to rev 1 | F-P3-1 (clamp direction site, scanner-invisible); the dead typed mirror; the VocabEntry cycle; the ordering-invariant proposer-scope gap; SOTA delegation with no direction statement | NEW — §2.7 |
 
+*This table is the HISTORICAL rev 1 → rev 2 reconciliation record and is
+deliberately preserved (freeze-cleanup rule: resolved questions do not erase
+their evidence). The rev 2 → rev 3 changes are the operator freeze rulings,
+recorded live in §14/§14.1; where a row above says "recommended", the
+binding disposition is §14.1's.*
+
 ---
 
-## 14. Open operator questions (each with a measured recommendation)
+## 14. Operator questions — ALL RESOLVED (freeze rulings 2026-08-20)
 
-| id | question | recommendation |
+| id | question | ruling |
 |---|---|---|
-| **Q-P3-2** | Confirm the Gate-1 ruling: ONE bounded real-LLM run (≤ 3 calls) on the D1/D2 authoring surface — or deterministic rendering fixtures alone? | **REQUIRED** — §8.2's grounds: the standard's optional-Gate row exercised because instruction-following under a `lower` regime is LLM-behavioral and has never been exercised by any prior proposer Gate; the parent pre-named this child for it |
-| **Q-P3-3** | Does proposer-facing evidence include P2b's secondary observations at all? | **NO for P3** — P2b's planner-exposure rationale applies to the SOTA-choosing stage; the interpreter's findings channel already carries secondary-informed science; reserved-name extension point declared so a future YES is one field behind one reader (§4.6). The negative assertion + invariant scope-extension land either way |
-| **Q-P3-4** | Is F-P3-1 (the clamp's descending retention draw) fixed inside P3, or recorded as named Step-10 direction debt? | **INCLUDE, bounded** — parent acceptance criterion **J** ("every direction-sensitive golden-metric decision consumes `MetricOrder`; … zero unmigrated sites") cannot close for Step 10 with a known unmigrated site left as debt; the fix's mechanism is P3's own typed identity on P3's own file, with Q-P2a-1's absence rule; excluding it ships DAVIS evidence curation inverted through P5/P6 development. The D-P2a-1 precedent (newly-measured sites absorbed into the already-approved direction scope) applies (§4.7) |
+| **Q-P3-2** | Gate-1 disposition and coverage | **RESOLVED = GATE_1_REQUIRED** — with the coverage CORRECTED at freeze: the run must exercise BOTH comparison/SOTA interpretation AND causal prediction authoring under the DAVIS-shaped lower control (a causal-only Gate would leave D3, a comparison-stage behavioral change, unexercised). Budget ≤ 3 real calls; §8.2 is the frozen contract |
+| **Q-P3-3** | Does proposer-facing evidence include P2b's secondary observations at all? | **RESOLVED = NO_RAW_SECONDARY_CONSUMPTION** — no field, no raw values/refusals/diagnostics in prompts; crash strings never proposer evidence; reserved docstring name only; a future exposure requires its own explicit ruling and must not arrive incidentally via P5 or another child; the negative test and invariant scope-extension are REQUIRED (§4.6) |
+| **Q-P3-4** | Is F-P3-1 (the clamp's descending retention draw) fixed inside P3, or recorded as named Step-10 direction debt? | **RESOLVED = INCLUDE / BOUNDED** — classified a bounded correctness closure, not scope creep: Step 10 cannot claim direction closure while knowingly leaving the site unmigrated; the §4.7 mechanism exactly, mandatory in C2 |
 
-Q-P3-1 (rev 1) is RESOLVED BY SOURCE (§0 item 1) and is not an operator
-question.
+Q-P3-1 (rev 1) was RESOLVED BY SOURCE in rev 2 (§0 item 1) and never
+reached the operator.
+
+### 14.1 Freeze dispositions (operator rulings 2026-08-20, recorded verbatim)
+
+| id | disposition |
+|---|---|
+| **Q-P3-2** | `GATE_1_REQUIRED` · budget **≤ 3 real calls** · coverage = **comparison + causal lower-direction behavioral surfaces** (acceptance A: given unambiguous candidate scores the real model identifies the LOWER score as SOTA under the stated direction; acceptance B: schema-valid prediction, `predicted_value` toward BETTER = LOWER, threshold on the REFUTED side, no inversion) · preferred execution = ONE production-shaped proposer run on a DAVIS/lower fixture; per-stage fallback allowed; optional higher-regime control only in the fallback shape · NO real call on absent identity (deterministic-owned) · evidence from persisted stage artifacts, not prompt inspection · a wrong model behavior is a real Gate failure — no blind rerun; a grammar/code correction is a NEW candidate with its own bounded Gate |
+| **Q-P3-3** | `NO_RAW_SECONDARY_CONSUMPTION` · `ProposerInterpretationEvidence` has NO `per_model_secondary_metrics` field · no raw `macro_f1`/`psnr`/`mae`, refusal entries or runtime diagnostics in proposer prompts · `secondary_metric_errors`/crash strings NEVER proposer evidence · reserved extension name documented only · future exposure needs an explicit semantic owner/ruling · required negative test: DAVIS upstream carries real `psnr`+`mae`, evidence and prompt bytes carry none · ordering-operand invariant stays scope-extended over proposer files |
+| **Q-P3-4** | `INCLUDE / BOUNDED` — a bounded correctness closure, not scope creep · §4.7's exact mechanism: `clamp_and_backstop_accumulated` / `clamp_comparative_analysis` consume `MetricOrder \| None` from the SAME typed identity; no new ordering authority; no new metric derivation · order present ⇒ retention = BEST per `MetricOrder`; order absent ⇒ score draw SKIPPED, recency-only, no "best" claim · required fixtures: DAVIS lower (lowest retained, worst clamped out) · TIDMAD/Pets higher · absent identity (recency-only) · the P2a scanner's transitive-taint behavior is NOT widened; the blind spot is recorded in that census when touched; hand-computed behavioral fixtures own the migrated site |
+| **C-P3-1** | Gate-surface consistency — every live Gate contract (C5, §8.2, §16, the §0 table) states that Gate 1 covers BOTH comparison/SOTA interpretation AND causal prediction authoring under the lower control; no wording implies causal-only coverage; the deterministic D1/D2/D3 diff-surface tests remain required |
+| **C-P3-2** | Ordering-wording precision — the live invariant reads: P3 adds ZERO NEW ordering semantics, ZERO NEW ordering authorities, ZERO metric-direction derivation authorities, and MIGRATES the already-existing F-P3-1 clamp preference site onto the existing P2a `MetricOrder` authority (the semantic decision already existed; P3 fixes its direction handling). `MetricOrder` implementation, reconciliation authority, `top_n` comparison and the P2a scanner's precision contract all unchanged (§10) |
+| **Gate 2** | `NOT REQUIRED` (§8.3) |
 
 ---
 
@@ -1156,8 +1254,8 @@ question.
 | A proposer path still bypasses the projection? | After C3 the raw field does not exist; the CLI calls the same function; census + plant stand guard; no other production module reads `ProposalInput.interpretation` (measured §2.1) |
 | Production and standalone read the same artifact differently? | One function, one Mapping input shape, equality-tested on identical bytes from C1; the persisted artifact IS `model_dump_json` (§4.2) |
 | Lower-is-better becomes higher through wording? | D1 states direction from the ONE wording authority; D2's DAVIS fixture falsifies an upward example; the §2.6 vocabulary audit classifies every remaining "best/improve" as direction-safe |
-| A secondary influences ranking? | none is projected (Q-P3-3 rec.); the ordering-operand invariant is scope-extended to the proposer files with a live plant; under a future YES the same invariant already covers the surface |
-| A secondary inherits the primary direction? | no secondary renders in P3; the pre-declared future shape mandates `render_secondary_metrics`, which asks each spec's OWN order (09b, unchanged) |
+| A secondary influences ranking? | none is projected (Q-P3-3 ruling); the ordering-operand invariant is scope-extended to the proposer files with a live plant; if a future ruling ever exposes them, the same invariant already covers the surface |
+| A secondary inherits the primary direction? | no secondary renders in P3 at all (Q-P3-3); the historically-recorded rejected shape would have mandated `render_secondary_metrics`, which asks each spec's OWN order (09b, unchanged) |
 | Direction re-derived from a name/sign/task? | the ONLY identity source is `metric_identity_from_mapping` over the digest's provenance; zero new `MetricOrder` construction sites outside the evidence path; the P2a scanner stays green over the whole diff |
 | Unavailable/refused presented as scored? | absent identity renders the canonical phrase and suppresses examples/ranking (D1/D2 absence states; `top_n`/clamp fallbacks); the projection never fabricates a value for an absent key (None rule) |
 | A crash diagnostic masquerades as science? | no crash carrier is projected (§4.1's exclusion list; secondary errors excluded with Q-P3-3) |
@@ -1168,12 +1266,28 @@ question.
 | Tests green for the wrong reason? | the whitelist finally gets a FULL-coverage golden (the parent measured 8/18 keys and zero prediction keys pinned today); the C0 plant/mutation steps prove each census can go RED; the clamp's guard is behavioral because the AST census provably cannot see the site (§2.7.1) |
 | The intermediate states are incoherent? | C1's dual-population state is the ONE declared intermediate, closed by C2/C3 inside the same PR (parent §20.7's anti-rule satisfied — no fake/unreachable feature at any commit boundary) |
 
+### 15.1 Freeze-time adversarial check (operator-required, answered before freeze)
+
+| attack | answer / owner |
+|---|---|
+| Can comparison-stage D3 pass every deterministic test while a real model still chooses the numerically highest DAVIS score as SOTA? | YES — deterministic tests prove prompt bytes, not obedience. **That is precisely why Gate-1 acceptance A exists** (§8.2): the persisted comparison artifact must name the LOWER score as SOTA on unambiguous inputs, or the Gate FAILS |
+| Can causal D2 move upward under DAVIS? | in rendering: the hand-written DAVIS fixture turns RED on any upward example or below-current threshold. In model behavior: Gate-1 acceptance B catches it from the persisted prediction |
+| Can the clamp still retain highest rather than best-under-order? | the DAVIS hand-computed retention fixture asserts the LOWEST-mse entries are retained and the known worst model is clamped OUT — RED otherwise (§4.7; the AST scanner provably cannot own this site, so the behavioral fixture is the standing guard) |
+| Can absent identity silently default to higher? | impossible at all four surfaces by construction: `top_n` → the P2a-pinned order-free `all` fallback; clamp → score draw SKIPPED, recency-only; D1 → the canonical unavailable statement with zero direction words; D2 → numeric example OMITTED. Each has its own absence fixture, and `metric_identity_from_mapping` returns None (never a default direction) for malformed identity |
+| Can raw P2b secondaries enter proposer evidence? | the field does not exist (schema), the required DAVIS negative fixture asserts evidence AND prompt bytes carry none, and the raw-dict input is removed in C3 so there is nothing left to mine them from |
+| Can P3 create a new ordering authority? | NO — zero new comparators/enums/derivations; every ordering ask goes through the existing `MetricOrder` from the one validated identity; the P2a scanner plus the §8.1 census row stand guard (C-P3-2's precise wording in §10) |
+| Can P3 implement P5 lifecycle? | NO — zero carrier/digest/restore/`ChainState` changes (§9, §10); the value is built per invocation |
+
 ---
 
 ## 16. Definition of done
 
-All §7 checklists `[x]` with evidence; censuses standing; Gate 1 PASS per
-§8.2 (operator-approved launch); node `.md` synced; ONE exact-head CI green
-with run id + SHA recorded; STOP at **READY FOR OPERATOR REVIEW — DO NOT
-MERGE**. Post-merge status sync (parent §0 · roadmap Step-10 row · CLAUDE.md
-current-state) is a separate follow-up commit, per Step-10 practice.
+All §7 checklists `[x]` with evidence; censuses standing; **Gate 1 PASS per
+§8.2 — BOTH behavioral surfaces (comparison/SOTA interpretation AND causal
+prediction authoring) under the lower-is-better control, ≤ 3 real calls,
+operator-approved launch, verdict from persisted stage artifacts**; the
+deterministic D1/D2/D3 diff-surface tests green; node `.md` synced; ONE
+exact-head CI green with run id + SHA recorded; STOP at **READY FOR
+OPERATOR REVIEW — DO NOT MERGE**. Post-merge status sync (parent §0 ·
+roadmap Step-10 row · CLAUDE.md current-state) is a separate follow-up
+commit, per Step-10 practice.
