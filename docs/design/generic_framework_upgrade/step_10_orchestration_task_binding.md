@@ -3,7 +3,58 @@
 ## 0. Status, provenance and source anchor
 
 **REVISION 2 — FROZEN. OPERATOR APPROVED — PARENT SEMANTICS ONLY.
-IMPLEMENTATION IN PROGRESS — 4 of 7 children merged (P1 · P4 · P2a · P2b).**
+IMPLEMENTATION IN PROGRESS — 5 of 7 children merged (P1 · P4 · P2a · P2b · P3).**
+
+**P3 (S4) — COMPLETE / MERGED 2026-08-21.** PR #245, squash
+**`254cbaa1466125873d6c7a72f59a7d25fd2c5619`**; final head `31cdabaa3d720c1b796bb20202700bd309664eb9`, exact-head CI **32457848717 SUCCESS**
+(lint · ruff-format · **pyright** · unit); merged master byte-identical to the
+validated head. **The proposer now has ONE declared interpretation contract,
+and it is told which direction is better.**
+
+`ProposerInterpretationEvidence` is a CONSUMER VIEW — 30 carried fields, 12
+refused each with a stated reason, 2 dead reads dropped — produced by the ONE
+projection `build_proposer_evidence(Mapping)` and consumed by BOTH entrypoints.
+`ProposalInput.interpretation` (the raw upstream dump two independent readers
+mined) and the zero-reader `per_model_score_tables` mirror are **REMOVED**, and
+the evidence is REQUIRED, so a caller that skipped the projection cannot
+construct an input at all. A standing census holds raw interpretation reads in
+the proposer's modules at **40 + 12 → 0**.
+
+**F-P3-1 closed** (Q-P3-4): `clamp_comparative_analysis` selected which
+comparison entries survive prompt clamping by raw `best_score` DESCENDING with
+a `-inf` missing-value sentinel — both halves assuming higher-is-better on the
+run's PRIMARY scores, so under a `lower` metric it curated the three WORST
+models into every later-stage prompt. It now consults `MetricOrder`, and the
+sentinel became `order.worst_sentinel`. The site is provably invisible to the
+P2a scanner, which was deliberately NOT widened; hand-computed retention
+fixtures are its standing guard.
+
+**D1/D2/D3** are the only intentional LLM-facing deltas: the comparison and
+causal stages state the run's metric and direction from the existing authority;
+the authoring example renders on that direction (byte-identical to the historic
+literal under `higher`, inverted with the threshold ABOVE current under
+`lower`); and SOTA is defined as BEST under the stated direction. Absent
+identity renders the canonical named absence — no direction words, no numeric
+example, no ranking claim. Six of ten LLM-facing surfaces are byte-identical,
+including every user prompt and the whole legacy path.
+
+**Gate 1 PASS** (Q-P3-2) on both surfaces, and it EARNED its keep: the first
+candidate genuinely FAILED — a real model authored a correct downward
+prediction but put the refutation threshold between the prediction and the
+current value. Diagnosed from the persisted prompt, which showed §4.5's
+aligning sentence had never been implemented; the correction produced a new
+candidate that passed. 9 real calls across 3 candidates, ≤ 3 each, enforced
+mechanically. **Gate 2 NOT REQUIRED, not run**; no training, inference or GPU.
+
+An operator-requested **adversarial debt review** then found three LIVE test
+failures (a declared delta C3 promised and never applied, a guard that pinned a
+file instead of a node, and the Gate harness itself executing a direction
+literal inside production-scanned `scripts/`), two prompt defects in the
+no-identity regime, a census whose anti-vacuity test tested nothing, and an
+"oracle" that read its key order from the code under test. All fixed. **Carried
+debt, recorded not hidden**: the typed migration stops at the declaration
+boundary — `accumulated` and `candidates` remain string-keyed dicts, so a
+future evidence field still travels its last hop as a dict key (Step 12).
 
 **P2b (S3) — COMPLETE / MERGED 2026-08-21.** PR #244, squash **`5a2ecfd1`**;
 final executable head `f6a73afd` (exact-head CI **32439134908 SUCCESS**), final
@@ -1449,6 +1500,13 @@ A typed contract makes all three of those a type error or a failing owner test
 rather than an incident found by a Gate.
 
 ### 11.2 The legacy / pipeline disposition — FROZEN (operator ruling §5, 2026-08-20)
+
+**CLOSED — P3 MERGED 2026-08-21 (PR #245, squash `254cbaa1466125873d6c7a72f59a7d25fd2c5619`).** S4 is
+delivered. Both entrypoints consume one typed value from one projection; the
+legacy prompt is byte-identical through the adapter; and the acceptance rule
+("no new evidence field may ever again need wiring into two readers") is true
+BY CONSTRUCTION rather than by discipline — the raw dict field no longer
+exists, so there is no second thing to wire.
 
 Rev 1 left "deprecate vs isolate" open. It is now decided, and the decision
 separates two things that were being conflated — an **entrypoint** and a

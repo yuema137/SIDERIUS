@@ -3,7 +3,7 @@
 ## 0. Status
 
 **REVISION 3 — FROZEN. OPERATOR APPROVED (freeze rulings 2026-08-20).
-IMPLEMENTATION COMPLETE — PR #245, awaiting the terminal exact-head CI.**
+IMPLEMENTATION COMPLETE — MERGED 2026-08-21, PR #245, squash `254cbaa1466125873d6c7a72f59a7d25fd2c5619`.**
 
 Implementation status (live; the ledger is §17):
 
@@ -14,7 +14,7 @@ Implementation status (live; the ledger is §17):
 | Gate 2 / real training / real inference / GPU | NOT REQUIRED, NOT RUN |
 | validation provenance | both operator-named gaps closed with tree-hash and exact-SHA evidence (§17.11) |
 | adversarial debt review | operator-requested; three live test failures and several design/test defects found and FIXED; carried debt recorded (§17.12) |
-| terminal exact-head CI | recorded in §17.13 |
+| terminal exact-head CI | **32457848717 SUCCESS** on `31cdabaa3d720c1b796bb20202700bd309664eb9` (§17.14) |
 
 The frozen sections below (§0-§16) are the design as approved and are NOT
 rewritten by implementation; everything the implementation learned lives in
@@ -2430,5 +2430,14 @@ review and the broad local sweep had independently identified — 3 failed /
 11,432 passed. It is the run that proves the type check this host cannot
 perform is green on P3's code, and that nothing beyond those three was wrong.
 
-The canonical terminal run is recorded below once it completes on the final
-head.
+**Canonical terminal run: CI `32457848717`, tested SHA
+`31cdabaa3d720c1b796bb20202700bd309664eb9` — SUCCESS.** lint PASS · ruff-format PASS · **pyright PASS** ·
+unit PASS. Tested SHA == final PR HEAD, verified rather than assumed. The
+verdict was read from the job log, not from a wrapper's exit status.
+
+Recorded here AFTER the merge on purpose: writing it before would have required
+a trailing commit that moves the head it is trying to certify, which is the
+self-referential SHA chase the validation rules forbid.
+
+**Merged**: PR #245, squash `254cbaa1466125873d6c7a72f59a7d25fd2c5619`; merged master verified byte-identical
+to the validated head `31cdabaa3d720c1b796bb20202700bd309664eb9`.

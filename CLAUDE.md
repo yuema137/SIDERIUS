@@ -641,8 +641,39 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
-- **STEP 10 — IN PROGRESS (2026-08-21). 4 of 7 children MERGED: P1
-  `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1`. NEXT = P3.**
+- **STEP 10 — IN PROGRESS (2026-08-21). 5 of 7 children MERGED: P1
+  `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1` ·
+  P3 `254cbaa1`. NEXT = P5.**
+  **P3 — Proposer Typed Evidence + Prediction Authoring — COMPLETE / MERGED
+  2026-08-21**: PR #245, squash `254cbaa1`; final head `31cdabaa`,
+  exact-head CI **32457848717 SUCCESS**. **The proposer has ONE declared
+  interpretation contract and is told which direction is better.**
+  `ProposerInterpretationEvidence` (30 carried / 12 refused-with-reasons / 2
+  dead reads dropped) is built by the ONE `build_proposer_evidence(Mapping)`
+  projection and consumed by BOTH entrypoints; `ProposalInput.interpretation`
+  and the zero-reader `per_model_score_tables` mirror are REMOVED and the
+  evidence is REQUIRED, so raw interpretation reads went **40 + 12 → 0** and a
+  bypass has no input to read. Things future work must not re-break: the
+  proposer must never regain a second semantic reader (a standing census with
+  five plant shapes, plus the structural fact that the raw carrier is gone);
+  **F-P3-1** — `clamp_comparative_analysis`'s retention draw is direction-aware
+  now, and its missing-score sentinel is `order.worst_sentinel`, because `-inf`
+  is "worst" only under `higher`; the P2a scanner was deliberately NOT widened
+  to see that site, so its hand-computed fixtures ARE its guard; raw secondary
+  metrics stay out of proposer evidence and prompts (Q-P3-3), with a DAVIS
+  negative fixture proving suppression rather than absence; and D1/D2/D3 are
+  the only LLM-facing deltas — the legacy path carries none of them and its
+  bytes are pinned. **Gate 1 PASS after a genuine FAIL** (a real model put the
+  refutation threshold on the wrong side; the persisted prompt showed the
+  design's aligning sentence had never been implemented — three numbers in a
+  JSON example do not teach a semantic). Gate 2 NOT REQUIRED; no training,
+  inference or GPU. **Carried debt**: the typed migration stops at the
+  DECLARATION boundary — `accumulated` and `candidates` are still string-keyed
+  dicts, so a future evidence field travels its last hop as a dict key
+  (Step 12). A second lesson worth keeping: the two dead reads survived for
+  years because they HAD A TEST that fed undeclared names into a
+  `dict[str, Any]` — a raw-mapping boundary lets tests certify behaviour
+  production cannot reach.
   Parent `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding.md`
   (REVISION 2 FROZEN) is the status authority; the roadmap's Step-10 row
   carries the per-child evidence. Step 09.5a merged first (PR #240, squash

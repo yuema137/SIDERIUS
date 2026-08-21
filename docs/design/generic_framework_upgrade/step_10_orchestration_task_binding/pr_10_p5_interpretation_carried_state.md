@@ -214,31 +214,372 @@ guards the surface). Absence states: a task whose predictions are never
 | `agent/schemas/interpretation.py` | — | none (both fields already exist) | — |
 | `nodes/interpretation_helpers.py` | — | none (producer untouched) | — |
 
-## 7. Proposed commit decomposition (PROVISIONAL until post-P3 reconciliation)
+## 7. Commit decomposition — FIVE commits, full plans
 
-* **C0** — lifecycle baseline: an executable census pinning the CURRENT
-  broken state (no projection, no carrier field, `{}` at the consumer — the
-  differential oracle already records it) + goldens of the producer's
-  accumulation on a fixed outcome sequence.
-* **C1** — projection + carriers: `project_vocab_link_confirmations` (+ its
-  failure-policy tests), `RestoredState.vocab_link_confirmations`,
-  the two ChainState fields, `from_restored` seeding. Inert until C2 (the
-  one intermediate state, closed in the same PR).
-* **C2** — the loop closures + consumer wiring: both iteration-end blocks
-  (the `prediction_memory` pattern); the workflow passes confirmations into
-  `InterpretationInput`; the findings consumer block reads the ChainState
-  field. **The ≥ 3-iteration deterministic reachability test lands HERE**:
-  three pseudo-mode iterations in one process; a link proposed in iter 1 and
-  confirmed in three distinct runs promotes into `related_to` at iter 3;
-  severing ANY link (projection, seed, closure, input pass) turns it RED —
-  proven by mutation, one per link.
-* **C3** — resume equality: run 3 iterations uninterrupted vs stop-after-
-  commit/restore/continue; both carried values deep-equal between the two
-  trajectories; legacy-digest fixtures (missing keys ⇒ `{}` / union of what
-  exists); the single-writer census (planted second writer RED).
-* **C4** — closure: censuses (no fifth loader — planted duplicate reader
-  RED; no new carrier; `campaign_artifacts` untouched), docs/ledger, ONE
-  exact-head CI.
+**Status of this section**: the commit BOUNDARIES are stable; every checklist
+below starts `[ ]` and is checked only against recorded evidence. The plans are
+written against source inspected at the anchor below, not from memory —
+`core/resume.py`, `core/chain_state.py`, `nodes/interpretation_helpers.py`,
+`nodes/result_interpretation_agent/result_interpretation_agent.py`,
+`agent/schemas/interpretation.py` and `workflows/model_exploration.py` were all
+read while writing them. Line anchors are evidence of what was inspected, never
+implementation authority.
+
+**Measured source facts these plans rest on** (re-verify at implementation
+start; a moved line is not a material deviation, a moved BEHAVIOUR is):
+
+| fact | where |
+|---|---|
+| the producer already works | `nodes/interpretation_helpers.py:587` `update_vocab_link_confirmations(prev_vocab_links, prediction_outcome, run_name, existing_confirmations, runtime_vocab, min_runs=3) -> (updated_confirmations, updated_vocab, newly_promoted_pairs)`; only `confirmed` counts; promotion at ≥ 3 DISTINCT runs |
+| it is already called | `result_interpretation_agent.py:902`, reading `inp.vocab_link_confirmations` at `:908` |
+| the value is already persisted | written to the output at `:1018` and to the digest at `:1125` |
+| both schema fields already exist | `InterpretationInput.vocab_link_confirmations` `interpretation.py:677`; `InterpretationOutput.vocab_link_confirmations` `:1155` |
+| **the missing half** | `RestoredState` (`core/resume.py:119`, fields `:203-215`) carries `accumulated_key_findings` but has **no** `vocab_link_confirmations` field, and no projection produces one |
+| the four existing projections | `project_knowledge` `:886` (chronological union, dedup, SOFT-fail), `project_fingerprint_history` `:951`, `project_prediction_memory` `:1004` (latest-wins, RAISES on a corrupted record), `project_knowledge_cache` `:1052` |
+| the restore wiring precedent | `restore_prior_state` `:1207`; `state.runtime_vocab, state.accumulated_key_findings = project_knowledge(digest_reads)` at `:1480` |
+| the carry precedent, end to end | `ChainState.current_prediction_memory` (`chain_state.py:100`), `from_restored(..., restored_prediction_memory=...)` (`:131-139`), workflow read at `model_exploration.py:1959/1975`, loop-closure write at `:2795` |
+| the findings consumer block | `model_exploration.py:2278-2292` — builds the `prior_iters` `ExpertContextItem` |
+
+**Per-commit rules.** Semantic commits are autonomous inside the frozen design.
+Before each: inspect the diff scope, run the cheapest authoritative validation,
+update this ledger, commit. No full local suite before the final head; ONE
+exact-head CI at the end. **Every commit must run the guards it is KNOWN to
+move** — P3's C3 skipped `tests/unit/workflows/` and left the Step-09.5a oracle
+red for three commits, which is precisely the failure this rule prevents.
+
+---
+
+### C0 — lifecycle baseline: pin the CURRENT broken state
+
+**1. Goal.**
+Make the defect executable before fixing it. Today `vocab_link_confirmations`
+is produced, returned and persisted — and then dropped: nothing projects it,
+nothing carries it, and the next iteration's `InterpretationInput` receives
+`{}`. So a link confirmed in three distinct runs can never reach the promotion
+threshold across a restart, and in a resumed chain it cannot reach it at all.
+This commit records that behaviour as a baseline so C1-C3 are diffs against
+evidence rather than against belief.
+
+It belongs here and nowhere else: once C1 adds the carrier the broken state is
+unreproducible, and a baseline captured after the fix proves nothing.
+
+**2. Scope.**
+Tests and goldens only. **Zero production edits** — the commit is a scope error
+if `git diff --stat` shows anything outside `tests/` and `docs/`.
+Depends on: nothing.
+
+**3. Implementation plan.**
+- [ ] Producer accumulation golden: drive `update_vocab_link_confirmations`
+      over a FIXED outcome sequence (confirmed / partial / refuted / confirmed
+      from distinct `run_name`s) and pin the returned
+      `(confirmations, vocab, newly_promoted)` at each step, including that
+      `partial` and `refuted` change nothing and that the same `run_name`
+      cannot confirm twice.
+- [ ] Promotion-threshold golden: pin that promotion happens at exactly
+      `min_runs` DISTINCT runs — not 2, not the same run 3 times.
+- [ ] **The broken-lifecycle census**, executable and named: assert that
+      `RestoredState` has NO `vocab_link_confirmations` field, that no
+      `project_*` function produces one, and that a restored chain therefore
+      hands the interpreter `{}`. This test is INVERTED in C1/C2, not deleted.
+- [ ] Multi-iteration baseline: three pseudo-mode iterations in one process
+      with a link proposed in iter 1 and confirmed in three distinct runs;
+      record that it does NOT promote today. This is the exact scenario C2
+      turns green, so capture it now with its current (wrong) result.
+- [ ] Record the guard-disposition table in the ledger: every existing test
+      this PR will turn red, and the commit that flips each.
+
+**4. Validation plan.**
+* Unit: the goldens above; deterministic, no I/O beyond `tmp_path`.
+* Negative/invalid: malformed digest payloads (missing key, non-dict,
+  unreadable) recorded as they behave TODAY, so C1's projection has a
+  before-picture to preserve or deliberately change.
+* Backward-compat/parity: none needed — nothing changes.
+* Gate tests: **NONE.** Gate 1 and Gate 2 are NOT REQUIRED for P5 (§8) and must
+  not be launched.
+
+**5. Acceptance criteria.**
+- [ ] `git diff --stat` on the commit shows only `tests/` and `docs/`.
+- [ ] The broken-lifecycle census PASSES on the unmodified tree, i.e. it
+      genuinely asserts the current absence rather than the desired presence.
+- [ ] The 3-iteration baseline records `related_to` WITHOUT the confirmed
+      capability, and the test states that this is the defect, not the target.
+- [ ] Goldens are byte-stable across two independent runs.
+
+**6. Failure and edge cases.**
+* A golden that embeds a `tmp_path`, a timestamp or a set-iteration order is a
+  broken baseline — capture deterministically or not at all.
+* `min_runs` is a DEFAULT (3): the goldens must pass it explicitly where the
+  claim is about the threshold, so a future default change is visible.
+
+**7. Verification commands and evidence.**
+```text
+pytest tests/unit/core tests/unit/agent/result_interpretation_agent \
+       tests/unit/workflows -q
+```
+- [ ] counts + wall time recorded in the ledger
+- [ ] any test that could not run recorded WITH the reason (never "passed")
+
+**8. Commit boundary.**
+Independently reviewable as "here is the defect, executable". Contains no
+production change and no cleanup.
+
+---
+
+### C1 — the projection and the carriers (inert)
+
+**1. Goal.**
+Give the value a way home: one projection over the already-read digests, one
+`RestoredState` field, and the ChainState carrier — with nothing yet consuming
+them. Separated from C2 so the reviewer can check the projection's failure
+policy against its four siblings without the loop wiring in the same diff.
+
+**2. Scope.**
+* `core/resume.py` — `project_vocab_link_confirmations`, the new
+  `RestoredState` field, the assignment in `restore_prior_state` beside the
+  `project_knowledge` line (`:1480`).
+* `core/chain_state.py` — the carrier field and its `from_restored` parameter,
+  following `current_prediction_memory` exactly (`:100`, `:131-139`).
+* **Non-goals**: no workflow change, no `InterpretationInput` change, no
+  consumer. The producer is untouched.
+* Depends on C0.
+
+**3. Implementation plan.**
+- [ ] Implement `project_vocab_link_confirmations(reads) -> dict[str, list[str]]`
+      with the rule the design ALREADY decided — **latest-wins whole-dict**
+      (§2.4, §4.2). It is not re-opened here: accumulation lives in the
+      PRODUCER (§2.1), so each digest already carries the full cumulative
+      mapping and a union across digests would double-count nothing but would
+      resurrect pairs a later iteration legitimately dropped. Implement it and
+      make the choice OBSERVABLE in a test over disagreeing digests; if
+      implementation surfaces evidence against it, that is a §4.2 freeze-review
+      item, not a silent change.
+- [ ] Failure policy exactly as §4.2 states: malformed value ⇒ **raise**
+      (the `project_prediction_memory` precedent — promotion state assembled
+      from a stale mapping silently delays or mislabels graduation); a digest
+      MISSING the key ⇒ `{}` (legacy digests predate activation — a compatible
+      default, never fabricated history); shape `dict[str, list[str]]` with
+      string members.
+- [ ] Add `RestoredState.vocab_link_confirmations` (additive, defaulted).
+- [ ] Wire it in `restore_prior_state` beside `:1480`.
+- [ ] Add the ChainState field + `from_restored` seeding.
+- [ ] INVERT C0's broken-lifecycle census: the field and the projection must
+      now EXIST. Do not delete the test.
+
+**4. Validation plan.**
+* Unit: projection over (a) no digests, (b) one digest, (c) several digests
+  that agree, (d) several that DISAGREE — (d) is what makes latest-wins
+  observable rather than incidental, and it must assert the LATER digest's
+  mapping wins outright, including a pair the later digest no longer carries.
+* Negative/invalid: missing key ⇒ `{}` (no warning); malformed value ⇒ RAISES
+  per §4.2, asserted by type and message rather than by "it failed";
+  unreadable digest ⇒ the same warning shape the siblings emit.
+* Backward-compat: a legacy digest with no `vocab_link_confirmations` key
+  restores `{}` and warns nothing.
+* Integration/pseudo: none required yet — nothing consumes it.
+* Gate: **NONE.**
+
+**5. Acceptance criteria.**
+- [ ] `RestoredState` and `ChainState` each carry the value; `from_restored`
+      seeds it.
+- [ ] The projection is the ONLY producer of a restored confirmations mapping
+      (census: no second reader of that digest key outside the interpreter).
+- [ ] Behaviour is UNCHANGED end to end: the 3-iteration baseline from C0 still
+      records no promotion, because nothing consumes the carrier yet. This is
+      the declared inert state.
+- [ ] `pyright` clean over the touched modules (recorded as CI-owned if it
+      cannot run locally — never claimed).
+
+**6. Failure and edge cases.**
+* Digests disagreeing on the same pair — latest-wins, and the test must show
+  the earlier value is DISCARDED rather than merged.
+* A confirmation list containing duplicates of one `run_name` — the PRODUCER
+  dedups by run (`update_vocab_link_confirmations` treats a run as confirming
+  once); the projection must not re-dedup, or the two would be two authorities
+  on the promotion count. Assert the projection passes the list through.
+* Non-string keys / non-list values in a hand-edited digest ⇒ raise, per §4.2.
+* A digest whose mapping is EMPTY (`{}`) is a legitimate state, not a missing
+  key: it must not be confused with absence, or a chain that legitimately
+  cleared its confirmations would silently resurrect them.
+
+**7. Verification commands and evidence.**
+```text
+pytest tests/unit/core -q
+pytest tests/unit/core/test_resume.py tests/unit/workflows -q
+```
+- [ ] counts + wall time recorded
+- [ ] the Step-09.5a workflow oracle run explicitly — `RestoredState` and
+      `ChainState` are inside its envelope, so this commit is KNOWN to be able
+      to move it; if it moves, DECLARE the delta in its docstring
+
+**8. Commit boundary.**
+Carrier layer only. No consumer, no loop change, no prompt byte moves.
+
+---
+
+### C2 — close the loop and wire the consumer
+
+**1. Goal.**
+Make the value actually travel: iteration-end write into ChainState, and the
+workflow passing it into the next `InterpretationInput`. This is the commit
+where the defect stops.
+
+**2. Scope.**
+* `workflows/model_exploration.py` — the iteration-end closure (pattern:
+  `:2795`), the restored seed (pattern: `:1959/1975`), and passing the value
+  into `InterpretationInput`.
+* **Non-goals**: the producer's semantics, the promotion rule, `min_runs`, the
+  findings half, prompts.
+* Depends on C1.
+
+**3. Implementation plan.**
+- [ ] Iteration-end: write the interpreter's returned confirmations into
+      ChainState, mirroring the `prediction_memory` closure exactly.
+- [ ] Startup: seed ChainState from `RestoredState` on resume.
+- [ ] Pass ChainState's value into `InterpretationInput.vocab_link_confirmations`
+      (the field already exists — `interpretation.py:677`).
+- [ ] **The ≥ 3-iteration reachability test lands HERE**: three pseudo-mode
+      iterations in ONE process; a link proposed in iter 1 and confirmed by
+      three DISTINCT runs promotes into `related_to` at iter 3.
+- [ ] **Mutation proof, one per link**: sever the projection, the seed, the
+      closure, and the input pass INDEPENDENTLY; each severing must turn the
+      reachability test RED. A carry with four links needs four proofs — a
+      single end-to-end green cannot tell which hop is load-bearing.
+- [ ] Flip C0's 3-iteration baseline from "records the defect" to "records the
+      fix", citing the commit.
+
+**4. Validation plan.**
+* Unit: the closure writes what the interpreter returned, unmodified.
+* Integration/pseudo: the 3-iteration in-process reachability test.
+* Negative: a chain where NO prediction is `confirmed` accumulates nothing and
+  promotes nothing (the empty mapping is first-class, not an error).
+* Backward-compat/parity: a single-iteration chain behaves exactly as before;
+  the §4.3 declared behaviour delta is the ONLY intended difference and must be
+  stated in the ledger with its before/after.
+* Gate: **NONE.**
+
+**5. Acceptance criteria.**
+- [ ] The 3-iteration test promotes the capability into `related_to` at
+      iteration 3 and NOT at iteration 2 — the threshold is observable, not
+      just the endpoint.
+- [ ] Each of the four severing mutations turns it RED, recorded individually.
+- [ ] Prompts are unchanged except where the findings block already renders,
+      and that difference is the declared §4.3 delta.
+- [ ] No new digest key: the digest already carries the value, so the digest
+      bytes must not move.
+
+**6. Failure and edge cases.**
+* Resume mid-chain — covered by C3, but C2 must not make it worse.
+* An iteration that produces no interpretation (a skipped or failed round):
+  the closure must not clobber accumulated state with `{}`.
+* Same `run_name` appearing in two iterations — dedup semantics must match the
+  producer's, or promotion counts drift.
+
+**7. Verification commands and evidence.**
+```text
+pytest tests/unit/workflows tests/unit/core \
+       tests/unit/agent/result_interpretation_agent -q
+pytest tests/integration/workflows/test_vocab_accumulation.py -q   # if applicable
+```
+- [ ] counts + wall time recorded
+- [ ] the Step-09.5a oracle run explicitly; any envelope delta DECLARED
+
+**8. Commit boundary.**
+Loop + consumer only. No projection changes, no producer changes.
+
+---
+
+### C3 — resume equality
+
+**1. Goal.**
+Prove the carried value survives a restart, which is the whole point: the
+defect's worst form is that a resumed chain can never promote at all.
+
+**2. Scope.**
+Tests plus whatever narrow fix they expose. Depends on C2.
+
+**3. Implementation plan.**
+- [ ] Uninterrupted-vs-resumed equality: run 3 iterations straight through, and
+      run 3 with a stop-after-commit / restore / continue in the middle; assert
+      both carried values deep-equal at the end.
+- [ ] Legacy-digest fixtures: digests written before this feature restore `{}`
+      (or the union of what exists — whichever C1 chose) and never crash.
+- [ ] Single-writer census: exactly one site writes the ChainState carrier;
+      plant a second writer and prove RED.
+
+**4. Validation plan.**
+* Integration/pseudo: the two trajectories above.
+* Negative: restore from a digest set with a corrupted middle entry — assert
+  the C1 failure policy end to end, not just at the projection.
+* Backward-compat: resuming a chain committed BEFORE this feature must not
+  raise and must not fabricate confirmations.
+* Gate: **NONE.**
+
+**5. Acceptance criteria.**
+- [ ] The two trajectories are deep-equal on both carried values.
+- [ ] The planted second writer turns the census RED; reverted, it is green and
+      the tree is clean.
+- [ ] A pre-feature digest set restores without warning noise beyond the
+      declared policy.
+
+**6. Failure and edge cases.**
+* Partial commit (digest written, iteration not finished).
+* Digest ordering: ascending is assumed by the siblings — assert it rather
+  than inherit it.
+
+**7. Verification commands and evidence.**
+```text
+pytest tests/unit/core tests/unit/workflows -q
+```
+- [ ] counts + wall time recorded
+
+**8. Commit boundary.**
+Resume evidence only.
+
+---
+
+### C4 — closure
+
+**1. Goal.**
+The standing guards hold at the final head, the operator surface is current,
+and the PR is reviewable.
+
+**2. Scope.**
+Censuses, docs (`core/resume.py` docstrings, any node `.md` the carry touches),
+the ledger, the PR, ONE exact-head CI. Depends on C0-C3.
+
+**3. Implementation plan.**
+- [ ] Census: no FIFTH digest loader — plant a duplicate reader, prove RED.
+- [ ] Census: no new carrier field beyond the declared one;
+      `campaign_artifacts` untouched.
+- [ ] Docs synced, with every documented claim QUOTED against merged source
+      rather than asserted.
+- [ ] Ledger closed: all checklists `[x]` with evidence, deviations recorded,
+      carried debt named.
+
+**4. Validation plan.**
+* All prior commits' targeted suites green at head, recorded per commit rather
+  than re-run wholesale.
+* ONE exact-head CI: lint · ruff-format · pyright · unit, all PASS, with the
+  run id and the tested SHA recorded and the verdict read FROM THE LOG.
+* Gate: **NONE** — and the ledger must say so explicitly rather than leaving it
+  unmentioned.
+
+**5. Acceptance criteria.**
+- [ ] `CI tested SHA == final PR HEAD`.
+- [ ] Working tree clean.
+- [ ] Every checklist item above is `[x]` with evidence, or explicitly recorded
+      as not done and why.
+
+**6. Failure and edge cases.**
+* A CI failure is diagnosed and fixed, not re-run hopefully.
+* A docs-only commit AFTER the canonical CI would move the head — fold docs in
+  BEFORE the final push.
+
+**7. Verification commands and evidence.**
+- [ ] CI run id, tested SHA, and each step's result recorded in the ledger.
+
+**8. Commit boundary.**
+Closure only. STOP at **READY FOR OPERATOR REVIEW — DO NOT MERGE**.
 
 ## 8. Validation strategy / Gate disposition
 
@@ -300,6 +641,44 @@ P3 per the operator's §31.
    P5 then consumes the typed boundary, not the block).
 2. Confirm P3 added no carrier field or digest reader (its §9 promise).
 3. Re-verify §2's line anchors; quote the gate standard; disposition Q-P5-1.
+
+### 14.1 What P3 actually landed (MERGED 2026-08-21, squash `254cbaa1`)
+
+Recorded so the reconciliation starts from merged truth rather than from the
+draft's expectations. **All three obligations above still stand and are NOT
+discharged by this note** — they must be re-run against master in a fresh
+session, reading source, before P5 freezes.
+
+* **P3 kept its §9 promise.** It added ZERO `ChainState` fields, ZERO digest
+  readers, ZERO restore paths, and no `accumulated_key_findings` or
+  `vocab_link_confirmations` lifecycle. Obligation 2 is expected to confirm
+  cleanly, but it must still be CHECKED, not assumed.
+* **The consumer boundary P5 will use now exists.**
+  `ProposalInput.interpretation_evidence: ProposerInterpretationEvidence`
+  (REQUIRED) is built by the ONE projection
+  `agent/schemas/proposer_evidence.py::build_proposer_evidence(Mapping)`. The
+  raw `interpretation` dict is REMOVED, so P5 could not add a raw reader even
+  if it wanted to — §4.4's "P5 never bypasses P3" is now structural.
+* **`vocab_link_confirmations` is explicitly REFUSED by that boundary**, by
+  name and with a reason: `NOT_CARRIED["vocab_link_confirmations"] = "P5's
+  cross-iteration lifecycle, not P3's"`. A partition test asserts carried ∪
+  refused covers all 42 upstream fields, so **if P5 decides the proposer should
+  see confirmations, adding the field is a deliberate, test-visible act** — it
+  cannot arrive incidentally. That is the extension surface §4.4 anticipated,
+  and it is now a real one.
+* **The findings ExpertContextItem block did NOT move.** It is still assembled
+  in `workflows/model_exploration.py` from the workflow's own
+  `accumulated_key_findings`, and `expert_context` is a separate
+  `ProposalInput` channel that P3 deliberately left alone. Obligation 1's
+  "may have moved" resolves to *did not* — but re-verify the line anchors,
+  because P3 moved a great deal of nearby code.
+* **A P3 lesson that applies directly to P5's C1.** P3's C3 removed two
+  `ProposalInput` fields and left the Step-09.5a workflow oracle RED for three
+  commits, because its targeted validation did not include
+  `tests/unit/workflows/`. P5's C1 adds a `RestoredState` field and a
+  `ChainState` field — both INSIDE that oracle's envelope — so C1 must run it
+  explicitly and DECLARE any delta, exactly as §7's C1 verification section
+  now requires.
 
 ## 15. Adversarial self-review (draft-stage)
 
