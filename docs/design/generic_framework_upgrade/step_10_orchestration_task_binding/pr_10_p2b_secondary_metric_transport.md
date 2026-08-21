@@ -2,24 +2,37 @@
 
 ## 0. Status
 
-**DRAFT rev 2 — POST-P2a/P4 RECONCILIATION — FOR OPERATOR REVIEW. NOT
-FROZEN. IMPLEMENTATION NOT STARTED.**
+**REVISION 3 — FROZEN. OPERATOR APPROVED (2026-08-21).
+IMPLEMENTATION NOT STARTED. Open operator questions: 0.
+Material contradictions: 0.**
 
-Rev 2 is the post-merge reconciliation rev 1 demanded of itself: every
-`PROVISIONAL(P1)` / `PROVISIONAL(P2a)` marker is resolved against MERGED
-source, all line anchors re-measured, and the §6 commit decomposition is
-rewritten into full eight-section per-commit plans with all-`[ ]` checklists.
-The Q-P2b-2 taxonomy audit the operator required before freeze has been
-**performed** (§2.6) and its disposition is PROPOSED in §12 — the ruling
-itself remains the operator's.
+Revision 3 is rev 2 (the post-P2a/P4 reconciliation, architecture review
+verdict **PASS**) plus the operator's freeze rulings and two bounded
+boundary corrections — no child redesign:
+
+* **Q-P2b-1 = WHEREVER_PRIMARY_EVALUATES**, **Q-P2b-2 RESOLVED with the
+  scope-violation exception-order correction**, **Q-P2b-3 =
+  _STATS_SUFFICIENT with the ownership-wording correction** — full rulings
+  in §14;
+* **C-P2b-1**: the zero-secondary serialization contract is now
+  SOURCE-GROUNDED (§4.7) — semantic emptiness is frozen, not persisted-JSON
+  byte identity, because the measured output path (`model_dump()` with no
+  exclude flags, `records.py:957`) serializes default-empty fields;
+* the false default-ownership claim "digest widening is P5 territory" is
+  removed (§14 Q-P2b-3 carries the corrected wording).
+
+Rev 2's own summary, preserved: every `PROVISIONAL(P1)` / `PROVISIONAL(P2a)`
+marker resolved against MERGED source, all line anchors re-measured, the §6
+commit decomposition in full eight-section per-commit plans with all-`[ ]`
+checklists, and the Q-P2b-2 taxonomy audit performed (§2.6).
 
 | field | value |
 |---|---|
 | parent | Step-10 parent REVISION 2 (frozen), §3.4 / §9 / §9.4; owns scope item **S3** |
 | source anchor | merged `master` = **`96dc1327`** (production tree identical to the P2a squash `e094fa26`). Contains P1 `bcb17e45` + P4 `79833db8` + P2a `e094fa26`. Line anchors are evidence, not implementation authority |
 | depends on | **P1 MERGED** (the composition edge C1 extends), **P2a MERGED** (ordering is closed, so nothing here migrates or duplicates it — parent §9.4 item 8). **P4 MERGED with ZERO production-file overlap with P2b's touch set** (measured §2.7) — a sequencing fact, not a dependency edge |
-| Gate disposition | proposed: **NO Gate — Gate 1 NOT REQUIRED, Gate 2 NOT REQUIRED.** Deterministic transport + carry-symmetry tests + the ordering-operand invariant are the owners (parent §22.1). The only LLM-facing delta is real values flowing through the ALREADY-LANDED 09b renderer (validated by 09b's Gate 1); TIDMAD prompt bytes are pinned identical (§5). Quoted against `docs/gates/gate_testing_standard.md` at freeze |
-| open operator questions | **3** (§12 — each now carries a post-audit disposition proposal) |
+| Gate disposition | **FROZEN (operator ruling 2026-08-21): Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED.** Deterministic composition/evaluation/transport/projection; the 09b renderer's semantics are reused unchanged (Gate-1-validated in 09b); TIDMAD prompt bytes have a deterministic parity owner (§5); `StubSandbox` exercises the real evaluation call shape. No real LLM/training/GPU may be run for P2b; a newly discovered non-deterministic failure class is a MATERIAL DEVIATION, never an autonomously invented Gate |
+| open operator questions | **0** — Q-P2b-1 / Q-P2b-2 / Q-P2b-3 all RESOLVED by operator ruling 2026-08-21 (§14) |
 
 **Frozen in this draft regardless of upstream shape** (operator §15,
 unchanged from rev 1): the declaration/binding concept, the result/refusal
@@ -142,7 +155,8 @@ the B-6 finding stands byte-for-byte.
   `ScopeViolationError` → end round (`:1016-1022`) and generic `Exception` →
   `_build_scoring_failure_record` → `error_scoring` record → next attempt
   (`:1023-1049`). The block runs for **both trial and formal** modes
-  (`:845-846`) — the measured fact behind Q-P2b-1's proposal.
+  (`:845-846`) — the measured fact behind the Q-P2b-1 ruling
+  (`WHEREVER_PRIMARY_EVALUATES`, §14.1).
 * The `_denoised_fn` closure (`:860-874`) resolves deliverable paths; a
   secondary evaluates the SAME deliverables through the SAME closure.
 * `TidmadSandbox.evaluate_metric` (`core/sandbox_executor.py:1940`) runs
@@ -192,13 +206,23 @@ The existing scorer/error taxonomy at the scoring point, measured:
 **Conclusion the audit supports**: the taxonomy ALREADY keeps *scientific
 refusal* and *implementation crash* distinct for the primary, at the record
 level, without inventing a third metric-payload state. The per-secondary
-mirror (proposed in §12 Q-P2b-2): a secondary `NotScoreableResult` → that
-secondary's typed `refusal` entry; a secondary CRASH → an additive
-`secondary_metric_errors: dict[metric_id, str]` on the record (non-silent:
-persisted + printed), which the interpreter projects as `unavailable` — the
-frozen three-state carrier is untouched, and no crash is ever dressed as a
-scientific refusal. Scope violations are not per-secondary (the SampleSet is
-validated once, before the primary).
+mirror is now RULED (operator 2026-08-21, §14 Q-P2b-2): a secondary
+`NotScoreableError` → that secondary's typed `refusal` entry; a secondary
+CRASH → an additive `secondary_metric_errors: dict[metric_id, str]` on the
+record (non-silent: persisted + emitted on the diagnostic surface), which
+the interpreter projects as `unavailable` — the frozen three-state carrier
+is untouched, and no crash is ever dressed as a scientific refusal.
+
+**Scope-violation correction (operator, superseding a wrong rev-2
+sentence).** Rev 2 claimed the SampleSet "is validated once, before the
+primary" — the measured route says otherwise: DataScope validation runs
+INSIDE every `evaluate_metric` call (`sandbox_executor.py:1940`, step 1), so
+a secondary call CAN raise `ScopeViolationError`. In practice the secondary
+receives the same SampleSet the primary just passed, but the CONTRACT must
+still be pinned: `ScopeViolationError` is **RE-RAISED** out of the secondary
+loop so the existing outer scope-violation handler (`execution.py:1016-1022`,
+terminate-run, non-retryable) retains ownership. A framework-integrity
+failure is NEVER downgraded into a harmless secondary error entry.
 
 ### 2.7 P4 — merged in parallel; measured relationship to P2b
 
@@ -256,7 +280,7 @@ cache-carry shape; dashboards (secondaries are interpreter evidence — adding
 dashboard rows is future scope); P3's typed reader; P4's Health surface;
 un-composed (legacy TIDMAD) runs, whose behaviour stays byte-identical.
 
-### 3.1 Structure preflight (parent §19.3 — binding at freeze)
+### 3.1 Structure preflight (parent §19.3 — BINDING, frozen with this revision)
 
 Measured sizes of every file P2b grows, with the boundary each change must
 respect (the operator's standing rule: no few-hundred-line functions, no
@@ -281,7 +305,7 @@ owners):
   semantics (refusal/crash/attempt-parity), record round-trip, projection
   four-state matrix, carry symmetry, rendering state fixtures, TIDMAD prompt
   byte-parity, the ordering-operand invariant + plants.
-* **Gate 1 / Gate 2**: NOT REQUIRED (proposed) — no new LLM-facing semantics
+* **Gate 1 / Gate 2**: NOT REQUIRED — **FROZEN, §14.5** — no new LLM-facing semantics
   (renderer landed in 09b and Gate-1-validated there; TIDMAD bytes pinned);
   no new real-lifecycle timing/arrival property (transport is deterministic;
   the StubSandbox route exercises the real call shape). If implementation
@@ -343,19 +367,39 @@ helper — §3.1):
 * each bound secondary evaluates the SAME deliverables through the SAME
   `sandbox.evaluate_metric(secondary, ...)` route and the SAME
   `_denoised_fn` (scoreability contract first, then arithmetic);
-* a secondary refusal (`NotScoreableError` caught around ITS call only) is
-  captured as that secondary's typed refusal — it never fails the attempt,
-  never alters the primary result, never triggers retries;
-* a secondary evaluation CRASH is caught around ITS call only, recorded per
-  the §12 Q-P2b-2 disposition as ratified at freeze (every candidate shape
-  is non-silent), and never propagates into the attempt lifecycle;
+* **the per-secondary exception order is FROZEN** (operator ruling
+  2026-08-21, §14 Q-P2b-2 — the catch around EACH secondary call, in this
+  order):
+
+  ```text
+  NotScoreableError    -> scientific refusal -> secondary_metric_refusals
+                          -> attempt remains successful
+  ScopeViolationError  -> RE-RAISE -> the existing OUTER handler owns it
+                          (terminate run, non-retryable) -> never downgraded
+                          into a secondary error
+  any other Exception  -> secondary_metric_errors[metric_id] = concise
+                          diagnostic -> persisted + emitted on the
+                          diagnostic surface -> attempt remains successful
+  ```
+
+* crash diagnostics go to the tuner's **existing diagnostic/logging/stderr
+  surface** — NEVER any stdout that carries a machine-readable contract
+  (the P2a `persisted_ranking` stderr rule), and NEVER a planner/reflector
+  prompt payload;
+* **"observational" is a bounded claim**: ordinary secondary
+  scientific/refusal/runtime outcomes cannot affect primary selection or
+  the retry lifecycle; **framework-integrity failures
+  (`ScopeViolationError`) retain their existing STRONGER semantics** —
+  observational never means swallowed;
 * the primary's own error semantics (`ScopeViolationError` → end round;
   primary exception → `error_scoring` record) are byte-untouched — the
   secondary loop runs only after a SUCCESSFUL primary result, so an
   `error_scoring` attempt carries no secondary entries by construction;
-* evaluation happens **wherever the primary evaluates** (Q-P2b-1 proposal):
-  the scoring block already runs for both trial and formal modes
-  (`execution.py:845-846`), and no round-type branch is added.
+* evaluation happens **wherever the primary evaluates** — **RULED**,
+  Q-P2b-1 = WHEREVER_PRIMARY_EVALUATES (§14): the scoring block already
+  runs for both trial and formal modes (`execution.py:845-846`), and no
+  round-type branch is added. A future secondary needing an independent
+  cadence is a NEW metric-evaluation policy capability, not P2b.
 
 ### 4.3 Record + output transport — the reserved names (delta D1)
 
@@ -365,18 +409,25 @@ Additive, defaults empty, frozen names untouched:
   entry per scored secondary;
 * `ExperimentRecord.secondary_metric_refusals: list[NotScoreableResult]` —
   one entry per refused secondary;
-* per the Q-P2b-2 disposition, the crash carrier (proposed:
-  `secondary_metric_errors: dict[str, str]`, id → one-line diagnosis);
+* `ExperimentRecord.secondary_metric_errors: dict[str, str]` (id → concise
+  one-line diagnostic) — **APPROVED as ruled (§14 Q-P2b-2): diagnostic
+  PROVENANCE, not scientific evidence.** It is deliberately a plain dict —
+  **no `SecondaryMetricError` Pydantic model is invented** unless source
+  truth during implementation PROVES the dict cannot satisfy the frozen
+  contract (a material deviation, not a preference). It never becomes a
+  fourth `SecondaryMetricEvidence` state; the interpreter projects a
+  crashed-but-declared secondary as `unavailable`;
 * a cross-field validator: no `metric_id` appears in more than one of the
   three carriers, and none duplicates within a carrier (per-secondary
   result/refusal exclusivity — the primary pair's validator idiom, per id);
-* `HyperparamTuningOutput.secondary_metric_specs: list[MetricSpecField]` —
-  the run's DECLARED set, stamped by the tuner from the bound tuple exactly
-  as the 09a `metric_spec` stamp is (`:3023` precedent). Absent/empty on
-  legacy outputs. This is §4.5's absence-detection source: artifact-borne,
-  so it survives chain-subprocess restore and mixed legacy/new corpora —
-  the same "consumers read what is persisted, never re-derive" rule P2a
-  enforced for the primary.
+* `HyperparamTuningOutput.secondary_metric_specs: list[MetricSpecField] | None`
+  — the run's DECLARED set, stamped by the tuner from the bound tuple
+  exactly as the 09a `metric_spec` stamp is (`:3023` precedent). `None` on
+  legacy outputs and zero-secondary runs; **absent, `null` and `[]` are
+  EQUIVALENT on read** (§4.7). This is §4.5's absence-detection source:
+  artifact-borne, so it survives chain-subprocess restore and mixed
+  legacy/new corpora — the same "consumers read what is persisted, never
+  re-derive" rule P2a enforced for the primary.
 
 ### 4.4 Interpreter projection + cache-carry symmetry (B-6, same child)
 
@@ -413,13 +464,52 @@ Plant-and-catch: a synthetic `sorted(models, key=...secondary...)` planted
 in a NEWLY-SCANNED scope must turn the invariant RED — proving the scope
 extension is real, not declared.
 
+### 4.7 Zero-secondary serialization semantics (C-P2b-1 — SOURCE-GROUNDED, FROZEN)
+
+Rev 2 used three phrasings for the zero-secondary state ("no record field
+populated / no output stamp", "additive fields with empty defaults", "empty
+carriers, no stamp write difference"). The operator required the ACTUAL
+persistence path to be audited before freeze, and it was:
+
+| surface | measured behaviour | consequence |
+|---|---|---|
+| per-record detail + summary JSON | `LocalRecorder.save_record` is a **dict pass-through** (`json.dump(safe_record)`, `sandbox_executor.py:344-354`); the record dict is BUILT by hand in `records.py` (e.g. `"metric_result": metric_payload` at `:1122`) | a key exists iff the builder writes it — the builder writes the three secondary carriers **only when non-empty**, no serializer machinery needed |
+| tuning-output artifact | the healthy path is `HyperparamTuningOutput.model_validate(dict)` then **`model_dump()` with NO exclude flags** (`records.py:957`), and the embedded `all_records` re-serialize through `ExperimentRecord` the same way | **default-empty fields WILL serialize** (`null` / `[]`) on every post-P2b output, including the records embedded in it |
+
+**Therefore the frozen contract is SEMANTIC EMPTINESS, not persisted-JSON
+byte identity** (the operator's ELSE branch): additive empty fields MAY
+serialize, and are semantically equivalent to absence. **No custom
+omission/serializer machinery is built to obtain cosmetic byte identity** —
+no existing public byte contract requires it (the manifest's
+`run_output_sha256` pins each artifact at ITS OWN commit time and old
+artifacts are never rewritten; the only byte-exact stdout contract in reach,
+`rebuild_per_file_best --print-only`, reads the per-file table, not
+outputs).
+
+The frozen zero-secondary / TIDMAD invariant:
+
+```text
+no secondary scientific evidence exists
+secondary carriers are semantically empty
+secondary_metric_specs absent, null and [] are EQUIVALENT on read
+no _stats secondary key is created
+the renderer emits zero secondary bytes
+planner/reflector prompt bytes are unchanged
+primary result / status / retry semantics are unchanged
+the zero-secondary composition fingerprint is unchanged (byte-identical sha)
+```
+
+Byte-parity claims elsewhere in this design bind exactly the surfaces listed
+above (prompts, fingerprint, attempt lifecycle) — never the full persisted
+JSON of new artifacts.
+
 ---
 
 ## 5. Three-task acceptance
 
 | task | required behaviour |
 |---|---|
-| TIDMAD | absence path: no secondary bound, no record field populated, no output stamp, no `_stats` key, renderer emits **zero bytes** for the section, prompts byte-identical to pre-P2b (parity sha) |
+| TIDMAD | absence path per the §4.7 frozen invariant: no secondary bound, carriers semantically empty (record keys unwritten on the dict path; output stamp `None`/absent — equivalent by contract), no `_stats` key, renderer emits **zero bytes** for the section, prompts byte-identical to pre-P2b (parity sha), fingerprint byte-identical |
 | Pets | `macro_f1` (higher) scored beside `accuracy`: composed → bound → evaluated → record → stamp → summary → rendered block; carry survives a quiet iteration (cache test); D16 note untouched |
 | DAVIS | the discriminating case: `psnr` (**higher**) scored beside the `mse` (**lower**) primary — the carrier's own direction words rendered, proven NOT inherited from the primary (explicit assertion on rendered direction text); `mae` exercised in the **unavailable** state on at least one fixture record; a refusal fixture (contract-failing deliverable) exercises `refused` |
 
@@ -661,8 +751,10 @@ when both exist.
       round-trip test before any tuner change.
 - [ ] `_evaluate_secondary_metrics(sandbox, secondaries, sample_set,
       anchor_map, s_max, denoised_fn) -> (results, refusals, errors)` —
-      per-secondary try: `NotScoreableError` → refusal; `Exception` → error
-      entry (printed, never raised); returns typed lists.
+      per-secondary catch in the FROZEN §4.2 order: `NotScoreableError` →
+      refusal entry; `ScopeViolationError` → RE-RAISE (the outer handler
+      owns it); any other `Exception` → error entry, emitted on the
+      diagnostic surface, never raised onward. Returns typed lists.
 - [ ] Call it ONLY on the primary-success path; populate the record payload
       beside `metric_payload`; stamp `secondary_metric_specs` from the bound
       tuple beside the `metric_spec` stamp.
@@ -700,6 +792,9 @@ when both exist.
 - [ ] A refused secondary yields exactly one `secondary_metric_refusals`
       entry and zero attempt-lifecycle deltas; a crashing secondary yields
       exactly one error entry and zero attempt-lifecycle deltas.
+- [ ] A `ScopeViolationError` raised from INSIDE a secondary call terminates
+      the run through the existing outer handler (asserted on the run
+      outcome), and no `secondary_metric_errors` entry exists for it.
 - [ ] The output stamp equals the bound declared set, in order; legacy
       outputs re-validate with the fields absent.
 - [ ] Planner/reflector serializations proven not to carry the new keys
@@ -710,10 +805,11 @@ when both exist.
 | case | required behaviour |
 |---|---|
 | primary raises (scoring crash / not-scoreable) | `error_scoring` path byte-unchanged; NO secondary evaluation runs; no secondary fields on the error record |
-| scope violation | run termination byte-unchanged; secondaries never evaluated |
+| scope violation raised by the PRIMARY | run termination byte-unchanged; secondaries never evaluated |
+| scope violation raised INSIDE a secondary call | RE-RAISED per the frozen §4.2 order — the existing outer handler terminates the run; NEVER downgraded to a `secondary_metric_errors` entry (asserted by a fixture whose stub raises it from the secondary call) |
 | every declared secondary refuses | all-refusals record; attempt success unchanged |
-| secondary evaluation crash | error entry per §12 disposition; NEVER coerced into `NotScoreableResult`; never silent |
-| zero bound secondaries | empty carriers, no stamp write difference vs pre-P2b (parity) |
+| secondary evaluation crash (ordinary `Exception`) | `secondary_metric_errors` entry per the §14 ruling; NEVER coerced into `NotScoreableResult`; never silent; never on a contract stdout; attempt unchanged |
+| zero bound secondaries | the §4.7 frozen invariant holds: carriers semantically empty, no `_stats` key, prompts/fingerprint byte-identical; persisted default-empty fields MAY serialize and are equivalent to absence |
 
 **7. Verification commands and evidence.**
 - [ ] `.venv/bin/python -m pytest tests/unit/agent/tune_ml_hyperparam_agent -q -k "secondary or scoring"` plus the new module — count + wall time. (Directory name MEASURED: the tuner's unit tree is `tests/unit/agent/tune_ml_hyperparam_agent/`, not the node's own name.)
@@ -881,7 +977,12 @@ names, prompts on secondary-less runs: byte-identical. The 09a carrier and
 renderer: shape-unchanged. `_is_loss_shaped`: untouched. P2a's ordering
 closure: zero sites re-opened (its scanner stays green over P2b's diff).
 P4's Health surface: untouched. Zero-secondary composed manifests: same
-semantic fingerprint as pre-P2b.
+semantic fingerprint as pre-P2b (byte-identical sha).
+`ScopeViolationError`: its existing terminate-run semantics are preserved
+from EVERY raise site, secondary calls included (§4.2). Byte-parity claims
+bind the §4.7-listed surfaces (prompts, fingerprint, attempt lifecycle) —
+zero-secondary persisted artifacts are governed by SEMANTIC emptiness, not
+persisted-JSON byte identity.
 
 ## 8. Failure / edge cases (cross-commit view)
 
@@ -928,13 +1029,15 @@ evaluation at all).
 | fingerprint churn fails existing composed resumes | D3's additive-when-nonempty rule + the byte-identity test against the FROZEN pre-P2b sha |
 | the new keys leak into planner/reflector prompts | C2 asserts on serialized text, not on the mechanism's description |
 
-## 12. Open operator questions (3 — now with post-audit disposition proposals)
+## 12. Operator questions — ALL RESOLVED (rulings 2026-08-21; full text §14)
 
-| id | question | disposition proposal (ratify at freeze) |
+**Open: 0.**
+
+| id | question | RULING |
 |---|---|---|
-| **Q-P2b-1** | Evaluate secondaries on trial rounds too, or formal-scored records only? | **Wherever the primary evaluates** — the scoring block already runs in both modes (`execution.py:845-846`); one rule, no round-type branch. Cost note: DAVIS adds two `GlobalMseMetric` passes per scored attempt — deterministic CPU arithmetic on already-produced deliverables |
-| **Q-P2b-2** | Classification of a secondary evaluation EXCEPTION | **Audit performed (§2.6).** Proposal: mirror the primary's two existing classes per-secondary — `NotScoreableError` → typed `refusal`; any other exception → `secondary_metric_errors[metric_id] = "{type}: {msg}"` (additive record field, persisted + printed, projecting as `unavailable`). Never coerced into `NotScoreableResult` (the primary's own rule at `records.py:592-623` keeps crash ≠ refusal); never silent; never touching the attempt lifecycle. The interpreter's frozen three-state carrier is untouched |
-| **Q-P2b-3** | Does the interpreter's own persisted digest carry per-model secondaries for resume continuity, or is `_stats` cache-carry sufficient? | `_stats` sufficient — matches `failure_counts` exactly (measured §2.2: same write site, same read-back site); digest widening would need its own projection rule (P5 territory) and no consumer requires it |
+| **Q-P2b-1** | Evaluate secondaries on trial rounds too, or formal-scored records only? | **RESOLVED: `WHEREVER_PRIMARY_EVALUATES`** — trial primary scoring → secondary scoring; formal primary scoring → secondary scoring; no round-type branch. A future secondary needing an independent cadence is a NEW metric-evaluation policy capability, not P2b |
+| **Q-P2b-2** | Classification of a secondary evaluation EXCEPTION | **RESOLVED, with the scope-violation exception-order correction**: `NotScoreableError` → typed refusal (attempt successful); `ScopeViolationError` → **RE-RAISE**, the existing outer handler retains ownership, never downgraded; any other `Exception` → `secondary_metric_errors[metric_id]` (plain dict — no new Pydantic model unless source truth proves the dict insufficient), persisted, emitted on the diagnostic/logging/stderr surface, never a contract stdout, never a prompt payload, attempt successful. "Observational" = ordinary secondary outcomes cannot affect primary selection/retry; framework-integrity failures retain their existing STRONGER semantics. The interpreter's frozen three-state carrier is untouched (crash projects `unavailable`) |
+| **Q-P2b-3** | Interpreter digest carry vs `_stats` cache-carry? | **RESOLVED: `_STATS_SUFFICIENT`** — durable evidence is already artifact-borne (record carriers + the output's `secondary_metric_specs` stamp); `_stats` owns only the existing quiet-iteration / Stability-Filter reuse continuity, mirroring `failure_counts` exactly. **No current P2b consumer requires digest persistence, so digest widening is unnecessary and outside P2b.** A future requirement for secondary evidence in a cross-iteration semantic digest would require its own explicit ownership decision — P5 is NOT a generic owner for arbitrary future digest fields |
 
 ## 13. Adversarial self-review (rev-2 additions marked ★)
 
@@ -945,6 +1048,8 @@ evaluation at all).
 | Is absence honest? | `unavailable` requires the output's declared stamp; undeclared tasks render zero bytes |
 | Third persistence shape? | one: the `failure_counts` idiom, asserted in the symmetry test |
 | ★ Can a crash masquerade as science? | the crash carrier is textual and separate; the validator refuses an id in two carriers; §2.6's taxonomy keeps the classes apart exactly as the primary does |
+| ★ Can a framework-integrity failure hide inside the secondary loop? | no — `ScopeViolationError` RE-RAISES per the frozen §4.2 order and the C2 fixture asserts run termination; "observational" is explicitly bounded to ordinary secondary outcomes |
+| ★ Can zero-secondary artifacts drift byte-wise into a broken claim? | the frozen contract is §4.7's SEMANTIC emptiness; byte parity binds only prompts/fingerprint/attempt lifecycle, where deterministic owners assert it |
 | ★ Can adding the feature break existing composed resumes? | only a manifest that DECLARES a secondary changes its fingerprint (D3); the zero-secondary byte-identity test pins it |
 | ★ Can the new fields leak to the LLM? | C2 asserts the planner/reflector serializations carry none of the three keys |
 | ★ Did P2b quietly extend P2a's scanner or reuse its refusal formatter? | no — §2.5 records both non-uses and why; the scanner's precision contract is not diluted |
@@ -952,8 +1057,116 @@ evaluation at all).
 
 ---
 
-*END — DRAFT rev 2, post-P2a/P4 reconciliation at `96dc1327`. NOT FROZEN;
-freeze is an operator act after this revision's review. Q-P2b-1/2/3 carry
-disposition proposals; the Q-P2b-2 pre-freeze taxonomy audit obligation is
-DISCHARGED (§2.6). Implementation begins only after freeze, in a fresh
-session, from a freshly filled Implementation Working Rules contract.*
+## 14. Freeze dispositions (operator rulings 2026-08-21)
+
+Architecture review verdict on rev 2: **PASS** — no child redesign; the
+rulings below plus the C-P2b-1 serialization audit are the whole delta from
+rev 2 to this frozen revision.
+
+### 14.1 Q-P2b-1 = `WHEREVER_PRIMARY_EVALUATES`
+
+Every declared secondary evaluates wherever the primary evaluates — trial
+primary scoring → secondary scoring; formal primary scoring → secondary
+scoring. **No round-type branch.** The existing scoring block already owns
+both modes (`execution.py:845-846`); current secondaries are deterministic
+arithmetic on already-produced deliverables. A future secondary requiring an
+independent cadence is a NEW metric-evaluation policy capability — not P2b,
+and not to be added quietly.
+
+### 14.2 Q-P2b-2 — RESOLVED, with the exception-order correction
+
+The source-grounded refusal-vs-crash distinction is approved. The frozen
+per-secondary taxonomy, in catch order:
+
+```text
+NotScoreableError
+    -> scientific secondary refusal
+    -> secondary_metric_refusals
+    -> attempt remains successful
+
+ScopeViolationError
+    -> RE-RAISE
+    -> existing OUTER scope-violation handler retains ownership
+    -> never downgraded into secondary_metric_errors
+
+any other Exception
+    -> secondary_metric_errors[metric_id] = concise diagnostic
+    -> persisted diagnostic
+    -> existing diagnostic/logging/stderr surface
+    -> NEVER stdout-contract output
+    -> NEVER planner/reflector prompt payload
+    -> attempt remains successful
+```
+
+**Semantic wording, binding**: *"secondary metrics are observational"* does
+NOT mean framework-integrity failures are swallowed. It means ordinary
+secondary scientific/refusal/runtime outcomes do not alter primary
+selection/retry semantics. A `ScopeViolationError` retains its pre-existing
+stronger framework semantics.
+
+The approved crash carrier is
+`ExperimentRecord.secondary_metric_errors: dict[str, str]` — diagnostic
+PROVENANCE, not scientific evidence. **No fourth `SecondaryMetricEvidence`
+state; no new `SecondaryMetricError` model** unless source truth during
+implementation proves the dict cannot satisfy this contract. The interpreter
+continues to project crash / no-result / no-refusal under a declared stamp
+as `unavailable`.
+
+### 14.3 Q-P2b-3 = `_STATS_SUFFICIENT`
+
+`_stats` cache-carry is sufficient; **the committed interpretation digest is
+NOT widened in P2b.** Durable evidence already lives artifact-borne in the
+`ExperimentRecord` secondary carriers plus
+`HyperparamTuningOutput.secondary_metric_specs`; `_stats` owns the existing
+quiet-iteration / Stability-Filter reuse carry, exactly mirroring
+`failure_counts`.
+
+**Ownership-wording correction (operator)**: the rev-2 phrase "digest
+widening would be P5 territory" is REMOVED as a false default-ownership
+claim. P5 is not a generic owner for arbitrary future digest fields. The
+corrected statement: no current P2b consumer requires secondary evidence in
+the committed interpretation digest, so digest widening is unnecessary and
+outside P2b; a future requirement for secondary evidence in a
+cross-iteration semantic digest would require its own explicit ownership
+decision.
+
+### 14.4 C-P2b-1 — zero-secondary serialization, audited and frozen
+
+The persistence path was audited (§4.7): the record path is a
+builder-controlled dict pass-through, while the output path is
+`model_dump()` with no exclude flags — **default-empty fields WILL
+serialize** there. Per the ruling's ELSE branch, the frozen contract is the
+§4.7 **semantic-emptiness invariant** (additive empty fields may serialize
+and are equivalent to absence; `secondary_metric_specs` absent / `null` /
+`[]` equivalent on read), and **no custom omission/serializer machinery is
+built for cosmetic byte identity** — no existing public byte contract
+requires it. §5, C2 and §7 were corrected to this one contract.
+
+### 14.5 Gate ruling — FROZEN
+
+**Gate 1 NOT REQUIRED · Gate 2 NOT REQUIRED.** Deterministic
+composition/evaluation/transport/projection; the 09b renderer's semantics
+are reused unchanged; TIDMAD prompt bytes have a deterministic parity owner;
+`StubSandbox` exercises the real evaluation call shape; no new
+timing/real-training/LLM failure class. Real LLM/training/GPU must not be
+run for P2b.
+
+### 14.6 Final consistency sweep (performed at freeze)
+
+Swept for: `PROVISIONAL`, `open operator`, `proposed`, `ratify`,
+`P5 territory`, generic "any other Exception" without the carve-out,
+un-narrowed "never touching the attempt lifecycle", "no output stamp",
+"byte-identical", `secondary_metric_errors`, `ScopeViolationError`. Every
+remaining occurrence is historical text (rev-1/rev-2 quotes in §0.1's delta
+table and §9's resolution table) or the frozen contract itself. Required
+final state holds: **open operator questions 0 · material contradictions 0 ·
+unresolved PROVISIONAL semantics 0.**
+
+---
+
+*END — REVISION 3 — FROZEN, operator approved 2026-08-21 (architecture PASS
++ freeze rulings Q-P2b-1/2/3 + C-P2b-1 serialization resolution applied).
+Source anchor `96dc1327`. Implementation status at the freeze commit: NOT
+STARTED. Gate 1 NOT REQUIRED; Gate 2 NOT REQUIRED. P2b implementation begins
+in a FRESH session from a newly filled Implementation Working Rules
+contract.*
