@@ -641,9 +641,40 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
-- **STEP 10 — IN PROGRESS (2026-08-21). 5 of 7 children MERGED: P1
+- **STEP 10 — IN PROGRESS (2026-08-21). 5 of 7 semantic children MERGED: P1
   `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1` ·
-  P3 `254cbaa1`. NEXT = P5.**
+  P3 `254cbaa1`. NEXT = the operator's freeze ruling on the CONSOLIDATED
+  P5+P6 child.**
+  **TOPOLOGY CONSOLIDATION (operator, 2026-08-21; parent §20.9)**: the two
+  REMAINING children P5 (S5) + P6 (S8) are ONE implementation child —
+  authoritative design
+  `docs/design/generic_framework_upgrade/step_10_orchestration_task_binding/pr_10_p5_6_lifecycle_and_three_task_closure.md`,
+  **DRAFT rev 1 READY FOR OPERATOR FREEZE** (the old P5 draft and P6
+  skeleton are REMOVED, reconciled section-by-section in its §18).
+  Implementation starts only after the freeze, in a fresh session read
+  from merged state. **Q-P56-1** (its ONE open operator question): the
+  source audit proved contrast-task loop TRAINING is a missing declared
+  capability — task-owned scope construction (the frozen D14 seam takes
+  CALLER-built scopes and deliberately excludes task vocabulary; the
+  tuner builds TIDMAD `SampleSet`s unconditionally; no scope argv;
+  `DatasetProfile` cannot describe Pets/DAVIS; production is
+  census-forbidden from reading pack manifests) — recommendation: close
+  Step 10 at the roadmap ladder's own depth (contrast L4 is scheduled at
+  Step 12 by §22.10 and the Step-12 row), name **CAP-SCOPE** as
+  post-Step-10 capability debt, amend parent §16.1/§17.1/§26.O wording at
+  freeze. The consolidated child's shape: carried-state lifecycle closure
+  (C0–C4: confirmations activation with latest-wins/raise-on-malformed
+  projection + producer cold-start carry-through DD-2; findings onto
+  `ChainState`; ≥ 3-iteration deterministic reachability + per-link
+  severing; resume deep-equality) → composed-chain operator surface +
+  wiring closures W1–W5 (C5: `run_chain.sh --task_composition`, shipped
+  `configs/task_composition/tidmad.yaml`, child built-in bootstrap,
+  reference-score guard, composed-metric pin) → three-task ORCHESTRATION
+  closure through ONE `run_workflow` path with a DAVIS ≥ 2-iteration
+  lower-is-better carried-state falsifier (C6) → runner-claims
+  disposition per Q-10-5 = B, real-execution claims retained (C7) →
+  **Gate 1 NOT REQUIRED · Gate 2 REQUIRED = the FIRST real COMPOSED chain
+  run, 2 iterations** (C8).
   **P3 — Proposer Typed Evidence + Prediction Authoring — COMPLETE / MERGED
   2026-08-21**: PR #245, squash `254cbaa1`; final head `31cdabaa`,
   exact-head CI **32457848717 SUCCESS**. **The proposer has ONE declared
