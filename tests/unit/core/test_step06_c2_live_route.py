@@ -177,18 +177,28 @@ MIGRATED_CONSUMERS = (
     "core/sandbox_executor.py",
     "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
     "execute_tools/denoising_score_single.py",  # C3 — the subprocess route
+    # --- Step 10 P2a: the D1 direction consumers, now REACHED ---
+    # These two sat in FORBIDDEN_CONSUMERS below, and the reason given there
+    # was explicitly that Step 06 "does not reach" them — enumerated D1 debt,
+    # not a permanent architectural boundary. P2a is the step that pays that
+    # debt: both now acquire a reconciled identity from the metric module and
+    # ask `MetricOrder` instead of spelling `>` themselves. They move rather
+    # than being deleted, so the seam cannot quietly go dead.
+    "workflows/model_exploration.py",  # P2a C1 — sites 1-3
+    "core/resume.py",  # P2a C2 — _pick_best + the chain fold
+    "dashboard/data_sources/local_json.py",  # P2a C3 — leaderboard + best_agent_score
 )
 
 # Sites that must NEVER import it. The frozen arithmetic (the handle wraps
-# it, it does not know about the handle); the crash-resume reuse guard
-# (design §12: NOT the scoreability mechanism); and the direction consumers
-# Step 06 explicitly does not reach (§16-Q6 — D1 debt, enumerated at C5).
+# it, it does not know about the handle) and the crash-resume reuse guard
+# (design §12: NOT the scoreability mechanism).
+#
+# `dashboard/data_sources/base.py` stays here for a DIFFERENT reason from the
+# two above: it is the abstract interface, all docstring and no execution, so
+# it legitimately imports nothing. Its P2a C3 change was prose only.
 FORBIDDEN_CONSUMERS = (
     "execute_tools/scoring_utils.py",
     "execute_tools/inference_single.py",
-    "workflows/model_exploration.py",
-    "core/resume.py",
-    "dashboard/data_sources/local_json.py",
     "dashboard/data_sources/base.py",
 )
 

@@ -101,6 +101,11 @@ from core.run_invariants import (
 from core.runtime_control.launch_guard import run_launch_self_test
 from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
+from execute_tools.evaluation_metric import (
+    StampedMetricSpec,
+    metric_identity_unavailable_notice,
+    reconcile_metric_specs,
+)
 from execute_tools.metric_order import MetricOrder
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
@@ -657,6 +662,78 @@ def _build_lit_review_input(
             **llm_kwargs,
         }
     )
+
+
+def _acquire_iteration_order(bindings, tune_output) -> MetricOrder | None:
+    """The reconciled ``MetricOrder`` for one iteration's golden comparisons.
+
+    Step 10 P2a C1, design §4.1. Acquisition is RECONCILIATION, not
+    precedence: the run's bound composition spec and the compared output's own
+    stamp are both offered to the ONE shared authority, so a composed run whose
+    bound metric disagrees with what the artifact was actually scored under
+    FAILS CLOSED instead of silently preferring either.
+
+    Args:
+        bindings: the run's ``WorkflowRunBindings``. ``task_composition`` is
+            ``None`` on a non-composed (legacy) run, in which case the output's
+            own stamp is the only identity available.
+        tune_output: the ``HyperparamTuningOutput`` being folded in.
+
+    Returns:
+        The order to rank with, or ``None`` when no identity is available
+        anywhere — the §4.2 unrankable state, which the caller must honour by
+        NOT ranking rather than by assuming a direction.
+
+    Raises:
+        MetricIdentityConflictError: bound spec and artifact stamp declare
+            different metrics. Deliberately not caught here: ranking an
+            iteration on a metric it was not scored under is worse than
+            stopping, and the message names both offenders.
+    """
+    composition = getattr(bindings, "task_composition", None)
+    bound = getattr(getattr(composition, "metric", None), "spec", None)
+    spec = reconcile_metric_specs(
+        [
+            StampedMetricSpec(
+                label=f"{tune_output.run_name!r} ({tune_output.model_type!r})",
+                spec=getattr(tune_output, "metric_spec", None),
+            )
+        ],
+        bound=bound,
+    )
+    return MetricOrder(spec) if spec is not None else None
+
+
+class _OncePerRunNotice:
+    """Prints a named notice the FIRST time a run hits an unrankable state.
+
+    Once per run rather than once per iteration: an unranked chain would
+    otherwise print the same line on every iteration and bury the run's real
+    output. The contexts that followed are still counted, so the closing line
+    reports how many iterations were affected rather than implying one.
+    """
+
+    __slots__ = ("_contexts", "_shown")
+
+    def __init__(self) -> None:
+        self._shown = False
+        self._contexts: list[str] = []
+
+    def warn_once(self, context: str) -> None:
+        self._contexts.append(context)
+        if self._shown:
+            return
+        self._shown = True
+        print(
+            metric_identity_unavailable_notice(
+                "the workflow best-score and chain-incumbent trackers",
+                detail=f"first at {context}",
+            )
+        )
+
+    @property
+    def affected(self) -> tuple[str, ...]:
+        return tuple(self._contexts)
 
 
 def _cap_knowledge_cache(
@@ -1956,6 +2033,14 @@ def run_workflow(
         elif hasattr(agent, "bridge") and agent.bridge is not None:
             agent.bridge.set_run_context(**kwargs)
 
+    # Step 10 P2a C1 — run-scoped so the Q-10-2 unrankable notice is printed
+    # once for the whole run rather than once per iteration.
+    _metric_identity_notice = _OncePerRunNotice()
+    # `_iter_order` is bound per iteration by the fold below; predeclared so
+    # the early-stop check reads a defined name even if an iteration exits
+    # before reaching the fold.
+    _iter_order: MetricOrder | None = None
+
     # Chain mode runs each iter as its own subprocess with max_iterations=1 and
     # an externally-supplied start_iteration. The loop variable becomes the
     # canonical chain-wide iteration index — it is what the InterpretationInput
@@ -2739,23 +2824,43 @@ def run_workflow(
         # formal rounds all got gated would otherwise misreport progress.
         # (Historical context: v15's mamba_multirate_fuser trial 7.65 /
         # dualpath_spectral_router trial 7.77 motivated formal-only.)
-        if tune_output.best_formal_denoising_score is not None and (
-            state.best_score_overall is None
-            or tune_output.best_formal_denoising_score > state.best_score_overall
-        ):
-            state.best_score_overall = tune_output.best_formal_denoising_score
+        # Step 10 P2a C1 — the order these three decisions use is acquired by
+        # RECONCILIATION, not precedence (design §4.1): the run's bound spec
+        # and this output's own stamp are BOTH offered, and a disagreement
+        # fails closed rather than letting either shadow the other. Acquired
+        # ONCE per iteration because all three decisions must rank on the same
+        # metric; a bound-vs-stamp conflict raises out of this call.
+        _iter_order = _acquire_iteration_order(bindings, tune_output)
 
-        # V19 PR 1 — DECISION-STATE incumbent update (in-process
-        # multi-iteration equivalence with N chained subprocesses,
-        # design §3.4): only this iteration's committed VALID formal may
-        # advance ``chain_formal_incumbent_reference``; strictly-greater
-        # keeps the earliest holder on ties (§3.3).
-        _iter_valid_formal = tune_output.best_valid_formal_denoising_score
-        if _iter_valid_formal is not None and (
-            state.chain_formal_incumbent_reference is None
-            or _iter_valid_formal > state.chain_formal_incumbent_reference
-        ):
-            state.chain_formal_incumbent_reference = _iter_valid_formal
+        if _iter_order is None:
+            # Q-10-2 / §4.2 case B-C: no reconciled identity, so NOTHING is
+            # ranked. The trackers are deliberately left untouched — including
+            # the bootstrap, because a tracker seeded with an arbitrary first
+            # value would then be printed as "Best overall" while no
+            # comparison was ever legitimate. Raw scores stay visible in the
+            # per-iteration line and the summary; no direction is assumed.
+            _metric_identity_notice.warn_once(f"iteration {iteration}")
+        else:
+            if tune_output.best_formal_denoising_score is not None and (
+                state.best_score_overall is None
+                or _iter_order.is_better(
+                    tune_output.best_formal_denoising_score, state.best_score_overall
+                )
+            ):
+                state.best_score_overall = tune_output.best_formal_denoising_score
+
+            # V19 PR 1 — DECISION-STATE incumbent update (in-process
+            # multi-iteration equivalence with N chained subprocesses,
+            # design §3.4): only this iteration's committed VALID formal may
+            # advance ``chain_formal_incumbent_reference``; strictly-BETTER
+            # keeps the earliest holder on ties (§3.3), which `is_better`
+            # preserves under both directions.
+            _iter_valid_formal = tune_output.best_valid_formal_denoising_score
+            if _iter_valid_formal is not None and (
+                state.chain_formal_incumbent_reference is None
+                or _iter_order.is_better(_iter_valid_formal, state.chain_formal_incumbent_reference)
+            ):
+                state.chain_formal_incumbent_reference = _iter_valid_formal
 
         print(
             f"\n  [{iteration}] Complete: {proposal.model_name} "
@@ -2798,10 +2903,17 @@ def run_workflow(
             iter_idx=iteration, phase="post_gc", workspace=bindings.workspace, scope="workflow"
         )
 
+        # Step 10 P2a C1 — "reached the target" means AT LEAST AS GOOD AS the
+        # target on the metric's own axis, which under a minimised metric is
+        # `<=`. `_iter_order` is this iteration's reconciled order; when it is
+        # None nothing was ranked, `best_score_overall` was never advanced, and
+        # the guard below short-circuits on it — an unranked run never stops
+        # early on an assumed direction.
         if (
             launch.target_score is not None
             and state.best_score_overall is not None
-            and state.best_score_overall >= launch.target_score
+            and _iter_order is not None
+            and _iter_order.is_at_least(state.best_score_overall, launch.target_score)
         ):
             print(
                 f"\n  Target score {launch.target_score} reached "

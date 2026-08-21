@@ -230,8 +230,13 @@ def leaderboard(
     status: str = Query(default="success", description="Filter by status"),
 ):
     """
-    Top N experiments for a model across all runs, ranked by denoising_score
-    descending (higher is better).
+    Top N experiments for a model across all runs, ranked best-first on the
+    metric the records declare they were scored under.
+
+    Step 10 P2a C3: the ordering direction comes from each record's persisted
+    metric identity rather than being assumed. Rows with no declared identity
+    are returned unranked (``rank: null``) with a ``metric_ranking`` note,
+    and keep their raw scores.
     """
     ds = get_data_source()
     try:

@@ -96,6 +96,11 @@ def test_viable_candidate_selection_uses_valid_best_not_collapsed_raw_best():
         },
         "model_descriptions": {},
         "model_knowledge_cache": {},
+        # Step 10 P2a C4 — `top_n` reads the identity the digest was ordered
+        # under. Without it the helper takes the Q-P2a-1 unranked fallback
+        # (the existing order-free `all` path), which deliberately does NOT
+        # apply the `best_score is None` filter this test is about.
+        "metric_identity": {"metric_id": "tidmad_denoising_score", "direction": "higher"},
     }
     selected = select_candidate_models(
         interpretation, ModelSelectionStrategy(method="top_n", params={"n": 2})

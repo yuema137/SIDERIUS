@@ -1,0 +1,125 @@
+{
+  "what": "Step 10 / P2a C0 pre-migration ordering sequences. Captured from the live implementation at the base commit, BEFORE any P2a migration. Later commits compare against this file, never against the code as it stands at comparison time.",
+  "captured_at_commit": "64446b2b8017499de6f4564003cd9f63342ab411",
+  "captured_by": "tests/unit/execute_tools/test_step10_p2a_c0_ordering_goldens.py",
+  "rule": "Ordering evidence is the ordered list of pairwise decisions a fixture drives, never the final winner alone.",
+  "fixtures": {
+    "tidmad_scores": [
+      -3.2,
+      -1.4,
+      -7.9
+    ],
+    "pets_scores": [
+      0.027,
+      0.61,
+      0.33
+    ],
+    "davis_scores": [
+      0.0174,
+      0.0172,
+      0.021
+    ],
+    "davis_target": 0.0173
+  },
+  "sites": {
+    "sites_1_3_incumbent_fold": {
+      "note": "Inline folds in run_model_exploration; hand-computed trajectories the migrated code must drive. davis_direction_blind is the trajectory the RAW comparator live at this commit produces on the same input \u2014 the defect C1 removes.",
+      "tidmad": {
+        "decisions": [
+          true,
+          true,
+          false
+        ],
+        "trajectory": [
+          -3.2,
+          -1.4,
+          -1.4
+        ]
+      },
+      "pets": {
+        "decisions": [
+          true,
+          true,
+          false
+        ],
+        "trajectory": [
+          0.027,
+          0.61,
+          0.61
+        ]
+      },
+      "davis": {
+        "decisions": [
+          true,
+          true,
+          false
+        ],
+        "trajectory": [
+          0.0174,
+          0.0172,
+          0.0172
+        ]
+      },
+      "davis_direction_blind": {
+        "decisions": [
+          true,
+          false,
+          true
+        ],
+        "trajectory": [
+          0.0174,
+          0.0174,
+          0.021
+        ]
+      },
+      "davis_target_satisfied_correct": [
+        false,
+        true,
+        false
+      ],
+      "davis_target_satisfied_direction_blind": [
+        true,
+        false,
+        true
+      ]
+    },
+    "site_4_pick_best": {
+      "note": "core.resume._pick_best, captured over growing prefixes.",
+      "tidmad_trajectory": [
+        "exp_a",
+        "exp_b",
+        "exp_b"
+      ],
+      "tie_trajectory": [
+        "exp_m",
+        "exp_b",
+        "exp_b"
+      ]
+    },
+    "site_5_row_beats": {
+      "note": "execute_tools.per_file_best._row_beats, captured pairwise; probe order matches ROW_BEATS_PROBES.",
+      "probe_names": [
+        "higher linear score wins",
+        "lower linear score loses",
+        "tie on score -> earlier iteration wins",
+        "tie on score -> later iteration loses",
+        "tie on score and iteration -> persisted beats legacy-unknown",
+        "tie on score and iteration -> legacy-unknown loses to persisted",
+        "tie through provenance -> smaller round_index wins",
+        "tie through round_index -> lexicographic exp_id wins",
+        "tie through round_index -> lexicographically larger exp_id loses"
+      ],
+      "verdicts": [
+        true,
+        false,
+        true,
+        false,
+        true,
+        false,
+        true,
+        true,
+        false
+      ]
+    }
+  }
+}

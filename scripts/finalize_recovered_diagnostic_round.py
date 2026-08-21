@@ -22,6 +22,7 @@ from execute_tools.health_checks.runner import (
     resolve_action,
 )
 from execute_tools.health_checks.schemas import HealthCheckContext
+from execute_tools.persisted_ranking import best_by_declared_metric
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, score_vector
 from nodes.ml_hyperparameter_tune_agent import (
     _gate_results_to_score_meta,
@@ -230,7 +231,11 @@ def main() -> None:
             f"count={len(completed)}, indices={sorted(round_indices)}"
         )
     valid = [item for item in completed if _finite_success(item)]
-    best = max(valid, key=lambda item: item["denoising_score"]) if valid else None
+    # Step 10 P2a C3 — the OOM-recovery finalizer ranks on the metric the
+    # records declare, not on an assumed higher-is-better. Identity-less
+    # records are excluded individually; nothing rankable means no best is
+    # reported rather than a guessed one.
+    best = best_by_declared_metric(valid, context="OOM-recovery round")
     output = {
         "run_name": workflow_run_name,
         "model_type": args.model,

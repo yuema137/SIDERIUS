@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from execute_tools.data_paths import SIDERIUS_DATA_DIR
+from execute_tools.persisted_ranking import best_by_declared_metric
 
 
 def _load(path: str) -> Any:
@@ -110,7 +111,12 @@ def main() -> None:
         and isinstance(record.get("denoising_score"), (int, float))
         and math.isfinite(record["denoising_score"])
     ]
-    best = max(valid, key=lambda record: record["denoising_score"]) if valid else None
+    # Step 10 P2a C3 — "best" is the metric's own direction, read from what the
+    # records declare. Identity-less records are excluded from ranking
+    # INDIVIDUALLY (§4.2 case B); when nothing rankable remains, or the set
+    # mixes incomparable metrics, this summary reports no best rather than
+    # assuming higher-is-better.
+    best = best_by_declared_metric(valid, context="diagnostic summary")
     baseline_exp_id = str(baseline.get("exp_id") or "")
     baseline_h5 = sorted(
         glob.glob(

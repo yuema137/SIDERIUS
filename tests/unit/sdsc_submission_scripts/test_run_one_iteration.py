@@ -1419,6 +1419,8 @@ class TestDeprecatedStrategyFlags:
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput  # noqa: E402
 from core.resume import restore_prior_state  # noqa: E402
+from execute_tools.evaluation_metric import TIDMAD_METRIC_ID  # noqa: E402
+from tests.helpers.metric_fixtures import shipped_spec  # noqa: E402
 
 
 def _p1_record(exp_id: str, score: float | None) -> dict:
@@ -1433,6 +1435,13 @@ def _p1_record(exp_id: str, score: float | None) -> dict:
         "denoising_score": score,
         "health_gate_results": [],
         "health_gate_enabled": False,
+        # Step 10 P2a C2 — a scored record carries the identity it was scored
+        # under, and the chain fold reads it to decide which way is better.
+        "metric_result": {
+            "metric_id": TIDMAD_METRIC_ID,
+            "direction": "higher",
+            "scalar": score,
+        },
     }
 
 
@@ -1456,6 +1465,11 @@ def _p1_tune_output(
         best_valid_formal_exp_id=exp_id,
         started_at="2026-07-27 00:00:00",
         finished_at="2026-07-27 00:00:01",
+        # Step 10 P2a C2: the chain incumbent fold builds its MetricOrder from
+        # the run's stamped MetricSpec (Step 09a). An output without one is a
+        # NAMED refusal rather than a re-derivation, so these attribution
+        # tests stamp what a real post-09a output carries.
+        metric_spec=shipped_spec(),
         # V20 PR D (D-C4): the chain incumbent now additionally requires
         # scientific authority. These tests are about incumbent
         # ATTRIBUTION in the manifest — which iteration a carried-over

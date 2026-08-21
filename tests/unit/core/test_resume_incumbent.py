@@ -19,6 +19,8 @@ import pytest
 import core.resume as resume
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.resume import ReplayIntegrityError, restore_prior_state
+from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
+from tests.helpers.metric_fixtures import shipped_spec
 
 # ---------------------------------------------------------------------------
 # Workspace builders
@@ -72,6 +74,20 @@ def _record(
         "denoising_score": score,
         "health_gate_results": verdicts or [],
     }
+    # Step 10 P2a C2 — a SCORED record carries the identity it was scored
+    # under (Step 06's additive `metric_result`), and resume now reads it to
+    # decide what may be ranked. These fixtures predate that field; stamping
+    # it here restores what a real post-Step-06 record looks like, so these
+    # tests keep asserting the incumbent WALK rather than accidentally
+    # asserting the legacy no-identity refusal. That refusal has its own
+    # dedicated coverage in
+    # tests/unit/execute_tools/test_step10_p2a_c2_resume_and_per_file.py.
+    if status == "success" and isinstance(score, (int, float)):
+        rec["metric_result"] = {
+            "metric_id": TIDMAD_METRIC_ID,
+            "direction": "higher",
+            "scalar": score,
+        }
     if waiver is False:
         rec["health_gate_enabled"] = False
     if is_trial:
@@ -143,6 +159,11 @@ def _write_iter(
         health_config_sha256=health_config_sha256,
         healthgate_mode=healthgate_mode,
         result_authority=result_authority,
+        # Step 10 P2a C2 — the run's stamped MetricSpec (Step 09a). It is the
+        # identity source resume builds its `MetricOrder` from; an output
+        # without it is a NAMED refusal, never a re-derivation (parent §8).
+        # A real post-09a output always carries it.
+        metric_spec=shipped_spec(),
     )
     output_path = os.path.join(model_dir, f"run_output_{run_name}.json")
     with open(output_path, "w") as f:

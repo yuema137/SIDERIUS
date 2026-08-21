@@ -54,10 +54,10 @@ from __future__ import annotations
 import os
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NamedTuple, cast, get_args
 
 import h5py
 from pydantic import (
@@ -697,6 +697,326 @@ def _metric_spec_from_any(value: Any) -> Any:
 #: ``InterpretationInput.metric_spec``, ``SecondaryMetricEvidence.spec``).
 #: It transports a value the run ALREADY resolved; it derives nothing.
 MetricSpecField = Annotated[MetricSpec, BeforeValidator(_metric_spec_from_any)]
+
+
+# ---------------------------------------------------------------------------
+# Metric-identity reconciliation — "are these the SAME metric?"
+#
+# Step 10 P2a C1 (Q-P2a-3 = PROMOTE). Promoted here from
+# ``nodes/result_interpretation_agent/evidence.py``, where it was node-private
+# by ownership while THREE generic consumers outside that node needed the same
+# decision.
+#
+# Deliberately NOT in ``MetricOrder``. The two questions are different
+# responsibilities and must not merge:
+#
+#     reconciliation : "are these the same metric?"     -> here, beside MetricSpec
+#     MetricOrder    : "for this KNOWN metric, which value is better?"
+#
+# Reconciliation runs FIRST. Ordering values whose identity has not been
+# reconciled is how two incomparable metrics get ranked against each other
+# while every individual comparison looks correct.
+# ---------------------------------------------------------------------------
+
+
+#: The canonical operator-facing name for the state in which a consumer holds
+#: a score but no declared metric identity (Q-P2a-2 — ONE formatter, owned
+#: beside the reconciliation authority rather than inside ``MetricOrder``,
+#: which stays focused on ordering a metric that is already known).
+#:
+#: The wording is the parent's frozen Q-10-2 phrasing. It is a NAMED absence,
+#: never a default: a consumer in this state shows raw values and refuses to
+#: rank, and must never fall back to higher-is-better.
+METRIC_IDENTITY_UNAVAILABLE = "metric direction unavailable / metric_spec absent"
+
+
+def metric_identity_unavailable_notice(context: str, *, detail: str = "") -> str:
+    """The ONE message a consumer prints when it cannot rank for lack of identity.
+
+    Args:
+        context: what could not be ranked, in the consumer's own words
+            (e.g. ``"chain formal incumbent"``, ``"dashboard leaderboard"``).
+        detail: optional extra clause naming the offending artifact(s).
+
+    Returns:
+        A single line beginning with the canonical
+        :data:`METRIC_IDENTITY_UNAVAILABLE` phrase, so every consumer's
+        refusal is greppable and reads the same way to an operator.
+    """
+    suffix = f" ({detail})" if detail else ""
+    return (
+        f"[metric] {METRIC_IDENTITY_UNAVAILABLE}: {context} is NOT ranked{suffix}. "
+        "Raw values remain readable; no direction is assumed."
+    )
+
+
+class MetricIdentityConflictError(ValueError):
+    """Two authorities disagree about which metric a comparison would rank on.
+
+    Raised instead of silently choosing one, because every available way of
+    choosing is wrong: preferring the bound spec ignores what the artifact was
+    actually scored under, and preferring the artifact ignores the run the
+    operator composed. The comparison is refused and the offenders are named.
+    """
+
+
+class MetricIdentityKey(NamedTuple):
+    """The MINIMUM comparison identity: ``metric_id`` + ``direction``.
+
+    Design §4.0/§4.4. A persisted ``ExperimentRecord`` carries exactly this
+    pair (through ``metric_result``), never a whole ``MetricSpec``, so it is
+    the granularity at which record-level corpora reconcile.
+
+    Both fields are load-bearing and neither is sufficient alone. ``direction``
+    without ``id`` would rank an accuracy against a PSNR because both are
+    ``higher``; ``id`` without ``direction`` would let the same metric be
+    ranked two opposite ways.
+    """
+
+    id: str
+    direction: MetricDirection
+
+
+#: Anything that can declare a metric's identity to reconciliation: the whole
+#: declaration, or the minimum comparison pair a persisted record carries.
+MetricDeclaration = MetricSpec | MetricIdentityKey
+
+
+class StampedMetricSpec(NamedTuple):
+    """One identity source offered to reconciliation.
+
+    Attributes:
+        label: how a refusal should NAME this source. Human-facing and
+            quoted into the message, so it must identify the artifact an
+            operator would go and look at.
+        spec: the declaration this source carries — a whole ``MetricSpec`` or
+            a :class:`MetricIdentityKey` — or ``None`` when it carries none (a
+            legacy or pre-stamping artifact).
+    """
+
+    label: str
+    spec: MetricDeclaration | None
+
+
+def reconcile_metric_specs(
+    stamped: Sequence[StampedMetricSpec],
+    *,
+    bound: MetricSpec | None = None,
+    bound_label: str = "the run's bound task composition",
+) -> MetricSpec | None:
+    """The ONE compatible ``MetricSpec`` behind a set of identity sources.
+
+    This COMPARES transported declarations. It derives nothing, infers nothing
+    from a metric's name, a score's sign or the current task, and has no
+    fallback.
+
+    The frozen truth table (design §4.1):
+
+    ==============  ==================  ==================================
+    bound           stamped             outcome
+    ==============  ==================  ==================================
+    A               A                   A
+    A               absent              A
+    A               B                   refuse
+    none            all A               A
+    none            all absent          ``None`` — caller takes its
+                                        unrankable state
+    none            A and B             refuse
+    ==============  ==================  ==================================
+
+    A bound spec is an authoritative INPUT, never permission to ignore a
+    conflicting artifact stamp — bound-A against stamped-B is a real
+    inconsistency and must fail closed rather than go unobserved.
+
+    PARTIAL stamping among the ``stamped`` sources is also a refusal: a set in
+    which some artifacts declare a metric and others declare none spans more
+    than one binding, and interpreting the stamped half would silently drop
+    the rest. Callers that legitimately rank a SUBSET (a dashboard corpus, a
+    resume record pool — design §4.2 case B) must exclude their
+    identity-less members BEFORE calling this, so the exclusion is a visible
+    act rather than a side effect of reconciliation.
+
+    Whole specs are compared, not ids: the same id with an opposite direction
+    is the most dangerous disagreement there is, because nothing about the
+    identity looks wrong while the ranking inverts.
+
+    Args:
+        stamped: the identity sources carried by the artifacts being compared.
+        bound: the run's composed metric spec, when the caller has one.
+        bound_label: how a refusal names ``bound``.
+
+    Returns:
+        The single compatible spec, or ``None`` when no source declares one.
+
+    Raises:
+        MetricIdentityConflictError: on any disagreement — bound against
+            stamp, stamp against stamp, or partial stamping.
+    """
+    reconciled = _reconcile_declarations(stamped, bound=bound, bound_label=bound_label)
+    assert reconciled is None or isinstance(reconciled, MetricSpec)
+    return reconciled
+
+
+def reconcile_metric_identity(
+    stamped: Sequence[StampedMetricSpec],
+    *,
+    bound: MetricSpec | None = None,
+    bound_label: str = "the run's bound task composition",
+) -> MetricIdentityKey | None:
+    """The same reconciliation, at RECORD granularity.
+
+    A persisted ``ExperimentRecord`` carries ``metric_result`` — ``metric_id``
+    plus ``direction`` — not a whole ``MetricSpec``. That pair IS the minimum
+    comparison identity (design §4.4), so record-level consumers reconcile on
+    it while spec-level consumers reconcile on the whole declaration.
+
+    Same engine, same truth table, same refusals — only the granularity of the
+    comparison differs, and it is the COARSEST granularity present: every input
+    is projected to :class:`MetricIdentityKey` before comparison, so a full
+    spec and a record identity can be checked against each other. This is
+    deliberately NOT a second reconciliation implementation; both entry points
+    delegate to :func:`_reconcile_declarations`.
+
+    Note that identity is weaker than a spec: two specs that share
+    ``(id, direction)`` but differ in transform or aggregation reconcile HERE
+    and refuse in :func:`reconcile_metric_specs`. That is correct — a record
+    only ever declared the pair, so demanding more of it would refuse every
+    real corpus.
+
+    Returns:
+        The single compatible identity, or ``None`` when no source declares
+        one.
+
+    Raises:
+        MetricIdentityConflictError: on any disagreement.
+    """
+    projected = [
+        StampedMetricSpec(label=entry.label, spec=_as_identity(entry.spec)) for entry in stamped
+    ]
+    reconciled = _reconcile_declarations(
+        projected, bound=_as_identity(bound), bound_label=bound_label
+    )
+    assert reconciled is None or isinstance(reconciled, MetricIdentityKey)
+    return reconciled
+
+
+def metric_identity_from_record(record: Mapping[str, Any]) -> MetricIdentityKey | None:
+    """The identity a PERSISTED record was scored under, or ``None``.
+
+    Step 10 P2a C2. Reads only what Step 06 persisted —
+    ``metric_result.metric_id`` and ``metric_result.direction`` — and never the
+    metric's name, the score's sign, the task, or a default.
+
+    It lives HERE, with the reconciliation authority, for the reason Step 06's
+    C5 boundary guard enforces: validating a persisted direction means reading
+    the ``MetricDirection`` vocabulary, and that vocabulary may be interpreted
+    in exactly one module. A consumer that inlined ``direction in ("higher",
+    "lower")`` would become a second declaration site — which is how a
+    vocabulary drifts. The check below reads the declaration itself via
+    ``get_args`` rather than restating its members.
+
+    Returns:
+        The ``(id, direction)`` pair, or ``None`` — a NAMED absence covering a
+        legacy record, an unscored record, and a malformed one alike. Callers
+        exclude such records from ranking individually (design §4.2 case B);
+        they never guess a direction for them.
+    """
+    return metric_identity_from_mapping(record.get("metric_result"))
+
+
+def metric_identity_from_mapping(payload: Any) -> MetricIdentityKey | None:
+    """Validate a raw ``{metric_id, direction}`` mapping into an identity.
+
+    The ONE validator for a transported metric identity, whatever shape
+    carries it — a record's ``metric_result``, an
+    ``InterpretationOutput.metric_identity`` digest field, or any future
+    persisted echo of the same pair.
+
+    It lives here because validating ``direction`` means reading the
+    ``MetricDirection`` vocabulary, and that vocabulary may be interpreted in
+    exactly one module (Step 06's C5 boundary guard enforces this). A consumer
+    that inlined ``direction in ("higher", "lower")`` would become a second
+    declaration site. The check reads the declaration itself through
+    ``get_args`` rather than restating its members.
+
+    Returns:
+        The identity, or ``None`` for a NAMED absence — missing, malformed,
+        or carrying a direction outside the declared vocabulary. Never a
+        guess, and never a default.
+    """
+    if not isinstance(payload, Mapping):
+        return None
+    metric_id = payload.get("metric_id")
+    direction = payload.get("direction")
+    if not isinstance(metric_id, str) or not metric_id:
+        return None
+    if direction not in get_args(MetricDirection):
+        return None
+    # The membership test above IS the check, and it reads the declaration
+    # itself rather than restating its members. `get_args` returns
+    # `tuple[Any, ...]`, so a type checker cannot narrow through it; the cast
+    # asserts only what the runtime check has already established. Spelling
+    # the members here to help the checker would create the second direction
+    # vocabulary this module exists to prevent.
+    return MetricIdentityKey(id=metric_id, direction=cast(MetricDirection, direction))
+
+
+def _as_identity(value: MetricDeclaration | None) -> MetricIdentityKey | None:
+    """Project any identity source down to ``(id, direction)``."""
+    if value is None:
+        return None
+    if isinstance(value, MetricIdentityKey):
+        return value
+    return MetricIdentityKey(id=value.id, direction=value.direction)
+
+
+def _reconcile_declarations(
+    stamped: Sequence[StampedMetricSpec],
+    *,
+    bound: MetricDeclaration | None,
+    bound_label: str,
+) -> MetricDeclaration | None:
+    """THE reconciliation engine — the one place the truth table is decided.
+
+    Both public entry points delegate here, so "are these the same metric?" is
+    answered by exactly one implementation regardless of whether the caller
+    holds whole specs or record identities.
+    """
+    present = [entry for entry in stamped if entry.spec is not None]
+    absent = [entry for entry in stamped if entry.spec is None]
+
+    if present and absent:
+        raise MetricIdentityConflictError(
+            "cannot reconcile the run MetricSpec: "
+            f"{_name_specs(present)} carry one but {_name_specs(absent)} do not. "
+            "A legacy/pre-09a tuning output lacks the stamped run MetricSpec required "
+            "for interpretation ordering — re-produce it under Step 09a or start a "
+            "fresh chain. No replacement spec is derived."
+        )
+
+    reference = bound
+    reference_label = bound_label
+    for entry in present:
+        assert entry.spec is not None  # narrowed by the filter above
+        if reference is None:
+            reference, reference_label = entry.spec, entry.label
+            continue
+        if entry.spec != reference:
+            raise MetricIdentityConflictError(
+                "cannot reconcile the run MetricSpec: "
+                f"{reference_label!r} declares "
+                f"id={reference.id!r} direction={reference.direction!r}, but "
+                f"{entry.label!r} declares "
+                f"id={entry.spec.id!r} direction={entry.spec.direction!r}. "
+                "One comparison covers one metric binding; a changed binding is a "
+                "different run."
+            )
+    return reference
+
+
+def _name_specs(entries: Sequence[StampedMetricSpec]) -> str:
+    """Quoted labels, so a refusal names its offenders."""
+    return ", ".join(entry.label for entry in entries) or "<none>"
 
 
 # ---------------------------------------------------------------------------

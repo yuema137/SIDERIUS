@@ -39,7 +39,13 @@ from agent.schemas.interpretation import (
 )
 from agent.schemas.ordering import ResolvedOrdering
 from agent.schemas.score_table import ScoreComparisonTable
-from execute_tools.evaluation_metric import MetricDirection, MetricSpec
+from execute_tools.evaluation_metric import (
+    MetricDirection,
+    MetricIdentityConflictError,
+    MetricSpec,
+    StampedMetricSpec,
+    reconcile_metric_specs,
+)
 from execute_tools.metric_order import MetricOrder
 
 if TYPE_CHECKING:
@@ -65,6 +71,13 @@ def reconcile_metric_spec(
     so this COMPARES transported values — it derives nothing and has no
     fallback.
 
+    Step 10 P2a C1 (Q-P2a-3 = PROMOTE): the DECISION now lives in
+    :func:`execute_tools.evaluation_metric.reconcile_metric_specs`, beside
+    ``MetricSpec`` itself, because three generic consumers outside this node
+    need the same answer. What remains here is the node's PROJECTION — tuning
+    outputs to labelled identity sources — and its own error type. There is
+    exactly one reconciliation implementation, and it is not this function.
+
     Returns the common spec; ``None`` when no output carries one (a legacy set,
     or a cold start), which is a NAMED absence the input contract then judges.
 
@@ -72,43 +85,23 @@ def reconcile_metric_spec(
         InterpretationContractError: if two outputs carry different specs, or
             if some carry one and others do not. Both cases mean the set spans
             more than one metric binding, and silently picking either would
-            order results on a metric they were not scored under.
+            order results on a metric they were not scored under. Semantics
+            are unchanged by the promotion, message text included.
     """
-    stamped = [o for o in outputs if getattr(o, "metric_spec", None) is not None]
-    if not stamped:
-        return None
-
-    unstamped = [o for o in outputs if getattr(o, "metric_spec", None) is None]
-    if unstamped:
-        raise InterpretationContractError(
-            "cannot reconcile the run MetricSpec: "
-            f"{_name_outputs(stamped)} carry one but {_name_outputs(unstamped)} do not. "
-            "A legacy/pre-09a tuning output lacks the stamped run MetricSpec required "
-            "for interpretation ordering — re-produce it under Step 09a or start a "
-            "fresh chain. No replacement spec is derived."
+    stamped = [
+        StampedMetricSpec(
+            label=f"{o.run_name!r} ({o.model_type!r})",
+            spec=getattr(o, "metric_spec", None),
         )
-
-    reference = stamped[0].metric_spec
-    assert reference is not None  # narrowed by the filter above
-    disagreeing = [o for o in stamped if o.metric_spec != reference]
-    if disagreeing:
-        other = disagreeing[0].metric_spec
-        assert other is not None  # narrowed by the same filter
-        raise InterpretationContractError(
-            "cannot reconcile the run MetricSpec: "
-            f"{_name_outputs([stamped[0]])} declares "
-            f"id={reference.id!r} direction={reference.direction!r}, but "
-            f"{_name_outputs(disagreeing)} declares "
-            f"id={other.id!r} direction={other.direction!r}. "
-            "One interpretation covers one metric binding; a changed binding is a "
-            "different run."
-        )
-    return reference
-
-
-def _name_outputs(outputs: Sequence[HyperparamTuningOutput]) -> str:
-    """``run_name`` / ``model_type`` pairs, so a refusal names its offenders."""
-    return ", ".join(f"{o.run_name!r} ({o.model_type!r})" for o in outputs) or "<none>"
+        for o in outputs
+    ]
+    try:
+        return reconcile_metric_specs(stamped)
+    except MetricIdentityConflictError as exc:
+        # The node keeps its own public error type: `InterpretationContractError`
+        # is what the interpreter's callers catch, and the promotion must not
+        # change that contract. The message is the shared authority's, unchanged.
+        raise InterpretationContractError(str(exc)) from exc
 
 
 def _project_metric_identity(records: list[ExperimentRecord]) -> MetricIdentity | None:

@@ -159,22 +159,26 @@ def test_no_production_surface_executes_a_direction_literal_outside_the_metric_m
 # checkable, and so migrating one of them is a visible, recorded act.
 NOT_REACHED_DIRECTION_CONSUMERS = (
     # D1 — chain / resume / artifacts / dashboard
-    (
-        # Step 09.5a C4a moved the accumulator onto the ChainState carrier, so
-        # the SPELLING changed. The consumer itself is UNMIGRATED — it is still
-        # a raw `>` that assumes higher-is-better, and it is still owed to D1 /
-        # Step 10. Updating the literal keeps this guard live; deleting the row
-        # would have silently retired the debt it exists to track.
-        "workflows/model_exploration.py",
-        "tune_output.best_formal_denoising_score > state.best_score_overall",
-    ),
-    ("core/resume.py", "if score > best_score or ("),
-    ("execute_tools/per_file_best.py", "return new.best_linear > current.best_linear"),
-    (
-        "dashboard/data_sources/local_json.py",
-        'entries.sort(key=lambda e: e["denoising_score"], reverse=True)',
-    ),
-    ("dashboard/data_sources/base.py", "ranked by denoising_score descending (higher is better)"),
+    #
+    # The `workflows/model_exploration.py` row that stood here was RETIRED by
+    # Step 10 P2a C1, which routed the workflow's raw-formal best tracker, the
+    # chain formal incumbent advance and the `target_score` early stop through
+    # `MetricOrder`. Per this file's own rule it moved to
+    # MIGRATED_TO_THE_ORDER_AUTHORITY rather than being deleted, so the
+    # migration leaves a trace.
+    # The `core/resume.py` and `execute_tools/per_file_best.py` rows that stood
+    # here were RETIRED by Step 10 P2a C2, which routed `_pick_best`, the
+    # chain-level incumbent fold and `_row_beats` through `MetricOrder`. Both
+    # moved to MIGRATED_TO_THE_ORDER_AUTHORITY rather than being deleted.
+    # The two `dashboard/` rows that stood here were RETIRED by Step 10 P2a
+    # C3, which routed the leaderboard sort and the best_agent_score scan
+    # through MetricOrder and replaced the "higher is better" prose with
+    # direction-aware wording. Both moved to MIGRATED_TO_THE_ORDER_AUTHORITY.
+    #
+    # This tuple is now EMPTY: every D1 direction consumer Step 06 enumerated
+    # as out of reach has been reached. It is kept rather than deleted so the
+    # parametrized guard below still names the concept, and so a future
+    # unmigrated consumer has an obvious home.
 )
 
 
@@ -255,7 +259,70 @@ MIGRATED_TO_THE_ORDER_AUTHORITY = (
         "workflows/model_exploration.py",
         'scored.sort(key=lambda x: x[1] if x[1] is not None else float("-inf"), reverse=True)',
     ),
+    # --- Step 10 P2a C1: the live-workflow surface (sites 1-3) ---
+    # The raw-formal best tracker, the chain formal incumbent advance and the
+    # `target_score` early stop. All three now acquire ONE reconciled
+    # `MetricOrder` per iteration and ask it; the first of these is the row
+    # that moved out of NOT_REACHED_DIRECTION_CONSUMERS above.
+    (
+        "workflows/model_exploration.py",
+        "tune_output.best_formal_denoising_score > state.best_score_overall",
+    ),
+    (
+        "workflows/model_exploration.py",
+        "_iter_valid_formal > state.chain_formal_incumbent_reference",
+    ),
+    (
+        "workflows/model_exploration.py",
+        "state.best_score_overall >= launch.target_score",
+    ),
+    # --- Step 10 P2a C2: resume selection and per-file best ---
+    # `_pick_best` and `_row_beats` now take a keyword-only `MetricOrder`, and
+    # the chain-level incumbent fold (found by the P2a scanner, absent from the
+    # frozen site table) asks the same authority.
+    ("core/resume.py", "if score > best_score or ("),
+    ("core/resume.py", 'or formal_cand["score"] > state.chain_best_valid_formal_score'),
+    ("core/resume.py", 'or trial_cand["score"] > state.chain_best_trial_score'),
+    ("execute_tools/per_file_best.py", "return new.best_linear > current.best_linear"),
+    # --- Step 10 P2a C3: the persisted-artifact consumers ---
+    # The dashboard and the two diagnostic scripts now read the direction from
+    # each record's persisted metric identity. The prose row is here too: it
+    # stated a direction that was only ever true of TIDMAD.
+    (
+        "dashboard/data_sources/local_json.py",
+        'entries.sort(key=lambda e: e["denoising_score"], reverse=True)',
+    ),
+    ("dashboard/data_sources/base.py", "ranked by denoising_score descending (higher is better)"),
+    (
+        "scripts/build_diagnostic_summary.py",
+        'max(valid, key=lambda record: record["denoising_score"])',
+    ),
+    (
+        "scripts/finalize_recovered_diagnostic_round.py",
+        'max(valid, key=lambda item: item["denoising_score"])',
+    ),
 )
+
+
+#: How each migrated consumer REACHES the order authority.
+#:
+#: Most name ``MetricOrder`` directly. Step 10 P2a C3's persisted-artifact
+#: consumers reach it through ``execute_tools/persisted_ranking.py``, the one
+#: shared composer that reconciles a corpus's declared identity and hands the
+#: result to ``MetricOrder`` — written once rather than three times, because
+#: three copies of a fail-closed rule are three chances for one to stop
+#: failing. The marker is per row so "reaches the authority" stays an
+#: ASSERTED property rather than becoming an unchecked exemption.
+_AUTHORITY_MARKERS: dict[str, str] = {
+    "dashboard/data_sources/local_json.py": "persisted_ranking",
+    "scripts/build_diagnostic_summary.py": "persisted_ranking",
+    "scripts/finalize_recovered_diagnostic_round.py": "persisted_ranking",
+    # A prose-only row: an abstract method's docstring, which names no
+    # authority because it executes nothing. What must be true of it is that
+    # it no longer STATES a fixed direction — asserted below by the absence of
+    # its old literal, and positively by the C3 prose test.
+    "dashboard/data_sources/base.py": "metric identity",
+}
 
 
 @pytest.mark.parametrize("relative, literal", MIGRATED_TO_THE_ORDER_AUTHORITY)
@@ -263,7 +330,13 @@ def test_the_migrated_consumers_no_longer_hold_their_literal(relative, literal):
     source = (REPO_ROOT / relative).read_text(encoding="utf-8")
     assert literal not in source, (
         f"{relative} still contains {literal!r}: this consumer was routed through "
-        f"MetricOrder (tuner: Step 07 PR 07b; interpreter: Step 09a C3), so the "
-        f"hardcoded higher-is-better comparison must be gone"
+        f"MetricOrder (tuner: Step 07 PR 07b; interpreter: Step 09a C3; "
+        f"chain/resume/artifacts: Step 10 P2a), so the hardcoded "
+        f"higher-is-better comparison must be gone"
     )
-    assert "MetricOrder" in source
+    marker = _AUTHORITY_MARKERS.get(relative, "MetricOrder")
+    assert marker in source, (
+        f"{relative} no longer reaches the order authority via {marker!r} — a "
+        f"migrated consumer that stops consulting it has silently regained the "
+        f"freedom to assume a direction"
+    )

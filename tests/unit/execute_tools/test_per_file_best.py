@@ -21,6 +21,7 @@ import pytest
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from core.resume import ReplayIntegrityError
+from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
 from execute_tools.per_file_best import (
     LOG_BASE,
     SCHEMA_VERSION,
@@ -111,6 +112,20 @@ def _record(
         "health_gate_results": verdicts or [],
         "model_params": model_params,
     }
+    # Step 10 P2a C2 — a SCORED record carries the identity it was scored
+    # under (Step 06's additive `metric_result`), and the table now reads it
+    # to decide which direction "best" means. These fixtures predate the
+    # field; stamping it restores what a real post-Step-06 record looks like,
+    # so these tests keep asserting row selection and provenance rather than
+    # accidentally asserting the no-identity refusal. That refusal has its own
+    # coverage in tests/unit/execute_tools/test_step10_p2a_c2_resume_and_per_file.py.
+    if status == "success" and rec["denoising_score"] is not None:
+        rec["metric_result"] = {
+            "metric_id": TIDMAD_METRIC_ID,
+            "direction": "higher",
+            "scalar": rec["denoising_score"],
+            "per_sample": file_vector,
+        }
     if waiver is False:
         rec["health_gate_enabled"] = False
     if is_trial:

@@ -15,6 +15,11 @@ import json
 import os
 
 from dashboard.data_sources.base import DataSource
+from execute_tools.evaluation_metric import (
+    METRIC_IDENTITY_UNAVAILABLE,
+    metric_identity_from_record,
+)
+from execute_tools.persisted_ranking import corpus_order as _corpus_order
 
 
 class LocalJsonDataSource(DataSource):
@@ -184,6 +189,12 @@ class LocalJsonDataSource(DataSource):
         best_score: float | None = None
         best_run_name: str | None = None
 
+        # Step 10 P2a C3 — a persisted artifact declares which metric it was
+        # scored on; ranking may not assume higher-is-better. Rows are
+        # collected first, then reconciled, then ranked (§4.1: reconciliation
+        # BEFORE ordering).
+        rankable: list[tuple[str, dict]] = []
+        unranked = 0
         for run_name in self._list_agent_run_names(model):
             path = self._agent_summary_path(model, run_name)
             for rec in self._read_json(path):
@@ -191,8 +202,20 @@ class LocalJsonDataSource(DataSource):
                     continue
                 status = rec.get("status", "unknown")
                 status_counts[status] = status_counts.get(status, 0) + 1
-                score = rec.get("denoising_score")
-                if score is not None and (best_score is None or score > best_score):
+                if rec.get("denoising_score") is None:
+                    continue
+                if metric_identity_from_record(rec) is None:
+                    # §4.2 case B/C: inspectable, raw value still shown
+                    # elsewhere, but never ranked and never called best.
+                    unranked += 1
+                    continue
+                rankable.append((run_name, rec))
+
+        order, identity_error = _corpus_order([rec for _, rec in rankable])
+        if order is not None:
+            for run_name, rec in rankable:
+                score = rec["denoising_score"]
+                if best_score is None or order.is_better(score, best_score):
                     best_score = score
                     best_run_name = run_name
 
@@ -207,6 +230,12 @@ class LocalJsonDataSource(DataSource):
             "total_experiments": total,
             "status_counts": status_counts,
             "runs": runs,
+            # Q-10-2: the named state, so an operator can tell "no best" from
+            # "best not computed". Absent identity is NOT an error.
+            "metric_identity_unavailable_rows": unranked,
+            "metric_ranking_unavailable": None
+            if order is not None
+            else (identity_error or METRIC_IDENTITY_UNAVAILABLE),
         }
 
     def get_leaderboard(
@@ -219,6 +248,7 @@ class LocalJsonDataSource(DataSource):
             raise KeyError(f"Model '{model}' not found in {self.root}")
 
         entries = []
+        ranked_records = []
         for run_name in self._list_agent_run_names(model):
             path = self._agent_summary_path(model, run_name)
             for rec in self._read_json(path):
@@ -229,23 +259,48 @@ class LocalJsonDataSource(DataSource):
                 score = rec.get("denoising_score")
                 if score is None:
                     continue
-                entries.append(
-                    {
-                        "exp_id": rec.get("exp_id"),
-                        "run_name": run_name,
-                        "denoising_score": score,
-                        "final_loss": rec.get("final_loss"),
-                        "model_params": rec.get("model_params"),
-                        "loss_type": rec.get("params", {}).get("loss_config", {}).get("loss_type"),
-                        "epochs": rec.get("params", {}).get("train_config", {}).get("epochs"),
-                        "timestamp": rec.get("timestamp"),
-                    }
-                )
+                entry = {
+                    "exp_id": rec.get("exp_id"),
+                    "run_name": run_name,
+                    "denoising_score": score,
+                    "final_loss": rec.get("final_loss"),
+                    "model_params": rec.get("model_params"),
+                    "loss_type": rec.get("params", {}).get("loss_config", {}).get("loss_type"),
+                    "epochs": rec.get("params", {}).get("train_config", {}).get("epochs"),
+                    "timestamp": rec.get("timestamp"),
+                }
+                # Step 10 P2a C3 / §4.2 — a row with no declared metric
+                # identity stays INSPECTABLE (its raw score is right here)
+                # but is never ranked and never called best. One such row
+                # does not poison the compatible rows beside it.
+                if metric_identity_from_record(rec) is None:
+                    entry["rank"] = None
+                    entry["metric_ranking"] = METRIC_IDENTITY_UNAVAILABLE
+                else:
+                    ranked_records.append(rec)
+                entries.append(entry)
 
-        entries.sort(key=lambda e: e["denoising_score"], reverse=True)
-        for i, entry in enumerate(entries[:top_n], start=1):
-            entry["rank"] = i
-        return entries[:top_n]
+        order, identity_error = _corpus_order(ranked_records)
+        if order is None:
+            # Case C (nothing rankable) or case D (incomparable identities):
+            # show every row, rank NOTHING, and say why.
+            for entry in entries:
+                entry["rank"] = None
+                entry["metric_ranking"] = identity_error or METRIC_IDENTITY_UNAVAILABLE
+            return entries[:top_n]
+
+        rankable = [e for e in entries if "metric_ranking" not in e]
+        unrankable = [e for e in entries if "metric_ranking" in e]
+        # Best-first on the metric's OWN axis: `rank` is 1 for the best value
+        # under either direction, so ordering by it needs no second reading of
+        # `direction` here. Ties share a rank, and Python's sort is stable, so
+        # equal scores keep their discovery order exactly as `reverse=True` did.
+        scores = [entry["denoising_score"] for entry in rankable]
+        rankable.sort(key=lambda entry: order.rank(scores, entry["denoising_score"]))
+        for position, entry in enumerate(rankable, start=1):
+            entry["rank"] = position
+        # Unrankable rows trail the ranked ones: still visible, never "top N".
+        return (rankable + unrankable)[:top_n]
 
     # ------------------------------------------------------------------
     # Health

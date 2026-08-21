@@ -18,6 +18,7 @@ import hashlib
 import json
 import math
 import os
+import sys
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -30,7 +31,14 @@ from core.resume import (
     ReplayIntegrityError,
     classify_committed_record,
 )
-from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
+from execute_tools.evaluation_metric import (
+    TIDMAD_METRIC_ID,
+    StampedMetricSpec,
+    metric_identity_from_record,
+    metric_identity_unavailable_notice,
+    reconcile_metric_identity,
+)
+from execute_tools.metric_order import MetricOrder
 
 
 def _iter_run_name(iter_idx: int) -> str:
@@ -277,13 +285,45 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
     iterations_included = sorted(s.iter_idx for s in sources)
     unverified = sum(1 for s in sources if not s.artifact_verified)
 
+    # Step 10 P2a C2 — one reconciled order for the whole table, built from
+    # what the artifacts DECLARE (§4.4). A set of iterations spanning two
+    # metric bindings refuses here rather than ranking per-file rows across
+    # incomparable metrics.
+    row_order = _table_order(sources)
+
     # (file_index, phase, validity) -> best row candidate, tracked in
     # linear space so tie-breaks compare on the same units as the
     # persisted vector.
     candidates: dict[tuple[int, str, str], _RowCandidate] = {}
     skipped_nonpositive = 0
 
-    for src in sources:
+    # Q-10-2: nothing declares which way is better, so no row can be called
+    # "best". The header is still emitted — the table stays inspectable and
+    # its provenance readable — but it carries no rows and says why.
+    scanned_sources = sources if row_order is not None else []
+    if row_order is None and sources:
+        # STDERR, not stdout. `scripts/rebuild_per_file_best.py --print-only`
+        # writes this table's canonical JSON to stdout and its contract is
+        # byte-exact (`test_cli_print_only_writes_canonical_json_to_stdout`
+        # compares stdout to `canonical_bytes` directly), so a diagnostic line
+        # on stdout would corrupt a machine-readable artifact. The notice is
+        # for a human; the table is for a program.
+        print(
+            metric_identity_unavailable_notice(
+                "the per-file best table",
+                detail=(
+                    f"{len(sources)} committed iteration(s) declare no metric identity; "
+                    "no row is selected"
+                ),
+            ),
+            file=sys.stderr,
+        )
+
+    for src in scanned_sources:
+        # `scanned_sources` is EMPTY whenever `row_order` is None, so the body
+        # below is unreachable without an order. Stated for the type checker,
+        # which cannot see that coupling across the assignment above.
+        assert row_order is not None
         # A single validity classification per record — used for BOTH
         # the ``valid`` row eligibility and the raw row's gate_summary.
         for rec in src.parsed.all_records:
@@ -330,6 +370,7 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
                         gate_summary=gate_summary,
                         timestamp=str(data.get("timestamp") or ""),
                     ),
+                    order=row_order,
                 )
                 # VALID rows only get commit-time VALID records.
                 if cls.validity is CandidateHealthValidity.VALID:
@@ -352,6 +393,7 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
                             gate_summary=gate_summary,
                             timestamp=str(data.get("timestamp") or ""),
                         ),
+                        order=row_order,
                     )
 
     files_covered = sorted({key[0] for key in candidates})
@@ -465,22 +507,84 @@ class _RowCandidate:
         }
 
 
+def _table_order(sources: list[_SourceIter]) -> MetricOrder | None:
+    """The ONE order every row in this table is selected by, or ``None``.
+
+    Step 10 P2a C2. Both declared sources §4.4 names for this module are
+    offered to the SHARED reconciliation authority — each iteration's stamped
+    ``MetricSpec`` and each scored record's persisted ``metric_result`` — so a
+    workspace whose iterations span two metric bindings refuses here rather
+    than silently ranking per-file rows across incomparable metrics.
+
+    Returns ``None`` when NOTHING declares an identity (a pre-Step-06
+    workspace). The table then reports no rows rather than ranking them on an
+    assumed direction.
+
+    **It deliberately does NOT derive a spec in that case.** An earlier draft
+    fell back to ``derive_tidmad_metric_spec``, reasoning that this module
+    already emits ``metric_id: TIDMAD_METRIC_ID`` in its own header. That was
+    wrong twice over: P2a's frozen contract is that it derives metric identity
+    NOWHERE, and Step 09a's executable census pins the exact set of production
+    modules allowed to derive the TIDMAD metric — the fallback made this a
+    fifth, and CI caught it. Emitting a metric's NAME is not the same as being
+    entitled to invent its direction.
+
+    Raises:
+        MetricIdentityConflictError: sources declare different metrics.
+    """
+    stamped: list[StampedMetricSpec] = [
+        StampedMetricSpec(label=f"iteration {src.iter_idx}", spec=src.parsed.metric_spec)
+        for src in sources
+        if getattr(src.parsed, "metric_spec", None) is not None
+    ]
+    stamped += [
+        StampedMetricSpec(
+            label=f"iteration {src.iter_idx} record {data.get('exp_id')!r}",
+            spec=identity,
+        )
+        for src in sources
+        for data in (_record_dict(rec) for rec in src.parsed.all_records)
+        if (identity := metric_identity_from_record(data)) is not None
+    ]
+    reconciled = reconcile_metric_identity(stamped)
+    return MetricOrder(reconciled) if reconciled is not None else None
+
+
 def _consider(
     candidates: dict[tuple[int, str, str], _RowCandidate],
     key: tuple[int, str, str],
     new: _RowCandidate,
+    *,
+    order: MetricOrder,
 ) -> None:
-    """A3 tie rule: max linear score; ties → earliest iteration →
+    """A3 tie rule: BEST linear score; ties → earliest iteration →
     persisted round rule → lex smallest ``exp_id``. Applied once per row
     key so incremental and rebuild resolve ties identically."""
     current = candidates.get(key)
-    if current is None or _row_beats(new, current):
+    if current is None or _row_beats(new, current, order=order):
         candidates[key] = new
 
 
-def _row_beats(new: _RowCandidate, current: _RowCandidate) -> bool:
+def _row_beats(new: _RowCandidate, current: _RowCandidate, *, order: MetricOrder) -> bool:
+    """Whether ``new`` displaces ``current`` for one row key.
+
+    Step 10 P2a C2 / design §4.3. Only the SCORE comparison consults
+    ``order``; every tie rule below it is direction-INDEPENDENT and is
+    unchanged.
+
+    Why comparing ``best_linear`` is legitimate (§4.3, a TIDMAD fact — NOT a
+    generic framework contract): ``best_linear`` holds the persisted
+    ``file_vector`` values themselves, and the log form emitted as
+    ``best_log_score`` is a DERIVED display computed by :func:`_log`. Since
+    ``LOG_BASE`` is 5.27 > 1, ``log_5.27`` is strictly increasing, so ranking
+    in linear space and ranking in log space agree for every positive value —
+    and the loader already discards non-positive entries. A future metric
+    whose per-sample values need a NON-monotone display transform would break
+    that equivalence; that is a named future capability requirement of the
+    metric interface, deliberately not faked here as a generic guard.
+    """
     if new.best_linear != current.best_linear:
-        return new.best_linear > current.best_linear
+        return order.is_better(new.best_linear, current.best_linear)
     if new.iter_idx != current.iter_idx:
         return new.iter_idx < current.iter_idx
     # Persisted round wins over legacy-unknown at the same iteration.

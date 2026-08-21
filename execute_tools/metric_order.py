@@ -49,7 +49,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Sequence
 from typing import TypeVar
 
-from execute_tools.evaluation_metric import MetricDirection, MetricSpec
+from execute_tools.evaluation_metric import MetricDeclaration, MetricDirection
 
 _T = TypeVar("_T")
 
@@ -65,8 +65,12 @@ class MetricOrder:
     interpretation site this class exists to prevent — use :meth:`worst`.
 
     Args:
-        spec: the bound golden metric's declaration. Only
-            :attr:`MetricSpec.direction` is read.
+        spec: the golden metric's declaration — either the whole
+            :class:`~execute_tools.evaluation_metric.MetricSpec` or the
+            minimum comparison identity
+            :class:`~execute_tools.evaluation_metric.MetricIdentityKey`
+            a persisted record carries. Only ``direction`` is read, from
+            either.
 
     Example:
         >>> from execute_tools.evaluation_metric import derive_tidmad_metric_spec
@@ -76,11 +80,23 @@ class MetricOrder:
         'higher'
         >>> order.is_better(-2.55, -2.91)
         True
+
+    Note (Step 10 P2a C3, deviation D-P2a-4): the parameter accepts
+    ``MetricIdentityKey`` as well as ``MetricSpec``. This is a TYPE-LEVEL
+    widening with no behavioural change — the class reads ``direction`` and
+    nothing else, exactly as before, and remains the single site where the
+    declaration is interpreted. It exists because the design's §4.4 states
+    that a persisted artifact carries ``metric_id`` + ``direction`` and NOT a
+    whole spec, while requiring those consumers (dashboard, diagnostic
+    scripts, proposer) to rank; without this the only alternatives were to
+    synthesise a fake ``MetricSpec`` — inventing ``aggregation`` and
+    ``scoreability`` a record never declared — or to add a second comparator
+    outside this class. Both are things P2a exists to prevent.
     """
 
     __slots__ = ("_higher", "direction")
 
-    def __init__(self, spec: MetricSpec) -> None:
+    def __init__(self, spec: MetricDeclaration) -> None:
         self.direction: MetricDirection = spec.direction
         self._higher: bool = spec.direction == _HIGHER
 

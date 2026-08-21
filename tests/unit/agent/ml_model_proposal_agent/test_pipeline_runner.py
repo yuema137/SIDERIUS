@@ -35,6 +35,15 @@ from ._prompt_utils import extract_accumulated_json
 FAKE_INTERPRETATION = {
     "model_types": ["punet", "wavenet", "fcnet", "gated_fno"],
     "total_experiments": 20,
+    # Step 10 P2a C4 — a real InterpretationOutput carries the identity the
+    # digest was ORDERED under (Step 09a's `metric_identity` provenance), and
+    # `select_candidate_models` now reads it instead of assuming that a larger
+    # score is better. This fixture predates the field; stamping TIDMAD's
+    # higher-is-better identity is what these tests always meant, and without
+    # it they would assert the Q-P2a-1 unranked fallback rather than the
+    # top_n cut they exist to test. The fallback has its own coverage in
+    # tests/unit/nodes/test_step10_p2a_c4_proposer_top_n.py.
+    "metric_identity": {"metric_id": "tidmad_denoising_score", "direction": "higher"},
     "per_model_best": {"punet": 1.8, "wavenet": 5.5, "fcnet": 0.9, "gated_fno": 4.2},
     "per_model_best_valid": {
         "punet": 1.8,

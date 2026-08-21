@@ -19,9 +19,27 @@ from dashboard.data_sources.local_json import LocalJsonDataSource
 
 
 def _make_record(
-    exp_id, status="success", score=None, loss_type="ce", epochs=10, model_type="punet"
+    exp_id,
+    status="success",
+    score=None,
+    loss_type="ce",
+    epochs=10,
+    model_type="punet",
+    *,
+    metric_identity=("tidmad_denoising_score", "higher"),
 ):
-    return {
+    """One synthetic persisted record.
+
+    Step 10 P2a C3: a real post-Step-06 record carries ``metric_result``, and
+    the dashboard now reads it to decide what may be ranked. These fixtures
+    predate that field, so it is stamped here by default — otherwise these
+    tests would silently stop asserting the ranking they exist to test and
+    start asserting the no-identity refusal instead.
+
+    Pass ``metric_identity=None`` for a legacy record with no declared
+    identity, or a different pair to build an incomparable corpus.
+    """
+    record = {
         "exp_id": exp_id,
         "status": status,
         "model_type": model_type,
@@ -35,6 +53,13 @@ def _make_record(
         "results": {"final_loss": 0.5, "model_params": 1000},
         "memory": {"hypothesis": "test", "conclusion": "ok"},
     }
+    if metric_identity is not None and score is not None:
+        record["metric_result"] = {
+            "metric_id": metric_identity[0],
+            "direction": metric_identity[1],
+            "scalar": score,
+        }
+    return record
 
 
 def _write_json(path, data):

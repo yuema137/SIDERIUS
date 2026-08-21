@@ -55,6 +55,12 @@ from core.run_invariants import (
 from core.sandbox_executor import get_plugin_dir
 from core.scientific_authority import resolve_record_authority
 from execute_tools.dataset_config import TIDMAD
+from execute_tools.evaluation_metric import (
+    StampedMetricSpec,
+    metric_identity_from_record,
+    metric_identity_unavailable_notice,
+    reconcile_metric_identity,
+)
 from execute_tools.health_checks.candidate_eligibility import (
     CandidateHealthValidity,
     classify_candidate_health,
@@ -64,6 +70,7 @@ from execute_tools.health_checks.config import (
     EFFECTIVE_CONFIG_BASENAME,
     read_effective_config_body_sha,
 )
+from execute_tools.metric_order import MetricOrder
 from workflows.model_exploration import _add_plugin_to_registries
 
 # ---------------------------------------------------------------------------
@@ -438,21 +445,117 @@ def _classify_commit_time(
     return classify_candidate_health(record, required_gate_ids=gate_ids)
 
 
-def _pick_best(records: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """Within-iteration selection: max score; tie → lexicographic smallest
+def _pick_best(records: list[dict[str, Any]], *, order: MetricOrder) -> dict[str, Any] | None:
+    """Within-iteration selection: BEST score; tie → lexicographic smallest
     ``exp_id`` (design §3.3 tie rules; cross-iteration earliest-wins is
-    enforced by the strictly-greater update in the caller's walk)."""
+    enforced by the strictly-better update in the caller's walk).
+
+    Step 10 P2a C2: "best" is the metric's own direction, asked of
+    ``MetricOrder`` — under a minimised metric this selects the MINIMUM. The
+    ``order`` is keyword-only and has NO default: a caller that has not
+    reconciled an identity must not be able to reach a ranking by omission.
+
+    The ``exp_id`` tie-break is DIRECTION-INDEPENDENT and is untouched.
+    """
     best: dict[str, Any] | None = None
     for rec in records:
         if best is None:
             best = rec
             continue
         score, best_score = rec["denoising_score"], best["denoising_score"]
-        if score > best_score or (
+        if order.is_better(score, best_score) or (
             score == best_score and str(rec.get("exp_id")) < str(best.get("exp_id"))
         ):
             best = rec
     return best
+
+
+def _chain_fold_order(parsed: HyperparamTuningOutput) -> MetricOrder | None:
+    """The order the CHAIN-level incumbent fold ranks one iteration's candidate by.
+
+    Step 10 P2a C2, deviation D-P2a-1. The chain fold compares an iteration's
+    winning candidate against the incumbent carried across iterations, so its
+    identity source is that iteration's own stamped ``MetricSpec``. ``None``
+    when the output carries none — a named refusal, never a re-derivation
+    (parent §8), which leaves the chain incumbent untouched for that iteration
+    rather than advancing it on an assumed direction.
+    """
+    run_spec = getattr(parsed, "metric_spec", None)
+    if run_spec is None:
+        print(
+            metric_identity_unavailable_notice(
+                "the chain incumbent fold",
+                detail=f"{parsed.run_name!r} carries no stamped MetricSpec",
+            )
+        )
+        return None
+    return MetricOrder(run_spec)
+
+
+def _rankable_pool(
+    records: list[dict[str, Any]],
+    parsed: HyperparamTuningOutput,
+    *,
+    context: str,
+) -> tuple[list[dict[str, Any]], MetricOrder | None]:
+    """Split a candidate pool into what may be RANKED, and the order to rank by.
+
+    Design §4.2/§4.2a, applied PER RECORD:
+
+    * a record carrying no metric identity is excluded INDIVIDUALLY — one
+      legacy row never poisons an otherwise compatible corpus (case B);
+    * the remaining identities are reconciled against the output's own
+      ``metric_spec`` stamp through the SHARED authority; conflicting KNOWN
+      identities fail closed (case D);
+    * no rankable record, or no spec to order by, yields ``None`` — the caller
+      restores no incumbent and says so (case C).
+
+    The order comes from the output's stamped ``MetricSpec``, never from a
+    spec re-derived out of a record's identity: parent §8 requires a named
+    refusal rather than a re-derivation, and a record only ever declared
+    ``(id, direction)``.
+
+    Raises:
+        MetricIdentityConflictError: conflicting known identities within the
+            pool, or against the output's stamp.
+    """
+    identities = [(rec, metric_identity_from_record(rec)) for rec in records]
+    rankable = [rec for rec, identity in identities if identity is not None]
+    excluded = [rec for rec, identity in identities if identity is None]
+
+    if excluded:
+        print(
+            metric_identity_unavailable_notice(
+                f"{len(excluded)} of {len(records)} {context} candidate records",
+                detail="excluded individually; the remaining records still compete",
+            )
+        )
+    if not rankable:
+        return [], None
+
+    run_spec = getattr(parsed, "metric_spec", None)
+    # Raises on a conflict — among the records themselves, or against the
+    # output's stamp. Never silently prefers one identity.
+    reconcile_metric_identity(
+        [
+            StampedMetricSpec(label=f"record {rec.get('exp_id')!r}", spec=identity)
+            for rec, identity in identities
+            if identity is not None
+        ],
+        bound=run_spec,
+        bound_label=f"the run's stamped MetricSpec ({parsed.run_name!r})",
+    )
+    if run_spec is None:
+        # The records agree on an identity, but nothing carries the declaration
+        # the order must be built from. A named refusal, NOT a re-derivation.
+        print(
+            metric_identity_unavailable_notice(
+                f"the {context} incumbent",
+                detail=f"{parsed.run_name!r} carries no stamped MetricSpec",
+            )
+        )
+        return [], None
+    return rankable, MetricOrder(run_spec)
 
 
 def _summary_mismatch(iter_idx: int, field_name: str, detail: str) -> None:
@@ -640,7 +743,13 @@ def _candidates_from_persisted_verdicts(
         if _classify_commit_time(r, gate_ids) is not CandidateHealthValidity.VALID:
             continue
         pool.append(r)
-    best = _pick_best(pool)
+    # Step 10 P2a C2 — reconcile identity BEFORE ordering. Validity filtering
+    # above is unchanged and still runs first; this only decides which of the
+    # already-valid candidates carry enough identity to be ranked at all.
+    rankable, order = _rankable_pool(pool, parsed, context="trial" if want_trial else "formal")
+    if order is None:
+        return None
+    best = _pick_best(rankable, order=order)
     if best is None:
         return None
     round_index, round_prov = _round_provenance(best)
@@ -1309,9 +1418,21 @@ def restore_prior_state(
             formal_cand, parsed, gate_ids, iter_idx
         ):
             formal_cand = None
-        if formal_cand is not None and (
-            state.chain_best_valid_formal_score is None
-            or formal_cand["score"] > state.chain_best_valid_formal_score
+        # Step 10 P2a C2, deviation D-P2a-1 — the CHAIN-level fold. Found by
+        # the C0 scanner, absent from the frozen §2.1 table, and audited to be
+        # the same golden values as `_pick_best` one level below (this
+        # candidate's "score" is `best_valid_formal_denoising_score`, or a
+        # record's own `denoising_score`). It ranks across ITERATIONS, so its
+        # order is reconciled per iteration from that iteration's output stamp.
+        _chain_order = _chain_fold_order(parsed)
+
+        if (
+            formal_cand is not None
+            and _chain_order is not None
+            and (
+                state.chain_best_valid_formal_score is None
+                or _chain_order.is_better(formal_cand["score"], state.chain_best_valid_formal_score)
+            )
         ):
             prov = _build_provenance(formal_cand, parsed, iter_idx, artifact_verified, trial=False)
             if prov is not None:
@@ -1319,9 +1440,13 @@ def restore_prior_state(
                 state.chain_best_valid_formal_provenance = prov
 
         trial_cand = _candidates_from_persisted_verdicts(parsed, gate_ids, want_trial=True)
-        if trial_cand is not None and (
-            state.chain_best_trial_score is None
-            or trial_cand["score"] > state.chain_best_trial_score
+        if (
+            trial_cand is not None
+            and _chain_order is not None
+            and (
+                state.chain_best_trial_score is None
+                or _chain_order.is_better(trial_cand["score"], state.chain_best_trial_score)
+            )
         ):
             prov = _build_provenance(trial_cand, parsed, iter_idx, artifact_verified, trial=True)
             if prov is not None:

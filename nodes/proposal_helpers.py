@@ -15,9 +15,40 @@ from agent.schemas.proposal import (
     ModelSelectionStrategy,
     ReasoningPipelineConfig,
 )
+from execute_tools.evaluation_metric import (
+    metric_identity_from_mapping,
+    metric_identity_unavailable_notice,
+)
+from execute_tools.metric_order import MetricOrder
 
 # Root of the SIDERIUS project
 _SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _interpretation_order(interpretation: dict[str, Any]) -> MetricOrder | None:
+    """The order the interpretation evidence was actually produced under.
+
+    Step 10 P2a C4. ``InterpretationOutput.metric_identity`` is Step 09a's
+    ordering PROVENANCE — the identity the digest was ordered under, echoed
+    from the run's bound ``MetricSpec``. It has always been present in the
+    dict this helper receives; the proposer simply never read it.
+
+    **Note for P3** (recorded so the mechanism can be replaced without
+    re-litigating the semantics): no threading was required. The helper
+    already takes the whole serialized interpretation, so C4 adds a READ, not
+    a new parameter, a new call-site argument or a typed reader. When P3
+    builds the proposer's typed evidence reader it should supply this same
+    identity through that reader and delete this function — the semantics to
+    preserve are "read the declared identity, never assume a direction, and
+    fall back to order-free `all` when it is absent".
+
+    Returns:
+        The order, or ``None`` when the digest carries no usable identity —
+        a NAMED absence (cold start, a scoreless input, or a pre-09a digest),
+        never a default direction.
+    """
+    identity = metric_identity_from_mapping(interpretation.get("metric_identity"))
+    return MetricOrder(identity) if identity is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -83,10 +114,30 @@ def select_candidate_models(
 
     if method == "top_n":
         n = params.get("n", 10)
-        # Sort by best_score descending, take top N
         scored = [m for m in all_models if m["best_score"] is not None]
-        scored.sort(key=lambda m: m["best_score"], reverse=True)
-        return scored[:n]
+        # Step 10 P2a C4 — the ONE site where a wrong direction changes what
+        # the SYSTEM DOES rather than what it displays. `reverse=True` on a
+        # minimised metric handed the proposer the WORST N candidates and
+        # called them the best.
+        order = _interpretation_order(interpretation)
+        if order is None:
+            # Q-P2a-1 (operator ruling): no usable metric identity means NO
+            # metric ranking happened, so this falls back to the EXISTING
+            # order-free `all` semantics rather than inventing a first-N /
+            # declaration-order-N policy. The result is deliberately NOT
+            # described as "top N" or "best" anywhere — nothing was ranked.
+            print(
+                metric_identity_unavailable_notice(
+                    f"the proposer's top_n({n}) candidate cut",
+                    detail="returning the full candidate set unranked",
+                )
+            )
+            return all_models
+        ranked = sorted(
+            scored,
+            key=lambda m: order.rank([c["best_score"] for c in scored], m["best_score"]),
+        )
+        return ranked[:n]
 
     if method == "human_specified":
         specified = set(params.get("models", []))

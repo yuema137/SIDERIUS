@@ -104,9 +104,30 @@ Replace `<server-ip>` with `localhost` if accessing from the same machine, or wi
 | GET | `/api/models/{model}/runs` | List run names for a model |
 | GET | `/api/models/{model}/runs/{run_name}` | Paginated experiment records |
 | GET | `/api/models/{model}/runs/{run_name}/experiments/{exp_id}` | Full record detail |
-| GET | `/api/models/{model}/leaderboard` | Top N experiments ranked by score |
+| GET | `/api/models/{model}/leaderboard` | Top N experiments, ranked best-first on the metric the records declare |
 
 Query params for the runs endpoint: `?limit=50&offset=0&status=success`
+
+### Ranking and metric direction
+
+Step 10 P2a: the dashboard does not assume that a larger score is better. Each
+persisted record declares the metric it was scored under (`metric_result`:
+`metric_id` + `direction`), and both the leaderboard and the model overview's
+`best_agent_score` read that declaration.
+
+Consequences an operator will actually see:
+
+* a run scored on a **lower-is-better** metric ranks ascending, and its "best"
+  is the smallest value;
+* a record carrying **no** declared metric identity (a legacy artifact written
+  before the field existed) is still listed with its raw score, but comes back
+  with `rank: null` and a `metric_ranking` note, and can never be reported as
+  best. One such record does not stop the others from ranking;
+* if a view would have to rank **two different metrics** against each other,
+  it refuses and names both — rather than silently picking one;
+* when nothing in the corpus is rankable, `best_agent_score` is `null` and
+  `metric_ranking_unavailable` says why. That is different from "there were no
+  records".
 
 ## Running tests
 

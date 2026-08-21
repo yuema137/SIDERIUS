@@ -115,12 +115,25 @@ class DataSource(ABC):
         status_filter: str = "success",
     ) -> list[dict]:
         """
-        Return top_n experiment records across all runs for a model,
-        ranked by denoising_score descending (higher is better).
+        Return top_n experiment records across all runs for a model, ranked
+        best-first on the metric the records DECLARE they were scored under.
+
+        Step 10 P2a C3: the direction is read from each record's persisted
+        metric identity, never assumed. Whether "best" means the largest or
+        the smallest denoising_score therefore depends on that declaration --
+        this docstring used to say "descending (higher is better)", which was
+        true only of TIDMAD.
+
+        A record carrying no metric identity stays inspectable and keeps its
+        raw score, but receives ``rank = None`` and a ``metric_ranking`` note
+        instead of a position; it is never described as best. When the corpus
+        has nothing rankable, or mixes two incomparable metrics, no row is
+        ranked and every row carries that note.
 
         Each entry is a flat dict with keys:
           exp_id, run_name, denoising_score, final_loss, model_params,
-          loss_type, epochs, timestamp
+          loss_type, epochs, timestamp, rank
+        plus ``metric_ranking`` on any row that could not be ranked.
 
         Raises:
             KeyError: if model does not exist.
