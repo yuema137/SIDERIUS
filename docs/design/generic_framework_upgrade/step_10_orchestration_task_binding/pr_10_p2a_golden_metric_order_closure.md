@@ -14,12 +14,25 @@ against them, it does not amend them.)*
 ### 0.1 Current lifecycle (live — updated after the freeze)
 
 ```text
-lifecycle           : IMPLEMENTATION COMPLETE
-                      POST-P4 RECONCILIATION COMPLETE
-                      READY FOR OPERATOR REVIEW  —  DO NOT MERGE
-PR                  : #242
+lifecycle           : MERGED / CLOSED (2026-08-21)
+PR                  : #242 — MERGED (squash)
+final PR head       : b50bec6a
+exact-head CI       : 32431989276 SUCCESS on b50bec6a — lint, ruff-format,
+                      pyright, unit all PASS (verdict read from the log)
+squash SHA          : e094fa26
+origin/master       : e094fa26 — verified byte-identical to the validated
+                      PR head b50bec6a
+final review        : operator verdict PASS — APPROVED TO MERGE
+                      (post-P4 merge-based reconciliation; force push not
+                      used; merge commit 553bd66c; 0 conflicts)
 ordering surface    : 12 measured sites at the base  ->  0
-open operator items : 0  (D-P2a-4 reviewed and ACCEPTED, §13.7)
+D-P2a-4             : ACCEPTED / BOUNDED (final operator disposition —
+                      ordering behavior/body unchanged; only the accepted
+                      declaration/identity annotation widened; §13.7)
+F-P2a-4             : RESOLVED (zero TIDMAD derivation sites added;
+                      direction never re-derived from task identity,
+                      metric name, or TIDMAD history)
+open operator items : 0
 ```
 
 **Post-freeze wording corrections (semantics unchanged).** Four passages
@@ -1336,8 +1349,11 @@ commit that cites it.
       deletion.
 - [x] Every C0–C5 checklist item is `[x]` with evidence, or explicitly
       recorded as not-run WITH the reason.
-- [ ] ONE exact-head CI on the final PR head; run id and tested SHA recorded.
-      *(pending — recorded in §13.6 once the PR head is final.)*
+- [x] ONE exact-head CI on the final PR head; run id and tested SHA recorded.
+      **Terminal: run `32431989276` on `b50bec6a` — SUCCESS** (lint,
+      ruff-format, pyright, unit). Two earlier greens are historical:
+      `32428195149` on `0ea3d238` (pre-P4). The four intermediate FAILED
+      runs are recorded in §13.6, not hidden.
 
 **6. Failure and edge cases.** A row with no citing commit ⇒ STOP: it means a
 site was never migrated. A scanner that reports zero sites AND zero
@@ -1348,7 +1364,8 @@ distinguishes the two.
 - [x] `.venv/bin/python -m pytest <scanner module> tests/unit/execute_tools/test_step06_c5_boundary_and_structure.py -q` — count + wall time.
       Recorded per commit in §13.1–§13.5; the final head's numbers are in
       §13.6.
-- [ ] Exact-head CI run id + `headSha` — record both. *(pending — §13.6.)*
+- [x] Exact-head CI run id + `headSha` — record both.
+      **`32431989276` / `b50bec6af335d503ebe60ffeaf859ad5f2d068e1` — SUCCESS.**
 
 **8. Commit boundary.** Census + docs + ledger. No production change, no
 unrelated cleanup. This is the last commit before READY FOR OPERATOR REVIEW.
