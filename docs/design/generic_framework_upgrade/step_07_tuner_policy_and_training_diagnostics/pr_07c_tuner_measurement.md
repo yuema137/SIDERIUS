@@ -2,6 +2,10 @@
 
 **STATUS — FROZEN — Revision 3. Operator approved 2026-08-17.**
 
+> **IMPLEMENTED AND MERGED 2026-08-17 — PR #219, squash `52bd98ba`. CONTEXT CLOSED.**
+> This document is now history plus the §17 ledger, not an instruction to implement.
+> Do not resume it; read what 07c did from merged master.
+
 | | |
 |---|---|
 | Freeze | **FROZEN — Revision 3**, operator approved **2026-08-17** |
@@ -1545,7 +1549,7 @@ passed.*
 | Implementation branch | `step07-pr07c-tuner-measurement` |
 | Implementation base | `0b92fac90d5279e2292ffa6551f1e4b572d89c2b` (= `origin/master`, clean tree, verified 2026-08-17) |
 | Prerequisites verified merged | PR0 `79403b44` · 07a `65804b3d` · 07b `9ea3755f` · correction `a15d1366` — all present in `git log` from the base |
-| Current checkpoint | **GATE 2 PASS (§18.15). Implementation complete; PR next.** |
+| Current checkpoint | **COMPLETE — MERGED 2026-08-17.** PR **#219**, squash **`52bd98ba`**, on `origin/master`. The 07c files on master are BYTE-IDENTICAL to this branch (`probe_batch.py`, `gpu_measurement_spec.py`, `training_history.py` all sha-verified 2026-08-21). The implementation branch `step07-pr07c-tuner-measurement` is SUPERSEDED. **This row read 'PR next' for four days after the merge — corrected 2026-08-21.** |
 
 ---
 
