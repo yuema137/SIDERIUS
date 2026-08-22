@@ -2,20 +2,25 @@
 
 ## 0. Status
 
-**STEP 11 REV 3 — RECONCILED AGAINST CURRENT MASTER.
-ONE MATERIAL FINDING (Q-11-4) BLOCKS FREEZE.
-Implementation MUST NOT start.**
+**STEP 11 — REVISION 4 — FROZEN. OPERATOR APPROVED 2026-08-21.
+READY FOR IMPLEMENTATION.**
 
-Rev 3 completed the bounded freshness reconciliation. **The 07c
-prerequisite was already satisfied** — 07c merged 2026-08-17 as PR #219,
-squash `52bd98ba`, four days BEFORE rev 2's own audit anchor, so rev 2's
-source audit already saw 07c's implementation. There is no post-07c
-semantic delta to absorb, and none was manufactured.
+Freeze history: rev 1 draft → rev 2 answered the operator review (12
+rulings, no `Decide`) → rev 3 reconciled against current master and
+surfaced one material finding → **rev 4 rules it and freezes**.
 
-Every rev-2 ruling survives. **But the C5 no-dispatch invariant fired**:
-the generic scope-reconstruction seam C5 assumed **does not exist**. That
-is a material capability finding, and per the invariant's own instruction
-it is brought back as **Q-11-4** rather than solved with task branches.
+**The 07c prerequisite was already satisfied**: 07c merged 2026-08-17 as
+PR #219, squash `52bd98ba`, four days BEFORE rev 2's own audit anchor, so
+rev 2's source audit already observed post-07c code. No post-07c semantic
+delta existed and none was manufactured.
+
+**Q-11-4 = B (operator):** the generic scope-reconstruction seam does not
+exist, and Step 11 does not invent one. Resolved training-scope transport
+is REMOVED, the commits are renumbered cleanly, and scope
+serialization/rehydration/construction plus real contrast-task subprocess
+L4 are deferred together to CAP-SCOPE (**R-11-12**).
+
+**Open operator questions: 0. Material findings: 0 unresolved.**
 
 Revision 2 answers the operator's rev-1 review (2026-08-21): Q-11-1 and
 Q-11-2 are RULED, every implementation-time `Decide` is promoted to a
@@ -29,7 +34,7 @@ contradiction is reconciled explicitly.
 | roadmap contract | `siderius_generic_framework_upgrade.md` §9 (§9.1 couplings, §9.2 target, §9.3 compatibility), completion-matrix row "§9 Execution infrastructure" |
 | source anchor | **`175904cd`** (clean master, 2026-08-21). Rev 2 audited at `a88aad9b`; **zero production files changed between them** (all five intervening commits are docs-only), so every §3 anchor was re-verified EXACT with no line movement — see §3.6. |
 | prerequisite status | Steps 00–06, **07 COMPLETE including §7e/07c (PR #219, squash `52bd98ba`, merged 2026-08-17)**, 08, 09, 09.5, 09.5a, 10 **COMPLETE**. **No outstanding prerequisite.** |
-| open operator questions | **1 — Q-11-4 (C5's missing reconstruction seam).** Q-11-1/2/3 remain RULED and re-confirmed valid at this anchor. |
+| open operator questions | **0.** Q-11-1, Q-11-2 (discharged), Q-11-3 and Q-11-4 all RULED. |
 | PR decomposition | **ONE PR** (see §6) |
 | Gate disposition | Gate 2 **REQUIRED**, 1 iteration x 1 round. Gate 1 **NOT REQUIRED** — Q-11-3 = A ruled by the operator; source-checked, not assumed (§8) |
 
@@ -42,18 +47,37 @@ evidence line is filled until the work has actually run.
 
 ## 1. Capability / final effect
 
-**A task's process execution is bound from its composition, not from
-TIDMAD's import-time constants.**
+**Step 11 makes the generic execution infrastructure task-neutral wherever
+an existing resolved framework binding already has a transport authority**
+— physical data root, deliverable naming, metric binding, resource
+calibration, spawn environment, paths, invariants and resume.
+**Task-owned training-scope construction and rehydration remain CAP-SCOPE**
+and are explicitly required before real contrast-task subprocess L4 can be
+claimed.
 
-Concretely, after Step 11 the sandbox spawn surface carries no task
-identity of its own: the physical data root, the deliverable naming
-template and the training scope reach a child because the RUN declared
-them, and the per-role resource ceilings are declared values with recorded
-provenance rather than undocumented module constants.
+The scope of the claim, stated so it cannot drift:
 
-**What this step does NOT claim** — see Q-11-1. Under the recommended
-disposition it does not claim that a contrast task really executes as a
-subprocess; it claims the surface no longer PREVENTS one.
+```text
+delivered by Step 11
+  data root transport                    yes
+  metric binding transport               yes
+  deliverable contract reading           yes
+  resource calibration + provenance      yes
+  spawn env / absolute paths             yes
+  invariants + resume genericity         yes
+  sentinel / IPC / cleanup preservation  yes
+
+NOT delivered, deferred to CAP-SCOPE (R-11-12)
+  task scope construction                no
+  task scope rehydration                 no
+  Pets / DAVIS real subprocess L4        no
+```
+
+**Two claims rev 2 made are WITHDRAWN**: that the training scope reaches a
+child because the run declared it, and that the surface "no longer PREVENTS"
+a contrast-task spawn. Both were stronger than the source supports. What
+Step 11 removes are the TIDMAD-shaped couplings that have transport
+authorities today; the scope gap is a separate missing capability.
 
 ---
 
@@ -328,7 +352,7 @@ C2's prompt-byte parity test is what pins this boundary.
 
 ---
 
-### Q-11-4 — OPEN, MATERIAL: C5 has no generic reconstruction seam
+### Q-11-4 — RULED: **B — scope rehydration leaves Step 11** (operator, 2026-08-21)
 
 **The rev-2 C5 invariant fired exactly as designed.** It said:
 
@@ -358,14 +382,27 @@ to rehydrate into**. Supplying that by hand is precisely the forbidden
 | **B** | **drop C5**; scope transport moves wholly to CAP-SCOPE | Step 11 then delivers data root + naming + metric + calibration + the three defects, and §1 must stop claiming scope can cross argv — the option the operator offered at rev 1 and did not take |
 | C | extend the frozen D14 four-method contract with a scope-reconstruction method | changes a FROZEN contract; effectively CAP-SCOPE |
 
-**Recommendation: A if a rehydration registry counts as transport under
-R-11-2; otherwise B.** The distinction is real — such a registry knows how
-to REHYDRATE a scope, never how to BUILD one for an arbitrary task — but it
-is the operator's line to draw, and C is not recommended because it edits a
-frozen contract.
+**OPERATOR RULING: B.** Resolved training-scope transport is REMOVED from
+Step 11. No scope-model registry is created here.
 
-**Nothing else in the design depends on this.** C0–C4 and C6–C11 are
-unaffected either way; only C5 and §1's scope sentence move.
+> Option A is a registry only in name. It would have to define scope type
+> identity, registration, discovery, serialization/deserialization,
+> unknown-type handling and future external-registration semantics — that
+> is a **task-owned scope extensibility mechanism**, not argv transport, and
+> it belongs near CAP-SCOPE / Step 12. Building it inside Step 11 would
+> violate the rule this project just adopted: do not expand a Gate, a PR or
+> a semantic scope because a neighbouring problem is adjacent. And the
+> shortcut version —
+>
+> ```python
+> scope_registry = {"tidmad": TidmadScope, "pets": PetsScope, ...}
+> ```
+>
+> — is precisely what the no-dispatch invariant exists to forbid.
+
+**This finding is the design guard succeeding, not Step 11 being blocked.**
+The old C5 is deleted and the remaining commits are renumbered cleanly, so
+the frozen plan carries no numbering baggage. See **R-11-12**.
 
 ---
 
@@ -503,6 +540,17 @@ defect-baseline assertion flips, it is either **transformed into the
 permanent contract owner or removed**. The pre-fix census and a second
 post-fix test proving the same behaviour must not both survive.
 
+**R-11-12 — scope rehydration belongs to CAP-SCOPE (operator, 2026-08-21).**
+Source reconciliation proved that **no generic scope reconstruction
+authority exists**: no registry, no shared base across `TidmadScope` /
+`PetsScope` / `DavisScope`, and a `TaskDataPath` protocol that takes
+`scope: object` as a parameter and never produces one. **Step 11 MUST NOT
+invent one.** Training-scope serialization, type registration,
+reconstruction, and arbitrary task-scope production are deferred TOGETHER
+to CAP-SCOPE. Consequently **real contrast-task subprocess execution
+remains explicitly UNCLAIMED after Step 11**, and this is the clear input
+Step 12 planning inherits.
+
 **R-11-11 — `sandbox_executor.py` stays the launch consumer.** New
 declaration parsing, calibration/provenance ownership and reusable binding
 resolution belong in responsibility-specific sibling modules. The file must
@@ -532,9 +580,9 @@ defects F-11-1/2/3 · spawn hygiene F-11-4/7 · invariants/resume F-11-5/6 ·
 census widening F-11-8 · operator surface docs.
 
 **Explicit non-goals**
-* **Task-owned scope CONSTRUCTION** — Q-11-1/R-11-2. Step 11 transports a
-  resolved scope (C5); it never builds one for an arbitrary task, and it
-  makes no claim that a contrast task can produce one.
+* **Task-owned scope CONSTRUCTION *and* REHYDRATION** — Q-11-4 = B,
+  **R-11-12**. Step 11 does neither, and creates no scope registry. The
+  rev-2/rev-3 C5 commit is DELETED, not emptied.
 * **Real contrast-task subprocess execution / contrast-track L4** — remains
   CAP-SCOPE's, and Step 12 may not claim L4 while CAP-SCOPE is open.
 * Retiring the D14 in-process runners — Step 10 Q-10-5 = B already gave
@@ -704,67 +752,9 @@ declaration/transport work, then hygiene, then guards and docs.
 6. **Failure/edge cases.** Missing root, placeholder root, non-directory —
    `DatasetDirectoryUnavailable` is the existing vehicle.
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** Data root only; scope is C5, metric is C6.
+8. **Commit boundary.** Data root only; metric acquisition is C5, naming is C6. **No scope transport (R-11-12).**
 
-### C5 — Resolved training-scope transport (the Q-11-1 owner)
-
-> **BLOCKED ON Q-11-4.** The generic reconstruction seam this commit assumed
-> does not exist at `175904cd`. Do not implement C5 until the operator
-> answers Q-11-4 (add a rehydration registry / drop C5 / extend the frozen
-> D14 contract). C0–C4 and C6–C11 are unaffected.
-
-1. **Goal.** If a resolved task scope is supplied, the subprocess boundary
-   can transport and reconstruct it. **This is the commit rev 1 was
-   missing.**
-2. **Scope.** The training argv builder; `train_engine_sandbox.main()`,
-   which today never passes `task_scope` so `:1124-1125` builds
-   `TidmadScope` unconditionally.
-3. **Implementation plan**
-   - [ ] Audit what a resolved scope must carry to survive serialization.
-   - [ ] Add an additive, composed-only argv carrier (R-11-1).
-   - [ ] Have `main()` reconstruct and pass `task_scope` when supplied,
-         falling back to today's `TidmadScope` path when not.
-   - [ ] **R-11-2 boundary test**: the child RECONSTRUCTS a supplied scope
-         and never CONSTRUCTS one for an arbitrary task.
-4. **Validation plan.** Unit; legacy path unchanged (no carrier ⇒
-   `TidmadScope`, byte-identical); a supplied non-TIDMAD scope reconstructs
-   in the child; negative: a malformed carrier refuses.
-5. **Acceptance criteria.** With no carrier, training behaviour is
-   byte-identical to C0. With a carrier, the child provably consumes the
-   supplied scope. **No claim is made that any contrast task can PRODUCE
-   one — that is CAP-SCOPE.** An executable census proves **zero**
-   task-identity or scope-kind dispatch was added to generic execution
-   infrastructure (the §6 invariant).
-6. **Failure/edge cases.** Malformed carrier, carrier naming an unknown
-   scope kind, carrier present on an un-composed run — all refuse.
-
-   **BINDING INVARIANT (operator, 2026-08-21) — no identity dispatch.**
-   C5 must NOT introduce a task-identity or built-in-scope-kind dispatch
-   table into generic execution infrastructure. This is forbidden:
-
-   ```python
-   if scope_kind == "tidmad": ...
-   elif scope_kind == "pets": ...      # <- CAP-SCOPE smuggled into Step 11
-   ```
-
-   Scope reconstruction must use an EXISTING generic
-   serialization/registration/interface authority, or a task-neutral
-   carrier. **If the source audit proves no such generic reconstruction
-   seam exists, that is a material capability finding: STOP and bring it
-   back before implementation — do not solve it with TIDMAD/Pets/DAVIS
-   branches.**
-
-   ```text
-   transport serialization              -> Step 11
-   generic registered reconstruction    -> Step 11, IF the seam exists
-   switch on task / scope identity      -> FORBIDDEN
-   invent task scope semantics          -> CAP-SCOPE
-   ```
-7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** Transport only. No task-owned scope construction,
-   no D14-runner rerouting.
-
-### C6 — Scoring metric via the Step-10 authority (R-11-4)
+### C5 — Scoring metric via the Step-10 authority (R-11-4)
 
 1. **Goal.** The scoring child stops unconditionally deriving TIDMAD's
    metric, so the spawn surface is task-neutral in all three roles.
@@ -791,7 +781,7 @@ declaration/transport work, then hygiene, then guards and docs.
 8. **Commit boundary.** Metric acquisition only; no metric semantics, no
    direction logic, no scoring arithmetic.
 
-### C7 — Deliverable naming flows FROM the contract (R-11-3)
+### C6 — Deliverable naming flows FROM the contract (R-11-3)
 
 1. **Goal.** A composed task's deliverable is named by the Deliverable
    Contract, so cleanup globs stop matching filenames a contrast run never
@@ -813,7 +803,7 @@ declaration/transport work, then hygiene, then guards and docs.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** Naming only.
 
-### C8 — Spawn hygiene (F-11-4, F-11-7)
+### C7 — Spawn hygiene (F-11-4, F-11-7)
 
 1. **Goal.** Remove accidental couplings that make the surface fragile.
 2. **Scope.** `cached_models` / `records` name derivation; the three
@@ -835,7 +825,7 @@ declaration/transport work, then hygiene, then guards and docs.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** No change to kill/cleanup semantics.
 
-### C9 — Invariants and resume (F-11-5, F-11-6, R-11-9)
+### C8 — Invariants and resume (F-11-5, F-11-6, R-11-9)
 
 1. **Goal.** Remove the last task token from the resume path and close the
    ingress-vs-lock asymmetry.
@@ -856,7 +846,7 @@ declaration/transport work, then hygiene, then guards and docs.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** No invariants beyond R-11-9.
 
-### C10 — Census widening, structural comparison, operator docs
+### C9 — Census widening, structural comparison, operator docs
 
 1. **Goal.** The spawn parent stops being invisible to the repository's own
    guards; the operator surface is documented; the structural budget is
@@ -885,14 +875,14 @@ declaration/transport work, then hygiene, then guards and docs.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** Docs, guards and measurement only.
 
-### C11 — Gate 2 evidence and closeout
+### C10 — Gate 2 evidence and closeout
 
 1. **Goal.** Produce the one real-execution evidence this PR owes: the
    subprocess path executes under a composed binding, with the transported
    values actually consumed, and TIDMAD parity intact. It is last because
    the Gate must run at the final executable head.
 2. **Scope.** Gate advice/config and the ledger. **No production change**
-   beyond what the Gate evidence itself requires. Depends on C0–C10.
+   beyond what the Gate evidence itself requires. Depends on C0–C9.
 3. **Implementation plan**
    - [ ] Write the Gate-readiness packet: candidate SHA, clean tree,
          deterministic prerequisites green, exact workload, projected
@@ -909,10 +899,14 @@ declaration/transport work, then hygiene, then guards and docs.
    assertion.
 5. **Acceptance criteria.** Chain exits 0; real training, inference and
    scoring executed (not pseudo, not skipped); the composed run's children
-   provably consumed the TRANSPORTED data root, scope carrier and metric
-   rather than TIDMAD defaults; un-composed argv byte-identical to the C0
-   census; TIDMAD ceilings resolve to 40/60/24; the TIDMAD cleanup glob
-   unchanged. **Model quality is NOT a criterion** (§8).
+   provably consumed the **TRANSPORTED data root and the Step-10 metric
+   binding** rather than TIDMAD defaults, with deliverable-derived behaviour
+   and resource calibration/provenance exercised; un-composed argv
+   byte-identical to the C0 census; TIDMAD ceilings resolve to 40/60/24; the
+   TIDMAD cleanup glob unchanged; kill/cleanup semantics unchanged.
+   **Model quality is NOT a criterion** (§8). **NOT claimed: generic
+   task-scope reconstruction, Pets/DAVIS subprocess execution, contrast L4
+   (R-11-12).**
 6. **Failure/edge cases.** A failure in the spawn/IPC/rlimit/cleanup path
    is a REAL Step-11 regression — fix it, do not work around it. A failure
    caused only by model quality, HealthGate output or score magnitude is
@@ -933,7 +927,7 @@ declaration/transport work, then hygiene, then guards and docs.
 | field | value |
 |---|---|
 | **FAILURE CLASS UNDER TEST** | the real subprocess execution path — spawn, argv, sentinel/IPC, rlimits, cleanup — driven from a run's declared composition rather than TIDMAD's import-time constants |
-| **REQUIRED REAL COMPONENTS** | real training, inference and scoring subprocesses under a composed binding; real rlimit application; real sentinel and cleanup |
+| **REQUIRED REAL COMPONENTS** | real training, inference and scoring subprocesses under a composed binding; real rlimit application; real sentinel and cleanup. **No scope carrier — R-11-12 removed it from this step; the Gate is not widened to compensate.** |
 | **NON-REQUIRED SCIENTIFIC QUALITY** | **model quality · HealthGate PASS · score magnitude · convergence · output diversity.** None is owned by Step 11; a poor or collapsed candidate is acceptable evidence |
 | **MAXIMUM TEMPORAL DEPTH** | **1 iteration × 1 round** (the standard's default) |
 | **EXTRA DEPTH JUSTIFICATION** | none required — Step 11's witness is observable within a single iteration. **Semantic-latency preflight: the witness is argv/sentinel/rlimit behaviour, which is produced and consumed inside one iteration, so no carried-state latency applies.** |
@@ -961,7 +955,7 @@ This was checked before freeze precisely so it is not discovered during C2.
 
 * Targeted tests per commit; no full local suite (validation-economy rule).
 * ONE authoritative exact-head CI at the final head.
-* **Doc sync in C10, BEFORE the final push** — Step 10's ordering error,
+* **Doc sync in C9, BEFORE the final push** — Step 10's ordering error,
   now a standing rule.
 * Byte-parity is the workhorse: un-composed argv, TIDMAD ceilings and the
   TIDMAD glob must all be provably unchanged.
@@ -983,25 +977,26 @@ This was checked before freeze precisely so it is not discovered during C2.
 
 *(empty — implementation has not started.)*
 
-**Entry conditions, in order.** Implementation MUST NOT start until all of
-these hold:
+**Entry conditions — ALL SATISFIED at freeze.**
 
-- [x] 07c implemented, Gate-2'd and MERGED — **PR #219, squash `52bd98ba`,
+- [x] 07c implemented, Gate-2'd and MERGED — PR #219, squash `52bd98ba`,
       2026-08-17. Verified from git ancestry and byte-identical file
-      content, not from a status document.**
-- [x] Step-11 source anchor refreshed to current clean master `175904cd`
-- [x] Bounded re-audit run — §3.6; zero production drift since rev 2's
-      anchor, all eight load-bearing anchors exact, structural baseline
-      unchanged
+      content, not from a status document.
+- [x] Step-11 source anchor refreshed to clean master `175904cd`
+- [x] Bounded re-audit run (§3.6) — zero production drift, all eight
+      load-bearing anchors exact, structural baseline unchanged
 - [x] The three rev-2 stale points confirmed fixed
-- [ ] **Q-11-4 answered** — C5's reconstruction seam does not exist; the
-      operator must choose registry / drop C5 / extend D14
-- [ ] C5 updated to match that answer (or removed, with §1's scope claim
-      withdrawn)
-- [ ] Open operator questions = **0**
-- [ ] Operator freezes as **Revision 4**
+- [x] **Q-11-4 answered — B.** C5 deleted, commits renumbered, R-11-12 added
+- [x] §1's scope claim withdrawn; Gate-2 acceptance no longer requires a
+      scope carrier
+- [x] Open operator questions = **0**
+- [x] **Operator froze this document as Revision 4 (2026-08-21)**
 
-Rulings standing at rev 3: **Q-11-1 = A** (transport, not construction) ·
-**Q-11-2 = 07c FIRST, DISCHARGED** (already merged) · **Q-11-3 = A**
-(tuner-visible only, prompt bytes unchanged, Gate 1 NOT REQUIRED). **Q-11-4
-is OPEN and is the only freeze blocker.**
+Frozen rulings: **Q-11-1 = A** (transport, not construction) ·
+**Q-11-2 = 07c FIRST, DISCHARGED** · **Q-11-3 = A** (tuner-visible only,
+prompt bytes unchanged, Gate 1 NOT REQUIRED) · **Q-11-4 = B** (scope
+rehydration deferred to CAP-SCOPE, R-11-12).
+
+**Implementation may now begin**, against a fresh Implementation Working
+Rules contract and a fresh handoff. All implementation checkboxes below
+are unchecked.
