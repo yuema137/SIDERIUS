@@ -641,6 +641,62 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 11 — COMPLETE / MERGED (2026-08-22)**: PR #247, squash `da2aa705`;
+  final executable head `88f190a1` with exact-head CI **32562135614 SUCCESS**
+  and **Gate 2 PASS on that same SHA**; final PR head `fd6bfccb`, CI
+  **32563043661 SUCCESS**, delta docs-only; landed master byte-identical to
+  the validated head. **The execution infrastructure is task-neutral wherever
+  a resolved framework binding already has a transport authority.** Three
+  values that made the spawn surface TIDMAD-only now cross it: the physical
+  data root reached **no** child (all three fell back to the import-time
+  `TIDMAD_DATA_DIR`) and is transported when composed — **`--data_dir` for
+  training/inference, `--raw_data_dir` for scoring**, whose `--data_dir` is
+  the DELIVERABLE dir and must never be conflated; the scoring child composes
+  the run's DECLARED metric through the same Step-10 authority with **no
+  fallback** (a failed composition terminates the subprocess — silently
+  scoring with TIDMAD's metric is C-P56-1 one layer down); and deliverable
+  naming is declared by the task, validated by `DeliverableNaming`, which
+  stays the sole owner. Transport is emitted **only when bound**, so legacy
+  argv is unchanged. Ceilings became declared calibration with provenance in
+  `core/execution_calibration.py` — two layers only, `0` still disables, a
+  malformed override REFUSES loudly, and the lock RECORDS them without ever
+  comparing them (`RunInvariants._PROVENANCE` partitions with `_CANONICAL`).
+  **Things future work must not re-break**: the `active_*` vs `resolve_*`
+  split on every run-scoped binding — the transport must ask the one WITHOUT
+  the legacy fallback, or every un-composed child's argv changes; the record
+  AND output composition stamps must read ONE run-scoped authority (a real
+  Gate caught them disagreeing — see below); `DeliverableNaming` needs
+  `extra="forbid"` because a misspelled declaration key otherwise yields the
+  shipped TIDMAD template and a cleanup glob that deletes files the run never
+  wrote; and `_ROLE_DEFAULT_RSS_GB` resolves 40/60/24 with the inference value
+  marked `empirical_unverified` — **lowering it without re-verifying
+  full-scope baseline inference is a regression**. **Operator rulings**:
+  **R-11-13** (R-11-1's "argv byte-identical" was literally false after C7's
+  frozen absolute script anchoring; wording corrected, code NOT reverted) and
+  **R-11-14** (C8's additive `task_composition_fingerprint` stamp RATIFIED —
+  R-11-9 was unsatisfiable as written because nothing carried a fingerprint;
+  implementation PASS, and the process deviation is recorded: a schema
+  expansion is not ordinary implementation discretion). **Gate 2 earned its
+  keep** — run 1 INCONCLUSIVE (RT4 watchdog at deadline + ~1 s; cause is
+  **Q-07c-6 = B**, admission prices `phase="training"` only, still OPEN and
+  NOT Step 11's; shrinking capacity shrinks the deadline so it cannot
+  converge), run 2 caught **F-11-C10-a** (the OUTPUT stamp read the tuner's
+  own sub-workspace lock and resolved to `None`, so a composed **2-iteration**
+  chain would have refused its own iteration-1 output — invisible to every
+  unit test), run 3 PASS. **Structural: zero branch growth and zero parameter
+  growth** in all four baselined `sandbox_executor.py` functions.
+  **NOT claimed**: task-scope construction/rehydration or any scope registry
+  (**R-11-12 → CAP-SCOPE**), real contrast-task subprocess L4, out-of-tree
+  plugin availability in children, removal of the import-time `data_paths`
+  fallback. **Carried debt for the Step-12 audit**: CAP-SCOPE · out-of-tree
+  child bootstrap · F-P56-3 (tuner sub-lock, now consumer-less) · the 60-GiB
+  recalibration · the legacy scoring path that never reads `score_res`
+  status · Q-07c-6 · two timing-sensitive real-training "unit" tests.
+  Design + evidence:
+  `generic_framework_upgrade/step_11_execution_infrastructure.md` §11a–§11e.
+  **NEXT = Step 12**, to be planned in a FRESH session from merged state,
+  never from the conversation that produced Step 11.
+
 - **STEP 10 — COMPLETE (2026-08-21). ALL 7 semantic children MERGED: P1
   `bcb17e45` · P4 `79833db8` · P2a `e094fa26` · P2b `5a2ecfd1` ·
   P3 `254cbaa1` · **P5+P6 `b54623b2`** (PR #246, squash; exact-head CI
