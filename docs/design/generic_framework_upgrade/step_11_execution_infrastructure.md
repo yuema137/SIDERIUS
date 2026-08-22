@@ -2,16 +2,23 @@
 
 ## 0. Status
 
-**DRAFT — Revision 1. NOT FROZEN. Implementation MUST NOT start.**
+**DRAFT — Revision 2. NOT FROZEN. Implementation MUST NOT start.**
+
+Revision 2 answers the operator's rev-1 review (2026-08-21): Q-11-1 and
+Q-11-2 are RULED, every implementation-time `Decide` is promoted to a
+numbered ruling **R-11-1 … R-11-11**, the three gaps the rev-1 commit plan
+did not own (resolved-scope transport, scoring metric derivation,
+deliverable-naming ownership) now have commits, and the argv-parity
+contradiction is reconciled explicitly.
 
 | field | value |
 |---|---|
 | roadmap contract | `siderius_generic_framework_upgrade.md` §9 (§9.1 couplings, §9.2 target, §9.3 compatibility), completion-matrix row "§9 Execution infrastructure" |
-| source anchor | merged master **`a88aad9b`** (Step 10 complete; all 7 children merged) |
+| source anchor | audited at **`a88aad9b`**. **STALE FOR FREEZE — master is already ahead, and Q-11-2 requires 07c to land first. The anchor MUST be refreshed and a bounded re-audit run before freeze (R-11-0).** |
 | prerequisite status | Steps 00–06, 07a/07b/07d, 08, 09, 09.5, 09.5a, 10 **COMPLETE**. **§7e (07c) NOT STARTED — see Q-11-2** |
-| open operator questions | **2 — Q-11-1, Q-11-2. Both block freeze.** |
+| open operator questions | **1 — Q-11-3 (F-11-1's Gate-1 disposition).** Q-11-1 and Q-11-2 are RULED below. |
 | PR decomposition | **ONE PR** (see §6) |
-| Gate disposition | Gate 2 **REQUIRED**; Gate 1 **UNDECIDED pending §7.9's source check** |
+| Gate disposition | Gate 2 **REQUIRED**, 1 iteration x 1 round. Gate 1 **NOT REQUIRED under the recommended Q-11-3 answer** — source-checked, not assumed (§8.1) |
 
 This document is the parent design AND the PR document — one PR, one doc,
 per the kickoff protocol. Per-commit checklists in §7 follow the operator's
@@ -190,40 +197,191 @@ the D14 seam. **The arithmetic no longer describes the path it governs.**
 
 ---
 
-## 4. Open operator questions (BOTH block freeze)
+## 4. Rulings and remaining questions
 
-### Q-11-1 — Is CAP-SCOPE in Step 11's scope?
+### Q-11-1 — RULED: **A, with the transport/construction correction**
 
-The frozen acceptance says *"contrast tasks spawn with zero infra edits"*.
-§3.1 proves contrast tasks cannot spawn **at all**: no argv can carry a
-non-TIDMAD scope, so `train_engine_sandbox.py:1124-1125` always builds
-`TidmadScope`. That gap is exactly **CAP-SCOPE**, which Step 10 froze as
-the REQUIRED prerequisite for contrast-track L4.
+Operator ruling, 2026-08-21:
 
-The criterion is therefore **unsatisfiable as written** — structurally the
-same class as F-P56-4, where a frozen Gate contract could not be met by the
-architecture as built.
+> Step 11 does not implement task-owned scope construction or claim real
+> Pets/DAVIS subprocess execution. It DOES make the execution boundary
+> task-neutral enough to **transport an already-resolved task execution
+> scope/binding when supplied**. CAP-SCOPE remains responsible for
+> CONSTRUCTING such a scope for arbitrary contrast tasks and for real
+> contrast-loop L4 execution.
 
-| option | Step 11 delivers | Gate 2 shape |
-|---|---|---|
-| **A (recommended)** — amend acceptance, defer CAP-SCOPE | the surface no longer PREVENTS a non-TIDMAD spawn: data root, deliverable naming and scope CAN cross argv; TIDMAD parity byte-identical | single-track TIDMAD composed chain |
-| **B** — include CAP-SCOPE | additionally task-owned scope construction, so Pets/DAVIS genuinely spawn; D14 runners routed through the sandbox | multi-track: TIDMAD parity **plus** a real contrast subprocess run |
+The distinction is the whole ruling:
 
-Recommendation **A**: fix the unsatisfiable criterion deliberately rather
-than discover it mid-implementation. B roughly doubles scope and pulls in
-the capability Step 12 also wants.
+```text
+CAP-SCOPE   "how do I BUILD a correct scope for an arbitrary task?"   -> deferred
+Step 11     "if a resolved scope is HANDED to me, can the subprocess
+             boundary transport / reconstruct / consume it?"          -> owned here
+```
 
-### Q-11-2 — Does 07c (§7e) implement before Step 11?
+**Rev-1 defect this closes**: rev 1's §1 and Option A both claimed scope
+"CAN cross argv" while **no commit implemented scope transport** — C4 did
+the data root, C5 did naming, and nothing owned the scope. Rev 2 gives it
+an owner (**C5**) and keeps the claim; the alternative the operator allowed
+— deleting the claim — is NOT taken, because §3.1 shows the scope gap is
+the reason the surface is TIDMAD-only.
 
-`pr_07c_tuner_measurement.md` is **FROZEN Revision 3, operator-approved
-2026-08-17, Q-07c-1…9 all closed, Gate 2 REQUIRED — and never
-implemented.** It edits `core/sandbox_executor.py` at `:446-481` (the
-measurement provider), `:944-953` (phase timing) and `:952-953` (the
-`elapsed <= deadline` comparison) — the same file Step 11 restructures.
+### Q-11-2 — RULED: **07c FIRST**
 
-Recommendation: **07c first.** It is already approved; landing Step 11
-first would force re-reconciliation of a 198 KB frozen design against a
-file whose timing and resource paths Step 11 just moved.
+> Implement/merge 07c, then re-anchor and reconcile Step 11 before freeze.
+
+07c (`pr_07c_tuner_measurement.md`) is FROZEN Revision 3, operator-approved
+2026-08-17, Q-07c-1…9 closed, Gate 2 REQUIRED, never implemented; it edits
+`sandbox_executor.py:446-481`, `:944-953`, `:952-953` — the timing and
+resource paths Step 11 restructures. Sequence:
+
+```text
+07c -> merge -> refresh Step-11 source anchor -> bounded re-audit
+    -> update this design -> operator freeze -> Step-11 implementation
+```
+
+### Q-11-3 — OPEN: F-11-1's Gate-1 disposition
+
+**Source-checked, not assumed.** The planner's OOM note is gated on
+`str(r.get("status", "")).endswith("_oom")` (`agent/prompts.py:1265-1270`).
+`"oom_host_ram"` ends in `_ram`, so it does **not** match today — a host
+OOM renders no planner bytes at all.
+
+| option | C2 does | LLM-facing? | Gate 1 |
+|---|---|---|---|
+| **A (recommended)** | make the host OOM visible to the TUNER only, without producing an `_oom`-suffixed status | no prompt byte changes | **NOT REQUIRED** |
+| B | route host OOM into an `_oom` status so the "NOT ATTRIBUTED" note also covers it | the note newly renders for host-OOM attempts | **REQUIRED** |
+
+B is arguably better science — a host-RAM ceiling genuinely is *not*
+evidence about model capacity, which is exactly what that note protects
+against. But it is **planner-feedback scope**, not execution-infrastructure
+scope, and the Gate-scope rule forbids acquiring acceptance criteria by
+proximity. Recommendation: **A**, and record B as named debt.
+
+---
+
+## 4a. Rulings (R-11-x) — every rev-1 `Decide` is resolved here
+
+Rev 1 left eleven semantic decisions as implementation-time `Decide`
+items. Each would have changed schema, compatibility, resume, failure
+semantics or operator behaviour, so each is promoted to a ruling. **A
+frozen design contains no `Decide`.**
+
+**R-11-0 — freeze prerequisites.** This document may not be frozen until
+(a) 07c has merged, (b) the source anchor is refreshed to the resulting
+master, and (c) a bounded re-audit re-verifies every §3 anchor. Line
+numbers in §3 are `a88aad9b` and WILL move.
+
+**R-11-1 — argv parity, reconciled.** §9.3's "argv/IPC/sentinels
+byte-identical" and Step 11's job of transporting new declared values are
+only compatible when stated per-mode:
+
+| mode | contract |
+|---|---|
+| legacy / un-composed TIDMAD | argv **byte-identical**, proven against the C0 census |
+| IPC / sentinels / cleanup semantics | **unchanged in every mode** |
+| composed run | argv MAY gain **additive, declared** binding arguments — that is the mechanism being introduced |
+| composed TIDMAD | runtime and scientific behaviour **parity required**; literal argv byte-identity is NOT required, because the new transport is the point |
+
+The existing `--task_data_path_id` is the precedent: emitted only when a
+composition is bound, so legacy argv is already untouched.
+
+**R-11-2 — transport, never construction.** Step 11 may serialize,
+transport and reconstruct a resolved binding. It may not construct a
+task's scope, derive a task's semantics, or infer identity from a name.
+
+**R-11-3 — the Deliverable Contract remains the naming owner.** The
+composition carries a **resolved declaration/reference**; it does not
+become a second naming authority.
+
+```text
+DeliverableSpec / Deliverable Contract   <- owns the naming rule
+        |
+        v
+resolved run binding / composition carrier   <- carries the resolved value
+        |
+        v
+Step 11 spawn / cleanup consumer             <- READER only
+```
+
+Rev-1's C5 wording ("allow a composition to declare the naming template")
+is withdrawn — it would have created the second authority §9.2 forbids.
+
+**R-11-4 — metric information comes from the Step-10 authority.** Any
+metric information the scoring subprocess requires must arrive through the
+**already-existing Step-10 metric binding authority**. Step 11 may
+transport it; it must not derive, redefine or infer it. `MetricSpec` has
+zero reachability in that child today, and
+`denoising_score_single.py:190-195` documents the current derivation as a
+deliberate Step-06 choice ("no spec or metric is serialized, no argv is
+added") — that choice is what makes it TIDMAD-only, and it is superseded
+here. C6 first audits what the child actually consumes; it does not
+speculatively transport every secondary metric.
+
+**R-11-5 — RSS precedence and the zero case.** The effective ceiling is
+`SIDERIUS_SUBPROCESS_RSS_GB` (global) → `_ROLE_DEFAULT_RSS_GB[role]`. **No
+third layer** (§9.3 finding 14). `0` currently DISABLES the ceiling and a
+negative/non-numeric value falls back **silently**; the declared form must
+preserve the disable semantics explicitly and must REFUSE a malformed
+value loudly rather than silently defaulting.
+
+**R-11-6 — the run-invariants lock records the ceilings.** A run must be
+able to say which ceilings it executed under. The pin is **recorded, not
+equality-enforced**: ceilings are host calibration, so a legitimate rerun
+on a different host must not be refused the way a scope or health-config
+change is.
+
+**R-11-7 — the data root is run binding, provenance-only.** It is a
+host path, and the semantic fingerprint deliberately excludes host paths
+(`task_composition.py:838-843`). It therefore joins **provenance**, never
+the fingerprint. `HyperparamTuningInput.data_dir` — which today reaches
+only the GPU measurement worker — is reconciled to the same authority
+rather than left as a second concept.
+
+**R-11-8 — fail-closed is a SEMANTIC change, decoupled from the import-time
+MECHANISM.** A composed run whose declared data root is missing or a
+placeholder FAILS CLOSED (`DatasetDirectoryUnavailable` is the existing
+vehicle). The import-time template fallback (`data_paths.py:26-34`) is NOT
+removed in this step: CI resolves the root from the tracked template and
+`.github/workflows/ci.yml` creates no real config, so removing it breaks
+collection repo-wide. Decoupling first (resolution behind a call) is the
+prerequisite; the removal is named debt.
+
+**R-11-9 — composed vs unstamped legacy records on resume.**
+
+| case | behaviour |
+|---|---|
+| legacy / un-composed run reading an unstamped record | **readable**, unchanged |
+| composed run reading a record that CARRIES a fingerprint | must **match**, else refuse |
+| composed run reading an unstamped legacy record | **refuse**, under a named rule — a record produced before composition existed cannot be certified as belonging to this composition |
+
+`_reject_legacy_runtime_lock` (`run_invariants.py:244-279`) is the
+precedent for refusing rather than defaulting. This closes rev-1's C7
+contradiction, which asserted both "a cross-composition seed must not pass
+ingress" and "a legacy unstamped record must remain readable" with no mode
+distinction.
+
+**R-11-10 — inverted guards must not become test debt.** Once a C0
+defect-baseline assertion flips, it is either **transformed into the
+permanent contract owner or removed**. The pre-fix census and a second
+post-fix test proving the same behaviour must not both survive.
+
+**R-11-11 — `sandbox_executor.py` stays the launch consumer.** New
+declaration parsing, calibration/provenance ownership and reusable binding
+resolution belong in responsibility-specific sibling modules. The file must
+not become the owner of every new semantic. Measured baseline at
+`a88aad9b` (C0 re-measures, C10 compares):
+
+```text
+file                       2,456 LOC
+execute_training :1315     92 stmts · 39 branch · 357 LOC · 14 params
+execute_inference :1686    69 stmts · 28 branch · 253 LOC ·  9 params
+_run_observed_subprocess   62 stmts · 27 branch · 186 LOC ·  9 params
+TidmadSandbox.__init__     22 stmts ·  6 branch ·  87 LOC · 12 params
+```
+
+`execute_training` is already 357 LOC with 14 parameters. If a commit would
+add a new branch family, a new schema resolution, or ~80-150 lines to one
+function, extract first.
 
 ---
 
@@ -236,7 +394,11 @@ defects F-11-1/2/3 · spawn hygiene F-11-4/7 · invariants/resume F-11-5/6 ·
 census widening F-11-8 · operator surface docs.
 
 **Explicit non-goals**
-* CAP-SCOPE / task-owned scope construction — Q-11-1 option A.
+* **Task-owned scope CONSTRUCTION** — Q-11-1/R-11-2. Step 11 transports a
+  resolved scope (C5); it never builds one for an arbitrary task, and it
+  makes no claim that a contrast task can produce one.
+* **Real contrast-task subprocess execution / contrast-track L4** — remains
+  CAP-SCOPE's, and Step 12 may not claim L4 while CAP-SCOPE is open.
 * Retiring the D14 in-process runners — Step 10 Q-10-5 = B already gave
   them a retention contract.
 * Out-of-tree plugin availability in children — Step 12.
@@ -268,228 +430,297 @@ PRs.
 
 ## 7. Commit plan
 
-All checkboxes start unchecked. Evidence lines are filled only after the
-work runs.
+Twelve commits, ONE PR. All checkboxes start unchecked; evidence lines are
+filled only after the work runs. **No commit contains a `Decide` — every
+semantic decision is a ruling in §4a.**
 
-### C0 — Baseline census and inverted guards
+Ordering rationale: defects first (they are small, independently
+reviewable, and two of them sit in code later commits rewrite), then the
+declaration/transport work, then hygiene, then guards and docs.
 
-1. **Goal.** Measure the current state and make each defect executably
-   visible BEFORE any behaviour changes, so every later commit has a
-   named test that flips.
-2. **Scope.** New tests only. No production file changes. Depends on
-   nothing.
+### C0 — Baselines, structural tripwire, inverted guards
+
+1. **Goal.** Measure the pre-change state and make each defect executably
+   visible BEFORE behaviour changes, so every later commit flips a named
+   test.
+2. **Scope.** Tests only. No production change. No dependency.
 3. **Implementation plan**
-   - [ ] Census: enumerate every argv flag per role from
-         `sandbox_executor.py:1401-1421`, `:1752-1778`, `:2068-2089`, and
-         pin the current set exactly.
-   - [ ] Inverted guard for F-11-1: assert `oom_host_ram` currently has no
-         consumer (the defect), so C2 turns it red.
-   - [ ] Inverted guard for F-11-2: assert `isolated_probe.py` currently
-         spawns without `env=`.
-   - [ ] Record `_ROLE_DEFAULT_RSS_GB` values and the two-layer precedence
-         as a pinned baseline.
+   - [ ] Pin the exact argv flag set per role (`sandbox_executor.py`
+         training / inference / scoring builders) — the R-11-1 legacy
+         parity baseline.
+   - [ ] Pin `_ROLE_DEFAULT_RSS_GB` and the two-layer precedence.
+   - [ ] Record the **R-11-11 structural baseline** (file LOC; stmts,
+         branch-ish, LOC, params for `execute_training`,
+         `execute_inference`, `_run_observed_subprocess`, `__init__`).
+   - [ ] Inverted guard F-11-1: `oom_host_ram` currently has no consumer.
+   - [ ] Inverted guard F-11-2: `isolated_probe.py` currently spawns with
+         no `env=`.
+   - [ ] Pin the TIDMAD cleanup glob and the TIDMAD-resolved ceilings.
 4. **Validation plan.** Unit only. No Gate.
-5. **Acceptance criteria.** Every census reproduces the §3 numbers exactly;
-   each inverted guard names the commit that will flip it.
-6. **Failure/edge cases.** A census that cannot see the spawn parent is the
-   F-11-8 blind spot — C8 widens it; C0 must not silently pass by scoping
-   itself to files it already covers.
+5. **Acceptance criteria.** Every census reproduces §3/§4a numbers exactly;
+   each inverted guard names the commit that flips it.
+6. **Failure/edge cases.** A census scoped only to files it already covers
+   would pass vacuously — F-11-8 is exactly that shape, so C0 must state
+   its own scope explicitly.
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** Tests only; independently reviewable.
+8. **Commit boundary.** Tests only. **Per R-11-10 these guards are
+   temporary; each later commit either converts its guard into the
+   permanent contract owner or deletes it.**
 
 ### C1 — F-11-2: env transport on the production spawner
 
 1. **Goal.** A production-reachable spawner must not lose the run-scoped
    plugin dir.
-2. **Scope.** `agent/skills/evaluate_vram_skill/isolated_probe.py`
-   (spec + spawn), the guard test. `probe_subprocess.py` decided
-   explicitly (it is production-unreachable — fix or record, not both).
+2. **Scope.** `isolated_probe.py` spec + spawn; the transport guard.
+   `probe_subprocess.py` handled explicitly (production-unreachable).
 3. **Implementation plan**
-   - [ ] Add `plugin_dir` / `loss_dir` to `IsolatedProbeSpec` (it has
-         nowhere to put the value today, `:158-195`).
-   - [ ] Pass `env=subprocess_env(...)` at `:482-487`.
-   - [ ] Rewrite the guard to test the CONTRACT — *every* production
-         spawner of a worker passes `env=` — not one file by path.
-   - [ ] Decide and record `probe_subprocess.py:336-341`.
-4. **Validation plan.** Unit + the rewritten guard. Negative: a planted
-   env-less spawner must turn it red.
+   - [ ] Add `plugin_dir` / `loss_dir` to `IsolatedProbeSpec` (no field
+         exists to hold them today).
+   - [ ] Pass `env=subprocess_env(...)` at the spawn.
+   - [ ] Rewrite the guard to test the CONTRACT — every production worker
+         spawner passes `env=` — not one file by path (F-P2b-4 shape).
+   - [ ] Record the `probe_subprocess.py` disposition.
+4. **Validation plan.** Unit + rewritten guard; mutation: a planted
+   env-less spawner must turn it RED.
 5. **Acceptance criteria.** The guard fails on a planted omission in ANY
-   production spawner, proven by mutation, not asserted.
-6. **Failure/edge cases.** `subprocess_env` never mutates `os.environ`;
-   the child must not lose the `PYTHONPATH` extension either.
+   production spawner, proven by mutation rather than asserted; the C0
+   inverted guard flips.
+6. **Failure/edge cases.** `subprocess_env` never mutates `os.environ`; the
+   child must not lose the `PYTHONPATH` extension either.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** One defect; no calibration or argv work.
 
-### C2 — F-11-1: make `oom_host_ram` actionable, or delete it
+### C2 — F-11-1: make the host OOM visible (per Q-11-3)
 
 1. **Goal.** A host OOM must not be invisible to the tuner.
-2. **Scope.** `sandbox_executor.py:1654,1923,2116` producers;
-   `execution.py:711,882` consumers; `records.py:150,173-174,205-207` tags.
+2. **Scope.** The three `oom_host_ram` producers; the tuner's consumer
+   branches. **Under Q-11-3 = A, no planner-visible string changes.**
 3. **Implementation plan**
-   - [ ] Decide: route `oom_host_ram` into the existing resource-failure
-         path, or delete the status and let it be a plain error. **Do not
-         invent a fourth failure state.**
-   - [ ] Implement the decision at all three producer sites.
-   - [ ] Ensure the planner-visible tag behaviour is stated explicitly —
-         **if this changes prompt-visible strings it triggers Gate 1
-         (§7.9).**
-4. **Validation plan.** Unit; negative test that a device OOM is still
-   classified as before; parity test that non-OOM errors are unchanged.
-5. **Acceptance criteria.** A host-OOM training failure reaches a named,
-   asserted tuner outcome; the C0 inverted guard flips.
-6. **Failure/edge cases.** A `-9` SIGKILL cannot be attributed
-   (`failure_attribution.py` deliberately returns `unknown`) — that must
-   remain true.
+   - [ ] Implement the Q-11-3 answer (A unless the operator rules B).
+   - [ ] Make the host-OOM outcome reach a NAMED tuner outcome.
+   - [ ] Assert the planner prompt bytes are unchanged (A) — the executable
+         form of the Gate-1 disposition.
+4. **Validation plan.** Unit; device-OOM classification unchanged; non-OOM
+   errors unchanged; **prompt-byte parity test**.
+5. **Acceptance criteria.** A host-OOM training failure reaches an asserted
+   tuner outcome; prompt bytes byte-identical under A; C0 guard flips.
+6. **Failure/edge cases.** A bare `-9` SIGKILL must remain unattributable —
+   `failure_attribution` deliberately returns `unknown`; do not invent a
+   fourth failure state.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** No OOM-matcher consolidation (F-11-9 is a non-goal).
 
-### C3 — Resource ceilings become declared calibration with provenance
+### C3 — Resource ceilings become declared calibration (R-11-5, R-11-6)
 
-1. **Goal.** The per-role ceilings stop being undocumented module
-   constants and start recording what they are derived from.
-2. **Scope.** `sandbox_executor.py:75-173`; a calibration declaration;
-   `core/run_invariants.py` (pin what a run executed under);
-   `_ROLE_DEFAULT_RSS_GB` value-pinning tests.
+1. **Goal.** Ceilings stop being undocumented constants and start recording
+   what they derive from.
+2. **Scope.** The ceiling table and resolver; a calibration declaration;
+   the run-invariants record; F-11-3.
 3. **Implementation plan**
    - [ ] Declare the ceilings with machine-readable provenance
-         (measured-on, device, derived-from). **Calibration config, NOT
-         task config** (§9.2).
-   - [ ] State precedence explicitly against the EXISTING override seam;
-         §9.3 forbids a third layer with unstated ordering.
-   - [ ] **F-11-3**: re-derive or retire the 60 GiB justification — its
-         cited anchor is gone and the dtype is task-declared.
-   - [ ] Decide whether the run-invariants lock pins the ceilings.
-4. **Validation plan.** Unit; parity test that TIDMAD resolves to the SAME
-   40/60/24; negative tests for a malformed env override (today a negative
-   or non-numeric value falls back **silently** — decide and test).
-5. **Acceptance criteria.** TIDMAD's resolved ceilings are byte-identical
-   to the pre-change values, proven by the C0 baseline, and each ceiling
-   carries provenance a reader can check.
-6. **Failure/edge cases.** `SIDERIUS_SUBPROCESS_RSS_GB=0` currently
-   DISABLES the ceiling — preserve or refuse deliberately, never by
-   accident.
+         (measured-on, device, derived-from). Calibration config, **NOT**
+         task config (§9.2).
+   - [ ] Implement R-11-5 precedence exactly; preserve the `0` disable
+         semantics; REFUSE malformed values loudly.
+   - [ ] Implement R-11-6: record ceilings in the lock, recorded-not-
+         enforced.
+   - [ ] **F-11-3**: re-derive or retire the 60 GiB justification, whose
+         cited anchor is now argmax code and whose dtype is task-declared.
+4. **Validation plan.** Unit; TIDMAD ceilings resolve to the SAME 40/60/24
+   (C0 baseline); negative tests for malformed and zero overrides.
+5. **Acceptance criteria.** TIDMAD's resolved ceilings byte-identical to
+   C0; every ceiling carries checkable provenance; a malformed override
+   refuses instead of silently defaulting.
+6. **Failure/edge cases.** Unknown role still raises; a rerun on a
+   different host must not be refused (R-11-6).
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** Declaration only; no task-derived ceilings unless
-   Q-11-1 = B.
+8. **Commit boundary.** Declaration only — no task-derived ceilings
+   (that would need Q-11-1 = B).
 
-### C4 — The data root becomes a composed, transported value
+### C4 — The data root becomes a transported run binding (R-11-7, R-11-8)
 
 1. **Goal.** The physical data root reaches every child because the run
    declared it.
-2. **Scope.** `workflows/task_composition.py` (manifest key + field);
-   `sandbox_executor.py:1136` `dirs["data"]` and `TidmadSandbox.__init__`;
-   the three argv builders; the three child defaults;
-   `data_paths.py` import-time binding; `run_one_iteration.py:1760`.
+2. **Scope.** The composition carrier; `dirs["data"]` and
+   `TidmadSandbox.__init__`; the three argv builders and three child
+   defaults; `HyperparamTuningInput.data_dir` reconciliation.
 3. **Implementation plan**
-   - [ ] Decide the owner of the data root and whether it joins the
-         semantic fingerprint (it is a host path; the fingerprint
-         deliberately excludes those — likely provenance-only).
-   - [ ] Thread it into `TidmadSandbox` rather than `_tidmad_data_dir()`.
-   - [ ] Transport across training, inference and scoring argv, following
-         the `--task_data_path_id` pattern.
-   - [ ] Reconcile the two existing data-dir concepts —
-         `HyperparamTuningInput.data_dir` reaches only the GPU measurement
-         worker today.
-   - [ ] Decide the fail-closed disposition for the import-time template
-         fallback (F-11-11) — **note CI currently runs on
-         `/path/to/TIDMAD/`**, so removing it naively breaks collection.
-4. **Validation plan.** Unit; un-composed argv byte-parity; a composed
-   non-TIDMAD manifest resolving a different root; negative: a composed run
-   with no declared root fails closed.
-5. **Acceptance criteria.** Un-composed argv is **byte-identical** to C0's
-   census; a composed run's children receive the declared root.
-6. **Failure/edge cases.** Missing root, placeholder root, root that is not
-   a directory — `DatasetDirectoryUnavailable` already exists as the
-   vehicle.
+   - [ ] Carry the resolved root on the run binding, **provenance-only**
+         (R-11-7).
+   - [ ] Thread it into the sandbox instead of `_tidmad_data_dir()`.
+   - [ ] Transport it across training, inference and scoring argv,
+         following the `--task_data_path_id` precedent (additive, emitted
+         only when composed — R-11-1).
+   - [ ] Reconcile `HyperparamTuningInput.data_dir` to the same authority.
+   - [ ] Implement R-11-8's composed fail-closed check. **Do not remove the
+         import-time fallback.**
+   - [ ] R-11-11 check before writing: `execute_training` is already 357
+         LOC / 14 params — extract rather than extend if this adds a branch
+         family.
+4. **Validation plan.** Unit; **un-composed argv byte-parity** vs C0; a
+   composed manifest resolving a different root; negative: composed run
+   with a missing/placeholder root fails closed.
+5. **Acceptance criteria.** Un-composed argv byte-identical to C0; a
+   composed run's children receive the declared root; CI (which resolves
+   the template root) still passes.
+6. **Failure/edge cases.** Missing root, placeholder root, non-directory —
+   `DatasetDirectoryUnavailable` is the existing vehicle.
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** Data root only; naming is C5.
+8. **Commit boundary.** Data root only; scope is C5, metric is C6.
 
-### C5 — Deliverable naming flows from the contract
+### C5 — Resolved training-scope transport (the Q-11-1 owner)
 
-1. **Goal.** A composed task names its own deliverable, so cleanup globs
-   stop matching TIDMAD filenames a contrast run never wrote.
-2. **Scope.** `deliverable_spec.py:355-356`; the composition manifest key
-   set; the two cleanup sites (already contract READERS).
+1. **Goal.** If a resolved task scope is supplied, the subprocess boundary
+   can transport and reconstruct it. **This is the commit rev 1 was
+   missing.**
+2. **Scope.** The training argv builder; `train_engine_sandbox.main()`,
+   which today never passes `task_scope` so `:1124-1125` builds
+   `TidmadScope` unconditionally.
 3. **Implementation plan**
-   - [ ] Allow a composition to declare the naming template.
+   - [ ] Audit what a resolved scope must carry to survive serialization.
+   - [ ] Add an additive, composed-only argv carrier (R-11-1).
+   - [ ] Have `main()` reconstruct and pass `task_scope` when supplied,
+         falling back to today's `TidmadScope` path when not.
+   - [ ] **R-11-2 boundary test**: the child RECONSTRUCTS a supplied scope
+         and never CONSTRUCTS one for an arbitrary task.
+4. **Validation plan.** Unit; legacy path unchanged (no carrier ⇒
+   `TidmadScope`, byte-identical); a supplied non-TIDMAD scope reconstructs
+   in the child; negative: a malformed carrier refuses.
+5. **Acceptance criteria.** With no carrier, training behaviour is
+   byte-identical to C0. With a carrier, the child provably consumes the
+   supplied scope. **No claim is made that any contrast task can PRODUCE
+   one — that is CAP-SCOPE.**
+6. **Failure/edge cases.** Malformed carrier, carrier naming an unknown
+   scope kind, carrier present on an un-composed run — all refuse.
+7. **Verification commands and evidence.** `[ ]` pending.
+8. **Commit boundary.** Transport only. No task-owned scope construction,
+   no D14-runner rerouting.
+
+### C6 — Scoring metric via the Step-10 authority (R-11-4)
+
+1. **Goal.** The scoring child stops unconditionally deriving TIDMAD's
+   metric, so the spawn surface is task-neutral in all three roles.
+2. **Scope.** `denoising_score_single.py` metric acquisition; the transport
+   carrier; the Step-10 metric binding authority (consumed, never
+   redefined).
+3. **Implementation plan**
+   - [ ] **Audit first**: what does the scoring child actually consume from
+         the metric? Do not speculatively transport secondaries.
+   - [ ] Replace the unconditional `derive_tidmad_metric` with acquisition
+         through the Step-10 authority.
+   - [ ] Keep the un-composed path byte-identical — the current derivation
+         is a documented Step-06 choice and stays the legacy branch.
+4. **Validation plan.** Unit; un-composed scoring parity (same score, same
+   record keys); a composed run using its declared metric; negative: a
+   composed run whose metric cannot be acquired refuses rather than falling
+   back to TIDMAD.
+5. **Acceptance criteria.** Zero unconditional TIDMAD metric derivations
+   remain in the scoring child; the frozen TIDMAD score is unchanged for
+   un-composed runs.
+6. **Failure/edge cases.** A composed run must never silently score with
+   TIDMAD's metric — that is the C-P56-1 failure class one layer down.
+7. **Verification commands and evidence.** `[ ]` pending.
+8. **Commit boundary.** Metric acquisition only; no metric semantics, no
+   direction logic, no scoring arithmetic.
+
+### C7 — Deliverable naming flows FROM the contract (R-11-3)
+
+1. **Goal.** A composed task's deliverable is named by the Deliverable
+   Contract, so cleanup globs stop matching filenames a contrast run never
+   wrote.
+2. **Scope.** The deliverable derivation; the run binding carrier; the two
+   cleanup sites, which are already contract READERS.
+3. **Implementation plan**
+   - [ ] Carry the **resolved** naming declaration on the run binding.
+         **The composition must NOT become a second naming authority
+         (R-11-3).**
    - [ ] Keep TIDMAD's defaults byte-identical when undeclared.
-4. **Validation plan.** Unit; TIDMAD glob byte-parity; a composed task
-   producing a different glob.
-5. **Acceptance criteria.** Both cleanup sites use the declared template
-   with no code change at the call sites.
-6. **Failure/edge cases.** An empty or malformed template must refuse, not
+4. **Validation plan.** Unit; TIDMAD glob byte-parity vs C0; a composed
+   task producing a different glob; an authority census proving one owner.
+5. **Acceptance criteria.** Both cleanup sites consume the declared
+   template with no change at the call sites; exactly one naming authority
+   exists.
+6. **Failure/edge cases.** An empty or malformed template must refuse, never
    produce a glob matching everything.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** Naming only.
 
-### C6 — Spawn hygiene
+### C8 — Spawn hygiene (F-11-4, F-11-7)
 
-1. **Goal.** Remove the accidental couplings that make the spawn surface
-   fragile.
-2. **Scope.** F-11-4 (`cached_models`/`records` single authority),
-   F-11-7 (absolute script paths).
+1. **Goal.** Remove accidental couplings that make the surface fragile.
+2. **Scope.** `cached_models` / `records` name derivation; the three
+   relative script paths; the stale launch-split docstring.
 3. **Implementation plan**
    - [ ] One authority for the sandbox subdirectory names, following the
-         `get_plugin_dir`/`get_loss_dir` precedent in the same file.
+         `get_plugin_dir` / `get_loss_dir` precedent in the same file.
    - [ ] Anchor the three script paths absolutely; keep `cwd` semantics.
-   - [ ] Record the §3.5 launch-split docstring correction (stale
-         `timeout --signal=INT` justification).
+   - [ ] Correct the launch-split justification (§3.5) — the cited
+         `timeout --signal=INT` mechanism does not exist; the real anchor
+         is the foreground process group plus the chain trap. **Fix the
+         reason, never the behaviour.**
 4. **Validation plan.** Unit; a parity test proving parent and child derive
-   the SAME paths — the guarantee that is coincidental today.
-5. **Acceptance criteria.** Planting a divergent literal turns the parity
-   test red.
-6. **Failure/edge cases.** The `_OK_` sentinel read depends on the match;
-   a mismatch currently produces a FALSE `error_training`.
+   the SAME paths; mutation: a planted divergent literal turns it RED.
+5. **Acceptance criteria.** The parent/child agreement is enforced rather
+   than coincidental.
+6. **Failure/edge cases.** The `_OK_` sentinel read depends on the match; a
+   mismatch currently produces a FALSE `error_training`.
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** No behaviour change to kill/cleanup semantics.
+8. **Commit boundary.** No change to kill/cleanup semantics.
 
-### C7 — Invariants and resume
+### C9 — Invariants and resume (F-11-5, F-11-6, R-11-9)
 
-1. **Goal.** Remove the last TIDMAD token from the resume path and close
-   the ingress-vs-lock asymmetry.
-2. **Scope.** F-11-5 (`resume.py:1483`), F-11-6
-   (`validate_stamped_invariants`).
+1. **Goal.** Remove the last task token from the resume path and close the
+   ingress-vs-lock asymmetry.
+2. **Scope.** `resume.py`'s `full_scope` derivation and `TIDMAD` import;
+   `validate_stamped_invariants` and its four hand-built call sites.
 3. **Implementation plan**
    - [ ] Replace `list(range(TIDMAD.num_files))` with the composed
          profile's `num_files`, as the sibling site already does; drop the
-         `TIDMAD` import.
-   - [ ] Decide whether outputs are stamped with
-         `task_composition_fingerprint` and what a `None` stamp means
-         (`_reject_legacy_runtime_lock` is the precedent for refusing
-         rather than defaulting).
-4. **Validation plan.** Unit; legacy-record compatibility; negative: a
-   cross-composition seed must not pass ingress if the decision says so.
-5. **Acceptance criteria.** `core/resume.py` contains zero task tokens.
-6. **Failure/edge cases.** A legacy unstamped record must remain readable —
-   Step 10 deliberately omits the key rather than serializing `null`.
+         import.
+   - [ ] Implement **R-11-9**'s three-case table exactly.
+4. **Validation plan.** Unit; legacy unstamped record readable in legacy
+   mode; composed + fingerprint mismatch refuses; composed + unstamped
+   legacy refuses under the named rule.
+5. **Acceptance criteria.** `core/resume.py` contains zero task tokens; all
+   three R-11-9 cases have a named test.
+6. **Failure/edge cases.** Step 10 omits the key rather than serializing
+   `null`; that must stay true so legacy locks remain byte-identical.
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** No new invariants beyond the decided one.
+8. **Commit boundary.** No invariants beyond R-11-9.
 
-### C8 — Census widening and operator docs
+### C10 — Census widening, structural comparison, operator docs
 
 1. **Goal.** The spawn parent stops being invisible to the repository's own
-   guards, and the operator surface is documented.
-2. **Scope.** F-11-8; `sdsc_submission_scripts/README.md`; any node `.md`
-   this PR's production changes touch.
+   guards; the operator surface is documented; the structural budget is
+   checked.
+2. **Scope.** F-11-8; the R-11-11 comparison; `sdsc_submission_scripts/README.md`
+   and any node `.md` this PR's production changes touch.
 3. **Implementation plan**
    - [ ] Bring `core/sandbox_executor.py` into the censused surface, or
-         state why not.
-   - [ ] Document the resource knobs — `SIDERIUS_SUBPROCESS_RSS_GB` and
-         `SIDERIUS_PREFLIGHT_WORKER_MEM_GIB` are env-only and undocumented
+         state why not. Widening may surface pre-existing leaks — record
+         them, never exempt by name.
+   - [ ] Re-measure the R-11-11 metrics and compare against C0. A function
+         that grew a branch family or ~80-150 lines must be extracted
+         before this commit closes.
+   - [ ] Document the resource knobs, which are env-only and undocumented
          outside source.
-   - [ ] **Doc sync lands HERE — before the final push, not after.**
-4. **Validation plan.** Unit; the widened census must be RED on a planted
-   leak.
+   - [ ] **Doc sync lands HERE — before the final push, not after**
+         (the Step-10 ordering lesson).
+   - [ ] **R-11-10 sweep**: every C0 inverted guard is now a permanent
+         contract owner or deleted; no duplicate pre/post pairs survive.
+4. **Validation plan.** Unit; the widened census RED on a planted leak.
 5. **Acceptance criteria.** Every documented flag quoted against merged
-   source.
-6. **Failure/edge cases.** Widening the census may surface pre-existing
-   leaks — record them, do not silently exempt by name.
+   source; the structural comparison recorded with real numbers; zero
+   duplicate guards.
+6. **Failure/edge cases.** If the structural budget is exceeded and cannot
+   be extracted safely, STOP and raise it rather than shipping the growth.
 7. **Verification commands and evidence.** `[ ]` pending.
-8. **Commit boundary.** Docs + guards only.
+8. **Commit boundary.** Docs, guards and measurement only.
 
-### C9 — Gate 2
+### C11 — Gate 2
 
-Gate section per the standard's required fields — see §8.
+Per §8. No production change in this commit beyond what the Gate evidence
+requires.
 
 ---
 
@@ -504,10 +735,19 @@ Gate section per the standard's required fields — see §8.
 | **EXTRA DEPTH JUSTIFICATION** | none required — Step 11's witness is observable within a single iteration. **Semantic-latency preflight: the witness is argv/sentinel/rlimit behaviour, which is produced and consumed inside one iteration, so no carried-state latency applies.** |
 | **ISOLATION** | if a quality subsystem would block the path on a criterion Step 11 does not own, isolate it with the existing production switch, changing no semantics |
 
-**Gate 1 — UNDECIDED.** §7.9 check: `agent/prompts.py:1265-1285` renders an
-OOM note keyed on the status string. If C2 changes planner-visible tags,
-Gate 1 becomes REQUIRED. **This must be resolved from source before freeze,
-not assumed.**
+**Gate 1 — resolved from source, pending only the Q-11-3 answer.** The
+planner's OOM note is gated on `str(r.get("status", "")).endswith("_oom")`
+(`agent/prompts.py:1265-1270`). `"oom_host_ram"` ends in `_ram`, so it does
+**not** match today and a host OOM renders no planner bytes.
+
+* **Q-11-3 = A (recommended)** — C2 keeps the status out of the `_oom`
+  family, prompt bytes are unchanged, **Gate 1 NOT REQUIRED**. C2 carries
+  an executable prompt-byte parity test, so this is asserted rather than
+  assumed.
+* **Q-11-3 = B** — the note newly renders for host-OOM attempts, which is
+  an LLM-facing change: **Gate 1 REQUIRED**.
+
+This was checked before freeze precisely so it is not discovered during C2.
 
 **Gate 2 — REQUIRED**, once, at the final executable head.
 
