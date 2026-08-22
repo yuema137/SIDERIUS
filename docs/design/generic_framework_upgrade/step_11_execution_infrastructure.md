@@ -2,13 +2,20 @@
 
 ## 0. Status
 
-**STEP 11 REV 2 — DESIGN SEMANTICS APPROVED (operator, 2026-08-21).
-PENDING THE 07c PREREQUISITE AND POST-07c RECONCILIATION.
-DO NOT FREEZE YET. Implementation MUST NOT start.**
+**STEP 11 REV 3 — RECONCILED AGAINST CURRENT MASTER.
+ONE MATERIAL FINDING (Q-11-4) BLOCKS FREEZE.
+Implementation MUST NOT start.**
 
-This is no longer "the design is unsettled". The semantics are approved;
-what remains is waiting for 07c to change the shared substrate, then
-re-anchoring against the resulting master and freezing as Revision 3.
+Rev 3 completed the bounded freshness reconciliation. **The 07c
+prerequisite was already satisfied** — 07c merged 2026-08-17 as PR #219,
+squash `52bd98ba`, four days BEFORE rev 2's own audit anchor, so rev 2's
+source audit already saw 07c's implementation. There is no post-07c
+semantic delta to absorb, and none was manufactured.
+
+Every rev-2 ruling survives. **But the C5 no-dispatch invariant fired**:
+the generic scope-reconstruction seam C5 assumed **does not exist**. That
+is a material capability finding, and per the invariant's own instruction
+it is brought back as **Q-11-4** rather than solved with task branches.
 
 Revision 2 answers the operator's rev-1 review (2026-08-21): Q-11-1 and
 Q-11-2 are RULED, every implementation-time `Decide` is promoted to a
@@ -20,9 +27,9 @@ contradiction is reconciled explicitly.
 | field | value |
 |---|---|
 | roadmap contract | `siderius_generic_framework_upgrade.md` §9 (§9.1 couplings, §9.2 target, §9.3 compatibility), completion-matrix row "§9 Execution infrastructure" |
-| source anchor | audited at **`a88aad9b`**. **STALE FOR FREEZE — master is already ahead, and Q-11-2 requires 07c to land first. The anchor MUST be refreshed and a bounded re-audit run before freeze (R-11-0).** |
-| prerequisite status | Steps 00–06, 07a/07b/07d, 08, 09, 09.5, 09.5a, 10 **COMPLETE**. **§7e (07c) NOT STARTED — see Q-11-2** |
-| open operator questions | **0.** Q-11-1, Q-11-2 and Q-11-3 are all RULED by the operator (§4). Rev 3 must re-confirm zero after the post-07c re-audit. |
+| source anchor | **`175904cd`** (clean master, 2026-08-21). Rev 2 audited at `a88aad9b`; **zero production files changed between them** (all five intervening commits are docs-only), so every §3 anchor was re-verified EXACT with no line movement — see §3.6. |
+| prerequisite status | Steps 00–06, **07 COMPLETE including §7e/07c (PR #219, squash `52bd98ba`, merged 2026-08-17)**, 08, 09, 09.5, 09.5a, 10 **COMPLETE**. **No outstanding prerequisite.** |
+| open operator questions | **1 — Q-11-4 (C5's missing reconstruction seam).** Q-11-1/2/3 remain RULED and re-confirmed valid at this anchor. |
 | PR decomposition | **ONE PR** (see §6) |
 | Gate disposition | Gate 2 **REQUIRED**, 1 iteration x 1 round. Gate 1 **NOT REQUIRED** — Q-11-3 = A ruled by the operator; source-checked, not assumed (§8) |
 
@@ -193,6 +200,33 @@ the D14 seam. **The arithmetic no longer describes the path it governs.**
 | F-11-10 | Device index 0 hardcoded in four production sites; no operator flag anywhere in production | `hardware_context.py:355,358-362`; `inference_single.py:65`; `probe_production.py:150` |
 | F-11-11 | CI resolves the data root from the tracked TEMPLATE (`/path/to/TIDMAD/`); `.github/workflows/ci.yml` never creates a real config, and `data_paths.py` binds at IMPORT | `data_paths.py:20-60` |
 
+### 3.6 Rev-3 freshness reconciliation (2026-08-21, anchor `175904cd`)
+
+**Bounded by design** — only the load-bearing assumptions were re-checked,
+not the whole surface.
+
+* **Production drift since rev 2's anchor `a88aad9b`: ZERO files.** All five
+  intervening commits are docs-only, so no §3 line anchor moved.
+* **Eight load-bearing anchors re-verified EXACT**: `dirs["data"] =
+  _tidmad_data_dir()` (`:1136`) · `TidmadScope` unconditional
+  (`train_engine_sandbox.py:1124-1125`) · `derive_tidmad_metric`
+  (`denoising_score_single.py:195`) · `isolated_probe.py:482-487` still has
+  **no** `env=` · all three `oom_host_ram` producers (`:1654,:1923,:2116`) ·
+  `resume.py:1483` `TIDMAD.num_files` · `_ROLE_DEFAULT_RSS_GB` 40/60/24 ·
+  `sandbox_executor.py` still ABSENT from `_DATA_PATH_SURFACE`.
+* **Structural baseline UNCHANGED**: file 2,456 LOC; `execute_training`
+  92 stmts / 39 branch / 357 LOC / 14 params; `execute_inference`
+  69/28/253/9; `_run_observed_subprocess` 62/27/186/9;
+  `TidmadSandbox.__init__` 22/6/87/12. R-11-11's budget stands as written.
+* **All rev-2 rulings re-confirmed valid** at this anchor: Q-11-1,
+  Q-11-2 (discharged — already merged), Q-11-3, R-11-1 … R-11-11.
+* **Gate dispositions unchanged**: Gate 1 NOT REQUIRED (Q-11-3 = A);
+  Gate 2 REQUIRED, 1 iteration x 1 round. The semantic-latency preflight is
+  re-affirmed — the witness is argv/sentinel/rlimit behaviour, produced and
+  consumed inside one iteration.
+* **One material finding: Q-11-4** — C5's assumed generic reconstruction
+  seam does not exist.
+
 ### 3.5 What must NOT move (verified invariants)
 
 * **The plain-vs-session launch split** (`sandbox_executor.py:903-911,
@@ -238,9 +272,24 @@ an owner (**C5**) and keeps the claim; the alternative the operator allowed
 — deleting the claim — is NOT taken, because §3.1 shows the scope gap is
 the reason the surface is TIDMAD-only.
 
-### Q-11-2 — RULED: **07c FIRST**
+### Q-11-2 — RULED: **07c FIRST** — and **already SATISFIED**
 
 > Implement/merge 07c, then re-anchor and reconcile Step 11 before freeze.
+
+**Status at rev 3: DISCHARGED, and it always was.** 07c merged **2026-08-17**
+as PR **#219**, squash **`52bd98ba`** — four days BEFORE rev 2's audit anchor
+`a88aad9b`. Rev 2's source audit therefore already observed post-07c code.
+
+Rev 2 recorded 07c as "FROZEN … never implemented" on the authority of two
+documents that were both stale: the roadmap's `§7e` row (`NOT STARTED`) and
+07c's own ledger (*"Implementation complete; PR next"*). Verified from git
+instead — `52bd98ba` is an ancestor of master, `execute_tools/probe_batch.py`
+and the `RuntimePhase` `"validation"` member and `validation_max_samples` are
+all present, `probe_data.py` is gone as C2 specified, and the 07c files on
+master are **byte-identical** to the (now deleted) implementation branch
+`step07-pr07c-tuner-measurement`, tip `4b73d34a`.
+
+**No post-07c semantic delta exists to absorb, and none was invented.**
 
 07c (`pr_07c_tuner_measurement.md`) is FROZEN Revision 3, operator-approved
 2026-08-17, Q-07c-1…9 closed, Gate 2 REQUIRED, never implemented; it edits
@@ -279,6 +328,47 @@ C2's prompt-byte parity test is what pins this boundary.
 
 ---
 
+### Q-11-4 — OPEN, MATERIAL: C5 has no generic reconstruction seam
+
+**The rev-2 C5 invariant fired exactly as designed.** It said:
+
+> If source audit proves no such generic reconstruction seam exists, that
+> is a material capability finding and must be brought back before
+> implementation rather than solved with TIDMAD/Pets/DAVIS branches.
+
+**Source audit at `175904cd` proves it does not exist:**
+
+| probe | result |
+|---|---|
+| a scope registry / `scope_kind` / scope-serialization helper anywhere in `execute_tools/`, `core/`, `nodes/`, `workflows/` | **none** |
+| `TaskDataPath` protocol exposing a scope TYPE, builder or reconstructor | **none** — its four methods take `scope: object` as a PARAMETER; the seam CONSUMES a scope and never produces one |
+| a shared base / Protocol / ABC across `TidmadScope`, `PetsScope`, `DavisScope` | **none** — three independent `BaseModel`s, docstringed as "opaque" and "task-owned vocabulary" |
+| how a scope is obtained today | direct class instantiation in Python (`PetsScope(rows=...)`, `run_pets_gate2.py:185`) — works only IN-PROCESS |
+
+Each scope is individually serializable because it is a Pydantic model.
+What is missing is any task-neutral way for the CHILD to know **which model
+to rehydrate into**. Supplying that by hand is precisely the forbidden
+`if scope_kind == "pets"` table.
+
+**C5 therefore cannot freeze as written.** Options:
+
+| # | option | character |
+|---|---|---|
+| **A** | C5 adds a **generic scope registry** (id → scope model), parallel to the EXISTING task-data-path registry, and reuses that registry's id transport | new generic machinery, task-neutral, no dispatch. Defensible as TRANSPORT: a registry rehydrates a scope that was already built; it never builds one from a manifest. But rev 2 assumed an EXISTING seam, so this is a real scope increase |
+| **B** | **drop C5**; scope transport moves wholly to CAP-SCOPE | Step 11 then delivers data root + naming + metric + calibration + the three defects, and §1 must stop claiming scope can cross argv — the option the operator offered at rev 1 and did not take |
+| C | extend the frozen D14 four-method contract with a scope-reconstruction method | changes a FROZEN contract; effectively CAP-SCOPE |
+
+**Recommendation: A if a rehydration registry counts as transport under
+R-11-2; otherwise B.** The distinction is real — such a registry knows how
+to REHYDRATE a scope, never how to BUILD one for an arbitrary task — but it
+is the operator's line to draw, and C is not recommended because it edits a
+frozen contract.
+
+**Nothing else in the design depends on this.** C0–C4 and C6–C11 are
+unaffected either way; only C5 and §1's scope sentence move.
+
+---
+
 ## 4a. Rulings (R-11-x) — every rev-1 `Decide` is resolved here
 
 Rev 1 left eleven semantic decisions as implementation-time `Decide`
@@ -286,10 +376,11 @@ items. Each would have changed schema, compatibility, resume, failure
 semantics or operator behaviour, so each is promoted to a ruling. **A
 frozen design contains no `Decide`.**
 
-**R-11-0 — freeze prerequisites.** This document may not be frozen until
-(a) 07c has merged, (b) the source anchor is refreshed to the resulting
-master, and (c) a bounded re-audit re-verifies every §3 anchor. Line
-numbers in §3 are `a88aad9b` and WILL move.
+**R-11-0 — freeze prerequisites. (a) and (b) and (c) are DISCHARGED at
+rev 3.** 07c merged 2026-08-17 (PR #219, `52bd98ba`); the anchor is
+refreshed to `175904cd`; the bounded re-audit is recorded in §3.6 and found
+zero production drift, so every §3 anchor holds exactly. **The remaining
+freeze blocker is Q-11-4 alone.**
 
 **R-11-1 — argv parity, reconciled.** §9.3's "argv/IPC/sentinels
 byte-identical" and Step 11's job of transporting new declared values are
@@ -617,6 +708,11 @@ declaration/transport work, then hygiene, then guards and docs.
 
 ### C5 — Resolved training-scope transport (the Q-11-1 owner)
 
+> **BLOCKED ON Q-11-4.** The generic reconstruction seam this commit assumed
+> does not exist at `175904cd`. Do not implement C5 until the operator
+> answers Q-11-4 (add a rehydration registry / drop C5 / extend the frozen
+> D14 contract). C0–C4 and C6–C11 are unaffected.
+
 1. **Goal.** If a resolved task scope is supplied, the subprocess boundary
    can transport and reconstruct it. **This is the commit rev 1 was
    missing.**
@@ -890,17 +986,22 @@ This was checked before freeze precisely so it is not discovered during C2.
 **Entry conditions, in order.** Implementation MUST NOT start until all of
 these hold:
 
-- [ ] 07c implemented, Gate-2'd and MERGED (Q-11-2)
-- [ ] Step-11 source anchor refreshed to the resulting master (R-11-0)
-- [ ] Bounded re-audit re-verifies every §3 anchor and line number, and
-      reconciles any semantics 07c changed — re-auditing ONLY the affected
-      source assumptions, not the whole surface again
-- [ ] The three rev-2 stale points confirmed fixed (this revision)
-- [ ] C5 confirmed to have no task/scope identity dispatch seam problem —
-      if no generic reconstruction seam exists, STOP and raise it
+- [x] 07c implemented, Gate-2'd and MERGED — **PR #219, squash `52bd98ba`,
+      2026-08-17. Verified from git ancestry and byte-identical file
+      content, not from a status document.**
+- [x] Step-11 source anchor refreshed to current clean master `175904cd`
+- [x] Bounded re-audit run — §3.6; zero production drift since rev 2's
+      anchor, all eight load-bearing anchors exact, structural baseline
+      unchanged
+- [x] The three rev-2 stale points confirmed fixed
+- [ ] **Q-11-4 answered** — C5's reconstruction seam does not exist; the
+      operator must choose registry / drop C5 / extend D14
+- [ ] C5 updated to match that answer (or removed, with §1's scope claim
+      withdrawn)
 - [ ] Open operator questions = **0**
-- [ ] Operator freezes as **Revision 3**
+- [ ] Operator freezes as **Revision 4**
 
-All three questions are RULED as of rev 2: **Q-11-1 = A** (transport, not
-construction) · **Q-11-2 = 07c FIRST** · **Q-11-3 = A** (tuner-visible
-only, prompt bytes unchanged, Gate 1 NOT REQUIRED).
+Rulings standing at rev 3: **Q-11-1 = A** (transport, not construction) ·
+**Q-11-2 = 07c FIRST, DISCHARGED** (already merged) · **Q-11-3 = A**
+(tuner-visible only, prompt bytes unchanged, Gate 1 NOT REQUIRED). **Q-11-4
+is OPEN and is the only freeze blocker.**
