@@ -2,7 +2,13 @@
 
 ## 0. Status
 
-**DRAFT — Revision 2. NOT FROZEN. Implementation MUST NOT start.**
+**STEP 11 REV 2 — DESIGN SEMANTICS APPROVED (operator, 2026-08-21).
+PENDING THE 07c PREREQUISITE AND POST-07c RECONCILIATION.
+DO NOT FREEZE YET. Implementation MUST NOT start.**
+
+This is no longer "the design is unsettled". The semantics are approved;
+what remains is waiting for 07c to change the shared substrate, then
+re-anchoring against the resulting master and freezing as Revision 3.
 
 Revision 2 answers the operator's rev-1 review (2026-08-21): Q-11-1 and
 Q-11-2 are RULED, every implementation-time `Decide` is promoted to a
@@ -16,9 +22,9 @@ contradiction is reconciled explicitly.
 | roadmap contract | `siderius_generic_framework_upgrade.md` §9 (§9.1 couplings, §9.2 target, §9.3 compatibility), completion-matrix row "§9 Execution infrastructure" |
 | source anchor | audited at **`a88aad9b`**. **STALE FOR FREEZE — master is already ahead, and Q-11-2 requires 07c to land first. The anchor MUST be refreshed and a bounded re-audit run before freeze (R-11-0).** |
 | prerequisite status | Steps 00–06, 07a/07b/07d, 08, 09, 09.5, 09.5a, 10 **COMPLETE**. **§7e (07c) NOT STARTED — see Q-11-2** |
-| open operator questions | **1 — Q-11-3 (F-11-1's Gate-1 disposition).** Q-11-1 and Q-11-2 are RULED below. |
+| open operator questions | **0.** Q-11-1, Q-11-2 and Q-11-3 are all RULED by the operator (§4). Rev 3 must re-confirm zero after the post-07c re-audit. |
 | PR decomposition | **ONE PR** (see §6) |
-| Gate disposition | Gate 2 **REQUIRED**, 1 iteration x 1 round. Gate 1 **NOT REQUIRED under the recommended Q-11-3 answer** — source-checked, not assumed (§8.1) |
+| Gate disposition | Gate 2 **REQUIRED**, 1 iteration x 1 round. Gate 1 **NOT REQUIRED** — Q-11-3 = A ruled by the operator; source-checked, not assumed (§8) |
 
 This document is the parent design AND the PR document — one PR, one doc,
 per the kickoff protocol. Per-commit checklists in §7 follow the operator's
@@ -65,8 +71,15 @@ the probe worker's missing-`env` asymmetry is deliberate. **§3.3 resolves
 it: it is a latent defect, not a choice.**
 
 Completion-matrix acceptance: *"argv/IPC/sentinels byte-identical;
-contrast tasks spawn with zero infra edits (L2/L3 as available)"*. **The
-second clause is not satisfiable as written — see Q-11-1.**
+contrast tasks spawn with zero infra edits (L2/L3 as available)"*.
+
+**Both clauses are AMENDED, not merely quoted.** The first is reconciled
+per-mode by **R-11-1** (legacy byte-identical; composed argv may gain
+additive declared arguments — that transport is the mechanism being
+introduced). The second was unsatisfiable under current CAP-SCOPE
+maturity, and **Q-11-1 / R-11-2 supply the bounded corrected Step-11
+acceptance**: the boundary must TRANSPORT a resolved scope, not CONSTRUCT
+one. Neither is an open blocker.
 
 ---
 
@@ -239,7 +252,7 @@ resource paths Step 11 restructures. Sequence:
     -> update this design -> operator freeze -> Step-11 implementation
 ```
 
-### Q-11-3 — OPEN: F-11-1's Gate-1 disposition
+### Q-11-3 — RULED: **A** (operator, 2026-08-21)
 
 **Source-checked, not assumed.** The planner's OOM note is gated on
 `str(r.get("status", "")).endswith("_oom")` (`agent/prompts.py:1265-1270`).
@@ -251,11 +264,18 @@ OOM renders no planner bytes at all.
 | **A (recommended)** | make the host OOM visible to the TUNER only, without producing an `_oom`-suffixed status | no prompt byte changes | **NOT REQUIRED** |
 | B | route host OOM into an `_oom` status so the "NOT ATTRIBUTED" note also covers it | the note newly renders for host-OOM attempts | **REQUIRED** |
 
+**Operator ruling — A.** Host-RAM OOM enters the tuner's structured
+runtime/resource failure handling and **does not change planner-facing
+prompt bytes**. **Gate 1 NOT REQUIRED.**
+
+> Step 11's failure class is execution infrastructure, not planner
+> feedback. Fixing a producer/consumer runtime bug is not a reason to
+> change what the LLM sees.
+
 B is arguably better science — a host-RAM ceiling genuinely is *not*
 evidence about model capacity, which is exactly what that note protects
-against. But it is **planner-feedback scope**, not execution-infrastructure
-scope, and the Gate-scope rule forbids acquiring acceptance criteria by
-proximity. Recommendation: **A**, and record B as named debt.
+against — and is recorded as **named debt, explicitly NOT Step 11's**.
+C2's prompt-byte parity test is what pins this boundary.
 
 ---
 
@@ -324,11 +344,29 @@ negative/non-numeric value falls back **silently**; the declared form must
 preserve the disable semantics explicitly and must REFUSE a malformed
 value loudly rather than silently defaulting.
 
-**R-11-6 — the run-invariants lock records the ceilings.** A run must be
-able to say which ceilings it executed under. The pin is **recorded, not
-equality-enforced**: ceilings are host calibration, so a legitimate rerun
-on a different host must not be refused the way a scope or health-config
-change is.
+**R-11-6 — the run-invariants lock RECORDS the ceilings (APPROVED,
+operator 2026-08-21).** A run must be able to say which ceilings it
+executed under. The pin is **recorded, not equality-enforced**: ceilings
+are execution-HOST calibration, not task semantics, so the same scientific
+run resumed on a differently-calibrated host must not be refused the way a
+composition, metric or dataset-semantics change is.
+
+**Added operator constraint — recorded-only must not be representationally
+confusable with the equality-enforced set.** Do not drop the ceilings into
+the canonical equality set and rely on a validator "remembering" not to
+compare them. The two concepts must be distinguishable in the
+representation:
+
+```text
+semantic invariants          -> equality ENFORCED
+execution provenance /
+  host calibration           -> RECORDED, equality NOT enforced
+```
+
+A new schema is not required — express it with the minimum the existing
+structure allows. **A test must prove**: same scientific run + different
+recorded host calibration ⇒ **resume remains legal**. Without that test a
+future generic invariant validator will comparison-sweep it by accident.
 
 **R-11-7 — the data root is run binding, provenance-only.** It is a
 host path, and the semantic fingerprint deliberately excludes host paths
@@ -345,6 +383,15 @@ removed in this step: CI resolves the root from the tracked template and
 `.github/workflows/ci.yml` creates no real config, so removing it breaks
 collection repo-wide. Decoupling first (resolution behind a call) is the
 prerequisite; the removal is named debt.
+
+**APPROVED (operator, 2026-08-21), with this wording pinned: the
+import-time template fallback is LEGACY-ONLY after Step 11 and must NEVER
+be consulted as a fallback for a composed run.** It is an isolated,
+named legacy debt — not a safety net the generic path may lean on. This
+follows the standing migration pattern: make the new generic path stop
+depending on the legacy fallback FIRST, retire the fallback SECOND, and
+never dismantle a repo-wide initialization assumption inside a
+high-blast-radius PR for tidiness.
 
 **R-11-9 — composed vs unstamped legacy records on resume.**
 
@@ -589,9 +636,34 @@ declaration/transport work, then hygiene, then guards and docs.
 5. **Acceptance criteria.** With no carrier, training behaviour is
    byte-identical to C0. With a carrier, the child provably consumes the
    supplied scope. **No claim is made that any contrast task can PRODUCE
-   one — that is CAP-SCOPE.**
+   one — that is CAP-SCOPE.** An executable census proves **zero**
+   task-identity or scope-kind dispatch was added to generic execution
+   infrastructure (the §6 invariant).
 6. **Failure/edge cases.** Malformed carrier, carrier naming an unknown
    scope kind, carrier present on an un-composed run — all refuse.
+
+   **BINDING INVARIANT (operator, 2026-08-21) — no identity dispatch.**
+   C5 must NOT introduce a task-identity or built-in-scope-kind dispatch
+   table into generic execution infrastructure. This is forbidden:
+
+   ```python
+   if scope_kind == "tidmad": ...
+   elif scope_kind == "pets": ...      # <- CAP-SCOPE smuggled into Step 11
+   ```
+
+   Scope reconstruction must use an EXISTING generic
+   serialization/registration/interface authority, or a task-neutral
+   carrier. **If the source audit proves no such generic reconstruction
+   seam exists, that is a material capability finding: STOP and bring it
+   back before implementation — do not solve it with TIDMAD/Pets/DAVIS
+   branches.**
+
+   ```text
+   transport serialization              -> Step 11
+   generic registered reconstruction    -> Step 11, IF the seam exists
+   switch on task / scope identity      -> FORBIDDEN
+   invent task scope semantics          -> CAP-SCOPE
+   ```
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** Transport only. No task-owned scope construction,
    no D14-runner rerouting.
@@ -717,10 +789,46 @@ declaration/transport work, then hygiene, then guards and docs.
 7. **Verification commands and evidence.** `[ ]` pending.
 8. **Commit boundary.** Docs, guards and measurement only.
 
-### C11 — Gate 2
+### C11 — Gate 2 evidence and closeout
 
-Per §8. No production change in this commit beyond what the Gate evidence
-requires.
+1. **Goal.** Produce the one real-execution evidence this PR owes: the
+   subprocess path executes under a composed binding, with the transported
+   values actually consumed, and TIDMAD parity intact. It is last because
+   the Gate must run at the final executable head.
+2. **Scope.** Gate advice/config and the ledger. **No production change**
+   beyond what the Gate evidence itself requires. Depends on C0–C10.
+3. **Implementation plan**
+   - [ ] Write the Gate-readiness packet: candidate SHA, clean tree,
+         deterministic prerequisites green, exact workload, projected
+         runtime and cost, PASS/FAIL/INCONCLUSIVE taxonomy.
+   - [ ] Re-read the gate standard and re-audit the CLI flags from source
+         immediately before launch (command shapes drift).
+   - [ ] Launch bounded and autonomously inside the pre-authorised
+         envelope, per §8.
+   - [ ] Record the result against its EXACT SHA in §11.
+4. **Validation plan.** This commit IS the validation. **Gate 2 REQUIRED —
+   listed separately here and NOT to be launched without the standing
+   pre-authorisation actually applying.** Gate 1 NOT REQUIRED (Q-11-3 = A),
+   pinned executably by C2's prompt-byte parity test rather than by
+   assertion.
+5. **Acceptance criteria.** Chain exits 0; real training, inference and
+   scoring executed (not pseudo, not skipped); the composed run's children
+   provably consumed the TRANSPORTED data root, scope carrier and metric
+   rather than TIDMAD defaults; un-composed argv byte-identical to the C0
+   census; TIDMAD ceilings resolve to 40/60/24; the TIDMAD cleanup glob
+   unchanged. **Model quality is NOT a criterion** (§8).
+6. **Failure/edge cases.** A failure in the spawn/IPC/rlimit/cleanup path
+   is a REAL Step-11 regression — fix it, do not work around it. A failure
+   caused only by model quality, HealthGate output or score magnitude is
+   **not** a Gate failure and is **not** grounds to tune anything. A
+   provider/network/machine fault is INCONCLUSIVE per the standard.
+7. **Verification commands and evidence.** `[ ]` pending — record the
+   workspace, the exact SHA, and the CI id alongside it. Never claim a run
+   that did not happen.
+8. **Commit boundary.** Evidence and ledger only. If the Gate exposes a
+   production defect, that fix is its own commit with its own checklist,
+   and the Gate re-runs at the new head only if the fix touches a
+   Gate-owned execution path.
 
 ---
 
@@ -757,7 +865,7 @@ This was checked before freeze precisely so it is not discovered during C2.
 
 * Targeted tests per commit; no full local suite (validation-economy rule).
 * ONE authoritative exact-head CI at the final head.
-* **Doc sync in C8, BEFORE the final push** — Step 10's ordering error,
+* **Doc sync in C10, BEFORE the final push** — Step 10's ordering error,
   now a standing rule.
 * Byte-parity is the workhorse: un-composed argv, TIDMAD ceilings and the
   TIDMAD glob must all be provably unchanged.
@@ -770,12 +878,29 @@ This was checked before freeze precisely so it is not discovered during C2.
 |---|---|
 | `sandbox_executor.py` is the highest-blast-radius file in the repo; the roadmap itself calls this step "highest blast radius, smallest genericity gain" | byte-parity gates on argv, ceilings and globs; kill/cleanup semantics explicitly out of scope |
 | 07c collides on the same file | Q-11-2 |
-| The acceptance criterion is unsatisfiable as written | Q-11-1 |
+| The ORIGINAL roadmap criterion was unsatisfiable under current CAP-SCOPE maturity | **RESOLVED** — Q-11-1 / R-11-2 supply the bounded corrected Step-11 acceptance (transport, not construction). Not an open blocker |
 | Removing the import-time fallback breaks CI at collection | C4 separates the fail-closed SEMANTIC decision from the import-time MECHANISM |
 
 ---
 
 ## 11. Implementation ledger
 
-*(empty — implementation has not started and MUST NOT start before the two
-open questions are answered and the operator freezes this document)*
+*(empty — implementation has not started.)*
+
+**Entry conditions, in order.** Implementation MUST NOT start until all of
+these hold:
+
+- [ ] 07c implemented, Gate-2'd and MERGED (Q-11-2)
+- [ ] Step-11 source anchor refreshed to the resulting master (R-11-0)
+- [ ] Bounded re-audit re-verifies every §3 anchor and line number, and
+      reconciles any semantics 07c changed — re-auditing ONLY the affected
+      source assumptions, not the whole surface again
+- [ ] The three rev-2 stale points confirmed fixed (this revision)
+- [ ] C5 confirmed to have no task/scope identity dispatch seam problem —
+      if no generic reconstruction seam exists, STOP and raise it
+- [ ] Open operator questions = **0**
+- [ ] Operator freezes as **Revision 3**
+
+All three questions are RULED as of rev 2: **Q-11-1 = A** (transport, not
+construction) · **Q-11-2 = 07c FIRST** · **Q-11-3 = A** (tuner-visible
+only, prompt bytes unchanged, Gate 1 NOT REQUIRED).
