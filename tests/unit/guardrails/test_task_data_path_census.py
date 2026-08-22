@@ -57,6 +57,13 @@ _DATA_PATH_SURFACE = (
     "execute_tools/train_engine_sandbox.py",
     "execute_tools/inference_single.py",
     "execute_tools/denoising_score_single.py",
+    # Step 11 C9 (F-11-8) — the SPAWN PARENT. It was absent while every one
+    # of its children was listed, so the module that decides what the
+    # children read was the one place this guardrail could not see. Bringing
+    # it in is the point of the finding, not a formality: it carries
+    # `TidmadSandbox`, `_tidmad_data_dir` and a `"tidmad_db"` literal, none
+    # of which the census had ever examined.
+    "core/sandbox_executor.py",
 )
 
 _TASK_NAME_TOKENS = {"tidmad", "pet", "pets", "davis"}

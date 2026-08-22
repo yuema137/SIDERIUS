@@ -56,6 +56,7 @@ from core.runtime_control.process_group import (
     signal_group,
     tree_rss_bytes,
 )
+from core.subprocess_env import subprocess_env
 
 #: Terminal dispositions. Each names WHAT was established, so that
 #: authority to reject a candidate — or to tell an agent to shrink it —
@@ -193,6 +194,22 @@ class IsolatedProbeSpec(BaseModel):
     #: document with no manifest and no reader beyond its worker, so an
     #: extra file would add a second lifetime to manage for no gain.
     model_io_contract: ModelIOContract | None = None
+    #: Step 11 C1 (F-11-2) — the RUN-SCOPED plugin directories, carried so
+    #: the worker is spawned with the same environment every other SIDERIUS
+    #: worker gets. Without them the child inherited the tuner's own
+    #: environ, which carries no ``SIDERIUS_PLUGIN_DIRS`` (that variable is
+    #: built per-sandbox for its children), and fell back to the legacy
+    #: global ``agent_generated/models/`` — the PR #184 failure shape one
+    #: directory along.
+    #:
+    #: ``None`` is the standalone-tooling path documented on
+    #: :func:`core.subprocess_env.subprocess_env`, and mirrors
+    #: ``GpuMeasurementSpec.plugin_dir`` / ``.loss_dir`` exactly. It is
+    #: NOT available to production: ``run_production_preflight`` requires
+    #: both keyword arguments, so a production caller cannot omit them
+    #: silently. A spec written before this field existed still validates.
+    plugin_dir: str | None = None
+    loss_dir: str | None = None
 
     def effective_cap_gb(self) -> float | None:
         """The cap the worker must apply: the LOWER of the operator ceiling
@@ -484,6 +501,13 @@ def run_isolated_preflight(
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,  # own process group: a kill reaches descendants
+            # Step 11 C1 (F-11-2). Spawning with no `env=` is what made
+            # every agent-generated candidate CONFIG_REJECTED in V20
+            # attempt 2 for the measurement worker; this spawner had the
+            # same omission. `subprocess_env` never mutates `os.environ`,
+            # and it also supplies the PYTHONPATH extension the child was
+            # losing regardless of whether the plugin dirs are known.
+            env=subprocess_env(plugin_dir=spec.plugin_dir, loss_dir=spec.loss_dir),
         )
     except Exception as exc:
         log_handle.close()

@@ -98,6 +98,7 @@
   "status": "skipped_oom_risk",
   "strategy_normalization_reason": null,
   "target_files": null,
+  "task_composition_fingerprint": null,
   "timestamp": "<present>",
   "timing": null,
   "traceback_summary": null,

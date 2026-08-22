@@ -10,6 +10,9 @@ Usage:
 
 import os
 import warnings
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 # Find config file relative to project root. The real (gitignored) config is
 # ``tidmad_data_config.yaml``; the tracked template is
@@ -134,6 +137,102 @@ def resolve_dataset_dir(explicit: str | None = None, *, purpose: str = "this run
             "--data_dir <path> to override."
         )
     return candidate
+
+
+# ---------------------------------------------------------------------------
+# Run-scoped physical data root (Step 11 C4 — R-11-7, R-11-8)
+# ---------------------------------------------------------------------------
+#
+# WHY THIS EXISTS. Before C4 the physical dataset root never crossed the
+# subprocess boundary: neither the training nor the inference argv carried
+# `--data_dir`, and the scoring argv carried no `--raw_data_dir`, so all
+# three children fell back to the module-level ``TIDMAD_DATA_DIR`` resolved
+# AT IMPORT. A composed run therefore read TIDMAD's data no matter what it
+# had declared — the whole spawn surface has only ever been executed by
+# TIDMAD (design §3.1).
+#
+# WHAT IT IS NOT. A host path is execution provenance, not task semantics
+# (R-11-7): it is deliberately excluded from the composition's semantic
+# fingerprint, because two checkouts of the same task package at different
+# paths are the same scientific run.
+#
+# The binding mirrors ``task_data_path``'s ContextVar pattern exactly, and
+# for the same reason its ``active_*`` / ``resolve_*`` split exists: a
+# caller asking *"which root should I use?"* wants the legacy fallback, and
+# a caller asking *"is this run explicitly bound?"* must NOT get it —
+# otherwise every legacy child's argv gains a flag it never had.
+
+_ACTIVE_PHYSICAL_DATA_ROOT: ContextVar[str | None] = ContextVar(
+    "siderius_active_physical_data_root", default=None
+)
+
+
+@contextmanager
+def bind_physical_data_root(root: str, *, purpose: str = "this run") -> Iterator[str]:
+    """Bind the run's resolved physical dataset root for the run scope.
+
+    **Fails closed at the BINDING edge** (R-11-8), which is the point: a
+    composed run whose declared root is missing, empty, a placeholder or
+    not a directory must be refused before it spends an LLM call or a GPU
+    minute — not after a child has silently read somebody else's data.
+    Validation is :func:`resolve_dataset_dir`, so there is exactly ONE
+    fail-closed rule and this is not a second convention.
+
+    Args:
+        root: the resolved root, e.g. the operator's ``--data_dir``.
+        purpose: named in the refusal so an operator knows which launch
+            refused.
+
+    Yields:
+        The validated root.
+
+    Raises:
+        DatasetDirectoryUnavailable: the root is unusable.
+    """
+    # An EMPTY root must refuse rather than reach `resolve_dataset_dir`,
+    # which treats a falsy `explicit` as "no override supplied" and falls
+    # back to TIDMAD_DATA_DIR. That fallback is correct at the LAUNCH
+    # boundary and wrong here: binding an empty string is a caller stating
+    # a root, and resolving it to TIDMAD's is exactly the silent substitution
+    # R-11-8 forbids for a composed run. Found by C4's own negative test.
+    if not root or not root.strip():
+        raise DatasetDirectoryUnavailable(
+            f"an empty physical data root was bound for {purpose}. A composed "
+            f"run must name a real directory: an empty value would otherwise "
+            f"resolve to the legacy import-time TIDMAD_DATA_DIR, which is the "
+            f"silent substitution Step 11 exists to remove."
+        )
+    validated = resolve_dataset_dir(root, purpose=purpose)
+    token = _ACTIVE_PHYSICAL_DATA_ROOT.set(validated)
+    try:
+        yield validated
+    finally:
+        _ACTIVE_PHYSICAL_DATA_ROOT.reset(token)
+
+
+def active_physical_data_root() -> str | None:
+    """The bound root, or ``None`` — **without** the legacy fallback.
+
+    This is what the subprocess transport asks. Emitting the flag on the
+    strength of a fallback would change the argv of every un-composed
+    legacy child, which R-11-1 forbids.
+    """
+    return _ACTIVE_PHYSICAL_DATA_ROOT.get()
+
+
+def resolve_physical_data_root() -> str:
+    """What a production read site asks for: bound root, else legacy.
+
+    The ``TIDMAD_DATA_DIR`` fallback is the LEGACY / un-composed path and,
+    after Step 11, must never be consulted for a composed run (R-11-8) —
+    which is enforced by a composed run being required to bind a root
+    rather than by a check here. Removing the import-time fallback itself
+    is explicitly NOT Step-11 scope: CI resolves the root from the tracked
+    template and creates no real config, so removing it would break
+    collection repo-wide.
+    """
+    bound = _ACTIVE_PHYSICAL_DATA_ROOT.get()
+    return bound if bound is not None else TIDMAD_DATA_DIR
 
 
 # ── V20 PR C1 / C-C3b: the task-owned measurement capability ────────────────

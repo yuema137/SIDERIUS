@@ -58,6 +58,7 @@ from execute_tools.evaluation_metric import (
 )
 from execute_tools.metric_order import MetricOrder
 from nodes.result_interpretation_agent import tuning_output_to_model_run_summary
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from tests.helpers.metric_fixtures import shipped_spec
 from tests.helpers.recording_sandbox import RecordingSandbox
 from tests.helpers.step00_pseudo_iteration import run_bounded_pseudo_iteration
@@ -118,7 +119,7 @@ def _drive(task: str, outcomes: dict[str, Any], tmp_path, monkeypatch) -> dict[s
 
     # The C1 link, re-asserted here rather than assumed: the run-scoped binding
     # activates exactly what composition resolved.
-    with bind_run_task_composition(composition):
+    with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
         bound = [(m.spec.id, m.spec.direction) for m in resolve_bound_run_secondary_metrics()]
 
     _LifecycleSandbox.outcomes = dict(outcomes)

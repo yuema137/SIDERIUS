@@ -37,6 +37,7 @@ from execute_tools.evaluation_metric import (
     bind_run_secondary_metrics,
     resolve_bound_run_secondary_metrics,
 )
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from workflows.task_composition import (
     CompositionNotBoundError,
     TaskCompositionError,
@@ -304,14 +305,16 @@ class TestTheRunScopedBinding:
     def test_the_composition_binding_activates_the_declared_family(self):
         composition = _compose("davis")
         assert resolve_bound_run_secondary_metrics() == ()
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             bound = resolve_bound_run_secondary_metrics()
             assert [m.spec.id for m in bound] == ["psnr", "mae"]
             assert bound == composition.secondary_metrics
         assert resolve_bound_run_secondary_metrics() == ()
 
     def test_a_zero_secondary_composition_binds_the_empty_tuple(self):
-        with bind_run_task_composition(_compose("tidmad")):
+        with bind_run_task_composition(
+            _compose("tidmad"), physical_data_root=COMPOSED_TEST_DATA_ROOT
+        ):
             assert resolve_bound_run_secondary_metrics() == ()
 
     def test_a_None_composition_is_still_a_no_op(self):
@@ -321,15 +324,18 @@ class TestTheRunScopedBinding:
 
     def test_nested_runs_do_not_leak_into_each_other(self):
         outer, inner = _compose("davis"), _compose("pets")
-        with bind_run_task_composition(outer):
-            with bind_run_task_composition(inner):
+        with bind_run_task_composition(outer, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+            with bind_run_task_composition(inner, physical_data_root=COMPOSED_TEST_DATA_ROOT):
                 assert [m.spec.id for m in resolve_bound_run_secondary_metrics()] == ["macro_f1"]
             assert [m.spec.id for m in resolve_bound_run_secondary_metrics()] == ["psnr", "mae"]
         assert resolve_bound_run_secondary_metrics() == ()
 
     def test_the_binding_unwinds_on_an_exception(self):
         composition = _compose("davis")
-        with pytest.raises(RuntimeError, match="forced"), bind_run_task_composition(composition):
+        with (
+            pytest.raises(RuntimeError, match="forced"),
+            bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT),
+        ):
             raise RuntimeError("forced")
         assert resolve_bound_run_secondary_metrics() == ()
 
@@ -338,7 +344,7 @@ class TestTheRunScopedBinding:
         evaluated would project the WHOLE family as a named absence — silent,
         and indistinguishable from a task that declared nothing."""
         composition = _compose("davis")
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             verify_composition_is_bound(composition)  # the healthy case
             with bind_run_secondary_metrics(()):
                 with pytest.raises(CompositionNotBoundError, match="secondary_metrics"):

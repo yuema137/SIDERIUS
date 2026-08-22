@@ -24,6 +24,7 @@ THAT process could resolve.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -161,19 +162,123 @@ class TestTheTransportIsWhatMakesItWork:
         )
 
 
-class TestTheSpawnerActuallyPassesIt:
-    def test_the_measurement_runner_spawns_with_the_transported_env(self):
-        # Reachability, asserted against the production call site: the
-        # runner must pass env=subprocess_env(...) built from the spec's
-        # plugin_dir. Parsed as source, because spawning a real measurement
-        # worker needs CUDA and a dataset.
-        src = (REPO_ROOT / "core" / "runtime_control" / "gpu_measurement_runner.py").read_text()
-        assert "env=subprocess_env(" in src, (
-            "the measurement worker must be spawned with the transported "
-            "environment; without env= it inherits a parent that has no "
-            "SIDERIUS_PLUGIN_DIRS"
+_PRODUCTION_ROOTS = ("core", "execute_tools", "agent", "nodes", "workflows", "dashboard")
+
+
+def _production_popen_sites() -> list[tuple[str, int, set[str]]]:
+    """Every ``subprocess.Popen(...)`` in production, with its kwarg names.
+
+    Scope, stated so this census cannot pass for the wrong reason: it
+    covers the **Popen** form only — the long-lived supervised worker
+    child, which is exactly the failure class here. `subprocess.run` calls
+    that launch `nvidia-smi`, `git` or `pytest` are a different shape
+    (short-lived external tools that consume no SIDERIUS plugin context)
+    and are deliberately outside it. The scope is defined by CALL FORM, not
+    by a list of file names — a by-name exemption is the F-P2b-4 shape this
+    census exists to replace.
+    """
+    sites: list[tuple[str, int, set[str]]] = []
+    for root in _PRODUCTION_ROOTS:
+        for path in sorted((REPO_ROOT / root).rglob("*.py")):
+            try:
+                tree = ast.parse(path.read_text(encoding="utf-8"))
+            except SyntaxError:  # pragma: no cover - defensive
+                continue
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "Popen"
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id == "subprocess"
+                ):
+                    sites.append(
+                        (
+                            str(path.relative_to(REPO_ROOT)),
+                            node.lineno,
+                            {kw.arg for kw in node.keywords if kw.arg},
+                        )
+                    )
+    return sites
+
+
+class TestEveryProductionWorkerSpawnerTransportsTheEnvironment:
+    """Step 11 C1 (F-11-2) — the CONTRACT, not one file by path.
+
+    The guard this replaced asserted that the substring
+    ``"env=subprocess_env("`` appeared in ONE named file. It was green
+    while a second production spawner one directory along
+    (`agent/skills/evaluate_vram_skill/isolated_probe.py`) had the very
+    omission it was written to catch — the F-P2b-4 shape recorded in
+    Step 10: a census green for the wrong reason.
+
+    Derived, not enumerated: any NEW production `subprocess.Popen` is in
+    scope the moment it is written.
+    """
+
+    def test_the_census_is_not_vacuous(self):
+        sites = _production_popen_sites()
+        assert len(sites) >= 5, f"the census found too few spawners to be meaningful: {sites}"
+
+    def test_every_production_popen_passes_env(self):
+        offenders = [(p, ln) for p, ln, kwargs in _production_popen_sites() if "env" not in kwargs]
+        assert offenders == [], (
+            "a production child spawned with no env= inherits a parent that "
+            "carries no SIDERIUS_PLUGIN_DIRS and loses the PYTHONPATH "
+            f"extension: {offenders}"
         )
-        assert "spec.plugin_dir" in src and "spec.loss_dir" in src
+
+    def test_the_isolated_preflight_transports_the_run_scoped_dirs(self):
+        """Passing *an* env is not enough — it must be the RUN's env.
+
+        Asserted behaviourally against the real spawn: `run_isolated_preflight`
+        is driven with a stub `command` so no worker is needed, and the env
+        the production code hands `Popen` is captured.
+        """
+        from agent.skills.evaluate_vram_skill import isolated_probe as mod
+
+        captured: dict[str, str] = {}
+
+        def _fake_popen(argv, **kwargs):
+            captured.update(kwargs.get("env") or {})
+            # The env is handed to Popen BEFORE anything else can happen, so
+            # failing here captures exactly what production passes and
+            # returns through the module's own typed
+            # PROBE_INFRASTRUCTURE_FAILURE path — no worker, no poll loop.
+            raise OSError("census stub")
+
+        spec = mod.IsolatedProbeSpec(
+            label="census",
+            model_type="fcnet",
+            result_path=str(Path(os.environ.get("PYTEST_TMPDIR", "/tmp")) / "census.json"),
+            worker_memory_limit_bytes=1024**3,
+            plugin_dir="/run/scoped/plugins",
+            loss_dir="/run/scoped/losses",
+        )
+        real_popen = subprocess.Popen
+        try:
+            subprocess.Popen = _fake_popen  # type: ignore[assignment]
+            result = mod.run_isolated_preflight(spec, deadline_seconds=0.1, command=["/bin/true"])
+        finally:
+            subprocess.Popen = real_popen  # type: ignore[assignment]
+
+        assert result.outcome == "PROBE_INFRASTRUCTURE_FAILURE"
+        assert captured.get("SIDERIUS_PLUGIN_DIRS") == "/run/scoped/plugins"
+        assert captured.get("SIDERIUS_LOSS_DIRS") == "/run/scoped/losses"
+
+    def test_the_production_entrypoint_cannot_omit_them(self):
+        """`run_production_preflight` takes both as keyword-only arguments
+        with NO default, so the defect cannot silently return through a
+        caller that forgets. An explicit `None` is a statement.
+        """
+        import inspect
+
+        from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
+
+        params = inspect.signature(run_production_preflight).parameters
+        for name in ("plugin_dir", "loss_dir"):
+            assert params[name].kind is inspect.Parameter.KEYWORD_ONLY
+            assert params[name].default is inspect.Parameter.empty
 
     def test_the_spec_carries_the_plugin_context(self):
         from core.runtime_control.gpu_measurement_spec import GpuMeasurementSpec

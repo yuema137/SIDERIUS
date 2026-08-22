@@ -37,6 +37,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from workflows.task_composition import (
     CompositionNotBoundError,
     bind_run_task_composition,
@@ -75,14 +76,14 @@ class TestEachFamilyIsConsumedThroughItsOwnSeam:
     def test_the_dataset_profile_seam_returns_the_composed_profile(self, composition):
         from execute_tools.dataset_config import resolve_dataset_profile
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_dataset_profile() is composition.dataset_profile
 
     def test_the_metric_seam_returns_the_composed_metric(self, composition):
         """The tuner's acquisition site calls exactly this."""
         from execute_tools.evaluation_metric import resolve_bound_run_metric
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             bound = resolve_bound_run_metric()
         assert bound is composition.metric
         assert bound.spec.id == "band_coverage_error"
@@ -94,14 +95,14 @@ class TestEachFamilyIsConsumedThroughItsOwnSeam:
             resolve_bound_task_data_path,
         )
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert active_task_data_path() is composition.task_data_path
             assert resolve_bound_task_data_path() is composition.task_data_path
 
     def test_the_task_config_seam_returns_the_composed_values(self, composition):
         from workflows.task_config import get_task_description, load_task_config
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             values = load_task_config()
             assert get_task_description(values) == composition.task_description
             assert values["forward_contract"]["task_type"] == "segmentation"
@@ -121,7 +122,7 @@ class TestEachFamilyIsConsumedThroughItsOwnSeam:
             resolve_bound_run_metric,
         )
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             acquired = resolve_bound_run_metric() or derive_tidmad_metric(TIDMAD_PROFILE)
         assert acquired is composition.metric
 
@@ -138,7 +139,7 @@ class TestTheWorkflowRefusesAHalfComposedRun:
             verify_composition_is_bound(composition)
 
     def test_a_bound_composition_passes(self, composition):
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             verify_composition_is_bound(composition)
 
     def test_an_un_composed_run_is_a_no_op(self):
@@ -198,7 +199,7 @@ class TestConsumerReachabilityMatrix:
         from agent.prompts import PLANNER_PROMPT
         from workflows.task_config import get_task_description, load_task_config
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             # 1. planner — the workflow assigns tune_input.task_description
             #    from this, and the bridge substitutes it into PLANNER_PROMPT.
             planner_value = get_task_description(load_task_config())
@@ -262,7 +263,7 @@ class TestNoLeakAcrossRuns:
         from execute_tools.task_data_path import active_task_data_path
         from workflows.task_config import get_task_description, load_task_config
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             pass
 
         assert active_task_data_path() is None
@@ -276,12 +277,12 @@ class TestNoLeakAcrossRuns:
 
         pets = compose_run_task_bindings(str(PETS_MANIFEST))
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_bound_run_metric().spec.id == "band_coverage_error"
-        with bind_run_task_composition(pets):
+        with bind_run_task_composition(pets, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_bound_run_metric().spec.id == "accuracy"
             assert resolve_dataset_profile() is pets.dataset_profile
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert resolve_bound_run_metric().spec.id == "band_coverage_error"
             assert resolve_dataset_profile() is composition.dataset_profile
 
@@ -289,8 +290,8 @@ class TestNoLeakAcrossRuns:
         from execute_tools.evaluation_metric import resolve_bound_run_metric
 
         pets = compose_run_task_bindings(str(PETS_MANIFEST))
-        with bind_run_task_composition(composition):
-            with bind_run_task_composition(pets):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+            with bind_run_task_composition(pets, physical_data_root=COMPOSED_TEST_DATA_ROOT):
                 assert resolve_bound_run_metric() is pets.metric
             assert resolve_bound_run_metric() is composition.metric
 
@@ -303,7 +304,7 @@ class TestNoLeakAcrossRuns:
         from execute_tools.task_data_path import active_task_data_path
 
         with pytest.raises(RuntimeError, match="deliberate"):
-            with bind_run_task_composition(composition):
+            with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
                 raise RuntimeError("deliberate failure inside the run region")
 
         assert active_task_data_path() is None

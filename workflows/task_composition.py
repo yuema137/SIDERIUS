@@ -65,6 +65,7 @@ import re
 import sys
 from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from typing import TYPE_CHECKING, Any, cast
@@ -99,6 +100,7 @@ _MANIFEST_KEYS = frozenset(
         "task_health",
         "interpretation_blocks",
         "task_config",
+        "deliverable",
     }
 )
 
@@ -195,6 +197,19 @@ class RunTaskComposition:
     forward_contract: ForwardContract
     semantic_fingerprint: str
     provenance: CompositionProvenance
+    deliverable_naming: Any = None
+    """The run's DECLARED deliverable naming, or ``None`` for the shipped one.
+
+    Step 11 C6. A RESOLVED ``DeliverableNaming`` — the Deliverable Contract's
+    own validated type — carried so the spawn and cleanup consumers can read
+    it. The composition does not become a second naming authority (R-11-3):
+    it holds what that contract produced and nothing else.
+
+    ``None`` is the un-declared state and resolves the shipped TIDMAD naming
+    byte-identically, so a manifest with no ``deliverable:`` section composes
+    exactly as it did before C6.
+    """
+
     secondary_metrics: tuple[EvaluationMetric, ...] = ()
     """The run's DECLARED observational secondary metrics, in manifest order.
 
@@ -829,6 +844,7 @@ def compute_semantic_fingerprint(
     forward_contract: ForwardContract,
     plugins: tuple[ResolvedPluginRef, ...],
     secondary_metric_declarations: list[dict[str, Any]] | None = None,
+    deliverable_naming_declaration: dict[str, Any] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -880,12 +896,160 @@ def compute_semantic_fingerprint(
     # secondaries is a different declaration, not the same one shuffled.
     if secondary_metric_declarations:
         payload["secondary_metric_declarations"] = secondary_metric_declarations
+    # Step 11 C6 — a DECLARED naming is semantic: it decides deliverable file
+    # identity, so two runs that name their outputs differently are not the
+    # same run. Added only when declared, following the secondaries
+    # precedent, so an un-declared manifest's fingerprint is unchanged.
+    if deliverable_naming_declaration:
+        payload["deliverable_naming"] = deliverable_naming_declaration
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
 # ---------------------------------------------------------------------------
 # The composition edge
 # ---------------------------------------------------------------------------
+
+
+def _compose_deliverable_naming(raw: dict[str, Any], manifest_path: str):
+    """The OPTIONAL ``deliverable:`` section → a ``DeliverableNaming``.
+
+    Step 11 C6 / R-11-3. The Deliverable Contract stays the sole naming
+    OWNER: this reads a declaration and hands it to
+    :class:`~execute_tools.deliverable_spec.DeliverableNaming`, whose own
+    fail-closed validators reject an empty prefix, a padded prefix, a glob
+    metacharacter in the stem or an extension that is not a dotted suffix.
+    Not one of those rules is restated here — a second naming authority is
+    exactly what §9.2 forbids.
+
+    Absent section ⇒ ``None`` ⇒ the shipped TIDMAD naming, byte-identical.
+    """
+    from execute_tools.deliverable_spec import DeliverableNaming
+
+    section = raw.get("deliverable")
+    if section is None:
+        return None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section 'deliverable' in {manifest_path!r} must be a mapping; "
+            f"got {type(section).__name__}."
+        )
+    try:
+        return DeliverableNaming(**section)
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"the 'deliverable' declaration in {manifest_path!r} is not a "
+            f"valid DeliverableNaming: {type(exc).__name__}: {exc}"
+        ) from exc
+
+
+def compose_deliverable_naming_from_manifest(manifest_path: str):
+    """The run's DECLARED deliverable naming, or ``None``. Step 11 C6.
+
+    The child-process counterpart of the naming half of
+    :func:`compose_run_task_bindings`, and only that half — the sibling of
+    :func:`compose_metric_from_manifest`, reading the same transported
+    manifest. ``None`` means the task declared no ``deliverable:`` section
+    and the shipped TIDMAD naming applies, byte-identically.
+    """
+    resolved_manifest = os.path.abspath(manifest_path)
+    return _compose_deliverable_naming(_read_manifest(resolved_manifest), resolved_manifest)
+
+
+def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
+    """The run's PRIMARY metric, composed from its manifest. Step 11 C5.
+
+    The child-process counterpart of the metric half of
+    :func:`compose_run_task_bindings`, and deliberately **only** that half:
+    a scoring subprocess must not re-resolve the profile, the Health family
+    or the interpretation blocks, all of which either already cross by
+    their own transport or have no consumer there.
+
+    It is a thin public entry over :func:`_compose_metric` — the SAME
+    declaration→spec→implementation authority the parent used — so Step 11
+    transports the binding and derives nothing (**R-11-4**). Every
+    fail-closed branch is that function's: an unreadable manifest, a
+    missing section, an invalid ``MetricSpec``, an unloadable symbol or an
+    implementation that is not an ``EvaluationMetric`` all raise
+    :class:`TaskCompositionError`.
+
+    Why the manifest PATH rather than a serialized metric: the composition
+    retains the resolved metric INSTANCE, not the declaration it was built
+    from, and an instance cannot cross a process boundary. Re-composing the
+    section from the run's own manifest is the same pattern the scoring
+    child already uses for its deliverable spec — reconstruct from what
+    crosses, one derivation, the same value the parent holds — with the
+    TIDMAD-shaped source replaced by the run's declared one.
+
+    Raises:
+        TaskCompositionError: the metric could not be composed. A composed
+            run MUST NOT silently score with TIDMAD's metric; that is the
+            C-P56-1 failure class one layer down.
+    """
+    resolved_manifest = os.path.abspath(manifest_path)
+    raw = _read_manifest(resolved_manifest)
+    metric, _declaration, _plugin = _compose_metric(
+        _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
+    )
+    return metric
+
+
+_ACTIVE_TASK_MANIFEST_PATH: ContextVar[str | None] = ContextVar(
+    "siderius_active_task_manifest_path", default=None
+)
+
+
+@contextmanager
+def bind_task_manifest_path(manifest_path: str) -> Iterator[str]:
+    """Bind the composed run's manifest path for the run scope. Step 11 C5.
+
+    Narrow on purpose. It would be easy to bind the whole composition and
+    let any call site help itself, and that is precisely what this module's
+    own rule forbids — a value that already has an explicit path must not
+    gain a second, ambient way to arrive. What is bound here is ONE
+    transportable string, for ONE consumer: the argv fragment that lets the
+    scoring child compose the run's declared metric instead of TIDMAD's.
+    """
+    token = _ACTIVE_TASK_MANIFEST_PATH.set(os.path.abspath(manifest_path))
+    try:
+        yield _ACTIVE_TASK_MANIFEST_PATH.get() or manifest_path
+    finally:
+        _ACTIVE_TASK_MANIFEST_PATH.reset(token)
+
+
+_ACTIVE_COMPOSITION_FINGERPRINT: ContextVar[str | None] = ContextVar(
+    "siderius_active_composition_fingerprint", default=None
+)
+
+
+@contextmanager
+def bind_composition_fingerprint(fingerprint: str) -> Iterator[str]:
+    """Bind the composed run's semantic fingerprint for the run scope.
+
+    Step 11 C8 / R-11-9. Narrow, like the manifest path beside it: ONE
+    string, for ONE consumer — the single validate-and-persist seam that
+    stamps every experiment record, so no record-construction site can
+    forget it. That is the reason `candidate_id` is stamped there too.
+    """
+    token = _ACTIVE_COMPOSITION_FINGERPRINT.set(fingerprint)
+    try:
+        yield fingerprint
+    finally:
+        _ACTIVE_COMPOSITION_FINGERPRINT.reset(token)
+
+
+def active_composition_fingerprint() -> str | None:
+    """The bound fingerprint, or ``None`` for an un-composed run."""
+    return _ACTIVE_COMPOSITION_FINGERPRINT.get()
+
+
+def active_task_manifest_path() -> str | None:
+    """The bound manifest path, or ``None`` — **no** legacy fallback.
+
+    Same ``active_*`` contract as ``active_task_data_path`` and
+    ``active_physical_data_root``: the transport must not emit a flag on
+    the strength of a fallback, or every legacy child's argv changes.
+    """
+    return _ACTIVE_TASK_MANIFEST_PATH.get()
 
 
 def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
@@ -958,6 +1122,10 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     for _index, _path in enumerate(secondary_declaration_paths):
         source_paths[f"secondary_metric_declaration[{_index}]"] = _path
 
+    # Step 11 C6 — the OPTIONAL naming declaration, validated by the
+    # Deliverable Contract's own type. Absent ⇒ the shipped TIDMAD naming.
+    deliverable_naming = _compose_deliverable_naming(raw, resolved_manifest)
+
     task_health_binding = _compose_task_health(
         _section(raw, "task_health", resolved_manifest), manifest_dir
     )
@@ -989,6 +1157,9 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         forward_contract=contract,
         plugins=tuple(plugins),
         secondary_metric_declarations=secondary_declarations,
+        deliverable_naming_declaration=(
+            deliverable_naming.model_dump(mode="json") if deliverable_naming is not None else None
+        ),
     )
 
     return RunTaskComposition(
@@ -1006,6 +1177,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
             plugins=tuple(plugins),
         ),
         secondary_metrics=secondary_metrics,
+        deliverable_naming=deliverable_naming,
     )
 
 
@@ -1026,9 +1198,29 @@ class CompositionNotBoundError(RuntimeError):
     """
 
 
+class CompositionDataRootMissing(RuntimeError):
+    """A composed run did not declare where its data physically lives.
+
+    Step 11 C4 / R-11-8. Before Step 11 every child fell back to the
+    import-time ``TIDMAD_DATA_DIR``, so a composed run read TIDMAD's data
+    no matter what it had declared and looked entirely normal doing it.
+    After Step 11 that fallback is **legacy-only** and must never be
+    consulted for a composed run — so a composition with no root is a
+    refusal at the binding edge, before any LLM call or GPU minute.
+
+    Removing the import-time fallback itself is deliberately NOT Step-11
+    scope (R-11-8): CI resolves the root from the tracked template and
+    creates no real config, so removing it would break collection
+    repo-wide. Stopping the composed path from DEPENDING on it comes
+    first; retiring it comes second.
+    """
+
+
 @contextmanager
 def bind_run_task_composition(
     composition: RunTaskComposition | None,
+    *,
+    physical_data_root: str | None = None,
 ) -> Iterator[RunTaskComposition | None]:
     """Activate every composed authority for the enclosing run scope.
 
@@ -1058,12 +1250,43 @@ def bind_run_task_composition(
         yield None
         return
 
+    from execute_tools.data_paths import bind_physical_data_root
     from execute_tools.dataset_config import bind_dataset_profile
     from execute_tools.evaluation_metric import bind_run_metric, bind_run_secondary_metrics
     from execute_tools.task_data_path import bind_task_data_path
     from workflows.task_config import bind_task_config
 
+    if not physical_data_root:
+        raise CompositionDataRootMissing(
+            "a composed run must declare where its data physically lives. "
+            "Supply --data_dir <path>. Without it every subprocess child "
+            "falls back to the import-time TIDMAD_DATA_DIR, so the run reads "
+            "TIDMAD's data whatever it composed — silently (Step 11 R-11-8)."
+        )
+
     with ExitStack() as stack:
+        # Step 11 C4 — FIRST on the stack, so it is bound before any other
+        # authority and unwinds last. `bind_physical_data_root` validates
+        # fail-closed through `resolve_dataset_dir`, the ONE such rule, so a
+        # missing / placeholder / non-directory root refuses HERE rather
+        # than in a child that has already been spawned.
+        stack.enter_context(
+            bind_physical_data_root(physical_data_root, purpose="this composed run")
+        )
+        # Step 11 C5 — the manifest path, so the scoring child can compose
+        # the run's DECLARED metric instead of unconditionally deriving
+        # TIDMAD's (R-11-4). One string, one consumer.
+        stack.enter_context(bind_task_manifest_path(composition.provenance.manifest_path))
+        # Step 11 C8 / R-11-9 — so every record this run persists carries the
+        # identity the ingress validator checks.
+        stack.enter_context(bind_composition_fingerprint(composition.semantic_fingerprint))
+        # Step 11 C6 — bound only when the task DECLARED naming. An
+        # un-declared composition binds nothing, so `resolve_deliverable_naming`
+        # returns the shipped TIDMAD naming and every glob is byte-identical.
+        if composition.deliverable_naming is not None:
+            from execute_tools.deliverable_spec import bind_deliverable_naming
+
+            stack.enter_context(bind_deliverable_naming(composition.deliverable_naming))
         stack.enter_context(bind_task_data_path(composition.task_data_path))
         stack.enter_context(bind_dataset_profile(composition.dataset_profile))
         stack.enter_context(bind_run_metric(composition.metric))
@@ -1094,6 +1317,7 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     if composition is None:
         return
 
+    from execute_tools.data_paths import active_physical_data_root
     from execute_tools.dataset_config import resolve_dataset_profile
     from execute_tools.evaluation_metric import (
         resolve_bound_run_metric,
@@ -1105,6 +1329,12 @@ def verify_composition_is_bound(composition: RunTaskComposition | None) -> None:
     unbound: list[str] = []
     if active_task_data_path() is not composition.task_data_path:
         unbound.append("task_data_path")
+    # Step 11 C4 — the root is not ON the composition (a host path is
+    # execution provenance, never fingerprint material — R-11-7), so what
+    # is checked is that ONE is bound at all. Unbound means every child
+    # would silently resolve TIDMAD's import-time constant.
+    if active_physical_data_root() is None:
+        unbound.append("physical_data_root")
     if resolve_dataset_profile() is not composition.dataset_profile:
         unbound.append("dataset_profile")
     if resolve_bound_run_metric() is not composition.metric:

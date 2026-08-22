@@ -76,6 +76,19 @@ class RecordingSandbox:
         for path in self.dirs.values():
             os.makedirs(path, exist_ok=True)
 
+        # Step 11 C1 — the RUN-SCOPED plugin directories. `TidmadSandbox`
+        # owns them (`sandbox_executor.py:1152,1161`) and production now
+        # READS them off the sandbox to transport into the isolated
+        # pre-flight, so a double that lacks them no longer stands in for
+        # one. Derived through the same public authorities, not guessed, so
+        # the double cannot drift from the layout under test.
+        from core.sandbox_executor import get_loss_dir, get_plugin_dir
+
+        self.plugin_dir = get_plugin_dir(base_dir, run_name)
+        self.loss_dir = get_loss_dir(base_dir, run_name)
+        os.makedirs(self.plugin_dir, exist_ok=True)
+        os.makedirs(self.loss_dir, exist_ok=True)
+
         # Stub segment_anchors.json so the tuner agent's
         # ``load_anchor_map(sandbox.dirs["data"]/segment_anchors.json)``
         # check at ml_hyperparameter_tune_agent.py:160 passes. The actual

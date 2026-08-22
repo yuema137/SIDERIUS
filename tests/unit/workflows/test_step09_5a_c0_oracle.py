@@ -48,6 +48,37 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   regression until somebody runs the test. Targeted validation must include the
   guards a change is KNOWN to move — and this one is named in the paragraph
   directly above.
+
+* **Step 11 / C3** — the run-invariants lock gained ONE key,
+  `execution_calibration`: the per-role subprocess memory ceilings the run
+  executed under, plus their provenance (R-11-6). Measured before the golden
+  was touched, and the report is quoted rather than paraphrased:
+
+      .artifacts.run_invariants_lock.json.execution_calibration: ADDED
+
+  — **exactly one ADDED key, zero changed, zero removed.** It is RECORDED and
+  never equality-enforced, precisely so the same scientific run resumed under
+  different host calibration stays legal; `RunInvariants._PROVENANCE` declares
+  that classification structurally rather than leaving it to a validator's
+  memory. The golden was edited SURGICALLY — the one key inserted into the
+  existing document — rather than regenerated, so nothing else could move
+  under cover of the re-baseline. That the oracle caught an additive lock key
+  is again the point: it is exactly the class of change that should be
+  declared here rather than discovered later.
+
+* **Step 11 / C8** — the tuning RESULT and each of its records gained
+  `task_composition_fingerprint`. Measured before the golden was touched:
+
+      .results[0].task_composition_fingerprint: ADDED (None)
+      .results[0].all_records[0].task_composition_fingerprint: ADDED (None)
+
+  — **exactly two ADDED paths, both `None`, zero changed, zero removed.**
+  `None` is the un-composed state, which is what this oracle drives; a
+  COMPOSED run stamps its own identity there so a later resume can certify
+  the records it restores (R-11-9). Without the stamp the frozen three-case
+  rule would have refused every composed run's own evidence, which is the
+  finding recorded as F-11-C8-a. The golden was edited SURGICALLY, one key
+  per reported path.
 """
 
 from __future__ import annotations

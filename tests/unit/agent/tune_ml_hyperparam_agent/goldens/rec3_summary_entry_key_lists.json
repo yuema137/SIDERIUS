@@ -10,7 +10,8 @@
       "params",
       "denoising_score",
       "memory",
-      "candidate_id"
+      "candidate_id",
+      "task_composition_fingerprint"
     ]
   },
   {
@@ -60,7 +61,8 @@
       "planned_eval_strategy",
       "strategy_normalization_reason",
       "runtime_verification",
-      "candidate_id"
+      "candidate_id",
+      "task_composition_fingerprint"
     ]
   },
   {
@@ -102,7 +104,8 @@
       "ordering_resolution_source",
       "scientific_authority",
       "runtime_verification",
-      "candidate_id"
+      "candidate_id",
+      "task_composition_fingerprint"
     ]
   }
 ]

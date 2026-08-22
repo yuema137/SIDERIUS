@@ -2058,7 +2058,11 @@ def main():
         # no-op and the run is byte-identical to its pre-Step-10 behaviour.
         # W7 — resolved once, above, before the invariants pre-flight.
         # ACTIVATION stays exactly where P1 put it.
-        with bind_run_task_composition(run_composition):
+        # Step 11 C4 — the run's resolved physical data root travels with
+        # the composition binding. `args.data_dir` was already put through
+        # `resolve_dataset_dir` above, so this is the SAME authority, not a
+        # second convention (R-11-7).
+        with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
             results = run_workflow(
                 launch=WorkflowLaunchConfig(
                     source_paths=resolved_paths,

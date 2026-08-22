@@ -1852,6 +1852,10 @@ def run_workflow(
                 "resolved_data_scope": getattr(_output, "resolved_data_scope", None),
                 "health_gate_enabled": getattr(_output, "health_gate_enabled", None),
                 "health_config_sha256": getattr(_output, "health_config_sha256", None),
+                # Step 11 C8 / R-11-9.
+                "task_composition_fingerprint": getattr(
+                    _output, "task_composition_fingerprint", None
+                ),
             },
             _run_invariants,
             full_scope=list(range(_run_dataset.num_files)),
@@ -3223,7 +3227,10 @@ def main():
     run_composition = (
         compose_run_task_bindings(args.task_composition) if args.task_composition else None
     )
-    with bind_run_task_composition(run_composition):
+    # Step 11 C4 — same binding, same authority as the chain launcher.
+    # A composed run with no --data_dir is refused rather than silently
+    # reading TIDMAD's data (R-11-8).
+    with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
         run_workflow(
             launch=WorkflowLaunchConfig(
                 data_dir=args.data_dir,

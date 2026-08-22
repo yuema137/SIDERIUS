@@ -59,6 +59,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.runtime_control.probe import descendant_pids
+from core.subprocess_env import subprocess_env
 
 WorkerPhase = Literal["launch", "setup", "training", "inference", "complete"]
 WorkerStatus = Literal["ok", "oom", "load_failure", "wall_cap"]
@@ -338,6 +339,18 @@ def spawn_worker(
             stdout=log_handle,
             stderr=subprocess.STDOUT,
             start_new_session=True,
+            # Step 11 C1 (F-11-2, same omission). This spawner is reachable
+            # only from `scripts/runtime_campaign.py`, so it is NOT the
+            # production defect — it is included so the transport census
+            # can be a UNIVERSAL rule instead of carrying a by-name
+            # exemption, which is the F-11-8 / F-P2b-4 shape.
+            #
+            # `ProbeWorkerSpec` declares no run-scoped plugin directories,
+            # so none are transported and plugin resolution is unchanged:
+            # the worker still falls back to the legacy global dir exactly
+            # as before. What it gains is the PYTHONPATH extension every
+            # other SIDERIUS worker already receives.
+            env=subprocess_env(),
         )
     except Exception as exc:
         log_handle.close()

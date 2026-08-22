@@ -547,6 +547,17 @@ class ExperimentRecord(BaseModel):
     # The existing ``trial_strategy`` / ``eval_strategy`` fields above hold
     # the EFFECTIVE (executed) strategies; the ``planned_*`` fields record
     # what the LLM plan proposed before any partial-scope normalization.
+    task_composition_fingerprint: str | None = Field(
+        default=None,
+        description=(
+            "The COMPOSED run's semantic task-composition fingerprint, or "
+            "None for an un-composed run and for every record written "
+            "before Step 11. Stamped at the single validate-and-persist "
+            "seam so no construction site can forget it, and checked at "
+            "ingress: a composed run must not admit a record it cannot "
+            "certify as its own (Step 11 C8 / R-11-9, F-11-6)."
+        ),
+    )
     resolved_data_scope: list[int] | None = Field(
         default=None,
         description=(
@@ -1944,10 +1955,14 @@ class HyperparamTuningInput(BaseModel):
     data_dir: str | None = Field(
         default=None,
         description=(
-            "Filesystem path to the TIDMAD data directory. Forwarded to "
-            "evaluate_time_skill so its real-dataset warmup can read 1 PSD "
-            "from the actual disk path the training run will use. When None, "
-            "the skill falls back to its static-formula estimate."
+            "Filesystem path to the dataset directory, for an UN-COMPOSED "
+            "run. Forwarded to evaluate_time_skill so its real-dataset warmup "
+            "can read 1 PSD from the actual disk path the training run will "
+            "use. When None, the skill falls back to its static-formula "
+            "estimate. Step 11 C4 (R-11-7): a COMPOSED run's bound physical "
+            "data root wins over this field — there is ONE authority for "
+            "where the data physically lives, and pricing a warmup against a "
+            "different root would measure the wrong disk."
         ),
     )
 
@@ -2832,6 +2847,19 @@ class HyperparamTuningOutput(BaseModel):
             "sha256 of the materialized effective config body — the value "
             "the run-invariants lock pins. None when the subsystem is "
             "disabled or on legacy outputs."
+        ),
+    )
+    task_composition_fingerprint: str | None = Field(
+        default=None,
+        description=(
+            "The COMPOSED run's semantic task-composition fingerprint — the "
+            "same value the run-invariants lock pins — or None for an "
+            "un-composed run and for every output written before Step 11. "
+            "Step 11 C8 / R-11-9: without this stamp the ingress validator "
+            "cannot tell a record produced under THIS composition from one "
+            "produced under a different task, so a composed run must refuse "
+            "an unstamped record. Additive and defaulted, so a legacy output "
+            "still validates and an un-composed run's outputs are unchanged."
         ),
     )
     formal_reference_score: float | None = Field(

@@ -27,6 +27,7 @@ a warning is logged when they are used.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
@@ -102,6 +103,17 @@ parser.add_argument(
 )
 parser.add_argument(
     "--output_json", type=str, help="Optional path; denoising_score is merged into this JSON."
+)
+parser.add_argument(
+    "--task_manifest",
+    type=str,
+    default=None,
+    help="Step 11 C5: the composed run's task-composition manifest, emitted "
+    "by the parent FROM its resolved run binding only — never an operator "
+    "flag. SUPPLIED -> the run's DECLARED metric is composed through the "
+    "same authority the parent used, and a failure to compose terminates "
+    "this subprocess rather than falling back. ABSENT -> the legacy "
+    "un-composed derivation, byte-identical.",
 )
 parser.add_argument(
     "--task_data_path_id",
@@ -191,8 +203,49 @@ else:
 # value the parent holds; no spec or metric is serialized, no argv is added.
 # The two deliverable-name literals 05c left here for Step 06 now resolve
 # through the naming authority: byte-identical names, declared once.
-deliverable_spec = derive_tidmad_deliverable_spec(dataset_profile)
-metric = derive_tidmad_metric(dataset_profile, deliverable_spec)
+# Step 11 C6 — a composed run's DECLARED deliverable naming, bound before the
+# spec is derived so `derive_tidmad_deliverable_spec` resolves the run's
+# template rather than the shipped one. Same transported manifest C5 uses,
+# same PRESENCE discrimination; an un-composed run binds nothing and derives
+# byte-identically. The Deliverable Contract remains the naming owner — this
+# child reads a declaration, it does not invent one (R-11-3).
+if args.task_manifest is not None:
+    from execute_tools.deliverable_spec import bind_deliverable_naming
+    from workflows.task_composition import compose_deliverable_naming_from_manifest
+
+    _declared_naming = compose_deliverable_naming_from_manifest(args.task_manifest)
+    _naming_ctx = (
+        bind_deliverable_naming(_declared_naming)
+        if _declared_naming is not None
+        else contextlib.nullcontext()
+    )
+else:
+    _naming_ctx = contextlib.nullcontext()
+
+with _naming_ctx:
+    deliverable_spec = derive_tidmad_deliverable_spec(dataset_profile)
+
+# Step 11 C5 (R-11-4) — the METRIC half of that reconstruction is no longer
+# unconditional. Step 06 chose to re-derive TIDMAD's metric here because
+# nothing else crossed; that choice is exactly what made this child
+# TIDMAD-only, and it is superseded for a COMPOSED run.
+#
+# Discrimination is by the PRESENCE of the transported manifest, never by a
+# task name. A composed run composes its DECLARED metric through the same
+# declaration -> MetricSpec -> implementation authority the parent used; an
+# un-composed run keeps the derivation byte-for-byte.
+#
+# There is deliberately NO fallback: `compose_metric_from_manifest` raises
+# `TaskCompositionError` and this child lets it terminate the scoring
+# subprocess. A composed run must NEVER silently score with TIDMAD's
+# metric — that is the C-P56-1 failure class one layer down, and a
+# fallback here would be indistinguishable from success.
+if args.task_manifest is not None:
+    from workflows.task_composition import compose_metric_from_manifest
+
+    metric = compose_metric_from_manifest(args.task_manifest)
+else:
+    metric = derive_tidmad_metric(dataset_profile, deliverable_spec)
 
 if args.denoising_model == "none":
     # RAW validation file — Step-02-owned INPUT topology, from the profile.

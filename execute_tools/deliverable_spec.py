@@ -62,6 +62,9 @@ ONE set of literals and ONE derivation. This mirrors ``DatasetProfile``'s own
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
@@ -98,7 +101,15 @@ class DeliverableNaming(BaseModel):
     mechanically.
     """
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    """``extra="forbid"`` added by Step 11 C6, and it is load-bearing.
+
+    A composition DECLARES naming in its manifest, so a misspelled key —
+    ``prefix_`` for ``prefix`` — would otherwise be silently ignored and the
+    composed task would resolve the SHIPPED TIDMAD template: right-looking
+    names, and a cleanup glob deleting files the run never wrote. That is
+    the same reasoning `_MANIFEST_KEYS` uses one level up, and the same
+    posture ``MetricSpec`` already takes."""
 
     prefix: str = Field(
         default=TIDMAD_DELIVERABLE_PREFIX,
@@ -299,6 +310,45 @@ class DeliverableSpec(BaseModel):
     )
 
 
+_ACTIVE_DELIVERABLE_NAMING: ContextVar[DeliverableNaming | None] = ContextVar(
+    "siderius_active_deliverable_naming", default=None
+)
+
+
+@contextmanager
+def bind_deliverable_naming(naming: DeliverableNaming) -> Iterator[DeliverableNaming]:
+    """Bind a composed run's DECLARED naming for the run scope. Step 11 C6.
+
+    The Deliverable Contract remains the sole naming OWNER (R-11-3): what a
+    composition supplies is a declaration, and it is this module's own
+    :class:`DeliverableNaming` — with its own fail-closed validators — that
+    turns it into a usable rule. Step 11 is a reader and a transporter.
+    """
+    token = _ACTIVE_DELIVERABLE_NAMING.set(naming)
+    try:
+        yield naming
+    finally:
+        _ACTIVE_DELIVERABLE_NAMING.reset(token)
+
+
+def active_deliverable_naming() -> DeliverableNaming | None:
+    """The bound naming, or ``None`` — no fallback. Step 11 C6."""
+    return _ACTIVE_DELIVERABLE_NAMING.get()
+
+
+def resolve_deliverable_naming() -> DeliverableNaming:
+    """The naming in force: a composed run's declared one, else the shipped.
+
+    Step 11 C6. Called at the two places a naming is CONSTRUCTED — the
+    sandbox and :func:`derive_tidmad_deliverable_spec` — so both cleanup
+    consumers pick up a composed task's template without a single call-site
+    change. Before this, a contrast run's cleanup glob matched filenames it
+    had never written.
+    """
+    bound = _ACTIVE_DELIVERABLE_NAMING.get()
+    return bound if bound is not None else DeliverableNaming()
+
+
 def default_deliverable_naming() -> DeliverableNaming:
     """The shipped TIDMAD naming, for consumers that need no profile.
 
@@ -308,7 +358,7 @@ def default_deliverable_naming() -> DeliverableNaming:
     read. This is the SAME literal the full derivation uses — one prefix,
     declared once, on :class:`DeliverableNaming`.
     """
-    return DeliverableNaming()
+    return resolve_deliverable_naming()
 
 
 def default_deliverable_storage() -> DeliverableStorage:
@@ -353,7 +403,8 @@ def derive_tidmad_deliverable_spec(dataset_profile: DatasetProfile) -> Deliverab
         names, groups and storage representation the pre-05c literals produced.
     """
     return DeliverableSpec(
-        naming=default_deliverable_naming(),
+        # Step 11 C6 — a composed run's DECLARED naming when one is bound.
+        naming=resolve_deliverable_naming(),
         storage=DeliverableStorage(
             input_channel_group=dataset_profile.channels.input_channel,
             target_channel_group=dataset_profile.channels.target_channel,

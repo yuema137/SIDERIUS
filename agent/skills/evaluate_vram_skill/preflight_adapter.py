@@ -222,6 +222,8 @@ def run_production_preflight(
     hardware_context: Any,
     workspace: str | Path,
     label: str,
+    plugin_dir: str | None,
+    loss_dir: str | None,
     deadline_seconds: float = 900.0,
     model_io_contract: ModelIOContract | None = None,
 ) -> dict[str, Any]:
@@ -237,6 +239,16 @@ def run_production_preflight(
     never resolved here: a resource path that re-read an ambient task
     configuration could price a run against a declaration the run is not
     using. ``None`` is the legacy no-contract path.
+
+    ``plugin_dir`` / ``loss_dir`` are the RUN-SCOPED plugin directories
+    (Step 11 C1, F-11-2). They are keyword-only **with no default** on
+    purpose: this is the production entrypoint, and the defect being fixed
+    is precisely a caller silently not supplying them. Pass the sandbox's
+    own ``sandbox.plugin_dir`` / ``sandbox.loss_dir`` — never a value
+    re-derived here, for the same reason ``model_io_contract`` is not
+    resolved here. An explicit ``None`` means "this caller genuinely has no
+    run-scoped directory" and reproduces the legacy global-dir behaviour;
+    it is a statement, not an omission.
     """
     snapshot = build_hardware_snapshot(hardware_context)
     workdir = Path(workspace) / "preflight_workers"
@@ -251,6 +263,8 @@ def run_production_preflight(
         worker_memory_limit_bytes=default_worker_memory_limit_bytes(),
         hardware=snapshot,
         model_io_contract=model_io_contract,
+        plugin_dir=plugin_dir,
+        loss_dir=loss_dir,
     )
     # No try/except around this call: a worker failure is already a typed
     # PROBE_INFRASTRUCTURE_FAILURE, and catching it to retry in-process is

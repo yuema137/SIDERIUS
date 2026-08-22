@@ -33,10 +33,15 @@ from typing import Any
 # membership tests, because changing which branch a model takes is a
 # behavioural risk and this is not.
 import ml_models.models_sandbox  # noqa: F401  (import side effect: plugin registry)
+from core.execution_calibration import (
+    ROLE_DEFAULT_RSS_GB,
+    MalformedCeilingOverride,  # noqa: F401  (re-exported: the launch path's refusal type)
+    resolve_role_ceiling_gb,
+)
 from core.inference_defaults import inference_batch_for
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
-from execute_tools.data_paths import TIDMAD_DATA_DIR
+from execute_tools.data_paths import TIDMAD_DATA_DIR, resolve_physical_data_root
 from execute_tools.dataset_config import (
     DataScope,
     ScopeViolationError,
@@ -101,76 +106,36 @@ def _tidmad_data_dir() -> str:
 #     of working VA — insufficient for PUNet-scale models plus AdamW
 #     state plus focal-loss intermediates.
 #
-# CUDA-role budget is derived as:
+# The per-role ceilings themselves — their VALUES, their PROVENANCE and
+# the resolution ladder — moved to `core/execution_calibration.py` in
+# Step 11 C3 (R-11-5, R-11-6, R-11-11). This file stays a launch CONSUMER:
+# the prose arithmetic that used to live here had gone stale without
+# anyone noticing (F-11-3), which is precisely the failure a bare comment
+# beside a bare dict cannot prevent.
 #
-#     40 GiB  =  20 GiB (static CUDA + torch VA overhead, rounded up
-#                        from the 18-20 GiB measured baseline for headroom
-#                        against driver-version drift)
-#             +  16 GiB (target physical VRAM budget for model weights,
-#                        activations, gradients, optimizer state — matches
-#                        the pre-existing "training workloads peak below
-#                        16 GB RSS" calibration)
-#             +   4 GiB (safety margin for DataLoader workers, intermediate
-#                        tensors the caching allocator reserves fresh VA
-#                        for, and h5py read buffers)
-#
-# At 40 GiB the host still has ~21 GiB of physical RAM free after the cap,
-# keeping the original Fix-1 protection intent intact — the point was to
-# catch a runaway before the kernel OOM-killer wakes up, not to minimise
-# absolute VA. Scoring stays at 24 GiB because its VA ≈ RSS on CPU-only
-# code, and that was the exact codepath the 2026-04-20 incident hit.
-#
-# Inference override (bumped 2026-07-13 from 40 → 60 GiB): the Phase 1
-# baseline path (``run_baseline_trial`` in ``scripts/run_comparison.py``,
-# hardcoded ``trial_portion=1.0``) holds four ~1.86 GiB int8 numpy arrays
-# simultaneously at ``inference_single.py:325-331`` (``denoised`` +
-# ``injected`` + their ``.flatten().astype()`` copies passed to
-# ``create_abra_file``) — ~7.4 GiB numpy peak on wavenet at seg_size=40k.
-# Combined with the ~18-20 GiB CUDA VA baseline and h5py buffers, that
-# reproducibly exceeded the 40 GiB cap (numpy._ArrayMemoryError on the
-# fourth allocation). Trial-round and formal-round inference use much
-# smaller LLM-planned ``eval_portion`` sample sets and would fit under
-# 40 GiB, but sharing the cap keeps the sandbox launch path simple.
+# The measured VA-vs-RSS calibration above is retained here because it
+# explains why an AS cap is the instrument at all, which is a property of
+# THIS launch path.
 
-_ROLE_DEFAULT_RSS_GB = {
-    "training": 40,  # CUDA — 20 (static) + 16 (working VRAM) + 4 (safety)
-    "inference": 60,  # CUDA — training's 40 GiB + 20 GiB for full-scope numpy peak
-    "scoring": 24,  # CPU-only — kept at original value, protects the 2026-04-20 incident path
-}
+_ROLE_DEFAULT_RSS_GB = ROLE_DEFAULT_RSS_GB
 
 
 def _subprocess_rss_gb(role: str) -> int:
     """Host-RAM ceiling (GiB) applied to a sandboxed subprocess.
 
-    Args:
-        role: One of ``"training"``, ``"inference"``, or ``"scoring"``.
-              The default ceiling is chosen per-role because CUDA and
-              CPU-only subprocesses have very different VA footprints
-              (see VA-vs-RSS calibration note above).
+    A thin consumer of :func:`core.execution_calibration.resolve_role_ceiling_gb`
+    (Step 11 C3, R-11-11). The name is kept because it is what this launch
+    path and its tests have always called; the semantics — the two-layer
+    ladder, the ``0`` disable, and the LOUD refusal of a malformed
+    override — are declared there.
 
-    Resolution order:
-        1. ``SIDERIUS_SUBPROCESS_RSS_GB`` (global override — if set, wins
-           for every role; backward-compatible with the pre-role env var).
-        2. Role-specific default from ``_ROLE_DEFAULT_RSS_GB``.
-
-    Special values:
-        * ``0`` — disable the ceiling entirely (pre-Fix-1 behaviour).
-        * Negative / non-numeric env override — ignored, falls back to
-          the role default.
+    Raises:
+        ValueError: unknown role.
+        MalformedCeilingOverride: ``SIDERIUS_SUBPROCESS_RSS_GB`` is set to
+            something that is not a non-negative integer. Before C3 such a
+            value was silently ignored (R-11-5).
     """
-    if role not in _ROLE_DEFAULT_RSS_GB:
-        raise ValueError(
-            f"_subprocess_rss_gb: unknown role {role!r}; "
-            f"expected one of {sorted(_ROLE_DEFAULT_RSS_GB)}"
-        )
-    raw = os.environ.get("SIDERIUS_SUBPROCESS_RSS_GB")
-    if raw is None:
-        return _ROLE_DEFAULT_RSS_GB[role]
-    try:
-        v = int(raw)
-    except ValueError:
-        return _ROLE_DEFAULT_RSS_GB[role]
-    return v if v >= 0 else _ROLE_DEFAULT_RSS_GB[role]
+    return resolve_role_ceiling_gb(role)
 
 
 def _limited_preexec(gb: int) -> Callable[[], None] | None:
@@ -285,6 +250,54 @@ def get_plugin_dir(workspace: str, run_name: str) -> str:
     so we do the same here to keep string equality usable in tests.
     """
     return os.path.join(os.path.abspath(workspace), "plugins", run_name)
+
+
+#: Sandbox subdirectory names the PARENT creates and every CHILD re-derives.
+#:
+#: Step 11 C7 (F-11-4). These were independent string literals on both sides
+#: — `sandbox_executor.py` built ``cached_models`` / ``records`` and
+#: `train_engine_sandbox.py` built them again from its own copies, with no
+#: shared authority and no parity test. The `_OK_<exp_id>` sentinel read and
+#: the checkpoint read both depend on the two agreeing, and a mismatch does
+#: not surface as "directory not found": it surfaces as a FALSE
+#: ``error_training``, because the parent looks for a sentinel in a place the
+#: child never wrote one.
+#:
+#: The in-file precedent is `get_plugin_dir` / `get_loss_dir`, which exist for
+#: exactly this reason one directory along.
+SANDBOX_SUBDIR_MODELS = "cached_models"
+SANDBOX_SUBDIR_RECORDS = "records"
+
+
+def sandbox_models_dir(base_dir: str) -> str:
+    """Where checkpoints and the `_OK_<exp_id>` sentinel live."""
+    return os.path.join(base_dir, SANDBOX_SUBDIR_MODELS)
+
+
+def sandbox_records_dir(base_dir: str) -> str:
+    """Where per-experiment result JSONs live."""
+    return os.path.join(base_dir, SANDBOX_SUBDIR_RECORDS)
+
+
+#: The repository root, resolved from THIS file rather than the caller's cwd.
+#:
+#: Step 11 C7 (F-11-7). The three child scripts were named by RELATIVE path
+#: while `cwd=os.getcwd()` was passed explicitly, so the launch worked only
+#: because every launcher happened to chdir to the repository first. Every
+#: peer module already anchors this way (`core/subprocess_env.py:68`,
+#: `execute_tools/data_paths.py:23`); this module was the exception.
+SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def child_script_path(relative_path: str) -> str:
+    """Absolute path to a child script, anchored at the repository root.
+
+    ``cwd`` semantics are deliberately UNCHANGED: the children still run
+    with the caller's working directory, because relative paths in their
+    own arguments and outputs resolve against it. What changes is only how
+    the interpreter FINDS the script.
+    """
+    return os.path.join(SIDERIUS_ROOT, relative_path)
 
 
 def get_loss_dir(workspace: str, run_name: str) -> str:
@@ -862,6 +875,47 @@ def _task_data_path_argv() -> list[str]:
     return transport_argv(bound) if bound is not None else []
 
 
+def _data_root_argv(flag: str) -> list[str]:
+    """The physical-data-root transport fragment — empty unless BOUND.
+
+    Step 11 C4 (R-11-7, R-11-8). Follows the ``--task_data_path_id``
+    precedent exactly: emitted only when the run explicitly bound a root,
+    so an un-composed run's argv is byte-identical to its pre-C4 form
+    (R-11-1) and its children keep resolving through the import-time
+    legacy fallback.
+
+    ``flag`` differs per role because the CHILDREN's flags differ, and the
+    difference is load-bearing rather than cosmetic:
+
+    * training and inference read the dataset root from ``--data_dir``;
+    * the scoring child's ``--data_dir`` is the **deliverable** directory
+      (the parent already passes ``self.base_dir`` there), so its dataset
+      root is ``--raw_data_dir``. Conflating the two would point the
+      scorer's raw-baseline read at the sandbox.
+    """
+    from execute_tools.data_paths import active_physical_data_root
+
+    bound = active_physical_data_root()
+    return [flag, bound] if bound is not None else []
+
+
+def _task_manifest_argv() -> list[str]:
+    """The composed run's manifest path — empty unless BOUND. Step 11 C5.
+
+    Lets the SCORING child compose the run's DECLARED metric through the
+    same authority the parent used, instead of unconditionally deriving
+    TIDMAD's (`denoising_score_single.py:195`). Emitted only when composed,
+    so legacy argv is byte-identical (R-11-1).
+
+    Only scoring needs it: it is the one child that constructs a metric.
+    Training and inference receive nothing new.
+    """
+    from workflows.task_composition import active_task_manifest_path
+
+    bound = active_task_manifest_path()
+    return ["--task_manifest", bound] if bound is not None else []
+
+
 def _run_observed_subprocess(
     cmd: list[str],
     *,
@@ -904,11 +958,22 @@ def _run_observed_subprocess(
     **Why the session behaviour is not unified, and will not be.**
     ``killpg`` needs its own group, so deadline mode passes
     ``start_new_session=True``. A child in its own session does *not*
-    receive a terminal SIGINT, while a child in the caller's group does —
-    and the chain runs under ``timeout --signal=INT``, so operator stop
-    depends on that signal reaching the work. Unifying the two would
-    change operator stop semantics through a diff that looks like a
-    refactor.
+    receive a terminal SIGINT, while a child in the caller's group does,
+    and operator stop depends on that signal reaching the work. Unifying
+    the two would change operator stop semantics through a diff that looks
+    like a refactor.
+
+    **Correction (Step 11 C7 / §3.5): the mechanism named here was wrong.**
+    This paragraph used to justify the split with *"the chain runs under
+    ``timeout --signal=INT``"*. No launcher uses ``timeout`` — the string
+    appears in no shell script in the repository. The real anchor is
+    ``sdsc_submission_scripts/run_chain.sh:171``, which runs the iteration
+    as a FOREGROUND child in the caller's process group, together with the
+    ``INT``/``TERM``/``HUP`` traps ``_chain_common.sh::install_chain_stop_traps``
+    installs. The conclusion is unchanged and so is every line of behaviour;
+    only the cited mechanism is corrected. **Fix the reason, never the
+    behaviour** — a stale justification is how a future reader talks
+    themselves into "unifying" a split that operator stop depends on.
 
     **The observer is an argument, not a third return value.** B-C2b
     needs evidence out of this function, and the obvious shape is to
@@ -925,10 +990,12 @@ def _run_observed_subprocess(
         # migration, and something `subprocess.run` cannot give.
         #
         # `start_new_session` is NOT passed, matching `subprocess.run`'s
-        # default: a child in the caller's process group receives a
-        # terminal SIGINT, and the chain runs under `timeout
-        # --signal=INT`. Only the deadline path below takes its own
-        # session, because `killpg` requires one.
+        # default: a child in the caller's process group receives the
+        # terminal SIGINT that reaches the chain's foreground iteration
+        # (`run_chain.sh:171` + `_chain_common.sh::install_chain_stop_traps`).
+        # Only the deadline path below takes its own session, because
+        # `killpg` requires one. See the docstring's C7 correction: this
+        # used to cite `timeout --signal=INT`, which no launcher uses.
         if observer is not None:
             # Before the child exists, so it can claim nothing about it.
             observer.capture_baseline()
@@ -1131,9 +1198,11 @@ class TidmadSandbox:
         self.base_dir = os.path.abspath(workspace)
         self.dirs = {
             "configs": os.path.join(self.base_dir, "configs", run_name),
-            "models": os.path.join(self.base_dir, "cached_models"),
-            "records": os.path.join(self.base_dir, "records"),
-            "data": _tidmad_data_dir(),
+            "models": sandbox_models_dir(self.base_dir),
+            "records": sandbox_records_dir(self.base_dir),
+            # Step 11 C4 — the run's BOUND root when composed; the legacy
+            # import-time constant otherwise (R-11-8: legacy-only).
+            "data": resolve_physical_data_root(),
         }
         for key, d in self.dirs.items():
             if key != "data":  # data dir is read-only input, not agent-generated output
@@ -1400,7 +1469,7 @@ class TidmadSandbox:
 
             cmd = [
                 sys.executable,
-                "execute_tools/train_engine_sandbox.py",
+                child_script_path("execute_tools/train_engine_sandbox.py"),
                 "--model_cfg",
                 paths["m"],
                 "--train_cfg",
@@ -1418,6 +1487,7 @@ class TidmadSandbox:
                 "--file_index",
                 str(self.file_index),
                 *_task_data_path_argv(),
+                *_data_root_argv("--data_dir"),
             ]
 
             # SampleSet boundary contract — this is ONE of exactly TWO
@@ -1751,7 +1821,7 @@ class TidmadSandbox:
 
         cmd = [
             sys.executable,
-            "execute_tools/inference_single.py",
+            child_script_path("execute_tools/inference_single.py"),
             "--mode",
             "agent",
             "-m",
@@ -1759,6 +1829,7 @@ class TidmadSandbox:
             "--dataset_profile_json",
             self._write_dataset_profile_config(exp_id),
             *_task_data_path_argv(),
+            *_data_root_argv("--data_dir"),
             "--model_cfg",
             m_path,
             "--loss_cfg",
@@ -2068,7 +2139,7 @@ class TidmadSandbox:
             subprocess.run(
                 [
                     sys.executable,
-                    "execute_tools/denoising_score_single.py",
+                    child_script_path("execute_tools/denoising_score_single.py"),
                     "--mode",
                     "agent",
                     "-m",
@@ -2076,6 +2147,12 @@ class TidmadSandbox:
                     "--dataset_profile_json",
                     self._write_dataset_profile_config(exp_id),
                     *_task_data_path_argv(),
+                    # The scoring child's `--data_dir` below is the
+                    # DELIVERABLE directory; its dataset root is
+                    # `--raw_data_dir`, which had no emitter at all before
+                    # C4 and fell back to the import-time TIDMAD constant.
+                    *_data_root_argv("--raw_data_dir"),
+                    *_task_manifest_argv(),
                     "--exp_id",
                     exp_id,
                     "--run_name",

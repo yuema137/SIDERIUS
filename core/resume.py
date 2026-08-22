@@ -54,7 +54,7 @@ from core.run_invariants import (
 )
 from core.sandbox_executor import get_plugin_dir
 from core.scientific_authority import resolve_record_authority
-from execute_tools.dataset_config import TIDMAD
+from execute_tools.dataset_config import resolve_dataset_profile
 from execute_tools.evaluation_metric import (
     StampedMetricSpec,
     metric_identity_from_record,
@@ -1478,9 +1478,21 @@ def restore_prior_state(
                     "resolved_data_scope": getattr(parsed, "resolved_data_scope", None),
                     "health_gate_enabled": getattr(parsed, "health_gate_enabled", None),
                     "health_config_sha256": getattr(parsed, "health_config_sha256", None),
+                    # Step 11 C8 / R-11-9.
+                    "task_composition_fingerprint": getattr(
+                        parsed, "task_composition_fingerprint", None
+                    ),
                 },
                 expected_invariants,
-                full_scope=list(range(TIDMAD.num_files)),
+                # Step 11 C8 (F-11-5) — the run's OWN profile, not TIDMAD's.
+                # This was the only task token in a 1,772-line file, while
+                # the sibling call site (`model_exploration.py:1857`) had
+                # already been composition-aware for a milestone: a composed
+                # resume compared its records against TIDMAD's file count.
+                # `resolve_dataset_profile()` honours a bound profile and
+                # otherwise returns the shipped one, so an un-composed
+                # resume is unchanged.
+                full_scope=list(range(resolve_dataset_profile().dataset.num_files)),
                 source=f"restored iter {iter_idx:03d} run_output {output_path}",
             )
 

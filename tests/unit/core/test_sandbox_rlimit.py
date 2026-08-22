@@ -134,15 +134,39 @@ class TestSubprocessRssGb:
         assert _subprocess_rss_gb("inference") == 0
         assert _subprocess_rss_gb("scoring") == 0
 
-    def test_env_non_numeric_falls_back_to_role_default(self, monkeypatch):
-        monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "not_a_number")
-        assert _subprocess_rss_gb("training") == _ROLE_DEFAULT_RSS_GB["training"]
-        assert _subprocess_rss_gb("scoring") == _ROLE_DEFAULT_RSS_GB["scoring"]
+    # UPGRADED by Step 11 C3 (R-11-5). These two used to assert that a
+    # malformed override falls back to the role default SILENTLY. That is
+    # the behaviour the ruling changes: an operator who sets the variable
+    # has stated an intention, and resolving it to a different number
+    # without saying so produces a run whose configuration nobody can
+    # reconstruct afterwards — `RSS_GB=4O` (letter O) reported nothing
+    # wrong. Their functional intent — "what happens on a malformed
+    # override" — is preserved; the expected answer is now a refusal.
 
-    def test_env_negative_falls_back_to_role_default(self, monkeypatch):
+    @pytest.mark.parametrize("bad", ["not_a_number", "12.5", "", "40 GiB"])
+    def test_env_non_numeric_refuses_loudly(self, monkeypatch, bad):
+        from core.execution_calibration import MalformedCeilingOverride
+
+        monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", bad)
+        for role in ("training", "inference", "scoring"):
+            with pytest.raises(MalformedCeilingOverride, match="not an integer"):
+                _subprocess_rss_gb(role)
+
+    def test_env_negative_refuses_loudly(self, monkeypatch):
+        from core.execution_calibration import MalformedCeilingOverride
+
         monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "-5")
-        assert _subprocess_rss_gb("training") == _ROLE_DEFAULT_RSS_GB["training"]
-        assert _subprocess_rss_gb("inference") == _ROLE_DEFAULT_RSS_GB["inference"]
+        for role in ("training", "inference", "scoring"):
+            with pytest.raises(MalformedCeilingOverride, match="negative"):
+                _subprocess_rss_gb(role)
+
+    def test_the_refusal_does_not_swallow_the_disable_escape_hatch(self, monkeypatch):
+        """`0` must stay a legal, meaningful value. An operator diagnosing
+        an allocator problem needs a way to take the cap off, and a
+        stricter parser that refused `0` would remove it.
+        """
+        monkeypatch.setenv("SIDERIUS_SUBPROCESS_RSS_GB", "0")
+        assert _subprocess_rss_gb("training") == 0
 
 
 # ==========================================

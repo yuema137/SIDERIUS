@@ -170,7 +170,7 @@ expression — and failing before any GPU work is the fail-closed direction.
 | `formal_time_budget_minutes` | `float \| None` | No | `None` | Wall-time budget against which `evaluate_time_skill` gates rounds where the planner picks formal mode. `None` = formal time-gate disabled. |
 | `trial_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates trial rounds. `None` = trial VRAM-gate disabled. |
 | `formal_vram_budget_gb` | `float \| None` | No | `None` | VRAM budget against which `evaluate_vram_skill` gates formal rounds. `None` = formal VRAM-gate disabled. |
-| `data_dir` | `str \| None` | No | `None` | Filesystem path to the TIDMAD data directory. Forwarded to `evaluate_time_skill` so the real-dataset warmup can read 1 PSD from disk. |
+| `data_dir` | `str \| None` | No | `None` | Filesystem path to the dataset directory, **for an UN-COMPOSED run**. Forwarded to `evaluate_time_skill` so the real-dataset warmup can read 1 PSD from disk. **Step 11 C4 (R-11-7)**: a COMPOSED run's bound physical data root WINS over this field — there is one authority for where the data physically lives, and pricing a warmup against a different root would measure the wrong disk. `None` on an un-composed run keeps its meaning: no warmup, static-formula estimate. |
 
 **The time budgets above are forecast/admission inputs, not runtime
 limits.** They gate whether a round is admitted, using an estimate; the
@@ -346,6 +346,39 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 - **Observational secondary metrics** (Step 10 / P2b, runtime-only): acquired at the SAME site as the primary, as `run_secondary_metrics = resolve_bound_run_secondary_metrics()`. Unlike the primary there is NO legacy branch — nothing to fall back to, because "this run declared no secondary" is the answer rather than a default — so an un-composed run gets `()` and nothing anywhere derives a secondary from task identity. A composed run gets what its manifest's optional `secondary_metrics:` section declared, resolved at the composition edge by the same `_compose_metric` authority the primary uses. They are evaluated by `_evaluate_secondary_metrics` immediately after the primary result inside the same scoring `try`, transported onto the record by the three carriers above, and stamped onto the output as `secondary_metric_specs` (the DECLARED set, in manifest order, written by the same single writer as `metric_spec` — and on the degraded partial-output branch too, because which secondaries a run declared is a launch fact that does not stop existing because the tuner later failed). They are OBSERVATIONAL: `run_order` is the run's ONE order authority and it interprets the PRIMARY spec only, which an AST census over the whole lifecycle enforces.
 
 ## Key behavioral notes
+
+### Execution infrastructure the tuner depends on (Step 11)
+
+Four things changed underneath this node. None alters its interface, and an
+un-composed run behaves exactly as before; they are recorded here because
+they change what its subprocesses read and what its records carry.
+
+* **The physical data root is transported** (C4). Training and inference
+  receive `--data_dir`, and scoring receives `--raw_data_dir`, emitted ONLY
+  when the run bound a root. Before this, none of the three carried one and
+  every child fell back to the import-time `TIDMAD_DATA_DIR` — so a composed
+  run read TIDMAD's data whatever it had declared. A composed run with no
+  declared root is now refused at the binding edge.
+
+* **The scoring child composes the run's DECLARED metric** (C5). It receives
+  `--task_manifest` when composed and re-composes the metric section through
+  the same authority the parent used, instead of unconditionally deriving
+  TIDMAD's. There is no fallback: a metric that cannot be composed terminates
+  the scoring subprocess rather than silently scoring with TIDMAD's.
+
+* **A host-RAM OOM is no longer invisible** (C2). `oom_host_ram` was produced
+  by the sandbox and read by nobody, so a host-OOM training failure fell
+  through every failure branch and was carried on as a normal outcome. It now
+  reaches the ordinary `error_training` / `error_inference` records and
+  `next_attempt()`. **Planner-facing prompt bytes are unchanged**: the record
+  carries no `_oom` suffix, so the "OUT-OF-MEMORY NOT ATTRIBUTED" note does
+  not render for it.
+
+* **Every record carries `task_composition_fingerprint`** (C8). Stamped at
+  `_emit_record`, the single validate-and-persist seam. `None` for an
+  un-composed run. A composed run refuses at ingress any restored record or
+  seed it cannot certify as its own.
+
 
 ### GPU admission and failure attribution (V20 PR B)
 

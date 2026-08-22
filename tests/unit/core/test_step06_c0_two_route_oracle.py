@@ -269,7 +269,33 @@ def test_c0_the_two_routes_agree_exactly(oracle_fixture, monkeypatch):
 
 def _normalize(cmd: list[str], workspace: str) -> list[str]:
     root = os.path.abspath(workspace)
-    return [PYTHON if tok == sys.executable else tok.replace(root, WORKSPACE) for tok in cmd]
+    # Step 11 C7 (F-11-7): the three child scripts are now named by ABSOLUTE
+    # path, anchored at the repository root rather than at the caller's cwd —
+    # the launch used to work only because every launcher happened to chdir
+    # to the repository first. The path is normalized back to its
+    # repo-relative form here, for two reasons:
+    #
+    #   * a golden must never embed a machine-specific absolute path
+    #     (the repository-portability rule), and
+    #   * this comparison exists to pin the ARGUMENT LIST — its flags, its
+    #     values and its ORDER — not the anchoring mechanism, which
+    #     `tests/unit/core/test_step11_c7_spawn_hygiene.py` owns and proves
+    #     absolute, existing and cwd-independent.
+    #
+    # Nothing else about these goldens moved.
+    from core.sandbox_executor import SIDERIUS_ROOT
+
+    siderius_root = os.path.abspath(SIDERIUS_ROOT) + os.sep
+    normalized = []
+    for tok in cmd:
+        if tok == sys.executable:
+            normalized.append(PYTHON)
+            continue
+        if tok.startswith(siderius_root) and tok.endswith(".py"):
+            normalized.append(tok[len(siderius_root) :])
+            continue
+        normalized.append(tok.replace(root, WORKSPACE))
+    return normalized
 
 
 @patch("core.sandbox_executor.subprocess.run")

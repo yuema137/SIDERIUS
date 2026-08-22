@@ -33,6 +33,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from tests.unit.workflows.test_step10_p1_c0_census import capture_uncomposed_child_argv
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
@@ -63,7 +64,7 @@ class TestEmissionWhenBound:
     ):
         from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
 
         assert set(vectors) == {"training", "inference", "scoring"}
@@ -81,7 +82,7 @@ class TestEmissionWhenBound:
         one — fine today, and a trap the moment two emitters disagree."""
         from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
         for phase, cmd in vectors.items():
             assert cmd.count(TASK_DATA_PATH_ARGV_FLAG) == 1, f"{phase} argv: {cmd}"
@@ -105,7 +106,7 @@ class TestNonEmissionWhenUnComposed:
         """The run scope really is the emission scope."""
         from execute_tools.task_data_path import TASK_DATA_PATH_ARGV_FLAG
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             bound = capture_uncomposed_child_argv(sandbox, tmp_path)
         after = capture_uncomposed_child_argv(sandbox, tmp_path)
 
@@ -136,7 +137,7 @@ class TestRoundTripReachability:
             resolve_transported_task_data_path,
         )
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             vectors = capture_uncomposed_child_argv(sandbox, tmp_path)
 
         for phase, cmd in vectors.items():
@@ -185,7 +186,7 @@ class TestTheEmitterUsesTheNonFallingBackAccessor:
         from core.sandbox_executor import _task_data_path_argv
 
         assert _task_data_path_argv() == []
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             assert _task_data_path_argv() == [
                 "--task_data_path_id",
                 "spectro_segmentation_v0",

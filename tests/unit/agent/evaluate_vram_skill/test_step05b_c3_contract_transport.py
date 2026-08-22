@@ -88,9 +88,15 @@ class TestTheContractArrivesInTheChild:
             workspace=tmp_path,
             label="s05b_c3_parent",
             model_io_contract=contract,
+            # Step 11 C1 — keyword-only with no default, so this transport
+            # test must state the run-scoped dirs like production does.
+            plugin_dir="/run/scoped/plugins",
+            loss_dir="/run/scoped/losses",
         )
 
         assert captured["spec"].model_io_contract == contract
+        assert captured["spec"].plugin_dir == "/run/scoped/plugins"
+        assert captured["spec"].loss_dir == "/run/scoped/losses"
 
     def test_it_round_trips_through_the_spec_json_unchanged(self, tmp_path):
         """Serialized, re-read the way the worker reads it, and revalidated

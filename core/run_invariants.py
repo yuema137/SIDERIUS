@@ -40,6 +40,8 @@ from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
+from core.execution_calibration import calibration_provenance
+
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
 
@@ -136,9 +138,23 @@ class RunInvariants(BaseModel):
     # legacy lock file stays byte-identical to its pre-P1 form.
     task_composition_fingerprint: str | None = None
     created_at: str | None = None
+    # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
+    # run executed under, plus their provenance. RECORDED, never compared.
+    #
+    # Ceilings are execution-HOST calibration, not task semantics: the same
+    # scientific run resumed on a differently-calibrated host must remain
+    # legal, unlike a composition, metric or dataset-semantics change. That
+    # is why this field is declared in `_PROVENANCE` below rather than
+    # merely left out of `_CANONICAL` — "absent from the canonical tuple"
+    # is a validator remembering not to compare something, and the operator
+    # constraint on R-11-6 is that the two concepts be distinguishable in
+    # the REPRESENTATION.
+    #
+    # Omitted from the serialized lock when None, like the composition
+    # fingerprint, so a pre-C3 lock file stays byte-identical.
+    execution_calibration: dict[str, Any] | None = None
 
-    # Fields participating in lock equality. created_at (and any future
-    # provenance metadata) is deliberately absent.
+    # Fields participating in lock equality.
     _CANONICAL: ClassVar[tuple[str, ...]] = (
         "resolved_data_scope",
         "health_gate_enabled",
@@ -153,6 +169,20 @@ class RunInvariants(BaseModel):
         "task_composition_fingerprint",
     )
 
+    #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
+    #:
+    #: The counterpart of ``_CANONICAL``, declared so the distinction is a
+    #: property of the model rather than of whichever validator happens to
+    #: read it. Together the two tuples must PARTITION every declared
+    #: field: a new field is either a semantic invariant or execution
+    #: provenance, and it cannot be neither. ``__init_subclass__``-free —
+    #: the partition is asserted by a guard test, because enforcing it at
+    #: import time would turn a naming slip into a repo-wide import error.
+    _PROVENANCE: ClassVar[tuple[str, ...]] = (
+        "created_at",
+        "execution_calibration",
+    )
+
     #: C9d fields that a legacy lock cannot supply. Their absence is a
     #: refusal, never a compatible default.
     _RUNTIME_IDENTITY_FIELDS: ClassVar[tuple[str, ...]] = (
@@ -163,6 +193,10 @@ class RunInvariants(BaseModel):
     def canonical(self) -> dict:
         """The equality-defining subset of the invariants."""
         return {name: getattr(self, name) for name in self._CANONICAL}
+
+    def provenance(self) -> dict:
+        """The RECORDED-only subset: audit evidence, never compared."""
+        return {name: getattr(self, name) for name in self._PROVENANCE}
 
 
 def _lock_path(workspace: str) -> str:
@@ -229,6 +263,11 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # composed with nothing. Pydantic's default makes it parse back to None.
     if payload.get("task_composition_fingerprint") is None:
         payload.pop("task_composition_fingerprint", None)
+    # Step 11 C3 — same rule, same reason: a lock written before execution
+    # calibration was recorded stays byte-identical rather than gaining a
+    # `null` for a concept it predates.
+    if payload.get("execution_calibration") is None:
+        payload.pop("execution_calibration", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -434,6 +473,11 @@ def build_run_invariants(
             # runner, standalone tuner) locks the same identities — the
             # builder is the one shared path by contract.
             task_composition_fingerprint=task_composition_fingerprint,
+            # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
+            # the same reason C9d is: every entry point then records the
+            # ceilings its children actually ran under. Provenance, never
+            # compared.
+            execution_calibration=calibration_provenance(),
             **_runtime_identity_fields(include_runtime_identities),
         ),
         effective_path,
@@ -478,6 +522,28 @@ def validate_stamped_invariants(
     - ``health_config_sha256`` missing → predates the policy lock; the sha
       comparison is skipped (scope + enabled remain enforced).
 
+    **Step 11 C8 / R-11-9 — the composition fingerprint, three cases.**
+    ``_CANONICAL`` has included ``task_composition_fingerprint`` since
+    Step 10, so the workspace LOCK refuses a cross-composition resume — but
+    this INGRESS validator never looked at it, so a record produced under a
+    different composition could be restored into a run that would then
+    compare it as though it were its own (**F-11-6**). The asymmetry is
+    closed under a rule that distinguishes the modes rather than picking one
+    default::
+
+        legacy / un-composed run + unstamped record   -> READABLE
+        composed run + record carrying a fingerprint  -> must MATCH
+        composed run + UNSTAMPED legacy record        -> REFUSE
+
+    The third case is the one that needs stating. A record written before
+    composition existed cannot be certified as belonging to this
+    composition: "unstamped" says *nothing was recorded*, not *nothing was
+    composed*. Treating absence as agreement is exactly how a
+    cross-composition record would slip in, so this follows
+    ``_reject_legacy_runtime_lock``'s precedent of refusing rather than
+    defaulting. An UN-composed run is untouched by all of it, which is what
+    keeps every pre-Step-10 workspace readable.
+
     Raises:
         RunInvariantsViolation: any present-or-assumed stamp contradicts
             ``expected``; the message names ``source`` and the field.
@@ -508,6 +574,26 @@ def validate_stamped_invariants(
             f"health_config_sha256: record pinned {record_sha[:12]}… vs "
             f"this run's {(expected.health_config_sha256 or 'None')[:12]}…"
         )
+
+    # Step 11 C8 / R-11-9 — the composition fingerprint. Keyed on whether
+    # THIS RUN is composed, never on a task name.
+    if expected.task_composition_fingerprint is not None:
+        record_fingerprint = stamped.get("task_composition_fingerprint")
+        if record_fingerprint is None:
+            problems.append(
+                "task_composition_fingerprint: this run is COMPOSED "
+                f"({expected.task_composition_fingerprint[:12]}…) but the record "
+                "carries no fingerprint. A record written before composition "
+                "existed cannot be certified as belonging to this composition — "
+                "unstamped means nothing was recorded, not that nothing was "
+                "composed."
+            )
+        elif record_fingerprint != expected.task_composition_fingerprint:
+            problems.append(
+                f"task_composition_fingerprint: record pinned "
+                f"{str(record_fingerprint)[:12]}… vs this run's "
+                f"{expected.task_composition_fingerprint[:12]}…"
+            )
 
     if problems:
         detail = "\n".join(f"  - {p}" for p in problems)

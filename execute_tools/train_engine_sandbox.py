@@ -1924,9 +1924,15 @@ def main():
 
     # Define standard sandbox structure
     base_sandbox = args.sandbox_dir
+    # Step 11 C7 (F-11-4) — the SAME authority the parent used. These were
+    # independent literals on both sides; a mismatch surfaces as a FALSE
+    # `error_training`, because the parent looks for the `_OK_<exp_id>`
+    # sentinel somewhere the child never wrote one.
+    from core.sandbox_executor import sandbox_models_dir, sandbox_records_dir
+
     sandbox_dirs = {
-        "models": os.path.join(base_sandbox, "cached_models"),
-        "results": os.path.join(base_sandbox, "records"),  # Use records dir for final JSONs
+        "models": sandbox_models_dir(base_sandbox),
+        "results": sandbox_records_dir(base_sandbox),  # Use records dir for final JSONs
     }
     os.makedirs(sandbox_dirs["models"], exist_ok=True)
     os.makedirs(sandbox_dirs["results"], exist_ok=True)

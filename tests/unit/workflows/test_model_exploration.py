@@ -80,8 +80,17 @@ from workflows.run_config import WorkflowLaunchConfig, launch_config_field_names
 # ---------------------------------------------------------------------------
 
 
-def _make_tuning_output(model_type="punet", run_name="v1", score=1.5):
+def _make_tuning_output(model_type="punet", run_name="v1", score=1.5, fingerprint=None):
+    """A seed tuning output.
+
+    ``fingerprint`` (Step 11 C8 / R-11-9) is the run's composition identity.
+    ``None`` — the default, and what every UN-composed caller wants — is the
+    legacy state a legacy run reads happily. A COMPOSED drive must pass its
+    own composition's fingerprint, because a composed run refuses a seed it
+    cannot certify as belonging to it.
+    """
     return HyperparamTuningOutput(
+        task_composition_fingerprint=fingerprint,
         run_name=run_name,
         model_type=model_type,
         file_index=6,
@@ -193,11 +202,13 @@ def _make_tune_output(model_type="gated_tcn", score=1.8):
     return _make_tuning_output(model_type=model_type, run_name="explore_v1", score=score)
 
 
-def _write_tuning_output(tmp_path, model_type="punet", run="v1", score=1.5):
+def _write_tuning_output(tmp_path, model_type="punet", run="v1", score=1.5, fingerprint=None):
     """Write a fake tuning output to the expected directory structure."""
     agent_dir = tmp_path / "data" / model_type / run / "agent"
     agent_dir.mkdir(parents=True)
-    output = _make_tuning_output(model_type=model_type, run_name=run, score=score)
+    output = _make_tuning_output(
+        model_type=model_type, run_name=run, score=score, fingerprint=fingerprint
+    )
     (agent_dir / f"run_output_{run}_agent.json").write_text(output.model_dump_json(indent=2))
 
 

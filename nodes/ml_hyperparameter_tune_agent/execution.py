@@ -243,6 +243,13 @@ def run_admission_preflight(
         # against, and "happens to read the same file" is
         # not that guarantee.
         model_io_contract=run_model_io,
+        # Step 11 C1 (F-11-2) — the run-scoped plugin directories, taken
+        # from the sandbox that owns them rather than re-derived. The
+        # worker previously inherited this parent's environ, which carries
+        # no SIDERIUS_PLUGIN_DIRS, and so priced the candidate against the
+        # legacy global plugin dir instead of this run's.
+        plugin_dir=sandbox.plugin_dir,
+        loss_dir=sandbox.loss_dir,
     )
     if resource_check.get("status") == "error":
         raise RuntimeError(f"Resource check error: {resource_check.get('message')}")
@@ -708,7 +715,10 @@ def run_training(
     train_status, training_results = _interpret_training_status(
         train_status, expected_validation=eval_sample_set is not None
     )
-    if train_status.get("status") == "error":
+    # Step 11 C2 (F-11-1) — ONE authority decides what "the subprocess
+    # failed" means. `oom_host_ram` used to miss this branch entirely and
+    # was carried on as a normal outcome.
+    if _records.is_execution_failure(train_status):
         # DataScope DS5 — scope violations are non-retryable
         # configuration/invariant failures: terminate the run.
         if train_status.get("error_type") == "scope_violation":
@@ -879,7 +889,8 @@ def run_inference_scoring_health(
             candidate_id=agent_input.candidate_id,
         ):
             return AttemptExecution.next_attempt()
-        if inf_status.get("status") == "error":
+        # Step 11 C2 (F-11-1) — same authority as the training branch.
+        if _records.is_execution_failure(inf_status):
             # DataScope DS5 — non-retryable: terminate the run.
             if inf_status.get("error_type") == "scope_violation":
                 _scope_violation_reason = inf_status.get("message", "scope violation in inference")

@@ -67,6 +67,29 @@
     },
     "run_invariants_lock.json": {
       "created_at": "<VOLATILE>",
+      "execution_calibration": {
+        "override_env": null,
+        "roles": {
+          "inference": {
+            "declared_gib": 60,
+            "derivation": "empirical_unverified",
+            "gib": 60,
+            "set_on": "2026-07-13"
+          },
+          "scoring": {
+            "declared_gib": 24,
+            "derivation": "incident",
+            "gib": 24,
+            "set_on": "2026-04-20"
+          },
+          "training": {
+            "declared_gib": 40,
+            "derivation": "measured",
+            "gib": 40,
+            "set_on": "2026-04-20"
+          }
+        }
+      },
       "health_config_sha256": "7a4debd66f65e33fbe830e7f310f401a3184ab2d934d738c04a9d8e4eaf1dc5a",
       "health_feedback_history_max_entries_per_model": 8,
       "health_feedback_history_window_iterations": 3,
@@ -1336,6 +1359,7 @@
           "status": "success",
           "strategy_normalization_reason": null,
           "target_files": null,
+          "task_composition_fingerprint": null,
           "timestamp": "<VOLATILE>",
           "timing": null,
           "traceback_summary": null,
@@ -1418,6 +1442,7 @@
       "secondary_metric_specs": null,
       "started_at": "<VOLATILE>",
       "status": "completed",
+      "task_composition_fingerprint": null,
       "termination_reason": "completed",
       "total_attempts": 3,
       "trial_validity_feedback": null

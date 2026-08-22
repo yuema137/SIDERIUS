@@ -35,6 +35,7 @@ import pytest
 
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
     _make_interpretation_output,
@@ -99,8 +100,10 @@ def _drive_composed_loop(task: str, tmp_path):
     Returns ``(results, interp_inputs)`` on success. Any exception propagates —
     C0 records the failure point rather than hiding it.
     """
-    _write_tuning_output(tmp_path, "punet")
     composition = _composition(task)
+    # Step 11 C8 / R-11-9 — a COMPOSED drive must seed evidence it can
+    # certify as its own; an unstamped seed is refused by design.
+    _write_tuning_output(tmp_path, "punet", fingerprint=composition.semantic_fingerprint)
 
     with (
         patch("workflows.model_exploration.ResultInterpretationAgent") as MockInterp,
@@ -117,7 +120,7 @@ def _drive_composed_loop(task: str, tmp_path):
             model_type=inp.model_type, score=1.6
         )
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             results = run_workflow(
                 launch=WorkflowLaunchConfig(
                     data_dir=str(tmp_path / "data"),
@@ -217,7 +220,7 @@ class TestComposedLoopDriveBaseline:
         from execute_tools.evaluation_metric import resolve_bound_run_metric
 
         composition = _composition(task)
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             bound = resolve_bound_run_metric()
             assert bound is not None
             assert bound.spec.id == composition.metric.spec.id
@@ -241,7 +244,9 @@ class TestTidmadReferenceScoresLeakIntoComposedRuns:
         DAVIS run's prompt tables."""
         from nodes.scoring_reference import load_reference_scores
 
-        with bind_run_task_composition(_composition(task)):
+        with bind_run_task_composition(
+            _composition(task), physical_data_root=COMPOSED_TEST_DATA_ROOT
+        ):
             refs = load_reference_scores(use_cache=False)
 
         # It succeeded, and every number it returned is TIDMAD's.

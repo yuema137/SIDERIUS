@@ -30,6 +30,7 @@ import pytest
 
 from core.chain_state import ChainState
 from core.resume import RestoredState
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 LAUNCHER = REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py"
@@ -312,7 +313,7 @@ class TestEndToEndAtTheEdge:
         )
 
         composition = compose_run_task_bindings(str(FOURTH_MANIFEST))
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             verify_composition_is_bound(composition)
 
     def test_an_absent_flag_produces_an_un_composed_run(self):
@@ -327,7 +328,7 @@ class TestEndToEndAtTheEdge:
         args = parser.parse_args([])
 
         composition = None if not args.task_composition else pytest.fail("unreachable")
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             verify_composition_is_bound(composition)
 
         from execute_tools.task_data_path import active_task_data_path

@@ -51,7 +51,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_61 = [
+EXPERIMENT_RECORD_FIELDS_62 = [
     "record_type",
     "exp_id",
     "status",
@@ -98,6 +98,14 @@ EXPERIMENT_RECORD_FIELDS_61 = [
     "train_portion",
     "target_files",
     "validation_workload_ceiling",
+    # Step 11 C8 — ADDITIVE (design step_11 §7 C8 / R-11-9): the COMPOSED
+    # run's task-composition fingerprint, stamped at the single
+    # validate-and-persist seam so a later resume can certify the records it
+    # restores. 61 -> 62; positioned with the other run-invariant stamps it
+    # is validated beside, every earlier position unchanged. Defaults None,
+    # so every record of an UN-composed run carries what these baselines
+    # already pin.
+    "task_composition_fingerprint",
     "resolved_data_scope",
     "health_gate_enabled",
     "planned_trial_strategy",
@@ -186,7 +194,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_61
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_62
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

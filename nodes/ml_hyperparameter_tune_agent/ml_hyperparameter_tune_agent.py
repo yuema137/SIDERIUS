@@ -44,6 +44,7 @@ from core.run_invariants import (
 from core.runtime_control.gpu_accounting import device_identity_from_hardware
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
+from execute_tools.data_paths import active_physical_data_root
 from execute_tools.dataset_config import (
     resolve_dataset_profile,
 )
@@ -623,6 +624,10 @@ class HyperparamTuningAgent:
             ),
         )
         health_config_sha256 = run_invariants.health_config_sha256
+        # Step 11 C8 / R-11-9 — read from the SAME resolved invariants the
+        # lock is built from, exactly as the sha above is. `None` for an
+        # un-composed run, which is what keeps legacy outputs unchanged.
+        task_composition_fingerprint = run_invariants.task_composition_fingerprint
         if _effective_config_path is not None:
             # Path swap: every downstream path-based loader (gate lookup,
             # evaluation, output persistence) now reads the materialized
@@ -695,7 +700,16 @@ class HyperparamTuningAgent:
         # the gate (one-time warning printed below per mode).
         trial_time_budget = agent_input.trial_time_budget_minutes
         formal_time_budget = agent_input.formal_time_budget_minutes
-        time_data_dir = agent_input.data_dir
+        # Step 11 C4 (R-11-7) — ONE authority for "where the data physically
+        # lives". A COMPOSED run's bound root wins, because that is the root
+        # its children read and pricing a warmup against a different one
+        # would measure the wrong disk. An UN-COMPOSED run resolves to
+        # `agent_input.data_dir` exactly as before — including `None`, which
+        # keeps its meaning of "no warmup, use the static-formula estimate".
+        # This reconciles the field to the run binding rather than leaving it
+        # as a second, independently-supplied concept.
+        _bound_data_root = active_physical_data_root()
+        time_data_dir = _bound_data_root if _bound_data_root is not None else agent_input.data_dir
         if trial_time_budget is None:
             print(
                 "[time-gate disabled / trial] trial_time_budget_minutes is None "
@@ -916,6 +930,7 @@ class HyperparamTuningAgent:
             if agent_input.health_gate_enabled
             else None,
             "health_config_sha256": health_config_sha256,
+            "task_composition_fingerprint": task_composition_fingerprint,
             # V19 PR 1 (P1-C5 A4) — formal sampling provenance so the
             # per-file best table can populate formal rows' eval_portion
             # from committed data (never from current defaults). Legacy

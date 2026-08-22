@@ -72,6 +72,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _json_safe_reference,
     _select_best_records,
 )
+from workflows.task_composition import active_composition_fingerprint
 
 
 def _may_advise_resource_reduction(status: dict) -> bool:
@@ -93,6 +94,43 @@ def _may_advise_resource_reduction(status: dict) -> bool:
     """
     attribution = (status.get("failure_attribution") or {}).get("attribution")
     return may_recommend_resource_reduction(attribution or "unknown")
+
+
+#: The sandbox's HOST-RAM exhaustion status (Step 11 C2, F-11-1).
+#:
+#: Produced at three sites in ``core/sandbox_executor.py`` — training
+#: (:1654), inference (:1923) and scoring (:2116) — whenever a child's
+#: ``CalledProcessError`` matches ``_is_oom_failure``. Named here so the
+#: consumer side has ONE authority to agree with the producer on, rather
+#: than a fourth string literal.
+HOST_RAM_OOM_STATUS = "oom_host_ram"
+
+
+def is_execution_failure(status: dict) -> bool:
+    """Did a GPU phase's subprocess FAIL? (Step 11 C2, F-11-1.)
+
+    The tuner used to ask ``status.get("status") == "error"`` directly, so
+    a host-RAM OOM — a DIFFERENT status the sandbox has produced since the
+    2026-04-20 incident — fell through every failure branch and was
+    treated as a normal outcome. Nothing read it: repo-wide, every other
+    occurrence of the string was the message text or a comment.
+
+    This is deliberately a two-member predicate and NOT a new taxonomy.
+    ``F-11-9`` records five OOM matchers with different vocabularies;
+    consolidating them is an explicit Step-11 non-goal.
+
+    **Why the resulting record carries no ``_oom`` suffix, by design**
+    (Q-11-3 = A). The failure record's status is chosen by
+    :func:`_is_cuda_oom` over the message, which is DEVICE-OOM only, so a
+    host OOM produces ``error_training`` / ``error_inference``. The
+    planner's "OUT-OF-MEMORY NOT ATTRIBUTED" note is gated on
+    ``str(status).endswith("_oom")`` (`agent/prompts.py:1265-1270`), so it
+    does not render and **planner-facing prompt bytes do not change**. A
+    host-RAM ceiling is not evidence about model capacity; routing it into
+    that note is arguably better science and is recorded as named debt
+    that is explicitly not Step 11's.
+    """
+    return status.get("status") in ("error", HOST_RAM_OOM_STATUS)
 
 
 #: Per-phase wording that is NOT shared. Everything else about a training
@@ -444,6 +482,12 @@ def _emit_record(
     # single validate-and-persist seam so no record-construction site can
     # forget it. None stays None — never synthesised (O-E-4/O-E-5).
     record["candidate_id"] = candidate_id
+    # Step 11 C8 / R-11-9 — the composed run's identity, stamped HERE for
+    # exactly the reason above: nine construction sites, one place that
+    # cannot be bypassed. `None` for an un-composed run, which leaves every
+    # legacy record byte-identical, and is precisely the state the ingress
+    # validator refuses to treat as agreement for a COMPOSED run.
+    record["task_composition_fingerprint"] = active_composition_fingerprint()
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
@@ -782,6 +826,16 @@ def finalize_run_output(
     resolved_bypass_formal_threshold = bindings.resolved_bypass_formal_threshold
     health_checks_config_source = bindings.health_checks_config_source
     health_config_sha256 = bindings.health_config_sha256
+    # Step 11 C8 — read from the SAME run-scoped authority the per-record
+    # stamp uses, NOT from `bindings`. Gate 2 caught the difference: the
+    # tuner's own sub-workspace lock does not carry the composition (carried
+    # Step-10 debt F-P56-3, "composition kwargs reach only the chain-level
+    # invariants lock"), so `bindings.task_composition_fingerprint` was None
+    # for a genuinely composed run while every RECORD was correctly stamped.
+    # A composed 2-iteration chain would then have refused its own iteration-1
+    # OUTPUT at ingress under R-11-9 case 3. One authority removes the
+    # possibility of the two stamps disagreeing at all.
+    task_composition_fingerprint = active_composition_fingerprint()
     completed_rounds = exit_snapshot.completed_rounds
     total_attempts = exit_snapshot.total_attempts
     consecutive_fails = exit_snapshot.consecutive_fails
@@ -877,6 +931,9 @@ def finalize_run_output(
         "candidate_id": agent_input.candidate_id,
         "health_checks_config_source": health_checks_config_source,
         "health_config_sha256": health_config_sha256,
+        # Step 11 C8 / R-11-9 — the run's composition identity on its OUTPUT,
+        # so a later resume can certify the records it restores.
+        "task_composition_fingerprint": task_composition_fingerprint,
         "formal_reference_score": _json_safe_reference(formal_reference_score),
         "formal_comparison_reference_source": formal_reference_source,
         "resolved_skip_formal_threshold": _json_safe_reference(resolved_skip_formal_threshold),

@@ -177,7 +177,57 @@ canonical/derived contract — is in `docs/running_chain_test.md`.
    transport channel**. Note that under cold start iteration 1 produces no
    findings, so a carried finding first reaches a proposer at iteration 3.
 
-7. **`--start_iter N` when auto-resume mis-parses.** The auto-resume
+7. **A composed run's data root is TRANSPORTED to every child**
+   (Step 11 C4, R-11-8). Until Step 11 the physical dataset root never
+   crossed the subprocess boundary at all — training and inference carried
+   no `--data_dir`, scoring carried no `--raw_data_dir` — so all three
+   children fell back to the import-time `TIDMAD_DATA_DIR` and a composed
+   run read TIDMAD's data whatever it had declared, silently. That fallback
+   is now **legacy-only**.
+
+   **Nothing changes on the operator surface.** `--data_dir` stays optional
+   exactly as `docs/gates/gate_testing_standard.md` describes: the chain
+   launcher resolves the root from `tidmad_data_config.yaml` at
+   `run_one_iteration.py:1760`, *before* the composition is bound, and
+   refuses the launch with exit 2 if nothing resolves. The module CLI
+   (`model_exploration.py:3208`) falls back to `SIDERIUS_DATA_DIR` the same
+   way. Pass `--data_dir` only to point a run at a different copy.
+
+   The `CompositionDataRootMissing` refusal therefore guards **programmatic**
+   callers of `bind_run_task_composition`, not operators: a composed run may
+   not lean on the import-time fallback, and a caller that binds a
+   composition without stating a root is refused at the binding edge, before
+   any LLM call or GPU minute. An empty, placeholder or non-directory root is
+   refused there too.
+
+8. **Per-role subprocess memory ceilings** (Step 11 C3). Declared in
+   `core/execution_calibration.py` with machine-readable provenance, and
+   resolved through exactly TWO layers — no third:
+
+   ```text
+   SIDERIUS_SUBPROCESS_RSS_GB   (global; when set, wins for EVERY role)
+       ->
+   the role's declared default:  training 40 · inference 60 · scoring 24 GiB
+   ```
+
+   * `0` **disables** the ceiling. Kept deliberately: an operator
+     diagnosing an allocator problem needs a way to take the cap off.
+   * anything else non-integer or negative is **REFUSED loudly**
+     (`MalformedCeilingOverride`). Before Step 11 it fell back to the role
+     default in silence, so `SIDERIUS_SUBPROCESS_RSS_GB=4O` (letter O)
+     produced a run that looked correctly configured and was not.
+   * these are **execution-HOST calibration, not task config**. Each run
+     records the ceilings it executed under in
+     `{workspace}/run_invariants_lock.json` under `execution_calibration` —
+     **recorded, never compared**, so the same scientific run resumed on a
+     differently-calibrated host is still legal.
+   * the inference ceiling's recorded derivation is marked
+     `empirical_unverified`: its original arithmetic cited code that has
+     since changed. The VALUE is known-good (full-scope baseline inference
+     fails under 40 GiB); lowering it without re-verifying that is a
+     regression.
+
+9. **`--start_iter N` when auto-resume mis-parses.** The auto-resume
    inspector's stdout can be polluted by plugin-loader prints, which makes
    the computed `START_ITER` non-numeric and aborts the launch. Passing
    `--start_iter N` explicitly is the workaround.

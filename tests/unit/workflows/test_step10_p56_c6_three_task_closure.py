@@ -44,6 +44,7 @@ from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
 from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
 from execute_tools.health_checks.registry import _PROVIDER_REGISTRY, _REGISTRY
+from tests.helpers.composition_data_root import COMPOSED_TEST_DATA_ROOT
 from tests.unit.workflows.test_model_exploration import (
     _make_implementor_output,
     _make_interpretation_output,
@@ -104,6 +105,12 @@ def _write_seed(tmp_path: Path, composition, score: float) -> None:
     ``accuracy`` composition is correctly refused by P2a's reconciliation —
     that refusal is the system working, and feeding it here would test the
     refusal rather than the orchestration.
+
+    Step 11 C8 adds a second axis of that same consistency: the seed now
+    also carries this composition's ``task_composition_fingerprint``,
+    because R-11-9 refuses an UNSTAMPED output under a composed run. The
+    docstring above already stated the principle; C8 only widened what
+    "consistent" covers.
     """
     agent_dir = tmp_path / "data" / "punet" / "v1" / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
@@ -112,6 +119,8 @@ def _write_seed(tmp_path: Path, composition, score: float) -> None:
         model_type="punet",
         file_index=0,
         status="completed",
+        # Step 11 C8 / R-11-9 — see the docstring.
+        task_composition_fingerprint=composition.semantic_fingerprint,
         completed_rounds=1,
         total_attempts=1,
         best_exp_id="punet_v1_001",
@@ -187,7 +196,7 @@ def drive(task: str, tmp_path: Path, *, iterations: int = 1) -> dict:
         MockValid.return_value.run.return_value = _make_validator_output(passed=True)
         MockTune.return_value.run.side_effect = _tune
 
-        with bind_run_task_composition(composition):
+        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             results = run_workflow(
                 launch=WorkflowLaunchConfig(
                     data_dir=str(tmp_path / "data"),
