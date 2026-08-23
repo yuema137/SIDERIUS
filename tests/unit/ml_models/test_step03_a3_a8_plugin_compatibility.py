@@ -33,6 +33,30 @@ lookup-time resolution       ``plugin_loader.py:192``   raise
 either direction, and either harmonisation is a behaviour change wearing
 a refactor's clothes.
 
+**AMENDED by Step 12 / PR-12a C4 (issue #234), deliberately and with
+operator ratification.** A3 pinned the leniency so it could not change by
+accident; #234 is the decision to change it on purpose. The load-time tier
+now splits what it used to treat alike:
+
+===============================  ==================================
+declaration                      load-time behaviour
+===============================  ==================================
+ABSENT                           still defaults to ``"classifier"``
+                                 (the pre-declaration compat path,
+                                 unchanged — and the validator's twin
+                                 ``_DEFAULT_OUTPUT_TYPE`` has its own
+                                 reachability test)
+PRESENT but not plugin-legal     **REFUSES** — named reason, ``None``
+                                 return, never coerced
+===============================  ==================================
+
+The reason is the graduation falsifier: an external package's model that
+emits segmentation masks must not train, score and rank as a 256-class
+classifier because its metadata was rewritten. The tiers still differ —
+the lenient tier is now lenient about OMISSION only — and that remaining
+divergence is what the A3 tests below pin. New owner of the strictness
+half: ``test_step12_pr12a_c4_output_type_vocabulary.py``.
+
 The unique failure class: *the lenient tier silently becomes strict, or
 the strict tier silently becomes lenient.* The strict tier alone is
 already covered — ``test_unknown_output_contract_fails_closed.py``,
@@ -112,26 +136,40 @@ class TestA3LoadTimeTierIsLenient:
         assert spec is not None
         assert spec["output_type"] == "classifier"
 
-    def test_invalid_declaration_warns_and_defaults_to_classifier(self, tmp_path, capsys):
-        """An unrecognised value does NOT reject the plugin. The warning is
-        part of the behaviour: silently defaulting with no trace would be a
-        different, worse contract."""
+    def test_invalid_declaration_now_REFUSES(self, tmp_path, capsys):
+        """UPGRADED by Step 12 / PR-12a C4 (issue #234) — same failure class,
+        reversed expectation.
+
+        A3 pinned this as "warns and defaults to classifier" so the leniency
+        could not change by ACCIDENT. #234 changed it on PURPOSE: an
+        unrecognised declaration is a defect, and coercing it turned a
+        metadata defect into wrong science. The trace requirement A3 cared
+        about is stronger now, not weaker — the reason is named and the
+        plugin does not load at all.
+        """
         spec = pl._load_plugin(
             _write_plugin(tmp_path, "a3_invalid", 'PLUGIN_OUTPUT_TYPE = "banana"')
         )
-        assert spec is not None
-        assert spec["output_type"] == "classifier"
+        assert spec is None
         out = capsys.readouterr().out
         assert "banana" in out
         assert "a3_invalid" in out
+        assert "is not a legal plugin output contract" in out
 
-    @pytest.mark.parametrize("declared", ["classifier", "regressor", "hybrid"])
+    @pytest.mark.parametrize("declared", ["classifier", "regressor"])
     def test_each_declared_value_is_carried_through_verbatim(self, tmp_path, declared):
-        """The three-value alphabet the loader accepts (``plugin_loader.py:82``).
+        """The alphabet a PLUGIN may declare (``PLUGIN_LEGAL_OUTPUT_TYPES``).
 
-        ``hybrid`` is included deliberately: §8c keeps it as a legacy
-        adapter, and the loader's hybrid arm must not be dropped just
-        because no generated plugin reaches it today.
+        NARROWED by Step 12 / PR-12a C4. ``hybrid`` was included here because
+        "the loader's hybrid arm must not be dropped just because no generated
+        plugin reaches it today" — and the audit confirmed that literally:
+        across the 109 generated plugins on record, ZERO declare it. It is a
+        BUILTIN adapter value (``BUILTIN_OUTPUT_TYPES["fcnet"]``), so it stays
+        in ``OUTPUT_TYPE_VOCABULARY`` and leaves the plugin-legal subset. A3's
+        concern — that the hybrid arm not be silently dropped — is now owned by
+        ``test_step12_pr12a_c4_output_type_vocabulary.TestHybridStaysLoadBearingForBuiltins``,
+        which pins the builtin table, ``get_output_type`` AND the real
+        consumer branch in the inference child.
         """
         spec = pl._load_plugin(
             _write_plugin(tmp_path, f"a3_{declared}", f'PLUGIN_OUTPUT_TYPE = "{declared}"')
@@ -157,13 +195,22 @@ class TestA3TheTwoTiersDiverge:
     not a tidy-up Step 03 may perform in passing.
     """
 
-    def test_a_bad_declaration_defaults_while_a_bad_lookup_raises(self, tmp_path):
-        lenient = pl._load_plugin(
-            _write_plugin(tmp_path, "a3_divergence", 'PLUGIN_OUTPUT_TYPE = "banana"')
-        )
+    def test_an_OMITTED_declaration_defaults_while_a_bad_lookup_raises(self, tmp_path):
+        """UPGRADED by Step 12 / PR-12a C4 — the divergence still exists, and
+        it MOVED. This test's job is unchanged: prove the two tiers are not
+        accidentally harmonised.
+
+        A3 demonstrated the divergence with a BAD declaration, which #234 has
+        since made strict on purpose. The lenient tier is now lenient about
+        OMISSION only, so the demonstration uses omission. Both halves are
+        asserted, as before, because a test that only checked one would go
+        green if the other quietly moved to match it.
+        """
+        lenient = pl._load_plugin(_write_plugin(tmp_path, "a3_divergence", ""))
         assert lenient is not None
         assert lenient["output_type"] == "classifier", (
-            "the load-time tier became strict — it must still default"
+            "the load-time tier became strict about OMISSION — it must still "
+            "default, or every pre-declaration plugin stops loading"
         )
 
         with pytest.raises(UnknownOutputContractError):

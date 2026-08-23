@@ -79,6 +79,44 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   rule would have refused every composed run's own evidence, which is the
   finding recorded as F-11-C8-a. The golden was edited SURGICALLY, one key
   per reported path.
+
+* **Step 12 / PR-12a C2** — the TUNER's run input gained
+  `task_composition_ref`: the typed composition PROJECTION (D-12a-1, ratified
+  at the design approval). Measured before the golden was touched:
+
+      .node_calls.tuner.run_inputs[0].task_composition_ref: ADDED (None)
+
+  — **exactly one ADDED path, `None`, zero changed, zero removed.** `None` is
+  the un-composed state this oracle drives, and it is what the tuner's two
+  consumers read to take their legacy branches, so no legacy behaviour moved.
+  The field reaches NO persisted artifact: it is read at three production
+  sites, all in the tuner's main module, and `records.py` never mentions it
+  (pinned by
+  `test_step12_pr12a_c2_composition_projection.TestTheStampsStillReadTheRunScopedAuthority`).
+  Before this, the tuner learned whether its own run was composed by calling
+  the ambient `active_task_data_path()` — a subsystem seam used as a
+  discriminator — and its per-model run-invariants lock had no composition
+  values to record at all. The golden was edited SURGICALLY, the one key
+  inserted at the reported path.
+
+* **Step 12 / PR-12a C7-3** — the PROPOSER's run input gained
+  `proposal_blocks`: the task-owned proposer guidance (D-12a-6, ratified at
+  the design approval). Measured before the golden was touched:
+
+      .node_calls.proposal.run_inputs[0].proposal_blocks: ADDED
+
+  — **exactly one ADDED path, zero changed, zero removed.** Unlike the C2
+  delta this one is not `None`: the value is TIDMAD's own declaration, which
+  the un-composed workflow resolves through the ONE bounded Regime-A adapter,
+  and this oracle drives an un-composed run. That is the point of the change —
+  the prose the proposer's prompts used to hardcode is now a VALUE the caller
+  supplies, so it becomes visible on the call surface instead of being
+  invisible inside a template.
+
+  The prompts themselves did NOT move: substituting these blocks back into
+  the tokenized templates reproduces their pre-C7 sha256 byte-exactly, pinned
+  by `test_step12_pr12a_c7_proposal_blocks.TestTheRelocationIsBYTE_EXACT`.
+  The golden was edited SURGICALLY, one key at the reported path.
 """
 
 from __future__ import annotations

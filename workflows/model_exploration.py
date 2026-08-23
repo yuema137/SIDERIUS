@@ -65,17 +65,20 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import psutil as _psutil
 import yaml
 
+from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.prompt_templates.interpretation.task_blocks import load_interpretation_task_blocks
+from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
     PhysicalRejection,
+    TaskCompositionRef,
 )
 from agent.schemas.interpretation import (
     InterpretationInput,
@@ -93,6 +96,12 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from core.chain_state import ChainState
 from core.hardware_context import get_or_create as get_or_create_hardware_context
+
+# Step 12 / PR-12a C6 — `core.resume` no longer imports a private symbol from
+# THIS module, so the cycle that forced `RestoredState` under TYPE_CHECKING and
+# `union_key_findings` into a function-local import is gone. Both are ordinary
+# top-level imports again.
+from core.resume import RestoredState, union_key_findings
 from core.run_invariants import (
     build_run_invariants,
     ensure_run_invariants,
@@ -109,6 +118,7 @@ from execute_tools.evaluation_metric import (
 from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
 from execute_tools.metric_order import MetricOrder
+from ml_models.plugin_loader import register_model_in_memory
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from nodes.ml_literature_review import MLLiteratureReviewAgent
@@ -133,9 +143,6 @@ from workflows.task_composition import (
     compose_run_task_bindings,
     verify_composition_is_bound,
 )
-
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from core.resume import RestoredState
 from workflows.task_config import get_task_description, load_task_config
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -921,50 +928,160 @@ def _validate_construction_memory(
         )
 
 
-def _add_plugin_to_registries(plugin_path: str) -> str | None:
-    """Register a single plugin file in every in-process registry surface.
+def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | None:
+    """Project the run's composition into what the TUNER needs (D-12a-1).
 
-    Updates three surfaces so the tuner's planner (running in the same process
-    as this workflow) can resolve the new model_type for both training and
-    inference without a re-scan:
+    One place builds it, from values the composition already resolved. The
+    tuner then learns "this run is composed, and by what" from its INPUT
+    instead of asking the ambient environment — the W4 reference-science guard
+    used to call ``active_task_data_path()`` for that, and the per-model
+    run-invariants lock had no composition values to record at all.
 
-      1. ``ml_models.models_sandbox.MODEL_REGISTRY``
-         — model_type → model class
-      2. ``ml_models.models_format_sandbox.PLUGIN_CONFIG_REGISTRY``
-         — model_type → config class
-      3. ``ml_models.plugin_loader.PLUGIN_OUTPUT_TYPE_REGISTRY``
-         — model_type → "classifier" | "regressor" | "hybrid", driving
-         classifier-vs-regressor routing in scoring + inference.
+    Deliberately NOT a second authority: nothing is re-derived here, and the
+    record/output composition-fingerprint stamps keep reading
+    ``active_composition_fingerprint()`` (Step 11 F-11-C10-a, AST-pinned).
 
-    After the 2026-05 package refactor every import resolves through the
-    qualified ``ml_models.*`` path, so there is a single canonical module
-    identity for each registry. The historical bare-name mirror that
-    previously protected the training subprocess from the duplicate-module
-    bug (see ``ml_models/models_sandbox.py`` history pre-package-migration)
-    is no longer required and has been removed.
+    Returns ``None`` for an un-composed run, which is what makes the whole
+    mechanism invisible to regime A.
+    """
+    if task_composition is None:
+        return None
+    return TaskCompositionRef(
+        semantic_fingerprint=task_composition.semantic_fingerprint,
+        task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
+        task_health_binding=task_composition.task_health_binding,
+    )
+
+
+def resolve_run_implementor_blocks(task_composition: Any) -> Any:
+    """The run's task-owned IMPLEMENTOR science (Step 12 / PR-12a C7-4).
+
+    Identical rule to :func:`resolve_run_proposal_blocks`, one node over:
+
+        composed    -> the composition's OWN declaration, INCLUDING the legal
+                       ``None`` of a task that declares none
+        un-composed -> the ONE bounded Regime-A adapter
+
+    A named authority rather than an inline conditional, for the same reason
+    its sibling is: ``run_workflow``'s §12.1 tripwire pins the branch count,
+    and a fork worth testing should be testable without a workflow drive.
+    """
+    if task_composition is None:
+        return load_implementor_task_blocks()
+    return task_composition.implementor_blocks
+
+
+def resolve_run_proposal_blocks(task_composition: Any) -> Any:
+    """The run's task-owned PROPOSER guidance (Step 12 / PR-12a C7, D-12a-6).
+
+    Resolved exactly as 09b resolves the interpreter's blocks:
+
+        composed    -> the composition's OWN declaration, INCLUDING the legal
+                       ``None`` of a task that declares none (absent blocks
+                       render zero added bytes, never another task's science)
+        un-composed -> the ONE bounded Regime-A adapter, whose single
+                       task-identity occurrence is a default-path CONSTANT
+
+    A named authority rather than an inline conditional because
+    ``run_workflow`` is already 1,500+ lines and its §12.1 sibling-shape
+    tripwire pins the branch count — the same disposition C1 and C7-1 reached.
+    It also makes the composed/un-composed fork independently testable
+    instead of only reachable through a full workflow drive.
+    """
+    if task_composition is None:
+        return load_proposal_task_blocks()
+    return task_composition.proposal_blocks
+
+
+def refuse_legacy_lit_review_on_composed_run(
+    *,
+    task_composition: Any,
+    lit_review_enabled: bool,
+) -> None:
+    """Fail closed when a COMPOSED run explicitly enables literature review.
+
+    Step 12 / PR-12a C7, D-12a-7 (Q-12-3, RATIFIED 2026-08-22).
+
+    The literature-review path is still task-specific (TIDMAD) science. It is
+    opt-in and OFF at all three layers — the chain script defaults
+    ``ML_LIT_REVIEW_ENABLED=0``, resolution is CLI > YAML > False, and the
+    shipped ``lit_review_config.yaml`` says ``enabled: false`` — so it is NOT
+    a load-bearing node of the normal composed chain. That is precisely why
+    Step 12's external-task graduation does not claim literature-review
+    support, and why full genericization is NAMED post-roadmap debt rather
+    than this PR's work.
+
+    What must not happen is a composed run EXPLICITLY enabling it and quietly
+    receiving another task's literature framing in its proposals.
+
+    Keyed on composition PRESENCE, never on a task identity (C-P56-1).
+    Un-composed runs are unaffected.
+
+    Raises:
+        ValueError: composed AND explicitly enabled — naming the remediation
+            and the ratified disposition, before any LLM or GPU spend.
+    """
+    if task_composition is None or not lit_review_enabled:
+        return
+    raise ValueError(
+        "literature review is enabled on a COMPOSED run, and the "
+        "literature-review path is still task-specific (TIDMAD) science. "
+        "Running it here would inject another task's literature framing "
+        "into this run's proposals.\n"
+        "  Remediation: launch without --ml_lit_review_enabled (it is OFF "
+        "by default at every layer), or run un-composed.\n"
+        "  Status: generic literature review is NAMED post-roadmap debt "
+        "(Q-12-3, ratified 2026-08-22). Step 12's external-task "
+        "graduation deliberately does not claim it."
+    )
+
+
+def resolve_tuner_health_config_source(
+    *,
+    task_composition: object | None,
+    effective_config_path: str | None,
+    operator_config: str | None,
+) -> str | None:
+    """The HealthGate config the workflow hands the tuner (Step 12 / PR-12a).
+
+    **The defect this closes (F-P56-3, health half).** The chain's pre-flight
+    materializes the run's EFFECTIVE Health config, resolving the composed
+    task's family through its ``task_health_binding``. Forwarding the
+    operator's RAW value instead meant the tuner re-materialized from scratch
+    with no binding, 08b resolved ``LEGACY_OMITTED``, and a COMPOSED run's
+    per-model gates were TIDMAD's. That is not a mislabelled document: TIDMAD's
+    roster peeks file indices a smaller composed topology does not have, so the
+    run refused itself at startup naming another task's gates.
+
+    **Why composition PRESENCE and not "always the effective path".** The
+    swap would be harmless for the roster on a legacy run — a legacy effective
+    document re-resolves to itself — but the tuner captures whatever it is
+    given as ``health_checks_config_source`` BEFORE its own effective swap, and
+    that value is a PERSISTED output field
+    (``HyperparamTuningOutput.health_checks_config_source``) and record key.
+    Swapping it unconditionally would move a legacy run's recorded provenance
+    from ``None`` to a path. Regime A stays byte-identical.
+
+    The discriminator is composition presence, never a task identity or any
+    surrogate for one (C-P56-1).
 
     Args:
-        plugin_path: filesystem path to the plugin ``.py`` file.
+        task_composition: the run's ``RunTaskComposition``, or ``None`` when
+            the launcher composed nothing. Typed ``object`` because only its
+            PRESENCE is consulted — reading a field here would make this a
+            second composition authority.
+        effective_config_path: the chain-level materialized effective config,
+            or ``None`` when HealthGates are disabled (no effective config
+            exists for a disabled run).
+        operator_config: the operator's raw ``--health_checks_config`` value.
 
     Returns:
-        The registered ``model_type`` string on success, or ``None`` if the
-        plugin file failed to load (validation error, missing required
-        attributes, etc — see ``ml_models.plugin_loader._load_plugin``).
+        The effective config path for a composed run whose gates are enabled;
+        otherwise ``operator_config`` unchanged.
     """
-    from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
-    from ml_models.models_sandbox import MODEL_REGISTRY
-    from ml_models.plugin_loader import PLUGIN_OUTPUT_TYPE_REGISTRY, _load_plugin
-
-    plugin_data = _load_plugin(plugin_path)
-    if plugin_data is None:
-        return None
-
-    model_type = plugin_data["model_type"]
-    MODEL_REGISTRY[model_type] = plugin_data["model_class"]
-    PLUGIN_CONFIG_REGISTRY[model_type] = plugin_data["config_class"]
-    PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin_data["output_type"]
-
-    return model_type
+    if task_composition is None or effective_config_path is None:
+        return operator_config
+    return effective_config_path
 
 
 def _register_plugin(
@@ -1119,7 +1236,12 @@ def _register_plugin(
 
     registered: str | None = None
     try:
-        registered = _add_plugin_to_registries(primary_plugin)
+        # Step 12 / PR-12a C6 — the PUBLIC registration authority.
+        # `workflows._add_plugin_to_registries` was a private duplicate of it:
+        # same `_load_plugin`, same three registries, same `model_type | None`
+        # return. Its only behavioural difference was the absence of the
+        # re-registration warning, which is strictly less visible.
+        registered = register_model_in_memory(primary_plugin)
         if registered:
             print(f"    Model '{model_name}' added to registries (model_type='{registered}')")
     except Exception as e:
@@ -1493,13 +1615,12 @@ def run_workflow(
     # another value. `RestoredState` is resume's OWN type and is allowed
     # across the launcher edge (09.5a §16); `ChainState` still never crosses
     # a process boundary. `None` is cold start.
-    # Quoted: `core.resume` imports THIS module at module level
-    # (`_add_plugin_to_registries`), so importing it back eagerly would be a
-    # cycle. The name is resolved under TYPE_CHECKING for the type checker
-    # and never evaluated at runtime — this module has no
-    # `from __future__ import annotations`, so an unquoted annotation would
-    # be evaluated when the function is defined.
-    restored_state: "RestoredState | None" = None,
+    # Step 12 / PR-12a C6 — an ordinary annotation again. It was QUOTED
+    # because `core.resume` imported a private symbol from this module
+    # (`_add_plugin_to_registries`), making an eager import here a cycle. That
+    # symbol is retired and resume now uses the public registration authority,
+    # so there is no cycle and no reason to defer the name.
+    restored_state: RestoredState | None = None,
     # --- run-scoped TASK composition (Step 10 P1) -------------------------
     task_composition: RunTaskComposition | None = None,
     # --- DS7 deprecated no-ops, kept for behaviour parity (FU-2) ----------
@@ -1614,6 +1735,16 @@ def run_workflow(
     # description from the legacy defaults, and would look completely normal
     # doing it. An un-composed run is a no-op here.
     verify_composition_is_bound(task_composition)
+
+    # Step 12 / PR-12a C7 (D-12a-7, Q-12-3 RATIFIED) — refused HERE, at
+    # startup, because this is the first point where composition presence and
+    # the resolved flag are both in hand, and refusing before the iteration
+    # loop means before any LLM call and any GPU work. The decision itself is
+    # a named authority so this orchestrator gains a CALL rather than another
+    # branch family (§12.1's sibling-shape tripwire).
+    refuse_legacy_lit_review_on_composed_run(
+        task_composition=task_composition, lit_review_enabled=launch.lit_review_enabled
+    )
 
     # DS7 — deprecated no-op strategy params (removal tracked as FU-2).
     for _name, _val, _default in (
@@ -1816,7 +1947,7 @@ def run_workflow(
             "default). Pass health_gate_files ⊆ the scope, or disable "
             "the subsystem with health_gate_enabled=False."
         )
-    _run_invariants, _ = build_run_invariants(
+    _run_invariants, _run_effective_health_config = build_run_invariants(
         resolved_data_scope=_resolved_scope,
         health_gate_enabled=health_gate_enabled,
         health_gate_files=health_gate_files,
@@ -1948,7 +2079,18 @@ def run_workflow(
         scope_is_partial=_scope_is_partial,
         health_gate_enabled=health_gate_enabled,
         health_gate_files=(tuple(health_gate_files) if health_gate_files is not None else None),
-        health_checks_config=health_checks_config,
+        # Step 12 / PR-12a **D-12a-2, source half** — the config the run
+        # ACTUALLY READS, not the operator's raw source value. The decision
+        # itself lives in `resolve_tuner_health_config_source`, a named
+        # module-level authority, so this orchestrator gains a CALL rather
+        # than another conditional (§12.1's sibling-shape tripwire, and
+        # CLAUDE.md's rule that a new responsibility gets a boundary before
+        # it gets a branch).
+        health_checks_config=resolve_tuner_health_config_source(
+            task_composition=task_composition,
+            effective_config_path=_run_effective_health_config,
+            operator_config=health_checks_config,
+        ),
         order_strategy_override=order_strategy_override,
         file_order_override=(
             tuple(file_order_override) if file_order_override is not None else None
@@ -2396,6 +2538,16 @@ def run_workflow(
                 _task_cfg = load_task_config()
                 propose_input.task_description = get_task_description(_task_cfg)
                 propose_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
+                # Step 12 / PR-12a C7 (D-12a-6) — task-owned PROPOSER science,
+                # resolved exactly as 09b resolves the interpreter's blocks: a
+                # composed run supplies its OWN declaration (including the
+                # legal `None` of a task that declares none, which renders
+                # zero added bytes), and the un-composed branch is the ONE
+                # bounded Regime-A adapter — a default-path constant, not a
+                # branch on a task name.
+                propose_input.proposal_blocks = resolve_run_proposal_blocks(
+                    bindings.task_composition
+                )
                 if previous_failures:
                     propose_input.previous_failures = previous_failures
                 if launch.human_advice_mindset is not None:
@@ -2496,6 +2648,11 @@ def run_workflow(
                     _task_cfg = load_task_config()
                     impl_input.task_description = get_task_description(_task_cfg)
                     impl_input.forward_contract = ForwardContract(**_task_cfg["forward_contract"])
+                    # Step 12 / PR-12a C7-4 — task-owned IMPLEMENTOR science,
+                    # resolved by the same rule as its two siblings.
+                    impl_input.implementor_blocks = resolve_run_implementor_blocks(
+                        bindings.task_composition
+                    )
                     # Step 04a (OD-S4-1): the same live manifest and budget
                     # the proposer receives, so the implementor's capacity
                     # prose quotes this machine instead of a stale literal.
@@ -2563,10 +2720,6 @@ def run_workflow(
 
                             _CapReg().register(_capmeta)
                             print(f"    ✅ Registered → model '{_capmeta.name}' (post-validation)")
-                            from ml_models.plugin_loader import (
-                                register_model_in_memory,
-                            )
-
                             _registered_in_memory = register_model_in_memory(
                                 impl_output.model_file_path
                             )
@@ -2684,6 +2837,10 @@ def run_workflow(
             tuning_storage,
             max_rounds=launch.max_rounds,
             health_checks_config=bindings.health_checks_config,
+            # Step 12 / PR-12a (D-12a-1) — the composition projection crosses
+            # the edge on the INPUT, beside every other run-scoped decision
+            # this protocol already maps.
+            task_composition_ref=build_task_composition_ref(bindings.task_composition),
             data_scope=bindings.data_scope,
             health_gate_enabled=bindings.health_gate_enabled,
             health_gate_files=(
@@ -2884,12 +3041,6 @@ def run_workflow(
         # per-iteration chain restore produce EQUAL state by construction, and
         # the merge rule does not live in this already-large function.
         #
-        # Imported locally: `core.resume` imports `_add_plugin_to_registries`
-        # from THIS module (`resume.py:74`), so a module-level import here
-        # would close that cycle. The same reason `RestoredState` above is
-        # under `TYPE_CHECKING`.
-        from core.resume import union_key_findings
-
         union_key_findings(state.accumulated_key_findings, interpretation.key_findings)
 
         # Update runtime vocab from interpretation output

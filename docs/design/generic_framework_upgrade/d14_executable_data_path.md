@@ -20,6 +20,17 @@ self-review per child; routine decisions unescalated), stopping only on the §7
 conditions or at each PR-ready operator review. Rev-2 history: §3.1/§3.2 added
 for the parent review. Rev-1: initial draft.
 
+**Recorded amendment (Step 12 Q-12-2 = A, operator 2026-08-22).** The
+four-method `TaskDataPath` contract remains FROZEN and unmodified. Step 12
+adds an OPTIONAL sibling `TaskScopeCapability` protocol beside it
+(task-owned scope construction + serialize/deserialize codec; scope
+transport = workspace artifact + digest), owned by
+`step_12_external_extensibility_graduation.md` §5 and implemented by its
+PR-12b. This document's "four methods" wording is therefore read as "four
+required methods, plus an optional sibling scope capability an
+implementation MAY declare"; the scope-opacity principle (issue #225) is
+unchanged — the framework still never inspects a scope's internals.
+
 Drafted 2026-08-18 against `master` @ `7f650971`, from a fresh source audit of:
 `execute_tools/train_engine_sandbox.py::TIDMADEpochDataset` (:295-449, plus its
 two construction sites :910 and :1448), `execute_tools/inference_single.py`

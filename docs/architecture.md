@@ -662,9 +662,19 @@ to agree with the frozen fields (the `failed_mode_collapse` penalty is the
 documented exception).
 
 **Losses are not metrics.** Train/validation loss have no deliverable, no
-reference and no task-independent direction (roadmap §20.2): the metric
-types refuse loss-shaped identities and forbid extra keys; surfacing losses
+reference and no task-independent direction (roadmap §20.2); surfacing losses
 is Step 07's `TrainingHistory` / `TrainingDiagnosis`.
+
+**Step 12 / PR-12a C5 (D16) changed HOW that is enforced.** Step 06 enforced
+it LEXICALLY — `_is_loss_shaped` refused any identity whose *name* looked
+like a loss. That rule was wrong in both directions: it refused a legitimate
+declared metric called `log_loss` (Oxford-IIIT Pet's, deliberately named to
+force this), and it would have accepted a genuine training objective under
+any other name. **`MetricSpec.id` is now an OPAQUE identifier**: meaning and
+direction come from the declaration, and the boundary is enforced where the
+real distinction lives — the metric types still forbid extra keys and carry
+no loss field, and a loss has no deliverable to score. Naming is validated
+for hygiene only, never for semantics.
 
 **Not reached by Step 06** (enumerated and asserted, D1 / Step 07a debt):
 incumbent/best selection in the tuner, `workflows/model_exploration.py`,

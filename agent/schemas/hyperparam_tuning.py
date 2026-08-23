@@ -1276,6 +1276,70 @@ class ExperimentPlan(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Task-composition projection (Step 12 / PR-12a, D-12a-1)
+# ---------------------------------------------------------------------------
+
+
+class TaskCompositionRef(BaseModel):
+    """What the tuner needs to know about its run's task composition.
+
+    **This is a PROJECTION, never a second semantic authority.** The composed
+    run's real authorities stay exactly where Step 10 put them: the metric,
+    dataset profile, task config and data-path implementation are run-scoped
+    ContextVar bindings resolved at the composition edge, and the record and
+    output composition-fingerprint STAMPS keep reading
+    ``active_composition_fingerprint()`` (Step 11's F-11-C10-a fix, AST-pinned
+    at exactly two call sites). Nothing here replaces any of them.
+
+    **What it does replace** is the tuner ASKING THE AMBIENT ENVIRONMENT
+    whether its own run is composed. Before PR-12a the W4 reference-science
+    guard called ``active_task_data_path()`` — a subsystem seam consulted as a
+    discriminator — and the tuner's per-model ``build_run_invariants`` call
+    simply had no composition values to pass, so a composed run's per-model
+    lock recorded none. A node should learn what kind of run it is from its
+    INPUT.
+
+    Every field is a value the composition already resolved; none is
+    re-derived here. The whole model is optional at the input (``None`` =
+    un-composed), so every existing caller is unaffected and regime A is
+    untouched.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    semantic_fingerprint: str = Field(
+        description=(
+            "The composition's semantic identity, as computed at the "
+            "composition edge. Carried so the tuner's per-model "
+            "run-invariants lock can record WHICH task produced that "
+            "workspace. It is NOT the source of the record/output stamps — "
+            "those read the run-scoped authority, and Gate 2 caught the two "
+            "disagreeing when they had separate sources (F-11-C10-a)."
+        )
+    )
+    task_data_path_id: str = Field(
+        description=(
+            "The bound data-path implementation's declared id. The W4 "
+            "reference-science guard keys on this projection's PRESENCE; the "
+            "id is carried for provenance and for error messages that have to "
+            "name what the run is bound to."
+        )
+    )
+    task_health_binding: Any = Field(
+        description=(
+            "The run's Health binding — a task-health config path, or a "
+            "``HealthBindingState`` naming an absence. Typed ``Any`` because "
+            "``TaskHealthBinding`` is ``HealthBindingState | str`` and this "
+            "schema must not import the health package to say so. Carried so "
+            "the tuner's per-model effective config is materialized under the "
+            "SAME binding as the chain's, instead of re-resolving "
+            "``LEGACY_OMITTED`` and stamping ``legacy_default`` on a document "
+            "that carries the task's roster."
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # Agent input
 # ---------------------------------------------------------------------------
 
@@ -2419,6 +2483,18 @@ class HyperparamTuningInput(BaseModel):
     progress_bar: bool = Field(
         default=False,
         description="Stream live tqdm progress bars from training/inference subprocesses.",
+    )
+
+    task_composition_ref: TaskCompositionRef | None = Field(
+        default=None,
+        description=(
+            "Step 12 / PR-12a (D-12a-1) — the run's task-composition "
+            "PROJECTION, or None for an un-composed (regime-A) run. Additive "
+            "and default-None by contract: every existing caller constructs "
+            "this input without it and gets byte-identical legacy behaviour. "
+            "It carries composition facts the tuner used to read from the "
+            "ambient environment; it is never a second authority for them."
+        ),
     )
 
     @field_validator("plan_overrides")

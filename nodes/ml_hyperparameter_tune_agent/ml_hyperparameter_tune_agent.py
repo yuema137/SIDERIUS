@@ -64,11 +64,6 @@ from execute_tools.health_checks.schemas import (
 from execute_tools.metric_order import MetricOrder
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_helpers import build_score_table
-
-# Step 10 / P5+P6 W4 — the composition-PRESENCE accessor. Deliberately
-# `active_task_data_path` (no fallback) rather than a metric handle: it answers
-# "is this run explicitly bound?" without ever naming or inspecting a task.
-from execute_tools.task_data_path import active_task_data_path
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
     build_agent_input,
@@ -530,10 +525,23 @@ class HyperparamTuningAgent:
         # the run writes artifacts nothing can find or clean (failure class 1).
         #
         # It is also what the sandbox is given, so the parent's readers and the
-        # child's producers cannot disagree. The spec is NOT serialized and
-        # crosses no process boundary: the subprocess reconstructs an equal
-        # value from `--dataset_profile_json`, which already crosses (§3.2a,
-        # Option A).
+        # child's producers cannot disagree.
+        #
+        # HOW IT CROSSES (corrected, Step 12 / PR-12a C3 — this comment used to
+        # say the spec "crosses no process boundary" and that the subprocess
+        # reconstructs it from `--dataset_profile_json` alone, which stopped
+        # being the whole truth at Step 11 C5/C6):
+        #
+        #   naming   a COMPOSED task's DECLARED naming is bound for the run by
+        #            `bind_run_task_composition`, and `derive_tidmad_deliverable_spec`
+        #            resolves the bound value internally — so this call already
+        #            yields the declared naming with no branch here. Children
+        #            re-compose it from `--task_manifest`.
+        #   storage  still derived from the dataset profile, and still
+        #            reconstructed child-side from `--dataset_profile_json`.
+        #            Generalizing THAT half is Q-12-4 / PR-12b, not this PR.
+        #
+        # The spec object itself is still not serialized.
         run_deliverable_spec = derive_tidmad_deliverable_spec(run_profile)
 
         # --- The run's ONE evaluation metric (Step 06; bound seam Step 10 P1) ---
@@ -622,6 +630,32 @@ class HyperparamTuningAgent:
             health_feedback_history_max_entries_per_model=(
                 agent_input.health_feedback_history_max_entries_per_model
             ),
+            # Step 12 / PR-12a (D-12a-1 / F-P56-3) — the composition-derived
+            # invariants, read from the run's INPUT projection.
+            #
+            # Both were simply absent before. The per-model lock therefore
+            # recorded no composition identity at all (a composed workspace
+            # could not say which task produced it), and the per-model
+            # effective Health config was re-materialized with NO binding —
+            # 08b resolved `LEGACY_OMITTED`, stamping `legacy_default` on a
+            # document whose roster is the task's. C1 fixed the roster by
+            # changing what the workflow HANDS this node; these two kwargs
+            # close what the node ASKS FOR, which is the half C1 could not
+            # reach.
+            #
+            # `None` for an un-composed run — the same values the un-composed
+            # call already produced by omission — so the legacy lock and the
+            # legacy effective document are byte-identical.
+            task_composition_fingerprint=(
+                agent_input.task_composition_ref.semantic_fingerprint
+                if agent_input.task_composition_ref is not None
+                else None
+            ),
+            task_health_binding=(
+                agent_input.task_composition_ref.task_health_binding
+                if agent_input.task_composition_ref is not None
+                else None
+            ),
         )
         health_config_sha256 = run_invariants.health_config_sha256
         # Step 11 C8 / R-11-9 — read from the SAME resolved invariants the
@@ -645,6 +679,11 @@ class HyperparamTuningAgent:
             model_io_contract=run_model_io,
             health_config=load_health_gates_config(agent_input.health_checks_config),
             efficiency_band_fraction=EFFICIENCY_BAND_FRACTION,
+            # Step 12 / PR-12a C7 (D-12a-5) — composition PRESENCE, from the
+            # run's own INPUT projection, so the render authority can gate the
+            # LLM-facing task science. `False` for every un-composed run,
+            # which renders the legacy bytes.
+            composed=agent_input.task_composition_ref is not None,
         )
 
         # Run-invariants lock (DS6b): an existing lock is validated NOW so a
@@ -836,7 +875,17 @@ class HyperparamTuningAgent:
         # machinery. If a composed task ever genuinely needs reference/SOTA
         # evidence, that is a future GENERIC declared capability, never
         # inferred by core.
-        if active_task_data_path() is None:
+        #
+        # Step 12 / PR-12a (D-12a-1) — the discriminator is now the run's own
+        # INPUT, not the ambient environment. It used to call
+        # `active_task_data_path()`, which answers "is a data-path
+        # implementation bound in this process right now?" — a subsystem seam
+        # consulted as a proxy for "is MY run composed?". The two coincide in
+        # production and can diverge anywhere else, and a node should not have
+        # to read a ContextVar to know what kind of run it was handed. The
+        # PRESENCE test and both branches are unchanged, so the guard's OUTPUT
+        # is identical on both paths.
+        if agent_input.task_composition_ref is None:
             reference_scores = load_reference_scores()
             print(
                 f"Reference scores loaded: s_max={reference_scores.s_max:.4e}, "
@@ -1306,6 +1355,9 @@ class HyperparamTuningAgent:
                         # this surface (the raw TrainingHistory stays out).
                         metric_spec=run_metric.spec,
                         training_diagnosis=training_diagnosis,
+                        # Step 12 / PR-12a C7 — the reflector's task-science
+                        # gating. Same run-scoped render the planner receives.
+                        task_render=run_task_render,
                     )
 
                     # Defensive unwrap: LLM occasionally emits [{...}] instead of {...}.

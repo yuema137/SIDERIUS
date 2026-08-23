@@ -1066,7 +1066,7 @@ table. It is **task-specific science**, so it is loaded ONLY when the run
 is un-composed:
 
 ```python
-if active_task_data_path() is None:
+if agent_input.task_composition_ref is None:
     reference_scores = load_reference_scores()
 else:
     reference_scores = None      # composed run: named absence
@@ -1076,6 +1076,17 @@ The guard keys on **composition PRESENCE**, never on `TIDMAD_METRIC_ID`, a
 task name, or any other task-identity surrogate — a surrogate would answer
 "is this TIDMAD?" when the question is "did this run declare its own
 science?".
+
+**Step 12 / PR-12a (D-12a-1) changed WHERE the presence is read**, not what
+it means. It used to call `active_task_data_path()` — which answers "is a
+data-path implementation bound in this process right now?", a subsystem seam
+consulted as a proxy for "is MY run composed?". The two coincide in
+production and can diverge anywhere else, and a node should not have to read
+a ContextVar to learn what kind of run it was handed. The run's composition
+now arrives as a typed projection on the node's own INPUT
+(`HyperparamTuningInput.task_composition_ref`, additive and default-`None`).
+The presence test and both branches are unchanged, so the guard's OUTPUT is
+identical on both paths.
 
 **Declared consequence, not a regression** (frozen ruling **C-P56-1**): a
 composed run's tuner/interpreter/proposer prompts carry the named absence

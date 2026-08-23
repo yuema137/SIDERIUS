@@ -16,6 +16,40 @@ object — pinned by type name; ``memory_history`` is recorded by
 reference — pinned by type/length here and by content in the registered
 k9 choreography (WF-4). Every VALUE-carrying kwarg remains deep-compared,
 so the exclusions cannot hide drift.
+
+DECLARED GOLDEN DELTAS (never a re-baseline to make a test green)
+----------------------------------------------------------------
+
+* **Step 12 / PR-12a C7-2** — the composed-prompt gating (D-12a-5). Two
+  deltas, measured BEFORE either golden was touched and applied by textual
+  insertion (**9 insertions, 0 deletions** across both files; nothing else
+  regenerated):
+
+  ``wf1_plan_call_round1_surface.json`` — ``kwargs.task_render`` gained
+  SEVEN keys: ``available_models_block``, ``per_file_table_protocol``,
+  ``target_strategy_impact_note``, ``sampling_impact_tradeoff``,
+  ``per_file_comparison_block``, ``score_field_noun``,
+  ``score_display_noun``. Each carries the LEGACY bytes VERBATIM — the
+  blocks moved out of the prompt templates into the render authority so a
+  COMPOSED run can be given different ones, and ``TunerTaskRender`` is
+  where 07b declared such tokens must live ("a renderer that grew a new
+  token would have to declare it here").
+
+  ``wf2_reflect_call_surfaces.json`` — ``additive_kwargs`` gained
+  ``task_render: TunerTaskRender`` on both calls. ``reflect()`` had no
+  ``task_render`` by 07b's §3.9 decision, which recorded the reflector's
+  literal "200 vs 4000" anchor as a GAP rather than "smuggling" a kwarg;
+  C7 must gate the reflector's task NAMING, and that needs the signal. It
+  is the same ADDITIVE-kwarg shape ``metric_spec`` and
+  ``training_diagnosis`` arrived in, and it defaults to ``None`` — so a
+  caller that omits it renders the legacy words.
+
+  **What these deltas deliberately do NOT show is a prompt change.** The
+  legacy RENDERED prompt manifest is byte-identical across all of C7 —
+  pinned independently at ``6e8de64b…`` by
+  ``tests/unit/guardrails/test_step12_pr12a_c0_legacy_parity.py``. These
+  goldens pin the CALL SURFACE; that one pins what the LLM receives. Both
+  had to be checked, and only the surface moved.
 """
 
 from __future__ import annotations

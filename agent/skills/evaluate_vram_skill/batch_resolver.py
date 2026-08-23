@@ -199,21 +199,39 @@ def resolve_inference_batch(
             continue
         candidate_elapsed = time.monotonic() - candidate_started
         if candidate_elapsed >= budgets.single_candidate_seconds:
-            raise BatchSearchTimeout(
-                ProbeTimeoutRecord(
-                    operation="batch_candidate",
-                    budget_seconds=budgets.single_candidate_seconds,
-                    elapsed_seconds=round(candidate_elapsed, 3),
-                    search_elapsed_seconds=round(time.monotonic() - search_started, 3),
-                    candidate_batch=B,
-                    phase="inference_batch_resolution",
-                    model_identity=model_identity or type(model).__name__,
-                    realized_parameter_count=sum(q.numel() for q in model.parameters()),
-                    device=str(next(model.parameters()).device)
-                    if any(True for _ in model.parameters())
-                    else "cpu",
-                    disposition="inconclusive",
-                )
+            # **F-12a-G2** (Step 12 / PR-12a, Gate-exposed). This branch USED
+            # to raise `BatchSearchTimeout` here and discard `probe`. That was
+            # wrong in the same way this module's own docstring says the V19
+            # 60-second alarm was wrong, one level down:
+            #
+            #   * `probe_activation_footprint` has already RETURNED. The
+            #     measurement exists. Nothing was interrupted and nothing
+            #     hung — a hung probe never reaches this line at all, so the
+            #     check could never have been the hang protection it looked
+            #     like.
+            #   * The elapsed time is a CPU wall-clock duration (the probe
+            #     traces a CPU-instantiated model), so it moves with host
+            #     load. Rule 2 above: only a MEASURED result may reject a
+            #     candidate for capacity. "The same configuration both failed
+            #     and passed depending on CPU load, which is what proves it
+            #     was never a capacity signal."
+            #
+            # Observed live: a 191.7 s completed probe on a 24-core host at
+            # load ~10 was thrown away against a 120 s budget calibrated on
+            # the same machine UNCONTENDED, and the tuner burned attempt after
+            # attempt on it.
+            #
+            # So the budget keeps its real job — flagging a slow probe for
+            # calibration — and loses the one it should never have had.
+            # Bounding a probe that has NOT returned is a genuine watchdog and
+            # a different mechanism (`ForwardPassTimeoutError` already exists
+            # for that); it is deliberately not built here.
+            print(
+                f"!!! [VRAMEval] SLOW PROBE (accepted): candidate batch {B} "
+                f"took {candidate_elapsed:.1f}s against a "
+                f"{budgets.single_candidate_seconds:.0f}s calibration budget. "
+                f"The measurement COMPLETED and is used; elapsed wall time is "
+                f"host-load-dependent and is not capacity evidence (F-12a-G2)."
             )
         peak = _predict_inference_peak_bytes(probe)
         vram_ok = peak <= cap_bytes

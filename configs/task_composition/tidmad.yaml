@@ -42,5 +42,16 @@ task_health:
 interpretation_blocks:
   config: ../task_interpretation/tidmad.yaml
 
+# Step 12 / PR-12a C7. The proposer and the implementor used to read TIDMAD's
+# science out of their own hardcoded prompts, so a COMPOSED run of any task got
+# it too. They now read a declaration, and TIDMAD declares its own here —
+# meaning composing TIDMAD still needs zero special-casing, and a task that
+# declares neither section gets no science rather than TIDMAD's.
+proposal_blocks:
+  config: ../task_proposal/tidmad.yaml
+
+implementor_blocks:
+  config: ../task_implementor/tidmad.yaml
+
 task_config:
   config: ../task_config.yaml

@@ -142,19 +142,61 @@ _LOSS_IDENTITIES = (
 
 
 @pytest.mark.parametrize("identity", _LOSS_IDENTITIES)
-def test_a_loss_shaped_identity_is_rejected_by_every_metric_type(identity):
-    """Constructing a 'metric' whose identity is a loss is refused at
-    construction — spec, result and not-scoreable result alike."""
-    with pytest.raises(ValidationError, match="names a training loss"):
+def test_a_loss_shaped_identity_is_ACCEPTED_by_every_metric_type(identity):
+    """UPGRADED by Step 12 / PR-12a C5 (D16), operator-ruled — the expectation
+    is reversed and the failure class is preserved.
+
+    This test used to assert that spec, result and not-scoreable result all
+    REFUSE an identity spelled like a loss. D16 removed that lexical rule: a
+    metric's identity is OPAQUE, and its meaning and direction come from the
+    declaration. The old rule was self-contradictory — it conceded that `mse`,
+    a loss formula, is a legitimate metric identity — so what it really keyed
+    on was spelling.
+
+    The property still worth testing across all three types is that they agree
+    with each other. They did when the rule was strict; they must still, now
+    that it is gone. A type left behind with the old validator would be caught
+    here exactly as a type left behind with the new one would have been.
+
+    The boundary this test used to be credited with is NOT removed — it moved
+    to where it was always actually enforced, and
+    `test_loss_history_cannot_populate_a_metric_result_under_any_key` below is
+    its executable owner.
+    """
+    spec = MetricSpec(
+        id=identity,
+        direction="lower",
+        aggregation="mean",
+        scoreability=PresenceScoreabilityContract(),
+    )
+    assert spec.id == identity
+    assert MetricResult(metric_id=identity, direction="lower", scalar=0.1).metric_id == identity
+    refusal = NotScoreableResult(
+        metric_id=identity,
+        direction="lower",
+        verdict=ScoreabilityVerdict(
+            contract_id="c", failures=(em.ScoreabilityFailure(requirement="r", detail="d"),)
+        ),
+    )
+    assert refusal.metric_id == identity
+
+
+@pytest.mark.parametrize("identity", ["", "  ", " padded ", "trailing "])
+def test_a_malformed_identifier_is_still_refused_by_every_metric_type(identity):
+    """The SIBLING check D16 must not have weakened. Removing the lexical rule
+    removed a judgement about MEANING; an empty or whitespace-padded
+    identifier is malformed whatever it spells, and all three types still say
+    so."""
+    with pytest.raises(ValidationError, match="non-empty identifier"):
         MetricSpec(
             id=identity,
             direction="lower",
             aggregation="mean",
             scoreability=PresenceScoreabilityContract(),
         )
-    with pytest.raises(ValidationError, match="names a training loss"):
+    with pytest.raises(ValidationError, match="non-empty identifier"):
         MetricResult(metric_id=identity, direction="lower", scalar=0.1)
-    with pytest.raises(ValidationError, match="names a training loss"):
+    with pytest.raises(ValidationError, match="non-empty identifier"):
         NotScoreableResult(
             metric_id=identity,
             direction="lower",

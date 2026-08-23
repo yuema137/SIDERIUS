@@ -99,6 +99,8 @@ _MANIFEST_KEYS = frozenset(
         "secondary_metrics",
         "task_health",
         "interpretation_blocks",
+        "proposal_blocks",
+        "implementor_blocks",
         "task_config",
         "deliverable",
     }
@@ -208,6 +210,28 @@ class RunTaskComposition:
     ``None`` is the un-declared state and resolves the shipped TIDMAD naming
     byte-identically, so a manifest with no ``deliverable:`` section composes
     exactly as it did before C6.
+    """
+
+    proposal_blocks: Any = None
+    """The run's DECLARED proposer guidance, or ``None``.
+
+    Step 12 / PR-12a C7 (D-12a-6). A ``ProposalTaskBlocks``, resolved by the
+    SAME optional-section shape ``interpretation_blocks`` uses. ``None`` is
+    the un-declared state and renders ZERO added bytes, so a manifest with no
+    ``proposal_blocks:`` section composes exactly as it did before C7. Typed
+    ``Any`` for the same reason the deliverable naming is: this carrier holds
+    what another module's contract produced and never becomes a second
+    authority for it.
+    """
+
+    implementor_blocks: Any = None
+    """The run's DECLARED implementor science, or ``None``.
+
+    Step 12 / PR-12a C7-4, the operator-ratified contract correction. An
+    ``ImplementorTaskBlocks``, resolved by the SAME optional-section shape its
+    two siblings use. ``None`` is the un-declared state and renders NOTHING —
+    a composed task that declares none gets no implementor science rather
+    than TIDMAD's.
     """
 
     secondary_metrics: tuple[EvaluationMetric, ...] = ()
@@ -747,6 +771,67 @@ def _compose_task_health(section: dict[str, Any], manifest_dir: str) -> TaskHeal
     return config_path
 
 
+def _compose_implementor_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple[Any, str | None]:
+    """Optional by design: an absent declaration renders NOTHING (C7-4).
+
+    Third instance of the same shape, deliberately identical to its two
+    siblings — same `none: true` escape, same `config:` ref, same fail-closed
+    propagation.
+    """
+    from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
+
+    section = raw.get("implementor_blocks")
+    if section is None:
+        return None, None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section 'implementor_blocks' must be a mapping; got {type(section).__name__}."
+        )
+    if section.get("none") is True:
+        return None, None
+
+    config_ref = _require(section, "config", "implementor_blocks (without 'none: true')")
+    config_path = _resolve_path(config_ref, manifest_dir)
+    try:
+        blocks = load_implementor_task_blocks(config_path)
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"implementor_blocks declaration at {config_path!r} could not be loaded: {exc}"
+        ) from exc
+    return blocks, config_path
+
+
+def _compose_proposal_blocks(raw: dict[str, Any], manifest_dir: str) -> tuple[Any, str | None]:
+    """Optional by design: an absent declaration renders NOTHING (D-12a-6).
+
+    Deliberately the same shape as :func:`_compose_interpretation_blocks` —
+    same `none: true` escape, same `config:` ref, same fail-closed
+    propagation. Two sibling families that behave differently would be two
+    things to learn instead of one.
+    """
+    from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
+
+    section = raw.get("proposal_blocks")
+    if section is None:
+        return None, None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section 'proposal_blocks' must be a mapping; got {type(section).__name__}."
+        )
+    if section.get("none") is True:
+        return None, None
+
+    config_ref = _require(section, "config", "proposal_blocks (without 'none: true')")
+    config_path = _resolve_path(config_ref, manifest_dir)
+    try:
+        blocks = load_proposal_task_blocks(config_path)
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"proposal_blocks declaration at {config_path!r} could not be loaded: {exc}"
+        ) from exc
+    return blocks, config_path
+
+
 def _compose_interpretation_blocks(
     raw: dict[str, Any], manifest_dir: str
 ) -> tuple[InterpretationTaskBlocks | None, str | None]:
@@ -845,6 +930,8 @@ def compute_semantic_fingerprint(
     plugins: tuple[ResolvedPluginRef, ...],
     secondary_metric_declarations: list[dict[str, Any]] | None = None,
     deliverable_naming_declaration: dict[str, Any] | None = None,
+    proposal_blocks: Any = None,
+    implementor_blocks: Any = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -902,6 +989,19 @@ def compute_semantic_fingerprint(
     # precedent, so an un-declared manifest's fingerprint is unchanged.
     if deliverable_naming_declaration:
         payload["deliverable_naming"] = deliverable_naming_declaration
+    # Step 12 / PR-12a C7 (D-12a-6) — declared proposer science is semantic:
+    # it changes what the model is ASKED, so two runs whose proposer guidance
+    # differs are not the same run. ADDITIVE WHEN DECLARED, on the same
+    # precedent as the two above, so every existing composed manifest's
+    # fingerprint is byte-unchanged and its resume still validates.
+    if proposal_blocks is not None:
+        payload["proposal_blocks"] = proposal_blocks.model_dump(mode="json")
+    # Step 12 / PR-12a C7-4 — same rule, same reason: declared implementor
+    # science changes what the model is asked, so it changes the run's
+    # identity. ADDITIVE WHEN DECLARED, so undeclared fingerprints are
+    # byte-unchanged.
+    if implementor_blocks is not None:
+        payload["implementor_blocks"] = implementor_blocks.model_dump(mode="json")
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -1137,6 +1237,15 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     interpretation_blocks, interpretation_path = _compose_interpretation_blocks(raw, manifest_dir)
     if interpretation_path is not None:
         source_paths["interpretation_blocks"] = interpretation_path
+    # Step 12 / PR-12a C7 (D-12a-6) — same shape, same `source_paths` entry,
+    # so the declaration participates in the semantic fingerprint exactly as
+    # its sibling does: editing the prose moves the run's identity.
+    proposal_blocks, proposal_path = _compose_proposal_blocks(raw, manifest_dir)
+    if proposal_path is not None:
+        source_paths["proposal_blocks"] = proposal_path
+    implementor_blocks, implementor_path = _compose_implementor_blocks(raw, manifest_dir)
+    if implementor_path is not None:
+        source_paths["implementor_blocks"] = implementor_path
 
     task_config_section = _section(raw, "task_config", resolved_manifest)
     description, contract, _values = _compose_task_config(
@@ -1160,6 +1269,8 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         deliverable_naming_declaration=(
             deliverable_naming.model_dump(mode="json") if deliverable_naming is not None else None
         ),
+        proposal_blocks=proposal_blocks,
+        implementor_blocks=implementor_blocks,
     )
 
     return RunTaskComposition(
@@ -1168,6 +1279,8 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         metric=metric,
         task_health_binding=task_health_binding,
         interpretation_blocks=interpretation_blocks,
+        proposal_blocks=proposal_blocks,
+        implementor_blocks=implementor_blocks,
         task_description=description,
         forward_contract=contract,
         semantic_fingerprint=fingerprint,

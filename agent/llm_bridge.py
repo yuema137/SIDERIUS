@@ -44,6 +44,7 @@ from pydantic import ValidationError
 
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
+    LEGACY_PER_FILE_COMPARISON_BLOCK,
     TunerTaskRender,
     render_metric_direction_words,
     render_metric_identity_line,
@@ -268,6 +269,30 @@ DEFAULT_REQUEST_TIMEOUT_SECONDS = 600.0
 #: loop: kill at 120 s, back off, kill at 120 s, forever, making no progress
 #: and billing every attempt.
 DEFAULT_TIMEOUT_RETRIES = 3
+
+
+def _reflector_score_noun(task_render: "TunerTaskRender | None") -> str:
+    """What the reflector calls the score in prose.
+
+    Step 12 / PR-12a C7 (D-12a-5). `None` — every un-composed run and every
+    caller predating this kwarg — renders the legacy words, so the reflector's
+    bytes do not move. The gating decision itself belongs to the render
+    authority; this only unwraps the optional bundle.
+    """
+    if task_render is None:
+        return "Denoising Score"
+    return task_render.score_display_noun
+
+
+def _reflector_per_file_block(task_render: "TunerTaskRender | None") -> str:
+    """The reflector's per-file reference-science block, or nothing.
+
+    Step 12 / PR-12a C7. `None` renders the legacy bytes for every caller
+    predating the kwarg, so an un-composed run does not move.
+    """
+    if task_render is None:
+        return LEGACY_PER_FILE_COMPARISON_BLOCK
+    return task_render.per_file_comparison_block
 
 
 class LLMBridge:
@@ -999,6 +1024,16 @@ class LLMBridge:
                 score_table_md or _PLANNER_SCORE_TABLE_FALLBACK,
             )
             .replace("{TASK_DESCRIPTION}", task_description)
+            # Step 12 / PR-12a C7 (D-12a-5) — composition-gated task science.
+            # The gating lives in the RENDER authority; this site substitutes
+            # a token like every other, so the bridge never learns what a
+            # composition is. Un-composed, each renders the exact bytes the
+            # template used to carry as a literal.
+            .replace("{AVAILABLE_MODELS_BLOCK}", task_render.available_models_block)
+            .replace("{PER_FILE_TABLE_PROTOCOL}", task_render.per_file_table_protocol)
+            .replace("{SCORE_FIELD_NOUN}", task_render.score_field_noun)
+            .replace("{TARGET_STRATEGY_IMPACT_NOTE}", task_render.target_strategy_impact_note)
+            .replace("{SAMPLING_IMPACT_TRADEOFF}", task_render.sampling_impact_tradeoff)
             .replace("{available_losses_block}", available_losses_block)
             .replace(
                 "{GATE_OUTPUT_DIVERSITY_ADVICE}",
@@ -1077,6 +1112,7 @@ class LLMBridge:
         *,
         metric_spec: MetricSpec | None = None,
         training_diagnosis: Any = None,
+        task_render: TunerTaskRender | None = None,
     ) -> dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
@@ -1123,6 +1159,22 @@ class LLMBridge:
             .replace("{METRIC_ANTONYM_UPPER}", _direction["antonym"].upper())
             .replace("{METRIC_COMPARATIVE}", _direction["comparative"])
             .replace("{METRIC_IDENTITY_LINE}", render_metric_identity_line(metric_spec))
+            # Step 12 / PR-12a C7 (D-12a-5) — the reflector's judgement
+            # protocol is task-GENERIC (compare against baseline and best;
+            # never call a negative score a failure); only its NAMING is
+            # TIDMAD's. `task_render` is the additive kwarg carrying the
+            # rendered noun, mirroring how `metric_spec` and
+            # `training_diagnosis` arrived in 07b. `None` renders the legacy
+            # words, so an un-composed run's bytes do not move.
+            .replace(
+                "{SCORE_DISPLAY_NOUN_UPPER}",
+                _reflector_score_noun(task_render).upper(),
+            )
+            .replace("{SCORE_DISPLAY_NOUN}", _reflector_score_noun(task_render))
+            .replace(
+                "{PER_FILE_COMPARISON_BLOCK}",
+                _reflector_per_file_block(task_render),
+            )
         )
         user_prompt = get_reflector_user_prompt(
             exp_id,

@@ -49,9 +49,17 @@ class TestRunWorkflowSignature:
 
 class TestLockCall:
     def test_workflow_lock_call_passes_policy_explicitly(self):
-        call = re.search(
-            r"_run_invariants, _ = build_run_invariants\((.*?)\n    \)", _SRC, re.DOTALL
-        ).group(1)
+        # The second element of the unpack is deliberately NOT pinned. It was
+        # `_` while the effective-config path was discarded; Step 12 / PR-12a
+        # C1 binds it (`_run_effective_health_config`) so the workflow can hand
+        # the tuner the config the run actually reads. This test's subject is
+        # the POLICY KWARGS, and hardcoding a throwaway binding name made it
+        # fail for a change that has nothing to do with them.
+        match = re.search(
+            r"_run_invariants, \w+ = build_run_invariants\((.*?)\n    \)", _SRC, re.DOTALL
+        )
+        assert match is not None, "the workflow's build_run_invariants call site was not found"
+        call = match.group(1)
         for kwarg in (
             "structured_health_feedback_enabled=enable_structured_health_feedback",
             "health_feedback_history_window_iterations=",

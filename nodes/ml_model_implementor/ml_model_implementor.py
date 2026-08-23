@@ -27,8 +27,10 @@ import re
 import tempfile
 import textwrap
 from datetime import UTC, datetime
+from typing import Any
 
 from agent.llm_bridge import LLMBridge
+from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.schemas.hyperparam_tuning import serialize_expert_advice
 from agent.schemas.implementor import ImplementorInput, ImplementorOutput, LossProvenance
 from agent.schemas.model_io_contract import ModelIOContract
@@ -315,6 +317,16 @@ PLUGIN_OUTPUT_TYPE = "{output_type}"  # {output_type_comment}
 #: are DERIVED (see ``_render_output_contract``); the shapes here are the
 #: shipped TIDMAD rendering, kept so a prose-only caller emits byte-identical
 #: plugins.
+#:
+#: Step 12 / PR-12a C7-4 (F-12a-C7-14) — the ONE surviving TIDMAD phrase in
+#: this node, and deliberately so. It is reachable only by a task that
+#: declines Step 03's ``model_io`` declaration; the shipped TIDMAD config
+#: declares one, so the production path renders from the declaration. Routing
+#: it through the task-owned phrase would mean either moving the LEGACY bytes
+#: this table exists to preserve, or branching on composition presence — the
+#: ambient discriminator D-12a-1 removed. The residue is PINNED by count in
+#: ``tests/unit/workflows/test_step12_pr12a_c7_implementor_blocks.py`` so a
+#: second occurrence cannot appear quietly.
 _LEGACY_OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
     "classifier": (
         "input [B, T] int64 → output [B, 256, T] float32",
@@ -326,15 +338,47 @@ _LEGACY_OUTPUT_CONTRACT_COMMENTS: dict[str, tuple[str, str]] = {
     ),
 }
 
-#: Phrase describing what the continuous form of an output means. It is not a
-#: contract fact — the contract says the shape, this says what the shape is
-#: FOR — so it stays a Step-04 template string.
-_CONTINUOUS_OUTPUT_PHRASE = "continuous waveform regression"
+
+def render_engineer_role(blocks: Any, *, for_losses: bool = False) -> str:
+    """The specialism clause of the implementor's engineer role line.
+
+    Step 12 / PR-12a C7-4 (blocks I1a/I1b). The clause used to read "deep
+    learning for signal denoising" / "loss functions for signal denoising" for
+    every task. The TASK now owns the science (``science_domain``); the
+    framework owns the role framing around it.
+
+    Rendered as a CLAUSE, so an undeclared task reads "You are a senior
+    PyTorch engineer." — grammatical, and carrying no science it did not
+    declare. No invented prose stands in for a missing declaration.
+    """
+    domain = getattr(blocks, "science_domain", None) if blocks is not None else None
+    if not domain:
+        return ""
+    framing = "loss functions for" if for_losses else "deep learning for"
+    return f" specialising in {framing} {domain}"
+
+
+def render_continuous_output_phrase(blocks: Any, emitted: Any) -> str:
+    """What a CONTINUOUS output means, for a generated plugin's comment.
+
+    Step 12 / PR-12a C7-4 (the I2 residue). The classifier counterpart is
+    already DERIVED from the declared class cardinality; this was the one
+    hardcoded half, and "waveform" is a task word.
+
+    Absent declaration ⇒ the neutral name of the DECLARED form, not TIDMAD's
+    phrase and not invented science: it names what the contract already says
+    the output is.
+    """
+    phrase = getattr(blocks, "continuous_output_phrase", None) if blocks is not None else None
+    if phrase:
+        return phrase
+    return f"continuous {emitted.render_shape()} output"
 
 
 def _render_output_contract(
     output_type: str,
     model_io_contract: ModelIOContract | None = None,
+    implementor_blocks: Any = None,
 ) -> tuple[str, str]:
     """Return (forward-contract comment, PLUGIN_OUTPUT_TYPE comment).
 
@@ -369,7 +413,7 @@ def _render_output_contract(
         # cardinality, so this is never None here.
         purpose = f"{model_io_contract.class_cardinality}-class classification"
     else:
-        purpose = _CONTINUOUS_OUTPUT_PHRASE
+        purpose = render_continuous_output_phrase(implementor_blocks, emitted)
     return forward_comment, f"{emitted.render_shape()} → {purpose}"
 
 
@@ -423,7 +467,7 @@ def test_config_instantiation():
 # ---------------------------------------------------------------------------
 
 IMPLEMENTOR_REASONING_PROMPT = """\
-You are a senior PyTorch engineer specialising in deep learning for signal denoising.
+You are a senior PyTorch engineer{ENGINEER_ROLE}.
 
 Your task: given a mathematical description of a new neural architecture and its
 baseline configuration, plan the PyTorch implementation in detail before writing code.
@@ -632,7 +676,7 @@ PLUGIN_LOSS_CLASS = {LossClass}
 
 
 IMPLEMENTOR_LOSS_REASONING_PROMPT = """\
-You are a senior PyTorch engineer specialising in loss functions for signal denoising.
+You are a senior PyTorch engineer{LOSS_ENGINEER_ROLE}.
 
 Your task: given a mathematical definition for a new loss function, plan its PyTorch
 implementation in detail before writing code. The loss receives classifier-shaped
@@ -1102,12 +1146,18 @@ def _build_reasoning_system_prompt(inp: ImplementorInput) -> str:
     ``load_task_config()``); test fixtures may leave both at defaults, in
     which case the placeholder collapses to ``""``.
     """
-    return IMPLEMENTOR_REASONING_PROMPT.replace(
-        "{TASK_BACKGROUND}",
-        _render_task_background(inp.task_description, inp.forward_contract),
-    ).replace(
-        "{CAPACITY_BUDGET}",
-        _render_capacity_budget(inp.hardware_context, inp.vram_budget_gb),
+    return (
+        IMPLEMENTOR_REASONING_PROMPT.replace(
+            "{ENGINEER_ROLE}", render_engineer_role(inp.implementor_blocks)
+        )
+        .replace(
+            "{TASK_BACKGROUND}",
+            _render_task_background(inp.task_description, inp.forward_contract),
+        )
+        .replace(
+            "{CAPACITY_BUDGET}",
+            _render_capacity_budget(inp.hardware_context, inp.vram_budget_gb),
+        )
     )
 
 
@@ -1410,7 +1460,7 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     # output_type. It is NEVER inferred from the loss family — that would
     # re-couple the two design dimensions this PR separates.
     forward_contract_comment, output_type_comment = _render_output_contract(
-        inp.output_type, inp.forward_contract.model_io
+        inp.output_type, inp.forward_contract.model_io, inp.implementor_blocks
     )
 
     return PLUGIN_TEMPLATE.format(
@@ -1630,7 +1680,12 @@ class MLModelImplementor:
         # ---- 2. LLM calls (reasoning + code) ----------------------------
         print(f"🧪 Generating custom loss '{loss_name}' ...")
         reasoning = self.bridge.generate_text(
-            IMPLEMENTOR_LOSS_REASONING_PROMPT,
+            # Step 12 / PR-12a C7-4 — the loss engineer's specialism comes
+            # from the run's declared science, not from a literal.
+            IMPLEMENTOR_LOSS_REASONING_PROMPT.replace(
+                "{LOSS_ENGINEER_ROLE}",
+                render_engineer_role(inp.implementor_blocks, for_losses=True),
+            ),
             _build_loss_reasoning_prompt(spec),
             label="implementor.loss.reasoning",
         )
@@ -1954,7 +2009,9 @@ class MLModelImplementor:
         # V21 PR A3/A4: the documented contract follows the declared output_type.
         # A regressor's description.md claiming [B, 256, T] would mislead the
         # validator's LLM reviewer, which reads this file as the model spec.
-        _fc_comment, _ = _render_output_contract(inp.output_type, inp.forward_contract.model_io)
+        _fc_comment, _ = _render_output_contract(
+            inp.output_type, inp.forward_contract.model_io, inp.implementor_blocks
+        )
         description_md = (
             f"# {_class_name(inp.model_name)}\n\n"
             f"## Overview\n\n{inp.model_description}\n\n"
@@ -2036,6 +2093,13 @@ def main():
         model_description=proposal["model_description"],
         mathematical_definition=proposal["mathematical_definition"],
         baseline_config=proposal["baseline_config"],
+        # Step 12 / PR-12a C7-4. Standalone CLI invocation is un-composed by
+        # construction — there is no manifest to read — so it resolves the
+        # bounded Regime-A adapter and its rendered prompt stays byte-identical
+        # to the pre-C7 surface. The CHAIN never reaches here: `run_workflow`
+        # injects `resolve_run_implementor_blocks(...)`, which is what refuses
+        # to hand TIDMAD's science to a composed task.
+        implementor_blocks=load_implementor_task_blocks(),
         storage=StorageConfig(
             backend="local",
             local=LocalStorageConfig(workspace=args.workspace, run_name=args.run_name),

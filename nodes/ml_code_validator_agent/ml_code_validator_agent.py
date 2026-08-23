@@ -59,6 +59,7 @@ from agent.skills.model_io_probe_skill import (
     declared_output_tensor,
     expected_output_shape,
 )
+from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
 
 # ---------------------------------------------------------------------------
 # LLM prompts
@@ -365,7 +366,13 @@ def _check_config_fields(config_fields: dict) -> tuple[bool, str | None]:
 
 #: Output contracts a plugin may declare. An unrecognised value fails closed
 #: rather than defaulting — see ``_check_instantiation_and_gradient``.
-_LEGAL_OUTPUT_TYPES: tuple[str, ...] = ("classifier", "regressor")
+#:
+#: Step 12 / PR-12a C4 (issue #234): IMPORTED, no longer a second literal. The
+#: validator had independently enforced this exact pair since V21 PR A while
+#: the loader accepted three, so a plugin declaring ``hybrid`` loaded and was
+#: then refused at validation. One authority, one set — a divergence is now a
+#: structural impossibility rather than something a census has to notice.
+_LEGAL_OUTPUT_TYPES: tuple[str, ...] = PLUGIN_LEGAL_OUTPUT_TYPES
 
 #: Legacy-read default for plugins predating the declaration (V21 PR A).
 #: A NEWLY generated plugin must always declare its contract explicitly;

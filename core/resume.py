@@ -71,7 +71,14 @@ from execute_tools.health_checks.config import (
     read_effective_config_body_sha,
 )
 from execute_tools.metric_order import MetricOrder
-from workflows.model_exploration import _add_plugin_to_registries
+
+# Step 12 / PR-12a C6 (09.5 Q2 = B) — the PUBLIC registration authority.
+# `core` used to import a PRIVATE symbol from `workflows`, which is the wrong
+# direction across the layering AND forced two cycle workarounds in
+# `model_exploration` (a TYPE_CHECKING-only `RestoredState` and a
+# function-local `union_key_findings`). The private duplicate is retired; both
+# workarounds are gone.
+from ml_models.plugin_loader import register_model_in_memory
 
 # ---------------------------------------------------------------------------
 # Cross-iter negative-feedback retention caps (V8 hardening §1).
@@ -128,7 +135,7 @@ class RestoredState:
             an in-process run would have accumulated naturally.
         restored_plugins: ``model_type`` strings whose plugin classes were
             re-registered into the four registry surfaces (see
-            :func:`workflows.model_exploration._add_plugin_to_registries`).
+            :func:`ml_models.plugin_loader.register_model_in_memory`).
             Plugin files that were missing on disk are *not* in this list
             (a warning is emitted but the restore continues — the JSON
             record is kept in ``resolved_source_paths`` because
@@ -1384,7 +1391,7 @@ def restore_prior_state(
             and refuse to launch.
 
     Side effects:
-        Calls :func:`_add_plugin_to_registries` for each prior iter, which
+        Calls :func:`register_model_in_memory` for each prior iter, which
         mutates the global ``MODEL_REGISTRY``, ``PLUGIN_CONFIG_REGISTRY``,
         and ``PLUGIN_OUTPUT_TYPE_REGISTRY``. Idempotent if the same plugin
         is already registered (overwrites with the same class).
@@ -1501,7 +1508,7 @@ def restore_prior_state(
         plugin_file = os.path.join(plugin_dir, f"{parsed.model_type}.py")
 
         if os.path.isfile(plugin_file):
-            registered = _add_plugin_to_registries(plugin_file)
+            registered = register_model_in_memory(plugin_file)
             if registered is None:
                 # The .py is on disk but failed _load_plugin validation —
                 # broken plugin contract (missing PLUGIN_MODEL_TYPE etc).

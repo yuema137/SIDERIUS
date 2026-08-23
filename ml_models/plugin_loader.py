@@ -46,6 +46,41 @@ _MODULE_NAME_PREFIX = "siderius_plugin_"
 PLUGIN_OUTPUT_TYPE_REGISTRY: dict[str, str] = {}
 
 
+# --- Output-contract vocabulary: ONE authority, two derived sets -------------
+# Step 12 / PR-12a C4, closing issue #234.
+#
+# The two sets are genuinely different, which is why one constant could not
+# serve both and why a 3-vs-2 disagreement between the loader and the validator
+# survived for so long: a plugin legal at LOAD time was refused at VALIDATION
+# time, and an unrecognised value was silently rewritten to "classifier".
+
+#: Every output contract the framework can INTERPRET, including the legacy
+#: builtin adapter value. ``"hybrid"`` is not a tensor semantic — it means "the
+#: shape is classifier-shaped but every loss is legal" and is carried by
+#: BUILT-IN models only (``BUILTIN_OUTPUT_TYPES``: ``fcnet``). It stays in the
+#: vocabulary because real consumers branch on it — ``inference_single``
+#: routes regression on ``output_type == "hybrid" and target_dtype ==
+#: torch.float32`` — so deleting it would change execution, not just wording.
+OUTPUT_TYPE_VOCABULARY: tuple[str, ...] = ("classifier", "regressor", "hybrid")
+
+#: What a PLUGIN may declare. Evidence-derived, not asserted: across the 109
+#: generated plugins on record the distribution is 106 ``classifier`` +
+#: 3 ``regressor`` and **zero** ``hybrid``; the implementor template emits one
+#: of the two; and the validator has independently enforced exactly this pair
+#: (``_LEGAL_OUTPUT_TYPES``) since V21 PR A. ``hybrid`` reaches the registry
+#: through the builtin table, never through a plugin file.
+PLUGIN_LEGAL_OUTPUT_TYPES: tuple[str, ...] = ("classifier", "regressor")
+
+#: Read for a plugin that predates the declaration (V21 PR A). Kept — and
+#: deliberately NOT folded into the refusal below — because the validator's
+#: matching ``_DEFAULT_OUTPUT_TYPE`` is a legacy-read path with its own
+#: reachability test guarding it against silent removal. Refusing omission here
+#: while the validator still accepts it would recreate the loader/validator
+#: divergence this commit exists to remove. Issue #234 is about a declaration
+#: that is PRESENT and unrecognised; that is what fails closed.
+_LEGACY_OMITTED_OUTPUT_TYPE = "classifier"
+
+
 def _load_plugin(path: str) -> dict | None:
     """Load a single plugin file. Returns attribute dict or None if invalid.
 
@@ -77,14 +112,27 @@ def _load_plugin(path: str) -> dict | None:
             print(f"[PluginLoader] Skipping {os.path.basename(path)}: missing '{attr}'")
             return None
 
-    # PLUGIN_OUTPUT_TYPE is optional — defaults to "classifier" for backward compat
-    output_type = getattr(module, "PLUGIN_OUTPUT_TYPE", "classifier")
-    if output_type not in ("classifier", "regressor", "hybrid"):
+    # PLUGIN_OUTPUT_TYPE is optional — an OMITTED declaration reads the legacy
+    # default (see `_LEGACY_OMITTED_OUTPUT_TYPE`). A declaration that is
+    # PRESENT but not plugin-legal REFUSES the plugin.
+    #
+    # Issue #234, closed here. This used to print a warning and rewrite the
+    # value to "classifier": an external package whose model emits, say,
+    # segmentation masks would then have trained, been scored and been ranked
+    # as a 256-class classifier, with nothing downstream able to tell. A
+    # metadata defect became wrong science. The refusal uses this module's
+    # established malformed-plugin convention — a named printed reason and a
+    # `None` return — so every existing caller already handles it.
+    output_type = getattr(module, "PLUGIN_OUTPUT_TYPE", _LEGACY_OMITTED_OUTPUT_TYPE)
+    if output_type not in PLUGIN_LEGAL_OUTPUT_TYPES:
         print(
-            f"[PluginLoader] Warning: '{os.path.basename(path)}' has invalid "
-            f"PLUGIN_OUTPUT_TYPE='{output_type}', defaulting to 'classifier'"
+            f"[PluginLoader] Skipping {os.path.basename(path)}: "
+            f"PLUGIN_OUTPUT_TYPE={output_type!r} is not a legal plugin output "
+            f"contract (expected one of: {', '.join(PLUGIN_LEGAL_OUTPUT_TYPES)}). "
+            f"It is NOT coerced to a default — an unrecognised output contract "
+            f"is a defect, not a preference."
         )
-        output_type = "classifier"
+        return None
 
     return {
         "model_type": module.PLUGIN_MODEL_TYPE,

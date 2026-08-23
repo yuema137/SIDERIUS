@@ -27,5 +27,15 @@ task_health:
 interpretation_blocks:
   config: ../../../../configs/task_interpretation/tidmad.yaml
 
+# Step 12 / PR-12a C7. Declared here for the same reason as everywhere else in
+# this file: the shipped manifest declares them, and the W2 invariant is that
+# these two are the SAME composition. A fixture that quietly declared less
+# would make the shipped manifest's fingerprint untestable.
+proposal_blocks:
+  config: ../../../../configs/task_proposal/tidmad.yaml
+
+implementor_blocks:
+  config: ../../../../configs/task_implementor/tidmad.yaml
+
 task_config:
   config: ../../../../configs/task_config.yaml

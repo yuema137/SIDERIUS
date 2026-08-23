@@ -21,7 +21,7 @@ modified to make an abstraction pass.
 | validation objective (R3) | mean validation cross entropy per epoch |
 | training history (R2) | mean training cross entropy per epoch |
 | golden metric (R4) | 37-class **accuracy** on the final-eval scope · direction HIGHER · terminal |
-| optional | validation accuracy (checkpointed); **macro-F1** (higher, terminal); `log_loss` (lower, terminal — **blocked by D16**, see `STATUS.md`) |
+| optional | validation accuracy (checkpointed); **macro-F1** (higher, terminal); `log_loss` (lower, terminal — declarable since D16 closed; not shipped, see `STATUS.md`) |
 
 ## What this pack contains at PR0 (identity + L0/L1 declarations)
 

@@ -131,9 +131,36 @@ def test_interpretation_framework_templates_are_task_free():
 
 
 def test_planner_prompt_per_file_table_uses_impact_columns():
-    assert "Impact_Score" in PLANNER_PROMPT
-    assert "Linear_Weight" in PLANNER_PROMPT
+    """Step 12 / PR-12a C7 — the impact columns are TIDMAD reference science
+    and are now gated behind composition presence. An UN-COMPOSED run still
+    renders them, which is what this test has always been about."""
+    from tests.helpers.step12_pr12a_prompt_capture import legacy_rendered_template
+
+    rendered = legacy_rendered_template("planner")
+    assert "Impact_Score" in rendered
+    assert "Linear_Weight" in rendered
 
 
 def test_proposer_reasoning_uses_impact_score():
-    assert "Impact_Score" in PROPOSAL_REASONING_PROMPT
+    """Step 12 / PR-12a C7-3 + C7-5 — same disposition as its planner sibling
+    above. The impact columns are TIDMAD reference science and now live in
+    `configs/task_proposal/tidmad.yaml`; an UN-COMPOSED run still renders them,
+    which is what this test has always been about. Asserting on the CONSTANT
+    would now be asserting where the bytes are stored."""
+    from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
+    from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
+        render_architect_role,
+        render_proposal_evidence_reading,
+    )
+
+    blocks = load_proposal_task_blocks()
+    rendered = (
+        PROPOSAL_REASONING_PROMPT.replace("{ARCHITECT_ROLE}", render_architect_role(blocks))
+        .replace("{EVIDENCE_READING}", render_proposal_evidence_reading(blocks))
+        .replace("{TARGET_SELECTOR_CLAUSE}", blocks.target_strategy_selector_clause or "")
+        .replace("{EVIDENCE_CITATION_CLAUSE}", blocks.evidence_citation_clause or "")
+    )
+    assert "Impact_Score" in rendered
+    assert "Linear_Weight" in rendered
+    # …and the template itself no longer carries it, which is the C7 contract.
+    assert "Impact_Score" not in PROPOSAL_REASONING_PROMPT

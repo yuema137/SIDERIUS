@@ -139,6 +139,189 @@ def render_gate_name_tokens(health_config: Any) -> dict[str, str]:
     return {check.name: check.name for gate in health_config.health_gates for check in gate.checks}
 
 
+# ===========================================================================
+# Step 12 / PR-12a C7 — composition-gated LLM-facing task science (D-12a-5)
+# ===========================================================================
+#
+# The governing rule: removing TIDMAD science is not sufficient. Each block
+# below was classified (design §8.9) as either (1) optional TIDMAD-only
+# advice, which may disappear on a composed run, or (2) required task
+# semantics, which must be REPLACED from a task-owned authority.
+#
+# All four legacy strings are carried VERBATIM, so an un-composed run renders
+# the exact bytes the template used to carry as a literal — the same
+# discipline 07b's P2 used, and what keeps the C0 legacy prompt fixtures green
+# through this commit.
+
+
+#: (2) required. LEGACY bytes of the planner's built-in roster block.
+LEGACY_AVAILABLE_MODELS_BLOCK = """### AVAILABLE MODELS:
+1. **PositionalUNet (punet)**: U-Net with positional encoding for global signal structures.
+2. **FCNet (fcnet)**: Fully-connected AutoEncoder, efficient for local smoothing.
+3. **TransformerModel (transformer)**: Self-attention over time steps; memory scales O(T²) — use small segmentation_size.
+4. **SimpleWaveNet (wavenet)**: Dilated causal convolutions; memory-efficient.
+5. **RNNSeq2Seq (rnn)**: LSTM encoder-decoder; memory grows linearly with batch_size × segmentation_size.
+"""
+
+#: (1) optional. LEGACY bytes of the planner's per-file-table protocol prose.
+#: On a composed run this explains evidence the run does not have: W4 already
+#: sets `reference_scores = None`, so the table itself is ALREADY absent and
+#: only the prose survives — describing `raw_baseline`, `ground_truth`, a
+#: global `s_max` and an `Impact_Score` ranking to a task with none of them.
+LEGACY_PER_FILE_TABLE_PROTOCOL = """### PER-FILE PERFORMANCE TABLE:
+
+Below is a comparison of your best experiment's per-file scores against two
+reference columns:
+
+- **raw_baseline**  = no denoising at all (CH1 passed through the scorer).
+- **ground_truth**  = what a perfect denoiser (CH2 substituted for CH1) scores.
+- **model**         = your best experiment so far.
+
+All three are log-space under the same global s_max, so differences are
+directly comparable.
+
+- `gain vs raw > 0`   → your model is doing useful work on that file.
+- `headroom vs gt`    → how far below the theoretical ceiling you are.
+- `Linear_Weight`     → the file's share of the linear denominator behind the
+                        aggregate scalar. Sums to 1 across sampled files.
+- `Impact_Score`      → the log-scalar gain you would obtain by lifting this
+                        file's `model` to its `ground_truth`. This is the
+                        per-file opportunity ranking; the table is followed
+                        by a secondary block re-sorted by `Impact_Score`
+                        descending.
+
+Read the table by `Impact_Score` descending — that is where the next-iter
+lever is. A multi-log-unit `headroom_vs_gt` does not by itself indicate
+opportunity; only `Impact_Score` does. A high-weight file at its ceiling has
+zero `Impact_Score` and is not actionable. If the entire `Impact_Score`
+column is small in magnitude relative to the chain's per-iter gains, this
+configuration has reached the dataset ceiling.
+
+"""
+
+
+def render_available_models_block(*, composed: bool) -> str:
+    """The planner's model-context block.
+
+    Class (2) — REQUIRED semantics — but the audit found the replacement
+    ALREADY PRESENT (design §8.9 / F-12a-C7-3): ``LLMBridge.plan`` renders the
+    run's own architecture description into the user message as
+    ``[MODEL ARCHITECTURE DESCRIPTION]``, from the description source, on both
+    paths and independently of this block. So "what model am I tuning?" is
+    answered elsewhere in the same prompt, and what the five built-in lines add
+    to a composed run is a menu of architectures it is not using.
+
+    The composed rendering therefore replaces them with a pointer to that
+    authority rather than restating it — restating would create a second
+    place the same fact is rendered, which is the shape this PR removes
+    everywhere else.
+
+    Args:
+        composed: whether the run is composed. PRESENCE only (C-P56-1).
+    """
+    if not composed:
+        return LEGACY_AVAILABLE_MODELS_BLOCK
+    return (
+        "### THE MODEL UNDER TUNING:\n"
+        "This run tunes ONE model, supplied by the task package. Its "
+        "architecture description — when the task declares one — appears in "
+        "the [MODEL ARCHITECTURE DESCRIPTION] block of the user message. Do "
+        "not assume a built-in architecture or its properties.\n"
+    )
+
+
+def render_per_file_table_protocol(*, composed: bool) -> str:
+    """The planner's per-file-table reading protocol.
+
+    Class (1) — optional TIDMAD-only advice, so the composed path renders
+    NOTHING. There is no task semantics to replace: the table this prose
+    explains is already withheld from composed runs by W4, so what is being
+    removed is an explanation of absent evidence.
+    """
+    return "" if composed else LEGACY_PER_FILE_TABLE_PROTOCOL
+
+
+def render_score_field_noun(*, composed: bool) -> str:
+    """What to call the `denoising_score` FIELD in prose.
+
+    F-12-5, as the audit corrected it (design §8.9 / F-12a-C7-1). The literal
+    `denoising_score` is a FROZEN RECORD KEY, task-invariant and genuinely
+    correct on a composed run — the LLM really does read that key out of the
+    history JSON, and substituting the composed metric id would tell it to
+    read a key that does not exist. What is wrong when composed is the NOUN:
+    calling that field "the metric" when the metric identity is what the
+    parameterized clause beside it already carries.
+
+    Legacy renders "metric", which is TRUE for a TIDMAD run — so this is the
+    accurate word on both paths rather than a compromise, and legacy prompt
+    bytes do not move.
+    """
+    return "field" if composed else "metric"
+
+
+def render_score_display_noun(*, composed: bool) -> str:
+    """What to call the score in the reflector's judgement protocol.
+
+    Class (2) for the PROTOCOL (compare against baseline and best; never call
+    a negative score a failure — all task-generic) and class (1) for its
+    NAMING. Only the naming is gated: "Denoising Score" is a task-specific
+    name for a field every task carries.
+    """
+    return "score" if composed else "Denoising Score"
+
+
+#: (1) optional. LEGACY bytes of the planner's `"target"` justification — the
+#: half of that bullet that argues from the per-file `Impact_Score` column.
+#: The STRATEGY itself (`target_files` exists and concentrates data) is
+#: framework machinery and is NOT gated; only the TIDMAD evidence it cites is.
+LEGACY_TARGET_STRATEGY_IMPACT_NOTE = """Useful when the per-file score table indicates a small set of
+  files carries most of the next-iter improvement budget — those are the files with the
+  largest `Impact_Score` for the current best model. Choosing `target_files` is a
+  data-allocation decision; it should be driven by the Impact_Score column, not by
+  fixed file-index labels or thresholds."""
+
+#: (1) optional. LEGACY bytes of the planner's sampling tradeoff advice that
+#: reads the same absent table.
+LEGACY_SAMPLING_IMPACT_TRADEOFF = """ Consult the per-file score table below — if
+`Impact_Score` is roughly uniform across files, snapshot is efficient. If a small subset
+of files dominates the `Impact_Score` ranking, target those files."""
+
+#: (1) optional. LEGACY bytes of the reflector's per-file comparison block —
+#: raw baseline, ground-truth ceiling, `Linear_Weight`, `Impact_Score`.
+LEGACY_PER_FILE_COMPARISON_BLOCK = """### PER-FILE COMPARISON (Impact-Aware):
+The score_comparison_table below shows per-file performance against the raw
+baseline and the ground-truth ceiling, alongside `Linear_Weight` (each
+file's share of the linear denominator behind the aggregate scalar) and
+`Impact_Score` (the log-scalar gain available if that file's `model` were
+lifted to its `ground_truth`). The table is followed by a secondary block
+re-sorted by `Impact_Score` descending.
+
+Use the table to produce per-file discoveries grounded in the
+`Impact_Score` ranking — e.g., "architecture X recovered most of the
+high-Impact rows but left rows with the largest remaining Impact untouched"
+rather than "score went up." Cite `Impact_Score` and `Linear_Weight`
+together when discussing per-file bottlenecks; do not assert that a file is
+permanently weak from a single round's reading or from `headroom_vs_gt`
+alone. These row-level insights compound across rounds when the next
+planner inherits them."""
+
+
+def render_target_strategy_impact_note(*, composed: bool) -> str:
+    """Class (1). Composed renders nothing: the column it argues from does
+    not exist for a composed run."""
+    return "" if composed else LEGACY_TARGET_STRATEGY_IMPACT_NOTE
+
+
+def render_sampling_impact_tradeoff(*, composed: bool) -> str:
+    """Class (1). Same table, same absence."""
+    return "" if composed else LEGACY_SAMPLING_IMPACT_TRADEOFF
+
+
+def render_per_file_comparison_block(*, composed: bool) -> str:
+    """Class (1). The reflector's per-file reference-science block."""
+    return "" if composed else LEGACY_PER_FILE_COMPARISON_BLOCK
+
+
 class TunerTaskRender(BaseModel):
     """Every P2 token for one run, rendered once at run scope.
 
@@ -174,6 +357,54 @@ class TunerTaskRender(BaseModel):
         description="The efficiency-equivalence band as a percentage, e.g. '5'."
     )
 
+    # --- Step 12 / PR-12a C7 (D-12a-5) — composition-gated task science -----
+    # Rendered here for the same reason every other token is: this class is
+    # where "the prompt says only what an authority owns" is checkable. A
+    # composed run's gating is a rendered STRING, not a branch at the
+    # assembly site, so `llm_bridge` keeps substituting tokens and never
+    # learns what a composition is.
+    available_models_block: str = Field(
+        default=LEGACY_AVAILABLE_MODELS_BLOCK,
+        description=(
+            "The planner's model-context block. Legacy: the five built-in "
+            "descriptions, verbatim. Composed: the run's OWN model "
+            "description, or a NAMED absence — never another task's roster."
+        ),
+    )
+    per_file_table_protocol: str = Field(
+        default=LEGACY_PER_FILE_TABLE_PROTOCOL,
+        description=(
+            "The planner's per-file-table reading protocol. Empty on a "
+            "composed run: W4 already withholds the table it explains."
+        ),
+    )
+    score_field_noun: str = Field(
+        default="metric",
+        description=(
+            "What to call the `denoising_score` FIELD in prose. The field "
+            "name itself is a frozen record key and is NOT gated (F-12a-C7-1)."
+        ),
+    )
+    target_strategy_impact_note: str = Field(
+        default=LEGACY_TARGET_STRATEGY_IMPACT_NOTE,
+        description="The planner's `target` justification that argues from `Impact_Score`.",
+    )
+    sampling_impact_tradeoff: str = Field(
+        default=LEGACY_SAMPLING_IMPACT_TRADEOFF,
+        description="The planner's sampling tradeoff advice that reads the per-file table.",
+    )
+    per_file_comparison_block: str = Field(
+        default=LEGACY_PER_FILE_COMPARISON_BLOCK,
+        description="The reflector's per-file reference-science block.",
+    )
+    score_display_noun: str = Field(
+        default="Denoising Score",
+        description=(
+            "What to call the score in the reflector's judgement protocol. "
+            "The protocol is task-generic; only its naming is TIDMAD's."
+        ),
+    )
+
     def has_check(self, name: str) -> bool:
         """Whether the run's effective health config declares ``name``.
 
@@ -190,6 +421,7 @@ def build_tuner_task_render(
     health_config: Any,
     efficiency_band_fraction: float,
     registry: dict[str, Any] | None = None,
+    composed: bool = False,
 ) -> TunerTaskRender:
     """Assemble the run's :class:`TunerTaskRender` from its landed authorities.
 
@@ -206,6 +438,16 @@ def build_tuner_task_render(
         focal_gamma_default=gamma,
         gate_check_names=tuple(render_gate_name_tokens(health_config)),
         efficiency_band_pct=f"{efficiency_band_fraction * 100:g}",
+        # Step 12 / PR-12a C7. `composed=False` is the default at BOTH the
+        # parameter and the field, so every existing caller renders the legacy
+        # bytes without knowing this exists.
+        available_models_block=render_available_models_block(composed=composed),
+        per_file_table_protocol=render_per_file_table_protocol(composed=composed),
+        score_field_noun=render_score_field_noun(composed=composed),
+        score_display_noun=render_score_display_noun(composed=composed),
+        target_strategy_impact_note=render_target_strategy_impact_note(composed=composed),
+        sampling_impact_tradeoff=render_sampling_impact_tradeoff(composed=composed),
+        per_file_comparison_block=render_per_file_comparison_block(composed=composed),
     )
 
 

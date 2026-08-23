@@ -43,6 +43,7 @@ from agent.schemas.proposer_evidence import (
     build_proposer_evidence,
 )
 from agent.schemas.task_config import ForwardContract
+from agent.skills.model_io_probe_skill import declared_output_tensor
 from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from agent_generated._registry import CapabilityRegistry
@@ -333,7 +334,7 @@ def _check_citation_discipline(
 # ---------------------------------------------------------------------------
 
 PROPOSAL_REASONING_PROMPT = """\
-You are a senior ML architect specialising in deep learning for signal denoising.
+You are a senior ML architect{ARCHITECT_ROLE}.
 
 Your task: given a structured analysis of past hyperparameter tuning experiments
 across one or more model architectures, reason deeply about what new neural
@@ -360,23 +361,14 @@ In your reasoning, cover all of the following:
 5. What are the likely failure modes of this architecture?
    What should the hyperparameter tuning agent watch out for?
 6. Per-file analysis and trial strategy guidance:
-   - Read each model's per-file score table by `Impact_Score` descending — that is
-     the per-iter opportunity ranking. Cite `Linear_Weight` as context, not as a
-     ranking metric on its own. Identify whether the largest remaining
-     `Impact_Score` levers concentrate on a small subset of files or are
-     distributed broadly, and whether the same files dominate across models —
-     those are the cross-model opportunities the new architecture should target.
-     Do not assert that any file is universally weak from `headroom_vs_gt` alone
-     or from a fixed file-index label.
+{EVIDENCE_READING}
    - Recommend a trial strategy for the hyperparameter tuner:
      * What trial_portion to start with (based on model complexity — larger models need more data)
      * How many epochs for initial screening vs refinement
-     * Whether to use "snapshot" (broad coverage), "target" (concentrate on the
-       highest-Impact_Score files), or "anchors" (small fixed subset)
+     * Whether to use "snapshot" (broad coverage), "target"{TARGET_SELECTOR_CLAUSE}, or "anchors" (small fixed subset)
      * Whether the architecture is data-hungry (needs high trial_portion) or data-efficient
 
-Think step by step. Be specific. Reference actual scores, model names, and the
-`Impact_Score` / `Linear_Weight` columns of the per-file score table. Do not
+Think step by step. Be specific. Reference actual scores, model names{EVIDENCE_CITATION_CLAUSE}. Do not
 produce JSON — that is the next step."""
 
 
@@ -388,9 +380,9 @@ Output a JSON object with exactly these fields:
 
 {
   "model_name": "short_snake_case_key",
-  "output_type": "classifier" or "regressor" — REQUIRED. The output representation this model commits to. "classifier" emits [B, 256, T] per-timestep class logits and admits loss_type ce/focal/focal_cw; "regressor" emits [B, T] the denoised waveform directly and admits loss_type smooth_l1. This is an INDEPENDENT design decision: do NOT pick a loss first and let the output follow, and do NOT infer one from the other. An inconsistent pair is rejected before training.",
+  "output_type": "classifier" or "regressor" — REQUIRED. The output representation this model commits to. "classifier" emits {CLASSIFIER_OUTPUT_SHAPE} per-timestep class logits and admits loss_type ce/focal/focal_cw; "regressor" emits {REGRESSOR_EMITS} and admits loss_type smooth_l1. This is an INDEPENDENT design decision: do NOT pick a loss first and let the output follow, and do NOT infer one from the other. An inconsistent pair is rejected before training.",
   "model_description": "One paragraph plain-English description of the architecture and why it is expected to improve on the current best.",
-  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: {INPUT_SHAPE} (per-timestep ADC class indices). Output: {OUTPUT_SHAPE} ({OUTPUT_DESCRIPTION})'; for 'regressor': 'Input: {INPUT_SHAPE} (per-timestep ADC class indices). Output: [B, T] float32 (the denoised waveform directly)'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '256 denoising bins per time step is contract-fixed, not a hyperparameter'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
+  "mathematical_definition": "Must open with a three-sentence 'Golden Paragraph' that cites: (1) the forward contract for the output_type you chose — for 'classifier': 'Input: {INPUT_SHAPE}{INPUT_SEMANTICS}. Output: {OUTPUT_SHAPE} ({OUTPUT_DESCRIPTION})'; for 'regressor': 'Input: {INPUT_SHAPE}{INPUT_SEMANTICS}. Output: {REGRESSOR_OUTPUT_FORM}'; (2) the segmentation semantics — state whether the body is segment-local (no cross-segment state) or segment-cross (e.g. global attention within a segment), and whether causal masking is required; (3) the output dimension — for 'classifier', '{CLASS_AXIS_NOTE}'; for 'regressor', 'the head emits one continuous value per time step'. After the Golden Paragraph, describe the architectural framework abstractly: key computational stages, mathematical operations, data flow. Do NOT include concrete layer dimensions, kernel sizes, or channel counts — those belong in baseline_config.",
   "motivation": "Why this specific architecture addresses the bottlenecks from the interpretation. Must reference the take-home message directly and name at least one specific bottleneck.",
   "expert_advice": {
     "focus_areas": ["What to prioritise during hyperparameter tuning for this architecture"],
@@ -399,11 +391,9 @@ Output a JSON object with exactly these fields:
     "suggested_directions": [
       "Concrete first experiments to try, e.g. 'start with depth=2, lr=1e-4'",
       "Trial strategy guidance: recommended trial_portion (e.g. 0.1 for data-hungry models)",
-      "Recommended epochs for screening (1-3) vs refinement (5-10)",
-      "Whether to use snapshot/target/anchors strategy based on the Impact_Score distribution",
-      "Which files (by Impact_Score ranking, not by fixed indices) to focus on if using target strategy"
+      "Recommended epochs for screening (1-3) vs refinement (5-10)"{PER_FILE_STRATEGY_DIRECTIONS}
     ],
-    "rationale": "Why this guidance is appropriate for this specific architecture. Include reasoning about data volume needs and per-file lever distribution from the Impact_Score column."
+    "rationale": "Why this guidance is appropriate for this specific architecture. Include reasoning about data volume needs{EVIDENCE_RATIONALE_CLAUSE}."
   },
   "baseline_config": {
     "model_config": { ... architecture-specific hyperparameter fields ... },
@@ -427,7 +417,7 @@ Hard constraints — violating any of these makes the proposal invalid:
   choose — it is a design decision, not a fixed constant:
     * `"classifier"` → output {OUTPUT_SHAPE} (per-timestep class logits);
       legal `loss_type`: {CLASSIFIER_LOSSES}
-    * `"regressor"`  → output [B, T] float32 (the denoised waveform directly);
+    * `"regressor"`  → output {REGRESSOR_OUTPUT_FORM};
       legal `loss_type`: {REGRESSOR_LOSSES}
   Choose the pair deliberately and state it in `output_type`. Do NOT pick a loss
   first and let the output follow — they are independent choices, and an
@@ -523,10 +513,142 @@ def _build_reasoning_system_prompt(inp: ProposalInput) -> str:
     ``load_task_config()``); test fixtures may leave both at defaults, in
     which case the placeholder collapses to ``""``.
     """
-    return PROPOSAL_REASONING_PROMPT.replace(
-        "{TASK_BACKGROUND}",
-        _render_task_background(inp.task_description, inp.forward_contract),
+    return (
+        PROPOSAL_REASONING_PROMPT.replace(
+            "{TASK_BACKGROUND}",
+            _render_task_background(inp.task_description, inp.forward_contract),
+        )
+        # Step 12 / PR-12a C7 (D-12a-6) — task-owned proposer science. The
+        # gating is a rendered STRING from the caller-supplied blocks, so this
+        # assembly site substitutes tokens and never learns what a composition
+        # is — the same discipline C7-2 used for the tuner surfaces.
+        .replace("{ARCHITECT_ROLE}", render_architect_role(inp.proposal_blocks))
+        .replace("{EVIDENCE_READING}", render_proposal_evidence_reading(inp.proposal_blocks))
+        # C7-5 (Pr3) — the two per-file clauses left behind by C7-3, both
+        # class (1): absent renders NOTHING rather than another task's columns.
+        .replace(
+            "{TARGET_SELECTOR_CLAUSE}",
+            _declared(inp.proposal_blocks, "target_strategy_selector_clause") or "",
+        )
+        .replace(
+            "{EVIDENCE_CITATION_CLAUSE}",
+            _declared(inp.proposal_blocks, "evidence_citation_clause") or "",
+        )
     )
+
+
+def render_architect_role(blocks: Any) -> str:
+    """The specialism clause of the architect role line (D-12a-6, Pr1).
+
+    Rendered as a CLAUSE, not a whole sentence, so an absent declaration
+    yields "You are a senior ML architect." — a role with no specialism,
+    rather than another task's. Legacy renders TIDMAD's clause verbatim, so
+    the un-composed bytes do not move.
+    """
+    role = getattr(blocks, "architect_role", None) if blocks is not None else None
+    return f" specialising in {role}" if role else ""
+
+
+def render_proposal_evidence_reading(blocks: Any) -> str:
+    """How to read THIS task's score evidence (D-12a-6, Pr3).
+
+    TIDMAD's version is a per-file `Impact_Score` / `Linear_Weight` ranking
+    protocol. A task that declares none gets NOTHING — asking a model to rank
+    by a column its evidence does not contain is worse than asking nothing.
+    """
+    reading = getattr(blocks, "evidence_reading", None) if blocks is not None else None
+    return reading or ""
+
+
+def _declared(blocks: Any, key: str) -> str | None:
+    """One accessor, so no renderer below learns what a composition is."""
+    return getattr(blocks, key, None) if blocks is not None else None
+
+
+def render_classifier_output_shape(fc: ForwardContract) -> str:
+    """The CLASSIFIER form's shape, derived from the run's declaration.
+
+    Step 12 / PR-12a C7-5 (Pr2). The prompt used to say ``[B, 256, T]`` for
+    every task. `declared_output_tensor` is the same authority the implementor
+    renders from and the probe validates against, so the commit prompt cannot
+    document a form the validator would reject.
+
+    A task with no normalized ``model_io`` keeps the legacy behaviour: the
+    declared ``output_shape`` with its dtype dropped, which is what the shape
+    meant before Step 03 existed.
+    """
+    if fc.model_io is not None:
+        return declared_output_tensor(fc.model_io, "classifier").render_shape()
+    return fc.output_shape.split(" float")[0].split(" int")[0]
+
+
+def render_regressor_output_form(fc: ForwardContract, blocks: Any, *, with_dtype: bool) -> str:
+    """The CONTINUOUS form: a declared SHAPE plus, when declared, its meaning.
+
+    Step 12 / PR-12a C7-5 (Pr2). The hardcoded
+    ``[B, T] float32 (the denoised waveform directly)`` told a video task that
+    it predicts a waveform. The shape is derived; the meaning is the task's,
+    and an undeclared task gets the shape alone rather than TIDMAD's noun.
+    """
+    if fc.model_io is not None:
+        tensor = declared_output_tensor(fc.model_io, "regressor")
+        shape = tensor.render() if with_dtype else tensor.render_shape()
+    else:
+        shape = fc.output_shape if with_dtype else fc.output_shape.split(" float")[0]
+    meaning = _declared(blocks, "continuous_output_meaning")
+    if not meaning:
+        return shape
+    return f"{shape} ({meaning})" if with_dtype else f"{shape} {meaning}"
+
+
+def render_input_semantics(blocks: Any) -> str:
+    """The parenthetical naming what the input VALUES are (Pr2).
+
+    Absent -> nothing, so the declared shape stands alone. Never another
+    task's ADC indices.
+    """
+    semantics = _declared(blocks, "input_semantics")
+    return f" ({semantics})" if semantics else ""
+
+
+def render_class_axis_note(fc: ForwardContract, blocks: Any) -> str:
+    """The contract-fixed statement about the class axis (Pr2).
+
+    Absent -> a GENERIC statement, not an invented count: the declared output
+    dimension is contract-fixed whatever the task is, and saying so is
+    framework structure rather than science.
+    """
+    note = _declared(blocks, "class_axis_note")
+    if note:
+        return note
+    return "the declared output dimension is contract-fixed, not a hyperparameter"
+
+
+def render_per_file_strategy_directions(blocks: Any) -> str:
+    """The task's per-sample strategy advice, as JSON list items (Pr3).
+
+    The task declares one sentence per LINE and never writes JSON; the
+    framework supplies the commas, quoting and indentation. Class (1): absent
+    renders NOTHING, because advice about a column the run has no table for is
+    worse than no advice.
+    """
+    guidance = _declared(blocks, "per_file_strategy_guidance")
+    if not guidance:
+        return ""
+    lines = [line.strip() for line in guidance.splitlines() if line.strip()]
+    return "".join(f',\n      "{line}"' for line in lines)
+
+
+def render_output_contract_guidance(blocks: Any) -> str:
+    """What this task's output representations MEAN (D-12a-6, Pr2).
+
+    The SHAPES are already declared by the run's ``ForwardContract`` and are
+    rendered from it; this is the prose beside them. Absent ⇒ the shapes
+    stand alone, which is honest, rather than "256 amplitude bins" for a task
+    that has none.
+    """
+    guidance = getattr(blocks, "output_contract_guidance", None) if blocks is not None else None
+    return guidance or ""
 
 
 def _render_cold_start_block(cold_start: bool) -> str:
@@ -1160,7 +1282,7 @@ def _render_loss_legality(losses: frozenset[str]) -> str:
     return ", ".join(f"`{name}`" for name in sorted(losses))
 
 
-def _render_commit_system_prompt(fc: ForwardContract) -> str:
+def _render_commit_system_prompt(fc: ForwardContract, blocks: Any = None) -> str:
     """Render the legacy commit SYSTEM prompt from its declarations.
 
     Substitutes the tier-(i) verbatim-renderable task facts — those whose
@@ -1211,6 +1333,21 @@ def _render_commit_system_prompt(fc: ForwardContract) -> str:
         .replace("{OUTPUT_DESCRIPTION}", fc.output_description)
         .replace("{CLASSIFIER_LOSSES}", _render_loss_legality(CLASSIFICATION_LOSSES))
         .replace("{REGRESSOR_LOSSES}", _render_loss_legality(REGRESSION_LOSSES))
+        # Step 12 / PR-12a C7-5 — the tier-(iii) literals this renderer's own
+        # docstring deferred to "a later step". Shapes derived from the
+        # declaration, prose from the task, and an undeclared task gets the
+        # shape rather than TIDMAD's noun for it.
+        .replace("{CLASSIFIER_OUTPUT_SHAPE}", render_classifier_output_shape(fc))
+        .replace("{REGRESSOR_EMITS}", render_regressor_output_form(fc, blocks, with_dtype=False))
+        .replace(
+            "{REGRESSOR_OUTPUT_FORM}", render_regressor_output_form(fc, blocks, with_dtype=True)
+        )
+        .replace("{INPUT_SEMANTICS}", render_input_semantics(blocks))
+        .replace("{CLASS_AXIS_NOTE}", render_class_axis_note(fc, blocks))
+        .replace("{PER_FILE_STRATEGY_DIRECTIONS}", render_per_file_strategy_directions(blocks))
+        .replace(
+            "{EVIDENCE_RATIONALE_CLAUSE}", _declared(blocks, "evidence_rationale_clause") or ""
+        )
     )
 
 
@@ -1333,7 +1470,7 @@ class MLModelProposalAgent:
 
         commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
         raw = self.bridge.generate(
-            _render_commit_system_prompt(inp.forward_contract),
+            _render_commit_system_prompt(inp.forward_contract, inp.proposal_blocks),
             commit_prompt,
             label="proposer.legacy_commit",
         )
@@ -1504,6 +1641,12 @@ class MLModelProposalAgent:
             # (design §4.1 tier (ii); OD-S1-7 rejected inventing one).
             "CLASSIFIER_LOSS_LIST": _render_loss_legality(CLASSIFICATION_LOSSES),
             "REGRESSOR_LOSS_LIST": _render_loss_legality(REGRESSION_LOSSES),
+            # Step 12 / PR-12a C7 (D-12a-6, Pr2) — what this task's output
+            # representations MEAN. The SHAPES beside it already come from the
+            # run's ForwardContract; this is the prose. A task that declares
+            # none renders nothing, so the shapes stand alone rather than
+            # carrying "256 amplitude bins" for a task that has none.
+            "OUTPUT_CONTRACT_GUIDANCE": render_output_contract_guidance(inp.proposal_blocks),
             # Proposing-stage placeholder. Other stages don't reference it; the
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.

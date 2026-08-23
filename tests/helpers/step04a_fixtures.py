@@ -28,6 +28,7 @@ as ``configs/task_config.yaml`` does.
 
 from __future__ import annotations
 
+from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.model_io_contract import (
     AxisRole,
@@ -178,8 +179,16 @@ def implementor_input(
             reaches the assembled bytes; ``plugin_dir``/``test_dir`` do not
             either, but they are pointed at the workspace so nothing can
             write into the live ``agent_generated/`` tree.
+
+    Step 12 / PR-12a C7-4: this fixture models the LEGACY un-composed TIDMAD
+    caller, so it resolves the bounded Regime-A adapter exactly as the
+    production composition root does for a run with no manifest. That is what
+    keeps the Step-04a frozen bytes frozen. A test that wants the composed
+    no-declaration behaviour builds its own input — see
+    ``tests/unit/workflows/test_step12_pr12a_c7_implementor_blocks.py``.
     """
     return ImplementorInput(
+        implementor_blocks=load_implementor_task_blocks(),
         model_name=MODEL_NAMES[output_type],
         output_type=output_type,
         model_description=f"Frozen Step-04a {output_type} baseline candidate.",

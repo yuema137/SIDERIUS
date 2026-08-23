@@ -27,6 +27,29 @@ Two rules follow, and this module exists to make them structural:
    peak above the configured cap — may reject a candidate for capacity,
    and only a measured result may tell an agent to make its model
    smaller.
+
+3. **Finishing IS a verdict** (Step 12 / PR-12a, **F-12a-G2**). The
+   converse of rule 2, and it had to be learned separately. The
+   per-candidate branch used to check elapsed time AFTER
+   ``probe_activation_footprint`` returned, and discard a COMPLETED
+   measurement that had taken too long. That is rule 1's defect one level
+   down: it protected against nothing (a hung probe never reaches the
+   check), and it made a capacity answer depend on host CPU load — the
+   very property the paragraph above cites as proof that wall time was
+   never a capacity signal. A probe that completes is accepted whatever
+   its duration; the duration survives as a diagnostic.
+
+   Four concepts, kept apart deliberately::
+
+       memory feasibility != calibration completeness
+                          != host wall time
+                          != watchdog timeout
+
+   Bounding a probe that has NOT returned is a real watchdog and a
+   different mechanism (``ForwardPassTimeoutError``). The remaining
+   ``batch_search_seconds`` check is legitimate and untouched: it is
+   evaluated BEFORE starting another candidate, so it bounds FUTURE work
+   rather than discarding finished work.
 """
 
 from __future__ import annotations
@@ -85,7 +108,21 @@ class ProbeBudgets(BaseModel):
     #: One `torchinfo`/structural inspection of the model.
     single_inspection_seconds: float = Field(default=120.0, gt=0.0)
     #: One candidate batch inside the resolution search.
-    single_candidate_seconds: float = Field(default=120.0, gt=0.0)
+    #:
+    #: **120.0 -> 200.0 (Step 12 / PR-12a, F-12a-G2, operator-approved host
+    #: calibration update).** Provenance: a COMPLETED CPU probe of a 24-layer
+    #: deep dilated-conv candidate at B=64 took 191.7 s and 182.9 s on this host
+    #: at load average ~10 with 72 logged-in users — against a 120 s value the
+    #: docstring above says was calibrated on the SAME machine uncontended.
+    #: 200 s is the observed figure plus a small margin, not a round number
+    #: picked to make something pass.
+    #:
+    #: What this number does NOW, and no longer does: since F-12a-G2 it flags
+    #: a slow probe for calibration and nothing else. A probe that COMPLETES is
+    #: accepted whatever its elapsed time, because wall time on a shared host
+    #: is not capacity evidence (rule 3). Raising it changes how often the
+    #: diagnostic prints; it can no longer change a capacity verdict.
+    single_candidate_seconds: float = Field(default=200.0, gt=0.0)
     #: The whole descending batch search, across every candidate.
     batch_search_seconds: float = Field(default=600.0, gt=0.0)
     #: One bounded training or inference footprint probe.

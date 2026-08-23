@@ -70,6 +70,11 @@ IMPLEMENTOR_INPUT_KEYS = {
     "candidate_id",  # V21 PR E2 — deliberate addition, this pin forced it
     "hardware_context",  # Step 04a / OD-S4-1 — deliberate, this pin forced it
     "vram_budget_gb",  # Step 04a / OD-S4-1 — deliberate, this pin forced it
+    # Step 12 / PR-12a C7-4 (D-12a-9) — the operator-ratified additive carrier
+    # for task-owned implementor science. Deliberate, and this pin forced the
+    # acknowledgement: the field landed in C7-4 and the pin caught it in the
+    # broader run, exactly as its docstring promises.
+    "implementor_blocks",
     "model_name",
     "output_type",
     "model_description",

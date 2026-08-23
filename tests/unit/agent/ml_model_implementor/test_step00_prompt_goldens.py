@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.schemas.implementor import ImplementorInput
 from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.task_config import ForwardContract
@@ -77,8 +78,15 @@ def fixture_forward_contract() -> ForwardContract:
 
 def fixture_input(**overrides) -> ImplementorInput:
     """All-optional-sections-ON input: one golden pins the full section
-    order (Expert < Human < Reference < PreviousFailure)."""
+    order (Expert < Human < Reference < PreviousFailure).
+
+    Step 12 / PR-12a C7-4: the PB goldens pin the LEGACY un-composed prompt
+    surface, so this fixture resolves the bounded Regime-A adapter exactly as
+    the composition root does for a run with no manifest. The goldens are
+    therefore unchanged — which is the property C7-4 had to preserve.
+    """
     base = dict(
+        implementor_blocks=load_implementor_task_blocks(),
         model_name="step00_fixture_model",
         model_description="Fixture description: a gated residual 1-D denoiser.",
         mathematical_definition="y = x + f(x) with f a dilated conv stack (fixture math).",

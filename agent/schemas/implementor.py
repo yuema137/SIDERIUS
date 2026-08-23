@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agent.schemas.hyperparam_tuning import ExpertAdviceInput
 from agent.schemas.model_io_contract import ModelIOContract
@@ -171,6 +171,54 @@ class LossProvenance(BaseModel):
     )
 
 
+class ImplementorTaskBlocks(BaseModel):
+    """Task-owned IMPLEMENTOR science — prose VALUES under framework keys.
+
+    Step 12 / PR-12a C7-4, operator-ratified as a bounded contract correction
+    (the Step-12 parent §12-12a-viii already required "proposer + implementor
+    task-science … caller-supplied task blocks … the corresponding optional
+    section(s)"; the concrete schema is ratified here).
+
+    Deliberately the same shape as ``InterpretationTaskBlocks`` (09b) and
+    ``ProposalTaskBlocks`` (C7-3): FRAMEWORK owns the keys and where each
+    renders, TASK owns the prose, every field optional, absent ⇒ NOTHING
+    rendered. The three families keep SEPARATE schemas because they render in
+    different places for different reasons; only their loading mechanics are
+    shared.
+
+    Two keys, not three, because the source audit showed the two role clauses
+    differ only in their framing: the prompts said "deep learning for signal
+    denoising" and "loss functions for signal denoising". The task owns the
+    SCIENCE ("signal denoising"); the role framing around it is the
+    framework's, and an undeclared task simply gets no specialism rather than
+    invented prose.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    science_domain: str | None = Field(
+        default=None,
+        description=(
+            "What this task's models actually DO, as a noun phrase — e.g. "
+            "'signal denoising'. The framework frames it into the model and "
+            "loss engineer role lines. Absent -> the role names no "
+            "specialism, never another task's."
+        ),
+    )
+    continuous_output_phrase: str | None = Field(
+        default=None,
+        description=(
+            "What a CONTINUOUS (regressor) output means for this task, as it "
+            "should read in generated-plugin comments — e.g. 'continuous "
+            "waveform regression'. The classifier form is already derived "
+            "from the declared class cardinality; this is the regressor "
+            "counterpart, and 'waveform' is a task word, not a framework one. "
+            "Absent -> the neutral name of the DECLARED output form is used, "
+            "never TIDMAD's."
+        ),
+    )
+
+
 class ImplementorInput(BaseModel):
     """
     Input to ml_model_implementor.
@@ -226,6 +274,18 @@ class ImplementorInput(BaseModel):
         "``ForwardContract()`` (all fields empty) is for test fixtures only; "
         "production callers always populate via "
         '``ForwardContract(**load_task_config()["forward_contract"])``.',
+    )
+    implementor_blocks: ImplementorTaskBlocks | None = Field(
+        default=None,
+        description=(
+            "Step 12 / PR-12a C7-4 — the run's task-owned IMPLEMENTOR "
+            "science, or None. Additive and default-None by contract: every "
+            "existing caller constructs this input without it. The CALLER "
+            "supplies it — the workflow's bounded Regime-A adapter on an "
+            "un-composed run, the composition's own declaration on a composed "
+            "one. A composed run that declares NOTHING renders no science "
+            "rather than inheriting TIDMAD's."
+        ),
     )
     # --- Step 04a (OD-S4-1) — capacity awareness ---
     # Mirrors ``ProposalInput.hardware_context`` / ``vram_budget_gb`` exactly,

@@ -200,16 +200,22 @@ class TestW4NoImplicitLegacyReferenceScience:
     """The five C-P56-1 tests. Test 5 is the one the operator's review added,
     and it pins the shape the task-name census is blind to."""
 
+    #: The expression the W4 guard keys on. Step 12 / PR-12a (D-12a-1) re-keyed
+    #: it from the AMBIENT `active_task_data_path()` to the run's own INPUT
+    #: projection: a node should learn whether ITS run is composed from what it
+    #: was handed, not from a ContextVar that happens to be bound in the
+    #: process. The forbidden-token list below is UNCHANGED — that is the
+    #: half of this census that must never be relaxed.
+    GUARD_KEY = "task_composition_ref"
+
     @staticmethod
     def _guard_node() -> ast.If:
         tree = ast.parse(TUNER.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
-            if isinstance(node, ast.If):
-                for sub in ast.walk(node.test):
-                    if isinstance(sub, ast.Call) and getattr(sub.func, "id", None) == (
-                        "active_task_data_path"
-                    ):
-                        return node
+            if isinstance(node, ast.If) and TestW4NoImplicitLegacyReferenceScience.GUARD_KEY in (
+                ast.dump(node.test)
+            ):
+                return node
         raise AssertionError("the W4 guard was not found")
 
     def test_1_the_legacy_branch_still_loads_the_full_reference_set(self):
@@ -223,15 +229,18 @@ class TestW4NoImplicitLegacyReferenceScience:
     def test_2_3_4_the_guard_keys_on_composition_presence_for_every_task(self):
         """One guard covers composed TIDMAD, Pets and DAVIS identically —
         there is no per-task branch to test separately, which IS the property.
-        """
-        from execute_tools.task_data_path import active_task_data_path, bind_task_data_path
 
-        assert active_task_data_path() is None  # legacy -> loads
+        Step 12 / PR-12a: the presence VALUE is now the projection the workflow
+        builds, so this asserts on that instead of on the ContextVar. The
+        property is unchanged — one discriminator, three tasks, no branch.
+        """
+        from workflows.model_exploration import build_task_composition_ref
+
+        assert build_task_composition_ref(None) is None  # legacy -> loads
         for task in ("tidmad", "pets", "davis"):
             _plugin_binding.reset_run_scope()
             composition = compose_run_task_bindings(str(FIXTURES / task / "composition.yaml"))
-            with bind_task_data_path(composition.task_data_path):
-                assert active_task_data_path() is not None  # composed -> skips
+            assert build_task_composition_ref(composition) is not None  # composed -> skips
 
     def test_5_no_metric_identity_conditional_entered_generic_core(self):
         """The census-invisible shape the operator's review rejected.
@@ -247,7 +256,7 @@ class TestW4NoImplicitLegacyReferenceScience:
                 f"the W4 guard tests {forbidden!r} — it must key on composition "
                 "PRESENCE only (C-P56-1)"
             )
-        assert "active_task_data_path" in rendered
+        assert self.GUARD_KEY in rendered
 
     def test_the_composed_branch_produces_a_named_absence_not_a_crash(self):
         """`reference_scores is None` is a supported downstream state, and the
@@ -340,6 +349,12 @@ class TestW7PreflightAndWorkflowAgree:
     No test caught it because none drove the REAL chain runner under a
     composition; the module CLI resolves the composition before its only
     materialization, so that path was always consistent.
+
+    **This class censuses the composition-derived keyword NAMES.** The VALUE
+    half lives in ``test_step12_pr12a_c1_composed_invariants.TestW7ValueAgreement``
+    (Step 12 / PR-12a, F-12-1): ``resolved_data_scope`` is passed by both call
+    sites and spelled identically while being computed from different
+    topologies, which a name census is structurally incapable of seeing.
     """
 
     @staticmethod

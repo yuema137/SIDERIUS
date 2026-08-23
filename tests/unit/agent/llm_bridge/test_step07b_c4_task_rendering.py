@@ -134,14 +134,25 @@ class TestTemplatesCarryNoRenderedLiteral:
         loss list. Asserting them absent would be asserting a claim 07b never
         made — and would push a future author toward inventing a task-config
         field to satisfy the test.
+
+        UPGRADED by Step 12 / PR-12a C7: these facts are still literal and
+        still un-owned by any task authority — but four of them now live in
+        the RENDER authority as the legacy substitution for a composition-gated
+        token, rather than inline in the template. The property this test
+        cares about is what an UN-COMPOSED run renders, which has not moved,
+        so it asks the legacy-rendered template instead of the raw constant.
+        Asserting them absent would still be asserting a claim nobody made.
         """
+        from tests.helpers.step12_pr12a_prompt_capture import legacy_rendered_template
+
+        rendered = legacy_rendered_template("planner")
         for kept in (
             "**PositionalUNet (punet)**",
             "200 segments",
             "`smooth_l1`",
             "raw_baseline",
         ):
-            assert kept in PLANNER_PROMPT
+            assert kept in rendered
 
     def test_the_reflector_template_renders_the_band_and_keeps_its_anchor(self):
         """The reflector's bridge surface stays the frozen additive one, so it

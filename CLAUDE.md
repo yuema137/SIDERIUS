@@ -592,7 +592,7 @@ TIDMAD's `network.py:FocalLoss1D`.
   `score_vector` at a call site, never move the contract after the arithmetic.
   `TIDMAD_METRIC_ID = "tidmad_denoising_score"` and the direction vocabulary
   are declared ONCE in the metric module (guarded); `per_file_best` imports
-  the id. Losses are NOT metrics (metric types refuse loss-shaped ids).
+  the id. Losses are NOT metrics — but that boundary is TYPED, not lexical: since Step 12 / PR-12a C5 closed D16, **`MetricSpec.id` is an OPAQUE identity** and `log_loss` is as declarable as `accuracy`. What enforces the boundary is the contract (a deliverable, an aggregation, an executable `ScoreabilityContract`), `_compose_metric`'s `EvaluationMetric` type check, and `extra="forbid"` plus zero loss-named fields on the record-facing types.
   Records carry the additive `metric_result` / `metric_refusal`; the frozen
   `denoising_score` / `file_vector` / `score_table` names are unchanged (D1).
 - **`ml_models/legacy_baseline_configs.json` is the paper-spec source of

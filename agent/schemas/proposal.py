@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
@@ -618,6 +618,137 @@ class ReasoningPipelineConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ProposalTaskBlocks(BaseModel):
+    """Task-owned PROPOSER guidance — prose VALUES under framework keys.
+
+    Step 12 / PR-12a C7 (D-12a-6), mirroring 09b's
+    :class:`~agent.schemas.interpretation.InterpretationTaskBlocks` exactly.
+    The FRAMEWORK owns the key set and where each section renders; the TASK
+    owns the prose. Each field is optional: an absent section is a legal named
+    absence and renders NOTHING — no header, no bytes.
+
+    The proposer never reads task files. The CALLER supplies this value: the
+    workflow's bounded Regime-A adapter today, the composition root for a
+    composed run. Key-set growth is a framework protocol decision, never a
+    per-task extension mechanism.
+
+    Why the proposer needed this at all: its prompts hardcoded that the
+    architect specialises in "signal denoising", that the classifier form
+    emits ``[B, 256, T]`` over "256 denoising bins", and how to read a
+    per-file ``Impact_Score`` table — TIDMAD science presented to whatever
+    task happened to be running.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    architect_role: str | None = Field(
+        default=None,
+        description=(
+            "The specialism clause of the architect role line, e.g. "
+            "'deep learning for signal denoising'. Rendered into BOTH proposer "
+            "reasoning prompts. Absent -> the role line names no specialism "
+            "rather than inventing one."
+        ),
+    )
+    output_contract_guidance: str | None = Field(
+        default=None,
+        description=(
+            "What this task's output representations MEAN — the prose beside "
+            "the shapes the ForwardContract already carries. Absent -> only "
+            "the declared shapes are shown, never another task's semantics."
+        ),
+    )
+    evidence_reading: str | None = Field(
+        default=None,
+        description=(
+            "How to read THIS task's score evidence (for TIDMAD: the per-file "
+            "Impact_Score / Linear_Weight ranking protocol). Absent -> the "
+            "proposer is asked for architecture reasoning without a per-file "
+            "protocol it has no table for."
+        ),
+    )
+
+    # --- C7-5 (F-12a-C9-1). The Pr2/Pr3 residues §8.9 classified and C7-3 did
+    # not reach, because its census never enumerated `PROPOSAL_COMMIT_PROMPT`.
+    # Step 01a's own renderer docstring had already deferred them: "no
+    # authority declares them ... owned by a later step". D-12a-6 is that
+    # authority and this is that step.
+    #
+    # SHAPES and CARDINALITIES are DERIVED from the run's declaration through
+    # `declared_output_tensor`, the same authority the implementor and the
+    # probe use — only the prose beside them is declared here. Like
+    # `evidence_reading` above, a value carries its own line wrapping, so the
+    # framework owns the sentence and the task owns the words.
+    input_semantics: str | None = Field(
+        default=None,
+        description=(
+            "What the input VALUES are, beside the shape the ForwardContract "
+            "already declares — for TIDMAD, 'per-timestep ADC class indices'. "
+            "A noun phrase; the framework supplies the parentheses. Absent -> "
+            "the declared shape stands alone."
+        ),
+    )
+    continuous_output_meaning: str | None = Field(
+        default=None,
+        description=(
+            "What a CONTINUOUS (regressor) output means for this task — for "
+            "TIDMAD, 'the denoised waveform directly'. A noun phrase. The "
+            "proposer's counterpart of "
+            "ImplementorTaskBlocks.continuous_output_phrase; separate because "
+            "they render in different grammar at different nodes. Absent -> "
+            "the declared shape stands alone."
+        ),
+    )
+    class_axis_note: str | None = Field(
+        default=None,
+        description=(
+            "The contract-fixed statement about a class alphabet's axis — for "
+            "TIDMAD, '256 denoising bins per time step is contract-fixed, not "
+            "a hyperparameter'. A full sentence. Absent -> the generic "
+            "statement that the declared output dimension is contract-fixed."
+        ),
+    )
+    per_file_strategy_guidance: str | None = Field(
+        default=None,
+        description=(
+            "Per-sample evidence advice for choosing a trial strategy (for "
+            "TIDMAD: which files to concentrate on by Impact_Score ranking). "
+            "One sentence per LINE — the framework renders each as its own "
+            "JSON list item, so the task writes prose and never JSON. Class "
+            "(1) in the D-12a-5 table: absent -> rendered NOWHERE, because "
+            "advice about columns the run has no table for is worse than "
+            "none."
+        ),
+    )
+    target_strategy_selector_clause: str | None = Field(
+        default=None,
+        description=(
+            "The parenthetical clause naming what the 'target' sampling "
+            "strategy concentrates ON — for TIDMAD, ' (concentrate on the "
+            "highest-Impact_Score files)'. Class (1). Absent -> the strategy "
+            "is still offered, without a selector the run cannot compute."
+        ),
+    )
+    evidence_rationale_clause: str | None = Field(
+        default=None,
+        description=(
+            "The clause naming what else the expert-advice rationale should "
+            "reason about — for TIDMAD, ' and per-file lever distribution "
+            "from the Impact_Score column'. Class (1). Absent -> rendered "
+            "nowhere."
+        ),
+    )
+    evidence_citation_clause: str | None = Field(
+        default=None,
+        description=(
+            "The clause naming what the proposer should CITE from this task's "
+            "evidence — for TIDMAD, the Impact_Score / Linear_Weight columns "
+            "of the per-file score table. Class (1). Absent -> rendered "
+            "nowhere."
+        ),
+    )
+
+
 class ProposalInput(BaseModel):
     """
     Input to ml_model_proposal_agent.
@@ -677,6 +808,18 @@ class ProposalInput(BaseModel):
         "``ForwardContract()`` (all fields "
         "empty) is for test fixtures only; production callers always populate "
         'via ``ForwardContract(**load_task_config()["forward_contract"])``.',
+    )
+    proposal_blocks: ProposalTaskBlocks | None = Field(
+        default=None,
+        description=(
+            "Step 12 / PR-12a C7 (D-12a-6) — the run's task-owned PROPOSER "
+            "guidance, or None. Additive and default-None by contract: every "
+            "existing caller constructs this input without it, and an absent "
+            "value renders ZERO added bytes rather than another task's "
+            "science. The CALLER supplies it — the workflow's bounded "
+            "Regime-A adapter on an un-composed run, the composition's own "
+            "declaration on a composed one. This node never reads a task file."
+        ),
     )
     # ``per_model_score_tables`` REMOVED by Step 10 / P3 C3. It was a typed
     # mirror of ``interpretation['per_model_score_tables']`` documented as

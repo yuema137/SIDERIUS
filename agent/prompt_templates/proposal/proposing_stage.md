@@ -70,8 +70,7 @@ representation your architecture actually needs, then a loss compatible with it:
 | `"classifier"` | `[B, 256, T]` float | {CLASSIFIER_LOSS_LIST} |
 | `"regressor"`  | `[B, T]` float      | {REGRESSOR_LOSS_LIST}               |
 
-Both are fully supported. Regression predicts the denoised waveform directly;
-classification predicts a distribution over 256 amplitude bins per timestep.
+Both are fully supported. {OUTPUT_CONTRACT_GUIDANCE}
 Neither is the default choice — pick the one your mechanism argues for, and say
 why in `motivation`.
 

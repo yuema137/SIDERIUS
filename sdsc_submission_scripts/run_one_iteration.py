@@ -53,7 +53,7 @@ from core.run_invariants import (
     build_run_invariants,
 )
 from execute_tools.data_paths import DatasetDirectoryUnavailable, resolve_dataset_dir
-from execute_tools.dataset_config import TIDMAD, DataScope
+from execute_tools.dataset_config import DataScope, resolve_dataset_profile
 from execute_tools.health_checks.launch_policy import (
     FormalLaunchPolicyError,
     validate_formal_launch,
@@ -1496,7 +1496,26 @@ def compute_expected_invariants(
     un-composed run gets.
     """
     run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
-    resolved_scope = run_scope.resolve(TIDMAD)
+    # Step 12 / PR-12a **F-12-1** — resolve against the RUN's topology.
+    #
+    # This pre-flight runs BEFORE `bind_run_task_composition`, so
+    # `resolve_dataset_profile()` cannot see a composition yet and would
+    # answer TIDMAD for every run. The composition object is already a
+    # parameter here (W7 threads its Health binding and fingerprint below),
+    # so the composed branch reads it directly — mirroring `run_workflow`'s
+    # own composed-aware site (`model_exploration.py`, `_run_dataset`).
+    #
+    # Un-composed this is byte-identical to the `TIDMAD` constant it
+    # replaces: `resolve_dataset_profile()` returns `TIDMAD_PROFILE` and
+    # `TIDMAD_PROFILE.dataset` IS that singleton, the same object. Reading
+    # it through the resolver rather than importing the task singleton is
+    # also what keeps this launcher clean for the F-12-6 census.
+    run_dataset = (
+        resolve_dataset_profile().dataset
+        if run_composition is None
+        else run_composition.dataset_profile.dataset
+    )
+    resolved_scope = run_scope.resolve(run_dataset)
     invariants, _ = build_run_invariants(
         resolved_data_scope=resolved_scope,
         health_gate_enabled=args.health_gate_enabled,

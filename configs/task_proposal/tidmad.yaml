@@ -1,0 +1,41 @@
+# TIDMAD's task-owned PROPOSER guidance (Step 12 / PR-12a C7, D-12a-6).
+#
+# The FRAMEWORK owns these keys and where each renders; TIDMAD owns the prose.
+# Every value here was MOVED VERBATIM out of the proposer's hardcoded prompts —
+# this file is a relocation, not a rewrite, which is why the legacy rendered
+# bytes do not move.
+#
+# The last seven keys landed with C7-5 (F-12a-C9-1), closing the Pr2/Pr3
+# residues C7-3 did not reach: they lived in `PROPOSAL_COMMIT_PROMPT`, which no
+# census had on its surface list. Some carry their own LINE WRAPPING, which is
+# why they look odd here — the framework owns the sentence, the task owns the
+# words, and the legacy bytes have to reproduce exactly.
+#
+# An external task ships its own file anywhere on disk and names it in its
+# composition manifest's `proposal_blocks:` section. It needs no SIDERIUS edit,
+# and a task that declares NOTHING renders zero added bytes.
+#
+# Mirrors `configs/task_interpretation/tidmad.yaml` (09b) exactly.
+architect_role: deep learning for signal denoising
+class_axis_note: 256 denoising bins per time step is contract-fixed, not a hyperparameter
+continuous_output_meaning: the denoised waveform directly
+evidence_citation_clause: ', and the
+
+  `Impact_Score` / `Linear_Weight` columns of the per-file score table'
+evidence_rationale_clause: ' and per-file lever distribution from the Impact_Score column'
+evidence_reading: "   - Read each model's per-file score table by `Impact_Score` descending \u2014 that\
+  \ is\n     the per-iter opportunity ranking. Cite `Linear_Weight` as context, not as a\n     ranking\
+  \ metric on its own. Identify whether the largest remaining\n     `Impact_Score` levers concentrate\
+  \ on a small subset of files or are\n     distributed broadly, and whether the same files dominate across\
+  \ models \u2014\n     those are the cross-model opportunities the new architecture should target.\n\
+  \     Do not assert that any file is universally weak from `headroom_vs_gt` alone\n     or from a fixed\
+  \ file-index label."
+input_semantics: per-timestep ADC class indices
+output_contract_guidance: 'Regression predicts the denoised waveform directly;
+
+  classification predicts a distribution over 256 amplitude bins per timestep.'
+per_file_strategy_guidance: 'Whether to use snapshot/target/anchors strategy based on the Impact_Score
+  distribution
+
+  Which files (by Impact_Score ranking, not by fixed indices) to focus on if using target strategy'
+target_strategy_selector_clause: " (concentrate on the\n       highest-Impact_Score files)"

@@ -36,6 +36,7 @@ from pathlib import Path
 
 import pytest
 
+from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
 from agent.schemas.proposal import (
     AgentCard,
     ExpertContextItem,
@@ -217,6 +218,12 @@ def fixture_interpretation() -> dict:
 def fixture_proposal_input(tmp_path, *, mode: str) -> ProposalInput:
     return ProposalInput(
         interpretation_evidence=build_proposer_evidence(fixture_interpretation()),
+        # Step 12 / PR-12a C7-3 — supplied because PRODUCTION supplies it:
+        # `run_workflow` resolves the run's proposer blocks on every
+        # iteration. A fixture that omitted them would be baselining a prompt
+        # no run produces, and the goldens below stay byte-identical BECAUSE
+        # the blocks carry TIDMAD's prose verbatim (D-12a-6 is a relocation).
+        proposal_blocks=load_proposal_task_blocks(),
         existing_model_types=["step00_alpha_net", "step00_beta_net"],
         cold_start=False,
         task_description="Step-00 fixture task: denoise a synthetic 1-D int8 series.",
@@ -542,7 +549,10 @@ class TestPB4LegacyCommit:
         golden = (GOLDENS / "pb4_legacy_commit_system.txt").read_text(encoding="utf-8")
         assert PROPOSAL_COMMIT_PROMPT != golden
         assert "{INPUT_SHAPE}" in PROPOSAL_COMMIT_PROMPT
-        assert _render_commit_system_prompt(_shipped_forward_contract()) == golden
+        assert (
+            _render_commit_system_prompt(_shipped_forward_contract(), load_proposal_task_blocks())
+            == golden
+        )
 
     def test_commit_user_render(self):
         user = _build_commit_prompt(_FIXTURE_REASONING, ["step00_alpha_net", "step00_beta_net"])

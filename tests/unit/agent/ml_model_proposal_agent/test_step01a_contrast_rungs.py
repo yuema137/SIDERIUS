@@ -86,15 +86,23 @@ def _assert_no_tidmad_derived_residue(rendered: str) -> None:
 
 
 def _assert_whitelisted_survivors_present(rendered: str) -> None:
-    """The three survivors MUST still be there.
+    """INVERTED by Step 12 / PR-12a C7-5 — the survivors now have an owner.
 
-    Asserting their presence is as important as asserting the residue's
-    absence: it stops a later contributor from "cleaning up" text that
-    another step owns, and it keeps this rung honest about its scope.
+    Step 01a deliberately left three literals in the template and this helper
+    pinned their PRESENCE, so that nobody "cleaned up" text another step owned.
+    The renderer's own docstring named the condition for lifting the pin:
+    *"no authority declares them ... owned by a later step"*. D-12a-6 is that
+    authority and C7-5 is that step, so the shapes are now DERIVED from the
+    declaration and the prose is declared by the task.
+
+    The helper is INVERTED rather than deleted, because the failure class is
+    unchanged and now checkable in the stronger direction: under a non-TIDMAD
+    contract with no declared blocks, none of the three may appear. A test
+    asserting their presence would today be asserting the defect.
     """
-    assert "[B, 256, T] per-timestep class logits" in rendered  # tier (ii)
-    assert "[B, T] float32 (the denoised waveform directly)" in rendered  # tier (iii)
-    assert "256 denoising bins per time step is contract-fixed" in rendered  # tier (iii)
+    assert "[B, 256, T] per-timestep class logits" not in rendered
+    assert "[B, T] float32 (the denoised waveform directly)" not in rendered
+    assert "256 denoising bins per time step is contract-fixed" not in rendered
 
 
 class TestRungBi:
@@ -209,10 +217,15 @@ class TestRungFX2:
         a = _render_commit_system_prompt(self.CONTRACT)
         b = _render_commit_system_prompt(rank2)
         assert a != b
+        # C7-5 derives the dtype-dropped forms from the SAME declaration, so
+        # the normalization covers them too. The property is unchanged and now
+        # spans more of the surface: equal-shaped declarations differing only
+        # in rank render identically once their shape tokens are equated.
         assert (
-            a.replace("[B, S, F1, F2] float32", "[B, S] float32").replace(
-                "[B, S, F3] float32", "[B, S] float32"
-            )
+            a.replace("[B, S, F1, F2] float32", "[B, S] float32")
+            .replace("[B, S, F3] float32", "[B, S] float32")
+            .replace("[B, S, F1, F2]", "[B, S]")
+            .replace("[B, S, F3]", "[B, S]")
             == b
         )
 
@@ -323,14 +336,31 @@ class TestSecondStepOneSurface:
         assert derived_block in _render_proposing_stage(rung)
 
     def test_tier_ii_table_literals_deliberately_survive_the_contrast(self):
-        """Scope honesty: PR 01a does NOT make this surface fully
-        task-agnostic. The literal shape column and the "256 amplitude
-        bins" sentence remain under every rung, and that is the frozen
-        disposition — not an oversight to be cleaned up here.
+        """Scope honesty, UPDATED where a later step actually did the work.
+
+        PR 01a's frozen disposition was that the literal shape column AND the
+        "256 amplitude bins" sentence both remain under every rung — "not an
+        oversight to be cleaned up here". Step 12 / PR-12a C7-3 (D-12a-6)
+        cleaned up exactly one of the two ON PURPOSE, so this pin now records
+        which:
+
+          * the shape COLUMN is still literal — PR 01a's tier-(ii) disposition
+            is untouched, and C7-3 deliberately did not widen into it;
+          * the "256 amplitude bins" SENTENCE moved to
+            `configs/task_proposal/tidmad.yaml` behind
+            `{OUTPUT_CONTRACT_GUIDANCE}`, because it states what a
+            representation MEANS for one task rather than what the surface's
+            table shows.
+
+        The sentence is still rendered VERBATIM for TIDMAD — proved
+        byte-exactly by
+        `test_step12_pr12a_c7_proposal_blocks.TestTheRelocationIsBYTE_EXACT` —
+        so nothing was lost, only relocated.
         """
         rendered = _render_proposing_stage(TestRungFX2.CONTRACT)
         assert "`[B, 256, T]` float" in rendered
-        assert "256 amplitude bins" in rendered
+        assert "256 amplitude bins" not in rendered
+        assert "{OUTPUT_CONTRACT_GUIDANCE}" in rendered
 
     def test_loss_legality_cells_derive_on_this_surface_too(self):
         rendered = _render_proposing_stage(TestRungFX2.CONTRACT)
@@ -379,13 +409,20 @@ class TestContractReassertionContrast:
         ):
             assert marker in spec
 
-    def test_tier_iii_bins_clause_is_whitelisted_not_derived(self):
-        """§9.5: the "256 denoising bins ... contract-fixed" clause has no
-        authority behind it and stays literal under every profile. Pinned
-        so its survival is a recorded decision rather than a silent
-        inconsistency someone later "fixes" inside this PR."""
+    def test_tier_iii_bins_clause_is_DECLARED_not_literal(self):
+        """INVERTED by Step 12 / PR-12a C7-5 — §9.5's clause now has authority.
+
+        Step 01a pinned that "256 denoising bins ... contract-fixed" stayed
+        literal under every profile, because nothing declared it. The task
+        declares it now (`ProposalTaskBlocks.class_axis_note`), so a profile
+        with no declared blocks must get the GENERIC statement instead of
+        TIDMAD's count — and the generic form is framework structure, not
+        invented science: whatever the task, its declared output dimension is
+        contract-fixed.
+        """
         spec = self._spec(TestRungBii.CONTRACT)
-        assert re.search(r"256 denoising bins[^\"]{0,60}contract-fixed", spec, re.DOTALL)
+        assert "256 denoising bins" not in spec
+        assert "the declared output dimension is contract-fixed" in spec
 
 
 class TestRungAtomicity:

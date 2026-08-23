@@ -65,7 +65,6 @@ from tests.helpers.metric_fixtures import shipped_spec
 _STEP09A_ORDER = MetricOrder(shipped_spec())
 from workflows.model_exploration import (
     _CONSTRUCTION_RSS_THRESHOLD_GB,
-    _add_plugin_to_registries,
     _register_plugin,
     _validate_construction_memory,
     load_tuning_outputs,
@@ -1599,7 +1598,7 @@ class TestRegisterPlugin:
 
 
 # ---------------------------------------------------------------------------
-# _add_plugin_to_registries — Phase 6.8 Commit 6
+# register_model_in_memory — Phase 6.8 Commit 6, RE-POINTED by Step 12 / PR-12a C6
 # ---------------------------------------------------------------------------
 #
 # The pre-Commit-6 _register_plugin only touched MODEL_REGISTRY and the packaged
@@ -1608,10 +1607,20 @@ class TestRegisterPlugin:
 # regressors to be miscategorised as classifiers and the training subprocess to
 # fail with `Unknown model_type` when run via bare imports. These tests pin the
 # fix.
+#
+# PR-12a C6 retired `workflows._add_plugin_to_registries`, which was a private
+# DUPLICATE of `ml_models.plugin_loader.register_model_in_memory` — same
+# `_load_plugin`, same three registries, same `model_type | None` return. The
+# failure class these tests own is not retired with it: it belongs to whichever
+# function writes those registries, which is now the public authority. So every
+# assertion below is unchanged and only the callee moved. Re-pointed, not
+# weakened.
 # ---------------------------------------------------------------------------
 
 import sys as _sys
 import textwrap as _textwrap
+
+from ml_models.plugin_loader import register_model_in_memory
 
 _REGRESSOR_PLUGIN_SRC = _textwrap.dedent("""\
     import torch
@@ -1728,28 +1737,29 @@ def clean_registries():
             PLUGIN_OUTPUT_TYPE_REGISTRY[k] = v
 
 
-class TestAddPluginToRegistries:
-    """Pins the four-surface contract for ``_add_plugin_to_registries``."""
+class TestRegisterModelInMemory:
+    """Pins the registry-surface contract for the ONE public registration
+    authority, ``ml_models.plugin_loader.register_model_in_memory``."""
 
     def test_returns_model_type_on_success(self, regressor_plugin_file, clean_registries):
-        result = _add_plugin_to_registries(regressor_plugin_file)
+        result = register_model_in_memory(regressor_plugin_file)
         assert result == "test_regressor_plugin_c6"
 
     def test_returns_none_on_invalid_plugin(self, tmp_path, clean_registries):
         bad = tmp_path / "broken_plugin.py"
         bad.write_text("# missing required attrs\n")
-        assert _add_plugin_to_registries(str(bad)) is None
+        assert register_model_in_memory(str(bad)) is None
 
     def test_updates_model_registry(self, classifier_plugin_file, clean_registries):
         from ml_models.models_sandbox import MODEL_REGISTRY
 
-        _add_plugin_to_registries(classifier_plugin_file)
+        register_model_in_memory(classifier_plugin_file)
         assert "test_classifier_plugin_c6" in MODEL_REGISTRY
 
     def test_updates_packaged_config_registry(self, classifier_plugin_file, clean_registries):
         from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
 
-        _add_plugin_to_registries(classifier_plugin_file)
+        register_model_in_memory(classifier_plugin_file)
         assert "test_classifier_plugin_c6" in PLUGIN_CONFIG_REGISTRY
 
     def test_regressor_routes_via_get_output_type(self, regressor_plugin_file, clean_registries):
@@ -1757,13 +1767,13 @@ class TestAddPluginToRegistries:
         'classifier' because PLUGIN_OUTPUT_TYPE_REGISTRY was never updated."""
         from ml_models.plugin_loader import get_output_type
 
-        _add_plugin_to_registries(regressor_plugin_file)
+        register_model_in_memory(regressor_plugin_file)
         assert get_output_type("test_regressor_plugin_c6") == "regressor"
 
     def test_classifier_default_routes_correctly(self, classifier_plugin_file, clean_registries):
         from ml_models.plugin_loader import get_output_type
 
-        _add_plugin_to_registries(classifier_plugin_file)
+        register_model_in_memory(classifier_plugin_file)
         assert get_output_type("test_classifier_plugin_c6") == "classifier"
 
     def test_no_bare_module_identity_after_package_refactor(
@@ -1773,7 +1783,7 @@ class TestAddPluginToRegistries:
         ``models_format_sandbox`` module identity to mirror to. The editable
         install exposes ``ml_models`` as a proper package, so the legacy
         ``sys.path`` insert that used to surface a duplicate bare module has
-        been removed and ``_add_plugin_to_registries`` no longer needs a
+        been removed and ``register_model_in_memory`` no longer needs a
         dual-mirror branch."""
         import sys
 
@@ -1787,7 +1797,7 @@ class TestAddPluginToRegistries:
         pkg = importlib.import_module("ml_models.models_format_sandbox")
         pkg.PLUGIN_CONFIG_REGISTRY.pop("test_classifier_plugin_c6", None)
 
-        _add_plugin_to_registries(classifier_plugin_file)
+        register_model_in_memory(classifier_plugin_file)
 
         assert "test_classifier_plugin_c6" in pkg.PLUGIN_CONFIG_REGISTRY
 

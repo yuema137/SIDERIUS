@@ -206,17 +206,32 @@ def test_metric_declarations_construct_with_direction_higher(stem: str, metric_i
     assert isinstance(spec.scoreability, PresenceScoreabilityContract)
 
 
-def test_log_loss_is_refused_by_the_metric_schema_today_d16_pin() -> None:
-    """Defect caught (inverted): the day D16 is narrowed and `log_loss` becomes
-    declarable, this test FAILS — forcing STATUS/README (which say "blocked by
-    D16") to change. Until then it pins the honest refusal."""
-    with pytest.raises(ValueError, match="names a training loss"):
-        MetricSpec(
-            id="log_loss",
-            direction="lower",
-            aggregation="mean_over_final_eval_images",
-            scoreability=PresenceScoreabilityContract(),
-        )
+def test_log_loss_is_now_declarable_d16_closed() -> None:
+    """The inverted pin FIRED, exactly as it was written to.
+
+    This test used to assert `MetricSpec(id="log_loss", ...)` RAISES, and said
+    so: "the day D16 is narrowed and `log_loss` becomes declarable, this test
+    FAILS — forcing STATUS/README (which say 'blocked by D16') to change."
+    Step 12 / PR-12a C5 narrowed it; the docs were forced to change in the same
+    commit; and the assertion is now the positive one.
+
+    `log_loss` is a legitimate evaluation-metric identity for a classifier
+    whose deliverable is genuinely scored by it. That the framework refused it
+    on SPELLING is what D16 named, and it is why the fourth graduation task is
+    required to declare a `loss`-token metric id (parent §16).
+
+    The pack still does not SHIP the declaration — declaring a metric is a
+    scientific choice about what Pets is evaluated on, not a side effect of a
+    schema change — so the artifact assertion is unchanged.
+    """
+    spec = MetricSpec(
+        id="log_loss",
+        direction="lower",
+        aggregation="mean_over_final_eval_images",
+        scoreability=PresenceScoreabilityContract(),
+    )
+    assert spec.id == "log_loss"
+    assert spec.direction == "lower"
     assert not (DECLARED / "metric_log_loss.json").exists()
 
 

@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import pytest
 
+from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.skills.model_io_probe_skill import (
     PROBE_BATCH,
     PROBE_SYMBOLIC_EXTENT,
@@ -107,7 +108,12 @@ def _consumers(contract, declared_form: str) -> dict:
     rendered prompt — rather than the configuration that produced them
     (§16's binding rule).
     """
-    forward_comment, output_comment = _render_output_contract(declared_form, contract)
+    # Step 12 / PR-12a C7-4: the ladder measures CONTRACT-driven derivation,
+    # so it supplies the legacy TIDMAD declaration once and holds it fixed
+    # across every rung — the varying input stays the contract, as §16 requires.
+    forward_comment, output_comment = _render_output_contract(
+        declared_form, contract, load_implementor_task_blocks()
+    )
     return {
         "expected_output_shape": str(expected_output_shape(contract, declared_form)),
         "probe_input_shape": str(realize_shape(contract.input)),

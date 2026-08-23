@@ -29,7 +29,12 @@ _PLUGIN_DIR_REL = os.path.join("tests", "pseudo_data", "plugins")
 
 
 def run_bounded_pseudo_iteration(
-    tmp_path, monkeypatch, preflight_results=None, input_overrides=None
+    tmp_path,
+    monkeypatch,
+    preflight_results=None,
+    input_overrides=None,
+    bridge=None,
+    capability_index_path=None,
 ):
     """Run one bounded pseudo tuner iteration; return (output, bridge, sandbox, workspace).
 
@@ -53,6 +58,25 @@ def run_bounded_pseudo_iteration(
     different SUPPORTED posture (e.g. the Step-07 correction's
     incumbent-formal-gates-on / time-budgets-off regression) pass it here
     rather than forking the harness.
+
+    ``bridge``: optional LLM bridge instance to drive the run with. ``None``
+    (the default) uses ``RecordingLLMBridge.for_agent`` exactly as before, so
+    every registered Step-00 baseline is byte-unaffected. Step 12 / PR-12a C0
+    passes a capturing ``StubLLMBridge`` subclass here because the RECORDING
+    double never renders a prompt — it is handed one — and a prompt-BYTE
+    baseline has to observe what the real ``plan``/``reflect`` render paths
+    actually produced. Forking the harness to get that would have meant two
+    harnesses drifting apart.
+
+    ``capability_index_path``: optional loss capability-index path forwarded
+    to ``HyperparamTuningAgent``. ``None`` (the default) keeps the production
+    default ``agent_generated/_capability_index.json``, so every existing
+    baseline is unaffected. A prompt-BYTE baseline MUST pass a pinned path:
+    the planner renders the AVAILABLE CUSTOM LOSSES block from this registry,
+    and ``agent_generated/`` is machine-local, gitignored, mutable state — a
+    committed sha over a prompt that embeds it would pass on the developer's
+    box and fail on a fresh CI clone, which is precisely the portability
+    failure ``CLAUDE.md`` names.
     """
     import time as _time
 
@@ -127,10 +151,13 @@ def run_bounded_pseudo_iteration(
         }
     )
 
-    bridge = RecordingLLMBridge.for_agent(PSEUDO_AGENT_FOLDER)
+    if bridge is None:
+        bridge = RecordingLLMBridge.for_agent(PSEUDO_AGENT_FOLDER)
     sandbox = RecordingSandbox.for_model(PLUGIN_MODEL_TYPE, base_dir=workspace, run_name=run_name)
     agent = HyperparamTuningAgent(
-        bridge_factory=lambda **kw: bridge, sandbox_factory=lambda **kw: sandbox
+        bridge_factory=lambda **kw: bridge,
+        sandbox_factory=lambda **kw: sandbox,
+        capability_index_path=capability_index_path,
     )
     try:
         output = agent.run(agent_input)

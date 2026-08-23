@@ -241,8 +241,22 @@ class TestP1OwnedSurfacesCarryNoAmbientTaskAuthority:
         The import is the thing to forbid: while it exists, the next reader
         who needs "how many files are there" has a wrong answer within easy
         reach.
+
+        **Step 12 / PR-12a C8 (F-12-6) widens the surface** to the two files
+        the audit found excluded: `sdsc_submission_scripts/run_one_iteration.py`
+        and `core/resume.py`. Both had ALREADY been migrated to
+        `resolve_dataset_profile` — by Step-11 C8 (F-11-5) for resume, and by
+        this PR's C1 for the iteration runner — so this widening records no new
+        leak. It closes the gap that let those migrations be undone silently:
+        the guard that would have caught the original defect did not look at
+        the two files where the same defect lived longest.
         """
-        surfaces = (*P1_OWNED_SURFACE, "workflows/model_exploration.py")
+        surfaces = (
+            *P1_OWNED_SURFACE,
+            "workflows/model_exploration.py",
+            "sdsc_submission_scripts/run_one_iteration.py",
+            "core/resume.py",
+        )
         offenders: dict[str, list[str]] = {}
         for rel in surfaces:
             tree = ast.parse((REPO_ROOT / rel).read_text(encoding="utf-8"))

@@ -25,6 +25,7 @@ from agent.schemas.hyperparam_tuning import (
     HealthGateMode,
     HyperparamTuningInput,
     ResultAuthority,
+    TaskCompositionRef,
     serialize_expert_advice,
 )
 from agent.schemas.ordering import OrderStrategy
@@ -41,6 +42,10 @@ def local_validated_model(
     storage: StorageConfig,
     max_rounds: int = 50,
     health_checks_config: str | None = None,
+    # Step 12 / PR-12a (D-12a-1) — the run's task-composition PROJECTION.
+    # Additive and default-None: an un-composed run passes nothing and the
+    # tuner sees `None`, which is regime A byte-for-byte.
+    task_composition_ref: TaskCompositionRef | None = None,
     # --- DataScope + HealthGate subsystem (DS6b) — defaults preserve
     #     full-scope, gates-enabled behavior ---
     data_scope: DataScope | None = None,
@@ -274,6 +279,10 @@ def local_validated_model(
         file_index=file_index,
         max_rounds=max_rounds,
         health_checks_config=health_checks_config,
+        # Step 12 / PR-12a — mapped straight through. This protocol is the
+        # field-mapping layer, so the projection crosses the edge here rather
+        # than the tuner rediscovering it from the ambient environment.
+        task_composition_ref=task_composition_ref,
         # DS6b — None normalizes to the full scope here (not in the schema)
         # so the input always carries an explicit DataScope object.
         data_scope=data_scope if data_scope is not None else DataScope.default(),

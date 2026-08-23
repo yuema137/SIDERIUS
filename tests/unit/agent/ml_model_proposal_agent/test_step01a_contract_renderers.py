@@ -119,9 +119,11 @@ class TestCommitSystemPromptRenderer:
         )
         assert "[B, T] int64" not in rendered
         assert "[B, 256, T] float32" not in rendered
-        # …while the whitelisted, unowned literals are still there:
-        assert "[B, T] float32 (the denoised waveform directly)" in rendered
-        assert "[B, 256, T] per-timestep class logits" in rendered
+        # C7-5: the tier-(ii)/(iii) survivors this docstring whitelisted now
+        # have an owner, so the shadow check covers them too — which is what
+        # the mutation finding above actually wanted.
+        assert "[B, T] float32 (the denoised waveform directly)" not in rendered
+        assert "[B, 256, T] per-timestep class logits" not in rendered
 
     def test_unfamiliar_task_type_and_rank_pass_through_opaquely(self):
         """Parent §6A.4: no renderer may branch on rank, axis names or
@@ -164,15 +166,22 @@ class TestCommitSystemPromptRenderer:
         ):
             assert token in PROPOSAL_COMMIT_PROMPT
 
-    def test_tier_iii_literals_are_deliberately_retained(self):
-        """Design §4.1 tier (iii): the regressor output form and the
-        "denoising bins" nouns have NO authority to render from, so they
-        stay literal and are routed to step 03. Pinned so a later
-        contributor does not "finish the job" by inventing an authority.
+    def test_tier_iii_literals_are_now_DECLARED_not_literal(self):
+        """INVERTED by Step 12 / PR-12a C7-5.
+
+        Step 01a pinned that the regressor output form and the "denoising
+        bins" noun stayed literal because nothing declared them, and warned a
+        later contributor not to "finish the job" by INVENTING an authority.
+        Nothing was invented: D-12a-6 ratified `ProposalTaskBlocks` as the
+        task-owned home, §8.9 classified these exact strings, and the shape is
+        derived from the run's own `ModelIOContract` through the same
+        `declared_output_tensor` the probe validates with.
+
+        So the pin inverts: an undeclared contract must NOT carry them.
         """
         rendered = _render_commit_system_prompt(_contract())
-        assert "[B, T] float32 (the denoised waveform directly)" in rendered
-        assert "256 denoising bins per time step is contract-fixed" in rendered
+        assert "[B, T] float32 (the denoised waveform directly)" not in rendered
+        assert "256 denoising bins per time step is contract-fixed" not in rendered
 
 
 class TestS1BProposingStageDerivation:

@@ -61,17 +61,11 @@ def _builtin_roster(task_render) -> str:
 
 PLANNER_PROMPT = """
 You are a Senior ML Research Analyst specializing in hyperparameter optimization for deep learning models.
-Your goal is to {METRIC_VERB} the `denoising_score` metric ({METRIC_IDENTITY_LINE}) across hyperparameter configurations for the following task:
+Your goal is to {METRIC_VERB} the `denoising_score` {SCORE_FIELD_NOUN} ({METRIC_IDENTITY_LINE}) across hyperparameter configurations for the following task:
 
 {TASK_DESCRIPTION}
 
-### AVAILABLE MODELS:
-1. **PositionalUNet (punet)**: U-Net with positional encoding for global signal structures.
-2. **FCNet (fcnet)**: Fully-connected AutoEncoder, efficient for local smoothing.
-3. **TransformerModel (transformer)**: Self-attention over time steps; memory scales O(T²) — use small segmentation_size.
-4. **SimpleWaveNet (wavenet)**: Dilated causal convolutions; memory-efficient.
-5. **RNNSeq2Seq (rnn)**: LSTM encoder-decoder; memory grows linearly with batch_size × segmentation_size.
-
+{AVAILABLE_MODELS_BLOCK}
 ### BASELINE REFERENCE RULE:
 In Round 1, you **must** use the Baseline Configuration found in the initial Research Memory
 (the record with "baseline" in its exp_id). Use the same model_config, train_config, and
@@ -182,16 +176,10 @@ Trial strategies (only relevant when `is_trial=true`):
   per file than snapshot at the same trial_portion, but other files receive zero coverage
   (their entries in `file_vector` are NaN).
 - `"target"`: Sample from a caller-specified list of files (`target_files`). Concentrates
-  all data on those files. Useful when the per-file score table indicates a small set of
-  files carries most of the next-iter improvement budget — those are the files with the
-  largest `Impact_Score` for the current best model. Choosing `target_files` is a
-  data-allocation decision; it should be driven by the Impact_Score column, not by
-  fixed file-index labels or thresholds.
+  all data on those files. {TARGET_STRATEGY_IMPACT_NOTE}
 
 **Key tradeoff**: snapshot gives broad but shallow coverage per file. anchors and target
-give deep coverage on fewer files. Consult the per-file score table below — if
-`Impact_Score` is roughly uniform across files, snapshot is efficient. If a small subset
-of files dominates the `Impact_Score` ranking, target those files.
+give deep coverage on fewer files.{SAMPLING_IMPACT_TRADEOFF}
 
 `trial_portion` (0.01-1.0): fraction of segments per file for the **training scope**.
 This determines how much data the model trains on. More data = better model but slower.
@@ -236,36 +224,7 @@ call. When the block above says "No custom losses registered yet", the only
 legal `loss_type` values are the four built-ins (`focal`, `focal_cw`, `ce`,
 `smooth_l1`) — see the COMPATIBILITY section in the user message below.
 
-### PER-FILE PERFORMANCE TABLE:
-
-Below is a comparison of your best experiment's per-file scores against two
-reference columns:
-
-- **raw_baseline**  = no denoising at all (CH1 passed through the scorer).
-- **ground_truth**  = what a perfect denoiser (CH2 substituted for CH1) scores.
-- **model**         = your best experiment so far.
-
-All three are log-space under the same global s_max, so differences are
-directly comparable.
-
-- `gain vs raw > 0`   → your model is doing useful work on that file.
-- `headroom vs gt`    → how far below the theoretical ceiling you are.
-- `Linear_Weight`     → the file's share of the linear denominator behind the
-                        aggregate scalar. Sums to 1 across sampled files.
-- `Impact_Score`      → the log-scalar gain you would obtain by lifting this
-                        file's `model` to its `ground_truth`. This is the
-                        per-file opportunity ranking; the table is followed
-                        by a secondary block re-sorted by `Impact_Score`
-                        descending.
-
-Read the table by `Impact_Score` descending — that is where the next-iter
-lever is. A multi-log-unit `headroom_vs_gt` does not by itself indicate
-opportunity; only `Impact_Score` does. A high-weight file at its ceiling has
-zero `Impact_Score` and is not actionable. If the entire `Impact_Score`
-column is small in magnitude relative to the chain's per-iter gains, this
-configuration has reached the dataset ceiling.
-
-{SCORE_COMPARISON_TABLE}
+{PER_FILE_TABLE_PROTOCOL}{SCORE_COMPARISON_TABLE}
 
 Use this table — not just the scalar — to decide where to focus next.
 
@@ -277,7 +236,7 @@ REFLECTOR_PROMPT = """
 You are a Research Analyst. Your job is to transform raw experiment results into **Research Memory**.
 
 ### OBJECTIVES:
-- **Validate Hypothesis**: Compare the initial hypothesis with the actual Denoising Score and Loss.
+- **Validate Hypothesis**: Compare the initial hypothesis with the actual {SCORE_DISPLAY_NOUN} and Loss.
 - **Extract Discovery**: Identify a specific pattern or rule learned from this run.
 - **Update Memory**: Write a concise 'Memory Entry' that will guide the Planner in the next iteration.
 
@@ -292,31 +251,16 @@ You are a Research Analyst. Your job is to transform raw experiment results into
   for the next configuration; do not attach a label the numbers do not establish, and do not infer
   one from the score's sign.
 
-### CRITICAL — HOW TO JUDGE THE DENOISING SCORE:
+### CRITICAL — HOW TO JUDGE THE {SCORE_DISPLAY_NOUN_UPPER}:
 - The `denoising_score` field carries the {METRIC_IDENTITY_LINE}.
-- The Denoising Score is a relative metric. Its absolute value and sign mean nothing in isolation.
+- The {SCORE_DISPLAY_NOUN} is a relative metric. Its absolute value and sign mean nothing in isolation.
 - ALWAYS compare against the Baseline Score and Best Score So Far provided in the context.
 - A result is GOOD if its denoising_score is {METRIC_COMPARATIVE_UPPER} than the best score so far.
 - A result is NEUTRAL if it matches previous scores.
 - A result is BAD if it is {METRIC_ANTONYM_UPPER} than most previous scores.
 - NEVER call a result a failure just because the score is negative.
 
-### PER-FILE COMPARISON (Impact-Aware):
-The score_comparison_table below shows per-file performance against the raw
-baseline and the ground-truth ceiling, alongside `Linear_Weight` (each
-file's share of the linear denominator behind the aggregate scalar) and
-`Impact_Score` (the log-scalar gain available if that file's `model` were
-lifted to its `ground_truth`). The table is followed by a secondary block
-re-sorted by `Impact_Score` descending.
-
-Use the table to produce per-file discoveries grounded in the
-`Impact_Score` ranking — e.g., "architecture X recovered most of the
-high-Impact rows but left rows with the largest remaining Impact untouched"
-rather than "score went up." Cite `Impact_Score` and `Linear_Weight`
-together when discussing per-file bottlenecks; do not assert that a file is
-permanently weak from a single round's reading or from `headroom_vs_gt`
-alone. These row-level insights compound across rounds when the next
-planner inherits them.
+{PER_FILE_COMPARISON_BLOCK}
 
 {SCORE_COMPARISON_TABLE}
 

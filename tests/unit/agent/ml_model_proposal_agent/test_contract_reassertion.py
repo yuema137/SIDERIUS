@@ -16,6 +16,7 @@ import re
 
 import pytest
 
+from agent.prompt_templates.proposal.task_blocks import load_proposal_task_blocks
 from agent.schemas.task_config import ForwardContract
 from nodes.ml_model_proposal_agent import PROPOSAL_COMMIT_PROMPT
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
@@ -41,7 +42,12 @@ def _rendered_commit_prompt() -> str:
     ``test_step01a_contract_renderers.py``; the contrast-profile variant
     of these same pins lands with the S1-D rungs.
     """
-    return _render_commit_system_prompt(_shipped_contract())
+    # Step 12 / PR-12a C7-5: these pins assert what a LEGACY TIDMAD run
+    # receives, so they resolve the bounded Regime-A adapter exactly as the
+    # composition root does for a run with no manifest. Without it they would
+    # be asserting the COMPOSED-undeclared render, which is a different
+    # surface with a different contract.
+    return _render_commit_system_prompt(_shipped_contract(), load_proposal_task_blocks())
 
 
 # ---------------------------------------------------------------------------

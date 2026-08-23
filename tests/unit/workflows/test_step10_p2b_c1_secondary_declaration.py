@@ -59,8 +59,18 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 #: legitimately changes a fingerprint and the literal is then updated with the
 #: reason recorded. A change caused by P2b's own machinery on a manifest that
 #: declares NO secondary is a defect in the additive rule.
+#: **`tidmad` updated by Step 12 / PR-12a C8, with the reason recorded** — the
+#: case this docstring's second paragraph names verbatim. TIDMAD's shipped
+#: manifest (which the fixture mirrors, W2) now DECLARES `proposal_blocks:` and
+#: `implementor_blocks:`, two real new sources, so its identity legitimately
+#: moved `d6628a93…` -> `5836cb0a…`, and again -> `9125bf58…` when C7-5
+#: closed the Pr2/Pr3 residues in that same declaration. This is NOT P2b's
+#: additive rule leaking:
+#: the manifest still declares no secondary, and `fourth_task` — which declares
+#: neither new section — is UNCHANGED at its P2b literal, which is what
+#: separates "a declaration was added" from "the machinery moved".
 PRE_P2B_FINGERPRINTS = {
-    "tidmad": "d6628a93fcb3578ca32812f39246f2b51abeecbd24d21df56856ea0ef9c56d3a",
+    "tidmad": "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac",
     "fourth_task": "fe00fd076153c847da65c71c72df5520bec902d6d17b43b9c7b1bb80e2ab099a",
     "pets": "52a422b030bb896cc22862b687855101ed302f2e59792b523d353b7dc67d6086",
     "davis": "9980a7a955c689a8f94ab048eee9c4715ce9a25fdaac7bf3a510197cf2e0ac26",

@@ -28,6 +28,7 @@ import sys
 
 import pytest
 
+from agent.prompt_templates.implementor.task_blocks import load_implementor_task_blocks
 from agent.skills.model_io_probe_skill import ProbeConstructionError
 from nodes.ml_model_implementor.ml_model_implementor import (
     _assemble_plugin,
@@ -98,7 +99,9 @@ def test_a_regressor_candidate_under_a_categorical_task_drops_the_class_axis(tmp
     not the task's ``[B, 256, T]``. That is the A3/A4 behaviour, now derived
     rather than tabulated.
     """
-    forward, output_type = _render_output_contract("regressor", tidmad_model_io())
+    forward, output_type = _render_output_contract(
+        "regressor", tidmad_model_io(), load_implementor_task_blocks()
+    )
     assert forward == "input [B, T] int64 → output [B, T] float32"
     assert output_type == "[B, T] → continuous waveform regression"
 
@@ -132,12 +135,19 @@ def test_the_legacy_path_renders_the_shipped_strings_verbatim():
     Fails when: the derived rendering and the shipped strings disagree for
     TIDMAD — the parity property, asserted between the two paths so that
     drifting both together cannot hide it.
+
+    Step 12 / PR-12a C7-4: the derived path now takes the continuous phrase
+    from the task's declaration, so the parity is asserted with TIDMAD's own
+    blocks supplied — which is what the composition root hands a legacy run.
+    The property is unchanged and slightly stronger: it now proves the
+    DECLARED phrase reproduces the tabulated legacy bytes.
     """
+    blocks = load_implementor_task_blocks()
     assert _render_output_contract("classifier", None) == _render_output_contract(
-        "classifier", tidmad_model_io()
+        "classifier", tidmad_model_io(), blocks
     )
     assert _render_output_contract("regressor", None) == _render_output_contract(
-        "regressor", regressor_model_io()
+        "regressor", regressor_model_io(), blocks
     )
 
 

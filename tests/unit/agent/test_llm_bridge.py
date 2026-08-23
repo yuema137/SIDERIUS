@@ -840,10 +840,17 @@ class TestScoreTablePromptStaticContent:
         assert "{SCORE_COMPARISON_TABLE}" in REFLECTOR_PROMPT
 
     def test_planner_prompt_has_new_section_header(self):
-        assert "### PER-FILE PERFORMANCE TABLE:" in PLANNER_PROMPT
+        # Step 12 / PR-12a C7 — the header moved into the render authority as
+        # the LEGACY substitution for a composition-gated token. What this
+        # test asserts is what an un-composed run renders, which is unchanged.
+        from tests.helpers.step12_pr12a_prompt_capture import legacy_rendered_template
+
+        assert "### PER-FILE PERFORMANCE TABLE:" in legacy_rendered_template("planner")
 
     def test_reflector_prompt_has_new_section_header(self):
-        assert "### PER-FILE COMPARISON" in REFLECTOR_PROMPT
+        from tests.helpers.step12_pr12a_prompt_capture import legacy_rendered_template
+
+        assert "### PER-FILE COMPARISON" in legacy_rendered_template("reflector")
 
     def test_old_file_vector_section_removed_from_planner(self):
         """The §9.1 rewrite deletes the 'FILE VECTOR AND SCORING' block and
@@ -854,7 +861,9 @@ class TestScoreTablePromptStaticContent:
     def test_planner_references_best_experiment_not_most_recent(self):
         """User-locked choice: the planner anchor is the best-so-far
         experiment, not the most recent. See the sub-commit C sign-off."""
-        assert "best experiment" in PLANNER_PROMPT
+        from tests.helpers.step12_pr12a_prompt_capture import legacy_rendered_template
+
+        assert "best experiment" in legacy_rendered_template("planner")
 
 
 class TestPlanScoreTableSubstitution:

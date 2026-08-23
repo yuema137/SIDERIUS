@@ -51,7 +51,7 @@ LOSS_CONFIG_REGISTRY: dict[str, type] = {}
 def register_loss_in_memory(plugin_path: str) -> str | None:
     """Load a loss plugin file and register its classes in ``LOSS_REGISTRY``.
 
-    L6c — mirrors ``workflows.model_exploration._add_plugin_to_registries``
+    L6c — mirrors ``ml_models.plugin_loader.register_model_in_memory``
     for the loss surface. Called by the workflow's ``_register_plugin`` after
     L6a copies the plugin file, AND by ``preload_global_losses()`` at
     workflow startup.

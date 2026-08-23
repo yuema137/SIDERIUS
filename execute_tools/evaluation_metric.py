@@ -15,9 +15,13 @@ TIDMAD's ``scalar + length-20 file_vector`` is instance #1, not the template.
 **What it is NOT.** A training observation. Train loss and validation loss are
 not evaluation metrics: they have no deliverable, no reference baseline and no
 direction independent of their ``loss_type`` (roadmap §20.2, OD-20-4/5). The
-types below carry **no loss field**, reject loss-shaped identities at
-construction, and forbid extra keys — so ``loss_history`` cannot be smuggled in
-under any name. Surfacing losses is Step 07's ``TrainingHistory`` /
+types below carry **no loss field** and forbid extra keys — so ``loss_history``
+cannot be smuggled in under any name. What they do NOT do, since Step 12 /
+PR-12a C5 closed D16, is judge an identity by its SPELLING: a metric id is
+OPAQUE, and ``log_loss`` is as declarable as ``accuracy`` when the task's
+deliverable is genuinely scored that way. The boundary is the typed
+contract — a deliverable, an aggregation and an executable scoreability
+contract — not a token. Surfacing losses is Step 07's ``TrainingHistory`` /
 ``TrainingDiagnosis``; validity/pathology verdicts are Step 08's HealthGates.
 
 **Ownership split (design §4, §16-Q1 CONFIRMED).** Step 05c's
@@ -52,7 +56,6 @@ and evaluates scoreability FIRST; the arithmetic entry is untouched.
 from __future__ import annotations
 
 import os
-import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -112,37 +115,46 @@ _TIDMAD_H5_SAMPLES_DATASET = "timeseries"
 
 MetricDirection = Literal["higher", "lower"]
 
-_IDENTIFIER_TOKENS = re.compile(r"[^a-z0-9]+")
 
+def _validate_metric_identifier(identifier: str, *, field: str) -> str:
+    """Identifier HYGIENE only. A metric's identity is OPAQUE.
 
-def _is_loss_shaped(identifier: str) -> bool:
-    """Whether ``identifier`` names a training loss rather than a metric.
+    **Step 12 / PR-12a C5 (D16), operator-ruled.** This function used to also
+    refuse any identifier whose tokens included ``loss``/``losses``. That
+    lexical rule is gone: the framework never infers "this is a training
+    objective, not an evaluation metric" from a name token. ``accuracy``,
+    ``mse``, ``log_loss``, ``negative_log_loss`` and ``banana_metric`` are all
+    equally legal identities whose meaning and DIRECTION come from the
+    declaration.
 
-    The boundary is by identity: any identifier whose tokens include
-    ``loss``/``losses`` (``train_loss``, ``validation_loss``, ``loss_history``,
-    ``final_loss``, ``focal_loss`` …) is a training observation and is refused
-    by every metric type below. Deliberately NOT a registry lookup: a loss
-    ``loss_type`` such as ``"mse"`` is a legitimate evaluation-metric identity
-    for a task whose deliverable IS scored by mean squared error; what makes
-    something a loss here is that it names the training objective, not its
-    formula.
+    The rule was self-contradictory in its own docstring, which conceded that
+    ``mse`` — a loss formula — is "a legitimate evaluation-metric identity for
+    a task whose deliverable IS scored by mean squared error". What it actually
+    keyed on was spelling, so a task whose deliverable is genuinely scored by
+    log loss could not declare it, while the same quantity named ``surprisal``
+    sailed through. That is not a boundary; it is a lint on vocabulary.
+
+    **What enforces the real boundary instead** — the typed contracts, which
+    the audit confirmed already do it and which C5 leaves untouched:
+
+    * an :class:`EvaluationMetric` is constructed from a :class:`MetricSpec`
+      carrying an ``aggregation`` and an executable
+      :class:`ScoreabilityContract` over a DELIVERABLE. A training objective
+      has neither, so it cannot occupy the slot;
+    * ``_compose_metric`` validates that a declared implementation IS an
+      ``EvaluationMetric`` instance;
+    * the record-facing types declare ``extra="forbid"`` and no field whose
+      name says loss, so ``loss_history`` / ``final_loss`` cannot ride along
+      under any key — the executable half of the evaluation-vs-training
+      boundary, and the reason removing the name check weakens nothing.
+
+    The hygiene kept here is a sibling check, not the D16 rule: an empty or
+    whitespace-padded identifier is malformed regardless of what it spells.
     """
-    tokens = _IDENTIFIER_TOKENS.split(identifier.strip().lower())
-    return any(token in ("loss", "losses") for token in tokens)
-
-
-def _reject_loss_shaped(identifier: str, *, field: str) -> str:
     if not identifier or identifier.strip() != identifier:
         raise ValueError(
             f"{field} must be a non-empty identifier with no surrounding whitespace; "
             f"got {identifier!r}."
-        )
-    if _is_loss_shaped(identifier):
-        raise ValueError(
-            f"{field}={identifier!r} names a training loss. Train/validation loss are NOT "
-            f"evaluation metrics (roadmap §20.2): they have no deliverable, no reference "
-            f"baseline and no task-independent direction. Losses belong to Step 07's "
-            f"TrainingHistory, never to a MetricSpec / MetricResult."
         )
     return identifier
 
@@ -387,7 +399,7 @@ class MetricSpec(BaseModel):
     @field_validator("id")
     @classmethod
     def _id_is_a_metric(cls, value: str) -> str:
-        return _reject_loss_shaped(value, field="id")
+        return _validate_metric_identifier(value, field="id")
 
 
 class MetricResult(BaseModel):
@@ -415,7 +427,7 @@ class MetricResult(BaseModel):
     @field_validator("metric_id")
     @classmethod
     def _id_is_a_metric(cls, value: str) -> str:
-        return _reject_loss_shaped(value, field="metric_id")
+        return _validate_metric_identifier(value, field="metric_id")
 
 
 class NotScoreableResult(BaseModel):
@@ -435,7 +447,7 @@ class NotScoreableResult(BaseModel):
     @field_validator("metric_id")
     @classmethod
     def _id_is_a_metric(cls, value: str) -> str:
-        return _reject_loss_shaped(value, field="metric_id")
+        return _validate_metric_identifier(value, field="metric_id")
 
     @model_validator(mode="after")
     def _verdict_names_a_failure(self) -> NotScoreableResult:

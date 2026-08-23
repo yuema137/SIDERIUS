@@ -48,6 +48,7 @@
       ],
       "additive_kwargs": {
         "metric_spec": "MetricSpec",
+        "task_render": "TunerTaskRender",
         "training_diagnosis": "TrainingDiagnosis"
       }
     },
@@ -95,6 +96,7 @@
       ],
       "additive_kwargs": {
         "metric_spec": "MetricSpec",
+        "task_render": "TunerTaskRender",
         "training_diagnosis": "TrainingDiagnosis"
       }
     }
