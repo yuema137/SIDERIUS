@@ -47,6 +47,7 @@ from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import active_physical_data_root
 from execute_tools.dataset_config import (
     resolve_dataset_profile,
+    tidmad_topology,
 )
 from execute_tools.deliverable_spec import (
     derive_tidmad_deliverable_spec,
@@ -64,6 +65,12 @@ from execute_tools.health_checks.schemas import (
 from execute_tools.metric_order import MetricOrder
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_helpers import build_score_table
+from execute_tools.task_data_path import (
+    LEGACY_TRIAL_ANCHOR_NAME,
+    TaskDataPathResolutionError,
+    declares_trial_anchoring,
+    require_bound_task_data_path,
+)
 from nodes.ml_hyperparameter_tune_agent.cli import (
     PARTIAL_CAMPAIGN_EXIT_CODE,
     build_agent_input,
@@ -382,6 +389,79 @@ _serialize_expert_advice = serialize_expert_advice
 # ---------------------------------------------------------------------------
 
 
+def _load_trial_anchor_map(*, composed: bool, data_root: str) -> dict | None:
+    """The trial-anchoring artifact for this run, or a NAMED absence.
+
+    Step 12 / PR-12bc B7, satellite (e). Extracted from ``run()`` rather than
+    inlined: the resolution has three cases and ``run()`` carries a §J branch
+    budget it had already spent.
+
+    Before B7 this was two lines in the orchestrator that joined a hardcoded
+    ``segment_anchors.json`` onto the run's physical root and raised
+    ``FileNotFoundError`` when it was absent — so a COMPOSED non-TIDMAD trial
+    run died naming a TIDMAD artifact it had never declared.
+
+    ```text
+    un-composed                -> regime A: the legacy artifact name, byte-identical
+    composed + declares it     -> the TASK's own artifact path
+    composed + declares none   -> None, with a named reason
+    composed + not resolvable  -> None, with a named reason
+    ```
+
+    ``None`` is an ALREADY LEGAL state, not a new one: ``execution.py:953``
+    guards the entire block that reads this, and that block is TIDMAD's
+    SCORING reference rather than a precondition of trial rounds (D-BC-15). A
+    consumer that genuinely needs an anchor map fails closed on its own; the
+    point is that nothing is GUESSED here.
+
+    Raises:
+        FileNotFoundError: A path was resolved and the artifact is not there —
+            the pre-existing behaviour, now naming whichever artifact the task
+            actually declared.
+    """
+    anchoring = None
+    if composed:
+        try:
+            anchoring = require_bound_task_data_path()
+        except TaskDataPathResolutionError:
+            # PR-12a's guard follows the INPUT FIELD even with the ContextVars
+            # unbound, so "the field says composed" does not imply "something
+            # is bound in this process".
+            anchoring = None
+
+    if anchoring is None and composed:
+        print(
+            "[Tuner] trial anchoring SKIPPED — this composed run has no "
+            "resolvable task data path to ask for one. Any consumer that needs "
+            "an anchor map will fail closed on its own; nothing is guessed here."
+        )
+        return None
+    if anchoring is None:
+        anchor_map_path = os.path.join(data_root, LEGACY_TRIAL_ANCHOR_NAME)
+    elif declares_trial_anchoring(anchoring):
+        # Positive branch on purpose: `declares_trial_anchoring` is a TypeGuard,
+        # and a TypeGuard narrows where it is TRUE. Written as
+        # `elif not declares(...)` the access below sat in an `else` the checker
+        # would not narrow — same behaviour, unprovable types.
+        anchor_map_path = anchoring.trial_anchor_path(data_root)
+    else:
+        print(
+            f"[Tuner] trial anchoring SKIPPED — task data path "
+            f"{anchoring.task_data_path_id!r} declares none, so there is no "
+            f"artifact to load. Any consumer that needs one will fail closed "
+            f"on its own; nothing is guessed here."
+        )
+        return None
+
+    if not os.path.exists(anchor_map_path):
+        raise FileNotFoundError(
+            f"Trial mode requires {os.path.basename(anchor_map_path)} at "
+            f"{anchor_map_path}. Run execute_tools/build_anchor_map.py first."
+        )
+    print("Trial mode enabled: anchor map loaded.")
+    return load_anchor_map(anchor_map_path)
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -599,12 +679,12 @@ class HyperparamTuningAgent:
         # let `validate_runtime_config` early-return believing the scope full
         # — skipping every partial-scope legality check — while this line
         # classified and stamped the run as partial.
-        resolved_data_scope = validate_runtime_config(agent_input, run_profile.dataset)
+        resolved_data_scope = validate_runtime_config(agent_input, run_profile.partition_count)
         # Step 07 PR 07b §3.3 row 5 — the one scale-sensitive rule that has no
         # honest generic reading. Refused here, on the same startup path and
         # before the same first LLM call as every other illegal operator flag.
         _validate_penalty_for_direction(agent_input, run_order)
-        scope_is_partial = resolved_data_scope != list(range(run_profile.dataset.num_files))
+        scope_is_partial = resolved_data_scope != list(range(run_profile.partition_count))
         health_checks_config_source = agent_input.health_checks_config
         # DS6b — build_run_invariants is the ONE shared path (tuner +
         # workflow) that materializes/hashes the effective config and then
@@ -675,7 +755,7 @@ class HyperparamTuningAgent:
         # any earlier and the check names would come from the shipped default
         # rather than from what this run will actually evaluate.
         run_task_render = build_tuner_task_render(
-            dataset=run_profile.dataset,
+            dataset=tidmad_topology(run_profile).dataset,
             model_io_contract=run_model_io,
             health_config=load_health_gates_config(agent_input.health_checks_config),
             efficiency_band_fraction=EFFICIENCY_BAND_FRACTION,
@@ -833,15 +913,10 @@ class HyperparamTuningAgent:
         # --- Pre-load anchor map if any round might use trial mode ---
         anchor_map_data: dict | None = None
         if trial_allowed:
-            anchor_map_path = os.path.join(sandbox.dirs["data"], "segment_anchors.json")
-            if os.path.exists(anchor_map_path):
-                anchor_map_data = load_anchor_map(anchor_map_path)
-            else:
-                raise FileNotFoundError(
-                    f"Trial mode requires segment_anchors.json at {anchor_map_path}. "
-                    "Run execute_tools/build_anchor_map.py first."
-                )
-            print("Trial mode enabled: anchor map loaded.")
+            anchor_map_data = _load_trial_anchor_map(
+                composed=agent_input.task_composition_ref is not None,
+                data_root=sandbox.dirs["data"],
+            )
 
         # Pre-load reference scores (raw_baseline + ground_truth per-file
         # logs, linear_sums, n_segments, and full-20 scalars). One disk
@@ -1071,7 +1146,7 @@ class HyperparamTuningAgent:
             run_invariants,
             existing_history,
             _lock_was_present,
-            dataset=run_profile.dataset,
+            partition_count=run_profile.partition_count,
         )
         consecutive_fails = 0
         # D-C6: set at the skip gate itself, so the feedback can state

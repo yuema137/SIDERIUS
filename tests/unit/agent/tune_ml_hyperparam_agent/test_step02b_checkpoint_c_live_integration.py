@@ -53,7 +53,13 @@ from agent.schemas.hyperparam_tuning import (
     StorageConfig,
 )
 from core.sandbox_executor import TidmadSandbox
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    TIDMAD_PROFILE,
+    DatasetProfile,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from tests.unit.agent.tune_ml_hyperparam_agent.test_tuning_agent import (
     FAKE_CONFIG_MANUAL,
@@ -113,9 +119,23 @@ class _AmbientConsulted(RuntimeError):
 
 
 def _contrast_profile():
-    profile = TIDMAD_PROFILE.model_copy(deep=True)
-    profile.dataset.num_files = CONTRAST_NUM_FILES
-    return profile
+    """TIDMAD with exactly one field changed.
+
+    ``model_copy`` deliberately, not ``model_validate``: this rung's
+    whole point is that EXACTLY ONE declared field differs, and a
+    smaller ``num_files`` makes TIDMAD's declared anchor/peek indices
+    out of range — re-declaring them too would vary three axes. Since
+    B2 ``model_copy`` understands the legacy section names and carries
+    ``partition_count`` along with ``num_files`` (it would otherwise
+    have gone silently stale).
+    """
+    return TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"num_files": CONTRAST_NUM_FILES}
+            )
+        }
+    )
 
 
 class _RealSandboxWithoutScoring(TidmadSandbox):
@@ -313,7 +333,7 @@ class TestCheckpointCLiveIntegration:
                 f"{name} carries {len(sample_set)} files; the bound contrast "
                 f"topology declares {CONTRAST_NUM_FILES}"
             )
-            assert len(sample_set) != TIDMAD_PROFILE.dataset.num_files, (
+            assert len(sample_set) != tidmad_topology(TIDMAD_PROFILE).dataset.num_files, (
                 f"{name} carries TIDMAD's file population — the production path "
                 "selected against the ambient topology"
             )

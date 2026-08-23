@@ -28,7 +28,10 @@ from typing import Any, ClassVar, Final
 
 import numpy as np
 
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import (
+    resolve_dataset_profile,
+    resolve_tidmad_topology,
+)
 from execute_tools.deliverable_spec import default_deliverable_storage
 from execute_tools.health_checks._composition import VALUE_SCALE_PARAMETER
 from execute_tools.health_checks._peek import peek_int8_at_channel
@@ -124,7 +127,7 @@ class SpectralPeakRatioCheck:
         cfg = config or {}
         scale = _value_scale(config)
         peek_samples = int(cfg.get("peek_samples", self._DEFAULT_PEEK_SAMPLES))
-        sampling_freq = float(resolve_dataset_profile().dataset.sampling_frequency)
+        sampling_freq = float(resolve_tidmad_topology().dataset.sampling_frequency)
 
         files = self._resolve_files(ctx, cfg)
         if not files:
@@ -241,5 +244,5 @@ class SpectralPeakRatioCheck:
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:
-            return list(range(resolve_dataset_profile().dataset.num_files))
+            return list(range(resolve_dataset_profile().partition_count))
         return []

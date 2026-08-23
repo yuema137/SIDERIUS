@@ -216,7 +216,7 @@ def _score_table(file_scores: list[float | None]) -> ScoreComparisonTable:
 def _num_declared_files() -> int:
     from execute_tools.dataset_config import resolve_dataset_profile
 
-    return resolve_dataset_profile().dataset.num_files
+    return resolve_dataset_profile().partition_count
 
 
 def _file_vector(base: float) -> list[float | None]:

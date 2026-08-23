@@ -1510,12 +1510,12 @@ def compute_expected_invariants(
     # `TIDMAD_PROFILE.dataset` IS that singleton, the same object. Reading
     # it through the resolver rather than importing the task singleton is
     # also what keeps this launcher clean for the F-12-6 census.
-    run_dataset = (
-        resolve_dataset_profile().dataset
+    run_partitions = (
+        resolve_dataset_profile().partition_count
         if run_composition is None
-        else run_composition.dataset_profile.dataset
+        else run_composition.dataset_profile.partition_count
     )
-    resolved_scope = run_scope.resolve(run_dataset)
+    resolved_scope = run_scope.resolve(run_partitions)
     invariants, _ = build_run_invariants(
         resolved_data_scope=resolved_scope,
         health_gate_enabled=args.health_gate_enabled,

@@ -124,7 +124,7 @@ class TestW2ShippedManifest:
         assert composition.metric.spec.id == "tidmad_denoising_score"
         assert composition.metric.spec.direction == "higher"
         assert composition.task_data_path.task_data_path_id == "tidmad"
-        assert composition.dataset_profile.dataset.num_files == 20
+        assert composition.dataset_profile.partition_count == 20
 
     def test_it_declares_no_secondaries(self):
         """TIDMAD's zero-secondary state is SEMANTIC emptiness (P2b §4.7): a

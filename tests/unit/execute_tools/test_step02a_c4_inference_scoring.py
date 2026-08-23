@@ -28,7 +28,11 @@ import numpy as np
 import pytest
 
 import execute_tools.scoring_utils as su
-from execute_tools.dataset_config import TIDMAD_PROFILE, DatasetProfile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    DatasetProfile,
+    tidmad_topology,
+)
 
 # Repo root from THIS file's location, per the portability rule — never an
 # absolute path, and never another clone.
@@ -43,7 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _profile_with(pattern: str) -> DatasetProfile:
     return TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                 update={"validation_file_pattern": pattern}
             )
         }
@@ -158,7 +162,7 @@ class TestNoDeliverableContractLeakage:
         the RAW input name; if a future edit pointed it at a denoised
         template, the scorer would read its own output as ground truth."""
         for i in (0, 7, 19):
-            assert "denoised" not in TIDMAD_PROFILE.dataset.validation_file_name(i)
+            assert "denoised" not in tidmad_topology(TIDMAD_PROFILE).dataset.validation_file_name(i)
 
     def test_the_deliverable_write_path_is_untouched_by_the_profile(self):
         """``create_abra_file`` writes the denoised artifact. C4 must not have

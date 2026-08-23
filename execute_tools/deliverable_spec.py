@@ -68,7 +68,11 @@ from contextvars import ContextVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
 
 # The TIDMAD deliverable stem, extracted VERBATIM from the seven production
 # sites it was inlined at. It is a frozen compatibility literal — files with
@@ -406,9 +410,9 @@ def derive_tidmad_deliverable_spec(dataset_profile: DatasetProfile) -> Deliverab
         # Step 11 C6 — a composed run's DECLARED naming when one is bound.
         naming=resolve_deliverable_naming(),
         storage=DeliverableStorage(
-            input_channel_group=dataset_profile.channels.input_channel,
-            target_channel_group=dataset_profile.channels.target_channel,
-            storage_dtype=dataset_profile.encoding.storage_dtype,
-            value_offset=dataset_profile.encoding.value_offset,
+            input_channel_group=tidmad_topology(dataset_profile).channels.input_channel,
+            target_channel_group=tidmad_topology(dataset_profile).channels.target_channel,
+            storage_dtype=tidmad_topology(dataset_profile).encoding.storage_dtype,
+            value_offset=tidmad_topology(dataset_profile).encoding.value_offset,
         ),
     )

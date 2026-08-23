@@ -45,7 +45,11 @@ from __future__ import annotations
 import pytest
 
 from core.campaign_artifacts import validate_experiment_completeness
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.health_checks.config import (
     clear_health_gates_config_cache,
     load_health_gates_config,
@@ -159,7 +163,7 @@ class TestTheContrastFixturesAreAtomic:
         ],
     )
     def test_exactly_one_declaration_differs(self, subcase, profile_fn, expected_axis):
-        differing = _diff_paths(TIDMAD_PROFILE.model_dump(), profile_fn().model_dump())
+        differing = _diff_paths(TIDMAD_PROFILE.to_wire(), profile_fn().to_wire())
         assert differing == [expected_axis], (
             f"{subcase} varies {differing}; it must vary {expected_axis!r} ALONE. "
             f"If one axis cannot be made meaningful, the declaration model is "
@@ -184,7 +188,7 @@ class TestTheContrastFixturesAreAtomic:
         here would re-answer 02b's question and drag in the Step-10
         residue §12.1 deliberately avoids."""
         for profile in (_c_anchor_profile(), _c_health_profile()):
-            assert profile.dataset == TIDMAD_PROFILE.dataset
+            assert tidmad_topology(profile).dataset == tidmad_topology(TIDMAD_PROFILE).dataset
 
 
 # ---------------------------------------------------------------------------

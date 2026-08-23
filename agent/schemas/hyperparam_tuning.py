@@ -34,7 +34,7 @@ from agent.schemas.training_diagnosis import TrainingDiagnosis
 # field did before. Same layering as proposal.py importing
 # core.hardware_context.
 from core.runtime_control.admission import AdmissionEnforcement
-from execute_tools.dataset_config import TIDMAD, DataScope, DatasetConfig
+from execute_tools.dataset_config import NUM_FILES, DataScope
 from execute_tools.evaluation_metric import MetricResult, MetricSpecField, NotScoreableResult
 from execute_tools.health_checks.schemas import PersistedHealthGateResult
 from execute_tools.training_history import TrainingHistory
@@ -2554,7 +2554,7 @@ class PlanOverridesError(ValueError):
 
 def validate_runtime_config(
     agent_input: HyperparamTuningInput,
-    dataset: DatasetConfig = TIDMAD,
+    partition_count: int = NUM_FILES,
 ) -> list[int]:
     """Dataset-resolved startup validation for a tuner run.
 
@@ -2569,9 +2569,11 @@ def validate_runtime_config(
 
     Args:
         agent_input: The validated tuner input.
-        dataset: The topology the DataScope resolves against. **Step 05a: the
-            tuner — the only production caller — supplies its run-bound
-            ``DatasetProfile.dataset`` explicitly.** The ``TIDMAD`` default is
+        partition_count: How many partitions the DataScope resolves against —
+            GENERIC IDENTITY since Step 12 / PR-12bc B2, where this function
+            was proven to read nothing but the partition count. **Step 05a:
+            the tuner — the only production caller — supplies its run-bound
+            ``DatasetProfile.partition_count`` explicitly.** The ``NUM_FILES`` default is
             the Regime-A compatibility adapter for callers that predate the
             profile transport, exactly like ``resolve_dataset_profile()``'s own
             fallback; it is not this function's authority.
@@ -2594,7 +2596,7 @@ def validate_runtime_config(
             ``health_gate_files``; single-file mode with ``file_index``
             outside the scope.
     """
-    resolved = agent_input.data_scope.resolve(dataset)
+    resolved = agent_input.data_scope.resolve(partition_count)
 
     # Ordering override: the scope-dependent half of the ordering contract
     # (the structural half ran in the schema validator). Checked for EVERY
@@ -2609,7 +2611,7 @@ def validate_runtime_config(
             override_file_order=agent_input.file_order_override,
         )
 
-    is_partial = resolved != list(range(dataset.num_files))
+    is_partial = resolved != list(range(partition_count))
     if not is_partial:
         return resolved
 

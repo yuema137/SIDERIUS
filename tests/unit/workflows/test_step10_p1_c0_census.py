@@ -292,6 +292,11 @@ class TestCensusBTransportEmissionSites:
                 elif node.func.id in {
                     "resolve_task_data_path",
                     "resolve_bound_task_data_path",
+                    # Step 12 / PR-12bc: the composed-caller variant, which
+                    # REFUSES the regime-A fallback. Tracked here too — a
+                    # resolve that this census could not see would be a
+                    # resolve the census does not constrain.
+                    "require_bound_task_data_path",
                 }:
                     resolves[rel] = resolves.get(rel, 0) + 1
 
@@ -306,6 +311,20 @@ class TestCensusBTransportEmissionSites:
             "agent/skills/evaluate_time_skill/wrapper.py": 1,
             # C1: the composition edge's own idempotent re-resolution.
             "workflows/task_composition.py": 1,
+            # Step 12 / PR-12bc. EXTENDED deliberately, never exempted by name
+            # (the Step-11 C9 rule). Two parent-side resolves were added, and
+            # both are asking the BOUND implementation for something only it
+            # can answer — which is the opposite of turning an id back into an
+            # implementation, the thing this census exists to forbid:
+            #
+            #   B5  scope_acquisition — the composed run's scopes must be
+            #       BUILT by the task; presence comes from the input
+            #       projection first, so an un-composed run never resolves.
+            #   B7  the tuner's trial-anchoring resolution — the task names
+            #       its own anchor artifact instead of the tuner inlining
+            #       TIDMAD's filename. Same presence-first rule.
+            "nodes/ml_hyperparameter_tune_agent/scope_acquisition.py": 1,
+            "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py": 1,
         }, f"an unexpected parent-side resolve appeared; found {resolves}"
 
     def test_the_workflow_itself_resolves_no_task_data_path(self):

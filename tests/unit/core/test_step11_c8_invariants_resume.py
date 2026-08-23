@@ -103,14 +103,14 @@ class TestResumeCarriesNoTaskToken:
 
     def test_the_scope_comes_from_the_runs_own_profile(self):
         src = RESUME.read_text(encoding="utf-8")
-        assert "resolve_dataset_profile().dataset.num_files" in src
+        assert "resolve_dataset_profile().partition_count" in src
 
     def test_it_matches_the_sibling_call_site(self):
         """The sibling was already composition-aware; the two now derive the
         same way, which is the point of removing the divergence.
         """
         sibling = (REPO_ROOT / "workflows" / "model_exploration.py").read_text(encoding="utf-8")
-        assert "_run_dataset = resolve_dataset_profile().dataset" in sibling
+        assert "_run_partitions = resolve_dataset_profile().partition_count" in sibling
 
 
 # ----------------------------------------------------------------------

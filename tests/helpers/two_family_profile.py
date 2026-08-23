@@ -22,7 +22,11 @@ from dataclasses import dataclass, field
 import h5py
 import numpy as np
 
-from execute_tools.dataset_config import TIDMAD_PROFILE, DatasetProfile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    DatasetProfile,
+    tidmad_topology,
+)
 
 DEFAULT_SEG_SIZE = 1000
 
@@ -45,10 +49,14 @@ class TwoFamilyFixture:
         return {str(i): list(range(self.segments_per_file)) for i in range(self.num_files)}
 
     def training_path(self, file_index: int) -> str:
-        return os.path.join(self.data_dir, self.profile.dataset.training_file_name(file_index))
+        return os.path.join(
+            self.data_dir, tidmad_topology(self.profile).dataset.training_file_name(file_index)
+        )
 
     def validation_path(self, file_index: int) -> str:
-        return os.path.join(self.data_dir, self.profile.dataset.validation_file_name(file_index))
+        return os.path.join(
+            self.data_dir, tidmad_topology(self.profile).dataset.validation_file_name(file_index)
+        )
 
 
 def make_two_family_profile(
@@ -66,7 +74,7 @@ def make_two_family_profile(
     inside the smaller index space, as any bound task with ``num_files``
     files would declare them.
     """
-    payload = TIDMAD_PROFILE.model_dump()
+    payload = TIDMAD_PROFILE.to_wire()
     payload["dataset"].update(
         {
             "psd_segment_length": psd_segment_length,
@@ -80,7 +88,7 @@ def make_two_family_profile(
 
 
 def _write_file(path: str, profile: DatasetProfile, n_samples: int, seed: int) -> None:
-    ch, enc = profile.channels, profile.encoding
+    ch, enc = tidmad_topology(profile).channels, tidmad_topology(profile).encoding
     rng = np.random.default_rng(seed)
     a = rng.integers(-128, 127, size=n_samples).astype(enc.storage_dtype)
     b = rng.integers(-128, 127, size=n_samples).astype(enc.storage_dtype)
@@ -118,9 +126,9 @@ def write_two_family_fixture(
         names: list[str] = []
         for i in range(num_files):
             name = (
-                profile.dataset.training_file_name(i)
+                tidmad_topology(profile).dataset.training_file_name(i)
                 if family == "training"
-                else profile.dataset.validation_file_name(i)
+                else tidmad_topology(profile).dataset.validation_file_name(i)
             )
             _write_file(os.path.join(data_dir, name), profile, n_samples, 1000 * salt + i)
             names.append(name)

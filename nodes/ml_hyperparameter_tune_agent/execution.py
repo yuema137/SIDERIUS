@@ -39,9 +39,9 @@ from agent.schemas.hyperparam_tuning import (
 from agent.schemas.score_table import ScoreComparisonTable
 from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
-from execute_tools.data_paths import TIDMAD_DATA_DIR
 from execute_tools.dataset_config import (
     ScopeViolationError,
+    tidmad_topology,
 )
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
@@ -854,6 +854,7 @@ def run_inference_scoring_health(
     run_metric = bindings.run_metric
     run_secondary_metrics = bindings.run_secondary_metrics
     run_name = bindings.run_name
+    run_profile = bindings.run_profile
     sandbox = bindings.sandbox
     workspace = bindings.workspace
     active_params = prepared.active_params
@@ -1051,8 +1052,21 @@ def run_inference_scoring_health(
                 # recording checks (pearson_dispersion, etc.).
                 # M8 §3.4: the check module stays task-agnostic;
                 # the tuner constructs the task-specific path here.
-                def _target_fn(i: int, _base: str = TIDMAD_DATA_DIR) -> str:
-                    return os.path.join(_base, f"abra_validation_{i:04d}.h5")
+                #
+                # Step 12 / PR-12bc B7, satellite (f). This used to join the
+                # IMPORT-TIME `TIDMAD_DATA_DIR` to an inline
+                # `abra_validation_{i:04d}.h5` literal, bypassing
+                # `validation_file_name` entirely — so a composed run peeked at
+                # TIDMAD's files, under TIDMAD's names, in TIDMAD's directory,
+                # whatever it had declared. Both halves now come from the run's
+                # own authorities: the COMPOSED physical root
+                # (`sandbox.dirs["data"]`, Step 11 C4) and the profile's
+                # declared validation-file template.
+                _peek_root = sandbox.dirs["data"]
+                _peek_names = tidmad_topology(run_profile).dataset
+
+                def _target_fn(i: int, _base: str = _peek_root) -> str:
+                    return os.path.join(_base, _peek_names.validation_file_name(i))
 
                 if agent_input.health_gate_enabled:
                     _gate_ids = (

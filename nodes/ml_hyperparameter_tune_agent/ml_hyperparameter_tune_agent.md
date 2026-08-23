@@ -129,6 +129,46 @@ Two properties follow, and both are pinned by tests:
 callers without a run-bound profile (`scripts/run_comparison.py`, the
 proposer pre-flight) continue to do.
 
+#### Task-built scopes on the composed path (Step 12 / PR-12bc, CAP-SCOPE)
+
+The two `build_sample_set()` calls above construct a **TIDMAD** `SampleSet`.
+That is correct for an un-composed run and is unchanged; it is not correct for
+a task whose data has a different shape, and it was the reason a composed
+contrast run could not train (Q-P56-1 = B, carried since Step 10).
+
+A task may now declare an **optional sibling capability**,
+`TaskScopeCapability` (`execute_tools/task_data_path.py`) — four methods
+(`build_training_scope`, `build_eval_scope`, `serialize_scope`,
+`deserialize_scope`). The frozen four-method `TaskDataPath` protocol is
+**unchanged**; a task that declares no scope capability behaves exactly as
+before.
+
+```text
+declared?  no  -> the legacy build_sample_set path, byte-identical
+           yes -> the tuner asks the TASK to build the attempt's scopes
+                  (nodes/ml_hyperparameter_tune_agent/scope_acquisition.py)
+                  -> the task serializes them
+                  -> the parent writes a scope ARTIFACT + sha256 digest
+                  -> the child verifies the digest, then asks the TASK to
+                     deserialize
+```
+
+The framework never inspects a scope's contents. What crosses the process
+boundary is the artifact **path and digest**, never raw scope JSON on argv;
+the parent writes the artifact atomically, and the child verifies **before**
+deserializing. `ScopeBuildRequest` carries only framework vocabulary —
+`round_kind`, `selection_strategy`, `portion`, `seed`, `max_samples`,
+`target_partitions`, `subset_ref` — plus one opaque per-attempt
+`task_parameters` payload the framework transports and never reads
+(`seg_size` travels there: it is the planner's per-attempt model choice, not
+framework vocabulary).
+
+Related: `DatasetProfile` now separates **generic identity**
+(`partition_count`, `anchor_selection_files`, `health_peek_files`) from an
+**opaque `topology`** dict the framework carries and never interprets
+(Q-12-4). TIDMAD's `dataset` / `channels` / `encoding` sections live inside
+that payload; the legacy wire form is still accepted and still emitted.
+
 ### Resource and time planning (Step-05b)
 
 The same run-binding rule now governs what the pre-flight gates are allowed
@@ -365,6 +405,19 @@ they change what its subprocesses read and what its records carry.
   the same authority the parent used, instead of unconditionally deriving
   TIDMAD's. There is no fallback: a metric that cannot be composed terminates
   the scoring subprocess rather than silently scoring with TIDMAD's.
+
+  **Step 12 / PR-12bc C3 widened the manifest transport to all three
+  children.** Step 11 emitted `--task_manifest` to scoring alone, which was
+  right for the METRIC and wrong for the task data path: training and
+  inference resolve a transported `--task_data_path_id` through the process
+  registry, and that registry holds only what the child's own bootstrap
+  imported — the three built-in implementations. An out-of-tree task therefore
+  resolved in the parent and was unresolvable in every child the parent
+  spawned. All three children now resolve through one authority
+  (`workflows.task_composition.resolve_child_task_data_path`), which composes
+  the declaration from the transported manifest when the id is not built in.
+  The emitter is still keyed on the binding, so an **un-composed** run's child
+  argv is unchanged.
 
 * **A host-RAM OOM is no longer invisible** (C2). `oom_host_ram` was produced
   by the sandbox and read by nobody, so a host-OOM training failure fell

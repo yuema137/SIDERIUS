@@ -184,10 +184,21 @@ class TestTheEmitterUsesTheNonFallingBackAccessor:
 
     def test_the_emitter_helper_is_empty_when_unbound_and_populated_when_bound(self, composition):
         from core.sandbox_executor import _task_data_path_argv
+        from execute_tools.task_data_path import (
+            active_task_data_path,
+            content_identity,
+        )
 
         assert _task_data_path_argv() == []
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
+            bound = active_task_data_path()
+            assert bound is not None
             assert _task_data_path_argv() == [
                 "--task_data_path_id",
                 "spectro_segmentation_v0",
+                # PR-12bc C2: the parent pins WHICH implementation it resolved,
+                # because an id alone re-resolves to whatever the child happens
+                # to have registered under that name.
+                "--task_data_path_identity",
+                content_identity(bound),
             ]

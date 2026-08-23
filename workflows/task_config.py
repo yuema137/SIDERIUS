@@ -74,9 +74,11 @@ def _dataset_num_classes() -> int | None:
     run. It must NEVER fall back to a literal, which would silently
     reintroduce TIDMAD's 256 as a default (§21).
     """
-    from execute_tools.dataset_config import resolve_dataset_profile
+    from execute_tools.dataset_config import (
+        resolve_tidmad_topology,
+    )
 
-    return resolve_dataset_profile().encoding.num_classes
+    return resolve_tidmad_topology().encoding.num_classes
 
 
 _BOUND_TASK_CONFIG: ContextVar[dict[str, Any] | None] = ContextVar(

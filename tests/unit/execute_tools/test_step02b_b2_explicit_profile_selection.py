@@ -28,7 +28,13 @@ from unittest.mock import patch
 import pytest
 
 from execute_tools import sample_set_builder
-from execute_tools.dataset_config import TIDMAD_PROFILE, DataScope
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    TIDMAD_PROFILE,
+    DataScope,
+    DatasetProfile,
+    tidmad_topology,
+)
 from execute_tools.sample_set_builder import build_sample_set
 
 # Equal to TIDMAD but a DISTINCT object, so a test cannot pass merely
@@ -122,8 +128,12 @@ class TestProfileIsConsumedNotRederived:
         independent `resolve_dataset_profile()` calls inside one build, any
         of which could disagree with the caller.
         """
-        narrow = TIDMAD_PROFILE.model_copy(deep=True)
-        narrow.dataset.segments_per_file = 7
+        # Built through the WIRE form: since B2 the topology is an opaque
+        # payload, so mutating a decoded VIEW would be discarded — the
+        # variant has to be declared, not patched onto a temporary.
+        narrow_wire = TIDMAD_PROFILE.to_wire()
+        narrow_wire["dataset"]["segments_per_file"] = 7
+        narrow = DatasetProfile.model_validate(narrow_wire)
         with _ambient_disabled():
             result = build_sample_set(is_trial=False, file_index=6, profile=narrow)
         assert len(result[6]) == 7, (

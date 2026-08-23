@@ -51,7 +51,7 @@ from unittest.mock import patch
 import pytest
 
 from core.sandbox_executor import TidmadSandbox
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import resolve_dataset_profile, resolve_tidmad_topology
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.train_engine_sandbox import TIDMADEpochDataset
@@ -250,7 +250,7 @@ class TestLiveConsumerReintsNumerically:
         # scraping digits out of the warning text: ".h5" carries a digit of
         # its own, so a digit-scrape reads file 4 as 45 and the order
         # assertion would compare nonsense.
-        dataset = resolve_dataset_profile().dataset
+        dataset = resolve_tidmad_topology().dataset
         by_name = {dataset.training_file_name(int(k)): int(k) for k in sample_set}
 
         visited = []

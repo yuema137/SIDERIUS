@@ -60,7 +60,11 @@ from torch.utils.data import DataLoader, Dataset
 
 import execute_tools.inference_single as inf
 import execute_tools.train_engine_sandbox as tes
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, get_config_class
 from ml_models.models_sandbox import BUILTIN_OUTPUT_TYPES, MODEL_REGISTRY
 
@@ -187,7 +191,7 @@ class _Int16Pairs(Dataset):
 def one_file_scope(tmp_path):
     """One tiny training file, two segments — enough for one streaming step."""
     rng = np.random.default_rng(0)
-    path = tmp_path / TIDMAD_PROFILE.dataset.training_file_name(4)
+    path = tmp_path / tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(4)
     n = 2 * SEG
     with h5py.File(path, "w") as f:
         ts = f.create_group("timeseries")
@@ -198,7 +202,11 @@ def one_file_scope(tmp_path):
             "timeseries", data=rng.integers(-128, 127, size=n, dtype=np.int8)
         )
     tiny = TIDMAD_PROFILE.model_copy(
-        update={"dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG})}
+        update={
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": SEG}
+            )
+        }
     )
     with bind_dataset_profile(tiny):
         yield str(tmp_path), {"4": [0, 1]}

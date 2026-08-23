@@ -86,7 +86,7 @@ class TestThreeTrackCompositionMatrix:
         assert composition.task_data_path_id == "tidmad"
         assert composition.metric.spec.id == "tidmad_denoising_score"
         assert composition.metric.spec.direction == "higher"
-        assert composition.dataset_profile.dataset.num_files == 20
+        assert composition.dataset_profile.partition_count == 20
         assert composition.interpretation_blocks is not None
         assert composition.task_description.strip()
 

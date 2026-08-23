@@ -201,7 +201,7 @@ def _build_rows(
     impacts: list[float | None] | None = None,
 ) -> list[PerFileRow]:
     rows: list[PerFileRow] = []
-    for i in range(resolve_dataset_profile().dataset.num_files):
+    for i in range(resolve_dataset_profile().partition_count):
         raw = reference.raw_per_file_log[i]
         gt = reference.gt_per_file_log[i]
         m = model_fv_log[i]
@@ -263,7 +263,7 @@ def _compute_weight_and_impact(
     project ever supports per-run-variable file shapes, the model's own
     n_segments must be threaded in instead.
     """
-    num_files = resolve_dataset_profile().dataset.num_files
+    num_files = resolve_dataset_profile().partition_count
     weights: list[float | None] = [None] * num_files
     impacts: list[float | None] = [None] * num_files
 
@@ -313,7 +313,7 @@ def _compute_weight_and_impact(
     # Impact_Score: log-space gain if file f were lifted to its gt ceiling,
     # holding the other sampled files fixed. Computed in linear-sum space
     # to match _aggregate_over_subset's grand-mean denominator.
-    num_files = resolve_dataset_profile().dataset.num_files
+    num_files = resolve_dataset_profile().partition_count
     n_per_file_n: list[int] = [0] * num_files
     n_per_file_linear_sum: list[float] = [0.0] * num_files
     for i in sampled_indices:

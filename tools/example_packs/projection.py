@@ -40,7 +40,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
 from execute_tools.evaluation_metric import derive_tidmad_metric_spec
 from tools.example_packs._common import repo_root, write_json, write_text
@@ -92,7 +96,7 @@ def project_identity(profile: DatasetProfile) -> dict[str, Any]:
     patterns the production data path formats. Anchor / peek file sets are
     already in the ``dataset_profile`` snapshot and are not repeated.
     """
-    dataset = profile.dataset
+    dataset = tidmad_topology(profile).dataset
     indices = list(range(dataset.num_files))
     return {
         "input_identity": "file_index",
@@ -123,7 +127,7 @@ def project_tidmad(root: Path | None = None) -> dict[str, dict[str, Any]]:
     contract = run_bound_model_io_contract(_task_config_path(root))
 
     projection: dict[str, dict[str, Any]] = {
-        "dataset_profile": profile.model_dump(mode="json"),
+        "dataset_profile": profile.to_wire(),
         "deliverable_spec": deliverable.model_dump(mode="json"),
         "metric_spec": metric.model_dump(mode="json"),
         "identity": project_identity(profile),

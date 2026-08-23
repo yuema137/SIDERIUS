@@ -34,6 +34,7 @@ from execute_tools.dataset_config import (
     TIDMAD_PROFILE,
     ChannelIdentity,
     DatasetProfile,
+    tidmad_topology,
 )
 
 SEG_SIZE = 8
@@ -56,8 +57,8 @@ def _flatten(dump: dict, prefix: str = "") -> dict[str, object]:
 
 
 def _changed_axes(profile: DatasetProfile) -> set[str]:
-    base = _flatten(TIDMAD_PROFILE.model_dump())
-    other = _flatten(profile.model_dump())
+    base = _flatten(TIDMAD_PROFILE.to_wire())
+    other = _flatten(profile.to_wire())
     assert base.keys() == other.keys(), "a rung must not add or drop declaration fields"
     return {k for k in base if base[k] != other[k]}
 
@@ -72,7 +73,7 @@ def _assert_atomic(profile: DatasetProfile, expected: set[str]) -> None:
 
 def _vary_dataset(**fields) -> DatasetProfile:
     return TIDMAD_PROFILE.model_copy(
-        update={"dataset": TIDMAD_PROFILE.dataset.model_copy(update=fields)}
+        update={"dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(update=fields)}
     )
 
 
@@ -83,7 +84,11 @@ def _vary_dataset(**fields) -> DatasetProfile:
 
 def _write(tmp_path, profile: DatasetProfile, file_index: int):
     """Write one training file exactly as the DECLARATION describes it."""
-    dataset, channels, enc = profile.dataset, profile.channels, profile.encoding
+    dataset, channels, enc = (
+        tidmad_topology(profile).dataset,
+        tidmad_topology(profile).channels,
+        tidmad_topology(profile).encoding,
+    )
     n = dataset.psd_segment_length
     payload_in = (np.arange(n, dtype=np.int64) % 251 - 125).astype(enc.storage_dtype)
     payload_tg = ((np.arange(n, dtype=np.int64) * 7) % 251 - 125).astype(enc.storage_dtype)
@@ -142,13 +147,13 @@ class TestRungA1FileCount:
     def test_the_index_space_follows_the_declaration(self):
         from execute_tools.dataset_config import DataScope
 
-        assert DataScope.default().resolve(self.PROFILE.dataset) == [0, 1, 2]
+        assert DataScope.default().resolve(self.PROFILE.partition_count) == [0, 1, 2]
 
     def test_an_index_outside_the_declared_count_is_rejected(self):
         from execute_tools.dataset_config import DataScope
 
         with pytest.raises(ValueError, match="out of range"):
-            DataScope(file_indices=[5]).resolve(self.PROFILE.dataset)
+            DataScope(file_indices=[5]).resolve(self.PROFILE.partition_count)
 
     def test_a_count_dependent_consumer_follows(self):
         """The score table's row rule is the consumer OD-02a-1 unblocked:
@@ -213,14 +218,14 @@ class TestRungA2FamilyTopology:
     def test_geometry_encoding_and_channels_are_untouched(self):
         """Parent §8 forbids A1/A2 from touching these. Stated as an
         assertion because the prohibition is binding."""
-        assert self.PROFILE.dataset.psd_segment_length == 10_000_000
-        assert self.PROFILE.dataset.segments_per_file == 200
-        assert self.PROFILE.channels == TIDMAD_PROFILE.channels
-        assert self.PROFILE.encoding == TIDMAD_PROFILE.encoding
+        assert tidmad_topology(self.PROFILE).dataset.psd_segment_length == 10_000_000
+        assert tidmad_topology(self.PROFILE).dataset.segments_per_file == 200
+        assert tidmad_topology(self.PROFILE).channels == tidmad_topology(TIDMAD_PROFILE).channels
+        assert tidmad_topology(self.PROFILE).encoding == tidmad_topology(TIDMAD_PROFILE).encoding
 
     def test_a_single_family_resolves_both_roles_to_one_file(self):
         """The load-bearing claim: nothing assumes two distinct families."""
-        dataset = self.PROFILE.dataset
+        dataset = tidmad_topology(self.PROFILE).dataset
         assert dataset.training_file_name(1) == "corpus_01.h5"
         assert dataset.validation_file_name(1) == "corpus_01.h5"
 
@@ -265,9 +270,9 @@ class TestRungBGeometry:
         """The divisors of 2048 in [100, 100_000] are not the divisors of
         10,000,000 — a consumer holding the frozen 36-entry list would be
         offering illegal sizes."""
-        legal = self.PROFILE.dataset.valid_segmentation_sizes()
+        legal = tidmad_topology(self.PROFILE).dataset.valid_segmentation_sizes()
         assert legal == [128, 256, 512, 1024, 2048]
-        assert legal != TIDMAD_PROFILE.dataset.valid_segmentation_sizes()
+        assert legal != tidmad_topology(TIDMAD_PROFILE).dataset.valid_segmentation_sizes()
         for size in legal:
             assert self.PSD % size == 0
 
@@ -299,8 +304,10 @@ class TestRungBGeometry:
     def test_no_ten_million_literal_survives_in_the_migrated_consumers(self):
         """Mutation-equivalent guard: a consumer that re-hardcoded 10,000,000
         would pass every parity test and fail only here."""
-        assert self.PROFILE.dataset.psd_segment_length != 10_000_000
-        assert 10_000_000 not in set(self.PROFILE.dataset.valid_segmentation_sizes())
+        assert tidmad_topology(self.PROFILE).dataset.psd_segment_length != 10_000_000
+        assert 10_000_000 not in set(
+            tidmad_topology(self.PROFILE).dataset.valid_segmentation_sizes()
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +326,9 @@ class TestRungDChannelIdentity:
 
     PROFILE = TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": 16}),
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": 16}
+            ),
             "channels": ChannelIdentity(input_channel="adc_raw", target_channel="adc_truth"),
         }
     )
@@ -336,7 +345,7 @@ class TestRungDChannelIdentity:
                 "channels.target_channel",
             },
         )
-        assert self.PROFILE.encoding == TIDMAD_PROFILE.encoding
+        assert tidmad_topology(self.PROFILE).encoding == tidmad_topology(TIDMAD_PROFILE).encoding
 
     def test_the_loader_reads_the_declared_channels(self, tmp_path):
         payload_in, payload_tg = _write(tmp_path, self.PROFILE, 4)
@@ -347,7 +356,7 @@ class TestRungDChannelIdentity:
             sample_set={"4": [0]},
             profile=self.PROFILE,
         )
-        fname = self.PROFILE.dataset.training_file_name(4)
+        fname = tidmad_topology(self.PROFILE).dataset.training_file_name(4)
         expected_in = payload_in.reshape(-1, SEG_SIZE)
         expected_tg = payload_tg.reshape(-1, SEG_SIZE)
         np.testing.assert_array_equal(dataset.idict[fname], expected_in)
@@ -361,7 +370,7 @@ class TestRungDChannelIdentity:
         passing — which is what makes this rung real evidence.
         """
         _write(tmp_path, self.PROFILE, 4)
-        path = tmp_path / self.PROFILE.dataset.training_file_name(4)
+        path = tmp_path / tidmad_topology(self.PROFILE).dataset.training_file_name(4)
         with h5py.File(path, "r") as handle:
             assert "channel0001" not in handle["timeseries"]
             assert "channel0002" not in handle["timeseries"]

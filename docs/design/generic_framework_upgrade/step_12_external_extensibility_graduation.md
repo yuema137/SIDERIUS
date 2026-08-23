@@ -2,13 +2,31 @@
 
 ## 0. Status, source anchors, authority
 
-**STEP 12 — REVISION 3 — OPERATOR APPROVED 2026-08-22. LIVE PARENT
-LEDGER, not an immutable freeze (operator clarification, 2026-08-22): the
-semantic contracts, PR topology, invariants and Gate classes below are the
-approved authority, and the parent is UPDATED as each child PR completes
-(the §11.1 checkpoint's ledger step). READY FOR PR-12A DETAILED DESIGN.
-IMPLEMENTATION MUST NOT BEGIN (each child implements only after ITS
-detailed design is approved).**
+**STEP 12 — REVISION 4 — LIVE PARENT LEDGER (operator-approved authority;
+not an immutable freeze — it is UPDATED as each child PR completes, the
+§11.1 checkpoint's ledger step).**
+
+**Rev 4 (2026-08-23) applies the operator's TOPOLOGY AMENDMENT: five PRs →
+four.** `12a → 12bc → 12d → 12e`, where former 12b and 12c become PHASE B
+and PHASE C inside **PR-12bc — Generic Task Boundary Closure** (§11.2). The
+PR boundary moved; **no semantic boundary, failure class, Gate or
+graduation requirement did**. Rev 4 also integrates §14a (the
+validation-economy ruling, reproduced from the PR-12a branch at `a401427b`
+— de-duplicated at §20a) and adds **§11.3** (the B→C internal checkpoint
+that replaces the removed merge boundary) and **§20a** (the mandatory
+post-12a-merge reconciliation).
+
+**PR-12a is MERGED (2026-08-23)** — PR #248, squash **`15554174`**; master
+now `3f45c450`. Planning for PR-12bc proceeded against a provisional 12a
+snapshot (V1 `a401427b` → V2 `99cb7853`) on the operator's 2026-08-23 ruling
+that architectural planning may proceed while only freeze/implementation
+authorization waits for landed master. **The mandatory post-merge
+reconciliation is now DISCHARGED (§20a): the landed delta against snapshot
+V2 is ONE comment-only line, all eight provisional assumptions are
+CONFIRMED, and PR-12bc is re-anchored on landed master.**
+
+**IMPLEMENTATION MUST NOT BEGIN** (each child implements only after ITS
+detailed design is approved AND §20a is discharged).
 
 Revision history: rev 1 (2026-08-22, anchor `c1caa609`, Step 11 unmerged) →
 operator review 2026-08-22 (verdict **NOT READY TO FREEZE**: architecture
@@ -41,9 +59,10 @@ per-commit checklist standard, and freezes before that child implements.
 | source anchor (rev 2) | **post-Step-11 master `e4cd5c18`** (= `origin/master`), main checkout `/home/yuema137/SIDERIUS`, branch `step12-external-extensibility`. Rev 1 was drafted at pre-merge `c1caa609` |
 | Step-11 status (rev 2) | **MERGED.** PR #247, squash `da2aa705` (merged 2026-08-22); final PR head `fd6bfccb`; **final executable head `88f190a1`**, exact-head CI `32562135614` SUCCESS; Gate-2 FINAL **PASS** at that head (Step-11 doc §11d). The rev-1 `[P11]` provisional facts are ALL reconciled against merged source — §0.1-A. Two new operator rulings recorded in Step-11's closeout, **R-11-13** (argv byte-parity wording) and **R-11-14** (C8 stamp ratified as a bounded contract correction), are absorbed there |
 | roadmap-row filename note | the roadmap row forward-referenced `step_12_task_composition_binding.md`; **corrected to this document in the rev-3 freeze commit**, together with the CAP-SCOPE-owner annotation and the D14 seam-wording amendment (Q-12-2 = A) |
-| operator questions (rev 3) | **0 OPEN.** Q-12-1 RULED = five PRs (§11) · Q-12-2 RULED = A (sibling `TaskScopeCapability` + artifact/digest transport, §5.5) · **Q-12-3 RATIFIED** (operator, 2026-08-22): fail-closed guard when the optional legacy lit-review path is explicitly enabled on a composed non-legacy run; full generic lit-review prompts = named post-roadmap debt; the Step-12 external graduation does NOT claim optional lit-review support (§0.1-B item 8) · **Q-12-4 RATIFIED AT PARENT LEVEL** (operator, 2026-08-22): the generic-topology principle is FROZEN; the concrete `DatasetProfile` topology contract is intentionally delegated to the PR-12b detailed design, which must source-audit and freeze it before 12b implements (§5.5) |
-| PR decomposition | **FIVE PRs — RULED (Q-12-1)**: 12a → 12b → 12c → 12d → 12e (§11) |
-| Gate disposition | per-PR (§14): 12a Gate 1 REQUIRED + Gate 2 REQUIRED (default 2×1) · 12b Gate 2 REQUIRED · 12c Gate 2 REQUIRED (minimal real-subprocess bootstrap, no training) · 12d Gate 2 REQUIRED (Pets + DAVIS, both out-of-tree-loaded) · 12e Gate 2 REQUIRED (fourth task 2×1) — five distinct real failure classes, no giant terminal Gate |
+| operator questions (rev 3) | **0 OPEN.** Q-12-1 RULED = five PRs (§11) · Q-12-2 RULED = A (sibling `TaskScopeCapability` + artifact/digest transport, §5.5) · **Q-12-3 RATIFIED** (operator, 2026-08-22): fail-closed guard when the optional legacy lit-review path is explicitly enabled on a composed non-legacy run; full generic lit-review prompts = named post-roadmap debt; the Step-12 external graduation does NOT claim optional lit-review support (§0.1-B item 8) · **Q-12-4 RATIFIED AT PARENT LEVEL** (operator, 2026-08-22): the generic-topology principle is FROZEN; the concrete `DatasetProfile` topology contract is intentionally delegated to the **PR-12bc PHASE-B** design, which must source-audit and freeze it before Phase B implements (§5.5) |
+| PR decomposition | **FOUR PRs — T5, operator ruling 2026-08-23 (§11.2)**: `12a → 12bc → 12d → 12e`. Supersedes Q-12-1's five-PR T2 **as the PR boundary only**; former 12b/12c become PHASE B / PHASE C inside PR-12bc, keeping separate semantics, separate evidence and separate Gates |
+| Gate disposition | per-PR (§14): 12a Gate 1 + Gate 2 (2×1) · **12bc TWO lightweight real Gates — `G-12bc-B` (scope transport; stops at the child's scope consumption) and `G-12bc-C` (out-of-tree identity in a real child; no training)** · 12d Gate 2 (Pets + DAVIS, both out-of-tree-loaded) · 12e Gate 2 (fourth task 2×1) — six real witnesses, five distinct failure classes, no giant terminal Gate |
+| status of PR-12a | **MERGED 2026-08-23.** PR #248, squash **`15554174`**; final executable head **`ec30bd65`** (where G-12a-2 ran); final PR head **`d4bf899d`**, exact-head CI **32615196536 SUCCESS**; post-merge sync `3f45c450` = current master. **G-12a-1 PASS · G-12a-2 PASS** (attempt 4 canonical). Every `PROVISIONAL_12A_ASSUMPTION` is **CONFIRMED against landed source** — §20a |
 
 Authority order used throughout: repository/git/source truth → frozen designs
 00–11 → merged implementation/tests 00–11 (Step 11 merged 2026-08-22; during
@@ -91,7 +110,7 @@ fact re-verified against merged source:
 | item | verdict at `e4cd5c18` |
 |---|---|
 | `deliverable:` manifest family + `RunTaskComposition.deliverable_naming` | **HELD** |
-| `--task_manifest` child re-composition (`denoising_score_single.py:108,212-216`; `compose_metric_from_manifest` / `compose_deliverable_naming_from_manifest`) | **HELD** — §7's 12c mechanism stands on it |
+| `--task_manifest` child re-composition (`denoising_score_single.py:108,212-216`; `compose_metric_from_manifest` / `compose_deliverable_naming_from_manifest`) | **HELD** — §7's Phase-C mechanism stands on it |
 | `bind_run_task_composition(…, physical_data_root=…)` (`task_composition.py:1223`) + `CompositionDataRootMissing` fail-closed | **HELD** |
 | `bind_task_manifest_path` / `bind_composition_fingerprint` ContextVars (`task_composition.py:1040` area) | **HELD** |
 | C8 additive default-`None` fingerprint stamps (`agent/schemas/hyperparam_tuning.py:550,2852`) | **HELD — now operator-RATIFIED as R-11-14** (bounded contract correction; the process lesson — a schema expansion is never implementation discretion — is recorded there and binds every Step-12 child) |
@@ -116,8 +135,8 @@ all applied in this revision:**
 | 8 | Q-12-3 approval withheld pending source evidence — **evidence now recorded**: literature review is opt-in and OFF by default at all three layers (`_chain_common.sh:192` `ML_LIT_REVIEW_ENABLED=0`; `run_one_iteration.py:2021-2032` CLI > YAML `enabled` > False, fail-safe False on unreadable YAML; `configs/lit_review_config.yaml:34` top-level `enabled: false`) — NOT a load-bearing node of the normal composed chain. Disposition re-submitted for ratification: fail-closed guard when explicitly enabled on a composed non-legacy run + named post-roadmap genericization debt + the graduation contract explicitly not claiming lit review for external tasks. **RATIFIED (operator, 2026-08-22, rev-3 closeout)** — this does not weaken the "normal composed workflow" graduation claim, because the path is not default/load-bearing | §0.1-B, §20 |
 | 9 | the explicit final validation matrix (§18a); per-PR terminal discipline (§12 preamble); post-Step-12 cross-system graduation audit (12e scope) | §18a, §12 |
 
-Validation strengthenings from the same review, applied: 12b's anonymous
-fourth-shaped scope-capability fixture (§12-12b) · 12d requires BOTH tracks
+Validation strengthenings from the same review, applied: Phase B's anonymous
+fourth-shaped scope-capability fixture (§12-PR-12bc) · 12d requires BOTH tracks
 loaded via out-of-tree `file:` refs (§12-12d) · 12e's restore proven by
 process provenance + negative controls EXECUTED, not unit-only (§12-12e).
 Process wording: the 12e mechanism-gap rule now reads
@@ -141,12 +160,12 @@ its owning PR (§11):
 
 | # | capability | owner |
 |---|---|---|
-| G1 | the composed path resolves **zero** implicit TIDMAD semantics (values or prompt science) | 12a |
-| G2 | task-owned training/eval **scope** is constructed by the task, transported generically, and rehydrated in the child (CAP-SCOPE (a)–(f)) | 12b |
-| G3 | an out-of-tree package's plugins are loadable in the **parent and in every required child**, run-scoped, leak-free | 12c |
+| G1 | the composed path resolves **zero** implicit TIDMAD semantics (values or prompt science) | **12a — implementation complete, PR #248 open (§0)** |
+| G2 | task-owned training/eval **scope** is constructed by the task, transported generically, and rehydrated in the child (CAP-SCOPE (a)–(f)) | **12bc / PHASE B** |
+| G3 | an out-of-tree package's plugins are loadable in the **parent and in every required child**, run-scoped, leak-free | **12bc / PHASE C** |
 | G4 | Pets and DAVIS cross the **same real subprocess training/inference/scoring boundary** with no task-specific infra edits (contrast L4) | 12d |
 | G5 | a genuinely out-of-tree **fourth task** registers and runs end-to-end with a machine-checked zero-core-edit census | 12e |
-| G6 | resume / invariants / fingerprints are correct for external packages (content-pinned, relocation-equal, fail-closed on mismatch) | 12a/12c/12e |
+| G6 | resume / invariants / fingerprints are correct for external packages (content-pinned, relocation-equal, fail-closed on mismatch) | **12a** (composed lock/fingerprint/resume chain — its G-12a-2 witness) · **12bc / PHASE C** (external-plugin content identity: pinned parent-side, verified child-side, refused on divergence) · **12e** (external-package restore across a real restart, relocation equality, edited-plugin refusal) |
 
 Two kinds of openness stay deliberately distinguished (§22.24.2, frozen):
 **task-plugin semantics** must be externally extensible with zero core edits;
@@ -219,10 +238,10 @@ marker is retained as provenance only, no longer as a provisional flag.
 
 | subsystem | semantic owner | selection / binding | crosses process? | unknown ref | classification | anchor |
 |---|---|---|---|---|---|---|
-| DatasetProfile / topology / value encoding | `execute_tools/dataset_config.py` | manifest `dataset_profile.config` → `load_dataset_profile` | yes (`--dataset_profile_json`) | fail-closed when supplied-broken | **EXT for declaration; CENTRAL for topology semantics** — the schema itself requires TIDMAD 1-D topology (`psd_segment_length`, `segments_per_file`, `abra_*.h5` patterns, `dataset_config.py:42-61`); Pets/DAVIS fixtures FABRICATE those values | CAP-SCOPE (d) → 12b |
+| DatasetProfile / topology / value encoding | `execute_tools/dataset_config.py` | manifest `dataset_profile.config` → `load_dataset_profile` | yes (`--dataset_profile_json`) | fail-closed when supplied-broken | **EXT for declaration; CENTRAL for topology semantics** — the schema itself requires TIDMAD 1-D topology (`psd_segment_length`, `segments_per_file`, `abra_*.h5` patterns, `dataset_config.py:42-61`); Pets/DAVIS fixtures FABRICATE those values | CAP-SCOPE (d) → 12bc-B |
 | ModelIOContract | `agent/schemas/model_io_contract.py` | external JSON, argv-bound `--model_io_json` | yes | fail-closed | **EXT** (debt-audit #6 SATISFIES; unchanged since) | — |
-| TaskDataPath (4-method seam) | `execute_tools/task_data_path.py` | manifest `task_data_path` `file:`/`module:` → registry | **id only** (`--task_data_path_id`, emitted `core/sandbox_executor.py:852-875`, consumed via `resolve_transported_task_data_path`) | fail-closed both ends (`task_data_path.py:294-300`) | **EXT in parent; IN-TREE in children** — children bootstrap exactly the 3 built-ins (`train_engine_sandbox.py:31-32`, `inference_single.py:26-27`, `denoising_score_single.py:174-176`; all three carry "out-of-tree … Step 12 owns it") | 12c |
-| task-owned scope | the 3 impl modules (`TidmadScope` `tidmad_data_path.py:297`, `PetsScope` `pets_data_path.py:115`, `DavisScope` `davis_data_path.py:86`) | direct Python instantiation only | **NO** — no serialization, no registry, no shared base (Step-11 §4 Q-11-4 table re-verified) | n/a — wrong-task scope raises `TypeError` in-process (`tidmad_data_path.py:327-334`) | **CAP-SCOPE** | 12b |
+| TaskDataPath (4-method seam) | `execute_tools/task_data_path.py` | manifest `task_data_path` `file:`/`module:` → registry | **id only** (`--task_data_path_id`, emitted `core/sandbox_executor.py:852-875`, consumed via `resolve_transported_task_data_path`) | fail-closed both ends (`task_data_path.py:294-300`) | **EXT in parent; IN-TREE in children** — children bootstrap exactly the 3 built-ins (`train_engine_sandbox.py:31-32`, `inference_single.py:26-27`, `denoising_score_single.py:174-176`; all three carry "out-of-tree … Step 12 owns it") | 12bc-C |
+| task-owned scope | the 3 impl modules (`TidmadScope` `tidmad_data_path.py:297`, `PetsScope` `pets_data_path.py:115`, `DavisScope` `davis_data_path.py:86`) | direct Python instantiation only | **NO** — no serialization, no registry, no shared base (Step-11 §4 Q-11-4 table re-verified) | n/a — wrong-task scope raises `TypeError` in-process (`tidmad_data_path.py:327-334`) | **CAP-SCOPE** | 12bc-B |
 | DeliverableSpec / DeliverableNaming | `execute_tools/deliverable_spec.py` | derived (`derive_tidmad_deliverable_spec`); [P11] optional manifest `deliverable:` → `DeliverableNaming` | reconstructed from `--dataset_profile_json`; [P11] scoring child re-composes from `--task_manifest` | validated by the contract's own type | **IN-TREE pre-Step-11; [P11] EXT** — but the TUNER-side spec acquisition is still unconditional TIDMAD (`ml_hyperparameter_tune_agent.py:537`) | 12a re-audit |
 | TrainingObjective (losses) | `models_format_sandbox.py` + `SIDERIUS_LOSS_DIRS` | env two-tier resolution, `loss_type="custom"` | yes (`subprocess_env` sets `SIDERIUS_LOSS_DIRS`; child reads `agent_generated/_loss_loader.py:148`) | fail-closed | **EXT** (the Level-2 existence proof, debt-audit §3.4) | — |
 | ValidationDiagnostic / TrainingDiagnosis | `execute_tools/training_history.py`, `agent/schemas/training_diagnosis.py` | derived from R2/R3 histories | R3 runs inside the training child | open `objective_kind: str`, zero task vocabulary | **EXT** (SATISFIES; unchanged) | — |
@@ -233,16 +252,16 @@ marker is retained as provenance only, no longer as a provisional flag.
 | proposer / implementor / planner PROMPT science | hardcoded framework literals | none — no task-blocks mechanism for these nodes (zero `task_blocks` outside `agent/schemas/interpretation.py:818`) | n/a | n/a | **CENTRAL** — `denoising` role prose, `[B,256,T]`/256-bin contract semantics, score-table protocol (`ml_model_proposal_agent.py:336,391,393,430`; `ml_model_implementor.py:426,635`; `agent/prompts.py:66` hardcodes `` `denoising_score` `` beside the parameterized `{METRIC_IDENTITY_LINE}`) | 12a (G1) |
 | interpretation task blocks | 09b `InterpretationTaskBlocks` | manifest `interpretation_blocks:`; workflow site composition-aware (`model_exploration.py:2197-2201`) | n/a | fail-closed loader | **EXT** (the pattern 12a extends to the proposer) | — |
 | tuner policy inputs (order, thresholds) | `MetricOrder` + spec stamps | from the bound spec | spec stamped on outputs | refuse-to-rank semantics | **EXT** | — |
-| tuner sample selection / eligibility | `planning.py:397-413` `build_sample_set` unconditional; trial anchors `ml_hyperparameter_tune_agent.py:795-803`; health peek paths `execution.py:42` + TIDMAD file naming | none — TIDMAD-shaped | TIDMAD ingredients as `--sample_set_json` etc. | n/a | **CAP-SCOPE (b)(e)(f)** | 12b |
-| runtime measurement scope | `agent/skills/evaluate_time_skill/wrapper.py:379` builds `TidmadScope` against the **bound** data path | none | in-process | wrong-task scope would `TypeError` at runtime | **CAP-SCOPE — a consumer the Step-11 audit did not list** (verified: `resolve_bound_task_data_path().training_dataset(TidmadScope(...))`) | 12b |
-| task composition root | `workflows/task_composition.py` | `--task_composition` on chain + module CLI + `run_one_iteration.py` (P5+P6 W1) | manifest path [P11] to scoring child only | every branch fail-closed; unknown manifest keys refused | **EXT** for its 7 families | 12c extends to all children |
-| run-scoped registries/bindings | ContextVars via `bind_run_task_composition` ExitStack (5 binders) | launcher edge | n/a | `verify_composition_is_bound` refuses half-composed runs | **EXT**; but plugin REGISTRATION is process-global with no content ledger (§8 finding) | 12c |
+| tuner sample selection / eligibility | `planning.py:397-413` `build_sample_set` unconditional; trial anchors `ml_hyperparameter_tune_agent.py:795-803`; health peek paths `execution.py:42` + TIDMAD file naming | none — TIDMAD-shaped | TIDMAD ingredients as `--sample_set_json` etc. | n/a | **CAP-SCOPE (b)(e)(f)** | 12bc-B |
+| runtime measurement scope | `agent/skills/evaluate_time_skill/wrapper.py:379` builds `TidmadScope` against the **bound** data path | none | in-process | wrong-task scope would `TypeError` at runtime | **CAP-SCOPE — a consumer the Step-11 audit did not list** (verified: `resolve_bound_task_data_path().training_dataset(TidmadScope(...))`) | 12bc-B |
+| task composition root | `workflows/task_composition.py` | `--task_composition` on chain + module CLI + `run_one_iteration.py` (P5+P6 W1) | manifest path [P11] to scoring child only | every branch fail-closed; unknown manifest keys refused | **EXT** for its 7 families | 12bc-C extends to all children |
+| run-scoped registries/bindings | ContextVars via `bind_run_task_composition` ExitStack (5 binders) | launcher edge | n/a | `verify_composition_is_bound` refuses half-composed runs | **EXT**; but plugin REGISTRATION is process-global with no content ledger (§8 finding) | 12bc-C |
 | plugin discovery (models) | `ml_models/plugin_loader.py` + `SIDERIUS_PLUGIN_DIRS` | env / per-run dir; mirrored files | yes (`subprocess_env`) | **FAIL-OPEN**: unknown `PLUGIN_OUTPUT_TYPE` silently coerced to `"classifier"` (`plugin_loader.py:80-87`); loader accepts 3 types, validator 2 (`ml_code_validator_agent.py:368`) — **issue #234, verified OPEN** | **EXT with a graduation-relevant defect** | 12a (#234) |
 | plugin discovery (losses) | `SIDERIUS_LOSS_DIRS` | env union | yes | fail-closed | **EXT** | — |
 | backend adapters | §22.24.2 | n/a | n/a | n/a | Python only, by design | NLB (doc only) |
 | data-root execution binding | master: import-time `TIDMAD_DATA_DIR` (`data_paths.py:20-60`); [P11] `bind_physical_data_root` + argv to all 3 children + `CompositionDataRootMissing` fail-closed | [P11] launcher `--data_dir` via `bind_run_task_composition(…, physical_data_root=…)` | [P11] yes | [P11] fail-closed for composed | **CENTRAL on master → [P11] EXT after Step 11** | 12a pin |
 | subprocess env/bootstrap | `core/subprocess_env.py` (3 vars, task-free) | spawner-passed | yes | n/a | **EXT**; two env-less spawners on master (`isolated_probe.py:482-487`, `probe_subprocess.py:336-341`) are [P11] fixed by C1 | 12a pin |
-| child-process plugin availability (composition families) | none | none | **NO** for out-of-tree `file:` refs — child registry never learns them | fail-closed (named id error) | **CENTRAL gap — the 12c core** | 12c |
+| child-process plugin availability (composition families) | none | none | **NO** for out-of-tree `file:` refs — child registry never learns them | fail-closed (named id error) | **CENTRAL gap — the 12c core** | 12bc-C |
 | resume / invariants / fingerprints | `core/run_invariants.py` (11-key `_CANONICAL`, `task_composition_fingerprint` equality-enforced at the workspace lock; omitted-when-None) + `core/resume.py` | stamped at chain level | n/a | `_reject_legacy_runtime_lock` precedent; [P11] R-11-9 3-case record ingress | **EXT**, with residues: the `resume.py` TIDMAD import (REMOVED by Step-11 C8 — closed), **`run_one_iteration.py:1499` `run_scope.resolve(TIDMAD)` (verified live on merged master)**, and F-P56-3 (tuner's per-model `build_run_invariants` at `ml_hyperparameter_tune_agent.py:605-625` passes neither fingerprint nor health binding; narrowed per §0.1-A) | 12a |
 | plugin-registry lifecycle layering | `workflows/model_exploration.py:924-967` `_add_plugin_to_registries`; **`core/resume.py:74` module-level private import** (verified) forcing the cycle workarounds at `model_exploration.py:2883-2887` | n/a | process-local, 3 registries | n/a | **CENTRAL layering debt — named Step-12 input (09.5 Q2 = B)** | 12a |
 | CLI / composition-root entrypoints | `run_chain.sh` / `_chain_common.sh` / `run_one_iteration.py` / module CLI | `--task_composition` (W1) | n/a | malformed manifest → crash-marked manifest + exit 1 (`run_one_iteration.py:1919-1934`) | **EXT** | — |
@@ -258,7 +277,7 @@ places: **(1)** the CAP-SCOPE family (scope + profile topology + trial
 anchoring + peek paths + measurement scope), **(2)** out-of-tree availability
 in children, **(3)** composed-path TIDMAD residues (three invariant sites +
 the tuner deliverable acquisition + prompt science + #234), **(4)** pack/L4
-completion and the final external proof. That is the 12a/12b/12c/12d/12e
+completion and the final external proof. That is the 12a/12bc-B/12bc-C/12d/12e
 partition.
 
 ---
@@ -277,8 +296,8 @@ re-implemented from the 2026-08-18 table.
 |---|---|---|---|
 | #1 task-config run-scoped binding | editing tracked YAML was the extension path | `bind_task_config` ContextVar override inside `load_task_config` (`workflows/task_config.py:82-84,173-176`); composed runs bind it via the manifest `task_config:` section (P1) | **CLOSED BY STEP 10** for composed runs; the un-composed default-path read is the bounded regime-A adapter and stays |
 | #2 ambient TIDMAD fallbacks on the composed path | `resolve_dataset_profile() or TIDMAD_PROFILE` etc. | profile/metric/task-config/data-path all bound at the edge (P1); W4 reference-science guard keyed on composition PRESENCE (`ml_hyperparameter_tune_agent.py:839`); [P11] data root fail-closed | **PARTIALLY CLOSED — four named residues STILL BLOCK STEP 12**: (R1) `run_one_iteration.py:1499` `run_scope.resolve(TIDMAD)` with import at `:56` — the composed pre-flight resolves the workspace lock's `resolved_data_scope` against TIDMAD topology (outside every census surface; **the candidate's delta to this file is only `physical_data_root=` threading — verified**); (R2) ~~tuner deliverable-spec acquisition unconditional~~ — **RE-CLASSIFIED by PR-12a's source audit (A-12a-1) and CLOSED for its NAMING half by Step 11 C6**: `bind_run_task_composition` enters `bind_deliverable_naming` when the task declared one and `derive_tidmad_deliverable_spec` resolves the BOUND value internally, so the tuner's single acquisition site already yields the declared naming with no branch. PR-12a C3 PINS that (differential + reachability, `test_step12_pr12a_c3_deliverable_pin.py`) and corrects the stale source comment; the STORAGE half stays profile-derived and is **Q-12-4 / PR-12b's**, not 12a's; (R3) **F-P56-3** — the tuner's per-model `build_run_invariants` (`:605-625`) passes neither `task_composition_fingerprint` nor `task_health_binding`, so a composed run's per-model lock records `None` and (gates on) re-materializes the effective health config under `LEGACY_OMITTED`. *Rev-2 narrowing (§0.1-A)*: Step 11's F-11-C10-a fix re-pointed both output/record stamps at the run-scoped authority, so the lock's `None` no longer feeds any stamp — what remains for 12a is the lock's own recorded honesty plus the `task_health_binding` kwarg; (R4) the ambient `active_task_data_path()` read pattern — the tuner consumes composition state ambiently instead of on its input (roadmap-carried "→ Step 12") |
-| #5 TaskDataPath external loading + transport | module-tail imports; `transport_argv` dormant | loading: manifest `file:`/`module:` (P1, out-of-tree-proven); transport: id emitted when composed (P1 C3), in-tree ids resolve in all 3 children (P5+P6 W3) | **parent CLOSED; child out-of-tree half STILL BLOCKS STEP 12** (12c) |
-| #12 tuner regime-A `derive_tidmad_*` | the one true central-edit site | metric: composed-aware with bounded legacy fallback, self-flagged "removing it belongs to Step 12" (`:548-556`); deliverable: the call site is unconditional but resolves the BOUND naming internally (Step 11 C6) | **metric half CLOSED for composed runs** (fallback stays for regime A by design); **deliverable NAMING half CLOSED BY STEP 11**, pinned by PR-12a C3 (A-12a-1); storage half → PR-12b (Q-12-4) |
+| #5 TaskDataPath external loading + transport | module-tail imports; `transport_argv` dormant | loading: manifest `file:`/`module:` (P1, out-of-tree-proven); transport: id emitted when composed (P1 C3), in-tree ids resolve in all 3 children (P5+P6 W3) | **parent CLOSED; child out-of-tree half STILL BLOCKS STEP 12** (12bc / PHASE C) |
+| #12 tuner regime-A `derive_tidmad_*` | the one true central-edit site | metric: composed-aware with bounded legacy fallback, self-flagged "removing it belongs to Step 12" (`:548-556`); deliverable: the call site is unconditional but resolves the BOUND naming internally (Step 11 C6) | **metric half CLOSED for composed runs** (fallback stays for regime A by design); **deliverable NAMING half CLOSED BY STEP 11**, pinned by PR-12a C3 (A-12a-1); storage half → PR-12bc PHASE B (Q-12-4) |
 | #13 metric `plugin_ref` + adapters | no registry, no loader | `_compose_metric`: declaration JSON + `file:`/`module:` implementation ref, five fail-closed branches, out-of-tree-proven (P1/P2b); [P11] scoring child re-composes via `compose_metric_from_manifest` | **CLOSED** (parent by Step 10; child [P11] by Step 11 — 12a pins both) |
 | #14 first-class objective-kind promotion procedure | undocumented | unchanged | **STILL OPEN — documentation-only obligation**, owned by 12e's operator docs |
 | issue #234 (output-type fail-open + 3-vs-2 vocabulary) | filed, "must be resolved before external composition acceptance" | **both defects verified live**: silent coercion `plugin_loader.py:80-87`; `_LEGAL_OUTPUT_TYPES` 2-member `ml_code_validator_agent.py:368` vs loader's 3 | **STILL BLOCKS STEP 12** → 12a. It is the canonical graduation falsifier: external model plugin with a novel/malformed output declaration must refuse, never silently train as a classifier |
@@ -294,7 +313,7 @@ re-implemented from the 2026-08-18 table.
 | id | finding | anchor | owner |
 |---|---|---|---|
 | **F-12-1** | the launcher's composed pre-flight resolves `resolved_data_scope` against the `TIDMAD` constant (R1 above) — for a composed task with ≠20 files the pre-flight lock value and the workflow's profile-derived value (`model_exploration.py:1803-1804`) can disagree | `run_one_iteration.py:56,1499` | 12a |
-| **F-12-2** | the runtime-measurement path builds `TidmadScope` against whatever data path is bound — a composed contrast run reaching time estimation raises `TypeError` in production | `agent/skills/evaluate_time_skill/wrapper.py:379` | 12b |
+| **F-12-2** | the runtime-measurement path builds `TidmadScope` against whatever data path is bound — a composed contrast run reaching time estimation raises `TypeError` in production | `agent/skills/evaluate_time_skill/wrapper.py:379` | 12bc-B |
 | **F-12-3** | **stale-instance / fresh-digest divergence**: `_compose_task_data_path` re-executes a `file:` plugin, digests the NEW bytes into the fingerprint, then returns the PREVIOUSLY REGISTERED instance when the id already exists (`workflows/task_composition.py:546-547`) — in one process, a second composition after a plugin edit runs the OLD code under the NEW identity. The health family already solved exactly this with its run-scope ledger (`_plugin_binding.py:381-398`) | `task_composition.py:498-560` | 12c (§8) |
 | **F-12-4** | parent/child same-authority divergence window: [P11] the scoring child re-composes the metric from the manifest **bytes at spawn time**; nothing cross-checks the child's composition against the parent's pinned `semantic_fingerprint` — a manifest/declaration edited mid-run scores with different semantics under the parent's identity | [P11] candidate `denoising_score_single.py` `--task_manifest` | 12c (falsifier §17-H) |
 | **F-12-5** | the planner prompt hardcodes `` `denoising_score` `` **beside** the parameterized `{METRIC_IDENTITY_LINE}` — a composed run's goal line names the wrong metric while the identity line names the right one | `agent/prompts.py:66` (verified) | 12a |
@@ -728,32 +747,109 @@ twice):
 | **T2** | **five PRs: 12a → 12b → 12c → 12d → 12e** | **RULED — Q-12-1 (operator review, 2026-08-22).** Rev 1's objection to a standalone 12c ("no independent real failure class") is OVERRULED with a better Gate shape: 12c's own failure classes — **F-12-3** stale-instance/fresh-digest divergence and **F-12-4** parent/child semantic divergence — are REAL process-boundary classes provable by a **minimal real-subprocess bootstrap Gate with NO training** (out-of-tree plugin → parent load + identity pin → real child spawn → child load → digest/integrity check). Splitting 12c from 12d is failure-class ISOLATION, not evidence duplication: 12c proves loading/identity; 12d proves real contrast data through training/inference/scoring |
 | T3 | four PRs (12c folded into 12d) | rev 1's recommendation — **SUPERSEDED** by the Q-12-1 ruling |
 | T4 | three PRs (12b absorbs 12c+12d) | REJECTED: it fuses distinct failure classes and produces the mega-PR pattern Step 10 was decomposed to avoid |
+| **T5** | **four PRs: 12a → 12bc → 12d → 12e**, where 12bc carries former 12b and 12c as two first-class INTERNAL phases | **RULED — §11.2 (operator ruling, 2026-08-23). THE ACTIVE TOPOLOGY.** Supersedes T2 as the PR boundary only |
 
-**RULED sequence and dependencies (Q-12-1 = five PRs):**
+### 11.2 TOPOLOGY AMENDMENT — T2 → T5 (operator ruling, 2026-08-23)
+
+**Recorded as an amendment, not a silent rewrite.** T2 above (five PRs) was
+the frozen ruling of the 2026-08-22 operator review and stands as the
+historical decision; it is SUPERSEDED for execution by T5, on the operator's
+explicit authorization. §14a.2 anticipated exactly this and deliberately
+keyed itself on failure classes rather than PR names so that neither this
+amendment nor §14a invalidates the other.
+
+**What changed:** the PR boundary between former 12b (CAP-SCOPE) and former
+12c (external child loading / identity / lifecycle) is removed. They become
+**PR-12bc — Generic Task Boundary Closure**, with `PHASE B` and `PHASE C`
+inside it.
+
+**What did NOT change — and must never be read as changed:**
 
 ```text
-PR-12a  composed-path closure & re-audit   Gate 1 REQUIRED · Gate 2 REQUIRED
-   ↓                                       (default 2×1 composed TIDMAD — §12-12a/§14)
-PR-12b  CAP-SCOPE                          Gate 2 REQUIRED (composed TIDMAD through the
-   ↓                                       generic scope-artifact path)
-PR-12c  external loading closure           Gate 2 REQUIRED (minimal real-subprocess
-   ↓                                       bootstrap + integrity; NO training)
-PR-12d  contrast subprocess closure        Gate 2 REQUIRED (Pets AND DAVIS bounded real
-   ↓                                       chains, BOTH via out-of-tree file: refs)
-PR-12e  out-of-tree graduation             Gate 2 REQUIRED (fourth task 2×1 + census
-                                           + executed negative controls)
+PR boundary        !=   validation boundary
+one PR             !=   one Gate
+combining B and C  !=   collapsing their semantic or failure-class boundaries
+```
+
+* B and C keep **separate semantic ownership**, separate deterministic
+  evidence, separate adversarial falsifiers and **two independently
+  justified real Gates** (`G-12bc-B`, `G-12bc-C`, §14).
+* Former C is **NOT** merged into 12d. 12d remains the separate Pets +
+  DAVIS real contrast execution closure, and it does not re-prove B or C
+  (§14a.4).
+* No final Step-12 graduation requirement is weakened, removed or deferred.
+  §18's zero-core-edit criterion, §18a's matrix rows and 12d/12e's
+  acceptance standards are untouched.
+
+**Why (operator rationale):** implementation continuity and autonomous
+execution efficiency. B and C touch the same generic task boundary and
+adjacent child-process surfaces, and **PR-12d depends on BOTH** before
+contrast execution can be meaningful — so an operator merge/re-anchor
+boundary between them buys a review cycle without buying failure isolation
+(which the two separate Gates already provide).
+
+**What replaces the removed merge boundary:** a **hard internal B → C
+reconciliation checkpoint** (§11.3), which is AUTOMATIC — it is not an
+operator stop.
+
+**RULED sequence and dependencies (T5, active):**
+
+```text
+PR-12a   composed-path closure & re-audit   Gate 1 REQUIRED · Gate 2 REQUIRED
+   ↓                                        (2×1 composed TIDMAD — §12-12a/§14)
+PR-12bc  Generic Task Boundary Closure      TWO lightweight real Gates:
+   │       PHASE B — CAP-SCOPE                G-12bc-B (scope transport, real child,
+   │       ─── internal checkpoint §11.3 ───             stop at the witness)
+   │       PHASE C — external loading         G-12bc-C (out-of-tree identity in a
+   ↓                                                    real child; no training)
+PR-12d   contrast subprocess closure        Gate 2 REQUIRED (Pets AND DAVIS bounded
+   ↓                                        real chains, BOTH via out-of-tree file: refs)
+PR-12e   out-of-tree graduation             Gate 2 REQUIRED (fourth task 2×1 + census
+                                            + executed negative controls)
 ```
 
 Each PR: independent semantic authority, independently reviewable contract,
-its own Gate boundary, real implementation risk. Each gets its own child
-detailed design (frozen per the kickoff protocol) before implementation; this
-parent freezes the split, the contracts, and the acceptance shape.
+real implementation risk. Each gets its own child detailed design (approved
+per the kickoff protocol) before implementation; this parent owns the split,
+the contracts, and the acceptance shape.
 
-### 11.1 Inter-PR reconciliation checkpoint (FROZEN — operator, 2026-08-22)
+### 11.3 The B → C internal checkpoint (replaces the removed merge boundary)
+
+Because T5 removes an inter-PR merge/re-anchor boundary, PR-12bc carries a
+**hard internal checkpoint** in its place. It is **AUTOMATIC**: if it passes,
+implementation continues directly into Phase C with no operator stop.
+
+PR-12bc implementation MUST NOT proceed from Phase B to Phase C until its
+implementation ledger proves all ten:
+
+```text
+ 1. Phase-B deterministic acceptance complete
+ 2. Phase-B real Gate (G-12bc-B) PASS
+ 3. exact Phase-B checkpoint SHA recorded
+ 4. Phase-B structural delta PASS (§10 budgets)
+ 5. all Phase-B decisions resolved and recorded in the Decision Ledger
+ 6. the concrete Q-12-4 DatasetProfile topology contract FROZEN and evidenced
+ 7. the scope artifact/digest ABI is stable for the remainder of PR-12bc
+ 8. no unconditional TIDMAD scope construction remains on the composed path
+    where Phase B owns it
+ 9. no hidden task/scope identity dispatch introduced (census green)
+10. Phase-C assumptions RE-AUDITED against the ACTUAL Phase-B implementation
+    rather than against pre-B source
+```
+
+Item 10 is the whole point: it is §11.1's discipline applied *inside* one PR.
+
+### 11.1 Inter-PR reconciliation checkpoint (FROZEN — operator, 2026-08-22; scope updated by §11.2)
 
 The dominant terminal-phase risk is not a wrong initial design but a later
-child implementing against stale assumptions ("12a merged, 12b still holds
+child implementing against stale assumptions ("12a merged, 12bc still holds
 three-day-old source beliefs"). Therefore, BINDING on every Step-12 child:
+
+**Under T5 (§11.2) this checkpoint applies at three boundaries —
+`12a → 12bc`, `12bc → 12d`, `12d → 12e`.** The former `12b → 12c` boundary is
+replaced by the INTERNAL checkpoint of §11.3, which enforces the same
+discipline without a merge. The `12a → 12bc` instance is specified concretely
+in §20a (post-12a-merge reconciliation).
 
 ```text
 After each Step-12 child PR merges, before the NEXT child design freezes:
@@ -845,7 +941,24 @@ closing checklist stage.
 8. **Commit boundary.** No scope machinery, no child-loading machinery, no
    pack completion. Strictly the composed-path closure + re-audit.
 
-### PR-12b — CAP-SCOPE
+### PR-12bc — Generic Task Boundary Closure (T5; former 12b + 12c)
+
+**One PR, two first-class phases.** Child design:
+`step_12_external_extensibility_graduation/pr_12bc_generic_task_boundary_closure.md`.
+The phases below keep the semantic ownership, the deterministic evidence and
+the two real Gates former 12b and 12c each had; only the PR boundary between
+them is gone (§11.2), replaced by the internal checkpoint of §11.3.
+
+**Combined capability.** *A composed task owns how its training/evaluation
+scopes are constructed; the framework transports those task-owned scopes
+generically across the real subprocess boundary under the frozen artifact +
+digest discipline; every required child can load an out-of-tree task
+implementation under an identity pinned by the parent; and the
+registration/binding lifecycle cannot leak or reuse stale implementation
+content across runs.* It does NOT prove Pets/DAVIS real training L4 (12d) and
+does NOT introduce the fourth task (12e).
+
+#### PHASE B — CAP-SCOPE
 
 1. **Goal.** G2: the frozen (a)–(f) family (+ (g) F-12-2) closes as ONE
    capability with one design, per §5.5; composed runs construct, transport
@@ -859,10 +972,10 @@ closing checklist stage.
    authority; (g) measurement-scope acquisition; `--data_scope` refusal on
    composed non-TIDMAD.
 3. **Implementation plan.** `[ ]` — child design
-   `pr_12b_cap_scope.md` (C0 differential baselines incl. the
-   composed-TIDMAD scope-equality oracle → protocol + request carrier →
-   TIDMAD impl → tuner acquisition → transport + child rehydration →
-   satellites (d)(e)(f)(g) → censuses → Gate 2).
+   `pr_12bc_generic_task_boundary_closure.md`, Phase-B spine (B0
+   differential baselines incl. the composed-TIDMAD scope-equality oracle →
+   protocol + request carrier → TIDMAD impl → tuner acquisition → transport
+   + child rehydration → satellites (d)(e)(f)(g) → censuses → B-Gate).
 4. **Validation.** Deterministic: scope round-trip per task; wrong-task
    payload refused; malformed payload refused; tampered scope artifact
    (bytes ≠ transported digest) refused before deserialization;
@@ -899,10 +1012,13 @@ closing checklist stage.
    existing composed value) — the oracle must cover trial AND formal rounds;
    seg_size/planner-knob provenance must not fork into two authorities.
 7. **Verification.** `[ ]` pending.
-8. **Commit boundary.** No out-of-tree child loading (12c), no real contrast
-   spawns (12d), no pack completion.
+8. **Commit boundary.** Phase B ends at the §11.3 internal checkpoint. No
+   out-of-tree child loading (Phase C), no real contrast spawns (12d), no
+   pack completion.
 
-### PR-12c — External loading closure (child bootstrap + registration lifecycle)
+#### ─── §11.3 B → C INTERNAL CHECKPOINT (automatic; ten proofs) ───
+
+#### PHASE C — External loading / identity / lifecycle
 
 1. **Goal.** G3: an out-of-tree package's composition plugins resolve in
    every required child under a PARENT-PINNED identity, and registration
@@ -915,7 +1031,9 @@ closing checklist stage.
    the child design); the transactional/run-scoped registration overlay
    closing F-12-3 (§8); cwd-independence of child resolution.
 3. **Implementation plan.** `[ ]` — child design
-   `pr_12c_external_loading_closure.md`.
+   `pr_12bc_generic_task_boundary_closure.md`, Phase-C spine (C0
+   loading/lifecycle differential baselines → parent-pinned child bootstrap
+   → transactional lifecycle → censuses → C-Gate).
 4. **Validation.** Deterministic: the child-resolution truth table
    (registered-with-matching-identity / composable-from-manifest / neither →
    named refusal; **hit-with-divergent-content → refusal**); overlay
@@ -938,7 +1056,8 @@ closing checklist stage.
    proceeds "because the id resolved".
 7. **Verification.** `[ ]` pending.
 8. **Commit boundary.** No contrast-task execution, no pack completion, no
-   fourth task.
+   fourth task. PR-12bc ends here: terminal adversarial + structural +
+   docs sweep, then ONE exact-final-PR-head CI (§12 preamble).
 
 ### PR-12d — Contrast subprocess closure (Pets + DAVIS L4)
 
@@ -1076,7 +1195,14 @@ re-checked for anchored-symbol blindness in the same commit.
 
 ---
 
-## 14. Gate plan (Phase 9) — five failure-class families across five PRs (12a carries two bounded runs)
+## 14. Gate plan (Phase 9) — six real witnesses across FOUR PRs (T5; 12a and 12bc each carry two)
+
+> **RE-KEYED by §11.2 (topology amendment, 2026-08-23).** `G-12b` and
+> `G-12c` are renamed **`G-12bc-B`** and **`G-12bc-C`** and both now live
+> inside PR-12bc. **Their failure classes, witnesses, dispositions and
+> costs are IDENTICAL to the rows below** — combining the PR changed the
+> owner column and nothing else. Neither Gate may be dropped, merged into
+> the other, deferred to 12d, or replaced by deterministic evidence.
 
 > **AMENDED by §14a (operator ruling, 2026-08-23).** The FAILURE CLASSES
 > below are unchanged and none is removed. What changed is COST: `G-12b`
@@ -1091,17 +1217,26 @@ re-checked for anchored-symbol blindness in the same commit.
 |---|---|---|---|---|---|---|---|
 | G-12a-1 | 12a | composed prompts carry the TASK's science (and legacy bytes unchanged) — real-model reading, the 09b/P3 class | real LLM calls, bounded probe set (~≤6 calls); no training | model quality, training, GPU | n/a (prompt-level) | probe harness re-reads persisted prompts | minutes |
 | G-12a-2 | 12a | the composed run's LOCK / FINGERPRINT / RESUME chain — pre-flight scope resolution, per-model lock kwargs, threaded composition, plugin-lifecycle authority — across a REAL restore | ONE composed-TIDMAD real chain, **default 2 iter × 1 round** (real training/inference/scoring) | model quality, HealthGate PASS, score magnitude, convergence | 2×1 default — the witness is carried STATE (iteration 2 ingests iteration 1's lock/records); downgrade only via the child design's explicit semantic-latency analysis | quality subsystems isolated by existing switches | ≤ ~45 min |
-| G-12b | 12b | the real subprocess boundary transports + rehydrates a task-built scope (spawn/artifact/digest/sentinel path under the new mechanism) | ONE composed-TIDMAD real chain: real training + inference + scoring, 1 iter × 1 round | model quality, HealthGate PASS, score magnitude, convergence | 1×1 — the witness (child consumed the transported scope artifact, digest-verified) is produced and consumed inside one iteration | same | ≤ ~30 min |
-| G-12c | 12c | **out-of-tree loading + identity integrity under a REAL spawn** — parent pins identity, child loads, digest verifies; tampered plugin/manifest refuses (F-12-3/F-12-4 made real) | out-of-tree plugin file → real child spawn through the production spawner → child-side load + integrity witness. **NO training, NO GPU** | training, scoring, model quality, contrast data | single spawn cycle — loading/identity has no iteration semantics | n/a | minutes |
-| G-12d | 12d | REAL contrast data crosses the same execution boundary (spawn/rlimit/sentinel/cleanup) with task-correct data shapes | Pets real chain 1×1 AND DAVIS real chain 1×1, **BOTH with out-of-tree `file:`-loaded data paths** | accuracy/MSE quality, HealthGate PASS (Pets collapse acceptable), convergence | 1×1 each — single-iteration witness; two tracks because §22.13 corpus breadth applies at the newly-executable seam | same as G-12b | ≤ ~1 h total |
+| **G-12bc-B** | **12bc / PHASE B** | the real subprocess boundary transports + rehydrates a task-built scope (spawn/artifact/digest path under the new mechanism) | **§14a-re-derived LIGHTWEIGHT witness**: parent builds scope → atomic artifact + digest → REAL production child spawn → child verifies digest → child resolves the correct `TaskDataPath` → child deserializes → the real dataset/materialization/training entry CONSUMES that scope. **STOPS THERE** — inference and scoring exercise no part of scope transport and are NOT required | model quality, HealthGate PASS, score magnitude, convergence, **inference, scoring, a complete workflow** | one spawn cycle — the class ends at the child's scope consumption | quality subsystems isolated by existing switches | minutes |
+| **G-12bc-C** | **12bc / PHASE C** | **out-of-tree loading + identity integrity under a REAL spawn** — parent pins identity, child loads, digest verifies; tampered plugin/manifest refuses (F-12-3/F-12-4 made real) | out-of-tree plugin file → real child spawn through the production spawner → child-side load + integrity witness. **NO training, NO GPU** | training, scoring, model quality, contrast data | single spawn cycle — loading/identity has no iteration semantics | n/a | minutes |
+| G-12d | 12d | REAL contrast data crosses the same execution boundary (spawn/rlimit/sentinel/cleanup) with task-correct data shapes | Pets real chain 1×1 AND DAVIS real chain 1×1, **BOTH with out-of-tree `file:`-loaded data paths** | accuracy/MSE quality, HealthGate PASS (Pets collapse acceptable), convergence | 1×1 each — single-iteration witness; two tracks because §22.13 corpus breadth applies at the newly-executable seam | same as G-12bc-B | ≤ ~1 h total |
 | G-12e | 12e | the WHOLE graduation chain for an unknown external package, including fingerprint-pinned restore | fourth-task real chain 2×1 (real LLM, small real training) + EXECUTED negative controls (removal, edited-plugin, relocation) + process-provenance restore evidence | quality, convergence, benchmark movement | **2×1** — iteration 2 must READ iteration 1's committed state through a real process restart with external plugin digests (semantic latency, the F-P56-4 rule) | same | ≤ ~1 h |
 
 No giant terminal Gate; each Gate's row is re-quoted against
 `docs/gates/gate_testing_standard.md` in its child design immediately before
 launch, with the readiness packet (SHA, command, taxonomy) written first.
-Gate-1 dispositions for 12b/12c/12d/12e are "NOT REQUIRED expected", each pinned
+Gate-1 dispositions for 12bc/12d/12e are "NOT REQUIRED expected", each pinned
 by an executable prompt-parity test, and re-derived in the child design if
 any prompt byte moves.
+
+**Anti-collapse rule for the combined PR (§11.2).** PR-12bc carries TWO
+real Gates. It is explicitly NOT acceptable to (a) run only one of them,
+(b) fold B's witness into C's spawn cycle or vice-versa, (c) defer either
+to G-12d, or (d) substitute deterministic evidence for either. They test
+different things: B asks *"did the right SCOPE arrive and get consumed?"*,
+C asks *"did the right IMPLEMENTATION arrive, under a verified identity?"*.
+A single red signal covering both would leave the failure un-isolated —
+the exact cost §14a.4 refuses to pay.
 
 ---
 
@@ -1312,14 +1447,14 @@ already owned by standing guards are extensions, not duplicates.
 |---|---|---|---|
 | A identity-leak | plant `if task == "external_task"` / `if scope_kind == "pets"` / a fourth-task import in production; plant a scope-class mapping table in core | dispatch census RED per shape; §18 census RED | 12a/12e censuses |
 | B registration | unknown plugin id; unknown/missing `file:`; duplicate id; malformed impl (missing protocol method); non-`EvaluationMetric` implementation; **unknown `PLUGIN_OUTPUT_TYPE`** | named `TaskCompositionError`/`TaskDataPathRegistrationError`/refusal — never a default, never `"classifier"` | 12a (#234) + existing branches, pinned |
-| C process-boundary | parent resolves, child cannot (manifest transport severed — remove the argv hop); plugin dir omitted from child env; child launched from non-repo cwd; sequential external runs in one process; **registry hit with divergent content** | child fails closed naming BOTH facts; cwd-independent resolution; overlay refusal; identity-mismatch refusal | 12c |
-| D scope | valid external scope round-trip; malformed payload; unknown impl id; wrong task's scope payload fed to an impl; capability absent; **tampered scope artifact (bytes ≠ transported digest)**; missing artifact file | codec fail-closed; `TypeError` pairing rule preserved; composition-time named refusal; **digest mismatch refuses before deserialization** | 12b |
+| C process-boundary | parent resolves, child cannot (manifest transport severed — remove the argv hop); plugin dir omitted from child env; child launched from non-repo cwd; sequential external runs in one process; **registry hit with divergent content** | child fails closed naming BOTH facts; cwd-independent resolution; overlay refusal; identity-mismatch refusal | 12bc-C |
+| D scope | valid external scope round-trip; malformed payload; unknown impl id; wrong task's scope payload fed to an impl; capability absent; **tampered scope artifact (bytes ≠ transported digest)**; missing artifact file | codec fail-closed; `TypeError` pairing rule preserved; composition-time named refusal; **digest mismatch refuses before deserialization** | 12bc-B |
 | E resume/state | same-task resume (legal); cross-task resume (refused); edited external plugin bytes (refused); package relocated (legal); pre-composition legacy record into composed run (refused, [P11] R-11-9) | per-row exact behaviour | 12a/12e |
 | F authority | metric declared externally while a planted core TIDMAD re-derivation is restored (mutation: re-inline `derive_tidmad_metric` in the scoring child) | the [P11] C5 pin / 12a pin turns RED | 12a |
 | F authority | deliverable naming declared while the shipped default is force-returned | naming parity census RED | 12a |
 | F authority | external data root missing/placeholder | `CompositionDataRootMissing` ([P11]) pinned | 12a pin |
 | F authority | secondary metric value injected into an ordering expression | ordering scanner / observational census RED | standing (P2a/P2b) |
-| G cross-task sequentiality | TIDMAD → Pets → external → DAVIS composed in ONE process (deterministic, pseudo-execution): assert zero binding leakage after each unwind, MID-RUN roster/content change refuses, and the NEXT run's different roster is LEGAL (§8 two-phase overlay — both halves falsified) | ContextVars empty between runs; in-run refusal named; post-unwind heterogeneous registration succeeds | 12c |
+| G cross-task sequentiality | TIDMAD → Pets → external → DAVIS composed in ONE process (deterministic, pseudo-execution): assert zero binding leakage after each unwind, MID-RUN roster/content change refuses, and the NEXT run's different roster is LEGAL (§8 two-phase overlay — both halves falsified) | ContextVars empty between runs; in-run refusal named; post-unwind heterogeneous registration succeeds | 12bc-C |
 | H mutation (transport hops) | sever each hop one at a time: scope artifact writer / ref-argv emitter / digest emitter; manifest argv emitter; child re-composition call; child identity check; fingerprint stamp; per-model lock kwargs; **the F-12-4 window** (edit the manifest or plugin between bind and spawn) | ≥1 named test RED per severed hop; the F-12-4 edit refuses at the child integrity check | 12b/12c/12d |
 | anti-vacuity meta | every census plant asserted count==1, cache-cleared, baseline re-run (mutation-proof hygiene) | recorded per plant | all |
 
@@ -1388,13 +1523,13 @@ graduation audit re-verifies it at the final head.
 |---|---|---|---|---|
 | composition resolves + binds (parent) | standing (P1 suite) | det (12d manifests) | det (12d manifests) | det (12e) + G-12e |
 | in-process execution semantics | standing suites | det + retained L3 runner claims until their 12d transfer | same | det (12e fixtures) |
-| real subprocess execution | G-12a-2 (lock/resume chain, full) + **G-12b** (scope path — **lightweight**, stops at child scope consumption per §14a) | **G-12d** (full) | **G-12d** (full) | **G-12e** (full) |
+| real subprocess execution | G-12a-2 (lock/resume chain, full) + **G-12bc-B** (scope path — **lightweight**, stops at child scope consumption per §14a) | **G-12d** (full) | **G-12d** (full) | **G-12e** (full) |
 | child discovery — in-tree ids | standing (W3 census) | standing | standing | n/a |
-| child discovery — out-of-tree + identity integrity | **G-12c** | G-12d (`file:` ref) | G-12d (`file:` ref) | G-12e |
-| scope build / serialize / artifact / rehydrate | det oracle (12b) + G-12b | det (12b) + G-12d | det (12b) + G-12d | det (12b **anonymous fourth-shaped fixture**) + G-12e |
-| full composed workflow (real LLM) | G-12a-1/-2, G-12b | G-12d | G-12d | G-12e (2×1) |
+| child discovery — out-of-tree + identity integrity | **G-12bc-C** | G-12d (`file:` ref) | G-12d (`file:` ref) | G-12e |
+| scope build / serialize / artifact / rehydrate | det oracle (12bc-B) + G-12bc-B | det (12bc-B) + G-12d | det (12bc-B) + G-12d | det (12bc-B **anonymous fourth-shaped fixture**) + G-12e |
+| full composed workflow (real LLM) | G-12a-1/-2 | G-12d | G-12d | G-12e (2×1) |
 | resume — same task | **G-12a-2** (real restore) + det | det | det | **G-12e** (real restore, process provenance) |
-| resume — cross-task / edited plugin / relocation | det (12a/12c) | det | det | **EXECUTED controls in G-12e** — deterministic or C-class subprocess witness, never one training chain per control (§14a.4) |
+| resume — cross-task / edited plugin / relocation | det (12a/12bc-C) | det | det | **EXECUTED controls in G-12e** — deterministic or C-class subprocess witness, never one training chain per control (§14a.4) |
 | failure modes (unknown ref · missing package · malformed/tampered scope · wrong pairing · missing data root · bootstrap failure · cross-run leakage) | det — every §17 row RED-proven | det | det | det + G-12e negative control |
 | architecture (zero identity branches · zero central catalog · zero core edit · one owner per declaration · no new god function) | §13.1 censuses + §10 structural deltas, at EVERY PR head | same | same | §18 census at G-12e + post-Step-12 audit |
 | compatibility (legacy byte-parity per R-11-13 · locks · prompts · records · CLI) | det parity fixtures, at every PR head | n/a (no legacy Pets path exists) | n/a | n/a |
@@ -1406,7 +1541,7 @@ graduation audit re-verifies it at the final head.
 | disposition | items |
 |---|---|
 | **BLOCKS STEP 12 (prerequisite)** | none. Step-11 merge is a sequencing prerequisite for freeze (§20), not a debt. **No Step 11.5 exists or is created** |
-| **MUST FIX INSIDE STEP 12** | CAP-SCOPE (a)–(g) incl. Q-12-4 + the scope artifact/digest transport → 12b · child out-of-tree availability + the transactional run-scoped overlay + F-12-3/F-12-4 under the §7 frozen invariant → 12c · composed-path residues F-12-1/R2/F-P56-3(narrowed, §0.1-A)/ambient-threading + census hole F-12-6 → 12a · issue #234 → 12a · D16 → 12a · `resume.py:74` layering (09.5 Q2 = B) → 12a · proposer/implementor/planner prompt-science family + F-12-5 → 12a · pack L4 completion + governance-pin relaxation → 12d · objective-kind promotion procedure DOCS (#14) + the §18a matrix execution + the post-Step-12 graduation audit → 12e |
+| **MUST FIX INSIDE STEP 12** | CAP-SCOPE (a)–(g) incl. Q-12-4 + the scope artifact/digest transport + **F-12bc-1 (`validate_sample_set` validates against the TIDMAD module constants regardless of the bound profile — `execute_tools/scoring_utils.py:278-335`)** → **12bc PHASE B** · child out-of-tree availability + the transactional run-scoped overlay + F-12-3/F-12-4 under the §7 frozen invariant → **12bc PHASE C** · composed-path residues F-12-1/R2/F-P56-3(narrowed, §0.1-A)/ambient-threading + census hole F-12-6 → 12a · issue #234 → 12a · D16 → 12a · `resume.py:74` layering (09.5 Q2 = B) → 12a · proposer/implementor/planner prompt-science family + F-12-5 → 12a · pack L4 completion + governance-pin relaxation → 12d · objective-kind promotion procedure DOCS (#14) + the §18a matrix execution + the post-Step-12 graduation audit → 12e |
 | **SHOULD FIX BEFORE FINAL GRADUATION (cheap, inside an owner PR; dropped without ceremony if not)** | D17 runtime scalar refusal (12a, if trivial) · the interpreter node-CLI unconditional legacy `task_blocks` load (`result_interpretation_agent.py:1308` — Regime-A entry; add the composition-aware branch if 12a touches the file) |
 | **NAMED POST-ROADMAP DEBT (explicitly deferred, with reasons)** | import-time data-root template REMOVAL (R-11-8: repo-wide CI collection dependency) · five OOM matchers (F-11-9) · device-0 selection (F-11-10, operator-surface feature) · D1 frozen record-key renames (`denoising_score` et al.) · dashboard/peripheral direction literals (D1 row) · lit-review full prompt genericization beyond Q-12-3's bounded ruling · `run_comparison.py` composition (Q-P1-1) · PRESETS register-or-retire · stale registration docstrings · timing-sensitive real-training tests in the unit tier (not expanded by Step 12) · anchored-census hygiene as a repo-wide sweep (stays per-census-when-touched, F-P2b-4) · auto-resume `START_ITER` stdout corruption (P5+P6-carried, workaround documented) |
 | **OUT OF SCOPE** | execution backends beyond Python (§22.24.2) · new tasks beyond the graduation fourth · any TIDMAD science change |
@@ -1452,14 +1587,18 @@ designs starts `[ ]` and no evidence line is filled before the work runs.)*
       drafted/reconciled against the merged truth of all preceding Step-12
       children (via the §11.1 checkpoint) rather than being prematurely
       frozen against the parent base.* Child docs live at
-      `step_12_external_extensibility_graduation/pr_12{a,b,c,d,e}_*.md`,
-      each with per-commit 8-section all-`[ ]` checklists per the
-      operator's standard (Goal · Scope · Implementation plan · Validation
-      plan · Acceptance criteria · Failure/edge cases · Verification
-      commands/evidence · Commit boundary), its own Evidence Economy
-      section, Gate-standard row quotes, and the §12 terminal-discipline
-      closing stage. **The next action after this freeze is the PR-12a
-      detailed design** — nothing else is drafted ahead of need.
+      `step_12_external_extensibility_graduation/pr_12{a,bc,d,e}_*.md`
+      (**four** under T5, §11.2), each with per-commit 8-section all-`[ ]`
+      checklists per the operator's standard (Goal · Scope · Implementation
+      plan · Validation plan · Acceptance criteria · Failure/edge cases ·
+      Verification commands/evidence · Commit boundary), its own Evidence
+      Economy section, Gate-standard row quotes, and the §12
+      terminal-discipline closing stage. Landed so far:
+      `pr_12a_composed_path_closure.md` (FROZEN; implementation in flight,
+      PR #248 open) and **`pr_12bc_generic_task_boundary_closure.md`
+      (**REVISION 2 — FROZEN, operator approved 2026-08-23**; §20a discharged;
+      both real Gates pre-authorized; open operator questions 0)**. Nothing
+      else is drafted ahead of need.
 - [x] Final consistency/adversarial sweep of Revision 3 recorded
       (2026-08-22): stale `--task_scope_json` row corrected (§7); zero
       `12cd` references outside historical records; anchors in the five
@@ -1558,7 +1697,149 @@ LANDED PR-12a source and perform the mandatory post-merge delta reconciliation
 
 | id | finding (rev 1) | resolution at merged `e4cd5c18` |
 |---|---|---|
-| P11-1 | child-side manifest re-composition exists for metric + naming (C5/C6) | **HELD** — `--task_manifest`, `denoising_score_single.py:108,212-216`; §7's 12c mechanism stands on it |
+| P11-1 | child-side manifest re-composition exists for metric + naming (C5/C6) | **HELD** — `--task_manifest`, `denoising_score_single.py:108,212-216`; §7's Phase-C mechanism stands on it |
 | P11-2 | data root is a launcher binding (`--data_dir` → binder kwarg), not a manifest key | **HELD** — `task_composition.py:1223`; fail-closed via `CompositionDataRootMissing`; 12a pins |
 | P11-3 | `run_one_iteration.py:1499` TIDMAD scope-resolve not in the candidate's delta | **CONFIRMED on merged source** — F-12-1 stays 12a's |
 | P11-4 | Gate 2 in flight at draft time | **RESOLVED** — Gate-2 FINAL PASS at `88f190a1` (Step-11 doc §11d); F-11-C10-a fixed (both stamps read `active_composition_fingerprint()`, dead `RunBindings` field removed, AST-pinned); R-11-13 + R-11-14 recorded as operator rulings and absorbed (§0.1-A) |
+
+---
+
+## 20a. POST-12A-MERGE RECONCILIATION — **DISCHARGED 2026-08-23**
+
+**PR-12a is MERGED.** The reconciliation this section required has been
+executed as the planned **delta audit** (snapshot V2 → landed), not as a
+repeat of the planning exercise.
+
+| anchor | value |
+|---|---|
+| merge / squash SHA | **`15554174`** (`1555417464bb48982b813458c08a113be60c6c37`), merged 2026-08-23T03:43Z |
+| final executable head | **`ec30bd65`** — where G-12a-2 ran |
+| final PR head | **`d4bf899d`** — exact-head CI **32615196536 SUCCESS** |
+| post-merge status sync | `3f45c450` = current `origin/master` |
+| Gates | **G-12a-1 PASS** (`f542e89e`, 4 real calls of a 6 cap) · **G-12a-2 PASS** (`ec30bd65`, attempt 4 canonical) |
+
+**Delta audit result — `git diff 99cb7853 15554174` over production paths:
+ONE file, ONE line.** `agent/skills/evaluate_vram_skill/probe_budgets.py` —
+a **comment-only** generalization of a model name in the
+`single_candidate_seconds` provenance note (`WaveNet` → "deep dilated-conv
+candidate"). **Zero executable change; zero BC-relevant change.** Every
+Phase-B and Phase-C anchor in the child design was already landed-master
+truth and is unaffected.
+
+**All eight `PROVISIONAL_12A_ASSUMPTION` entries: CONFIRMED against landed
+source** (child §A.3b), including the single MATERIAL-if-false item
+**P12A-4** — `_compose_task_data_path`'s early-return branch and
+`bind_run_task_composition` are unchanged by the merge, so F-12-3 remains
+live and remains Phase C's to close.
+
+**One BC-relevant item imported from 12a's terminal review — registration
+order, "CASE A".** 12a's forensic (`pr_12a_composed_path_closure.md` §8.11)
+recorded a **pre-existing, execution-order-dependent** failure:
+
+```text
+TaskCompositionError: task_data_path names module
+'execute_tools.tidmad_data_path', which could not be imported:
+TaskDataPathRegistrationError: Task data path 'tidmad' is already
+registered. Currently registered: [...]
+```
+
+Classified **CASE A** (the baseline fails the same way; PR-12a did not
+introduce it) and carried forward **unsolved**. It is the *observed*
+manifestation of the registry-lifecycle hazard PR-12bc's Phase C was
+already designed to close from source evidence — see child §A.5 (F-12bc-5)
+and the D-BC-10 scope decision.
+
+**Also carried forward by 12a, none solved there and none owned by 12bc
+unless stated**: Q-07c-6 · F-12a-G2b · partial-calibration acceptance + a
+true probe watchdog · CAP-SCOPE · external child loading · Pets/DAVIS L4 ·
+fourth-task graduation. **Two things 12a's Gate must not be read as
+proving**: that the chain ran uninterrupted (it was killed mid-run after a
+provider hang and resumed at iteration 2 in the same workspace), and
+anything about provider-hang robustness.
+
+**The bounded terminal-equivalence exception** granted for 12a's
+`ec30bd65..870897c6` delta is explicitly **not** a generic relaxation of the
+Step-12 terminal rule; §N's discipline stands unchanged for PR-12bc.
+
+**Remaining gate on PR-12bc freeze** is therefore operator ratification of
+the §A.4 items — **not** source reconciliation, which is complete.
+
+---
+
+### 20a.1 Historical: the provisional-planning ruling this discharges
+
+PR-12bc planning proceeded deliberately against a **provisional 12a source
+snapshot**, refreshed once (V1 `a401427b` → **V2 `99cb7853`**), on the
+operator ruling of 2026-08-23 that separates:
+
+```text
+(A) architectural planning   -> MAY proceed against a clearly identified
+                                provisional 12a snapshot
+(B) freeze / implementation  -> REQUIRES this reconciliation against
+        authorization           LANDED master
+```
+
+Being unmerged was NOT a material design deviation. The procedure below is
+retained as the executed record.
+
+**Provisional snapshot used by PR-12bc planning.**
+**`PROVISIONAL_12A_SNAPSHOT_V2` = `99cb7853`** (PR #248 head, origin-confirmed;
+refreshed 2026-08-23), superseding V1 `a401427b`. `origin/master` `e4cd5c18`.
+
+**V1 → V2 bounded refresh — result: ZERO BC-relevant production change.**
+Two commits (`ec30bd65` F-12a-G2, `99cb7853` Gate-2 evaluator); three
+production files, all under `agent/skills/evaluate_vram_skill/` plus a Gate
+script. Classified **PARENT_VALIDATION_RELEVANT**, not architecture: a
+completed resource probe is no longer discarded for being slow on a busy
+host (`single_candidate_seconds` 120 → 200, provenance recorded; the value
+can no longer change a capacity verdict), which measurably improved Gate
+operability (`InconclusivePreflight ×4 → ×0`). **Resource calibration is NOT
+pulled into 12bc.** Full classification: child design §A.3a.
+
+**12a Gate state as observed AT THE V2 REFRESH (historical; both Gates have since PASSED — see the anchors above).** G-12a-1 PASS. G-12a-2: attempt 1
+INCONCLUSIVE (shared-GPU contention), attempt 2 INCONCLUSIVE — the
+pre-existing **Q-07c-6** admission defect (`WallClockTimeoutError`, 119.365 s
+vs a 118.749 s deadline; admission prices `phase="training"` only, so 07a's
+in-subprocess validation pass is unpriced), attempt 3 pending with
+`--runtime_watchdog` isolated (operator-accepted; it is the documented
+default-off production posture). **Consequence carried into the remaining
+plan**: every later Step-12 Gate that spawns a real training child states its
+watchdog posture in its readiness packet, and a Q-07c-6 kill is
+**INCONCLUSIVE, never FAIL**.
+
+**On merge of PR #248, before PR-12bc freezes, execute — a bounded DELTA
+AUDIT (not a repeat of the planning exercise):**
+
+1. `git fetch origin`; re-anchor the planning branch onto the newly landed
+   master (rebase the planning commits only; **never** carry duplicate 12a
+   implementation history).
+2. Record: 12a merge/squash SHA · final executable SHA · final PR SHA ·
+   G-12a-1 result · G-12a-2 result · authoritative CI result · post-merge
+   status-sync SHA if separate.
+3. Diff the LANDED 12a source against **snapshot V2**
+   (`git diff 99cb7853..<merge SHA>` restricted to production paths).
+4. Audit ONLY the PR-12bc-relevant seams: DatasetProfile/topology ·
+   TaskDataPath · the composition projection (`TaskCompositionRef`) ·
+   composition fingerprint payload · plugin-registration authority ·
+   parent/child manifest + bootstrap · resume/binding lifecycle ·
+   scope-adjacent execution surfaces · §10 structural baselines for the
+   files PR-12bc will touch.
+5. Resolve every **PROVISIONAL_12A_ASSUMPTION** (enumerated in the child
+   design §A.3, with V2 verdicts in §A.3b) as exactly one of:
+   `CONFIRMED` · `UPDATED_NONMATERIAL` · `MATERIAL_CHANGE`. All eight were
+   **CONFIRMED_BY_LATEST_12A** at the V2 refresh, so this step is expected to
+   be short; **P12A-4** stays the single MATERIAL-if-false item.
+6. Update this parent and the PR-12bc design accordingly.
+7. Re-run the internal design consistency / adversarial sweep.
+
+**Outcome rule.** All `CONFIRMED` or `UPDATED_NONMATERIAL` ⇒ PR-12bc
+proceeds to final operator freeze/review **without redoing the planning
+exercise**. A `MATERIAL_CHANGE` that invalidates a core Phase-B or Phase-C
+architecture claim ⇒ return **that specific deviation** for operator
+review. **Never restart planning from zero automatically.**
+
+**Parent-doc overlap note.** §14a arrived on the 12a branch and is
+reproduced in the planning branch for self-containment; at reconciliation it
+is **DE-DUPLICATED against the landed copy** (kept once), not merged twice.
+Overlap is resolved by semantic reconciliation, never by a blind
+`--ours`/`--theirs`.

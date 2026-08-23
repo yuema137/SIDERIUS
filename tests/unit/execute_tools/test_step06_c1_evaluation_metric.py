@@ -30,7 +30,10 @@ from pydantic import ValidationError
 
 from execute_tools import evaluation_metric as em
 from execute_tools.array2h5 import create_abra_file
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
 from execute_tools.evaluation_metric import (
     TIDMAD_METRIC_ID,
@@ -97,7 +100,7 @@ def test_a_renamed_deliverable_spec_moves_the_contract_with_it():
     not hold a second copy of the TIDMAD names.)"""
     profile = TIDMAD_PROFILE.model_copy(
         update={
-            "channels": TIDMAD_PROFILE.channels.model_copy(
+            "channels": tidmad_topology(TIDMAD_PROFILE).channels.model_copy(
                 update={"input_channel": "s6_in", "target_channel": "s6_target"}
             )
         }

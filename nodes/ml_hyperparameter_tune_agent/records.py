@@ -31,9 +31,6 @@ from core.run_invariants import (
 )
 from core.runtime_control.failure_attribution import may_recommend_resource_reduction
 from core.scientific_authority import ScientificAuthority
-from execute_tools.dataset_config import (
-    DatasetConfig,
-)
 from execute_tools.deliverable_spec import (
     DeliverableNaming,
     default_deliverable_naming,
@@ -728,7 +725,7 @@ def _validate_history_and_lock(
     existing_history: list[dict[str, Any]],
     lock_was_present: bool,
     *,
-    dataset: DatasetConfig,
+    partition_count: int,
 ) -> None:
     """DS6b — ingress validation + deferred lock creation.
 
@@ -753,7 +750,7 @@ def _validate_history_and_lock(
                 validate_stamped_invariants(
                     rec,
                     run_invariants,
-                    full_scope=list(range(dataset.num_files)),
+                    full_scope=list(range(partition_count)),
                     source=f"workspace summary record {rec.get('exp_id') or '(no exp_id)'}",
                 )
     ensure_run_invariants(workspace, run_invariants)

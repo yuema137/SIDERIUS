@@ -212,6 +212,11 @@ class PreparedAttempt:
     memory_history: Any
     train_sample_set: Any
     eval_sample_set: Any
+    #: Step 12 / PR-12bc B5 — the task-built scopes for this attempt, or
+    #: an empty ``AttemptScopes`` when the run is un-composed. ADDITIVE:
+    #: the sample sets above are unchanged on both paths, because their
+    #: consumers are unchanged until B6 (D-BC-13).
+    task_scopes: Any
     train_psd_segments: Any
     eval_psd_segments: Any
     ordering: Any

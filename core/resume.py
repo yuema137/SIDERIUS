@@ -1499,7 +1499,7 @@ def restore_prior_state(
                 # `resolve_dataset_profile()` honours a bound profile and
                 # otherwise returns the shipped one, so an un-composed
                 # resume is unchanged.
-                full_scope=list(range(resolve_dataset_profile().dataset.num_files)),
+                full_scope=list(range(resolve_dataset_profile().partition_count)),
                 source=f"restored iter {iter_idx:03d} run_output {output_path}",
             )
 

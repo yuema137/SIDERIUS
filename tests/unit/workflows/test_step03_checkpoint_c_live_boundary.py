@@ -41,7 +41,11 @@ from agent.schemas.model_io_resolution import (
     UnknownPresetError,
 )
 from agent.schemas.task_config import ForwardContract
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     _render_commit_system_prompt,
 )
@@ -78,6 +82,17 @@ def _clear_cache():
     tc._clear_cache_for_tests()
 
 
+#: The class-extent contrast. WIDER than TIDMAD's 256, not narrower.
+#: Pre-B2 this was 16, which is an IMPOSSIBLE declaration — an int8 payload
+#: shifted by 128 spans [0, 255] and needs at least 256 symbols. It survived
+#: because ``model_copy`` skips validation; since B2 the typed topology view
+#: re-validates what it decodes, so the fixture is now a profile that could
+#: actually exist. The claim under test is unchanged: only the class extent
+#: varies, and a renderer still emitting a literal would produce identical
+#: bytes for both.
+_CONTRAST_CLASSES = 512
+
+
 def _profile_with(num_classes: int):
     """A Dataset Profile whose ValueEncoding declares ``num_classes``.
 
@@ -88,7 +103,11 @@ def _profile_with(num_classes: int):
     cardinality contrast needs a matching profile rather than a bypass.
     """
     return TIDMAD_PROFILE.model_copy(
-        update={"encoding": TIDMAD_PROFILE.encoding.model_copy(update={"num_classes": num_classes})}
+        update={
+            "encoding": tidmad_topology(TIDMAD_PROFILE).encoding.model_copy(
+                update={"num_classes": num_classes}
+            )
+        }
     )
 
 
@@ -122,13 +141,13 @@ class TestBoundaryILiveRendering:
             **load_task_config(_write(tmp_path, classes=256))["forward_contract"]
         )
         tc._clear_cache_for_tests()
-        with bind_dataset_profile(_profile_with(16)):
+        with bind_dataset_profile(_profile_with(_CONTRAST_CLASSES)):
             narrow = ForwardContract(
-                **load_task_config(_write(tmp_path, classes=16))["forward_contract"]
+                **load_task_config(_write(tmp_path, classes=_CONTRAST_CLASSES))["forward_contract"]
             )
 
         assert "[B, 256, T] float32" in render_forward_contract(wide)
-        assert "[B, 16, T] float32" in render_forward_contract(narrow)
+        assert f"[B, {_CONTRAST_CLASSES}, T] float32" in render_forward_contract(narrow)
         assert render_forward_contract(wide) != render_forward_contract(narrow)
 
     def test_the_proposer_system_prompt_carries_the_derived_shapes(self):
@@ -155,14 +174,14 @@ class TestBoundaryILiveRendering:
     def test_a_varied_contract_changes_the_proposer_system_prompt(self, tmp_path):
         """End to end for C(i): a different declaration produces a
         different LLM-facing prompt."""
-        with bind_dataset_profile(_profile_with(16)):
+        with bind_dataset_profile(_profile_with(_CONTRAST_CLASSES)):
             narrow = ForwardContract(
-                **load_task_config(_write(tmp_path, classes=16))["forward_contract"]
+                **load_task_config(_write(tmp_path, classes=_CONTRAST_CLASSES))["forward_contract"]
             )
         tc._clear_cache_for_tests()
         shipped = ForwardContract(**load_task_config()["forward_contract"])
         assert _render_commit_system_prompt(narrow) != _render_commit_system_prompt(shipped)
-        assert "[B, 16, T] float32" in _render_commit_system_prompt(narrow)
+        assert f"[B, {_CONTRAST_CLASSES}, T] float32" in _render_commit_system_prompt(narrow)
 
 
 class TestBoundaryIIFailsClosedBeforeTheLLM:

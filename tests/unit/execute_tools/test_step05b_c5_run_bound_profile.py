@@ -40,7 +40,10 @@ import pytest
 from agent.skills.inference_skill.estimator import _total_inference_steps
 from agent.skills.training_skill.estimator import _total_train_steps
 from execute_tools import workload_resolvers
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 
 #: The incident scope the RT1 resolver tests use — 6 files x 20 PSD segments.
 SS = {str(i): list(range(20)) for i in range(4, 10)}
@@ -54,7 +57,7 @@ CONTRAST_PSD = 2_048_000
 def _contrast_profile():
     return TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                 update={"psd_segment_length": CONTRAST_PSD}
             )
         }

@@ -250,12 +250,32 @@ class TestTheChildBranchesOnPresenceNotOnTaskName:
                     )
 
 
-class TestOnlyScoringGetsTheManifest:
-    """R-11-4 / R-11-1: the transport is scoped to the child that needs it."""
+class TestTheManifestTransportIsBindingScoped:
+    """R-11-1: the transport exists only when the run bound a composition.
 
-    def test_the_emitter_is_used_once_and_only_by_scoring(self):
-        src = (REPO_ROOT / "core" / "sandbox_executor.py").read_text(encoding="utf-8")
-        assert src.count("*_task_manifest_argv(),") == 1
+    Was `TestOnlyScoringGetsTheManifest`. Step 12 / PR-12bc C3 made that name
+    false: training and inference receive the manifest too, because they
+    resolve a task data path and the registry holds only what their bootstrap
+    imported — so an out-of-tree implementation resolved in the parent and
+    failed in every child it spawned.
+
+    Two members were RETIRED here rather than edited (R-11-10 — a flipped
+    guard becomes the permanent owner or is deleted, never both):
+
+    * `test_the_emitter_is_used_once_and_only_by_scoring` — the count moved to
+      3 and its owner is now
+      `test_step12_pr12bc_c3_child_loading.py::test_the_emitter_is_used_at_all_three_spawn_sites`,
+      which states it with the reason. Keeping a second copy here would be
+      twinning.
+    * `test_training_and_inference_do_not_get_it` — asserted the defect. Its
+      surviving half (an UN-composed child gains nothing) is owned by
+      `test_the_un_composed_child_argv_gains_no_manifest_flag`, and the
+      positive by that module's end-to-end hop.
+
+    What stays here is Step 11's own and is unaffected: the emitter needs a
+    binding, produces the flag when bound, and secondaries are not
+    transported.
+    """
 
     def test_the_emitter_requires_a_binding(self):
         from core.sandbox_executor import _task_manifest_argv
@@ -307,39 +327,6 @@ class TestOnlyScoringGetsTheManifest:
 
         assert "--task_manifest" in cmd
         assert cmd[cmd.index("--task_manifest") + 1] == str(manifest)
-
-    def test_training_and_inference_do_not_get_it(self, tmp_path):
-        """Only the child that constructs a metric receives the manifest."""
-        from unittest.mock import MagicMock, patch
-
-        from core.sandbox_executor import TidmadSandbox
-
-        manifest = tmp_path / "m.yaml"
-        manifest.write_text("metric: {}\n", encoding="utf-8")
-
-        with patch("core.sandbox_executor._run_observed_subprocess") as mock_run:
-            sb = TidmadSandbox(run_name="c5_run", workspace=str(tmp_path / "ws2"))
-
-            def _ok(*_a, **_k):
-                import os as _os
-
-                _os.makedirs(sb.dirs["models"], exist_ok=True)
-                open(_os.path.join(sb.dirs["models"], "_OK_c5_exp"), "wb").close()
-                r = MagicMock()
-                r.returncode, r.stdout, r.stderr = 0, "done\n", ""
-                return r, None
-
-            mock_run.side_effect = _ok
-            with bind_task_manifest_path(str(manifest)):
-                sb.execute_training(
-                    "c5_exp",
-                    "c5_run",
-                    "fcnet",
-                    {"model_type": "fcnet", "segmentation_size": 10000},
-                    {"lr": 1e-4, "epochs": 1, "batch_size": 1, "device": "cpu"},
-                    {"loss_type": "ce"},
-                )
-            assert "--task_manifest" not in mock_run.call_args[0][0]
 
     def test_secondaries_are_not_transported(self):
         """R-11-4 explicitly: do not speculatively transport every secondary

@@ -22,6 +22,8 @@ objective semantics; accuracy lives with the Step-06 authority.
 
 from __future__ import annotations
 
+import json
+import random
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, ClassVar
@@ -36,7 +38,9 @@ from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
     EvaluationReadRequest,
+    ScopeBuildRequest,
     ValidationScopeError,
+    deserialize_rows_scope,
     register_task_data_path,
 )
 
@@ -187,6 +191,86 @@ class PetsTaskDataPath:
 
     task_data_path_id: ClassVar[str] = PETS_TASK_DATA_PATH_ID
 
+    #: The scope payload's self-identifying tag (PR-12bc B8).
+    _SCOPE_KIND: ClassVar[str] = "pets_scope_v1"
+
+    def __init__(self, *, manifest_path: str | None = None) -> None:
+        """Step 12 / PR-12bc B8 — TASK-INSTANCE CONFIGURATION (§D.1).
+
+        An implementation that needs its own sources to BUILD scopes receives
+        them at CONSTRUCTION, via the manifest's ``task_data_path`` section.
+        Pets' scope authority is its committed manifest, so that is what it
+        takes. The module-level registration below passes nothing, which is
+        the regime-A instance: it can still materialize a scope it is HANDED,
+        it simply cannot build one from nothing — and it says so by name.
+
+        The task's own plugin reading the task's own manifest is never a
+        FRAMEWORK import of ``examples/``, so the governance census
+        (``test_pack_governance.py:211-221``) stays green.
+        """
+        self._manifest_path = manifest_path
+
+    # ------------------------------------------------------------------
+    # TaskScopeCapability (PR-12bc B8)
+    # ------------------------------------------------------------------
+
+    def _rows(self) -> tuple[PetsItem, ...]:
+        if self._manifest_path is None:
+            raise ValueError(
+                f"task data path {self.task_data_path_id!r} was asked to BUILD a "
+                f"scope but was constructed with no manifest. Declare "
+                f"`config: {{manifest_path: ...}}` in the composition's "
+                f"`task_data_path` section — the manifest is this task's scope "
+                f"authority and there is nothing to sample without it."
+            )
+        return load_pets_manifest(self._manifest_path)
+
+    def _select(self, request: ScopeBuildRequest) -> PetsScope:
+        rows = self._rows()
+        if request.selection_strategy == "anchors":
+            raise ValueError(
+                f"task data path {self.task_data_path_id!r} declares no anchor "
+                f"representatives, so the 'anchors' selection strategy has no "
+                f"content for it. Use 'snapshot', or 'target' with an explicit "
+                f"subset."
+            )
+        if request.selection_strategy == "target":
+            if not request.target_partitions:
+                raise ValueError("'target' selection requires a non-empty subset.")
+            bound = len(rows)
+            out_of_range = [i for i in request.target_partitions if not 0 <= i < bound]
+            if out_of_range:
+                raise ValueError(
+                    f"target partitions {out_of_range} are outside this task's "
+                    f"{bound} manifest rows."
+                )
+            rows = tuple(rows[i] for i in request.target_partitions)
+        keep = max(1, round(request.portion * len(rows)))
+        if request.seed is not None:
+            rows = tuple(random.Random(request.seed).sample(list(rows), keep))
+        else:
+            rows = rows[:keep]
+        if request.max_samples is not None:
+            rows = rows[: request.max_samples]
+        return PetsScope(rows=rows)
+
+    def build_training_scope(self, request: ScopeBuildRequest) -> object:
+        return self._select(request)
+
+    def build_eval_scope(self, request: ScopeBuildRequest) -> object:
+        return self._select(request)
+
+    def serialize_scope(self, scope: object) -> str:
+        s = self._scope(scope)
+        return json.dumps(
+            {"kind": self._SCOPE_KIND, "rows": [r.model_dump() for r in s.rows]},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def deserialize_scope(self, payload: str) -> object:
+        return deserialize_rows_scope(payload, self._SCOPE_KIND, PetsItem, PetsScope)
+
     @staticmethod
     def _scope(scope: object) -> PetsScope:
         if not isinstance(scope, PetsScope):
@@ -257,4 +341,6 @@ def deliverable_name(request: DeliverableWriteRequest | EvaluationReadRequest) -
     return f"predictions_{request.model_type}_{request.run_name}_{request.exp_id}.csv"
 
 
+# Regime-A instance: no manifest, so it materializes a scope it is HANDED
+# but refuses to BUILD one, by name (PR-12bc B8).
 register_task_data_path(PetsTaskDataPath())

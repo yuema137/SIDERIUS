@@ -45,7 +45,11 @@ import pytest
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.build_anchor_map import default_anchor_map_path, load_anchor_map
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
 from execute_tools.evaluation_metric import (
     TIDMAD_METRIC_ID,
@@ -89,7 +93,7 @@ def workspace(tmp_path_factory):
     valid_pattern = str(data_dir / "s6_valid_{file_index:04d}.h5")
     profile = TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                 update={
                     "segments_per_file": 1,
                     "num_files": 1,
@@ -101,7 +105,7 @@ def workspace(tmp_path_factory):
             "health_peek_files": [FILE_INDEX],
         }
     )
-    (cfg_dir / "dataset_profile.json").write_text(json.dumps(profile.model_dump()))
+    (cfg_dir / "dataset_profile.json").write_text(json.dumps(profile.to_wire()))
     storage = derive_tidmad_deliverable_spec(profile).storage
     raw = _signal(10)
     for pattern in (train_pattern, valid_pattern):

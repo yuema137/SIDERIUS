@@ -57,7 +57,10 @@ from core.runtime_control.gpu_measurement_data import (
     BoundedProbeBatch,
     BoundedReadEvidence,
 )
-from execute_tools.dataset_config import DatasetProfile
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    tidmad_topology,
+)
 
 __all__ = ["build_bounded_probe_batch", "resolve_declared_source_file"]
 
@@ -85,7 +88,10 @@ def resolve_declared_source_file(profile: DatasetProfile, data_dir: str) -> str:
     Raises:
         RuntimeError: no declared training file is present.
     """
-    declared = [profile.dataset.training_file_name(i) for i in range(profile.dataset.num_files)]
+    declared = [
+        tidmad_topology(profile).dataset.training_file_name(i)
+        for i in range(profile.partition_count)
+    ]
     for name in declared:
         candidate = os.path.join(data_dir, name)
         if os.path.isfile(candidate):
@@ -127,8 +133,8 @@ def build_bounded_probe_batch(
     import torch
 
     source = resolve_declared_source_file(profile, data_dir)
-    channel_name = profile.channels.input_channel
-    encoding = profile.encoding
+    channel_name = tidmad_topology(profile).channels.input_channel
+    encoding = tidmad_topology(profile).encoding
     needed = batch_size * segment_length
 
     with h5py.File(source, "r") as handle:

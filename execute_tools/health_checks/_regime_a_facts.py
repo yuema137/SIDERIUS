@@ -23,7 +23,11 @@ different inapplicability reasons.
 
 from __future__ import annotations
 
-from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import DeliverableStorage, derive_tidmad_deliverable_spec
 from execute_tools.health_checks.schemas import TaskHealthFacts
 
@@ -67,9 +71,9 @@ def derive_health_facts(profile: DatasetProfile) -> TaskHealthFacts:
     Axes and their sources::
 
         encoding_family        deliverable storage dtype (via the contract)
-        symbol_cardinality     profile.encoding.num_classes, when symbolic
-        file_group_size        profile.dataset.num_files
-        sampling_frequency_hz  profile.dataset.sampling_frequency
+        symbol_cardinality     tidmad_topology(profile).encoding.num_classes, when symbolic
+        file_group_size        profile.partition_count
+        sampling_frequency_hz  tidmad_topology(profile).dataset.sampling_frequency
         value_scale_unit       ABSENT — see below
 
     ``value_scale_unit`` is deliberately NOT derived. The millivolt scale
@@ -86,10 +90,12 @@ def derive_health_facts(profile: DatasetProfile) -> TaskHealthFacts:
         encoding_family=family,
         # Guarded by the family: a cardinality without a family is rejected
         # by TaskHealthFacts, and would be meaningless besides.
-        symbol_cardinality=profile.encoding.num_classes if family is not None else None,
+        symbol_cardinality=tidmad_topology(profile).encoding.num_classes
+        if family is not None
+        else None,
         value_scale_unit=None,
-        file_group_size=profile.dataset.num_files,
-        sampling_frequency_hz=profile.dataset.sampling_frequency,
+        file_group_size=profile.partition_count,
+        sampling_frequency_hz=tidmad_topology(profile).dataset.sampling_frequency,
     )
 
 

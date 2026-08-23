@@ -484,7 +484,17 @@ def _load_symbol(
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     try:
-        spec.loader.exec_module(module)
+        # Step 12 / PR-12bc C1 — F-12bc-2. The `sys.modules` rollback below was
+        # only half the story: a plugin that REGISTERED a data path and then
+        # raised left the registry dirty, so its id was permanently taken by an
+        # implementation whose module never finished running. The health loader
+        # already rolls back its own registries (`_plugin_binding.py:338-341`);
+        # this is the same idiom, one family over, and it is what the retirement
+        # path added by the overlay makes possible.
+        from execute_tools.task_registration_scope import registration_rollback
+
+        with registration_rollback():
+            spec.loader.exec_module(module)
     except Exception as exc:
         # Roll back so a corrected plugin can be retried in the same process
         # (the 08b idiom) — a half-executed module left in sys.modules would
@@ -538,7 +548,9 @@ def _compose_task_data_path(
     from execute_tools.task_data_path import (
         TaskBindingContext,
         TaskDataPathRegistrationError,
+        content_identity,
         register_task_data_path,
+        registered_content_identity,
         registered_task_data_path_ids,
         resolve_task_data_path,
     )
@@ -568,6 +580,35 @@ def _compose_task_data_path(
         )
 
     if declared in registered_task_data_path_ids():
+        # Step 12 / PR-12bc C1 — F-12-3. This used to return the registered
+        # object on an ID match alone, while the composition went on to report
+        # the NEWLY loaded plugin's content digest into the fingerprint. An
+        # EDITED plugin therefore ran the OLD code under a FRESH identity, and
+        # nothing anywhere said so.
+        #
+        # The registration performed above (or, for an already-present id,
+        # skipped as idempotent) has already settled the two-phase rule: an
+        # id whose content DIFFERS never reaches here, because
+        # `register_task_data_path` refused it. So reaching this line means the
+        # content matched, and returning the registered object is correct —
+        # but the check is stated HERE too, because "the other function
+        # already checked" is exactly the kind of reasoning that decays.
+        registered_identity = registered_content_identity(declared)
+        loaded_identity = content_identity(resolved)
+        if (
+            loaded_identity is not None
+            and registered_identity is not None
+            and loaded_identity != registered_identity
+        ):
+            raise TaskCompositionError(
+                f"{where}: task_data_path {declared!r} is registered with "
+                f"different content than the plugin just loaded.\n"
+                f"  registered: {registered_identity}\n"
+                f"  loaded:     {loaded_identity}\n"
+                f"Returning the registered object would run the OLD code under "
+                f"the NEW plugin's identity — the composition fingerprint would "
+                f"name something that never executed."
+            )
         return resolve_task_data_path(TaskBindingContext(task_data_path_id=declared)), plugin_ref
 
     # A plugin's symbol is `Any` by construction — it came from a file this
@@ -957,7 +998,7 @@ def compute_semantic_fingerprint(
 
     payload = {
         "task_data_path_id": task_data_path_id,
-        "dataset_profile": dataset_profile.model_dump(mode="json"),
+        "dataset_profile": dataset_profile.to_wire(),
         "metric_declaration": metric_declaration,
         "task_health_binding_kind": binding_repr,
         "task_health_content_sha256": task_health_content,
@@ -1091,6 +1132,118 @@ def compose_metric_from_manifest(manifest_path: str) -> EvaluationMetric:
         _section(raw, "metric", resolved_manifest), os.path.dirname(resolved_manifest)
     )
     return metric
+
+
+def compose_task_data_path_from_manifest(manifest_path: str) -> TaskDataPath:
+    """The run's DECLARED task data path, composed from its manifest.
+
+    Step 12 / PR-12bc C3. The sibling of :func:`compose_metric_from_manifest`,
+    reading the same transported manifest through the same authority
+    (:func:`_compose_task_data_path`) the parent used — so a child DERIVES
+    nothing, exactly as R-11-4 requires. Composition registers the
+    implementation as a side effect, which is what makes the id resolvable
+    for the rest of the child's life.
+
+    Raises:
+        TaskCompositionError: the manifest is unreadable, declares no
+            ``task_data_path`` section, or the section could not be composed.
+    """
+    resolved_manifest = os.path.abspath(manifest_path)
+    raw = _read_manifest(resolved_manifest)
+    impl, _plugin = _compose_task_data_path(
+        _section(raw, "task_data_path", resolved_manifest),
+        os.path.dirname(resolved_manifest),
+    )
+    return impl
+
+
+def resolve_child_task_data_path(
+    task_data_path_id: str,
+    *,
+    identity: str | None = None,
+    manifest_path: str | None = None,
+) -> TaskDataPath:
+    """Resolve a transported id in a child, composing it if it is not built in.
+
+    Step 12 / PR-12bc C3 — §E.1's four-row table, and the reason an
+    OUT-OF-TREE task can reach a training or inference subprocess at all.
+    Before this, a child resolved the transported id through the registry
+    alone, and the registry holds exactly what the child's bootstrap imported:
+    the three built-ins. An externally declared implementation was therefore
+    resolvable in the parent and unresolvable in every child it spawned::
+
+        transported id -> registry lookup
+                          |- HIT  -> verify identity == parent-pinned
+                          |           match     -> use it
+                          |           divergent -> REFUSE (C2)
+                          |- MISS -> compose `task_data_path` from the
+                          |           transported manifest via the SAME
+                          |           authority, then verify as above
+                          '- neither registered nor composable -> REFUSE,
+                                      naming BOTH facts
+
+    **A MISS is a membership question, never an exception to catch.** Row 2's
+    identity refusal and row 4's resolution refusal are different failures,
+    and treating the first as a miss would silently re-compose a task whose
+    registration diverged — turning C2's refusal into a fallback, which is the
+    C-P56-1 shape.
+
+    Args:
+        task_data_path_id: the id the parent transported.
+        identity: the parent-pinned content identity, if the parent pinned
+            one. ``None`` is an ABSENCE OF A CLAIM (a pre-C2 parent), not a
+            passing check.
+        manifest_path: the transported manifest, if the run is composed.
+            ``None`` means an un-composed run, whose id must already be built
+            in.
+
+    Raises:
+        TaskDataPathIdentityError: the implementation resolved here is not the
+            one the parent pinned.
+        TaskDataPathResolutionError: the id is neither registered nor
+            composable. The message names both facts, because "unknown id" and
+            "no manifest reached me" send an operator to different files.
+        TaskCompositionError: a manifest was transported but could not be
+            composed.
+    """
+    from execute_tools.task_data_path import (
+        TaskDataPathResolutionError,
+        registered_task_data_path_ids,
+        resolve_transported_task_data_path,
+        verify_transported_identity,
+    )
+
+    registered = registered_task_data_path_ids()
+    if task_data_path_id in registered:
+        # Rows 1 and 2 — the existing child-side authority, unchanged.
+        return resolve_transported_task_data_path(task_data_path_id, identity)
+
+    if manifest_path is None:
+        raise TaskDataPathResolutionError(
+            f"task data path {task_data_path_id!r} is not registered in this "
+            f"child process, and no task manifest was transported to it.\n"
+            f"  registered here: {sorted(registered)}\n"
+            f"  manifest:        (none)\n"
+            f"Both facts matter: an id the child cannot find AND no "
+            f"declaration it could compose one from. A composed run emits "
+            f"--task_manifest; an un-composed run's id must be a built-in."
+        )
+
+    # Rows 3 and 4 — compose from the run's own declaration. Registration is
+    # the composer's side effect, so a later resolve in this process hits.
+    composed = compose_task_data_path_from_manifest(manifest_path)
+    declared = composed.task_data_path_id
+    if declared != task_data_path_id:
+        raise TaskDataPathResolutionError(
+            f"task data path {task_data_path_id!r} is not registered in this "
+            f"child process, and the transported manifest declares "
+            f"{declared!r} instead.\n"
+            f"  registered here: {sorted(registered)}\n"
+            f"  manifest:        {manifest_path}\n"
+            f"The parent and the child are reading different declarations — "
+            f"composing this one would run a task the parent never bound."
+        )
+    return verify_transported_identity(composed, identity)
 
 
 _ACTIVE_TASK_MANIFEST_PATH: ContextVar[str | None] = ContextVar(

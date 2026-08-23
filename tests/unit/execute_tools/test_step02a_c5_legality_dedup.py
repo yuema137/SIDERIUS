@@ -24,10 +24,13 @@ from pathlib import Path
 import pytest
 
 from execute_tools.dataset_config import (
+    NUM_FILES,
     TIDMAD,
     TIDMAD_PROFILE,
     bind_dataset_profile,
     resolve_dataset_profile,
+    resolve_tidmad_topology,
+    tidmad_topology,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -36,7 +39,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def _profile_with_psd(psd_len: int):
     return TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": psd_len})
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": psd_len}
+            )
         }
     )
 
@@ -150,7 +155,7 @@ class TestRenderedProseIsUnchanged:
             ms_per_step=10.0,
             seg_size=100_000,
             batch_size=8,
-            psd_segment_length=resolve_dataset_profile().dataset.psd_segment_length,
+            psd_segment_length=resolve_tidmad_topology().dataset.psd_segment_length,
         )
         assert message == (
             "Raise segmentation_size to the next valid divisor of 10,000,000 "
@@ -167,7 +172,7 @@ class TestRenderedProseIsUnchanged:
                 ms_per_step=10.0,
                 seg_size=100_000,
                 batch_size=8,
-                psd_segment_length=resolve_dataset_profile().dataset.psd_segment_length,
+                psd_segment_length=resolve_tidmad_topology().dataset.psd_segment_length,
             )
         assert "2,048,000" in message
         assert "10,000,000" not in message
@@ -206,7 +211,11 @@ class TestReferenceArtifactFileCount:
         assert len(reference._fine_indices()) == TIDMAD.num_files
         with bind_dataset_profile(
             TIDMAD_PROFILE.model_copy(
-                update={"dataset": TIDMAD_PROFILE.dataset.model_copy(update={"num_files": 5})}
+                update={
+                    "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                        update={"num_files": 5}
+                    )
+                }
             )
         ):
             assert len(reference._fine_indices()) == 5

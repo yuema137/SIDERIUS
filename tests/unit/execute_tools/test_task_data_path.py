@@ -25,6 +25,7 @@ from torch.utils.data import Dataset
 import execute_tools.task_data_path as tdp
 from execute_tools.task_data_path import (
     TASK_DATA_PATH_ARGV_FLAG,
+    TASK_DATA_PATH_IDENTITY_FLAG,
     TIDMAD_COMPATIBILITY_ID,
     DeliverableWriteRequest,
     EpochSamplingParams,
@@ -34,6 +35,7 @@ from execute_tools.task_data_path import (
     TaskDataPathRegistrationError,
     TaskDataPathResolutionError,
     bind_task_data_path,
+    content_identity,
     register_task_data_path,
     resolve_bound_task_data_path,
     resolve_task_data_path,
@@ -44,8 +46,14 @@ from execute_tools.task_data_path import (
 
 @pytest.fixture(autouse=True)
 def _isolated_registry(monkeypatch):
-    """Each test sees an empty registry; nothing leaks between tests."""
+    """Each test sees an empty registry; nothing leaks between tests.
+
+    BOTH structures, since C1: the content-identity map is written and cleared
+    in lockstep with the registry, so isolating only one would leave a stale
+    identity behind an absent id.
+    """
     monkeypatch.setattr(tdp, "_REGISTRY", {})
+    monkeypatch.setattr(tdp, "_CONTENT", {})
 
 
 # ---------------------------------------------------------------------------
@@ -178,10 +186,31 @@ class TestTheResolverTruthTable:
             register_task_data_path(MissingMethods())
         assert "write_deliverable" in str(err.value)
 
-    def test_duplicate_registration_refused(self):
+    def test_duplicate_registration_follows_the_two_phase_rule(self):
+        """UPGRADED at Step 12 / PR-12bc C1.
+
+        This asserted that ANY second registration of an id refuses. That
+        compared the ID ALONE, which made a re-execution of the IDENTICAL
+        module indistinguishable from a genuine collision — and that is
+        CASE A: a module evicted from ``sys.modules`` re-runs its
+        registration and is punished for doing exactly what it did the first
+        time.
+
+        The frozen §8 rule is two-phase, and BOTH halves are asserted here so
+        neither can quietly disappear:
+
+            same id + SAME content       -> idempotent
+            same id + DIFFERENT content  -> refused, by name
+        """
         register_task_data_path(SyntheticTaskDataPath())
-        with pytest.raises(TaskDataPathRegistrationError, match="already registered"):
-            register_task_data_path(SyntheticTaskDataPath())
+        # Same class, same source file: the SAME implementation. Idempotent.
+        register_task_data_path(SyntheticTaskDataPath())
+
+        class _Different(SyntheticTaskDataPath):
+            """A genuinely different implementation claiming the same id."""
+
+        with pytest.raises(TaskDataPathRegistrationError, match="DIFFERENT content"):
+            register_task_data_path(_Different())
 
     def test_blank_id_refused(self):
         class BlankId(SyntheticTaskDataPath):
@@ -199,18 +228,24 @@ class TestTheResolverTruthTable:
 class TestTransportCarriesOnlyTheResolvedBinding:
     def test_transport_argv_derives_from_the_implementation(self):
         """The signature IS the enforcement: `transport_argv` takes the
-        resolved implementation, not a free string, so the transported id
-        cannot be anything but the binding."""
+        resolved implementation, not a free string, so neither the transported
+        id NOR the identity pinned beside it (PR-12bc C2) can be anything but
+        the binding's own."""
         impl = SyntheticTaskDataPath()
-        assert transport_argv(impl) == [TASK_DATA_PATH_ARGV_FLAG, "synthetic_vector_pairs"]
+        assert transport_argv(impl) == [
+            TASK_DATA_PATH_ARGV_FLAG,
+            "synthetic_vector_pairs",
+            TASK_DATA_PATH_IDENTITY_FLAG,
+            content_identity(impl),
+        ]
 
     def test_round_trip_transported_id_resolves_to_the_same_registration(self):
         register_task_data_path(SyntheticTaskDataPath())
         impl = resolve_task_data_path(
             TaskBindingContext(task_data_path_id="synthetic_vector_pairs")
         )
-        _flag, value = transport_argv(impl)
-        assert resolve_transported_task_data_path(value) is impl
+        _flag, value, _identity_flag, identity = transport_argv(impl)
+        assert resolve_transported_task_data_path(value, identity) is impl
 
     def test_a_transported_unknown_id_fails_closed_in_the_child(self):
         """The child-process side is an EXPLICIT binding — the parent resolved

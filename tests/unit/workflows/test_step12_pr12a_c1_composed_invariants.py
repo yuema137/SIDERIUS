@@ -126,7 +126,7 @@ class TestF121PreflightResolvesTheRunsTopology:
 
     def test_an_un_composed_run_is_unchanged(self, tmp_path):
         """LEGACY PARITY. Un-composed, the resolver returns ``TIDMAD_PROFILE``
-        and ``TIDMAD_PROFILE.dataset`` IS the singleton the constant named —
+        and ``tidmad_topology(TIDMAD_PROFILE).dataset`` IS the singleton the constant named —
         the same object — so this value cannot have moved."""
         invariants = compute_expected_invariants(_preflight_args(str(tmp_path)))
         assert invariants.resolved_data_scope == list(range(20))

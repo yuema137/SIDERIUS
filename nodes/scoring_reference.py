@@ -33,7 +33,7 @@ def _fine_indices() -> tuple[int, ...]:
     and its generator (``scripts/compute_raw_baseline.py``) cannot silently
     disagree about how many files exist.
     """
-    return tuple(range(resolve_dataset_profile().dataset.num_files))
+    return tuple(range(resolve_dataset_profile().partition_count))
 
 
 _RAW_PER_FILE_FMT = "raw_baseline_score_file_{idx:04d}.json"

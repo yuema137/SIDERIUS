@@ -10,7 +10,11 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.dataset_config import TIDMAD, DataScope
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    TIDMAD,
+    DataScope,
+)
 
 # ---------------------------------------------------------------------------
 # default() / resolve() / is_full()
@@ -19,40 +23,40 @@ from execute_tools.dataset_config import TIDMAD, DataScope
 
 class TestDefaultScope:
     def test_default_resolves_to_all_files(self):
-        assert DataScope.default().resolve(TIDMAD) == list(range(20))
+        assert DataScope.default().resolve(NUM_FILES) == list(range(20))
 
     def test_default_is_full(self):
-        assert DataScope.default().is_full(TIDMAD)
+        assert DataScope.default().is_full(NUM_FILES)
 
     def test_none_file_indices_is_default(self):
         assert DataScope(file_indices=None) == DataScope.default()
 
     def test_explicit_full_range_is_full(self):
         scope = DataScope(file_indices=list(range(20)))
-        assert scope.is_full(TIDMAD)
+        assert scope.is_full(NUM_FILES)
 
     def test_partial_scope_is_not_full(self):
-        assert not DataScope(file_indices=[4, 5, 6]).is_full(TIDMAD)
+        assert not DataScope(file_indices=[4, 5, 6]).is_full(NUM_FILES)
 
 
 class TestResolve:
     def test_normalizes_sorted_and_deduped(self):
         scope = DataScope(file_indices=[9, 4, 4, 7])
-        assert scope.resolve(TIDMAD) == [4, 7, 9]
+        assert scope.resolve(NUM_FILES) == [4, 7, 9]
 
     def test_out_of_range_raises_with_index_and_bound(self):
         scope = DataScope(file_indices=[4, 25])
         with pytest.raises(ValueError, match=r"\[25\].*num_files=20.*0\.\.19"):
-            scope.resolve(TIDMAD)
+            scope.resolve(NUM_FILES)
 
     def test_boundary_index_is_valid(self):
-        assert DataScope(file_indices=[19]).resolve(TIDMAD) == [19]
+        assert DataScope(file_indices=[19]).resolve(NUM_FILES) == [19]
 
     def test_resolve_returns_fresh_copy(self):
         scope = DataScope(file_indices=[4, 5])
-        resolved = scope.resolve(TIDMAD)
+        resolved = scope.resolve(NUM_FILES)
         resolved.append(99)
-        assert scope.resolve(TIDMAD) == [4, 5]
+        assert scope.resolve(NUM_FILES) == [4, 5]
 
 
 # ---------------------------------------------------------------------------
@@ -132,7 +136,7 @@ class TestFromCli:
 
 class TestSerialization:
     def test_resolved_scope_is_json_serializable(self):
-        resolved = DataScope.from_cli("4-9").resolve(TIDMAD)
+        resolved = DataScope.from_cli("4-9").resolve(NUM_FILES)
         assert json.loads(json.dumps(resolved)) == [4, 5, 6, 7, 8, 9]
 
     def test_model_round_trip(self):

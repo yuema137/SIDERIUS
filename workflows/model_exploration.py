@@ -1586,6 +1586,37 @@ def _cleanup_stale_registry_entries(registry) -> tuple[int, list[str]]:
 # ---------------------------------------------------------------------------
 
 
+def _refuse_data_scope_for_a_foreign_topology(scope_is_partial: bool, task_composition) -> None:
+    """`--data_scope` names FILE INDICES; refuse it for a task without them.
+
+    Step 12 / PR-12bc B7 (§D.4). Extracted rather than inlined: `run_workflow`
+    carries a §12.1 branch tripwire, and this check is a self-contained
+    decision with its own reason — exactly the shape that belongs behind a
+    call.
+
+    `--data_scope` is TIDMAD/legacy vocabulary. Silently resolving it against a
+    composed task's partition count would restrict a run to partitions the
+    operator never meant. Refused BY NAME, at startup, before an LLM call or a
+    GPU minute. Composed TIDMAD keeps honouring it through its own capability,
+    which is why the discriminator is "does this task declare TIDMAD's
+    topology" and never a task name.
+    """
+    if not scope_is_partial or task_composition is None:
+        return
+    from execute_tools.dataset_config import tidmad_topology
+
+    try:
+        tidmad_topology(resolve_dataset_profile())
+    except ValueError as exc:
+        raise ValueError(
+            f"--data_scope names FILE INDICES, which is legacy vocabulary this "
+            f"composed task does not share ({exc}). Declare the restriction "
+            f"through the task's own scope capability instead; a file-index "
+            f"list cannot be reinterpreted for a task with a different "
+            f"partition concept."
+        ) from exc
+
+
 def run_workflow(
     *,
     # --- transit configuration (Step 09.5a C3; the 72 values this run
@@ -1931,15 +1962,16 @@ def run_workflow(
     # Composed, it is the composed profile — without this a composed 4-file
     # task would have had its scope resolved against TIDMAD's 20 files and
     # its `scope_is_partial` computed from somebody else's topology.
-    _run_dataset = resolve_dataset_profile().dataset
-    _resolved_scope = _run_scope.resolve(_run_dataset)
-    _scope_is_partial = _resolved_scope != list(range(_run_dataset.num_files))
+    _run_partitions = resolve_dataset_profile().partition_count
+    _resolved_scope = _run_scope.resolve(_run_partitions)
+    _scope_is_partial = _resolved_scope != list(range(_run_partitions))
     if _scope_is_partial and launch.formal_strategy != "snapshot":
         raise ValueError(
             f"partial data_scope requires formal_strategy='snapshot' "
             f"(got {launch.formal_strategy!r}). Operator configuration is a "
             f"contract — it is never normalized."
         )
+    _refuse_data_scope_for_a_foreign_topology(_scope_is_partial, task_composition)
     if health_gate_enabled and _scope_is_partial and health_gate_files is None:
         raise ValueError(
             "partial data_scope with HealthGates enabled requires an "
@@ -1989,7 +2021,7 @@ def run_workflow(
                 ),
             },
             _run_invariants,
-            full_scope=list(range(_run_dataset.num_files)),
+            full_scope=list(range(_run_partitions)),
             source=f"seed/restored output '{_output.run_name}' ({_output.model_type})",
         )
     # C9d — runtime-control launch guard. Runs BEFORE any LLM call or

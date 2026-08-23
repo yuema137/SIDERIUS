@@ -40,6 +40,7 @@ from execute_tools.dataset_config import (
     DatasetProfile,
     load_dataset_profile,
     resolve_dataset_profile,
+    tidmad_topology,
 )
 from execute_tools.model_input_dtype import (
     TRAINING_SITE_DTYPE,
@@ -60,7 +61,6 @@ from execute_tools.task_data_path import (
     TaskDataPath,
     bind_task_data_path,
     resolve_bound_task_data_path,
-    resolve_transported_task_data_path,
 )
 from execute_tools.task_data_path import (
     ValidationScopeError as ValidationScopeError,
@@ -137,7 +137,7 @@ class TIDMADDataset(Dataset):
         self.profile = profile or resolve_dataset_profile()
         self.idict = {}
         self.tdict = {}
-        self.class_count = torch.ones(self.profile.encoding.num_classes)
+        self.class_count = torch.ones(tidmad_topology(self.profile).encoding.num_classes)
 
         if self.sample_set is not None:
             self.train_events = self._pull_events_from_sample_set()
@@ -152,7 +152,7 @@ class TIDMADDataset(Dataset):
         filename, row_idx = self.train_events[idx]
         input_data = self.idict[filename][row_idx]
         target_data = self.tdict[filename][row_idx]
-        enc = self.profile.encoding
+        enc = tidmad_topology(self.profile).encoding
         return (
             input_data.astype(enc.compute_dtype) + enc.value_offset,
             target_data.astype(enc.compute_dtype) + enc.value_offset,
@@ -170,8 +170,8 @@ class TIDMADDataset(Dataset):
             file_path = os.path.join(self.filepath, filename)
             if not os.path.exists(file_path):
                 continue
-            channels = self.profile.channels
-            enc = self.profile.encoding
+            channels = tidmad_topology(self.profile).channels
+            enc = tidmad_topology(self.profile).encoding
             with h5py.File(file_path, "r") as f:
                 alltrain = np.array(
                     _h5_dataset(f, "timeseries", channels.input_channel, "timeseries")
@@ -221,9 +221,9 @@ class TIDMADDataset(Dataset):
             )
         sample_set = self.sample_set
         evlist = []
-        dataset = self.profile.dataset
-        channels = self.profile.channels
-        enc = self.profile.encoding
+        dataset = tidmad_topology(self.profile).dataset
+        channels = tidmad_topology(self.profile).channels
+        enc = tidmad_topology(self.profile).encoding
         psd_len = dataset.psd_segment_length
         ml_segs_per_psd = psd_len // self.seg_size
 
@@ -635,7 +635,7 @@ def _preflight_validation_scope(
     Raises:
         ValidationScopeError: on any violation.
     """
-    dataset, channels = profile.dataset, profile.channels
+    dataset, channels = tidmad_topology(profile).dataset, tidmad_topology(profile).channels
     psd_len = dataset.psd_segment_length
     ml_segs_per_psd = psd_len // seg_size
     total_rows = 0
@@ -1233,7 +1233,7 @@ def run_experiment_streaming(
             eval_sample_set = clamp_validation_scope(
                 eval_sample_set,
                 max_samples=max_validation_samples,
-                ml_segs_per_psd=profile.dataset.psd_segment_length // seg_size,
+                ml_segs_per_psd=tidmad_topology(profile).dataset.psd_segment_length // seg_size,
             )
         validation_requested_rows = _preflight_validation_scope(
             data_dir, eval_sample_set, seg_size, profile
@@ -1415,7 +1415,7 @@ def run_experiment_streaming(
             # deterministic per epoch, so every epoch runs the same count.
             steps_per_epoch = len(loader)
             file_paths = [
-                os.path.join(data_dir, profile.dataset.training_file_name(int(k)))
+                os.path.join(data_dir, tidmad_topology(profile).dataset.training_file_name(int(k)))
                 for k in sorted(sample_set.keys(), key=int)
             ]
             # Scoped read volume (pre-Gate F2): the setup reads only the
@@ -1425,7 +1425,9 @@ def run_experiment_streaming(
                 storage_provenance=capture_storage_provenance(
                     data_dir,
                     file_paths,
-                    scoped_bytes=n_psd_scoped * profile.dataset.psd_segment_length * 3,
+                    scoped_bytes=n_psd_scoped
+                    * tidmad_topology(profile).dataset.psd_segment_length
+                    * 3,
                 ),
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
@@ -1717,6 +1719,54 @@ def run_experiment_streaming(
 # ==========================================
 
 
+def _load_transported_scope(ref: str | None, digest: str | None, *, leg: str) -> object | None:
+    """The child half of the scope transport: verify, THEN deserialize.
+
+    Step 12 / PR-12bc B6. The same two-case rule every other transported flag
+    follows — SUPPLIED but broken fails closed naming the path; ABSENT leaves
+    regime-A to the run itself.
+
+    Order is load-bearing, and is why this is ONE function rather than two
+    steps at the call site: the bytes are checked against the digest the PARENT
+    transported before the task's parser is ever handed them. A parser's job is
+    to build a scope, not to authenticate one.
+
+    Args:
+        ref: ``--task_scope_ref`` / ``--task_eval_scope_ref``.
+        digest: its out-of-band sha256.
+        leg: which leg, for diagnostics only.
+
+    Returns:
+        The task's own scope object, or ``None`` when the flag was absent.
+
+    Raises:
+        ValueError: The pair is half-supplied.
+        ScopeArtifactError: The artifact is missing, unreadable or tampered.
+    """
+    if ref is None and digest is None:
+        return None
+    if ref is None or digest is None:
+        raise ValueError(
+            f"the {leg} scope transport is half-supplied (ref={ref!r}, digest "
+            f"{'present' if digest else 'absent'}). A path without its digest "
+            f"could not be verified and a digest without a path names nothing — "
+            f"refusing rather than proceeding on whichever half arrived."
+        )
+    from execute_tools.scope_artifact import read_scope_artifact
+    from execute_tools.task_data_path import (
+        resolve_bound_task_data_path,
+        resolve_task_scope_capability,
+    )
+
+    # Verify FIRST, then narrow through the ONE resolver. `deserialize_scope`
+    # is not on the frozen four-method protocol and must not be: the capability
+    # is an optional sibling, so a binding that declares none must produce a
+    # named refusal here rather than an AttributeError deep in the engine.
+    payload = read_scope_artifact(ref, digest)
+    capability = resolve_task_scope_capability(resolve_bound_task_data_path())
+    return capability.deserialize_scope(payload)
+
+
 def _load_eval_sample_set_arg(path: str | None) -> dict | None:
     """Load ``--eval_sample_set_json`` fail-closed (design §3.4).
 
@@ -1785,6 +1835,36 @@ def main():
     )
     parser.add_argument("--sandbox_dir", type=str, default=None, help="Sandbox output directory.")
     parser.add_argument("--file_index", type=int, default=6)
+    parser.add_argument(
+        "--task_scope_ref",
+        type=str,
+        default=None,
+        help="Step 12 / PR-12bc B6: path to this attempt's TASK-BUILT training "
+        "scope artifact, emitted by the parent FROM its resolved binding only — "
+        "never an operator flag. SUPPLIED -> the artifact is digest-verified and "
+        "deserialized by the transported implementation, and the regime-A "
+        "TidmadScope fallback is NOT reached. ABSENT -> regime-A, byte-identical.",
+    )
+    parser.add_argument(
+        "--task_scope_digest",
+        type=str,
+        default=None,
+        help="sha256 of the training scope artifact, transported OUT OF BAND so "
+        "the artifact is never asked to vouch for itself. Required with "
+        "--task_scope_ref.",
+    )
+    parser.add_argument(
+        "--task_eval_scope_ref",
+        type=str,
+        default=None,
+        help="The EVALUATION leg's artifact — same rule, same verification.",
+    )
+    parser.add_argument(
+        "--task_eval_scope_digest",
+        type=str,
+        default=None,
+        help="The evaluation leg's out-of-band sha256.",
+    )
     parser.add_argument("--exp_id", type=str, default="default_exp")
     parser.add_argument(
         "--run_name", type=str, default="test_run", help="Run name for the auto-exploration."
@@ -1870,6 +1950,20 @@ def main():
         "operator flag. SUPPLIED -> explicit binding (an unknown id fails "
         "closed, never falls back); ABSENT -> regime-A (TIDMAD compatibility).",
     )
+    parser.add_argument(
+        "--task_data_path_identity",
+        type=str,
+        default=None,
+        help="Step 12 / PR-12bc C2: the PARENT-PINNED IDENTITY of the implementation named by --task_data_path_id. The id says WHICH implementation; this says WHICH CODE. Verified BEFORE the implementation is consumed, because a registry hit is never proof of identity — a stale registration answers to the right name while running different bytes. ABSENT -> a parent that predates this transport made no claim, and a child must not invent one.",
+    )
+    parser.add_argument(
+        "--task_manifest",
+        type=str,
+        default=None,
+        help="Step 12 / PR-12bc C3: the composed run's task-composition manifest, emitted by the parent FROM its resolved run binding only "
+        "— never an operator flag. SUPPLIED -> a transported id that is not built into this child is composed from the run's OWN declaration, through the same authority the parent used, which is what lets an "
+        "OUT-OF-TREE task reach a training or inference subprocess. ABSENT -> the id must already be registered here.",
+    )
     args = parser.parse_args()
 
     # Dataset Profile resolution — the child side of the parent's transport.
@@ -1899,7 +1993,7 @@ def main():
     # difference Checkpoint C(iii) surfaced.
     if model_io is not None:
         resolve_model_io_contract(
-            model_io, dataset_num_classes=dataset_profile.encoding.num_classes
+            model_io, dataset_num_classes=tidmad_topology(dataset_profile).encoding.num_classes
         )
 
     # RT2-B: create the verification session FIRST so the measured setup
@@ -1986,12 +2080,32 @@ def main():
         # id as an EXPLICIT binding (unknown -> fail closed, never a
         # fallback); ABSENT leaves regime-A to the run itself.
         if args.task_data_path_id is not None:
+            # C3: imported here, not at module scope — the composition layer
+            # sits ABOVE this one, and only a composed run ever reaches it.
+            from workflows.task_composition import resolve_child_task_data_path
+
             binding_cm = bind_task_data_path(
-                resolve_transported_task_data_path(args.task_data_path_id)
+                resolve_child_task_data_path(
+                    args.task_data_path_id,
+                    identity=args.task_data_path_identity,
+                    manifest_path=args.task_manifest,
+                )
             )
         else:
             binding_cm = contextlib.nullcontext()
         with binding_cm:
+            # Step 12 / PR-12bc B6 — the child side of the SCOPE transport, and
+            # the close of the pairing gap. Before this the binding crossed and
+            # the scope did not, so the engine fell into its regime-A branch and
+            # built a `TidmadScope` that a non-TIDMAD implementation refused.
+            # Resolved INSIDE the binding: the bytes must be deserialized by the
+            # implementation that wrote them.
+            task_scope = _load_transported_scope(
+                args.task_scope_ref, args.task_scope_digest, leg="training"
+            )
+            task_eval_scope = _load_transported_scope(
+                args.task_eval_scope_ref, args.task_eval_scope_digest, leg="evaluation"
+            )
             results = run_experiment_streaming(
                 model_cfg,
                 train_cfg,
@@ -2009,6 +2123,8 @@ def main():
                 profile=dataset_profile,
                 model_io=model_io,
                 eval_sample_set=eval_sample_set,
+                task_scope=task_scope,
+                task_eval_scope=task_eval_scope,
             )
         if results is None:
             # Runtime verification rejected the attempt: the structured
@@ -2021,7 +2137,7 @@ def main():
         # Legacy single-file mode: pre-load entire file into TIDMADDataset
         dataset = TIDMADDataset(
             args.data_dir,
-            [dataset_profile.dataset.training_file_name(args.file_index)],
+            [tidmad_topology(dataset_profile).dataset.training_file_name(args.file_index)],
             model_cfg.segmentation_size,
             profile=dataset_profile,
         )

@@ -78,7 +78,7 @@ def _fixture_score_rows() -> list[dict]:
     """
     from execute_tools.dataset_config import resolve_dataset_profile
 
-    num_files = resolve_dataset_profile().dataset.num_files
+    num_files = resolve_dataset_profile().partition_count
     # Sigma linear_weight must round-trip to 1.0 within 1e-9 (score_table.py:256-280).
     weight = 1.0 / num_files
     return [

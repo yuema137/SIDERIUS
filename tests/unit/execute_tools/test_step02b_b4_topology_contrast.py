@@ -36,25 +36,44 @@ from unittest.mock import patch
 import pytest
 
 from execute_tools import sample_set_builder
-from execute_tools.dataset_config import TIDMAD_PROFILE, DataScope
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    TIDMAD_PROFILE,
+    DataScope,
+    DatasetProfile,
+    tidmad_topology,
+)
 from execute_tools.sample_set_builder import build_sample_set
 
 CONTRAST_NUM_FILES = 7
 
 
 def _contrast_profile():
-    """TIDMAD with exactly one field changed."""
-    profile = TIDMAD_PROFILE.model_copy(deep=True)
-    profile.dataset.num_files = CONTRAST_NUM_FILES
-    return profile
+    """TIDMAD with exactly one field changed.
+
+    ``model_copy`` deliberately, not ``model_validate``: this rung's
+    whole point is that EXACTLY ONE declared field differs, and a
+    smaller ``num_files`` makes TIDMAD's declared anchor/peek indices
+    out of range — re-declaring them too would vary three axes. Since
+    B2 ``model_copy`` understands the legacy section names and carries
+    ``partition_count`` along with ``num_files`` (it would otherwise
+    have gone silently stale).
+    """
+    return TIDMAD_PROFILE.model_copy(
+        update={
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"num_files": CONTRAST_NUM_FILES}
+            )
+        }
+    )
 
 
 class TestContrastFixtureIsAtomic:
     """The rung is only meaningful if it varies ONE axis."""
 
     def test_exactly_one_field_differs_from_the_tidmad_declaration(self):
-        baseline = TIDMAD_PROFILE.model_dump()
-        contrast = _contrast_profile().model_dump()
+        baseline = TIDMAD_PROFILE.to_wire()
+        contrast = _contrast_profile().to_wire()
 
         differing = _diff_paths(baseline, contrast)
         assert differing == ["dataset.num_files"], (
@@ -69,8 +88,8 @@ class TestContrastFixtureIsAtomic:
         02a already proved the profile can represent geometry; re-varying it
         here would re-answer 02a's question instead of 02b's.
         """
-        assert _contrast_profile().dataset.segments_per_file == (
-            TIDMAD_PROFILE.dataset.segments_per_file
+        assert tidmad_topology(_contrast_profile()).dataset.segments_per_file == (
+            tidmad_topology(TIDMAD_PROFILE).dataset.segments_per_file
         )
 
 
@@ -104,7 +123,7 @@ class TestSelectionFollowsTheContrastTopology:
             )
 
         assert sorted(result) == list(range(CONTRAST_NUM_FILES))
-        assert len(result) != TIDMAD_PROFILE.dataset.num_files, (
+        assert len(result) != tidmad_topology(TIDMAD_PROFILE).dataset.num_files, (
             "selection produced TIDMAD's file population under a contrast "
             "profile — a consumer is still assuming 20 files"
         )
@@ -122,7 +141,7 @@ class TestSelectionFollowsTheContrastTopology:
             side_effect=AssertionError("ambient resolution was consulted"),
         ):
             result = build_sample_set(is_trial=False, file_index=0, profile=_contrast_profile())
-        assert len(result[0]) == TIDMAD_PROFILE.dataset.segments_per_file
+        assert len(result[0]) == tidmad_topology(TIDMAD_PROFILE).dataset.segments_per_file
 
     def test_scope_resolution_follows_the_contrast_population(self):
         """DataScope.default() must resolve against the SUPPLIED profile.

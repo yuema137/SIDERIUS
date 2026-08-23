@@ -27,6 +27,8 @@ scoreability belong to the Step-06 authority.
 
 from __future__ import annotations
 
+import json
+import random
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 from typing import Any, ClassVar
@@ -42,7 +44,9 @@ from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
     EvaluationReadRequest,
+    ScopeBuildRequest,
     ValidationScopeError,
+    deserialize_rows_scope,
     register_task_data_path,
 )
 
@@ -283,6 +287,80 @@ class DavisTaskDataPath:
 
     task_data_path_id: ClassVar[str] = DAVIS_TASK_DATA_PATH_ID
 
+    #: The scope payload's self-identifying tag (PR-12bc B8).
+    _SCOPE_KIND: ClassVar[str] = "davis_scope_v1"
+
+    def __init__(self, *, clips_path: str | None = None) -> None:
+        """Step 12 / PR-12bc B8 — TASK-INSTANCE CONFIGURATION (§D.1).
+
+        DAVIS' scope authority is its committed CLIP manifest — the windows
+        themselves, already derived deterministically (``load_davis_clips``,
+        no RNG ever). Named ``clips_path`` rather than ``sequences_path``
+        because that is what the loader actually reads: a sequences manifest
+        has a different header and is refused by it.
+
+        The module-level registration passes nothing — the regime-A instance
+        materializes a scope it is HANDED and refuses to BUILD one, by name.
+        """
+        self._clips_path = clips_path
+
+    # ------------------------------------------------------------------
+    # TaskScopeCapability (PR-12bc B8)
+    # ------------------------------------------------------------------
+
+    def _select(self, request: ScopeBuildRequest) -> DavisScope:
+        if self._clips_path is None:
+            raise ValueError(
+                f"task data path {self.task_data_path_id!r} was asked to BUILD a "
+                f"scope but was constructed with no sequences manifest. Declare "
+                f"`config: {{clips_path: ...}}` in the composition's "
+                f"`task_data_path` section — the manifest is this task's scope "
+                f"authority and there is nothing to select without it."
+            )
+        if request.selection_strategy == "anchors":
+            raise ValueError(
+                f"task data path {self.task_data_path_id!r} declares no anchor "
+                f"representatives, so the 'anchors' selection strategy has no "
+                f"content for it. Use 'snapshot', or 'target' with an explicit "
+                f"subset."
+            )
+        clips = load_davis_clips(self._clips_path)
+        if request.selection_strategy == "target":
+            if not request.target_partitions:
+                raise ValueError("'target' selection requires a non-empty subset.")
+            bound = len(clips)
+            out_of_range = [i for i in request.target_partitions if not 0 <= i < bound]
+            if out_of_range:
+                raise ValueError(
+                    f"target partitions {out_of_range} are outside this task's {bound} clips."
+                )
+            clips = tuple(clips[i] for i in request.target_partitions)
+        keep = max(1, round(request.portion * len(clips)))
+        if request.seed is not None:
+            clips = tuple(random.Random(request.seed).sample(list(clips), keep))
+        else:
+            clips = clips[:keep]
+        if request.max_samples is not None:
+            clips = clips[: request.max_samples]
+        return DavisScope(rows=clips)
+
+    def build_training_scope(self, request: ScopeBuildRequest) -> object:
+        return self._select(request)
+
+    def build_eval_scope(self, request: ScopeBuildRequest) -> object:
+        return self._select(request)
+
+    def serialize_scope(self, scope: object) -> str:
+        s = self._scope(scope)
+        return json.dumps(
+            {"kind": self._SCOPE_KIND, "rows": [r.model_dump() for r in s.rows]},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+    def deserialize_scope(self, payload: str) -> object:
+        return deserialize_rows_scope(payload, self._SCOPE_KIND, DavisClip, DavisScope)
+
     @staticmethod
     def _scope(scope: object) -> DavisScope:
         if not isinstance(scope, DavisScope):
@@ -350,4 +428,6 @@ def truth_windows(data_dir: str | Path, clips: Sequence[DavisClip]) -> dict[str,
     return truth
 
 
+# Regime-A instance: no manifest, so it materializes a scope it is HANDED
+# but refuses to BUILD one, by name (PR-12bc B8).
 register_task_data_path(DavisTaskDataPath())

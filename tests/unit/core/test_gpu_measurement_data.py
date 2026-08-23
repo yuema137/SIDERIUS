@@ -33,7 +33,10 @@ import pytest
 import torch
 
 from core.runtime_control.gpu_measurement_data import load_bounded_probe_batch
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -44,10 +47,10 @@ BATCH = 4
 # profile, so the test reads them from the same authority the production path
 # does. A test that kept its own copies could agree with a builder that had
 # stopped reading the profile at all.
-INPUT_CHANNEL = TIDMAD_PROFILE.channels.input_channel
-TARGET_CHANNEL = TIDMAD_PROFILE.channels.target_channel
-CLASS_INDEX_OFFSET = TIDMAD_PROFILE.encoding.value_offset
-COMPUTE_DTYPE = TIDMAD_PROFILE.encoding.compute_dtype
+INPUT_CHANNEL = tidmad_topology(TIDMAD_PROFILE).channels.input_channel
+TARGET_CHANNEL = tidmad_topology(TIDMAD_PROFILE).channels.target_channel
+CLASS_INDEX_OFFSET = tidmad_topology(TIDMAD_PROFILE).encoding.value_offset
+COMPUTE_DTYPE = tidmad_topology(TIDMAD_PROFILE).encoding.compute_dtype
 
 # --------------------------------------------------------------------------
 # PR 07c Checkpoint 0 — the byte-identity oracle, captured BEFORE the refactor

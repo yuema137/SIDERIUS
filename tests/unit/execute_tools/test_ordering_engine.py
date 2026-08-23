@@ -22,7 +22,11 @@ import pytest
 from torch.utils.data import DataLoader, Dataset
 
 import execute_tools.train_engine_sandbox as tes
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 
 SEG_SIZE = 1000
 
@@ -47,7 +51,7 @@ def multi_file_data(tmp_path):
         # Build the name from the DECLARATION, not from whatever the
         # engine module happens to import — C3 removed the engine's
         # dependency on the TIDMAD singleton entirely.
-        path = tmp_path / TIDMAD_PROFILE.dataset.training_file_name(file_index)
+        path = tmp_path / tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(file_index)
         n = segments_per_file * SEG_SIZE
         with h5py.File(path, "w") as f:
             ts = f.create_group("timeseries")
@@ -60,7 +64,9 @@ def multi_file_data(tmp_path):
     sample_set = {"4": [0, 1], "5": [0, 1], "6": [0, 1]}
     tiny = TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": SEG_SIZE}
+            )
         }
     )
     with bind_dataset_profile(tiny):

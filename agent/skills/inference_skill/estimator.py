@@ -52,7 +52,10 @@ from core.inference_defaults import (
     inference_batch_for,
     is_inference_batch_registered,
 )
-from execute_tools.dataset_config import DatasetProfile
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    tidmad_topology,
+)
 
 _BYTES_F32 = 4
 
@@ -209,7 +212,7 @@ def _total_inference_steps(
     run bound to one decomposition topology be priced against another.
     """
     n_psd = sum(len(v) for v in sample_set.values())
-    ml_per_psd = profile.dataset.psd_segment_length // seg_size
+    ml_per_psd = tidmad_topology(profile).dataset.psd_segment_length // seg_size
     total_ml = n_psd * ml_per_psd
     return math.ceil(total_ml / max(inf_batch, 1))
 

@@ -20,7 +20,10 @@ from __future__ import annotations
 
 import pytest
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 from execute_tools.train_engine_sandbox import ValidationScopeError, clamp_validation_scope
 from execute_tools.training_history import TrainingHistory
 
@@ -324,7 +327,7 @@ class TestTheProfileGeometryIsRealistic:
         rounding behaviour above is not a fixture artefact — under TIDMAD at
         seg 40 000 one PSD segment is 250 ML rows, and a ceiling of 100 is
         genuinely unsatisfiable."""
-        psd = TIDMAD_PROFILE.dataset.psd_segment_length
+        psd = tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length
         assert psd // 40_000 == 250
         with pytest.raises(ValidationScopeError, match="below one PSD segment"):
             clamp_validation_scope({0: [0, 1]}, max_samples=100, ml_segs_per_psd=psd // 40_000)

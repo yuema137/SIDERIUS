@@ -684,9 +684,9 @@ def _render_data_scope_block(scope) -> str:
     """
     from execute_tools.dataset_config import TIDMAD as _TIDMAD
 
-    if scope is None or scope.is_full(_TIDMAD):
+    if scope is None or scope.is_full(_TIDMAD.num_files):
         return ""
-    resolved = scope.resolve(_TIDMAD)
+    resolved = scope.resolve(_TIDMAD.num_files)
     return (
         "[DATA SCOPE]\n"
         f"This run is restricted to validation files {resolved} — the ONLY\n"

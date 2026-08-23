@@ -486,7 +486,10 @@ class TestNoGpuNoDisk:
 from agent.utils.proposer_preflight import (
     _synthesise_default_sample_set,
 )
-from execute_tools.dataset_config import DataScope
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    DataScope,
+)
 
 
 class TestScopedSynthesis:

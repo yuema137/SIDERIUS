@@ -114,7 +114,7 @@ class PerFileRow(BaseModel):
         made a different file count unrepresentable. The rule is unchanged;
         only its source moved to the resolved Dataset Profile.
         """
-        num_files = resolve_dataset_profile().dataset.num_files
+        num_files = resolve_dataset_profile().partition_count
         if self.file_index >= num_files:
             raise ValueError(
                 f"file_index={self.file_index} is outside the declared topology "
@@ -172,7 +172,7 @@ class AggregateScalars(BaseModel):
     @model_validator(mode="after")
     def _sampled_count_within_declared_topology(self) -> AggregateScalars:
         """A run cannot sample more files than the dataset declares."""
-        num_files = resolve_dataset_profile().dataset.num_files
+        num_files = resolve_dataset_profile().partition_count
         if self.num_sampled_files > num_files:
             raise ValueError(
                 f"num_sampled_files={self.num_sampled_files} exceeds the declared "
@@ -244,7 +244,7 @@ class ScoreComparisonTable(BaseModel):
         import. Same rule, resolved against the profile so a contrast
         topology produces a correctly shaped table instead of a length error.
         """
-        num_files = resolve_dataset_profile().dataset.num_files
+        num_files = resolve_dataset_profile().partition_count
         if len(self.rows) != num_files:
             raise ValueError(
                 f"ScoreComparisonTable needs exactly one row per validation file: "

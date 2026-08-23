@@ -47,9 +47,11 @@ from unittest.mock import patch
 import pytest
 
 from execute_tools.dataset_config import (
+    NUM_FILES,
     TIDMAD_PROFILE,
     DatasetProfile,
     bind_dataset_profile,
+    tidmad_topology,
 )
 from nodes.ml_hyperparameter_tune_agent import HyperparamTuningAgent
 from tests.helpers.scoring_stubs import stub_scoring
@@ -74,9 +76,9 @@ def _profile(**dataset_overrides) -> DatasetProfile:
     Built through the real constructors, so the declared file sets are
     validated against the topology rather than mutated past the validator.
     """
-    dataset = TIDMAD_PROFILE.dataset.model_copy(update=dataset_overrides)
+    dataset = tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(update=dataset_overrides)
     num_files = dataset.num_files
-    if num_files >= TIDMAD_PROFILE.dataset.num_files:
+    if num_files >= tidmad_topology(TIDMAD_PROFILE).dataset.num_files:
         anchors = list(TIDMAD_PROFILE.anchor_selection_files)
         peek = list(TIDMAD_PROFILE.health_peek_files)
     else:
@@ -579,7 +581,7 @@ def test_each_subcase_moves_exactly_one_fact(fact, contrast, tidmad):
         "segments_per_file": ACCOUNTING_PROFILE,
     }
     profile = profiles[fact]
-    assert getattr(profile.dataset, fact) == contrast
+    assert getattr(tidmad_topology(profile).dataset, fact) == contrast
 
     for other in ("psd_segment_length", "num_files", "segments_per_file"):
         if other == fact:
@@ -587,7 +589,7 @@ def test_each_subcase_moves_exactly_one_fact(fact, contrast, tidmad):
         expected = {"psd_segment_length": 10_000_000, "num_files": 20, "segments_per_file": 200}[
             other
         ]
-        assert getattr(profile.dataset, other) == expected, (
+        assert getattr(tidmad_topology(profile).dataset, other) == expected, (
             f"the {fact} fixture also moved {other} — the subcase is no longer atomic"
         )
-    assert tidmad == getattr(TIDMAD_PROFILE.dataset, fact)
+    assert tidmad == getattr(tidmad_topology(TIDMAD_PROFILE).dataset, fact)

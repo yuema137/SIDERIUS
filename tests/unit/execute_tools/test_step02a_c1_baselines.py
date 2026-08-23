@@ -56,6 +56,7 @@ from execute_tools.dataset_config import (
     TIDMAD,
     TIDMAD_PROFILE,
     bind_dataset_profile,
+    tidmad_topology,
 )
 
 # Tiny geometry. PSD_SEGMENT_LENGTH is monkeypatched to PSD_LEN so one PSD
@@ -110,7 +111,9 @@ def tiny_dataset(tmp_path):
             ts.create_group("channel0002").create_dataset("timeseries", data=ch2)
     tiny = TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": PSD_LEN})
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": PSD_LEN}
+            )
         }
     )
     with bind_dataset_profile(tiny):

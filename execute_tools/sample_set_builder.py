@@ -19,9 +19,9 @@ from typing import Literal
 
 from execute_tools.dataset_config import (
     DataScope,
-    DatasetConfig,
     DatasetProfile,
     resolve_dataset_profile,
+    tidmad_topology,
 )
 from execute_tools.scoring_utils import SampleSet
 
@@ -82,12 +82,12 @@ def build_sample_set(
     # profile, or a rebind between reads could split one SampleSet across
     # two topologies.
     resolved_profile = profile if profile is not None else resolve_dataset_profile()
-    dataset = resolved_profile.dataset
-    resolved_scope = (scope or DataScope.default()).resolve(dataset)
-    scope_is_full = resolved_scope == list(range(dataset.num_files))
+    partition_count = resolved_profile.partition_count
+    resolved_scope = (scope or DataScope.default()).resolve(partition_count)
+    scope_is_full = resolved_scope == list(range(partition_count))
 
     if not is_trial:
-        return _build_normal(file_index, resolved_scope, dataset)
+        return _build_normal(file_index, resolved_scope, resolved_profile)
 
     # Determine which files to include
     if trial_strategy == "snapshot":
@@ -115,7 +115,7 @@ def build_sample_set(
         raise ValueError(f"Unknown trial_strategy: {trial_strategy!r}")
 
     # Compute number of segments to sample per file
-    segments_per_file = dataset.segments_per_file
+    segments_per_file = tidmad_topology(resolved_profile).dataset.segments_per_file
     n_segments = max(1, round(trial_portion * segments_per_file))
 
     rng = random.Random(seed)
@@ -129,7 +129,7 @@ def build_sample_set(
     return sample_set
 
 
-def _build_normal(file_index: int, resolved_scope: list[int], dataset: DatasetConfig) -> SampleSet:
+def _build_normal(file_index: int, resolved_scope: list[int], profile: DatasetProfile) -> SampleSet:
     """Normal mode: all segments of a single file (must be in scope).
 
     Args:
@@ -142,4 +142,4 @@ def _build_normal(file_index: int, resolved_scope: list[int], dataset: DatasetCo
     """
     if file_index not in resolved_scope:
         raise ValueError(f"file_index={file_index} is outside the DataScope {resolved_scope}.")
-    return {file_index: list(range(dataset.segments_per_file))}
+    return {file_index: list(range(tidmad_topology(profile).dataset.segments_per_file))}

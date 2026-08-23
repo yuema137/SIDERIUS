@@ -899,6 +899,64 @@ def _data_root_argv(flag: str) -> list[str]:
     return [flag, bound] if bound is not None else []
 
 
+def _task_scope_argv(configs_dir: str, exp_id: str, task_scopes: object) -> list[str]:
+    """The composed run's SCOPE transport — empty unless scopes were acquired.
+
+    Step 12 / PR-12bc B6. Follows ``_task_data_path_argv``'s shape exactly: a
+    small pure emitter, splatted at the call site, that yields NOTHING when the
+    run is un-composed. An un-composed command line is therefore byte-identical
+    (R-11-1 / R-11-13), which the B0 fixture pins independently.
+
+    The scope payload itself never rides argv (parent §5.5, frozen): the task's
+    canonical bytes are written to a run-scoped ATOMIC artifact and argv carries
+    only a path and a digest, so a large or variable-length scope has no
+    ``ARG_MAX`` exposure.
+
+    The bytes come from the TASK (``serialize_scope``); this function neither
+    inspects nor canonicalizes them.
+    """
+    from execute_tools.scope_artifact import (
+        EVAL_SCOPE_STEM,
+        TRAINING_SCOPE_STEM,
+        scope_artifact_path,
+        write_scope_artifact,
+    )
+    from execute_tools.task_data_path import (
+        active_task_data_path,
+        resolve_task_scope_capability,
+    )
+
+    training = getattr(task_scopes, "training", None)
+    if training is None:
+        return []
+    bound = active_task_data_path()
+    if bound is None:
+        raise ValueError(
+            "task scopes were acquired but no task data path is bound, so the "
+            "bytes cannot be produced by the implementation that built them."
+        )
+
+    # Narrowed through the ONE resolver rather than accessed off `TaskDataPath`:
+    # the frozen four-method protocol does NOT declare `serialize_scope`, and it
+    # must not — the capability is an optional SIBLING. Reaching for the method
+    # directly is what a static checker rejects, and it is right to: the binding
+    # here could be an implementation that declares no capability at all, and
+    # the resolver is what turns that into a named refusal.
+    capability = resolve_task_scope_capability(bound)
+
+    fragment: list[str] = []
+    for stem, scope, flag in (
+        (TRAINING_SCOPE_STEM, training, "--task_scope"),
+        (EVAL_SCOPE_STEM, getattr(task_scopes, "evaluation", None), "--task_eval_scope"),
+    ):
+        if scope is None:
+            continue
+        path = scope_artifact_path(configs_dir, stem, exp_id)
+        digest = write_scope_artifact(path, capability.serialize_scope(scope))
+        fragment.extend([f"{flag}_ref", path, f"{flag}_digest", digest])
+    return fragment
+
+
 def _task_manifest_argv() -> list[str]:
     """The composed run's manifest path — empty unless BOUND. Step 11 C5.
 
@@ -907,8 +965,13 @@ def _task_manifest_argv() -> list[str]:
     TIDMAD's (`denoising_score_single.py:195`). Emitted only when composed,
     so legacy argv is byte-identical (R-11-1).
 
-    Only scoring needs it: it is the one child that constructs a metric.
-    Training and inference receive nothing new.
+    Step 12 / PR-12bc C3 — now emitted to ALL THREE children. Step 11's note
+    that "only scoring needs it" was true of the METRIC and false of the
+    task data path: training and inference resolve a transported id through
+    the registry, which holds only what their bootstrap imported, so an
+    out-of-tree implementation resolved in the parent and failed in both of
+    the children the parent spawned. The manifest is what lets them compose
+    the declaration the parent composed, through the same authority.
     """
     from workflows.task_composition import active_task_manifest_path
 
@@ -1378,7 +1441,7 @@ class TidmadSandbox:
         """
         path = os.path.abspath(os.path.join(self.dirs["configs"], f"dataset_profile_{exp_id}.json"))
         with open(path, "w") as handle:
-            json.dump(resolve_dataset_profile().model_dump(), handle)
+            json.dump(resolve_dataset_profile().to_wire(), handle)
         return path
 
     def execute_training(
@@ -1396,6 +1459,7 @@ class TidmadSandbox:
         order_strategy: str = "shuffle",
         file_order: list[int] | None = None,
         eval_sample_set: dict | None = None,
+        task_scopes: object | None = None,
     ):
         """Executes the training physical script.
 
@@ -1487,6 +1551,7 @@ class TidmadSandbox:
                 "--file_index",
                 str(self.file_index),
                 *_task_data_path_argv(),
+                *_task_manifest_argv(),
                 *_data_root_argv("--data_dir"),
             ]
 
@@ -1551,6 +1616,10 @@ class TidmadSandbox:
                     with open(fo_path, "w") as f:
                         json.dump(list(file_order), f)
                     cmd.extend(["--file_order_json", fo_path])
+                # Step 12 / PR-12bc B6 — the composed run's task-built scopes.
+                # Splatted like every other composed-only transport, so an
+                # un-composed argv is unchanged.
+                cmd.extend(_task_scope_argv(self.dirs["configs"], exp_id, task_scopes))
 
                 # RT2-B: in-subprocess runtime verification (streaming mode
                 # only). Remove any stale sidecar from a previous attempt with
@@ -1829,6 +1898,7 @@ class TidmadSandbox:
             "--dataset_profile_json",
             self._write_dataset_profile_config(exp_id),
             *_task_data_path_argv(),
+            *_task_manifest_argv(),
             *_data_root_argv("--data_dir"),
             "--model_cfg",
             m_path,

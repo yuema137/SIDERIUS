@@ -33,6 +33,7 @@ from execute_tools.dataset_config import (
     bind_dataset_profile,
     load_dataset_profile,
     resolve_dataset_profile,
+    tidmad_topology,
 )
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
@@ -47,7 +48,6 @@ from execute_tools.model_input_dtype import (
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
     resolve_task_data_path,
-    resolve_transported_task_data_path,
 )
 
 # D14-1 C4: the deliverable READER lives with the TIDMAD codec now; the alias
@@ -119,6 +119,20 @@ def get_parser():
         "by the parent process FROM its resolved run binding only — never an "
         "operator flag. SUPPLIED -> explicit binding (an unknown id fails "
         "closed, never falls back); ABSENT -> regime-A (TIDMAD compatibility).",
+    )
+    parser.add_argument(
+        "--task_data_path_identity",
+        type=str,
+        default=None,
+        help="Step 12 / PR-12bc C2: the PARENT-PINNED IDENTITY of the implementation named by --task_data_path_id. The id says WHICH implementation; this says WHICH CODE. Verified BEFORE the implementation is consumed, because a registry hit is never proof of identity — a stale registration answers to the right name while running different bytes. ABSENT -> a parent that predates this transport made no claim, and a child must not invent one.",
+    )
+    parser.add_argument(
+        "--task_manifest",
+        type=str,
+        default=None,
+        help="Step 12 / PR-12bc C3: the composed run's task-composition manifest, emitted by the parent FROM its resolved run binding only "
+        "— never an operator flag. SUPPLIED -> a transported id that is not built into this child is composed from the run's OWN declaration, through the same authority the parent used, which is what lets an "
+        "OUT-OF-TREE task reach a training or inference subprocess. ABSENT -> the id must already be registered here.",
     )
     parser.add_argument("--data_dir", "-d", type=str, default=None)
     parser.add_argument("--denoising_model", "-m", type=str, default="punet")
@@ -367,8 +381,8 @@ def main():
         dataset_profile = load_dataset_profile(args.dataset_profile_json)
     else:
         dataset_profile = resolve_dataset_profile()
-    profile_dataset = dataset_profile.dataset
-    profile_channels = dataset_profile.channels
+    profile_dataset = tidmad_topology(dataset_profile).dataset
+    profile_channels = tidmad_topology(dataset_profile).channels
     psd_segment_length = profile_dataset.psd_segment_length
 
     # Step 05c — the child's side of the Deliverable Contract. The spec is NOT
@@ -393,8 +407,16 @@ def main():
     # production deliverable WRITE goes through it; naming for logging and the
     # reuse probe stays on the deliverable authority above, which the
     # implementation delegates to — one authority, same bytes.
+    # C3: imported here, not at module scope — the composition layer sits
+    # ABOVE this one, and only a composed run ever reaches it.
+    from workflows.task_composition import resolve_child_task_data_path
+
     data_path = (
-        resolve_transported_task_data_path(args.task_data_path_id)
+        resolve_child_task_data_path(
+            args.task_data_path_id,
+            identity=args.task_data_path_identity,
+            manifest_path=args.task_manifest,
+        )
         if args.task_data_path_id is not None
         else resolve_task_data_path(None)
     )

@@ -209,5 +209,5 @@ class PerFileOutputStdCheck:
         if ctx.denoised_paths:
             return sorted(ctx.denoised_paths.keys())
         if ctx.denoised_filename_fn is not None:
-            return list(range(resolve_dataset_profile().dataset.num_files))
+            return list(range(resolve_dataset_profile().partition_count))
         return []

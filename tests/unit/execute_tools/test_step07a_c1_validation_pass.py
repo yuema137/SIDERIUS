@@ -42,7 +42,10 @@ from torch.utils.data import DataLoader
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.session import RuntimeVerificationSession
-from execute_tools.dataset_config import bind_dataset_profile
+from execute_tools.dataset_config import (
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.training_history import (
     COMPARABILITY_REASON_SUM,
     LEGACY_TRAINING_RESULT_KEYS,
@@ -377,7 +380,7 @@ class TestLegacySingleFile:
         with bind_dataset_profile(two_family.profile):
             ds = tes.TIDMADDataset(
                 two_family.data_dir,
-                [two_family.profile.dataset.training_file_name(0)],
+                [tidmad_topology(two_family.profile).dataset.training_file_name(0)],
                 two_family.seg_size,
                 sample_size=1,  # the fixture file holds 8 × seg_size samples
                 profile=two_family.profile,

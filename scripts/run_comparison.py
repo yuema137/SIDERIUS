@@ -52,7 +52,7 @@ from core.run_invariants import (
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
-from execute_tools.dataset_config import TIDMAD, DataScope, resolve_dataset_profile
+from execute_tools.dataset_config import NUM_FILES, TIDMAD, DataScope, resolve_dataset_profile
 from execute_tools.deliverable_spec import default_deliverable_naming
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
@@ -357,7 +357,7 @@ def run_baseline_trial(
     # DS6d — scoped baselines: sample sets are built within the scope and the
     # sandbox boundary enforces it before any file I/O.
     scope = data_scope if data_scope is not None else DataScope.default()
-    resolved_scope = scope.resolve(TIDMAD)
+    resolved_scope = scope.resolve(NUM_FILES)
 
     sandbox = TidmadSandbox(
         metadata_source="local",
@@ -1116,7 +1116,7 @@ def main():
         )
     except ValueError as e:
         raise SystemExit(f"[ERROR] {e}") from e
-    resolved_data_scope = data_scope.resolve(TIDMAD)
+    resolved_data_scope = data_scope.resolve(NUM_FILES)
 
     # DS6d — v17_pregate override pin: that campaign's policy file is the
     # contract; run-level HealthGate overrides are not allowed for it.

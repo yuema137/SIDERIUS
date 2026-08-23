@@ -22,6 +22,7 @@ from agent.schemas.hyperparam_tuning import (
     TrialConfig,
 )
 from agent.schemas.ordering import resolve_ordering
+from execute_tools.dataset_config import tidmad_topology
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
@@ -37,6 +38,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
 from nodes.ml_hyperparameter_tune_agent.runtime import (
     _apply_epoch_bound,
 )
+from nodes.ml_hyperparameter_tune_agent.scope_acquisition import acquire_attempt_scopes
 
 
 def prepare_attempt(
@@ -376,7 +378,7 @@ def prepare_attempt(
     _validate_data_config(
         trial_config,
         plan.model_cfg.get("segmentation_size", 10000),
-        run_profile.dataset,
+        tidmad_topology(run_profile).dataset,
     )
 
     # Build TWO independent SampleSets — training and validation
@@ -424,6 +426,27 @@ def prepare_attempt(
         eval_sample_set = None
         print(f"  Legacy mode: file_index={file_index}")
 
+    # Step 12 / PR-12bc B5 — task-owned scope acquisition. A CALLED boundary,
+    # never a branch family here (§J). Un-composed runs acquire nothing and
+    # keep resolving exactly as before; a composed run asks its BOUND
+    # implementation to build this attempt's scopes, and a composed
+    # implementation without the capability is refused HERE — parent-side,
+    # before any subprocess — rather than at first spawn.
+    task_scopes = acquire_attempt_scopes(
+        composed=agent_input.task_composition_ref is not None,
+        mode=trial_config.mode,
+        trial_strategy=trial_config.trial_strategy,
+        trial_portion=trial_config.trial_portion,
+        eval_strategy=trial_config.eval_strategy,
+        eval_portion=trial_config.eval_portion,
+        train_sampling_seed=trial_config.train_sampling_seed,
+        eval_sampling_seed=trial_config.eval_sampling_seed,
+        target_files=trial_config.target_files,
+        subset=agent_input.data_scope,
+        validation_max_samples=agent_input.validation_max_samples,
+        task_parameters={"seg_size": plan.model_cfg.get("segmentation_size", 10000)},
+    )
+
     # Segment counts for records and reflector context
     if train_sample_set:
         train_psd_segments = sum(len(v) for v in train_sample_set.values())
@@ -434,12 +457,12 @@ def prepare_attempt(
         # TIDMAD this is byte-identical, and under a bound task
         # the record no longer reports TIDMAD's 200 segments
         # for a file that does not have 200.
-        train_psd_segments = run_profile.dataset.segments_per_file
+        train_psd_segments = tidmad_topology(run_profile).dataset.segments_per_file
 
     if eval_sample_set:
         eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
     else:
-        eval_psd_segments = run_profile.dataset.segments_per_file  # legacy
+        eval_psd_segments = tidmad_topology(run_profile).dataset.segments_per_file  # legacy
 
     # When force_model is set, override the LLM's model_type choice.
     # (C7d: ruff SIM108 collapses this to a ternary now that the block sits at
@@ -469,6 +492,10 @@ def prepare_attempt(
         "train_config": plan.train_cfg,
         "loss_config": plan.loss_cfg,
         "sample_set": train_sample_set,  # training data (from training files)
+        # Step 12 / PR-12bc B6 — the composed run's TASK-BUILT scopes.
+        # Empty on an un-composed run, so the emitter yields nothing and
+        # the child argv is byte-identical.
+        "task_scopes": task_scopes,
         "train_portion": trial_config.train_portion,
         "train_base_seed": trial_config.train_base_seed,
         "eval_sample_set": eval_sample_set,  # validation data (from validation files)
@@ -499,6 +526,7 @@ def prepare_attempt(
         memory_history=memory_history,
         train_sample_set=train_sample_set,
         eval_sample_set=eval_sample_set,
+        task_scopes=task_scopes,
         train_psd_segments=train_psd_segments,
         eval_psd_segments=eval_psd_segments,
         ordering=ordering,

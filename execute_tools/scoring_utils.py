@@ -64,11 +64,12 @@ from execute_tools.dataset_config import (
     NUM_FILES,
     SEGMENT_LENGTH,
     SEGMENTS_PER_FILE,
-    TIDMAD,
     DataScope,
     DatasetProfile,
     ScopeViolationError,
     resolve_dataset_profile,
+    resolve_tidmad_topology,
+    tidmad_topology,
 )
 
 
@@ -275,7 +276,32 @@ SampleSet = dict[int, list[int]]
 """Mapping of file_index → list of segment indices to process."""
 
 
-def validate_sample_set(sample_set: dict, scope: "DataScope | None" = None) -> SampleSet:
+def _sample_set_bounds(profile: "DatasetProfile | None") -> tuple[int, int | None]:
+    """What a SampleSet may be validated against, split as Q-12-4 splits it.
+
+    Step 12 / PR-12bc B7. Extracted rather than inlined into
+    :func:`validate_sample_set`: "which bounds apply to this profile" and
+    "does this sample set satisfy them" are two responsibilities, and folding
+    the first into the second pushed the validator past its §J branch budget.
+
+    Returns:
+        ``(partition_count, segment_bound)``. The partition count is GENERIC
+        IDENTITY and always available. The per-partition index bound is TASK
+        TOPOLOGY: ``None`` when the task declares none, which means "not
+        checkable", never "check it against TIDMAD's".
+    """
+    resolved = profile if profile is not None else resolve_dataset_profile()
+    try:
+        return resolved.partition_count, tidmad_topology(resolved).dataset.segments_per_file
+    except ValueError:
+        return resolved.partition_count, None
+
+
+def validate_sample_set(
+    sample_set: dict,
+    scope: "DataScope | None" = None,
+    profile: "DatasetProfile | None" = None,
+) -> SampleSet:
     """
     Lightweight validation for a SampleSet dict.
 
@@ -287,11 +313,36 @@ def validate_sample_set(sample_set: dict, scope: "DataScope | None" = None) -> S
     the final guarantee before file I/O, catching SampleSets that did not go
     through ``build_sample_set``'s constructive enforcement.
 
+    **Step 12 / PR-12bc B7 — F-12bc-1, D-BC-8 = "profile-aware".** This
+    function used to validate against the TIDMAD MODULE CONSTANTS
+    (``NUM_FILES``, ``SEGMENTS_PER_FILE``, ``TIDMAD``), so every parent-side
+    boundary check applied TIDMAD's 20x200 grid whatever task was bound: a
+    run with 3 files silently accepted ``{19: [199]}``, and a run with 400
+    segments per file had two thirds of its index space rejected. The bound
+    now comes from the run's own profile, split exactly as Q-12-4 split the
+    profile itself:
+
+    ```text
+    partition bound      GENERIC IDENTITY  -> always checked
+    per-partition bound  TASK TOPOLOGY     -> checked when the task declares
+                                              one; SKIPPED, not guessed, when
+                                              it does not
+    ```
+
+    Skipping is the honest behaviour for the second bound, not a weakening: a
+    task that declares no per-partition index space has no number to check
+    against, and inventing TIDMAD's is precisely the defect being removed. The
+    structural checks — dict, non-empty, integer keys, non-empty integer
+    segment lists, non-negative — apply to every task unconditionally.
+
     Args:
         sample_set: Raw dict, possibly from JSON (string keys).
         scope:      Optional DataScope; file indices outside its resolution
                     raise :class:`ScopeViolationError`. ``None`` (default)
-                    keeps the legacy full-dataset range check only.
+                    keeps the full-dataset range check only.
+        profile:    The run's Dataset Profile. ``None`` resolves the bound
+                    profile — the Regime-A adapter, so every pre-B7 caller
+                    keeps its exact behaviour on a TIDMAD run.
 
     Returns:
         Validated SampleSet with int keys and sorted int segment lists.
@@ -306,7 +357,8 @@ def validate_sample_set(sample_set: dict, scope: "DataScope | None" = None) -> S
     if not sample_set:
         raise ValueError("SampleSet must not be empty.")
 
-    allowed = scope.resolve(TIDMAD) if scope is not None else None
+    partition_count, segment_bound = _sample_set_bounds(profile)
+    allowed = scope.resolve(partition_count) if scope is not None else None
 
     validated: SampleSet = {}
     for key, segments in sample_set.items():
@@ -314,8 +366,10 @@ def validate_sample_set(sample_set: dict, scope: "DataScope | None" = None) -> S
             file_index = int(key)
         except (ValueError, TypeError) as e:
             raise ValueError(f"SampleSet key must be an integer, got {key!r}") from e
-        if not (0 <= file_index < NUM_FILES):
-            raise ValueError(f"SampleSet file_index {file_index} out of range [0, {NUM_FILES}).")
+        if not (0 <= file_index < partition_count):
+            raise ValueError(
+                f"SampleSet file_index {file_index} out of range [0, {partition_count})."
+            )
         if allowed is not None and file_index not in allowed:
             raise ScopeViolationError(
                 f"SampleSet file_index {file_index} is outside the DataScope {allowed}."
@@ -325,10 +379,14 @@ def validate_sample_set(sample_set: dict, scope: "DataScope | None" = None) -> S
                 f"SampleSet[{file_index}] must be a non-empty list, got {type(segments).__name__}"
             )
         for seg in segments:
-            if not isinstance(seg, int) or seg < 0 or seg >= SEGMENTS_PER_FILE:
+            if not isinstance(seg, int) or seg < 0:
+                raise ValueError(
+                    f"SampleSet[{file_index}] segment {seg!r} invalid — must be a non-negative int."
+                )
+            if segment_bound is not None and seg >= segment_bound:
                 raise ValueError(
                     f"SampleSet[{file_index}] segment {seg!r} invalid — "
-                    f"must be int in [0, {SEGMENTS_PER_FILE})."
+                    f"must be int in [0, {segment_bound})."
                 )
         validated[file_index] = segments
 
@@ -386,7 +444,7 @@ def score_segments(
     if raw_data_dir is None:
         raw_data_dir = data_dir
     if raw_filename is None:
-        raw_filename = resolve_dataset_profile().dataset.validation_file_name(file_index)
+        raw_filename = resolve_tidmad_topology().dataset.validation_file_name(file_index)
 
     file_anchors = anchor_map[str(file_index)]
     weighted_snrs = []
@@ -599,7 +657,7 @@ def score_vector(
     # names keep coming from ``denoised_filename_fn``, which is the
     # Deliverable Contract's and is NOT 02a's to touch (§5f). Both are keyed
     # by the same input identity, ``file_index``.
-    dataset = (profile or resolve_dataset_profile()).dataset
+    dataset = tidmad_topology(profile or resolve_dataset_profile()).dataset
     tasks = []
     for file_index, segment_indices in sample_set.items():
         denoised_filename = denoised_filename_fn(file_index)

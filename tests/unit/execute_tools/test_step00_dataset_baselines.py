@@ -96,7 +96,7 @@ class TestDS1TidmadDatasetConfig:
         assert TIDMAD.validation_file_pattern.format(file_index=7) == "abra_validation_0007.h5"
 
     def test_default_scope_resolves_full_range(self):
-        assert DataScope.default().resolve(TIDMAD) == list(range(20))
+        assert DataScope.default().resolve(NUM_FILES) == list(range(20))
 
 
 class TestDS2ShapeClassAndIdentityOrder:

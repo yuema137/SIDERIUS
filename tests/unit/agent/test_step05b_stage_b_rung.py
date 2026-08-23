@@ -30,7 +30,10 @@ restating the observations.
 
 from __future__ import annotations
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 from tests.helpers.step04a_fixtures import tidmad_model_io
 
 
@@ -76,8 +79,8 @@ class TestB1IsSingleAxis:
         perturbed the topology would be a two-axis contrast wearing a
         one-axis name."""
         assert tidmad_model_io(num_classes=16).class_cardinality == 16
-        assert TIDMAD_PROFILE.dataset.psd_segment_length == 10_000_000
-        assert TIDMAD_PROFILE.encoding.num_classes == 256
+        assert tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length == 10_000_000
+        assert tidmad_topology(TIDMAD_PROFILE).encoding.num_classes == 256
 
 
 # ---------------------------------------------------------------------------
@@ -89,12 +92,12 @@ class TestB2IsSingleAxis:
     def test_the_contrast_moves_exactly_the_decomposition_length(self):
         contrast = TIDMAD_PROFILE.model_copy(
             update={
-                "dataset": TIDMAD_PROFILE.dataset.model_copy(
+                "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                     update={"psd_segment_length": 2_048_000}
                 )
             }
         )
-        moved = _diff(TIDMAD_PROFILE.model_dump(mode="json"), contrast.model_dump(mode="json"))
+        moved = _diff(TIDMAD_PROFILE.to_wire(), contrast.to_wire())
         assert moved == ["dataset.psd_segment_length"], moved
 
     def test_the_contrast_leaves_the_model_io_authority_untouched(self):
@@ -104,12 +107,15 @@ class TestB2IsSingleAxis:
         detect."""
         contrast = TIDMAD_PROFILE.model_copy(
             update={
-                "dataset": TIDMAD_PROFILE.dataset.model_copy(
+                "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                     update={"psd_segment_length": 2_048_000}
                 )
             }
         )
-        assert contrast.encoding.num_classes == TIDMAD_PROFILE.encoding.num_classes
+        assert (
+            tidmad_topology(contrast).encoding.num_classes
+            == tidmad_topology(TIDMAD_PROFILE).encoding.num_classes
+        )
         assert tidmad_model_io().class_cardinality == 256
 
 

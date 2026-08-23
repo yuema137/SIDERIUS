@@ -38,7 +38,12 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.dataset_config import ValueEncoding, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    ValueEncoding,
+    resolve_dataset_profile,
+    resolve_tidmad_topology,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
     derive_tidmad_deliverable_spec,
@@ -83,7 +88,7 @@ def test_the_full_encode_decode_round_trip_is_value_exact():
     """
     stored = np.asarray(INPUT_SAMPLES, dtype=np.int8)
 
-    decoded = stored.astype(np.int16) + resolve_dataset_profile().encoding.value_offset
+    decoded = stored.astype(np.int16) + resolve_tidmad_topology().encoding.value_offset
     re_encoded = (decoded - TIDMAD_STORAGE.value_offset).astype(TIDMAD_STORAGE.storage_dtype)
 
     assert re_encoded.tolist() == stored.tolist()
@@ -112,8 +117,8 @@ def test_the_offset_derives_from_the_profile_rather_than_matching_it():
 
     derived = derive_tidmad_deliverable_spec(contrast).storage
 
-    assert derived.value_offset == contrast.encoding.value_offset
-    assert derived.storage_dtype == contrast.encoding.storage_dtype
+    assert derived.value_offset == tidmad_topology(contrast).encoding.value_offset
+    assert derived.storage_dtype == tidmad_topology(contrast).encoding.storage_dtype
 
 
 # ---------------------------------------------------------------------------

@@ -35,7 +35,10 @@ from collections.abc import Mapping, Sequence
 
 from core.runtime_control.phases import RuntimePhase
 from core.runtime_control.workload import ResolvedPhaseWorkload
-from execute_tools.dataset_config import DatasetProfile
+from execute_tools.dataset_config import (
+    DatasetProfile,
+    tidmad_topology,
+)
 
 SampleSet = Mapping[str, Sequence[int]] | Mapping[int, Sequence[int]]
 
@@ -50,7 +53,7 @@ def _validate_seg(seg_size: int, profile: DatasetProfile) -> int:
     """
     if seg_size <= 0:
         raise ValueError(f"seg_size must be positive; got {seg_size!r}.")
-    return profile.dataset.psd_segment_length // seg_size
+    return tidmad_topology(profile).dataset.psd_segment_length // seg_size
 
 
 def resolve_training_workload(
@@ -156,7 +159,9 @@ def resolve_inference_workload(
         total_ml += dim1
         total_batches += batches
 
-    output_bytes = total_psd * profile.dataset.psd_segment_length * 2  # denoised + injected
+    output_bytes = (
+        total_psd * tidmad_topology(profile).dataset.psd_segment_length * 2
+    )  # denoised + injected
 
     return ResolvedPhaseWorkload(
         phase="inference",

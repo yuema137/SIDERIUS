@@ -65,7 +65,13 @@ import pytest
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.build_anchor_map import default_anchor_map_path, load_anchor_map
-from execute_tools.dataset_config import TIDMAD_PROFILE, DatasetProfile, bind_dataset_profile
+from execute_tools.dataset_config import (
+    NUM_FILES,
+    TIDMAD_PROFILE,
+    DatasetProfile,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import derive_tidmad_deliverable_spec
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -124,7 +130,7 @@ def _bound_profile(raw_pattern: str) -> DatasetProfile:
     """
     return TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                 update={"segments_per_file": 1, "validation_file_pattern": raw_pattern}
             )
         }
@@ -344,4 +350,4 @@ def test_c0_execute_scoring_argv_ordered_golden(mock_run, tmp_path):
     transported = json.loads(
         (tmp_path / "configs" / RUN_NAME / "dataset_profile_c0exp.json").read_text()
     )
-    assert transported == TIDMAD_PROFILE.model_dump()
+    assert transported == TIDMAD_PROFILE.to_wire()

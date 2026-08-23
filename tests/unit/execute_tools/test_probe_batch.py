@@ -16,7 +16,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 from execute_tools.probe_batch import build_bounded_probe_batch
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -34,10 +37,10 @@ def _write_file(directory: Path, name: str, *, samples: int) -> np.ndarray:
     targets = rng.integers(-128, 128, size=samples, dtype=np.int8)
     with h5py.File(directory / name, "w") as handle:
         group = handle.create_group("timeseries")
-        group.create_group(TIDMAD_PROFILE.channels.input_channel).create_dataset(
+        group.create_group(tidmad_topology(TIDMAD_PROFILE).channels.input_channel).create_dataset(
             "timeseries", data=inputs
         )
-        group.create_group(TIDMAD_PROFILE.channels.target_channel).create_dataset(
+        group.create_group(tidmad_topology(TIDMAD_PROFILE).channels.target_channel).create_dataset(
             "timeseries", data=targets
         )
     return inputs
@@ -64,8 +67,8 @@ class TestItOpensADeclaredFile:
         expected = _write_file(tmp_path, "abra_training_0003.h5", samples=SEG * (BATCH + 1))
         result = _build(tmp_path)
         assert result.evidence.source_file == "abra_training_0003.h5"
-        first = expected[:SEG].astype(TIDMAD_PROFILE.encoding.compute_dtype)
-        first = first + TIDMAD_PROFILE.encoding.value_offset
+        first = expected[:SEG].astype(tidmad_topology(TIDMAD_PROFILE).encoding.compute_dtype)
+        first = first + tidmad_topology(TIDMAD_PROFILE).encoding.value_offset
         assert result.tensor[0].tolist() == first.tolist()
 
     def test_the_lowest_declared_index_wins_over_a_higher_one(self, tmp_path):
@@ -88,10 +91,10 @@ class TestItOpensADeclaredFile:
         with pytest.raises(RuntimeError) as excinfo:
             _build(tmp_path)
         message = str(excinfo.value)
-        assert TIDMAD_PROFILE.dataset.training_file_name(0) in message
-        assert TIDMAD_PROFILE.dataset.training_file_name(TIDMAD_PROFILE.dataset.num_files - 1) in (
-            message
-        )
+        assert tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(0) in message
+        assert tidmad_topology(TIDMAD_PROFILE).dataset.training_file_name(
+            tidmad_topology(TIDMAD_PROFILE).dataset.num_files - 1
+        ) in (message)
 
 
 class TestTheReadStaysExactlyAsWideAsTheBatch:
@@ -106,7 +109,7 @@ class TestTheReadStaysExactlyAsWideAsTheBatch:
         """
         _write_file(tmp_path, "abra_training_0000.h5", samples=SEG * 40)
         evidence = _build(tmp_path).evidence
-        itemsize = np.dtype(TIDMAD_PROFILE.encoding.storage_dtype).itemsize
+        itemsize = np.dtype(tidmad_topology(TIDMAD_PROFILE).encoding.storage_dtype).itemsize
         assert evidence.bytes_read == BATCH * SEG * itemsize
         assert evidence.file_sample_count == SEG * 40
         assert evidence.fraction_of_file_read < 0.1
@@ -130,10 +133,10 @@ class TestTheMeasurementPathHoldsNoTaskLiterals:
         from an instruction.
         """
         forbidden_strings = {
-            TIDMAD_PROFILE.channels.input_channel,
-            TIDMAD_PROFILE.channels.target_channel,
+            tidmad_topology(TIDMAD_PROFILE).channels.input_channel,
+            tidmad_topology(TIDMAD_PROFILE).channels.target_channel,
         }
-        pattern_stem = TIDMAD_PROFILE.dataset.training_file_pattern.split("{")[0]
+        pattern_stem = tidmad_topology(TIDMAD_PROFILE).dataset.training_file_pattern.split("{")[0]
         module = ast.parse((REPO_ROOT / relative_path).read_text(encoding="utf-8"))
         for node in ast.walk(module):
             if not isinstance(node, ast.Constant):
@@ -161,7 +164,7 @@ class TestTheMeasurementPathHoldsNoTaskLiterals:
             if isinstance(n, ast.Constant)
             and isinstance(n.value, int)
             and not isinstance(n.value, bool)
-            and n.value == TIDMAD_PROFILE.encoding.value_offset
+            and n.value == tidmad_topology(TIDMAD_PROFILE).encoding.value_offset
         ]
         assert offsets == [], "the class-index offset must come from the profile"
 

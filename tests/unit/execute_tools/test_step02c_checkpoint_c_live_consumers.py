@@ -41,7 +41,11 @@ import numpy as np
 import pytest
 
 from core.campaign_artifacts import decide_phase1_reuse, sha256_file
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.health_checks.config import clear_health_gates_config_cache
 from execute_tools.health_checks.runner import evaluate_gate
 from execute_tools.health_checks.schemas import GateAction, HealthCheckContext
@@ -97,7 +101,7 @@ class _RealFiles:
         degenerate = degenerate or set()
         self.opened: set[int] = set()
         self._paths = {}
-        for index in range(TIDMAD_PROFILE.dataset.num_files):
+        for index in range(tidmad_topology(TIDMAD_PROFILE).dataset.num_files):
             path = tmp_path / f"denoised_{index:04d}.h5"
             _write_file(path, degenerate=index in degenerate)
             self._paths[index] = str(path)
@@ -161,7 +165,7 @@ class TestRealHealthGateEvaluation:
         with bind_dataset_profile(_contrast_profile()):
             evaluate_gate(RECORDING_GATE, files.ctx, config_path=_declared_config(tmp_path))
 
-        assert files.opened == set(range(TIDMAD_PROFILE.dataset.num_files))
+        assert files.opened == set(range(tidmad_topology(TIDMAD_PROFILE).dataset.num_files))
 
 
 class TestGateVerdictSemanticsAreUnchanged:
@@ -245,7 +249,7 @@ class TestRealCampaignDecision:
             configured_gate_ids=[BLOCKING_GATE],
             expected_output_paths=outputs,
             declared_health_peek=list(DECLARED_PEEK),
-            full_scope_num_files=TIDMAD_PROFILE.dataset.num_files,
+            full_scope_num_files=tidmad_topology(TIDMAD_PROFILE).dataset.num_files,
         )
 
     def test_an_incomplete_declared_peek_forces_a_retrain(self, tmp_path):
@@ -300,7 +304,7 @@ class TestRealSelectionPath:
             seed=42,
             profile=_contrast_profile(),
         )
-        expected = max(1, round(0.05 * TIDMAD_PROFILE.dataset.segments_per_file))
+        expected = max(1, round(0.05 * tidmad_topology(TIDMAD_PROFILE).dataset.segments_per_file))
         assert {len(v) for v in result.values()} == {expected}
 
 

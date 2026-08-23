@@ -124,6 +124,12 @@ parser.add_argument(
     "operator flag. SUPPLIED -> explicit binding (an unknown id fails "
     "closed, never falls back); ABSENT -> regime-A (TIDMAD compatibility).",
 )
+parser.add_argument(
+    "--task_data_path_identity",
+    type=str,
+    default=None,
+    help="Step 12 / PR-12bc C2: the PARENT-PINNED IDENTITY of the implementation named by --task_data_path_id. The id says WHICH implementation; this says WHICH CODE. Verified BEFORE the implementation is consumed, because a registry hit is never proof of identity — a stale registration answers to the right name while running different bytes. ABSENT -> a parent that predates this transport made no claim, and a child must not invent one.",
+)
 
 args = parser.parse_args()
 
@@ -151,6 +157,7 @@ from execute_tools.data_paths import TIDMAD_DATA_DIR  # noqa: E402
 from execute_tools.dataset_config import (  # noqa: E402
     load_dataset_profile,
     resolve_dataset_profile,
+    tidmad_topology,
 )
 
 if args.data_dir is None:
@@ -249,7 +256,7 @@ else:
 
 if args.denoising_model == "none":
     # RAW validation file — Step-02-owned INPUT topology, from the profile.
-    fname = dataset_profile.dataset.validation_file_name(args.file_index)
+    fname = tidmad_topology(dataset_profile).dataset.validation_file_name(args.file_index)
     full_path = os.path.join(args.data_dir, fname)
 elif args.mode == "fix":
     fname = deliverable_spec.naming.unqualified_name(
@@ -267,11 +274,19 @@ else:  # agent
     from execute_tools.task_data_path import (
         EvaluationReadRequest,
         resolve_task_data_path,
-        resolve_transported_task_data_path,
     )
 
+    # C3: one resolution authority across all three children. Scoring already
+    # had the manifest for its metric; the data path now reads it too, so an
+    # out-of-tree task resolves the same way here as in training and inference.
+    from workflows.task_composition import resolve_child_task_data_path
+
     _data_path = (
-        resolve_transported_task_data_path(args.task_data_path_id)
+        resolve_child_task_data_path(
+            args.task_data_path_id,
+            identity=args.task_data_path_identity,
+            manifest_path=args.task_manifest,
+        )
         if args.task_data_path_id is not None
         else resolve_task_data_path(None)
     )
@@ -308,7 +323,9 @@ anchor_data = load_anchor_map(args.anchor_map)
 s_max = float(anchor_data["s_max"])
 anchors = anchor_data["anchors"]
 
-sample_set = {args.file_index: list(range(dataset_profile.dataset.segments_per_file))}
+sample_set = {
+    args.file_index: list(range(tidmad_topology(dataset_profile).dataset.segments_per_file))
+}
 
 
 def _denoised_fn(_fi: int) -> str:

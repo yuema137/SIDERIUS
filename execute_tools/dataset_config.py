@@ -16,10 +16,12 @@ Constants:
 """
 
 import json
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
+from copy import deepcopy
 from string import Formatter
+from typing import Any, ClassVar
 
 from pydantic import (
     BaseModel,
@@ -282,33 +284,58 @@ class DataScope(BaseModel):
                     ) from e
         return cls(file_indices=indices)
 
-    def resolve(self, dataset: DatasetConfig) -> list[int]:
-        """Return the concrete allowed file indices for ``dataset``.
+    def to_cli(self) -> str | None:
+        """The inverse of :meth:`from_cli`: the operator spelling, or ``None``.
 
-        ``None`` resolves to every file. Explicit indices are validated
-        against the dataset bound — resolution is the single place where
-        scope meets dataset definition.
-
-        Returns:
-            Sorted list of allowed file indices (a fresh copy).
-
-        Raises:
-            ValueError: If any index is outside ``[0, dataset.num_files)``.
+        Step 12 / PR-12bc B5. A composed run transports the operator's
+        partition restriction as an OPAQUE string (``ScopeBuildRequest.
+        subset_ref``) which the TASK interprets, so the framework needs a way
+        to spell a scope it already holds. ``None`` for the complete dataset,
+        which is what "no restriction" means — deliberately not the empty
+        string, which ``from_cli`` would have to disambiguate.
         """
         if self.file_indices is None:
-            return list(range(dataset.num_files))
-        out_of_range = [i for i in self.file_indices if i >= dataset.num_files]
+            return None
+        return ",".join(str(i) for i in self.file_indices)
+
+    def resolve(self, partition_count: int) -> list[int]:
+        """Return the concrete allowed partition indices.
+
+        ``None`` resolves to every partition. Explicit indices are validated
+        against the bound — resolution is the single place where scope meets
+        the dataset's partition domain.
+
+        Step 12 / PR-12bc B2 (Q-12-4): the parameter is the **partition
+        count**, not a ``DatasetConfig``. This function only ever read
+        ``num_files``, and the partition count is generic identity while the
+        rest of that object is task-owned topology. Taking the whole config
+        made a purely generic operation look like it needed TIDMAD's
+        geometry.
+
+        Args:
+            partition_count: How many partitions the dataset has —
+                ``DatasetProfile.partition_count``.
+
+        Returns:
+            Sorted list of allowed partition indices (a fresh copy).
+
+        Raises:
+            ValueError: If any index is outside ``[0, partition_count)``.
+        """
+        if self.file_indices is None:
+            return list(range(partition_count))
+        out_of_range = [i for i in self.file_indices if i >= partition_count]
         if out_of_range:
             raise ValueError(
                 f"DataScope file_indices {out_of_range} out of range for "
-                f"dataset with num_files={dataset.num_files} "
-                f"(valid: 0..{dataset.num_files - 1})."
+                f"dataset with num_files={partition_count} "
+                f"(valid: 0..{partition_count - 1})."
             )
         return list(self.file_indices)
 
-    def is_full(self, dataset: DatasetConfig) -> bool:
-        """Whether this scope covers the complete dataset."""
-        return self.resolve(dataset) == list(range(dataset.num_files))
+    def is_full(self, partition_count: int) -> bool:
+        """Whether this scope covers every partition."""
+        return self.resolve(partition_count) == list(range(partition_count))
 
 
 # ---------------------------------------------------------------------------
@@ -458,14 +485,38 @@ class DatasetProfile(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    dataset: DatasetConfig = Field(
-        description="File topology, sample geometry, and the sample-shape legality rule.",
+    partition_count: int = Field(
+        gt=0,
+        description=(
+            "**GENERIC IDENTITY.** How many partitions this dataset has — the "
+            "cardinality of the index domain :class:`DataScope` addresses.\n\n"
+            "Step 12 / PR-12bc B2 (Q-12-4). This is the ONE topology fact "
+            "framework infrastructure reasons about with the SAME semantics "
+            "across materially different tasks: 16 production sites compute "
+            "``list(range(...))`` over it, compare a resolved scope against "
+            "it, or allocate one slot per index, and each means the same "
+            "thing for TIDMAD files, Pets shards and DAVIS clips. It was "
+            "``dataset.num_files``; the rename to ``partition`` is not what "
+            "earns it generic status — the consumer audit did (§Q.B2.1)."
+        ),
     )
-    channels: ChannelIdentity = Field(
-        description="Which in-file channel is the model input and which is the truth.",
-    )
-    encoding: ValueEncoding = Field(
-        description="Data-side dtype/offset/class-count declaration.",
+    topology: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "**OPAQUE TASK-OWNED TOPOLOGY.** The task's own physical layout: "
+            "TIDMAD's PSD geometry, sampling frequency, file-name patterns, "
+            "h5 channel identities and value encoding all live in here.\n\n"
+            "**The framework NEVER inspects inside this payload** — it "
+            "transports it, serializes it and hands it back to the task. "
+            "There is deliberately no ``TidmadTopology | PetsTopology | "
+            "DavisTopology`` union and no catalog of optional built-in "
+            "blocks: one optional built-in block is the same defect with "
+            "N=1, and it is exactly what forced the Pets fixture to declare "
+            "``sampling_frequency: 1.0`` and ``psd_segment_length: 256`` for "
+            "an image-classification task.\n\n"
+            "A task that has no physical topology to declare leaves it "
+            "empty and every generic-identity reader still works."
+        ),
     )
 
     # --- Task-owned file sets (Step 02c) --------------------------------
@@ -512,6 +563,153 @@ class DatasetProfile(BaseModel):
         ),
     )
 
+    #: The legacy document's sections, in their original declaration order.
+    #: Named ONCE so the wire reader, the wire writer and ``model_copy``'s
+    #: adapter cannot drift — three call sites, one definition of "what the
+    #: pre-B2 shape was".
+    _LEGACY_SECTIONS: ClassVar[tuple[str, ...]] = ("dataset", "channels", "encoding")
+
+    @staticmethod
+    def _partition_count_from_legacy(topology: Mapping[str, Any]) -> int | None:
+        """The partition count a LEGACY topology payload carries, if any.
+
+        The one place the legacy shape's interior is read. Every other
+        framework site reads :attr:`partition_count`.
+        """
+        dataset = topology.get("dataset")
+        if isinstance(dataset, Mapping):
+            count = dataset.get("num_files")
+        else:
+            # Direct keyword construction — ``DatasetProfile(dataset=TIDMAD,
+            # …)`` — hands a MODEL here, not a mapping. Accepted for the same
+            # reason the mapping form is: it is the pre-B2 spelling, and
+            # rejecting it would turn a legacy caller into an obscure
+            # "partition_count field required" instead of just working.
+            count = getattr(dataset, "num_files", None)
+        return count if isinstance(count, int) else None
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Any:
+        """``model_copy`` that still understands the legacy section names.
+
+        Step 12 / PR-12bc B2, and it is a CORRECTNESS fix rather than a
+        convenience. ``model_copy(update=...)`` bypasses validation entirely
+        in Pydantic v2, so after the split
+        ``profile.model_copy(update={"dataset": smaller})`` would have
+        SILENTLY DONE NOTHING — the caller would get a profile still carrying
+        20 partitions and no error anywhere. That is precisely the class of
+        quiet wrongness this contract exists to remove, so the legacy section
+        names are translated into a topology update instead, and
+        ``partition_count`` follows ``num_files`` rather than going stale.
+        """
+        if update:
+            legacy = {k: update[k] for k in self._LEGACY_SECTIONS if k in update}
+            if legacy:
+                update = {k: v for k, v in update.items() if k not in legacy}
+                topology = dict(self.topology)
+                for key, value in legacy.items():
+                    topology[key] = (
+                        value.model_dump() if isinstance(value, BaseModel) else dict(value)
+                    )
+                update["topology"] = topology
+                if "partition_count" not in update:
+                    resolved = self._partition_count_from_legacy(topology)
+                    if resolved is not None:
+                        update["partition_count"] = resolved
+        return super().model_copy(update=dict(update) if update else None, deep=deep)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_the_legacy_wire_form(cls, data: Any) -> Any:
+        """BOUNDED LEGACY ADAPTER: read a pre-B2 profile document.
+
+        Step 12 / PR-12bc B2. The `--dataset_profile_json` wire form predates
+        the generic/opaque split and its **bytes are contract** (R-11-13):
+        every committed profile snapshot, every persisted config a resume
+        reads, and the Step-00 golden are written in it. This adapter is the
+        ONE place that shape is understood.
+
+        ```text
+        LEGACY IN   {"dataset": {...,"num_files": N}, "channels": {...},
+                     "encoding": {...}, "anchor_selection_files": [...],
+                     "health_peek_files": [...]}
+        INTERNAL    {"partition_count": N, "topology": {dataset, channels,
+                     encoding}, "anchor_selection_files": [...],
+                     "health_peek_files": [...]}
+        ```
+
+        **This is not the framework inspecting task topology.** It is the
+        framework parsing its OWN legacy serialization, which happens to be
+        TIDMAD-shaped because it predates the split. A profile authored in
+        the new form passes through untouched, and nothing downstream of this
+        function looks inside ``topology`` again — which is what the §Q.B2
+        census enforces.
+
+        Bounded exactly as 08b's ``TASK_HEALTH_PEEK`` adapter is: it exists
+        so existing documents stay readable, it is named, it is tested, and
+        it is the only legacy reader.
+        """
+        if not isinstance(data, dict):
+            return data
+        if "partition_count" in data:
+            return data  # already the internal form
+        if "dataset" not in data:
+            return data  # let the schema report what is actually missing
+        legacy = dict(data)
+        topology: dict[str, Any] = {}
+        for key in cls._LEGACY_SECTIONS:
+            if key in legacy:
+                # Normalized to plain data AND copied: the topology is an
+                # OPAQUE payload, so a model handed in by a legacy keyword
+                # caller becomes its dump, and a caller's dict must not
+                # become live state inside a frozen profile.
+                section = legacy.pop(key)
+                topology[key] = (
+                    section.model_dump() if isinstance(section, BaseModel) else deepcopy(section)
+                )
+        resolved = cls._partition_count_from_legacy(topology)
+        if resolved is None:
+            return data  # malformed: let the schema say so, do not guess
+        legacy["partition_count"] = resolved
+        legacy["topology"] = topology
+        return legacy
+
+    def to_wire(self) -> dict[str, Any]:
+        """The LEGACY observable form, for transport and persistence.
+
+        §D.3a: the internal domain model has ONE semantic authority; legacy
+        byte compatibility lives HERE, at the boundary, rather than by
+        retaining duplicate live physical fields.
+
+        For any profile whose topology carries the legacy sections this
+        reproduces the pre-B2 document **byte-identically** — the property
+        `--dataset_profile_json` and the Step-00 golden depend on. A profile
+        with no such topology serializes its generic identity plus whatever
+        the task did declare; there is no TIDMAD-shaped default to fall back
+        on and none is invented.
+        """
+        # DEEP-COPIED, never aliased. ``DatasetProfile`` is frozen, but a
+        # plain ``dict`` inside it is not: returning the profile's own
+        # sections would let ``profile.to_wire()["dataset"].update(...)`` —
+        # the obvious way to build a variant — silently mutate the SHIPPED
+        # profile for the rest of the process. That is not hypothetical; it
+        # is what this method did when first written, and it poisoned every
+        # later test in the same interpreter.
+        wire: dict[str, Any] = {}
+        for key in self._LEGACY_SECTIONS:
+            if key in self.topology:
+                wire[key] = deepcopy(self.topology[key])
+        extra = {k: deepcopy(v) for k, v in self.topology.items() if k not in wire}
+        if extra:
+            wire["topology"] = extra
+        if "dataset" not in wire:
+            # Nothing in this task's topology carries the legacy partition
+            # count, so the generic identity must cross explicitly or the
+            # child could not reconstruct it.
+            wire["partition_count"] = self.partition_count
+        wire["anchor_selection_files"] = list(self.anchor_selection_files)
+        wire["health_peek_files"] = list(self.health_peek_files)
+        return wire
+
     @model_validator(mode="after")
     def _declared_file_sets_are_legal_for_this_topology(self) -> "DatasetProfile":
         """Both declared file sets must index files this dataset has.
@@ -536,7 +734,7 @@ class DatasetProfile(BaseModel):
         establish that this object fails loudly rather than quietly
         repairing. Consumer-side dedupe of RUNTIME lists is untouched.
         """
-        num_files = self.dataset.num_files
+        num_files = self.partition_count
         for field_name in ("anchor_selection_files", "health_peek_files"):
             declared: list[int] = getattr(self, field_name)
             if not declared:
@@ -568,24 +766,99 @@ class DatasetProfile(BaseModel):
 # declares its own. The adapter exists so an existing caller that predates
 # the profile transport keeps resolving exactly today's behaviour — it is
 # NOT a statement about what a generic dataset looks like.
+TIDMAD_CHANNELS = ChannelIdentity(
+    input_channel="channel0001",
+    target_channel="channel0002",
+)
+TIDMAD_ENCODING = ValueEncoding(
+    storage_dtype="int8",
+    compute_dtype="int16",
+    value_offset=128,
+    num_classes=256,
+)
+
 TIDMAD_PROFILE = DatasetProfile(
-    dataset=TIDMAD,
-    channels=ChannelIdentity(
-        input_channel="channel0001",
-        target_channel="channel0002",
-    ),
-    encoding=ValueEncoding(
-        storage_dtype="int8",
-        compute_dtype="int16",
-        value_offset=128,
-        num_classes=256,
-    ),
+    partition_count=TIDMAD.num_files,
+    # TIDMAD's own physical layout, as OPAQUE task topology (B2 / Q-12-4).
+    # Built from the same three declarations as before, dumped in their
+    # declaration order so `to_wire()` reproduces the pre-B2 document
+    # byte-identically.
+    topology={
+        "dataset": TIDMAD.model_dump(),
+        "channels": TIDMAD_CHANNELS.model_dump(),
+        "encoding": TIDMAD_ENCODING.model_dump(),
+    },
     # TIDMAD's own task-owned file sets. Both were hardcoded before Step
     # 02c — the anchors list at sample_set_builder.py, the peek triplet as
     # a YAML literal PLUS a hardcoded copy inside the campaign validator.
     anchor_selection_files=[0, 10, 19],
     health_peek_files=[3, 10, 17],
 )
+
+
+# ---------------------------------------------------------------------------
+# TIDMAD's typed topology view — TASK-OWNED, never read by generic core
+# ---------------------------------------------------------------------------
+#
+# Step 12 / PR-12bc B2. `DatasetConfig`, `ChannelIdentity` and `ValueEncoding`
+# stopped being FIELDS of `DatasetProfile` because no cross-task framework
+# consumer reasons about them with one semantics (§Q.B2.1). They remain the
+# TYPES through which TIDMAD reads its own opaque payload.
+#
+# The census in `tests/unit/execute_tools/test_step12_pr12bc_b2_topology_contract.py`
+# is what keeps this honest: a module on the GENERIC list that calls
+# `tidmad_topology()` turns it RED. Being declared in this file is not the
+# same as being read by generic core, and the census asserts the second.
+
+
+class TidmadTopology(BaseModel):
+    """TIDMAD's physical layout, decoded from the opaque topology payload."""
+
+    model_config = ConfigDict(frozen=True)
+
+    dataset: DatasetConfig
+    channels: ChannelIdentity
+    encoding: ValueEncoding
+
+
+def tidmad_topology(profile: DatasetProfile) -> TidmadTopology:
+    """Decode ``profile``'s opaque payload as TIDMAD's typed topology.
+
+    **FAILS CLOSED.** A profile whose topology does not carry TIDMAD's
+    sections is a profile TIDMAD's code cannot run against, and saying so by
+    name is the whole point of the split — the alternative is what the Pets
+    fixture had to do, invent a ``sampling_frequency`` for a task that has no
+    sampling frequency.
+
+    Raises:
+        ValueError: The payload is missing a section or does not satisfy the
+            typed view.
+    """
+    missing = [k for k in ("dataset", "channels", "encoding") if k not in profile.topology]
+    if missing:
+        raise ValueError(
+            f"this dataset profile declares no TIDMAD topology (missing "
+            f"{missing}); its topology keys are {sorted(profile.topology)}. "
+            f"TIDMAD-physical code cannot run against a task that did not "
+            f"declare TIDMAD's physical layout."
+        )
+    try:
+        return TidmadTopology.model_validate(
+            {k: profile.topology[k] for k in ("dataset", "channels", "encoding")}
+        )
+    except ValidationError as exc:
+        raise ValueError(
+            f"this dataset profile's topology does not satisfy TIDMAD's typed view ({exc})."
+        ) from exc
+
+
+def resolve_tidmad_topology() -> TidmadTopology:
+    """The bound profile's TIDMAD topology — the regime-A convenience hop.
+
+    Exists so the many TIDMAD-physical call sites do not each repeat
+    ``tidmad_topology(resolve_dataset_profile())``.
+    """
+    return tidmad_topology(resolve_dataset_profile())
 
 
 _ACTIVE_PROFILE: ContextVar[DatasetProfile | None] = ContextVar(

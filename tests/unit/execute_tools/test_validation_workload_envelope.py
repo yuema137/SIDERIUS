@@ -22,7 +22,11 @@ import pytest
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.workload_resolvers import resolve_training_workload
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
 
@@ -51,7 +55,7 @@ def tiny_dataset(tmp_path):
 
     profile = TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                 update={"psd_segment_length": SEG_SIZE * ML_PER_PSD}
             )
         }

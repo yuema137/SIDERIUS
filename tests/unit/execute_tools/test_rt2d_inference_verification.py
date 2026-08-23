@@ -29,7 +29,11 @@ from core.runtime_control.adaptive import AdaptiveVerificationConfig
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from core.runtime_control.steady_state import SteadyStateConfig
 from core.runtime_control.workload import ResolvedPhaseWorkload
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from ml_models.models_format_sandbox import WaveNetConfig
 from ml_models.models_sandbox import MODEL_REGISTRY
 
@@ -60,7 +64,9 @@ def tiny_profile():
     """
     return TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": SEG_SIZE}
+            )
         }
     )
 

@@ -120,7 +120,7 @@ def fixture_score_table() -> dict:
                 "gain_vs_raw": 0.29,
                 "headroom_vs_gt": 2.91,
             }
-            for i in range(resolve_dataset_profile().dataset.num_files)
+            for i in range(resolve_dataset_profile().partition_count)
         ],
         "aggregate": {
             "raw_baseline_scalar": -3.2,

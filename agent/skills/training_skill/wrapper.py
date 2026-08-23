@@ -26,4 +26,8 @@ def run_skill(sandbox, **kwargs):
         # this point re-derives precedence.
         order_strategy=kwargs.get("order_strategy", "shuffle"),
         file_order=kwargs.get("file_order"),
+        # Step 12 / PR-12bc B6: the composed run's task-built scopes.
+        # Forwarded EXPLICITLY rather than enumerated away — the
+        # transport-drop defect OD-S7-1 named this exact shape.
+        task_scopes=kwargs.get("task_scopes"),
     )

@@ -28,6 +28,7 @@ the moved block byte-identical.
 """
 
 import gc
+import json
 import os
 import random
 from collections.abc import Iterable
@@ -39,18 +40,25 @@ from pydantic import BaseModel, ConfigDict, Field
 from torch.utils.data import Dataset
 
 from execute_tools.array2h5 import create_abra_file
-from execute_tools.dataset_config import DatasetProfile, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DataScope,
+    DatasetProfile,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
     default_deliverable_storage,
     derive_tidmad_deliverable_spec,
 )
+from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.task_data_path import (
     TIDMAD_COMPATIBILITY_ID,
     DeliverableWriteRequest,
     EpochSamplingParams,
     EvalMaterializationParams,
     EvaluationReadRequest,
+    ScopeBuildRequest,
     ValidationScopeError,
     register_task_data_path,
 )
@@ -135,9 +143,9 @@ class TIDMADEpochDataset(Dataset):
 
         # Regime-A when no profile is supplied (§5c).
         self.profile = profile or resolve_dataset_profile()
-        dataset = self.profile.dataset
-        channels = self.profile.channels
-        enc = self.profile.encoding
+        dataset = tidmad_topology(self.profile).dataset
+        channels = tidmad_topology(self.profile).channels
+        enc = tidmad_topology(self.profile).encoding
         psd_len = dataset.psd_segment_length
         ml_segs_per_psd = psd_len // seg_size
         all_ch1, all_ch2 = [], []
@@ -239,7 +247,7 @@ class TIDMADEpochDataset(Dataset):
         return len(self.inputs)
 
     def __getitem__(self, idx):
-        enc = self.profile.encoding
+        enc = tidmad_topology(self.profile).encoding
         return (
             self.inputs[idx].astype(enc.compute_dtype) + enc.value_offset,
             self.targets[idx].astype(enc.compute_dtype) + enc.value_offset,
@@ -292,6 +300,15 @@ def is_complete_trial_output(
         return True
     except (KeyError, OSError, ValueError):
         return False
+
+
+#: The scope payload's self-identifying tag. A scope that does not declare it
+#: is refused BEFORE any field is read — a wrong-task payload must fail by
+#: name, not by whichever field happens to be missing first.
+_TIDMAD_SCOPE_KIND = "tidmad_scope_v1"
+
+#: TIDMAD's trial-anchoring artifact, relocated from the tuner at B7.
+_TIDMAD_ANCHOR_MAP_NAME = "segment_anchors.json"
 
 
 class TidmadScope(BaseModel):
@@ -349,6 +366,123 @@ class TidmadTaskDataPath:
             max_samples=params.max_samples,
         )
 
+    # ------------------------------------------------------------------
+    # TaskScopeCapability — the OPTIONAL sibling (Step 12 / PR-12bc B3)
+    # ------------------------------------------------------------------
+    #
+    # Scope CONSTRUCTION for TIDMAD is `build_sample_set`, which already
+    # exists and is already the authority. These methods RELOCATE the call;
+    # they never copy the selection logic. The differential oracle in
+    # `tests/unit/execute_tools/test_step12_pr12bc_b3_tidmad_capability.py`
+    # is what proves that: a capability-built scope deep-equals the
+    # legacy-built one for every cell of the matrix.
+
+    #: The per-attempt task knob TIDMAD's scope needs and the framework has no
+    #: vocabulary for: the planner's ML segmentation size. It rides the
+    #: request's OPAQUE `task_parameters` (D-BC-1 extension, B3).
+    _SEG_SIZE_PARAMETER: ClassVar[str] = "seg_size"
+
+    def _build_scope(self, request: ScopeBuildRequest, *, strategy: str, seed: int | None):
+        profile = resolve_dataset_profile()
+        seg_size = request.task_parameters.get(self._SEG_SIZE_PARAMETER)
+        if not isinstance(seg_size, int) or seg_size <= 0:
+            raise ValueError(
+                f"TIDMAD scope construction requires a positive "
+                f"{self._SEG_SIZE_PARAMETER!r} in the request's task_parameters "
+                f"(the planner's ML segmentation size); got {seg_size!r}. The "
+                f"framework has no vocabulary for it, so it must be declared by "
+                f"the caller rather than guessed here."
+            )
+        sample_set = build_sample_set(
+            # Both existing tuner call sites pass ``is_trial=True`` and differ
+            # only in VALUES (`planning.py:397-414`); ``round_kind`` carries
+            # which round those values came from, not a different code path.
+            is_trial=True,
+            trial_strategy=cast('Literal["snapshot", "anchors", "target"]', strategy),
+            trial_portion=request.portion,
+            target_files=list(request.target_partitions) or None,
+            seed=seed,
+            scope=DataScope.from_cli(request.subset_ref) if request.subset_ref else None,
+            profile=profile,
+        )
+        return TidmadScope(sample_set=sample_set, seg_size=seg_size, profile=profile)
+
+    def build_training_scope(self, request: ScopeBuildRequest) -> object:
+        """The attempt's TRAINING scope, through the existing authority."""
+        return self._build_scope(request, strategy=request.selection_strategy, seed=request.seed)
+
+    def build_eval_scope(self, request: ScopeBuildRequest) -> object:
+        """The attempt's EVALUATION scope.
+
+        Formal-mode eval strategy is locked to ``snapshot``
+        (``policy.py:1169``); the CALLER resolves that and hands it here, so
+        this method does not re-decide policy it does not own.
+        """
+        return self._build_scope(request, strategy=request.selection_strategy, seed=request.seed)
+
+    def trial_anchor_path(self, data_root: str) -> str:
+        """TIDMAD's trial-anchoring artifact (B7, satellite (e)).
+
+        The filename the tuner used to inline. It lives HERE now because it is
+        TIDMAD's, which is what lets a task that has no such artifact refuse a
+        trial round by name instead of failing on a filename it never declared.
+        """
+        return os.path.join(data_root, _TIDMAD_ANCHOR_MAP_NAME)
+
+    def serialize_scope(self, scope: object) -> str:
+        """CANONICAL bytes for a ``TidmadScope``.
+
+        Canonical because the framework digests the result: ``sort_keys`` and
+        the compact separators are the contract, not a formatting preference.
+        Sample-set keys become STRINGS here, which is what JSON does anyway
+        and what ``:375``'s ``int(k)`` already expects on the way back.
+        """
+        s = self._scope(scope)
+        payload = {
+            "kind": _TIDMAD_SCOPE_KIND,
+            "sample_set": {str(k): list(v) for k, v in s.sample_set.items()},
+            "seg_size": s.seg_size,
+            "profile": s.profile.to_wire() if s.profile is not None else None,
+        }
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    def deserialize_scope(self, payload: str) -> object:
+        """The inverse, FAIL-CLOSED.
+
+        A payload this implementation did not write — another task's scope, a
+        truncated file, a future version — RAISES naming what was wrong. It is
+        never partially accepted, because a partially accepted scope trains on
+        data nobody declared.
+        """
+        try:
+            decoded = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"TIDMAD scope payload is not valid JSON ({exc}).") from exc
+        if not isinstance(decoded, dict):
+            raise ValueError(
+                f"TIDMAD scope payload must be a JSON object, got {type(decoded).__name__}."
+            )
+        kind = decoded.get("kind")
+        if kind != _TIDMAD_SCOPE_KIND:
+            raise ValueError(
+                f"scope payload declares kind {kind!r}, not {_TIDMAD_SCOPE_KIND!r} — "
+                f"the binding and the scope object must come from the same task."
+            )
+        missing = [k for k in ("sample_set", "seg_size") if k not in decoded]
+        if missing:
+            raise ValueError(f"TIDMAD scope payload is missing {missing}.")
+        raw_profile = decoded.get("profile")
+        try:
+            return TidmadScope(
+                sample_set={int(k): list(v) for k, v in decoded["sample_set"].items()},
+                seg_size=decoded["seg_size"],
+                profile=(
+                    DatasetProfile.model_validate(raw_profile) if raw_profile is not None else None
+                ),
+            )
+        except (TypeError, ValueError, AttributeError) as exc:
+            raise ValueError(f"TIDMAD scope payload is malformed ({exc}).") from exc
+
     def validation_dataset(self, scope: object, params: EvalMaterializationParams) -> Dataset[Any]:
         """Materialize the validation scope EXACTLY, failing closed.
 
@@ -370,7 +504,7 @@ class TidmadTaskDataPath:
             file_family="validation",
         )
         profile = s.profile or resolve_dataset_profile()
-        ml_segs_per_psd = profile.dataset.psd_segment_length // s.seg_size
+        ml_segs_per_psd = tidmad_topology(profile).dataset.psd_segment_length // s.seg_size
         per_file_requested = {
             int(k): len(segments) * ml_segs_per_psd for k, segments in s.sample_set.items()
         }

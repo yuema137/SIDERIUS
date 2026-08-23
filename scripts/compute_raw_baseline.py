@@ -48,7 +48,10 @@ import numpy as np
 from tqdm import tqdm
 
 from execute_tools.build_anchor_map import load_anchor_map
-from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.dataset_config import (
+    resolve_dataset_profile,
+    resolve_tidmad_topology,
+)
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, process_segment
 
 # ---------------------------------------------------------------------------
@@ -157,7 +160,7 @@ def _fine_indices() -> tuple[int, ...]:
     its consumer cannot silently disagree about how many files exist — the
     §8 reachability argument for pulling this script into 02a.
     """
-    return tuple(range(resolve_dataset_profile().dataset.num_files))
+    return tuple(range(resolve_dataset_profile().partition_count))
 
 
 def _maybe_write_anchor_normalized_scalar(
@@ -324,7 +327,7 @@ def main():
 
         coarse = idx >= 20
         mode = "coarse" if coarse else "fine"
-        fname = resolve_dataset_profile().dataset.validation_file_name(idx)
+        fname = resolve_tidmad_topology().dataset.validation_file_name(idx)
         out_path = os.path.join(args.output_dir, f"raw_baseline_score_file_{idx:04d}.json")
 
         if os.path.exists(out_path) and not args.override:

@@ -24,7 +24,31 @@ from pathlib import Path
 import pytest
 
 from execute_tools import train_engine_sandbox
-from execute_tools.dataset_config import TIDMAD, DatasetConfig
+from execute_tools.dataset_config import (
+    TIDMAD,
+    TIDMAD_PROFILE,
+    DatasetConfig,
+    DatasetProfile,
+    bind_dataset_profile,
+)
+
+
+def _profile_with_pattern(pattern: str) -> DatasetProfile:
+    """TIDMAD's profile declaring a different training-file pattern.
+
+    UPGRADED at Step 12 / PR-12bc B2. These probes used to
+    ``monkeypatch.setattr(TIDMAD, "training_file_pattern", ...)``, which
+    worked only because ``TIDMAD_PROFILE.dataset`` WAS the ``TIDMAD``
+    singleton — patching one patched the other. B2 makes the topology an
+    opaque payload, so that aliasing is gone and a monkeypatch on the
+    singleton would silently probe nothing. Declaring the pattern and BINDING
+    the profile exercises the production resolution path instead, which is
+    what the claim was always about.
+    """
+    wire = TIDMAD_PROFILE.to_wire()
+    wire["dataset"]["training_file_pattern"] = pattern
+    return DatasetProfile.model_validate(wire)
+
 
 SYNTHETIC_PATTERN = "run_{file_index:02d}.hdf5"
 
@@ -60,37 +84,35 @@ def test_tidmad_and_second_dataset_disagree(second_dataset):
 # ---- the loader consumes the seam (not merely renamed) ----
 
 
-def test_epoch_dataset_path_follows_the_configured_pattern(tmp_path, monkeypatch, capsys):
+def test_epoch_dataset_path_follows_the_configured_pattern(tmp_path, capsys):
     """Swap the pattern; the loader's own resolved path must follow it.
 
     Probed via the missing-file warning, which prints the exact path the
     loader built — no HDF5 fixture needed, and the skip path is unchanged
     behavior this commit must preserve.
     """
-    monkeypatch.setattr(TIDMAD, "training_file_pattern", SYNTHETIC_PATTERN)
-
-    train_engine_sandbox.TIDMADEpochDataset(
-        data_dir=str(tmp_path),
-        sample_set={"1": [0]},
-        seg_size=1000,
-        rng=random.Random(0),
-    )
+    with bind_dataset_profile(_profile_with_pattern(SYNTHETIC_PATTERN)):
+        train_engine_sandbox.TIDMADEpochDataset(
+            data_dir=str(tmp_path),
+            sample_set={"1": [0]},
+            seg_size=1000,
+            rng=random.Random(0),
+        )
 
     warning = capsys.readouterr().out
     assert "run_01.hdf5" in warning
     assert "abra_training_" not in warning
 
 
-def test_sample_set_loader_path_follows_the_configured_pattern(tmp_path, monkeypatch, capsys):
+def test_sample_set_loader_path_follows_the_configured_pattern(tmp_path, capsys):
     """Same probe for TIDMADDataset's sample-set branch (the other loader)."""
-    monkeypatch.setattr(TIDMAD, "training_file_pattern", SYNTHETIC_PATTERN)
-
-    train_engine_sandbox.TIDMADDataset(
-        str(tmp_path),
-        [],
-        segmentation_size=1000,
-        sample_set={"2": [0]},
-    )
+    with bind_dataset_profile(_profile_with_pattern(SYNTHETIC_PATTERN)):
+        train_engine_sandbox.TIDMADDataset(
+            str(tmp_path),
+            [],
+            segmentation_size=1000,
+            sample_set={"2": [0]},
+        )
 
     warning = capsys.readouterr().out
     assert "run_02.hdf5" in warning

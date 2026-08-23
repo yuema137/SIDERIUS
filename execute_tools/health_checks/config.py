@@ -463,7 +463,7 @@ def validate_health_scope(config: HealthChecksConfig, resolved_scope: list[int])
         ValueError: Listing every offending gate/check with remediation.
     """
     scope_set = set(resolved_scope)
-    num_files = resolve_dataset_profile().dataset.num_files
+    num_files = resolve_dataset_profile().partition_count
     scope_is_full = scope_set == set(range(num_files))
     problems: list[str] = []
     for gate in config.health_gates:

@@ -34,6 +34,7 @@ from execute_tools.dataset_config import (
     ValueEncoding,
     load_dataset_profile,
     resolve_dataset_profile,
+    tidmad_topology,
 )
 
 SEG_SIZE = 8
@@ -55,7 +56,7 @@ def _contrast_profile(**dataset_overrides) -> DatasetProfile:
     task declares its own.
     """
     overrides = {"psd_segment_length": PSD_LEN, **dataset_overrides}
-    dataset = TIDMAD_PROFILE.dataset.model_copy(update=overrides)
+    dataset = tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(update=overrides)
     n = dataset.num_files
     return TIDMAD_PROFILE.model_copy(
         update={
@@ -110,7 +111,7 @@ class TestConfigFileRoundTrip:
     )
     def test_profile_survives_json(self, tmp_path, profile):
         path = tmp_path / "dataset_profile.json"
-        path.write_text(json.dumps(profile.model_dump()))
+        path.write_text(json.dumps(profile.to_wire()))
         assert load_dataset_profile(str(path)) == profile
 
 
@@ -200,7 +201,7 @@ class TestChildConsumesTheTransportedProfile:
         ch_in, ch_tg = _write_h5(tmp_path / "abra_training_0004.h5", ("sensor_raw", "sensor_clean"))
         profile = TIDMAD_PROFILE.model_copy(
             update={
-                "dataset": TIDMAD_PROFILE.dataset.model_copy(
+                "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
                     update={"psd_segment_length": PSD_LEN}
                 ),
                 "channels": ChannelIdentity(
@@ -257,9 +258,15 @@ class TestChildConsumesTheTransportedProfile:
         base = _contrast_profile()
         wide = base.model_copy(
             update={
-                "encoding": base.encoding.model_copy(
-                    update={"storage_dtype": "int16", "num_classes": 512}
-                )
+                # ONLY the alphabet size is varied. The pre-B2 version of
+                # this test also set ``storage_dtype="int16"``, which makes
+                # 512 an IMPOSSIBLE declaration (int16 shifted by 128 spans
+                # [-32640, 32895] and needs >= 32896 symbols). It survived
+                # because ``model_copy`` skips validation; since B2 the typed
+                # view re-validates what it decodes, so the fixture is now a
+                # profile that could actually exist. The claim under test —
+                # the alphabet size comes from the DECLARATION — is unchanged.
+                "encoding": tidmad_topology(base).encoding.model_copy(update={"num_classes": 512})
             }
         )
         dataset = tes.TIDMADDataset(

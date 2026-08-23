@@ -37,6 +37,8 @@ from execute_tools.dataset_config import (
     ValueEncoding,
     bind_dataset_profile,
     resolve_dataset_profile,
+    resolve_tidmad_topology,
+    tidmad_topology,
 )
 from nodes import scoring_reference
 
@@ -47,7 +49,9 @@ def _profile(**dataset_overrides) -> DatasetProfile:
     Single-axis by construction, which is what the Stage-B rungs will need.
     """
     return TIDMAD_PROFILE.model_copy(
-        update={"dataset": TIDMAD_PROFILE.dataset.model_copy(update=dataset_overrides)}
+        update={
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(update=dataset_overrides)
+        }
     )
 
 
@@ -58,24 +62,31 @@ def _profile(**dataset_overrides) -> DatasetProfile:
 
 class TestDeclarationParity:
     def test_profile_carries_the_shipped_tidmad_dataset_unchanged(self):
-        """The profile COMPOSES ``DatasetConfig`` rather than replacing it.
+        """The shipped profile still declares EXACTLY ``TIDMAD``.
 
-        If a future change inlined the fields into a new type instead, the
-        Step-00 golden (``TIDMAD.model_dump()`` field by field) would be
-        pinning an object the production path no longer reads.
+        UPGRADED at Step 12 / PR-12bc B2. This asserted object IDENTITY
+        (``is TIDMAD``) while ``dataset`` was a field of the profile. Since
+        B2 the topology is an OPAQUE payload and the typed view is decoded
+        from it, so identity is no longer the right question — and asserting
+        it would only re-pin an implementation detail. The property that
+        still matters, and the one the Step-00 golden depends on, is that
+        what the shipped profile declares is VALUE-EQUAL to ``TIDMAD`` and
+        that the legacy wire form reproduces the golden byte-for-byte.
         """
-        assert TIDMAD_PROFILE.dataset is TIDMAD
+        assert tidmad_topology(TIDMAD_PROFILE).dataset == TIDMAD
+        assert TIDMAD_PROFILE.to_wire()["dataset"] == TIDMAD.model_dump()
+        assert TIDMAD_PROFILE.partition_count == TIDMAD.num_files
 
     def test_declarations_match_the_literals_production_used(self):
         """Hardcoded expectations — the whole point is that these values
         used to live as literals at ~15 (channels) and ~8 (encoding)
         production sites with nothing tying them together."""
-        assert TIDMAD_PROFILE.channels.input_channel == "channel0001"
-        assert TIDMAD_PROFILE.channels.target_channel == "channel0002"
-        assert TIDMAD_PROFILE.encoding.storage_dtype == "int8"
-        assert TIDMAD_PROFILE.encoding.compute_dtype == "int16"
-        assert TIDMAD_PROFILE.encoding.value_offset == 128
-        assert TIDMAD_PROFILE.encoding.num_classes == 256
+        assert tidmad_topology(TIDMAD_PROFILE).channels.input_channel == "channel0001"
+        assert tidmad_topology(TIDMAD_PROFILE).channels.target_channel == "channel0002"
+        assert tidmad_topology(TIDMAD_PROFILE).encoding.storage_dtype == "int8"
+        assert tidmad_topology(TIDMAD_PROFILE).encoding.compute_dtype == "int16"
+        assert tidmad_topology(TIDMAD_PROFILE).encoding.value_offset == 128
+        assert tidmad_topology(TIDMAD_PROFILE).encoding.num_classes == 256
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +167,7 @@ class TestInjectionReachability:
         module state."""
         with pytest.raises(RuntimeError):
             with bind_dataset_profile(_profile(num_files=3)):
-                assert resolve_dataset_profile().dataset.num_files == 3
+                assert resolve_tidmad_topology().dataset.num_files == 3
                 raise RuntimeError("boom")
         assert resolve_dataset_profile() is TIDMAD_PROFILE
 
@@ -276,8 +287,11 @@ class TestDeclarationValidators:
             anchor_selection_files=[0, 2],
             health_peek_files=[1],
         )
-        assert other.dataset.validation_file_name(2) == "val_02.hdf5"
-        assert "abra" not in other.dataset.training_file_name(1)
+        assert tidmad_topology(other).dataset.validation_file_name(2) == "val_02.hdf5"
+        assert "abra" not in tidmad_topology(other).dataset.training_file_name(1)
+        # B2: the GENERIC identity is what the framework reads, and it
+        # followed the declaration rather than TIDMAD's 20.
+        assert other.partition_count == 3
 
 
 # ---------------------------------------------------------------------------
@@ -292,4 +306,4 @@ def test_validation_file_name_renders_from_the_declared_pattern():
     assert TIDMAD.validation_file_name(0) == "abra_validation_0000.h5"
     assert TIDMAD.validation_file_name(19) == "abra_validation_0019.h5"
     with bind_dataset_profile(_profile(validation_file_pattern="v_{file_index}.h5")):
-        assert resolve_dataset_profile().dataset.validation_file_name(3) == "v_3.h5"
+        assert resolve_tidmad_topology().dataset.validation_file_name(3) == "v_3.h5"

@@ -24,7 +24,10 @@ from __future__ import annotations
 import pytest
 
 from agent.skills.evaluate_time_skill import wrapper as ts
-from execute_tools.dataset_config import TIDMAD_PROFILE
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    tidmad_topology,
+)
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -74,7 +77,7 @@ def test_suggest_lever_high_ms_per_step_recommends_shrinking_model():
         ms_per_step=80.0,
         seg_size=1000,
         batch_size=1,
-        psd_segment_length=TIDMAD_PROFILE.dataset.psd_segment_length,
+        psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
     )
 
 
@@ -83,7 +86,7 @@ def test_suggest_lever_small_seg_bs1_recommends_raising_batch():
         ms_per_step=2.0,
         seg_size=1000,
         batch_size=1,
-        psd_segment_length=TIDMAD_PROFILE.dataset.psd_segment_length,
+        psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
     )
 
 
@@ -93,7 +96,7 @@ def test_suggest_lever_otherwise_recommends_raising_seg_size():
         ms_per_step=10.0,
         seg_size=16000,
         batch_size=1,
-        psd_segment_length=TIDMAD_PROFILE.dataset.psd_segment_length,
+        psd_segment_length=tidmad_topology(TIDMAD_PROFILE).dataset.psd_segment_length,
     )
     assert "segmentation_size" in msg
 

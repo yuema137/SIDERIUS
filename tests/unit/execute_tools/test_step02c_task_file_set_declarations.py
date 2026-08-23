@@ -29,7 +29,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.dataset_config import TIDMAD_PROFILE, DatasetProfile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    DatasetProfile,
+    tidmad_topology,
+)
 from execute_tools.health_checks.config import (
     TASK_HEALTH_PEEK,
     CheckRef,
@@ -72,7 +76,7 @@ class TestDeclaredFileSetsMustBeLegalForTheTopology:
         ],
     )
     def test_illegal_membership_is_rejected(self, field, case, value, expected_fragment):
-        payload = {**TIDMAD_PROFILE.model_dump(), field: value}
+        payload = {**TIDMAD_PROFILE.to_wire(), field: value}
         with pytest.raises(ValidationError) as excinfo:
             DatasetProfile.model_validate(payload)
         message = str(excinfo.value)
@@ -84,9 +88,9 @@ class TestDeclaredFileSetsMustBeLegalForTheTopology:
         """File 19 is legal under TIDMAD's 20 files and illegal under a
         5-file dataset. If the bound topology were ignored, a task would
         silently declare files it cannot open."""
-        narrow = TIDMAD_PROFILE.dataset.model_copy(update={"num_files": 5})
+        narrow = tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(update={"num_files": 5})
         payload = {
-            **TIDMAD_PROFILE.model_dump(),
+            **TIDMAD_PROFILE.to_wire(),
             "dataset": narrow.model_dump(),
             "anchor_selection_files": [0, 2, 4],
             "health_peek_files": [1, 3],

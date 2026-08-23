@@ -24,7 +24,11 @@ import pytest
 
 import execute_tools.train_engine_sandbox as tes
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from ml_models.models_format_sandbox import LossConfig, TrainConfig, WaveNetConfig
 
 SEG_SIZE = 1000  # minimum segmentation_size; 1 PSD segment == 1 ML segment below
@@ -71,7 +75,9 @@ def tiny_setup(tmp_path, synthetic_h5, monkeypatch):
 
     _tiny = TIDMAD_PROFILE.model_copy(
         update={
-            "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"psd_segment_length": SEG_SIZE})
+            "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                update={"psd_segment_length": SEG_SIZE}
+            )
         }
     )
     with bind_dataset_profile(_tiny):

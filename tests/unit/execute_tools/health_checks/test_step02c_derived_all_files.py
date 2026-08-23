@@ -25,7 +25,11 @@ from __future__ import annotations
 
 import pytest
 
-from execute_tools.dataset_config import TIDMAD_PROFILE, bind_dataset_profile
+from execute_tools.dataset_config import (
+    TIDMAD_PROFILE,
+    bind_dataset_profile,
+    tidmad_topology,
+)
 from execute_tools.health_checks._composition import (
     VALUE_SCALE_PARAMETER,
     VALUE_SCALE_UNIT_PARAMETER,
@@ -89,7 +93,9 @@ class TestAllFilesTracksTheDeclaredTopology:
         """
         profile = TIDMAD_PROFILE.model_copy(
             update={
-                "dataset": TIDMAD_PROFILE.dataset.model_copy(update={"num_files": num_files}),
+                "dataset": tidmad_topology(TIDMAD_PROFILE).dataset.model_copy(
+                    update={"num_files": num_files}
+                ),
                 # The declared sets must be legal for the topology this
                 # profile declares — `model_copy` does not revalidate, and
                 # an incoherent fixture would only surface on a round-trip.
@@ -114,7 +120,7 @@ class TestAllFilesTracksTheDeclaredTopology:
         could disagree — which is the failure mode the Dataset Profile
         exists to prevent.
         """
-        declared = set(TIDMAD_PROFILE.model_dump())
+        declared = set(TIDMAD_PROFILE.to_wire())
         assert "all_files" not in declared
         for name in declared:
             assert "all_file" not in name, (
