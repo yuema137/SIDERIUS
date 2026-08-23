@@ -641,6 +641,66 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 12 / PR-12bc — COMPLETE / MERGED (2026-08-23)**: PR #249, squash
+  `42d79b9d`; final executable head `486ea47f`, final PR head `06103e9a`
+  (delta **docs-only**), authoritative exact-head CI **32657760919 SUCCESS**
+  with **no commit after it**; landed master **byte-identical** to the
+  validated head. **`G-12bc-B` PASS** (`8fd80cdc`, re-run PASS at `486ea47f`)
+  and **`G-12bc-C` PASS** (`2ad868e3`, re-run PASS at `486ea47f`).
+  **CAP-SCOPE IS CLOSED.** A task now declares an **OPTIONAL SIBLING**
+  `TaskScopeCapability` — the frozen four-method `TaskDataPath` is
+  **unchanged** — and builds its own training/eval scopes; they cross the
+  process boundary as an **artifact + sha256 verified BEFORE deserialization**
+  (raw scope JSON never goes on argv), written atomically by the parent.
+  `DatasetProfile` splits into **generic identity** (`partition_count`,
+  `anchor_selection_files`, `health_peek_files`) plus an **opaque `topology`**
+  the framework carries and never interprets (Q-12-4); the legacy wire form is
+  still accepted and emitted. The **pairing gap** is closed — the binding used
+  to cross while the scope did not, so a composed child fell into its regime-A
+  `TidmadScope` branch that a non-TIDMAD implementation then refused.
+  Registration-order **CASE A is CLOSED** through production lifecycle
+  semantics only (a two-phase rule: same id + same content ⇒ idempotent, same
+  id + different content ⇒ refuse; plus a run-scoped registration overlay) —
+  no pytest-order hack, no test-specific reset, no weakened reproducer. The
+  parent **pins a per-family content identity** the child verifies **before
+  consuming** (a registry HIT is never identity proof), and **a child can
+  resolve a task the framework has never heard of** by composing the
+  transported manifest through the SAME authority the parent used — the
+  manifest now reaches all three children, not only scoring.
+  **Things future work must not re-break**: the transported identity is the
+  value **CAPTURED at registration**, never a fresh read of the plugin file
+  (**F-12bc-7**) · row 2 (divergent identity) is not row 4 (miss), so the
+  child's MISS must stay a **membership test** and never an exception to catch,
+  or C2's refusal silently becomes a fallback · the §F item-9 census scopes now
+  include `execute_tools/`, where the scope ABI lives (**F-12bc-9**) ·
+  `_task_manifest_argv()` is emitted at all three spawn sites but still **only
+  when bound**, so legacy argv is unchanged.
+  **Why the two lightweight real Gates were worth keeping.** `G-12bc-C`
+  **FAILED on its first launch** and found **F-12bc-7**: `content_identity()`
+  hashes the source FILE, so `transport_argv` re-derived the "parent-pinned"
+  identity at SPAWN time from whatever was on disk — the pin followed the very
+  edit it exists to catch, and a tampered plugin was loaded AND consumed.
+  Every deterministic identity test was green because each held
+  `content_identity(impl)` as a **string** across the edit: *the test pinned a
+  value where production pinned a function call.* **A test that captures what
+  production recomputes cannot see a recomputation defect.** CI's pyright found
+  **F-12bc-10** — three sites reaching for optional-sibling methods off the base
+  `TaskDataPath`, i.e. the type system enforcing this PR's own architecture on
+  paths no test could reach. Two **census** defects: **F-12bc-6** (a flip
+  detector that named a SYMBOL and stayed green through the landing it was
+  written to announce) and **F-12bc-9** (a census whose FILE SET omitted the
+  scope ABI's directory — self-evidencing, since its own exemption list could
+  never fire). **F-12bc-8 is NOT a census defect** — it is a **test-isolation /
+  import-registration lifetime** defect (a built-in imported under a blanked
+  registry never registers again), surfaced by the regression suite AFTER CASE
+  A had already been closed independently, and never a means of closing it.
+  **§G plant matrix 9/9 RED** against named owners; **§J** max **+2** branch
+  nodes against a +3 budget with **zero parameter growth**. Design + evidence:
+  `generic_framework_upgrade/step_12_external_extensibility_graduation/pr_12bc_generic_task_boundary_closure.md`
+  §A (terminal facts) and §Q (per-checkpoint). **NEXT = PR-12d** (Pets + DAVIS
+  real contrast execution closure) — CAP-SCOPE was its frozen prerequisite and
+  is now discharged — to be planned in a FRESH session from merged state, never
+  from the conversation that produced PR-12bc.
 - **STEP 12 / PR-12a — COMPLETE / MERGED (2026-08-23)**: PR #248, squash
   `15554174`; final executable head `ec30bd65` (where G-12a-2 ran), final PR
   head `d4bf899d`, exact-head CI **32615196536 SUCCESS**; local master

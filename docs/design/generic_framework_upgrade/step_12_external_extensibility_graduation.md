@@ -25,8 +25,30 @@ reconciliation is now DISCHARGED (§20a): the landed delta against snapshot
 V2 is ONE comment-only line, all eight provisional assumptions are
 CONFIRMED, and PR-12bc is re-anchored on landed master.**
 
-**IMPLEMENTATION MUST NOT BEGIN** (each child implements only after ITS
-detailed design is approved AND §20a is discharged).
+**PR-12bc is MERGED (2026-08-23)** — PR #249, squash **`42d79b9d`**; final
+executable head **`486ea47f`**, final PR head **`06103e9a`** (delta docs-only),
+authoritative exact-head CI **`32657760919` SUCCESS**, no commit after it, and
+landed master **byte-identical** to the validated head. **`G-12bc-B` PASS**
+(`8fd80cdc`, re-run PASS at `486ea47f`) and **`G-12bc-C` PASS** (`2ad868e3`,
+re-run PASS at `486ea47f`) — the two lightweight real Gates §14 refused to let
+be collapsed, and they earned it: `G-12bc-C` FAILED on its first launch and
+found **F-12bc-7**, in which the "parent-pinned identity" was a re-read of the
+plugin file at spawn time and therefore followed the very edit it exists to
+catch. Every deterministic identity test was green, because each held the
+digest as a STRING across the edit while production re-derived it — *the test
+and production were not performing the same operation at the moment identity is
+captured*. The §G plant matrix is 9/9 RED; §J max +2 branch nodes against a +3
+budget with zero parameter growth. Child ledger:
+`step_12_external_extensibility_graduation/pr_12bc_generic_task_boundary_closure.md`
+§A (terminal facts) and §Q (per-checkpoint evidence).
+
+**NEXT = PR-12d** (Pets + DAVIS real contrast execution closure), to be planned
+in a FRESH session from merged state — never from the conversation that
+produced PR-12bc. **CAP-SCOPE is now landed**, which was the frozen prerequisite
+for the contrast-track L4 claim (Q-P56-1 = B).
+
+**IMPLEMENTATION MUST NOT BEGIN for a child whose detailed design is not yet
+approved** (each child implements only after ITS detailed design is approved).
 
 Revision history: rev 1 (2026-08-22, anchor `c1caa609`, Step 11 unmerged) →
 operator review 2026-08-22 (verdict **NOT READY TO FREEZE**: architecture

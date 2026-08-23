@@ -2,26 +2,46 @@
 
 ## A. Status, authority, source anchors
 
-> ### IMPLEMENTATION COMPLETE — READY FOR OPERATOR REVIEW — DO NOT MERGE
+> ### COMPLETE / MERGED — 2026-08-23
+>
+> **PR #249, squash `42d79b9d`.** Operator verdict: *CODE / GATE REVIEW PASS,
+> merge approved conditional on the terminal CI succeeding at the exact final
+> head.* All five closeout conditions were mechanically verified before the
+> merge, and landed master is **byte-identical** to the validated head.
+>
+> | terminal fact | value |
+> |---|---|
+> | final EXECUTABLE head | **`486ea47f`** (F-12bc-10's narrowing) |
+> | final PR head | **`06103e9a`** — delta from the executable head is **docs only**, 1 file, +27/−2 |
+> | authoritative exact-head CI | **`32657760919` SUCCESS** on `06103e9a` |
+> | commits after that CI | **none** |
+> | `G-12bc-B` | **PASS** `8fd80cdc`, **re-run PASS** `486ea47f` |
+> | `G-12bc-C` | **PASS** `2ad868e3`, **re-run PASS** `486ea47f` |
+> | §G plant matrix | **9/9 RED** against named owners |
 >
 > The frozen 17-block spine is discharged: **B0–B8 · B-GATE · §F · C0–C4 ·
-> C-GATE · BC-FINAL**. Both real Gates PASS — **`G-12bc-B` at `8fd80cdc`**
-> (§Q.B-GATE.1) and **`G-12bc-C` at `2ad868e3`** (§Q.C-GATE) — and **both were
-> re-run and PASS again at the final head `486ea47f`** (§Q.CI), because a later
-> production change touched the functions `G-12bc-B`'s class runs through. The
-> §G plant matrix is 9/9 RED against named owners (§Q.BC-FINAL).
+> C-GATE · BC-FINAL**.
 >
-> **Two production defects were found by real Gates, not by 11,000 unit
+> **Two PRODUCTION defects were found by real Gates, not by 11,000 unit
 > tests**: the pairing gap (Phase B's headline) and **F-12bc-7**, in which the
 > "parent-pinned identity" turned out to be a re-read that followed the very
-> edit it exists to catch. Three further findings are census defects —
-> **F-12bc-6** (a flip detector that named a symbol and never fired),
-> **F-12bc-9** (a census whose file set omitted `execute_tools/`, where the
-> scope ABI lives) and **F-12bc-8** (a test-isolation hazard in the CASE-A
-> family). See §Q.C-GATE, §Q.C4 and §Q.BC-FINAL.
+> edit it exists to catch. A third, **F-12bc-10**, was found by CI's pyright —
+> three sites reaching for optional-sibling methods off the base
+> `TaskDataPath`, which is the frozen architecture the type system was
+> enforcing.
 >
-> Remaining: the terminal CI at the exact final PR head. Nothing here is
-> merged.
+> **TWO census defects** — **F-12bc-6** (a flip detector that named a symbol
+> and never fired) and **F-12bc-9** (a census whose FILE SET omitted
+> `execute_tools/`, where the scope ABI lives).
+>
+> **`F-12bc-8` is NOT a census defect** (operator wording correction). It is a
+> **test-isolation / import-registration lifetime** defect: a built-in imported
+> inside a test whose fixture had blanked the registry registers into the
+> temporary dict and never registers again. It surfaced in the regression suite
+> **after** CASE A had already been closed independently by C1's production
+> lifecycle mechanism, and was never a means of closing it.
+>
+> See §Q.C-GATE, §Q.C4, §Q.BC-FINAL and §Q.CI.
 
 **REVISION 2 — FROZEN. OPERATOR APPROVED 2026-08-23.
 IMPLEMENTED 2026-08-23 in a fresh implementation session, from this frozen
@@ -2183,14 +2203,23 @@ last unit's Definition of Done.
          pass: one was my harness naming the wrong owner, one was
          **F-12bc-9** — a real missing guard, fixed here.
    - [x] Final §J comparison across both phases. → §Q.C4.
-   - [ ] Verify the executable-head → PR-head delta is **docs-only**.
-   - [ ] ONE authoritative CI at the exact final PR head.
+   - [x] Verify the executable-head → PR-head delta is **docs-only**.
+         → `git diff 486ea47f..06103e9a --name-only` = the design doc alone.
+   - [x] ONE authoritative CI at the exact final PR head.
+         → **`32657760919` SUCCESS** on `06103e9a`; the earlier `486ea47f` run
+         was cancelled by the docs push, deliberately, so exactly one
+         authoritative run exists.
 4. **Validation plan.** The adversarial matrix + the terminal CI. No new Gate.
 5. **Acceptance criteria**
    - [x] Every §G row executed with a recorded verdict; zero unproven plants.
-   - [ ] `git diff <final executable head>..<final PR head> --name-only`
-         contains only documentation.
-   - [ ] CI SUCCESS at the exact final PR head; **no commit after it**.
+   - [x] `git diff <final executable head>..<final PR head> --name-only`
+         contains only documentation. → 1 file, +27/−2.
+   - [x] CI SUCCESS at the exact final PR head; **no commit after it**.
+         → local = remote = PR = CI head = `06103e9a`, verified immediately
+         before the merge. **These four boxes are EXTERNAL TERMINAL FACTS**
+         recorded post-merge: ticking them inside the PR would have required a
+         commit after the authoritative CI, which §N forbids (operator ruling,
+         2026-08-23).
    - [x] Both Gate results recorded against their exact SHAs.
          → `G-12bc-B` PASS at `8fd80cdc` (§Q.B-GATE.1);
          `G-12bc-C` PASS at `2ad868e3` (§Q.C-GATE), clean tree, evidence at
@@ -4503,7 +4532,22 @@ was not collapsible into deterministic evidence. **11,000+ unit tests, 3
 purpose-built identity modules, and an adversarial C2 test suite did not see
 it. One real spawn did.**
 
-#### F-12bc-8 — the test-isolation hazard the fix's regression run exposed
+#### F-12bc-8 — a test-isolation / import-registration lifetime defect
+
+**Classification, stated because it is easy to get wrong** (operator
+correction, 2026-08-23): this is **not** a census defect. The census defects in
+this PR are exactly two — F-12bc-6 and F-12bc-9. F-12bc-8 is a
+**test-isolation / import-registration lifetime** defect.
+
+**And it is not how CASE A was closed.** CASE A was already closed,
+independently, by C1's production lifecycle mechanism (the two-phase
+registration rule plus the run-scoped overlay) — the restricted reproducer went
+9 failed / 1,306 passed → 1,315 passed with the duplicate same-id /
+different-content refusal intact and no test-specific reset or ordering hack.
+F-12bc-8 surfaced **afterwards**, in the regression suite of an unrelated fix,
+and its collection-time bootstrap fixes only the test harness. Reading it as
+part of the CASE-A closure would credit a test-side change with a production
+guarantee it did not provide.
 
 Fixing F-12bc-7 required a targeted re-run, and that re-run went red in
 `test_step10_p1_c3_transport.py` — a module Phase C never touched. Cause:
@@ -4517,8 +4561,9 @@ C1 imports execute_tools.tidmad_data_path INSIDE a test body
   -> an unrelated module fails, three modules later
 ```
 
-Same family as CASE A, one layer over: a registration whose visibility depends
-on when the import happened. Fixed by performing the built-ins' bootstrap at
+The same *shape* as CASE A, one layer over — a registration whose visibility
+depends on when the import happened — but in the harness, not in production.
+Fixed by performing the built-ins' bootstrap at
 **collection** time in the three Phase-C modules — the one moment guaranteed
 to precede every test. Not a production defect: production imports the
 built-ins at child startup, before anything patches anything.
