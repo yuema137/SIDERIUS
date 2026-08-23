@@ -1477,11 +1477,35 @@ audit re-classified three parent §4 rows — deliverable naming half
 closed-by-Step-11, F-P56-3's health half confirmed real, layering fix as
 consolidation). PR-12b design follows the §11.1 checkpoint after 12a merges.
 
-**PR-12a IMPLEMENTATION IN FLIGHT (2026-08-22)** — branch
-`step12-pr12a-composed-path-closure`, base `eeb073dc`. **C0–C8 COMPLETE; C9
-(Gate 1, Gate 2, ONE exact-head CI) is the remaining work.** The child doc's
-§8 is the live ledger and the status authority; per-commit evidence is in its
-§8.4 milestone table. What the parent needs to carry forward:
+**PR-12a — COMPLETE / MERGED (2026-08-23).** PR #248, squash
+**`15554174`** (`1555417464bb48982b813458c08a113be60c6c37`); final executable
+head **`ec30bd65`** (where G-12a-2 ran); final PR head **`d4bf899d`** with
+exact-head CI **32615196536 SUCCESS**; local master verified identical to
+`origin/master` at the squash SHA.
+
+```text
+G-12a-1   PASS   SHA f542e89e   4 real calls of a 6 cap
+G-12a-2   PASS   SHA ec30bd65   attempt 4 canonical; A1/A2/A3
+CI        SUCCESS 32615196536   on the exact final PR head d4bf899d
+```
+
+Operator terminal review 2026-08-23 returned **APPROVE WITH SMALL CLOSEOUT
+FIXES**, ratifying four substantive items: the TIDMAD composition fingerprint
+move (fail-closed resume intended, **no compatibility bypass**), C7-5's
+`ProposalTaskBlocks` key growth as an **in-scope completion of D-12a-6**,
+F-12a-G2 as implemented (not to be broadened), and attempt 4 as the canonical
+G-12a-2 PASS. A **BOUNDED TERMINAL-EQUIVALENCE EXCEPTION** was granted for
+this PR's `ec30bd65..870897c6` delta, which was **not literally docs-only** and
+was accepted on proven execution-inertness — **explicitly not a generic
+relaxation of the Step-12 terminal rule** (child §8.23/§8.24).
+
+Two things that must not be claimed from the Gate: that the chain ran
+uninterrupted (it was killed mid-run after a provider hang and resumed at
+iteration 2 in the same workspace), and anything about provider-hang
+robustness.
+
+The child doc's §8 remains the evidence authority. What the parent carries
+forward:
 
 * **Every §4 residue this child owns is closed**, and the composed path
   resolves no implicit TIDMAD semantics as VALUES (pre-flight scope topology,
@@ -1511,6 +1535,23 @@ consolidation). PR-12b design follows the §11.1 checkpoint after 12a merges.
   operator-directed forensic — not introduced by 12a and not CI-reachable —
   with its exact reproducer and baseline SHA recorded in child §8.12 as a
   regression falsifier.
+* **Named debt carried forward by PR-12a, none solved here**: **Q-07c-6**
+  (admission prices `phase="training"` only; it killed G-12a-2 attempt 2) ·
+  registration-order **CASE A** · **F-12a-G2b** (the usable VRAM cap derives
+  from TOTAL rather than currently-free memory, so it over-promises on a
+  shared GPU) · **partial-calibration acceptance + a true probe watchdog**
+  (deferred because the descending batch search cannot derive a conservative
+  successful batch from larger-batch failures without changing the algorithm)
+  · **CAP-SCOPE** · **external child loading** · **Pets/DAVIS L4** ·
+  **fourth-task graduation**.
+* **§14a (validation economy) stands** — Gate count by failure class, Gate
+  cost by earliest sufficient witness, keyed on failure classes because §11's
+  frozen topology is still T2.
+
+**NEXT — owned by the isolated Step-12 planning session, NOT by any
+implementation session**: re-anchor the provisional PR-12bc design against
+LANDED PR-12a source and perform the mandatory post-merge delta reconciliation
+(§11.1) before 12bc freezes. No 12bc design decision is taken here.
 
 **PROVISIONAL STEP-11 FINDINGS — ALL RESOLVED at the reconciliation
 (§0.1-A):**

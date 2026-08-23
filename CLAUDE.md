@@ -641,6 +641,43 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 12 / PR-12a — COMPLETE / MERGED (2026-08-23)**: PR #248, squash
+  `15554174`; final executable head `ec30bd65` (where G-12a-2 ran), final PR
+  head `d4bf899d`, exact-head CI **32615196536 SUCCESS**; local master
+  byte-identical to `origin/master`. **A composed run resolves ZERO implicit
+  TIDMAD semantics in the surfaces 12a owns** — pre-flight scope topology,
+  per-model lock identity, health materialization and deliverable naming as
+  VALUES; planner / reflector / proposer / implementor as PROMPT SCIENCE.
+  Legacy un-composed bytes are proved identical against RECORDED pre-C7
+  digests, not against themselves. **Gate 1 PASS** (with no declared blocks a
+  real model answered *"No domain was stated."* rather than inventing TIDMAD's
+  science) and **Gate 2 PASS** (A1/A2/A3; three per-model locks carrying
+  `task_composition_fingerprint 9125bf58…` and the chain's own
+  `health_config_sha256` — **F-P56-3 closed with a live witness**).
+  **Things future work must not re-break**: the shipped TIDMAD manifest now
+  DECLARES `proposal_blocks:` and `implementor_blocks:`, so its composition
+  fingerprint moved `d6628a93…` → `9125bf58…` and **a composed workspace
+  started before this PR fails its resume CLOSED — intended, and no
+  compatibility bypass may be added**; `MetricSpec.id` is OPAQUE (D16/C5, the
+  lexical `_is_loss_shaped` rule is gone); and **F-12a-G2** — a COMPLETED
+  resource probe may never be discarded for elapsed wall time, because
+  `memory feasibility != calibration completeness != host wall time !=
+  watchdog timeout` (the check ran AFTER the probe returned, so it guarded
+  nothing and made capacity depend on host load). **Gate-2 honesty**: attempt
+  4 is canonical, and the chain was NOT uninterrupted — a provider hang forced
+  a kill and a resume at iteration 2 in the same workspace; no provider-hang
+  robustness may be inferred. A **BOUNDED TERMINAL-EQUIVALENCE EXCEPTION** was
+  granted for the final delta (not literally docs-only; accepted on proven
+  execution-inertness) and is **explicitly not a generic relaxation** of the
+  Step-12 terminal rule. **Carried debt, none solved**: Q-07c-6 ·
+  registration-order CASE A · F-12a-G2b (usable VRAM cap derives from TOTAL,
+  not free) · partial-calibration acceptance + a true probe watchdog ·
+  CAP-SCOPE · external child loading · Pets/DAVIS L4 · fourth-task
+  graduation. Parent gained **§14a** (Gate count by failure class, Gate cost
+  by earliest sufficient witness). **NEXT = PR-12bc, owned by the isolated
+  Step-12 planning session**, which must re-anchor against LANDED source per
+  §11.1 before freezing — never from an implementation session.
+
 - **STEP 11 — COMPLETE / MERGED (2026-08-22)**: PR #247, squash `da2aa705`;
   final executable head `88f190a1` with exact-head CI **32562135614 SUCCESS**
   and **Gate 2 PASS on that same SHA**; final PR head `fd6bfccb`, CI
