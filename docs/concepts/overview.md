@@ -48,15 +48,7 @@ what data is read, how a result is scored, or whether a result is valid.
 
 ## The loop
 
-```mermaid
-flowchart TD
-    I[interpret<br/><i>what did the last round tell us?</i>] --> L[literature review<br/><i>optional</i>]
-    L --> P[propose<br/><i>an architecture + a prediction</i>]
-    P --> M[implement<br/><i>write the model plugin</i>]
-    M --> V[validate<br/><i>does the code hold up?</i>]
-    V --> T[tune<br/><i>N rounds: plan → train → infer → score → health → reflect</i>]
-    T --> I
-```
+![The SIDERIUS discovery loop](../assets/discovery-loop.svg)
 
 Six LLM-powered stages. Everything inside the tune box that touches data — the
 training run, the inference pass, the scoring, the health evaluation — is
@@ -68,25 +60,7 @@ what one round actually does.
 SIDERIUS separates **scientific semantics** (yours) from **execution
 infrastructure** (its own).
 
-```mermaid
-flowchart LR
-    subgraph you["YOU DECLARE — the task package"]
-        direction TB
-        A[how to read your data]
-        B[what a model reads and produces]
-        C[what the training objective is]
-        D[what 'better' means]
-        E[what makes an output invalid]
-    end
-    subgraph fw["SIDERIUS PROVIDES — the framework"]
-        direction TB
-        F[the agent loop]
-        G[training / inference / scoring execution]
-        H[resource gating, retries, resume]
-        I[provenance and reproducibility]
-    end
-    you -->|"one composition manifest"| fw
-```
+![What you declare versus what SIDERIUS provides](../assets/ownership-split.svg)
 
 A **task package** is that left-hand column, declared in one YAML manifest.
 Composing a run binds those declarations for the whole run; nothing about your

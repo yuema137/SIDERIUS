@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="396" viewBox="0 0 960 396" role="img" aria-label="The SIDERIUS discovery loop: interpret, optional literature review, propose, implement, validate, train and tune, then back to interpret. Inside one tuning round: plan, train, infer, score, health gate, reflect.">
+  <defs>
+    <marker id="aGrey" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto">
+      <path d="M0,0 L7.5,4 L0,8 z" fill="#7F8C8D"/>
+    </marker>
+    <marker id="aRed" markerWidth="8" markerHeight="8" refX="6.5" refY="4" orient="auto">
+      <path d="M0,0 L7.5,4 L0,8 z" fill="#C0392B"/>
+    </marker>
+    <style>
+      text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+      .h  { font-size: 13.5px; font-weight: 700; fill: #fff; letter-spacing: .2px; }
+      .s  { font-size: 10.5px; font-style: italic; fill: #fff; opacity: .9; }
+      .cap{ font-size: 12px; fill: #5D6D7E; }
+      .lbl{ font-size: 11.5px; font-style: italic; fill: #C0392B; }
+      .kick { font-size: 10px; font-weight: 700; fill: #C0392B; letter-spacing: 1.1px; opacity: .75; }
+      .take { font-size: 15px; font-weight: 700; font-style: italic; fill: #C0392B; }
+      .inner { font-size: 13px; fill: #34495E; }
+      .arrowsep { font-size: 13px; fill: #D5A6A0; }
+    </style>
+  </defs>
+
+  <rect width="960" height="396" fill="#ffffff"/>
+
+  <!-- loop-back over the top -->
+  <path d="M860,124 L860,88 L100,88 L100,120" fill="none" stroke="#C0392B" stroke-width="2" marker-end="url(#aRed)"/>
+  <text class="lbl" x="480" y="82" text-anchor="middle">next iteration — carrying everything the last one learned</text>
+
+  <!-- 1 INTERPRET -->
+  <rect x="33" y="124" width="134" height="86" rx="10" fill="#2980B9"/>
+  <text class="h" x="100" y="158" text-anchor="middle">INTERPRET</text>
+  <text class="s" x="100" y="176" text-anchor="middle">the analyst</text>
+  <line x1="170" y1="167" x2="182" y2="167" stroke="#7F8C8D" stroke-width="2" marker-end="url(#aGrey)"/>
+
+  <!-- 2 LITERATURE (optional) -->
+  <rect x="185" y="124" width="134" height="86" rx="10" fill="#8E44AD" opacity=".13"/>
+  <rect x="185" y="124" width="134" height="86" rx="10" fill="none" stroke="#8E44AD" stroke-width="2.5" stroke-dasharray="6,5"/>
+  <text x="252" y="155" text-anchor="middle" style="font-size:13.5px;font-weight:700;fill:#6C3483;letter-spacing:.2px">LITERATURE</text>
+  <text x="252" y="172" text-anchor="middle" style="font-size:10.5px;font-style:italic;fill:#8E44AD">the scout</text>
+  <rect x="222" y="181" width="60" height="17" rx="8.5" fill="#8E44AD"/>
+  <text x="252" y="193.5" text-anchor="middle" style="font-size:9.5px;font-weight:700;fill:#ffffff">OPTIONAL</text>
+  <line x1="322" y1="167" x2="334" y2="167" stroke="#7F8C8D" stroke-width="2" marker-end="url(#aGrey)"/>
+
+  <!-- 3 PROPOSE -->
+  <rect x="337" y="124" width="134" height="86" rx="10" fill="#F39C12"/>
+  <text class="h" x="404" y="158" text-anchor="middle">PROPOSE</text>
+  <text class="s" x="404" y="176" text-anchor="middle">the PI</text>
+  <line x1="474" y1="167" x2="486" y2="167" stroke="#7F8C8D" stroke-width="2" marker-end="url(#aGrey)"/>
+
+  <!-- 4 IMPLEMENT -->
+  <rect x="489" y="124" width="134" height="86" rx="10" fill="#16A085"/>
+  <text class="h" x="556" y="158" text-anchor="middle">IMPLEMENT</text>
+  <text class="s" x="556" y="176" text-anchor="middle">the engineer</text>
+  <line x1="626" y1="167" x2="638" y2="167" stroke="#7F8C8D" stroke-width="2" marker-end="url(#aGrey)"/>
+
+  <!-- 5 VALIDATE -->
+  <rect x="641" y="124" width="134" height="86" rx="10" fill="#2C3E50"/>
+  <text class="h" x="708" y="158" text-anchor="middle">VALIDATE</text>
+  <text class="s" x="708" y="176" text-anchor="middle">the referee</text>
+  <line x1="778" y1="167" x2="790" y2="167" stroke="#7F8C8D" stroke-width="2" marker-end="url(#aGrey)"/>
+
+  <!-- 6 TRAIN &amp; TUNE -->
+  <rect x="793" y="124" width="134" height="86" rx="10" fill="#E74C3C"/>
+  <text class="h" x="860" y="158" text-anchor="middle">TRAIN &amp; TUNE</text>
+  <text class="s" x="860" y="176" text-anchor="middle">the experimentalist</text>
+
+  <!-- caption -->
+  <text class="cap" x="480" y="240" text-anchor="middle">every stage is an LLM agent with a typed input and output schema</text>
+  <text class="cap" x="480" y="258" text-anchor="middle">the data selection, training and scoring it drives are deterministic code</text>
+
+  <!-- drill-down into the tuner -->
+  <line x1="860" y1="210" x2="860" y2="282" stroke="#E74C3C" stroke-width="2" stroke-dasharray="5,4" marker-end="url(#aRed)"/>
+  <rect x="300" y="286" width="630" height="56" rx="10" fill="#FDF1F0" stroke="#E74C3C" stroke-width="2" stroke-dasharray="6,5"/>
+  <text class="kick" x="318" y="306">INSIDE ONE TUNING ROUND — REPEATED N TIMES</text>
+  <text class="inner" x="318" y="328">plan <tspan class="arrowsep">&#8594;</tspan> train <tspan class="arrowsep">&#8594;</tspan> infer <tspan class="arrowsep">&#8594;</tspan> score <tspan class="arrowsep">&#8594;</tspan> health gate <tspan class="arrowsep">&#8594;</tspan> reflect</text>
+
+  <text class="take" x="480" y="376" text-anchor="middle">The judgement is the agents'. The data, the scoring and the verdict are not.</text>
+</svg>

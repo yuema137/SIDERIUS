@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="404" viewBox="0 0 960 404" role="img" aria-label="What you declare versus what SIDERIUS provides. You declare how your data is read, what a model reads and produces, the training objective, what better means, and what makes an output invalid. SIDERIUS provides the agent loop, training inference and scoring, resource gating retries and resume, and provenance. They meet at one composition manifest.">
+  <defs>
+    <marker id="aNavy" markerWidth="10" markerHeight="10" refX="7.5" refY="5" orient="auto">
+      <path d="M0,0 L9,5 L0,10 z" fill="#2C3E50"/>
+    </marker>
+    <style>
+      text { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+      .ptitle { font-size: 14px; font-weight: 700; letter-spacing: 1px; }
+      .row    { font-size: 13px; fill: #34495E; }
+      .rowq   { font-size: 13px; fill: #34495E; font-style: italic; }
+      .mid    { font-size: 12px; font-weight: 700; fill: #2C3E50; letter-spacing: 1.1px; }
+      .midsub { font-size: 11px; font-style: italic; fill: #7F8C8D; }
+      .foot   { font-size: 11.5px; font-style: italic; fill: #7F8C8D; }
+      .take   { font-size: 15px; font-weight: 700; font-style: italic; fill: #C0392B; }
+    </style>
+  </defs>
+
+  <rect width="960" height="404" fill="#ffffff"/>
+
+  <!-- ============ left: the task package ============ -->
+  <rect x="30" y="64" width="360" height="252" rx="14" fill="#F6FCFB" stroke="#16A085" stroke-width="3"/>
+  <text class="ptitle" x="210" y="92" text-anchor="middle" fill="#117A65">YOU DECLARE</text>
+  <text class="midsub" x="210" y="110" text-anchor="middle" fill="#16A085">the task package — one manifest</text>
+
+  <rect x="52" y="128" width="6" height="18" rx="3" fill="#16A085"/>
+  <text class="rowq" x="70" y="142">how your data is read</text>
+
+  <rect x="52" y="162" width="6" height="18" rx="3" fill="#16A085"/>
+  <text class="rowq" x="70" y="176">what a model reads and produces</text>
+
+  <rect x="52" y="196" width="6" height="18" rx="3" fill="#16A085"/>
+  <text class="rowq" x="70" y="210">the training objective</text>
+
+  <rect x="52" y="230" width="6" height="18" rx="3" fill="#16A085"/>
+  <text class="rowq" x="70" y="244">what “better” means</text>
+
+  <rect x="52" y="264" width="6" height="18" rx="3" fill="#16A085"/>
+  <text class="rowq" x="70" y="278">what makes an output invalid</text>
+
+  <!-- ============ right: the framework ============ -->
+  <rect x="570" y="64" width="360" height="252" rx="14" fill="#FBFCFC" stroke="#2C3E50" stroke-width="3"/>
+  <text class="ptitle" x="750" y="92" text-anchor="middle" fill="#2C3E50">SIDERIUS PROVIDES</text>
+  <text class="midsub" x="750" y="110" text-anchor="middle">the infrastructure — you never re-declare it</text>
+
+  <rect x="592" y="136" width="6" height="18" rx="3" fill="#2C3E50"/>
+  <text class="row" x="610" y="150">the six-stage agent loop</text>
+
+  <rect x="592" y="176" width="6" height="18" rx="3" fill="#2C3E50"/>
+  <text class="row" x="610" y="190">training, inference and scoring</text>
+
+  <rect x="592" y="216" width="6" height="18" rx="3" fill="#2C3E50"/>
+  <text class="row" x="610" y="230">resource gating, retries, resume</text>
+
+  <rect x="592" y="256" width="6" height="18" rx="3" fill="#2C3E50"/>
+  <text class="row" x="610" y="270">provenance and reproducibility</text>
+
+  <!-- ============ the join ============ -->
+  <line x1="398" y1="190" x2="564" y2="190" stroke="#2C3E50" stroke-width="2.5" marker-end="url(#aNavy)"/>
+  <text class="mid"    x="480" y="176" text-anchor="middle">ONE MANIFEST</text>
+  <text class="midsub" x="480" y="212" text-anchor="middle">5 required sections</text>
+  <text class="midsub" x="480" y="227" text-anchor="middle">5 optional</text>
+
+  <!-- footers -->
+  <text class="foot" x="210" y="342" text-anchor="middle">a package may live entirely outside the SIDERIUS tree —</text>
+  <text class="foot" x="210" y="358" text-anchor="middle">plugins are declared by module or by file path</text>
+
+  <text class="foot" x="750" y="342" text-anchor="middle">nothing about your task is hardcoded in framework source;</text>
+  <text class="foot" x="750" y="358" text-anchor="middle">no code branches on a task name</text>
+
+  <text class="take" x="480" y="392" text-anchor="middle">You bring the science. The framework brings everything that isn't.</text>
+</svg>

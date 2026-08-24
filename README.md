@@ -31,39 +31,14 @@ inside a larger loop).
 
 ## The loop
 
-```mermaid
-flowchart TD
-    I["<b>interpret</b><br/>what does the evidence so far support?"] --> P["<b>propose</b><br/>an architecture + an explicit prediction"]
-    P --> M["<b>implement</b><br/>write the model plugin"]
-    M --> V["<b>validate</b><br/>does the code hold up?"]
-    V --> T["<b>tune</b><br/>N rounds: plan → train → infer → score → health → reflect"]
-    T --> I
-```
+![The SIDERIUS discovery loop](docs/assets/discovery-loop.svg)
 
 An optional literature-review stage runs between interpretation and proposal,
 surfacing recent papers as soft priors.
 
 ## Who provides what
 
-```mermaid
-flowchart LR
-    subgraph you["YOU DECLARE — a task package"]
-        direction TB
-        A["how your data is read"]
-        B["what a model reads and produces"]
-        C["the training objective"]
-        D["what 'better' means"]
-        E["what makes an output invalid"]
-    end
-    subgraph fw["SIDERIUS PROVIDES"]
-        direction TB
-        F["the agent loop"]
-        G["training / inference / scoring"]
-        H["resource gating, retries, resume"]
-        J["provenance and reproducibility"]
-    end
-    you -->|"one composition manifest"| fw
-```
+![What you declare versus what SIDERIUS provides](docs/assets/ownership-split.svg)
 
 Nothing about your task is hardcoded in framework source. A **task package** is
 one YAML manifest — ten possible sections, five required — plus whatever small
@@ -73,15 +48,11 @@ can live entirely outside this repository.
 → [What a task must provide](docs/concepts/task-package.md) ·
 [the full section table](docs/reference/task-composition.md)
 
-## Three numbers that are not the same thing
+## Four numbers, and only one of them decides
 
 This distinction is the one most worth understanding before you start:
 
-| | question | who consumes it |
-|---|---|---|
-| **training objective** | what is optimisation minimising right now? | the optimiser |
-| **primary metric** | how good is the finished model, scientifically? | **model selection** |
-| **health gate** | is this output valid enough to be worth trusting? | the loop's control flow |
+![The four quantities a run produces and who consumes each](docs/assets/three-kinds-of-number.svg)
 
 Only the **primary metric** selects models. Additional **secondary metrics** are
 observational evidence and influence no ordering anywhere — deliberately, so that

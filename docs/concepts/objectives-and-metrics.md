@@ -18,6 +18,8 @@ legitimately occupy more than one role.
 | **Primary metric** *(golden metric)* | how good is the finished model, scientifically? | **model selection** |
 | **Secondary metric** | what else is worth knowing about this result? | the agents, as evidence |
 
+![The four quantities a run produces and who consumes each](../assets/three-kinds-of-number.svg)
+
 The distinction that matters most: **only the primary metric selects models.**
 Everything else informs.
 
