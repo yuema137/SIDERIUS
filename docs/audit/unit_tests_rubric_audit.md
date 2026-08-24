@@ -150,7 +150,7 @@ provably preserves behaviour.
 
 These files are 100 % (or near-100 %) mock-driven and validate only the wiring between an
 agent's own steps. They belong in `tests/integration/` (pseudo-mode by default, real-API under
-`-m real_run`) per the dual-mode infrastructure in `docs/pseudo_test_infra.md`.
+`-m real_run`) per the dual-mode infrastructure in `tests/pseudo_data/README.md`.
 
 1. `test_proposal_agent.py` (17/17) — convert entire file to a `@dual_mode` integration test.
 2. `test_tuning_agent.py` (17/19 in reviewed slice) — convert entire orchestration suite.

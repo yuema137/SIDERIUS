@@ -2,380 +2,219 @@
 
 ### **S**cientific **I**nquiry, **D**esign, **E**xploration, and **R**easoning **I**ntegrated **U**sing multi-agent **S**ystems
 
-An autonomous research platform that closes the loop on scientific discovery — hypothesis,
-implementation, training, scoring, reflection, repeat. Inspired by Galileo's *Sidereus Nuncius*,
-SIDERIUS uses a multi-agent architecture as a "digital telescope" for extracting physical
-laws from noisy data. Current target: **denoising the TIDMAD SQUID time-series dataset** in
-search of axion dark-matter signals.
+**A closed-loop research framework for supervised scientific machine learning.**
+You describe a scientific task; SIDERIUS runs the loop a research group would run
+— read the evidence, propose a model, implement it, check it, train it, score it,
+judge whether the result is trustworthy, interpret what happened, and go again.
 
-> *"All truths are easy to understand once they are discovered; the point is to discover them."*
-> — Galileo Galilei
-
----
-
-## Architecture at a glance
-
-SIDERIUS is **a typed, directed graph**. Every component is a node with a Pydantic input
-schema and output schema; every edge is a typed `protocol` function; every LLM call routes
-through `agent/llm_bridge.LLMBridge` (the single source of truth for retry policy and provider
-routing — enforced by `tests/unit/agent/test_llm_bridge_singleton.py`).
-
-Task-specific framing (`task_description` + `forward_contract`) lives in one operator-visible
-file, [`configs/task_config.yaml`](configs/task_config.example.yaml), and is injected into
-every LLM prompt via `{TASK_DESCRIPTION}` / `{FORWARD_CONTRACT}` placeholders. Porting
-SIDERIUS to a new task starts with editing that file — no grep-and-replace across Python
-sources. See [`docs/design/enable_global_task_config.md`](docs/design/enable_global_task_config.md).
-
-See [`docs/architecture.md`](docs/architecture.md) for the full design,
-[`docs/design/agent_composition_architecture.md`](docs/design/agent_composition_architecture.md)
-for the three-layer roadmap, and [`CLAUDE.md`](CLAUDE.md) for the coding standards every
-contributor (human or LLM) must follow. New nodes follow
-[`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md).
-
-### The model-exploration loop (6 agents)
-
-`workflows/model_exploration.py` implements the closed-loop iteration:
-
-```
-   ┌─────────────────────────── result_interpretation_agent
-   │   (synthesizes records across models, surfaces bottlenecks)
-   ▼
-ml_literature_review                              ← gated by --ml_lit_review_enabled
-   │   (S2 dynamic search → paper extraction → synthesis to ExpertContextItem findings)
-   ▼
-ml_model_proposal_agent
-   │   (LLM proposes architecture, consumes lit-review findings as soft priors)
-   ▼
-ml_model_implementor
-   │   (writes PyTorch model plugin + optional custom loss plugin + test skeleton + description.md)
-   ▼
-ml_code_validator_agent
-   │   (7 checks: load, pytest, description, config, instantiation, gradient flow, LLM review)
-   ▼
-ml_hyperparameter_tune_agent
-   │   (N rounds: plan → train → infer → score → reflect; planner / reflector use independent models)
-   └────────► back to result_interpretation_agent
-```
-
-**Stop conditions**: `max_iterations` count or `target_score` threshold. Validation failures
-trigger automatic retry with error feedback.
-
-**Reliability guardrails** (full design in the linked docs):
-
-- **Pre-flight resource gating** — the proposer must justify VRAM + wall-time estimates against
-  trial / formal budgets. Over-budget proposals get up to 3 revision rounds.
-- **Per-round attempt budget** — `--attempts_per_round` caps retries inside one planner round;
-  `--max_fail_rounds` triggers a clean abort on a streak of fails.
-- **Cumulative negative feedback** — architectural patterns that gate-exhausted in earlier
-  iterations are tagged and forwarded as `disallowed_architectural_patterns`. The proposer
-  won't re-propose them.
-- **Pluggable HealthGates** — YAML-configured check-and-route gates (`configs/health_checks.yaml`)
-  fire at tuner round boundaries. Six shipped checks: three blocking
-  (`output_diversity`, `output_std`, `amplitude_collapse` — catch mode-collapse before it burns
-  compute) and three recording-only (`pearson_dispersion`, `spectral_peak_ratio`,
-  `per_file_output_std`), routing to one of `continue` / `skip_iter` / `skip_to_formal` /
-  `invalidate_round`. Two run-level inputs (not YAML): `--health_gate_enabled` and
-  `--health_gate_files` (shared monitored-file list; the effective config is materialized per
-  workspace and pinned by the run-invariants lock). Skills live under
-  `execute_tools/health_checks/`. See
-  [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md).
-- **Cross-iteration knowledge accumulation** — runtime vocab, key findings, per-model knowledge
-  cache, negative feedback (physical rejections + gate exhaustions), and the previous iter's
-  proposal are all carried forward by `sdsc_submission_scripts/run_one_iteration.py` and injected
-  into the next iter's proposer / interpreter / tuner.
+> *"All truths are easy to understand once they are discovered; the point is to
+> discover them."* — Galileo Galilei
 
 ---
 
-## Quick start
+## Why you might want it
 
-### Prerequisites
+You have a supervised scientific problem, a way to measure success, and more
+architectural ideas than time to try them.
 
-- Python 3.12+, NVIDIA GPU with CUDA, ~50 GB for TIDMAD raw data
-- [uv](https://docs.astral.sh/uv/) package manager
-- Gemini, OpenAI, and/or DeepSeek API key
-- Optional (for lit-review): Semantic Scholar API key
+SIDERIUS automates the *research* loop, not just the search. The parts that
+require judgement — reading diagnostic evidence, forming a hypothesis about why
+the last attempt behaved as it did, deciding what to try next — are performed by
+LLM agents. The parts that must be exact — data selection, training, scoring,
+validity checking, provenance — are deterministic code, and no agent is allowed
+to influence them.
 
-### Install + configure
+It is **not** an AutoML library (it writes new model code rather than searching a
+fixed space), **not** a general agent framework (the workflow is a fixed,
+deterministic path), and **not** a hyperparameter sweeper (tuning is one phase
+inside a larger loop).
+
+## The loop
+
+```mermaid
+flowchart TD
+    I["<b>interpret</b><br/>what does the evidence so far support?"] --> P["<b>propose</b><br/>an architecture + an explicit prediction"]
+    P --> M["<b>implement</b><br/>write the model plugin"]
+    M --> V["<b>validate</b><br/>does the code hold up?"]
+    V --> T["<b>tune</b><br/>N rounds: plan → train → infer → score → health → reflect"]
+    T --> I
+```
+
+An optional literature-review stage runs between interpretation and proposal,
+surfacing recent papers as soft priors.
+
+## Who provides what
+
+```mermaid
+flowchart LR
+    subgraph you["YOU DECLARE — a task package"]
+        direction TB
+        A["how your data is read"]
+        B["what a model reads and produces"]
+        C["the training objective"]
+        D["what 'better' means"]
+        E["what makes an output invalid"]
+    end
+    subgraph fw["SIDERIUS PROVIDES"]
+        direction TB
+        F["the agent loop"]
+        G["training / inference / scoring"]
+        H["resource gating, retries, resume"]
+        J["provenance and reproducibility"]
+    end
+    you -->|"one composition manifest"| fw
+```
+
+Nothing about your task is hardcoded in framework source. A **task package** is
+one YAML manifest — ten possible sections, five required — plus whatever small
+amount of Python the framework cannot supply generically for your data. A package
+can live entirely outside this repository.
+
+→ [What a task must provide](docs/concepts/task-package.md) ·
+[the full section table](docs/reference/task-composition.md)
+
+## Three numbers that are not the same thing
+
+This distinction is the one most worth understanding before you start:
+
+| | question | who consumes it |
+|---|---|---|
+| **training objective** | what is optimisation minimising right now? | the optimiser |
+| **primary metric** | how good is the finished model, scientifically? | **model selection** |
+| **health gate** | is this output valid enough to be worth trusting? | the loop's control flow |
+
+Only the **primary metric** selects models. Additional **secondary metrics** are
+observational evidence and influence no ordering anywhere — deliberately, so that
+watching six quantities does not silently turn your run into a multi-objective
+optimisation nobody declared.
+
+A **health gate PASS is not a scientific success.** It means nothing detectably
+invalid — a model can pass every gate and be useless. Gates exist to catch
+collapse before it burns GPU-hours.
+
+→ [Objectives and metrics](docs/concepts/objectives-and-metrics.md) ·
+[Health gates](docs/concepts/health-gates.md)
+
+## What has actually been demonstrated
+
+SIDERIUS is contract-driven rather than modality-limited — nothing in its source
+branches on a task name. Three example tasks exist as evidence of tested breadth,
+**at deliberately different maturity**:
+
+| example | shape | status |
+|---|---|---|
+| **TIDMAD** | 1-D scientific signal denoising (SQUID time series, axion dark-matter search) | ✅ runs the full agent loop end-to-end through the production chain |
+| **Oxford-IIIT Pet** | RGB image, 37-way breed classification | 🟡 real data, training, inference and scoring — through a direct-execution harness, **not** the production chain |
+| **DAVIS 2017** | RGB spatiotemporal, 8→4 future-frame prediction | 🟡 same |
+
+The difference is real and this documentation states it everywhere it matters:
+the execution path below the composition edge is not yet task-neutral end to end,
+so the contrast tasks cannot currently run the chain. Closing that is in flight.
+
+→ [Supported tasks and current maturity](docs/concepts/supported-tasks.md) —
+current state and target state in one table
+
+## Quickstart
 
 ```bash
-# 1. Clone + install
 curl -LsSf https://astral.sh/uv/install.sh | sh
 git clone git@github.com:Galileo-Sandbox/SIDERIUS.git && cd SIDERIUS
 uv sync && source .venv/bin/activate
 
-# 2. Copy machine-specific config templates (the real files are gitignored)
-cp tidmad_data_config.example.yaml tidmad_data_config.yaml
+cp tidmad_data_config.example.yaml tidmad_data_config.yaml   # edit paths
 cp dashboard_config.example.yaml   dashboard_config.yaml
-# edit each for your machine's paths
+printf 'OPENAI_API_KEY=...\n' > .env
 
-# 2b. (Only if you're changing tasks) copy the task-config template and set
-#     task_description + forward_contract for your problem. The committed
-#     configs/task_config.yaml already carries the SQUID/TIDMAD defaults.
-cp configs/task_config.example.yaml configs/task_config.yaml
-# edit only if your task differs from the committed defaults
-
-# 3. API keys (.env)
-cat > .env << 'EOF'
-GEMINI_API_KEY=...
-OPENAI_API_KEY=...        # optional
-DEEPSEEK_API_KEY=...      # optional, for lit-review
-S2_API_KEY=...            # optional, for lit-review
-EOF
-
-# 4. Smoke test — the scoring anchor map ships committed at
-#    reference_data/segment_anchors.json (a fixed artifact determined by the
-#    TIDMAD data), so no per-machine precompute is needed.
-python env_validation/test_agent_env.py
-uv run pytest tests/unit/ -q
+python env_validation/test_agent_env.py     # environment + API reachability
+uv run pytest tests/unit/ -q                # no GPU, no API calls
 ```
 
-### Porting to a new server or GPU
-
-Moving to a different server or GPU is **config-only — no code changes**:
-
-1. `uv sync` to build the venv (step 1 above).
-2. Set the two paths in `tidmad_data_config.yaml` (`tidmad_data_dir` = raw
-   TIDMAD `.h5` files, `siderius_data_dir` = run outputs) and stage the `.h5`
-   files at `tidmad_data_dir`. This gitignored file is the single server path
-   profile.
-3. Put your API keys in `.env`.
-
-Everything else adapts automatically:
-
-- **GPU** — `core/hardware_context.py` detects the active device at runtime and
-  scales the VRAM budget to it (`0.80 ×` detected VRAM); device selection is
-  `cuda:0` with CPU fallback. A different GPU needs no config. On a multi-GPU
-  node, pick one with `CUDA_VISIBLE_DEVICES` (honored externally).
-- **Scoring anchor map** — committed at `reference_data/segment_anchors.json`
-  and used by default (resolved relative to the package, independent of the
-  working directory). The run entry points always use the committed map;
-  an `--anchor_map` override exists only on the reference-generation and
-  standalone scoring scripts (`scripts/compute_ground_truth.py`,
-  `scripts/compute_raw_baseline.py`, `execute_tools/denoising_score_single.py`).
-
-Optional, not required to run:
-
-- Per-server scoring wall-time calibration lives in
-  `core/server_configs/{hostname}.py`; an unknown host falls back to a default
-  (with a one-time warning) and only the time *forecast* is affected until a
-  module is added. The per-GPU calibration cache location is overridable via
-  `$SIDERIUS_CALIBRATION_DIR`.
-
----
-
-## Common workflows
-
-For full argument lists, run each entry point with `--help`. The agent-level descriptions
-live in `nodes/<agent>/<agent>.md` (per the [`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md)
-convention).
-
-### Single-tuner run (most common)
-
-One model, N rounds of hyperparameter tuning. The tuner CLI takes advice as a raw string via
-`--human_advice`, not a file path — the JSON advice files under
-[`advice/single_agent/`](advice/single_agent/) are meant for the chain runner. For an ad-hoc
-single-tuner run, pass a short prompt inline:
-
-```bash
-python nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py \
-    --force_model gated_fno \
-    --is_trial --max_rounds 20 \
-    --run_name gated_fno_smoke_v1
-```
-
-The planner/reflector split (`--reflect_provider` / `--reflect_model_id`) cuts top-tier LLM
-quota use roughly in half.
-Delta-based skip-formal and bypass-time-budget gates suppress spurious formal promotions when a new plan's trial score
-barely moves; their flags (`--skip_formal_min_delta`, `--bypass_formal_time_budget_min_delta`)
-live on the CHAIN entry points (`run_chain.sh` / `run_one_iteration.py`), not on the
-single-tuner CLI — see the `HyperparamTuningInput` schema docstring in
-`agent/schemas/hyperparam_tuning.py` for semantics.
-
-### Multi-iteration exploration chain
-
-The 6-agent loop, run N times in sequence. `run_chain.sh --mode {lilab,sdsc}` dispatches
-to foreground (lilab) or Slurm `afterany` chain (SDSC).
+Then see what a real run would execute, without executing it:
 
 ```bash
 bash sdsc_submission_scripts/run_chain.sh --mode lilab \
-    --workspace /home/klz/Data/SIDEREIS_DATA/exploration_chain_v1 \
-    --run_name exploration_chain_v1 \
-    --num_iterations 5 \
-    --seed_paths /path/to/seed_records.json \
-    --max_rounds 5 --max_epochs 5 \
-    --human_advice_file advice/workflow/human_advice_chain_test.json \
-    --llm_config llm_configs/openai_tiered_v1.json
+    --workspace /path/to/workspace --run_name first_run_v1 \
+    --task_composition configs/task_composition/tidmad.yaml \
+    --data_dir /path/to/tidmad/data \
+    --num_iterations 1 --max_rounds 1 --dry-run
 ```
 
-### Scoped run — restrict a chain to a file subset (DataScope)
+→ [Installation](docs/getting-started/installation.md) ·
+[Your first run](docs/getting-started/first-run.md)
 
-`--data_scope` restricts everything a run touches — training, inference,
-scoring, and HealthGate peeks — to a validation-file subset, enforced at the
-sample-set builder and the sandbox I/O boundary (never by prompts). Both
-`4-9` and `4,5,6,7,8,9` (and mixed `0-3,7`) spec forms canonicalize to one
-sorted, deduplicated list. Partial scopes are snapshot-only and require an
-explicit in-scope `--health_gate_files` monitored list when gates are on:
+## Extending SIDERIUS
 
-```bash
-bash sdsc_submission_scripts/run_chain.sh --mode lilab \
-    [... usual args ...] \
-    --data_scope 4-9 --health_gate_files 4,7,9
-```
+The principle: **infrastructure specifies protocols; scientific semantics live in
+task packages.** Adding a task should never require editing framework source.
 
-To disable the HealthGate subsystem entirely (successful finite-score
-records then count as valid candidates):
+You need only configuration when the framework already has a generic
+implementation of what you need — several health checks, for instance, are
+reusable by any task of the right shape. You need a plugin when your data access
+or your metric mathematics is genuinely yours. Either can be declared by
+importable module or by file path, and a file-declared plugin's content hash
+joins the run's identity, so an edited plugin is detected rather than silently
+used.
 
-```bash
-    --no-health_gate_enabled
-```
+→ [Define your own task](docs/guides/define-a-task.md)
 
-The resolved scope + gate policy are pinned per workspace by
-`run_invariants_lock.json` — re-running or resuming a workspace with a
-different scope or gate config fails at startup, and aggregate scalars are
-only comparable within one scope. Full design:
-[`docs/design/enable_partial_file_list.md`](docs/design/enable_partial_file_list.md).
+## Documentation
 
-### Literature-review-augmented chain
+| you are… | start at |
+|---|---|
+| new here | [What SIDERIUS is](docs/concepts/overview.md) → [Quickstart](docs/getting-started/installation.md) |
+| building a task | [What a task must provide](docs/concepts/task-package.md) → [Define your own task](docs/guides/define-a-task.md) |
+| running experiments | [Operating a run](docs/guides/operating-a-run.md) → [Entrypoints](docs/reference/entrypoints.md) |
+| developing the framework | [Agent reference](docs/agent-reference/README.md) → [`CLAUDE.md`](CLAUDE.md) |
 
-Add `--ml_lit_review_enabled` to enable the literature-review agent. It runs once per
-iteration, between interpretation and proposal, surfacing recent papers as soft-prior
-findings the proposer consumes.
+Full map: [`docs/README.md`](docs/README.md). Glossary:
+[`docs/concepts/glossary.md`](docs/concepts/glossary.md).
 
-```bash
-bash sdsc_submission_scripts/run_chain.sh --mode lilab \
-    [... usual args ...] \
-    --ml_lit_review_enabled \
-    --ml_lit_review_config configs/lit_review_config.yaml
-```
-
-Operator-visible knobs (root papers, S2 search budget, confidence rubric, task description)
-live in [`configs/lit_review_config.yaml`](configs/lit_review_config.yaml).
-
-### Baseline comparison + dashboard
-
-```bash
-# Baseline comparison across built-in models (raw / model / ceiling)
-# one architecture per invocation (--model is single-valued)
-python scripts/run_comparison.py --model punet --is_trial
-
-# Dashboard (Plotly + FastAPI)
-cp dashboard_config.example.yaml dashboard_config.yaml   # then edit root_data_dir
-python dashboard/main.py                                  # http://localhost:8000
-```
-
-For SSH-tunneling SDSC runs: `ssh -L 8000:localhost:8000 sdsc_expanse`.
-
----
-
-## Project layout
+## Repository layout
 
 ```
-SIDERIUS/
-├── agent/                 # LLM transport + schemas + atomic skills
-│   ├── llm_bridge.py      # ⭐ universal API gateway (single LLM call site)
-│   ├── prompt_templates/  # per-stage prompt fragments (proposal + literature_review)
-│   ├── schemas/           # Pydantic schemas + typed protocols/
-│   ├── skills/            # atomic tools (training, inference, scoring, paper_resolver_skill, …)
-│   └── utils/             # architectural-pattern tagger + proposer pre-flight helpers
-│
-├── nodes/                 # the agent implementations (one directory per node)
-│   ├── NODE_TEMPLATE.md   # ⭐ contract every new node must follow
-│   ├── result_interpretation_agent/
-│   ├── ml_literature_review/
-│   ├── ml_model_proposal_agent/
-│   ├── ml_model_implementor/
-│   ├── ml_code_validator_agent/
-│   └── ml_hyperparameter_tune_agent/
-│
-├── workflows/             # deterministic graph traversals (model_exploration.py, llm_config.py, task_config.py)
-├── core/                  # sandbox executor, hardware context, resume, server calibration
-├── execute_tools/         # training / inference / scoring subprocess entry points
-│   └── health_checks/     # pluggable HealthGate skills (output_diversity, amplitude_collapse, …)
-├── ml_models/             # built-in models + LossConfig + plugin loader
-├── agent_generated/       # LLM-written plugins (gitignored) — models AND custom losses;
-│                          # runtime-extended MODEL_REGISTRY + LOSS_REGISTRY via CapabilityRegistry
-├── dashboard/             # FastAPI + Plotly result browser
-├── scripts/               # standalone runners (run_comparison, checkpoint_s_runner, baselines, …)
-├── sdsc_submission_scripts/  # Slurm wrappers + chain runner (--mode lilab|sdsc)
-├── advice/                # human-written advice JSON (single_agent/, workflow/ — incl. v15/v16 explorer configs)
-├── llm_configs/           # per-stage LLM routing JSON (consumed by --llm_config)
-├── configs/               # operator-visible YAML — task_config, lit_review_config, health_checks
-├── reference_data/        # in-repo scoring baselines, signal frequencies, paper caches
-├── docs/                  # design docs (see Documentation map below)
-└── tests/{unit,integration}/   # 5-tier pyramid — see Testing
+agent/          LLM transport (one gateway), schemas, typed protocols, atomic skills
+nodes/          the six workflow nodes, one directory each, each with its .md
+workflows/      deterministic graph traversals + task composition
+core/           sandbox executor, hardware context, resume, run invariants
+execute_tools/  training / inference / scoring subprocesses, data paths, metrics,
+                health checks
+ml_models/      built-in models + loss configs + plugin loader
+agent_generated/  LLM-written model and loss plugins (gitignored)
+configs/        task semantics and framework policy — see the configuration map
+examples/       the three example task packages
+sdsc_submission_scripts/  chain launchers (--mode lilab | sdsc)
+scripts/        standalone runners and baselines
+dashboard/      FastAPI + Plotly result browser
+docs/           documentation (see the map) + design history
+tests/          unit + integration tiers
 ```
 
----
+## Key invariants
 
-## Key invariants (must-read before contributing)
+Before contributing, four rules that are enforced, not aspirational:
 
-1. **Pydantic at every boundary**: LLM output → schema → execution. Never pass raw LLM
-   output to a training/inference call.
-2. **No hidden inter-node communication**: schemas + protocols + per-node storage are the
-   *only* channels. No reading peer files by convention.
-3. **`LLMBridge` is the single API gateway**: every agent goes through it. Direct
-   `OpenAI()` constructors are CI-banned outside `agent/llm_bridge.py`.
-4. **Plugins are pluggable + run-scoped**: agent-generated models extend `MODEL_REGISTRY`
-   at runtime; each run stages its plugin into `{workspace}/plugins/{run_name}/`.
-5. **One scoring ruler (Option B, global `s_max`)**: model output, raw-baseline, and
-   perfect-denoiser ceiling all share the same FFT path and `log_{5.27}` step.
-6. **`docs/commit_plan_*.md` is the live execution doc** for any multi-commit feature.
-   Update the design doc and the code together; never let them drift.
+1. **Pydantic at every boundary.** LLM output → schema → execution. Execution
+   reads the validated object, never a raw dict.
+2. **Nodes communicate only through schemas, protocols and their own storage.**
+   Storage is a log, not a channel; reading a peer's output file is a defect.
+3. **One LLM gateway.** Every agent call routes through `agent/llm_bridge`;
+   direct provider constructors elsewhere are CI-banned.
+4. **One authority per rule.** Metric direction has exactly one interpreter;
+   deliverable naming has one owner. Re-inlining any of them is the defect the
+   guards exist to catch.
 
----
+Full standards: [`CLAUDE.md`](CLAUDE.md).
 
 ## Testing
 
-The pyramid has five tiers, distinguished by *how many nodes* a test exercises and
-*whether it hits real LLM APIs / real training*.
-
 ```bash
-# Always (CI gate)
-uv run pytest tests/unit/ -q                    # mocked LLM, no GPU
-uv run pytest tests/integration/ -q             # Tier 0 dual-mode (pseudo, ms)
-
-# On demand — opt in via flag or marker
-uv run pytest tests/integration/ --real-api-call --real-training -v   # real Tier 0
-uv run pytest tests/integration/nodes/ -m real_run -v                 # Tier 1
-uv run pytest tests/integration/protocols/ -m real_run -v             # Tier 2
-uv run pytest tests/integration/workflows/ -m real_run -v             # Tier 3
+uv run pytest tests/unit/ -q          # CI gate: mocked LLM, no GPU
+uv run pytest tests/integration/ -q   # full orchestration, predefined responses, ms
 ```
 
-`real_run`-marked tests skip automatically when the required API key is absent — they
-never run in CI.
-
----
-
-## Documentation map
-
-The full set lives under [`docs/`](docs/). The curated start:
-
-**Design + invariants**
-- [`docs/architecture.md`](docs/architecture.md) — full system design (graph, nodes, protocols, skills)
-- [`docs/design/agent_composition_architecture.md`](docs/design/agent_composition_architecture.md) — three-layer roadmap (nodes → protocols → orchestrators; Run Monitor vision)
-- [`CLAUDE.md`](CLAUDE.md) — coding standards every contributor must follow
-- [`nodes/NODE_TEMPLATE.md`](nodes/NODE_TEMPLATE.md) — node-directory contract
-
-**Workflow + agents**
-
-**Custom-loss inventory + task config (recent)**
-- [`docs/design/enable_loss_inventory.md`](docs/design/enable_loss_inventory.md) — proposer proposes custom loss plugins symmetric with model plugins; `LOSS_REGISTRY` + promotion contract
-- [`docs/design/enable_global_task_config.md`](docs/design/enable_global_task_config.md) — `configs/task_config.yaml` de-hardcodes `task_description` + `forward_contract` across implementor / proposer / tuner / lit-review
-
-**HealthGate + tuner controls**
-- [`docs/design/pluggable_health_checks.md`](docs/design/pluggable_health_checks.md) — HealthGate skills + `configs/health_checks.yaml`
-
-**Scoring**
-- [`reference_data/raw_and_ground_score.md`](reference_data/raw_and_ground_score.md) — per-file raw + ceiling table
-
-**Reliability**
-
-**Test infra + gates**
-- [`docs/gates/gate_testing_standard.md`](docs/gates/gate_testing_standard.md) — canonical Gate testing standard (params + pass criteria)
-
-Per-developer memories live under `docs/memories/` (gitignored). See `docs/memories/README.md`.
-
----
+Real-API and real-training tiers are opt-in (`--real-api-call`,
+`--real-training`, `-m real_run`) and skip automatically without the required
+keys. They never run in CI.
 
 ## License
 

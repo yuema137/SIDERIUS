@@ -5,6 +5,21 @@ The persistent SPATIOTEMPORAL / REGRESSION contrast track (roadmap
 specification §22.9a, example-pack governance §22.23). Fixed by the task
 immutability policy.
 
+> **New here?** This is one of three example task packages that show what a
+> SIDERIUS task looks like. Start with
+> [what a task must provide](../../docs/concepts/task-package.md); see
+> [supported tasks and current maturity](../../docs/concepts/supported-tasks.md)
+> for how the three compare.
+>
+> **Maturity**: 🟡 real data, training, inference and scoring execute — through
+> a direct-execution harness (`scripts/run_davis_gate2.py`), **not** through the
+> production chain. There is no single run command for this pack yet. See
+> `STATUS.md`.
+>
+> This pack is also the clearest illustration that one formula can hold three
+> lifecycle roles: MAE is the training objective, the validation history *and* a
+> declared secondary metric, while MSE is the primary metric.
+
 ## Task (frozen §22.9a) — a SIDERIUS-defined task on DAVIS frames
 
 | aspect | value |

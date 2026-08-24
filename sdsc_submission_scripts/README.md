@@ -4,7 +4,9 @@ Entry scripts and slurm job templates for running SIDERIUS chain
 exploration on both **lilab** (foreground subprocess, dev GPU) and
 **SDSC Expanse** (slurm + afterany dependency chain).
 
-The operator runbook is `docs/running_chain_test.md`. This README is the
+The operator runbook is [`docs/guides/operating-a-run.md`](../docs/guides/operating-a-run.md);
+launcher flags are in [`docs/reference/entrypoints.md`](../docs/reference/entrypoints.md).
+This README is the
 **folder map** — what each file does and which one you actually invoke.
 
 ---
@@ -113,7 +115,8 @@ both are validated as safe path components (1-128 chars of
 is refused before anything is created.
 
 Full operator detail — the stop commands, the wave-record schema and the
-canonical/derived contract — is in `docs/running_chain_test.md`.
+canonical/derived contract — is in this file and in the launcher headers
+(`run_chain.sh`, `_chain_common.sh`).
 
 ### Generated / runtime
 
@@ -236,9 +239,9 @@ canonical/derived contract — is in `docs/running_chain_test.md`.
 
 ## Where to look next
 
-* Operator runbook (step-by-step launch + recovery):
-  `docs/running_chain_test.md`
-* Auto-resume design + manifest contract:
-  `docs/phase68_orchestrator_memory_and_resume.md`
-* Token-budget audit / chain knobs:
-  `docs/audit_and_optimize_token_usage_and_growth.md`
+* Operator guide (launch, scope, budgets, resume, refusals):
+  [`docs/guides/operating-a-run.md`](../docs/guides/operating-a-run.md)
+* Launcher flags and defaults:
+  [`docs/reference/entrypoints.md`](../docs/reference/entrypoints.md)
+* Auto-resume, the invariants lock and carried state:
+  [`docs/agent-reference/mechanisms/persistence-and-resume.md`](../docs/agent-reference/mechanisms/persistence-and-resume.md)

@@ -7,7 +7,7 @@
 - **Node type**: **workflow-only** — no CLI `main()`; `experiment_history` requires an `InterpretationOutput` assembled by the upstream interpretation node and threaded through `workflows/model_exploration.py`. (Programmatic Python-API use works but requires the caller to construct `LiteratureReviewInput` manually — used by the §10 diagnostic scripts and integration tests.)
 - **Upstream**: `result_interpretation_agent` (provides `experiment_history: InterpretationOutput` — the current iteration's bottlenecks + key findings that ground every synthesized finding).
 - **Downstream**: `ml_model_proposal_agent` (consumes this node's four channels via the proposer's `agent_cards` / `expert_context` / `mindset` / `vocab_seed` inputs).
-- **Protocol**: `local_all_channels` in `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py` — maps `LiteratureReviewOutput.findings` / `new_vocab_candidates` / `agent_card` / `suggested_mindset` into the proposer's four kwargs. No `reference_library` channel — equations travel inline inside finding `content` (per the Commit 2d revision; see §5b of `docs/external_agents_for_proposer.md`).
+- **Protocol**: `local_all_channels` in `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py` — maps `LiteratureReviewOutput.findings` / `new_vocab_candidates` / `agent_card` / `suggested_mindset` into the proposer's four kwargs. No `reference_library` channel — equations travel inline inside finding `content` (per the Commit 2d revision).
 
 ## Input
 
@@ -96,7 +96,7 @@ The `root_cache_dir` ctor arg controls where per-paper extracts cache (default `
 
 ## Key behavioral notes
 
-- **Bottleneck-grounding is the dominant finding-count gate.** The synthesis prompt requires every finding's Implication to address a specific current bottleneck. Papers transferable in principle but not addressing any current bottleneck are correctly omitted. The finding count is naturally bounded by the seed's stable-attractor count — typically `min(num_bottlenecks, corpus_size)`. See `docs/external_agents_for_proposer.md` §10.5.a for the calibration principle.
+- **Bottleneck-grounding is the dominant finding-count gate.** The synthesis prompt requires every finding's Implication to address a specific current bottleneck. Papers transferable in principle but not addressing any current bottleneck are correctly omitted. The finding count is naturally bounded by the seed's stable-attractor count — typically `min(num_bottlenecks, corpus_size)`.
 - **Equations travel inline inside finding `content`** (in Mechanism), not via a separate channel. For Tier-1 (`arxiv_source`) papers the equation is quoted verbatim from the source `.tex`. For Tier-2 (`pdfplumber_llm`) the equation is paraphrased with an explicit flag word ("approximate equation, reconstructed from a degraded PDF"). The Adaptation section MUST NOT contain raw equations (locked placement rule).
 - **Soft-drop hooks silently drop LLM-emitted findings before they reach output.** Drop conditions, all inside `_synthesize`'s for-loop: missing `content` or non-dict payload; `source_ref` not in the retrieved set; `content_paper_id != source_ref` (the cite-id consistency hook from `ce67cd2`); schema validation failure on the `ExpertContextItem` constructor. See the Parameter Reference's "Validation / soft-drop hooks" subsection for the full list.
 - **`abstract_only_ceiling=0.79`** clamps abstract-only-cited findings' confidence post-synthesis — papers the LLM never deep-read can never have a top-band (0.80+) finding. This is a clip, not a drop.
@@ -168,7 +168,7 @@ This appendix enumerates every knob that influences the `ml_literature_review` n
 
 ### Grounding context (`LiteratureReviewInput.experiment_history` → `InterpretationOutput`)
 
-The synthesis prompt requires every finding's **Implication** to ground in one of the listed `bottlenecks`. This makes the experiment seed itself a finding-count parameter — a corpus of 7 papers against 2 bottlenecks yields ~2 stable-attractor findings plus an intermittent third slot (per `docs/external_agents_for_proposer.md` §10.5.a; the 2026-06-09 run chain in `validation_suite_runs.md` is the empirical record).
+The synthesis prompt requires every finding's **Implication** to ground in one of the listed `bottlenecks`. This makes the experiment seed itself a finding-count parameter — a corpus of 7 papers against 2 bottlenecks yields ~2 stable-attractor findings plus an intermittent third slot.
 
 | Parameter | Location | Type / values | Default | Controls | Affects |
 |---|---|---|---|---|---|

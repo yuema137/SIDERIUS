@@ -688,7 +688,8 @@ no authoritative measurement for any candidate. Consequences:
   configure the host's ceilings (the `28.0` GiB default suits a ~32 GiB
   card and would badly under-serve a larger one), collect a bounded
   driver-visible measurement, and have PR C validate and promote it.
-  The operator sequence is `docs/running_chain_test.md` → "New GPU host".
+  The operator sequence is [`docs/getting-started/installation.md`](../../docs/getting-started/installation.md)
+  → "Moving to a different machine or GPU".
 
 **No CLI argument was added or changed by V20 PR B.** Admission is
 configured on the run rather than through a flag, and no default moved:
@@ -846,7 +847,7 @@ for the full design rationale.
   - **C8c (2026-07-30) — the time gate's authority now comes from the shared `RuntimeDecisionPolicy`, not from the skill.** The tuner passes `runtime_phase="trial"|"formal"`; the skill returns `feasible` DERIVED from the policy decision, plus `breakdown.runtime_decision` / `runtime_decision_reasons` / `runtime_decision_provenance` / `runtime_policy_identity` / `over_effective_budget`. Consequences: a **measured** (warmup-backed) projection over budget still emits `skipped_time_risk` with identical arithmetic (including the 10 % measured-inference slack); a **static** or **store-reused** projection no longer can — it is reported (verdict text, suggestion, `over_effective_budget=True`) but cannot gate the round, because prior-tier evidence has no blocking authority (`docs/design/runtime_estimation_and_calibration.md` §7.4). In **formal** mode with prior-tier evidence and no probe record the decision is `REQUEST_PROBE`, which lets the round proceed into the authoritative in-subprocess (RT2) verification instead of pricing it from a prior. An **uninterpretable** evidence source is an evidence-channel failure: the skill returns `status="error"` and the tuner raises — never a candidate-level "infeasible". `evaluate_vram_skill` uses architectural pattern tagging (`TIME_FACTOR_THRESHOLD`, `VRAM_FACTOR_THRESHOLD`) and a per-pattern memory budget. Both gates emit a `GateExhaustionInfo` payload when they reject all attempts in a round.
   - **V21 PR G (2026-08-10) — the time gate prices inference at the batch that will actually run.** The feasible VRAM-gate return's probe-derived `inference_batch` is captured into `active_params` (`:4696`) before the time gate fires, and `_run_time_preflight` forwards it (the `**active_params` splat) into `evaluate_time_skill`, which uses the SAME value for the hint→ms/step conversion and the inference estimator. This is a two-sided correction on the `training_warmup_x2.7_fallback` forecast branch: a plan is no longer falsely `skipped_time_risk` when the probed batch > 25, and no longer falsely admitted when it is < 25. No-hint callers (baselines, legacy scripts) keep registry-table pricing unchanged. `active_params` is rebuilt per attempt, so a stale hint cannot leak between attempts (0.R.4).
 - **Sandbox subprocess for skill execution.** Each skill runs in a fresh subprocess via `TidmadSandbox` for memory isolation (PyTorch's CUDA context doesn't reliably release VRAM in-process). The sandbox communicates via JSON files in a temp dir and reports back through `get_summary()`. Pseudo-mode tests replace the sandbox with a `RecordingSandbox` that returns canned results without subprocess overhead.
-- **Per-run plugin dir** isolates agent-generated plugins. When `seed_plugin_path` is set, the file is copied into `{workspace}/plugins/{run_name}/` and the training subprocess sees this via `SIDERIUS_PLUGIN_DIRS`. Plugins from one run don't pollute another's `MODEL_REGISTRY`. See `docs/run_scoped_plugins.md` Phase 3.
+- **Per-run plugin dir** isolates agent-generated plugins. When `seed_plugin_path` is set, the file is copied into `{workspace}/plugins/{run_name}/` and the training subprocess sees this via `SIDERIUS_PLUGIN_DIRS`. Plugins from one run don't pollute another's `MODEL_REGISTRY`. See [`docs/agent-reference/mechanisms/plugins.md`](../../docs/agent-reference/mechanisms/plugins.md).
 - **Hardware context per run.** `core.hardware_context.get_or_create(workspace, run_name)` writes a per-run manifest (device, total memory, hostname, availability). Subprocess children read this via file IPC instead of probing CUDA themselves. See Phase 6.6 §3.9.
 - **OOM-skipped attempts are saved to memory but don't count as rounds.** This is deliberate: the LLM needs to see the OOM failure to avoid proposing the same config again, but it shouldn't burn round budget on a config that never trained.
 - **Run-scoped plugins are NOT cached across iterations.** Each iteration starts with an empty `{workspace}/plugins/{run_name}/`. If the workflow needs to chain plugins, it re-copies `seed_plugin_path` each time. (See `feedback_no_file_index_in_trial` — `--file_index` is silently ignored in trial mode.)
@@ -1313,7 +1314,7 @@ reachability claims about the run loop.
   validation estimate exists when admission executes. Owner:
   admission / runtime-control (§7e); NOT bound to D14. It must never be
   approximated from the training measurement by a fixed ratio — that is the
-  hand-calibrated `× 2.7` pattern `docs/refine_inference_time_estimator.md`
-  exists to remove.
+  hand-calibrated `× 2.7` pattern that the (now removed)
+  `refine_inference_time_estimator` design existed to eliminate.
 
 Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md` §14.9 - §14.9.5.

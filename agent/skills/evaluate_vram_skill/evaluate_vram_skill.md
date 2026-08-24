@@ -65,7 +65,7 @@ GPU UUID
 **An RTX 5090 measurement is not an H100 measurement.** Moving to new
 hardware invalidates every stored figure for admission purposes, even
 for a byte-identical candidate. See the cross-hardware bring-up runbook
-in `docs/running_chain_test.md`.
+in [`docs/guides/operating-a-run.md`](../../../docs/guides/operating-a-run.md).
 
 **This skill does not promote anything.** It measures and returns. It
 does not decide whether a figure is applicable elsewhere, does not write
@@ -145,4 +145,4 @@ GPU.
   out-of-memory says anything about the candidate at all.
 - `docs/design/v20_priorities/pr_b_gpu_aggregation_attribution.md` —
   the measurement/attribution design and the cross-hardware section.
-- `docs/running_chain_test.md` — new-machine bring-up runbook.
+- [`docs/getting-started/installation.md`](../../../docs/getting-started/installation.md) — new-machine bring-up.

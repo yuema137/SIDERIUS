@@ -260,7 +260,8 @@ The `LLMBridge` singleton invariant (enforced by
 `tests/unit/agent/test_llm_bridge_singleton.py`) guarantees no code outside
 `agent/llm_bridge.py` constructs an `OpenAI()` client. Combined with the DI factories,
 this means a single `--real-api-call` flag controls whether the entire system talks to
-real APIs or to recording fakes. See `docs/pseudo_test_infra.md` for the full design.
+real APIs or to recording fakes. See [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md)
+for the pseudo-mode fixtures.
 
 ---
 
@@ -714,8 +715,8 @@ legacy history is stamp-checked before a lock-less workspace is ever
 locked). **Aggregate scalars are comparable only within one scope**;
 cross-scope analysis uses per-file vectors. Default (no scope) is
 behaviorally identical to pre-feature runs. Full design:
-`docs/design/enable_partial_file_list.md`; split-mode campaign tooling:
-`docs/v18_split_run_plan.md`.
+`docs/design/enable_partial_file_list.md`. Operator surface:
+[`docs/reference/entrypoints.md`](reference/entrypoints.md).
 
 ---
 
@@ -724,7 +725,8 @@ behaviorally identical to pre-feature runs. Full design:
 Agent tests have five categories. Unit tests and pseudo-full-loop tests run on every
 commit (no external resources needed). The three real-API integration tiers require
 API keys and/or GPU and are gated by `pytest.mark.real_run` + the `--real-api-call`
-flag — they never run in CI. See `docs/pseudo_test_infra.md` for the dual-mode design.
+flag — they never run in CI. See [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md)
+for the dual-mode fixtures.
 
 ### Unit tests
 
@@ -827,8 +829,8 @@ corresponding pseudo data must change in the same commit. See
 **Rule**: new integration tests should be dual-mode by default. Real-only tests are
 reserved for cases where no predefined response can meaningfully validate the behavior.
 
-See `docs/pseudo_test_infra.md` for the full design, implementation checklist, and
-rationale.
+See [`tests/pseudo_data/README.md`](../tests/pseudo_data/README.md) for the fixture
+format and how to add a predefined response.
 
 ---
 

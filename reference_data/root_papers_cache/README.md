@@ -84,5 +84,5 @@ the default.
 
 - `nodes/ml_literature_review/ml_literature_review.py` — the consumer.
 - `agent/schemas/literature_review.py` — `RetrievedPaper` schema.
-- `docs/commit_plan_ml_literature_review.md` — Commit 6 design (Risk 5).
-- `docs/external_agents_for_proposer.md` §4 — verbosity tiers + cache rule.
+- [`nodes/ml_literature_review/ml_literature_review.md`](../../nodes/ml_literature_review/ml_literature_review.md)
+  — the literature-review node contract, including cache usage.

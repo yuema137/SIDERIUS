@@ -7,7 +7,7 @@ dict shaped exactly like what the real production code would return at the
 corresponding boundary.
 
 The full design rationale lives in
-[`docs/pseudo_test_infra.md`](../../docs/pseudo_test_infra.md). This file is
+this file. This file is
 the short-form reminder for anyone navigating into the tree to add or edit
 canned data — and it leads with the **one invariant** you must internalize
 before touching anything here.
@@ -154,5 +154,5 @@ bridge = RecordingLLMBridge(responses={"generate": {"action": "PUNET", ...}})
 4. Keep the dict minimal — just enough to drive the test you're writing.
    Schema-required fields must be present; optional fields can be omitted
    if the test doesn't depend on them.
-5. Update [`docs/pseudo_test_infra.md`](../../docs/pseudo_test_infra.md)'s
+5. Update this README's
    pseudo data table if the new directory should be listed.
