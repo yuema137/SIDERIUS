@@ -617,6 +617,16 @@ def render_synthesis_prompt(
     'strict' omits cross-domain papers; 'moderate' emits a finding for a
     transferable cross-domain mechanism with an explicit Adaptation caveat;
     'liberal' emits for any potentially relevant technique.
+
+    Empty-bottlenecks (cold-start) render — issue #303: when ``bottlenecks``
+    is empty after ``_bullets``' whitespace cleaning (the list renders as
+    ``(none)``), the closing instruction switches from the bottleneck-omission
+    rule — which, against an empty list, would instruct omitting EVERY
+    paper — to grounding on the task description. The branch keys on the
+    RENDERED block (``== "(none)"``), never on a separate emptiness
+    predicate, so the instruction can never contradict what the prompt
+    shows. Non-empty renders are byte-identical to the pre-#303 prompt
+    (pinned by the PB-9 user-prompt golden).
     """
     rubric = confidence_rubric or ConfidenceRubric()
     syn_cfg = synthesis_config or SynthesisConfig()
@@ -636,15 +646,35 @@ def render_synthesis_prompt(
     else:
         papers_block = "(no papers were retrieved this run)"
 
+    bottlenecks_block = _bullets(bottlenecks)
+    if bottlenecks_block == "(none)":
+        # Cold-start branch (issue #303): with zero bottlenecks the legacy
+        # closing line would instruct omitting every paper ("omit any paper
+        # that does not address one of the bottlenecks above" — and there
+        # are none). Redirect the grounding to the task description, which
+        # the system prompt carries under "The task the proposer is working
+        # on". Keyed on the rendered block so the instruction and the list
+        # it points at can never disagree.
+        closing_instruction = (
+            "Produce the findings JSON. No open bottlenecks are recorded yet — "
+            "ground each finding in the task described in the system prompt "
+            "('The task the proposer is working on') instead, and omit any "
+            "paper that is not relevant to that task."
+        )
+    else:
+        closing_instruction = (
+            "Produce the findings JSON. Omit any paper that does not address one of "
+            "the bottlenecks above."
+        )
+
     user_prompt = (
         "## Current experiment state (PRIMARY — ground every finding in these)\n\n"
-        f"Open bottlenecks:\n{_bullets(bottlenecks)}\n\n"
+        f"Open bottlenecks:\n{bottlenecks_block}\n\n"
         f"Key findings:\n{_bullets(key_findings)}\n\n"
         f"Take-home message: {take_home_message or '(none)'}\n\n"
         "## Papers retrieved this iteration\n\n"
         f"{papers_block}\n\n"
-        "Produce the findings JSON. Omit any paper that does not address one of "
-        "the bottlenecks above."
+        f"{closing_instruction}"
     )
     return system_prompt, user_prompt
 

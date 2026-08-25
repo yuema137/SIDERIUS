@@ -21,6 +21,8 @@ from nodes.ml_literature_review.ml_literature_review import (
     _parse_dimension,
     _sanitize_paper_id,
     _validate_content_paper_id,
+    load_experiment_history,
+    main,
 )
 
 __all__ = [
@@ -29,6 +31,8 @@ __all__ = [
     "_parse_dimension",
     "_sanitize_paper_id",
     "_validate_content_paper_id",
+    "load_experiment_history",
+    "main",
 ]
 
 # --- sys.modules rebind ------------------------------------------------------

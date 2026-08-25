@@ -4,7 +4,7 @@
 
 ## Position in the pipeline
 
-- **Node type**: **workflow-only** — no CLI `main()`; `experiment_history` requires an `InterpretationOutput` assembled by the upstream interpretation node and threaded through `workflows/model_exploration.py`. (Programmatic Python-API use works but requires the caller to construct `LiteratureReviewInput` manually — used by the §10 diagnostic scripts and integration tests.)
+- **Node type**: **standalone-capable** — `main()` CLI added by issue #303, mirroring the sibling node CLIs. `experiment_history` is read from the upstream interpretation node's **persisted record on disk**: `{workspace}/interpretation_{run_name}.json` by naming convention (the same file the proposal agent's CLI reads), or an explicit `--experiment-history` path. The workflow path is unchanged (`InterpretationOutput` threaded in memory through `workflows/model_exploration.py`); programmatic Python-API use also works as before — the §10 diagnostic scripts and integration tests construct `LiteratureReviewInput` manually.
 - **Upstream**: `result_interpretation_agent` (provides `experiment_history: InterpretationOutput` — the current iteration's bottlenecks + key findings that ground every synthesized finding).
 - **Downstream**: `ml_model_proposal_agent` (consumes this node's four channels via the proposer's `agent_cards` / `expert_context` / `mindset` / `vocab_seed` inputs).
 - **Protocol**: `local_all_channels` in `agent/schemas/protocols/ml_literature_review_to_ml_model_propose.py` — maps `LiteratureReviewOutput.findings` / `new_vocab_candidates` / `agent_card` / `suggested_mindset` into the proposer's four kwargs. No `reference_library` channel — equations travel inline inside finding `content` (per the Commit 2d revision).
@@ -53,11 +53,33 @@
 
 ## CLI usage
 
-None — this node does not expose a standalone CLI (`main()` is not implemented). Invoke programmatically via the Python API below, or via the workflow integration in `workflows/model_exploration.py` (Commit 6+).
+```bash
+.venv/bin/python nodes/ml_literature_review/ml_literature_review.py \
+    --workspace ./siderius_workspace \
+    --run_name v1 \
+    --experiment-history ./siderius_workspace/interpretation_v1.json \
+    --provider gemini \
+    --model_id gemini-3.1-flash-lite-preview
+```
+
+Run from the repo root (the task profile `configs/task_config.yaml` resolves relative to the CWD, exactly as in the sibling CLIs). `python -m nodes.ml_literature_review.ml_literature_review ...` is equivalent; the short package form `python -m nodes.ml_literature_review` does NOT work — the package `__init__.py`'s pre-existing `sys.modules` rebind (which keeps `mock.patch` semantics) leaves no `__path__` for a `__main__` lookup, and no node supports that form.
+
+The CLI reads the upstream `InterpretationOutput` (`--experiment-history`, defaulting to `{workspace}/interpretation_{run_name}.json` — the same persisted record the proposal agent's CLI reads), loads the node knobs from `configs/lit_review_config.yaml` with the same key mapping the workflow uses (`_build_lit_review_input`), resolves `task_description` from the canonical task profile via `get_task_description(load_task_config())`, builds a validated `LiteratureReviewInput`, runs the agent (the same `run()` the workflow calls — unchanged), and writes `{workspace}/ml_literature_review_{run_name}.json`.
+
+**Ingestion refusals are loud and distinct** (`load_experiment_history`): a missing file raises `FileNotFoundError` naming the path and the upstream node to run; unparseable JSON raises `ValueError` ("not valid JSON") chaining the `JSONDecodeError`; valid JSON that is not a valid `InterpretationOutput` raises `ValueError` naming the schema, chaining the pydantic `ValidationError`. The CLI never silently degrades to an empty history.
 
 ### CLI arguments
 
-N/A.
+| Flag | Default | Description |
+|---|---|---|
+| `--workspace` | `./siderius_workspace` | Root directory for reading the upstream interpretation output and writing this node's output JSON. |
+| `--run_name` | `v1` | Run identifier — reads `interpretation_{run_name}.json` (unless `--experiment-history` overrides), writes `ml_literature_review_{run_name}.json`. |
+| `--experiment-history` | `{workspace}/interpretation_{run_name}.json` | Explicit path to the upstream `InterpretationOutput` JSON. `--experiment_history` is accepted as an alias (repo flag style); the dashed form is the issue-#303 acceptance spelling. |
+| `--lit_review_config` | `configs/lit_review_config.yaml` | Node-knob YAML (`root_papers` / `dynamic_search` / `synthesis` / `confidence_rubric` / `findings_verbosity`) — same file and key mapping as the workflow. A relative path resolves against the repo root. The YAML's top-level `enabled:` key gates the **workflow** stage only and is ignored by the CLI — invoking the CLI is the enablement. |
+| `--provider` | `gemini` | LLMBridge provider (`gemini` / `openai`) for compression + search-decision + synthesis. The CLI does not expose the optional `search_llm_*` split; the search-decision step falls back to this provider (schema semantics). |
+| `--model_id` | `gemini-3.1-flash-lite-preview` | LLMBridge model id. |
+
+**Limitations of standalone CLI use** (compared to workflow-driven use): no `search_llm_provider` / `search_llm_model_id` split (that routing lives in the chain's `WorkflowLLMConfig`), and no 4-channel merge into the proposer — the CLI produces this node's output JSON only.
 
 ## Python API usage
 
@@ -96,7 +118,8 @@ The `root_cache_dir` ctor arg controls where per-paper extracts cache (default `
 
 ## Key behavioral notes
 
-- **Bottleneck-grounding is the dominant finding-count gate.** The synthesis prompt requires every finding's Implication to address a specific current bottleneck. Papers transferable in principle but not addressing any current bottleneck are correctly omitted. The finding count is naturally bounded by the seed's stable-attractor count — typically `min(num_bottlenecks, corpus_size)`.
+- **Bottleneck-grounding is the dominant finding-count gate.** The synthesis prompt requires every finding's Implication to address a specific current bottleneck. Papers transferable in principle but not addressing any current bottleneck are correctly omitted. The finding count is naturally bounded by the seed's stable-attractor count — typically `min(num_bottlenecks, corpus_size)`. (For the zero-bottleneck cold-start case, see the next bullet.)
+- **Empty-bottlenecks (cold-start) synthesis render — verified + fixed under issue #303.** With zero bottlenecks (after whitespace cleaning) the synthesis user prompt renders the explicit absence `Open bottlenecks:` / `(none)`, and its closing instruction switches: the legacy closing ("Produce the findings JSON. Omit any paper that does not address one of the bottlenecks above.") would, against an empty list, instruct omitting EVERY paper, so the empty case instead closes with "No open bottlenecks are recorded yet — ground each finding in the task described in the system prompt ('The task the proposer is working on') instead, and omit any paper that is not relevant to that task." The branch keys on the RENDERED bottleneck block (`== "(none)"`), never a separate emptiness predicate, so the instruction can never contradict the list it points at; non-empty renders are byte-identical to the pre-#303 prompt (pinned by the PB-9 user golden). The search-decision prompt needs no such branch: it renders the same `(none)` absence, and three of its four query dimensions (`take_home` / `architectural_gap` / `adjacent_technique`) remain targetable without bottlenecks.
 - **Equations travel inline inside finding `content`** (in Mechanism), not via a separate channel. For Tier-1 (`arxiv_source`) papers the equation is quoted verbatim from the source `.tex`. For Tier-2 (`pdfplumber_llm`) the equation is paraphrased with an explicit flag word ("approximate equation, reconstructed from a degraded PDF"). The Adaptation section MUST NOT contain raw equations (locked placement rule).
 - **Soft-drop hooks silently drop LLM-emitted findings before they reach output.** Drop conditions, all inside `_synthesize`'s for-loop: missing `content` or non-dict payload; `source_ref` not in the retrieved set; `content_paper_id != source_ref` (the cite-id consistency hook from `ce67cd2`); schema validation failure on the `ExpertContextItem` constructor. See the Parameter Reference's "Validation / soft-drop hooks" subsection for the full list.
 - **`abstract_only_ceiling=0.79`** clamps abstract-only-cited findings' confidence post-synthesis — papers the LLM never deep-read can never have a top-band (0.80+) finding. This is a clip, not a drop.
@@ -168,7 +191,7 @@ This appendix enumerates every knob that influences the `ml_literature_review` n
 
 ### Grounding context (`LiteratureReviewInput.experiment_history` → `InterpretationOutput`)
 
-The synthesis prompt requires every finding's **Implication** to ground in one of the listed `bottlenecks`. This makes the experiment seed itself a finding-count parameter — a corpus of 7 papers against 2 bottlenecks yields ~2 stable-attractor findings plus an intermittent third slot.
+The synthesis prompt requires every finding's **Implication** to ground in one of the listed `bottlenecks`. This makes the experiment seed itself a finding-count parameter — a corpus of 7 papers against 2 bottlenecks yields ~2 stable-attractor findings plus an intermittent third slot. (When the list is empty — a cold start — the prompt's closing instruction grounds on the task description instead; see "Empty-bottlenecks (cold-start) synthesis render" in Key behavioral notes.)
 
 | Parameter | Location | Type / values | Default | Controls | Affects |
 |---|---|---|---|---|---|
@@ -199,9 +222,9 @@ The synthesis prompt requires every finding's **Implication** to ground in one o
 | Constant | Location | Value | Controls | Affects |
 |---|---|---|---|---|
 | `MAX_RAW_TEXT_CHARS` | `agent/prompt_templates/literature_review/__init__.py:185` | `120_000` (~30k tokens at 4 chars/token) | Hard cap on raw paper text fed to the compression prompt. Beyond is replaced with `[...TRUNCATED...]`. | extraction quality (truncated papers lose content) |
-| `DEFAULT_ROOT_CACHE_DIR` | `nodes/ml_literature_review/ml_literature_review.py:64` | `"reference_data/root_papers_cache"` | On-disk directory for root-paper extract cache. Override via `MLLiteratureReviewAgent(root_cache_dir=...)`. | cost (cache hit avoids re-resolve + re-compress) |
+| `DEFAULT_ROOT_CACHE_DIR` | `nodes/ml_literature_review/ml_literature_review.py:72` | `"reference_data/root_papers_cache"` | On-disk directory for root-paper extract cache. Override via `MLLiteratureReviewAgent(root_cache_dir=...)`. | cost (cache hit avoids re-resolve + re-compress) |
 | `S2_DEFAULT_TIMEOUT_S` / `S2_MIN_REQUEST_INTERVAL_S` / `S2_MAX_RETRIES` | `agent/skills/paper_resolver_skill/wrapper.py:46-51` | `30` / `1.1` / `3` | S2 network behavior. | extraction success rate |
-| `_AGENT_CARD.trust_level` | `nodes/ml_literature_review/ml_literature_review.py:65` | `"soft_prior"` | Machine-readable trust calibration emitted on every run, read by the proposer's synthesis rules (P-b + P-c). Three valid levels: `hard_limit` (non-negotiable — physics-style constraints), `strong_prior` (weight comparably to experiment data — human directives), `soft_prior` (inspirational priors requiring experiment validation — literature). Lit-review is `soft_prior` by design. **Override only by changing the constant in code** — per-run override would defeat the calibration's role as a stable signal. | proposal weighting |
+| `_AGENT_CARD.trust_level` | `nodes/ml_literature_review/ml_literature_review.py:100` | `"soft_prior"` | Machine-readable trust calibration emitted on every run, read by the proposer's synthesis rules (P-b + P-c). Three valid levels: `hard_limit` (non-negotiable — physics-style constraints), `strong_prior` (weight comparably to experiment data — human directives), `soft_prior` (inspirational priors requiring experiment validation — literature). Lit-review is `soft_prior` by design. **Override only by changing the constant in code** — per-run override would defeat the calibration's role as a stable signal. | proposal weighting |
 
 ### Resolver-skill parameters NOT currently exposed via `LiteratureReviewInput`
 

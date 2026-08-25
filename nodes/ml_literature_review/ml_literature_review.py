@@ -24,11 +24,18 @@ Conventions match the existing nodes (confirmed by reading
   - ``bridge.generate()`` returns a parsed dict, validated with
     ``model_validate``.
 
+A standalone CLI (``main()``, issue #303) wraps this same ``run()`` path,
+mirroring the sibling node CLIs: the upstream ``InterpretationOutput`` is
+read from ``{workspace}/interpretation_{run_name}.json`` (or an explicit
+``--experiment-history`` path) and the node knobs come from the same YAML +
+key mapping the workflow uses.
+
 See docs/commit_plan_ml_literature_review.md Commit 4 + Checkpoint C.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import re
@@ -45,6 +52,7 @@ from agent.prompt_templates.literature_review import (
     render_search_decision_prompt,
     render_synthesis_prompt,
 )
+from agent.schemas.interpretation import InterpretationOutput
 from agent.schemas.literature_review import (
     ConfidenceRubric,
     LiteratureReviewInput,
@@ -939,3 +947,191 @@ class MLLiteratureReviewAgent:
             path.write_text(out.model_dump_json(indent=2))
         except OSError as e:
             logger.warning("failed to write node output: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# CLI (issue #303 — the sixth standalone node CLI)
+# ---------------------------------------------------------------------------
+
+# Repo root for anchoring a relative --lit_review_config path, mirroring the
+# workflow's SIDERIUS_ROOT anchor (workflows/model_exploration.py). Derived
+# from this file's location per the portability rule — never hardcoded.
+_SIDERIUS_ROOT = Path(__file__).resolve().parents[2]
+
+
+def load_experiment_history(path: str | Path) -> InterpretationOutput:
+    """Load + validate the upstream ``InterpretationOutput`` JSON for the CLI.
+
+    The standalone ingestion boundary (issue #303): the file is the
+    result_interpretation_agent's persisted record — the interpreter persists
+    exactly ``model_dump_json``, so this file and the in-memory object the
+    workflow passes are ONE input shape with two sources. The three failure
+    modes refuse loudly and DISTINCTLY; the CLI never silently degrades to an
+    empty history (which would feed the LLM a fabricated cold start):
+
+      - missing file   -> ``FileNotFoundError`` naming the path and the
+        upstream node to run;
+      - unparseable    -> ``ValueError`` ("not valid JSON") naming the path,
+        chaining the ``json.JSONDecodeError``;
+      - schema-invalid -> ``ValueError`` ("not a valid InterpretationOutput")
+        naming the path, chaining the pydantic ``ValidationError``.
+
+    Args:
+        path: Path to the JSON file — ``interpretation_{run_name}.json`` by
+            the CLI's naming convention, or an explicit ``--experiment-history``
+            argument.
+
+    Returns:
+        The validated ``InterpretationOutput``.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Experiment-history file not found: {path}\n"
+            f"Run result_interpretation_agent first (it writes "
+            f"interpretation_{{run_name}}.json into the workspace), or pass "
+            f"--experiment-history explicitly / check --workspace and --run_name."
+        )
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Experiment-history file is not valid JSON: {path} ({e})") from e
+    try:
+        return InterpretationOutput.model_validate(raw)
+    except ValidationError as e:
+        raise ValueError(
+            f"Experiment-history file is not a valid InterpretationOutput: {path}\n{e}"
+        ) from e
+
+
+def _build_arg_parser() -> argparse.ArgumentParser:
+    """The CLI flag surface — mirrors the sibling node CLIs (issue #303).
+
+    Kept separate from ``main()`` so tests can pin the flag surface without
+    entering the run path.
+    """
+    parser = argparse.ArgumentParser(description="SIDERIUS ml_literature_review")
+    parser.add_argument(
+        "--workspace",
+        type=str,
+        default="./siderius_workspace",
+        help="Root directory for reading the upstream interpretation output and "
+        "writing ml_literature_review_{run_name}.json",
+    )
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default="v1",
+        help="Run name — reads interpretation_{run_name}.json (unless "
+        "--experiment-history overrides), writes ml_literature_review_{run_name}.json",
+    )
+    parser.add_argument(
+        # The dashed spelling is the issue-#303 acceptance form; the underscore
+        # alias matches the repo's flag style (--run_name, --model_id). argparse
+        # has no dash/underscore equivalence, so both are declared explicitly.
+        "--experiment-history",
+        "--experiment_history",
+        type=str,
+        default=None,
+        help="Explicit path to the upstream InterpretationOutput JSON. Default: "
+        "{workspace}/interpretation_{run_name}.json — the same persisted record "
+        "the proposal agent's CLI reads.",
+    )
+    parser.add_argument(
+        "--lit_review_config",
+        type=str,
+        default="configs/lit_review_config.yaml",
+        help="Node-knob YAML (root_papers / dynamic_search / synthesis / "
+        "confidence_rubric / findings_verbosity) — the same file and key mapping "
+        "the workflow uses. A relative path resolves against the repo root. The "
+        "YAML's top-level `enabled:` key gates the workflow stage only and is "
+        "ignored here — invoking this CLI is the enablement.",
+    )
+    parser.add_argument("--provider", type=str, default="gemini", choices=["gemini", "openai"])
+    parser.add_argument("--model_id", type=str, default="gemini-3.1-flash-lite-preview")
+    return parser
+
+
+def main() -> None:
+    """Standalone CLI entry point (issue #303).
+
+    Mirrors the sibling node CLIs (``ml_model_proposal_agent`` /
+    ``result_interpretation_agent``): parse flags -> load the upstream
+    persisted record -> ``model_validate`` the node input -> ``run()`` ->
+    print a summary. ``run()`` itself is unchanged — the CLI is additive.
+    """
+    args = _build_arg_parser().parse_args()
+
+    if args.experiment_history is not None:
+        history_path = Path(args.experiment_history)
+    else:
+        history_path = Path(args.workspace) / f"interpretation_{args.run_name}.json"
+    experiment_history = load_experiment_history(history_path)
+
+    # Node knobs: the SAME YAML + key mapping the workflow uses
+    # (workflows/model_exploration.py::_build_lit_review_input), with a
+    # relative path anchored on the repo root exactly as the workflow
+    # anchors it. The YAML's top-level `enabled:` flag gates the WORKFLOW
+    # stage and is deliberately not read here.
+    import yaml
+
+    config_path = Path(args.lit_review_config)
+    if not config_path.is_absolute():
+        config_path = _SIDERIUS_ROOT / config_path
+    with open(config_path, encoding="utf-8") as f:
+        lit_review_config = yaml.safe_load(f) or {}
+
+    # Step 04b single source: the task description resolves from the
+    # canonical task profile through the SAME accessor every production
+    # caller uses (workflow + sibling CLIs) — no second config path.
+    from workflows.task_config import get_task_description, load_task_config
+
+    task_description = get_task_description(load_task_config())
+
+    agent_input = LiteratureReviewInput.model_validate(
+        {
+            "experiment_history": experiment_history,
+            "root_papers": lit_review_config.get("root_papers", []),
+            "dynamic_search": lit_review_config.get("dynamic_search", {}),
+            "synthesis_config": lit_review_config.get("synthesis", {}),
+            "confidence_rubric": lit_review_config.get("confidence_rubric", {}),
+            "findings_verbosity": lit_review_config.get("findings_verbosity", 1),
+            "task_description": task_description,
+            "storage": {
+                "backend": "local",
+                "local": {"workspace": args.workspace, "run_name": args.run_name},
+            },
+            "run_name": args.run_name,
+            "llm_provider": args.provider,
+            "llm_model_id": args.model_id,
+        }
+    )
+    print(
+        f"Input validated: bottlenecks={len(experiment_history.bottlenecks)} | "
+        f"key_findings={len(experiment_history.key_findings)} | "
+        f"root_papers={len(agent_input.root_papers)}"
+    )
+    if not experiment_history.bottlenecks:
+        print(
+            "Note: zero bottlenecks in the experiment history (cold start) — the "
+            "synthesis prompt grounds findings in the task description instead."
+        )
+
+    agent = MLLiteratureReviewAgent()
+    output = agent.run(agent_input)
+
+    print(f"\n{'=' * 60}")
+    print(f"  Literature review — {output.run_name}")
+    print(f"{'=' * 60}")
+    print(f"  Papers retrieved : {len(output.retrieved_papers)}")
+    print(f"  Search rounds    : {output.search_rounds_used}")
+    print(f"  Findings         : {len(output.findings)}")
+    for item in output.findings:
+        print(f"    - [{item.source_ref}] confidence={item.confidence}")
+    out_path = Path(args.workspace) / f"ml_literature_review_{args.run_name}.json"
+    print(f"\n  Output: {out_path}")
+    print(f"{'=' * 60}\n")
+
+
+if __name__ == "__main__":
+    main()
