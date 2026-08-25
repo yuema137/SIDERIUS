@@ -57,7 +57,11 @@ from execute_tools.evaluation_metric import (
     resolve_bound_run_secondary_metrics,
     resolve_run_metric,
 )
-from execute_tools.health_checks.config import load_health_gates_config
+from execute_tools.health_checks.config import (
+    HealthChecksConfig,
+    load_composed_health_config,
+    load_health_gates_config,
+)
 from execute_tools.health_checks.schemas import (
     GateAction,
 )
@@ -495,6 +499,35 @@ def _resolve_run_gate_ids(agent_input: Any) -> Any:
     return resolve_run_scientific_gate_ids(ref.task_health_binding) if ref is not None else None
 
 
+def _resolve_run_health_config(agent_input: Any) -> HealthChecksConfig:
+    """The roster this run will evaluate, resolved from the run's OWN declaration.
+
+    F-C12P-CP12-1, second half. This is the tuner's FIRST health resolution,
+    and the first resolution in a process is authoritative: it binds the
+    task's Health plugin set into the run scope, and the Step-08b guard
+    refuses every later, differing bind.
+
+    ``load_health_gates_config`` cannot take a binding, so with no explicit
+    config path it composes ``LEGACY_OMITTED`` — TIDMAD's family. That is
+    correct for an un-composed run and wrong for a composed one, which then
+    bound TIDMAD here and had its OWN family refused at
+    :func:`_resolve_run_gate_ids`. The path is reachable exactly when this run
+    materialized no effective config, i.e. ``health_gate_enabled=False``; with
+    gates enabled ``build_run_invariants`` has already composed and bound the
+    run's own family and the swapped-in effective path carries its roster,
+    which ``load_composed_health_config`` returns untouched.
+
+    Un-composed runs take the identical call they always took.
+    """
+    ref = getattr(agent_input, "task_composition_ref", None)
+    if ref is None:
+        return load_health_gates_config(agent_input.health_checks_config)
+    config, _task_config, _plugins = load_composed_health_config(
+        agent_input.health_checks_config, ref.task_health_binding
+    )
+    return config
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -811,7 +844,7 @@ class HyperparamTuningAgent:
         run_task_render = build_tuner_task_render(
             dataset=project_attempt_topology_facts(run_profile).physical_dataset,
             model_io_contract=run_model_io,
-            health_config=load_health_gates_config(agent_input.health_checks_config),
+            health_config=_resolve_run_health_config(agent_input),
             efficiency_band_fraction=EFFICIENCY_BAND_FRACTION,
             # Step 12 / PR-12a C7 (D-12a-5) — composition PRESENCE, from the
             # run's own INPUT projection, so the render authority can gate the

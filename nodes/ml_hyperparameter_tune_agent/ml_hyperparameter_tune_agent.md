@@ -1323,6 +1323,35 @@ input projection instead of the run's own authority made a composed chain
 refuse its own output. `None` for an un-composed run resolves the legacy
 default exactly as before, so TIDMAD's `best_*` selection is unaffected.
 
+## The run's FIRST health resolution uses the run's own binding (F-C12P-CP12-1)
+
+The same mechanism, one step earlier in `run()`. Building the planner/reflector
+task render needs the roster the run will actually evaluate, and that call —
+now `_resolve_run_health_config(agent_input)` — is the tuner's FIRST health
+resolution. The first resolution in a process is authoritative: it binds the
+task's Health plugin set into the run scope, and the Step-08b guard refuses
+every later, differing bind.
+
+`load_health_gates_config` takes no binding, so given no explicit config path
+it composes `LEGACY_OMITTED` — TIDMAD's family. That path is reachable exactly
+when the run materialized no effective config, i.e.
+**`health_gate_enabled=False`**; with gates enabled `build_run_invariants` has
+already composed and bound the run's own family and the swapped-in effective
+path carries its roster. A composed gates-off run therefore bound TIDMAD here
+and had its OWN family refused moments later at `_resolve_run_gate_ids`.
+
+`_resolve_run_health_config` asks the same authority
+(`load_composed_health_config`) with the run's declared
+`task_composition_ref.task_health_binding`. An un-composed run takes the
+identical call it always took, so legacy behaviour is unchanged.
+
+This was masked until `execute_tools/health_checks/config.py` keyed its
+process-wide cache on the resolved binding: whether the wrong family got bound
+used to depend on whether `_CACHED_GATES` happened to be warm, so the failure
+appeared only in a cold process. The memo still short-circuits — it just
+cannot short-circuit across a *change* of binding any more, which is the only
+case in which skipping composition changed the answer.
+
 ## Watchdog kills reach the architectural-feedback trigger (F-RC-6)
 
 `_collect_disallowed_patterns` tells the next proposer "this architecture

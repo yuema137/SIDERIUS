@@ -23,6 +23,7 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from execute_tools.dataset_config import resolve_dataset_profile
+from execute_tools.health_checks import _plugin_binding
 from execute_tools.health_checks._composition import (
     DEFAULT_DISPOSITION_POLICY,
     LEGACY_DEFAULT_TASK_HEALTH_CONFIG,
@@ -354,6 +355,63 @@ class HealthChecksConfig(BaseModel):
 
 _CACHED_GATES: HealthChecksConfig | None = None
 
+_CACHED_BINDING_IDENTITY: tuple[Any, ...] | None = None
+"""The resolved binding ``_CACHED_GATES`` was composed under.
+
+``None`` means nothing is memoized. See :func:`_resolved_binding_identity`
+for why the memo is keyed on this and on nothing else.
+"""
+
+
+def _resolved_binding_identity(path: str | None) -> tuple[Any, ...]:
+    """Which binding is resolved in this process RIGHT NOW.
+
+    Read entirely from run-scoped state that is **already in memory**: no
+    file is opened, no plugin is re-read and no digest is recomputed. That
+    is the whole point — a key whose computation paid the composition's I/O
+    would have reinvented the cost it exists to remove.
+
+    The components are exactly the three run-scoped globals that a
+    composition ESTABLISHES and that ``_plugin_binding.reset_run_scope``
+    clears — the plugin set loaded into this process, the bound task's
+    declared facts, and the resolved view bindings. Completeness against
+    that list is not an assertion here; it is pinned executably by
+    ``tests/unit/execute_tools/health_checks/test_c12p_cp12_composition_cache_authority.py``,
+    so a fourth run-scoped global cannot be added without the key learning
+    to observe it. ``path`` is part of the key because a different source
+    file is a different composition; only the default path is ever
+    memoized, so the memoized key's ``path`` component is always ``None``.
+
+    TWO DIFFERENT MECHANISMS PROTECT THIS KEY, and conflating them is how
+    someone reintroduces the very defect this memo exists to kill.
+
+    ``_RUN_SCOPE`` and ``_TASK_FACTS`` are **REBOUND** (``_plugin_binding``
+    :421 / :599 and :540 / :600). They must be read through the MODULE,
+    never ``from ... import _RUN_SCOPE``, because an imported name would be
+    a snapshot taken at import time and would answer this question with the
+    state of a process that no longer exists.
+
+    ``_VIEW_BINDINGS`` is **MUTATED IN PLACE and never rebound** — declared
+    once at ``_plugin_binding:191``, then ``.clear()`` + ``.update()`` at
+    :534-535 and ``.clear()`` at :601. For that component the module read
+    buys nothing; what protects it is ``tuple(sorted(...items()))``, a
+    VALUE SNAPSHOT taken at key-build time and therefore immune to in-place
+    mutation.
+
+    **Do not "simplify" that component to ``_plugin_binding._VIEW_BINDINGS``**
+    to match the shape of its two neighbours. The key would then hold a live
+    reference to a dict that is mutated in place, the memo comparison would
+    compare that dict to itself, it would ALWAYS be equal, and a CHANGED view
+    binding would produce a silent memo HIT serving a stale config — this
+    PR's own defect, one layer up.
+    """
+    return (
+        path,
+        _plugin_binding._RUN_SCOPE,
+        _plugin_binding._TASK_FACTS,
+        tuple(sorted(_plugin_binding._VIEW_BINDINGS.items())),
+    )
+
 
 def _load_raw_health_config(path: str | None = None) -> HealthChecksConfig:
     """Parse one config file verbatim. No composition, no binding.
@@ -387,6 +445,36 @@ def load_health_gates_config(path: str | None = None) -> HealthChecksConfig:
     a pre-08b/custom YAML — is returned untouched (see
     :func:`load_composed_health_config`).
 
+    **F-C12P-CP12-1: the memo is keyed on the RESOLVED BINDING, because
+    composing is not only a computation — it BINDS.** It resolves the task's
+    Health plugin set into this process's run scope
+    (``_plugin_binding.load_task_health_plugins``) and replaces the regime-A
+    fact derivation with the task's DECLARED facts
+    (``_plugin_binding.resolve_task_health_bindings`` → ``_TASK_FACTS``).
+    Those globals have their own lifecycle and are cleared independently of
+    this cache, so the original memo — keyed on NOTHING, and therefore able
+    to return a value composed under a *different* binding — made composition
+    AUTHORITY depend on cache warmth: the same declaration resolved TIDMAD's
+    declared facts in a cold process and ``None`` — the regime-A fallback,
+    with no ``value_scale`` — in a warm one, and a run whose first health
+    resolution bound nothing then let a second, DIFFERENT family bind past
+    the run-scope guard.
+
+    Keying on :func:`_resolved_binding_identity` fixes exactly that and
+    nothing else. Cold: no memo, so it composes and binds. Warm under the
+    SAME binding: recomposing could not reach a different result or a
+    different binding, so the memo is sound and the call is O(1). Warm under
+    a DIFFERENT binding: a MISS *by construction*, so it recomposes and the
+    Step-08b run-scope guard fires exactly as it does cold. **The property
+    that survives is the one that matters — a cold process and a warm one
+    resolve the same authority** — and it survives without paying the
+    composition's file I/O on all 17 call sites, several of them per
+    gate evaluation.
+
+    The rejected alternative was to split "ensure the binding is established"
+    from "load the config": it still pays the binding's I/O on every call
+    just to discover the bind is idempotent, which is the cost being removed.
+
     Args:
         path: Optional override for the config file location.
 
@@ -394,20 +482,36 @@ def load_health_gates_config(path: str | None = None) -> HealthChecksConfig:
         A validated ``HealthChecksConfig`` whose ``health_gates`` are the
         gates in effect.
     """
-    global _CACHED_GATES
-    if path is None and _CACHED_GATES is not None:
+    global _CACHED_GATES, _CACHED_BINDING_IDENTITY
+    if (
+        path is None
+        and _CACHED_GATES is not None
+        and _resolved_binding_identity(path) == _CACHED_BINDING_IDENTITY
+    ):
         return _CACHED_GATES
     cfg, _task_config, _plugins = load_composed_health_config(path)
-    if path is None:
-        _CACHED_GATES = cfg
-    return cfg
+    if path is not None:
+        return cfg
+    # Recorded AFTER composing: the key describes the binding this value was
+    # composed under, which is precisely the state composition just left
+    # behind. Never recorded on the failure path — an exception propagates
+    # before this line, so a refused composition memoizes nothing.
+    _CACHED_GATES = cfg
+    _CACHED_BINDING_IDENTITY = _resolved_binding_identity(path)
+    return _CACHED_GATES
 
 
 def clear_health_gates_config_cache() -> None:
     """Clear the process-wide cache for the rev-6 config. Test-only —
-    never call from production code."""
-    global _CACHED_GATES
+    never call from production code.
+
+    Resets the memoized value AND its binding key together: a key left
+    behind without its value (or the reverse) is the half-cleared state the
+    keying exists to make impossible.
+    """
+    global _CACHED_GATES, _CACHED_BINDING_IDENTITY
     _CACHED_GATES = None
+    _CACHED_BINDING_IDENTITY = None
 
 
 # ---------------------------------------------------------------------------
