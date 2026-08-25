@@ -372,9 +372,15 @@ class ExperimentRecord(BaseModel):
         default=None,
         description="Final training loss (last epoch). Comparable only across same loss_type.",
     )
-    loss_history: list[float] | None = Field(
+    loss_history: list[float | None] | None = Field(
         default=None,
-        description="Training loss per epoch.",
+        description=(
+            "Training loss per epoch. An element is None where the objective "
+            "was non-finite (a diverged epoch): that is the STORAGE IMAGE of "
+            "NaN/±inf written by scoring_utils.coerce_nonfinite_to_none at the "
+            "recorder boundary, exactly as file_vector already carries it. "
+            "Positions are preserved, so len() still equals the epoch count."
+        ),
     )
     model_params: int | None = Field(
         default=None,

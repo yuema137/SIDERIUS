@@ -34,6 +34,16 @@ Frozen semantics this module carries:
   ``absent``.
 * Non-finite objective values are EVIDENCE (a diverged run), not a schema
   error; only the lengths must agree.
+* That evidence must SURVIVE the storage boundary. Every record is written
+  through :func:`execute_tools.scoring_utils.coerce_nonfinite_to_none`
+  (``sandbox_executor.LocalRecorder.save_record``), which replaces every
+  non-finite float with JSON ``null`` — RFC-8259 has no NaN/Infinity token.
+  So the STORAGE IMAGE of a diverged objective is a ``None`` ELEMENT, and
+  the objective series accept it: ``list[float | None]``. Positions are
+  preserved, so ``epochs_completed == len(train_objective)`` and the
+  R2/R3 length agreement are unaffected. A strict ``list[float]`` here made
+  re-validation of a diverged run's own record raise, which discarded the
+  whole scored attempt rather than declining to summarize it.
 """
 
 from __future__ import annotations
@@ -41,7 +51,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -179,12 +189,22 @@ class TrainingHistory(BaseModel):
     comparability_reason: str | None = None
     epochs_planned: int = Field(ge=0)
     epochs_completed: int = Field(ge=0)
-    train_objective: list[float] = Field(
-        description="R2 — the SAME floats as the legacy loss_history."
+    train_objective: list[float | None] = Field(
+        description=(
+            "R2 — the SAME floats as the legacy loss_history. An ELEMENT is "
+            "None where that epoch's objective was non-finite and the record "
+            "has crossed the storage boundary (see the module docstring's "
+            "storage-image note); the LIST itself is never None."
+        )
     )
-    validation_objective: list[float] | None = Field(
+    validation_objective: list[float | None] | None = Field(
         default=None,
-        description="R3 — None ONLY when no validation scope was given (legacy tolerance).",
+        description=(
+            "R3 — the LIST is None ONLY when no validation scope was given "
+            "(legacy tolerance). An ELEMENT is None on the same storage-image "
+            "grounds as train_objective: R3 is the SAME criterion, so a "
+            "diverged model produces non-finite R3 rows too."
+        ),
     )
     validation_requested_samples: int | None = None
     validation_samples: int | None = None
@@ -332,7 +352,7 @@ def _same_float(a: object, b: object) -> bool:
     return a == b
 
 
-def _same_series(xs: list[float], ys: object) -> bool:
+def _same_series(xs: Sequence[float | None], ys: object) -> bool:
     if not isinstance(ys, list) or len(xs) != len(ys):
         return False
     return all(_same_float(x, y) for x, y in zip(xs, ys, strict=True))

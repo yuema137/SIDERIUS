@@ -25,7 +25,7 @@ Step 07 PR 07a (design §3.6; genericity contract Seam 5; parent §8.2 item 3).
 from __future__ import annotations
 
 import math
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -61,8 +61,18 @@ def _trend(series: list[float], tol: float) -> Trend:
     return "decreasing" if last < first else "increasing"
 
 
-def _all_finite(series: list[float] | None) -> bool:
-    return series is None or all(math.isfinite(v) for v in series)
+def _all_finite(series: list[float | None] | None) -> bool:
+    """``True`` when the series is absent or every element is a finite float.
+
+    A ``None`` ELEMENT is the STORAGE IMAGE of a non-finite objective —
+    ``scoring_utils.coerce_nonfinite_to_none`` writes JSON ``null`` for
+    ``NaN``/``±inf`` at the recorder boundary — so it is judged exactly as
+    the non-finite value it stands for, and a restored diverged history
+    reaches the same ``state="invalid"`` verdict as the in-memory one.
+    Without the ``is not None`` test ``math.isfinite`` raises ``TypeError``
+    on that restored history instead.
+    """
+    return series is None or all(v is not None and math.isfinite(v) for v in series)
 
 
 class TrainingDiagnosis(BaseModel):
@@ -151,13 +161,15 @@ def derive_training_diagnosis(
             state="absent", validation_state="absent", flat_rel_tol=flat_rel_tol
         )
 
-    r2 = list(history.train_objective)
-    r3 = list(history.validation_objective) if history.validation_objective is not None else None
-    validation_state: ValidationState = "present" if r3 is not None else "absent"
+    raw_r2 = history.train_objective
+    raw_r3 = history.validation_objective
+    validation_state: ValidationState = "present" if raw_r3 is not None else "absent"
 
-    if not r2 or not _all_finite(r2) or not _all_finite(r3):
+    if not raw_r2 or not _all_finite(raw_r2) or not _all_finite(raw_r3):
         # Divergence / non-finite criterion is EVIDENCE — the raw values stay
         # on the record's history; the diagnosis declines to summarize them.
+        # A ``None`` ELEMENT is the storage image of that same evidence
+        # (``coerce_nonfinite_to_none``) and reaches this branch identically.
         return TrainingDiagnosis(
             state="invalid",
             validation_state=validation_state,
@@ -167,6 +179,15 @@ def derive_training_diagnosis(
             truncated=history.epochs_completed < history.epochs_planned,
             flat_rel_tol=flat_rel_tol,
         )
+
+    # Past the guard every element is a finite float, so the curve arithmetic
+    # below is total. A ``cast`` and NOT a ``[v for v in ... if v is not None]``
+    # comprehension on purpose: a comprehension would silently SHORTEN the
+    # series if this guard were ever weakened, turning a refused record into a
+    # quietly wrong statistic. The cast is a runtime no-op, so the same mistake
+    # raises instead.
+    r2 = cast(list[float], list(raw_r2))
+    r3 = cast(list[float], list(raw_r3)) if raw_r3 is not None else None
 
     train_min_epoch = min(range(len(r2)), key=lambda i: r2[i])
     fields: dict[str, object] = {

@@ -46,8 +46,8 @@ boundary rather than leaking through.
 | `epoch_statistic` | sample-count-weighted mean of the batch criterion |
 | `comparability` + `comparability_reason` | see below |
 | `epochs_planned` / `epochs_completed` | truncation is derivable |
-| `train_objective` | **R2** — the same floats as the legacy loss history |
-| `validation_objective` | **R3** — `None` only when no validation scope was given |
+| `train_objective` | **R2** — the same floats as the legacy loss history. An *element* is `None` where that epoch's objective was non-finite and the record has crossed the storage boundary (see "The storage image" below); the *list* is never `None` |
+| `validation_objective` | **R3** — the *list* is `None` only when no validation scope was given. An *element* is `None` on the same storage-image grounds as R2: R3 is the same criterion, so a diverged model produces non-finite R3 rows too |
 | `validation_requested_samples{,_before_limit}`, `validation_samples` | scope provenance |
 
 ### Comparability
@@ -83,8 +83,32 @@ this is a contract, not an accident:
 |---|---|
 | `state: ok` | a finite history |
 | `state: absent` | no history payload — a legacy trainer or a crash |
-| `state: invalid` | empty R2, or any non-finite value in R2/R3 (divergence evidence; raw values stay on the record) |
+| `state: invalid` | empty R2, or any non-finite value in R2/R3 (divergence evidence; raw values stay on the record) — including its storage image, a `None` element |
 | `validation_state: absent` | "not fully supported" — the legacy tolerance |
+
+### The storage image
+
+Every record is written through `coerce_nonfinite_to_none`
+(`execute_tools/scoring_utils.py`, applied in
+`core/sandbox_executor.py::LocalRecorder.save_record`), which replaces every
+non-finite float with JSON `null` — RFC-8259 has no `NaN` or `Infinity` token.
+So the on-disk image of a diverged epoch is a `None` **element**, and the
+objective series are typed `list[float | None]` to accept it.
+
+Two consequences worth stating plainly:
+
+- **Positions are preserved.** A `None` still occupies its epoch's slot, so
+  `epochs_completed == len(train_objective)` and the R2/R3 length agreement are
+  unaffected. Tolerance here is *typing*, never filtering — dropping the element
+  would shift every downstream length.
+- **`None` is judged as the value it stands for.** `_all_finite` treats it
+  exactly as `NaN`/`±inf`, so a restored history reaches the same
+  `state: invalid` verdict as the live one. It is never skipped, which would
+  summarize a diverged curve as if it were healthy.
+
+Before this was fixed (F-12e-G2) the strict `list[float]` element type made a
+diverged run's own record fail re-validation, which discarded the whole scored
+attempt — the opposite of "the raw values stay on the record".
 
 Facts carried: first/last/min of the train and validation curves with their
 epochs, `truncated`, the final-versus-best validation degradation (absolute and
@@ -117,7 +141,7 @@ otherwise `decreasing` or `increasing`. There is no hidden smoothing.
 |---|---|
 | trainer emits an undeclared key | rejected at the tuner boundary |
 | expected validation, missing R3 | `error_training` |
-| non-finite value in R2 or R3 | `state: invalid`; raw values preserved on the record |
+| non-finite value in R2 or R3 | `state: invalid`; raw values preserved on the record (as `null` once persisted — see "The storage image"), the record itself still admitted |
 | custom or `sum`-reduced objective | `comparability: not_established`, with a reason |
 
 ## Source map

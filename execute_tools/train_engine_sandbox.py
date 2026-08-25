@@ -6,7 +6,7 @@ import os
 import random
 import sys
 import time
-from collections.abc import Sized
+from collections.abc import Sequence, Sized
 from typing import Any, cast
 
 import h5py
@@ -830,14 +830,20 @@ def _build_training_history(
     *,
     loss_cfg: LossConfig,
     epochs_planned: int,
-    train_objective: list[float],
-    validation_objective: list[float] | None,
+    train_objective: Sequence[float | None],
+    validation_objective: Sequence[float | None] | None,
     validation_requested_samples: int | None,
     validation_samples: int | None,
     validation_seconds: list[float] | None,
     validation_requested_samples_before_limit: int | None = None,
 ) -> TrainingHistory:
-    """Assemble the additive ``training_history`` payload (design §3.5)."""
+    """Assemble the additive ``training_history`` payload (design §3.5).
+
+    The objective parameters are ``Sequence[float | None]`` only because the
+    FIELDS accept the storage image of a non-finite epoch (``None``); this
+    producer itself emits plain floats. ``Sequence`` (covariant) rather than
+    ``list`` (invariant) so a ``list[float]`` accumulator still passes.
+    """
     comparability, reason = stamp_comparability(loss_cfg)
     return TrainingHistory(
         objective_kind=loss_cfg.loss_type,
@@ -848,7 +854,7 @@ def _build_training_history(
         epochs_planned=epochs_planned,
         epochs_completed=len(train_objective),
         train_objective=list(train_objective),
-        validation_objective=validation_objective,
+        validation_objective=None if validation_objective is None else list(validation_objective),
         validation_requested_samples=validation_requested_samples,
         validation_samples=validation_samples,
         validation_requested_samples_before_limit=validation_requested_samples_before_limit,
