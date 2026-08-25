@@ -38,12 +38,14 @@ from agent.schemas.proposal import CustomLossSpec
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent.skills.model_io_probe_skill import (
+    PROBE_REQUIRED_FIELD_VALUES,
     ProbeConstructionError,
     build_loss_probe_pair,
     build_model_input,
     declared_output_tensor,
     expected_output_shape,
     input_index_extent,
+    probe_config_kwargs,
 )
 from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
 from core.hardware_context import HardwareContext
@@ -57,6 +59,39 @@ from workflows.task_config import render_forward_contract
 def _class_name(model_name: str) -> str:
     """Convert snake_case model name to CamelCase class name."""
     return "".join(word.capitalize() for word in model_name.split("_"))
+
+
+def _declared_segmentation_size(baseline_config: dict) -> int | None:
+    """The segmentation size the BASELINE declared, or ``None``.
+
+    C12-P / F-12e-G1. ONE authority for a question three surfaces in this
+    module ask — what the generated class declares, how its own test
+    constructs it, and whether the self-check's rejection is actionable.
+
+    ``None`` is a first-class answer and must stay one: the framework has no
+    vocabulary for a task's geometry, so an undeclared size is an ABSENCE to
+    carry, never a number to invent. Downstream,
+    ``estimator.resolve_model_field`` reads the generated class's declaration
+    and the tuner turns "nothing declares it" back into the task's own named
+    refusal.
+
+    The key is spelled as a STRING LITERAL here and at every other ``.get``
+    site in this module, deliberately and permanently. B11's standing census
+    (``tests/unit/guardrails/test_c12p_b11_segmentation_default_census.py``)
+    matches ``<mapping>.get(<str constant>, <int literal>)`` on the AST; hiding
+    the key behind a module constant would make a returning
+    ``.get(_FIELD, 40000)`` invisible to it — census-blindness shape 1, "the
+    guard names a symbol". A named constant would be tidier and strictly worse.
+
+    The ``train_config`` arm is kept because a proposer baseline is a free-form
+    dict that has carried the key there; note ``TrainConfig`` itself declares
+    no such field, so the pre-repair inner ``.get(..., 40000)`` fallback could
+    only ever produce its literal.
+    """
+    model_cfg = (baseline_config or {}).get("model_config") or {}
+    train_cfg = (baseline_config or {}).get("train_config") or {}
+    declared = model_cfg.get("segmentation_size", train_cfg.get("segmentation_size"))
+    return None if declared is None else int(declared)
 
 
 # Fields provided by the fixed template — LLM must not redefine them,
@@ -141,8 +176,22 @@ def _smoke_test_plugin(
             if not hasattr(mod, attr):
                 return f"Plugin missing required attribute: {attr}"
 
-        # Instantiate
-        config = mod.PLUGIN_CONFIG_CLASS()
+        # Instantiate. C12-P / F-12e-G1: a candidate whose baseline declared
+        # no segmentation size gets a REQUIRED field rather than an invented
+        # default, so "construct with defaults" is no longer a thing that
+        # exists for it. The self-check states the size of the probe it is
+        # about to run — the same symbolic extent `build_model_input` realizes
+        # below and numerically the legacy `_LEGACY_SELF_CHECK_TIME_STEPS`.
+        # That is a property of THIS PROBE, not a claim about the task: it
+        # never leaves this temp module and never reaches a declaration, a
+        # record or a price.
+        #
+        # The rule lives in the Step-04 recipe module, NOT here, because
+        # `ml_code_validator_agent`'s check 6 constructs the same class and
+        # must reach the same answer. Two copies diverge silently — that is
+        # exactly how this node started emitting candidates the validator
+        # then rejected.
+        config = mod.PLUGIN_CONFIG_CLASS(**probe_config_kwargs(mod.PLUGIN_CONFIG_CLASS))
         model = mod.PLUGIN_MODEL_CLASS(config)
         model.eval()
 
@@ -191,6 +240,60 @@ def _smoke_test_plugin(
             pass
 
 
+def _rejection_is_only_the_undeclared_segmentation_size(
+    exc: Exception,
+    model_cfg: dict,
+) -> bool:
+    """Whether *exc* is exactly "``segmentation_size`` is missing", and nothing else.
+
+    C12-P / F-12e-G1. Since the template stopped inventing a size, a baseline
+    that declares none produces a config class with a REQUIRED
+    ``segmentation_size``. Constructing it from that same baseline therefore
+    raises a Pydantic ``missing`` error for a field the baseline was never
+    going to supply.
+
+    Deliberately narrow — every clause is load-bearing:
+
+    * the baseline must genuinely OMIT the key (a stated value that fails
+      validation is a real rejection and must still be reported);
+    * EVERY error in the group must be ``missing`` at ``segmentation_size``
+      (one real constraint violation alongside it and the whole rejection is
+      reported, so no genuine schema defect is swallowed);
+    * a non-Pydantic exception has no ``errors()`` and is never suppressed.
+    """
+    if "segmentation_size" in model_cfg:
+        return False
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return False
+    try:
+        details = errors()
+    except Exception:
+        # FAIL-CLOSED, and it must stay that way: an exception this function
+        # cannot classify is REPORTED, never discarded. Every early return
+        # here means "report it", so a Pydantic vocabulary change degrades
+        # into a loud false rejection rather than a silent pass.
+        return False
+    if not isinstance(details, list):
+        # Same fail-closed rule, one shape further out: `errors()` returning
+        # anything but a list is a vocabulary this function cannot classify,
+        # so the rejection is REPORTED. This also narrows `object` for the
+        # type checker -- deliberately by narrowing rather than by `cast` or
+        # `# type: ignore`, because the whole value of this predicate is that
+        # an unrecognised Pydantic shape degrades into a loud false rejection
+        # instead of a silent pass. Silencing the checker here would erase
+        # exactly the guarantee the suppression is allowed to exist for.
+        return False
+    if not details:
+        return False
+    return all(
+        isinstance(detail, dict)
+        and detail.get("type") == "missing"
+        and tuple(detail.get("loc") or ()) == ("segmentation_size",)
+        for detail in details
+    )
+
+
 def _check_baseline_schema_compatibility(
     plugin_src: str,
     model_name: str,
@@ -201,7 +304,9 @@ def _check_baseline_schema_compatibility(
     ``baseline_config['model_config']`` values — not just its own defaults.
 
     This is Phase B.2's post-write gate. The smoke test already instantiates
-    ``PLUGIN_CONFIG_CLASS()`` with defaults (which always pass by construction);
+    the config class from its own declarations (C12-P / F-12e-G1: with the
+    probe's symbolic extent supplied when the baseline declared no
+    ``segmentation_size``, since there is then no default to construct from);
     this helper instantiates ``PLUGIN_CONFIG_CLASS(**model_config)`` with the
     values the proposer actually asked for. A mismatch means the implementor
     invented a constraint (e.g. ``multiple_of=2``) that rejects the proposer's
@@ -253,6 +358,16 @@ def _check_baseline_schema_compatibility(
         try:
             mod.PLUGIN_CONFIG_CLASS(**model_cfg)
         except Exception as exc:
+            if _rejection_is_only_the_undeclared_segmentation_size(exc, model_cfg):
+                # C12-P / F-12e-G1. Nothing declared a segmentation size, so
+                # the template emitted a REQUIRED field rather than inventing
+                # one, and the baseline cannot satisfy a key it never stated.
+                # That is the contract working, not a schema defect — and it
+                # is not actionable by the LLM either: the repair prompt below
+                # says "RELAX the offending constraint" while forbidding any
+                # change to `segmentation_size`, so reporting it would spend
+                # every repair attempt on an unsatisfiable instruction.
+                return None
             return (
                 f"Baseline self-check failed: the plugin's PLUGIN_CONFIG_CLASS "
                 f"rejects the proposer's baseline_config.model_config. "
@@ -290,7 +405,7 @@ PLUGIN_MODEL_TYPE = "{model_name}"
 
 class {ModelClass}Config(BaseModel):
     model_type: str = Field(default="{model_name}", description="Plugin model type key.")
-    segmentation_size: int = Field(default={segmentation_size}, ge=1)
+    {segmentation_size_field}
     batch_size: int = Field(default={batch_size}, ge=1)
 {config_fields_code}
 {config_validators_code}
@@ -428,7 +543,7 @@ from {model_name} import PLUGIN_MODEL_CLASS, PLUGIN_CONFIG_CLASS, PLUGIN_OUTPUT_
 
 
 def test_forward_shape():
-    config = PLUGIN_CONFIG_CLASS()
+    config = PLUGIN_CONFIG_CLASS({config_probe_kwargs})
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
     x = torch.randint(0, {index_extent}, (2, config.segmentation_size))
@@ -446,7 +561,7 @@ def test_forward_shape():
 
 
 def test_forward_no_nan():
-    config = PLUGIN_CONFIG_CLASS()
+    config = PLUGIN_CONFIG_CLASS({config_probe_kwargs})
     model = PLUGIN_MODEL_CLASS(config)
     model.eval()
     x = torch.randint(0, {index_extent}, (1, config.segmentation_size))
@@ -456,7 +571,7 @@ def test_forward_no_nan():
 
 
 def test_config_instantiation():
-    config = PLUGIN_CONFIG_CLASS()
+    config = PLUGIN_CONFIG_CLASS({config_probe_kwargs})
     assert config.segmentation_size > 0
     assert config.batch_size >= 1
 """
@@ -1191,9 +1306,18 @@ def _build_reasoning_prompt(inp: ImplementorInput) -> str:
         json.dumps(model_cfg, indent=2),
         "",
         "train_config (for context only — do not implement training logic):",
-        f"  segmentation_size: {train_cfg.get('segmentation_size', 40000)} (if present)",
-        f"  batch_size: {train_cfg.get('batch_size', 1)}",
     ]
+
+    # C12-P / F-12e-G1. The size is rendered only when the baseline actually
+    # DECLARED one. The old `.get('segmentation_size', 40000)` put a
+    # TIDMAD-scale number into the prompt of a run that never stated one — a
+    # foreign composed task would read 40000 as its own geometry and size
+    # buffers to it. An absent key stays absent; `model_config` is already
+    # dumped verbatim above, so nothing declared is lost.
+    declared_segmentation_size = train_cfg.get("segmentation_size")
+    if declared_segmentation_size is not None:
+        lines.append(f"  segmentation_size: {declared_segmentation_size} (if present)")
+    lines.append(f"  batch_size: {train_cfg.get('batch_size', 1)}")
 
     # --- Forward contract (rendered from inp.forward_contract; suppressed
     # when the contract is empty — only happens in test fixtures that don't
@@ -1415,7 +1539,24 @@ def _build_loss_repair_prompt(
 def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     model_cfg = inp.baseline_config.get("model_config", {})
     train_cfg = inp.baseline_config.get("train_config", {})
-    seg_size = model_cfg.get("segmentation_size", train_cfg.get("segmentation_size", 40000))
+    # C12-P / F-12e-G1. `_assemble_plugin` does not CONSUME a segmentation
+    # size — it WRITES A DECLARATION. A literal here is laundered into the
+    # generated class's own default and then read back through
+    # `get_config_class` -> `resolve_model_field` -> the tuner's
+    # `_resolve_declared_segmentation_size` as if it were the task's own
+    # value, which is how a framework number becomes permanent instead of
+    # transient. Because a generated class ALWAYS declared a default, that
+    # helper could never return None for a plugin, and the task's named
+    # refusal (`execute_tools/tidmad_data_path.py`) was defeated from outside.
+    # So: DECLARED or ABSENT, never invented. An absent size emits a REQUIRED
+    # field — the attribute still exists on the class (`train_engine_sandbox`
+    # and `inference_single` read it), but nothing pretends to know its value.
+    seg_size = _declared_segmentation_size(inp.baseline_config)
+    segmentation_size_field = (
+        f"segmentation_size: int = Field(default={int(seg_size)}, ge=1)"
+        if seg_size is not None
+        else "segmentation_size: int = Field(ge=1)"  # nothing declared it — do not invent one
+    )
     batch_size = model_cfg.get("batch_size", train_cfg.get("batch_size", 1))
     model_cls = _class_name(inp.model_name)
 
@@ -1466,7 +1607,7 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     return PLUGIN_TEMPLATE.format(
         model_name=inp.model_name,
         ModelClass=model_cls,
-        segmentation_size=seg_size,
+        segmentation_size_field=segmentation_size_field,
         batch_size=batch_size,
         extra_imports=extra_imports,
         config_fields_code=config_fields_code,
@@ -1479,7 +1620,12 @@ def _assemble_plugin(inp: ImplementorInput, code: dict) -> str:
     )
 
 
-def _assemble_test(model_name: str, model_io_contract: ModelIOContract | None = None) -> str:
+def _assemble_test(
+    model_name: str,
+    model_io_contract: ModelIOContract | None = None,
+    *,
+    config_declares_segmentation_size: bool = True,
+) -> str:
     """Render the candidate's own test file.
 
     Step 04a: the class count and the index range the generated test uses are
@@ -1490,6 +1636,16 @@ def _assemble_test(model_name: str, model_io_contract: ModelIOContract | None = 
     no class alphabet: there the classifier branch of the generated test is
     unreachable, because ``_render_output_contract`` has already refused to
     assemble a classifier plugin under such a contract.
+
+    Args:
+        config_declares_segmentation_size: whether the assembled plugin's
+            config class carries a ``segmentation_size`` DEFAULT. C12-P /
+            F-12e-G1: a candidate whose baseline declared no size gets a
+            required field instead of an invented default, and the generated
+            test — which ``ml_code_validator_agent`` actually runs under
+            pytest — must therefore state the probe size it wants rather than
+            construct "with defaults" that no longer exist. ``True`` renders
+            ``PLUGIN_CONFIG_CLASS()`` byte-for-byte as before.
     """
     if model_io_contract is None:
         num_classes = _LEGACY_SELF_CHECK_CLASSES
@@ -1497,10 +1653,19 @@ def _assemble_test(model_name: str, model_io_contract: ModelIOContract | None = 
     else:
         index_extent = input_index_extent(model_io_contract)
         num_classes = model_io_contract.class_cardinality or index_extent
+    # Rendered from the SAME table `probe_config_kwargs` supplies from, so the
+    # source text this node writes into the candidate's test file cannot drift
+    # from the kwargs the two in-process probes actually pass.
+    config_probe_kwargs = (
+        ""
+        if config_declares_segmentation_size
+        else ", ".join(f"{name}={value}" for name, value in PROBE_REQUIRED_FIELD_VALUES.items())
+    )
     return TEST_TEMPLATE.format(
         model_name=model_name,
         num_classes=num_classes,
         index_extent=index_extent,
+        config_probe_kwargs=config_probe_kwargs,
     )
 
 
@@ -1954,7 +2119,16 @@ class MLModelImplementor:
             print(f"   ✅ Self-correction succeeded on attempt {attempt + 1}.")
 
         plugin_src = _assemble_plugin(inp, code)
-        test_src = _assemble_test(inp.model_name, inp.forward_contract.model_io)
+        test_src = _assemble_test(
+            inp.model_name,
+            inp.forward_contract.model_io,
+            # C12-P / F-12e-G1: read from the SAME authority the plugin's own
+            # declaration was rendered from, so the generated test can never
+            # construct a class the assembled source does not support.
+            config_declares_segmentation_size=(
+                _declared_segmentation_size(inp.baseline_config) is not None
+            ),
+        )
 
         # --- Write plugin file ---
         os.makedirs(inp.plugin_dir, exist_ok=True)

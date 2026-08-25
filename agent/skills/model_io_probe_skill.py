@@ -27,6 +27,16 @@ same declaration. Two copies of these rules would be two authorities, and
 the way that fails is silent: the implementor emits a candidate its own
 generated test accepts and the validator then rejects, or vice versa.
 
+That is not hypothetical. C12-P / F-12e-G1 stopped the implementor inventing
+a ``segmentation_size`` default into the plugin it generates, which made a
+config class with a REQUIRED field a legitimate candidate state for the first
+time. The implementor taught its own self-check to construct such a class;
+``ml_code_validator_agent`` still called ``PLUGIN_CONFIG_CLASS()`` and
+rejected the candidate at check 6 — exactly the silent divergence above.
+:func:`probe_config_kwargs` is the ONE answer to "what must a probe pass to
+construct this config class", and BOTH nodes ask it. Copying it back into
+either node re-creates the divergence.
+
 This module deliberately does not import ``torch`` at module scope — the
 implementor keeps torch off its import-time path, and this module is
 imported by it.
@@ -34,7 +44,9 @@ imported by it.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Any
 
 from agent.schemas.model_io_contract import AxisRole, ModelIOContract, TensorContract
 from ml_models.models_format_sandbox import OutputSemantic
@@ -46,6 +58,7 @@ __all__ = [
     "LOSS_PROBE_BATCH",
     "LOSS_PROBE_LENGTH",
     "PROBE_BATCH",
+    "PROBE_REQUIRED_FIELD_VALUES",
     "PROBE_SYMBOLIC_EXTENT",
     "ProbeConstructionError",
     "build_loss_probe_pair",
@@ -55,6 +68,7 @@ __all__ = [
     "input_index_extent",
     "loss_probe_semantic",
     "output_without_class_axis",
+    "probe_config_kwargs",
     "realize_shape",
 ]
 
@@ -86,6 +100,67 @@ _UNIVERSAL_INDEX_EXTENT: int = 1
 #: model semantics (Step-03 §4a.1), so it lives here at the site and is
 #: honoured only when the contract admits it.
 _PROBE_SITE_DTYPE: str = "int64"
+
+
+# ---------------------------------------------------------------------------
+# The config-construction recipe — C12-P / F-12e-G1
+# ---------------------------------------------------------------------------
+
+#: The value a probe SUPPLIES for a framework-template config field the
+#: candidate's own class declares as REQUIRED. One entry, and it is the extent
+#: this module already realizes for a symbolic axis, so a probe's tensor and a
+#: probe's config state the same length by construction.
+#:
+#: This is emphatically NOT a default. It is never written into a declaration,
+#: never persisted, never priced and never read back: it is passed by keyword
+#: into a throwaway in-process instance and dies with it. The generated class
+#: still declares the field REQUIRED, so ``resolve_model_field`` and the
+#: tuner's ``_resolve_declared_segmentation_size`` still see NOTHING declared
+#: and the task's own named refusal stays reachable. Turning this into a
+#: ``Field(default=...)`` anywhere is the defect F-12e-G1 removed.
+PROBE_REQUIRED_FIELD_VALUES: Mapping[str, int] = MappingProxyType(
+    {"segmentation_size": PROBE_SYMBOLIC_EXTENT}
+)
+
+
+def probe_config_kwargs(config_cls: Any) -> dict[str, int]:
+    """Kwargs a PROBE must pass to construct *config_cls*.
+
+    The ONE answer to "how do I build one minimal config instance in order to
+    test a candidate" — the question this module's second paragraph declares
+    it owns. ``ml_model_implementor``'s self-check and
+    ``ml_code_validator_agent``'s check-6 instantiation both ask it, and
+    neither may re-implement it (see the module docstring: two copies fail
+    silently, as they did before this function existed).
+
+    **The invariant being corrected.** A generated config class may
+    legitimately declare required fields, so *"``PLUGIN_CONFIG_CLASS()`` must
+    succeed with zero arguments"* is not a valid generic validator invariant.
+    What IS valid is "a probe states the values it needs".
+
+    Empty — i.e. ``PLUGIN_CONFIG_CLASS()`` byte-for-byte, which is every
+    candidate shipped before C12-P — unless the class declares one of
+    :data:`PROBE_REQUIRED_FIELD_VALUES`' fields with NO default. A field the
+    class does not declare, or declares with a default of its own, is never
+    supplied and never overridden: the candidate's own declaration always
+    wins.
+
+    Args:
+        config_cls: the candidate's ``PLUGIN_CONFIG_CLASS`` — any Pydantic
+            model class. A non-model object (no ``model_fields``) yields ``{}``,
+            so a malformed plugin still fails at ITS OWN construction with its
+            own error rather than here.
+
+    Returns:
+        The keyword arguments to splat into ``config_cls(...)``.
+    """
+    fields = getattr(config_cls, "model_fields", None) or {}
+    supplied: dict[str, int] = {}
+    for name, value in PROBE_REQUIRED_FIELD_VALUES.items():
+        declared = fields.get(name)
+        if declared is not None and declared.is_required():
+            supplied[name] = value
+    return supplied
 
 
 class ProbeConstructionError(ValueError):

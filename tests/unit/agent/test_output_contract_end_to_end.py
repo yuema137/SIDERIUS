@@ -184,7 +184,10 @@ def test_generated_test_file_matches_the_declared_contract(tmp_path, output_type
     import sys
 
     from agent.schemas.storage import LocalStorageConfig, StorageConfig
-    from nodes.ml_model_implementor.ml_model_implementor import _assemble_test
+    from nodes.ml_model_implementor.ml_model_implementor import (
+        _assemble_test,
+        _declared_segmentation_size,
+    )
 
     model_name = f"gen_test_{output_type}"
     storage = StorageConfig(
@@ -207,8 +210,21 @@ def test_generated_test_file_matches_the_declared_contract(tmp_path, output_type
     # `_assemble_test` is what the implementor actually calls, and it is where
     # the contract-derived class count is applied — formatting the template
     # directly would test a string this node never emits.
+    #
+    # C12-P / F-12e-G1: the declaration flag is DERIVED from the same authority
+    # production reads (`MLModelImplementor.run` does exactly this), not
+    # hardcoded. This fixture's baseline omits `segmentation_size`, so the
+    # assembled plugin declares it REQUIRED and its generated test must state a
+    # probe size. Hardcoding `False` here would pass today and silently stop
+    # mirroring production the moment the fixture gained a declared size.
     (tmp_path / f"test_{model_name}.py").write_text(
-        _assemble_test(model_name, impl_input.forward_contract.model_io)
+        _assemble_test(
+            model_name,
+            impl_input.forward_contract.model_io,
+            config_declares_segmentation_size=(
+                _declared_segmentation_size(impl_input.baseline_config) is not None
+            ),
+        )
     )
 
     result = subprocess.run(

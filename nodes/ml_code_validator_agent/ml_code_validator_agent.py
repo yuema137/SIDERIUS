@@ -15,11 +15,16 @@ Deterministic:
      dimension (T). Such loops cause RAM OOMs and CPU hangs at long T.
 
 In-process (no subprocess):
-  6. Instantiation: PLUGIN_CONFIG_CLASS() and PLUGIN_MODEL_CLASS(config) succeed;
+  6. Instantiation: PLUGIN_CONFIG_CLASS(...) and PLUGIN_MODEL_CLASS(config) succeed;
      a dummy forward pass produces the shape the candidate's declared contract
      requires. Since Step 04a that shape is DERIVED from the task's normalized
      Model-I/O contract when one is supplied — it is not a fixed [1, 256, 64].
-     Without a contract the legacy geometry is used unchanged.
+     Without a contract the legacy geometry is used unchanged. The config
+     kwargs come from the same recipe module, via `probe_config_kwargs` —
+     empty for every candidate that declares its own defaults, and a value
+     only for a framework-template field the candidate declares REQUIRED
+     (C12-P / F-12e-G1). A required field is a legal declaration, not a
+     defect.
   7. Gradient flow: loss.backward() succeeds; all trainable parameters have
      non-None gradients.
 
@@ -58,6 +63,7 @@ from agent.skills.model_io_probe_skill import (
     build_model_input,
     declared_output_tensor,
     expected_output_shape,
+    probe_config_kwargs,
 )
 from ml_models.plugin_loader import PLUGIN_LEGAL_OUTPUT_TYPES
 
@@ -459,9 +465,25 @@ def _check_instantiation_and_gradient(
     except Exception as e:
         return False, False, False, f"Import error: {e}", None, None
 
-    # Instantiate config and model
+    # Instantiate config and model.
+    #
+    # C12-P / F-12e-G1: a generated config class may LEGITIMATELY declare
+    # required fields. Since the implementor stopped inventing a
+    # `segmentation_size` default into the plugins it writes, a candidate
+    # whose baseline declared no size carries that field as REQUIRED — and
+    # "PLUGIN_CONFIG_CLASS() must succeed with zero arguments" is not a valid
+    # generic validator invariant. It rejected such a candidate here with an
+    # opaque Pydantic string, before the tuner ever saw it, so the task's own
+    # named refusal was never what the operator read.
+    #
+    # The probe kwargs come from the Step-04 recipe module — the SAME
+    # authority the implementor's self-check and the generated test file use.
+    # This node deliberately learns nothing about WHICH fields those are or
+    # what they mean; it asks, and splats. Re-spelling the rule here would
+    # recreate the implementor/validator divergence that recipe module exists
+    # to prevent.
     try:
-        config = module.PLUGIN_CONFIG_CLASS()
+        config = module.PLUGIN_CONFIG_CLASS(**probe_config_kwargs(module.PLUGIN_CONFIG_CLASS))
         model = module.PLUGIN_MODEL_CLASS(config)
         model.train()
     except Exception as e:
