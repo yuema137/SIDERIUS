@@ -130,6 +130,45 @@ _runtime = _import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 SIDERIUS_ROOT = str(_Path(__file__).resolve().parents[2])
 
 
+def wall_time_preflight_applicable(run_profile: object) -> bool:
+    """Is the wall-time pre-flight family in this run's domain at all?
+
+    C12-P / B1 + B4. The whole family — the training and inference wall-time
+    estimators, and the bounded live probe a ``REQUEST_PROBE`` verdict resolves
+    — prices a workload through ``execute_tools/workload_resolvers.py``, whose
+    arithmetic is ``psd_segment_length // seg_size``. That is TIDMAD physics.
+    There is exactly ONE workload-resolver implementation, no protocol, no
+    registry and no task-owned accessor for a step count, so a task that
+    declares no TIDMAD topology has no value this family could be computed
+    from. It is **semantically outside the subsystem**, which is precisely
+    what ``NOT_APPLICABLE`` means; it is not a missing artifact and not an
+    error.
+
+    **ONE decision for the whole family, made caller-side.** B1 (the estimate)
+    and B4 (the probe lane) are two consumers of the same assumption, and B1
+    fires first, so repairing only B1 moves the failure ~30 lines down into a
+    probe that reports ``probe_status="load_failure"`` — blaming the candidate
+    model for a task-applicability fact. The applicability layer that owns the
+    resolved profile answers once, here, and both consumers inherit it.
+
+    **A MEMBERSHIP TEST, never a caught ``ValueError``.** ``tidmad_topology()``
+    raises for two different reasons — sections ABSENT, and sections PRESENT
+    but MALFORMED — so inferring non-membership from the exception would
+    silently reclassify a broken TIDMAD declaration as "some other task" and
+    skip a check that must instead FAIL. A malformed TIDMAD profile therefore
+    returns ``True`` here, still runs, and still fails closed.
+
+    ``run_profile`` that is not a ``DatasetProfile`` is Regime A — an
+    un-composed run, which IS TIDMAD — so it stays applicable and the legacy
+    path is bit-for-bit unchanged.
+    """
+    from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
+
+    if not isinstance(run_profile, DatasetProfile):
+        return True
+    return declares_tidmad_topology(run_profile)
+
+
 def run_admission_preflight(
     bindings: RunBindings,
     prepared: PreparedAttempt,
@@ -189,6 +228,14 @@ def run_admission_preflight(
         round_index=round_index,
         attempt_in_round=attempt_in_round,
         dataset_profile=run_profile,
+        # C12-P / B7. Applicability is decided HERE, by the layer that owns
+        # the resolved context, and passed down — the guardrail must not
+        # rediscover either value. `prepared.task_scopes` is what PR-12bc B5
+        # already acquired for this attempt; `time_data_dir` is the ONE
+        # authority for where the data physically lives (Step 11 C4), which
+        # is exactly what the §AB.3 transport repaired.
+        task_scopes=prepared.task_scopes,
+        data_dir=time_data_dir,
     ):
         return AdmissionOutcome.next_attempt()
 
@@ -410,7 +457,19 @@ def run_admission_preflight(
     # single time_budget_minutes kwarg.
     chosen_time_budget = trial_time_budget if plan.is_trial else formal_time_budget
     time_check = None
-    if chosen_time_budget is not None:
+    # C12-P B1/B4 — decided ONCE, before the gate, for the whole family.
+    # `time_check` staying None is the state an unset budget already produces,
+    # so an inapplicable run takes a downstream path that has always existed.
+    _walltime_applicable = wall_time_preflight_applicable(run_profile)
+    if chosen_time_budget is not None and not _walltime_applicable:
+        print(
+            "  Wall-time pre-flight NOT APPLICABLE: this task declares no "
+            "TIDMAD topology, and the wall-time family prices a workload as "
+            "psd_segment_length // segmentation_size. No time estimate and no "
+            "bounded probe is attempted for this run; the VRAM capacity gate "
+            "is unaffected. This is an applicability decision, not a failure."
+        )
+    if chosen_time_budget is not None and _walltime_applicable:
         stage.name = "time_estimation"
         # refine_inference_time_estimator.md Commit D — pull
         # the most recent successful trial round's measured

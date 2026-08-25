@@ -208,10 +208,20 @@ def build_planned_identity(
     the two sides cannot disagree because one of them filled a blank
     differently.
     """
+    from agent.skills.training_skill.estimator import resolve_model_field
     from core.runtime_control.calibration_context import training_loop_runtime_flags
     from core.runtime_control.identity import config_hash12
 
-    seg_size = int(model_config.get("segmentation_size", 40_000))
+    # C12-P / B11. `seg_size` is HASHED into `planned_config_hash`, so a
+    # literal fallback does not merely mis-size a batch — it writes a durable
+    # false provenance: two candidates that will train at different sizes
+    # collide under one calibration identity, and the recorded `seg_size` names
+    # a workload nobody ran. Resolved through the one authority that reproduces
+    # what the model will be constructed with; unchanged whenever the key is
+    # present, which is every production plan.
+    seg_size = resolve_model_field(
+        model_type, model_config, "segmentation_size", safety_margin=40_000
+    )
     batch_size = int(train_config.get("batch_size", 1))
     optimizer_type = str(train_config.get("optimizer_type", "adamw"))
     payload = {

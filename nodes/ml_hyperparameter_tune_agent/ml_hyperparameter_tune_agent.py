@@ -1540,12 +1540,14 @@ class HyperparamTuningAgent:
                     # V20 PR C1 / C-C3c: the derived calibration view of the
                     # SAME measurement System A just persisted. Success path
                     # only -- see the helper's docstring for why not the
-                    # shared append helper.
+                    # shared append helper, and for why C12-P/B5 passes
+                    # `run_profile` as a value rather than deciding here.
                     _derive_calibration_from_observation(
                         sandbox,
                         rv_block=final_record["runtime_verification"],
                         device_identity=device_identity,
                         data_dir=time_data_dir,
+                        run_profile=run_profile,
                     )
 
                     # Phase F post-flight REMOVED (operator decision 2026-08-03).

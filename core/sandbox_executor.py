@@ -39,6 +39,7 @@ from core.execution_calibration import (
     resolve_role_ceiling_gb,
 )
 from core.inference_defaults import inference_batch_for
+from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
 from execute_tools.data_paths import TIDMAD_DATA_DIR, resolve_physical_data_root
@@ -1563,20 +1564,18 @@ class TidmadSandbox:
                         json.dump(list(file_order), f)
                     cmd.extend(["--file_order_json", fo_path])
 
-                # RT2-B: in-subprocess runtime verification (streaming mode
-                # only). Remove any stale sidecar from a previous attempt with
-                # this exp_id so a pre-launch crash can never resurface old
-                # evidence as current.
-                if os.path.isfile(rv_sidecar_path):
-                    os.remove(rv_sidecar_path)
-                cmd.extend(["--runtime_observation_out", rv_sidecar_path])
-                if policy_obj is not None:
-                    rp_path = os.path.abspath(
-                        os.path.join(self.dirs["configs"], f"runtime_policy_{exp_id}.json")
-                    )
-                    with open(rp_path, "w") as f:
-                        json.dump(policy_obj.model_dump(), f)
-                    cmd.extend(["--runtime_policy_json", rp_path])
+            # C12-P B6 — task-neutral runtime control, armed ONCE by
+            # `has_scope_to_launch_from`. A SPLIT, not a hoist: the sampler
+            # flags above stay under `sample_set` (see `launch_argv`).
+            armed = has_scope_to_launch_from(sample_set, task_scopes)
+            if armed:
+                cmd += runtime_control_argv(
+                    configs_dir=self.dirs["configs"],
+                    exp_id=exp_id,
+                    observation_out=rv_sidecar_path,
+                    policy=policy_obj,
+                    drop_stale_observation=True,
+                )
 
             # Step 12 / PR-12bc B6 + PR-12d seam C (B9) — the composed run's
             # task-built scopes and the CALLER's declared validation row count.
@@ -1608,7 +1607,7 @@ class TidmadSandbox:
                 return _refusal
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("training"))
-            if policy_obj is not None and policy_obj.watchdog.enabled and sample_set is not None:
+            if policy_obj is not None and policy_obj.watchdog.enabled and armed:
                 # RT4 (§4): process-group launch + deadline kill. The
                 # deadline tightens mid-flight from the live observation
                 # sidecar (component-deadline interface).
@@ -1937,16 +1936,20 @@ class TidmadSandbox:
             # measurement-driven gate path (see refine_inference_time_estimator.md).
             cmd.extend(["--timing_out_json", timing_out])
 
-            # RT2-D: resume the attempt's runtime observation (training
-            # components stay — the sidecar is NEVER deleted here).
-            cmd.extend(["--runtime_observation_out", rv_sidecar_path])
-            if policy_obj is not None:
-                rp_path = os.path.abspath(
-                    os.path.join(self.dirs["configs"], f"runtime_policy_{exp_id}.json")
-                )
-                with open(rp_path, "w") as f:
-                    json.dump(policy_obj.model_dump(), f)
-                cmd.extend(["--runtime_policy_json", rp_path])
+        # C12-P B6 — the inference leg of the same split, decided ONCE.
+        # `--timing_out_json` DELIBERATELY STAYS ABOVE, gated by the SampleSet:
+        # it looks task-neutral and is not (see `launch_argv`).
+        armed = has_scope_to_launch_from(sample_set, task_scopes)
+        if armed:
+            # RT2-D RESUMES the observation training wrote, so unlike the
+            # training leg the sidecar is NEVER dropped here.
+            cmd += runtime_control_argv(
+                configs_dir=self.dirs["configs"],
+                exp_id=exp_id,
+                observation_out=rv_sidecar_path,
+                policy=policy_obj,
+                drop_stale_observation=False,
+            )
 
         try:
             print(f">>> [Executor] Running inference for {exp_id}...")
@@ -1958,7 +1961,7 @@ class TidmadSandbox:
             t_subprocess_start = time.perf_counter()
             env = _subprocess_env(plugin_dir=self.plugin_dir, loss_dir=self.loss_dir)
             preexec = _limited_preexec(_subprocess_rss_gb("inference"))
-            if policy_obj is not None and policy_obj.watchdog.enabled and sample_set is not None:
+            if policy_obj is not None and policy_obj.watchdog.enabled and armed:
                 result, kill_info = _run_observed_subprocess(
                     cmd,
                     env=env,

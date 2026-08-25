@@ -155,15 +155,72 @@ class TestItem8NoUnconditionalTidmadScopeConstruction:
     def test_the_measurement_path_checks_the_topology_first(self):
         """The third site. It builds a TidmadScope only after confirming the
         run's profile actually declares TIDMAD's geometry — otherwise it
-        SKIPS with a named reason rather than measuring the wrong thing.
+        refuses with a NAMED reason rather than measuring the wrong thing.
+
+        DEFECT THIS TEST ALONE CATCHES
+            The measurement path constructing a regime-A ``TidmadScope`` for a
+            run whose profile never declared TIDMAD's geometry, or doing so
+            without leaving a named reason behind when it declines.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
+            Deleting the membership test, or moving it below the construction,
+            makes ``membership < build`` false. Removing the refusal's named
+            reason empties ``reasons``.
+
+        C12-P / F-C12P-12BC-1 — re-anchored, deliberately NOT weakened.
+        This used to read::
+
+            guard = src.index("tidmad_topology(profile)")
+            assert "measurement SKIPPED" in src[guard : guard + 600]
+
+        Two independent defects, both of the "census matches a token exactly"
+        shape this repository has been burned by before:
+
+        1. ``declares_tidmad_topology(profile)`` — the MEMBERSHIP authority
+           C12-P introduced — *contains* the substring ``tidmad_topology(
+           profile)``. So ``str.index`` silently stopped anchoring on the
+           raising call it was written for and began anchoring on the
+           membership test that now precedes it. The guard was passing, but
+           measuring something other than what it names. Had the membership
+           test later been removed, the window would have slid BACK to the
+           raising call and the guard could have gone green for the wrong
+           reason — the dangerous direction.
+        2. It pinned one PROSE SENTENCE. C12-P's frozen taxonomy renamed the
+           semantic-non-membership refusal to ``NOT APPLICABLE`` (absent =>
+           NOT_APPLICABLE; malformed => loud ERROR). The concept the guard
+           exists to protect was unchanged; only the vocabulary moved.
+
+        The load-bearing property — *the refusal precedes the construction it
+        protects* — is unchanged and still asserted. What is no longer
+        asserted is one particular English sentence.
         """
         src = (REPO_ROOT / "agent" / "skills" / "evaluate_time_skill" / "wrapper.py").read_text(
             encoding="utf-8"
         )
-        guard = src.index("tidmad_topology(profile)")
         build = src.index("TidmadScope(")
-        assert guard < build, "the topology guard must precede the construction it protects"
-        assert "measurement SKIPPED" in src[guard : guard + 600]
+
+        # Anchor on the MEMBERSHIP authority explicitly, so the anchor cannot
+        # drift onto a different call whose text happens to contain it.
+        membership = src.index("declares_tidmad_topology(profile)")
+        assert membership < build, (
+            "the topology membership test must precede the TidmadScope construction it protects"
+        )
+
+        # The named reason, asserted as a CONCEPT rather than as one sentence:
+        # the refusal must say the measurement is not being performed AND why.
+        window = src[membership : membership + 600]
+        reasons = [
+            phrase for phrase in ("NOT APPLICABLE", "measurement SKIPPED") if phrase in window
+        ]
+        assert reasons, (
+            "the measurement path declines without a named reason. It must "
+            "state that it is not measuring and why; a silent early return is "
+            "the exact harm this guard exists to prevent."
+        )
+        assert "topology" in window or "psd_segment_length" in window, (
+            "the refusal names no cause. A reason that does not say WHICH "
+            "declaration was missing cannot be acted on by the operator."
+        )
 
 
 #: The generic tree. TIDMAD's own module, the contrast tasks' own modules and

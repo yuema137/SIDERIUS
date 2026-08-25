@@ -36,6 +36,62 @@ from execute_tools.health_checks.schemas import (
 )
 
 
+def _attempts_that_trained(records: list) -> int:
+    """How many of ``records`` describe an attempt that ACTUALLY trained.
+
+    F-C12P-OBS-1. The gate-exhaustion triggers test *"no record reached
+    ``status == 'success'``"*, which is a statement about OUTCOMES. It is
+    NOT the same fact as *"training never ran"*: an attempt that trains and
+    then fails a HealthGate satisfies the trigger while having trained.
+
+    Read from the two record fields that already own the fact — no new
+    field, schema or transport:
+
+    * ``training_history.epochs_completed`` — Step 07a's typed payload,
+      schema-pinned to ``len(train_objective)`` (``TrainingHistory._consistent``),
+      so ``> 0`` means at least one epoch's objective was observed. Zero
+      means the attempt entered training and crashed before finishing an
+      epoch, which is NOT "trained".
+    * ``final_loss`` — the same fact from a producer that predates 07a (the
+      baseline runner). Only the completed-attempt record builder writes it
+      (``records.py``: ``"final_loss": train_results.get("final_loss")``);
+      skip, admission-refusal and execution-failure records never carry it.
+    """
+    trained = 0
+    for record in records:
+        history = record.get("training_history") or {}
+        epochs = history.get("epochs_completed") if isinstance(history, dict) else None
+        if isinstance(epochs, int) and epochs > 0:
+            trained += 1
+            continue
+        if record.get("final_loss") is not None:
+            trained += 1
+    return trained
+
+
+def _render_gate_exhaustion_log_line(info: GateExhaustionInfo, records: list) -> str:
+    """The operator-facing one-liner for a surfaced gate-exhaustion report.
+
+    F-C12P-OBS-1. Extracted from the emission site in ``records.py`` so the
+    claim it makes is testable without running the finalisation orchestrator.
+    It states counts only: the previous wording ("iteration ended without
+    ever training") was false for every trained-then-failed attempt, and
+    false unconditionally under Trigger B, which requires a successful round.
+
+    ``records`` is the iteration's full record list; ``info`` may describe a
+    narrower set (Trigger B reports the failure burst), so the two scopes are
+    labelled separately rather than blended into one number.
+    """
+    return (
+        f"[gate-exhaustion] surfacing gate-exhaustion report to next proposer: "
+        f"{_attempts_that_trained(records)} of {len(records)} attempt(s) in this "
+        f"iteration reached training; report covers {info.total_attempts} "
+        f"attempt(s) — {info.vram_gated_attempts} VRAM-gated, "
+        f"{info.time_gated_attempts} time-gated, "
+        f"{info.other_failure_attempts} other failures."
+    )
+
+
 def _collect_disallowed_patterns(
     records: list,
     *,
@@ -394,6 +450,7 @@ def _build_gate_exhaustion(
             baseline_time_factor=baseline_time_factor,
             worst_vram_factor=worst_vram_factor,
             worst_time_factor=worst_time_factor,
+            trained=_attempts_that_trained(report_records),
         )
 
     return GateExhaustionInfo(
@@ -430,32 +487,54 @@ def _render_gate_exhaustion_summary(
     baseline_time_factor: float | None,
     worst_vram_factor: float | None,
     worst_time_factor: float | None,
+    trained: int,
 ) -> str:
     """One-paragraph LLM-readable synthesis of the gate-exhaustion state.
 
     The wording adapts to which axis was the binding ceiling — VRAM-only,
     time-only, or mixed — so the next proposer reads a clear instruction
     rather than a generic "everything failed" line. See §10.13.3.
+
+    ``trained`` is :func:`_attempts_that_trained` over the same records this
+    summary describes. It is REQUIRED, not defaulted: this text is spliced
+    into the next proposal agent's prompt by
+    ``_format_recent_gate_exhaustions_block``, and a caller that omitted it
+    would silently re-publish F-C12P-OBS-1's false "nothing ever trained"
+    framing to the LLM.
     """
     parts = []
 
-    # Lead sentence — what failed and how widely.
+    # Lead sentence — what failed and how widely. NOT "All N attempt(s) were
+    # rejected by the gate": the trigger only requires >= 1 gate rejection,
+    # so the `other` failures may well have trained (F-C12P-OBS-1).
     if vram_gated and not time_gated:
         parts.append(
-            f"All {total} attempt(s) ({vram_gated} VRAM-gated, {other} other "
-            f"failures) were rejected by the pre-flight VRAM gate."
+            f"Of {total} attempt(s), {vram_gated} were rejected by the "
+            f"pre-flight VRAM gate ({other} other failure(s))."
         )
     elif time_gated and not vram_gated:
         parts.append(
-            f"All {total} attempt(s) ({time_gated} time-gated, {other} other "
-            f"failures) were rejected by the pre-flight time gate."
+            f"Of {total} attempt(s), {time_gated} were rejected by the "
+            f"pre-flight time gate ({other} other failure(s))."
         )
     else:
         parts.append(
             f"Of {total} attempt(s), {vram_gated} were rejected by the VRAM "
             f"gate and {time_gated} by the time gate "
-            f"({other} other failures); none ever trained successfully."
+            f"({other} other failure(s))."
         )
+
+    # F-C12P-OBS-1 — separate the fact the trigger tests (no SUCCESSFUL
+    # outcome) from the fact the old wording asserted (training never ran).
+    parts.append("No attempt produced a successful training outcome.")
+    if trained:
+        parts.append(
+            f"{trained} attempt(s) did reach training and recorded training "
+            f"results before failing, so this is not a pure pre-flight "
+            f"rejection — the training itself is evidence to reason from."
+        )
+    else:
+        parts.append("No attempt reached the training stage.")
 
     # VRAM diagnostic.
     if vram_budget_gb is not None and baseline_vram is not None:

@@ -446,6 +446,8 @@ def run_bootstrap(
         return _finish(False)
 
     # 9 — persist THROUGH THE REGISTRY ONLY
+    from agent.skills.training_skill.estimator import resolve_model_field
+
     try:
         records = deps.build_observations(
             result,
@@ -455,9 +457,22 @@ def run_bootstrap(
             # configs, never from the caps: D4 buckets and C7 applicability
             # ranges are keyed on these, so a wrong value here mislabels the
             # evidence for every future comparison.
+            #
+            # C12-P / B11: that sentence had become FALSE for an omitted
+            # `segmentation_size`. `build_executors` is wired to
+            # `production_probe_executors`, which builds the model with
+            # `config_cls(**model_config)` — so the probe ran at the config
+            # class's DECLARED default while this recorded `0`. The paired
+            # tuner site (`ml_hyperparameter_tune_agent/runtime.py`) moves in
+            # the same commit, because they describe the same probe.
             workload={
                 "batch_size": int(train_config.get("batch_size", 1)),
-                "segment_length": int(model_config.get("segmentation_size", 0)),
+                # `safety_margin=0` is unreachable, not chosen: a model with no
+                # registered config class makes `production_probe_executors`
+                # raise long before any observation is built.
+                "segment_length": resolve_model_field(
+                    model_type, model_config, "segmentation_size", safety_margin=0
+                ),
                 "n_timed_train_steps": result.caps.n_timed_train_steps,
                 "n_timed_inference_batches": result.caps.n_timed_inference_batches,
                 "probe": "bootstrap",

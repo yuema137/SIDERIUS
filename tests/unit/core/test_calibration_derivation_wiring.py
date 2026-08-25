@@ -27,11 +27,36 @@ from __future__ import annotations
 
 import ast
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 import nodes.ml_hyperparameter_tune_agent as tuner
+from tests.helpers.hardware_profile_stub import stub_hardware_profile_collection
 from tests.helpers.tuner_source import tuner_node_source
+
+#: A CLEAN, calibration-eligible System-A observation. `final_status` must be
+#: one of `observation_store._CALIBRATION_ELIGIBLE_STATUSES` ({"completed",
+#: "inference_complete"}) and the measurement must have reached steady state;
+#: anything else derives to `NotDerivable`, which writes NOTHING AND PRINTS
+#: NOTHING, and would make an "it was not exported" assertion pass vacuously.
+_ELIGIBLE_OBSERVATION = {
+    "timestamp": "2026-08-24T00:00:00Z",
+    "final_status": "completed",
+    "calibration_context": {"model_family": "fcnet"},
+    "components": {
+        "training": {
+            "measurement": {
+                "unit": "optimizer_step",
+                "n_measured_units": 50,
+                "n_stabilization_units": 5,
+                "unit_time_ms_median": 12.5,
+                "steady_state_reached": True,
+                "total_measurement_seconds": 0.625,
+            }
+        }
+    },
+}
 
 SOURCE = tuner_node_source()
 TREE = ast.parse(SOURCE)
@@ -206,6 +231,25 @@ class TestLosingCalibrationNeverCostsAnAttempt:
 
 
 class TestIdentityIsNotFabricated:
+    class _Sandbox:
+        base_dir = "/tmp"
+
+    @pytest.fixture(autouse=True)
+    def _stub_the_accelerator_probe(self, monkeypatch):
+        """The derivation reads the live GPU; the unit layer must not.
+
+        `collect_hardware_compatibility_profile()` raises
+        `RuntimeError("hardware profile collection requires CUDA")` on a
+        CPU-only host — every CI runner — and the derivation's broad `except`
+        degrades that to a non-fatal print, so nothing reaches `observations/`
+        OR `quarantine/`. The quarantine half of the assertion below is what
+        catches it: "nothing exported" alone would have passed vacuously.
+
+        Mocked, not skipped: skipping would disarm this falsifier on the only
+        machine that runs it.
+        """
+        stub_hardware_profile_collection(monkeypatch)
+
     def test_a_missing_uuid_cannot_produce_an_eligible_identity(self):
         """`IdentityContext` refuses a blank field, so an absent device UUID
         yields `identity=None` and the derivation quarantines. The wiring
@@ -222,12 +266,57 @@ class TestIdentityIsNotFabricated:
                 runtime_stack_identity="s",
             )
 
-    def test_the_wiring_guards_on_the_uuid_before_building_identity(self):
-        """Source-level, because the alternative — a placeholder UUID — would
-        produce an eligible record that looks measured and names the wrong
-        device."""
-        helper = _function(DERIVATION)
-        code = ast.unparse(helper)
-        assert "if uuid and" in code, (
-            "the wiring must not construct an IdentityContext without a real device UUID"
+    def test_the_wiring_guards_on_the_uuid_before_building_identity(self, tmp_path, monkeypatch):
+        """A measurement with no device UUID must QUARANTINE, never export.
+
+        UPGRADED at C12-P B5 from a source-shape assertion (`"if uuid and" in
+        code`) to the behaviour that shape existed to produce. The old form
+        pinned an implementation detail: it would have gone red for a correct
+        refactor, and — more importantly — it asserted the ORDER of a
+        conjunction rather than its CONSEQUENCE, so it could not distinguish
+        `if uuid and X:` from `if uuid and (X or True):`.
+
+        WHY THIS IS THE INVARIANT. `IdentityContext.hardware_uuid` is
+        `Field(min_length=1)`, so an absent UUID does NOT fail closed on its
+        own: `str(None)` is the four-character string `"None"`, which passes
+        `min_length=1` and yields a FULLY ELIGIBLE calibration record naming a
+        device that does not exist. The uuid check must therefore happen
+        BEFORE the context is constructed, and the observable proof is that
+        the derivation lands in `quarantine/` and writes nothing to
+        `observations/`.
+
+        FAILS ON REGRESSION: drop `and uuid` from the guard and this test goes
+        red immediately — an eligible record appears, carrying the literal
+        `"None"` as its hardware uuid.
+        """
+        monkeypatch.setenv("SIDERIUS_CALIBRATION_DIR", str(tmp_path))
+
+        import nodes.ml_hyperparameter_tune_agent as tuner_module
+        from core.runtime_control.calibration_registry import registry_dirname
+
+        device = MagicMock()
+        device.uuid = None  # the whole point: a device with no instance id
+
+        tuner_module._derive_calibration_from_observation(
+            self._Sandbox(),
+            rv_block=_ELIGIBLE_OBSERVATION,
+            device_identity=device,
+            data_dir=str(tmp_path / "data"),
         )
+
+        root = tmp_path / registry_dirname()
+        exported = sorted((root / "observations").glob("*.json"))
+        assert exported == [], (
+            "a measurement with no device UUID was exported as usable "
+            "calibration evidence; the identity names a device that does not "
+            f"exist. Wrote: {[p.name for p in exported]}"
+        )
+        assert sorted((root / "quarantine").glob("*.json")), (
+            "the measurement is real and must be PRESERVED as quarantined "
+            "evidence (O-2), not silently dropped"
+        )
+        # Belt and braces: the placeholder must not appear anywhere written.
+        for path in root.rglob("*.json"):
+            assert '"hardware_uuid": "None"' not in path.read_text(), (
+                f"{path.name} carries the string 'None' as a device identity"
+            )

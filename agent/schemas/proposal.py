@@ -25,8 +25,12 @@ from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
 from agent.schemas.vocab import VocabEntry
 from core.hardware_context import HardwareContext
-from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
-from execute_tools.dataset_config import DataScope
+from execute_tools.dataset_config import (
+    DataScope,
+    declares_tidmad_topology,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
 
 # ---------------------------------------------------------------------------
 # Phase B schemas — three-stage reasoning pipeline
@@ -1242,6 +1246,31 @@ class ProposalOutput(BaseModel):
         No-ops gracefully when ``baseline_config`` lacks ``model_config`` or the
         nested ``segmentation_size`` field — some architectures don't have one,
         and existing tests construct ``ProposalOutput`` with ``baseline_config={}``.
+
+        **The divisibility half of this rule is TIDMAD physics and is SKIPPED,
+        never guessed, for a task that declares no physical geometry.**
+        C12-P / B3. This validator used to read the module-scope ``TIDMAD``
+        singleton, so *every* task had its segmentation legality decided by
+        ``psd_segment_length=10_000_000`` — Pets' own declared
+        ``segmentation_size=144`` was rejected (remainder 64) and DAVIS's 128
+        passed only because ``10**7 == 2**7 * 5**7``. The applicable geometry
+        now comes from :func:`resolve_dataset_profile`, the Regime-A seam
+        whose docstring names Pydantic field validation as its intended
+        consumer — the same migration ``agent/schemas/score_table.py`` already
+        made for its file-index bound.
+
+        Applicability is a MEMBERSHIP TEST
+        (:func:`declares_tidmad_topology`), never ``try: tidmad_topology(...)
+        except ValueError``: that function raises both for ABSENT sections and
+        for sections PRESENT-BUT-MALFORMED, and catching it would silently
+        reclassify a malformed TIDMAD profile as "this task declares none".
+        A malformed TIDMAD topology must still RAISE.
+
+        Under Regime A — nothing bound, or TIDMAD bound —
+        ``tidmad_topology(TIDMAD_PROFILE).dataset`` IS the ``TIDMAD``
+        singleton this code used to read, so the rule and its diagnostic are
+        byte-identical. The generic positive-int check above is task-neutral
+        and stays unguarded.
         """
         model_cfg = self.baseline_config.get("model_config") if self.baseline_config else None
         if not isinstance(model_cfg, dict):
@@ -1254,9 +1283,13 @@ class ProposalOutput(BaseModel):
                 f"baseline_config['model_config']['segmentation_size'] must be a "
                 f"positive int, got {seg!r}."
             )
-        psd = DATASET_CONFIG.psd_segment_length
+        profile = resolve_dataset_profile()
+        if not declares_tidmad_topology(profile):
+            return self
+        dataset = tidmad_topology(profile).dataset
+        psd = dataset.psd_segment_length
         if psd % seg != 0:
-            valid = DATASET_CONFIG.valid_segmentation_sizes()
+            valid = dataset.valid_segmentation_sizes()
             raise ValueError(
                 f"baseline_config['model_config']['segmentation_size'] ({seg}) "
                 f"must exactly divide psd_segment_length ({psd}). "

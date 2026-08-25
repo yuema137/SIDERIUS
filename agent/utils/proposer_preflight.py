@@ -51,7 +51,11 @@ from typing import Any
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
-from execute_tools.dataset_config import DataScope, resolve_dataset_profile
+from execute_tools.dataset_config import (
+    DataScope,
+    declares_tidmad_topology,
+    resolve_dataset_profile,
+)
 from execute_tools.sample_set_builder import build_sample_set
 
 # The synthesised default ``sample_set`` mirrors the tuner's trial-mode
@@ -161,17 +165,60 @@ def estimate_proposal_time(
     if time_budget_minutes <= 0:
         raise ValueError(f"time_budget_minutes must be positive; got {time_budget_minutes!r}.")
 
+    # C12-P / B1 — the proposer-side member of the wall-time family.
+    #
+    # This entry point IS production-live (see the corrected note below) and it
+    # reaches the SAME TIDMAD-physical estimators. Its first raise is not the
+    # estimators, though: with no caller-supplied `sample_set` it synthesises
+    # one through `build_sample_set`, which reads
+    # `tidmad_topology(...).dataset.segments_per_file` and fails closed one
+    # step earlier. Either way the proposer dies for a task that simply has no
+    # psd_segment_length.
+    #
+    # Same ONE rule as the tuner-side gate, same membership test, never a
+    # caught ValueError: a malformed TIDMAD profile stays applicable and still
+    # fails closed.
+    if not declares_tidmad_topology(resolve_dataset_profile()):
+        return {
+            "estimated_minutes": None,
+            "factor": None,
+            "verdict": (
+                "NOT APPLICABLE — this task declares no TIDMAD topology, and "
+                "the wall-time pre-flight prices a workload as "
+                "psd_segment_length // segmentation_size."
+            ),
+            "feasible": None,
+            "applicable": False,
+            "provenance": "static_uncalibrated",
+            "advisory_only": True,
+        }
+
     if sample_set is None:
         sample_set = _synthesise_default_sample_set(trial_portion=trial_portion, scope=data_scope)
 
     loss_type = _training_est.resolve_loss_type(loss_config)
 
-    # Step 05b: the estimators now require an explicit topology. This entry
-    # point is NOT production-live — its only non-test caller is
-    # `production_estimator_factory._static`, reached solely through
-    # `estimator.estimate()`, which no production code calls (ledger §18.1).
-    # So it is not genericized (§4's binding rule); it simply acquires at its
-    # own boundary and states that it does.
+    # Step 05b: the estimators now require an explicit topology.
+    #
+    # C12-P / W3, B1 — CORRECTION. This comment used to read "This entry point
+    # is NOT production-live — its only non-test caller is
+    # `production_estimator_factory._static` … So it is not genericized (§4's
+    # binding rule)". That claim was FALSE, and the exemption it justified is
+    # why this live entry point still resolves an AMBIENT profile:
+    # `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py` imports
+    # `estimate_proposal_time` at module scope and calls it from
+    # `_run_preflight_check`, gated only on a non-null time budget.
+    #
+    # The genericization debt is therefore REAL and OPEN, not exempt. Under a
+    # composed non-TIDMAD run this ambient read yields the bound foreign
+    # profile, and the TIDMAD-physical family below — `build_sample_set`'s
+    # `segments_per_file` read above, then both wall-time estimators —
+    # fails closed. The applicability refusal that closes it must ask
+    # `execute_tools.dataset_config.declares_tidmad_topology`, the ONE
+    # membership authority, and must never infer membership by catching
+    # `tidmad_topology`'s `ValueError` (it raises for two different reasons).
+    # Pinned by
+    # tests/unit/agent/tune_ml_hyperparam_agent/test_c12p_b1_walltime_preflight_applicability.py.
     dataset_profile = resolve_dataset_profile()
 
     # All three estimators run in static-formula mode: ms_per_step=None

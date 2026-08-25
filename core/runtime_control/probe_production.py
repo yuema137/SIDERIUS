@@ -231,7 +231,19 @@ def production_probe_executors(
                 f"dataset directory unavailable for the probe: {resolved_dir!r} "
                 "(no silent synthetic fallback — F-1a)"
             )
-        seg = int(model_config.get("segmentation_size", 40_000))
+        # C12-P / B11. The probe builds its batch at the segmentation size the
+        # model will ACTUALLY be constructed with, resolved by the one authority
+        # that already knows how: `config_cls(**model_config)` two lines above
+        # substitutes the config class's declared default for an absent key, so
+        # a literal `40_000` here was a TIDMAD-scale guess that could disagree
+        # with the very model this closure just built (transformer declares
+        # 20000, a generated plugin declares whatever it declares). Behaviour is
+        # unchanged whenever the key is present, which is every production plan.
+        from agent.skills.training_skill.estimator import resolve_model_field
+
+        seg = resolve_model_field(
+            model_type, model_config, "segmentation_size", safety_margin=40_000
+        )
         bs = int(train_config.get("batch_size", 1))
         # 07c C2: the ONE builder, the same one the measurement worker goes
         # through. It replaces `load_probe_batch`, which reached

@@ -3130,11 +3130,13 @@ class HyperparamTuningOutput(BaseModel):
     gate_exhaustion: GateExhaustionInfo | None = Field(
         default=None,
         description=(
-            "Populated only when the iteration ended without ever training "
-            "successfully AND >=1 attempt was rejected by the pre-flight "
-            "resource gate. Consumed by the next iteration's proposer via "
-            "ProposalInput.prior_iteration_gate_exhaustion. None on healthy "
-            "runs (any success) and on all-failure-but-not-budget-related runs."
+            "Populated when EITHER gate-exhaustion trigger fires. Trigger A: "
+            "no attempt reached status=='success' AND >=1 attempt was rejected "
+            "by the pre-flight resource gate. Trigger B: the outer loop aborted "
+            "on the consecutive-failure brake after completed_rounds>0 -- so "
+            "under Trigger B earlier rounds DID succeed. Consumed by the next "
+            "iteration's proposer via "
+            "ProposalInput.prior_iteration_gate_exhaustion."
         ),
     )
     trial_validity_feedback: TrialValidityFeedback | None = Field(

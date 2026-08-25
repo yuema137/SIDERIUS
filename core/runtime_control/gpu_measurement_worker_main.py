@@ -269,7 +269,18 @@ def build_production_components(spec: GpuMeasurementSpec, trace: Any = None):
                 f"dataset directory unavailable for the measurement: "
                 f"{spec.data_dir!r} (no silent synthetic fallback — F-1a)"
             )
-        seg = int(spec.model_config_payload.get("segmentation_size", 40_000))
+        # C12-P / B11. Paired with `build_planned_identity`, whose docstring
+        # states the invariant explicitly: "the defaults for `seg_size` and
+        # `batch_size` are the same ones the measurement worker will apply, so
+        # the two sides cannot disagree because one of them filled a blank
+        # differently." Both sides now fill the blank through the SAME
+        # authority, so the invariant holds for a model whose declared default
+        # is not 40 000 as well.
+        from agent.skills.training_skill.estimator import resolve_model_field
+
+        seg = resolve_model_field(
+            model_type, spec.model_config_payload, "segmentation_size", safety_margin=40_000
+        )
         # TWO batches, deliberately distinct.
         #
         # `batch_size` is the TRAINING batch. It is the identity field C1's

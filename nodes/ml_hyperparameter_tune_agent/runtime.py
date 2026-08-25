@@ -781,6 +781,19 @@ def _resolve_time_check_probe_request(
     # `model_family=model_type` (evaluate_time_skill/wrapper.py). Declaring
     # it here makes the registry agree with the store instead of writing a
     # second family namespace.
+    #
+    # C12-P / B11. `workload` is PROVENANCE — what the probe actually ran at.
+    # `.get("segmentation_size", 0)` recorded `0` for an omitted key while
+    # `production_probe_executors` built the very same dict with
+    # `config_cls(**model_config)`, i.e. at the config class's DECLARED default
+    # (wavenet 40000, transformer 20000). D4 buckets and C7 applicability
+    # ranges are keyed on this field, so a recorded `0` drags
+    # `ApplicabilityEnvelope.observed_min` to zero and
+    # `applicability_for_request` then labels far smaller requests
+    # "interpolation" — and `0` cannot even be read back as a sentinel,
+    # because the request side declares `Field(gt=0)`.
+    from agent.skills.training_skill.estimator import resolve_model_field
+
     request = ProbeRequest(
         model_identity=model_type,
         model_family=classify_model_family(declared_family=model_type),
@@ -788,8 +801,16 @@ def _resolve_time_check_probe_request(
         inference_batches=0,
         workload={
             "batch_size": int((active_params.get("train_config") or {}).get("batch_size", 1)),
-            "segment_length": int(
-                (active_params.get("model_config") or {}).get("segmentation_size", 0)
+            # `safety_margin=0` is unreachable rather than chosen:
+            # `production_probe_executors` raises for a model with no
+            # registered config class, so no observation is ever recorded on
+            # that path. It preserves the pre-existing value for the case that
+            # cannot occur instead of inventing a workload number.
+            "segment_length": resolve_model_field(
+                model_type,
+                dict(active_params.get("model_config") or {}),
+                "segmentation_size",
+                safety_margin=0,
             ),
         },
     )
@@ -926,6 +947,86 @@ def _evaluate_step_guardrails(
     return violations
 
 
+def _resolve_task_scope_guardrail_steps(
+    *,
+    task_scopes,
+    data_dir: str | None,
+    train_cfg: dict,
+    train_portion: float | None,
+    max_samples: int | None,
+) -> int | None:
+    """The §5 step count for an attempt whose scope its TASK built (B7).
+
+    C12-P / finding B7. ``_resolve_guardrail_steps`` returned ``None`` the
+    moment there was no legacy ``SampleSet``, and PR-12d's planning seam B
+    made that state reachable for every composed task that declares no
+    physical partition geometry. ``_evaluate_step_guardrails`` then
+    short-circuits on the ``None`` and ``--max_steps_per_attempt`` decides
+    nothing — silently, with no log line, because the early return is taken
+    before the ``except`` that would have printed one. An operator hard bound
+    that is quietly disabled for a whole class of runs is worse than one that
+    refuses loudly.
+
+    **Applicability is decided by the caller and passed down.** This function
+    rediscovers nothing: ``task_scopes`` and ``data_dir`` are values
+    ``run_admission_preflight`` already holds (``prepared.task_scopes``,
+    ``bindings.time_data_dir``). An ABSENT training scope means the legacy
+    single-file / un-composed regime, where ``None`` is the correct and
+    unchanged answer — that is what ``test_rt5_guardrails.py`` pins.
+
+    **Nothing TIDMAD-physical is resolved here.** The legacy leg needs
+    ``segmentation_size`` because it divides PSD segments; a task-owned scope
+    is measured by the implementation that built it
+    (``resolve_task_scope_training_workload``), so no segment geometry, no
+    dataset profile and no task name appears on this path.
+
+    Best-effort like its sibling: a resolver failure prints and returns
+    ``None`` rather than aborting an attempt the primary runtime criterion
+    still protects. The difference from the defect is that the failure now
+    SPEAKS.
+
+    Args:
+        task_scopes: this attempt's :class:`AttemptScopes`, or ``None``.
+        data_dir: the run's resolved physical data root, or ``None``.
+        train_cfg: the plan's training config.
+        train_portion: the round's per-epoch subsample fraction.
+        max_samples: the validation-envelope row ceiling, or ``None``.
+
+    Returns:
+        The resolved optimizer-step count, or ``None`` when this attempt has
+        no task-owned scope or the count could not be resolved.
+    """
+    training = getattr(task_scopes, "training", None)
+    if training is None:
+        return None  # no task-owned scope — the legacy regime, unchanged
+    try:
+        from agent.skills.training_skill.estimator import _usable, resolve_train_field
+        from execute_tools.workload_resolvers import resolve_task_scope_training_workload
+
+        # B1b's rule, on this leg too: resolve an ABSENT key from the
+        # declaration, never substitute for one the plan states impossibly.
+        supplied_epochs = train_cfg.get("epochs")
+        if supplied_epochs is not None and not _usable(supplied_epochs):
+            return None
+        if not data_dir:
+            raise ValueError(
+                "a composed attempt acquired a task-owned training scope but no "
+                "resolved data root reached the guardrail, so the scope cannot "
+                "be materialized and max_steps_per_attempt cannot be priced."
+            )
+        return resolve_task_scope_training_workload(
+            training,
+            data_dir=data_dir,
+            batch_size=int(train_cfg.get("batch_size", 1)),
+            train_portion=train_portion,
+            epochs=resolve_train_field(train_cfg, "epochs", safety_margin=1),
+            max_samples=max_samples,
+        ).unit_count
+    except Exception as exc:
+        print(f"[guardrails] task-owned step resolution failed (non-fatal): {exc}")
+        return None
+
+
 def _resolve_guardrail_steps(
     train_sample_set: dict | None,
     model_config: dict,
@@ -934,6 +1035,9 @@ def _resolve_guardrail_steps(
     dataset_profile,
     model_type: str = "",
     max_samples: int | None = None,
+    *,
+    task_scopes=None,
+    data_dir: str | None = None,
 ) -> int | None:
     """Resolved step count for the §5 guardrails. Best-effort: a
     resolver failure returns None (the guardrail is defense-in-depth —
@@ -959,7 +1063,18 @@ def _resolve_guardrail_steps(
     unknown type simply falls through to the documented safety margins.
     """
     if train_sample_set is None:
-        return None  # single-file legacy mode — no scoped workload to resolve
+        # C12-P / B7. This was `return None` — a SILENT early return that
+        # disabled `--max_steps_per_attempt` for every composed task without
+        # physical partition geometry. A task-owned scope is priced by the
+        # implementation that built it; its absence still means the legacy
+        # single-file mode, and still resolves to None.
+        return _resolve_task_scope_guardrail_steps(
+            task_scopes=task_scopes,
+            data_dir=data_dir,
+            train_cfg=train_cfg,
+            train_portion=train_portion,
+            max_samples=max_samples,
+        )
     try:
         from agent.skills.training_skill.estimator import (
             _usable,
@@ -1191,10 +1306,19 @@ def _check_and_record_guardrail_skip(
     round_index: int,
     attempt_in_round: int,
     dataset_profile,
+    task_scopes=None,
+    data_dir: str | None = None,
 ) -> bool:
     """Run the §5 guardrails; on violation save the planner-visible
     record and return True (the attempt loop `continue`s). Single call
-    site keeps run() under the analyzer's complexity ceiling."""
+    site keeps run() under the analyzer's complexity ceiling.
+
+    ``task_scopes`` / ``data_dir`` are C12-P / B7: this is the one
+    admission decision that never received the attempt's task-owned scope,
+    which is why a composed run had nothing to price and its operator step
+    bound went silently inert. Both default to ``None`` so the legacy
+    call shape and the legacy resolution are unchanged.
+    """
     # The EXECUTED step count, not the planned one. Under a validation
     # envelope the trainer builds a smaller epoch, so judging the planner's
     # unclamped figure would skip an attempt whose real workload is already
@@ -1208,6 +1332,8 @@ def _check_and_record_guardrail_skip(
         dataset_profile,
         model_type=model_type,
         max_samples=agent_input.validation_max_train_samples,
+        task_scopes=task_scopes,
+        data_dir=data_dir,
     )
     violations = _evaluate_step_guardrails(
         n_steps=n_steps,
@@ -1542,12 +1668,56 @@ def _append_runtime_observation(sandbox, run_name: str, rv_block: dict | None) -
         print(f"[runtime_control] observation-store append failed (non-fatal): {exc}")
 
 
+def _tidmad_calibration_identity_applicable(run_profile: Any) -> bool:
+    """May this run's calibration be labelled with TIDMAD's identity?
+
+    C12-P B5. ``resolve_tidmad_measurement_capability`` answers for TIDMAD and
+    for TIDMAD only -- ``task_identity="tidmad_denoise"`` and the
+    ``psd..._seg..._files...`` shape class are LITERALS over the module-level
+    TIDMAD profile (``execute_tools/data_paths.py``), and only ``dataset_root``
+    is parameterised. Consulting it for a task that declares no TIDMAD topology
+    does not produce a weaker identity; it produces a CONFIDENT WRONG one, and
+    the calibration bucket does not separate tasks (``calibration_policy
+    .bucket_components`` keys on ``model_family``, never on ``task_identity``),
+    so a foreign record would sit in the same promotion bucket as genuine
+    TIDMAD evidence.
+
+    The bounded rule, therefore: *no applicable declared measurement identity
+    under the existing supported contract => DO NOT EXPORT calibration state
+    for that task.* **Absence of a valid identity is not a licence to call the
+    task TIDMAD.** The measurement itself is still preserved -- it quarantines
+    with a reason (O-2) -- it simply never becomes authority.
+
+    **A MEMBERSHIP TEST, never a caught ``ValueError``.** ``tidmad_topology()``
+    raises for sections ABSENT and for sections PRESENT-but-MALFORMED alike, so
+    inferring "this is some other task" from catching it would silently
+    reclassify a BROKEN TIDMAD declaration as inapplicable and quietly stop
+    exporting evidence that must instead stay visible. A malformed TIDMAD
+    profile therefore returns ``True`` here and still fails loudly downstream.
+
+    Regime A -- ``run_profile`` that is not a ``DatasetProfile`` -- is an
+    UN-COMPOSED run, which IS TIDMAD, so it stays applicable and TIDMAD's
+    behaviour is bit-for-bit what it was.
+
+    Deliberately the same three-line shape as
+    ``execution.wall_time_preflight_applicable`` and the prephase rule above:
+    this consumes an existing authority rather than inventing a generic
+    measurement-identity capability family.
+    """
+    from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
+
+    if not isinstance(run_profile, DatasetProfile):
+        return True
+    return declares_tidmad_topology(run_profile)
+
+
 def _derive_calibration_from_observation(
     sandbox,
     *,
     rv_block: dict | None,
     device_identity,
     data_dir: str | None,
+    run_profile: Any = None,
 ) -> None:
     """Derive a v2 calibration record from a SUCCESSFUL attempt's observation.
 
@@ -1567,6 +1737,19 @@ def _derive_calibration_from_observation(
     is already decided and persisted, and losing a calibration sample must
     never cost an attempt. The loss is printed rather than swallowed, so a
     missing sample is visible.
+
+    C12-P / B5 — WHY `run_profile` IS A PARAMETER AND NOT A LOOKUP.
+    The run's resolved profile decides whether TIDMAD's measurement identity
+    may be stamped on this run's calibration at all: a task that declares no
+    measurement identity of its own must not inherit TIDMAD's, because the
+    calibration store is machine-global (`~/.siderius/`) and a wrong
+    `task_identity` there silently pollutes every later run on this host.
+
+    It arrives as a VALUE decided by the caller. `run()` is the giant
+    orchestrator the decomposition rule governs, so the applicability rule
+    lives here — beside the identity it guards — rather than as another
+    branch up there. Resolving it here instead would also make the decision
+    ambient, which is the defect B1/B4 closed on the sibling surface.
     """
     if not rv_block:
         return
@@ -1589,15 +1772,41 @@ def _derive_calibration_from_observation(
         from execute_tools.data_paths import resolve_tidmad_measurement_capability
 
         observation = RuntimeObservation.model_validate(rv_block)
-        capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
         uuid = getattr(device_identity, "uuid", None)
         stack = capture_software_stack()
 
         # A missing dimension drives QUARANTINE, never a fabricated default:
-        # `IdentityContext` refuses a blank, so an absent UUID or task yields
-        # `identity=None` and the derivation quarantines with the reason.
+        # `IdentityContext` refuses a blank, so an absent UUID or an
+        # INAPPLICABLE task yields `identity=None` and the derivation
+        # quarantines with the reason.
+        #
+        # `uuid` must be checked BEFORE the context is built and this ordering
+        # is load-bearing: `IdentityContext.hardware_uuid` is `min_length=1`,
+        # so `str(None)` would sail through as the literal `"None"` and produce
+        # an ELIGIBLE record naming a device that does not exist. Absence must
+        # reach the quarantine path, never a placeholder.
+        #
+        # C12-P B5 -- the applicability term. The two dropped terms
+        # (`capability.task_identity and capability.data_shape_class`) were a
+        # TAUTOLOGY: both are `Field(min_length=1)` on
+        # `ResolvedMeasurementCapability` and are populated on EVERY return
+        # path, refusals included, so they could never be falsy and the guard
+        # reduced to `if uuid:`. They are replaced by the question that
+        # actually needed asking -- see
+        # `_tidmad_calibration_identity_applicable`. The capability is now
+        # resolved INSIDE the branch, so a foreign task never even constructs
+        # TIDMAD's identity.
+        #
+        # THE PROBE LANE NEEDS NO TWIN OF THIS GUARD, and adding one would be
+        # redundant, not safer. `probe_wiring`'s registry write is reached only
+        # through `_resolve_time_check_probe_request`, which sits behind
+        # `execution.wall_time_preflight_applicable` (C12-P B1) and is
+        # therefore already unreachable for a task declaring no TIDMAD
+        # topology. A second guard there would imply the first one is not
+        # trusted. Do not reintroduce it.
         identity = None
-        if uuid and capability.task_identity and capability.data_shape_class:
+        if _tidmad_calibration_identity_applicable(run_profile) and uuid:
+            capability = resolve_tidmad_measurement_capability(dataset_root=data_dir)
             identity = IdentityContext(
                 task_identity=capability.task_identity,
                 data_shape_class=capability.data_shape_class,

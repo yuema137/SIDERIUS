@@ -51,7 +51,12 @@ from core.run_invariants import (
 )
 from core.sandbox_executor import TidmadSandbox
 from execute_tools.build_anchor_map import load_anchor_map
-from execute_tools.data_paths import SIDERIUS_DATA_DIR, TIDMAD_DATA_DIR
+from execute_tools.data_paths import (
+    SIDERIUS_DATA_DIR,
+    TIDMAD_DATA_DIR,
+    DatasetDirectoryUnavailable,
+    resolve_dataset_dir,
+)
 from execute_tools.dataset_config import NUM_FILES, TIDMAD, DataScope, resolve_dataset_profile
 from execute_tools.deliverable_spec import default_deliverable_naming
 from execute_tools.health_checks.config import load_health_gates_config
@@ -665,10 +670,17 @@ def run_agent(
     runtime_formal_safety_factor: float | None = None,
     runtime_watchdog_floor_seconds: float | None = None,
     enable_chain_incumbent_formal_gates: bool = False,
+    data_dir: str | None = None,
 ):
     """
     Launches nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py as a subprocess, locked to
     model_type, for max_rounds rounds.
+
+    ``data_dir`` is the run's ALREADY-RESOLVED physical dataset root (C12-P).
+    It is forwarded to the tuner verbatim; this function does not resolve it,
+    because the resolution must happen once at the launch boundary before any
+    expensive work — see ``main()``. ``None`` reproduces the pre-C12-P argv
+    exactly, which is what every caller that has not been migrated still gets.
 
     DS6d: ``data_scope_spec`` / ``health_gate_files_spec`` are the operator's
     raw CLI spec strings, forwarded verbatim to the tuner's own
@@ -711,6 +723,22 @@ def run_agent(
         "--expert_advice",
         expert_advice,
     ]
+    # C12-P: the physical dataset root, resolved ONCE at the launch boundary.
+    #
+    # Its absence is what blocked PR-12d's TIDMAD attempts 5 and 6. This
+    # launcher never forwarded the value, so `agent_input.data_dir` reached the
+    # tuner as None and TWO runtime-control consumers refused, fail-closed but
+    # only after a real LLM had already produced a candidate:
+    #   armed time budget    -> probe_production.py       "no dataset directory
+    #                                                      was supplied"
+    #   unarmed time budget  -> gpu_measurement_worker_main.py
+    #                                                     "dataset directory
+    #                                                      unavailable ...: None"
+    # `sdsc_submission_scripts/run_one_iteration.py` already resolved and
+    # forwarded it; this is the SAME authority applied at the second launch
+    # boundary, never a second convention and never a default path.
+    if data_dir:
+        cmd.extend(["--data_dir", data_dir])
     if reflect_provider:
         cmd.extend(["--reflect_provider", reflect_provider])
     if reflect_model_id:
@@ -920,6 +948,20 @@ def main():
         default=None,
         help="Optional HealthGate YAML override; omitted preserves the default.",
     )
+    # --- physical dataset root (C12-P) ---
+    parser.add_argument(
+        "--data_dir",
+        type=str,
+        default=None,
+        help=(
+            "Physical dataset root for this run. Optional: when omitted the "
+            "machine-local tidmad_data_config.yaml supplies it, which is the "
+            "precedence execute_tools.data_paths.resolve_dataset_dir already "
+            "declares. Resolved and validated at launch and forwarded to the "
+            "tuner; an unresolvable root refuses the launch rather than "
+            "failing later inside runtime-control."
+        ),
+    )
     # --- DataScope + HealthGate subsystem (DS6d) ---
     parser.add_argument(
         "--data_scope",
@@ -1128,6 +1170,30 @@ def main():
             "--health_gate_files / --no-health_gate_enabled are not allowed "
             "for this campaign."
         )
+
+    # C12-P — resolve the physical dataset root ONCE, at the launch boundary,
+    # through the same authority and precedence (explicit override >
+    # machine-local config) that `sdsc_submission_scripts/run_one_iteration.py`
+    # already applies. It FAILS CLOSED: an unresolvable root refuses here,
+    # before any expensive work, rather than after a real LLM has generated and
+    # registered a candidate — the cost PR-04a paid once and PR-12d's TIDMAD
+    # attempts 5/6 paid again.
+    #
+    # ORDERED AFTER the pure-CLI validation above, deliberately. Those guards
+    # decide whether the operator's FLAGS are well formed, which is knowable
+    # with no machine configuration at all; this one asks whether the
+    # ENVIRONMENT can supply a dataset. Resolving first made a malformed
+    # `--data_scope` report a missing data directory instead, and made the
+    # startup guards untestable anywhere without a per-machine config —
+    # environment coupling in exactly the place the portability rule forbids it.
+    #
+    # No default, no synthetic directory, no task-name dispatch: the value
+    # comes from the operator's override or the gitignored per-machine config,
+    # and from nowhere else.
+    try:
+        resolved_data_dir = resolve_dataset_dir(args.data_dir, purpose="this comparison run")
+    except DatasetDirectoryUnavailable as e:
+        raise SystemExit(f"[ERROR] {e}") from e
 
     if args.health_checks_config:
         args.health_checks_config = os.path.abspath(args.health_checks_config)
@@ -1583,6 +1649,7 @@ def main():
         runtime_formal_safety_factor=args.runtime_formal_safety_factor,
         runtime_watchdog_floor_seconds=args.runtime_watchdog_floor_seconds,
         enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
+        data_dir=resolved_data_dir,
     )
 
     print(f"\n{'#' * 60}")

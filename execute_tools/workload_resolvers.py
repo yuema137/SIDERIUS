@@ -122,6 +122,118 @@ def resolve_training_workload(
     )
 
 
+def resolve_task_scope_training_workload(
+    training_scope: object,
+    *,
+    data_dir: str,
+    batch_size: int,
+    train_portion: float | None,
+    epochs: int,
+    max_samples: int | None = None,
+) -> ResolvedPhaseWorkload:
+    """:func:`resolve_training_workload`'s TASK-NEUTRAL sibling (C12-P / B7).
+
+    The legacy resolver above prices a TIDMAD ``SampleSet``: it needs a PSD
+    segment length, a segments-per-file decomposition and a ``seg_size`` to
+    divide by. A composed task that declares no physical partition geometry
+    has none of those, so it has no legacy sample set at all — and every
+    operator bound expressed in optimizer steps was therefore inert for it.
+
+    **The cardinality comes from the frozen four-method contract, not from a
+    new one.** ``TaskDataPath.training_dataset`` is the training sibling of
+    the ``validation_dataset`` leg already in production at
+    ``scope_artifact.validation_rows_argv``, and ``len()`` on the torch
+    ``Dataset`` the ``DataLoader`` already requires to be ``Sized`` is the
+    same instrument that leg uses. Nothing is added to ``TaskDataPath`` and
+    nothing is added to the optional ``TaskScopeCapability`` sibling: the
+    implementation that BUILT the scope is the one asked how big it is.
+
+    **The arithmetic mirrors the resolver above**, one term at a time::
+
+        legacy   samples_per_epoch = n_psd_kept × ml_per_psd
+        generic  samples_per_epoch = len(training_dataset(scope, params))
+
+        both     steps_per_epoch   = samples_per_epoch // batch_size
+        both     total_steps       = steps_per_epoch × epochs
+
+    ``train_portion`` and ``max_samples`` are NOT applied here. They travel
+    on :class:`EpochSamplingParams` into the implementation's own
+    materialization, exactly as they do for the epoch the trainer will build,
+    so the count is the executed one rather than a framework re-derivation of
+    it. Re-applying them here would price the subsample twice.
+
+    **What this costs** — the same trade ``validation_rows_argv`` documents:
+    the parent materializes the dataset object, so an implementation whose
+    construction touches its rows pays that I/O here. That is the price of
+    asking the other side of the boundary instead of guessing.
+
+    Args:
+        training_scope: the task's OPAQUE training scope for this attempt.
+        data_dir: the run's resolved physical data root.
+        batch_size: the loader's batch size (``drop_last=True`` floor).
+        train_portion: per-epoch subsample fraction, or ``None``.
+        epochs: the epoch count the attempt will run.
+        max_samples: the validation-envelope row ceiling, or ``None``.
+
+    Returns:
+        The optimizer-step workload, in the same shape and unit as
+        :func:`resolve_training_workload`.
+
+    Raises:
+        ValueError: ``batch_size``/``epochs`` are out of range, or no task
+            data path is bound — a scope built by an implementation cannot be
+            measured without that implementation.
+    """
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be positive; got {batch_size!r}.")
+    if epochs < 0:
+        raise ValueError(f"epochs must be non-negative; got {epochs!r}.")
+
+    from execute_tools.task_data_path import (
+        EpochSamplingParams,
+        active_task_data_path,
+    )
+
+    # `active_task_data_path`, never `resolve_bound_task_data_path`: the
+    # legacy fallback would hand back the TIDMAD compatibility implementation
+    # and price a contrast task's scope against TIDMAD's data path. The
+    # caller establishes PRESENCE (it holds the acquired scope); this asks
+    # only for the implementation that presence implies.
+    bound = active_task_data_path()
+    if bound is None:
+        raise ValueError(
+            "a task-owned training scope was supplied but no task data path is "
+            "bound, so its row count cannot be declared by the implementation "
+            "that built it."
+        )
+    dataset = bound.training_dataset(
+        training_scope,
+        EpochSamplingParams(
+            data_dir=data_dir,
+            train_portion=train_portion,
+            max_samples=max_samples,
+        ),
+    )
+    samples_per_epoch = len(dataset)  # type: ignore[arg-type]
+    steps_per_epoch = samples_per_epoch // batch_size
+    total_steps = steps_per_epoch * epochs
+
+    return ResolvedPhaseWorkload(
+        phase="training",
+        unit="optimizer_step",
+        unit_count=total_steps,
+        detail={
+            "source": "task_training_dataset",
+            "samples_per_epoch": samples_per_epoch,
+            "steps_per_epoch": steps_per_epoch,
+            "epochs": epochs,
+            "batch_size": batch_size,
+            "train_portion": train_portion,
+            "max_samples": max_samples,
+        },
+    )
+
+
 def resolve_inference_workload(
     sample_set: SampleSet,
     *,

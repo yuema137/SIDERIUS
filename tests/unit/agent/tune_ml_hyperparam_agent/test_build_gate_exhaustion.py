@@ -19,6 +19,10 @@ from nodes.ml_hyperparameter_tune_agent import (
     _build_gate_exhaustion,
     _render_gate_exhaustion_summary,
 )
+from nodes.ml_hyperparameter_tune_agent.feedback import (
+    _attempts_that_trained,
+    _render_gate_exhaustion_log_line,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers — concise factories so individual test bodies stay tight.
@@ -308,6 +312,7 @@ class TestRenderGateExhaustionSummary:
             baseline_time_factor=None,
             worst_vram_factor=1.5,
             worst_time_factor=None,
+            trained=0,
         )
         assert "baseline estimate not recorded" in msg
         assert "1.50×" in msg
@@ -370,9 +375,13 @@ class TestBuildGateExhaustionTriggerBTruthTable:
             completed_rounds=0,
         )
         assert info is not None
-        # Trigger A summary, NOT Trigger B's "Model too large" lead.
+        # Trigger A summary, NOT Trigger B's "Model too large" lead. The
+        # positive marker was "All 3 attempt" until F-C12P-OBS-1 retired that
+        # false claim; "Of N attempt(s)," is Trigger A's lead and Trigger B
+        # opens with "Model too large" / "Burst breakdown:" instead, so the
+        # renderer-discrimination intent is unchanged.
         assert "Model too large" not in info.summary_message
-        assert "All 3 attempt" in info.summary_message
+        assert "Of 3 attempt(s)," in info.summary_message
 
     def test_burst_below_50pct_gate_skip_does_not_fire(self):
         """Burst with 1 gate-skip + 2 schema-violations (33%) does not
@@ -497,3 +506,144 @@ class TestBuildGateExhaustionTriggerBPopulated:
         )
         assert info is not None
         assert "VRAM/time gate" in info.summary_message
+
+
+# ---------------------------------------------------------------------------
+# F-C12P-OBS-1 — the trigger predicate is "no SUCCESSFUL outcome", NOT
+# "training never ran". Witness: run ``c12p_j_smoke_a5`` (7 records, 5
+# ``skipped_time_risk``, 2 ``failed_mode_collapse`` that BOTH carried real
+# training results) emitted
+#
+#   [gate-exhaustion] iteration ended without ever training; 0 VRAM-gated,
+#   5 time-gated, 2 other failures. Surfacing to next proposer.
+#
+# and shipped the LLM-facing summary "All 7 attempt(s) (5 time-gated, 2 other
+# failures) were rejected by the pre-flight time gate." Both denied training
+# that demonstrably happened, and the summary reaches the next proposal
+# agent's prompt via ``_format_recent_gate_exhaustions_block``.
+# ---------------------------------------------------------------------------
+
+
+def _trained_then_collapsed(final_loss=2.409924192428589, time_estimate_minutes=36.6):
+    """An attempt that genuinely trained one epoch and then failed HealthGate.
+
+    Shaped after ``wavenet_c12p_j_smoke_a5_agent_006``.
+    """
+    return {
+        "exp_id": "trained_then_collapsed",
+        "status": "failed_mode_collapse",
+        "final_loss": final_loss,
+        "training_history": {
+            "epochs_completed": 1,
+            "train_objective": [final_loss],
+        },
+        "memory": {
+            "time_estimate_minutes": time_estimate_minutes,
+            "time_budget_minutes": 20.0,
+            "time_mode": "formal",
+        },
+    }
+
+
+def _legacy_baseline_collapsed(final_loss=1.4699515031576156):
+    """A pre-07a producer: real training, real ``final_loss``, NO history.
+
+    Shaped after ``baseline_wavenet_1787612028`` in the witness run.
+    """
+    return {
+        "exp_id": "baseline",
+        "status": "failed_mode_collapse",
+        "final_loss": final_loss,
+        "memory": {},
+    }
+
+
+def _witness_records():
+    """The ``c12p_j_smoke_a5`` record set: 2 trained, 5 time-gated, 0 success."""
+    return [
+        _legacy_baseline_collapsed(),
+        *[_time_gated(time_estimate_minutes=36.6) for _ in range(5)],
+        _trained_then_collapsed(),
+    ]
+
+
+class TestGateExhaustionMustNotDenyTrainingThatHappened:
+    """Defect only these catch: the gate-exhaustion feedback asserting that
+    training never occurred, on an iteration where an attempt trained and
+    then failed. Pydantic/pyright/ruff cannot see prose; every other test in
+    this file feeds records that genuinely never trained, so the false claim
+    is true-by-accident there and no assertion fails.
+
+    How they fail when the behaviour breaks: re-derive the prose from
+    ``status != "success"`` alone and the trained-count sentence disappears
+    (or reads ``0``), and the ``All N attempt(s) ... were rejected`` /
+    ``reached training`` assertions below go RED on the witness fixture.
+    """
+
+    def test_summary_must_not_claim_every_attempt_was_gate_rejected(self):
+        info = _build_gate_exhaustion(
+            records=_witness_records(),
+            active_mode="formal",
+            vram_budget_gb=None,
+            time_budget_minutes=20.0,
+        )
+        assert info is not None
+        msg = info.summary_message
+        # The false claim, verbatim from the witness run.
+        assert "All 7 attempt(s) (5 time-gated, 2 other failures) were rejected" not in msg
+        # The true one, hardcoded — 2 of the 7 records carry training results.
+        assert "2 attempt(s) did reach training and recorded training results before failing" in msg
+        assert "No attempt reached the training stage." not in msg
+        # The predicate that actually fired is still reported.
+        assert "No attempt produced a successful training outcome." in msg
+
+    def test_genuine_zero_training_case_still_reports_no_training(self):
+        """Preservation: fixing the trained-but-failed case must not make the
+        honest zero-training case say something else."""
+        info = _build_gate_exhaustion(
+            records=[_time_gated(), _time_gated(), _schema_violation()],
+            active_mode="trial",
+            vram_budget_gb=4.0,
+            time_budget_minutes=20.0,
+        )
+        assert info is not None
+        msg = info.summary_message
+        assert "No attempt reached the training stage." in msg
+        assert "did reach training" not in msg
+
+    def test_log_line_states_how_many_attempts_reached_training(self):
+        """The operator-facing emission site (records.py) rendered through its
+        own boundary, so the claim is testable without the orchestrator."""
+        records = _witness_records()
+        info = _build_gate_exhaustion(
+            records=records,
+            active_mode="formal",
+            vram_budget_gb=None,
+            time_budget_minutes=20.0,
+        )
+        assert info is not None
+        line = _render_gate_exhaustion_log_line(info, records)
+        assert line == (
+            "[gate-exhaustion] surfacing gate-exhaustion report to next proposer: "
+            "2 of 7 attempt(s) in this iteration reached training; report covers "
+            "7 attempt(s) — 0 VRAM-gated, 5 time-gated, 2 other failures."
+        )
+        assert "without ever training" not in line
+
+    def test_trained_count_reads_the_record_authorities(self):
+        """``epochs_completed > 0`` (07a typed payload) OR a recorded
+        ``final_loss`` (legacy/baseline producer). A record whose training
+        crashed before finishing an epoch has a history object but zero
+        epochs — counting truthiness of ``training_history`` instead would
+        wrongly call that "trained"."""
+        crashed_before_first_epoch = {
+            "exp_id": "crashed",
+            "status": "error_training",
+            "final_loss": None,
+            "training_history": {"epochs_completed": 0, "train_objective": []},
+            "memory": {},
+        }
+        assert _attempts_that_trained([_trained_then_collapsed()]) == 1
+        assert _attempts_that_trained([_legacy_baseline_collapsed()]) == 1
+        assert _attempts_that_trained([crashed_before_first_epoch]) == 0
+        assert _attempts_that_trained([_time_gated(), _schema_violation(), _error()]) == 0

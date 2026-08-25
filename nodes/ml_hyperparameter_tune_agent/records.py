@@ -63,6 +63,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
 from nodes.ml_hyperparameter_tune_agent.feedback import (
     _build_gate_exhaustion,
     _build_trial_validity_feedback,
+    _render_gate_exhaustion_log_line,
 )
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _compute_termination_state,
@@ -916,13 +917,11 @@ def finalize_run_output(
         )
 
     if gate_exhaustion is not None:
-        print(
-            f"[gate-exhaustion] iteration ended without ever training; "
-            f"{gate_exhaustion.vram_gated_attempts} VRAM-gated, "
-            f"{gate_exhaustion.time_gated_attempts} time-gated, "
-            f"{gate_exhaustion.other_failure_attempts} other failures. "
-            f"Surfacing to next proposer."
-        )
+        # F-C12P-OBS-1: the trigger predicate is "no record reached
+        # status == 'success'", not "training never ran" — and Trigger B
+        # requires a successful round outright. The line is rendered by the
+        # feedback module so the claim is testable on its own.
+        print(_render_gate_exhaustion_log_line(gate_exhaustion, all_records))
 
     agent_output_dict = {
         "run_name": run_name,

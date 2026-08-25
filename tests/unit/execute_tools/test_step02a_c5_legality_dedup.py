@@ -14,6 +14,15 @@ of which already read the authority (``agent/prompts.py:746``,
 ``agent/schemas/proposal.py:1127``). Those are deliberately UNTOUCHED —
 this module asserts they stay that way, because "de-duplicate" must not
 turn into "rewrite the two sites that were already correct".
+
+**C12-P / B3 correction.** "Already correct" was scoped to the divisor-list
+AUTHORITY hop, and this module's assertion could never have meant more than
+that: it matches the symbol ``valid_segmentation_sizes()``, which says
+nothing about WHICH dataset object is asked. ``agent/schemas/proposal.py``
+was in fact asking the module-scope TIDMAD singleton for every task, and
+this module was green throughout. The symbol assertion is KEPT (it still
+guards re-inlining) and a companion assertion now covers the applicability
+half — see ``TestLegalityRuleIsNotRestated``.
 """
 
 from __future__ import annotations
@@ -86,9 +95,43 @@ class TestLegalityRuleIsNotRestated:
 
     def test_the_two_already_correct_sites_still_read_the_authority(self):
         """§6.5 scope: ``agent/prompts.py`` and ``agent/schemas/proposal.py``
-        were already correct and are explicitly out of C5's diff."""
+        read the divisor-list AUTHORITY rather than re-deriving the rule.
+
+        Defect caught: a future author re-inlines ``range(100, psd + 1)`` at
+        either site, restoring the drift risk and the 10M-iteration loop that
+        C5 removed. It fails by the substring being absent.
+
+        **Scope correction, C12-P / B3.** This assertion names a SYMBOL, and a
+        symbol cannot say WHICH dataset object is asked for the divisor list.
+        It stayed green while ``agent/schemas/proposal.py`` applied TIDMAD's
+        ``psd_segment_length`` to every task — so its old docstring claim that
+        the site "was already correct" was true only of the authority hop, and
+        false of the applicability question. The companion test below is what
+        now guards the half this one is structurally blind to; neither replaces
+        the other.
+        """
         for rel in ("agent/prompts.py", "agent/schemas/proposal.py"):
             assert "valid_segmentation_sizes()" in (REPO_ROOT / rel).read_text(), rel
+
+    def test_the_proposal_schema_asks_the_resolved_profile_not_the_singleton(self):
+        """C12-P / B3. The proposer's legality site must consult the RUN's
+        profile, never the module-scope ``TIDMAD`` singleton.
+
+        Defect caught (and this test alone catches it, because the sibling
+        above matches on a symbol that is present either way): reintroducing
+        ``from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG``
+        at module scope in ``agent/schemas/proposal.py`` and reading its
+        ``psd_segment_length`` — which is what made a composed Pets run unable
+        to emit its own declared ``segmentation_size=144``.
+
+        It fails on regression by the banned import re-appearing in the source,
+        or by the resolution seam disappearing from it.
+        """
+        source = (REPO_ROOT / "agent/schemas/proposal.py").read_text()
+        assert "TIDMAD as DATASET_CONFIG" not in source
+        assert "DATASET_CONFIG" not in source
+        assert "resolve_dataset_profile" in source
+        assert "declares_tidmad_topology" in source
 
 
 # ---------------------------------------------------------------------------

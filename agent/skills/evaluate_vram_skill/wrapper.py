@@ -75,6 +75,7 @@ from agent.skills.model_io_probe_skill import (
     output_without_class_axis,
     realize_shape,
 )
+from agent.skills.training_skill.estimator import resolve_model_field
 from core.hardware_context import HardwareContext, discover
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import (
@@ -691,7 +692,23 @@ def run_skill(sandbox, **kwargs):
     # can route custom-loss target dtype via PLUGIN_LOSS_TARGET_DTYPE.
     loss_name = loss_cfg.get("loss_name")
     batch_size = int(train_cfg.get("batch_size", 1))
-    seg_size = int(model_cfg.get("segmentation_size", 40000))
+    # C12-P / B2 — price the candidate from the DECLARATION, not a literal.
+    #
+    # This read was `model_cfg.get("segmentation_size", 40000)`: a raw dict
+    # lookup with TIDMAD's scale as the fallback, while `_build_model` above
+    # constructs the very same candidate through its config CLASS, whose pack
+    # defaults are 144 (Pets) and 128 (DAVIS). The two halves of one function
+    # therefore disagreed, silently, and `seg_size` is the SOLE operand of the
+    # compute-intensity gate below — so any planned `batch_size >= 21` refused
+    # a foreign candidate and advised the LLM to "reduce segmentation_size", a
+    # knob both contrast packs declare as inert engine residue.
+    #
+    # `resolve_model_field` is the existing single authority (supplied value >
+    # config-class default > safety margin) and four sibling estimators already
+    # use it; this was the last holdout. The margin keeps the previous last
+    # resort, so behaviour is unchanged whenever the key is present — which is
+    # every production plan measured across 1,844 persisted planner configs.
+    seg_size = resolve_model_field(model_type, model_cfg, "segmentation_size", safety_margin=40000)
     optimizer = str(train_cfg.get("optimizer") or _DEFAULT_OPTIMIZER).lower()
 
     print(

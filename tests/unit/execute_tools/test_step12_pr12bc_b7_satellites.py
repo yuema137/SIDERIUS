@@ -345,25 +345,95 @@ class TestTheMeasurementPathSkipsRatherThanGuesses:
     design's own B0 edge-case note for this satellite.
     """
 
+    #: The named reasons the measurement path may decline with, ACROSS the
+    #: C12-P vocabulary change. C12-P's frozen taxonomy renamed the
+    #: semantic-non-membership refusal to "NOT APPLICABLE" (absent =>
+    #: NOT_APPLICABLE; inside-but-malformed => loud ERROR). Both spellings are
+    #: accepted because what this guard protects is that the path declines with
+    #: a NAMED REASON -- not which English sentence it uses.
+    _NAMED_REFUSALS = ("NOT APPLICABLE", "measurement SKIPPED")
+
     def test_it_guards_the_tidmad_geometry_before_using_it(self):
+        """DEFECT THIS TEST ALONE CATCHES
+            The measurement path timing a run against TIDMAD's geometry when
+            the run's task declares different geometry -- returning a confident
+            wrong number instead of declining.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
+            The topology guard, the error handling, or the named reason
+            disappears from the measurement block.
+
+        C12-P / F-C12P-12BC-1, SECOND SITE. This pinned the sentence
+        ``"measurement SKIPPED"``. C12-P renamed that reason to
+        ``NOT APPLICABLE`` under the frozen taxonomy, which turned this RED for
+        a vocabulary change while the guarded behaviour was intact. The
+        sentence was never the safety control; declining with a named reason
+        is. Same repair as the sibling guard in
+        ``tests/unit/guardrails/test_step12_pr12bc_f_checkpoint.py``.
+        """
         src = (REPO_ROOT / "agent" / "skills" / "evaluate_time_skill" / "wrapper.py").read_text(
             encoding="utf-8"
         )
-        block = src[src.index("required_segs = (n_warmup_batches") - 2000 :]
-        assert "tidmad_topology(profile)" in block
-        assert "except ValueError as exc:" in block
-        assert "measurement SKIPPED" in block
+
+        # ORDERING, not a fixed-size window. This used to slice 2000 chars
+        # backwards from the geometry USE and assert three strings landed
+        # inside it. C12-P's B1 fix HOISTED the membership refusal above the
+        # broad `except Exception` -- a deliberate structural change, so that a
+        # malformed TIDMAD declaration stays loud instead of being swallowed --
+        # which moved the refusal out of that window while making the guard
+        # STRONGER. A byte-distance is not the invariant; "the guard precedes
+        # the use" is.
+        use = src.index("required_segs = (n_warmup_batches")
+        membership = src.index("declares_tidmad_topology(profile)")
+        assert membership < use, (
+            "the topology membership test no longer precedes the geometry it "
+            "protects, so the measurement can time a run against TIDMAD's "
+            "geometry when the task declares different geometry."
+        )
+
+        assert "tidmad_topology(profile)" in src[:use]
+        assert "except ValueError as exc:" in src
+
+        refusal_positions = [src.index(r) for r in self._NAMED_REFUSALS if r in src]
+        assert refusal_positions, (
+            "the measurement path no longer declines with a NAMED reason. It "
+            "must say that it is not measuring and why; a silent early return "
+            "is the exact harm this guard exists to prevent."
+        )
+        assert min(refusal_positions) < use, (
+            "the named refusal follows the geometry use instead of preceding "
+            "it, so the wrong number is computed before anything declines."
+        )
 
     def test_the_skip_returns_the_declared_empty_shape(self):
         """Both early returns must obey ``tuple[float | None, dict]`` — a bare
         ``None`` would crash the caller's unpacking, which the module's own
         docstring already warns about.
+
+        DEFECT THIS TEST ALONE CATCHES
+            A refusal that returns a bare ``None``, crashing the caller's
+            two-value unpacking at the moment the run declines rather than at
+            the moment it is written.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR REGRESSES
+            The declared empty shape stops following the named refusal.
+
+        C12-P: anchored on whichever named refusal is present rather than on
+        one hardcoded sentence, for the reason given on the test above.
         """
         src = (REPO_ROOT / "agent" / "skills" / "evaluate_time_skill" / "wrapper.py").read_text(
             encoding="utf-8"
         )
-        i = src.index("measurement SKIPPED")
-        assert "return None, empty_breakdown" in src[i : i + 200]
+        anchors = [src.index(r) for r in self._NAMED_REFUSALS if r in src]
+        assert anchors, (
+            "the measurement path declines with no named reason at all, so "
+            "there is nothing to anchor the return-shape check on."
+        )
+        assert any("return None, empty_breakdown" in src[i : i + 200] for i in anchors), (
+            "a named refusal is not followed by the declared empty shape. A "
+            "bare `None` would crash the caller's `tuple[float | None, dict]` "
+            "unpacking."
+        )
 
     def test_regime_A_still_builds_its_own_scope(self):
         src = (REPO_ROOT / "agent" / "skills" / "evaluate_time_skill" / "wrapper.py").read_text(

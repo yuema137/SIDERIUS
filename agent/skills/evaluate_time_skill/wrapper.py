@@ -66,6 +66,7 @@ from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
 from execute_tools.dataset_config import (
     DatasetProfile,
+    declares_tidmad_topology,
     tidmad_topology,
 )
 
@@ -333,6 +334,37 @@ def _measure_ms_per_step(
         print("    [warmup skipped] CUDA not available; falling back to static formula.")
         return None, empty_breakdown
 
+    # ── C12-P — the DECLARATION boundary, deliberately OUTSIDE the broad
+    # operational fallback below. Two different questions, two different
+    # answers, and the ordering is what keeps them apart.
+    #
+    # 1. MEMBERSHIP (`declares_tidmad_topology`) is an explicit decision, never
+    #    a caught exception. `tidmad_topology` raises for TWO reasons —
+    #    sections ABSENT and sections PRESENT-BUT-MALFORMED — so the old
+    #    `try: tidmad_topology(...) / except ValueError: SKIP` claimed a
+    #    membership conclusion ("not TIDMAD") from an exception that also means
+    #    "your TIDMAD declaration is broken".
+    #
+    # 2. DECODE runs here, before the `try`, so a malformed declaration
+    #    PROPAGATES. Inside the try it was swallowed by the broad
+    #    `except Exception` at the bottom, which degraded a semantically
+    #    invalid declaration to a static-formula estimate — logged, but not
+    #    loud, and the run continued on a number derived from a declaration
+    #    nobody had validated.
+    #
+    # The broad catch keeps its job: an UNKNOWN OPERATIONAL failure (dataloader,
+    # CUDA, a codec, a missing shard) still degrades conservatively. What may no
+    # longer reach it is a KNOWN semantic invalidity, which is a configuration
+    # defect the operator must fix rather than a measurement that went wrong.
+    if not declares_tidmad_topology(profile):
+        print(
+            "    [measurement] inference-time measurement NOT APPLICABLE: this "
+            "task declares no TIDMAD topology, so there is no psd_segment_length "
+            "to measure against."
+        )
+        return None, empty_breakdown
+    _topology = tidmad_topology(profile)
+
     try:
         from torch.utils.data import DataLoader
 
@@ -380,11 +412,6 @@ def _measure_ms_per_step(
         # reason: the caller already handles a `None` estimate, whereas
         # measuring against somebody else's geometry would return a confident
         # wrong number.
-        try:
-            _topology = tidmad_topology(profile)
-        except ValueError as exc:
-            print(f"[measurement] inference-time measurement SKIPPED — {exc}")
-            return None, empty_breakdown
         ml_per_psd = _topology.dataset.psd_segment_length // seg_size
         required_segs = (n_warmup_batches + n_timed_batches) * batch_size
         n_psd_needed = max(1, math.ceil(required_segs / max(ml_per_psd, 1)))

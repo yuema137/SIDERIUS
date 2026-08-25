@@ -85,6 +85,57 @@ def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
     return plan
 
 
+def _resolve_declared_segmentation_size(model_type: str, model_cfg: dict) -> int | None:
+    """The ``segmentation_size`` the run WILL ACTUALLY USE, or ``None``.
+
+    C12-P / B11 + F-C12P-B11-2. Extracted rather than inlined: ``prepare_attempt``
+    is a phase orchestrator under the decomposition rule, and this is a decision
+    with its own contract, its own failure mode and its own tests.
+
+    THREE REGIMES, and the middle one is the whole point::
+
+        plan states it              -> that value
+        plan omits, model declares  -> the model's declared default
+        nothing declares it         -> None, and the TASK refuses by name
+
+    ``.get("segmentation_size", 10000)`` used to check a number nothing in the
+    run used: an omitted key makes the model be CONSTRUCTED at its config
+    class's declared default (``config_cls(**model_config)`` -- wavenet 40000,
+    transformer 20000). Under TIDMAD both divide ``psd_segment_length`` evenly,
+    so the check passed and the disagreement stayed silent.
+
+    B11's first repair dropped the literal and let an omitted key stay omitted
+    so the task could refuse in its own words. The refusal is right and is
+    preserved. Dropping the literal with NOTHING in its place was not: the key
+    is legitimately optional (``agent/schemas/proposal.py:1247`` -- "some
+    architectures don't have one"), so every run whose plan omitted it died at
+    scope construction, on every attempt, and never reached the reflector.
+    **A proposal omitting the key does not mean the model declares no
+    geometry.**
+
+    So resolve through the ONE authority. This is not the framework inventing a
+    task value -- it reads the MODEL's own declaration, in the exact order the
+    model itself resolves it (supplied -> config-class default -> margin).
+
+    ``safety_margin=0`` is an internal "nothing declares this" sentinel,
+    unreachable as a real segmentation size; ``or None`` turns it back into the
+    absence that keeps the task's refusal reachable. The sentinel is proven not
+    to escape by ``tests/unit/core/test_c12p_b11_2_zero_sentinel_never_escapes.py``.
+
+    Args:
+        model_type: the EFFECTIVE model type, i.e. after the ``force_model``
+            override. Passing the plan's own ``model_type`` when an override is
+            set would ask the wrong config class.
+        model_cfg: the plan's model config; read, never mutated.
+
+    Returns:
+        The resolved size, or ``None`` when no authority declares one.
+    """
+    from agent.skills.training_skill.estimator import resolve_model_field
+
+    return resolve_model_field(model_type, model_cfg, "segmentation_size", safety_margin=0) or None
+
+
 def _psd_segment_counts(
     train_sample_set: dict | None,
     eval_sample_set: dict | None,
@@ -484,10 +535,18 @@ def prepare_attempt(
     # a 37-way image classifier and a frame-window predictor do not have. The
     # D-BC-8 precedent — the partition bound is generic identity and is always
     # checked; the per-partition bound is task topology and is skipped.
-    if topology_facts.declares_physical_geometry:
+    # The effective model type (the `force_model` override), resolved ONCE and
+    # early. It used to be computed ~120 lines below, next to `exp_id`; hoisting
+    # a pure expression over two values in scope since the unpack changes no
+    # behaviour, and it is what lets the resolution below ask the RIGHT config
+    # class. See `_resolve_declared_segmentation_size`.
+    model_type = model_type_setting if model_type_setting != "auto" else plan.model_type
+
+    declared_segmentation_size = _resolve_declared_segmentation_size(model_type, plan.model_cfg)
+    if topology_facts.declares_physical_geometry and declared_segmentation_size is not None:
         _validate_data_config(
             trial_config,
-            plan.model_cfg.get("segmentation_size", 10000),
+            int(declared_segmentation_size),
             topology_facts.physical_dataset,
         )
 
@@ -570,7 +629,22 @@ def prepare_attempt(
         target_files=trial_config.target_files,
         subset=agent_input.data_scope,
         validation_max_samples=agent_input.validation_max_samples,
-        task_parameters={"seg_size": plan.model_cfg.get("segmentation_size", 10000)},
+        # C12-P / B11. The DECLARED value travels; nothing becomes `10000`.
+        # `task_parameters` is OPAQUE to the framework, and its only production
+        # reader (`execute_tools/tidmad_data_path.py:383-395`) explicitly
+        # refuses to guess this key — "the framework has no vocabulary for it,
+        # so it must be declared by the caller rather than guessed here". The
+        # literal defeated that refusal from outside, which is why it had never
+        # once been reached; it is reachable now, and a model that declares
+        # nothing still arrives here as `None` and is still refused by name.
+        #
+        # What travels is resolved above from the MODEL's declaration, not
+        # authored by the framework. The distinction B11 drew — do not put a
+        # framework-invented number into a channel the framework does not
+        # speak — is intact: this number is the task's own, read through the
+        # single authority, and it is the same one the model is constructed
+        # with.
+        task_parameters={"seg_size": declared_segmentation_size},
     )
 
     # Segment counts for records and reflector context. EXTRACTED (§E.2):
@@ -580,10 +654,9 @@ def prepare_attempt(
         train_sample_set, eval_sample_set, topology_facts
     )
 
-    # When force_model is set, override the LLM's model_type choice.
-    # (C7d: ruff SIM108 collapses this to a ternary now that the block sits at
-    # function level; the value is identical.)
-    model_type = model_type_setting if model_type_setting != "auto" else plan.model_type
+    # `model_type` (the force_model override) is resolved ONCE, above, before
+    # the first site that needs it. It used to be computed here; the assignment
+    # was hoisted rather than duplicated, so there is still exactly one.
     exp_id = f"{model_type}_{run_name}_{total_attempts:03d}"
     hypothesis = plan.hypothesis
 

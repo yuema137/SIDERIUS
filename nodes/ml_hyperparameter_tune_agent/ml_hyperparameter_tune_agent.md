@@ -304,7 +304,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `best_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the best experiment. Enriches `best_file_vector` with raw_baseline + ground_truth columns. |
 | `formal_score_table` | `ScoreComparisonTable \| None` | Score comparison table from the most recent successful formal (full 20-file) round. Distinct from `best_score_table` because the best run might be a trial, not the formal canonical. |
 | `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, OOM-skipped, and (V20 PR B) admission-refused rounds — the last are phases that never started, so they carry no score and are not candidate failures. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
-| `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated only when the iteration ended without ever training successfully AND ≥1 attempt was rejected by the pre-flight resource gate. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. |
+| `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated when **either** trigger fires. **Trigger A**: no attempt reached `status == "success"` AND ≥1 attempt was rejected by the pre-flight resource gate. **Trigger B**: the outer loop aborted on the consecutive-failure brake after `completed_rounds > 0` — so under Trigger B earlier rounds **did** succeed. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. C12-P: the rendered `summary_message` and log line now state how many attempts **reached training**, because Trigger A's predicate ("no *successful* outcome") was being rendered as "never trained" — false for an attempt that trained and then failed HealthGate, and false unconditionally under Trigger B. |
 | `trial_validity_feedback` | `TrialValidityFeedback \| None` | **V20 PR D (D-C6)** — populated only when the iteration ran trial rounds but produced NO HealthGate-valid winner. Reaches the next proposer via `ProposalInput.recent_trial_validity`. Deliberately SEPARATE from `gate_exhaustion`, which reports BUDGET exhaustion: these trials ran and succeeded and then failed their scientific gates, so `gate_exhaustion`'s triggers never fire for them, and the two call for opposite responses (propose lighter vs propose something that does not collapse). `None` whenever any trial is valid. |
 | `formal_comparison_reference_source` | `str \| None` | **V20 PR D (D-C3)** — provenance of `formal_reference_score`: `restored_valid_formal_incumbent`, `negative_infinity_bootstrap` (no incumbent existed; the reference resolved to `-inf` internally) or `gates_disabled`. Read it WITH the reference: `null` alone is ambiguous across all three. `-inf` is never serialised. |
 | `scientific_authority` (per record) | `dict \| None` | **V20 PR D (D-C2b/D-C4)** — on FORMAL records only, the authority verdict with its three facts beside its conclusions, so it is recomputable and therefore tamper-EVIDENT. Consumers must re-derive via `resolve_record_authority()` rather than trusting the stored conclusions. |
@@ -923,6 +923,82 @@ a second place the rule could drift from the authority. It now calls
 derivations produce the identical 36-entry list, so the error message —
 which prints the legal values — is byte-identical. Pinned by
 `tests/unit/execute_tools/test_step02a_c5_legality_dedup.py`.
+
+### `segmentation_size` is the PLAN's, never the framework's (C12-P / B11)
+
+`prepare_attempt` used to fill an absent `model_config.segmentation_size`
+with a literal `10000` at two sites. It no longer fills it at all:
+
+- **`_validate_data_config`** is given the size the plan STATED. A plan that
+  states none has nothing here to check, and the call is skipped. Previously
+  the geometry rule was applied to `10000` while the model was CONSTRUCTED at
+  its config class's declared default (`config_cls(**model_config)` — wavenet
+  40000, transformer 20000). Under TIDMAD both divide `psd_segment_length`
+  evenly, so the check passed and the disagreement was silent.
+- **`ScopeBuildRequest.task_parameters["seg_size"]`** carries the plan's
+  stated value or `None`. That channel is OPAQUE to the framework, and
+  `execute_tools/tidmad_data_path.py` explicitly REFUSES to guess this key;
+  the literal defeated that refusal from outside, so the refusal was
+  unreachable. It is reachable now.
+
+**Behaviour change, not a preservation.** A plan that STATES the field — every
+production plan — is unaffected. A legacy TIDMAD plan that OMITS it used to
+scope its data at 10000 while training at 40000; it now fails loudly with the
+task's own message. Falsifiers:
+`tests/unit/nodes/ml_hyperparameter_tune_agent/test_c12p_b11_composed_seg_size_authoring.py`.
+
+The paired probe-provenance sites moved with it: `runtime.py`'s `ProbeRequest`
+and `core/runtime_control/bootstrap.py` recorded `segment_length: 0` for an
+omitted key while `production_probe_executors` ran the probe at the declared
+default. Both now resolve through `resolve_model_field`, because a recorded
+`0` drags `ApplicabilityEnvelope`'s `observed_min` to zero and grants far
+smaller candidates an `"interpolation"` label no probe ever earned.
+
+### `--max_steps_per_attempt` now applies to a composed run too (C12-P / B7)
+
+**No CLI argument, type or default changed.** `--max_steps_per_attempt` is
+still `type=int, default=150_000` and `0 disables` (`cli.py:383-390`;
+`input_dict["max_steps_per_attempt"] = args.max_steps_per_attempt or None`,
+`cli.py:633`), and the schema field is still `int | None`, `default=None`,
+`gt=0`. `--min_formal_batch_size` (`default=4`) and `--allow_extreme_steps`
+are untouched — the batch floor reads `batch_size`, which is always present,
+and was never part of this defect.
+
+What changed is **where the bound can be evaluated**. The §5 step count came
+only from the legacy TIDMAD `SampleSet`, and `_resolve_guardrail_steps`
+returned `None` the moment there was none. PR-12d's planning seam B made that
+state normal: a composed task that declares no physical partition geometry
+builds no `SampleSet` at all (`planning.py:524-565`). `_evaluate_step_guardrails`
+then short-circuits on the `None`, so the bound decided nothing — and it did
+so **silently**, because the early return is taken before the `except` that
+would have printed a line. An operator hard bound was inert for a whole class
+of runs with zero output.
+
+The count is now derived from the attempt's **task-owned** scope:
+
+```text
+run_admission_preflight   passes prepared.task_scopes + bindings.time_data_dir
+                          (applicability decided by the layer holding them)
+_resolve_guardrail_steps  no legacy SampleSet -> the task-scope leg
+                          no task scope either -> None, legacy regime unchanged
+resolve_task_scope_       len(TaskDataPath.training_dataset(scope, params))
+  training_workload       steps = (len // batch_size) * epochs
+```
+
+`TaskDataPath.training_dataset` is one of the four FROZEN contract methods —
+the training sibling of the `validation_dataset` leg already in production at
+`execute_tools/scope_artifact.py::validation_rows_argv`. **No new capability,
+no new protocol method, no task name**, and nothing TIDMAD-physical on this
+leg: unlike the legacy resolver it needs no `segmentation_size`, so it does
+not touch the plan-owned field the section above governs. `train_portion` and
+`max_samples` travel on `EpochSamplingParams` into the implementation's own
+materialization rather than being re-applied by the framework.
+
+Both legs stay **best-effort** — an unresolvable count returns `None` and
+leaves the primary runtime criterion to protect the attempt — but the
+task-scope leg now PRINTS `[guardrails] task-owned step resolution failed
+(non-fatal): …` instead of returning in silence. Falsifiers:
+`tests/unit/nodes/ml_hyperparameter_tune_agent/test_c12p_b7_composed_step_guardrail.py`.
 
 ### Which profile the tuner asks (PR 05a, 2026-08)
 
