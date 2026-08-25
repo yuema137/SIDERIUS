@@ -20,6 +20,7 @@ prose, the undeclared two-output-form catalogue, and
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
 import pytest
 
@@ -335,30 +336,79 @@ class TestSecondStepOneSurface:
             )
         assert derived_block in _render_proposing_stage(rung)
 
-    def test_tier_ii_table_literals_deliberately_survive_the_contrast(self):
-        """Scope honesty, UPDATED where a later step actually did the work.
+    #: The tier-(ii) shape cells' STATIC post-P1-B wording, hardcoded. Kept
+    #: here rather than imported from the template-layer pin so that a single
+    #: edit cannot move both the expectation and the thing it constrains.
+    STATIC_SHAPE_CELLS: ClassVar[tuple[str, ...]] = (
+        "a per-class score axis (exact shape: forward contract below)",
+        "continuous values (exact shape: forward contract below)",
+    )
 
-        PR 01a's frozen disposition was that the literal shape column AND the
-        "256 amplitude bins" sentence both remain under every rung — "not an
-        oversight to be cleaned up here". Step 12 / PR-12a C7-3 (D-12a-6)
-        cleaned up exactly one of the two ON PURPOSE, so this pin now records
-        which:
+    #: What the same two cells said before Step 12 / C12-P-P's P1-B —
+    #: TIDMAD's shapes, shown to every task. IMMUTABLE historical record.
+    PRE_P1B_SHAPE_CELLS: ClassVar[tuple[str, ...]] = (
+        "`[B, 256, T]` float",
+        "`[B, T]` float",
+    )
 
-          * the shape COLUMN is still literal — PR 01a's tier-(ii) disposition
-            is untouched, and C7-3 deliberately did not widen into it;
-          * the "256 amplitude bins" SENTENCE moved to
-            `configs/task_proposal/tidmad.yaml` behind
-            `{OUTPUT_CONTRACT_GUIDANCE}`, because it states what a
-            representation MEANS for one task rather than what the surface's
-            table shows.
+    @pytest.mark.parametrize(
+        "rung",
+        [TestRungBi.CONTRACT, TestRungBii.CONTRACT, TestRungFX2.CONTRACT, TestRungFX5.CONTRACT],
+    )
+    def test_tier_ii_shape_cells_are_STATIC_and_therefore_rung_invariant(self, rung):
+        """Scope honesty, UPDATED TWICE — and the render-layer half of the
+        "no new dynamic injection channel" invariant.
 
-        The sentence is still rendered VERBATIM for TIDMAD — proved
-        byte-exactly by
-        `test_step12_pr12a_c7_proposal_blocks.TestTheRelocationIsBYTE_EXACT` —
-        so nothing was lost, only relocated.
+        HISTORY. PR 01a froze the literal shape column AND the "256 amplitude
+        bins" sentence as surviving every rung — "not an oversight to be
+        cleaned up here". PR-12a C7-3 (D-12a-6) relocated the SENTENCE to
+        `configs/task_proposal/tidmad.yaml` behind
+        `{OUTPUT_CONTRACT_GUIDANCE}` and deliberately declined to widen into
+        the COLUMN. C12-P-P's P1-B then retired the column's TIDMAD literals,
+        replacing them with the static task-neutral wording below. Nothing was
+        lost in either move: the sentence still renders VERBATIM for TIDMAD
+        (`test_step12_pr12a_c7_proposal_blocks.TestTheRelocationIsBYTE_EXACT`),
+        and the shapes were already rendered by the pre-existing
+        `{forward_contract}` section that the retired literals duplicated.
+
+        DEFECT ONLY THIS CATCHES: the shape column turning into a DYNAMIC,
+        task-specific channel at the RENDER layer — a formatter or renderer
+        that rewrites these cells from the run's declaration. The
+        template-layer census
+        (`test_step01a_contract_renderers.TestS1BProposingStageDerivation
+        ::test_p1b_introduced_no_new_dynamic_injection_channel`) cannot see
+        that: it counts `{token}`s in the template and stays green for any
+        post-substitution rewriting. Only rendering the SAME cells under
+        FOUR different declarations can distinguish static prose from an
+        injected string — static text is rung-INVARIANT by construction, so
+        a cell that moves with the contract proves a channel was introduced.
+
+        The retired literals are asserted absent in the same row: restoring
+        them under a rung that declares something else is precisely the
+        contamination P1-B removed, and it is forbidden.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR BREAKS: a static cell stops occurring
+        exactly once under some rung (it became declaration-dependent), or a
+        TIDMAD shape literal reappears in a render for a rung that never
+        declared it.
         """
-        rendered = _render_proposing_stage(TestRungFX2.CONTRACT)
-        assert "`[B, 256, T]` float" in rendered
+        rendered = _render_proposing_stage(rung)
+        for cell in self.STATIC_SHAPE_CELLS:
+            assert rendered.count(cell) == 1, (
+                f"tier-(ii) shape cell {cell[:40]!r}… does not appear exactly "
+                f"once under a rung declaring {rung.output_shape!r}. This cell "
+                "is STATIC prompt text and must render identically for every "
+                "declaration; varying with the contract means a dynamic "
+                "task-specific injection channel was introduced here."
+            )
+        for retired in self.PRE_P1B_SHAPE_CELLS:
+            assert retired not in rendered, (
+                f"{retired!r} — a TIDMAD shape — reappeared in a stage rendered "
+                f"for a rung declaring {rung.output_shape!r}. P1-B retired this "
+                "literal precisely because it showed one task's shape to every "
+                "task; restoring it is forbidden."
+            )
+        # C7-3's disposition, unchanged by P1-B and still load-bearing here.
         assert "256 amplitude bins" not in rendered
         assert "{OUTPUT_CONTRACT_GUIDANCE}" in rendered
 

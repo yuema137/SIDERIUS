@@ -2625,3 +2625,45 @@ summary trusted in place of the evidence it summarises.
 | `F-C12P-CONT-1` | **OPEN** — continuity hooks |
 
 Three FIXED, five OPEN, **zero waived**.
+
+### AE.15 `F-C12P-GPU-1` — five tests silently required a CUDA host, and two were vacuous because of it
+
+Found by the FIRST canonical CI run of #295/#296, which is exactly where a
+GPU-dev-box blind spot should be found and exactly what local green could not
+tell us.
+
+| field | value |
+|---|---|
+| **identifier** | `F-C12P-GPU-1` |
+| **class** | portability (CLAUDE.md "Repository and Environment Portability") — **attributable to C12-P**, not pre-existing |
+| **evidence** | CI: `5 failed, 13027 passed`, captured stdout `[runtime_control] calibration derivation failed (non-fatal): hardware profile collection requires CUDA`. Reproduced locally and exactly with `CUDA_VISIBLE_DEVICES=""` ⇒ the same 5 |
+| **mechanism** | `probe_production.py:46-47` raises `RuntimeError` when `torch.cuda.is_available()` is false. Four tests reach it through `_derive_calibration_from_observation`; the fifth hits a DIFFERENT accelerator gate (`evaluate_time_skill/wrapper.py:333`) sitting ahead of the membership test — same class, different site |
+| **why local green meant nothing** | this dev box has GPUs; CI runners do not. The tests passed because of the machine, not the code — the precise hazard the portability rule names |
+| **repair** | MOCKED, not skipped (`tests/helpers/hardware_profile_stub.py`, class-autouse). A skip would make these vacuous on exactly the machine CI runs, silently retiring the B5/B6 and B1 guards this PR exists to establish |
+
+**The part that matters more than the red.** The crash was not only failing
+tests — it was making NEGATIVE tests pass **for the wrong reason**. With the B5
+defect planted on a CPU host,
+`test_a_composed_foreign_task_exports_no_tidmad_labelled_calibration` **PASSED**:
+its registry was empty because the probe crashed, not because the guard refused.
+Same for `test_absent_identity_still_fails_closed_to_quarantine`. **Two tests
+were decoration on CI while reporting green** — which is why the fixtures cover
+the whole class, not only the three that were red.
+
+**And a third, found while fixing them.**
+`test_a_foreign_profile_is_skipped_without_an_exception_handler` — the declared
+*other half* of B1's biconditional — passed `data_dir="/nonexistent"`, returning
+at `wrapper.py:325` before the membership test at `:359` ever ran. Its
+assertions are what that guard returns for **any** profile, so it would have
+stayed green with the foreign refusal deleted outright, on CPU **and** GPU. It
+is the identical defect its sibling's docstring records as defect (1) — fixed
+there with a real directory, never fixed here. **A biconditional with a vacuous
+half is not a biconditional.** Now uses a real directory and asserts the ROUTE
+TAKEN; proven by plant (deleting the refusal turns it RED, where before it did
+not).
+
+**Sibling of `F-C12P-METHOD-1`**: three incidents there were scans narrower than
+the failure set; this is the same shape in the ENVIRONMENT dimension — a host
+capability standing in for coverage.
+
+| **final disposition** | **FIXED** — `bc120c24` (mock) + `be408048` (de-vacuified biconditional) |

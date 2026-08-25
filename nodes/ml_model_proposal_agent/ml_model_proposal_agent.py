@@ -48,7 +48,12 @@ from agent.utils.architectural_pattern_tagger import ARCHITECTURAL_PATTERNS
 from agent.utils.proposer_preflight import estimate_proposal_time
 from agent_generated._registry import CapabilityRegistry
 from core.hardware_context import HardwareContext
-from execute_tools.dataset_config import TIDMAD as DATASET_CONFIG
+from execute_tools.dataset_config import (
+    DatasetConfig,
+    declares_tidmad_topology,
+    resolve_dataset_profile,
+    tidmad_topology,
+)
 from ml_models.models_format_sandbox import (
     CLASSIFICATION_LOSSES,
     REGRESSION_LOSSES,
@@ -121,6 +126,35 @@ _MAX_REASONING_RETRIES = 1
 # every proposing structural attempt, so they can only be corrected at the
 # causal stage itself. Total causal validation attempts = retries + 1.
 _MAX_CAUSAL_CORRECTION_RETRIES = 2
+
+
+def _applicable_dataset_constraints() -> DatasetConfig | None:
+    """The dataset whose segmentation rule the proposer is actually judged by.
+
+    C12-P-P / P1-A. Mirrors, and deliberately does NOT duplicate, the
+    applicability decision of
+    ``ProposalOutput._validate_baseline_segmentation_size`` (C12-P / B3): the
+    PROMPT must state exactly the rule the VALIDATOR enforces. Before this, the
+    prompt read the module-scope ``TIDMAD`` singleton unconditionally, so a
+    composed foreign task was taught TIDMAD's PSD divisor rule — a rule B3 no
+    longer applies to it.
+
+    Applicability is a MEMBERSHIP TEST, never ``try: tidmad_topology(...)
+    except ValueError``: that function raises for ABSENT sections *and* for
+    sections PRESENT-BUT-MALFORMED, so catching it would silently reclassify a
+    malformed TIDMAD profile as "this task declares none" and render no
+    constraint at all. A malformed topology must stay loud.
+
+    Returns:
+        The applicable ``DatasetConfig``, or ``None`` when the run's profile
+        declares no TIDMAD topology. ``None`` makes
+        ``_format_known_constraints_block`` render ``""`` — its existing,
+        documented contract — so no new channel is introduced.
+    """
+    profile = resolve_dataset_profile()
+    if not declares_tidmad_topology(profile):
+        return None
+    return tidmad_topology(profile).dataset
 
 
 def _active_time_budget_minutes(inp: ProposalInput) -> float | None:
@@ -1650,7 +1684,12 @@ class MLModelProposalAgent:
             # Proposing-stage placeholder. Other stages don't reference it; the
             # template_vars replace is a no-op when the placeholder is absent.
             # See docs/improving_validation_awareness.md Phase A.2/A.3.
-            "known_constraints_block": _format_known_constraints_block(DATASET_CONFIG),
+            # C12-P-P / P1-A — the applicable dataset, not the TIDMAD
+            # singleton. A task declaring no TIDMAD topology renders "" here,
+            # matching what B3's validator will actually enforce on it.
+            "known_constraints_block": _format_known_constraints_block(
+                _applicable_dataset_constraints()
+            ),
             # Phase N (§14.N.3) — proposing-stage placeholder for the
             # aggregate-window gate-exhaustion report across up to the
             # last 3 tuner iterations. Empty list collapses to "".

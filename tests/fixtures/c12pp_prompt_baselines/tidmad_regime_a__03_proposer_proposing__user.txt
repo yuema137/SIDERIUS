@@ -1,0 +1,597 @@
+[HARDWARE CONTEXT]
+Device:            NVIDIA RTX 3090
+Total VRAM:        24.00 GB
+Usable cap (80%):  19.20 GB
+Host:              checkpoint-p-audit-host
+Regime:            PHYSICAL — no operator budget set; cap = 19.20 GB.
+
+Your baseline_config must fit within the **effective cap** shown above. The VRAM engine will reject any architecture whose predicted peak exceeds this ceiling; a rejection consumes a tuner attempt with no scored round. Size your baseline to stay comfortably below the cap (target ≤ 80% of the effective cap at baseline) so the tuner has headroom to vary batch_size and segmentation_size upward.
+
+## Constraints
+Existing model type keys (your `model_name` must NOT be any of these): ['punet', 'wavenet']
+  - VRAM < 10 GB
+  - params < 50M
+
+## External Contributors
+
+Read each contributor's trust level and trust guidance before reading their findings.
+
+### ml_literature_review
+  Trust Level: soft_prior
+  Role: Surface ML denoising literature relevant to the current iteration.
+  Expertise Domain: ML denoising architectures; Semantic Scholar corpus.
+  Coverage: ArXiv/S2 results any year; local PDFs in reference_data/.
+  Limitations: Cannot run experiments; cannot judge SQUID-specific applicability without empirical confirmation.
+  Trust Guidance: Treat findings as inspirational priors — experiment runs are required to confirm applicability before adoption.
+
+### human
+  Trust Level: strong_prior
+  Role: Human operator providing direct guidance for this iteration.
+  Expertise Domain: Task-specific operational knowledge and strategic intent.
+  Coverage: This iteration only — human_advice is per-run, not accumulated across iterations.
+  Limitations: May not have full visibility into all past experiment results.
+  Trust Guidance: Human directives carry strong_prior weight — treat them comparably to experiment data. Override only with explicit justification.
+
+
+## Expert Context
+
+[HUMAN DIRECTIVE] (from human, source_ref=human:human_advice)
+  Prioritize low-frequency recovery; tolerate up to 12 GB VRAM if the extra capacity directly improves files 0-3. Avoid frequency-split training — keep the full-spectrum setting locked.
+
+[LITERATURE REFERENCE] (from ml_literature_review, confidence=0.85, source_ref=arxiv:2312.00752)
+  **Implication:** A frequency-aware composite loss may widen wavenet's effective spectral coverage on low-freq files (bottleneck 1).
+
+**Mechanism:** Composite loss $\min_\theta \delta L^f + (1-\delta) L^t$ (FreLE), where $L^f$ is the Fourier-magnitude loss and $L^t$ is the time-domain reconstruction loss; $\delta \in [0, 1]$ trades off the two. Lifted verbatim from the source paper's Eq. 4.
+
+**Adaptation:** Apply the composite loss directly to the wavenet decoder with the clean signal's Fourier magnitudes as the spectral target. Keep wavenet's dilated_causal_conv backbone unchanged.
+
+
+## Candidate Models — detailed view
+
+### Candidate: punet
+
+_Score table unavailable._
+
+#### Source Code
+```python
+class PositionalUNet(nn.Module):
+    """
+    Dynamic Positional U-Net for Agent Sandbox.
+
+    The architecture scales automatically based on the 'depth' parameter.
+    Agent can optimize: multi, depth, bilinear, pe_factor, etc.
+    """
+
+    def __init__(self, config: PUNetConfig):
+        super().__init__()
+
+        # visit properties directly, as the input was valudated by pydantic
+        self.multi = config.multi
+        self.depth = config.depth
+        self.bilinear = config.bilinear
+        self.seg_size = config.segmentation_size
+        self.pe_factor = config.pe_factor
+        self.kernel_size = config.kernel_size
+        self.padding = int((self.kernel_size - 1) / 2)
+
+        adc_channel = config.num_classes
+        emb_dim = config.embedding_dim
+
+        # 1. Input layers
+        self.embedding = nn.Embedding(adc_channel, emb_dim, scale_grad_by_freq=True)
+        self.pe_in = PositionalEncoding(emb_dim, max_len=self.seg_size, factor=self.pe_factor)
+        self.inc = DoubleConv(
+            emb_dim, self.multi, kernel_size=self.kernel_size, padding=self.padding
+        )
+        self.pe_inc = PositionalEncoding(self.multi, max_len=self.seg_size, factor=self.pe_factor)
+
+        # 2. Downward Path (Encoder)
+        self.downs = nn.ModuleList()
+        self.pe_downs = nn.ModuleList()
+
+        curr_ch = self.multi
+        for i in range(self.depth):
+            out_ch = curr_ch * 2
+            # different calculation for bilinear case
+            if i == self.depth - 1:
+                factor = 2 if self.bilinear else 1
+                out_ch = out_ch // factor
+
+            self.downs.append(
+                Down(curr_ch, out_ch, kernel_size=self.kernel_size, padding=self.padding)
+            )
+            self.pe_downs.append(
+                PositionalEncoding(out_ch, max_len=self.seg_size, factor=self.pe_factor)
+            )
+            curr_ch = out_ch
+
+        # 3. Upward Path (Decoder)
+        self.ups = nn.ModuleList()
+        self.pe_ups = nn.ModuleList()
+
+        # Up: reversal of down
+        for i in range(self.depth):
+            # Bilinear upsampling preserves channels, so the existing Up
+            # contract receives the concatenated-width channel count. A
+            # transposed convolution operates on the decoder tensor before
+            # concatenation and must therefore receive its actual width.
+            up_in_ch = curr_ch * 2 if self.bilinear else curr_ch
+            up_out_ch = curr_ch // 2
+            # align the top layer output
+            if i == self.depth - 1:
+                up_out_ch = self.multi // (2 if self.bilinear else 1)
+
+            self.ups.append(
+                Up(
+                    up_in_ch,
+                    up_out_ch,
+                    self.bilinear,
+                    kernel_size=self.kernel_size,
+                    padding=self.padding,
+                )
+            )
+            self.pe_ups.append(
+                PositionalEncoding(up_out_ch, max_len=self.seg_size, factor=self.pe_factor)
+            )
+            curr_ch = up_out_ch
+
+        # 4. Output layer
+        self.outc = OutConv(curr_ch, adc_channel)
+
+    def forward(self, x):
+        x = self.embedding(x).transpose(-1, -2)
+        x = self.pe_in(x)
+
+        # 1. Input layer and first skip
+        x1 = self.pe_inc(self.inc(x))
+        # store intermediate result for Skip Connection
+        skip_outputs = [x1]
+
+        # 2. Downward path
+        curr_x = x1
+        for i in range(self.depth - 1):  # Only store until the second to last layer
+            curr_x = self.downs[i](curr_x)
+            curr_x = self.pe_downs[i](curr_x)
+            skip_outputs.append(curr_x)
+
+        # 3. Bottom layer (no skip storage)
+        curr_x = self.downs[-1](curr_x)
+        curr_x = self.pe_downs[-1](curr_x)
+
+        # 4. Upward path
+        for i in range(self.depth):
+            skip_x = skip_outputs.pop()
+            curr_x = self.ups[i](curr_x, skip_x)
+            curr_x = self.pe_ups[i](curr_x)
+
+        return self.outc(curr_x)
+
+
+
+class DoubleConv(nn.Module):
+    """
+    A foundational building block consisting of two consecutive 1D convolutional layers,
+    each followed by Batch Normalization and LeakyReLU activation.
+
+    Agent-Adjustable Parameters:
+    - kernel_size: Defines the receptive field. Larger values capture broader wave features.
+    - padding: Maintains the temporal resolution. Must be tuned with kernel_size to avoid shape mismatch.
+    - bias: Toggles the additive bias. Typically False when used with BatchNorm.
+    """
+
+    def __init__(
+        self, in_channels, out_channels, mid_channels=None, kernel_size=9, padding=4, bias=False
+    ):
+        super().__init__()
+        if not mid_channels:
+            mid_channels = out_channels
+        self.double_conv = nn.Sequential(
+            nn.Conv1d(
+                in_channels, mid_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            ),
+            nn.BatchNorm1d(mid_channels),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv1d(
+                mid_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            ),
+            nn.BatchNorm1d(out_channels),
+            nn.LeakyReLU(inplace=True),
+        )
+
+    def forward(self, x):
+        return self.double_conv(x)
+
+
+
+class Down(nn.Module):
+    """
+    Adjustable parameters for the Agent:
+    - stride: The downsampling factor (default 4).
+             Larger stride saves memory but may lose signal resolution.
+    - kernel_size, padding, bias: Passed to DoubleConv to define feature extraction.
+    """
+
+    def __init__(self, in_channels, out_channels, stride=4, kernel_size=9, padding=4, bias=False):
+        super().__init__()
+        # pass stride to MaxPool1d,pass kernel size and padding to DoubleConv
+        self.maxpool_conv = nn.Sequential(
+            nn.MaxPool1d(kernel_size=stride, stride=stride),
+            DoubleConv(
+                in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            ),
+        )
+
+    def forward(self, x):
+        return self.maxpool_conv(x)
+
+
+
+class Up(nn.Module):
+    """
+    Upsampling block that increases temporal resolution.
+
+    Agent-Adjustable Parameters:
+    - bilinear: If True, uses Upsample (linear mode). If False, uses ConvTranspose1d.
+    - stride: The upsampling factor (default 4).
+    - kernel_size: Parameters passed to the DoubleConv layer.
+    """
+
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        bilinear=True,
+        stride=4,
+        kernel_size=9,
+        padding=4,
+        bias=False,
+    ):
+        super().__init__()
+
+        # Calculate padding to maintain sequence length: p = (k-1)/2
+        padding = (kernel_size - 1) // 2
+
+        if bilinear:
+            # For bilinear, we use nn.Upsample which doesn't change channels.
+            # The channel reduction happens inside DoubleConv's mid_channels.
+            self.up = nn.Upsample(scale_factor=stride, mode="linear", align_corners=True)
+            self.conv = DoubleConv(
+                in_channels,
+                out_channels,
+                in_channels // 2,
+                kernel_size=kernel_size,
+                padding=padding,
+                bias=bias,
+            )
+        else:
+            # For ConvTranspose1d, it reduces channels by half during the upsampling step.
+            self.up = nn.ConvTranspose1d(
+                in_channels, in_channels // 2, kernel_size=stride, stride=stride
+            )
+            # After concatenation with skip connection, the input to DoubleConv returns to in_channels logic
+            self.conv = DoubleConv(
+                in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=bias
+            )
+
+    def forward(self, x1, x2):
+        # x1: incoming feature map from the lower layer
+        # x2: skip connection feature map from the downward path
+        x1 = self.up(x1)
+
+        # Temporal alignment (handling odd lengths or stride mismatches)
+        # x.size() -> [Batch, Channel, Length]
+        diff = x2.size()[2] - x1.size()[2]
+        if diff != 0:
+            x1 = F.pad(x1, [diff // 2, diff - diff // 2])
+
+        # Concatenate along the channel dimension
+        x = torch.cat([x2, x1], dim=1)
+        return self.conv(x)
+
+
+
+class OutConv(nn.Module):
+    """
+    Final output layer that maps feature channels to the physical ADC channel space (256).
+
+    Agent-Adjustable Parameters:
+    - bias: Toggles the additive bias for the final projection.
+    """
+
+    def __init__(self, in_channels, out_channels, bias=True):
+        super().__init__()
+        # We keep kernel_size=1 to perform point-wise classification across channels
+        self.conv = nn.Sequential(
+            torch.nn.Conv1d(in_channels, out_channels, kernel_size=1, bias=bias),
+        )
+
+    def forward(self, x):
+        return self.conv(x)
+
+
+
+class PositionalEncoding(nn.Module):
+    """
+    Injects temporal position information into the latent space.
+    Crucial for phase-coherent dark matter signals.
+
+    Agent-Adjustable Parameters:
+    - max_len: Must match the current 'segmentation_size'. Defines the temporal buffer.
+    - factor: The strength of positional information.
+    - dropout: Regularization strength to prevent the model from over-relying on position.
+    """
+
+    def __init__(self, d_model, max_len, start=0, dropout=0.1, factor=1.0):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        self.factor = factor
+        self.start = start
+
+        # Generate the sinusoid positional encoding matrix up to max_len
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+        # Reshape to (1, d_model, max_len) to match Conv1d input format [Batch, Channel, Time]
+        pe = pe.unsqueeze(0).transpose(1, 2)
+
+        # Register as buffer (fixed during training, moved with model to GPU)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        """
+        Adds positional encoding to the input tensor.
+        x shape: [Batch, d_model, Length]
+        """
+        # Slice the pre-computed pe buffer to match the input length. The
+        # `cast` is a no-op at runtime; it tells pyright that `self.pe` (which
+        # PyTorch's stub returns as `Module` from `register_buffer` lookup) is
+        # actually the Tensor we registered above, so `[:, :, ...]` is valid.
+        x = (
+            x
+            + self.factor * cast(torch.Tensor, self.pe)[:, :, self.start : (self.start + x.size(2))]
+        )
+        x = self.dropout(x)
+        return x
+
+
+```
+
+---
+
+### Candidate: wavenet
+
+_Score table unavailable._
+
+#### Source Code
+```python
+class CausalConv1d(nn.Module):
+    """Causal convolution — no future information leakage."""
+
+    def __init__(self, in_channels, out_channels, kernel_size, dilation=1):
+        super().__init__()
+        self.padding = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(
+            in_channels, out_channels, kernel_size, padding=self.padding, dilation=dilation
+        )
+
+    def forward(self, x):
+        x = self.conv(x)
+        if self.padding > 0:
+            x = x[:, :, : -self.padding]
+        return x
+
+
+
+class WaveNetBlock(nn.Module):
+    """Single WaveNet residual block with dilated causal convolution."""
+
+    def __init__(self, residual_channels, gate_channels, skip_channels, kernel_size, dilation):
+        super().__init__()
+        self.causal_conv = CausalConv1d(residual_channels, gate_channels, kernel_size, dilation)
+        half = gate_channels // 2
+        self.gate_conv = nn.Conv1d(half, half, 1)
+        self.filter_conv = nn.Conv1d(half, half, 1)
+        self.residual_conv = nn.Conv1d(half, residual_channels, 1)
+        self.skip_conv = nn.Conv1d(half, skip_channels, 1)
+
+    def forward(self, x):
+        residual = x
+        x = self.causal_conv(x)
+        filter_part, gate_part = torch.chunk(x, 2, dim=1)
+        x = torch.tanh(self.filter_conv(filter_part)) * torch.sigmoid(self.gate_conv(gate_part))
+        skip = self.skip_conv(x)
+        res_out = self.residual_conv(x)
+        if res_out.size(-1) != residual.size(-1):
+            residual = residual[:, :, : res_out.size(-1)]
+        return residual + res_out, skip
+
+
+
+class SimpleWaveNet(nn.Module):
+    """
+    WaveNet-style model for ADC denoising.
+    Input:  [B, T]  — integer ADC values (0-255)
+    Output: [B, 256, T] — class logits per time step
+    """
+
+    def __init__(self, config: WaveNetConfig):
+        super().__init__()
+        self.embedding = nn.Embedding(config.num_classes, config.input_channels)
+        self.input_conv = nn.Conv1d(config.input_channels, config.residual_channels, 1)
+        self.blocks = nn.ModuleList(
+            [
+                WaveNetBlock(
+                    config.residual_channels,
+                    config.gate_channels,
+                    config.skip_channels,
+                    config.kernel_size,
+                    2**i,
+                )
+                for i in range(config.num_blocks)
+            ]
+        )
+        self.output_conv1 = nn.Conv1d(config.skip_channels, config.skip_channels, 1)
+        self.output_conv2 = nn.Conv1d(config.skip_channels, config.num_classes, 1)
+
+    def forward(self, x):
+        x = self.embedding(x.long())  # [B, T, input_channels]
+        x = x.transpose(1, 2)  # [B, input_channels, T]
+        x = self.input_conv(x)
+        # WaveNetConfig.num_blocks is constrained ``ge=1`` by Pydantic, so
+        # self.blocks is guaranteed non-empty. Seed skip_sum from the first
+        # block's skip output (instead of None + an in-loop branch) so the
+        # accumulator is unambiguously a Tensor — no Optional, no assert,
+        # identical end state to the previous None-initialised pattern.
+        first_block, *rest_blocks = self.blocks
+        x, skip_sum = first_block(x)
+        for block in rest_blocks:
+            x, skip = block(x)
+            min_len = min(skip_sum.size(-1), skip.size(-1))
+            skip_sum = skip_sum[:, :, :min_len] + skip[:, :, :min_len]
+        x = F.relu(skip_sum)
+        x = F.relu(self.output_conv1(x))
+        return self.output_conv2(x)  # [B, 256, T]
+
+
+# ==========================================
+# RNNSeq2Seq
+# ==========================================
+
+
+```
+
+---
+
+## Accumulated context
+
+```json
+{
+  "candidates": [
+    {
+      "model_type": "punet",
+      "best_score": null,
+      "raw_best_score": 1.2,
+      "raw_best_health_validity": "unknown",
+      "worst_score": 0.4,
+      "model_params": null,
+      "description": "U-Net baseline for 1-D signal denoising.",
+      "training_segments": null,
+      "source": "seed"
+    },
+    {
+      "model_type": "wavenet",
+      "best_score": null,
+      "raw_best_score": 5.57,
+      "raw_best_health_validity": "unknown",
+      "worst_score": 2.1,
+      "model_params": null,
+      "description": "Dilated causal convolutional network \u2014 current SOTA.",
+      "training_segments": null,
+      "source": "seed"
+    }
+  ],
+  "non_candidates_overview": [],
+  "interpretation_summary": {
+    "model_types": [
+      "punet",
+      "wavenet"
+    ],
+    "total_experiments": 2,
+    "best_denoising_score": 5.57,
+    "worst_denoising_score": 0.4,
+    "key_findings": [
+      "wavenet's dilated_causal_conv stack drives high-freq performance.",
+      "punet plateaus at depth=6; deeper variants saw no lift."
+    ],
+    "bottlenecks": [
+      "Low-frequency files (0-3) remain weak across all models.",
+      "Wavenet's receptive field saturates before low-freq capture."
+    ],
+    "take_home_message": "Next iteration: target low-freq recovery via a richer frequency-aware mechanism while inheriting wavenet's high-freq strength.",
+    "per_model_best": {
+      "punet": 1.2,
+      "wavenet": 5.57
+    },
+    "per_model_worst": {
+      "punet": 0.4,
+      "wavenet": 2.1
+    },
+    "cumulative_information_gain": 0.0,
+    "prediction_outcomes_history": {
+      "confirmed": 0,
+      "partial": 0,
+      "refuted": 0
+    },
+    "prediction_outcomes_by_semantics": {},
+    "cumulative_information_gain_by_semantics": {},
+    "prediction_pool_sizes": {},
+    "prediction_evaluation_semantics": "legacy_v1"
+  },
+  "existing_model_types": [
+    "punet",
+    "wavenet"
+  ],
+  "previous_failures": [],
+  "comparison": {
+    "comparisons": [
+      {
+        "model_type": "wavenet",
+        "source": "seed",
+        "best_score": 5.57,
+        "key_mechanism": "dilated_causal_conv stack \u2014 exponential receptive field growth.",
+        "strengths": [
+          "scores 8.2 on files 15-19 (high-freq)"
+        ],
+        "weaknesses": [
+          "near-zero on files 0-3 (low-freq)"
+        ],
+        "lesson_for_next_proposal": "Inherit dilated_causal_conv; augment for low-freq."
+      },
+      {
+        "model_type": "punet",
+        "source": "seed",
+        "best_score": 1.2,
+        "key_mechanism": "U-Net encoder/decoder with skip connections.",
+        "strengths": [
+          "compact"
+        ],
+        "weaknesses": [
+          "plateaus at depth=6"
+        ],
+        "lesson_for_next_proposal": "Skip if wavenet inheritance is preferred."
+      }
+    ],
+    "proposed_vocab_links": [],
+    "proposed_vocab_candidates": [],
+    "sota_model_type": "wavenet",
+    "sota_score": 5.57,
+    "sota_mechanism": "dilated_causal_conv provides exponential receptive field growth."
+  },
+  "causal_reasoning": {
+    "proposed_change": "Augment wavenet with a frequency-aware composite loss ($\\delta L^f + (1-\\delta) L^t$) to widen spectral coverage.",
+    "causal_hypothesis": "wavenet's dilated_causal_conv (Stage 1 ModelComparison) saturates high-freq but leaves low-freq files weak. A composite frequency loss (source_ref arxiv:2312.00752, trust_level=soft_prior) directly targets the low-freq bottleneck without altering the proven backbone.",
+    "falsifiable_prediction": {
+      "metric": "mean(file_vector[0:3])",
+      "current_value": 0.5,
+      "predicted_value": 1.5,
+      "threshold_for_refutation": 0.7,
+      "rationale": "FreLE's spectral loss is on-domain for 1-D denoising."
+    },
+    "predicted_failure_modes": [
+      "Composite loss may destabilise training in early epochs."
+    ],
+    "inherited_components": [
+      {
+        "component": "dilated_causal_conv",
+        "source_type": "experiment",
+        "source_id": "wavenet",
+        "contribution_evidence": "Core mechanism of wavenet's 5.57 SOTA score."
+      }
+    ]
+  }
+}
+```

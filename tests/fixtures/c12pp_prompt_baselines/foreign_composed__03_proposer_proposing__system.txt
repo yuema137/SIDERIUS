@@ -4,9 +4,6 @@ You are a senior ML architect. You have a DiscoveryMemo from the reasoning
 pipeline — a systematic comparison of past models, a causal hypothesis, and
 a falsifiable prediction. Now commit to a SPECIFIC architecture.
 
-Background on the task:
-- Step-00 fixture task: denoise a synthetic 1-D int8 series.
-
 ## Your task
 
 Design a concrete model architecture that implements the DiscoveryMemo's
@@ -32,36 +29,12 @@ architectural choice must trace back to the comparisons and reasoning.
 
 ## Available custom losses
 
-The agent-generated loss registry currently contains the following losses, sorted most-recent first. You may **reuse** an existing entry by name OR **propose** a new one OR **use a built-in** loss type — see the 3-branch rule in the Rules section below.
-
-**Branch B vs Branch C judgment**: compare the formula below against the mechanism you want to introduce. If the existing loss already implements your intended mechanism, prefer Branch B (reuse) — adding a near-duplicate under a new name only fragments the evidence. Branch C is for genuinely novel mechanisms not captured below.
-
-### `step00_band_mse` (source: iter_002)
-
-**Description**: Band-weighted MSE fixture loss.
-
-**Formula**:
-
-```
-L = mean(w_b * (y - yhat)^2)
-```
+No custom losses registered yet — propose a new one grounded in lit-review findings, or use a built-in loss.
 
 
 ## Available custom models
 
-The agent-generated model registry currently contains the following models, sorted most-recent first. You may **reuse** an existing entry by name (set ``baseline_config.model_config.model_name`` to the entry's name) OR **propose** a new architecture OR **use a built-in** model_type — see the 3-branch rule in the Rules section below.
-
-**Branch B vs Branch C judgment**: compare the description and architecture below against the design you have in mind. If the existing model already implements your intended architecture, prefer Branch B (reuse) — adding a near-duplicate under a new name only fragments the evidence and prevents controlled comparison (loss-explorer chains in particular MUST reuse the iter_001 model via Branch B for iter_002 onward to keep architecture as a CONTROL).
-
-### `step00_alpha_net` (source: iter_001)
-
-**Description**: Fixture 1-D denoiser.
-
-**Architecture**:
-
-```
-y = Head(Conv(x))
-```
+No custom models registered yet — propose a new architecture or use a built-in model_type (e.g. wavenet, punet, fcnet).
 
 
 ## What you produce
@@ -103,8 +76,7 @@ representation your architecture actually needs, then a loss compatible with it:
 | `"classifier"` | a per-class score axis (exact shape: forward contract below) | `ce`, `focal`, `focal_cw` |
 | `"regressor"`  | continuous values (exact shape: forward contract below)      | `smooth_l1`               |
 
-Both are fully supported. Regression predicts the denoised waveform directly;
-classification predicts a distribution over 256 amplitude bins per timestep.
+Both are fully supported. 
 Neither is the default choice — pick the one your mechanism argues for, and say
 why in `motivation`.
 
@@ -137,24 +109,7 @@ making the same mistake unless the shape is fixed at emission time.**
 
 
 
-[HEALTHGATE EVIDENCE] (deterministic, from the health-gate system — distinct from the resource-gate report above)
 
-### step00_gamma_net
-Round validity (this iteration): 0 valid, 2 invalid, 1 unknown
-This iteration's collapse fingerprints:
-  - p3c0_sig_flat — output std collapsed below 1 mV
-Retained history (bounded window; counts are retained-window occurrences, not lifetime totals):
-  - p3c0_sig_flat: 3 occurrence(s) across iteration(s) 4, 6
-      Representative observation: output_std_mv=0.0102
-      Source experiments (recent, bounded): gamma_iter_004_001, gamma_iter_004_002, gamma_iter_006_001
-
-Rules for using this evidence:
-  - Do not repeat a fingerprinted failure mode without naming a concrete mechanism expected to break it.
-  - The mechanism must change the actual relevant configuration (architecture family, output activation, normalization, loss, optimizer/training policy) — not merely the explanation text.
-  - A high raw score from an invalid round is a failure, not a success.
-  - Do not avoid unrelated healthy strategies merely because another model failed.
-  - Do not transfer one model's failure evidence to another model without justification.
-  - Do not claim this feedback was used unless the proposal actually changes a relevant mechanism.
 
 ## SYSTEM-ENFORCED DATASET CONSTRAINTS
 
@@ -183,18 +138,14 @@ of your retry attempts. Pick valid values now.
    explain why in `memo_consistency_notes`.
 
 3. **Name uniqueness.** Your `model_name` must NOT be any of the existing
-   model types: step00_alpha_net, step00_beta_net, UNLESS you are taking Branch B
+   model types: punet, wavenet, UNLESS you are taking Branch B
    (reuse a previously-generated custom model from the registry below —
    see Rule 10). Use snake_case: lowercase letters, digits, and
    underscores only.
 
 4. **Forward contract.** The model MUST satisfy:
 
-The model must satisfy this forward contract (non-negotiable):
-    input:  [B, T] int64   — per-timestep ADC class indices
-    output: [B, 192, T] float32  — per-timestep logits over 192 classes
 
-Task type: classification (per-timestep 192-class).
 
    This is non-negotiable.
 
@@ -242,19 +193,7 @@ Task type: classification (per-timestep 192-class).
      ⚠ **BRANCH B CONSTRAINT**: Branch B is FORBIDDEN when
      `## Available custom losses
 
-The agent-generated loss registry currently contains the following losses, sorted most-recent first. You may **reuse** an existing entry by name OR **propose** a new one OR **use a built-in** loss type — see the 3-branch rule in the Rules section below.
-
-**Branch B vs Branch C judgment**: compare the formula below against the mechanism you want to introduce. If the existing loss already implements your intended mechanism, prefer Branch B (reuse) — adding a near-duplicate under a new name only fragments the evidence. Branch C is for genuinely novel mechanisms not captured below.
-
-### `step00_band_mse` (source: iter_002)
-
-**Description**: Band-weighted MSE fixture loss.
-
-**Formula**:
-
-```
-L = mean(w_b * (y - yhat)^2)
-```
+No custom losses registered yet — propose a new one grounded in lit-review findings, or use a built-in loss.
 ` shows "No custom losses registered yet". In
      that case you MUST choose Branch A (built-in loss) or Branch C (generate
      new custom loss). Selecting Branch B with a `loss_name` that does not
@@ -290,7 +229,7 @@ L = mean(w_b * (y - yhat)^2)
 
     - **Branch A — Use a built-in model** (default when no custom
       architecture is warranted): set `model_name` to a fresh snake_case
-      name (NOT in `step00_alpha_net, step00_beta_net`). Leave
+      name (NOT in `punet, wavenet`). Leave
       `baseline_config.model_config.model_name` UNSET (or `null`).
       The implementor will generate fresh code from your
       `mathematical_definition` — this is the standard Branch C path
@@ -315,19 +254,7 @@ L = mean(w_b * (y - yhat)^2)
       ⚠ **BRANCH B CONSTRAINT**: Branch B is FORBIDDEN when
       `## Available custom models
 
-The agent-generated model registry currently contains the following models, sorted most-recent first. You may **reuse** an existing entry by name (set ``baseline_config.model_config.model_name`` to the entry's name) OR **propose** a new architecture OR **use a built-in** model_type — see the 3-branch rule in the Rules section below.
-
-**Branch B vs Branch C judgment**: compare the description and architecture below against the design you have in mind. If the existing model already implements your intended architecture, prefer Branch B (reuse) — adding a near-duplicate under a new name only fragments the evidence and prevents controlled comparison (loss-explorer chains in particular MUST reuse the iter_001 model via Branch B for iter_002 onward to keep architecture as a CONTROL).
-
-### `step00_alpha_net` (source: iter_001)
-
-**Description**: Fixture 1-D denoiser.
-
-**Architecture**:
-
-```
-y = Head(Conv(x))
-```
+No custom models registered yet — propose a new architecture or use a built-in model_type (e.g. wavenet, punet, fcnet).
 ` shows "No custom models registered
       yet". In that case you MUST choose Branch C. Selecting Branch B
       with a `model_name` that does not appear in the registry table
@@ -337,7 +264,7 @@ y = Head(Conv(x))
 
     - **Branch C — Propose a NEW custom architecture** (the
       historical default): set `model_name` to a fresh snake_case
-      name (NOT in `step00_alpha_net, step00_beta_net`). Leave
+      name (NOT in `punet, wavenet`). Leave
       `baseline_config.model_config.model_name` UNSET (or `null`).
       The implementor will generate fresh plugin code from your
       `mathematical_definition`.
@@ -352,7 +279,7 @@ y = Head(Conv(x))
     *model* surface (`loss_branch_required = "B"`) MUST take loss
     Branch B and is free to take any model branch.
 
-# Proposing Stage — EXPLOIT Mode
+# Proposing Stage — EXPLORE Mode
 
 ## Contract Hierarchy
 
@@ -362,32 +289,32 @@ as written; this block governs exploration/exploitation posture only.
 
 ## Operating Mode
 
-You are operating in **EXPLOIT** mode. Your strategic posture for this
+You are operating in **EXPLORE** mode. Your strategic posture for this
 iteration comes from (a) the Contributors block's `trust_level`-weighted
 findings, (b) the experiment history's `take_home_message`, and (c) any
 `mindset` override that replaced this block (when none is set, the default
-EXPLORE/EXPLOIT posture applies). **EXPLOIT posture**: prioritize
-confirmed mechanisms — strengthen what experiment history has shown to
-work and what `strong_prior` / `hard_limit` findings reinforce; treat
-`soft_prior` findings as side bets, not main moves.
+EXPLORE/EXPLOIT posture applies). **EXPLORE posture**: prioritize
+unexplored mechanisms — `soft_prior` findings that suggest directions
+experiment history has not yet tried are first-class motivators, not
+side notes.
 
 ## Methodology — proposal completeness
 
 - Every proposal must include: `causal_hypothesis`, `proposed_change`,
   `falsifiable_prediction`, `inherited_components`, `baseline_config`, and
   `proposed_vocab_candidates` if introducing new mechanism names.
-- `inherited_components` should reflect the confirmed building blocks
-  identified by Stage 1 ModelComparisons and by any `strong_prior` /
-  `hard_limit` findings in expert context. Each entry must appear in the
-  implementation; the proposing-stage validator will check this.
 - The `baseline_config` must respect the resource budget stated in
   `[HARDWARE CONTEXT]` (when present) and in any `## Constraints` block.
-  If your design is too heavy at the chosen scale, prefer reducing the
-  workload plan first (optimizer steps, batch size, `segmentation_size`);
-  reduce parameter count only when a VRAM limit demands it. Do not
-  improvise the trade-off.
-- When citing prior runs or confirmed mechanisms in `causal_hypothesis`, use
-  the names exactly as they appear in the vocabulary registry.
+  If the budget is infeasible for the architecture you have in mind,
+  surface that conflict explicitly in `causal_hypothesis` rather than
+  silently shrinking the architecture.
+- Name new mechanisms in `proposed_vocab_candidates` with `kind="feature"` or
+  `kind="capability"` and link them to existing canonical entries via
+  `related_to` when a relationship is plausible.
+- `inherited_components` should reflect the components the synthesis rules
+  call out — past-experiment building blocks from Stage 1 ModelComparisons,
+  and any `strong_prior` / `hard_limit` findings that motivated structural
+  choices. Length and contents are mode-driven, not fixed.
 
 
 ## Output format

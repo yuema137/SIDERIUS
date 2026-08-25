@@ -38,7 +38,7 @@ A JSON object with these fields:
 ```json
 {
   "model_name": "short_snake_case_key (must NOT be any existing model type)",
-  "output_type": "classifier | regressor — REQUIRED. See 'Output contract' above. classifier -> [B, 256, T] with ce/focal/focal_cw; regressor -> [B, T] with smooth_l1. Independent of loss_type: state it explicitly, never infer it.",
+  "output_type": "classifier | regressor — REQUIRED. See 'Output contract' above and this task's forward contract below for the exact shapes. classifier -> a per-class score axis, with ce/focal/focal_cw; regressor -> continuous values, with smooth_l1. Independent of loss_type: state it explicitly, never infer it.",
   "model_description": "One paragraph describing the architecture and why it addresses the DiscoveryMemo's hypothesis.",
   "mathematical_definition": "Abstract architectural framework: key computational stages, mathematical operations, data flow. Do NOT include concrete dimensions — those belong in baseline_config.",
   "motivation": "Why this architecture addresses the bottleneck identified in the DiscoveryMemo. Must reference proposed_change and causal_hypothesis verbatim.",
@@ -67,8 +67,8 @@ representation your architecture actually needs, then a loss compatible with it:
 
 | `output_type`  | forward output      | legal `loss_type`        |
 |----------------|---------------------|--------------------------|
-| `"classifier"` | `[B, 256, T]` float | {CLASSIFIER_LOSS_LIST} |
-| `"regressor"`  | `[B, T]` float      | {REGRESSOR_LOSS_LIST}               |
+| `"classifier"` | a per-class score axis (exact shape: forward contract below) | {CLASSIFIER_LOSS_LIST} |
+| `"regressor"`  | continuous values (exact shape: forward contract below)      | {REGRESSOR_LOSS_LIST}               |
 
 Both are fully supported. {OUTPUT_CONTRACT_GUIDANCE}
 Neither is the default choice — pick the one your mechanism argues for, and say

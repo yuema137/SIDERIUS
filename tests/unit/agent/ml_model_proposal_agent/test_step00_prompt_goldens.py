@@ -30,9 +30,11 @@ two-input render (user); nothing environment-coupled.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -558,4 +560,107 @@ class TestPB4LegacyCommit:
         user = _build_commit_prompt(_FIXTURE_REASONING, ["step00_alpha_net", "step00_beta_net"])
         assert_golden(
             user, GOLDENS / "pb4_legacy_commit_user.txt", surface="PB-4 legacy commit user prompt"
+        )
+
+
+class TestTheProposingGoldensAreOneDeclaredEditFromTheirParents:
+    """The epoch bridge for every proposing-stage golden in this corpus.
+
+    WHY THIS CLASS SPANS TWO GOLDEN FAMILIES. PB-3 and P3-C0 pin the same
+    three template lines, one fully rendered, under four fixture/mode
+    combinations. Step 12 / C12-P-P's P1-B rewrote those lines from
+    TIDMAD-specific tensor shapes (``[B, 256, T]`` / ``[B, T]``) into
+    task-neutral language that defers the exact shape to the task's own
+    ``{forward_contract}``. All four goldens therefore had to move in the same
+    commit, per the Step-00 §17 rule 3 update policy — and §17 rule 3 is
+    exactly where a golden corpus is weakest: "regenerate on an intentional
+    change" is satisfied equally well by regenerating an UNINTENTIONAL one.
+
+    ``assert_golden`` cannot see that. It proves production agrees with the
+    committed bytes; it cannot prove the committed bytes are the recorded past
+    plus one reviewable edit. Both are true of a golden refreshed by running
+    the capture and committing whatever came out.
+
+    P3-C0's goldens are bridged here rather than in
+    ``test_step10_p3_c0_baselines.py`` because the declared edit is ONE edit:
+    a second copy of the enumeration in the sibling module could drift from
+    this one, and a drifted delta table fails as "line not found", which reads
+    like a broken guard rather than an undeclared change.
+    """
+
+    #: EPOCH 1 — each golden's digest at P1-B's actual parent, ``bca52bca~1``.
+    #: IMMUTABLE historical evidence: a statement about that commit's content,
+    #: true forever. A later PR that legitimately moves these goldens records
+    #: its own edit in ``tests/helpers/c12pp_p1b_delta.py`` and adds its own
+    #: epoch; it does NOT re-point these.
+    PRE_P1B_GOLDEN_SHA: ClassVar[dict[str, str]] = {
+        "pb3_proposing_explore_system.txt": (
+            "287fcee75ef179c59880468c85ba28872294c3328abd9f42f9d52b6712a14029"
+        ),
+        "pb3_proposing_exploit_system.txt": (
+            "b833efe9c870ba0d2285230dce18e2fddc70d5e0a282f8103e0217696487bac2"
+        ),
+        "p3c0_full_proposing_explore_system.txt": (
+            "0d096019c224604d5f2be0c97c15e714653083afc1b6fd099940954e277cb859"
+        ),
+        "p3c0_full_proposing_exploit_system.txt": (
+            "f43dfe88152010a0ae93e1ff12e3f87550a68e34018647e9b4271dae945f765e"
+        ),
+    }
+
+    @pytest.mark.parametrize("name", sorted(PRE_P1B_GOLDEN_SHA))
+    def test_reversing_p1b_reproduces_the_parents_golden_bytes(self, name: str) -> None:
+        """DEFECT ONLY THIS CATCHES: a proposing-stage golden regenerated to
+        absorb an UNDECLARED change — the §17 rule 3 refresh that quietly
+        carries a second edit alongside the intended one.
+
+        Neither ``assert_golden`` nor any digest on the current bytes can see
+        it: both are satisfied by whatever the capture last emitted, so a
+        contributor who edits the template twice and regenerates once leaves a
+        green suite. Reversing the ENUMERATED P1-B edit and landing on the
+        parent commit's recorded digest is what makes "one declared edit"
+        checkable.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR BREAKS: either a declared line stops
+        occurring exactly once in the golden (``reverse_p1b`` raises, naming
+        the stale delta table), or the reversed bytes miss the hardcoded
+        ``bca52bca~1`` digest — meaning something OTHER than P1-B's edit is
+        baked into the committed golden.
+        """
+        from tests.helpers.c12pp_p1b_delta import P1B_RENDERED_DELTA, reverse_p1b
+
+        current = (GOLDENS / name).read_text(encoding="utf-8")
+        reverted = reverse_p1b(current, P1B_RENDERED_DELTA, surface=f"golden {name}")
+        assert (
+            hashlib.sha256(reverted.encode("utf-8")).hexdigest() == self.PRE_P1B_GOLDEN_SHA[name]
+        ), (
+            f"reversing P1-B's declared edit did NOT reproduce {name} as it "
+            "stood at bca52bca~1. This golden differs from the recorded past "
+            "by something OTHER than the declared edit — declare that change "
+            "in tests/helpers/c12pp_p1b_delta.py and add its own epoch row; "
+            "do NOT re-point PRE_P1B_GOLDEN_SHA."
+        )
+
+    def test_the_bridge_covers_every_golden_carrying_the_neutralised_lines(self) -> None:
+        """DEFECT ONLY THIS CATCHES: a fifth proposing-stage golden added (or
+        an existing golden growing the shape table) without joining the
+        bridge — it would be pinned byte-wise by ``assert_golden`` and be
+        free to absorb an undeclared edit, because the row above only
+        iterates names someone remembered to list.
+
+        HOW IT FAILS: a golden in this directory contains a P1-B post-edit
+        line while its name is absent from ``PRE_P1B_GOLDEN_SHA``.
+        """
+        from tests.helpers.c12pp_p1b_delta import P1B_RENDERED_DELTA
+
+        carriers = {
+            path.name
+            for path in sorted(GOLDENS.glob("*.txt"))
+            if any(post in path.read_text(encoding="utf-8") for post, _pre in P1B_RENDERED_DELTA)
+        }
+        assert carriers == set(self.PRE_P1B_GOLDEN_SHA), (
+            "the set of goldens carrying P1-B's neutralised lines is not the "
+            f"set the bridge pins. Unbridged: {sorted(carriers - set(self.PRE_P1B_GOLDEN_SHA))}; "
+            f"pinned but no longer carrying: "
+            f"{sorted(set(self.PRE_P1B_GOLDEN_SHA) - carriers)}"
         )

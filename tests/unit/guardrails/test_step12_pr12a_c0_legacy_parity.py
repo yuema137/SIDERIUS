@@ -139,7 +139,11 @@ class TestLegacyRenderedPromptBytes:
 # ======================================================================
 
 #: ``name -> sha256`` over each LLM-facing production prompt constant and
-#: template file PR-12a's C7 touches. Frozen at ``eeb073dc``.
+#: template file PR-12a's C7 touches. Frozen at ``eeb073dc``; the rows marked
+#: below were RE-FROZEN inside PR-12a itself, so this table's epoch is "the
+#: tree as PR-12a landed it" (``15554174``) rather than the C0 base for those
+#: rows. See ``POST_P1B_PROMPT_SOURCE_SHA`` for why that distinction now
+#: matters.
 PROMPT_SOURCE_SHA: dict[str, str] = {
     # RE-FROZEN by C7-2, with the evidence its own docstring demanded.
     #
@@ -235,6 +239,40 @@ PROMPT_SOURCE_SHA: dict[str, str] = {
 }
 
 
+#: EPOCH 2 — the OVERLAY for surfaces a LATER, deliberate change has moved
+#: since ``PROMPT_SOURCE_SHA`` was last frozen. Keys here shadow the table
+#: above; every other surface stays pinned at its epoch-1 value.
+#:
+#: WHY AN OVERLAY AND NOT A RE-FREEZE IN PLACE. ``test_prompt_bytes_are_
+#: unchanged``'s message says a moved constant may be re-frozen once "the
+#: legacy rendered manifest is still identical". That condition was written
+#: for C7-2/C7-3, which TOKENIZED these templates — the bytes moved while what
+#: a real model reads did not, so re-freezing recorded a relocation.
+#:
+#: Step 12 / C12-P-P's P1-B is NOT that. It rewrites three lines of
+#: ``proposing_stage.md`` from TIDMAD-specific tensor shapes into task-neutral
+#: static wording, so a LEGACY un-composed proposer run genuinely sends
+#: different bytes to the model. The named condition is nevertheless
+#: technically satisfiable, because ``LEGACY_TUNER_PROMPT_MANIFEST_SHA``
+#: covers the TUNER's assembly and never covered a proposer template at all —
+#: i.e. a bare re-freeze here would have passed its own stated test while
+#: recording a real legacy behaviour change as if it were byte-neutral. That
+#: is the "green for the wrong reason" shape, so the two epochs are named
+#: separately instead.
+#:
+#: DERIVATION, and the only one permitted: apply
+#: ``tests/helpers/c12pp_p1b_delta.P1B_TEMPLATE_DELTA`` to the epoch-1 bytes
+#: (``bca52bca~1``, digest ``1d33b844…``). That yields ``75932e34…``, verified
+#: equal to the value hardcoded here. It is deliberately NOT "whatever the
+#: tree hashes to" — ``TestTheProposingStageIsOneDeclaredEditFromEpochOne``
+#: proves the two constants are exactly one declared edit apart.
+POST_P1B_PROMPT_SOURCE_SHA: dict[str, str] = {
+    "prompt_templates/proposal/proposing_stage.md": (
+        "75932e347b87a4bbfabf0b207701acae7e0cb6d213ab188a4f6cd3005121ca39"
+    ),
+}
+
+
 def _prompt_sources() -> dict[str, str]:
     """The live prompt bytes, by name."""
     from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
@@ -281,11 +319,77 @@ class TestLegacyPromptSourceBytes:
 
     @pytest.mark.parametrize("name", sorted(PROMPT_SOURCE_SHA))
     def test_prompt_bytes_are_unchanged(self, name):
-        assert _sha(_prompt_sources()[name]) == PROMPT_SOURCE_SHA[name], (
+        expected = POST_P1B_PROMPT_SOURCE_SHA.get(name, PROMPT_SOURCE_SHA[name])
+        assert _sha(_prompt_sources()[name]) == expected, (
             f"{name} changed. If C7 gated TIDMAD science at the ASSEMBLY, this "
-            f"should not move; if the constant itself had to change, prove the "
-            f"legacy rendered manifest is still identical and re-freeze here."
+            f"should not move. If the surface genuinely had to change, do NOT "
+            f"re-point the row above: state whether a legacy un-composed run's "
+            f"LLM-facing bytes moved, declare the edit in "
+            f"tests/helpers/c12pp_p1b_delta.py, and add an epoch row to "
+            f"POST_P1B_PROMPT_SOURCE_SHA with a bridge proving the new value "
+            f"is the old one plus exactly that edit."
         )
+
+
+class TestTheProposingStageIsOneDeclaredEditFromEpochOne:
+    """The bridge between ``PROMPT_SOURCE_SHA`` and its P1-B overlay.
+
+    Two digests over the same file cannot detect a SILENT REPIN: each is
+    individually satisfied by any bytes at all, so a contributor who edits the
+    template and pastes the new digest into the overlay gets a green suite and
+    an unreviewable change. Reversing the ENUMERATED edit and landing on the
+    epoch-1 digest is the only assertion here that spans both epochs, which is
+    why it is a separate row rather than an extra line in the pin above.
+    """
+
+    def test_reversing_p1b_reproduces_the_epoch_one_template_bytes(self):
+        """DEFECT ONLY THIS CATCHES: ``POST_P1B_PROMPT_SOURCE_SHA`` re-pointed
+        to whatever ``proposing_stage.md`` currently hashes to, without
+        declaring what changed — including an undeclared edit riding along in
+        the same commit as a declared one.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR BREAKS: either a line declared in
+        ``P1B_TEMPLATE_DELTA`` stops occurring exactly once in the live
+        template (``reverse_p1b`` raises, naming the stale table), or the
+        reversed bytes miss ``PROMPT_SOURCE_SHA``'s hardcoded epoch-1 digest,
+        proving the tree differs from the recorded past by more than the
+        declared edit.
+        """
+        from tests.helpers.c12pp_p1b_delta import P1B_TEMPLATE_DELTA, reverse_p1b
+
+        name = "prompt_templates/proposal/proposing_stage.md"
+        reverted = reverse_p1b(_prompt_sources()[name], P1B_TEMPLATE_DELTA, surface=f"live {name}")
+        assert _sha(reverted) == PROMPT_SOURCE_SHA[name], (
+            "reversing P1-B's declared edit did NOT reproduce the epoch-1 "
+            "bytes of proposing_stage.md. The current template differs from "
+            "the recorded past by something OTHER than the declared edit. "
+            "Declare that change in tests/helpers/c12pp_p1b_delta.py; do NOT "
+            "re-point PROMPT_SOURCE_SHA."
+        )
+
+    def test_the_overlay_shadows_only_surfaces_the_declared_edit_reaches(self):
+        """DEFECT ONLY THIS CATCHES: an overlay row for a surface the declared
+        edit does not touch — the shape a silent repin takes when it is
+        dressed as P1-B. Such a row would disable that surface's epoch-1 pin
+        permanently while the bridge above, which only ever looks at the
+        proposing stage, stayed green.
+
+        HOW IT FAILS: an overlay key is absent from the epoch-1 table, or its
+        live bytes carry none of the declared post-P1-B lines.
+        """
+        from tests.helpers.c12pp_p1b_delta import P1B_TEMPLATE_DELTA
+
+        sources = _prompt_sources()
+        for name in POST_P1B_PROMPT_SOURCE_SHA:
+            assert name in PROMPT_SOURCE_SHA, (
+                f"{name} is overlaid at epoch 2 but has no epoch-1 row — an "
+                "overlay must record a MOVE, never introduce a surface"
+            )
+            assert any(post in sources[name] for post, _pre in P1B_TEMPLATE_DELTA), (
+                f"{name} is overlaid as a P1-B consequence but carries none of "
+                "P1-B's declared lines — its epoch-1 pin has been disabled by "
+                "an unrelated change wearing P1-B's name"
+            )
 
 
 # ======================================================================

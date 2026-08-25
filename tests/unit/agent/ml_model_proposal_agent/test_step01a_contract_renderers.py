@@ -17,6 +17,7 @@ import json
 import pathlib
 import re
 import typing
+from typing import ClassVar
 
 import pytest
 
@@ -210,13 +211,129 @@ class TestS1BProposingStageDerivation:
         # the extracted cells must not survive as literals in the table
         assert "| `ce`, `focal`, `focal_cw` |" not in raw
 
-    def test_tier_ii_shape_column_deliberately_stays_literal(self):
-        """OD-S1-7: the table's dtype-dropped shape column has no declared
-        formatting rule, so it is NOT extracted. Pinned so a later
-        contributor does not "finish the job" by inventing one."""
+    #: EPOCH 1 — the tier-(ii) shape column's TIDMAD-specific literals, as
+    #: OD-S1-7 froze them and PR-12a C7-3 re-affirmed them. IMMUTABLE
+    #: historical record of what this surface used to say; a statement about
+    #: the past, not a requirement on the tree.
+    PRE_P1B_SHAPE_CELLS: ClassVar[tuple[str, ...]] = (
+        "`[B, 256, T]` float",
+        "`[B, T]` float",
+    )
+
+    #: EPOCH 2 — the STATIC task-neutral wording P1-B put in their place.
+    #: Hardcoded verbatim, never read back off the template: this is the
+    #: content the pin exists to hold, so deriving it from the file under
+    #: test would make the row true for any bytes at all.
+    POST_P1B_SHAPE_CELLS: ClassVar[tuple[str, ...]] = (
+        "a per-class score axis (exact shape: forward contract below)",
+        "continuous values (exact shape: forward contract below)",
+    )
+
+    def test_tier_ii_shape_column_is_now_STATIC_task_neutral_wording(self):
+        """INVERTED by Step 12 / C12-P-P P1-B — same shape as C7-5's inversion
+        of the tier-(iii) pin above, and for the same reason.
+
+        WHAT THIS USED TO PIN. OD-S1-7 froze the legality table's
+        dtype-dropped shape column as a LITERAL, on the grounds that no
+        declared formatting rule existed for it, and warned a later
+        contributor not to "finish the job" by INVENTING an authority. C7-3
+        re-affirmed it, relocating the "256 amplitude bins" SENTENCE while
+        deliberately declining to widen into this column.
+
+        WHAT SURVIVES THE INVERSION, AND WHAT DOES NOT. The surviving
+        invariant is NOT "TIDMAD's bytes stay here forever" — that literal
+        showed one task's tensor shape to every task. It is that this column
+        remains EXPLICIT, STATIC prompt content: P1-B replaced a hardcoded
+        claim with hardcoded prose, and OD-S1-7's actual concern — a
+        fabricated dynamic formatting rule — is not engaged, because no
+        placeholder, formatter or channel was introduced (pinned by
+        `test_p1b_introduced_no_new_dynamic_injection_channel` below).
+
+        DEFECT ONLY THIS CATCHES: the shape column drifting off static text —
+        either a task's tensor shape re-inlined into a template SHARED by
+        every task (the regression P1-B undid, which NO render-layer test can
+        see for a task that happens to declare those same shapes, since
+        TIDMAD's render is byte-identical either way), or the static wording
+        being dropped so the column says nothing at all.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR BREAKS: a hardcoded TIDMAD shape
+        reappears in the template bytes, or one of the two static cells stops
+        appearing exactly once.
+        """
         raw = self.TEMPLATE.read_text(encoding="utf-8")
-        assert "`[B, 256, T]` float" in raw
-        assert "`[B, T]` float" in raw
+        for retired in self.PRE_P1B_SHAPE_CELLS:
+            assert retired not in raw, (
+                f"{retired!r} is a TIDMAD tensor shape baked back into a "
+                "template SHARED by every task, showing one task's shape to a "
+                "task that declared something else. P1-B retired this cell; "
+                "restoring it is forbidden."
+            )
+        for static_cell in self.POST_P1B_SHAPE_CELLS:
+            assert raw.count(static_cell) == 1, (
+                f"the tier-(ii) shape column no longer carries {static_cell!r} "
+                "exactly once. The column must remain EXPLICIT STATIC prompt "
+                "content — neither restored to a task-specific literal nor "
+                "emptied out."
+            )
+
+    #: The template's COMPLETE injection surface as it stood at P1-B's parent
+    #: (`bca52bca~1`): every `{token}` and how many times it occurs.
+    #: Hardcoded, never re-derived from the file — a table read back off the
+    #: template under test would be satisfied by any injection surface.
+    PRE_P1B_PLACEHOLDER_CENSUS: ClassVar[dict[str, int]] = {
+        "{CLASSIFIER_LOSS_LIST}": 1,
+        "{OUTPUT_CONTRACT_GUIDANCE}": 1,
+        "{REGRESSOR_LOSS_LIST}": 1,
+        "{available_losses_block}": 2,
+        "{available_models_block}": 2,
+        "{existing_model_types}": 3,
+        "{forward_contract}": 1,
+        "{healthgate_evidence_block}": 1,
+        "{known_constraints_block}": 1,
+        "{recent_gate_exhaustions_block}": 1,
+        "{recent_trial_validity_block}": 1,
+        "{task_background_block}": 1,
+    }
+
+    def test_p1b_introduced_no_new_dynamic_injection_channel(self):
+        """The load-bearing half of OD-S1-7, kept intact while its literal
+        inverted — and the reason the inversion above is permitted at all.
+
+        OD-S1-7's warning was against INVENTING an authority to format this
+        column with. P1-B did not. Stated precisely: it removed a shape
+        literal from static prose that DUPLICATED an already-rendered section
+        of the same prompt, and the pointer left in its place is itself
+        static text. `{forward_contract}` (template line 130, fed by
+        production at `ml_model_proposal_agent.py:1743` via
+        `render_forward_contract(inp.forward_contract)`) PRE-DATES P1-B and is
+        untouched by it — P1-B stopped restating what that existing channel
+        already carried rather than creating a channel. It touched no
+        production Python at all.
+
+        DEFECT ONLY THIS CATCHES: a new dynamic task-specific injection point
+        appearing in this template — a fresh `{token}`, or an existing one
+        gaining a second substitution site — dressed as "finishing P1-B".
+        Every other pin here is over CONTENT and is satisfied by content that
+        arrived through a brand-new channel; only a census of the injection
+        surface itself can tell static prose from an injected string.
+
+        HOW IT FAILS WHEN THE BEHAVIOUR BREAKS: the template's placeholder
+        census stops matching the hardcoded pre-P1-B inventory, naming the
+        token that appeared, vanished, or changed multiplicity.
+        """
+        raw = self.TEMPLATE.read_text(encoding="utf-8")
+        census = {
+            token: raw.count(token) for token in set(re.findall(r"\{[A-Za-z_][A-Za-z0-9_]*\}", raw))
+        }
+        assert census == self.PRE_P1B_PLACEHOLDER_CENSUS, (
+            "the proposing stage's injection surface moved. P1-B is a "
+            "STATIC-text edit and must leave this census byte-identical to "
+            "its pre-P1-B inventory. A new or duplicated token here is a new "
+            "dynamic task-specific injection channel, which OD-S1-7 forbids "
+            "and P1-B did not introduce.\n"
+            f"  expected: {self.PRE_P1B_PLACEHOLDER_CENSUS}\n"
+            f"  observed: {dict(sorted(census.items()))}"
+        )
 
     def test_builtin_alphabet_count_matches_the_declaration(self):
         """The template says the slot "accepts five values". That count is

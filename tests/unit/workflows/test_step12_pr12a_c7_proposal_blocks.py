@@ -38,6 +38,7 @@ from nodes.ml_model_proposal_agent.ml_model_proposal_agent import (
     render_output_contract_guidance,
     render_proposal_evidence_reading,
 )
+from tests.helpers.c12pp_p1b_delta import P1B_TEMPLATE_DELTA, reverse_p1b
 from tests.helpers.composed_manifest import write_complete_manifest
 from workflows.model_exploration import resolve_run_proposal_blocks
 from workflows.task_composition import TaskCompositionError, compose_run_task_bindings
@@ -102,21 +103,51 @@ class TestTidmadsProseWasRELOCATEDNotRewritten:
 
 
 class TestTheRelocationIsBYTE_EXACT:
-    """The strongest form of the legacy-parity claim available here.
+    """The strongest form of the legacy-parity claim available here — now
+    stated across the TWO epochs it actually spans.
 
-    C7-2 could only show that the tuner's RENDERED manifest did not move.
-    For the proposer there is a stricter proof: substituting TIDMAD's declared
-    blocks back into the tokenized templates reproduces the PRE-C7 bytes
-    exactly — the C0 fixture's original sha256, hardcoded below rather than
-    recomputed, so this compares against the recorded past and not against
-    itself.
+    C7-2 could only show that the tuner's RENDERED manifest did not move. For
+    the proposer there is a stricter proof: substituting TIDMAD's declared
+    blocks back into the tokenized templates reproduces bytes recorded
+    elsewhere — hardcoded below rather than recomputed, so every assertion here
+    compares against a recorded value and never against the code under test.
+
+    WHY THERE ARE TWO REFERENCES AND NOT ONE (Step 12 / C12-P-P, operator
+    ruling 2). Until P1-B the single ``PRE_C7_SHA`` did two jobs at once: it
+    recorded PR-12a's historical relocation AND it constrained the current
+    working tree in perpetuity. Those coincide only while nothing ever
+    intentionally changes the bytes. P1-B intentionally does — it rewrites
+    ``proposing_stage.md``'s TIDMAD-specific shape language into task-neutral
+    language sourced from ``{forward_contract}`` — so the two jobs came apart,
+    and repointing ``PRE_C7_SHA`` would have overloaded a historical constant
+    with a present-tense meaning, i.e. rewritten history to match the
+    candidate. The two epochs are therefore named separately:
+
+      * ``PRE_C7_SHA`` — EPOCH 1, the recorded PAST. IMMUTABLE.
+      * ``POST_P1B_SHA`` — EPOCH 2, the CURRENT-TREE reference.
+      * ``P1B_SHAPE_NEUTRALISATION`` — the declared, enumerated edit that
+        carries epoch 1 to epoch 2, and the only difference permitted between
+        them.
 
     If anyone ever "tidies" a value in `configs/task_proposal/tidmad.yaml`,
     this turns RED and names the surface. That is the whole safety argument
-    for calling D-12a-6 a relocation.
+    for calling D-12a-6 a relocation, and P1-B does not weaken it.
     """
 
+    #: EPOCH 1 — IMMUTABLE HISTORICAL EVIDENCE, NOT A FIXTURE TO REPOINT.
+    #:
     #: The C0 baseline shas, captured at `eeb073dc` BEFORE any block moved.
+    #: Mechanically re-verified at C12-P-P against that commit's own content:
+    #:
+    #:   git show eeb073dc:agent/prompt_templates/proposal/proposing_stage.md
+    #:     | sha256sum                                  -> 8d52e156…
+    #:   sha256 of `PROPOSAL_REASONING_PROMPT` literal-eval'd out of
+    #:   `eeb073dc:nodes/…/ml_model_proposal_agent.py` -> 7c69ce7b…
+    #:
+    #: Both matched. These digests are a statement ABOUT `eeb073dc` and are
+    #: true forever; a later PR that legitimately changes the live templates
+    #: does not make them false and MUST NOT edit them. Record the change in
+    #: `POST_P1B_SHA` and `P1B_SHAPE_NEUTRALISATION` instead.
     PRE_C7_SHA: ClassVar[dict[str, str]] = {
         "PROPOSAL_REASONING_PROMPT": (
             "7c69ce7bae2509b830ad2cdfd8c239390554215e9feed259e83488845f1b9071"
@@ -124,12 +155,39 @@ class TestTheRelocationIsBYTE_EXACT:
         "proposing_stage.md": ("8d52e15675dcd6f5b96710dcc33809470123517e3d6b2734fd57300040d21ff1"),
     }
 
-    def test_substituting_tidmads_blocks_reproduces_the_original_bytes(self):
-        import hashlib
+    #: EPOCH 2 — the CURRENT-TREE reference, as of C12-P-P P1-B (`bca52bca`).
+    #:
+    #: Derivation, and the only derivation permitted: apply
+    #: `P1B_SHAPE_NEUTRALISATION` to the epoch-1 bytes. It is NOT "whatever the
+    #: tree currently hashes to" — the row below proves the two constants are
+    #: exactly one declared edit apart, so a future repin that skips declaring
+    #: its edit is caught rather than absorbed.
+    #:
+    #: `PROPOSAL_REASONING_PROMPT` is deliberately ABSENT: P1-B did not touch
+    #: it, so it is still pinned at its epoch-1 value and any movement is RED.
+    POST_P1B_SHA: ClassVar[dict[str, str]] = {
+        "proposing_stage.md": ("81e39ada124151c5f1c559b6279aac5bd27ed785ea1764e9ded1e8e0cbf9debf"),
+    }
 
-        blocks = load_proposal_task_blocks()
+    #: The declared epoch-1 -> epoch-2 edit, as (POST_P1B line, PRE_C7 line)
+    #: pairs: P1-B's three task-neutralised lines in `proposing_stage.md`
+    #: (:41 the JSON `output_type` gloss, :70/:71 the legality table's shape
+    #: column). Each must occur EXACTLY ONCE — an edit that stopped matching
+    #: is an undeclared drift, not a silent no-op.
+    #:
+    #: The enumeration itself now lives in `tests/helpers/c12pp_p1b_delta.py`,
+    #: because THREE frozen baselines reverse the same edit — this relocation
+    #: proof, the C0 raw-template pin, and the four proposing-stage prompt
+    #: goldens. Private copies would let a contributor amend the edit in one
+    #: module and leave the others describing a file that no longer exists,
+    #: and a stale table cannot fail honestly: it fails as "line not present",
+    #: which reads like a broken guard rather than an undeclared change. This
+    #: name stays bound so the row below reads as it did when it was written.
+    P1B_SHAPE_NEUTRALISATION: ClassVar[tuple[tuple[str, str], ...]] = P1B_TEMPLATE_DELTA
 
-        reasoning = (
+    @staticmethod
+    def _substituted_reasoning(blocks) -> str:
+        return (
             PROPOSAL_REASONING_PROMPT.replace("{ARCHITECT_ROLE}", render_architect_role(blocks))
             .replace("{EVIDENCE_READING}", render_proposal_evidence_reading(blocks))
             # C7-5's two additional Pr3 clauses in the same constant. The
@@ -139,17 +197,86 @@ class TestTheRelocationIsBYTE_EXACT:
             .replace("{TARGET_SELECTOR_CLAUSE}", blocks.target_strategy_selector_clause or "")
             .replace("{EVIDENCE_CITATION_CLAUSE}", blocks.evidence_citation_clause or "")
         )
+
+    @staticmethod
+    def _substituted_stage(blocks) -> str:
+        return PROPOSING_STAGE.read_text(encoding="utf-8").replace(
+            "{OUTPUT_CONTRACT_GUIDANCE}", render_output_contract_guidance(blocks)
+        )
+
+    def test_the_reasoning_prompt_still_reproduces_the_PRE_C7_bytes(self):
+        """EPOCH 1, still live for the surface P1-B did not touch.
+
+        DEFECT ONLY THIS CATCHES: TIDMAD's `architect_role`, `evidence_reading`,
+        `target_strategy_selector_clause` or `evidence_citation_clause` in
+        `configs/task_proposal/tidmad.yaml` being reworded, or
+        `PROPOSAL_REASONING_PROMPT` being edited around them — either of which
+        turns D-12a-6 from a relocation into a rewrite, silently changing what
+        a legacy un-composed run asks a real model.
+
+        HOW IT FAILS: substituting the declared blocks back no longer hashes to
+        `eeb073dc`'s recorded digest, and the assertion prints both.
+        """
+        import hashlib
+
+        reasoning = self._substituted_reasoning(load_proposal_task_blocks())
         assert (
             hashlib.sha256(reasoning.encode("utf-8")).hexdigest()
             == self.PRE_C7_SHA["PROPOSAL_REASONING_PROMPT"]
         )
 
-        stage = PROPOSING_STAGE.read_text(encoding="utf-8").replace(
-            "{OUTPUT_CONTRACT_GUIDANCE}", render_output_contract_guidance(blocks)
-        )
+    def test_the_proposing_stage_matches_its_POST_P1B_reference(self):
+        """EPOCH 2 — the live guard on the surface P1-B deliberately changed.
+
+        DEFECT ONLY THIS CATCHES: any unrecorded movement in the CURRENT
+        proposing-stage bytes — a reworded `output_contract_guidance` in
+        `configs/task_proposal/tidmad.yaml`, or a template edit — after P1-B
+        made the epoch-1 digest inapplicable to this file. Without this row the
+        only pin on `proposing_stage.md` would be a historical one that no
+        longer describes the tree, i.e. no pin at all.
+
+        HOW IT FAILS: the substituted stage no longer hashes to
+        `POST_P1B_SHA`, and the assertion names the file.
+        """
+        import hashlib
+
+        stage = self._substituted_stage(load_proposal_task_blocks())
         assert (
             hashlib.sha256(stage.encode("utf-8")).hexdigest()
+            == self.POST_P1B_SHA["proposing_stage.md"]
+        )
+
+    def test_the_stages_ONLY_delta_from_PRE_C7_is_P1Bs_declared_edit(self):
+        """The bridge between the two epochs, and the reason neither pretends
+        to be the other.
+
+        DEFECT ONLY THIS CATCHES: a future PR repointing `POST_P1B_SHA` to
+        whatever the tree happens to hash to, without declaring what it
+        changed. The two shas alone cannot see that — each is individually
+        satisfiable by any bytes. Reversing the ENUMERATED P1-B edit and
+        landing back on `eeb073dc`'s digest is what proves the current tree is
+        the recorded past plus exactly one declared, reviewable change, so an
+        undeclared edit riding along in the same commit is RED.
+
+        HOW IT FAILS: either a declared line stops occurring exactly once (an
+        edit was made that the table no longer describes), or the reversed text
+        misses `PRE_C7_SHA` (something ELSE moved too).
+        """
+        import hashlib
+
+        reconstructed = reverse_p1b(
+            self._substituted_stage(load_proposal_task_blocks()),
+            self.P1B_SHAPE_NEUTRALISATION,
+            surface="substituted proposing stage",
+        )
+        assert (
+            hashlib.sha256(reconstructed.encode("utf-8")).hexdigest()
             == self.PRE_C7_SHA["proposing_stage.md"]
+        ), (
+            "reversing P1-B's declared neutralisation did NOT reproduce the "
+            "`eeb073dc` bytes — the current tree differs from the recorded past "
+            "by something OTHER than the declared edit. Declare it in "
+            "tests/helpers/c12pp_p1b_delta.py, do not repoint PRE_C7_SHA."
         )
 
 
