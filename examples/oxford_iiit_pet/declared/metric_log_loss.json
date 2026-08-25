@@ -1,0 +1,11 @@
+{
+  "aggregation": "mean_natural_log_loss_over_final_eval_images",
+  "direction": "lower",
+  "id": "log_loss",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

@@ -1337,6 +1337,21 @@ class TaskCompositionRef(BaseModel):
             "that carries the task's roster."
         )
     )
+    objective: Any = Field(
+        default=None,
+        description=(
+            "The task's AUTHORITATIVE training objective as a validated "
+            "``LossConfig``, or ``None`` when the task declares none. Step 12 "
+            "/ PR-12d, F-12d-31: a task that ships its own objective must not "
+            "depend on the planner choosing it — two real composed DAVIS runs "
+            "trained with ``smooth_l1`` because the planner is told that is "
+            "the only valid regressor loss and never learns the task declares "
+            "exact L1. Typed ``Any`` for the same reason "
+            "``task_health_binding`` is: this schema must not import "
+            "``ml_models`` to name ``LossConfig``. ``None`` is every run that "
+            "exists today and leaves the planner's choice standing."
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

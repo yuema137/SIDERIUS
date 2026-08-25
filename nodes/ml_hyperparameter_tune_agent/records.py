@@ -554,7 +554,7 @@ def _build_denoised_filename(
     model_type: str,
     run_name: str,
     exp_id: str,
-    file_index: int,
+    input_identity: int,
     base_dir: str,
     naming: DeliverableNaming | None = None,
 ) -> str:
@@ -573,7 +573,10 @@ def _build_denoised_filename(
         model_type: Plugin model identifier (e.g. ``wavenet``).
         run_name: Chain-level run name (pins the workspace scope).
         exp_id: Per-round experiment id.
-        file_index: Validation file index (0-19 for TIDMAD).
+        input_identity: Opaque integer identity of the input this deliverable
+            answers (0-19 for TIDMAD's validation files). Named for what the
+            framework holds, not for how the naming capability renders it —
+            Step 12 / PR-12d seam E.
         base_dir: Sandbox output directory (usually
             ``TidmadSandbox.base_dir`` — the abspath of the run
             workspace). ``os.path.join(base_dir, absolute_filename)`` is
@@ -596,7 +599,7 @@ def _build_denoised_filename(
         model_type=model_type,
         run_name=run_name,
         exp_id=exp_id,
-        file_index=file_index,
+        input_identity=input_identity,
     )
     return os.path.join(base_dir, filename)
 
@@ -858,7 +861,17 @@ def finalize_run_output(
         evidence_channel_failure=_evidence_channel_failure,
     )
     all_records = sandbox.get_summary()
-    _best_tracks = _select_best_records(all_records, order=run_order)
+    # F-12d-30 — the RUN's own scientific gate set, not the process default.
+    # Taken from the RUN-SCOPED binding, never from the input projection:
+    # PR-12a C2 pins that this module reads run-scoped authorities, because a
+    # stamp that read the projection instead is exactly what made a composed
+    # chain refuse its own output (F-11-C10-a). The resolution itself happens
+    # once, at run scope, through the W6 authority.
+    _best_tracks = _select_best_records(
+        all_records,
+        order=run_order,
+        required_gate_ids=bindings.run_scientific_gate_ids,
+    )
     top_record = _best_tracks.top
     formal_top_record = _best_tracks.formal
     valid_top_record = _best_tracks.valid

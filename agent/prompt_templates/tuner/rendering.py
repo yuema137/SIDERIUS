@@ -83,15 +83,33 @@ def render_builtin_model_roster(registry: dict[str, Any] | None = None) -> str:
     return " | ".join(builtins)
 
 
-def render_full_scope_segments(dataset: Any) -> int:
+def render_full_scope_segments(dataset: Any | None) -> int | None:
     """Total PSD segments a full-scope run trains on: ``num_files × segments_per_file``.
 
     4 000 under TIDMAD's 20 files × 200 segments. The prompts use it as the
     reference volume a sparse trial is compared against ("the baseline
     typically trains on 4000 segments"), so a task with a different topology
     must not be told TIDMAD's number.
+
+    Step 12 / PR-12d, seam B: ``None`` in, ``None`` out. A task that declares
+    no physical geometry has no such volume, and the reference sentence must
+    say so rather than report a number that does not exist. TIDMAD's value is
+    untouched.
     """
+    if dataset is None:
+        return None
     return int(dataset.num_files) * int(dataset.segments_per_file)
+
+
+def render_full_scope_segments_token(full_scope_segments: int | None) -> str:
+    """The prompt TOKEN for the reference volume.
+
+    The substitution belongs to this authority rather than to
+    ``llm_bridge``, which is a substituter and owns no semantics. ``"N/A"`` is
+    the vocabulary this repository's prompts already use for an unavailable
+    quantity (``agent/prompts.py:1434``), so nothing new is introduced.
+    """
+    return "N/A" if full_scope_segments is None else str(full_scope_segments)
 
 
 def render_output_contract_shape(contract: Any | None) -> str | None:
@@ -340,8 +358,12 @@ class TunerTaskRender(BaseModel):
     builtin_model_roster: str = Field(
         description="The built-in architectures, pipe-joined, in registry order."
     )
-    full_scope_segments: int = Field(
-        description="num_files x segments_per_file for the run's dataset."
+    full_scope_segments: int | None = Field(
+        default=None,
+        description=(
+            "num_files x segments_per_file for the run's dataset, or None for "
+            "a task that declares no physical partition geometry."
+        ),
     )
     output_contract_shape: str | None = Field(
         default=None,

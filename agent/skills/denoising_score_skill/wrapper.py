@@ -16,4 +16,8 @@ def run_skill(sandbox: TidmadSandbox, **kwargs):
         m_cfg=kwargs["model_config"],
         t_cfg=kwargs["train_config"],
         l_cfg=kwargs["loss_config"],
+        # Step 12 / PR-12d D4b: the composed run's task-built scopes, already
+        # in the tuner's `active_params` for the training and inference
+        # spawns. Forwarded, not re-acquired — one acquisition, three children.
+        task_scopes=kwargs.get("task_scopes"),
     )

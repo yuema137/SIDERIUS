@@ -69,7 +69,12 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
 )
-from agent.skills.model_io_probe_skill import declared_output_tensor, realize_shape
+from agent.skills.model_io_probe_skill import (
+    build_model_input,
+    declared_output_tensor,
+    output_without_class_axis,
+    realize_shape,
+)
 from core.hardware_context import HardwareContext, discover
 from ml_models.loss_models_sandbox import get_criterion, get_target_torch_dtype
 from ml_models.models_format_sandbox import (
@@ -261,6 +266,51 @@ def _contract_target_shape(
     )
 
 
+def _probe_input_tensor(
+    batch_size: int,
+    seg_size: int,
+    model_io_contract: ModelIOContract | None,
+) -> torch.Tensor:
+    """The probe's INPUT tensor — F-12d-24.
+
+    Contract-shaped and contract-dtyped, at the candidate's REAL batch size
+    and segmentation length, when a Model-I/O declaration is bound
+    (``model_io_probe_skill.build_model_input`` — the same Step-04 recipe
+    authority ``realize_shape``'s own docstring already promised this caller
+    "supplies the candidate's real batch size" / "real segmentation size",
+    a promise this module never kept until now). Otherwise the exact
+    ``[B, T]`` int64 tensor every call built before Step 05b — legacy,
+    byte-identical, untouched.
+    """
+    if model_io_contract is not None:
+        return build_model_input(model_io_contract, batch=batch_size, symbolic=seg_size)
+    return torch.zeros((batch_size, seg_size), dtype=torch.long)
+
+
+def _class_index_target_tensor(
+    batch_size: int,
+    seg_size: int,
+    model_io_contract: ModelIOContract | None,
+) -> torch.Tensor:
+    """The classification loss's class-INDEX target — F-12d-24.
+
+    One integer per remaining (non-class) position of the contract's output
+    — ``model_io_probe_skill.output_without_class_axis`` — at the
+    candidate's real batch/segmentation size, when a Model-I/O declaration
+    is bound. This is why TIDMAD's own shape is unchanged: its output
+    carries both a class axis (256, dropped) and a temporal axis (T, kept),
+    so the realized shape is exactly the legacy ``[B, T]`` below. Otherwise
+    that exact ``[B, T]`` long tensor every classifier-loss call built
+    before Step 05b — legacy, byte-identical, untouched.
+    """
+    if model_io_contract is not None:
+        shape = realize_shape(
+            output_without_class_axis(model_io_contract), batch=batch_size, symbolic=seg_size
+        )
+        return torch.zeros(shape, dtype=torch.long)
+    return torch.zeros((batch_size, seg_size), dtype=torch.long)
+
+
 def _build_probe_tensors(
     batch_size: int,
     seg_size: int,
@@ -312,7 +362,7 @@ def _build_probe_tensors(
     ``model_io_contract=None`` is the legacy no-contract path and builds
     byte-identical tensors to every call before Step 05b.
     """
-    inp = torch.zeros((batch_size, seg_size), dtype=torch.long)
+    inp = _probe_input_tensor(batch_size, seg_size, model_io_contract)
     # Dict-unpack to mirror the existing ``LossConfig(**loss_cfg)`` pattern
     # at the run_skill site (line ~469); avoids a Literal-narrowing pyright
     # error when ``loss_type`` arrives as a plain ``str``.
@@ -320,7 +370,7 @@ def _build_probe_tensors(
         LossConfig(**{"loss_type": loss_type, "loss_name": loss_name})
     )
     if target_dtype == torch.long:
-        return inp, torch.zeros((batch_size, seg_size), dtype=torch.long)
+        return inp, _class_index_target_tensor(batch_size, seg_size, model_io_contract)
 
     # Float target: the shape follows the declared output contract.
     output_type = None
@@ -496,6 +546,7 @@ def _render_inference_killer(
     seg_size: int,
     cap_bytes: int,
     total_memory_bytes: int,
+    model_io_contract: ModelIOContract | None = None,
 ) -> killer_report.KillerReport:
     """Build a killer report for the inference-resolver-failed case.
 
@@ -516,7 +567,7 @@ def _render_inference_killer(
     inf_probe = probe_activation_footprint(
         model=model_tmp,
         loss_module=None,
-        input_sample=torch.zeros((1, seg_size), dtype=torch.long),
+        input_sample=_probe_input_tensor(1, seg_size, model_io_contract),
         target_sample=None,
         mode="inference",
     )
@@ -553,6 +604,7 @@ def _render_killer(
     seg_size: int,
     cap_bytes: int,
     total_memory_bytes: int,
+    model_io_contract: ModelIOContract | None = None,
 ) -> killer_report.KillerReport:
     """Pick the right renderer based on which cap(s) bound the refusal.
 
@@ -588,6 +640,7 @@ def _render_killer(
             seg_size=seg_size,
             cap_bytes=cap_bytes,
             total_memory_bytes=total_memory_bytes,
+            model_io_contract=model_io_contract,
         )
     raise RuntimeError("_render_killer called with no binding failure")
 
@@ -769,6 +822,7 @@ def run_skill(sandbox, **kwargs):
                 cap_bytes=cap_bytes,
                 budgets=_BUDGETS,
                 model_identity=model_type,
+                model_io_contract=model_io_contract,
             )
             del model_for_resolve
             gc.collect()
@@ -778,10 +832,7 @@ def run_skill(sandbox, **kwargs):
                 inference_probe = probe_activation_footprint(
                     model=model_for_bd,
                     loss_module=None,
-                    input_sample=torch.zeros(
-                        (inference_batch, seg_size),
-                        dtype=torch.long,
-                    ),
+                    input_sample=_probe_input_tensor(inference_batch, seg_size, model_io_contract),
                     target_sample=None,
                     mode="inference",
                 )
@@ -857,6 +908,7 @@ def run_skill(sandbox, **kwargs):
             seg_size=seg_size,
             cap_bytes=cap_bytes,
             total_memory_bytes=total_memory_bytes,
+            model_io_contract=model_io_contract,
         )
         print(f"    Verdict    : {report.verdict}")
         print("    Feasible   : NO")

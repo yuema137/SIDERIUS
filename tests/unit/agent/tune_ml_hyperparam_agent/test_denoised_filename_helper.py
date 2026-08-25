@@ -27,7 +27,7 @@ def test_returned_path_is_absolute():
         model_type="wavenet",
         run_name="iter_001",
         exp_id="wavenet_iter_001_002",
-        file_index=0,
+        input_identity=0,
         base_dir="/tmp/checkpoint_workspace",
     )
     assert os.path.isabs(path), (
@@ -45,7 +45,7 @@ def test_returned_path_starts_with_base_dir():
         model_type="wavenet",
         run_name="iter_001",
         exp_id="wavenet_iter_001_002",
-        file_index=0,
+        input_identity=0,
         base_dir=base_dir,
     )
     assert path.startswith(base_dir + os.sep), (
@@ -62,7 +62,7 @@ def test_filename_component_encodes_all_identifiers():
         model_type="wavenet",
         run_name="iter_001",
         exp_id="wavenet_iter_001_002",
-        file_index=7,
+        input_identity=7,
         base_dir="/tmp/checkpoint_workspace",
     )
     fname = os.path.basename(path)
@@ -81,14 +81,14 @@ def test_file_index_zero_padded_to_four_digits():
         model_type="wavenet",
         run_name="r",
         exp_id="e",
-        file_index=0,
+        input_identity=0,
         base_dir="/tmp",
     )
     path_19 = _build_denoised_filename(
         model_type="wavenet",
         run_name="r",
         exp_id="e",
-        file_index=19,
+        input_identity=19,
         base_dir="/tmp",
     )
     assert os.path.basename(path_0).endswith("_0000.h5")

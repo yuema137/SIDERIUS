@@ -610,12 +610,29 @@ class BestTracks:
     valid_trial: dict | None
 
 
-def _select_best_records(all_records: list, *, order: MetricOrder) -> BestTracks:
+def _select_best_records(
+    all_records: list,
+    *,
+    order: MetricOrder,
+    required_gate_ids: frozenset[str] | None = None,
+) -> BestTracks:
     """Resolve the five ``best_*`` tracks from a run's complete record list.
 
     Args:
         all_records: every record the invocation produced.
         order: the run's ONE order authority.
+        required_gate_ids: the RUN's own scientific gate set — F-12d-30.
+            Omitted (``None``) means "resolve the default", which
+            ``is_valid_candidate`` does by calling
+            :func:`required_blocking_gate_ids`; that composes with
+            ``LEGACY_OMITTED`` and is therefore **TIDMAD's** set. Correct for
+            an un-composed run and wrong for a composed one, where it makes
+            the process bind TIDMAD's Health family after the run has already
+            bound its own — which the Step-08b run-scope guard then refuses,
+            killing an otherwise-complete run at finalize. The caller resolves
+            this through :func:`resolve_run_scientific_gate_ids`, the
+            authority Step 10 / P5+P6 W6 built for exactly this
+            (finding F-P56-2); this call site was simply never migrated to it.
 
     Returns:
         A :class:`BestTracks` whose fields are the winning records (or
@@ -631,7 +648,9 @@ def _select_best_records(all_records: list, *, order: MetricOrder) -> BestTracks
     top_record = order.best(successful_records, key=_score_of) if successful_records else None
     formal_records = [r for r in successful_records if not r.get("is_trial", False)]
     formal_top_record = order.best(formal_records, key=_score_of) if formal_records else None
-    valid_records = [r for r in successful_records if is_valid_candidate(r)]
+    valid_records = [
+        r for r in successful_records if is_valid_candidate(r, required_gate_ids=required_gate_ids)
+    ]
     valid_top_record = order.best(valid_records, key=_score_of) if valid_records else None
     valid_formal_records = [r for r in valid_records if not r.get("is_trial", False)]
     valid_formal_top_record = (
@@ -1211,3 +1230,51 @@ def _apply_plan_overrides(plan: ExperimentPlan, overrides: dict[str, Any]) -> Ex
         ) from e
     print(f"  Plan overrides applied: {list(overrides.keys())}")
     return effective
+
+
+class ScoringRoute(StrEnum):
+    """WHICH scoring path an attempt takes — named, not inferred.
+
+    Step 12 / PR-12d D4b (B4). The decision used to be spelled
+    ``if anchor_map_data is not None:``, with an ``else`` commented "legacy
+    single-file mode". Two things were wrong with that, and only the first was
+    in the register:
+
+    * **a task with no anchor artifact fell through silently.** Every composed
+      contrast task has none — no contrast implementation declares trial
+      anchoring — so a Pets or DAVIS run took a branch named for TIDMAD's
+      legacy single-file mode.
+    * **so did every un-composed NON-TRIAL run.** ``anchor_map_data`` is only
+      ATTEMPTED when the run is a trial, so the ``else`` was never "legacy
+      single-file" in the sense its comment claimed. The comment described a
+      condition the code did not test.
+
+    Naming the routes makes both facts visible at the call site, and makes the
+    third route — a task scoring its OWN deliverable through its OWN metric —
+    something the reader can see rather than infer from an absence.
+    """
+
+    ANCHOR_NORMALIZED = "anchor_normalized"
+    """TIDMAD's in-process anchor-normalized scoring. REQUIRES an anchor map."""
+
+    TASK_OWNED = "task_owned"
+    """A composed task's own deliverable, scored through its own metric in the
+    scoring subprocess, with the evaluation scope its ground truth needs."""
+
+    SUBPROCESS_LEGACY = "subprocess_legacy"
+    """TIDMAD scoring through the subprocess, with no anchor normalization."""
+
+
+def resolve_scoring_route(anchor_map_data, task_scopes) -> ScoringRoute:
+    """Decide the route from what each one actually REQUIRES.
+
+    Order is the specificity order, and each test names its own precondition:
+    anchor-normalized scoring cannot run without an anchor map; task-owned
+    scoring cannot run without the task's evaluation scope; the subprocess
+    legacy route needs neither.
+    """
+    if anchor_map_data is not None:
+        return ScoringRoute.ANCHOR_NORMALIZED
+    if getattr(task_scopes, "evaluation", None) is not None:
+        return ScoringRoute.TASK_OWNED
+    return ScoringRoute.SUBPROCESS_LEGACY

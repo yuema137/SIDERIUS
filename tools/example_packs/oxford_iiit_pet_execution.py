@@ -34,7 +34,7 @@ from execute_tools.pets_data_path import (
     RESIZE_SHORTER_SIDE,
     transform_probe_sha256,
 )
-from tools.example_packs._common import repo_root, write_json, write_text
+from tools.example_packs._common import repo_root, write_json, write_sha256sums, write_text
 from tools.example_packs.oxford_iiit_pet import (
     MANIFEST_RELDIR,
     PACK_DIRNAME,
@@ -108,6 +108,11 @@ def write_execution_artifacts(pack_root: Path, images_root: Path) -> dict[str, A
         name = f"gate2_{scope}.csv"
         write_text(manifest_dir / name, render_manifest_csv(subset))
         written[name] = subset
+    # F-12d-5 (Step 12 / PR-12d D5). The Gate reads these subsets, so they
+    # carry integrity pins like every other committed manifest. Re-pinning the
+    # WHOLE directory rather than appending keeps one authority for the file's
+    # contents whichever of the two pack writers ran last.
+    write_sha256sums(manifest_dir, sorted(p.name for p in manifest_dir.glob("*.csv")))
     return written
 
 

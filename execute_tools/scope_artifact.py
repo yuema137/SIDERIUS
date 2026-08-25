@@ -194,3 +194,179 @@ class ScopeEvidence(BaseModel):
     digest: str = Field(
         min_length=64, max_length=64, description="sha256 of the transported payload."
     )
+
+
+def load_transported_scope(ref: str | None, digest: str | None, *, leg: str) -> object | None:
+    """The child half of the scope transport: verify, THEN deserialize.
+
+    Step 12 / PR-12bc B6; RELOCATED here by PR-12d seam C (B6). It lived in
+    ``train_engine_sandbox`` while the training child was the only one that
+    received a scope. Now that the inference child receives one too, a copy
+    there would be the duplicated child-side verification §E.2 forbids — so
+    the reader moves beside the writer, and both children import the SAME
+    function. The order it enforces is unchanged.
+
+    The same two-case rule every other transported flag follows — SUPPLIED but broken fails closed naming the path; ABSENT leaves
+    regime-A to the run itself.
+
+    Order is load-bearing, and is why this is ONE function rather than two
+    steps at the call site: the bytes are checked against the digest the PARENT
+    transported before the task's parser is ever handed them. A parser's job is
+    to build a scope, not to authenticate one.
+
+    Args:
+        ref: ``--task_scope_ref`` / ``--task_eval_scope_ref``.
+        digest: its out-of-band sha256.
+        leg: which leg, for diagnostics only.
+
+    Returns:
+        The task's own scope object, or ``None`` when the flag was absent.
+
+    Raises:
+        ValueError: The pair is half-supplied.
+        ScopeArtifactError: The artifact is missing, unreadable or tampered.
+    """
+    if ref is None and digest is None:
+        return None
+    if ref is None or digest is None:
+        raise ValueError(
+            f"the {leg} scope transport is half-supplied (ref={ref!r}, digest "
+            f"{'present' if digest else 'absent'}). A path without its digest "
+            f"could not be verified and a digest without a path names nothing — "
+            f"refusing rather than proceeding on whichever half arrived."
+        )
+    from execute_tools.task_data_path import (
+        resolve_bound_task_data_path,
+        resolve_task_scope_capability,
+    )
+
+    # Verify FIRST, then narrow through the ONE resolver. `deserialize_scope`
+    # is not on the frozen four-method protocol and must not be: the capability
+    # is an optional sibling, so a binding that declares none must produce a
+    # named refusal here rather than an AttributeError deep in the engine.
+    payload = read_scope_artifact(ref, digest)
+    capability = resolve_task_scope_capability(resolve_bound_task_data_path())
+    return capability.deserialize_scope(payload)
+
+
+def task_scope_argv(configs_dir: str, exp_id: str, task_scopes: object) -> list[str]:
+    """The composed run's SCOPE transport — empty unless scopes were acquired.
+
+    Step 12 / PR-12bc B6; RELOCATED here by PR-12d seam C. It lived in
+    ``core/sandbox_executor.py`` — the launch consumer — while it had one call
+    site. With a second child receiving a scope it grew a sibling
+    (:func:`validation_rows_argv`), and the launch consumer's own file budget
+    named the remedy: *"extract the responsibility into a sibling module
+    instead of growing the launch consumer"* (R-11-11). The scope ABI is that
+    sibling: this function WRITES the artifacts this module defines and puts
+    their paths on argv, so it belongs beside them.
+
+    Follows ``_task_data_path_argv``'s shape exactly: a
+    small pure emitter, splatted at the call site, that yields NOTHING when the
+    run is un-composed. An un-composed command line is therefore byte-identical
+    (R-11-1 / R-11-13), which the B0 fixture pins independently.
+
+    The scope payload itself never rides argv (parent §5.5, frozen): the task's
+    canonical bytes are written to a run-scoped ATOMIC artifact and argv carries
+    only a path and a digest, so a large or variable-length scope has no
+    ``ARG_MAX`` exposure.
+
+    The bytes come from the TASK (``serialize_scope``); this function neither
+    inspects nor canonicalizes them.
+    """
+    from execute_tools.task_data_path import (
+        active_task_data_path,
+        resolve_task_scope_capability,
+    )
+
+    training = getattr(task_scopes, "training", None)
+    if training is None:
+        return []
+    bound = active_task_data_path()
+    if bound is None:
+        raise ValueError(
+            "task scopes were acquired but no task data path is bound, so the "
+            "bytes cannot be produced by the implementation that built them."
+        )
+
+    # Narrowed through the ONE resolver rather than accessed off `TaskDataPath`:
+    # the frozen four-method protocol does NOT declare `serialize_scope`, and it
+    # must not — the capability is an optional SIBLING. Reaching for the method
+    # directly is what a static checker rejects, and it is right to: the binding
+    # here could be an implementation that declares no capability at all, and
+    # the resolver is what turns that into a named refusal.
+    capability = resolve_task_scope_capability(bound)
+
+    fragment: list[str] = []
+    for stem, scope, flag in (
+        (TRAINING_SCOPE_STEM, training, "--task_scope"),
+        (EVAL_SCOPE_STEM, getattr(task_scopes, "evaluation", None), "--task_eval_scope"),
+    ):
+        if scope is None:
+            continue
+        path = scope_artifact_path(configs_dir, stem, exp_id)
+        digest = write_scope_artifact(path, capability.serialize_scope(scope))
+        fragment.extend([f"{flag}_ref", path, f"{flag}_digest", digest])
+    return fragment
+
+
+def validation_rows_argv(task_scopes: object, data_dir: str) -> list[str]:
+    """The CALLER's declared validation row count — empty unless composed.
+
+    Step 12 / PR-12d, seam C (B9). ``run_experiment_streaming`` REFUSES an
+    explicit ``task_eval_scope`` that arrives without
+    ``validation_requested_rows``, and nothing in production emitted one: the
+    only two callers that ever supplied it are the in-process D14 Gate
+    harnesses, which built their own row lists and therefore knew the number.
+    A composed contrast run had no such caller, so its training child refused
+    before the first epoch.
+
+    **Why the count is produced HERE and not by the child.** The child's
+    ``TrainingHistory`` asserts ``requested == materialized``, and the
+    materialized value comes from the validation pass itself. A declaration
+    the child derived would compare the pass to itself and pass for any
+    number — CLAUDE.md's "never assert a value read back from the thing under
+    test". The declaration has to come from the other side of the boundary,
+    which is what makes the check able to catch a scope that crossed
+    corrupted or a pass that silently truncated.
+
+    **Why no new capability method.** The count is obtained through
+    ``validation_dataset`` — one of the FOUR FROZEN ``TaskDataPath`` methods —
+    and ``len()`` on the torch ``Dataset`` the ``DataLoader`` already requires
+    to be ``Sized``. Reuse before invention (§D.C): nothing is added to
+    ``TaskScopeCapability``, whose four methods 12bc froze.
+
+    **What this costs, corrected at F-12d-35.** This docstring used to claim
+    materialization "is lazy for every shipped implementation, so this reads a
+    row count, not the data". That is FALSE for TIDMAD, whose
+    ``validation_dataset`` builds a ``TIDMADEpochDataset`` over the real
+    ``.h5`` files and FAILS CLOSED when materialized != requested. So for any
+    run that acquired an evaluation scope, the PARENT touches the dataset
+    while building argv, and a missing or short dataset is refused here rather
+    than inside the child.
+
+    That is the intended trade — the count must come from the other side of
+    the boundary or it proves nothing — but it is a real I/O cost and a real
+    failure site, and it went unnoticed until CI (which has no TIDMAD data)
+    failed on a test that passed on every developer machine.
+
+    Returns ``[]`` when the run is un-composed or acquired no evaluation
+    scope, so a legacy argv is byte-identical.
+    """
+    from execute_tools.task_data_path import (
+        EvalMaterializationParams,
+        active_task_data_path,
+    )
+
+    evaluation = getattr(task_scopes, "evaluation", None)
+    if evaluation is None:
+        return []
+    bound = active_task_data_path()
+    if bound is None:
+        raise ValueError(
+            "an evaluation scope was acquired but no task data path is bound, "
+            "so its row count cannot be declared by the implementation that "
+            "built it."
+        )
+    dataset = bound.validation_dataset(evaluation, EvalMaterializationParams(data_dir=data_dir))
+    return ["--validation_requested_rows", str(len(dataset))]  # type: ignore[arg-type]

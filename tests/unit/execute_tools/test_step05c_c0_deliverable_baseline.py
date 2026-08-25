@@ -266,7 +266,7 @@ def test_c0_path_builder_agrees_with_the_producer_filename_golden():
         model_type=GOLDEN_MODEL_TYPE,
         run_name=GOLDEN_RUN_NAME,
         exp_id=GOLDEN_EXP_ID,
-        file_index=GOLDEN_FILE_INDEX,
+        input_identity=GOLDEN_FILE_INDEX,
         base_dir="/step05c/workspace",
     )
 

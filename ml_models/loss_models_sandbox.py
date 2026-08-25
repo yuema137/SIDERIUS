@@ -75,7 +75,11 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
     """
     # Lazy import keeps ml_models loadable without agent_generated/ on the
     # Python path (legacy tests that exercise loss_models_sandbox in isolation).
-    from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY, load_loss_plugin_from_path
+    from agent_generated._loss_loader import (
+        LOSS_REDUCTION_REGISTRY,
+        LOSS_TARGET_DTYPE_REGISTRY,
+        load_loss_plugin_from_path,
+    )
 
     plugin = load_loss_plugin_from_path(plugin_path)
     if plugin is None:
@@ -99,6 +103,11 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
     # ``"target_dtype"`` key (defaulting to ``"long"`` when the plugin's
     # ``PLUGIN_LOSS_TARGET_DTYPE`` declaration is missing).
     LOSS_TARGET_DTYPE_REGISTRY[loss_type] = plugin["target_dtype"]
+    # Step 12 / PR-12d D4c: the OPTIONAL declared normalization, recorded on
+    # the SAME event as the dtype. Tier 1 and Tier 2 must agree about the same
+    # plugin — F-12d-2 was exactly the cost of them not agreeing.
+    if plugin["reduction"] is not None:
+        LOSS_REDUCTION_REGISTRY[loss_type] = plugin["reduction"]
     return loss_type
 
 

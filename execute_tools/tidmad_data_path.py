@@ -543,7 +543,7 @@ class TidmadTaskDataPath:
                     model_type=request.model_type,
                     run_name=request.run_name,
                     exp_id=request.exp_id,
-                    file_index=file_index,
+                    input_identity=file_index,
                 ),
             )
             if os.path.exists(out_name):
@@ -573,14 +573,14 @@ class TidmadTaskDataPath:
         if not os.path.isdir(request.deliverable_dir):
             return payload
         for entry in sorted(os.listdir(request.deliverable_dir)):
-            file_index = spec.naming.file_index_of(entry)
+            file_index = spec.naming.input_identity_of(entry)
             if file_index is None:
                 continue
             expected = spec.naming.name(
                 model_type=request.model_type,
                 run_name=request.run_name,
                 exp_id=request.exp_id,
-                file_index=file_index,
+                input_identity=file_index,
             )
             if entry != expected:
                 continue

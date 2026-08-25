@@ -472,11 +472,33 @@ def build_parser() -> argparse.ArgumentParser:
         "contradiction and is refused, while blocking+diagnostic is "
         "coherent — enforced, and deliberately not promoted.",
     )
+    parser.add_argument(
+        "--task_composition",
+        type=str,
+        default=None,
+        help=(
+            "Path to a YAML task-composition manifest. Omitted = the legacy "
+            "un-composed run, byte-identical to its pre-Step-10 behaviour. "
+            "Supplied, it binds this run's task data path, dataset profile, "
+            "metric, declared secondaries, Health family and task "
+            "description/forward contract EXPLICITLY, and every "
+            "unresolvable reference fails closed before any LLM call. "
+            "Same manifest shape and same composition authority the chain "
+            "launcher's --task_composition already uses "
+            "(sdsc_submission_scripts/run_chain.sh) — added here (Step 12 "
+            "/ PR-12d D8a) so a SINGLE model can be run composed and "
+            "--force_model-locked in one launch, without the multi-agent "
+            "chain's proposer choosing the architecture. "
+            "docs/design/generic_framework_upgrade/"
+            "step_10_orchestration_task_binding/"
+            "pr_10_p1_run_scoped_task_composition.md."
+        ),
+    )
     return parser
 
 
 def build_agent_input(
-    args: argparse.Namespace, parser: argparse.ArgumentParser
+    args: argparse.Namespace, parser: argparse.ArgumentParser, run_composition: object = None
 ) -> HyperparamTuningInput:
     """Translate parsed CLI arguments into the validated node input.
 
@@ -616,6 +638,18 @@ def build_agent_input(
     input_dict["runtime_trial_safety_factor"] = args.runtime_trial_safety_factor
     input_dict["runtime_formal_safety_factor"] = args.runtime_formal_safety_factor
     input_dict["runtime_watchdog_floor_seconds"] = args.runtime_watchdog_floor_seconds
+
+    # Step 12 / PR-12d D8a. `run_composition` is the SAME object `main()`
+    # binds around `.run()` — passed in rather than re-composed here, so
+    # there is exactly ONE composition per process (re-composing a second
+    # time from `args.task_composition` would be a second resolution the
+    # registry-identity rules (Step 12 / PR-12bc CASE A) treat as a fresh
+    # instance, not the same one). `None` for an un-composed run, which is
+    # what makes `task_composition_ref` absent and this whole branch
+    # invisible to regime A.
+    from workflows.task_composition import build_task_composition_ref
+
+    input_dict["task_composition_ref"] = build_task_composition_ref(run_composition)
 
     agent_input = HyperparamTuningInput.model_validate(input_dict)
     return agent_input

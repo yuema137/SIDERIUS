@@ -325,3 +325,89 @@ Do not widen the allowlist.
 handoff genuinely is current and the guard is wrong, that is a bug in
 `tools/claude_hooks/`; fix it there with a test, never by loosening the
 freshness fields to values you have not verified.
+
+---
+
+## Known limitation: a PARALLEL session is blocked by the implementation session's handoff
+
+**Observed 2026-08-23, Step 12 (recorded, NOT fixed — see the ruling at the
+end of this section).** A planning / design / audit session running in a
+SEPARATE worktree, alongside a live implementation session, is blocked at
+every turn-end and handed **the implementation session's** next actions.
+
+### What happens
+
+```text
+/home/<user>/SIDERIUS                  main checkout — implementation session,
+                                       CONTEXT STATE: ACTIVE, next actions listed
+/home/<user>/siderius-<topic>-planning separate worktree — planning session,
+                                       different branch, its own unrelated work
+```
+
+The planning session finishes its work and tries to end the turn. The guard
+blocks it and quotes the implementation session's checklist.
+
+### Why — and note the branch check is not the bug
+
+The guard's branch condition is real, but `stop_continuation_guard.main()`
+does:
+
+```python
+root = repo_root()          # resolves to CLAUDE_PROJECT_DIR — the MAIN checkout, always
+decision, ... = evaluate(root)
+```
+
+so `branch_name(root)`, `head_sha(root)` and the handoff all come from
+whatever occupies the **main checkout**, regardless of which worktree the
+session is actually working in. From the guard's viewpoint the repository has
+exactly one current checkout, and that checkout is ACTIVE with next actions
+pending. A session in another worktree is invisible to it.
+
+### What is actually blocked
+
+**Only the stop.** No tool call is prevented: edits, commits and subagents in
+the parallel session all execute normally. The cost is extra turns, not lost
+or corrupted work.
+
+### What a blocked session MUST NOT do
+
+1. **Do not execute the quoted next actions.** They belong to another
+   session, in another worktree, which very likely has uncommitted changes
+   there. The message is imperative ("Continue with the recorded next
+   actions") and looks authoritative — that is exactly the trap.
+2. **Do not write `before_end_memory.md`** to take the guard's escape clause.
+   That file is the *implementation* session's crash-recovery handoff;
+   marking it `Operator input required: yes` corrupts the state of a session
+   that is running normally.
+
+Instead: verify from git which session owns which worktree and branch, say so
+plainly, deliver the parallel session's own work, and let the operator decide.
+
+**The real risk is a FRESH session, not an informed one.** A session without
+this history reads a confident, specific checklist and may simply do it — in
+the wrong worktree, or on top of another session's uncommitted work.
+
+### Operator ruling, 2026-08-23: RECORD, DO NOT FIX
+
+> The main implementation must not be put at risk to remove an annoyance.
+
+The guard is **left exactly as it is**. This section is the mitigation. The
+cheapest workaround while a parallel session is running is to close it rather
+than let it end its turn.
+
+**If it is ever fixed, it needs evidence first, not a patch.** Two candidate
+designs were considered and **neither is validated**:
+
+* resolve the root from the *calling* worktree (`git rev-parse
+  --show-toplevel`) instead of `repo_root()` — depends on the Stop event
+  carrying a `cwd`, or on the harness launching the hook inside the session's
+  worktree. **Neither is confirmed**; every hook in this repository reads only
+  `session_id` and `source`, so there is no local precedent.
+* record in the handoff the `session_id` that authored it and allow the stop
+  when the event's `session_id` differs — needs no worktree topology at all,
+  but must not lose protection when a session resumes under a new id (fall
+  back to the branch check for that case).
+
+**Dump one real Stop event and read its fields before choosing.** Any change
+here lands with a test, on a checkout that is not hosting a live
+implementation session.

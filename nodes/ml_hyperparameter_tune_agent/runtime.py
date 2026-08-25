@@ -220,7 +220,7 @@ def _handle_prephase_gpu_measurement(
     governs, and reimplementing any of that here would put O-7's accounting
     in the one scope where it is hardest to see.
 
-    **Two applicability rules, neither of them a feature flag.**
+    **Three applicability rules, none of them a feature flag.**
 
     *Trial rounds are not measured.* O-7 governs formal execution, and a
     trial round's admission posture already proceeds while recording what it
@@ -231,6 +231,45 @@ def _handle_prephase_gpu_measurement(
     `_admission_refusal` already applies -- a CPU or pseudo run has no card
     to take a driver-visible reading from, and admission has nothing to
     decide. Unchanged behaviour there, not a refusal.
+
+    *A task declaring no TIDMAD topology has no batch this probe can build.*
+    Step 12 / PR-12d, **B12 / F-12d-25**, operator-ruled 2026-08-24
+    (option B). The worker's batch builder
+    (`probe_batch.build_bounded_probe_batch`) has a TIDMAD-SPECIFIC INPUT
+    CONTRACT -- `abra_training_????.h5`, `tidmad_topology(...).channels`,
+    h5py group layout -- and deliberately refuses synthetic data (F-1a).
+    Pets and DAVIS have no semantically valid input to that legacy probe, so
+    applicability must REFUSE TO RUN IT rather than fabricate a TIDMAD input;
+    reporting `STOP_INFRASTRUCTURE_FAILURE` (what happened before this rule)
+    claimed the ENVIRONMENT was broken when it was healthy. This is the same
+    correction Step 08a made when it introduced `CheckVerdict.inapplicable`
+    instead of "passed=True with prose", and applicability is decided HERE,
+    before the worker is spawned, so an inapplicable measurement opens no
+    artifact.
+
+    **This rule is a MEMBERSHIP TEST, never a caught exception, and the
+    distinction is load-bearing.** `declares_tidmad_topology` asks whether
+    the sections are PRESENT. `tidmad_topology()` raises for TWO different
+    reasons -- absent sections, and sections present but MALFORMED -- so
+    inferring "this task declares none" from catching its `ValueError` would
+    silently reclassify a malformed TIDMAD profile as inapplicable and skip a
+    measurement that must instead FAIL. A malformed TIDMAD topology therefore
+    still returns `True` here, still spawns the worker, and still fails
+    closed. (12bc's row-2-vs-row-4 rule, one subsystem over; the predicate's
+    own docstring states it.)
+
+    **What this rule does NOT do**: it does not suppress a failing APPLICABLE
+    probe (a TIDMAD run whose data is present but whose probe crashes still
+    reaches `TERMINAL_INFRASTRUCTURE_FAILURE`), and it does not touch any
+    resource enforcement that is independent of this measurement -- the
+    `evaluate_vram_skill` capacity gate still runs for every task and still
+    governs admission. Downstream, a measurement that never happened is an
+    ALREADY-SUPPORTED state, not a new one: `sandbox_executor.py:552-565`
+    returns `(None, None)` when no requirement table was attached.
+
+    **Option A -- making bounded probe-batch construction fully
+    task-composable so arbitrary topologies can be measured -- is recorded as
+    explicit post-Step-12 debt and is deliberately NOT absorbed here.**
     """
     if is_trial:
         return PrephaseOutcome.PROCEED
@@ -245,6 +284,22 @@ def _handle_prephase_gpu_measurement(
 
     device_identity = getattr(sandbox, "device_identity", None)
     if not isinstance(device_identity, DeviceIdentity):
+        return PrephaseOutcome.PROCEED
+
+    # B12 / F-12d-25. `run_profile is None` is Regime A — an un-composed run,
+    # which IS TIDMAD — so it stays applicable and TIDMAD's behaviour is
+    # bit-for-bit what it was. Only a COMPOSED profile that declares no
+    # TIDMAD topology reaches the inapplicable path.
+    from execute_tools.dataset_config import DatasetProfile, declares_tidmad_topology
+
+    if isinstance(run_profile, DatasetProfile) and not declares_tidmad_topology(run_profile):
+        print(
+            "  Pre-phase GPU measurement NOT APPLICABLE: this task declares no "
+            "TIDMAD topology, and the bounded probe batch is TIDMAD-physical "
+            "(h5 training family / declared input channel). No measured "
+            "requirement is attached for this run; the VRAM capacity gate is "
+            "unaffected. This is an applicability decision, not a probe failure."
+        )
         return PrephaseOutcome.PROCEED
 
     import uuid as _uuid

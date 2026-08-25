@@ -21,8 +21,15 @@ task_data_path:
   module: execute_tools.pets_data_path
   symbol: PetsTaskDataPath
 
+# Step 12 / PR-12d D5 — the fabricated profile that used to sit beside this
+# file is DELETED, not edited. It declared `psd_segment_length`,
+# `segments_per_file`, `sampling_frequency` and `pets_train_shard_*.h5`
+# patterns for a task that has no PSD segments, no sampling frequency and no
+# HDF5 shards (F-12d-4). The fixture now points at the pack's OWN shipped
+# declaration, so there is exactly one Pets profile in the repository and it
+# cannot drift from the one a real run composes.
 dataset_profile:
-  config: dataset_profile.json
+  config: ../../../../examples/oxford_iiit_pet/declared/dataset_profile.json
 
 metric:
   declaration: ../../../../examples/oxford_iiit_pet/declared/metric_accuracy.json
@@ -35,10 +42,14 @@ metric:
 # (Q-10-4 = A). Same {declaration, implementation} shape as `metric` above,
 # resolved by the same authority.
 secondary_metrics:
+  # Step 12 / PR-12d D4c: was bound to `AccuracyMetric`, which computes
+  # accuracy — on this pack's own golden fixture the two differ (0.5 vs
+  # 0.0315), so the report would have carried the wrong science under the
+  # right label. See F-12d-3.
   - declaration: ../../../../examples/oxford_iiit_pet/declared/metric_macro_f1.json
     implementation:
-      module: execute_tools.evaluation_metric
-      symbol: AccuracyMetric
+      file: ../../../../examples/oxford_iiit_pet/plugins/_pets_metrics.py
+      symbol: PetsMacroF1Metric
 
 task_health:
   config: ../../../../examples/oxford_iiit_pet/declared/task_health.yaml

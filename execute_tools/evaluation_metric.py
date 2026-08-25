@@ -60,7 +60,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
-from typing import Annotated, Any, Literal, NamedTuple, cast, get_args
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, cast, get_args
 
 import h5py
 from pydantic import (
@@ -73,7 +73,7 @@ from pydantic import (
     model_validator,
 )
 
-from execute_tools.dataset_config import DatasetProfile
+from execute_tools.dataset_config import DatasetProfile, ScopeViolationError
 from execute_tools.deliverable_spec import DeliverableSpec, derive_tidmad_deliverable_spec
 from execute_tools.scoring_helpers import _LOG_BASE as _TIDMAD_LOG_BASE
 
@@ -462,6 +462,17 @@ class NotScoreableResult(BaseModel):
 MetricOutcome = MetricResult | NotScoreableResult
 
 
+class NoRunMetricError(RuntimeError):
+    """A run has neither a declared metric nor the geometry to derive one.
+
+    Step 12 / PR-12d, seam B. Deliberately NOT a ``NotScoreableError``: that
+    one means "this deliverable cannot be scored", a structured scientific
+    refusal the record persists. This means "the run's metric could not be
+    established at all", which is a composition wiring failure and must stop
+    the run rather than become an ``error_scoring`` record.
+    """
+
+
 class NotScoreableError(Exception):
     """A :class:`NotScoreableResult`, for callers whose contract is exception-based.
 
@@ -500,6 +511,26 @@ class EvaluationMetric(ABC):
     subclass arithmetic is reached. Subclasses implement only
     :meth:`_compute`; they cannot reorder the two.
     """
+
+    #: The metric ids whose SEMANTICS this implementation computes.
+    #:
+    #: Step 12 / PR-12d D4c, closing **F-12d-3**. ``_compose_metric``'s only
+    #: identity check was ``metric.spec.id != spec.id`` — and since
+    #: ``__init__`` assigns ``self.spec = spec``, that compares the
+    #: declaration to itself. It could fire only for an implementation that
+    #: rewrites its own id, and was blind to the case the acceptance names: a
+    #: declaration bound to the WRONG implementation. The shipped fixtures
+    #: bound ``psnr`` AND ``mae`` to :class:`GlobalMseMetric`, and
+    #: ``macro_f1`` to :class:`AccuracyMetric`, all composing green.
+    #:
+    #: A claim here is the implementation asserting, independently of the
+    #: declaration it is handed, what arithmetic it performs. It does NOT
+    #: reintroduce lexical parsing of ``MetricSpec.id`` (D16/C5): the
+    #: framework still never interprets the string — it only checks that two
+    #: parties agree. An implementation that makes NO claim (the default)
+    #: composes under any id, which is what keeps a genuinely generic
+    #: implementation reusable and keeps every pre-D4c binding valid.
+    IMPLEMENTS: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, spec: MetricSpec) -> None:
         self.spec = spec
@@ -547,6 +578,8 @@ class TidmadDenoisingMetric(EvaluationMetric):
     its parameters or its return contract is restated here.
     """
 
+    IMPLEMENTS: ClassVar[tuple[str, ...]] = (TIDMAD_METRIC_ID,)
+
     def _compute(
         self, deliverables: Mapping[int, str], /, **compute_kwargs: Any
     ) -> tuple[float, list[float | None] | None, tuple[str, ...]]:
@@ -569,6 +602,8 @@ class AccuracyMetric(EvaluationMetric):
     :func:`metric_spec_from_declaration`); ``per_sample`` is ``None`` — no
     per-file vector concept exists here.
     """
+
+    IMPLEMENTS: ClassVar[tuple[str, ...]] = ("accuracy",)
 
     def _compute(
         self,
@@ -601,6 +636,8 @@ class GlobalMseMetric(EvaluationMetric):
     defensible numeric stand-in, and a partial deliverable that scored
     anyway would silently flatter the model.
     """
+
+    IMPLEMENTS: ClassVar[tuple[str, ...]] = ("mse",)
 
     def _compute(
         self,
@@ -760,6 +797,101 @@ def metric_identity_unavailable_notice(context: str, *, detail: str = "") -> str
         f"[metric] {METRIC_IDENTITY_UNAVAILABLE}: {context} is NOT ranked{suffix}. "
         "Raw values remain readable; no direction is assumed."
     )
+
+
+def evaluate_declared_secondaries(
+    secondaries: tuple[EvaluationMetric, ...],
+    evaluate_one: Callable[[EvaluationMetric], MetricOutcome],
+) -> tuple[list[MetricResult], list[NotScoreableResult], dict[str, str]]:
+    """The run's DECLARED OBSERVATIONAL secondaries, through the ONE frozen
+    exception taxonomy. Step 10 / P2b C2; Step 12 / PR-12d.
+
+    **Extracted at Step 12 / PR-12d** so the taxonomy has exactly ONE body
+    regardless of ROUTE. Before this, ``nodes/ml_hyperparameter_tune_agent/
+    execution.py::_evaluate_secondary_metrics`` (the anchor-normalized,
+    in-process route) and ``execute_tools/denoising_score_single.py::
+    _evaluate_task_owned_secondaries`` (the task-owned, scoring-CHILD route,
+    added by F-12d-18) each carried an independent copy of the same
+    try/except order — exactly the twinning hazard
+    ``test_the_secondary_evaluator_has_exactly_one_owner`` (Step 09a C6,
+    Q-09-7) exists to catch, and did: a second evaluator is a second place a
+    secondary outcome could come into existence, and the whole frozen
+    exception taxonomy lived inside "this one function" only as long as
+    there was exactly one.
+
+    ``evaluate_one`` is the ONLY thing that legitimately differs by route —
+    HOW a single secondary is evaluated (the anchor route calls
+    ``sandbox.evaluate_metric(secondary, sample_set=..., ...)``; the
+    task-owned route calls ``secondary.evaluate({0: deliverable}, **kwargs)``)
+    — so it is the one parameter. The ORDER, and what happens in each branch,
+    is not a parameter: it is frozen (design §4.2, operator ruling Q-P2b-2).
+
+    ``NotScoreableError``
+        a scientific refusal by THAT metric's contract. Recorded as a typed
+        refusal; the attempt remains successful, because the primary already
+        produced its result.
+    ``ScopeViolationError``
+        **RE-RAISED**. DataScope validation can run inside a secondary's own
+        evaluation, so it CAN raise this, and the CALLER's existing outer
+        handler owns it (terminate the run, non-retryable). "Observational"
+        bounds ordinary secondary outcomes; it never means a
+        framework-integrity failure gets swallowed. It must therefore be
+        caught BEFORE the generic clause, exactly as the primary's own
+        handlers are ordered.
+    any other ``Exception``
+        an implementation crash. Recorded as diagnostic PROVENANCE keyed by
+        metric id and printed, never coerced into a ``NotScoreableResult`` —
+        that would report a contract verdict nothing produced — and never
+        raised onward.
+
+    Returns:
+        ``(results, refusals, errors)``, keyed consistently by metric id so
+        no id can appear in two of them (each caller's own record validator
+        enforces it).
+
+    Raises:
+        ScopeViolationError: re-raised from a secondary call, unchanged.
+    """
+    results: list[MetricResult] = []
+    refusals: list[NotScoreableResult] = []
+    errors: dict[str, str] = {}
+    for secondary in secondaries:
+        metric_id = secondary.spec.id
+        try:
+            outcome = evaluate_one(secondary)
+            # A refusal reaches this taxonomy in TWO shapes, and both must land
+            # in `refusals` (F-12d-33, found by CI pyright).
+            #
+            #   anchor route  -> `sandbox.evaluate_metric` converts a returned
+            #                    `NotScoreableResult` into a RAISED
+            #                    `NotScoreableError` and returns `MetricResult`
+            #   task-owned    -> the child calls `secondary.evaluate(...)`
+            #                    DIRECTLY, and that declares
+            #                    `MetricOutcome = MetricResult |
+            #                    NotScoreableResult` — so it RETURNS the refusal
+            #
+            # Appending the return value unconditionally therefore recorded a
+            # child-side refusal as a SCORE, and `model_dump()`'d it into
+            # `secondary_metric_results`. The anchor route can never produce
+            # this branch, so its behaviour is unchanged.
+            if isinstance(outcome, NotScoreableResult):
+                refusals.append(outcome)
+                print(f"  [secondary] {metric_id}: not scoreable — {outcome.verdict.contract_id}")
+                continue
+            results.append(outcome)
+        except NotScoreableError as refusal:
+            refusals.append(refusal.result)
+            print(f"  [secondary] {metric_id}: not scoreable — {refusal}")
+        except ScopeViolationError:
+            raise
+        except Exception as exc:
+            errors[metric_id] = f"{type(exc).__name__}: {exc}"
+            # The diagnostic surface, never a machine-readable stdout
+            # contract and never a planner/reflector payload: a secondary
+            # crash is an operator-facing fact about the implementation, not
+            # evidence the model gets to reason from.
+            print(f"  [secondary] {metric_id}: evaluation crashed — {errors[metric_id]}")
+    return results, refusals, errors
 
 
 class MetricIdentityConflictError(ValueError):
@@ -1077,6 +1209,42 @@ def derive_tidmad_metric(
 ) -> TidmadDenoisingMetric:
     """The TIDMAD handle, bound to the spec :func:`derive_tidmad_metric_spec` derives."""
     return TidmadDenoisingMetric(derive_tidmad_metric_spec(dataset_profile, deliverable_spec))
+
+
+def resolve_run_metric(
+    dataset_profile: DatasetProfile, deliverable_spec: DeliverableSpec | None
+) -> EvaluationMetric:
+    """The run's ONE metric: the DECLARED one, else TIDMAD's regime-A instance.
+
+    Step 12 / PR-12d, seam B. The rule is byte-identical to the expression it
+    replaces (``resolve_bound_run_metric() or derive_tidmad_metric(profile,
+    spec)``); what moved is WHERE it lives. Two reasons, both structural:
+
+    * the tuner's ``run()`` is hard-capped at its current branch count, and
+      the ``or`` was one of its branch nodes — resolving here spends none of
+      that budget;
+    * ``deliverable_spec`` became ``DeliverableSpec | None`` when B11 was
+      closed, and the narrowing belongs beside the derivation that needs it
+      rather than inside a 1,100-line orchestrator.
+
+    A composed run finds its declared metric bound and never reaches the
+    legacy branch. An un-composed run has, by construction, a profile that
+    declares TIDMAD's geometry — so its spec is never ``None``, and a ``None``
+    arriving here would mean a composed run reached the legacy branch, which
+    is ``C-P56-1`` and is refused by name rather than silently derived
+    against an invented topology.
+    """
+    declared = resolve_bound_run_metric()
+    if declared is not None:
+        return declared
+    if deliverable_spec is None:
+        raise NoRunMetricError(
+            "this run declares no metric AND its task declares no TIDMAD "
+            "deliverable geometry, so there is nothing to derive the legacy "
+            "TIDMAD metric from. Scoring a composed task with TIDMAD's metric "
+            "is the failure this refusal exists to prevent."
+        )
+    return derive_tidmad_metric(dataset_profile, deliverable_spec)
 
 
 # ---------------------------------------------------------------------------

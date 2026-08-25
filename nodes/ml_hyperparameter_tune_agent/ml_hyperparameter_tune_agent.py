@@ -47,16 +47,15 @@ from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import active_physical_data_root
 from execute_tools.dataset_config import (
     resolve_dataset_profile,
-    tidmad_topology,
 )
 from execute_tools.deliverable_spec import (
-    derive_tidmad_deliverable_spec,
+    derive_run_deliverable_spec,
+    indexed_cleanup_naming,
 )
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
-    derive_tidmad_metric,
-    resolve_bound_run_metric,
     resolve_bound_run_secondary_metrics,
+    resolve_run_metric,
 )
 from execute_tools.health_checks.config import load_health_gates_config
 from execute_tools.health_checks.schemas import (
@@ -202,6 +201,9 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
+)
+from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
+    project_attempt_topology_facts,
 )
 from nodes.scoring_reference import load_reference_scores
 from workflows.task_config import run_bound_model_io_contract
@@ -462,6 +464,37 @@ def _load_trial_anchor_map(*, composed: bool, data_root: str) -> dict | None:
     return load_anchor_map(anchor_map_path)
 
 
+def _resolve_run_gate_ids(agent_input: Any) -> Any:
+    """The RUN's own scientific gate set — F-12d-30.
+
+    Resolved ONCE, here, so ``records.py`` can read it off ``RunBindings``
+    rather than reaching into the input projection: PR-12a C2 pins that the
+    record module reads run-scoped AUTHORITIES, because a stamp that read the
+    projection instead is what made a composed chain refuse its own output
+    (F-11-C10-a).
+
+    The zero-argument default inside ``is_valid_candidate`` composes with
+    ``LEGACY_OMITTED`` — TIDMAD's set. Correct for an un-composed run, and
+    wrong for a composed one, where it binds TIDMAD's Health family into a
+    process that has already bound the run's own and the Step-08b run-scope
+    guard then refuses an otherwise-complete run at finalize.
+
+    Extracted rather than inlined at the construction site: ``run()`` sits on
+    a PR-12a C0 structural LOC budget and §E.2 requires new behaviour to
+    arrive by EXTRACTION rather than by spending the allowance. Inlining these
+    eleven lines put it 88 over an 80-line budget and the guard caught it.
+
+    ``None`` for an un-composed run, which resolves the legacy default exactly
+    as before.
+    """
+    from execute_tools.health_checks.candidate_eligibility import (
+        resolve_run_scientific_gate_ids,
+    )
+
+    ref = getattr(agent_input, "task_composition_ref", None)
+    return resolve_run_scientific_gate_ids(ref.task_health_binding) if ref is not None else None
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -619,10 +652,24 @@ class HyperparamTuningAgent:
         #            re-compose it from `--task_manifest`.
         #   storage  still derived from the dataset profile, and still
         #            reconstructed child-side from `--dataset_profile_json`.
-        #            Generalizing THAT half is Q-12-4 / PR-12b, not this PR.
+        #
+        # Step 12 / PR-12d, seam B — B11, the TRANSITIVE blocker. This call
+        # reached `tidmad_topology` FOUR times through the storage half and
+        # killed the tuner before any training for a Q-12-4-honest profile.
+        # `derive_run_deliverable_spec` answers `None` for a task that
+        # declares no such geometry — a DECLARED absence — and the conditional
+        # lives in the derivation's OWN module so this orchestrator gains no
+        # branch. Every surviving consumer here reads `.naming`, which needs
+        # no geometry; seam E (D4b) decides what the generic identity IS.
         #
         # The spec object itself is still not serialized.
-        run_deliverable_spec = derive_tidmad_deliverable_spec(run_profile)
+        run_deliverable_spec = derive_run_deliverable_spec(run_profile)
+        # Step 12 / PR-12d seam E: the OPTIONAL indexed naming. `None` for a
+        # task that names its own artifacts — its consumers skip rather than
+        # sweep with a template the run never writes (F-A4-1). Asking the
+        # REFUSING accessor here would kill a composed contrast run at binding
+        # time, before anything had asked for a filename.
+        run_deliverable_naming = indexed_cleanup_naming()
 
         # --- The run's ONE evaluation metric (Step 06; bound seam Step 10 P1) ---
         # Still exactly one acquisition site, and still the run's single
@@ -640,9 +687,12 @@ class HyperparamTuningAgent:
         # scoreability contract declared AGAINST the run's deliverable spec.
         # `derive_tidmad_metric` is therefore the bounded legacy adapter from
         # here on; removing it belongs to Step 12 with the composition root.
-        run_metric: EvaluationMetric = resolve_bound_run_metric() or derive_tidmad_metric(
-            run_profile, run_deliverable_spec
-        )
+        # Step 12 / PR-12d, seam B: the SAME rule, moved into the metric
+        # module. `resolve_run_metric` is byte-identical to the `or` it
+        # replaces for every run that has a spec, and it is what narrows the
+        # now-optional spec — see its docstring for why the branch left this
+        # function rather than growing inside it.
+        run_metric: EvaluationMetric = resolve_run_metric(run_profile, run_deliverable_spec)
 
         # --- The run's DECLARED observational secondaries (Step 10 / P2b) ---
         # Acquired at the SAME site as the primary, from the same composition,
@@ -754,8 +804,12 @@ class HyperparamTuningAgent:
         # EFFECTIVE health config, whose path was just swapped in above. Built
         # any earlier and the check names would come from the shipped default
         # rather than from what this run will actually evaluate.
+        # Step 12 / PR-12d, seam B — the fifth direct decoder. `None` is the
+        # declared absence for a task with no physical geometry, and the
+        # render authority owns what that renders (it is the only fact here
+        # that reaches a prompt).
         run_task_render = build_tuner_task_render(
-            dataset=tidmad_topology(run_profile).dataset,
+            dataset=project_attempt_topology_facts(run_profile).physical_dataset,
             model_io_contract=run_model_io,
             health_config=load_health_gates_config(agent_input.health_checks_config),
             efficiency_band_fraction=EFFICIENCY_BAND_FRACTION,
@@ -884,7 +938,7 @@ class HyperparamTuningAgent:
             file_index=file_index,
             data_scope=agent_input.data_scope,
             device_identity=device_identity,
-            deliverable_naming=run_deliverable_spec.naming,
+            deliverable_naming=run_deliverable_naming,
         )
 
         # Seed plugin copy — docs/run_scoped_plugins.md (Phase 3). Validation
@@ -1197,9 +1251,11 @@ class HyperparamTuningAgent:
             run_profile=run_profile,
             run_model_io=run_model_io,
             run_deliverable_spec=run_deliverable_spec,
+            run_deliverable_naming=run_deliverable_naming,
             run_metric=run_metric,
             run_secondary_metrics=run_secondary_metrics,
             run_order=run_order,
+            run_scientific_gate_ids=_resolve_run_gate_ids(agent_input),
             run_task_render=run_task_render,
             run_name=run_name,
             workspace=workspace,
@@ -1679,13 +1735,34 @@ class HyperparamTuningAgent:
 
 
 def main() -> int:
-    """Thin CLI wrapper — parses args, builds HyperparamTuningInput, calls run()."""
+    """Thin CLI wrapper — parses args, builds HyperparamTuningInput, calls run().
+
+    Step 12 / PR-12d D8a. `--task_composition` composes ONCE, here — the same
+    object threads into `build_agent_input` (for `task_composition_ref`, the
+    tuner's typed record of what it is bound to) and into the binding
+    context around `.run()` (which activates `active_task_data_path()`,
+    `active_run_model_plugins()`, `active_deliverable_naming()`, etc.).
+    Composing twice would be a SECOND resolution — the registry-identity
+    rules (Step 12 / PR-12bc CASE A) treat that as a fresh instance, not the
+    same one. Omitted ⇒ `None` ⇒ `bind_run_task_composition` is a no-op and
+    every un-composed launch is byte-identical to before this flag existed.
+
+    Mirrors the SAME pattern the chain launcher already uses
+    (`workflows/model_exploration.py`'s own CLI entry) — this is the second
+    composition edge, not a new authority.
+    """
+    from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+
     parser = build_parser()
     args = parser.parse_args()
-    agent_input = build_agent_input(args, parser)
+    run_composition = (
+        compose_run_task_bindings(args.task_composition) if args.task_composition else None
+    )
+    agent_input = build_agent_input(args, parser, run_composition)
 
     agent = HyperparamTuningAgent()
-    output = agent.run(agent_input)
+    with bind_run_task_composition(run_composition, physical_data_root=args.data_dir):
+        output = agent.run(agent_input)
     if output.status != "completed" or output.completed_rounds != args.max_rounds:
         return PARTIAL_CAMPAIGN_EXIT_CODE
     return 0

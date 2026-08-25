@@ -73,30 +73,84 @@ class TestItem8NoUnconditionalTidmadScopeConstruction:
         """The substantive half of item 8. A transported scope must never be
         overwritten by the regime-A construction, and `is None` is what makes
         that true rather than hoped for.
+
+        Step 12 / PR-12d F-12d-34: this census used to COUNT `if <scope> is
+        None:` blocks whose body TEXT contained ``TidmadScope(``, and expect
+        exactly 2. Extracting one construction into ``_regime_a_train_scope``
+        — a behaviour-preserving change that left the guard exactly where it
+        was — turned it RED, because what it actually asserted was a SYNTACTIC
+        LOCATION, not the invariant.
+
+        The invariant is *every* regime-A construction is reachable only when
+        the transported scope is ABSENT. So each construction is now proven
+        dominated by such a guard in one of two ways: lexically inside the
+        guard's body, or inside a helper whose EVERY call site is. A helper
+        with one unguarded call site fails — which is the hole an "or it's in
+        a helper" relaxation would have opened.
         """
         src = (REPO_ROOT / "execute_tools" / "train_engine_sandbox.py").read_text(encoding="utf-8")
         tree = ast.parse(src)
-        guarded = 0
-        for node in ast.walk(tree):
+
+        def _is_scope_absence_guard(node: ast.AST) -> bool:
             if not isinstance(node, ast.If):
-                continue
+                return False
             test = node.test
-            if (
+            return (
                 isinstance(test, ast.Compare)
                 and isinstance(test.left, ast.Name)
                 and test.left.id in {"task_scope", "task_eval_scope"}
                 and isinstance(test.ops[0], ast.Is)
                 and isinstance(test.comparators[0], ast.Constant)
                 and test.comparators[0].value is None
-            ):
-                body = ast.unparse(ast.Module(body=node.body, type_ignores=[]))
-                if "TidmadScope(" in body:
-                    guarded += 1
-        assert guarded == 2, (
-            f"expected BOTH regime-A TidmadScope constructions to sit inside an "
-            f"`if <scope> is None:` guard; found {guarded}. An unguarded one "
-            f"would overwrite a transported scope."
+            )
+
+        # Every node that sits inside the body of a scope-absence guard.
+        guarded_nodes: set[int] = set()
+        for node in ast.walk(tree):
+            if _is_scope_absence_guard(node):
+                for stmt in node.body:
+                    guarded_nodes.update(id(d) for d in ast.walk(stmt))
+
+        # Enclosing function of every node, so a construction can name its owner.
+        enclosing: dict[int, ast.FunctionDef] = {}
+        for fn in ast.walk(tree):
+            if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for d in ast.walk(fn):
+                    enclosing.setdefault(id(d), fn)
+
+        def _calls_to(name: str) -> list[ast.Call]:
+            return [
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name
+            ]
+
+        constructions = _calls_to("TidmadScope")
+        assert len(constructions) == 2, (
+            f"expected exactly 2 regime-A TidmadScope constructions in the training "
+            f"engine; found {len(constructions)}. A new one is a new place the "
+            f"framework can overwrite a transported scope."
         )
+
+        for call in constructions:
+            if id(call) in guarded_nodes:
+                continue  # dominated lexically
+            owner = enclosing.get(id(call))
+            assert owner is not None, (
+                "a module-level TidmadScope construction is reachable unconditionally"
+            )
+            call_sites = _calls_to(owner.name)
+            assert call_sites, (
+                f"{owner.name} constructs a TidmadScope but is never called from this "
+                f"module — an unreachable fallback is not a guarded one"
+            )
+            unguarded = [c for c in call_sites if id(c) not in guarded_nodes]
+            assert not unguarded, (
+                f"{owner.name} constructs a regime-A TidmadScope and has "
+                f"{len(unguarded)} call site(s) NOT inside an `if <scope> is None:` "
+                f"guard. Every path to it must first establish that no scope was "
+                f"transported, or a composed run's scope is silently overwritten."
+            )
 
     def test_the_measurement_path_checks_the_topology_first(self):
         """The third site. It builds a TidmadScope only after confirming the

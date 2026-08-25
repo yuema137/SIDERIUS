@@ -103,6 +103,17 @@ def _copy_pack(task: str, tmp_path: Path) -> Path:
             value = section.get(key)
             if isinstance(value, str) and value.startswith(".."):
                 section[key] = str((FIXTURES / task / value).resolve())
+        # Step 12 / PR-12d D4c: `implementation.file` is now an out-of-tree ref
+        # too. The pack-local metric implementations live under `examples/`, so
+        # a secondary bound by `file:` reaches out with the same `../../../../`
+        # the declarations always did — and it needs the same treatment. This
+        # helper covering only two of the three ref shapes is why six tests
+        # resolved a plugin path against `/tmp`.
+        implementation = section.get("implementation")
+        if isinstance(implementation, dict):
+            ref = implementation.get("file")
+            if isinstance(ref, str) and ref.startswith(".."):
+                implementation["file"] = str((FIXTURES / task / ref).resolve())
 
     for key, value in raw.items():
         if isinstance(value, dict):
@@ -226,7 +237,14 @@ class TestTheFailClosedBranches:
 
     def test_an_unimportable_secondary_implementation_fails_the_run_closed(self, tmp_path):
         def mutate(raw):
-            raw["secondary_metrics"][0]["implementation"]["module"] = "no.such.module"
+            # REPLACE the implementation, never add a key to it. Since D4c the
+            # DAVIS secondaries bind by `file:`, so setting `module` alongside
+            # it would trip the exactly-ONE-of check first and this test would
+            # pass on the wrong refusal.
+            raw["secondary_metrics"][0]["implementation"] = {
+                "module": "no.such.module",
+                "symbol": "Whatever",
+            }
 
         with pytest.raises(TaskCompositionError, match="could not be imported"):
             compose_run_task_bindings(self._mutate(tmp_path, "davis", mutate))

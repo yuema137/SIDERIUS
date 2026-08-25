@@ -146,21 +146,74 @@ def _resolve_plugin_dirs() -> list[str]:
     """Return the ordered list of directories to scan for plugins.
 
     Priority:
-      1. ``SIDERIUS_PLUGIN_DIRS`` env var — ``os.pathsep``-separated list of
+      1. the RUN-SCOPED binding's declared roots (Step 12 / PR-12d, seam P),
+         when a composed run declared model plugins. These come FIRST because
+         they are the most run-specific statement of what should execute.
+      2. ``SIDERIUS_PLUGIN_DIRS`` env var — ``os.pathsep``-separated list of
          directory paths. Per-run mode: scans exactly those directories,
          does NOT fall back to ``AGENT_GENERATED_DIR``.
-      2. ``[AGENT_GENERATED_DIR]`` — legacy global-dir mode. Back-compat
-         default when the env var is unset or empty.
+      3. ``[AGENT_GENERATED_DIR]`` — legacy global-dir mode. Back-compat
+         default when neither of the above is present.
+
+    **Nothing about (2) or (3) changed.** A process with no run-scoped
+    binding — every legacy and un-composed run, and every child of one —
+    resolves byte-identically to its pre-seam-P self. The binding only ever
+    ADDS, which is the whole propagation rule: a runtime default may extend
+    the declared set and may never overwrite or drop it.
 
     Whitespace-only or empty entries in the env var are filtered out so
     that ``SIDERIUS_PLUGIN_DIRS=":dir_a::dir_b:"`` still resolves to
     ``["dir_a", "dir_b"]`` — this matches how shells commonly compose
-    path-like variables.
+    path-like variables. The merge is delegated to
+    ``plugin_binding.union_plugin_roots``, the ONE place root-set merging is
+    expressed, so the loader and the transport cannot drift apart.
     """
+    from ml_models.plugin_binding import active_run_model_plugin_roots, union_plugin_roots
+
+    declared = active_run_model_plugin_roots()
     env = os.environ.get(_PLUGIN_DIRS_ENV_VAR, "").strip()
+    if declared:
+        return list(union_plugin_roots(declared, env))
     if env:
         return [p for p in env.split(os.pathsep) if p.strip()]
     return [AGENT_GENERATED_DIR]
+
+
+def _refuse_ambiguous_origins(origins: dict[str, list[str]], scanned: list[str]) -> None:
+    """Refuse a ``model_type`` produced by more than one scanned DIRECTORY.
+
+    Step 12 / PR-12d, seam P. ``extend_registries`` resolves collisions by
+    scan order — the later directory wins — which was safe for as long as
+    exactly one directory was ever scanned. That was structurally true before
+    seam P: ``_resolve_plugin_dirs`` returned *either* the env list (one
+    entry, the sandbox's own plugin dir) *or* ``[AGENT_GENERATED_DIR]``.
+
+    Unioning declared roots into the set makes the collision reachable, and
+    silent shadowing there is the failure this PR exists to prevent: a run
+    that declared a pack's reference model would train, score and rank a
+    same-named implementation from a directory it never declared, with
+    nothing anywhere saying so.
+
+    **Legacy cannot reach this.** With a single scanned directory a
+    ``model_type`` can have only one origin, so the refusal never fires and
+    the pre-seam-P warn-and-overwrite behaviour within one directory is
+    untouched.
+    """
+    if len(scanned) < 2:
+        return
+    ambiguous = {
+        model_type: sorted(set(dirs)) for model_type, dirs in origins.items() if len(set(dirs)) > 1
+    }
+    if not ambiguous:
+        return
+    from ml_models.plugin_binding import ModelPluginResolutionError
+
+    raise ModelPluginResolutionError(
+        f"model type(s) {sorted(ambiguous)} are produced by more than one "
+        f"scanned plugin directory: {ambiguous}. Which implementation would "
+        f"execute depends on scan order, so the scan REFUSES instead of "
+        f"letting the last one win. Scanned, in order: {scanned}."
+    )
 
 
 def extend_registries(model_registry: dict, config_registry: dict) -> list:
@@ -171,12 +224,15 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
 
     Returns the list of successfully loaded plugin ``model_type`` strings,
     in the order they were loaded across all scanned directories. When the
-    same ``model_type`` appears in more than one directory, the later
-    directory's plugin overwrites the earlier one (matching the existing
-    shadow-warning behavior).
+    same ``model_type`` appears twice within ONE directory, the later file's
+    plugin overwrites the earlier one (matching the existing shadow-warning
+    behavior); when it appears in more than one directory the scan REFUSES —
+    see :func:`_refuse_ambiguous_origins`.
     """
     loaded = []
-    for plugin_dir in _resolve_plugin_dirs():
+    scanned = _resolve_plugin_dirs()
+    origins: dict[str, list[str]] = {}
+    for plugin_dir in scanned:
         if not os.path.isdir(plugin_dir):
             continue
 
@@ -194,12 +250,14 @@ def extend_registries(model_registry: dict, config_registry: dict) -> list:
                     f"[PluginLoader] Warning: plugin '{model_type}' shadows an existing registry entry."
                 )
 
+            origins.setdefault(model_type, []).append(plugin_dir)
             model_registry[model_type] = plugin["model_class"]
             config_registry[model_type] = plugin["config_class"]
             PLUGIN_OUTPUT_TYPE_REGISTRY[model_type] = plugin["output_type"]
             loaded.append(model_type)
             print(f"[PluginLoader] Loaded plugin: '{model_type}' from {fname}")
 
+    _refuse_ambiguous_origins(origins, scanned)
     return loaded
 
 

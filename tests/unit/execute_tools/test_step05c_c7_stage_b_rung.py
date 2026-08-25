@@ -40,7 +40,7 @@ IDENTIFIERS = {
     "model_type": "wavenet",
     "run_name": "stage_b_run",
     "exp_id": "wavenet_stage_b_run_001",
-    "file_index": 3,
+    "input_identity": 3,
 }
 
 # Every production CONSUMER the §0 census assigns to 05c. The structural guard
@@ -171,7 +171,7 @@ def test_every_owned_seam_moves_together_under_one_renamed_naming(tmp_path):
     * the path builder — what the scorer and the HealthGate peeks open
     * ``experiment_glob`` — ``--cleanup_denoised``
     * ``attempt_glob`` — the watchdog's partial-artifact cleanup
-    * ``any_glob`` + ``file_index_of`` — the workspace auditor
+    * ``any_glob`` + ``input_identity_of`` — the workspace auditor
     * the launcher's baseline path — ``run_comparison``
 
     Asserted in one test, on one axis, because that is the property: they
@@ -186,7 +186,7 @@ def test_every_owned_seam_moves_together_under_one_renamed_naming(tmp_path):
     resolved = {
         "producer_qualified": renamed_name,
         "producer_fix_mode": RENAMED.unqualified_name(
-            model_type=IDENTIFIERS["model_type"], file_index=IDENTIFIERS["file_index"]
+            model_type=IDENTIFIERS["model_type"], input_identity=IDENTIFIERS["input_identity"]
         ),
         "path_builder": _build_denoised_filename(
             **IDENTIFIERS, base_dir=str(tmp_path), naming=RENAMED
@@ -208,8 +208,8 @@ def test_every_owned_seam_moves_together_under_one_renamed_naming(tmp_path):
     # ...and the auditor's index parse inverts the renamed producer name,
     # which is what proves the glob and the parse are one authority and not
     # two that happen to agree under TIDMAD.
-    assert RENAMED.file_index_of(renamed_name) == IDENTIFIERS["file_index"]
-    assert RENAMED.file_index_of(default_deliverable_naming().name(**IDENTIFIERS)) is None
+    assert RENAMED.input_identity_of(renamed_name) == IDENTIFIERS["input_identity"]
+    assert RENAMED.input_identity_of(default_deliverable_naming().name(**IDENTIFIERS)) is None
 
 
 def test_the_rung_does_not_fire_on_the_legitimate_single_spec_binding():
@@ -224,7 +224,7 @@ def test_the_rung_does_not_fire_on_the_legitimate_single_spec_binding():
 
     assert shipped.name(**IDENTIFIERS).startswith(TIDMAD_PREFIX)
     assert shipped.experiment_glob(exp_id=IDENTIFIERS["exp_id"]).startswith(TIDMAD_PREFIX)
-    assert shipped.file_index_of(shipped.name(**IDENTIFIERS)) == IDENTIFIERS["file_index"]
+    assert shipped.input_identity_of(shipped.name(**IDENTIFIERS)) == (IDENTIFIERS["input_identity"])
 
 
 def test_only_the_naming_axis_moves_under_a_rename():

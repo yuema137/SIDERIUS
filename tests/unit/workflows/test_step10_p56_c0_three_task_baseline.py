@@ -53,7 +53,12 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 
 #: Declared file counts, hardcoded from the fixture profiles — NOT read back
 #: from the code under test. TIDMAD ships 20 per-file reference artifacts.
-DECLARED_NUM_FILES = {"tidmad": 20, "pets": 4, "davis": 3}
+#: Step 12 / PR-12d D5 MOVED the Pets entry 4 -> 370, with this reason: the
+#: fabricated fixture profile that declared 4 HDF5 shards is deleted, and the
+#: shipped Pets profile declares its real index domain — the 370 rows of the
+#: Gate manifest its scope capability samples. DAVIS' 3 is still the
+#: fabricated fixture value and moves at D6.
+DECLARED_NUM_FILES = {"tidmad": 20, "pets": 370, "davis": 3}
 TIDMAD_REFERENCE_FILES = 20
 
 
@@ -238,34 +243,60 @@ class TestTidmadReferenceScoresLeakIntoComposedRuns:
     `TIDMAD_METRIC_ID` or any other task-identity surrogate (§10.5, §19.3).
     """
 
-    @pytest.mark.parametrize("task", ["pets", "davis"])
-    def test_a_composed_contrast_run_silently_loads_tidmad_reference_science(self, task):
-        """THE DEFECT: no crash, no warning — TIDMAD's numbers, in a Pets or
-        DAVIS run's prompt tables."""
+    def test_a_composed_davis_run_silently_loads_tidmad_reference_science(self):
+        """THE DEFECT: no crash, no warning — TIDMAD's numbers, in a DAVIS
+        run's prompt tables."""
         from nodes.scoring_reference import load_reference_scores
 
         with bind_run_task_composition(
-            _composition(task), physical_data_root=COMPOSED_TEST_DATA_ROOT
+            _composition("davis"), physical_data_root=COMPOSED_TEST_DATA_ROOT
         ):
             refs = load_reference_scores(use_cache=False)
 
         # It succeeded, and every number it returned is TIDMAD's.
         assert refs.s_max > 0
-        assert len(refs.raw_per_file_log) == DECLARED_NUM_FILES[task]
-        assert len(refs.gt_per_file_log) == DECLARED_NUM_FILES[task]
+        assert len(refs.raw_per_file_log) == DECLARED_NUM_FILES["davis"]
+        assert len(refs.gt_per_file_log) == DECLARED_NUM_FILES["davis"]
 
-    def test_the_leak_is_silent_because_the_contrast_tasks_declare_fewer_files(self):
-        """WHY it is a silent leak rather than a loud failure — the fact the
+    def test_a_composed_pets_run_now_loads_them_LOUDLY_instead(self):
+        """The SAME defect, wearing the other of its two faces.
+
+        This case used to be parametrized alongside DAVIS and asserted the
+        SILENT outcome. Step 12 / PR-12d D5 gave Pets its honest 370-partition
+        index domain, and the sibling test below already named what that would
+        do: *"a task declaring MORE than 20 would have crashed instead"*. It
+        does — `_fine_indices()` walks past `raw_baseline_score_file_0019` and
+        `FileNotFoundError` names the TIDMAD artifact a Pets run has no
+        business reading.
+
+        Kept, rather than deleted with the silent case, because the two faces
+        of this leak are exactly why the C5 guard may not key on file counts:
+        loud and silent are both wrong, and only removing the call from
+        composed runs fixes either. Fails if someone "repairs" this by making
+        `load_reference_scores` tolerate a missing reference file — which
+        would restore the silent leak for every task at once.
+        """
+        from nodes.scoring_reference import load_reference_scores
+
+        with bind_run_task_composition(
+            _composition("pets"), physical_data_root=COMPOSED_TEST_DATA_ROOT
+        ):
+            with pytest.raises(FileNotFoundError, match="raw_baseline_score_file_0020"):
+                load_reference_scores(use_cache=False)
+
+    def test_the_leak_takes_ITS_SHAPE_from_the_declared_partition_count(self):
+        """WHY it is silent for one task and loud for the other — the fact the
         C5 guard must not depend on.
 
-        `_fine_indices()` derives the count from the resolved profile, and both
-        contrast fixtures declare FEWER files than TIDMAD ships references for,
-        so every lookup hits an existing TIDMAD artifact. A task declaring MORE
-        than 20 would have crashed instead. Neither outcome is acceptable; C5
-        removes the call from composed runs entirely.
+        `_fine_indices()` derives the count from the resolved profile. DAVIS
+        declares FEWER partitions than TIDMAD ships references for, so every
+        lookup hits an existing TIDMAD artifact; Pets now declares MORE, so
+        the walk runs off the end. Neither outcome is acceptable; C5 removes
+        the call from composed runs entirely, and does it by keying on
+        composition PRESENCE rather than on any count.
         """
-        assert DECLARED_NUM_FILES["pets"] < TIDMAD_REFERENCE_FILES
         assert DECLARED_NUM_FILES["davis"] < TIDMAD_REFERENCE_FILES
+        assert DECLARED_NUM_FILES["pets"] > TIDMAD_REFERENCE_FILES
         assert DECLARED_NUM_FILES["tidmad"] == TIDMAD_REFERENCE_FILES
 
     def test_an_uncomposed_run_loads_them_too_and_must_keep_doing_so(self):

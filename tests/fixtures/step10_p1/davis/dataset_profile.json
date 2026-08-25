@@ -1,21 +1,24 @@
 {
-  "dataset": {
-    "psd_segment_length": 8,
-    "segments_per_file": 12,
-    "num_files": 3,
-    "sampling_frequency": 24.0,
-    "training_file_pattern": "davis_train_clip_{file_index:04d}.h5",
-    "validation_file_pattern": "davis_val_clip_{file_index:04d}.h5"
-  },
-  "channels": {
-    "input_channel": "context_frames",
-    "target_channel": "future_frames"
-  },
-  "encoding": {
-    "storage_dtype": "uint8",
-    "compute_dtype": "int16",
-    "value_offset": 0,
-    "num_classes": 256
+  "partition_count": 3,
+  "topology": {
+    "frame": {
+      "channels": 3,
+      "dtype": "float32",
+      "height": 128,
+      "layout": "CHW",
+      "value_range": [0.0, 1.0],
+      "width": 224
+    },
+    "partition_identity": ["sequence_name", "start_frame"],
+    "partition_kind": "clip",
+    "spatiotemporal": {
+      "context_frames": 8,
+      "future_frames": 4,
+      "temporal_extent_input": 8,
+      "temporal_extent_output": 4,
+      "window_frames": 12
+    },
+    "target_semantic": "continuous"
   },
   "anchor_selection_files": [0],
   "health_peek_files": [1, 2]

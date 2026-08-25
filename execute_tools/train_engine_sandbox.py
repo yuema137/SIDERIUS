@@ -38,6 +38,7 @@ from core.runtime_control.workload import ResolvedPhaseWorkload
 from execute_tools.dataset_config import SEGMENT_LENGTH as PSD_SEGMENT_LENGTH
 from execute_tools.dataset_config import (
     DatasetProfile,
+    declares_tidmad_topology,
     load_dataset_profile,
     resolve_dataset_profile,
     tidmad_topology,
@@ -47,6 +48,7 @@ from execute_tools.model_input_dtype import (
     apply_contract_cardinality,
     resolve_input_dtype,
 )
+from execute_tools.scope_artifact import load_transported_scope
 
 # D14-1 C2b/C3: TIDMADEpochDataset's owner is now execute_tools/tidmad_data_path.py
 # (moved verbatim) and ValidationScopeError's is execute_tools/task_data_path.py.
@@ -333,7 +335,7 @@ class TIDMADSingleFileDataset(Dataset):
 def validate_ordering_against_scope(
     order_strategy: str,
     file_order: list[int] | None,
-    sample_set: dict,
+    sample_set: dict | None,
 ) -> None:
     """Re-check resolved ordering at the execution boundary.
 
@@ -367,6 +369,20 @@ def validate_ordering_against_scope(
         return
     if file_order is None:
         return  # ascending sample-set order, resolved at build time
+
+    if sample_set is None:
+        # A permutation cannot be checked against a scope that does not
+        # exist. Composed runs train from a transported task scope and emit
+        # no `--file_order`; a legacy run always carries both. Reaching here
+        # means those two facts came apart upstream — refuse, rather than
+        # raise `TypeError: 'NoneType' is not iterable` from inside a set
+        # comprehension four frames down.
+        raise ValueError(
+            f"file_order={file_order} was supplied under order_strategy="
+            f"'sequential' but this run carries no sample set to order "
+            f"against. A file order is meaningful only for a run whose scope "
+            f"is a legacy SampleSet."
+        )
 
     scope = {int(k) for k in sample_set}
     order = list(file_order)
@@ -982,11 +998,83 @@ def run_experiment(
     return summary
 
 
+def _regime_a_train_scope(
+    sample_set: dict | None, seg_size: int, profile: DatasetProfile
+) -> TidmadScope:
+    """Assemble regime A's training scope from the legacy arguments.
+
+    Reached only when NO task scope was transported. In that regime a legacy
+    ``SampleSet`` is what the run trains from, so its absence is not a
+    degraded mode to paper over — it means the run has no scope at all, and
+    ``main`` already refuses that combination in
+    ``_has_scope_to_train_from``. This states the same invariant at the point
+    of USE, where the value is consumed.
+
+    Extracted rather than inlined: ``run_experiment_streaming`` is frozen by
+    the PR-12bc B0 / PR-12d D0 structural baselines, and §E.2 requires new
+    behaviour to arrive by extraction rather than by spending the branch
+    allowance. The caller keeps exactly the one branch it already had.
+    """
+    if sample_set is None:
+        raise ValueError(
+            "no task scope was transported and no legacy sample set was "
+            "supplied — this run has nothing to train from. A composed run "
+            "carries `--task_scope_ref`; a legacy run carries a SampleSet."
+        )
+    return TidmadScope(sample_set=sample_set, seg_size=seg_size, profile=profile)
+
+
+def _setup_storage_provenance(
+    data_dir: str, sample_set: dict | None, profile: DatasetProfile
+) -> dict:
+    """RT2-B storage provenance for the measured setup window.
+
+    Step 12 / PR-12d, seam C (B9). EXTRACTED so the declared-absence case
+    costs ``run_experiment_streaming`` no branch nodes, and because "what did
+    the setup read" is its own question.
+
+    Under TIDMAD the answer is unchanged: the per-file paths the scope names,
+    and the scoped byte volume (pre-Gate F2 — whole-file sizes misclassify a
+    sparse read as warm). A task that declares no TIDMAD topology has neither
+    a file-name template nor a PSD segment length, so it reports the dataset
+    ROOT and no per-file claim — which is exactly true, and honest in the way
+    ``F-12-2`` already made the runtime ESTIMATE honest: skip the term, never
+    guess it.
+    """
+    if sample_set is None or not declares_tidmad_topology(profile):
+        # No legacy SampleSet means no per-file scope to enumerate — the same
+        # answer, and for the same reason, as a profile that declares no
+        # TIDMAD topology: report the dataset ROOT and make no per-file claim.
+        # (Composed TIDMAD can reach here with a topology AND no SampleSet:
+        # it trains from its transported scope, whose per-file identity is the
+        # task's to know, not this function's to guess.)
+        return capture_storage_provenance(data_dir, [])
+    dataset = tidmad_topology(profile).dataset
+    file_paths = [
+        os.path.join(data_dir, dataset.training_file_name(int(k)))
+        for k in sorted(sample_set.keys(), key=int)
+    ]
+    # Scoped read volume (pre-Gate F2): the setup reads only the scope's PSD
+    # slices — ch1 int8 + ch2 int16 = 3 bytes/sample.
+    n_psd_scoped = sum(len(v) for v in sample_set.values())
+    return capture_storage_provenance(
+        data_dir, file_paths, scoped_bytes=n_psd_scoped * dataset.psd_segment_length * 3
+    )
+
+
 def run_experiment_streaming(
     model_cfg,
     train_cfg: TrainConfig,
     loss_cfg: LossConfig,
-    sample_set: dict,
+    # `None` since F-12d-27: a COMPOSED run has no legacy SampleSet by
+    # construction and trains from its transported task scope instead. The
+    # annotation said `dict` while the dispatch already admitted `None`,
+    # which CI pyright caught. Safe on every reachable path: the only
+    # unguarded read is `validate_ordering_against_scope`'s `sequential`
+    # branch, and `--order_strategy` is still emitted ONLY inside the
+    # SampleSet block, so a composed child defaults to `shuffle` and
+    # returns before it.
+    sample_set: dict | None,
     data_dir: str,
     sandbox_dirs: dict,
     exp_id: str,
@@ -1122,7 +1210,7 @@ def run_experiment_streaming(
     # from the legacy arguments — discrimination by PRESENCE, never task name.
     data_path = resolve_bound_task_data_path()
     if task_scope is None:
-        task_scope = TidmadScope(sample_set=sample_set, seg_size=seg_size, profile=profile)
+        task_scope = _regime_a_train_scope(sample_set, seg_size, profile)
     # (The regime-A EVAL scope is assembled further down, after the 07c C6
     # clamp has produced the EFFECTIVE eval_sample_set — assembling it here
     # would freeze the pre-clamp scope and break `requested == materialized`.)
@@ -1414,21 +1502,8 @@ def run_experiment_streaming(
             # (drop_last floor), the production ground truth; ``n_keep`` is
             # deterministic per epoch, so every epoch runs the same count.
             steps_per_epoch = len(loader)
-            file_paths = [
-                os.path.join(data_dir, tidmad_topology(profile).dataset.training_file_name(int(k)))
-                for k in sorted(sample_set.keys(), key=int)
-            ]
-            # Scoped read volume (pre-Gate F2): the setup reads only the
-            # scope's PSD slices — ch1 int8 + ch2 int16 = 3 bytes/sample.
-            n_psd_scoped = sum(len(v) for v in sample_set.values())
             runtime_session.complete_setup(
-                storage_provenance=capture_storage_provenance(
-                    data_dir,
-                    file_paths,
-                    scoped_bytes=n_psd_scoped
-                    * tidmad_topology(profile).dataset.psd_segment_length
-                    * 3,
-                ),
+                storage_provenance=_setup_storage_provenance(data_dir, sample_set, profile),
                 training_workload=ResolvedPhaseWorkload(
                     phase="training",
                     unit="optimizer_step",
@@ -1719,54 +1794,6 @@ def run_experiment_streaming(
 # ==========================================
 
 
-def _load_transported_scope(ref: str | None, digest: str | None, *, leg: str) -> object | None:
-    """The child half of the scope transport: verify, THEN deserialize.
-
-    Step 12 / PR-12bc B6. The same two-case rule every other transported flag
-    follows — SUPPLIED but broken fails closed naming the path; ABSENT leaves
-    regime-A to the run itself.
-
-    Order is load-bearing, and is why this is ONE function rather than two
-    steps at the call site: the bytes are checked against the digest the PARENT
-    transported before the task's parser is ever handed them. A parser's job is
-    to build a scope, not to authenticate one.
-
-    Args:
-        ref: ``--task_scope_ref`` / ``--task_eval_scope_ref``.
-        digest: its out-of-band sha256.
-        leg: which leg, for diagnostics only.
-
-    Returns:
-        The task's own scope object, or ``None`` when the flag was absent.
-
-    Raises:
-        ValueError: The pair is half-supplied.
-        ScopeArtifactError: The artifact is missing, unreadable or tampered.
-    """
-    if ref is None and digest is None:
-        return None
-    if ref is None or digest is None:
-        raise ValueError(
-            f"the {leg} scope transport is half-supplied (ref={ref!r}, digest "
-            f"{'present' if digest else 'absent'}). A path without its digest "
-            f"could not be verified and a digest without a path names nothing — "
-            f"refusing rather than proceeding on whichever half arrived."
-        )
-    from execute_tools.scope_artifact import read_scope_artifact
-    from execute_tools.task_data_path import (
-        resolve_bound_task_data_path,
-        resolve_task_scope_capability,
-    )
-
-    # Verify FIRST, then narrow through the ONE resolver. `deserialize_scope`
-    # is not on the frozen four-method protocol and must not be: the capability
-    # is an optional sibling, so a binding that declares none must produce a
-    # named refusal here rather than an AttributeError deep in the engine.
-    payload = read_scope_artifact(ref, digest)
-    capability = resolve_task_scope_capability(resolve_bound_task_data_path())
-    return capability.deserialize_scope(payload)
-
-
 def _load_eval_sample_set_arg(path: str | None) -> dict | None:
     """Load ``--eval_sample_set_json`` fail-closed (design §3.4).
 
@@ -1795,6 +1822,64 @@ def _load_eval_sample_set_arg(path: str | None) -> dict | None:
             f"indices to lists of integer PSD segment indices, got {type(payload).__name__}."
         )
     return payload
+
+
+def _cross_check_model_io(model_io, dataset_profile: DatasetProfile) -> None:
+    """The Step-03 contract-vs-dataset cross-check, at the child's boundary.
+
+    EXTRACTED by PR-12d seam C: ``main``'s LOC budget is an inherited
+    tripwire, and the rule it enforces is the same one §E.2 states — extract
+    the responsibility rather than grow the orchestrator.
+
+    The parent already resolves this against its own authority, but the child
+    receives the two as SEPARATE argv files and cannot assume the parent
+    paired them. Re-checking costs nothing and converts a contradiction into a
+    typed refusal instead of an embedding index error thousands of steps into
+    a forward pass — the difference Checkpoint C(iii) surfaced.
+
+    ``dataset_num_classes`` is ``int | None`` BY DESIGN — its own docstring
+    says a caller with no bound profile "is not forced to invent one" — so a
+    task that declares no TIDMAD encoding passes the DECLARED ABSENCE rather
+    than dying on the decode. The cross-check then simply has nothing to
+    compare against, which is the honest state; the contract's own shape
+    validation is unaffected.
+    """
+    if model_io is None:
+        return
+    resolve_model_io_contract(
+        model_io,
+        dataset_num_classes=(
+            tidmad_topology(dataset_profile).encoding.num_classes
+            if declares_tidmad_topology(dataset_profile)
+            else None
+        ),
+    )
+
+
+def _has_scope_to_train_from(args: Any, sample_set: dict | None) -> bool:
+    """Does this invocation carry ANY scope to train from — F-12d-27.
+
+    ``main``'s mode dispatch used to test ``sample_set is not None`` alone,
+    which asks *"did a legacy TIDMAD SampleSet arrive?"* when the question it
+    needs answered is *"do I have a scope to train from at all?"*. A composed
+    contrast run has no SampleSet **by construction** — its profile declares
+    no physical geometry — so it fell into the legacy branch and hit
+    ``tidmad_topology(dataset_profile)``, which fails closed for a task that
+    declares none.
+
+    Only the transported scope REFERENCE is read here: argv, never bytes.
+    Deserialization still happens inside the task binding in ``main``, because
+    the bytes must be decoded by the implementation that wrote them.
+
+    An un-composed TIDMAD run carries no ``--task_scope_ref``, so its dispatch
+    is still decided by ``sample_set`` exactly as before.
+
+    Extracted rather than inlined: ``main`` sits under a PR-12bc B0 structural
+    LOC budget, and §E.2 requires new behaviour to arrive by EXTRACTION rather
+    than by spending the allowance. Inlining these lines put it 94 over an
+    80-line budget and the guard caught it.
+    """
+    return sample_set is not None or getattr(args, "task_scope_ref", None) is not None
 
 
 def main():
@@ -1887,6 +1972,22 @@ def main():
             "must materialize exactly (fails closed otherwise). SUPPLIED but "
             "unreadable / not a mapping → ValueError naming the path. ABSENT → no "
             "validation pass; R3 is honestly absent (legacy tolerance)."
+        ),
+    )
+    parser.add_argument(
+        "--validation_requested_rows",
+        type=int,
+        default=None,
+        help=(
+            "Step 12 / PR-12d (B9): the CALLER's declared validation row count "
+            "for the EXPLICIT eval-scope leg. Required whenever "
+            "--task_eval_scope_ref is supplied and --eval_sample_set_json is "
+            "not: the engine refuses an unvalidated R3, and TrainingHistory "
+            "asserts requested == materialized. The declaration comes from the "
+            "PARENT so that check compares two sides of the process boundary "
+            "rather than the pass against itself. Refused crosswise with "
+            "--eval_sample_set_json, which is the regime-A leg whose "
+            "declaration is the preflight."
         ),
     )
     parser.add_argument(
@@ -1991,10 +2092,7 @@ def main():
     # and converts a contradiction into a typed refusal instead of an
     # embedding index error thousands of steps into a forward pass — the
     # difference Checkpoint C(iii) surfaced.
-    if model_io is not None:
-        resolve_model_io_contract(
-            model_io, dataset_num_classes=tidmad_topology(dataset_profile).encoding.num_classes
-        )
+    _cross_check_model_io(model_io, dataset_profile)
 
     # RT2-B: create the verification session FIRST so the measured setup
     # window covers config load and everything after — main() entry is the
@@ -2072,7 +2170,7 @@ def main():
     # fails closed naming the path; ABSENT means no validation pass.
     eval_sample_set = _load_eval_sample_set_arg(args.eval_sample_set_json)
 
-    if sample_set is not None:
+    if _has_scope_to_train_from(args, sample_set):
         # Multi-file mode: per-epoch concatenated dataset over the sample set.
         #
         # Child side of the task-data-path transport (D14-1 C3), the same
@@ -2100,10 +2198,10 @@ def main():
             # built a `TidmadScope` that a non-TIDMAD implementation refused.
             # Resolved INSIDE the binding: the bytes must be deserialized by the
             # implementation that wrote them.
-            task_scope = _load_transported_scope(
+            task_scope = load_transported_scope(
                 args.task_scope_ref, args.task_scope_digest, leg="training"
             )
-            task_eval_scope = _load_transported_scope(
+            task_eval_scope = load_transported_scope(
                 args.task_eval_scope_ref, args.task_eval_scope_digest, leg="evaluation"
             )
             results = run_experiment_streaming(
@@ -2125,6 +2223,7 @@ def main():
                 eval_sample_set=eval_sample_set,
                 task_scope=task_scope,
                 task_eval_scope=task_eval_scope,
+                validation_requested_rows=args.validation_requested_rows,
             )
         if results is None:
             # Runtime verification rejected the attempt: the structured

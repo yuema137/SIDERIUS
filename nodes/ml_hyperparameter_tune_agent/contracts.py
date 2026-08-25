@@ -179,6 +179,40 @@ class RunBindings:
     health_checks_config_source: Any
     health_config_sha256: Any
 
+    # --- Step 12 / PR-12d (F-12d-5) -----------------------------------------
+    run_deliverable_naming: Any = None
+    """The run's DELIVERABLE NAMING authority — ALWAYS present.
+
+    ``run_deliverable_spec`` became ``DeliverableSpec | None`` at D2: its
+    STORAGE half is TIDMAD-physical, so a task declaring no such geometry has
+    none. NAMING has no such dependency — it is
+    ``resolve_deliverable_naming()``, the run's declared naming or the shipped
+    default — and carrying it separately is what stops every consumer from
+    reaching through an OPTIONAL value for a MANDATORY one.
+
+    Defaulted so it sits last and every existing construction site is
+    unchanged; production always supplies it.
+    """
+
+    run_scientific_gate_ids: Any = None
+    """The RUN's own scientific gate set, or ``None`` — F-12d-30.
+
+    Resolved ONCE at run scope through ``resolve_run_scientific_gate_ids``
+    (Step 10 / P5+P6 W6, finding F-P56-2) and carried here rather than
+    re-derived per record. The zero-argument default composes with
+    ``LEGACY_OMITTED``, i.e. TIDMAD's set — correct for an un-composed run and
+    wrong for a composed one, where it makes the process bind TIDMAD's Health
+    family after the run has already bound its own and the Step-08b run-scope
+    guard then refuses an otherwise-complete run at finalize.
+
+    It lives on the bindings, not on the input projection, because PR-12a C2
+    pins that ``records.py`` reads run-scoped AUTHORITIES and never
+    ``task_composition_ref`` — the F-11-C10-a lesson, where a stamp reading
+    the projection instead of the run's own authority made a composed chain
+    refuse its own output. ``None`` is an un-composed run and resolves the
+    legacy default exactly as before.
+    """
+
     def __post_init__(self) -> None:
         offending = sorted(FORBIDDEN_BINDING_FIELDS & {f.name for f in fields(self)})
         if offending:

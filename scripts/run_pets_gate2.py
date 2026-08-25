@@ -48,10 +48,25 @@ engine on real data, real inference, the real deliverable codec, the real
 metric handle, and the pack's Health family evaluated on a FRESH real
 deliverable.
 
-FULL RETIREMENT IS BLOCKED ON **CAP-SCOPE** (design §10.2): until
-task-owned scope construction exists, the generic loop cannot execute real
-contrast-task training, so these claims have no generic owner to move to.
-Step 12 must not claim contrast-track L4 while CAP-SCOPE is open.
+RETIREMENT DISPOSITION — Step 12 / PR-12d D8b
+----------------------------------------------
+The paragraph that stood here said full retirement was BLOCKED ON
+**CAP-SCOPE**, because a generic loop with no task-owned scope construction
+could not execute real contrast-task training, leaving these claims no
+owner to move to. Both halves are now false: CAP-SCOPE landed with PR-12bc,
+and ``G-12d`` drove this pack's real training, inference and scoring
+children through the ONE composed production chain. Every claim above now
+has a surviving owner.
+
+The runner is nonetheless **RETAINED, not retired** — a D8b decision, not
+an unfinished transfer. "Retire only if every claim has a surviving owner"
+is a NECESSARY condition for retirement, never an instruction to retire
+once it holds. What it still buys: this is the only harness that executes
+the pack's real data path WITHOUT the composed chain, so when a real run
+fails it is what separates *the pack is broken* from *the composition is
+broken*. Deleting it would spend that discrimination to save nothing.
+
+It remains an L3 evidence harness, and never a way the task runs.
 
 """
 

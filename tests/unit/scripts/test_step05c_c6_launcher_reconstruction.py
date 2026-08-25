@@ -137,7 +137,7 @@ def test_the_launcher_resolves_the_c0_producer_name():
             model_type=GOLDEN_MODEL_TYPE,
             run_name=GOLDEN_RUN_NAME,
             exp_id=GOLDEN_EXP_ID,
-            file_index=GOLDEN_FILE_INDEX,
+            input_identity=GOLDEN_FILE_INDEX,
         )
         == GOLDEN_SAMPLE_SET_NAME
     )
@@ -154,8 +154,8 @@ def test_the_workspace_auditor_recognises_renamed_artifacts(tmp_path):
     from scripts.v18_wave_summary import _check_denoised_artifacts
 
     naming = default_deliverable_naming()
-    in_scope = naming.name(model_type="wavenet", run_name="r", exp_id="e", file_index=4)
-    out_of_scope = naming.name(model_type="wavenet", run_name="r", exp_id="e", file_index=11)
+    in_scope = naming.name(model_type="wavenet", run_name="r", exp_id="e", input_identity=4)
+    out_of_scope = naming.name(model_type="wavenet", run_name="r", exp_id="e", input_identity=11)
     (tmp_path / in_scope).write_bytes(b"x")
     (tmp_path / out_of_scope).write_bytes(b"x")
     (tmp_path / "abra_validation_0011.h5").write_bytes(b"x")
@@ -198,7 +198,7 @@ def test_launcher_and_producer_move_together_under_a_rename():
         "model_type": GOLDEN_MODEL_TYPE,
         "run_name": GOLDEN_RUN_NAME,
         "exp_id": GOLDEN_EXP_ID,
-        "file_index": GOLDEN_FILE_INDEX,
+        "input_identity": GOLDEN_FILE_INDEX,
     }
 
     # The producer (inference_single) and every migrated reader compose the

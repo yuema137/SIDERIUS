@@ -64,13 +64,42 @@ windows needs per-sequence frame counts and the executable data path
 `declared/` holds instance DECLARATIONS this pack owns (roadmap §22.23.1),
 built through the REAL framework schemas (`agent/schemas/model_io_contract.py`,
 `execute_tools/evaluation_metric.py`) and validated by
-`tests/unit/examples/test_davis_future_prediction_pack.py`. The runtime does
-not read them yet: binding a pack to a run is Step 12's.
+`tests/unit/examples/test_davis_future_prediction_pack.py`.
+
+## Launching a composed DAVIS run (Step 12 / PR-12d D6)
+
+The runtime now reads these declarations. The operator entrypoint is:
+
+```bash
+run_chain.sh ... --task_composition configs/task_composition/davis.yaml
+```
+
+That file is a POINTER (Q-12d-1): it carries refs into this pack and no second
+copy of any task semantics. D6 added the two declarations it still needed —
+
+```text
+declared/dataset_profile.json   partition_count 60 (the gate2_train clip subset the
+                                manifest binds) + an OPAQUE DAVIS topology (clip identity,
+                                the frozen frame transform, temporal extents 8 in / 4 out)
+                                + anchor_selection_files / health_peek_files
+declared/task_config.yaml       this pack's OWN task_description + prose forward_contract
+```
+
+— and extended `data/manifests/SHA256SUMS` beyond `sequences.csv` to
+`clips.csv` and the three `gate2_*.csv` the Gate actually reads (F-12d-5).
+
+**Declared is not executed.** No composed DAVIS run has happened yet; that is
+`G-12d`'s, and `STATUS.md` says so rather than claiming L4.
 
 ## What the framework can / cannot do with this task today
 
 See `STATUS.md`. In one line: the two declarable contracts are declared;
 `DatasetProfile`, `DeliverableSpec`, frame reader / window materialization,
 clip identity, a reference plugin and Gate subsets are D14 seams; task
-binding is Step 12; health applicability is Step 08. There is no launcher for
-this task yet — this pack does not claim to run.
+binding is Step 12; health applicability is Step 08.
+
+**There IS a launcher now** — see "Launching a composed DAVIS run" above. This
+sentence used to read *"there is no launcher for this task yet — this pack
+does not claim to run"*, which contradicted the section that documents the
+composed entrypoint. Corrected at PR-12d D-FINAL: the launcher landed with
+D6/D8a and the stale line survived directly above it.

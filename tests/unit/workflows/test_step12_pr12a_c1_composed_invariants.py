@@ -48,9 +48,15 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 
 #: The three composition fixtures and the topology each DECLARES. Hand-written
-#: from the fixtures' own `dataset_profile.json`, never read back from the
+#: from each fixture's resolved `dataset_profile`, never read back from the
 #: object under test.
-DECLARED_NUM_FILES = {"tidmad": 20, "pets": 4, "davis": 3}
+#:
+#: Step 12 / PR-12d D5 MOVED the Pets entry 4 -> 370, with this reason: the
+#: fixture no longer carries its own fabricated profile — it resolves the
+#: pack's SHIPPED `examples/oxford_iiit_pet/declared/dataset_profile.json`,
+#: whose index domain is the 370 rows of the Gate manifest. DAVIS still
+#: declares the fabricated 3 and moves at D6.
+DECLARED_NUM_FILES = {"tidmad": 20, "pets": 370, "davis": 3}
 
 
 @pytest.fixture(autouse=True)
@@ -121,7 +127,7 @@ class TestF121PreflightResolvesTheRunsTopology:
             _preflight_args(str(tmp_path / "d")),
             run_composition=compose_run_task_bindings(str(FIXTURES / "davis" / "composition.yaml")),
         )
-        assert pets.resolved_data_scope == [0, 1, 2, 3]
+        assert pets.resolved_data_scope == list(range(370))
         assert davis.resolved_data_scope == [0, 1, 2]
 
     def test_an_un_composed_run_is_unchanged(self, tmp_path):
@@ -241,12 +247,12 @@ class TestComposedHealthConfigHandoff:
 
         # Bound, because that is how the tuner runs: `validate_health_scope`
         # asks `resolve_dataset_profile()` how many files a FULL scope has, so
-        # an unbound call would judge Pets' complete [0,1,2,3] against
-        # TIDMAD's 20 and call it partial.
+        # an unbound call would judge Pets' complete 370-row scope
+        # against TIDMAD's 20 and call it partial.
         composition = compose_run_task_bindings(str(FIXTURES / "pets" / "composition.yaml"))
         with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
             path, _sha = materialize_effective_config(
-                handed, None, str(model_workspace), resolved_scope=[0, 1, 2, 3]
+                handed, None, str(model_workspace), resolved_scope=list(range(370))
             )
         per_model = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
 

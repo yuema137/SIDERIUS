@@ -821,6 +821,24 @@ class TidmadTopology(BaseModel):
     encoding: ValueEncoding
 
 
+def declares_tidmad_topology(profile: DatasetProfile) -> bool:
+    """Does ``profile`` carry TIDMAD's physical topology sections?
+
+    Step 12 / PR-12d, seam B. The MEMBERSHIP question that must be asked
+    before :func:`tidmad_topology`, never inferred from catching its
+    ``ValueError`` — that function raises for two different reasons, and
+    conflating them would silently accept a MALFORMED TIDMAD topology as
+    "this task simply declares none". Exactly 12bc's row-2-vs-row-4 rule, one
+    subsystem over: *a miss is a membership test, never an exception to
+    catch.*
+
+    Declared here rather than in a caller so the section names have ONE
+    owner: this module defines the typed view, so it also answers whether a
+    profile has one.
+    """
+    return all(section in profile.topology for section in ("dataset", "channels", "encoding"))
+
+
 def tidmad_topology(profile: DatasetProfile) -> TidmadTopology:
     """Decode ``profile``'s opaque payload as TIDMAD's typed topology.
 

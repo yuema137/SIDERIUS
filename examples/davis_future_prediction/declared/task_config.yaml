@@ -1,0 +1,79 @@
+# DAVIS future-frame prediction — the pack's OWN task configuration.
+#
+# Step 12 / PR-12d D6. Co-located with the pack per Q-12d-1: task-owned
+# declarations live under `examples/<pack>/`, and the shipped composition
+# manifest (`configs/task_composition/davis.yaml`) references this file. The
+# framework never scans for it.
+#
+# Content is the §22.9a Track-C freeze, transcribed rather than reinvented:
+# 8 context RGB frames -> the next 4, dense continuous output, LOWER-is-better
+# global MSE. Nothing here restates a threshold, a direction or an aggregation
+# that a metric declaration already owns.
+#
+# CORRECTED (G-12d Track 3 forensic finding, found via Track 2's real Pets
+# crash and re-audited here before launch): this comment used to say "Regime-A
+# prose form deliberately... authoring a second `model_io:` block here would
+# make two copies of the same contract, which is the duplicate authority the
+# project rules forbid" (§A.2's "no composition family references
+# [model_io_contract.json]" audit note). That reasoning conflated two
+# DIFFERENT paths: `declared/model_io_contract.json` is a pinned fixture
+# only this pack's own tests read; `task_config.yaml`'s `model_io` field
+# below is what `run_bound_model_io_contract()` resolves at RUN TIME, feeding
+# the admission resource-check's dtype resolution. Leaving it undeclared
+# left the resource-check with no contract to consult, so it fell back to
+# the int64 site preference that is correct for TIDMAD's raw-signal models
+# and wrong for this float-native video model — the same
+# `RuntimeError: Input type (long int) and bias type (float) should be the
+# same` Pets hit. `model_io:` below now IS declared, transcribed from
+# `model_io_contract.json` (a cross-check test asserts they never diverge),
+# and `input_shape`/`output_shape`/`num_classes` are DERIVED from it
+# (`ForwardContract` validator) rather than authored, mirroring TIDMAD's own
+# `configs/task_config.yaml`. The prose below is still what reaches the
+# implementor/proposer prompts, and it still names the two DIFFERING
+# temporal extents explicitly, because an 8-in / 4-out model is the shape a
+# reader gets wrong.
+
+task_description: |
+  real-RGB future-frame prediction on DAVIS 2017 video: given 8 context
+  frames of a clip at [3, 128, 224] each, predict the next 4 frames as a
+  dense continuous tensor. Clips are (sequence_name, start_frame) windows
+  chosen deterministically per sequence; sequences never cross a scope
+  boundary, so there is no temporal leakage between training and evaluation.
+
+forward_contract:
+  # Mirrors `declared/model_io_contract.json` exactly (no axis is tagged
+  # `role: temporal` there, so none is tagged here either — the two must
+  # stay semantically identical, which the cross-check test enforces).
+  model_io:
+    input:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 3}}
+        - {dimension: {fixed: 8}}
+        - {dimension: {fixed: 128}}
+        - {dimension: {fixed: 224}}
+      dtype: {admissible: ["float32"]}
+    output:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 3}}
+        - {dimension: {fixed: 4}}
+        - {dimension: {fixed: 128}}
+        - {dimension: {fixed: 224}}
+      dtype: {admissible: ["float32"]}
+  input_description: >-
+    eight context frames, channel-first per frame and stacked on a temporal
+    axis; pixel values already normalized to [0, 1]
+  output_description: >-
+    the next four frames in the same layout and value range — a dense
+    continuous tensor, NOT logits and NOT class indices
+  task_type: "regression"
+  output_head_note: >-
+    The temporal extents DIFFER: the input carries T=8 and the output must
+    carry exactly T=4. A head that echoes the input's temporal length is the
+    single most common shape error on this task.
+  task_note: >-
+    Offline prediction over a fixed window — the model sees all 8 context
+    frames at once and no causal masking is required. No augmentation, no
+    flipping and no random cropping: the decode/resize rule is frozen by the
+    pack's execution manifest, and the run's identity depends on it.

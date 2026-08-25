@@ -46,6 +46,7 @@ from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
     LEGACY_PER_FILE_COMPARISON_BLOCK,
     TunerTaskRender,
+    render_full_scope_segments_token,
     render_metric_direction_words,
     render_metric_identity_line,
 )
@@ -1046,7 +1047,10 @@ class LLMBridge:
             .replace("{FOCAL_ALPHA_DEFAULT}", task_render.focal_alpha_default)
             .replace("{FOCAL_GAMMA_DEFAULT}", task_render.focal_gamma_default)
             .replace("{EFFICIENCY_BAND_PCT}", task_render.efficiency_band_pct)
-            .replace("{FULL_SCOPE_SEGMENTS}", str(task_render.full_scope_segments))
+            .replace(
+                "{FULL_SCOPE_SEGMENTS}",
+                render_full_scope_segments_token(task_render.full_scope_segments),
+            )
             # P3 — the ONLY intentional LLM-visible byte deltas in 07b (§3.7).
             .replace("{METRIC_VERB}", _direction["verb"])
             .replace("{METRIC_COMPARATIVE}", _direction["comparative"])

@@ -173,7 +173,11 @@ def test_c6a_the_flipped_direction_enters_the_record_through_the_live_route(tmp_
     swapped for the direction-only instance, every success record's payload
     carries ``direction="lower"`` and the flipped id, with ``scalar ==
     denoising_score`` — the same record mechanics, one axis moved."""
-    shipped_derivation = _TUNER.derive_tidmad_metric
+    # Step 12 / PR-12d seam B: the run-scope resolution moved into
+    # `evaluation_metric.resolve_run_metric` (the spec became optional at
+    # B11 and `run()` is branch-capped). The stub follows the resolution
+    # to its new owner; the question this test asks is unchanged.
+    shipped_derivation = _TUNER.resolve_run_metric
     derivations: list[int] = []
 
     def _bind_once(*args, **kwargs):
@@ -184,7 +188,7 @@ def test_c6a_the_flipped_direction_enters_the_record_through_the_live_route(tmp_
             else shipped_derivation(*args, **kwargs)
         )
 
-    monkeypatch.setattr(_TUNER, "derive_tidmad_metric", _bind_once)
+    monkeypatch.setattr(_TUNER, "resolve_run_metric", _bind_once)
     output, _bridge, _sandbox, _ws = run_bounded_pseudo_iteration(
         tmp_path, monkeypatch, preflight_results=_preflight()
     )
@@ -236,14 +240,18 @@ def _preflight():
 
 
 def test_the_contrast_enters_the_record_through_the_live_route(tmp_path, monkeypatch):
-    shipped_derivation = _TUNER.derive_tidmad_metric
+    # Step 12 / PR-12d seam B: the run-scope resolution moved into
+    # `evaluation_metric.resolve_run_metric` (the spec became optional at
+    # B11 and `run()` is branch-capped). The stub follows the resolution
+    # to its new owner; the question this test asks is unchanged.
+    shipped_derivation = _TUNER.resolve_run_metric
     derivations: list[int] = []
 
     def _bind_once(*args, **kwargs):  # contrast at run scope only (see C2 binding test)
         derivations.append(1)
         return _contrast_metric() if len(derivations) == 1 else shipped_derivation(*args, **kwargs)
 
-    monkeypatch.setattr(_TUNER, "derive_tidmad_metric", _bind_once)
+    monkeypatch.setattr(_TUNER, "resolve_run_metric", _bind_once)
     output, _bridge, _sandbox, _ws = run_bounded_pseudo_iteration(
         tmp_path, monkeypatch, preflight_results=_preflight()
     )
@@ -257,8 +265,12 @@ def test_the_contrast_enters_the_record_through_the_live_route(tmp_path, monkeyp
         )
         assert record.metric_result.scalar == record.denoising_score
     assert len(derivations) == 1
-    # Same process, shipped derivation object: still TIDMAD / higher.
-    shipped = shipped_derivation(TIDMAD_PROFILE).spec
+    # Same process, shipped DERIVATION: still TIDMAD / higher. Asked of
+    # `derive_tidmad_metric` rather than of `shipped_derivation`, because
+    # PR-12d seam B made the latter the RESOLVER — which takes the run's
+    # deliverable spec as well. The claim is about the derivation being
+    # untouched by the run-scope swap, and that is what this asks.
+    shipped = derive_tidmad_metric(TIDMAD_PROFILE).spec
     assert (shipped.id, shipped.direction) == (TIDMAD_METRIC_ID, "higher")
 
 

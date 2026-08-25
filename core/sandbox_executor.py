@@ -47,7 +47,7 @@ from execute_tools.dataset_config import (
     ScopeViolationError,
     resolve_dataset_profile,
 )
-from execute_tools.deliverable_spec import DeliverableNaming, default_deliverable_naming
+from execute_tools.deliverable_spec import DeliverableNaming, indexed_cleanup_naming
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
     MetricResult,
@@ -55,6 +55,7 @@ from execute_tools.evaluation_metric import (
     NotScoreableResult,
     derive_tidmad_metric,
 )
+from execute_tools.scope_artifact import task_scope_argv, validation_rows_argv
 from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
 from execute_tools.training_history import (
     TRAINING_HISTORY_KEY,
@@ -899,64 +900,6 @@ def _data_root_argv(flag: str) -> list[str]:
     return [flag, bound] if bound is not None else []
 
 
-def _task_scope_argv(configs_dir: str, exp_id: str, task_scopes: object) -> list[str]:
-    """The composed run's SCOPE transport — empty unless scopes were acquired.
-
-    Step 12 / PR-12bc B6. Follows ``_task_data_path_argv``'s shape exactly: a
-    small pure emitter, splatted at the call site, that yields NOTHING when the
-    run is un-composed. An un-composed command line is therefore byte-identical
-    (R-11-1 / R-11-13), which the B0 fixture pins independently.
-
-    The scope payload itself never rides argv (parent §5.5, frozen): the task's
-    canonical bytes are written to a run-scoped ATOMIC artifact and argv carries
-    only a path and a digest, so a large or variable-length scope has no
-    ``ARG_MAX`` exposure.
-
-    The bytes come from the TASK (``serialize_scope``); this function neither
-    inspects nor canonicalizes them.
-    """
-    from execute_tools.scope_artifact import (
-        EVAL_SCOPE_STEM,
-        TRAINING_SCOPE_STEM,
-        scope_artifact_path,
-        write_scope_artifact,
-    )
-    from execute_tools.task_data_path import (
-        active_task_data_path,
-        resolve_task_scope_capability,
-    )
-
-    training = getattr(task_scopes, "training", None)
-    if training is None:
-        return []
-    bound = active_task_data_path()
-    if bound is None:
-        raise ValueError(
-            "task scopes were acquired but no task data path is bound, so the "
-            "bytes cannot be produced by the implementation that built them."
-        )
-
-    # Narrowed through the ONE resolver rather than accessed off `TaskDataPath`:
-    # the frozen four-method protocol does NOT declare `serialize_scope`, and it
-    # must not — the capability is an optional SIBLING. Reaching for the method
-    # directly is what a static checker rejects, and it is right to: the binding
-    # here could be an implementation that declares no capability at all, and
-    # the resolver is what turns that into a named refusal.
-    capability = resolve_task_scope_capability(bound)
-
-    fragment: list[str] = []
-    for stem, scope, flag in (
-        (TRAINING_SCOPE_STEM, training, "--task_scope"),
-        (EVAL_SCOPE_STEM, getattr(task_scopes, "evaluation", None), "--task_eval_scope"),
-    ):
-        if scope is None:
-            continue
-        path = scope_artifact_path(configs_dir, stem, exp_id)
-        digest = write_scope_artifact(path, capability.serialize_scope(scope))
-        fragment.extend([f"{flag}_ref", path, f"{flag}_digest", digest])
-    return fragment
-
-
 def _task_manifest_argv() -> list[str]:
     """The composed run's manifest path — empty unless BOUND. Step 11 C5.
 
@@ -1236,8 +1179,11 @@ class TidmadSandbox:
         # cannot disagree about what an attempt's artifacts are called. `None`
         # resolves the shipped TIDMAD default, which is what every caller that
         # predates 05c gets — identical behaviour, no migration.
+        # Step 12 / PR-12d seam E: MAY be `None`. A task that names its own
+        # artifacts has no indexed template, and the two glob sites below skip
+        # rather than sweep with a pattern this run never wrote.
         self.deliverable_naming = (
-            deliverable_naming if deliverable_naming is not None else default_deliverable_naming()
+            deliverable_naming if deliverable_naming is not None else indexed_cleanup_naming()
         )
         # Boundary DataScope invariant: every SampleSet is validated against
         # this scope before any file I/O (train / inference / score_vector).
@@ -1616,10 +1562,6 @@ class TidmadSandbox:
                     with open(fo_path, "w") as f:
                         json.dump(list(file_order), f)
                     cmd.extend(["--file_order_json", fo_path])
-                # Step 12 / PR-12bc B6 — the composed run's task-built scopes.
-                # Splatted like every other composed-only transport, so an
-                # un-composed argv is unchanged.
-                cmd.extend(_task_scope_argv(self.dirs["configs"], exp_id, task_scopes))
 
                 # RT2-B: in-subprocess runtime verification (streaming mode
                 # only). Remove any stale sidecar from a previous attempt with
@@ -1635,6 +1577,28 @@ class TidmadSandbox:
                     with open(rp_path, "w") as f:
                         json.dump(policy_obj.model_dump(), f)
                     cmd.extend(["--runtime_policy_json", rp_path])
+
+            # Step 12 / PR-12bc B6 + PR-12d seam C (B9) — the composed run's
+            # task-built scopes and the CALLER's declared validation row count.
+            #
+            # **Emitted OUTSIDE the `sample_set is not None` block (F-12d-27).**
+            # These two were nested inside it, which coupled the COMPOSED
+            # transport to the presence of a LEGACY TIDMAD SampleSet. A composed
+            # contrast round has `sample_set=None` by construction — `planning.py`
+            # builds one only when the profile `declares_physical_geometry`, which
+            # is false for Pets and DAVIS — so the training child received NO
+            # scope at all and fell into its own legacy branch, where
+            # `tidmad_topology(dataset_profile)` raises for a task that declares
+            # none. The inference (`:1874`) and scoring (`:2211`) spawns already
+            # splat the same emitter unconditionally; training was the only one
+            # of the three that did not, and that asymmetry was the whole defect.
+            #
+            # Both emitters are no-ops when nothing is composed
+            # (`task_scope_argv`/`validation_rows_argv` return `[]` for absent
+            # scopes), so an un-composed TIDMAD argv is byte-identical — which is
+            # exactly why this is a hoist and not a new branch.
+            cmd.extend(task_scope_argv(self.dirs["configs"], exp_id, task_scopes))
+            cmd.extend(validation_rows_argv(task_scopes, self.dirs["data"]))
 
             print(f">>> [Executor] Running training for {exp_id}...")
             _observer = _make_phase_observer(self)
@@ -1832,6 +1796,7 @@ class TidmadSandbox:
         sample_set: dict | None = None,
         inference_batch: int | None = None,
         runtime_policy: dict | None = None,
+        task_scopes: object = None,
     ):
         """Executes the inference physical script.
 
@@ -1860,6 +1825,15 @@ class TidmadSandbox:
                              the inference component; the updated
                              observation is attached to the result as
                              ``runtime_verification``.
+            task_scopes:     Step 12 / PR-12d seam C (B6). The composed run's
+                             task-built scopes, forwarded to the child through
+                             the SAME artifact+digest ABI the training spawn
+                             uses. ``None`` on an un-composed run, so the
+                             emitter yields nothing and the argv is
+                             byte-identical. Before this the transport reached
+                             the TRAINING child only — ``_task_scope_argv``
+                             had exactly one call site — so an inference child
+                             could not know what to iterate.
         """
         policy_obj = RuntimeControlPolicy(**runtime_policy) if runtime_policy is not None else None
         validated_m, validated_l = self._validate_model_and_loss(model_type, m_cfg, l_cfg)
@@ -1916,6 +1890,11 @@ class TidmadSandbox:
             inf_bs,
             "--file_index",
             str(self.file_index),
+            # Step 12 / PR-12d seam C (B6) — the composed run's task-built
+            # scopes, on the SAME emitter the training spawn uses. Splatted
+            # like every other composed-only transport, so an un-composed argv
+            # is unchanged.
+            *task_scope_argv(self.dirs["configs"], exp_id, task_scopes),
         ]
 
         # Step 03 — same transport, same omit-vs-broken distinction as
@@ -1996,14 +1975,15 @@ class TidmadSandbox:
                     # denoised outputs (mirrors --cleanup_denoised).
                     import glob as _glob
 
-                    pattern = os.path.join(
-                        self.base_dir,
-                        self.deliverable_naming.attempt_glob(
-                            model_type=model_type, run_name=run_name, exp_id=exp_id
-                        ),
-                    )
-                    for partial in _glob.glob(pattern):
-                        os.remove(partial)
+                    if self.deliverable_naming is not None:
+                        pattern = os.path.join(
+                            self.base_dir,
+                            self.deliverable_naming.attempt_glob(
+                                model_type=model_type, run_name=run_name, exp_id=exp_id
+                            ),
+                        )
+                        for partial in _glob.glob(pattern):
+                            os.remove(partial)
                     return {
                         "status": "wall_clock_timeout",
                         "message": (
@@ -2187,9 +2167,25 @@ class TidmadSandbox:
         return result.per_sample, result.scalar
 
     def execute_scoring(
-        self, exp_id: str, run_name: str, model_type: str, m_cfg: dict, t_cfg: dict, l_cfg: dict
+        self,
+        exp_id: str,
+        run_name: str,
+        model_type: str,
+        m_cfg: dict,
+        t_cfg: dict,
+        l_cfg: dict,
+        task_scopes: object = None,
     ):
-        """Calculates score and returns results to Skill layer."""
+        """Calculates score and returns results to Skill layer.
+
+        ``task_scopes`` — Step 12 / PR-12d D4b. The composed run's task-built
+        scopes, on the SAME artifact+digest emitter the training and inference
+        spawns use (§D.C names all three sites). The scoring child needs the
+        EVALUATION scope because a task-owned metric's ground truth lives in
+        it: ``read_evaluation_payload`` is a codec and decodes the deliverable
+        only. ``None`` on an un-composed run, so the emitter yields nothing
+        and the argv is byte-identical.
+        """
         result_dir = os.path.join(self.dirs["records"], run_name)
         _ensure_dir(result_dir)
 
@@ -2233,6 +2229,9 @@ class TidmadSandbox:
                     self.base_dir,
                     "--file_index",
                     str(self.file_index),
+                    # Step 12 / PR-12d D4b — the composed run's task-built
+                    # scopes, same emitter, same emitted-only-when-bound rule.
+                    *task_scope_argv(self.dirs["configs"], exp_id, task_scopes),
                 ],
                 check=True,
                 stdout=None if self.progress_bar else subprocess.PIPE,

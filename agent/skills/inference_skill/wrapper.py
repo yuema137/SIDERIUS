@@ -23,4 +23,8 @@ def run_skill(sandbox: TidmadSandbox, **kwargs):
         # RT2-G: the inference subprocess RESUMES the attempt's runtime
         # observation under the same policy (RT2-D).
         runtime_policy=kwargs.get("runtime_policy"),
+        # Step 12 / PR-12d seam C (B6): the composed run's task-built scopes,
+        # already present in the tuner's `active_params` for the training
+        # spawn. Forwarded, not re-derived — one acquisition, two children.
+        task_scopes=kwargs.get("task_scopes"),
     )

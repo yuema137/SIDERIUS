@@ -267,9 +267,46 @@ class TestFingerprintParticipation:
     #: Measured AT `eeb073dc` — before the section existed — in a detached
     #: worktree, so these compare against the recorded past rather than
     #: against the code under test.
+    #:
+    #: MOVED at Step 12 / PR-12d D4c, with the reason. The Pets/DAVIS
+    #: fixtures' secondary metrics were bound to implementations computing
+    #: something else — `psnr` and `mae` both to `GlobalMseMetric`, `macro_f1`
+    #: to `AccuracyMetric` (F-12d-3). Rebinding to the packs' own
+    #: implementations turns `implementation:` from a `module:` ref into a
+    #: `file:` ref, which contributes its CONTENT DIGEST. The composition
+    #: genuinely changed; the fingerprint rule did not.
+    #:
+    #: TIDMAD's shipped fingerprint is UNTOUCHED at `9125bf58…`.
+    #:
+    #: MOVED AGAIN at Step 12 / PR-12d, once per pack and each for its own
+    #: reason — D6 for DAVIS, D5 for Pets. Both fixtures stopped carrying the
+    #: fabricated TIDMAD-shaped `dataset_profile` F-12d-4 condemned
+    #: (`psd_segment_length`, `segments_per_file`, `.h5` shard patterns for
+    #: tasks that have clips and images): DAVIS' was re-authored into the
+    #: Q-12-4 shape, and Pets' was DELETED so the fixture resolves the pack's
+    #: SHIPPED `declared/dataset_profile.json` — exactly one Pets profile now
+    #: exists. The profile's wire form enters the semantic fingerprint, so
+    #: both values move because the DECLARATIONS genuinely changed; the
+    #: fingerprint rule did not.
+    #:
+    #: TIDMAD's shipped fingerprint remains `9125bf58…` and is asserted
+    #: separately — no TIDMAD declaration was touched by either commit.
+    #: MOVED a THIRD time, and NOT because this fixture's own YAML changed —
+    #: it did not. Both fixtures bind their SECONDARY metric through a `file:`
+    #: ref into `_pets_metrics.py` / `_davis_metrics.py`, and a `file:` ref's
+    #: CONTENT DIGEST enters the fingerprint. F-12d-19 added
+    #: `PetsAccuracyMetric` / `DavisMseMetric` to those same files (to give the
+    #: SHIPPED manifest's primary a binding that accepts the composed call),
+    #: which moved the digest — and with it, every fixture referencing the
+    #: file, whether or not the fixture's own content moved.
+    #:
+    #: The generalisable point: a `file:` ref's identity is the FILE's content,
+    #: not the symbol composed. Two manifests binding different symbols out of
+    #: the same file share one identity, and editing the file for one manifest
+    #: silently reopens every other manifest's pinned fingerprint.
     PRE_SECTION_FINGERPRINT: ClassVar[dict[str, str]] = {
-        "davis": "c59342f809073690b305448e3301d997aed209449ba11ee35bc860ca7805d3b7",
-        "pets": "2b3b53837670592d36e072bdd49a37059cb2a3a63b7cda950f3a0b96bc4447e8",
+        "davis": "48b5e53e389f349396b83446e398a9ad02b6b3c36146e83ab4e5e668584d3b94",
+        "pets": "600d7c2eea82fb03e56c41640d9837336259918293861eacdcc0c7d78a95bdfb",
     }
 
     @pytest.mark.parametrize("task", ["davis", "pets"])

@@ -54,6 +54,7 @@ __all__ = [
     "expected_output_shape",
     "input_index_extent",
     "loss_probe_semantic",
+    "output_without_class_axis",
     "realize_shape",
 ]
 
@@ -305,7 +306,22 @@ def declared_output_tensor(
     # `regressor`, or any other value the caller has already accepted as
     # legal: the continuous form of this task's output — the declared tensor
     # with the class axis dropped, if the task declares one.
-    if not has_class_axis:
+    return output_without_class_axis(contract)
+
+
+def output_without_class_axis(contract: ModelIOContract) -> TensorContract:
+    """The contract's output tensor with any class-role axis dropped.
+
+    Extracted from :func:`declared_output_tensor`'s ``regressor`` branch
+    (F-12d-24) because a second, independent consumer needs the identical
+    transformation: a classification LOSS's class-INDEX target is one
+    integer per remaining (non-class) position, regardless of what any
+    candidate declares itself to be — the target's shape is a fact about
+    the LOSS, not about the candidate, so it must not go through
+    ``declared_output_type`` selection at all.
+    """
+    output = contract.output
+    if output.axis_with_role(AxisRole.CLASS) is None:
         return output
     return TensorContract(
         axes=tuple(a for a in output.axes if a.role is not AxisRole.CLASS),
@@ -355,7 +371,12 @@ def input_index_extent(contract: ModelIOContract) -> int:
     return cardinality
 
 
-def build_model_input(contract: ModelIOContract) -> torch.Tensor:
+def build_model_input(
+    contract: ModelIOContract,
+    *,
+    batch: int | None = None,
+    symbolic: int | None = None,
+) -> torch.Tensor:
     """Construct one probe input satisfying the contract's input declaration.
 
     Shape, rank and axis order come from :func:`realize_shape`; the concrete
@@ -364,6 +385,19 @@ def build_model_input(contract: ModelIOContract) -> torch.Tensor:
     than a second mapping, with this site's historical ``int64`` preference
     honoured whenever the contract admits it — which is what keeps the
     shipped TIDMAD probe byte-identical.
+
+    Args:
+        contract: the declared Model-I/O contract to realize a probe for.
+        batch: forwarded to :func:`realize_shape`. Step-04's two node
+            consumers omit it and get :data:`PROBE_BATCH`; Step-05b's
+            capacity probe supplies the candidate's real batch size — this
+            parameter exists FOR that caller (see ``realize_shape``'s own
+            docstring), and F-12d-24 is this promise finally kept: the
+            wiring existed here and was never reached from
+            ``evaluate_vram_skill``.
+        symbolic: forwarded to :func:`realize_shape`. Step-04 omits it and
+            gets :data:`PROBE_SYMBOLIC_EXTENT`; Step-05b supplies the
+            candidate's real segmentation size.
 
     Raises:
         ProbeConstructionError: no concrete dtype is both admissible and
@@ -376,7 +410,7 @@ def build_model_input(contract: ModelIOContract) -> torch.Tensor:
         resolve_model_input_dtype,
     )
 
-    shape = realize_shape(contract.input)
+    shape = realize_shape(contract.input, batch=batch, symbolic=symbolic)
     try:
         dtype = resolve_model_input_dtype(contract.input.dtype, site_preference=_PROBE_SITE_DTYPE)
     except UnsupportedModelInputDtypeError as exc:

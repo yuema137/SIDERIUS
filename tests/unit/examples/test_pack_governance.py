@@ -57,11 +57,43 @@ def _python_files_under(root: Path) -> list[Path]:
     return sorted(p for p in root.rglob("*.py") if p.is_file())
 
 
-def _yaml_parallel_copies(examples_root: Path) -> list[tuple[Path, str]]:
+def _composition_bound_task_configs(repo_root: Path) -> frozenset[Path]:
+    """Every path a SHIPPED composition manifest binds as its ``task_config``.
+
+    Step 12 / PR-12d D5 — the evidence that re-scopes guard (a). A pack's own
+    task config is legitimate exactly when a manifest RESOLVES it; a YAML
+    nobody binds is still the hand-written parallel copy the guard was written
+    against. Refs resolve against the manifest's own directory, which is the
+    rule ``workflows/task_composition.py::_resolve_path`` applies.
+    """
+    bound: set[Path] = set()
+    manifests = repo_root / "configs" / "task_composition"
+    if not manifests.is_dir():
+        return frozenset()
+    for manifest in sorted(manifests.glob("*.yaml")):
+        payload = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+        section = payload.get("task_config") if isinstance(payload, dict) else None
+        ref = section.get("config") if isinstance(section, dict) else None
+        if isinstance(ref, str) and ref.strip():
+            bound.add((manifest.parent / ref).resolve())
+    return frozenset(bound)
+
+
+def _yaml_parallel_copies(
+    examples_root: Path, bound_task_configs: frozenset[Path] = frozenset()
+) -> list[tuple[Path, str]]:
     """(path, key) for every YAML under examples/ whose TOP-LEVEL mapping
-    declares a runtime-authority key. Prose mentioning the word is fine."""
+    declares a runtime-authority key. Prose mentioning the word is fine.
+
+    ``bound_task_configs`` are the files a shipped composition manifest
+    actually resolves — those are BOUND declarations, not parallel copies, and
+    the default empty set means "nothing is exempt" so the plant below still
+    exercises the original rule.
+    """
     offenders: list[tuple[Path, str]] = []
     for path in sorted(p for p in examples_root.rglob("*") if p.suffix in (".yaml", ".yml")):
+        if path.resolve() in bound_task_configs:
+            continue
         payload = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(payload, dict):
             offenders.extend((path, key) for key in PARALLEL_COPY_KEYS if key in payload)
@@ -126,29 +158,77 @@ def _missing_persistent_roots(examples_root: Path) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def test_no_yaml_under_examples_declares_a_runtime_authority_key() -> None:
-    """[MATURITY PIN — valid before Step 12 — relaxation owner: Step 12]
+def test_no_yaml_under_examples_declares_an_UNBOUND_runtime_authority_key() -> None:
+    """[MATURITY PIN, RE-SCOPED BY Step 12 / PR-12d D5 (the named relaxation
+    owner) — original: NO top-level `task_description` / `forward_contract`
+    YAML under `examples/` at all, valid through Step 11]
 
-    Defect caught: a YAML under `examples/` declares a TOP-LEVEL
-    `task_description` / `forward_contract` — a hand-written parallel copy of
-    the single runtime task authority (`configs/task_config.yaml`) before task
-    composition owns where a bound declaration lives (roadmap §22.23.1). Not
-    caught elsewhere: `test_step04b_task_description_single_source` scans
-    `configs/` only. Inspects YAML top-level KEYS, so prose (README) may name
-    the word freely. Step 12 relaxes / re-scopes this in ITS design."""
+    Defect caught, unchanged in substance: a YAML under `examples/` declares a
+    TOP-LEVEL `task_description` / `forward_contract` that NOTHING resolves —
+    a hand-written parallel copy of a runtime task authority. Not caught
+    elsewhere: `test_step04b_task_description_single_source` scans `configs/`
+    only. Inspects YAML top-level KEYS, so prose (README) may name the word
+    freely.
+
+    What D5 changed is the PREMISE, not the rule. Before task composition,
+    `configs/task_config.yaml` was the single runtime authority and any second
+    copy was by definition parallel. A composed run reads whatever its
+    manifest's `task_config.config:` names, so a pack's own declaration is now
+    the legitimate location (Q-12d-1: task-owned declarations co-locate with
+    the pack) — but ONLY when a shipped manifest actually binds it. An
+    unbound one is still the original defect, which is why the exemption is
+    computed from the manifests rather than allowlisted by filename.
+    """
     assert EXAMPLES_ROOT.is_dir()
-    assert _yaml_parallel_copies(EXAMPLES_ROOT) == []
+    bound = _composition_bound_task_configs(REPO_ROOT)
+    assert bound, "no shipped composition binds a task config — the exemption is vacuous"
+    assert _yaml_parallel_copies(EXAMPLES_ROOT, bound) == []
 
 
 def test_negative_parallel_copy_yaml_in_mirror_is_detected(tmp_path: Path) -> None:
-    """Proves guard (a) fires on a top-level key and NOT on prose or a nested key."""
+    """Proves guard (a) fires on a top-level key and NOT on prose or a nested key.
+
+    The fourth case is the Step-12 re-scope: a pack's own task config is not
+    an offender **while a shipped manifest BINDS it**. The exemption is the
+    binding, never the path — which is what
+    `test_negative_an_UNBOUND_pack_task_config_is_still_an_offender` proves
+    from the other side, using the one input that can tell the two rules
+    apart.
+    """
     pack = tmp_path / "examples" / "some_pack"
-    pack.mkdir(parents=True)
+    (pack / "declared").mkdir(parents=True)
     (pack / "task.yaml").write_text("task_description: parallel copy\nother: 1\n")
     (pack / "notes.yaml").write_text("readme: 'the phrase task_description in prose'\n")
     (pack / "nested.yaml").write_text("meta:\n  forward_contract: {}\n")
-    offenders = _yaml_parallel_copies(tmp_path / "examples")
+    bound_config = pack / "declared" / "task_config.yaml"
+    bound_config.write_text("task_description: bound\n")
+    offenders = _yaml_parallel_copies(tmp_path / "examples", frozenset({bound_config.resolve()}))
     assert offenders == [(pack / "task.yaml", "task_description")]
+
+
+def test_negative_an_UNBOUND_pack_task_config_is_still_an_offender() -> None:
+    """The re-scope's own falsifier: the exemption is BINDING, not location.
+
+    Fails when someone widens `_yaml_parallel_copies` to allow any file called
+    `declared/task_config.yaml` — the shipped Pets declaration would stay
+    green either way, so only a file in the sanctioned LOCATION that no
+    manifest resolves can tell the two rules apart.
+    """
+    bound = _composition_bound_task_configs(REPO_ROOT)
+    shipped = [
+        EXAMPLES_ROOT / pack / "declared" / "task_config.yaml"
+        for pack in ("davis_future_prediction", "oxford_iiit_pet")
+    ]
+    assert shipped, "no pack ships a task config, so this proves nothing"
+    for path in shipped:
+        assert path.resolve() in bound, f"{path} is shipped but no manifest binds it"
+
+    # With NOTHING bound, every one of them is an offender again. That is the
+    # whole claim: the location did not change, only the binding did.
+    unbound_offenders = _yaml_parallel_copies(EXAMPLES_ROOT, frozenset())
+    for path in shipped:
+        assert (path, "task_description") in unbound_offenders
+    assert _yaml_parallel_copies(EXAMPLES_ROOT, bound) == []
 
 
 # ---------------------------------------------------------------------------

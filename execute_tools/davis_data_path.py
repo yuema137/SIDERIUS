@@ -282,6 +282,35 @@ def clip_key(clip: DavisClip) -> str:
     return f"{clip.sequence_name}:{clip.start_frame}"
 
 
+def pair_with_scope(outputs, request: DeliverableWriteRequest):
+    """Pair unpaired per-sample outputs with this task's own row identities.
+
+    Step 12 / PR-12d seam C (B7). The generic inference unit iterates
+    ``validation_dataset`` and hands back per-sample outputs IN DATASET ORDER
+    together with the scope it iterated — it cannot pair them itself without
+    learning this task's vocabulary, which is exactly what the seam exists to
+    prevent. So the pairing happens HERE, in the task's own file.
+
+    ``request.task_scope is None`` means the caller already paired them, which
+    is what every pre-12d producer does; that shape passes straight through.
+
+    ``strict=True`` is the point rather than a detail: a length mismatch means
+    the outputs and the scope disagree about how many samples there were, and
+    silently zipping to the shorter one would mis-attribute every prediction
+    after the first missing sample.
+    """
+    if request.task_scope is None:
+        return list(outputs)
+    rows = getattr(request.task_scope, "rows", None)
+    if rows is None:
+        raise ValueError(
+            f"deliverable write for {DAVIS_TASK_DATA_PATH_ID!r} received a task_scope "
+            f"of type {type(request.task_scope).__name__}, which declares no "
+            f"rows to pair the outputs with."
+        )
+    return list(zip(rows, outputs, strict=True))
+
+
 class DavisTaskDataPath:
     """The registered DAVIS implementation of the four-method seam."""
 
@@ -290,7 +319,9 @@ class DavisTaskDataPath:
     #: The scope payload's self-identifying tag (PR-12bc B8).
     _SCOPE_KIND: ClassVar[str] = "davis_scope_v1"
 
-    def __init__(self, *, clips_path: str | None = None) -> None:
+    def __init__(
+        self, *, clips_path: str | None = None, eval_clips_path: str | None = None
+    ) -> None:
         """Step 12 / PR-12bc B8 — TASK-INSTANCE CONFIGURATION (§D.1).
 
         DAVIS' scope authority is its committed CLIP manifest — the windows
@@ -301,15 +332,31 @@ class DavisTaskDataPath:
 
         The module-level registration passes nothing — the regime-A instance
         materializes a scope it is HANDED and refuses to BUILD one, by name.
+
+        ``eval_clips_path`` — Step 12 / PR-12d, closing **F-12d-17**. This
+        pack ships THREE DISJOINT role manifests (train 60 / validation 15 /
+        final 15, train n validation = 0), and the `scope` column inside each
+        one is CONSTANT — the role IS the file. Before this, both
+        :meth:`build_training_scope` and :meth:`build_eval_scope` selected
+        from the single ``clips_path``, so a composed run trained and
+        evaluated on the identical clips. The D14 runner never showed it
+        because the runner loads all three manifests and passes both scopes
+        itself; the composed path is the only caller that has to CHOOSE.
+
+        OPTIONAL and additive: absent, both scopes come from ``clips_path``
+        exactly as before, so every existing caller — the runner, the
+        registration, every current test — is unchanged.
         """
         self._clips_path = clips_path
+        self._eval_clips_path = eval_clips_path
 
     # ------------------------------------------------------------------
     # TaskScopeCapability (PR-12bc B8)
     # ------------------------------------------------------------------
 
-    def _select(self, request: ScopeBuildRequest) -> DavisScope:
-        if self._clips_path is None:
+    def _select(self, request: ScopeBuildRequest, *, source: str | None = None) -> DavisScope:
+        source = source or self._clips_path
+        if source is None:
             raise ValueError(
                 f"task data path {self.task_data_path_id!r} was asked to BUILD a "
                 f"scope but was constructed with no sequences manifest. Declare "
@@ -324,7 +371,7 @@ class DavisTaskDataPath:
                 f"content for it. Use 'snapshot', or 'target' with an explicit "
                 f"subset."
             )
-        clips = load_davis_clips(self._clips_path)
+        clips = load_davis_clips(source)
         if request.selection_strategy == "target":
             if not request.target_partitions:
                 raise ValueError("'target' selection requires a non-empty subset.")
@@ -348,7 +395,14 @@ class DavisTaskDataPath:
         return self._select(request)
 
     def build_eval_scope(self, request: ScopeBuildRequest) -> object:
-        return self._select(request)
+        """The EVAL manifest when one is declared, else the training one.
+
+        The fallback is what keeps this additive (F-12d-17); it is not a
+        recommendation. A composition that declares only ``clips_path`` gets
+        an evaluation scope drawn from its training clips, which is the
+        pre-existing behaviour and is why the shipped manifest declares both.
+        """
+        return self._select(request, source=self._eval_clips_path or self._clips_path)
 
     def serialize_scope(self, scope: object) -> str:
         s = self._scope(scope)
@@ -392,7 +446,7 @@ class DavisTaskDataPath:
     ) -> None:
         """Persist ``{clip_key: float32 [3,4,128,224]}`` as one compressed npz."""
         arrays: dict[str, np.ndarray] = {}
-        for clip, prediction in outputs:
+        for clip, prediction in pair_with_scope(outputs, request):
             value = (
                 prediction.detach().cpu().numpy()
                 if isinstance(prediction, torch.Tensor)

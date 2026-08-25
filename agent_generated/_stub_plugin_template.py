@@ -14,7 +14,6 @@ import torch
 import torch.nn as nn
 from pydantic import BaseModel, Field
 
-
 PLUGIN_MODEL_TYPE = "stub_arch"
 
 

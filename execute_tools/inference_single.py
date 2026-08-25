@@ -1,9 +1,10 @@
 import argparse
+import contextlib
 import gc
 import json
 import os
 import time
-from typing import Any, cast
+from typing import Any, NamedTuple, cast
 
 import h5py
 import numpy as np
@@ -31,6 +32,7 @@ from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificati
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import (
     bind_dataset_profile,
+    declares_tidmad_topology,
     load_dataset_profile,
     resolve_dataset_profile,
     tidmad_topology,
@@ -38,15 +40,17 @@ from execute_tools.dataset_config import (
 from execute_tools.deliverable_spec import (
     DeliverableStorage,
     default_deliverable_storage,
-    derive_tidmad_deliverable_spec,
+    derive_run_deliverable_spec,
 )
 from execute_tools.model_input_dtype import (
     INFERENCE_SITE_DTYPE,
     apply_contract_cardinality,
     resolve_input_dtype,
 )
+from execute_tools.scope_artifact import load_transported_scope
 from execute_tools.task_data_path import (
     DeliverableWriteRequest,
+    bind_task_data_path,
     resolve_task_data_path,
 )
 
@@ -133,6 +137,33 @@ def get_parser():
         help="Step 12 / PR-12bc C3: the composed run's task-composition manifest, emitted by the parent FROM its resolved run binding only "
         "— never an operator flag. SUPPLIED -> a transported id that is not built into this child is composed from the run's OWN declaration, through the same authority the parent used, which is what lets an "
         "OUT-OF-TREE task reach a training or inference subprocess. ABSENT -> the id must already be registered here.",
+    )
+    # Step 12 / PR-12d seam C (B6). The SAME four flags the training child
+    # already accepts, emitted by the SAME `_task_scope_argv`. The training
+    # pair is accepted and ignored here — the parent emits both legs from one
+    # acquisition, and a child that REFUSED a flag it does not consume would
+    # make the emitter task- and child-aware, which is the coupling this seam
+    # removes. What this child iterates is the EVALUATION scope.
+    parser.add_argument("--task_scope_ref", type=str, default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--task_scope_digest", type=str, default=None, help=argparse.SUPPRESS)
+    parser.add_argument(
+        "--task_eval_scope_ref",
+        type=str,
+        default=None,
+        help=(
+            "Step 12 / PR-12d: path to the run-scoped EVALUATION scope "
+            "artifact. SUPPLIED -> this child iterates the TASK's own "
+            "evaluation dataset and writes the TASK's own deliverable, "
+            "instead of TIDMAD's SampleSet loop. Verified against "
+            "--task_eval_scope_digest BEFORE deserialization. ABSENT -> "
+            "regime-A, unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--task_eval_scope_digest",
+        type=str,
+        default=None,
+        help="Out-of-band sha256 of --task_eval_scope_ref. Half a pair is refused by name.",
     )
     parser.add_argument("--data_dir", "-d", type=str, default=None)
     parser.add_argument("--denoising_model", "-m", type=str, default="punet")
@@ -362,6 +393,99 @@ def process_batch(
     return index, (output_seq - value_offset).flatten(), (targetarr - value_offset).flatten()
 
 
+class _ChildTidmadFacts(NamedTuple):
+    """The TIDMAD-physical facts this child decodes, or their declared absence.
+
+    Step 12 / PR-12d D4b. Every field is ``None`` for a task that declares no
+    TIDMAD topology, and every consumer of them sits on a TIDMAD-only code
+    path — the SampleSet loop, the HDF5 channel reads, the PSD slicing and the
+    legacy single-file modes. The generic route added at D3 touches none of
+    them, so a contrast run simply never reads a ``None``.
+
+    Extracted rather than inlined because ``main`` is HARD-CAPPED at its D0
+    branch count (§E H1): four conditional expressions here would have spent
+    the entire remaining budget on a declared absence.
+    """
+
+    dataset: Any = None
+    channels: Any = None
+    psd_segment_length: Any = None
+
+    def storage_dtype(self, deliverable_spec: Any) -> Any:
+        """The persisted storage dtype, or ``None`` when the task declares none."""
+        return None if deliverable_spec is None else deliverable_spec.storage.storage_dtype
+
+
+def _child_tidmad_facts(dataset_profile) -> _ChildTidmadFacts:
+    """Decode TIDMAD's physical facts, or declare their absence BY NAME."""
+    if not declares_tidmad_topology(dataset_profile):
+        return _ChildTidmadFacts()
+    topology = tidmad_topology(dataset_profile)
+    return _ChildTidmadFacts(
+        dataset=topology.dataset,
+        channels=topology.channels,
+        psd_segment_length=topology.dataset.psd_segment_length,
+    )
+
+
+def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
+    """Run the generic route and write the child's result JSON.
+
+    Kept OUT of ``main`` for the reason §E H1 states: ``main`` is this PR's
+    god function and may gain a call, not a branch family. The iteration
+    itself lives one module further out again, in ``generic_inference``, so
+    it is testable without this child's argv surface at all.
+    """
+    from execute_tools.generic_inference import run_generic_inference
+    from execute_tools.task_data_path import DeliverableWriteRequest
+
+    outcome = run_generic_inference(
+        data_path=data_path,
+        task_scope=task_eval_scope,
+        model=model,
+        device=DEVICE,
+        data_dir=args.data_dir,
+        batch_size=args.inference_batch_size,
+        write_request=DeliverableWriteRequest(
+            output_dir=args.output_dir if args.output_dir else args.data_dir,
+            exp_id=args.exp_id,
+            run_name=args.run_name,
+            model_type=args.denoising_model,
+        ),
+    )
+    print(
+        f"[generic_inference] {outcome.samples} sample(s) in {outcome.batches} batch(es) "
+        f"-> {outcome.deliverable_name} ({outcome.inference_seconds:.2f}s)"
+    )
+    if args.timing_out_json:
+        with open(args.timing_out_json, "w") as fh:
+            json.dump(outcome.model_dump(), fh)
+
+
+def _resume_runtime_session(args, sample_set):
+    """RT2-D: resume the attempt's observation sidecar, or return ``None``.
+
+    EXTRACTED by Step 12 / PR-12d seam C. Behaviour is unchanged — same
+    condition, same policy load, same ``resumed_status`` — but ``main`` is
+    HARD-CAPPED at its pre-12d branch count (§E H1: the god function of this
+    PR), so the generic-inference route below had to be paid for rather than
+    simply added. This is the payment: four branch nodes leave ``main`` for a
+    question that was always its own.
+    """
+    if not (args.runtime_observation_out and sample_set is not None):
+        return None
+    policy = None
+    if args.runtime_policy_json:
+        with open(args.runtime_policy_json) as f:
+            policy = RuntimeControlPolicy(**json.load(f))
+    return RuntimeVerificationSession.resume_or_start(
+        args.runtime_observation_out,
+        policy=policy,
+        attempt_id=args.exp_id,
+        resumed_status="inference_started",
+    )
+
+
 def main():
     # 1. Parse arguments locally to avoid NameError scope issues
     parser = get_parser()
@@ -381,9 +505,15 @@ def main():
         dataset_profile = load_dataset_profile(args.dataset_profile_json)
     else:
         dataset_profile = resolve_dataset_profile()
-    profile_dataset = tidmad_topology(dataset_profile).dataset
-    profile_channels = tidmad_topology(dataset_profile).channels
-    psd_segment_length = profile_dataset.psd_segment_length
+    # Step 12 / PR-12d D4b — the child's TIDMAD facts, resolved through ONE
+    # helper that answers a DECLARED ABSENCE instead of raising. These three
+    # were decoded unconditionally here, so a Q-12-4-honest profile killed
+    # this child ~300 lines before D3's generic route could run. Same B11
+    # defect D2 closed in the tuner, left open in the children.
+    _tidmad = _child_tidmad_facts(dataset_profile)
+    profile_dataset = _tidmad.dataset
+    profile_channels = _tidmad.channels
+    psd_segment_length = _tidmad.psd_segment_length
 
     # Step 05c — the child's side of the Deliverable Contract. The spec is NOT
     # transported: it is RECONSTRUCTED here from the profile that already
@@ -391,7 +521,7 @@ def main():
     # parent calls (§3.2a, Option A). One function, two callers, no duplicated
     # literal and no third IPC mechanism. Note this consumes `dataset_profile`
     # as resolved above — it adds no second `resolve_dataset_profile()` call.
-    deliverable_spec = derive_tidmad_deliverable_spec(dataset_profile)
+    deliverable_spec = derive_run_deliverable_spec(dataset_profile)
     # Carried on `args` exactly as `_model_io` is, so `process_batch` can read
     # the persisted-output offset without a new parameter on every call site.
     args._deliverable_spec = deliverable_spec
@@ -400,7 +530,7 @@ def main():
     # `np.int8` — so the deliverable's storage representation has exactly one
     # source. The INPUT-side dtype work at :82-101 and :216-218 is a different
     # contract and is deliberately untouched (§2.2).
-    _storage_dtype = deliverable_spec.storage.storage_dtype
+    _storage_dtype = _tidmad.storage_dtype(deliverable_spec)
 
     # D14-1 C4 — the run-bound TaskDataPath, resolved once (child side of the
     # transport: SUPPLIED+unknown fails closed; ABSENT is regime-A). The
@@ -602,20 +732,53 @@ def main():
         with open(args.sample_set_json) as f:
             sample_set = json.load(f)
 
-    # RT2-D: resume the attempt's observation (trial mode only).
-    runtime_session = None
-    verifier = None
-    if args.runtime_observation_out and sample_set is not None:
-        policy = None
-        if args.runtime_policy_json:
-            with open(args.runtime_policy_json) as f:
-                policy = RuntimeControlPolicy(**json.load(f))
-        runtime_session = RuntimeVerificationSession.resume_or_start(
-            args.runtime_observation_out,
-            policy=policy,
-            attempt_id=args.exp_id,
-            resumed_status="inference_started",
+    # Step 12 / PR-12d seam C (B6/B7) — the GENERIC route. A composed task
+    # that declares its own scope iterates ITS OWN evaluation dataset and
+    # writes ITS OWN deliverable, through two of the four FROZEN TaskDataPath
+    # methods. `main` gains a CALL and one route selection, never a branch
+    # family (§E H1): everything the route does lives in
+    # `execute_tools/generic_inference.py`, independently testable.
+    #
+    # The scope arrives through the SAME artifact+digest ABI the training
+    # child uses, read by the SAME `load_transported_scope` — verify BEFORE
+    # deserialize, one implementation, no child-side copy.
+    # F-12d-28 — deserialize INSIDE the binding, exactly as the training child
+    # does (`train_engine_sandbox.py:2138`).
+    #
+    # This child already RESOLVED its task data path above, but never BOUND
+    # it. `load_transported_scope` delegates to whichever implementation is
+    # ACTIVE, so with no binding it reached the legacy registered one, which
+    # refused the composed payload BY NAME — the scope object declaring one
+    # task's kind while the active binding belonged to another.
+    #
+    # (The refusal text is deliberately paraphrased rather than quoted: the
+    # §F item-9 census forbids naming a scope KIND anywhere in generic core,
+    # and a verbatim error quote in a comment trips it just as a dispatch
+    # would. The guard cannot tell prose from a branch, and should not have to.)
+    #
+    # That message is PR-12bc's pairing-gap guard firing correctly, one child
+    # over: the scope crossed while the binding did not. Resolving is not
+    # binding — the bytes must be decoded by the implementation that wrote
+    # them, which is a run-scoped fact, not a local variable.
+    #
+    # An un-composed run has `task_data_path_id is None`, takes the
+    # `nullcontext`, and behaves exactly as before.
+    _binding_cm = (
+        bind_task_data_path(data_path)
+        if args.task_data_path_id is not None
+        else contextlib.nullcontext()
+    )
+    with _binding_cm:
+        task_eval_scope = load_transported_scope(
+            args.task_eval_scope_ref, args.task_eval_scope_digest, leg="evaluation"
         )
+        if task_eval_scope is not None:
+            _emit_generic_inference(args, data_path, model, task_eval_scope)
+            return
+
+    # RT2-D: resume the attempt's observation (trial mode only).
+    runtime_session = _resume_runtime_session(args, sample_set)
+    verifier = None
 
     # Decomposition geometry comes from the resolved Dataset Profile.
 
@@ -701,7 +864,7 @@ def main():
                     model_type=args.denoising_model,
                     run_name=args.run_name,
                     exp_id=args.exp_id,
-                    file_index=file_index,
+                    input_identity=file_index,
                 ),
             )
             expected_samples = len(psd_segment_indices) * psd_segment_length
@@ -992,7 +1155,7 @@ def main():
                 out_dir,
                 deliverable_spec.naming.unqualified_name(
                     model_type=args.denoising_model,
-                    file_index=args.file_index,
+                    input_identity=args.file_index,
                 ),
             )
         else:
@@ -1002,7 +1165,7 @@ def main():
                     model_type=args.denoising_model,
                     run_name=args.run_name,
                     exp_id=args.exp_id,
-                    file_index=args.file_index,
+                    input_identity=args.file_index,
                 ),
             )
 

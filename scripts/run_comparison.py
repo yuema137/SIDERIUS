@@ -444,7 +444,7 @@ def run_baseline_trial(
 
     def _denoised_fn(fi):
         return default_deliverable_naming().name(
-            model_type=model_type, run_name=run_name, exp_id=exp_id, file_index=fi
+            model_type=model_type, run_name=run_name, exp_id=exp_id, input_identity=fi
         )
 
     file_vector, final_scalar = score_vector(
@@ -1284,7 +1284,7 @@ def main():
                             model_type=model_type,
                             run_name=baseline_run_name,
                             exp_id=exp_id,
-                            file_index=i,
+                            input_identity=i,
                         ),
                     )
                     for i in resolved_data_scope
@@ -1400,7 +1400,7 @@ def main():
                     model_type=model_type,
                     run_name=baseline_run_name,
                     exp_id=baseline_exp_id,
-                    file_index=i,
+                    input_identity=i,
                 ),
             )
             for i in resolved_data_scope

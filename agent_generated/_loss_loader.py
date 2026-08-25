@@ -115,11 +115,33 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
         )
         target_dtype = "long"
 
+    # Step 12 / PR-12d D4c — the OPTIONAL normalization declaration.
+    #
+    # `stamp_comparability` refused every custom objective with the reason
+    # `custom_objective_undeclared`, and that reason named exactly what was
+    # missing: the plugin contract had no way to SAY how it reduces. A loss
+    # that declares `PLUGIN_LOSS_REDUCTION = "mean"` is making the same claim
+    # the built-in kinds make by construction, so its R2/R3 numbers are
+    # comparable across epochs for the same reason theirs are.
+    #
+    # Additive within the existing custom family: no new `loss_type`, no new
+    # capability. A plugin that declares nothing is unchanged — still
+    # `not_established`, still for the same honest reason.
+    reduction = getattr(module, "PLUGIN_LOSS_REDUCTION", None)
+    if reduction is not None and reduction not in ("mean", "sum"):
+        print(
+            f"[LossLoader] Warning: {os.path.basename(path)}: "
+            f"PLUGIN_LOSS_REDUCTION={reduction!r} is not 'mean' or 'sum'; "
+            f"treating the objective as undeclared."
+        )
+        reduction = None
+
     return {
         "loss_type": module.PLUGIN_LOSS_TYPE,
         "config_class": module.PLUGIN_LOSS_CONFIG_CLASS,
         "loss_class": module.PLUGIN_LOSS_CLASS,
         "target_dtype": target_dtype,
+        "reduction": reduction,
     }
 
 
@@ -198,6 +220,26 @@ def load_loss_plugin(loss_name: str) -> dict[str, Any] | None:
             if plugin is None:
                 continue
             if plugin["loss_type"] == loss_name:
+                # Step 12 / PR-12d D4c — F-12d-2. Record the plugin's DECLARED
+                # target dtype here, at the point the plugin is actually
+                # resolved.
+                #
+                # `LOSS_TARGET_DTYPE_REGISTRY` used to be populated only by
+                # `register_loss_in_memory`, which the TRAINING SUBPROCESS never
+                # calls — it resolves a custom loss through this Tier-2
+                # filesystem path. So `get_loss_target_dtype` fell through to
+                # its "long" default and a plugin declaring
+                # `PLUGIN_LOSS_TARGET_DTYPE = "float"` had its float targets
+                # cast to int64 at `train_engine_sandbox.py:1544`. An exact-MAE
+                # objective would have computed against truncated integers and
+                # nothing would have said so.
+                #
+                # Same class as issue #234, which PR-12a closed one family
+                # over: a metadata declaration silently ignored becomes wrong
+                # science.
+                LOSS_TARGET_DTYPE_REGISTRY[loss_name] = plugin["target_dtype"]
+                if plugin["reduction"] is not None:
+                    LOSS_REDUCTION_REGISTRY[loss_name] = plugin["reduction"]
                 return plugin
     return None
 
@@ -236,3 +278,22 @@ def get_loss_target_dtype(loss_name: str) -> str:
     that follow that contract continue to receive correct dtype.
     """
     return LOSS_TARGET_DTYPE_REGISTRY.get(loss_name, "long")
+
+
+#: Step 12 / PR-12d D4c. Keys are ``PLUGIN_LOSS_TYPE`` values; values are the
+#: literal ``"mean"`` or ``"sum"`` a plugin DECLARED via
+#: ``PLUGIN_LOSS_REDUCTION``. A loss absent from this mapping declared
+#: nothing — which is a different statement from declaring ``"sum"``, and the
+#: two must never collapse into one default.
+LOSS_REDUCTION_REGISTRY: dict[str, str] = {}
+
+
+def get_loss_declared_reduction(loss_name: str) -> str | None:
+    """The plugin's DECLARED reduction, or ``None`` when it declared none.
+
+    ``None`` is a real answer, not a missing one: an objective that has not
+    said how it normalizes cannot have its epoch-to-epoch values called
+    comparable, and guessing ``"mean"`` on its behalf is precisely the silent
+    assumption `custom_objective_undeclared` exists to refuse.
+    """
+    return LOSS_REDUCTION_REGISTRY.get(loss_name)

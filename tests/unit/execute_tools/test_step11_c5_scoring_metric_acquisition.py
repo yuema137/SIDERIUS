@@ -328,10 +328,44 @@ class TestTheManifestTransportIsBindingScoped:
         assert "--task_manifest" in cmd
         assert cmd[cmd.index("--task_manifest") + 1] == str(manifest)
 
-    def test_secondaries_are_not_transported(self):
-        """R-11-4 explicitly: do not speculatively transport every secondary
-        metric. They are observational and have their own P2b lifecycle.
+    def test_secondaries_are_not_UNCONDITIONALLY_transported(self):
+        """R-11-4, NARROWED at Step 12 / PR-12d — RETIRED-AND-REPLACED
+        in place (R-11-10), same file, since the property moved rather than
+        vanished.
+
+        R-11-4's actual concern was never the STRING "secondary_metric" — it
+        was *speculative* transport: passing secondary specs down the ABI
+        regardless of whether the run needs them. That is a real property
+        and it still holds. What changed is that it is no longer witnessed by
+        an absence of the string, because F-12d-18 gave the scoring child a
+        genuine reason to hold one: on the TASK-OWNED route the deliverable
+        is read by the CHILD, so the child is the only party that can
+        evaluate the run's declared secondaries at all — the tuner cannot
+        reach them from outside a process boundary.
+
+        The narrowed property, positively:
+
+        * secondary composition is GATED on `args.task_manifest is not None`
+          (`_compose_child_secondary_metrics`) — an un-composed / legacy
+          TIDMAD launch, which passes no manifest, composes and transports
+          NOTHING;
+        * the whole path is reachable ONLY from `_emit_task_owned_score`,
+          never from the legacy TIDMAD branch — so the anchor-normalized
+          route (which already evaluates secondaries in-process,
+          `_evaluate_secondary_metrics`) gains no second reader.
+
+        Both are asserted here directly, from the CHILD's own source, so this
+        stays the record of what R-11-4 protects; the END-TO-END witness that
+        the task-owned route actually computes them lives in
+        `tests/unit/execute_tools/test_step12_pr12d_task_owned_secondaries.py`.
         """
         src = SCORING_CHILD.read_text(encoding="utf-8")
-        assert "secondary_metric" not in src
-        assert "compose_secondary" not in src
+        assert "def _compose_child_secondary_metrics(args)" in src
+        fn_body = src.split("def _compose_child_secondary_metrics(args)")[1].split("\n\n\n")[0]
+        assert "if args.task_manifest is None:" in fn_body
+        assert "return ()" in fn_body
+        # The legacy TIDMAD branch never calls the emitter that reaches
+        # secondaries — reachability, not just presence of the guard above.
+        legacy_body = src.split("else:")[-1].split("def _resolve_child_data_path")[0]
+        assert "_evaluate_task_owned_secondaries" not in legacy_body
+        assert "_compose_child_secondary_metrics" not in legacy_body

@@ -16,13 +16,13 @@ returns a :class:`PreparedAttempt`: the products of planning, and nothing else.
 
 import json
 import os
+from typing import Any
 
 from agent.schemas.hyperparam_tuning import (
     ExperimentPlan,
     TrialConfig,
 )
 from agent.schemas.ordering import resolve_ordering
-from execute_tools.dataset_config import tidmad_topology
 from execute_tools.health_checks.candidate_eligibility import (
     is_valid_candidate,
 )
@@ -38,7 +38,91 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
 from nodes.ml_hyperparameter_tune_agent.runtime import (
     _apply_epoch_bound,
 )
-from nodes.ml_hyperparameter_tune_agent.scope_acquisition import acquire_attempt_scopes
+from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
+    AttemptTopologyFacts,
+    acquire_attempt_scopes,
+    project_attempt_topology_facts,
+)
+
+
+def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
+    """Bind the task's DECLARED objective onto the plan — F-12d-31 wire B.
+
+    A task that ships its own training objective must not depend on an LLM
+    choosing it. Two real composed DAVIS runs trained with ``smooth_l1``
+    because the planner is told that is the only valid regressor loss and is
+    never shown the task's exact-L1 — so the objective is applied here as a
+    typed authority rather than a prompt suggestion.
+
+    **Selection, not vocabulary.** The composed value is an ordinary validated
+    ``LossConfig`` on the pre-existing ``custom`` + ``loss_name`` route. No
+    enum grows, no task name is read, and nothing here knows what DAVIS is:
+    the discriminator is whether the RUN declared an objective.
+
+    **Silent no-op when nothing is declared**, which is every run that exists
+    today: ``composition_ref`` is ``None`` for an un-composed run and
+    ``objective`` is ``None`` for a composed task that declares none. In both
+    cases the plan is returned unchanged and the planner's choice stands.
+
+    The substitution is announced, because a silently overridden objective is
+    the same opacity in the other direction.
+    """
+    declared = getattr(composition_ref, "objective", None) if composition_ref else None
+    if declared is None:
+        return plan
+    planned = dict(plan.loss_cfg or {})
+    effective = declared.model_dump()
+    if planned.get("loss_type") != effective.get("loss_type") or planned.get(
+        "loss_name"
+    ) != effective.get("loss_name"):
+        print(
+            f"  [objective] task-declared objective applied: "
+            f"{planned.get('loss_type')!r}/{planned.get('loss_name')!r} -> "
+            f"{effective['loss_type']!r}/{effective['loss_name']!r} "
+            f"(the task declares this; the planner does not choose it)"
+        )
+    plan.loss_cfg = effective
+    return plan
+
+
+def _psd_segment_counts(
+    train_sample_set: dict | None,
+    eval_sample_set: dict | None,
+    topology_facts: AttemptTopologyFacts,
+) -> tuple[int | None, int | None]:
+    """``(train, eval)`` PSD-segment counts for the record and the reflector.
+
+    A built SampleSet reports what it actually holds. Without one, the legacy
+    single-file round uses the whole file, so the count IS the run topology's
+    segments-per-file — and a task that declares no such geometry reports
+    ``None``. Both record fields are already ``int | None``; an invented 0
+    would be persisted as a measurement.
+    """
+
+    def _count(sample_set: dict | None) -> int | None:
+        if sample_set:
+            return sum(len(v) for v in sample_set.values())
+        if not topology_facts.declares_physical_geometry:
+            return None
+        return topology_facts.physical_dataset.segments_per_file
+
+    return _count(train_sample_set), _count(eval_sample_set)
+
+
+def _no_sample_set_notice(mode: str, file_index: int | None) -> str:
+    """What to print when no SampleSet was built.
+
+    TWO different states share that branch and saying so matters: the legacy
+    single-file round has always been there, and a composed task that declares
+    no physical geometry joins it because its scope is the one
+    ``acquire_attempt_scopes`` builds, not a SampleSet.
+    """
+    if mode == "single_file":
+        return f"  Legacy mode: file_index={file_index}"
+    return (
+        "  Task-owned scope: no SampleSet is built for a task that declares "
+        "no physical partition geometry"
+    )
 
 
 def prepare_attempt(
@@ -216,6 +300,19 @@ def prepare_attempt(
         trial_winner=formal_trial_winner,
     )
 
+    # Step 12 / PR-12d, F-12d-31 wire B — the task's AUTHORITATIVE objective.
+    #
+    # Applied AFTER `_apply_mode_override_chain` deliberately. That chain's
+    # forced-formal branch copies the winning trial's `loss_config` wholesale
+    # (`policy.py:741,764`), so an objective applied before it would be
+    # silently replaced by whatever the trial happened to run — the exact
+    # class of silent substitution this wire exists to prevent. Last writer on
+    # the plan wins, and the declared objective is the last writer.
+    #
+    # A task that declares none leaves `objective` None and the planner's
+    # choice stands, which is every run that exists today.
+    plan = _apply_declared_objective(plan, agent_input.task_composition_ref)
+
     # DataScope DS5 — normalize LLM-planned strategies under a
     # partial scope. LLM plans are proposals (normalized with
     # persisted provenance, not failed); operator config was
@@ -374,15 +471,44 @@ def prepare_attempt(
         resolved_file_order=ordering.resolved_file_order,
     )
 
-    # Validate integer relationships between dataset, PSD, ML segments
-    _validate_data_config(
-        trial_config,
-        plan.model_cfg.get("segmentation_size", 10000),
-        tidmad_topology(run_profile).dataset,
-    )
+    # Step 12 / PR-12d, seam B. The ONE place this package learns what
+    # physical geometry the run's task declares. Under TIDMAD — legacy or
+    # composed — every fact below is the same object it was before, by
+    # construction rather than by a parallel branch.
+    topology_facts = project_attempt_topology_facts(run_profile)
 
-    # Build TWO independent SampleSets — training and validation
-    if trial_config.mode in ("trial", "formal"):
+    # Validate integer relationships between dataset, PSD, ML segments.
+    #
+    # SKIPPED, never guessed, for a task that declares no physical geometry:
+    # the rule is PSD-segment divisibility and per-file segment counts, which
+    # a 37-way image classifier and a frame-window predictor do not have. The
+    # D-BC-8 precedent — the partition bound is generic identity and is always
+    # checked; the per-partition bound is task topology and is skipped.
+    if topology_facts.declares_physical_geometry:
+        _validate_data_config(
+            trial_config,
+            plan.model_cfg.get("segmentation_size", 10000),
+            topology_facts.physical_dataset,
+        )
+
+    # Build TWO independent SampleSets — training and validation.
+    #
+    # Step 12 / PR-12d, seam B (B2). `build_sample_set` decodes TIDMAD's
+    # topology and fails closed without it, and it was called UNCONDITIONALLY
+    # for every trial/formal round — before and independently of
+    # `acquire_attempt_scopes`. A composed contrast run therefore died here,
+    # holding a perfectly good task scope capability it was never asked to
+    # use. The legacy SampleSets are now built only when the run's task
+    # declares the geometry they are made of; a composed task without it
+    # carries `task_scopes` instead.
+    #
+    # DEFERRED BY NAME to D3 (12bc's B6): the legacy sample sets still reach
+    # the training spawn (`runtime.py:875`), both inference spawns
+    # (`execution.py:992`, `:1038`) and the validation-expectation decision
+    # (`execution.py:716`). D3 flips those consumers to the transported scope.
+    # Until it does, a composed contrast run reaches those sites with `None`
+    # — strictly further than the `tidmad_topology` refusal it hit before.
+    if trial_config.mode in ("trial", "formal") and topology_facts.declares_physical_geometry:
         # Step-02b: the run's profile is supplied EXPLICITLY to
         # both construction sites, rather than each one resolving
         # it ambiently inside the builder. Two consequences: a run
@@ -424,7 +550,7 @@ def prepare_attempt(
     else:
         train_sample_set = None
         eval_sample_set = None
-        print(f"  Legacy mode: file_index={file_index}")
+        print(_no_sample_set_notice(trial_config.mode, file_index))
 
     # Step 12 / PR-12bc B5 — task-owned scope acquisition. A CALLED boundary,
     # never a branch family here (§J). Un-composed runs acquire nothing and
@@ -447,22 +573,12 @@ def prepare_attempt(
         task_parameters={"seg_size": plan.model_cfg.get("segmentation_size", 10000)},
     )
 
-    # Segment counts for records and reflector context
-    if train_sample_set:
-        train_psd_segments = sum(len(v) for v in train_sample_set.values())
-    else:
-        # Legacy single-file: the whole file is used, so the
-        # count IS the run topology's segments-per-file.
-        # Step-05a reads it from the run-bound profile — under
-        # TIDMAD this is byte-identical, and under a bound task
-        # the record no longer reports TIDMAD's 200 segments
-        # for a file that does not have 200.
-        train_psd_segments = tidmad_topology(run_profile).dataset.segments_per_file
-
-    if eval_sample_set:
-        eval_psd_segments = sum(len(v) for v in eval_sample_set.values())
-    else:
-        eval_psd_segments = tidmad_topology(run_profile).dataset.segments_per_file  # legacy
+    # Segment counts for records and reflector context. EXTRACTED (§E.2):
+    # seam B's declared-absence case would otherwise have grown this function
+    # by four branch nodes, and the accounting is its own responsibility.
+    train_psd_segments, eval_psd_segments = _psd_segment_counts(
+        train_sample_set, eval_sample_set, topology_facts
+    )
 
     # When force_model is set, override the LLM's model_type choice.
     # (C7d: ruff SIM108 collapses this to a ternary now that the block sits at

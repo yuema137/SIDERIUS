@@ -174,7 +174,16 @@ def test_declared_files_deep_equal_a_fresh_declaration() -> None:
     """Defect caught: a `declared/*.json` drifts from what the tooling declares
     (hand edit, or a tooling change without regeneration)."""
     fresh = declare_contracts()
-    assert set(fresh) == {"model_io_contract", "metric_accuracy", "metric_macro_f1"}
+    assert set(fresh) == {
+        "model_io_contract",
+        "metric_accuracy",
+        "metric_macro_f1",
+        # Step 12 / PR-12d D5: the third terminal metric §22.9a freezes. It is
+        # listed here rather than only in the loop below because the SET is
+        # the claim — a declaration that ships without the tooling knowing how
+        # to regenerate it is a hand edit, which is the drift this test names.
+        "metric_log_loss",
+    }
     for stem, payload in fresh.items():
         tracked = json.loads((DECLARED / f"{stem}.json").read_text(encoding="utf-8"))
         assert tracked == json.loads(json.dumps(payload)), f"{stem}.json drifted"
@@ -206,33 +215,44 @@ def test_metric_declarations_construct_with_direction_higher(stem: str, metric_i
     assert isinstance(spec.scoreability, PresenceScoreabilityContract)
 
 
-def test_log_loss_is_now_declarable_d16_closed() -> None:
-    """The inverted pin FIRED, exactly as it was written to.
+def test_log_loss_is_now_declared_and_its_direction_is_LOWER() -> None:
+    """The inverted pin FIRED TWICE, and this is its terminal form.
 
-    This test used to assert `MetricSpec(id="log_loss", ...)` RAISES, and said
-    so: "the day D16 is narrowed and `log_loss` becomes declarable, this test
-    FAILS — forcing STATUS/README (which say 'blocked by D16') to change."
-    Step 12 / PR-12a C5 narrowed it; the docs were forced to change in the same
-    commit; and the assertion is now the positive one.
+    Round one: the test asserted `MetricSpec(id="log_loss", ...)` RAISES, and
+    said "the day D16 is narrowed and `log_loss` becomes declarable, this test
+    FAILS — forcing STATUS/README (which say 'blocked by D16') to change".
+    Step 12 / PR-12a C5 narrowed it and the assertion became the positive one,
+    while still pinning that the pack shipped NO declaration.
 
-    `log_loss` is a legitimate evaluation-metric identity for a classifier
-    whose deliverable is genuinely scored by it. That the framework refused it
-    on SPELLING is what D16 named, and it is why the fourth graduation task is
-    required to declare a `loss`-token metric id (parent §16).
+    Round two, Step 12 / PR-12d D5: the pack now SHIPS it, so the
+    `not ... .exists()` half fired in its turn and is replaced by the property
+    that actually matters from here on — the shipped bytes declare
+    **`log_loss` / LOWER**.
 
-    The pack still does not SHIP the declaration — declaring a metric is a
-    scientific choice about what Pets is evaluated on, not a side effect of a
-    schema change — so the artifact assertion is unchanged.
+    Defect caught: the third terminal metric loses its identity, silently
+    acquires `higher` (which would invert every ordering decision made about
+    it — a lower cross-entropy is a BETTER model), or stops carrying a real
+    framework scoreability contract. The direction is hardcoded here, never
+    read back from the declaration under test.
     """
-    spec = MetricSpec(
-        id="log_loss",
-        direction="lower",
-        aggregation="mean_over_final_eval_images",
-        scoreability=PresenceScoreabilityContract(),
-    )
+    payload = json.loads((DECLARED / "metric_log_loss.json").read_text(encoding="utf-8"))
+    spec = metric_spec_from_declared(payload)
     assert spec.id == "log_loss"
     assert spec.direction == "lower"
-    assert not (DECLARED / "metric_log_loss.json").exists()
+    assert isinstance(spec.scoreability, PresenceScoreabilityContract)
+    # The identity §22.9a chose on purpose: a legitimate terminal metric whose
+    # name contains "loss". That the framework once refused it on SPELLING is
+    # what D16 named, and it is why the fourth graduation task is required to
+    # declare a `loss`-token metric id (parent §16).
+    assert (
+        MetricSpec(
+            id="log_loss",
+            direction="lower",
+            aggregation="mean_over_final_eval_images",
+            scoreability=PresenceScoreabilityContract(),
+        ).id
+        == "log_loss"
+    )
 
 
 # ---------------------------------------------------------------------------

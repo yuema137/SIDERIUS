@@ -101,6 +101,24 @@ def objective_config_fingerprint(loss_cfg: LossConfig) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _declared_custom_reduction(loss_name: str | None) -> str | None:
+    """The custom plugin's DECLARED reduction, or ``None``.
+
+    Imported lazily: ``execute_tools`` must stay importable without
+    ``agent_generated/`` on the path (the legacy isolation tests rely on it),
+    and a comparability stamp is not worth coupling the two modules at import
+    time. A loader that cannot be imported means nothing was declared, which
+    is the honest answer rather than an error.
+    """
+    if not loss_name:
+        return None
+    try:
+        from agent_generated._loss_loader import get_loss_declared_reduction
+    except ImportError:
+        return None
+    return get_loss_declared_reduction(loss_name)
+
+
 def stamp_comparability(loss_cfg: LossConfig) -> tuple[Comparability, str | None]:
     """Decide the R2/R3 comparability stamp from the RESOLVED ``LossConfig``.
 
@@ -111,7 +129,23 @@ def stamp_comparability(loss_cfg: LossConfig) -> tuple[Comparability, str | None
     :data:`COMPARABILITY_REASON_SUM`.
     """
     if loss_cfg.loss_type == "custom":
-        return "not_established", COMPARABILITY_REASON_CUSTOM
+        # Step 12 / PR-12d D4c. This used to be an unconditional refusal, and
+        # the reason string named the way out: `custom_objective_undeclared`
+        # is a statement about what the PLUGIN failed to say, not about custom
+        # objectives being inherently incomparable.
+        #
+        # A plugin that declares `PLUGIN_LOSS_REDUCTION = "mean"` makes the
+        # same claim the audited built-in kinds make by construction, so the
+        # same rule applies to it: mean-reduced values are comparable across
+        # epochs, sum-reduced ones are not (they scale with batch count).
+        # Declaring nothing stays `not_established` — unchanged, and for the
+        # same honest reason.
+        declared = _declared_custom_reduction(loss_cfg.loss_name)
+        if declared is None:
+            return "not_established", COMPARABILITY_REASON_CUSTOM
+        if declared != "mean":
+            return "not_established", COMPARABILITY_REASON_SUM
+        return "established", None
     if loss_cfg.reduction != "mean":
         return "not_established", COMPARABILITY_REASON_SUM
     if loss_cfg.loss_type in COMPARABILITY_ESTABLISHED_KINDS:

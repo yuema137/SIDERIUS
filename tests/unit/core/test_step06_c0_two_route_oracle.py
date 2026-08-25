@@ -167,7 +167,7 @@ def oracle_fixture(tmp_path_factory):
         storage=spec.storage,
     )
     deliverable_name = spec.naming.name(
-        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, file_index=FILE_INDEX
+        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, input_identity=FILE_INDEX
     )
     create_abra_file(
         str(workspace / deliverable_name),

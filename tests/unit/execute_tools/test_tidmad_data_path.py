@@ -105,7 +105,7 @@ class TestDeliverableDelegationParity:
             impl.write_deliverable([(3, denoised, injected)], request)
 
             expected_name = spec.naming.name(
-                model_type="wavenet", run_name="d14c2b", exp_id="e7", file_index=3
+                model_type="wavenet", run_name="d14c2b", exp_id="e7", input_identity=3
             )
             written = tmp_path / expected_name
             assert written.exists(), "writer must use the naming authority"
@@ -128,7 +128,7 @@ class TestDeliverableDelegationParity:
             # A foreign deliverable (another exp) and an unrelated file must
             # both be excluded by the exact round-trip name match.
             foreign = spec.naming.name(
-                model_type="wavenet", run_name="d14c2b", exp_id="OTHER", file_index=1
+                model_type="wavenet", run_name="d14c2b", exp_id="OTHER", input_identity=1
             )
             (tmp_path / foreign).write_bytes(b"x")
             (tmp_path / "notes.txt").write_bytes(b"x")

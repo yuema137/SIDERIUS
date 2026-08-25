@@ -277,27 +277,47 @@ class TestW5BoundMetricScoringPin:
     def test_the_tuner_acquires_its_metric_from_the_binding(self):
         """P1 hand-off (a) is closed BY CONSTRUCTION; this pins it.
 
-        The acquisition is `resolve_bound_run_metric() or derive_tidmad_metric(...)`
-        — the composed value FIRST, the legacy derivation only as the
-        un-composed fallback. Reversing those operands would silently score
-        every composed run under TIDMAD's metric.
+        The composed value comes FIRST and the legacy derivation is only the
+        un-composed fallback. Reversing them would silently score every
+        composed run under TIDMAD's metric.
+
+        **Step 12 / PR-12d seam B** moved that rule out of the tuner and into
+        `evaluation_metric.resolve_run_metric`, so this follows it there. The
+        tuner's own half — that it acquires the metric through THAT resolver
+        and nothing else — is asserted first.
         """
-        tree = ast.parse(TUNER.read_text(encoding="utf-8"))
-        found = []
-        for node in ast.walk(tree):
-            if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
-                names = [
-                    n.func.id
-                    for n in node.values
-                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                ]
-                if "resolve_bound_run_metric" in names:
-                    found.append(names)
-        assert found, "the bound-metric acquisition was not found"
-        for names in found:
-            assert names[0] == "resolve_bound_run_metric", (
-                f"the bound metric must be the FIRST operand, got {names}"
+        tuner = ast.parse(TUNER.read_text(encoding="utf-8"))
+        acquisitions = [
+            node
+            for node in ast.walk(tuner)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ("resolve_run_metric", "resolve_bound_run_metric")
+        ]
+        assert [n.func.id for n in acquisitions] == ["resolve_run_metric"], (
+            "the tuner must acquire its metric through the ONE resolver"
+        )
+
+        resolver = next(
+            node
+            for node in ast.walk(
+                ast.parse(
+                    (REPO_ROOT / "execute_tools" / "evaluation_metric.py").read_text(
+                        encoding="utf-8"
+                    )
+                )
             )
+            if isinstance(node, ast.FunctionDef) and node.name == "resolve_run_metric"
+        )
+        called = [
+            node.func.id
+            for node in ast.walk(resolver)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        ]
+        assert "resolve_bound_run_metric" in called, "the bound-metric consult was not found"
+        assert called.index("resolve_bound_run_metric") < called.index("derive_tidmad_metric"), (
+            f"the bound metric must be consulted FIRST, got {called}"
+        )
 
     def test_a_bound_metric_is_what_resolves(self):
         """The mutation: rebind, and the resolved identity moves."""

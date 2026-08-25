@@ -153,6 +153,25 @@ class RunInvariants(BaseModel):
     # Omitted from the serialized lock when None, like the composition
     # fingerprint, so a pre-C3 lock file stays byte-identical.
     execution_calibration: dict[str, Any] | None = None
+    # Step 12 / PR-12d, seam P — WHICH model-plugin implementations this run
+    # actually loaded, as host-independent content identities. RECORDED,
+    # never compared.
+    #
+    # Not canonical, and deliberately so: what makes an edited pack plugin a
+    # different scientific run is already the composition fingerprint, which
+    # hashes these same content digests and IS compared. Comparing them here
+    # too would be a second opinion on one fact — and would refuse a resume
+    # on a host where the pack simply lives at a different path, which is not
+    # a semantic difference (the Q-P1-2 exclusion rule).
+    #
+    # What it buys is the thing nothing else offered: production-visible
+    # evidence of the implementation that executed, so a Gate can answer
+    # "was that really the pack's reference model" from a persisted artifact
+    # rather than from a transient log line.
+    #
+    # Omitted from the serialized lock when None, like the two fields above,
+    # so every pre-seam-P lock file stays byte-identical.
+    model_plugin_identities: list[dict[str, str]] | None = None
 
     # Fields participating in lock equality.
     _CANONICAL: ClassVar[tuple[str, ...]] = (
@@ -181,6 +200,7 @@ class RunInvariants(BaseModel):
     _PROVENANCE: ClassVar[tuple[str, ...]] = (
         "created_at",
         "execution_calibration",
+        "model_plugin_identities",
     )
 
     #: C9d fields that a legacy lock cannot supply. Their absence is a
@@ -268,6 +288,11 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # `null` for a concept it predates.
     if payload.get("execution_calibration") is None:
         payload.pop("execution_calibration", None)
+    # Step 12 / PR-12d, seam P — third instance of the same rule: a run that
+    # declared no model plugins writes no key, so every legacy lock is
+    # byte-identical rather than gaining a `null` for a concept it predates.
+    if payload.get("model_plugin_identities") is None:
+        payload.pop("model_plugin_identities", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -478,10 +503,34 @@ def build_run_invariants(
             # ceilings its children actually ran under. Provenance, never
             # compared.
             execution_calibration=calibration_provenance(),
+            # Step 12 / PR-12d, seam P — the same shape and the same
+            # justification as the line above: a PROVENANCE field is read
+            # from the run-scoped authority AT the shared builder, not
+            # threaded through five call sites, because "what was active
+            # when this lock was written" is exactly the question it
+            # answers. The CANONICAL composition fingerprint is threaded
+            # explicitly two lines up precisely because it is compared, and
+            # a compared value must never arrive ambiently.
+            model_plugin_identities=_model_plugin_identities(),
             **_runtime_identity_fields(include_runtime_identities),
         ),
         effective_path,
     )
+
+
+def _model_plugin_identities() -> list[dict[str, str]] | None:
+    """The run's declared model-plugin identities, or ``None`` when unbound.
+
+    ``None`` — not ``[]`` — is what an un-composed run, and a composed run
+    that declares no model plugins, produce: the key is then OMITTED from the
+    serialized lock, so every pre-seam-P lock file stays byte-identical. An
+    empty list would be a different, and wrong, statement: "this run declared
+    plugins and there were none of them".
+    """
+    from ml_models.plugin_binding import active_run_model_plugins
+
+    binding = active_run_model_plugins()
+    return None if binding is None else binding.canonical_identities()
 
 
 def _runtime_identity_fields(include: bool) -> dict[str, str | None]:

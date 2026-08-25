@@ -71,7 +71,13 @@ def _calls_named(source: str, name: str) -> int:
 def test_the_child_derives_the_metric_and_the_spec_exactly_once():
     source = CHILD.read_text()
     assert _calls_named(source, "derive_tidmad_metric") == 1
-    assert _calls_named(source, "derive_tidmad_deliverable_spec") == 1
+    # Step 12 / PR-12d D4b: the SPEC derivation became the geometry-aware
+    # `derive_run_deliverable_spec`, which answers a DECLARED ABSENCE instead
+    # of raising for a task that declares no TIDMAD storage geometry. The
+    # claim this test makes — EXACTLY ONE derivation, no ambient second one —
+    # is unchanged; only which function performs it moved.
+    assert _calls_named(source, "derive_tidmad_deliverable_spec") == 0
+    assert _calls_named(source, "derive_run_deliverable_spec") == 1
     # The pre-existing Regime-A fallback (absent --dataset_profile_json) and
     # nothing else: no ambient second resolution when a profile was given.
     assert _calls_named(source, "resolve_dataset_profile") == 1
@@ -116,7 +122,7 @@ def unscoreable_workspace(tmp_path):
     profile = _bound_profile(str(tmp_path / "raw_{file_index:04d}.h5"))
     spec = derive_tidmad_deliverable_spec(profile)
     name = spec.naming.name(
-        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, file_index=FILE_INDEX
+        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, input_identity=FILE_INDEX
     )
     wide = np.arange(64, dtype=np.int16)
     create_abra_file(str(workspace / name), wide, wide, indexed=False, storage=spec.storage)

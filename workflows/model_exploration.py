@@ -78,7 +78,6 @@ from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
     HyperparamTuningOutput,
     PhysicalRejection,
-    TaskCompositionRef,
 )
 from agent.schemas.interpretation import (
     InterpretationInput,
@@ -140,6 +139,7 @@ from workflows.strategy_modes import (
 from workflows.task_composition import (
     RunTaskComposition,
     bind_run_task_composition,
+    build_task_composition_ref,
     compose_run_task_bindings,
     verify_composition_is_bound,
 )
@@ -926,31 +926,6 @@ def _validate_construction_memory(
             f"Fix: move all T-dependent allocations to forward(). "
             f"SSM hidden states must be shape [B, d_state], not [B, T, d_state]."
         )
-
-
-def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | None:
-    """Project the run's composition into what the TUNER needs (D-12a-1).
-
-    One place builds it, from values the composition already resolved. The
-    tuner then learns "this run is composed, and by what" from its INPUT
-    instead of asking the ambient environment — the W4 reference-science guard
-    used to call ``active_task_data_path()`` for that, and the per-model
-    run-invariants lock had no composition values to record at all.
-
-    Deliberately NOT a second authority: nothing is re-derived here, and the
-    record/output composition-fingerprint stamps keep reading
-    ``active_composition_fingerprint()`` (Step 11 F-11-C10-a, AST-pinned).
-
-    Returns ``None`` for an un-composed run, which is what makes the whole
-    mechanism invisible to regime A.
-    """
-    if task_composition is None:
-        return None
-    return TaskCompositionRef(
-        semantic_fingerprint=task_composition.semantic_fingerprint,
-        task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
-        task_health_binding=task_composition.task_health_binding,
-    )
 
 
 def resolve_run_implementor_blocks(task_composition: Any) -> Any:

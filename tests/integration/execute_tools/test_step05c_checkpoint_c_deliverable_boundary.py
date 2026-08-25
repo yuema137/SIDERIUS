@@ -254,7 +254,7 @@ def test_the_child_names_the_deliverable_through_the_reconstructed_spec(produced
     one from the profile that already crosses.
     """
     expected = default_deliverable_naming().name(
-        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, file_index=FILE_INDEX
+        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, input_identity=FILE_INDEX
     )
 
     written = sorted(p.name for p in Path(produced["out_dir"]).glob("*.h5"))

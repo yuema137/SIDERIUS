@@ -314,6 +314,20 @@ class DeliverableWriteRequest(BaseModel):
     exp_id: str = Field(min_length=1)
     run_name: str = Field(min_length=1)
     model_type: str = Field(min_length=1)
+    task_scope: Any = Field(
+        default=None,
+        description=(
+            "Step 12 / PR-12d seam C (B7). The OPAQUE evaluation scope whose "
+            "samples produced these outputs, in the order the generic "
+            "inference unit iterated them. Present ONLY when the framework "
+            "hands UNPAIRED per-sample outputs, so the implementation can "
+            "pair each with its own identity — an `image_id`, a clip — "
+            "without the framework ever learning that vocabulary. `None` "
+            "means the caller already paired them, which is what every "
+            "pre-12d producer does, so every existing construction is "
+            "unchanged."
+        ),
+    )
 
 
 class EvaluationReadRequest(BaseModel):
@@ -955,3 +969,26 @@ def resolve_transported_task_data_path(
         resolve_task_data_path(TaskBindingContext(task_data_path_id=task_data_path_id)),
         identity,
     )
+
+
+def task_declared_deliverable_name(data_path: object, request: object) -> str:
+    """The deliverable's name, from the TASK's own naming rule.
+
+    Step 12 / PR-12d. Read through the implementation's module-level
+    ``deliverable_name`` when it declares one — the SAME function its
+    ``write_deliverable`` and ``read_evaluation_payload`` already agree on, so
+    a reported name cannot drift from the written one.
+
+    Declared HERE, beside the contract, because BOTH the generic inference
+    unit and the scoring child need it: a second copy is the duplicated
+    child-side logic §E.2 forbids.
+
+    A task that declares no such helper gets the request's directory back —
+    honest rather than invented: the framework does not know the name and
+    says so. Physical artifact semantics stay task-owned either way.
+    """
+    module = sys.modules.get(type(data_path).__module__)
+    namer = getattr(module, "deliverable_name", None)
+    if callable(namer):
+        return str(namer(request))
+    return str(getattr(request, "output_dir", None) or getattr(request, "deliverable_dir", ""))

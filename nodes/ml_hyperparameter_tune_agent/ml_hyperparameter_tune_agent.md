@@ -169,6 +169,47 @@ Related: `DatasetProfile` now separates **generic identity**
 (Q-12-4). TIDMAD's `dataset` / `channels` / `encoding` sections live inside
 that payload; the legacy wire form is still accepted and still emitted.
 
+#### Consolidated physical-topology projection (Step 12 / PR-12d, seam B)
+
+Five sites in this package used to decode TIDMAD's topology directly —
+`planning.py` (data-config validation, SampleSet construction, segment
+counts), `ml_hyperparameter_tune_agent.py` (the task-render dataset fact) and
+`execution.py` (the raw validation-file peek path) — and each independently
+killed a composed contrast run before any training, because a task whose
+profile carries no `dataset`/`channels`/`encoding` sections has nothing for
+`tidmad_topology()` to decode.
+
+`scope_acquisition.py::project_attempt_topology_facts(run_profile)` is now the
+ONE place this package asks. It returns an `AttemptTopologyFacts` — a single
+`physical_dataset: DatasetConfig | None` plus a `declares_physical_geometry`
+property and a `require_physical_dataset(purpose)` accessor that raises
+`TaskTopologyUnavailableError` naming what was unavailable. The decision is a
+**membership test** (`declares_tidmad_topology`), never a caught exception: a
+profile that declares TIDMAD's sections but carries a malformed payload still
+raises out of `tidmad_topology()` rather than being reclassified as "declares
+none".
+
+Two consumers now SKIP rather than fabricate when the run's task declares no
+physical geometry, instead of dying:
+
+- `_validate_data_config` (PSD-segment divisibility / per-file segment
+  counts) — skipped; per the D-BC-8 precedent, this is TASK topology, not the
+  generic partition-count bound.
+- the two legacy `build_sample_set()` calls (training + validation
+  SampleSets) — skipped in favour of `AttemptScopes`, the task-owned scope
+  acquired separately by `acquire_attempt_scopes` (PR-12bc B5).
+
+**Deferred by name, not fixed here**: the legacy SampleSets still reach the
+training spawn, both inference spawns and the validation-expectation decision
+in `execution.py`. A composed contrast run without physical geometry reaches
+those sites with `None` — further than the outright `tidmad_topology`
+refusal it hit before PR-12d, but D3 (12bc's B6) is what flips those
+consumers to read the transported task scope instead.
+
+Under TIDMAD — composed or not — every fact `AttemptTopologyFacts` reports is
+the SAME object it was before this projection existed; nothing here changes
+un-composed or TIDMAD-composed behaviour.
+
 ### Resource and time planning (Step-05b)
 
 The same run-binding rule now governs what the pre-flight gates are allowed
@@ -329,6 +370,7 @@ The CLI is the historical TIDMAD-style invocation and is what `scripts/run_compa
 | `--order_strategy_override` | `str` (`shuffle` \| `sequential`) | `None` | Force the training sample visitation order for every round, overriding any agent proposal. Omit = the agent decides, falling back to `shuffle`. |
 | `--file_order_override` | `str` (comma-separated) | `None` | File visitation **order** for `--order_strategy_override sequential`, e.g. `4,6,5,9,7,8`. Order is preserved as written; must be a full permutation of the resolved `DataScope`. Range syntax (`4-9`) is rejected — a range cannot express an order. Omit for ascending file index. |
 | `--progress_bar` | flag | `False` | Stream subprocess tqdm output. |
+| `--task_composition` | `str` (path, optional) | `None` | **Step 12 / PR-12d D8a.** Path to a YAML task-composition manifest. Omitted = the legacy un-composed run, byte-identical to pre-Step-10 behaviour. Supplied, it binds this run's task data path, dataset profile, metric, declared secondaries, Health family and task description/forward contract explicitly, and every unresolvable reference fails closed before any LLM call. Composed exactly ONCE in `main()` — the same composed object threads into both `build_agent_input` (as `task_composition_ref`) and the `bind_run_task_composition` context around `.run()`, because composing twice would be a second resolution the registry-identity rules (Step 12 / PR-12bc CASE A) treat as a fresh instance. Same manifest shape and composition authority the chain launcher's own `--task_composition` already uses (`sdsc_submission_scripts/run_chain.sh`) — added here so a single model can be run composed and `--force_model`-locked in one launch, without the multi-agent chain's proposer choosing the architecture. |
 
 ## Python API usage
 
@@ -380,10 +422,10 @@ The constructor accepts `bridge_factory` and `sandbox_factory` (for test injecti
 - **Per-round trial config**: `{workspace}/trial_config_{run_name}_round{N}.json` — the resolved `TrialConfig` for round N, written before the training subprocess starts. Used by `core.resume.restore_prior_state` for crash-recovery.
 - **Token usage**: `{workspace}/token_usage.jsonl` (when `set_run_context` is called by the workflow) — append-only log of every LLM call's token cost.
 - **Per-run plugin dir**: `{workspace}/plugins/{run_name}/` — copy of `seed_plugin_path` written at run start so the training subprocess can find the plugin via `SIDERIUS_PLUGIN_DIRS`. Only populated when `seed_plugin_path` is set.
-- **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`. **Step 05c**: their name, the cleanup pattern that matches them, the HDF5 channel-group identity and the persisted storage representation all resolve through one provisional runtime `DeliverableSpec` (`execute_tools/deliverable_spec.py`), bound once per run from the run-scoped `DatasetProfile`. The tuner's path builder (`_build_denoised_filename`, which the HealthGate peeks and the scorer receive verbatim) and the `--cleanup_denoised` glob both consume it, and the sandbox is handed the same value — so parent readers cannot disagree with the child that writes the files. The spec is runtime-only: no config file, no schema field, no CLI flag, and the subprocess RECONSTRUCTS an equal value from the `DatasetProfile` that already crosses via `--dataset_profile_json`.
-- **Evaluation metric** (Step 06, runtime-only; bound seam Step 10 P1): the run's `EvaluationMetric` handle (`execute_tools/evaluation_metric.py`) is acquired ONCE at run scope, beside `run_profile` / `run_model_io` / `run_deliverable_spec`, as `resolve_bound_run_metric() or derive_tidmad_metric(run_profile, run_deliverable_spec)`. A **composed** run (launched with `--task_composition <manifest>`) supplies the metric its own declaration named, resolved at the composition edge, so a composed classification or regression run never executes TIDMAD's derivation. An **un-composed** run finds nothing bound and takes the byte-identical legacy branch — `derive_tidmad_metric` is the bounded legacy adapter from Step 10 on, and removing it belongs to Step 12 with the composition root. Still no config file read here, no CLI flag on this node, no new argv; the scoring subprocess reconstructs the same instance from `--dataset_profile_json`. What reaches storage is the additive per-record payload above (`metric_result` / `metric_refusal`).
+- **Denoised HDF5s** (intermediate): written by the training/scoring skill subprocesses. Cleaned up after scoring when `cleanup_denoised=True`. **Step 05c**: their name, the cleanup pattern that matches them, the HDF5 channel-group identity and the persisted storage representation all resolve through one provisional runtime `DeliverableSpec` (`execute_tools/deliverable_spec.py`), bound once per run from the run-scoped `DatasetProfile`. **Step 12 / PR-12d, seam B/E**: `run_deliverable_spec` is now `derive_run_deliverable_spec(run_profile)` and is `None` for a task that declares no TIDMAD physical geometry (only the STORAGE half — channel identity, storage dtype, value offset — needs it; naming does not). NAMING is acquired separately and unconditionally as `run_deliverable_naming = indexed_cleanup_naming()` (`DeliverableNaming | None`): the run's bound naming when composed, the shipped TIDMAD default when the run's task does not name its own artifacts, and `None` when it does. The tuner's path builder (`_build_denoised_filename`, which the HealthGate peeks and the scorer receive verbatim) and the `--cleanup_denoised` glob both consume `run_deliverable_naming` (not `run_deliverable_spec.naming`) and both SKIP — no sweep, no delete — when it is `None`, because sweeping with TIDMAD's template against a task that names its own artifacts matched nothing while reporting a cleanup (F-A4-1). The sandbox is handed the same naming value, so parent readers cannot disagree with the child that writes the files. Both values are runtime-only: no config file, no schema field, no CLI flag, and the subprocess RECONSTRUCTS an equal deliverable spec from the `DatasetProfile` that already crosses via `--dataset_profile_json`.
+- **Evaluation metric** (Step 06, runtime-only; bound seam Step 10 P1): the run's `EvaluationMetric` handle (`execute_tools/evaluation_metric.py`) is acquired ONCE at run scope, beside `run_profile` / `run_model_io` / `run_deliverable_spec`, as `resolve_run_metric(run_profile, run_deliverable_spec)` (**Step 12 / PR-12d, seam B** — byte-identical to the `resolve_bound_run_metric() or derive_tidmad_metric(...)` expression it replaced; moved into the metric module because `run_deliverable_spec` is now `DeliverableSpec | None` and the narrowing belongs beside the derivation that needs it, not inside `run()`). A **composed** run (launched with this node's own `--task_composition <manifest>`, or with the chain launcher's) supplies the metric its own declaration named, resolved at the composition edge, so a composed classification or regression run never executes TIDMAD's derivation. An **un-composed** run finds nothing bound and takes the byte-identical legacy branch — `derive_tidmad_metric` is the bounded legacy adapter from Step 10 on. A composed run that declares neither its own metric nor TIDMAD deliverable geometry is refused (`NoRunMetricError`) rather than silently deriving TIDMAD's metric against an invented topology. Still no config file read here, no new argv on top of `--task_composition`; the scoring subprocess reconstructs the same instance from `--dataset_profile_json`. What reaches storage is the additive per-record payload above (`metric_result` / `metric_refusal`).
 
-- **Observational secondary metrics** (Step 10 / P2b, runtime-only): acquired at the SAME site as the primary, as `run_secondary_metrics = resolve_bound_run_secondary_metrics()`. Unlike the primary there is NO legacy branch — nothing to fall back to, because "this run declared no secondary" is the answer rather than a default — so an un-composed run gets `()` and nothing anywhere derives a secondary from task identity. A composed run gets what its manifest's optional `secondary_metrics:` section declared, resolved at the composition edge by the same `_compose_metric` authority the primary uses. They are evaluated by `_evaluate_secondary_metrics` immediately after the primary result inside the same scoring `try`, transported onto the record by the three carriers above, and stamped onto the output as `secondary_metric_specs` (the DECLARED set, in manifest order, written by the same single writer as `metric_spec` — and on the degraded partial-output branch too, because which secondaries a run declared is a launch fact that does not stop existing because the tuner later failed). They are OBSERVATIONAL: `run_order` is the run's ONE order authority and it interprets the PRIMARY spec only, which an AST census over the whole lifecycle enforces.
+- **Observational secondary metrics** (Step 10 / P2b, runtime-only): acquired at the SAME site as the primary, as `run_secondary_metrics = resolve_bound_run_secondary_metrics()`. Unlike the primary there is NO legacy branch — nothing to fall back to, because "this run declared no secondary" is the answer rather than a default — so an un-composed run gets `()` and nothing anywhere derives a secondary from task identity. A composed run gets what its manifest's optional `secondary_metrics:` section declared, resolved at the composition edge by the same `_compose_metric` authority the primary uses. They are evaluated by `_evaluate_secondary_metrics` immediately after the primary result inside the same scoring `try`, transported onto the record by the three carriers above, and stamped onto the output as `secondary_metric_specs` (the DECLARED set, in manifest order, written by the same single writer as `metric_spec` — and on the degraded partial-output branch too, because which secondaries a run declared is a launch fact that does not stop existing because the tuner later failed). They are OBSERVATIONAL: `run_order` is the run's ONE order authority and it interprets the PRIMARY spec only, which an AST census over the whole lifecycle enforces. **Step 12 / PR-12d**: on the `TASK_OWNED` scoring route (see *Scoring routes* under Round-loop structure below) the tuner cannot evaluate them in-process — the deliverable and evaluation scope live only in the scoring child — so the child computes them and reports them in its output; `_adopt_child_secondaries` (`execution.py`) re-types them into the same `MetricResult` / `NotScoreableResult` carriers. Total by construction: anything the anchor route already produced wins unconditionally, so the record has one shape regardless of which route ran.
 
 ## Key behavioral notes
 
@@ -502,12 +544,13 @@ The tuner calls `_handle_prephase_gpu_measurement` and reads only the
 disposition; identity comparison, classification, authority validation and
 admission all live in `core/runtime_control/prephase_admission.py`.
 
-**When it does NOT run**, and these are the only two cases:
+**When it does NOT run**, and these are the only three cases:
 
 | Condition | Behaviour |
 |---|---|
 | trial round | not measured — O-7 governs formal execution, and trial admission already proceeds while recording what it could not prove |
 | `sandbox.device_identity` is not a `DeviceIdentity` | not measured — no card means nothing to measure and nothing for admission to decide, the same conclusion `_admission_refusal` reaches. CPU and pseudo runs are unaffected. |
+| the run's task declares no TIDMAD topology (**Step 12 / PR-12d, B12 / F-12d-25**, operator-ruled 2026-08-24 option B) | not measured — the isolated worker's bounded probe-batch builder has a TIDMAD-specific input contract (`abra_training_????.h5`, TIDMAD channel layout) and cannot build a batch for a Pets or DAVIS profile. Resolves to `PrephaseOutcome.PROCEED` (no measured requirement attached; the VRAM capacity gate is unaffected) — never `STOP_INFRASTRUCTURE_FAILURE`, which would misreport a healthy environment as broken. A **membership test** (`declares_tidmad_topology`), not a caught exception: a malformed TIDMAD profile still measures and still fails closed. An un-composed run (`run_profile is None`) is Regime A — always TIDMAD — and stays applicable, bit-for-bit unchanged. Making the probe batch task-composable (option A) is recorded as post-Step-12 debt, not attempted here. |
 
 There is **no flag**. It is not optional on a formal attempt with a real
 device.
@@ -837,7 +880,7 @@ for the full design rationale.
   2b. **Pre-phase GPU measurement** (V20 PR C2, **formal attempts with a real device only**) — a bounded isolated measurement of the exact candidate on the current card, feeding PR B's admission gate. A stop consumes the attempt and starts no GPU work. See *Pre-phase GPU measurement* above.
   3. **Train** — `training_skill` runs as a subprocess via `TidmadSandbox`. Writes the trained model + denoised outputs. **Step 07a**: the tuner's `eval_sample_set` reaches the trainer (`--eval_sample_set_json`), which evaluates the same run-resolved objective on it after every completed epoch (R3, transactional: model / optimizer / objective state and every RNG restored) and emits `training_history` beside the three legacy keys; the tuner interprets the results through the typed boundary `_interpret_training_status` → `interpret_training_results(raw, expected_validation=eval_sample_set is not None)` (a contract violation → the existing `error_training` record path) and derives `training_diagnosis` once.
   4. **Infer** — `inference_skill` runs as a subprocess. Writes denoised HDF5s.
-  5. **Score** — the frozen TIDMAD scorer runs **through the run's evaluation-metric handle** (Step 06): `sandbox.evaluate_metric(run_metric, …)` validates the DataScope, runs the metric's scoreability contract over the deliverables the scorer would open, and only then calls `scoring_utils.score_vector` (unchanged arithmetic) → `denoising_score` / `file_vector` / `metric_result`. A deliverable the contract refuses never reaches the scorer: it becomes an `error_scoring` record with `failure_type='not_scoreable'` and a structured `metric_refusal`. Cleanup runs after if `cleanup_denoised=True`.
+  5. **Score** — the frozen TIDMAD scorer runs **through the run's evaluation-metric handle** (Step 06): `sandbox.evaluate_metric(run_metric, …)` validates the DataScope, runs the metric's scoreability contract over the deliverables the scorer would open, and only then calls `scoring_utils.score_vector` (unchanged arithmetic) → `denoising_score` / `file_vector` / `metric_result`. A deliverable the contract refuses never reaches the scorer: it becomes an `error_scoring` record with `failure_type='not_scoreable'` and a structured `metric_refusal`. **Scoring routes (Step 12 / PR-12d, D4b)** — `policy.py::ScoringRoute` / `resolve_scoring_route` NAME which of three paths an attempt actually takes: `ANCHOR_NORMALIZED` (an anchor map exists — the in-process path just described), `TASK_OWNED` (a composed task's own deliverable, scored by its own metric inside the scoring subprocess against the transported evaluation scope — every composed contrast run, since no contrast implementation declares trial anchoring), or `SUBPROCESS_LEGACY` (TIDMAD scoring through the subprocess with no anchor normalization — every un-composed FORMAL round, and any trial round with no anchor map; the code's prior `else  # legacy single-file mode` comment mis-described this branch, which was never only "legacy single-file"). Cleanup runs after if `cleanup_denoised=True`.
   6. **Reflect** — `bridge.reflect(...)` analyses the round's result and updates memory for the next plan call.
 - **Two LLM sub-calls per round** (planner + reflector). When `reflect_provider` / `reflect_model_id` are set, the two go through separate `LLMBridge` instances — enables splits like "cheap planner + smarter reflector" or "small planner + large reflector" without changing prompts.
 - **Attempt vs round distinction.** A *round* is a slot in the optimization history that produces a final record. An *attempt* is one LLM-plan + downstream-execution attempt. Each round can consume up to `attempts_per_round` (or `attempts_per_formal_round` for the forced-formal round) attempts before being marked failed. Attempts that fail at the pre-flight gate cost LLM tokens but no GPU time; attempts that reach training but fail (OOM, training error) cost both.
@@ -924,8 +967,9 @@ contract have exactly one source for the whole run.
 
 | Element | Where | What |
 |---|---|---|
-| binding | `run()`, run scope, after `run_deliverable_spec` | `run_metric = resolve_bound_run_metric() or derive_tidmad_metric(run_profile, run_deliverable_spec)` — **Step 10 P1**: a COMPOSED run's declared metric wins; un-composed falls through to the Regime-A derivation, byte-identical, and resumed un-composed runs re-derive the same value. Exactly ONE acquisition site, pinned by census (`tests/unit/workflows/test_step10_p1_c0_census.py`), which also pins the ORDER — putting the derivation first would make every composed run execute TIDMAD's arithmetic while the composed metric sat unused |
-| live route | the anchor-map scoring branch | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — everything downstream (HealthGates, `score_res`, reflector, record) unchanged |
+| binding | `run()`, run scope, after `run_deliverable_spec` | `run_metric = resolve_run_metric(run_profile, run_deliverable_spec)` — **Step 10 P1**, moved into the metric module at **Step 12 / PR-12d seam B** (byte-identical to the `resolve_bound_run_metric() or derive_tidmad_metric(...)` expression it replaced): a COMPOSED run's declared metric wins; un-composed falls through to the Regime-A derivation, byte-identical, and resumed un-composed runs re-derive the same value; a composed run declaring neither its own metric nor TIDMAD deliverable geometry is refused (`NoRunMetricError`) rather than deriving TIDMAD's against an invented topology. Exactly ONE acquisition site, pinned by census (`tests/unit/workflows/test_step10_p1_c0_census.py`), which also pins the ORDER — putting the derivation first would make every composed run execute TIDMAD's arithmetic while the composed metric sat unused |
+| live route (`ANCHOR_NORMALIZED`) | the anchor-map scoring branch | `metric_result = sandbox.evaluate_metric(run_metric, sample_set=eval_sample_set, anchor_map=…, s_max=…, denoised_filename_fn=_denoised_fn)`; `file_vector, final_scalar = metric_result.per_sample, metric_result.scalar` — everything downstream (HealthGates, `score_res`, reflector, record) unchanged |
+| task-owned route (`TASK_OWNED`, **Step 12 / PR-12d**) | scoring subprocess — every composed contrast run, which declares no trial anchor map | the child scores its OWN deliverable through the SAME composed metric and reports `metric_result` (plus declared secondaries) in its JSON output; the tuner ADOPTS them (`_adopt_child_metric_result`, `_adopt_child_secondaries` in `execution.py`) because only the child holds the deliverable and the evaluation scope. Total-function precedence: an anchor-route value, when one was computed, always wins, so adoption can never blank an in-process result |
 | order inside the seam | `TidmadSandbox.evaluate_metric` | DataScope `validate_sample_set` (unchanged, first) → `TidmadScoreabilityContract.check({file_index: path})` → `scoring_utils.score_vector(**the same kwargs as before)` |
 | refusal | `NotScoreableError` from the seam → the scoring `except` → `_build_scoring_failure_record` | `status='error_scoring'`, `failure_stage='scoring'`, `failure_type='not_scoreable'`, `metric_refusal=<NotScoreableResult>`, memory prose naming contract + requirement (never "crashed"); round outcome unchanged (next attempt) |
 | record | success record | `metric_result` (identity / direction / scalar / references; `per_sample` = pointer to `file_vector`) |
@@ -1153,6 +1197,56 @@ Downstream, `reference_scores` may therefore be `None`, and the score-table
 guard in `execution.py` tests for it. Carried debt: `contracts.py` still
 declares the field as `Any`, so that `None` is invisible to pyright.
 
+## Task-declared training objective overrides the planner's choice (Step 12 / PR-12d, F-12d-31)
+
+A task may declare an authoritative training objective on its composition
+manifest (`objective:`, a validated `LossConfig`, carried on
+`task_composition_ref.objective`). When declared,
+`planning.py::_apply_declared_objective` overwrites `plan.loss_cfg` with it —
+an ordinary validated `LossConfig` on the pre-existing `custom` + `loss_name`
+route; no new enum value, and nothing here reads a task name. The
+discriminator is only whether the RUN declared an objective.
+
+**Why**: without it, the planner chooses the loss from what its prompt tells
+it is valid — and two real composed DAVIS runs trained with `smooth_l1`
+because the planner was never shown DAVIS's own exact-L1 objective. A task
+declaring its own objective removes that as a planner decision.
+
+**Applied AFTER the mode-override chain** (`_apply_mode_override_chain`,
+`policy.py`) deliberately: that chain's forced-formal branch copies the
+winning trial's `loss_config` wholesale, so an objective applied earlier
+would be silently overwritten by whatever the trial happened to run. Last
+writer on the plan wins, and the declared objective is the last writer.
+
+**Silent no-op for every run that exists today**: `composition_ref` is
+`None` for an un-composed run, and `objective` is `None` for a composed task
+that declares none — in both cases the plan is returned unchanged. A
+substitution that does happen is announced with a `[objective]` print line
+naming the planner's choice and the value that replaced it.
+
+## Composed run's own scientific gate set governs best-track selection (Step 12 / PR-12d, F-12d-30)
+
+`finalize_run_output`'s `_select_best_records` (`policy.py`) resolves the
+five `best_*` tracks (including `valid_top_record`, which feeds
+`best_exp_id` / `best_denoising_score`) through
+`is_valid_candidate(record, required_gate_ids=...)`. Before this PR the call
+site never passed `required_gate_ids`, so every run — composed or not — was
+scored against the zero-argument default, which composes with
+`LEGACY_OMITTED`: TIDMAD's scientific gate set. Correct for an un-composed
+run; for a composed one it bound TIDMAD's Health family into a process that
+had already bound the run's own, and the Step-08b run-scope guard then
+refused an otherwise-complete run at finalize.
+
+`run()` now resolves `run_scientific_gate_ids` ONCE, at run scope
+(`_resolve_run_gate_ids`, `ml_hyperparameter_tune_agent.py`, via
+`resolve_run_scientific_gate_ids` — Step 10 / P5+P6 W6, finding F-P56-2), and
+carries it on `RunBindings.run_scientific_gate_ids`.
+`records.py::finalize_run_output` reads it off the BINDING, never off
+`task_composition_ref` — the F-11-C10-a lesson, where a stamp reading the
+input projection instead of the run's own authority made a composed chain
+refuse its own output. `None` for an un-composed run resolves the legacy
+default exactly as before, so TIDMAD's `best_*` selection is unaffected.
+
 ## Watchdog kills reach the architectural-feedback trigger (F-RC-6)
 
 `_collect_disallowed_patterns` tells the next proposer "this architecture
@@ -1199,6 +1293,7 @@ to new consumers.
 | Module | Responsibility |
 |---|---|
 | `contracts.py` | typed carriers only — no policy, execution, persistence or rendering |
+| `scope_acquisition.py` | task-owned scope acquisition (PR-12bc B5) and the package's ONE physical-topology decode (`AttemptTopologyFacts`, PR-12d seam B) |
 | `planning.py` | observe -> plan (LLM) -> overrides -> strategy/epoch clamps -> the round's sample sets |
 | `execution.py` | the physical work, in three coarse phases (admission/preflight, training, inference+scoring+health) |
 | `records.py` | BUILDS records and the run output |
@@ -1215,6 +1310,10 @@ main ──> planning ──┐
      ├─> runtime ───┘        └────> contracts   (a leaf)
      └─> cli
 ```
+
+`scope_acquisition.py` is a second leaf, not shown above: imported directly
+by `main`, `planning` and `execution`, and importing nothing from its
+siblings.
 
 `records` BUILDS, `runtime` EMITS. That is the rule that decides which of the
 two owns a helper, and it is why `runtime` may import `records` and never the
@@ -1246,9 +1345,10 @@ propagate into `run()`'s handler exactly as before.
 
 `RunBindings` is frozen and carries only what startup resolved once — the
 authorities (`run_profile`, `run_model_io`, `run_deliverable_spec`,
-`run_metric`, `run_order`, `run_task_render`, `registry`), the services
-(`sandbox`, `brain`, `agent_input`) and the stable resolved facts (budgets,
-scope, thresholds, hardware and provenance).
+`run_deliverable_naming`, `run_metric`, `run_order`, `run_task_render`,
+`run_scientific_gate_ids`, `registry`), the services (`sandbox`, `brain`,
+`agent_input`) and the stable resolved facts (budgets, scope, thresholds,
+hardware and provenance).
 
 It carries **no** counters, no current plan, no current results and no
 termination flags. That is enforced at construction by

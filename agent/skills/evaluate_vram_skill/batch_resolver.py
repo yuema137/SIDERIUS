@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -52,6 +53,9 @@ from agent.skills.evaluate_vram_skill.structural_probe import (
     ProbeResult,
     probe_activation_footprint,
 )
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agent.schemas.model_io_contract import ModelIOContract
 
 # ── Candidate search space (§3.5 — descending powers of two down to 1) ─────
 
@@ -79,13 +83,28 @@ def _predict_inference_peak_bytes(probe: ProbeResult) -> int:
     )
 
 
-def _build_probe_input(batch_size: int, segmentation_size: int) -> torch.Tensor:
-    """Zero-valued int64 input matching the SIDERIUS forward contract.
+def _build_probe_input(
+    batch_size: int,
+    segmentation_size: int,
+    model_io_contract: ModelIOContract | None = None,
+) -> torch.Tensor:
+    """Zero/contract-valued input matching the candidate's forward contract.
 
-    The project-wide model contract is ``[B, T] int → [B, 256, T] float``
-    (see ``core/plugin_loader.py``). torchinfo traces shape propagation, not
-    values, so zeros are fine. ``long`` matches the plugin-embedding signature.
+    Legacy (``model_io_contract=None``): the project-wide model contract is
+    ``[B, T] int → [B, 256, T] float`` (see ``core/plugin_loader.py``).
+    torchinfo traces shape propagation, not values, so zeros are fine.
+    ``long`` matches the plugin-embedding signature.
+
+    F-12d-24: when a Model-I/O declaration is bound, the probe is built from
+    it instead — contract-shaped and contract-dtyped, at this candidate's
+    real batch size — through the same Step-04/05b recipe authority
+    ``evaluate_vram_skill.wrapper._probe_input_tensor`` uses, so the search
+    probes the same tensor a real forward would receive.
     """
+    if model_io_contract is not None:
+        from agent.skills.model_io_probe_skill import build_model_input
+
+        return build_model_input(model_io_contract, batch=batch_size, symbolic=segmentation_size)
     return torch.zeros((batch_size, segmentation_size), dtype=torch.long)
 
 
@@ -113,6 +132,7 @@ def resolve_inference_batch(
     candidate_batches: Sequence[int] = _DEFAULT_CANDIDATE_BATCHES,
     budgets: ProbeBudgets | None = None,
     model_identity: str | None = None,
+    model_io_contract: ModelIOContract | None = None,
 ) -> int:
     """Return the largest candidate batch that clears both caps.
 
@@ -177,7 +197,7 @@ def resolve_inference_batch(
             probe = probe_activation_footprint(
                 model=model,
                 loss_module=None,
-                input_sample=_build_probe_input(B, segmentation_size),
+                input_sample=_build_probe_input(B, segmentation_size, model_io_contract),
                 target_sample=None,
                 mode="inference",
             )

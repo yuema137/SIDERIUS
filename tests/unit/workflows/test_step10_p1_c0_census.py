@@ -137,8 +137,15 @@ class TestCensusAFiveDefaultMechanisms:
         """ONE acquisition, and the legacy derivation is its FALLBACK.
 
         At C0 this was a bare `derive_tidmad_metric(...)` call. C2 turned it
-        into `resolve_bound_run_metric() or derive_tidmad_metric(...)` — the
-        shape asserted here — which is the whole of P1's metric change.
+        into `resolve_bound_run_metric() or derive_tidmad_metric(...)`, which
+        is the whole of P1's metric change.
+
+        **Step 12 / PR-12d seam B moved the RULE, not the property.** The
+        `or` became `evaluation_metric.resolve_run_metric(...)`, because the
+        deliverable spec became optional (B11) and the tuner's `run()` is
+        branch-capped. Both properties below are unchanged and are now
+        asserted where the rule lives: ONE acquisition site in the tuner, and
+        the BOUND metric consulted FIRST inside the resolver.
 
         Two things this catches that no behavioural test does. A SECOND
         acquisition site: the run's metric identity, direction and acceptance
@@ -164,18 +171,30 @@ class TestCensusAFiveDefaultMechanisms:
         ]
         assert len(assignments) == 1, "exactly one run-scoped metric acquisition expected"
         value = assignments[0].value
-        assert isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or), (
-            "the acquisition must be `bound or legacy-derivation`"
+        assert isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+        assert value.func.id == "resolve_run_metric", (
+            "the acquisition must go through the ONE resolver; a second way to "
+            "obtain the run's metric is how two sources agree until they do not"
         )
-        first, second = value.values
-        assert isinstance(first, ast.Call) and isinstance(first.func, ast.Name)
-        assert first.func.id == "resolve_bound_run_metric", (
-            "the BOUND metric must be consulted first, or a composed run would "
-            "execute the legacy derivation"
+
+        # The ORDER rule, at its owner. Putting the derivation first would make
+        # every composed run execute TIDMAD's arithmetic while the composed
+        # metric sat unused — and an un-composed TIDMAD run, the only kind the
+        # suite exercises end to end, would look perfectly healthy.
+        resolver = next(
+            node
+            for node in ast.walk(
+                ast.parse((REPO_ROOT / "execute_tools" / "evaluation_metric.py").read_text())
+            )
+            if isinstance(node, ast.FunctionDef) and node.name == "resolve_run_metric"
         )
-        assert isinstance(second, ast.Call) and isinstance(second.func, ast.Name)
-        assert second.func.id == "derive_tidmad_metric", (
-            "the legacy derivation must remain the un-composed fallback"
+        called = [
+            node.func.id
+            for node in ast.walk(resolver)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        ]
+        assert called.index("resolve_bound_run_metric") < called.index("derive_tidmad_metric"), (
+            f"the BOUND metric must be consulted before the legacy derivation; got {called}"
         )
 
     def test_default_5_both_interpretation_callers_pass_no_path(self):
@@ -277,6 +296,26 @@ class TestCensusBTransportEmissionSites:
             "scripts/run_pets_gate2.py",
             "scripts/run_davis_gate2.py",
         }
+        #: Step 12 / PR-12d: exempt by ENCLOSING FUNCTION, not by file.
+        #:
+        #: `load_transported_scope` is CHILD-side code — all three children
+        #: call it to rehydrate a transported scope — but since D4b it lives in
+        #: `execute_tools/scope_artifact.py`, a module that ALSO holds the
+        #: parent's writer. Adding that file to `child_or_runner` would have
+        #: blinded this census to every future parent-side resolve in it,
+        #: which is the file-set blindness F-12bc-9 already cost us once.
+        #: Keyed on the function, a new parent-side resolve in the same module
+        #: still trips.
+        child_side_functions = {"load_transported_scope"}
+
+        def _enclosing_function(tree, target):
+            for fn in ast.walk(tree):
+                if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+                    node is target for node in ast.walk(fn)
+                ):
+                    return fn.name
+            return None
+
         binds: dict[str, int] = {}
         resolves: dict[str, int] = {}
         for path in _production_py_files():
@@ -298,6 +337,8 @@ class TestCensusBTransportEmissionSites:
                     # resolve the census does not constrain.
                     "require_bound_task_data_path",
                 }:
+                    if _enclosing_function(tree, node) in child_side_functions:
+                        continue
                     resolves[rel] = resolves.get(rel, 0) + 1
 
         assert binds == {

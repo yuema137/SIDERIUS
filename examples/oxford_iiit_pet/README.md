@@ -75,5 +75,10 @@ runtime does not read them yet: binding a pack to a run is Step 12's.
 See `STATUS.md`. In one line: the two declarable contracts are declared;
 `DatasetProfile`, `DeliverableSpec`, reader/preprocessing, a reference
 plugin and Gate subsets are D14 seams; task binding is Step 12; health
-applicability is Step 08. There is no launcher for this task yet — this pack
-does not claim to run.
+applicability is Step 08.
+
+**There IS a launcher now** — the composed entrypoint is
+`--task_composition configs/task_composition/pets.yaml`. This sentence used
+to read *"there is no launcher for this task yet — this pack does not claim
+to run"*; corrected at PR-12d D-FINAL, where the claim was checked against
+the shipped tree rather than carried forward.

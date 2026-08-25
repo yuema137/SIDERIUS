@@ -98,7 +98,7 @@ def main() -> None:
                 model_type=args.model,
                 run_name=workflow_run_name,
                 exp_id=args.source_exp_id,
-                file_index=int(file_index),
+                input_identity=int(file_index),
             ),
         )
 

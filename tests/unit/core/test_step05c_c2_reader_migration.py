@@ -71,7 +71,7 @@ def test_path_builder_resolves_through_the_injected_naming():
         "model_type": GOLDEN_MODEL_TYPE,
         "run_name": GOLDEN_RUN_NAME,
         "exp_id": GOLDEN_EXP_ID,
-        "file_index": GOLDEN_FILE_INDEX,
+        "input_identity": GOLDEN_FILE_INDEX,
         "base_dir": "/step05c/workspace",
     }
 
@@ -84,7 +84,7 @@ def test_path_builder_resolves_through_the_injected_naming():
             model_type=GOLDEN_MODEL_TYPE,
             run_name=GOLDEN_RUN_NAME,
             exp_id=GOLDEN_EXP_ID,
-            file_index=GOLDEN_FILE_INDEX,
+            input_identity=GOLDEN_FILE_INDEX,
         ),
     )
 
@@ -167,8 +167,8 @@ def test_watchdog_cleanup_follows_an_injected_renamed_naming(tmp_path):
     what is asserted.
     """
     renamed_files = (
-        RENAMED.name(model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, file_index=0),
-        RENAMED.name(model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, file_index=7),
+        RENAMED.name(model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, input_identity=0),
+        RENAMED.name(model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, input_identity=7),
     )
     tidmad_file = "abra_validation_denoised_fcnet_c0run_c0exp_0000.h5"
     _seed(tmp_path, (*renamed_files, tidmad_file))
@@ -224,7 +224,14 @@ def _tuner_source() -> str:
     ("start_anchor", "end_anchor", "expected_accessor"),
     [
         (
-            "if agent_input.cleanup_denoised:",
+            # Step 12 / PR-12d D4b: anchored on the CONDITION rather than the
+            # whole line. Seam E added `and run_deliverable_naming is not
+            # None` — a behaviour-preserving guard for a task that names its
+            # own artifacts — and a whole-line anchor could not survive it.
+            # Same failure shape as the source-string pins upgraded in 12a C3,
+            # 12bc B7 and D0's B8: what this test owns is that the block uses
+            # the naming AUTHORITY, not that the `if` is spelled a given way.
+            "agent_input.cleanup_denoised",
             # C7d: the cleanup block ends the inference/scoring phase in
             # `execution.py`, so the anchor that follows it is now that phase's
             # return rather than run()'s next section comment.
@@ -270,8 +277,26 @@ def test_no_tuner_reader_executes_an_inlined_deliverable_template(
     coincidence.
     """
     source = _tuner_source()
-    start = source.index(start_anchor)
-    block = source[start : source.index(end_anchor, start)]
+    # Step 12 / PR-12d D-FINAL: a missing anchor used to raise
+    # `ValueError: substring not found` from `str.index`, which pytest reports
+    # as an ERROR with no indication of what this guard is for. A test that
+    # cannot say why it broke sends the next reader to `git blame` instead of
+    # to the invariant. The anchors are the guard's own scaffolding, so their
+    # disappearance is a maintenance fact, NOT evidence about the production
+    # invariant — it must be reported as such rather than as a silent crash.
+    start = source.find(start_anchor)
+    assert start != -1, (
+        f"the anchor {start_anchor!r} no longer appears in the tuner source. "
+        f"This says nothing about whether an inlined template survived — it "
+        f"means this guard can no longer FIND the block it audits. Re-anchor "
+        f"it on the moved code; never delete the case."
+    )
+    end = source.find(end_anchor, start)
+    assert end != -1, (
+        f"the closing anchor {end_anchor!r} no longer follows {start_anchor!r}. "
+        f"Re-anchor this case on the code that now ends the block."
+    )
+    block = source[start:end]
 
     assert expected_accessor in block, (
         f"{start_anchor!r} must resolve through the deliverable naming authority"

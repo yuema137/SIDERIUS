@@ -39,8 +39,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from core.sandbox_executor import TidmadSandbox, _task_scope_argv
+# PR-12d seam C RELOCATED the emitter beside the ABI it writes (R-11-11:
+# extract the responsibility rather than grow the launch consumer). Same
+# function, same body; aliased so every assertion below is unchanged.
+from core.sandbox_executor import TidmadSandbox
 from execute_tools.scope_artifact import ScopeArtifactError, scope_digest
+from execute_tools.scope_artifact import task_scope_argv as _task_scope_argv
 from execute_tools.task_data_path import bind_task_data_path
 from execute_tools.tidmad_data_path import TidmadScope, TidmadTaskDataPath
 from nodes.ml_hyperparameter_tune_agent.scope_acquisition import AttemptScopes
@@ -91,6 +95,37 @@ def _scopes() -> AttemptScopes:
 
 def _value(cmd: list[str], flag: str) -> str | None:
     return cmd[cmd.index(flag) + 1] if flag in cmd else None
+
+
+#: Rows the stubbed validation dataset reports, so the declared count is a
+#: value this test CHOSE rather than one the environment happened to supply.
+_STUB_VALIDATION_ROWS = 7
+
+
+class _SizedStub:
+    """A ``Sized`` stand-in for a materialized validation dataset."""
+
+    def __len__(self) -> int:
+        return _STUB_VALIDATION_ROWS
+
+
+def _stub_validation_materialization():
+    """Keep the training spawn off the real TIDMAD files.
+
+    Step 12 / PR-12d, F-12d-35. These two tests acquire an EVALUATION scope,
+    and since F-12d-27 hoisted ``validation_rows_argv`` to the training spawn
+    the PARENT now calls ``TaskDataPath.validation_dataset`` while building
+    argv — which for TIDMAD constructs a ``TIDMADEpochDataset`` over real
+    ``.h5`` files and FAILS CLOSED when materialized != requested.
+
+    So these tests silently began requiring a machine with the TIDMAD dataset
+    installed. They passed locally and failed on CI, which is exactly the
+    failure mode CLAUDE.md's portability rule describes: *local success is not
+    evidence of portability when a test touches datasets.* Stubbing the
+    materialization removes the dependency AND lets the row count be asserted
+    against a value the test owns, instead of whatever the local disk holds.
+    """
+    return patch.object(TidmadTaskDataPath, "validation_dataset", return_value=_SizedStub())
 
 
 # ======================================================================
@@ -186,7 +221,7 @@ class TestTheTrainingArgv:
         commit adds.
         """
         impl = TidmadTaskDataPath()
-        with bind_task_data_path(impl):
+        with bind_task_data_path(impl), _stub_validation_materialization():
             mock_run.side_effect = _train_success(sandbox, EXP_ID)
             sandbox.execute_training(
                 EXP_ID,
@@ -216,6 +251,19 @@ class TestTheTrainingArgv:
         added = {t for t in composed if t.startswith("--")} - {
             t for t in bound_without_scopes if t.startswith("--")
         }
+        # Step 12 / PR-12d seam C (B9) adds ONE more composed-only flag at the
+        # same acquisition: `--validation_requested_rows`, the CALLER's
+        # declared row count that `run_experiment_streaming` requires for an
+        # explicit eval scope and that nothing in production emitted. It is
+        # part of the same delta — a scope acquired but undeclarable is a
+        # scope the child refuses — so it is added to the expected set rather
+        # than excused from it.
+        added -= {"--validation_requested_rows"}
+        # ...and it declares the count the PARENT materialized, not one the
+        # child derived — the whole point of producing it on this side of the
+        # boundary. Asserted against the stub's length so the expectation is
+        # hardcoded rather than read back from the thing under test.
+        assert _value(composed, "--validation_requested_rows") == str(_STUB_VALIDATION_ROWS)
         assert added == set(SCOPE_FLAGS), (
             f"a composed run's argv gained {sorted(added)}; exactly the four "
             f"scope flags were expected and nothing else new"
@@ -228,7 +276,7 @@ class TestTheTrainingArgv:
     @patch("core.sandbox_executor._run_observed_subprocess")
     def test_the_artifact_lands_under_the_runs_configs_dir(self, mock_run, sandbox):
         mock_run.side_effect = _train_success(sandbox, EXP_ID)
-        with bind_task_data_path(TidmadTaskDataPath()):
+        with bind_task_data_path(TidmadTaskDataPath()), _stub_validation_materialization():
             sandbox.execute_training(
                 EXP_ID,
                 RUN_NAME,
@@ -252,7 +300,13 @@ class TestTheTrainingArgv:
 
 class TestTheChildRehydrates:
     def test_an_absent_pair_leaves_regime_A_alone(self):
-        from execute_tools.train_engine_sandbox import _load_transported_scope
+        # PR-12d seam C (B6) RELOCATED this reader beside its writer, so the
+        # inference child reuses the SAME verify-before-deserialize
+        # implementation instead of copying it. The order it enforces, and
+        # every assertion below, are unchanged.
+        from execute_tools.scope_artifact import (
+            load_transported_scope as _load_transported_scope,
+        )
 
         assert _load_transported_scope(None, None, leg="training") is None
 
@@ -262,13 +316,25 @@ class TestTheChildRehydrates:
         path names nothing. Proceeding on whichever half arrived is exactly the
         partial-wiring failure the design names.
         """
-        from execute_tools.train_engine_sandbox import _load_transported_scope
+        # PR-12d seam C (B6) RELOCATED this reader beside its writer, so the
+        # inference child reuses the SAME verify-before-deserialize
+        # implementation instead of copying it. The order it enforces, and
+        # every assertion below, are unchanged.
+        from execute_tools.scope_artifact import (
+            load_transported_scope as _load_transported_scope,
+        )
 
         with pytest.raises(ValueError, match="half-supplied"):
             _load_transported_scope(ref, digest, leg="training")
 
     def test_it_verifies_then_deserializes(self, tmp_path):
-        from execute_tools.train_engine_sandbox import _load_transported_scope
+        # PR-12d seam C (B6) RELOCATED this reader beside its writer, so the
+        # inference child reuses the SAME verify-before-deserialize
+        # implementation instead of copying it. The order it enforces, and
+        # every assertion below, are unchanged.
+        from execute_tools.scope_artifact import (
+            load_transported_scope as _load_transported_scope,
+        )
 
         impl = TidmadTaskDataPath()
         scope = TidmadScope(sample_set={0: [1, 2]}, seg_size=10_000)
@@ -283,7 +349,13 @@ class TestTheChildRehydrates:
         """The spy: `deserialize_scope` must never be reached. If verification
         ever moves after parsing, this fails.
         """
-        from execute_tools.train_engine_sandbox import _load_transported_scope
+        # PR-12d seam C (B6) RELOCATED this reader beside its writer, so the
+        # inference child reuses the SAME verify-before-deserialize
+        # implementation instead of copying it. The order it enforces, and
+        # every assertion below, are unchanged.
+        from execute_tools.scope_artifact import (
+            load_transported_scope as _load_transported_scope,
+        )
 
         impl = TidmadTaskDataPath()
         payload = impl.serialize_scope(TidmadScope(sample_set={0: [1]}, seg_size=64))
@@ -308,7 +380,13 @@ class TestTheChildRehydrates:
         """The pairing RULE, preserved: the binding and the scope must come
         from the same task. B6 closes the GAP without softening this.
         """
-        from execute_tools.train_engine_sandbox import _load_transported_scope
+        # PR-12d seam C (B6) RELOCATED this reader beside its writer, so the
+        # inference child reuses the SAME verify-before-deserialize
+        # implementation instead of copying it. The order it enforces, and
+        # every assertion below, are unchanged.
+        from execute_tools.scope_artifact import (
+            load_transported_scope as _load_transported_scope,
+        )
 
         payload = json.dumps({"kind": "pets_scope_v1", "rows": [1, 2]})
         path = tmp_path / "task_scope_x.json"

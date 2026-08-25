@@ -72,6 +72,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
+from agent.schemas.hyperparam_tuning import TaskCompositionRef
+
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.interpretation import InterpretationTaskBlocks
     from agent.schemas.task_config import ForwardContract
@@ -103,6 +105,9 @@ _MANIFEST_KEYS = frozenset(
         "implementor_blocks",
         "task_config",
         "deliverable",
+        "model_plugins",
+        "loss_plugins",
+        "objective",
     }
 )
 
@@ -232,6 +237,32 @@ class RunTaskComposition:
     two siblings use. ``None`` is the un-declared state and renders NOTHING —
     a composed task that declares none gets no implementor science rather
     than TIDMAD's.
+    """
+
+    model_plugins: Any = None
+    loss_plugins: Any = None
+    objective: Any = None
+    """The run's AUTHORITATIVE objective as a validated ``LossConfig``, or ``None``.
+
+    Step 12 / PR-12d, F-12d-31. Present only when the manifest declares an
+    ``objective:`` section. ``None`` means the task states no authoritative
+    objective and the planner's choice stands, which is every run that
+    exists today.
+    """
+
+    """The run's DECLARED model plugins, resolved and pinned, or ``None``.
+
+    Step 12 / PR-12d, seam P. A ``RunModelPluginBinding`` — the plugin
+    authority's own validated type — carried so the composition edge can bind
+    it for the run and the invariants lock can record which implementations
+    executed. This carrier does not become a second plugin authority: it holds
+    what ``ml_models.plugin_binding`` produced and nothing else, the same rule
+    ``deliverable_naming`` follows (R-11-3).
+
+    ``None`` is the un-declared state, binds nothing, and leaves plugin
+    resolution byte-identical to its pre-seam-P behaviour. Typed ``Any`` for
+    the same reason the naming is: importing the concrete type here would pull
+    ``ml_models`` into every importer of this module.
     """
 
     secondary_metrics: tuple[EvaluationMetric, ...] = ()
@@ -529,21 +560,176 @@ def _getattr_or_fail(module: Any, symbol: str, where: str, origin: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
+def _refuse_unknown_section_keys(
+    section: dict[str, Any], allowed: frozenset[str], where: str
+) -> None:
+    """Refuse a key a section does not define. Fails closed, by name.
+
+    Step 12 / PR-12d, seam A. The top-level unknown-key refusal at
+    ``_read_manifest`` never looked INSIDE a section, so a misspelled sibling
+    — ``configs:`` for ``config:`` — was silently dropped and the family
+    resolved as though nothing had been declared. That is the same
+    silent-default failure the top-level check exists to prevent, one level
+    down.
+    """
+    unknown = sorted(set(section) - allowed)
+    if unknown:
+        raise TaskCompositionError(
+            f"section {where!r} declares unknown key(s) {unknown}; known keys "
+            f"are {sorted(allowed)}. An unknown key inside a section is "
+            f"refused rather than ignored: a misspelled key would otherwise "
+            f"be silently dropped and the family would resolve as though "
+            f"nothing had been declared."
+        )
+
+
+def _validated_task_config_mapping(
+    section: dict[str, Any], manifest_dir: str, where: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The OPTIONAL ``config:`` mapping — shape only, never a field name.
+
+    Step 12 / PR-12d, seam A. This is the whole task-agnosticism rule made
+    executable: the composition authority checks that the declaration is a
+    mapping with string keys, and then hands it to the implementation's own
+    constructor. ``manifest_path`` and ``clips_path`` are strings the TASK's
+    constructor understands; nothing here knows either name, and nothing here
+    maps a task id to a set of arguments.
+
+    **The ``{ref: …}`` envelope, and why it is necessary.** Every other ref in
+    a manifest is resolved relative to the MANIFEST's directory, so a task
+    package composes identically wherever it is checked out and whatever the
+    cwd is. A ``config:`` value cannot get that for free: the framework must
+    not decide which of a task's own keys hold paths, because that is exactly
+    the task knowledge this seam exists to keep out. So the TASK declares it::
+
+        config:
+          manifest_path: {ref: ../../examples/<pack>/data/manifests/train.csv}
+          batch_hint: 32
+
+    A value that is a mapping with exactly the key ``ref`` is resolved through
+    the SAME ``_resolve_path`` authority every other ref uses; everything else
+    passes through verbatim. The framework still knows no field name — only a
+    shape the task opted into.
+
+    Returns ``(constructor_kwargs, declared_config)``. The second is the
+    AUTHORED form, and it is what enters the semantic fingerprint: hashing the
+    resolved absolute paths would make the same task package at two checkout
+    locations two different runs, which is precisely the Q-P1-2 exclusion the
+    fingerprint already applies to every other ref.
+    """
+    config = section.get("config")
+    if config is None:
+        return {}, {}
+    if not isinstance(config, dict):
+        raise TaskCompositionError(
+            f"{where}.config must be a mapping of constructor arguments the "
+            f"declared implementation understands; got {type(config).__name__}."
+        )
+    bad = sorted(str(key) for key in config if not isinstance(key, str) or not key.strip())
+    if bad:
+        raise TaskCompositionError(
+            f"{where}.config keys must be non-empty strings; got {bad}. They "
+            f"are passed to the implementation's constructor as keyword "
+            f"arguments, so a non-identifier key could never be accepted."
+        )
+
+    kwargs: dict[str, Any] = {}
+    for key, value in config.items():
+        if not isinstance(value, dict) or "ref" not in value:
+            kwargs[key] = value
+            continue
+        if set(value) != {"ref"}:
+            raise TaskCompositionError(
+                f"{where}.config[{key!r}] declares a 'ref' alongside "
+                f"{sorted(set(value) - {'ref'})}. A ref envelope carries "
+                f"exactly one key; a sibling next to it is a misspelling that "
+                f"would otherwise be passed through as an opaque mapping."
+            )
+        ref = value["ref"]
+        if not isinstance(ref, str) or not ref.strip():
+            raise TaskCompositionError(
+                f"{where}.config[{key!r}].ref must be a non-empty string path "
+                f"relative to the manifest; got {ref!r}."
+            )
+        kwargs[key] = _resolve_path(ref, manifest_dir)
+    return kwargs, dict(config)
+
+
+def _construct_declared_implementation(factory: Any, config: dict[str, Any], where: str) -> Any:
+    """Turn a resolved symbol plus its declared config into a live instance.
+
+    Extracted rather than inlined (§E.2): construction is its own
+    responsibility — it decides between an already-built instance and a
+    class/factory, applies the task's own constructor arguments, and owns
+    three named refusals. Folding it into :func:`_compose_task_data_path`
+    would have pushed that function's branch count past the budget for a
+    reason the decomposition rule already answers.
+
+    Three fail-closed branches, each named:
+
+    * ``config:`` declared against an already-CONSTRUCTED symbol —
+      configuration happens at construction, and a composition never mutates
+      an object it was handed;
+    * a key the declared implementation does not accept — the keys are the
+      implementation's OWN constructor arguments, and this authority never
+      invents or renames one;
+    * a constructor that raises for any other reason.
+    """
+    if _looks_like_instance(factory):
+        if config:
+            raise TaskCompositionError(
+                f"{where}.config was declared, but {where}.symbol resolves to "
+                f"an already-constructed instance rather than a class or "
+                f"factory. Configuration happens AT construction — a "
+                f"composition never mutates an object it was handed."
+            )
+        return factory
+    if not callable(factory):
+        return factory
+    try:
+        return factory(**config)
+    except TypeError as exc:
+        raise TaskCompositionError(
+            f"{where}: the declared implementation does not accept the "
+            f"declared config {sorted(config)}: {exc}. The config keys are "
+            f"the implementation's OWN constructor arguments; the composition "
+            f"authority never invents or renames them."
+        ) from exc
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"{where}: the declared implementation raised while being "
+            f"constructed with config {sorted(config)}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+
+
 def _compose_task_data_path(
     section: dict[str, Any], manifest_dir: str
-) -> tuple[TaskDataPath, ResolvedPluginRef | None]:
+) -> tuple[TaskDataPath, ResolvedPluginRef | None, dict[str, Any]]:
     """Load the implementation, register it if new, and return the OBJECT.
 
     Registration is the existing public registry's own call, so a duplicate
     id is refused by the authority that owns ids rather than by a second
     opinion here.
 
-    Re-composing the same task twice in one process (tests, sequential runs)
-    is idempotent, and it returns the **registered** instance rather than the
-    freshly constructed one. That is not a detail: the child process resolves
-    a transported id through the registry, so if the parent bound a second
-    instance of the same class the two ends would hold different objects
-    while every id-based check still passed. One id, one object.
+    **"One id, one object" means one SEMANTIC IMPLEMENTATION IDENTITY, not
+    one immortal Python instance** (Step 12 / PR-12d, ruling A1). Source
+    already implied it: ``content_identity`` is class-and-source derived, so a
+    bare and a CONFIGURED instance of the same class are identically
+    identified, and a child process can never share the parent's object
+    anyway. So the registered instance ANCHORS the identity — that is what
+    keeps a transported id resolvable in every child — while a declaration
+    carrying ``config:`` yields the run-specific configured instance, and the
+    bare object is **never returned in its place**.
+
+    Before this, ``factory()`` was called with no arguments and no ``config:``
+    key existed, so ``PetsTaskDataPath`` and ``DavisTaskDataPath`` raised BY
+    NAME at the first tuner attempt — instructing the operator to declare a
+    section key the composition authority did not implement (F-12d-8).
+
+    Returns ``(implementation, plugin_ref, config)``. The config travels out
+    because it is SEMANTIC: changing ``manifest_path`` changes what the run
+    trains on, so it must move the composition fingerprint.
     """
     from execute_tools.task_data_path import (
         TaskBindingContext,
@@ -556,10 +742,13 @@ def _compose_task_data_path(
     )
 
     where = "task_data_path"
-    factory, plugin_ref = _load_symbol(section, manifest_dir, where)
-    resolved: Any = (
-        factory() if callable(factory) and not _looks_like_instance(factory) else factory
+    _refuse_unknown_section_keys(
+        section, frozenset({"file", "module", "symbol", "id", "config"}), where
     )
+    config, declared_config = _validated_task_config_mapping(section, manifest_dir, where)
+    factory, plugin_ref = _load_symbol(section, manifest_dir, where)
+
+    resolved = _construct_declared_implementation(factory, config, where)
 
     declared = getattr(resolved, "task_data_path_id", None)
     if not isinstance(declared, str) or not declared:
@@ -609,7 +798,21 @@ def _compose_task_data_path(
                 f"the NEW plugin's identity — the composition fingerprint would "
                 f"name something that never executed."
             )
-        return resolve_task_data_path(TaskBindingContext(task_data_path_id=declared)), plugin_ref
+        if config:
+            # Ruling A1. The registered instance ANCHORS the identity — the
+            # check above just proved the content matches — but it was built
+            # with nothing, and this declaration asked for configured
+            # semantics. Returning the bare object here is exactly the defect:
+            # every built-in registers at module import in all three children,
+            # so the registered instance ALWAYS exists first, and a composed
+            # Pets or DAVIS run would silently receive the one that cannot
+            # build a scope.
+            return cast("TaskDataPath", resolved), plugin_ref, declared_config
+        return (
+            resolve_task_data_path(TaskBindingContext(task_data_path_id=declared)),
+            plugin_ref,
+            declared_config,
+        )
 
     # A plugin's symbol is `Any` by construction — it came from a file this
     # module executed. The narrowing is DISCHARGED on the very next line:
@@ -622,7 +825,7 @@ def _compose_task_data_path(
         register_task_data_path(impl)
     except TaskDataPathRegistrationError as exc:
         raise TaskCompositionError(f"{where}: {exc}") from exc
-    return impl, plugin_ref
+    return impl, plugin_ref, declared_config
 
 
 def _looks_like_instance(candidate: Any) -> bool:
@@ -696,6 +899,28 @@ def _compose_metric(
             f"{where}: the declaration declares id {spec.id!r} but the "
             f"instantiated metric reports {metric.spec.id!r}. An implementation "
             "that rewrites its own spec breaks the declaration's authority."
+        )
+    # Step 12 / PR-12d D4c — F-12d-3. The check ABOVE compares the declaration
+    # to itself (`EvaluationMetric.__init__` assigns `self.spec = spec`), so it
+    # can only fire for an implementation that rewrites its own id. It is kept
+    # — that case is real — but it never was the check this line needs.
+    #
+    # `IMPLEMENTS` is what the implementation asserts INDEPENDENTLY of the
+    # declaration it was handed. When it makes a claim and the declared id is
+    # not in it, the two parties disagree about what arithmetic will run, and
+    # composition refuses. An implementation making no claim composes under any
+    # id, so `MetricSpec.id` stays opaque (D16/C5) and every pre-D4c binding
+    # remains valid.
+    claimed = getattr(type(metric), "IMPLEMENTS", ())
+    if claimed and spec.id not in claimed:
+        raise TaskCompositionError(
+            f"{where}: the declaration declares id {spec.id!r}, but "
+            f"{type(metric).__name__} states it implements "
+            f"{', '.join(repr(c) for c in claimed)}. Binding a metric id to an "
+            "implementation that computes something else produces a terminal "
+            "report labelled with one metric and populated by another — the "
+            "declaration would name the science and the arithmetic would "
+            "disagree with it, silently."
         )
     return metric, payload, plugin_ref
 
@@ -778,6 +1003,329 @@ def _compose_secondary_metrics(
         declaration_paths.append(_resolve_path(_require(entry, "declaration", where), manifest_dir))
 
     return tuple(metrics), declarations, plugins, declaration_paths
+
+
+def _compose_model_plugins(raw: dict[str, Any], manifest_dir: str):
+    """The OPTIONAL ``model_plugins`` section → a run-scoped plugin binding.
+
+    Step 12 / PR-12d, seam P. The task DECLARES where its own model plugins
+    live and which model types that root must produce; the framework resolves
+    them through the SAME public loader the legacy path uses and pins their
+    content identities. There is no task name here and no catalog — the
+    declaration belongs to the pack, exactly as ``task_health`` already does.
+
+    Shape, deliberately the same optional-section idiom the three ``*_blocks``
+    families use — a mapping, ``none: true`` for a NAMED absence, otherwise a
+    ``dir`` ref plus a ``require`` list::
+
+        model_plugins:
+          dir: ../../examples/oxford_iiit_pet/plugins
+          require: [pets_reference_cnn]
+
+    An ABSENT section and ``none: true`` both yield ``None``, which binds
+    nothing: a manifest that declares no model plugins composes exactly as it
+    did before seam P, and its semantic fingerprint is byte-unchanged.
+
+    Returns ``(binding_or_None, resolved_root_or_None)``.
+
+    Raises:
+        TaskCompositionError: the section is not a mapping, declares both
+            ``none: true`` and a ``dir``, omits ``dir`` or ``require``,
+            declares a malformed ``require`` list, or the resolver refuses.
+    """
+    from ml_models.plugin_binding import (
+        ModelPluginResolutionError,
+        normalized_ref,
+        resolve_declared_model_plugins,
+    )
+
+    where = "model_plugins"
+    section = raw.get(where)
+    if section is None:
+        return None, None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section {where!r} must be a mapping; got {type(section).__name__}."
+        )
+    if section.get("none") is True:
+        if "dir" in section:
+            raise TaskCompositionError(
+                f"{where} declares both 'none: true' and a 'dir'. A task either "
+                "ships model plugins or explicitly ships none."
+            )
+        return None, None
+
+    dir_ref = _require(section, "dir", f"{where} (without 'none: true')")
+    required = section.get("require")
+    if not isinstance(required, list) or not required:
+        raise TaskCompositionError(
+            f"{where} requires a non-empty list 'require' naming the model "
+            f"type(s) the declared root must produce; got {required!r}. "
+            "Without it an unresolvable plugin would be indistinguishable "
+            "from a root that simply had nothing in it."
+        )
+    if not all(isinstance(name, str) and name.strip() for name in required):
+        raise TaskCompositionError(
+            f"{where}.require must contain only non-empty strings; got {required!r}."
+        )
+
+    root = _resolve_path(dir_ref, manifest_dir)
+    try:
+        binding = resolve_declared_model_plugins(
+            configured_ref=normalized_ref(dir_ref),
+            root=root,
+            required_model_types=tuple(str(name) for name in required),
+        )
+    except ModelPluginResolutionError as exc:
+        raise TaskCompositionError(f"{where}: {exc}") from exc
+    return binding, root
+
+
+def _compose_loss_plugins(raw: dict[str, Any], manifest_dir: str):
+    """The OPTIONAL ``loss_plugins`` section → the run's declared loss roots.
+
+    Step 12 / PR-12d D4c, closing two of A3's four named blockers: there was
+    no way for a pack to DECLARE where its objective lives, and loss-directory
+    discovery therefore never saw a pack at all. DAVIS's exact-L1 objective
+    could be written but not reached.
+
+    **Why this is not folded into ``model_plugins``**, even though a pack keeps
+    both in one directory: the two environment variables were split on purpose
+    (`core/subprocess_env.py:40-42`) because sharing one masks the globally
+    registered loss library whenever only a model directory is set. One
+    directory, two channels.
+
+    Shape mirrors ``model_plugins`` exactly, minus ``require``: a loss is
+    resolved BY NAME at training time through ``LossConfig.loss_name``, so the
+    "which types must this root produce" question has no analogue here — the
+    run's own `loss_name` already names it, and an unresolvable one is already
+    a named refusal in `_load_custom_loss`::
+
+        loss_plugins:
+          dir: ../../examples/davis_future_prediction/plugins
+
+    An ABSENT section and ``none: true`` both yield ``()``, which binds
+    nothing: legacy loss discovery is untouched and the semantic fingerprint
+    is byte-unchanged.
+
+    Returns ``(roots_tuple, resolved_root_or_None)``.
+    """
+    where = "loss_plugins"
+    section = raw.get(where)
+    if section is None:
+        return (), None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section {where!r} must be a mapping; got {type(section).__name__}."
+        )
+    if section.get("none") is True:
+        if "dir" in section:
+            raise TaskCompositionError(
+                f"{where} declares both 'none: true' and a 'dir'. A task either "
+                "ships loss plugins or explicitly ships none."
+            )
+        return (), None
+
+    dir_ref = _require(section, "dir", f"{where} (without 'none: true')")
+    root = _resolve_path(dir_ref, manifest_dir)
+    if not os.path.isdir(root):
+        raise TaskCompositionError(
+            f"{where}.dir names {dir_ref!r}, which does not resolve to a directory "
+            f"at {root!r}. A declared objective root that does not exist would "
+            "leave the run silently falling back to the global loss library."
+        )
+    return (root,), root
+
+
+def _objective_name_declared_by(path: str) -> str | None:
+    """The ``PLUGIN_LOSS_TYPE`` a loss file declares, by TEXT not import.
+
+    Read rather than imported on purpose: this runs over every candidate in the
+    run's loss search path, and importing arbitrary modules to answer "does
+    this shadow my objective?" would execute third-party code as a side effect
+    of a safety check.
+    """
+    try:
+        with open(path, encoding="utf-8", errors="ignore") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    match = re.search(r"^PLUGIN_LOSS_TYPE\s*[:=][^=]*?['\"]([^'\"]+)['\"]", text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def _refuse_ambiguous_objective(
+    declared_name: str,
+    resolved_ref: ResolvedPluginRef | None,
+    manifest_dir: str,
+    where: str,
+) -> None:
+    """One authoritative declaration must resolve to ONE implementation.
+
+    Step 12 / PR-12d, F-12d-31 — the C12-I substitution finding. Runtime
+    resolves a custom loss BY NAME over a UNION (``SIDERIUS_LOSS_DIRS`` ∪
+    ``agent_generated/losses/``, plus an in-memory registry). So a second file
+    anywhere in that search path declaring the same ``PLUGIN_LOSS_TYPE`` could
+    be the one actually executed, while the fingerprint pinned the declared
+    one — selection and identity silently describing different code.
+
+    For an AUTHORITATIVELY DECLARED objective that must fail loudly. This does
+    NOT touch legacy loss discovery: a run that declares no ``objective:`` is
+    unaffected, name-based resolution is unchanged, and nothing here alters
+    which directories are searched. It only refuses the ambiguity for the one
+    objective a manifest claims authority over.
+
+    ``resolved_ref is None`` is the ``module:`` form — an in-tree import whose
+    identity the repository's own commit already pins, with no directory to be
+    shadowed from.
+    """
+    if resolved_ref is None:
+        return
+    declared_path = os.path.realpath(resolved_ref.absolute_path)
+    # PRODUCTION's own search path, not a reconstruction of it: asking a
+    # different question than runtime asks is how a guard passes while the
+    # thing it guards is broken.
+    try:
+        from agent_generated._loss_loader import _resolve_loss_dirs
+
+        search_roots = list(_resolve_loss_dirs())
+    except Exception:  # pragma: no cover - loader absent in a trimmed checkout
+        search_roots = []
+    search_roots.append(os.path.dirname(declared_path))
+
+    shadows: list[str] = []
+    for root in search_roots:
+        if not os.path.isdir(root):
+            continue
+        for entry in sorted(os.listdir(root)):
+            if not entry.endswith(".py"):
+                continue
+            candidate = os.path.realpath(os.path.join(root, entry))
+            if candidate == declared_path or candidate in shadows:
+                continue
+            if _objective_name_declared_by(candidate) == declared_name:
+                shadows.append(candidate)
+    if shadows:
+        raise TaskCompositionError(
+            f"{where} declares the authoritative objective {declared_name!r}, but "
+            f"{len(shadows)} OTHER implementation(s) in this run's loss search "
+            f"path declare the same name: {shadows}. Runtime resolves a custom "
+            f"loss by name, so which one trains would be decided by search "
+            f"order while the run's identity pinned "
+            f"{resolved_ref.configured_ref!r}. An authoritative objective "
+            "resolves to exactly one implementation or the run refuses."
+        )
+
+
+def _compose_objective(raw: dict[str, Any], manifest_dir: str):
+    """The OPTIONAL ``objective`` section → the run's AUTHORITATIVE loss.
+
+    Step 12 / PR-12d, F-12d-31. ``loss_plugins:`` made a pack's objective
+    REACHABLE; nothing made it SELECTED. A composed DAVIS run therefore trained
+    with ``smooth_l1`` twice, because the planner is told ``smooth_l1`` is the
+    only valid regressor loss and never learns the task ships its own. §I
+    requires exact MAE/L1, so "the objective a task declares" has to be a
+    typed authority, not a prompt suggestion an LLM may decline.
+
+    **The name is NOT restated here.** The manifest points at the
+    implementation and at the symbol that implementation uses to declare
+    itself::
+
+        objective:
+          implementation:
+            file: ../../examples/davis_future_prediction/plugins/davis_exact_l1_loss.py
+            symbol: PLUGIN_LOSS_TYPE
+
+    ``_load_symbol`` returns that symbol's VALUE — the loss name the plugin
+    claims — so the implementation is the single source of its own identity
+    and the manifest cannot disagree with it. Exactly the ``IMPLEMENTS``
+    discipline F-12d-3 established for metrics, one family over.
+
+    **No new selection vocabulary.** The result is an ordinary validated
+    :class:`LossConfig` on the existing ``custom`` + ``loss_name`` route —
+    ``loss_type`` keeps its five members, nothing is added to a central enum,
+    and no task name appears anywhere.
+
+    Absent section ⇒ ``(None, None)``: no override, no fingerprint key, legacy
+    byte-unchanged.
+
+    Returns ``(loss_config_or_None, resolved_ref_or_None)``.
+    """
+    where = "objective"
+    section = raw.get(where)
+    if section is None:
+        return None, None
+    if not isinstance(section, dict):
+        raise TaskCompositionError(
+            f"section {where!r} must be a mapping; got {type(section).__name__}."
+        )
+    if section.get("none") is True:
+        if "implementation" in section:
+            raise TaskCompositionError(
+                f"{where} declares both 'none: true' and an 'implementation'. A task "
+                "either declares an authoritative objective or explicitly declares none."
+            )
+        return None, None
+
+    implementation = section.get("implementation")
+    if not isinstance(implementation, dict):
+        raise TaskCompositionError(
+            f"{where} (without 'none: true') requires an 'implementation' mapping "
+            f"naming the plugin file and the symbol it declares itself with; got "
+            f"{implementation!r}."
+        )
+    declared_name, resolved_ref = _load_symbol(
+        implementation, manifest_dir, f"{where}.implementation"
+    )
+    if not isinstance(declared_name, str) or not declared_name.strip():
+        raise TaskCompositionError(
+            f"{where}.implementation resolves a loss name that is not a non-empty "
+            f"string: {declared_name!r}. The symbol named here must be the "
+            "implementation's own declaration of the loss it provides (e.g. "
+            "PLUGIN_LOSS_TYPE), so the plugin states its identity and the "
+            "manifest merely points at it."
+        )
+
+    _refuse_ambiguous_objective(declared_name, resolved_ref, manifest_dir, where)
+
+    from ml_models.models_format_sandbox import LossConfig
+
+    try:
+        loss_config = LossConfig(loss_type="custom", loss_name=declared_name)
+    except Exception as exc:
+        raise TaskCompositionError(
+            f"{where}.implementation declares loss name {declared_name!r}, which does "
+            f"not form a valid LossConfig: {type(exc).__name__}: {exc}"
+        ) from exc
+    return loss_config, resolved_ref
+
+
+def build_task_composition_ref(task_composition: Any) -> TaskCompositionRef | None:
+    """Project the run's composition into what the TUNER needs (D-12a-1).
+
+    Step 12 / PR-12d D8a — relocated from ``workflows/model_exploration.py`` so the tuner's standalone CLI (`nodes/ml_hyperparameter_tune_agent/cli.py`) can call it without importing an ORCHESTRATOR module that itself imports the tuner node — the dependency direction CLAUDE.md's decomposition rule asks every module to respect. `model_exploration.py` re-imports it from here; nothing about the function's behaviour moved.
+
+    One place builds it, from values the composition already resolved. The
+    tuner then learns "this run is composed, and by what" from its INPUT
+    instead of asking the ambient environment — the W4 reference-science guard
+    used to call ``active_task_data_path()`` for that, and the per-model
+    run-invariants lock had no composition values to record at all.
+
+    Deliberately NOT a second authority: nothing is re-derived here, and the
+    record/output composition-fingerprint stamps keep reading
+    ``active_composition_fingerprint()`` (Step 11 F-11-C10-a, AST-pinned).
+
+    Returns ``None`` for an un-composed run, which is what makes the whole
+    mechanism invisible to regime A.
+    """
+    if task_composition is None:
+        return None
+    return TaskCompositionRef(
+        semantic_fingerprint=task_composition.semantic_fingerprint,
+        task_data_path_id=type(task_composition.task_data_path).task_data_path_id,
+        task_health_binding=task_composition.task_health_binding,
+        objective=getattr(task_composition, "objective", None),
+    )
 
 
 def _compose_task_health(section: dict[str, Any], manifest_dir: str) -> TaskHealthBinding:
@@ -973,6 +1521,7 @@ def compute_semantic_fingerprint(
     deliverable_naming_declaration: dict[str, Any] | None = None,
     proposal_blocks: Any = None,
     implementor_blocks: Any = None,
+    task_data_path_config: dict[str, Any] | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -1043,6 +1592,16 @@ def compute_semantic_fingerprint(
     # byte-unchanged.
     if implementor_blocks is not None:
         payload["implementor_blocks"] = implementor_blocks.model_dump(mode="json")
+    # Step 12 / PR-12d, seam A (ruling A1) — the task-instance CONFIG is
+    # semantic: `manifest_path` decides which images a Pets run trains on and
+    # `clips_path` which clips DAVIS uses, so two runs configured differently
+    # are not the same run. Without this, changing either would leave resume
+    # identity unchanged — "a second hole, of the same family as the one being
+    # closed". ADDITIVE WHEN NON-EMPTY, on the same precedent as the four
+    # additions above, so every existing composed manifest's fingerprint is
+    # byte-unchanged and its resume still validates.
+    if task_data_path_config:
+        payload["task_data_path_config"] = task_data_path_config
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -1150,7 +1709,7 @@ def compose_task_data_path_from_manifest(manifest_path: str) -> TaskDataPath:
     """
     resolved_manifest = os.path.abspath(manifest_path)
     raw = _read_manifest(resolved_manifest)
-    impl, _plugin = _compose_task_data_path(
+    impl, _plugin, _config = _compose_task_data_path(
         _section(raw, "task_data_path", resolved_manifest),
         os.path.dirname(resolved_manifest),
     )
@@ -1334,7 +1893,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     source_paths: dict[str, str] = {}
     plugins: list[ResolvedPluginRef] = []
 
-    impl, impl_plugin = _compose_task_data_path(
+    impl, impl_plugin, task_data_path_config = _compose_task_data_path(
         _section(raw, "task_data_path", resolved_manifest), manifest_dir
     )
     if impl_plugin is not None:
@@ -1374,6 +1933,49 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
     plugins.extend(secondary_plugins)
     for _index, _path in enumerate(secondary_declaration_paths):
         source_paths[f"secondary_metric_declaration[{_index}]"] = _path
+
+    # Step 12 / PR-12d, seam P — the OPTIONAL model-plugin declaration. Its
+    # resolved identities join the SAME `plugins` set the fingerprint already
+    # hashes, so editing a pack plugin moves the run's identity and fails a
+    # resume closed, and a manifest that declares none is byte-unchanged.
+    model_plugin_binding, model_plugin_root = _compose_model_plugins(raw, manifest_dir)
+    loss_plugin_roots, loss_plugin_root = _compose_loss_plugins(raw, manifest_dir)
+    if model_plugin_binding is not None:
+        source_paths["model_plugins"] = str(model_plugin_root)
+        plugins.extend(
+            ResolvedPluginRef(
+                configured_ref=f"{plugin.configured_ref}/{plugin.member}",
+                symbol=plugin.model_type,
+                content_sha256=plugin.content_sha256,
+                absolute_path=plugin.absolute_path,
+            )
+            for plugin in model_plugin_binding.plugins
+        )
+    # Step 12 / PR-12d D4c: the declared loss ROOT joins `source_paths`, so the
+    # run's identity records where its objective came from. The individual loss
+    # files are deliberately NOT hashed into `plugins` the way model plugins
+    # are: a loss is resolved by NAME at training time from whatever the root
+    # holds, so hashing every file in the directory would make the run identity
+    # depend on losses it never loads.
+    if loss_plugin_root is not None:
+        source_paths["loss_plugins"] = str(loss_plugin_root)
+
+    # Step 12 / PR-12d, F-12d-31 wire C — the AUTHORITATIVE objective's content
+    # identity. Appended to the SAME `plugins` set the fingerprint already
+    # hashes, exactly as seam P does for model plugins, so editing the declared
+    # objective moves the run's identity and fails a resume closed. Declaring an
+    # authoritative objective while leaving the selected behaviour outside
+    # semantic identity would be an incomplete contract — which is why the
+    # operator ruled the three wires land together.
+    #
+    # This is NOT the "hash every loss in the root" rule the comment above
+    # rejects: exactly ONE file is hashed, the one the manifest explicitly
+    # named, and only when a manifest names it. A task declaring no objective
+    # adds no plugin entry and its fingerprint is byte-unchanged.
+    composed_objective, objective_ref = _compose_objective(raw, manifest_dir)
+    if objective_ref is not None:
+        source_paths["objective"] = str(objective_ref.absolute_path)
+        plugins.append(objective_ref)
 
     # Step 11 C6 — the OPTIONAL naming declaration, validated by the
     # Deliverable Contract's own type. Absent ⇒ the shipped TIDMAD naming.
@@ -1424,6 +2026,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         ),
         proposal_blocks=proposal_blocks,
         implementor_blocks=implementor_blocks,
+        task_data_path_config=task_data_path_config,
     )
 
     return RunTaskComposition(
@@ -1444,6 +2047,9 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         ),
         secondary_metrics=secondary_metrics,
         deliverable_naming=deliverable_naming,
+        model_plugins=model_plugin_binding,
+        loss_plugins=loss_plugin_roots or None,
+        objective=composed_objective,
     )
 
 
@@ -1553,6 +2159,20 @@ def bind_run_task_composition(
             from execute_tools.deliverable_spec import bind_deliverable_naming
 
             stack.enter_context(bind_deliverable_naming(composition.deliverable_naming))
+        # Step 12 / PR-12d, seam P — bound only when the task DECLARED model
+        # plugins, so an un-declared composition binds nothing and every
+        # child's plugin environment is byte-identical to its pre-seam-P
+        # value. Placed before the data path because a task's own model
+        # implementation must be reachable by the time anything asks the run
+        # to build or execute against a scope.
+        if composition.model_plugins is not None:
+            from ml_models.plugin_binding import bind_run_model_plugins
+
+            stack.enter_context(bind_run_model_plugins(composition.model_plugins))
+        if composition.loss_plugins is not None:
+            from ml_models.plugin_binding import bind_run_loss_plugin_roots
+
+            stack.enter_context(bind_run_loss_plugin_roots(composition.loss_plugins))
         stack.enter_context(bind_task_data_path(composition.task_data_path))
         stack.enter_context(bind_dataset_profile(composition.dataset_profile))
         stack.enter_context(bind_run_metric(composition.metric))

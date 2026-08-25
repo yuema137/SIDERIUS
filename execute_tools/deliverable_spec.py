@@ -103,6 +103,29 @@ class DeliverableNaming(BaseModel):
     ``DeliverableNaming()`` therefore yields the shipped default with no
     declaration needed, which is what "REQUIRED FOR LEGACY RUNS? NO" means
     mechanically.
+
+    **SCOPE, NARROWED — Step 12 / PR-12d seam E (A4).** This is *not* the
+    generic composed-task deliverable contract, and it never was. It is the
+    **INDEXED naming capability**: a TIDMAD implementation detail, plus an
+    OPTIONAL capability any task may declare — the same architectural move
+    ``TaskScopeCapability`` made beside the frozen four-method
+    ``TaskDataPath``.
+
+    A deliverable's task semantics already live in
+    ``TaskDataPath.write_deliverable`` / ``read_evaluation_payload``, where
+    Pets and DAVIS name their artifacts outright and neither carries an index
+    of any kind. What generic core genuinely holds is an **opaque integer
+    input identity** — which input this deliverable answers — never an index
+    in a filename. So the accessors take ``input_identity``; rendering it as
+    a zero-padded component is this class's private decision.
+
+    **The fix for "a contrast deliverable has no file index" was NOT to make
+    the field ``int | None``.** Widening the generic abstraction until every
+    task must look like TIDMAD is what produced the defect; narrowing the
+    TIDMAD-specific responsibility is what removes it. A task that has no
+    indexed template declares no naming, and
+    :func:`resolve_deliverable_naming` then REFUSES rather than silently
+    handing back this shipped default.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -160,28 +183,34 @@ class DeliverableNaming(BaseModel):
             raise ValueError(f"extension must start with '.' and name a suffix; got {value!r}.")
         return value
 
-    def _index(self, file_index: int) -> str:
-        return str(int(file_index)).zfill(self.index_width)
+    def _index(self, input_identity: int) -> str:
+        return str(int(input_identity)).zfill(self.index_width)
 
-    def name(self, *, model_type: str, run_name: str, exp_id: str, file_index: int) -> str:
+    def name(self, *, model_type: str, run_name: str, exp_id: str, input_identity: int) -> str:
         """The fully qualified deliverable name.
 
         The shape every production producer, reader and cleanup consumer
         agrees on: ``<prefix>_<model>_<run>_<exp>_<index><ext>``.
+
+        ``input_identity`` is what generic core actually holds: an opaque
+        INTEGER identifying which input this deliverable answers. Whether it
+        becomes a zero-padded component of a filename is this capability's
+        business alone — see the class docstring on why the parameter is no
+        longer called ``file_index``.
         """
         return (
             f"{self.prefix}_{model_type}_{run_name}_{exp_id}_"
-            f"{self._index(file_index)}{self.extension}"
+            f"{self._index(input_identity)}{self.extension}"
         )
 
-    def unqualified_name(self, *, model_type: str, file_index: int) -> str:
+    def unqualified_name(self, *, model_type: str, input_identity: int) -> str:
         """The legacy ``mode == "fix"`` name — model and index only.
 
         A genuinely different NAME SHAPE, not a different directory: the fix
         path predates run/exp scoping and omits both. Preserved rather than
         unified, because files with this name exist on disk.
         """
-        return f"{self.prefix}_{model_type}_{self._index(file_index)}{self.extension}"
+        return f"{self.prefix}_{model_type}_{self._index(input_identity)}{self.extension}"
 
     def attempt_glob(self, *, model_type: str, run_name: str, exp_id: str) -> str:
         """Fully qualified match for ONE attempt's own outputs.
@@ -204,7 +233,7 @@ class DeliverableNaming(BaseModel):
         """Match any deliverable, for workspace-wide artifact audits."""
         return f"{self.prefix}_*{self.extension}"
 
-    def file_index_of(self, name: str) -> int | None:
+    def input_identity_of(self, name: str) -> int | None:
         """Parse the file index back out of a deliverable name.
 
         The INVERSE of :meth:`name`, and the reason it belongs here: an audit
@@ -340,17 +369,123 @@ def active_deliverable_naming() -> DeliverableNaming | None:
     return _ACTIVE_DELIVERABLE_NAMING.get()
 
 
-def resolve_deliverable_naming() -> DeliverableNaming:
-    """The naming in force: a composed run's declared one, else the shipped.
+class DeliverableNamingNotApplicableError(RuntimeError):
+    """A composed run reached the INDEXED naming capability without one.
 
-    Step 11 C6. Called at the two places a naming is CONSTRUCTED — the
-    sandbox and :func:`derive_tidmad_deliverable_spec` — so both cleanup
-    consumers pick up a composed task's template without a single call-site
-    change. Before this, a contrast run's cleanup glob matched filenames it
-    had never written.
+    Step 12 / PR-12d seam E (A4, F-A4-1). Raised — never defaulted around —
+    because the default IS the defect: see :func:`resolve_deliverable_naming`.
+    """
+
+
+def resolve_deliverable_naming() -> DeliverableNaming:
+    """The indexed naming in force, or an honest refusal.
+
+    Step 11 C6 introduced this as *"a composed run's declared one, else the
+    shipped"*. Step 12 / PR-12d seam E (**A4**, closing **F-A4-1**) removes
+    the second half for composed runs, because that fallback was not a
+    default — it was a wrong answer delivered silently.
+
+    A composed **non-TIDMAD** run that declares no naming has no indexed
+    filename template at all: its artifact semantics live in
+    ``TaskDataPath.write_deliverable`` / ``read_evaluation_payload``, where
+    Pets and DAVIS own their names outright. Handing such a run
+    ``DeliverableNaming()`` gave it TIDMAD's ``denoised_*.h5`` template, and
+    the consequence was not cosmetic: the ``--cleanup_denoised`` glob then
+    addressed a filename pattern the run had never written — the Step-11
+    ``extra="forbid"`` lesson, arrived at from the other direction.
+
+    The four states. Note what the refusal keys on: a **DECLARED capability**,
+    never a task identity (C-P56-1). The first draft of this keyed on
+    composition PRESENCE alone, and TIDMAD's own composed manifest declares no
+    ``deliverable:`` naming — so a composed TIDMAD run would have been refused
+    its own shipped template. Two Step-11 tests said so immediately. The right
+    question is not *"is this run composed?"* but *"does this run's task name
+    its artifacts ITSELF?"*:
+
+    * a naming is BOUND — return it, composed or not;
+    * NOT bound and NOT composed — the legacy path, byte-for-byte unchanged;
+    * composed, and the task declares NO ``deliverable_name`` of its own —
+      the shipped indexed template, which is what TIDMAD's composed manifest
+      has always resolved and must keep resolving;
+    * composed, and the task DOES name its own artifacts (Pets, DAVIS) —
+      REFUSE. *Generic naming capability not applicable; physical artifact
+      semantics are task-owned.* This is the F-A4-1 state, and the one where
+      the old fallback silently handed back a template the run never writes.
+
+    Callers that can proceed without an indexed template must ask
+    :func:`active_deliverable_naming`, which reports the absence as ``None``
+    rather than raising. That is the ``active_*`` / ``resolve_*`` split
+    Step 11 established on every run-scoped binding, applied here.
+
+    Raises:
+        DeliverableNamingNotApplicableError: when the run is composed and
+            declared no naming capability.
     """
     bound = _ACTIVE_DELIVERABLE_NAMING.get()
-    return bound if bound is not None else DeliverableNaming()
+    if bound is not None:
+        return bound
+
+    if _task_names_its_own_deliverables():
+        raise DeliverableNamingNotApplicableError(
+            "this composed run declared no deliverable naming capability, so it has "
+            "no indexed filename template; physical artifact semantics are task-owned "
+            "(TaskDataPath.write_deliverable / read_evaluation_payload). Resolving the "
+            "shipped TIDMAD template here would give the run a name it never writes — "
+            "and a cleanup glob that matches files it never created. Declare "
+            "`deliverable_naming:` in the task manifest if this task genuinely names "
+            "its artifacts by a zero-padded input index."
+        )
+    return DeliverableNaming()
+
+
+def _task_names_its_own_deliverables() -> bool:
+    """Does the run's bound task own its artifact names outright?
+
+    The discriminator for :func:`resolve_deliverable_naming`'s refusal, and
+    the reason it is a separate function: it must be readable as *"a declared
+    capability"* and nothing else.
+
+    ``task_declared_deliverable_name`` reads a module-level
+    ``deliverable_name`` beside the implementation — the same function that
+    task's ``write_deliverable`` and ``read_evaluation_payload`` already agree
+    on. Asking for its PRESENCE here therefore asks exactly the right
+    question, against exactly the authority that answers it elsewhere.
+
+    Returns ``False`` when nothing is bound, so an un-composed run never
+    reaches the refusal.
+    """
+    import sys
+
+    from execute_tools.task_data_path import active_task_data_path
+
+    impl = active_task_data_path()
+    if impl is None:
+        return False
+    module = sys.modules.get(type(impl).__module__)
+    return callable(getattr(module, "deliverable_name", None))
+
+
+def indexed_cleanup_naming() -> DeliverableNaming | None:
+    """The naming a CLEANUP GLOB may use, or ``None`` when there is none.
+
+    Step 12 / PR-12d seam E (F-A4-1). The cleanup sites are where an absent
+    indexed template stops being an abstraction question and becomes a
+    filesystem operation: ``--cleanup_denoised`` and the watchdog's
+    partial-artifact sweep both build a glob and delete what it matches.
+
+    Handing those sites the shipped TIDMAD template for a task that names its
+    artifacts itself was harmless only by luck — the glob matched nothing, so
+    the run's OWN artifacts were never reclaimed while the code reported a
+    cleanup. Handing them ``None`` says the truth: this task's artifact
+    lifecycle is task-owned, and a TIDMAD-shaped sweep has no business here.
+
+    Returns the bound naming when one exists (composed or not), the shipped
+    TIDMAD default for a run whose task does not name its own artifacts, and
+    ``None`` for one that does.
+    """
+    if _task_names_its_own_deliverables():
+        return _ACTIVE_DELIVERABLE_NAMING.get()
+    return resolve_deliverable_naming()
 
 
 def default_deliverable_naming() -> DeliverableNaming:
@@ -406,9 +541,53 @@ def derive_tidmad_deliverable_spec(dataset_profile: DatasetProfile) -> Deliverab
         The deliverable spec for this run. Under TIDMAD this resolves the
         names, groups and storage representation the pre-05c literals produced.
     """
+    return _tidmad_deliverable_spec(dataset_profile)
+
+
+def derive_run_deliverable_spec(dataset_profile: DatasetProfile) -> DeliverableSpec | None:
+    """The run's TIDMAD deliverable spec, or ``None`` when it has no geometry.
+
+    Step 12 / PR-12d, seam B — B11, the TRANSITIVE blocker. The tuner derived
+    this UNCONDITIONALLY at run scope (``HyperparamTuningAgent.run():625``),
+    and :func:`derive_tidmad_deliverable_spec` reaches ``tidmad_topology``
+    four times for the STORAGE half. A Q-12-4-honest profile therefore killed
+    the tuner before any training — invisible to a census that greps for
+    direct calls.
+
+    Only the STORAGE half needs physical geometry: channel-group identity,
+    storage dtype and value offset are TIDMAD-physical, while
+    :attr:`DeliverableSpec.naming` comes from
+    :func:`resolve_deliverable_naming` and needs nothing. So a task that
+    declares no such geometry gets ``None`` here — a DECLARED absence — and
+    its callers resolve naming directly.
+
+    **Seam B owns "the tuner must not die"; seam E owns what a composed
+    deliverable's generic identity actually IS.** This function is the first
+    half only, and deliberately does not decide the second.
+    """
+    from execute_tools.dataset_config import declares_tidmad_topology
+
+    if not declares_tidmad_topology(dataset_profile):
+        return None
+    return _tidmad_deliverable_spec(dataset_profile)
+
+
+def _tidmad_deliverable_spec(dataset_profile: DatasetProfile) -> DeliverableSpec:
+    """The shared body of the two derivations above."""
     return DeliverableSpec(
         # Step 11 C6 — a composed run's DECLARED naming when one is bound.
-        naming=resolve_deliverable_naming(),
+        #
+        # Step 12 / PR-12d seam E: `active_*`, NOT `resolve_*`. Both callers
+        # that reach here are TIDMAD-shaped BY DECLARATION — one is
+        # `derive_tidmad_deliverable_spec`, which says so in its name, and the
+        # other is `derive_run_deliverable_spec`, which has already returned
+        # `None` for any profile that declares no TIDMAD topology. Asking the
+        # REFUSING accessor here would make a caller that explicitly requested
+        # the TIDMAD spec fail because some OTHER task is bound, which is not
+        # what F-A4-1 is about. The refusal belongs on the generic resolution
+        # path — the cleanup globs and the path builder — where a wrong answer
+        # becomes a wrong FILENAME.
+        naming=active_deliverable_naming() or DeliverableNaming(),
         storage=DeliverableStorage(
             input_channel_group=tidmad_topology(dataset_profile).channels.input_channel,
             target_channel_group=tidmad_topology(dataset_profile).channels.target_channel,

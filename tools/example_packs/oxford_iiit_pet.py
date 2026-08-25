@@ -212,7 +212,16 @@ def declare_model_io_contract() -> ModelIOContract:
 
 
 def declare_metric_specs() -> dict[str, MetricSpec]:
-    """The two declarable terminal metrics (§22.9a). ``log_loss`` is D16-blocked."""
+    """The three terminal metrics §22.9a freezes for this track.
+
+    Step 12 / PR-12d D5 added ``log_loss``. It used to be excluded because
+    Step 06's D16 rule rejected a metric id that LOOKED like a loss name;
+    PR-12a C5 removed that rule, so a metric identity is opaque and what
+    separates a metric from a loss is the contract — a deliverable, an
+    aggregation and an executable scoreability contract, all of which this
+    declaration carries. §22.9a chose the identity deliberately for exactly
+    that reason.
+    """
     return {
         "accuracy": MetricSpec(
             id="accuracy",
@@ -224,6 +233,12 @@ def declare_metric_specs() -> dict[str, MetricSpec]:
             id="macro_f1",
             direction="higher",
             aggregation="unweighted_mean_of_per_class_f1_over_37_classes",
+            scoreability=PresenceScoreabilityContract(),
+        ),
+        "log_loss": MetricSpec(
+            id="log_loss",
+            direction="lower",
+            aggregation="mean_natural_log_loss_over_final_eval_images",
             scoreability=PresenceScoreabilityContract(),
         ),
     }
@@ -247,12 +262,15 @@ def declare_contracts() -> dict[str, dict[str, Any]]:
 def write_pack(pack_root: Path, manifests: Manifests) -> dict[str, str]:
     """Write manifests + SHA256SUMS + declared JSON; return the SHA-256 pins."""
     manifest_dir = pack_root / MANIFEST_RELDIR
-    names: list[str] = []
     for scope in SCOPES:
-        name = f"{scope}.csv"
-        write_text(manifest_dir / name, render_manifest_csv(manifests.rows(scope)))
-        names.append(name)
-    pins = write_sha256sums(manifest_dir, names)
+        write_text(manifest_dir / f"{scope}.csv", render_manifest_csv(manifests.rows(scope)))
+    # F-12d-5: pin EVERY committed manifest, not only the three this writer
+    # produced. The Gate-consumed `gate2_*.csv` subsets are written by
+    # `oxford_iiit_pet_execution.py`, so a `names`-limited pin here would
+    # silently DELETE their coverage whenever the identity manifests were
+    # regenerated — a pin file that shrinks is worse than one that never
+    # existed, because it still looks complete.
+    pins = write_sha256sums(manifest_dir, sorted(p.name for p in manifest_dir.glob("*.csv")))
     for stem, payload in declare_contracts().items():
         write_json(pack_root / DECLARED_RELDIR / f"{stem}.json", payload)
     return pins

@@ -71,12 +71,12 @@ def test_spec_resolves_the_c0_producer_names():
             model_type=GOLDEN_MODEL_TYPE,
             run_name=GOLDEN_RUN_NAME,
             exp_id=GOLDEN_EXP_ID,
-            file_index=GOLDEN_FILE_INDEX,
+            input_identity=GOLDEN_FILE_INDEX,
         )
         == GOLDEN_SAMPLE_SET_NAME
     )
     assert (
-        naming.unqualified_name(model_type=GOLDEN_MODEL_TYPE, file_index=GOLDEN_FILE_INDEX)
+        naming.unqualified_name(model_type=GOLDEN_MODEL_TYPE, input_identity=GOLDEN_FILE_INDEX)
         == GOLDEN_FIX_MODE_NAME
     )
 
@@ -142,16 +142,19 @@ def test_file_index_parse_is_the_inverse_of_name():
     naming = default_deliverable_naming()
 
     for index in (0, 7, 19, 9999):
-        resolved = naming.name(model_type="wavenet", run_name="r", exp_id="e", file_index=index)
-        assert naming.file_index_of(resolved) == index
+        resolved = naming.name(model_type="wavenet", run_name="r", exp_id="e", input_identity=index)
+        assert naming.input_identity_of(resolved) == index
 
     # The fix-mode shape parses too, and MUST: it is a deliverable of this
     # spec and it does carry a file index. The production regex it replaces
     # (``v18_wave_summary.py:55``) matches it for the same reason.
-    assert naming.file_index_of(naming.unqualified_name(model_type="wavenet", file_index=3)) == 3
+    assert (
+        naming.input_identity_of(naming.unqualified_name(model_type="wavenet", input_identity=3))
+        == 3
+    )
 
-    assert naming.file_index_of("abra_validation_0000.h5") is None
-    assert naming.file_index_of("abra_validation_denoised_fcnet_run_exp_0000.txt") is None
+    assert naming.input_identity_of("abra_validation_0000.h5") is None
+    assert naming.input_identity_of("abra_validation_denoised_fcnet_run_exp_0000.txt") is None
 
 
 def test_every_accessor_moves_with_one_renamed_prefix():
@@ -164,11 +167,11 @@ def test_every_accessor_moves_with_one_renamed_prefix():
     renamed = DeliverableNaming(prefix="step05c_renamed")
 
     assert (
-        renamed.name(model_type="wavenet", run_name="r", exp_id="e", file_index=1)
+        renamed.name(model_type="wavenet", run_name="r", exp_id="e", input_identity=1)
         == "step05c_renamed_wavenet_r_e_0001.h5"
     )
     assert (
-        renamed.unqualified_name(model_type="wavenet", file_index=1)
+        renamed.unqualified_name(model_type="wavenet", input_identity=1)
         == "step05c_renamed_wavenet_0001.h5"
     )
     assert (
@@ -177,10 +180,10 @@ def test_every_accessor_moves_with_one_renamed_prefix():
     )
     assert renamed.experiment_glob(exp_id="e") == "step05c_renamed_*_e_*.h5"
     assert renamed.any_glob() == "step05c_renamed_*.h5"
-    assert renamed.file_index_of("step05c_renamed_wavenet_r_e_0001.h5") == 1
+    assert renamed.input_identity_of("step05c_renamed_wavenet_r_e_0001.h5") == 1
     # ...and the TIDMAD name is no longer recognised, which is what proves the
     # accessors read the field rather than a captured constant.
-    assert renamed.file_index_of(GOLDEN_SAMPLE_SET_NAME) is None
+    assert renamed.input_identity_of(GOLDEN_SAMPLE_SET_NAME) is None
 
 
 @pytest.mark.parametrize("bad_prefix", ["", "  ", " abra ", "abra_*_denoised"])
@@ -239,7 +242,7 @@ def test_tidmad_derivation_reproduces_the_inlined_literals():
             model_type=GOLDEN_MODEL_TYPE,
             run_name=GOLDEN_RUN_NAME,
             exp_id=GOLDEN_EXP_ID,
-            file_index=GOLDEN_FILE_INDEX,
+            input_identity=GOLDEN_FILE_INDEX,
         )
         == GOLDEN_SAMPLE_SET_NAME
     )

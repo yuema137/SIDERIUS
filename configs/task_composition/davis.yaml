@@ -1,0 +1,140 @@
+# DAVIS 2017 future-frame prediction — the SHIPPED task composition.
+#
+# Step 12 / PR-12d D6. The canonical manifest an operator points
+# `--task_composition` at:
+#
+#     run_chain.sh ... --task_composition configs/task_composition/davis.yaml
+#
+# **This file is an ENTRYPOINT POINTER (Q-12d-1), not a second copy of the
+# task.** Every declaration it names lives with the pack under
+# `examples/davis_future_prediction/`; nothing below restates a threshold, a
+# direction, an aggregation or a piece of task prose. Move the pack and the
+# refs move with it; edit a threshold and you edit it in exactly one place.
+#
+# Paths resolve against THIS file's directory (`workflows/task_composition.py`
+# resolves refs relative to the manifest), which is why they are `../`-rooted.
+#
+# Nothing here is special-cased. `davis_future_prediction` is an ordinary
+# declared id and every section uses the same mechanism an out-of-tree fourth
+# task uses. If composing DAVIS needed one extra affordance, the claim "a
+# fourth task needs zero framework edits" would be untestable.
+
+task_data_path:
+  module: execute_tools.davis_data_path
+  symbol: DavisTaskDataPath
+  id: davis_future_prediction
+  # Seam A (D1). DAVIS' scope authority is its committed CLIP manifest — the
+  # windows themselves, already derived deterministically. `clips_path`, NOT
+  # `sequences_path`: `load_davis_clips` identifies a manifest by its HEADER
+  # and refuses a sequences manifest by name (PR-12bc B8). The registered
+  # module-level instance holds no manifest and refuses to BUILD a scope; this
+  # config is what makes the composed instance able to.
+  #
+  # BOTH manifests are declared, and that is F-12d-17's closure. This pack
+  # ships three DISJOINT role manifests and the `scope` column inside each is
+  # constant — the role IS the file. Declaring only `clips_path` would make a
+  # composed run train and evaluate on the identical 60 clips, because
+  # `build_eval_scope` falls back to the training manifest. The D14 runner
+  # never showed this: it loads all three itself and passes both scopes, so
+  # the composed path is the only caller that has to choose.
+  config:
+    clips_path:
+      ref: ../../examples/davis_future_prediction/data/manifests/gate2_train.csv
+    eval_clips_path:
+      ref: ../../examples/davis_future_prediction/data/manifests/gate2_validation.csv
+
+dataset_profile:
+  config: ../../examples/davis_future_prediction/declared/dataset_profile.json
+
+# PRIMARY: global mean squared error, direction LOWER. The only track of the
+# three whose primary is minimized, which is what makes it the falsifier for
+# every ordering site that could have hardcoded "bigger is better".
+metric:
+  declaration: ../../examples/davis_future_prediction/declared/metric_mse.json
+  # Step 12 / PR-12d: the PACK'S OWN implementation, not the framework's
+  # same-named one. Both compute identical arithmetic; they differ in calling
+  # vocabulary. The framework's takes `predictions`/`truth` already assembled,
+  # which suits the in-process D14 runner; the composed SCORING CHILD owns only
+  # `evaluation_payload`/`task_scope`/`data_dir`, because assembling truth from
+  # a scope is TASK knowledge. Binding the framework metric here failed a REAL
+  # scoring child with `TypeError: ... unexpected keyword argument
+  # 'evaluation_payload'`.
+  implementation:
+    file: ../../examples/davis_future_prediction/plugins/_davis_metrics.py
+    symbol: DavisMseMetric
+
+# OBSERVATIONAL secondaries, and deliberately MIXED-DIRECTION: `psnr` is
+# HIGHER-is-better while the primary and `mae` are LOWER. A carrier that
+# inherited the primary's direction would render psnr backwards; a carrier
+# that inherited one secondary's direction would render mae backwards.
+# Manifest order is semantic and is what the output stamps.
+#
+# Both bind the pack's OWN implementations through the `file:` route, so the
+# content digest joins the run's semantic fingerprint and `EvaluationMetric.
+# IMPLEMENTS` can prove the declaration and the computation agree (D4c
+# F-12d-3 — both were previously bound to `GlobalMseMetric`, which computes
+# neither).
+secondary_metrics:
+  - declaration: ../../examples/davis_future_prediction/declared/metric_psnr.json
+    implementation:
+      file: ../../examples/davis_future_prediction/plugins/_davis_metrics.py
+      symbol: DavisPsnrMetric
+  - declaration: ../../examples/davis_future_prediction/declared/metric_mae.json
+    implementation:
+      file: ../../examples/davis_future_prediction/plugins/_davis_metrics.py
+      symbol: DavisMaeMetric
+
+task_health:
+  config: ../../examples/davis_future_prediction/declared/task_health.yaml
+
+# NAMED absences, not omissions. DAVIS declares no interpretation, proposal or
+# implementor science, so a composed DAVIS run renders no header and no bytes
+# for them — never TIDMAD's.
+interpretation_blocks:
+  none: true
+
+proposal_blocks:
+  none: true
+
+implementor_blocks:
+  none: true
+
+model_plugins:
+  dir: ../../examples/davis_future_prediction/plugins
+  require: [davis_reference_predictor]
+
+# D4c. The pack's exact-MAE objective (`PLUGIN_LOSS_TYPE = "davis_exact_l1"`),
+# reached by `LossConfig(loss_type="custom", loss_name="davis_exact_l1")`.
+# §22.9a freezes DAVIS' R1 as exact MAE / L1, and the built-in `smooth_l1`
+# cannot express it: `LossConfig.beta` is constrained to [0.1, 10.0], so the
+# beta=0.01 approximation is REFUSED by the schema — and widening a production
+# constraint to fit one task is forbidden. Declaring the objective as a pack
+# plugin is how the task gets what it needs without the framework yielding.
+loss_plugins:
+  dir: ../../examples/davis_future_prediction/plugins
+
+# Step 12 / PR-12d, F-12d-31 — the AUTHORITATIVE training objective.
+#
+# `loss_plugins:` above makes this pack's objective REACHABLE; it does not make
+# it SELECTED. Two real composed runs proved the difference: both trained with
+# `smooth_l1`, because the planner is told `smooth_l1` is the only valid
+# regressor loss and never learns the task ships its own exact-L1. §22.9a's
+# Track-C freeze and §I's DAVIS acceptance both require EXACT MAE/L1, so the
+# objective has to be a typed authority rather than something an LLM may
+# decline.
+#
+# The loss NAME is deliberately NOT restated here. This points at the
+# implementation and at the symbol the implementation uses to declare itself,
+# so `PLUGIN_LOSS_TYPE`'s value IS the binding and the manifest cannot disagree
+# with the plugin — the same `IMPLEMENTS` discipline the metric family follows.
+#
+# It composes to an ordinary `LossConfig(loss_type="custom", loss_name=...)` on
+# the route that already existed: `loss_type` keeps its five members and no
+# central enum grows for DAVIS.
+objective:
+  implementation:
+    file: ../../examples/davis_future_prediction/plugins/davis_exact_l1_loss.py
+    symbol: PLUGIN_LOSS_TYPE
+
+task_config:
+  config: ../../examples/davis_future_prediction/declared/task_config.yaml

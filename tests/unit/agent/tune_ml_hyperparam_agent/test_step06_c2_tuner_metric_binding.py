@@ -86,27 +86,36 @@ def test_a_contrast_handle_bound_at_run_scope_reaches_the_scoring_seam(tmp_path,
             scoreability=PresenceScoreabilityContract(),
         )
 
-    # The contrast is returned ONLY by the first derivation — the run-scope
-    # binding. A call site that re-derived the metric on its own authority
-    # (a second `derive_tidmad_metric(...)` per scoring call) would obtain the
-    # SHIPPED instance and the seam would see TIDMAD, not the contrast. (C7
-    # mutation "live route bypasses the handle" survived the always-contrast
-    # stub — equivalent under that oracle — and is killed by this one.)
-    shipped = _TUNER.derive_tidmad_metric
+    # The contrast is returned ONLY by the first resolution — the run-scope
+    # binding. A call site that re-resolved the metric on its own authority
+    # (a second resolution per scoring call) would obtain the SHIPPED
+    # instance and the seam would see TIDMAD, not the contrast. (C7 mutation
+    # "live route bypasses the handle" survived the always-contrast stub —
+    # equivalent under that oracle — and is killed by this one.)
+    #
+    # Step 12 / PR-12d seam B UPGRADED the patch TARGET, not the intent. The
+    # tuner used to spell this `resolve_bound_run_metric() or
+    # derive_tidmad_metric(profile, spec)` inline; the whole rule now lives in
+    # `evaluation_metric.resolve_run_metric`, because the spec became optional
+    # (B11) and `run()` is branch-capped. The question this test asks —
+    # is the metric resolved EXACTLY ONCE, at run scope, and does the live
+    # scoring route carry THAT identity — is unchanged, so the stub follows
+    # the resolution to its new owner.
+    shipped = _TUNER.resolve_run_metric
     derivations: list[int] = []
 
     def _bind_once(*args, **kwargs):
         derivations.append(1)
         return _ContrastHandle() if len(derivations) == 1 else shipped(*args, **kwargs)
 
-    monkeypatch.setattr(_TUNER, "derive_tidmad_metric", _bind_once)
+    monkeypatch.setattr(_TUNER, "resolve_run_metric", _bind_once)
     _, _, sandbox, _ = run_bounded_pseudo_iteration(
         tmp_path, monkeypatch, preflight_results=_preflight()
     )
     calls = _scoring_calls(sandbox)
     assert calls
     assert all(c[1:] == ("step06_contrast_lower", "lower") for c in calls), calls
-    assert len(derivations) == 1, "the metric is bound exactly once per run, at run scope"
+    assert len(derivations) == 1, "the metric is resolved exactly once per run, at run scope"
 
 
 # ---------------------------------------------------------------------------

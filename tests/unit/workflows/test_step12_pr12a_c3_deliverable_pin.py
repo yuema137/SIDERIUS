@@ -115,13 +115,23 @@ class TestComposedDeliverableNaming:
             for node in ast.walk(tree)
             if isinstance(node, ast.Call)
             and isinstance(node.func, ast.Name)
-            and node.func.id == "derive_tidmad_deliverable_spec"
+            and node.func.id in ("derive_run_deliverable_spec", "derive_tidmad_deliverable_spec")
         ]
         assert len(acquisitions) == 1, (
             "the tuner must have exactly ONE deliverable acquisition site; a "
             "second one is how a rename moves some artifacts and not others."
         )
-        assert ast.unparse(acquisitions[0]) == "derive_tidmad_deliverable_spec(run_profile)"
+        # Step 12 / PR-12d seam B (B11): the tuner now calls
+        # `derive_run_deliverable_spec`, which answers `None` for a task that
+        # declares no TIDMAD storage geometry and is otherwise the SAME
+        # derivation (pinned by D2's differential oracle). The ARGUMENT is
+        # still asserted -- a spec derived from anything other than the run's
+        # own profile is the defect this reachability test exists for -- but
+        # the exact `ast.unparse` STRING is not, because renaming a local
+        # would turn it RED with no semantic change.
+        assert acquisitions[0].func.id == "derive_run_deliverable_spec"
+        assert [ast.unparse(arg) for arg in acquisitions[0].args] == ["run_profile"]
+        assert acquisitions[0].keywords == []
 
 
 class TestTheStorageHalfIsStillProfileDerived:

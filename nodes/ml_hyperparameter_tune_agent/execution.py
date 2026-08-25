@@ -27,6 +27,7 @@ on the raising path the handler still has to know which phase was executing.
 
 import os
 import time
+from collections.abc import Mapping
 from importlib import import_module as _import_module
 from pathlib import Path as _Path
 from typing import Any
@@ -41,12 +42,10 @@ from agent.schemas.training_diagnosis import derive_training_diagnosis
 from agent.skills.evaluate_vram_skill.preflight_adapter import run_production_preflight
 from execute_tools.dataset_config import (
     ScopeViolationError,
-    tidmad_topology,
 )
 from execute_tools.evaluation_metric import (
     EvaluationMetric,
     MetricResult,
-    NotScoreableError,
     NotScoreableResult,
 )
 from execute_tools.health_checks.evaluation import evaluate_and_persist_health_gates
@@ -71,11 +70,13 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     TrainingOutcome,
 )
 from nodes.ml_hyperparameter_tune_agent.policy import (
+    ScoringRoute,
     _apply_degeneracy_reaction,
     _fmt_reference,
     _gate_results_to_score_meta,
     _merge_score_validity_failure,
     _should_bypass_formal_time_budget,
+    resolve_scoring_route,
 )
 from nodes.ml_hyperparameter_tune_agent.records import (
     _build_denoised_filename,
@@ -101,6 +102,9 @@ from nodes.ml_hyperparameter_tune_agent.runtime import (
     _time_skip_memory_extra,
     _vram_skip_memory_extra,
     is_evidence_refusal,
+)
+from nodes.ml_hyperparameter_tune_agent.scope_acquisition import (
+    project_attempt_topology_facts,
 )
 
 # `_emit_record` is the node's ONE record-emission point, called from four
@@ -752,6 +756,91 @@ def run_training(
     )
 
 
+def _adopt_child_secondaries(
+    score_results: Mapping[str, Any],
+    *,
+    results: list[MetricResult],
+    refusals: list[NotScoreableResult],
+    errors: dict[str, str],
+) -> tuple[list[MetricResult], list[NotScoreableResult], dict[str, str]]:
+    """The run's secondaries, from whichever route evaluated them.
+
+    Step 12 / PR-12d. Two routes can produce them and exactly one does per
+    attempt:
+
+    * ``ANCHOR_NORMALIZED`` — the tuner evaluates them in-process
+      (:func:`_evaluate_secondary_metrics`) and passes them in here, already
+      typed. They win, unconditionally.
+    * ``TASK_OWNED`` — the tuner CANNOT: the deliverable is read by the
+      scoring child, so the child is the only party holding the evaluation
+      payload and the scope. It computes them and serialises them into
+      ``--output_json``, and this re-types them into the SAME carriers, so
+      the record has ONE shape regardless of route and nothing downstream
+      needs to know which ran.
+
+    **Total by construction**, which is why the precedence lives here rather
+    than at the call site: anything already evaluated passes straight through,
+    so a child that reported none can never blank an anchor-route result, and
+    the orchestrator gains no branch (§E.2's zero-net-growth budget).
+
+    Validation is deliberate rather than a ``model_construct`` shortcut —
+    these values crossed a process boundary as JSON, and nothing reaches an
+    execution layer without passing its schema. A malformed entry fails loudly
+    here instead of producing a half-typed record.
+
+    A run declaring no secondaries gets three empty containers on both routes,
+    and the record is byte-unchanged.
+    """
+    if results or refusals or errors:
+        return results, refusals, errors
+    adopted = [
+        MetricResult.model_validate(item)
+        for item in score_results.get("secondary_metric_results", ())
+    ]
+    adopted_refusals = [
+        NotScoreableResult.model_validate(item)
+        for item in score_results.get("secondary_metric_refusals", ())
+    ]
+    return adopted, adopted_refusals, dict(score_results.get("secondary_metric_errors", {}) or {})
+
+
+def _adopt_child_metric_result(
+    score_results: Mapping[str, Any],
+    *,
+    current: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """The run's PRIMARY metric identity, from whichever route produced it.
+
+    Step 12 / PR-12d, F-12d-32 — the sibling of
+    :func:`_adopt_child_secondaries`, and it exists because the primary had
+    the defect its own secondaries did not.
+
+    ``metric_payload`` is assigned in exactly one place, inside the
+    ``ANCHOR_NORMALIZED`` branch. On the ``TASK_OWNED`` route nothing assigned
+    it, so a completed contrast round persisted ``metric_result: null`` beside
+    a perfectly good ``denoising_score``: the metric's VALUE crossed the
+    process boundary and its IDENTITY did not. §I requires the terminal report
+    to carry the metric id and direction and to prove they belong to the
+    implementation production actually bound, which a bare scalar cannot.
+
+    **Total, and anchor-wins**, exactly as the secondaries helper is: a value
+    already computed in-process passes straight through, so a child that
+    reported none can never blank it, and the call site gains no branch
+    (§E.2's zero-net-growth budget).
+
+    Validated rather than trusted — the payload crossed as JSON, and
+    re-typing it through :class:`MetricResult` means a malformed entry fails
+    loudly here instead of persisting a half-typed identity. The value is
+    re-dumped so the record's shape is identical on both routes.
+    """
+    if current is not None:
+        return current
+    reported = score_results.get("metric_result")
+    if not reported:
+        return None
+    return MetricResult.model_validate(reported).model_dump(mode="json", exclude={"per_sample"})
+
+
 def _evaluate_secondary_metrics(
     sandbox: Any,
     secondaries: tuple[EvaluationMetric, ...],
@@ -775,26 +864,16 @@ def _evaluate_secondary_metrics(
     ``sandbox.evaluate_metric`` route and the SAME ``denoised_filename_fn``
     the primary just used — scoreability contract first, then arithmetic.
 
-    The per-secondary catch order is FROZEN (design §4.2, operator ruling
-    Q-P2b-2) and the ORDER is the contract:
-
-    ``NotScoreableError``
-        a scientific refusal by THAT metric's contract. Recorded as a typed
-        refusal; the attempt remains successful, because the primary already
-        produced its result.
-    ``ScopeViolationError``
-        **RE-RAISED**. DataScope validation runs inside every
-        ``evaluate_metric`` call, so a secondary CAN raise it, and the
-        existing outer handler owns it (terminate the run, non-retryable).
-        "Observational" bounds ordinary secondary outcomes; it never means a
-        framework-integrity failure gets swallowed. It must therefore be
-        caught BEFORE the generic clause, exactly as the primary's own
-        handlers are ordered.
-    any other ``Exception``
-        an implementation crash. Recorded as diagnostic PROVENANCE keyed by
-        metric id and printed, never coerced into a ``NotScoreableResult`` —
-        that would report a contract verdict nothing produced — and never
-        raised onward.
+    A THIN ADAPTER — Step 12 / PR-12d. The per-secondary exception taxonomy
+    (design §4.2, Q-P2b-2) moved to
+    ``execute_tools.evaluation_metric.evaluate_declared_secondaries``, the
+    ONE shared owner both this ANCHOR-NORMALIZED route and the TASK-OWNED
+    route (``denoising_score_single.py::_evaluate_task_owned_secondaries``)
+    now call, closing the twinning hazard
+    ``test_the_secondary_evaluator_has_exactly_one_owner`` exists to catch.
+    This function's own job is narrowed to ONE thing: supply the
+    anchor-route-specific ``sandbox.evaluate_metric(...)`` call as the
+    per-secondary evaluator.
 
     Returns:
         ``(results, refusals, errors)``, keyed consistently by metric id so
@@ -803,36 +882,18 @@ def _evaluate_secondary_metrics(
     Raises:
         ScopeViolationError: re-raised from a secondary call, unchanged.
     """
-    results: list[MetricResult] = []
-    refusals: list[NotScoreableResult] = []
-    errors: dict[str, str] = {}
+    from execute_tools.evaluation_metric import evaluate_declared_secondaries
 
-    for secondary in secondaries:
-        metric_id = secondary.spec.id
-        try:
-            results.append(
-                sandbox.evaluate_metric(
-                    secondary,
-                    sample_set=sample_set,
-                    anchor_map=anchor_map,
-                    s_max=s_max,
-                    denoised_filename_fn=denoised_filename_fn,
-                )
-            )
-        except NotScoreableError as refusal:
-            refusals.append(refusal.result)
-            print(f"  [secondary] {metric_id}: not scoreable — {refusal}")
-        except ScopeViolationError:
-            raise
-        except Exception as exc:
-            errors[metric_id] = f"{type(exc).__name__}: {exc}"
-            # The diagnostic surface, never a machine-readable stdout
-            # contract and never a planner/reflector payload: a secondary
-            # crash is an operator-facing fact about the implementation, not
-            # evidence the model gets to reason from.
-            print(f"  [secondary] {metric_id}: evaluation crashed — {errors[metric_id]}")
-
-    return results, refusals, errors
+    return evaluate_declared_secondaries(
+        secondaries,
+        lambda secondary: sandbox.evaluate_metric(
+            secondary,
+            sample_set=sample_set,
+            anchor_map=anchor_map,
+            s_max=s_max,
+            denoised_filename_fn=denoised_filename_fn,
+        ),
+    )
 
 
 def run_inference_scoring_health(
@@ -850,7 +911,11 @@ def run_inference_scoring_health(
     expert_advice_str = bindings.expert_advice_str
     file_index = bindings.file_index
     reference_scores = bindings.reference_scores
-    run_deliverable_spec = bindings.run_deliverable_spec
+    # Step 12 / PR-12d (F-12d-5): this phase now reads the run's NAMING
+    # authority, which is always present, rather than reaching through the
+    # OPTIONAL deliverable spec for it. The spec itself has no consumer
+    # here.
+    run_deliverable_naming = bindings.run_deliverable_naming
     run_metric = bindings.run_metric
     run_secondary_metrics = bindings.run_secondary_metrics
     run_name = bindings.run_name
@@ -949,8 +1014,9 @@ def run_inference_scoring_health(
         # memory_history). Now we catch, write an error_scoring
         # record (matches the error_training/inference pattern
         # above), and continue. See docs/V8_Gap_Report.md Domain 2a.
+        _scoring_route = resolve_scoring_route(anchor_map_data, prepared.task_scopes)
         try:
-            if anchor_map_data is not None:
+            if _scoring_route is ScoringRoute.ANCHOR_NORMALIZED:
                 # Anchor-normalized scoring (both trial and formal modes).
                 # Trial: sparse SampleSet. Formal: full SampleSet (all 20 × 200).
                 # B023 — default-arg locking pins the captured loop
@@ -971,13 +1037,13 @@ def run_inference_scoring_health(
                     model_type=model_type,
                     exp_id=exp_id,
                     base_dir=sandbox.base_dir,
-                    naming=run_deliverable_spec.naming,
+                    naming=run_deliverable_naming,
                 ):
                     return _build_denoised_filename(
                         model_type=model_type,
                         run_name=run_name,
                         exp_id=exp_id,
-                        file_index=fi,
+                        input_identity=fi,
                         base_dir=base_dir,
                         naming=naming,
                     )
@@ -1062,11 +1128,25 @@ def run_inference_scoring_health(
                 # own authorities: the COMPOSED physical root
                 # (`sandbox.dirs["data"]`, Step 11 C4) and the profile's
                 # declared validation-file template.
+                #
+                # Step 12 / PR-12d, seam B. The decode moved to the ONE
+                # projection this package uses, and the resolution DECLINES BY
+                # NAME when the run's task declares no physical geometry —
+                # rather than dying at construction for every composed
+                # contrast run. That is the honest shape: a raw-target path is
+                # something only a check that compares against the RAW SIGNAL
+                # asks for, and the contrast packs' Health families consume
+                # decoded views of the deliverable instead, so `_target_fn` is
+                # simply never called for them. A check that DID ask gets a
+                # named refusal, never a fabricated filename.
                 _peek_root = sandbox.dirs["data"]
-                _peek_names = tidmad_topology(run_profile).dataset
+                _peek_facts = project_attempt_topology_facts(run_profile)
 
-                def _target_fn(i: int, _base: str = _peek_root) -> str:
-                    return os.path.join(_base, _peek_names.validation_file_name(i))
+                def _target_fn(i: int, _base: str = _peek_root, _facts=_peek_facts) -> str:
+                    names = _facts.require_physical_dataset(
+                        "resolving a raw validation-file path for a Health peek"
+                    )
+                    return os.path.join(_base, names.validation_file_name(i))
 
                 if agent_input.health_gate_enabled:
                     _gate_ids = (
@@ -1152,7 +1232,19 @@ def run_inference_scoring_health(
                     },
                 }
             else:
-                # Legacy single-file mode (trial_allowed=False, no anchor map)
+                # The scoring SUBPROCESS, serving two routes that differ only
+                # in what the child is handed:
+                #
+                # * `TASK_OWNED` — a composed task's own deliverable, scored
+                #   through its own metric against the evaluation scope
+                #   transported alongside it. Every composed contrast run
+                #   takes this route, because no contrast implementation
+                #   declares trial anchoring.
+                # * `SUBPROCESS_LEGACY` — TIDMAD without anchor normalization.
+                #   NOT "legacy single-file mode": `anchor_map_data` is only
+                #   ATTEMPTED for a trial round, so this branch is also where
+                #   every un-composed FORMAL round has always gone. The old
+                #   comment named a condition the code never tested.
                 score_res = _runtime._run_skill("denoising_score_skill", sandbox, **active_params)
         except ScopeViolationError as e:
             # DataScope DS5 — non-retryable: terminate the run
@@ -1203,6 +1295,34 @@ def run_inference_scoring_health(
         train_results = training_results.legacy_payload
         training_diagnosis = derive_training_diagnosis(training_results.history)
         score_results = score_res.get("results", {})
+
+        # Step 12 / PR-12d: the DECLARED secondaries, when the SCORING CHILD
+        # evaluated them.
+        #
+        # On the anchor-normalized route the tuner evaluates secondaries
+        # in-process (`_evaluate_secondary_metrics`, above). On the task-owned
+        # route it cannot: the deliverable is read by the child, so the child
+        # is the only party holding the evaluation payload and the scope — and
+        # it is the child that computes them and reports them here.
+        #
+        # The ADOPTION DECISION lives in the helper, not here: this phase is
+        # already a 26-branch orchestrator and §E.2's budget is zero net
+        # branch growth achieved by EXTRACTION rather than restraint. The
+        # helper is a total function — it returns what the anchor route
+        # already produced whenever that is non-empty — so the call site
+        # gains no branch and cannot express the wrong precedence.
+        secondary_results, secondary_refusals, secondary_errors = _adopt_child_secondaries(
+            score_results,
+            results=secondary_results,
+            refusals=secondary_refusals,
+            errors=secondary_errors,
+        )
+        # F-12d-32 — the PRIMARY's identity, by the same rule and for the same
+        # reason as its secondaries one line above. `metric_payload` is only
+        # assigned inside the ANCHOR_NORMALIZED branch, so a task-owned round
+        # persisted `metric_result: null` beside a valid score. Total function,
+        # anchor value wins, no branch at the call site.
+        metric_payload = _adopt_child_metric_result(score_results, current=metric_payload)
 
         # Generic degeneracy reaction. The task-specific predicate
         # already ran tuner-side (evaluate_gate + resolve_action +
@@ -1291,12 +1411,17 @@ def run_inference_scoring_health(
         # above, AND on any uncaught exception. Glob is keyed to
         # this attempt's ``exp_id`` so other attempts' files
         # (e.g. from a not-yet-cleaned prior leak) are untouched.
-        if agent_input.cleanup_denoised:
+        # Step 12 / PR-12d seam E (F-A4-1): `run_deliverable_naming` is `None`
+        # when the run's task names its own artifacts. Sweeping with TIDMAD's
+        # template there matched nothing while reporting a cleanup — so the
+        # honest action is to skip, and leave the artifact lifecycle with the
+        # task that owns it.
+        if agent_input.cleanup_denoised and run_deliverable_naming is not None:
             import glob as _glob
 
             pattern = os.path.join(
                 sandbox.base_dir,
-                run_deliverable_spec.naming.experiment_glob(exp_id=exp_id),
+                run_deliverable_naming.experiment_glob(exp_id=exp_id),
             )
             denoised_files = _glob.glob(pattern)
             if denoised_files:

@@ -434,8 +434,13 @@ class TestStep09AddsNoProductionMetricDerivationSite:
 
     PRODUCTION_DIRS = ("nodes", "agent", "core", "execute_tools", "workflows", "dashboard")
     DERIVERS: ClassVar[set[str]] = {"derive_tidmad_metric", "derive_tidmad_metric_spec"}
+    #: Step 12 / PR-12d seam B REMOVED one — the tuner. It used to spell the
+    #: rule inline as ``resolve_bound_run_metric() or derive_tidmad_metric(...)``
+    #: and now calls ``evaluation_metric.resolve_run_metric``, which owns the
+    #: whole rule including the order. That is this census's goal arriving,
+    #: not a violation of it: the claim is "ZERO ADDED derivation sites", and
+    #: a site leaving makes the ONE derivation more true, not less.
     EXPECTED: ClassVar[set[str]] = {
-        "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py",
         "execute_tools/denoising_score_single.py",
         "core/sandbox_executor.py",
         "execute_tools/evaluation_metric.py",
@@ -460,7 +465,7 @@ class TestStep09AddsNoProductionMetricDerivationSite:
                             found.add(path.relative_to(REPO_ROOT).as_posix())
         return found
 
-    def test_the_production_derivation_call_sites_are_exactly_the_expected_four(self):
+    def test_the_production_derivation_call_sites_are_exactly_the_expected_set(self):
         assert self._callers(self.PRODUCTION_DIRS) == self.EXPECTED, (
             "the set of production modules deriving the TIDMAD metric changed. "
             "Step 09 transports the tuner's already-resolved spec and adds ZERO "
@@ -470,7 +475,7 @@ class TestStep09AddsNoProductionMetricDerivationSite:
     def test_the_census_is_not_vacuous(self):
         """If the AST walk found nothing, the assertion above would be trivially
         satisfiable by deleting the whole feature."""
-        assert len(self._callers(self.PRODUCTION_DIRS)) == 4
+        assert len(self._callers(self.PRODUCTION_DIRS)) == 3
 
     def test_the_calibration_fixture_is_the_one_stamping_module_and_is_unreachable_from_production(
         self,

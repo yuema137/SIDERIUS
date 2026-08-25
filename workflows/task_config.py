@@ -69,16 +69,34 @@ def _dataset_num_classes() -> int | None:
     dataset side as the single cardinality authority and Step 03 only
     derives from or cross-validates against it.
 
-    Returns ``None`` if no profile can be resolved, so a caller in an
-    environment without one is not blocked; the cross-check simply does not
-    run. It must NEVER fall back to a literal, which would silently
-    reintroduce TIDMAD's 256 as a default (§21).
+    Returns ``None`` if no class count can be resolved, so a caller without
+    one is not blocked; the cross-check simply does not run. It must NEVER
+    fall back to a literal, which would silently reintroduce TIDMAD's 256 as
+    a default (§21).
+
+    **Step 12 / PR-12d (F-12d-4) — the body now implements that promise.**
+    It read ``resolve_tidmad_topology()`` unconditionally, which RAISES for a
+    profile that declares no TIDMAD topology. So a composed Pets or DAVIS run
+    whose ``task_config`` declared ``model_io`` failed at composition, inside
+    the very ``bind_dataset_profile`` that ``_compose_task_config`` wraps
+    around this call so the cross-check would see the composed profile.
+
+    A task with no ``ValueEncoding`` has no class count — that is a DECLARED
+    ABSENCE, and ``None`` is exactly how this function's contract already
+    says to express it. The cross-check then has nothing to compare against,
+    which is honest; the contract's own shape validation is untouched, and
+    the TIDMAD answer is unchanged.
     """
     from execute_tools.dataset_config import (
-        resolve_tidmad_topology,
+        declares_tidmad_topology,
+        resolve_dataset_profile,
+        tidmad_topology,
     )
 
-    return resolve_tidmad_topology().encoding.num_classes
+    profile = resolve_dataset_profile()
+    if not declares_tidmad_topology(profile):
+        return None
+    return tidmad_topology(profile).encoding.num_classes
 
 
 _BOUND_TASK_CONFIG: ContextVar[dict[str, Any] | None] = ContextVar(

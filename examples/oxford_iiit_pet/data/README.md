@@ -41,4 +41,7 @@ Preparation (decode → resize → crop → tensor) is CODE since D14-2 —
 `execute_tools/pets_data_path.py::decode_and_transform`, pinned by
 `manifests/execution.json` (37 class-covering probe hashes). The gate
 subsets `manifests/gate2_*.csv` are committed, derived first-N-per-class
-from the frozen identity manifests.
+from the frozen identity manifests, and — since Step 12 / PR-12d D5
+(F-12d-5) — carry their own `SHA256SUMS` pins, because a Gate reads them.
+Both pack writers re-pin the WHOLE manifest directory, so regenerating the
+identity manifests can no longer silently drop the subsets' coverage.

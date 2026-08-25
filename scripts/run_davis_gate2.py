@@ -49,10 +49,31 @@ metric handle, and the pack's Health family evaluated on a FRESH real
 deliverable. For DAVIS that also includes the
 last-frame-copy baseline comparison.
 
-FULL RETIREMENT IS BLOCKED ON **CAP-SCOPE** (design §10.2): until
-task-owned scope construction exists, the generic loop cannot execute real
-contrast-task training, so these claims have no generic owner to move to.
-Step 12 must not claim contrast-track L4 while CAP-SCOPE is open.
+RETIREMENT DISPOSITION — Step 12 / PR-12d D8b
+----------------------------------------------
+The paragraph that stood here said full retirement was BLOCKED ON
+**CAP-SCOPE**, because a generic loop with no task-owned scope construction
+could not execute real contrast-task training, leaving these claims no
+owner to move to. Both halves are now false: CAP-SCOPE landed with PR-12bc,
+and ``G-12d`` drove this pack's real training, inference and scoring
+children through the ONE composed production chain — with its declared
+exact-L1 objective and a distinct eval leg.
+
+One claim is **INTENTIONALLY NOT TRANSFERRED**:
+``davis.last_frame_copy_baseline_comparison``. The runner computes it for
+RECORDING only and never asserts it, and §I excludes benchmark improvement,
+model quality and score magnitude from ``G-12d``'s PASS criteria. Named
+here rather than silently dropped — an intentional non-transfer is a
+decision; a claim that quietly disappears is a gap.
+
+The runner is **RETAINED, not retired** — a D8b decision, not an
+unfinished transfer. "Retire only if every claim has a surviving owner" is
+a NECESSARY condition for retirement, never an instruction to retire once
+it holds. What it still buys: this is the only harness that executes the
+pack's real data path WITHOUT the composed chain, so when a real run fails
+it is what separates *the pack is broken* from *the composition is broken*.
+
+It remains an L3 evidence harness, and never a way the task runs.
 
 """
 
@@ -70,6 +91,8 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACK_ROOT = REPO_ROOT / "examples" / "davis_future_prediction"
+#: The pack's own plugin root — the frozen exact-L1 objective lives here.
+PACK_PLUGINS = PACK_ROOT / "plugins"
 PLUGINS_DIR = PACK_ROOT / "plugins"
 MANIFESTS = PACK_ROOT / "data" / "manifests"
 
@@ -98,6 +121,7 @@ from execute_tools.task_data_path import (  # noqa: E402
     EvaluationReadRequest,
     bind_task_data_path,
 )
+from ml_models.plugin_binding import bind_run_loss_plugin_roots  # noqa: E402
 from scripts._gate2_health_stage import run_health_stage  # noqa: E402
 
 MODEL_TYPE = "davis_reference_predictor"
@@ -158,7 +182,10 @@ def main() -> int:
 
     torch.manual_seed(11)
     t0 = time.perf_counter()
-    with bind_task_data_path(impl):
+    # Step 12 / PR-12d D4c: this harness executes the engine IN-PROCESS, so it
+    # binds the pack's own loss root itself rather than inheriting it from a
+    # composed spawn. Same root a `loss_plugins:` manifest section declares.
+    with bind_task_data_path(impl), bind_run_loss_plugin_roots((str(PACK_PLUGINS),)):
         results = run_experiment_streaming(
             config_cls(batch_size=args.batch_size),
             TrainConfig(
@@ -168,11 +195,24 @@ def main() -> int:
                 optimizer_type="adam",
                 device=device,
             ),
-            # MAE-family objective (child design §2.5, amended at C7): the
-            # frozen LossConfig validates beta in [0.1, 10.0], so 0.1 — the
-            # schema's MINIMUM, the most L1-like admissible setting — is used.
-            # A production constraint is never widened to fit a task.
-            LossConfig(loss_type="smooth_l1", beta=0.1),
+            # The frozen EXACT MAE / L1 objective — Step 12 / PR-12d D4c,
+            # ruling A3.
+            #
+            # This was `smooth_l1(beta=0.1)`, chosen because 0.1 is the
+            # schema's MINIMUM and therefore the most L1-like setting the
+            # built-in family admitted. It was honest about the compromise and
+            # it was still the wrong objective: smooth L1 is QUADRATIC below
+            # beta, which is where a future-frame model spends its time near
+            # convergence. On a small probe the two differ by ~8% (0.350000 vs
+            # 0.320833), and the report said MAE either way.
+            #
+            # The exact objective now travels the EXISTING custom family from
+            # the pack that owns it — no new `loss_type` member, no central
+            # catalog. `loss_name` resolves through the run's declared
+            # `loss_plugins:` root; the plugin DECLARES float targets and mean
+            # reduction, which is what makes `comparability` established
+            # below rather than `custom_objective_undeclared`.
+            LossConfig(loss_type="custom", loss_name="davis_exact_l1"),
             sample_set={},
             data_dir=args.data_dir,
             sandbox_dirs=sandbox_dirs,

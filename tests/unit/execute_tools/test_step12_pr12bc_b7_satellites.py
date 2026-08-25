@@ -178,12 +178,33 @@ class TestThePeekPathComesFromTheRunsAuthorities:
     def test_the_path_is_built_from_the_composed_root_and_the_declaration(self):
         """Both halves, at the site. A fix that replaced only the filename
         would still peek in TIDMAD's directory.
+
+        **Step 12 / PR-12d seam B -- asserted SEMANTICALLY, not as a source
+        string.** The filename half used to be pinned as the literal
+        ``_peek_names.validation_file_name(i)``, which turned RED when seam B
+        renamed a LOCAL VARIABLE, with no semantic change at all. What
+        matters is what the resolver READS: the COMPOSED physical root, and
+        ``validation_file_name`` from an authority the run owns rather than
+        an inline template. Both are asserted against the resolver's own AST.
         """
+        import ast as _ast
+
         src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "execution.py").read_text(
             encoding="utf-8"
         )
-        assert '_peek_root = sandbox.dirs["data"]' in src
-        assert "_peek_names.validation_file_name(i)" in src
+        assert '_peek_root = sandbox.dirs["data"]' in src, "the COMPOSED root half"
+
+        resolver = next(
+            node
+            for node in _ast.walk(_ast.parse(src))
+            if isinstance(node, _ast.FunctionDef) and node.name == "_target_fn"
+        )
+        body = _ast.unparse(resolver)
+        assert "validation_file_name" in body, (
+            "the filename must still come from the declared template authority"
+        )
+        assert "abra_validation" not in body, "no inline TIDMAD filename literal may return"
+        assert "os.path.join" in body
 
     def test_tidmads_peek_names_are_byte_identical(self):
         """Parity: the declaration renders exactly what the literal did."""

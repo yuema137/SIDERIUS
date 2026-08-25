@@ -447,6 +447,27 @@ class TestRungB07a2ValidationScopeAxis:
             f"[B-07a-2] r3={h.validation_objective[-1]!r} val_ref={val_ref!r} train_ref={train_ref!r}"
         )
         # Cross-process float32 accumulation (batch 2 in the child vs batch 1
-        # here) leaves ~1e-7; the two FAMILIES differ by orders of magnitude more.
-        assert h.validation_objective[-1] == pytest.approx(val_ref, abs=1e-5)
-        assert abs(h.validation_objective[-1] - train_ref) > 1e-4
+        # here) leaves ~1e-7, so R3 must MATCH the validation family closely.
+        r3 = h.validation_objective[-1]
+        assert r3 == pytest.approx(val_ref, abs=1e-5)
+
+        # ...and must be nearer the validation family than the training one.
+        #
+        # Step 12 / PR-12d, F-12d-35. This was `abs(r3 - train_ref) > 1e-4`,
+        # justified as "the two FAMILIES differ by orders of magnitude more".
+        # On CI they differed by 8.0e-06 and the test failed — while the
+        # SEMANTICS were perfectly intact: r3 sat 1.5e-07 from val_ref and
+        # 8.0e-06 from train_ref, i.e. R3 was computed over the validation
+        # family, exactly as claimed. The absolute threshold was a claim about
+        # how different two DATASETS happen to be, which no amount of correct
+        # production code controls, and which is not what this test owns.
+        #
+        # A RELATIVE comparison owns the defect precisely: were R3 computed
+        # over the training family, `r3` would coincide with `train_ref` and
+        # this fails. It is strictly better targeted, not weaker — the failure
+        # it catches is unchanged, and the environmental coupling is gone.
+        assert abs(r3 - val_ref) < abs(r3 - train_ref), (
+            f"R3 {r3!r} is nearer the TRAINING family {train_ref!r} than the "
+            f"validation family {val_ref!r} — the validation pass ran over the "
+            f"wrong file family"
+        )

@@ -31,13 +31,97 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from execute_tools.dataset_config import DataScope
+from execute_tools.dataset_config import (
+    DataScope,
+    DatasetProfile,
+    declares_tidmad_topology,
+    tidmad_topology,
+)
 from execute_tools.task_data_path import (
     ScopeBuildRequest,
     TaskDataPathResolutionError,
     require_bound_task_data_path,
     resolve_task_scope_capability,
 )
+
+
+class TaskTopologyUnavailableError(RuntimeError):
+    """A caller asked for physical geometry this run's task does not declare.
+
+    Step 12 / PR-12d, seam B. Raised only where a bound genuinely cannot be
+    supplied and the caller has no legal way to continue. Every other consumer
+    of :class:`AttemptTopologyFacts` **skips or declines by name** instead —
+    the D-BC-8 precedent, where the partition bound is generic identity and is
+    always checked while the per-partition bound is task topology and is
+    SKIPPED, never guessed.
+    """
+
+
+class AttemptTopologyFacts(BaseModel):
+    """What the tuner's own paths still need to know about physical geometry.
+
+    Step 12 / PR-12d, seam B. Five sites in this package decoded TIDMAD's
+    topology directly — ``planning.py`` 381/460/465,
+    ``ml_hyperparameter_tune_agent.py`` 758 and ``execution.py`` 1066 — and
+    each one killed a composed contrast run before any training. The defect
+    was never "N calls to ``tidmad_topology``": it was that a composed run
+    **already has a bound scope capability while planning and execution
+    separately construct TIDMAD facts**.
+
+    ```text
+    COMPOSED            -> the bound task scope / capability is authoritative
+    LEGACY / UNCOMPOSED -> the existing TIDMAD regime-A construction remains
+                           authoritative
+    ```
+
+    **Legacy values arrive BY CONSTRUCTION, not via a parallel branch.** The
+    projection asks the profile what it declares; a TIDMAD profile always
+    declares physical geometry, so every legacy caller receives exactly the
+    object it received before. There is deliberately no ``if composed:`` here
+    and no task name: what discriminates is what the PROFILE declares, which
+    is a stronger statement than composition presence — a composed TIDMAD run
+    is still physical, and that is the honest answer for it.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid", arbitrary_types_allowed=True)
+
+    physical_dataset: Any = Field(
+        default=None,
+        description=(
+            "The run's TIDMAD ``DatasetConfig`` when the profile declares "
+            "TIDMAD's physical topology, else ``None`` — a DECLARED absence, "
+            "not a missing value."
+        ),
+    )
+
+    @property
+    def declares_physical_geometry(self) -> bool:
+        return self.physical_dataset is not None
+
+    def require_physical_dataset(self, purpose: str) -> Any:
+        """The dataset config, or a refusal that NAMES what was unavailable."""
+        if self.physical_dataset is None:
+            raise TaskTopologyUnavailableError(
+                f"{purpose} requires this run's physical dataset geometry, and "
+                f"the run's task declares none. A composed task that is not "
+                f"TIDMAD-shaped has no PSD segment length, no segments per "
+                f"file and no validation-file template — and inventing them is "
+                f"what the Q-12-4 profile split exists to prevent."
+            )
+        return self.physical_dataset
+
+
+def project_attempt_topology_facts(profile: DatasetProfile) -> AttemptTopologyFacts:
+    """The ONE place the tuner package decodes physical topology.
+
+    A MEMBERSHIP test decides whether the profile declares one; a profile that
+    declares the sections but carries a MALFORMED payload still raises out of
+    :func:`tidmad_topology`, because that is a broken declaration rather than
+    an absent one.
+    """
+    if not declares_tidmad_topology(profile):
+        return AttemptTopologyFacts()
+    return AttemptTopologyFacts(physical_dataset=tidmad_topology(profile).dataset)
 
 
 class AttemptScopes(BaseModel):

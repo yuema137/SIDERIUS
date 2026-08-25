@@ -124,7 +124,7 @@ def _check_denoised_artifacts(workspace: str, scope: list[int], abnormal: list[s
     naming = default_deliverable_naming()
     scope_set = set(scope)
     for path in glob.glob(os.path.join(workspace, "**", naming.any_glob()), recursive=True):
-        file_index = naming.file_index_of(os.path.basename(path))
+        file_index = naming.input_identity_of(os.path.basename(path))
         if file_index is not None and file_index not in scope_set:
             abnormal.append(f"OUT-OF-SCOPE denoised artifact on disk: {path}")
 

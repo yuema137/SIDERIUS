@@ -116,8 +116,15 @@ def test_the_child_reconstructs_the_spec_and_adds_no_second_resolution():
 
     §3.2a's frozen acceptance has two halves and both are asserted:
 
-    * the child calls ``derive_tidmad_deliverable_spec`` — it does not receive
-      a serialized spec and does not rebuild the template itself;
+    * the child derives the spec from the profile — it does not receive a
+      serialized spec and does not rebuild the template itself. **UPGRADED at
+      Step 12 / PR-12d D4b (B11):** the derivation it calls is now
+      ``derive_run_deliverable_spec``, which answers ``None`` for a profile
+      declaring no physical geometry instead of dying inside
+      ``tidmad_topology``. The property is unchanged — *exactly one
+      derivation, from the transported profile* — so this asserts the new
+      authority AND that the unconditional TIDMAD one is gone, rather than
+      being retired for having changed name;
     * it adds **no** ``resolve_dataset_profile()`` call. Exactly one remains,
       the pre-existing legacy adapter in the ``else`` branch at ``:339`` for a
       caller that never heard of ``--dataset_profile_json``. A second one
@@ -127,6 +134,13 @@ def test_the_child_reconstructs_the_spec_and_adds_no_second_resolution():
     tree = ast.parse(_source())
 
     derivations = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "derive_run_deliverable_spec"
+    ]
+    tidmad_derivations = [
         node
         for node in ast.walk(tree)
         if isinstance(node, ast.Call)
@@ -142,6 +156,11 @@ def test_the_child_reconstructs_the_spec_and_adds_no_second_resolution():
     ]
 
     assert len(derivations) == 1, "the child must derive the spec exactly once"
+    assert tidmad_derivations == [], (
+        "B11: the child must not derive the TIDMAD spec unconditionally — a "
+        "profile that declares no physical geometry died here before reaching "
+        "its own route"
+    )
     assert len(ambient) == 1, (
         f"expected exactly one resolve_dataset_profile() — the pre-existing "
         f"legacy adapter at :339 — found {len(ambient)}"
@@ -157,13 +176,13 @@ def test_the_child_reconstructs_the_spec_and_adds_no_second_resolution():
                 "model_type": GOLDEN_MODEL_TYPE,
                 "run_name": GOLDEN_RUN_NAME,
                 "exp_id": GOLDEN_EXP_ID,
-                "file_index": GOLDEN_FILE_INDEX,
+                "input_identity": GOLDEN_FILE_INDEX,
             },
             GOLDEN_SAMPLE_SET_NAME,
         ),
         (
             "unqualified_name",
-            {"model_type": GOLDEN_MODEL_TYPE, "file_index": GOLDEN_FILE_INDEX},
+            {"model_type": GOLDEN_MODEL_TYPE, "input_identity": GOLDEN_FILE_INDEX},
             GOLDEN_FIX_MODE_NAME,
         ),
     ],

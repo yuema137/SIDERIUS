@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import json
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -186,6 +186,56 @@ class _PetsManifestDataset(Dataset):
         return decode_and_transform(self._images_root / f"{row.image_id}.jpg"), int(row.class_index)
 
 
+def _pets_image_id(identity: object) -> str:
+    """The image id, from either a paired caller's string or a scope row."""
+    return str(getattr(identity, "image_id", identity))
+
+
+def _pets_class_index(prediction: object) -> int:
+    """The predicted class, from a caller's int or the model's raw logits.
+
+    The generic inference unit hands back what the MODEL produced — a logit
+    vector per sample — because it has no idea that this task's deliverable is
+    a class index. Turning logits into a label is task semantics, so it
+    happens here. An already-decided int (every pre-12d caller) passes
+    through.
+    """
+    import torch
+
+    if isinstance(prediction, torch.Tensor) and prediction.ndim >= 1:
+        return int(torch.argmax(prediction).item())
+    return int(prediction)  # type: ignore[arg-type]
+
+
+def pair_with_scope(outputs, request: DeliverableWriteRequest):
+    """Pair unpaired per-sample outputs with this task's own row identities.
+
+    Step 12 / PR-12d seam C (B7). The generic inference unit iterates
+    ``validation_dataset`` and hands back per-sample outputs IN DATASET ORDER
+    together with the scope it iterated — it cannot pair them itself without
+    learning this task's vocabulary, which is exactly what the seam exists to
+    prevent. So the pairing happens HERE, in the task's own file.
+
+    ``request.task_scope is None`` means the caller already paired them, which
+    is what every pre-12d producer does; that shape passes straight through.
+
+    ``strict=True`` is the point rather than a detail: a length mismatch means
+    the outputs and the scope disagree about how many samples there were, and
+    silently zipping to the shorter one would mis-attribute every prediction
+    after the first missing sample.
+    """
+    if request.task_scope is None:
+        return list(outputs)
+    rows = getattr(request.task_scope, "rows", None)
+    if rows is None:
+        raise ValueError(
+            f"deliverable write for {PETS_TASK_DATA_PATH_ID!r} received a task_scope "
+            f"of type {type(request.task_scope).__name__}, which declares no "
+            f"rows to pair the outputs with."
+        )
+    return list(zip(rows, outputs, strict=True))
+
+
 class PetsTaskDataPath:
     """The registered Pets implementation of the four-method seam."""
 
@@ -194,7 +244,9 @@ class PetsTaskDataPath:
     #: The scope payload's self-identifying tag (PR-12bc B8).
     _SCOPE_KIND: ClassVar[str] = "pets_scope_v1"
 
-    def __init__(self, *, manifest_path: str | None = None) -> None:
+    def __init__(
+        self, *, manifest_path: str | None = None, eval_manifest_path: str | None = None
+    ) -> None:
         """Step 12 / PR-12bc B8 — TASK-INSTANCE CONFIGURATION (§D.1).
 
         An implementation that needs its own sources to BUILD scopes receives
@@ -207,15 +259,29 @@ class PetsTaskDataPath:
         The task's own plugin reading the task's own manifest is never a
         FRAMEWORK import of ``examples/``, so the governance census
         (``test_pack_governance.py:211-221``) stays green.
+
+        ``eval_manifest_path`` — Step 12 / PR-12d, closing **F-12d-17** on the
+        Pets side (DAVIS closed first, in `davis_data_path.py`). This pack
+        ships THREE DISJOINT role manifests (train 370 / validation 74 /
+        final 370, `scope` constant per file), and before this both
+        :meth:`build_training_scope` and :meth:`build_eval_scope` selected
+        from the single ``manifest_path`` — so a composed run trained and
+        evaluated on the identical images. The D14 runner never showed it: it
+        loads all three manifests itself and passes both scopes explicitly.
+
+        OPTIONAL and additive: absent, both scopes come from ``manifest_path``
+        exactly as before, so every existing caller is byte-unchanged.
         """
         self._manifest_path = manifest_path
+        self._eval_manifest_path = eval_manifest_path
 
     # ------------------------------------------------------------------
     # TaskScopeCapability (PR-12bc B8)
     # ------------------------------------------------------------------
 
-    def _rows(self) -> tuple[PetsItem, ...]:
-        if self._manifest_path is None:
+    def _rows(self, *, source: str | None = None) -> tuple[PetsItem, ...]:
+        source = source or self._manifest_path
+        if source is None:
             raise ValueError(
                 f"task data path {self.task_data_path_id!r} was asked to BUILD a "
                 f"scope but was constructed with no manifest. Declare "
@@ -223,10 +289,10 @@ class PetsTaskDataPath:
                 f"`task_data_path` section — the manifest is this task's scope "
                 f"authority and there is nothing to sample without it."
             )
-        return load_pets_manifest(self._manifest_path)
+        return load_pets_manifest(source)
 
-    def _select(self, request: ScopeBuildRequest) -> PetsScope:
-        rows = self._rows()
+    def _select(self, request: ScopeBuildRequest, *, source: str | None = None) -> PetsScope:
+        rows = self._rows(source=source)
         if request.selection_strategy == "anchors":
             raise ValueError(
                 f"task data path {self.task_data_path_id!r} declares no anchor "
@@ -258,7 +324,14 @@ class PetsTaskDataPath:
         return self._select(request)
 
     def build_eval_scope(self, request: ScopeBuildRequest) -> object:
-        return self._select(request)
+        """The EVAL manifest when one is declared, else the training one.
+
+        The fallback keeps this additive (F-12d-17); it is not a
+        recommendation. A composition declaring only ``manifest_path`` gets an
+        evaluation scope drawn from its training rows — the pre-existing
+        behaviour, and why the shipped manifest declares both.
+        """
+        return self._select(request, source=self._eval_manifest_path or self._manifest_path)
 
     def serialize_scope(self, scope: object) -> str:
         s = self._scope(scope)
@@ -306,12 +379,17 @@ class PetsTaskDataPath:
         """The classification deliverable: ONE CSV, header
         ``image_id,predicted_class_index``, rows sorted by image_id
         (byte-deterministic). Codec only — no correctness knowledge."""
-        rows = sorted((str(image_id), int(pred)) for image_id, pred in outputs)
+        paired = pair_with_scope(outputs, request)
+        rows = sorted(
+            (str(_pets_image_id(identity)), _pets_class_index(prediction))
+            for identity, prediction in paired
+        )
         path = Path(request.output_dir) / deliverable_name(request)
         with path.open("w", encoding="utf-8", newline="") as fh:
             fh.write("image_id,predicted_class_index\n")
             for image_id, pred in rows:
                 fh.write(f"{image_id},{pred}\n")
+        _write_probabilities_sidecar(paired, request)
 
     def read_evaluation_payload(self, request: EvaluationReadRequest) -> object:
         """Decode the deliverable to ``{image_id: predicted_class_index}``.
@@ -333,12 +411,93 @@ class PetsTaskDataPath:
                 continue
             image_id, pred = line.split(",")
             payload[image_id] = int(pred)
-        return payload
+        probabilities = _read_probabilities_sidecar(request)
+        if probabilities is None:
+            return payload
+        return PetsEvaluationPayload(labels=payload, probabilities=probabilities)
+
+
+class PetsEvaluationPayload(Mapping):
+    """The deliverable, read back: arg-max labels PLUS the distribution.
+
+    Step 12 / PR-12d. A ``Mapping`` of ``{image_id: class_index}`` so every
+    label-reading consumer — `accuracy`, `macro_f1`, and every pre-12d caller
+    — is unchanged and cannot tell the difference. ``probabilities`` is the
+    additive half `log_loss` needs.
+
+    Being a Mapping rather than a pair of arguments is what keeps this
+    task-owned: the framework hands whatever ``read_evaluation_payload``
+    returns to whatever metric the task declared, and never inspects it.
+    """
+
+    def __init__(self, labels: dict[str, int], probabilities: dict[str, Any]) -> None:
+        self._labels = labels
+        self.probabilities = probabilities
+
+    def __getitem__(self, key: str) -> int:
+        return self._labels[key]
+
+    def __iter__(self):
+        return iter(self._labels)
+
+    def __len__(self) -> int:
+        return len(self._labels)
+
+
+def _write_probabilities_sidecar(paired, request: DeliverableWriteRequest) -> None:
+    """Persist the predicted distribution, when the model produced one.
+
+    A caller that already decided a label (every pre-12d producer, and the
+    D14 runner) hands back ints, not logits — there is no distribution to
+    write and none is written. That absence is DATA, not an error: the
+    sidecar's reader returns ``None`` and `log_loss` refuses by name.
+    """
+    import numpy as np
+    import torch
+
+    rows: dict[str, Any] = {}
+    for identity, prediction in paired:
+        if not isinstance(prediction, torch.Tensor) or prediction.ndim < 1:
+            return
+        rows[str(_pets_image_id(identity))] = (
+            torch.softmax(prediction.detach().float().flatten(), dim=0).cpu().numpy()
+        )
+    if not rows:
+        return
+    np.savez_compressed(Path(request.output_dir) / probabilities_sidecar_name(request), **rows)
+
+
+def _read_probabilities_sidecar(request: EvaluationReadRequest) -> dict[str, Any] | None:
+    """The distribution, or ``None`` when this run wrote none."""
+    import numpy as np
+
+    path = Path(request.deliverable_dir) / probabilities_sidecar_name(request)
+    if not path.exists():
+        return None
+    with np.load(path) as handle:
+        return {key: handle[key] for key in handle.files}
 
 
 def deliverable_name(request: DeliverableWriteRequest | EvaluationReadRequest) -> str:
     """ONE naming rule, both directions (write + read)."""
     return f"predictions_{request.model_type}_{request.run_name}_{request.exp_id}.csv"
+
+
+def probabilities_sidecar_name(request: DeliverableWriteRequest | EvaluationReadRequest) -> str:
+    """The predicted DISTRIBUTION's file, beside the CSV.
+
+    Step 12 / PR-12d. `log_loss` needs the probability the model assigned to
+    the true class, and the CSV carries only the arg-max label — so with the
+    CSV alone that declaration could compose and never compute.
+
+    **A SIDECAR rather than extra CSV columns, and the reason is bytes.** The
+    CSV's exact header and row format are pinned in several places, including
+    the sha-pinned D14 Pets collapse fixture and the codec-parity regression.
+    Widening it would move digests that record a REAL observed collapse, for
+    a reason that has nothing to do with that collapse. An additive file moves
+    nothing: every existing reader, and the CSV's own digest, are untouched.
+    """
+    return f"predictions_{request.model_type}_{request.run_name}_{request.exp_id}_probs.npz"
 
 
 # Regime-A instance: no manifest, so it materializes a scope it is HANDED

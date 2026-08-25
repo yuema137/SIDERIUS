@@ -53,18 +53,54 @@ def subprocess_env(
     imports in those scripts resolve regardless of working directory, and
     forwards the run-scoped plugin directories when supplied.
 
+    **The model-plugin variable is UNIONED, not assigned** (Step 12 /
+    PR-12d, seam P). It used to be assigned while `PYTHONPATH` two lines
+    above was joined, and that asymmetry was the defect: the one variable
+    whose entire purpose is to say *which implementation runs* was the one
+    a child spawn destroyed. A child or runtime default may now ADD to the
+    set the run declared; it can never overwrite or drop it.
+
+    TWO sources merge, in precedence order: the caller's `plugin_dir` (most
+    run-specific — the workspace where implementor output lands) and the
+    RUN-SCOPED BINDING's declared roots. Nothing else.
+
+    **The ambient environment is deliberately NOT a third source**, and that
+    is a correction rather than an omission. An earlier draft unioned it too,
+    reasoning that a process which received roots from ITS parent carries no
+    binding object. But that case is already covered: with no `plugin_dir`
+    supplied the `os.environ.copy()` below carries the inherited value
+    unchanged, so the transitive hop works without any union at all. What the
+    third source DID do was change legacy behaviour — an ambient value that
+    used to be replaced would now survive into a child — which breaks seam P's
+    own requirement that un-composed plugin resolution be observably
+    unchanged. It was caught by a REAL-TRAINING test whose numerics moved
+    because the child suddenly scanned a directory it had never scanned:
+    plugin imports consume RNG, so the trained weights differed. The frozen
+    rule says a child default may never drop **the parent's BINDING**; it says
+    nothing about ambient state, and reading more into it cost correctness.
+
     Args:
-        plugin_dir: run-scoped model-plugin directory. When provided, the
-            subprocess scans only this directory instead of the legacy
-            global `agent_generated/models/`. `None` leaves the variable
-            unset and the subprocess falls back to the legacy global dir —
-            preserving back-compat for callers outside the sandbox flow.
-        loss_dir: run-scoped loss-plugin directory, same semantics.
+        plugin_dir: run-scoped model-plugin directory. When provided it is
+            merged with the run's declared roots. `None` contributes nothing
+            and leaves whatever the process inherited untouched. With no
+            binding — every legacy and un-composed caller — the result is
+            exactly `plugin_dir` alone, or the inherited value, byte-for-byte
+            as before.
+        loss_dir: run-scoped loss-plugin directory. Deliberately NOT changed
+            here: `_resolve_loss_dirs` already unions the env var with the
+            global losses directory on the READ side, so the loss family has
+            no equivalent hole.
 
     Returns:
         A copy of the current environment with the above applied. Never
         mutates `os.environ`.
     """
+    from ml_models.plugin_binding import (
+        active_run_loss_plugin_roots,
+        active_run_model_plugin_roots,
+        union_plugin_roots,
+    )
+
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     extra_paths = [
         project_root,
@@ -74,8 +110,20 @@ def subprocess_env(
     env = os.environ.copy()
     existing = env.get("PYTHONPATH", "")
     env["PYTHONPATH"] = os.pathsep.join(extra_paths + ([existing] if existing else []))
-    if plugin_dir:
-        env[PLUGIN_DIRS_ENV_VAR] = plugin_dir
-    if loss_dir:
-        env[LOSS_DIRS_ENV_VAR] = loss_dir
+    plugin_roots = union_plugin_roots(
+        [plugin_dir] if plugin_dir else (),
+        active_run_model_plugin_roots(),
+    )
+    if plugin_roots:
+        env[PLUGIN_DIRS_ENV_VAR] = os.pathsep.join(plugin_roots)
+    # Step 12 / PR-12d D4c: the loss variable is UNIONED for the same reason
+    # seam P unioned the model one — a child spawn must never destroy the set
+    # the run declared. Two sources merge: the caller's `loss_dir` (most
+    # specific, first) and the run's declared loss-plugin roots.
+    loss_roots = union_plugin_roots(
+        [loss_dir] if loss_dir else (),
+        active_run_loss_plugin_roots(),
+    )
+    if loss_roots:
+        env[LOSS_DIRS_ENV_VAR] = os.pathsep.join(loss_roots)
     return env

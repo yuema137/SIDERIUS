@@ -713,13 +713,40 @@ class TestQ097StaysBinding:
             if "secondar" in name.lower() and re.search(r"evaluat|scor|load", name, re.I)
         ]
 
+    #: Step 12 / PR-12d D8a — F-12d-18 gave the task-owned route its OWN
+    #: reason to evaluate secondaries (the tuner cannot reach them once the
+    #: deliverable is read by the scoring CHILD), so the NAME-based census
+    #: below now finds three functions, not one. The name predicate cannot
+    #: distinguish "a second independent taxonomy" (the regression this
+    #: guard exists to catch) from "a per-route ADAPTER that delegates to
+    #: the one shared taxonomy" (the fix) — only the TRY/EXCEPT structure
+    #: can. `TAXONOMY_HANDLERS` is that structure, read once from the
+    #: shared owner rather than hardcoded a second time.
+    TAXONOMY_HANDLERS: ClassVar[tuple[str, ...]] = (
+        "NotScoreableError",
+        "ScopeViolationError",
+        "Exception",
+    )
+
+    @staticmethod
+    def _try_handler_types(fn: ast.FunctionDef) -> list[str]:
+        return [
+            ast.unparse(h.type) if h.type is not None else "bare"
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Try)
+            for h in node.handlers
+        ]
+
     def test_the_secondary_evaluator_has_exactly_one_owner(self):
         """The C2 half of the inversion (C1 inverted the binder half into
         `tests/unit/workflows/test_step10_p2b_c1_secondary_declaration.py`).
 
-        A SECOND evaluator would be a second place a secondary outcome could
-        come into existence — and the whole frozen exception taxonomy lives
-        inside this one function, so a second one would silently not have it.
+        A SECOND evaluator CARRYING THE TAXONOMY would be a second place a
+        secondary outcome could come into existence with its own,
+        independently-driftable exception handling. A per-route ADAPTER
+        that delegates to the one shared owner is not that — it is the fix
+        F-12d-18's twinning defect required (Step 12 / PR-12d, extracting
+        `execute_tools.evaluation_metric.evaluate_declared_secondaries`).
 
         F-P2b-4: the Step-09a census used two anchored alternations, one of
         which required the name to BEGIN with `evaluat`/`load`. The real
@@ -730,14 +757,61 @@ class TestQ097StaysBinding:
         anchoring and no assumption about which half comes first.
         """
         offenders: dict[str, list[str]] = {}
+        owners: dict[str, list[str]] = {}
         for root in ("nodes", "agent", "core", "execute_tools", "workflows"):
             for path in sorted((REPO_ROOT / root).rglob("*.py")):
-                hits = self._secondary_evaluators_in(path.read_text(encoding="utf-8"))
-                if hits:
-                    offenders[path.relative_to(REPO_ROOT).as_posix()] = sorted(hits)
+                source = path.read_text(encoding="utf-8")
+                hits = self._secondary_evaluators_in(source)
+                if not hits:
+                    continue
+                rel = path.relative_to(REPO_ROOT).as_posix()
+                offenders[rel] = sorted(hits)
+                tree = ast.parse(source)
+                for fn in ast.walk(tree):
+                    if (
+                        isinstance(fn, ast.FunctionDef)
+                        and fn.name in hits
+                        and self._try_handler_types(fn) == list(self.TAXONOMY_HANDLERS)
+                    ):
+                        owners.setdefault(rel, []).append(fn.name)
+
         assert offenders == {
-            "nodes/ml_hyperparameter_tune_agent/execution.py": ["_evaluate_secondary_metrics"]
-        }, f"secondary-metric evaluation must have exactly one owner: {offenders}"
+            "nodes/ml_hyperparameter_tune_agent/execution.py": ["_evaluate_secondary_metrics"],
+            "execute_tools/denoising_score_single.py": ["_evaluate_task_owned_secondaries"],
+            "execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"],
+        }, f"the census's own reachable set moved — update BOTH sides deliberately: {offenders}"
+        assert owners == {
+            "execute_tools/evaluation_metric.py": ["evaluate_declared_secondaries"]
+        }, (
+            f"exactly one function may CONTAIN the try/except taxonomy; found it in: {owners}. "
+            "Every other name-matching function must be a thin adapter that DELEGATES to it."
+        )
+
+    def test_the_taxonomy_detector_FIRES_on_a_planted_second_copy(self):
+        """Anti-vacuity: the NEW half of the guard, proven to actually see a
+        regression rather than merely never having found one yet."""
+        planted = ast.parse(
+            "def _secondary_evaluator_regression(x):\n"
+            "    try:\n"
+            "        pass\n"
+            "    except NotScoreableError:\n"
+            "        pass\n"
+            "    except ScopeViolationError:\n"
+            "        raise\n"
+            "    except Exception:\n"
+            "        pass\n"
+        ).body[0]
+        assert self._try_handler_types(planted) == list(self.TAXONOMY_HANDLERS)
+
+    def test_the_shared_owner_really_does_contain_the_taxonomy(self):
+        """The premise: `evaluate_declared_secondaries` is not itself a
+        further layer of indirection with nothing underneath it."""
+        import inspect
+
+        from execute_tools.evaluation_metric import evaluate_declared_secondaries
+
+        fn = ast.parse(inspect.getsource(evaluate_declared_secondaries)).body[0]
+        assert self._try_handler_types(fn) == list(self.TAXONOMY_HANDLERS)
 
     @pytest.mark.parametrize(
         "planted",

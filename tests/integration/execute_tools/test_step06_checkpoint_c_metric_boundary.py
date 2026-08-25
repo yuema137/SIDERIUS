@@ -260,7 +260,7 @@ def test_the_structured_refusal_crosses_the_real_child(produced, monkeypatch):
     other.mkdir(exist_ok=True)
     spec = derive_tidmad_deliverable_spec(ws["profile"])
     name = spec.naming.name(
-        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, file_index=FILE_INDEX
+        model_type=MODEL_TYPE, run_name=RUN_NAME, exp_id=EXP_ID, input_identity=FILE_INDEX
     )
     wide = np.arange(64, dtype=np.int16)
     create_abra_file(str(other / name), wide, wide, indexed=False, storage=spec.storage)
