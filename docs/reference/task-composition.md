@@ -170,6 +170,19 @@ Notes:
 - `deliverable` is `extra="forbid"`: a misspelled key is refused rather than
   falling back to a template.
 - An empty `task_description` is refused.
+- **An `objective:` file must export all three loss-plugin symbols** —
+  `PLUGIN_LOSS_TYPE`, `PLUGIN_LOSS_CONFIG_CLASS` and `PLUGIN_LOSS_CLASS` — even
+  though the manifest names only the first. The section is checked against the
+  same contract the loss registry enforces, so composition refuses at startup
+  and names the missing symbol.
+
+  > **Behaviour change.** Before this check existed, a manifest naming a plugin
+  > that exported only `PLUGIN_LOSS_TYPE` composed successfully and the run
+  > died much later, at admission, with `Custom loss ... not found in
+  > LOSS_REGISTRY` and a remediation line telling you to run the implementor —
+  > wrong advice for a declared pack plugin. Such a manifest now fails to
+  > launch. That is the same defect surfacing earlier and with the real cause;
+  > the fix is to export the two missing symbols, not to revert the check.
 
 ## Beyond the manifest: `--data_dir`
 

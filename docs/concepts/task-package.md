@@ -134,8 +134,16 @@ For a task that needs its own data access or metric mathematics, add:
 ```
 └── plugins/
     ├── my_task_data_path.py    # TaskDataPath (+ optional TaskScopeCapability)
-    └── my_task_metric.py       # EvaluationMetric
+    ├── my_task_metric.py       # EvaluationMetric
+    └── my_model/
+        └── description.md      # optional — the planner reads this
 ```
+
+A model plugin declared through `model_plugins:` may ship a `description.md`
+under `{plugin root}/{model_type}/`. The tuner reads it into the planner's
+prompt; a pack without one runs with a thinner prompt and says nothing, so it
+is worth adding. It is searched after the run's own workspace, so it never
+shadows the copy a run actually staged.
 
 Plugins may be declared **by module** (importable) or **by file** (an arbitrary
 path). A `file:` reference is how a task lives outside the SIDERIUS source tree —

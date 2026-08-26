@@ -449,7 +449,11 @@ def _module_name(logical_ref: str, symbol: str) -> str:
 
 
 def _load_symbol(
-    section: dict[str, Any], manifest_dir: str, where: str
+    section: dict[str, Any],
+    manifest_dir: str,
+    where: str,
+    *,
+    also_require: tuple[str, ...] = (),
 ) -> tuple[Any, ResolvedPluginRef | None]:
     """Resolve ``{file, symbol}`` or ``{module, symbol}`` to a live object.
 
@@ -464,6 +468,36 @@ def _load_symbol(
       shipped data-path implementations). A dotted name the manifest supplies
       is still the task naming its own binding; the framework holds no
       mapping from task identity to symbol.
+
+    ``also_require`` names COMPANION symbols that must exist on the same
+    module for the resolved object to be USABLE by its consumer — the loader
+    that will later scan for this plugin. Empty by default, so every caller
+    that does not pass it behaves exactly as before.
+
+    It exists because resolving a symbol proves the manifest pointed
+    somewhere real, NOT that the downstream registry can load what it points
+    at. The loss registry requires three symbols and SKIPS a module missing
+    any one; the ``objective:`` resolver used to require only the one it
+    reads, so composition could accept an objective the registry would refuse
+    — and the failure surfaced much later, as a missing-loss RuntimeError
+    whose remediation text names a generated plugin (F12). Checking the
+    companions HERE, against the module that was just executed, is free: no
+    second import, no text heuristic, and exact parity with the loader's own
+    ``hasattr`` test because both read one shared tuple.
+
+    **BOUNDARY — the check may only be applied to a module THIS function
+    loaded.** It is inside ``_load_symbol`` for that reason, not by accident.
+    A sibling of this file, ``_objective_name_declared_by``, deliberately
+    answers a similar-looking question by TEXT because it runs over every
+    other candidate in the loss search path — arbitrary third-party files the
+    manifest never named — and importing them to answer a safety question
+    would execute code as a side effect of a check. That property is real and
+    must not be eroded. It does not apply here: the manifest named THIS file
+    and the resolver already had to execute it to read its symbol's value.
+    Moving this check to a call site that has not itself loaded the module
+    would turn a free assertion into exactly the unsafe import that sibling
+    exists to avoid, so a refactor that lifts it out must not happen — pinned
+    by ``test_lane_e_f12_objective_loader_contract.py``.
 
     Returns ``(object, resolved_ref_or_None)``. The ref is ``None`` for the
     module form: an in-tree module has no content digest to pin that the
@@ -492,6 +526,13 @@ def _load_symbol(
                 f"{where} names module {module_ref!r}, which could not be "
                 f"imported: {type(exc).__name__}: {exc}"
             ) from exc
+        # No rollback scope here, matching this branch's pre-existing shape.
+        # The asymmetry with the file branch below is deliberate and bounded:
+        # `module:` names an IN-TREE importable module shipped with the
+        # framework, importlib owns its own sys.modules bookkeeping, and this
+        # branch has never had a rollback. Widening it is a separate change
+        # against a separate baseline, not part of closing C4.
+        _require_companion_symbols(module, also_require, where, module_ref)
         return _getattr_or_fail(module, symbol, where, module_ref), None
 
     if not isinstance(file_ref, str) or not file_ref.strip():
@@ -526,6 +567,19 @@ def _load_symbol(
 
         with registration_rollback():
             spec.loader.exec_module(module)
+            # INSIDE the rollback (Lane E / C4). This check used to run after
+            # the block had committed and after the handler that pops
+            # sys.modules, so a plugin that registered a data path, metric or
+            # health check and THEN failed the companion contract left the
+            # registry dirty — reopening F-12bc-2 three lines below the
+            # comment describing it.
+            _require_companion_symbols(module, also_require, where, logical)
+    except TaskCompositionError:
+        # Our own refusal. Unwind the import so a corrected plugin can be
+        # retried in the same process, but let the message through: wrapping
+        # it below would rename a precise refusal into an import failure.
+        sys.modules.pop(module_name, None)
+        raise
     except Exception as exc:
         # Roll back so a corrected plugin can be retried in the same process
         # (the 08b idiom) — a half-executed module left in sys.modules would
@@ -543,6 +597,33 @@ def _load_symbol(
         absolute_path=target,
     )
     return _getattr_or_fail(module, symbol, where, logical), resolved
+
+
+def _require_companion_symbols(
+    module: Any, required: tuple[str, ...], where: str, origin: str
+) -> None:
+    """Refuse a plugin missing a symbol its downstream LOADER requires.
+
+    See ``_load_symbol``'s ``also_require``. Reports EVERY missing symbol at
+    once rather than the first: a pack adapting another pack's plugin
+    typically drops the same companion pair together, and naming one at a
+    time turns one edit into two failed launches.
+
+    The message states the CONSUMER's rule, because "PLUGIN_LOSS_TYPE
+    resolved fine" is precisely what makes the later registry skip
+    inexplicable.
+    """
+    missing = [name for name in required if not hasattr(module, name)]
+    if not missing:
+        return
+    raise TaskCompositionError(
+        f"{where} resolves plugin {origin!r}, which is missing "
+        f"{', '.join(repr(m) for m in missing)}. A loss plugin must define all "
+        f"of {', '.join(repr(r) for r in required)}; the loss registry SKIPS a "
+        "module missing any one of them, so this objective would compose "
+        "successfully and then be unloadable at training time. Add the missing "
+        f"symbol{'s' if len(missing) > 1 else ''} to the plugin file."
+    )
 
 
 def _getattr_or_fail(module: Any, symbol: str, where: str, origin: str) -> Any:
@@ -1274,8 +1355,13 @@ def _compose_objective(raw: dict[str, Any], manifest_dir: str):
             f"naming the plugin file and the symbol it declares itself with; got "
             f"{implementation!r}."
         )
+    from agent_generated._loss_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
+
     declared_name, resolved_ref = _load_symbol(
-        implementation, manifest_dir, f"{where}.implementation"
+        implementation,
+        manifest_dir,
+        f"{where}.implementation",
+        also_require=REQUIRED_LOSS_PLUGIN_SYMBOLS,
     )
     if not isinstance(declared_name, str) or not declared_name.strip():
         raise TaskCompositionError(

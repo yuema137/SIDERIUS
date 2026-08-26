@@ -235,7 +235,36 @@ class TrainingHistory(BaseModel):
         ),
     )
     validation_seconds: list[float] | None = None
-    observations: dict[str, list[float]] = Field(default_factory=dict)
+    observations: dict[str, list[float]] = Field(
+        default_factory=dict,
+        description=(
+            "Named per-epoch series ALONGSIDE R2/R3 — a validation quantity "
+            "that is NOT the resolved objective (pets: validation_accuracy "
+            "under a `ce` objective; davis: validation_psnr under `mae`). "
+            "Each series must be `epochs_completed` long, enforced below.\n\n"
+            "**READ THIS BEFORE BUILDING ON IT (Lane E, F1).** The carrier is "
+            "real but the feature is UNFINISHED, and the shape of what is "
+            "missing is not obvious from the type:\n\n"
+            "* there is NO DECLARATION SURFACE — the manifest's "
+            "``_MANIFEST_KEYS`` has no section through which a task can say "
+            "it wants a validation quantity distinct from its objective;\n"
+            "* there is NO PRODUCTION PRODUCER — the training subprocess "
+            "never populates this dict, so every persisted record carries "
+            "``{}``;\n"
+            "* NO REAL TRAINING RUN HAS EVER PRODUCED AN OBSERVATION. The "
+            "only populated instances are the two HAND-AUTHORED L1 fixtures "
+            "under ``examples/{oxford_iiit_pet,davis_future_prediction}/"
+            "expected/``. The ``real_component`` fixtures — whose R2/R3 came "
+            "from actual bounded D14 gate runs — carry ``{}``.\n\n"
+            "So this field is not a placeholder and not dead: it is the "
+            "typed evidence that ONE history schema spans three sciences "
+            "unchanged, which both packs' STATUS.md cite as L1 maturity, and "
+            "which rung B-07a-1 asserts. Do not delete it to tidy up — that "
+            "removes genericity evidence and breaks four committed fixtures "
+            "against ``extra='forbid'``. Do not read it as production "
+            "state either; it is empty in every real record."
+        ),
+    )
 
     @model_validator(mode="after")
     def _consistent(self) -> TrainingHistory:

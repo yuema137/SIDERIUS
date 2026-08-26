@@ -76,6 +76,32 @@ def _chain_workspace_candidates(model_type: str) -> list[str]:
     return matches
 
 
+def _declared_pack_candidates(model_type: str) -> list[str]:
+    """Description paths under the run's DECLARED model-plugin roots.
+
+    Lane E / F11. Every other candidate root is inside the checkout or the
+    generated library, so a task package living outside the tree had nowhere
+    to put a ``description.md`` — it could only supply one by writing into
+    the framework's own directories, which is precisely what the package
+    contract exists to prevent. The effect was silent: the tuner's read is
+    non-fatal, so an out-of-tree task simply got a thinner planner prompt
+    forever.
+
+    No new declaration surface is introduced. The manifest's
+    ``model_plugins:`` section ALREADY declares where a pack's models live;
+    this reads those same roots through the same ``active_*`` accessor the
+    transport uses, and applies the layout every other candidate uses
+    (``{root}/{model_type}/description.md``).
+
+    Empty for an un-composed run, so legacy resolution is byte-unchanged.
+    """
+    from ml_models.plugin_binding import active_run_model_plugin_roots
+
+    return [
+        os.path.join(root, model_type, "description.md") for root in active_run_model_plugin_roots()
+    ]
+
+
 def get_model_description(model_type: str, *, baseline_isolation: bool = False) -> str:
     """
     Load and return the description.md for the given model_type.
@@ -90,6 +116,15 @@ def get_model_description(model_type: str, *, baseline_isolation: bool = False) 
          (chain workspace plugin tree, newest registration first; any
          subdir name is accepted — chain mode uses ``iter_NNN``,
          in-process workflows use whatever ``run_name`` the caller passed)
+      5. {declared model-plugin root}/{model_type}/description.md (Lane E /
+         F11 — the roots the manifest's ``model_plugins:`` section declares,
+         so an OUT-OF-TREE pack can ship a description beside its plugin
+         instead of writing into the framework tree. Empty, hence invisible,
+         for an un-composed run.)
+
+    Searched LAST, deliberately: a pack description must not shadow a
+    workspace registration for the same model type, because the workspace
+    copy is what the run actually staged and promoted.
 
     ``baseline_isolation`` (arXiv U3, #260 / ruling R6): when True, candidate
     1 — the BUNDLED baseline description — is refused rather than searched,
@@ -110,6 +145,7 @@ def get_model_description(model_type: str, *, baseline_isolation: bool = False) 
         os.path.join(generated_models_dir(), model_type, "description.md"),
         os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md"),
         *_chain_workspace_candidates(model_type),
+        *_declared_pack_candidates(model_type),
     ]
 
     for path in candidates:

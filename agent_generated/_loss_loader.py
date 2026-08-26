@@ -68,6 +68,24 @@ _LOSS_DIRS_ENV_VAR = "SIDERIUS_LOSS_DIRS"
 # ``sys.modules`` without colliding.
 _MODULE_NAME_PREFIX = "siderius_loss_plugin_"
 
+#: The module-level symbols a loss plugin MUST define to be registrable.
+#:
+#: PUBLIC because it is the loss-plugin ADMISSION CONTRACT, and more than one
+#: authority has to apply it. ``_load_loss_plugin`` below enforces it at scan
+#: time (a module missing any one of these is SKIPPED, not raised on); the
+#: manifest's ``objective:`` resolver enforces the same tuple at COMPOSITION
+#: time, so a declared objective the registry could never load is refused at
+#: startup instead of surfacing later as a missing-loss RuntimeError.
+#:
+#: Both readers MUST import this tuple. A second hand-written copy is exactly
+#: the drift that let producer acceptance and consumer executability disagree
+#: in the first place (F12).
+REQUIRED_LOSS_PLUGIN_SYMBOLS: tuple[str, ...] = (
+    "PLUGIN_LOSS_TYPE",
+    "PLUGIN_LOSS_CONFIG_CLASS",
+    "PLUGIN_LOSS_CLASS",
+)
+
 
 def _load_loss_plugin(path: str) -> dict[str, Any] | None:
     """Load a single loss-plugin file. Returns attribute dict or None if invalid.
@@ -104,7 +122,7 @@ def _load_loss_plugin(path: str) -> dict[str, Any] | None:
         print(f"[LossLoader] Failed to load {path}: {e}")
         return None
 
-    for attr in ("PLUGIN_LOSS_TYPE", "PLUGIN_LOSS_CONFIG_CLASS", "PLUGIN_LOSS_CLASS"):
+    for attr in REQUIRED_LOSS_PLUGIN_SYMBOLS:
         if not hasattr(module, attr):
             print(f"[LossLoader] Skipping {os.path.basename(path)}: missing '{attr}'")
             return None

@@ -123,13 +123,14 @@ byte-unchanged. Four states, keyed on capability, never on task identity.
 | resolved carrier (`RunTaskComposition`) | `:183` |
 | manifest read / validate | `:340-383` |
 | path resolution | `:402` |
-| symbol loading (`module:` / `file:`) | `:451-547` |
-| per-section resolvers | `:706-1643` |
-| declared model/loss roots + objective | `:1008` / `:1084` / `:1220` |
-| semantic fingerprint | `:1509` |
-| compose entrypoint | `:1867` |
-| run-scoped binding | `:2092` |
-| post-condition guard | `:2188` |
+| symbol loading (`module:` / `file:`) | `:451-600` |
+| companion-symbol refusal (`_require_companion_symbols`) | `:602` |
+| per-section resolvers | `:787-1786` |
+| declared model/loss roots + objective | `:1089` / `:1165` / `:1301` |
+| semantic fingerprint | `:1595` |
+| compose entrypoint | `:1970` |
+| run-scoped binding | `:2237` |
+| post-condition guard | `:2333` |
 | shipped manifests | `configs/task_composition/{tidmad,pets,davis,quickstart}.yaml` |
 
 ## Related

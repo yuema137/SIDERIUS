@@ -1079,7 +1079,15 @@ def _dummy_tensor_validate_loss(
         except Exception as e:
             return f"Plugin source failed to import: {type(e).__name__}: {e}"
 
-        for attr in ("PLUGIN_LOSS_TYPE", "PLUGIN_LOSS_CONFIG_CLASS", "PLUGIN_LOSS_CLASS"):
+        # The SHARED admission contract, not a local copy. This validator, the
+        # loss loader and the manifest's objective resolver all enforce the
+        # same tuple: a fourth symbol added to the loader must reject an
+        # assembled plugin here too, or an LLM-generated plugin passes
+        # validation, is promoted, is SKIPPED by the registry, and dies at
+        # admission with a misleading "run the implementor first" remediation.
+        from agent_generated._loss_loader import REQUIRED_LOSS_PLUGIN_SYMBOLS
+
+        for attr in REQUIRED_LOSS_PLUGIN_SYMBOLS:
             if not hasattr(module, attr):
                 return f"Assembled plugin is missing required attribute '{attr}'."
 
