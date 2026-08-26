@@ -1379,6 +1379,31 @@ class TaskCompositionRef(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+#: Lane F / F14 — the ONE authority for "trial-scoped plan_overrides keys"
+#: (review C4 closed the shared-name gap): TWO different sets both used to be
+#: called this. The tuner CLI's ``--is_trial`` BUNDLE is only
+#: {is_trial, trial_portion, eval_portion}; the RESOLVER's formal branch
+#: (``_resolve_sample_set_cfg("formal")``) replaces FIVE plan fields —
+#: trial_strategy, trial_portion, train_portion, eval_strategy,
+#: eval_portion — so an override on ANY of them (plus ``is_trial`` itself,
+#: which the mode chain flips) is discarded on a formal round. This set is
+#: the resolver's, the superset; the schema validator and the node's
+#: formal-round disclosure both consume it, so ``--plan_overrides
+#: '{"train_portion": 1.0}'`` can no longer be silently discarded one key
+#: outside the guarded set. Layering: defined HERE because the schema may
+#: not import from nodes; the node imports it from the schema.
+TRIAL_SCOPED_OVERRIDE_KEYS: frozenset[str] = frozenset(
+    {
+        "is_trial",
+        "trial_strategy",
+        "trial_portion",
+        "train_portion",
+        "eval_strategy",
+        "eval_portion",
+    }
+)
+
+
 class HyperparamTuningInput(BaseModel):
     """
     Full specification for a tune_ml_hyperparam_agent run.
@@ -2403,6 +2428,53 @@ class HyperparamTuningInput(BaseModel):
                 "validation_max_phase_seconds requires runtime_watchdog_enabled=True: "
                 "the watchdog is what enforces the deadline, so without it the "
                 "ceiling would be recorded and never applied."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_trial_overrides_satisfiable(self):
+        """Lane F / F14 (fresh-user witness, 2026-08-26): an override that
+        can never apply is a lie the run tells the operator.
+
+        Trial-scoped ``plan_overrides`` keys (``TRIAL_SCOPED_OVERRIDE_KEYS``
+        — the resolver's FULL formal-branch replacement set, not just the
+        CLI bundle; review B4/C4) constrain trial rounds — a formal round's
+        workload comes from the ``formal_*`` operator knobs by design
+        (``_resolve_sample_set_cfg``). With ``is_trial=True`` (trial mode
+        allowed), ``max_rounds == 1`` and ``force_formal_round`` (default
+        True), the run's ONLY round is formal-forced, so the override would
+        apply to ZERO rounds while "Plan overrides applied" prints that it
+        did — the F14 witness asked for ``--trial_portion 1.0`` and trained
+        on 10%. The FU-10 lock's contract ("never silently released") makes
+        the combination a refusal, not a silent discard.
+
+        The ``is_trial`` conjunct is load-bearing (review B1): with
+        ``is_trial=False`` the round resolves to SINGLE_FILE mode, whose
+        branch READS the overridden plan values (``trial_portion`` /
+        ``train_portion``) — the override demonstrably applies, so refusing
+        there was simply wrong.
+        """
+        trial_scoped = TRIAL_SCOPED_OVERRIDE_KEYS & set(self.plan_overrides)
+        if trial_scoped and self.is_trial and self.max_rounds == 1 and self.force_formal_round:
+            # Remedy ORDER is deliberate (F-316 finding: a remedy must be
+            # REACHABLE from the surface that names it). The refusal fires
+            # in practice on the tuner node CLI (`--is_trial` there is the
+            # only auto-bundling route), and that surface HAS NO
+            # force-formal flag — so the universally-typeable remedies
+            # lead, and the force-formal escape is marked chain-path-only.
+            raise ValueError(
+                f"plan_overrides carries trial-scoped key(s) {sorted(trial_scoped)} "
+                "but max_rounds=1 with force_formal_round=True forces the run's "
+                "only round to FORMAL, so the override would apply to zero "
+                "rounds (formal workload comes from --formal_strategy / "
+                "--formal_portion / --formal_train_portion / "
+                "--formal_eval_portion, with eval_strategy locked to "
+                "'snapshot'). Refusing "
+                "instead of silently ignoring the request. Remedies: raise "
+                "--max_rounds so trial rounds exist, or drop the trial-scoped "
+                "request (--is_trial / the trial overrides); on the CHAIN "
+                "launcher only, --no-force_formal_round makes the final round "
+                "honor the trial plan (the tuner node CLI has no such flag)."
             )
         return self
 

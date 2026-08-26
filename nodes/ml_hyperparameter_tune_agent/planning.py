@@ -31,6 +31,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import PreparedAttempt, RunBin
 from nodes.ml_hyperparameter_tune_agent.policy import (
     _apply_mode_override_chain,
     _apply_plan_overrides,
+    _disclose_inapplicable_trial_overrides,
     _resolve_sample_set_cfg,
     _score_of,
     _validate_data_config,
@@ -410,6 +411,12 @@ def prepare_attempt(
         mode = "formal"
     else:
         mode = "single_file"
+
+    # Lane F / F14 — per-round disclosure when trial-scoped operator
+    # overrides do not govern the resolved FORMAL mode (the schema refuses
+    # the zero-trial-round combination outright; this covers the legitimate
+    # multi-round shape where the last round is formal-forced).
+    _disclose_inapplicable_trial_overrides(mode, agent_input)
 
     # Phase M / Phase R — mode-gated sample-set config. Formal-mode
     # eval strategy is locked to ``snapshot``; the portion defaults

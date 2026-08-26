@@ -90,9 +90,16 @@ source "${SCRIPT_DIR}/_chain_common.sh"
 #   2. project-local ${PROJECT_DIR}/.venv    — the standard repo layout
 #   3. uv run python                          — lilab fallback when no .venv
 #   4. system python3                         — last resort, prominent warn
-# After resolution, two guards run unconditionally:
+# THE PRECEDENCE SELECTS AN INTERPRETER (dependencies), NOT A SOURCE TREE:
+# with an editable install the venv would otherwise also pick which
+# checkout's framework code executes (Lane F / F5). After resolution,
+# three guards run unconditionally:
 #   - enforce_py_version_guard: SIDERIUS requires Python 3.10+
 #   - setup_py_env_passthrough: ensure subprocesses inherit the same venv
+#   - enforce_source_tree_authority: framework source is PYTHONPATH-pinned
+#     to THIS checkout, verified by a neutral-cwd import probe, and the
+#     launch is REFUSED if the pin does not hold — foreign source never
+#     executes silently.
 # Sets PY_CMD (array) + PY_SOURCE (label) + PY_VENV_ROOT (path or empty).
 # PY_VENV_ROOT empty means "no venv to passthrough" (uv or system python3).
 resolve_py_cmd() {
@@ -156,6 +163,92 @@ setup_py_env_passthrough() {
         *":$PY_VENV_ROOT/bin:"*) ;;  # already first or present; idempotent
         *) export PATH="$PY_VENV_ROOT/bin:$PATH" ;;
     esac
+}
+
+# Lane F / F5 (fresh-user witness, 2026-08-26) — SOURCE-TREE AUTHORITY.
+# resolve_py_cmd selects an INTERPRETER; with an editable install (the
+# layout the quickstart creates) the venv's .pth finder ALSO silently
+# selects which checkout's framework source executes — launching THIS
+# checkout's script with another checkout's venv active ran the other
+# tree's core/, workflows/ and execute_tools/ with only a "Python : ..."
+# line printed. CLAUDE.md's portability rule names the class: a green run
+# is meaningful only if it executes the code from the checkout it claims
+# to. The repair (not a refusal — the shared-venv worktree workflow is
+# legitimate and common): PIN framework source to THIS checkout via
+# PYTHONPATH (the established E1 pattern the band launchers use), then
+# VERIFY the pin with the neutral-cwd import probe — a `-c` probe is
+# blind because cwd itself sits on sys.path — and REFUSE the launch if
+# the pin did not hold. The venv keeps serving DEPENDENCIES either way.
+enforce_source_tree_authority() {
+    export PYTHONPATH="${PROJECT_DIR}${PYTHONPATH:+:$PYTHONPATH}"
+    # NOTE the premise carefully: a dry-run is NOT execution-free —
+    # resolve_start_iter runs scripts/inspect_run_state.py through PY_CMD
+    # whenever auto-resume meets an existing workspace, dry-run included.
+    # So the probe ALWAYS runs and FOREIGN resolution ALWAYS refuses; what
+    # DRY_RUN relaxes is only the MISSING-DEPENDENCIES class (the
+    # quickstart's published pre-venv dry-run flow), where nothing can
+    # execute silently: any framework call in a dep-less env fails loudly.
+    if [ -n "$PY_VENV_ROOT" ] && [[ "$PY_VENV_ROOT" != "$PROJECT_DIR"/* ]]; then
+        echo "[source-authority] venv lives OUTSIDE this checkout ($PY_VENV_ROOT):" >&2
+        echo "  its packages serve dependencies; framework SOURCE is pinned to" >&2
+        echo "  this checkout via PYTHONPATH and verified below." >&2
+    fi
+    local probe_src="${SCRIPT_DIR}/_import_resolution_probe.py"
+    if [ ! -f "$probe_src" ]; then
+        echo "ERROR: source-authority probe missing: $probe_src" >&2
+        exit 1
+    fi
+    local neutral_dir probe_out probe_rc
+    neutral_dir="$(mktemp -d)"
+    cp "$probe_src" "${neutral_dir}/probe.py"
+    probe_rc=0
+    probe_out="$(cd "$neutral_dir" && "${PY_CMD[@]}" probe.py "$PROJECT_DIR" --tree-only 2>&1)" || probe_rc=$?
+    rm -rf "$neutral_dir"
+    echo "$probe_out" >&2
+    # STRICT cause-keying on the probe's EXIT-CODE CONTRACT (its docstring):
+    # 0 verified · 4 foreign · 3 deps-unavailable · anything else
+    # UNCLASSIFIED. The DRY_RUN relaxation applies to exit 3 and NOTHING
+    # else — an unclassified failure fails CLOSED even on a dry-run,
+    # because "not provably foreign" is not "provably safe".
+    case "$probe_rc" in
+        0)
+            echo "[source-authority] framework source: $PROJECT_DIR (PYTHONPATH-pinned, probe-verified)" >&2
+            return 0
+            ;;
+        4)
+            echo "ERROR: SOURCE-TREE AUTHORITY REFUSED — the resolved interpreter imports" >&2
+            echo "  framework code from OUTSIDE this checkout even after the PYTHONPATH pin" >&2
+            echo "  (probe output above names the foreign path). Refused on dry-runs too:" >&2
+            echo "  auto-resume executes the inspector through this interpreter." >&2
+            echo "  Interpreter: ${PY_CMD[*]}  (source: $PY_SOURCE)" >&2
+            echo "  This checkout: $PROJECT_DIR" >&2
+            echo "  Fix: deactivate the foreign venv, or create this checkout's own venv" >&2
+            echo "  (cd $PROJECT_DIR && python3 -m venv .venv && .venv/bin/pip install -e .)." >&2
+            ;;
+        3)
+            if [ "${DRY_RUN:-0}" -eq 1 ]; then
+                # The quickstart's pre-venv dry-run: nothing can execute
+                # SILENTLY in a dep-less env — a framework call fails
+                # loudly, never foreign.
+                echo "[source-authority] dry-run: interpreter lacks framework deps (probe exit 3);" >&2
+                echo "  nothing executes silently; full verification applies at the real launch." >&2
+                echo "  PYTHONPATH pinned." >&2
+                return 0
+            fi
+            echo "ERROR: LAUNCH ENVIRONMENT REFUSED — the resolved interpreter cannot" >&2
+            echo "  import the SIDERIUS framework (probe exit 3: missing dependencies," >&2
+            echo "  not a foreign checkout)." >&2
+            echo "  Interpreter: ${PY_CMD[*]}  (source: $PY_SOURCE)" >&2
+            echo "  Fix: create this checkout's venv and install dependencies:" >&2
+            echo "    cd $PROJECT_DIR && python3 -m venv .venv && .venv/bin/pip install -e ." >&2
+            ;;
+        *)
+            echo "ERROR: SOURCE-AUTHORITY PROBE UNCLASSIFIED (exit $probe_rc) — refusing," >&2
+            echo "  dry-run included: an unclassified failure is not provably safe." >&2
+            echo "  Interpreter: ${PY_CMD[*]}  (source: $PY_SOURCE)" >&2
+            ;;
+    esac
+    exit 1
 }
 
 submit_iteration_lilab() {
@@ -252,6 +345,12 @@ resolve_py_cmd
 # the SDSC submission node and lilab orchestrator agree on the contract.
 enforce_py_version_guard
 setup_py_env_passthrough
+# Lane F / F5 — source-tree authority: pin + neutral-cwd verify + refuse.
+# Runs after the passthrough so the probe sees the same env every child
+# will inherit. SDSC compute jobs own their env inside the slurm script;
+# this guard covers the submission node's own framework imports
+# (inspect_run_state auto-resume) and every lilab child.
+enforce_source_tree_authority
 
 # --- 13.B: Auto-resume + safety guard + idempotency ---
 

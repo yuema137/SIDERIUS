@@ -171,7 +171,11 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
         "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py"
         "::HyperparamTuningAgent.run"
     ): (258, 67, 1085, 2),
-    "nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (116, 32, 471, 7),
+    # RE-RECORDED 2026-08-26 (Lane F / F14): 471 → landed master 551 (+80
+    # accumulated, exactly at the growth ceiling) → +6 disclosure call →
+    # 557; branch 32 → 31. Same ledger as the 12bc B0 twin row; the
+    # decomposition-debt flag lives there.
+    "nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (117, 31, 557, 7),
     "nodes/ml_hyperparameter_tune_agent/execution.py::run_admission_preflight": (
         107,
         36,

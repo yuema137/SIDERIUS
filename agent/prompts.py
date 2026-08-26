@@ -802,7 +802,11 @@ def _format_fixed_params_block(plan_overrides=None, max_epochs=None, resolved_da
         lines.append(
             f"  eval_portion     = {overrides['eval_portion']}    ← formal mode auto-uses 1.0"
         )
-    # Render any other override keys generically
+    # Render any other override keys generically. NOT the same concept as
+    # the schema's TRIAL_SCOPED_OVERRIDE_KEYS (review NOTE-g): that set is
+    # "which keys the resolver DISCARDS on a formal round"; this set is
+    # "which keys got a bespoke prompt line above vs the generic fallback
+    # below". Same-name-adjacent, deliberately distinct — do not unify.
     rendered_keys = {"is_trial", "trial_portion", "train_portion", "eval_portion"}
     for k, v in overrides.items():
         if k not in rendered_keys:

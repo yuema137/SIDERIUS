@@ -157,7 +157,11 @@ class TestDeprecatedStrategyFlagsTunerCLI:
     @patch("nodes.ml_hyperparameter_tune_agent.HyperparamTuningAgent")
     def test_non_default_warns_and_is_ignored(self, mock_agent_cls, tmp_path):
         mock_agent_cls.return_value = MagicMock()
-        argv = _argv(tmp_path, "--is_trial", "--trial_strategy", "target")
+        # --max_rounds 2 (argparse last-wins over the helper's 1): with the
+        # F14 satisfiability refusal, --is_trial at max_rounds=1 is the
+        # zero-trial-round contradiction and correctly refuses at input
+        # construction; this test's subject is the deprecation warning.
+        argv = _argv(tmp_path, "--is_trial", "--trial_strategy", "target", "--max_rounds", "2")
         with patch.object(sys, "argv", argv):
             with pytest.warns(DeprecationWarning, match="deprecated and IGNORED"):
                 main()

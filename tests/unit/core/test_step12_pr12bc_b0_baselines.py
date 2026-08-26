@@ -567,7 +567,15 @@ PHASE_B_STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
     "core/sandbox_executor.py::TidmadSandbox.execute_scoring": (26, 10, 79, 7),
     "core/sandbox_executor.py::_task_data_path_argv": (5, 1, 24, 0),
     "core/sandbox_executor.py::_task_manifest_argv": (5, 1, 15, 0),
-    "nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (116, 32, 471, 7),
+    # RE-RECORDED 2026-08-26 (Lane F / F14) — the arithmetic ledger:
+    # era-pin 471 LOC → landed master 6b123947 measured 551 (+80, accumulated
+    # across the PRs since this baseline's era, sitting EXACTLY at
+    # MAX_LOC_GROWTH) → F14's mode-boundary disclosure call +6 → 557.
+    # Branch 32 → 31 (landed refactors, a decrease). Zero param growth.
+    # prepare_attempt is now flagged as decomposition debt (the
+    # sat-exactly-on-the-ceiling signal CLAUDE.md's decomposition rule
+    # names) — owed a bounded in-passing split, NOT widened further.
+    "nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (117, 31, 557, 7),
     "nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py::"
     "HyperparamTuningAgent.run": (258, 69, 1142, 2),
     "nodes/ml_hyperparameter_tune_agent/execution.py::run_inference_scoring_health": (

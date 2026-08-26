@@ -1166,6 +1166,19 @@ def build_attempt_record(
     _planned_portions = prepared._planned_portions
     cfg_eval_portion = prepared.cfg_eval_portion
     cfg_train_portion = prepared.cfg_train_portion
+    # Lane F / F14 — record-key semantics, stated once and CORRECTED by the
+    # independent review (B2): the top-level record key ``trial_portion``
+    # is written ONLY for TRIAL rounds — the stamp at the "Trial context"
+    # block below sits inside ``if trial_config.is_trial:``, and the
+    # existing authority already says so (``BestTracks``: "Formal records
+    # have no ``is_trial`` key … absence == formal"). A FORMAL round's
+    # resolved workload is visible instead at
+    # ``validation_workload_ceiling.resolved.trial_portion`` (below), in
+    # the reflector context (``actual_results["trial_portion"]``,
+    # policy.py) and in the planning printout. Reading a portion value
+    # off ANY of those without checking the round's mode is how the F14
+    # witness mis-attributed a formal default. Key names are FROZEN
+    # (downstream consumers + resume); do not rename.
     cfg_trial_portion = prepared.cfg_trial_portion
     eval_psd_segments = prepared.eval_psd_segments
     exp_id = prepared.exp_id

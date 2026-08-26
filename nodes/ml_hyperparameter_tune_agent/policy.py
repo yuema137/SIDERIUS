@@ -27,6 +27,7 @@ from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_FRACTION,
 )
 from agent.schemas.hyperparam_tuning import (
+    TRIAL_SCOPED_OVERRIDE_KEYS,
     ExperimentPlan,
     HyperparamTuningInput,
     PlanOverridesError,
@@ -1230,6 +1231,64 @@ def _apply_plan_overrides(plan: ExperimentPlan, overrides: dict[str, Any]) -> Ex
         ) from e
     print(f"  Plan overrides applied: {list(overrides.keys())}")
     return effective
+
+
+#: Which override keys each resolved mode DISCARDS (review NOTE-b — the B1
+#: fix exempted ``is_trial=False`` from the refusal, which is exactly the
+#: condition that reaches single_file, so single_file must DISCLOSE or F14's
+#: class survives there). Per ``_resolve_sample_set_cfg``: the formal branch
+#: replaces all six; the single_file branch forces ``trial_strategy`` /
+#: ``eval_strategy`` to "snapshot" and ``eval_portion`` to 1.0 while READING
+#: ``trial_portion`` / ``train_portion`` — and the mode chain's trial
+#: lockout discards an ``is_trial`` override on the way there. Trial mode
+#: discards nothing.
+_DISCARDED_OVERRIDE_KEYS_BY_MODE: dict[str, frozenset[str]] = {
+    "formal": TRIAL_SCOPED_OVERRIDE_KEYS,
+    "single_file": frozenset({"is_trial", "trial_strategy", "eval_strategy", "eval_portion"}),
+}
+
+
+def _disclose_inapplicable_trial_overrides(
+    mode: str, agent_input: HyperparamTuningInput
+) -> str | None:
+    """Lane F / F14 — the override lock's honesty at the mode boundary.
+
+    ``_apply_plan_overrides`` prints "Plan overrides applied" for EVERY
+    attempt, but the resolved mode can discard some of what was just
+    applied: a FORMAL round sources its whole workload from
+    ``agent_input.formal_*`` (plus the snapshot eval lock); a SINGLE_FILE
+    round forces the strategies and ``eval_portion`` while reading the
+    portions. Before this disclosure, that pairing let a
+    ``--trial_portion 1.0`` request train on the 10% ``formal_portion``
+    default with no trace (the F14 witness). Returns the disclosure line
+    (also printed) when it applies, else ``None`` — a return value so the
+    boundary is directly testable.
+    """
+    discarded_for_mode = _DISCARDED_OVERRIDE_KEYS_BY_MODE.get(mode)
+    if discarded_for_mode is None:
+        return None
+    trial_scoped = discarded_for_mode & set(agent_input.plan_overrides or {})
+    if not trial_scoped:
+        return None
+    if mode == "formal":
+        governs = (
+            f"formal workload comes from formal_strategy={agent_input.formal_strategy} "
+            f"formal_portion={agent_input.formal_portion} "
+            f"formal_train_portion={agent_input.formal_train_portion} "
+            f"formal_eval_portion={agent_input.formal_eval_portion} "
+            f"(eval_strategy locked to 'snapshot')"
+        )
+    else:
+        governs = (
+            "single_file locks trial_strategy/eval_strategy to 'snapshot' and "
+            "eval_portion to 1.0 (trial_portion/train_portion still apply)"
+        )
+    line = (
+        f"  [plan_overrides] NOTE: trial-scoped override key(s) "
+        f"{sorted(trial_scoped)} do NOT govern this {mode.upper()} round — {governs}."
+    )
+    print(line)
+    return line
 
 
 class ScoringRoute(StrEnum):

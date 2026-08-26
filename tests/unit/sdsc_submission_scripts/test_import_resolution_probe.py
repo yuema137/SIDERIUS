@@ -51,5 +51,10 @@ def test_wrong_intended_tree_fails_with_the_named_reason(tmp_path):
     exists to block. Fails by: rc == 0, or the refusal not naming the
     outside-tree cause."""
     r = _run(tmp_path, intended=tmp_path / "not_a_checkout", pin=REPO_ROOT)
-    assert r.returncode == 1, (r.stdout, r.stderr)
+    # DECLARED DELTA (Lane F / F5 strict cause-keying, 2026-08-26): FOREIGN
+    # is now the probe's contract code 4, distinct from the #299
+    # semantic-leg's 1 and from DEPS-UNAVAILABLE's 3, so run_chain's guard
+    # can key its dry-run relaxation on the exact cause. R2b consumes the
+    # probe nonzero-generically and is unaffected.
+    assert r.returncode == 4, (r.stdout, r.stderr)
     assert "resolves OUTSIDE the intended tree" in r.stderr
