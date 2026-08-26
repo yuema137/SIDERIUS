@@ -151,7 +151,9 @@ async function bootstrap() {
 }
 
 function initCharts() {
-  const scoreLayout  = makePlotLayout('Denoising score (higher = better)');
+  // No series is loaded yet, so no metric is declared yet: the caption states
+  // that rather than asserting a direction the page cannot know.
+  const scoreLayout  = makePlotLayout(scoreAxisLabel());
   const memoryLayout = makePlotLayout('Model parameters');
   Plotly.newPlot('chart-score',  [], scoreLayout,  PLOT_CONFIG);
   Plotly.newPlot('chart-memory', [], memoryLayout, PLOT_CONFIG);
@@ -287,9 +289,12 @@ async function loadExplorationData(series) {
     const url = `/api/exploration/runs/${series.run}/models/${series.model}?limit=${series.limit}&status=success`;
     const data = await fetchJSON(url);
     series.records = data.records || [];
+    // F-12e-UX-9 — the direction the server reconciled for this series.
+    series.metric  = data.metric || null;
     series.error   = null;
   } catch (e) {
     series.records = [];
+    series.metric  = null;
     series.error   = e.message;
     console.warn(`Failed to load exploration ${series.model}/${series.run}:`, e);
   }
@@ -328,21 +333,114 @@ async function loadSeriesData(series) {
     const url = `/api/models/${series.model}/runs/${series.run}?limit=${series.limit}&status=success`;
     const data = await fetchJSON(url);
     series.records = data.records || [];
+    // F-12e-UX-9 — the direction the server reconciled for this series.
+    series.metric  = data.metric || null;
     series.error   = null;
   } catch (e) {
     series.records = [];
+    series.metric  = null;
     series.error   = e.message;
     console.warn(`Failed to load ${series.model}/${series.run}:`, e);
   }
 }
 
+// ── Metric direction ─────────────────────────────────────────────────────────
+// Step 12 / PR-12e (F-12e-UX-3 + F-12e-UX-9).
+//
+// This is the ONE place in the frontend that turns a declared direction into a
+// comparison, and it is the JavaScript counterpart of `MetricOrder` — the
+// module SIDERIUS permits to interpret `direction`, and nowhere else.
+//
+// The browser does NOT decide direction: `series.metric.direction` is
+// reconciled server-side by `execute_tools.persisted_ranking` and arrives on
+// the wire (`RunSummary.metric`). If a second `Math.max(best, score)` or
+// `score > best` appears anywhere below, the dashboard has silently re-adopted
+// higher-is-better and a lower-is-better run — DAVIS's `mse`, Pets' declared
+// `log_loss` — will render an inverted best-curve under a contradicting label.
+// That is exactly the defect this replaced, and the Python-side census now
+// scans `.js` so it cannot come back unnoticed.
+//
+// `direction` absent means the identity could not be established. There is no
+// fallback: `orderFor` returns null, and every caller then declines to rank.
+function orderFor(metric) {
+  const direction = metric && metric.direction;
+  if (direction !== 'higher' && direction !== 'lower') return null;
+  const higher = direction === 'higher';
+  return {
+    direction,
+    comparative: higher ? 'higher' : 'lower',
+    // Strictly better — a tie is not better, which keeps "new best" from
+    // firing twice on equal scores.
+    isBetter: (a, b) => (higher ? a > b : a < b),
+    // The cumulative fold. `Math.max` was the old spelling and is wrong under
+    // `lower`; keeping the incumbent on a tie matches `Math.max`'s value.
+    fold: (best, score) => (best === null ? score : ((higher ? score > best : score < best) ? score : best)),
+  };
+}
+
+// The y-axis caption for the score chart, derived from what the series
+// actually declare. Never a constant: two series on different metrics say so,
+// and a series with no declared identity says that instead of asserting one.
+function scoreAxisLabel() {
+  const labels = new Set();
+  let unknown = 0;
+  state.series.forEach(s => {
+    const order = orderFor(s.metric);
+    if (!order) { unknown += 1; return; }
+    labels.add(`${(s.metric && s.metric.metric_id) || 'score'} (${order.comparative} = better)`);
+  });
+  if (labels.size === 1 && unknown === 0) return Array.from(labels)[0];
+  if (labels.size > 1) return 'Score — mixed metrics, see per-series notes';
+  if (unknown > 0) return 'Score — direction not declared, not ranked';
+  return 'Score';
+}
+
+// Writes the direction sentence under chart 1. Replaces the page-constant
+// "Higher is better" that index.html used to assert: an unranked series gets
+// a NAMED refusal here, never a silent omission and never a guessed direction.
+function renderDirectionNote() {
+  const el = document.getElementById('score-direction-note');
+  if (!el) return;
+  if (state.series.length === 0) { el.textContent = ''; return; }
+  const notes = [];
+  state.series.forEach(s => {
+    const label = `${s.model} / ${s.run}`;
+    const order = orderFor(s.metric);
+    if (!order) {
+      notes.push(`${label}: not ranked — ${(s.metric && s.metric.note) || 'no metric identity declared'}`);
+    } else {
+      const id = (s.metric && s.metric.metric_id) || 'score';
+      notes.push(`${label}: ${id}, ${order.comparative} is better`);
+      if (s.metric && s.metric.note) notes.push(`${label}: ${s.metric.note}`);
+    }
+  });
+  el.textContent = ` · ${notes.join(' · ')}`;
+}
+
+// Model parameter count. Step 12 / PR-12e (F-12e-UX-4): the production
+// `ExperimentRecord` carries `model_params` at TOP LEVEL and has no `results`
+// key at all, so the old `r.results?.model_params` yielded null for every
+// record written by the current pipeline and this chart was permanently
+// blank. The legacy fallback is kept deliberately — `ExperimentResults` is
+// `extra="allow"`, so older records that really did nest it still plot.
+function recordModelParams(r) {
+  const params = r.model_params ?? r.results?.model_params;
+  return (params !== null && params !== undefined) ? params : null;
+}
+
 // ── Data transformations ─────────────────────────────────────────────────────
-function computeBestScoreCurve(records) {
+// `order` may be null — the series declared no reconcilable metric identity.
+// Then there is NO cumulative best: the raw values stay fully readable and the
+// series simply never receives a ranking. That is the frontend half of
+// `partition_by_metric_identity`'s rule, and it is why these return nulls
+// rather than falling back to a direction.
+function computeBestScoreCurve(records, order) {
+  if (!order) return records.map(() => null);
   let best = null;
   return records.map(r => {
     const score = r.denoising_score;
     if (score !== null && score !== undefined) {
-      best = best === null ? score : Math.max(best, score);
+      best = order.fold(best, score);
     }
     return best;
   });
@@ -356,24 +454,22 @@ function computeCurrentScoreCurve(records) {
 }
 
 function computeMemoryCurve(records) {
-  return records.map(r => {
-    const params = r.results?.model_params;
-    return (params !== null && params !== undefined) ? params : null;
-  });
+  return records.map(recordModelParams);
 }
 
 // Returns {xs, scoreYs, memYs} for records that set a new best score.
 // fromBest: the running best before this slice (null = no prior best).
-function computeNewBestPoints(records, fromBest = null) {
+function computeNewBestPoints(records, order, fromBest = null) {
+  if (!order) return { xs: [], scoreYs: [], memYs: [], runningBest: fromBest };
   let best = fromBest;
   const xs = [], scoreYs = [], memYs = [];
   records.forEach((r, i) => {
     const score = r.denoising_score;
-    if (score != null && (best === null || score > best)) {
+    if (score != null && (best === null || order.isBetter(score, best))) {
       best = score;
       xs.push(i + 1);
       scoreYs.push(score);
-      memYs.push(r.results?.model_params ?? null);
+      memYs.push(recordModelParams(r));
     }
   });
   return { xs, scoreYs, memYs, runningBest: best };
@@ -395,10 +491,11 @@ function updateCharts() {
     const alpha = getSeriesOpacity(s);
     const ca    = colorWithAlpha(c, alpha);
 
-    const bestData    = computeBestScoreCurve(s.records);
+    const order       = orderFor(s.metric);
+    const bestData    = computeBestScoreCurve(s.records, order);
     const currentData = computeCurrentScoreCurve(s.records);
     const memData     = computeMemoryCurve(s.records);
-    const nb          = computeNewBestPoints(s.records);
+    const nb          = computeNewBestPoints(s.records, order);
 
     // Track state for incremental refresh
     s.renderedCount = n;
@@ -456,12 +553,13 @@ function updateCharts() {
     });
   });
 
-  const scoreLayout  = makePlotLayout('Denoising score (higher = better)');
+  const scoreLayout  = makePlotLayout(scoreAxisLabel());
   const memoryLayout = makePlotLayout('Model parameters');
 
   Plotly.react('chart-score',  scoreTraces,  scoreLayout,  PLOT_CONFIG);
   Plotly.react('chart-memory', memoryTraces, memoryLayout, PLOT_CONFIG);
   renderChartLegends();
+  renderDirectionNote();
 }
 
 function renderChartLegends() {
@@ -496,21 +594,22 @@ function extendCharts() {
     const newXs      = newRecords.map((_, i) => startX + i);
 
     // Continue cumulative best from where we left off
+    const order    = orderFor(s.metric);
     const prevBest = s.runningBest;   // capture before mutation
     let best = prevBest;
     const newBest = newRecords.map(r => {
       const score = r.denoising_score;
-      if (score != null) best = best === null ? score : Math.max(best, score);
-      return best;
+      if (order && score != null) best = order.fold(best, score);
+      return order ? best : null;
     });
     s.runningBest   = best;
     s.renderedCount = newCount;
 
     const newCurrent = newRecords.map(r => r.denoising_score ?? null);
-    const newMemory  = newRecords.map(r => r.results?.model_params ?? null);
+    const newMemory  = newRecords.map(recordModelParams);
 
     // New-best points in this batch (local indices 1…n → offset to global x)
-    const nb = computeNewBestPoints(newRecords, prevBest);
+    const nb = computeNewBestPoints(newRecords, order, prevBest);
     nb.xs = nb.xs.map(x => x + startX - 1);
 
     // Trace indices: score chart has 3 traces per series, memory chart has 2

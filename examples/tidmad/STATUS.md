@@ -15,16 +15,22 @@ status authority; this file mirrors it for a reader of the pack.
 | task description / forward contract | REFERENCE to `configs/task_config.yaml` | README cites the owning path |
 | health policy | REFERENCE to `configs/health_checks.yaml` | README cites the owning path |
 | data root | REFERENCE to the `tidmad_data_config.yaml` mechanism | `data/README.md` |
+| run entrypoint (Step 12 / PR-12e) | `quickstart.sh` — a thin adapter that supplies `configs/task_composition/tidmad.yaml` plus a bounded posture and then executes `sdsc_submission_scripts/run_chain.sh`; it contains no framework code | `tests/unit/examples/test_step12_pr12e_tidmad_quickstart.py` |
 
-**The runtime does not read anything under `examples/tidmad/`.** The
-snapshots are read-only projections; editing them changes nothing at run
-time (design §3.6).
+**Nothing under `examples/tidmad/` is an authoring surface: the runtime does
+not read these snapshots as a task authority.** They are generated
+projections, and editing one changes nothing you want changed (design §3.6).
+The one nuance: the shipped composition manifest
+`configs/task_composition/tidmad.yaml` binds `resolved/dataset_profile.json`
+and `resolved/metric_spec.json` as declaration references, so a composed run
+does load those two — which is exactly why a hand edit is caught as a red
+test rather than being harmless.
 
 ## NOT projected here (and who owns it)
 
 | seam | status | owner |
 |---|---|---|
-| launcher / run instructions inside the pack | not projected — runs go through the existing operator docs and `scripts/` | Steps 10 / 12 (binding + launcher interface) |
+| task-owned data preparation | not projected — TIDMAD's acquisition is owned by the paper's own repository, and this pack ships no fetcher (`PROVENANCE.md`, `data/README.md`) | upstream (the TIDMAD distribution) |
 | model / loss plugins, skills, `configs/` inside the pack | not projected (no consumer-less files, roadmap §22.23.3) | Step 12 (composition) |
 | task binding of the pack as a whole | `configs/task_config.yaml` remains the single runtime task authority | Step 12 |
 | training-history / diagnosis semantics | **production-backed from 07a** (Step 07 PR 07a): the production trainer emits R2 + R3 (`training_history`) and the tuner persists the derived `training_diagnosis` on every `ExperimentRecord` (`run_output_*.json`); NO new `resolved/` snapshot — the history is per-run evidence, not task config; hidden from both LLM-facing renders until 07b | landed (07a); rendering 07b; interpretation Step 09 |

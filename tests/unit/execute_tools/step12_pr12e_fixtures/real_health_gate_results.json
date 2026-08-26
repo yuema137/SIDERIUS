@@ -1,0 +1,1227 @@
+[
+  {
+    "gate_name": "output_diversity_blocking",
+    "execution_status": "failed",
+    "check_passed": false,
+    "would_invalidate_under_production_policy": true,
+    "resolved_action": "invalidate_round",
+    "failure_reason": "output_diversity: aggregation=any_pass failed \u2014 per-file: file_4=2, file_5=2, file_6=2, file_7=2, file_8=2, file_9=2 (threshold: unique_int8 > 25). Class-127 collapse artifact \u2014 score would be 5.5762667 via 2^17 FP ratio.",
+    "threshold": {
+      "metric": "n_unique_int8_values",
+      "operator": ">",
+      "value": 25,
+      "unit": "count"
+    },
+    "aggregation": {
+      "aggregation_rule": "any_pass",
+      "files_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_completed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_passed": [],
+      "files_failed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "aggregate_passed": false
+    },
+    "metrics": {
+      "aggregated_passed": false,
+      "aggregation": "any_pass",
+      "n_files_attempted": 6,
+      "n_files_io_failed": 0,
+      "per_file": {
+        "4": {
+          "file_index": 4,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0004.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211366520909972,
+            "stable_inventory_id": "7fc78dc0684079b47050876221a688858a9a38089b68875c1b1cfddec7f9c2fd"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "n_unique_int8_values": {
+              "value": 2,
+              "unit": "count"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "5": {
+          "file_index": 5,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0005.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211369992984769,
+            "stable_inventory_id": "e2eb8d040a4d085a1cc09aea38b94ca97b2685f062a296dbb0c5e230646d9d57"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "n_unique_int8_values": {
+              "value": 2,
+              "unit": "count"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "6": {
+          "file_index": 6,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0006.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211373337056814,
+            "stable_inventory_id": "ee09be01ffa3dd5ee5ad9cc38bab37131ba4dce65bf550fb38adda5957e8aa89"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "n_unique_int8_values": {
+              "value": 2,
+              "unit": "count"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "7": {
+          "file_index": 7,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0007.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211376765130677,
+            "stable_inventory_id": "5d33737fee9f65f0209020e88edbd2d94bcce6081ed74fec82665eddd37d0080"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "n_unique_int8_values": {
+              "value": 2,
+              "unit": "count"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "8": {
+          "file_index": 8,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0008.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211380197204631,
+            "stable_inventory_id": "e153c4b97d0c8fccdd0fb2735ffda6d25945228dec934a060ee34a7ffc87e05b"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "n_unique_int8_values": {
+              "value": 2,
+              "unit": "count"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "9": {
+          "file_index": 9,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0009.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211383673279539,
+            "stable_inventory_id": "d8a2903bf26812df634aab237d6230f72c005ba5183ac2735a306fdfa0f7faea"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "n_unique_int8_values": {
+              "value": 2,
+              "unit": "count"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        }
+      },
+      "threshold": 25,
+      "peek_samples_requested": 100000,
+      "aggregate_statistics": {
+        "count": 6,
+        "minimum": 2.0,
+        "q25": 2.0,
+        "median": 2.0,
+        "q75": 2.0,
+        "maximum": 2.0,
+        "mean": 2.0,
+        "standard_deviation": 0.0
+      }
+    },
+    "gate_runtime_seconds": 0.01832385128363967,
+    "gate_role": "blocking",
+    "configured_action": "invalidate_round",
+    "healthgate_mode": "blocking",
+    "result_authority": "scientific",
+    "check_verdicts": {
+      "output_diversity": "failed"
+    },
+    "display_label": "output_diversity_blocking (enforcing)"
+  },
+  {
+    "gate_name": "output_std_blocking",
+    "execution_status": "failed",
+    "check_passed": false,
+    "would_invalidate_under_production_policy": true,
+    "resolved_action": "invalidate_round",
+    "failure_reason": "output_std: aggregation=any_pass failed \u2014 per-file: file_4=0.095298927517247, file_5=0.10372962130431934, file_6=0.09097963714480292, file_7=0.09995486774508532, file_8=0.10671760614321098, file_9=0.1099411730128322 (threshold: std_mv >= 1 mV). Model output is too tightly clustered to carry a real denoising signal.",
+    "threshold": {
+      "metric": "output_std_mv",
+      "operator": ">=",
+      "value": 1.0,
+      "unit": "mV"
+    },
+    "aggregation": {
+      "aggregation_rule": "any_pass",
+      "files_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_completed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_passed": [],
+      "files_failed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "aggregate_passed": false
+    },
+    "metrics": {
+      "aggregated_passed": false,
+      "aggregation": "any_pass",
+      "n_files_attempted": 6,
+      "n_files_io_failed": 0,
+      "per_file": {
+        "4": {
+          "file_index": 4,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0004.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211366520909972,
+            "stable_inventory_id": "7fc78dc0684079b47050876221a688858a9a38089b68875c1b1cfddec7f9c2fd"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.095298927517247,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "5": {
+          "file_index": 5,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0005.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211369992984769,
+            "stable_inventory_id": "e2eb8d040a4d085a1cc09aea38b94ca97b2685f062a296dbb0c5e230646d9d57"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.10372962130431934,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "6": {
+          "file_index": 6,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0006.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211373337056814,
+            "stable_inventory_id": "ee09be01ffa3dd5ee5ad9cc38bab37131ba4dce65bf550fb38adda5957e8aa89"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.09097963714480292,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "7": {
+          "file_index": 7,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0007.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211376765130677,
+            "stable_inventory_id": "5d33737fee9f65f0209020e88edbd2d94bcce6081ed74fec82665eddd37d0080"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.09995486774508532,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "8": {
+          "file_index": 8,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0008.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211380197204631,
+            "stable_inventory_id": "e153c4b97d0c8fccdd0fb2735ffda6d25945228dec934a060ee34a7ffc87e05b"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.10671760614321098,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "9": {
+          "file_index": 9,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0009.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211383673279539,
+            "stable_inventory_id": "d8a2903bf26812df634aab237d6230f72c005ba5183ac2735a306fdfa0f7faea"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.1099411730128322,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        }
+      },
+      "threshold_mv": 1.0,
+      "peek_samples_requested": 100000,
+      "aggregate_statistics": {
+        "count": 6,
+        "minimum": 0.09097963714480292,
+        "q25": 0.09646291257420658,
+        "median": 0.10184224452470234,
+        "q75": 0.10597060993348807,
+        "maximum": 0.1099411730128322,
+        "mean": 0.10110363881124962,
+        "standard_deviation": 0.00712775114511966
+      }
+    },
+    "gate_runtime_seconds": 0.009044538252055645,
+    "gate_role": "blocking",
+    "configured_action": "invalidate_round",
+    "healthgate_mode": "blocking",
+    "result_authority": "scientific",
+    "check_verdicts": {
+      "output_std": "failed"
+    },
+    "display_label": "output_std_blocking (enforcing)"
+  },
+  {
+    "gate_name": "amplitude_collapse_blocking",
+    "execution_status": "failed",
+    "check_passed": false,
+    "would_invalidate_under_production_policy": true,
+    "resolved_action": "invalidate_round",
+    "failure_reason": "amplitude_collapse: aggregation=any_pass failed \u2014 per-file: file_4=0.99741, file_5=0.99693, file_6=0.99764, file_7=0.99715, file_8=0.99675, file_9=0.99655 (threshold: dominant_fraction < 0.95). Single-class dominance \u2014 the model is producing a near-constant output.",
+    "threshold": {
+      "metric": "dominant_mode_fraction",
+      "operator": "<=",
+      "value": 0.95,
+      "unit": "fraction"
+    },
+    "aggregation": {
+      "aggregation_rule": "any_pass",
+      "files_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_completed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_passed": [],
+      "files_failed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "aggregate_passed": false
+    },
+    "metrics": {
+      "aggregated_passed": false,
+      "aggregation": "any_pass",
+      "n_files_attempted": 6,
+      "n_files_io_failed": 0,
+      "per_file": {
+        "4": {
+          "file_index": 4,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0004.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211366520909972,
+            "stable_inventory_id": "7fc78dc0684079b47050876221a688858a9a38089b68875c1b1cfddec7f9c2fd"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "dominant_mode_fraction": {
+              "value": 0.99741,
+              "unit": "fraction"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "5": {
+          "file_index": 5,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0005.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211369992984769,
+            "stable_inventory_id": "e2eb8d040a4d085a1cc09aea38b94ca97b2685f062a296dbb0c5e230646d9d57"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "dominant_mode_fraction": {
+              "value": 0.99693,
+              "unit": "fraction"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "6": {
+          "file_index": 6,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0006.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211373337056814,
+            "stable_inventory_id": "ee09be01ffa3dd5ee5ad9cc38bab37131ba4dce65bf550fb38adda5957e8aa89"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "dominant_mode_fraction": {
+              "value": 0.99764,
+              "unit": "fraction"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "7": {
+          "file_index": 7,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0007.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211376765130677,
+            "stable_inventory_id": "5d33737fee9f65f0209020e88edbd2d94bcce6081ed74fec82665eddd37d0080"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "dominant_mode_fraction": {
+              "value": 0.99715,
+              "unit": "fraction"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "8": {
+          "file_index": 8,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0008.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211380197204631,
+            "stable_inventory_id": "e153c4b97d0c8fccdd0fb2735ffda6d25945228dec934a060ee34a7ffc87e05b"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "dominant_mode_fraction": {
+              "value": 0.99675,
+              "unit": "fraction"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "9": {
+          "file_index": 9,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0009.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211383673279539,
+            "stable_inventory_id": "d8a2903bf26812df634aab237d6230f72c005ba5183ac2735a306fdfa0f7faea"
+          },
+          "passed": false,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "dominant_mode_fraction": {
+              "value": 0.99655,
+              "unit": "fraction"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        }
+      },
+      "threshold": 0.95,
+      "peek_samples_requested": 100000,
+      "aggregate_statistics": {
+        "count": 6,
+        "minimum": 0.99655,
+        "q25": 0.996795,
+        "median": 0.9970399999999999,
+        "q75": 0.997345,
+        "maximum": 0.99764,
+        "mean": 0.9970716666666667,
+        "standard_deviation": 0.000409703144565245
+      }
+    },
+    "gate_runtime_seconds": 0.012501876335591078,
+    "gate_role": "blocking",
+    "configured_action": "invalidate_round",
+    "healthgate_mode": "blocking",
+    "result_authority": "scientific",
+    "check_verdicts": {
+      "amplitude_collapse": "failed"
+    },
+    "display_label": "amplitude_collapse_blocking (enforcing)"
+  },
+  {
+    "gate_name": "pearson_dispersion_recording",
+    "execution_status": "passed",
+    "check_passed": true,
+    "would_invalidate_under_production_policy": false,
+    "resolved_action": "continue",
+    "failure_reason": null,
+    "threshold": null,
+    "aggregation": {
+      "aggregation_rule": "recording",
+      "files_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_completed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_passed": [],
+      "files_failed": [],
+      "aggregate_passed": true
+    },
+    "metrics": {
+      "n_files_measured": 6,
+      "n_files_io_failed": 0,
+      "n_files_attempted": 6,
+      "peek_samples_requested": 1000000,
+      "pearson_per_file": {
+        "4": 0.0005253577634836752,
+        "5": 0.0010644430121407563,
+        "6": -0.0011006543090790021,
+        "7": -0.0014260032335476713,
+        "8": 0.001854301401948605,
+        "9": -0.0014756404343361517
+      },
+      "unit": "dimensionless_correlation",
+      "calculation_version": "pearson_dispersion_v1",
+      "pearson_dispersion": 0.0014295441785108095,
+      "pearson_mean": -9.303263323163142e-05,
+      "pearson_range": 0.003329941836284757,
+      "per_file": {
+        "4": {
+          "file_index": 4,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0004.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211366520909972,
+            "stable_inventory_id": "7fc78dc0684079b47050876221a688858a9a38089b68875c1b1cfddec7f9c2fd"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "pearson_correlation": {
+              "value": 0.0005253577634836752,
+              "unit": "correlation"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "5": {
+          "file_index": 5,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0005.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211369992984769,
+            "stable_inventory_id": "e2eb8d040a4d085a1cc09aea38b94ca97b2685f062a296dbb0c5e230646d9d57"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "pearson_correlation": {
+              "value": 0.0010644430121407563,
+              "unit": "correlation"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "6": {
+          "file_index": 6,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0006.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211373337056814,
+            "stable_inventory_id": "ee09be01ffa3dd5ee5ad9cc38bab37131ba4dce65bf550fb38adda5957e8aa89"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "pearson_correlation": {
+              "value": -0.0011006543090790021,
+              "unit": "correlation"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "7": {
+          "file_index": 7,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0007.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211376765130677,
+            "stable_inventory_id": "5d33737fee9f65f0209020e88edbd2d94bcce6081ed74fec82665eddd37d0080"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "pearson_correlation": {
+              "value": -0.0014260032335476713,
+              "unit": "correlation"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "8": {
+          "file_index": 8,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0008.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211380197204631,
+            "stable_inventory_id": "e153c4b97d0c8fccdd0fb2735ffda6d25945228dec934a060ee34a7ffc87e05b"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "pearson_correlation": {
+              "value": 0.001854301401948605,
+              "unit": "correlation"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "9": {
+          "file_index": 9,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0009.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211383673279539,
+            "stable_inventory_id": "d8a2903bf26812df634aab237d6230f72c005ba5183ac2735a306fdfa0f7faea"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "pearson_correlation": {
+              "value": -0.0014756404343361517,
+              "unit": "correlation"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        }
+      },
+      "aggregate_statistics": {
+        "count": 6,
+        "minimum": -0.0014756404343361517,
+        "q25": -0.0013446660024305042,
+        "median": -0.00028764827279766347,
+        "q75": 0.000929671699976486,
+        "maximum": 0.001854301401948605,
+        "mean": -9.303263323163142e-05,
+        "standard_deviation": 0.0014295441785108095
+      }
+    },
+    "gate_runtime_seconds": 0.19954992504790425,
+    "gate_role": "observational",
+    "configured_action": "continue",
+    "healthgate_mode": "blocking",
+    "result_authority": "scientific",
+    "check_verdicts": {
+      "pearson_dispersion": "passed"
+    },
+    "display_label": "pearson_dispersion_recording (observational)"
+  },
+  {
+    "gate_name": "spectral_peak_ratio_recording",
+    "execution_status": "passed",
+    "check_passed": true,
+    "would_invalidate_under_production_policy": false,
+    "resolved_action": "continue",
+    "failure_reason": null,
+    "threshold": null,
+    "aggregation": {
+      "aggregation_rule": "recording",
+      "files_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_completed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_passed": [],
+      "files_failed": [],
+      "aggregate_passed": true
+    },
+    "metrics": {
+      "n_files_measured": 6,
+      "n_files_io_failed": 0,
+      "n_files_attempted": 6,
+      "ratio_per_file": {
+        "4": 16.335151856556006,
+        "5": 9.97142281450789,
+        "6": 16.234142139169524,
+        "7": 19.351707633318615,
+        "8": 15.964663815976209,
+        "9": 10.384368020655147
+      },
+      "io_failed": {},
+      "peek_samples_requested": 1000000,
+      "unit": "dimensionless_ratio",
+      "calculation_version": "spectral_peak_ratio_v1",
+      "ratio_mean": 14.706909380030565,
+      "ratio_median": 16.099402977572865,
+      "ratio_min": 9.97142281450789,
+      "ratio_max": 19.351707633318615,
+      "per_file": {
+        "4": {
+          "file_index": 4,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0004.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211366520909972,
+            "stable_inventory_id": "7fc78dc0684079b47050876221a688858a9a38089b68875c1b1cfddec7f9c2fd"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "spectral_peak_ratio": {
+              "value": 16.335151856556006,
+              "unit": "ratio"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "5": {
+          "file_index": 5,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0005.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211369992984769,
+            "stable_inventory_id": "e2eb8d040a4d085a1cc09aea38b94ca97b2685f062a296dbb0c5e230646d9d57"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "spectral_peak_ratio": {
+              "value": 9.97142281450789,
+              "unit": "ratio"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "6": {
+          "file_index": 6,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0006.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211373337056814,
+            "stable_inventory_id": "ee09be01ffa3dd5ee5ad9cc38bab37131ba4dce65bf550fb38adda5957e8aa89"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "spectral_peak_ratio": {
+              "value": 16.234142139169524,
+              "unit": "ratio"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "7": {
+          "file_index": 7,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0007.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211376765130677,
+            "stable_inventory_id": "5d33737fee9f65f0209020e88edbd2d94bcce6081ed74fec82665eddd37d0080"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "spectral_peak_ratio": {
+              "value": 19.351707633318615,
+              "unit": "ratio"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "8": {
+          "file_index": 8,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0008.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211380197204631,
+            "stable_inventory_id": "e153c4b97d0c8fccdd0fb2735ffda6d25945228dec934a060ee34a7ffc87e05b"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "spectral_peak_ratio": {
+              "value": 15.964663815976209,
+              "unit": "ratio"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "9": {
+          "file_index": 9,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0009.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211383673279539,
+            "stable_inventory_id": "d8a2903bf26812df634aab237d6230f72c005ba5183ac2735a306fdfa0f7faea"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 1000000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "spectral_peak_ratio": {
+              "value": 10.384368020655147,
+              "unit": "ratio"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        }
+      },
+      "aggregate_statistics": {
+        "count": 6,
+        "minimum": 9.97142281450789,
+        "q25": 11.779441969485413,
+        "median": 16.099402977572865,
+        "q75": 16.309899427209388,
+        "maximum": 19.351707633318615,
+        "mean": 14.706909380030565,
+        "standard_deviation": 3.721529452082689
+      }
+    },
+    "gate_runtime_seconds": 0.07033601077273488,
+    "gate_role": "observational",
+    "configured_action": "continue",
+    "healthgate_mode": "blocking",
+    "result_authority": "scientific",
+    "check_verdicts": {
+      "spectral_peak_ratio": "passed"
+    },
+    "display_label": "spectral_peak_ratio_recording (observational)"
+  },
+  {
+    "gate_name": "per_file_output_std_recording",
+    "execution_status": "passed",
+    "check_passed": true,
+    "would_invalidate_under_production_policy": false,
+    "resolved_action": "continue",
+    "failure_reason": null,
+    "threshold": null,
+    "aggregation": {
+      "aggregation_rule": "recording",
+      "files_requested": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_completed": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "files_passed": [],
+      "files_failed": [],
+      "aggregate_passed": true
+    },
+    "metrics": {
+      "n_files_measured": 6,
+      "n_files_io_failed": 0,
+      "n_files_attempted": 6,
+      "std_mv_per_file": {
+        "4": 0.095298927517247,
+        "5": 0.10372962130431934,
+        "6": 0.09097963714480292,
+        "7": 0.09995486774508532,
+        "8": 0.10671760614321098,
+        "9": 0.1099411730128322
+      },
+      "io_failed": {},
+      "peek_samples_requested": 100000,
+      "unit": "mV",
+      "calculation_version": "per_file_output_std_v1",
+      "std_mv_mean": 0.10110363881124962,
+      "std_mv_median": 0.10184224452470234,
+      "std_mv_min": 0.09097963714480292,
+      "std_mv_max": 0.1099411730128322,
+      "per_file": {
+        "4": {
+          "file_index": 4,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0004.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211366520909972,
+            "stable_inventory_id": "7fc78dc0684079b47050876221a688858a9a38089b68875c1b1cfddec7f9c2fd"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.095298927517247,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "5": {
+          "file_index": 5,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0005.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211369992984769,
+            "stable_inventory_id": "e2eb8d040a4d085a1cc09aea38b94ca97b2685f062a296dbb0c5e230646d9d57"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.10372962130431934,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "6": {
+          "file_index": 6,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0006.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211373337056814,
+            "stable_inventory_id": "ee09be01ffa3dd5ee5ad9cc38bab37131ba4dce65bf550fb38adda5957e8aa89"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.09097963714480292,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "7": {
+          "file_index": 7,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0007.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211376765130677,
+            "stable_inventory_id": "5d33737fee9f65f0209020e88edbd2d94bcce6081ed74fec82665eddd37d0080"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.09995486774508532,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "8": {
+          "file_index": 8,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0008.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211380197204631,
+            "stable_inventory_id": "e153c4b97d0c8fccdd0fb2735ffda6d25945228dec934a060ee34a7ffc87e05b"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.10671760614321098,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        },
+        "9": {
+          "file_index": 9,
+          "file": {
+            "path": "/tmp/gate2_09_5a_1787208851/iter_002/iteration_002/hybrid_spectral_gated_tcn_v1/abra_validation_denoised_hybrid_spectral_gated_tcn_v1_iter_002_hybrid_spectral_gated_tcn_v1_iter_002_006_0009.h5",
+            "exists": true,
+            "size_bytes": 40047952,
+            "mtime_ns": 1787211383673279539,
+            "stable_inventory_id": "d8a2903bf26812df634aab237d6230f72c005ba5183ac2735a306fdfa0f7faea"
+          },
+          "passed": null,
+          "execution_status": "passed",
+          "sample_count_inspected": 100000,
+          "sampling_method": "channel0001_prefix_peek",
+          "metrics": {
+            "output_std_mv": {
+              "value": 0.1099411730128322,
+              "unit": "mV"
+            }
+          },
+          "checkpoint_sha256": "c594404d37afbfe40ae03a5630b8fbb3138f5591b6dc42e288ef810156de7740",
+          "io_warning": null
+        }
+      },
+      "aggregate_statistics": {
+        "count": 6,
+        "minimum": 0.09097963714480292,
+        "q25": 0.09646291257420658,
+        "median": 0.10184224452470234,
+        "q75": 0.10597060993348807,
+        "maximum": 0.1099411730128322,
+        "mean": 0.10110363881124962,
+        "standard_deviation": 0.00712775114511966
+      }
+    },
+    "gate_runtime_seconds": 0.0065085566602647305,
+    "gate_role": "observational",
+    "configured_action": "continue",
+    "healthgate_mode": "blocking",
+    "result_authority": "scientific",
+    "check_verdicts": {
+      "per_file_output_std": "passed"
+    },
+    "display_label": "per_file_output_std_recording (observational)"
+  }
+]

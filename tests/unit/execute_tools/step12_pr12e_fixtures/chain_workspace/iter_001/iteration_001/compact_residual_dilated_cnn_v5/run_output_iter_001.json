@@ -1,0 +1,411 @@
+{
+    "run_name": "iter_001",
+    "model_type": "compact_residual_dilated_cnn_v5",
+    "file_index": 6,
+    "health_checks_config": null,
+    "resolved_data_scope": [
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+    ],
+    "health_gate_enabled": false,
+    "healthgate_mode": "blocking",
+    "result_authority": "diagnostic",
+    "candidate_id": "cand_db8f43ff007a4f0990795a4f032df2fa",
+    "health_checks_config_source": null,
+    "health_config_sha256": null,
+    "formal_reference_score": null,
+    "formal_comparison_reference_source": "gates_disabled",
+    "resolved_skip_formal_threshold": null,
+    "resolved_bypass_formal_threshold": null,
+    "status": "completed",
+    "completed_rounds": 1,
+    "total_attempts": 1,
+    "best_exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+    "best_denoising_score": -1.229119191657453,
+    "best_formal_denoising_score": -1.229119191657453,
+    "best_valid_exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+    "best_valid_denoising_score": -1.229119191657453,
+    "best_valid_formal_exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+    "best_valid_formal_denoising_score": -1.229119191657453,
+    "best_valid_trial_exp_id": null,
+    "best_valid_trial_denoising_score": null,
+    "best_valid_config": {
+        "exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+        "run_name": "iter_001",
+        "model_type": "compact_residual_dilated_cnn_v5",
+        "model_config": {
+            "model_type": "compact_residual_dilated_cnn_v5",
+            "segmentation_size": 4000,
+            "batch_size": 4,
+            "adc_vocab_size": 256,
+            "num_classes": 256,
+            "embedding_dim": 16,
+            "hidden_channels": 32,
+            "num_residual_blocks": 10,
+            "kernel_size": 5,
+            "num_groups": 4,
+            "skip_channels": 32,
+            "head_hidden_channels": 32
+        },
+        "train_config": {
+            "lr": 0.001,
+            "epochs": 1,
+            "batch_size": 4,
+            "optimizer_type": "adamw",
+            "weight_decay": 1e-05,
+            "device": "cuda"
+        },
+        "loss_config": {
+            "loss_type": "ce",
+            "reduction": "mean"
+        },
+        "inference_batch": 64
+    },
+    "best_valid_file_vector": [
+        null,
+        null,
+        null,
+        null,
+        0.00019906082970964364,
+        0.010681674860703372,
+        0.007882305337296463,
+        0.07194932832380065,
+        0.24743131606687832,
+        0.43982115623359064,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+    ],
+    "best_valid_score_table": null,
+    "best_valid_formal_score_table": null,
+    "best_config": {
+        "exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+        "run_name": "iter_001",
+        "model_type": "compact_residual_dilated_cnn_v5",
+        "model_config": {
+            "model_type": "compact_residual_dilated_cnn_v5",
+            "segmentation_size": 4000,
+            "batch_size": 4,
+            "adc_vocab_size": 256,
+            "num_classes": 256,
+            "embedding_dim": 16,
+            "hidden_channels": 32,
+            "num_residual_blocks": 10,
+            "kernel_size": 5,
+            "num_groups": 4,
+            "skip_channels": 32,
+            "head_hidden_channels": 32
+        },
+        "train_config": {
+            "lr": 0.001,
+            "epochs": 1,
+            "batch_size": 4,
+            "optimizer_type": "adamw",
+            "weight_decay": 1e-05,
+            "device": "cuda"
+        },
+        "loss_config": {
+            "loss_type": "ce",
+            "reduction": "mean"
+        },
+        "inference_batch": 64
+    },
+    "best_file_vector": [
+        null,
+        null,
+        null,
+        null,
+        0.00019906082970964364,
+        0.010681674860703372,
+        0.007882305337296463,
+        0.07194932832380065,
+        0.24743131606687832,
+        0.43982115623359064,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+    ],
+    "best_score_table": null,
+    "formal_score_table": null,
+    "all_records": [
+        {
+            "record_type": "experiment",
+            "exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+            "status": "success",
+            "model_type": "compact_residual_dilated_cnn_v5",
+            "candidate_id": "cand_db8f43ff007a4f0990795a4f032df2fa",
+            "timestamp": "2026-08-21 14:10:51",
+            "file_index": 6,
+            "params": {
+                "exp_id": "compact_residual_dilated_cnn_v5_iter_001_001",
+                "run_name": "iter_001",
+                "model_type": "compact_residual_dilated_cnn_v5",
+                "model_config": {
+                    "model_type": "compact_residual_dilated_cnn_v5",
+                    "segmentation_size": 4000,
+                    "batch_size": 4,
+                    "adc_vocab_size": 256,
+                    "num_classes": 256,
+                    "embedding_dim": 16,
+                    "hidden_channels": 32,
+                    "num_residual_blocks": 10,
+                    "kernel_size": 5,
+                    "num_groups": 4,
+                    "skip_channels": 32,
+                    "head_hidden_channels": 32
+                },
+                "train_config": {
+                    "lr": 0.001,
+                    "epochs": 1,
+                    "batch_size": 4,
+                    "optimizer_type": "adamw",
+                    "weight_decay": 1e-05,
+                    "device": "cuda"
+                },
+                "loss_config": {
+                    "loss_type": "ce",
+                    "reduction": "mean"
+                },
+                "inference_batch": 64
+            },
+            "logical_round": null,
+            "attempt_index": null,
+            "failure_stage": null,
+            "failure_type": null,
+            "proposed_config": null,
+            "gpu_evidence": null,
+            "failure_attribution": null,
+            "traceback_summary": null,
+            "counts_toward_completed_rounds": null,
+            "counts_toward_attempt_budget": true,
+            "final_loss": 3.0346752113215127,
+            "loss_history": [
+                3.0346752113215127
+            ],
+            "model_params": 88064,
+            "training_history": {
+                "cadence": "per_epoch",
+                "objective_kind": "ce",
+                "objective_config_fingerprint": "39166a78381b777f6409745acd56b4593e26108c5d0b883dd069d823a13315fd",
+                "objective_reduction": "mean",
+                "epoch_statistic": "sample_count_weighted_mean_of_batch_criterion",
+                "comparability": "established",
+                "comparability_reason": null,
+                "epochs_planned": 1,
+                "epochs_completed": 1,
+                "train_objective": [
+                    3.0346752113215127
+                ],
+                "validation_objective": [
+                    2.312438826560974
+                ],
+                "validation_requested_samples": 10000,
+                "validation_samples": 10000,
+                "validation_requested_samples_before_limit": 300000,
+                "validation_seconds": [
+                    44.994524735957384
+                ],
+                "observations": {}
+            },
+            "training_diagnosis": {
+                "state": "ok",
+                "validation_state": "present",
+                "comparability": "established",
+                "epochs_planned": 1,
+                "epochs_completed": 1,
+                "truncated": false,
+                "train_first": 3.0346752113215127,
+                "train_last": 3.0346752113215127,
+                "train_min": 3.0346752113215127,
+                "train_min_epoch": 0,
+                "validation_first": 2.312438826560974,
+                "validation_last": 2.312438826560974,
+                "validation_min": 2.312438826560974,
+                "best_validation_epoch": 0,
+                "final_vs_best_validation_degradation": 0.0,
+                "final_vs_best_validation_degradation_rel": 0.0,
+                "validation_degraded_after_best": false,
+                "train_validation_gap_final": -0.7222363847605386,
+                "train_validation_gap_final_rel": 0.23799462363091756,
+                "train_trend": "single_point",
+                "validation_trend": "single_point",
+                "flat_rel_tol": 0.01
+            },
+            "denoising_score": -1.229119191657453,
+            "file_vector": [
+                null,
+                null,
+                null,
+                null,
+                0.00019906082970964364,
+                0.010681674860703372,
+                0.007882305337296463,
+                0.07194932832380065,
+                0.24743131606687832,
+                0.43982115623359064,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+            ],
+            "score_table": null,
+            "failure_reason": null,
+            "gate_action": null,
+            "health_gate_results": [],
+            "scientific_authority": {
+                "healthgate_mode": "blocking",
+                "declared_result_authority": "diagnostic",
+                "formal_validity": "valid",
+                "blocking_reasons": [
+                    "declared_diagnostic"
+                ],
+                "authoritative": false,
+                "primary_basis": "declared_diagnostic",
+                "enters_incumbent_selection": false,
+                "enters_scientific_aggregation": false
+            },
+            "training_psd_segments": 120,
+            "eval_psd_segments": 120,
+            "timing": {
+                "train_time_s": 683.3,
+                "inference_time_s": 156.0,
+                "scoring_time_s": 95.0
+            },
+            "memory": {
+                "expert_advice_followed": "Focus areas: Keep the baseline narrow: embedding_dim=16, residual_channels=32, skip_channels=32, and roughly 8-10 residual blocks before considering any capacity increase.; Tune segmentation_size first because activation memory scales with T; use 4000 as the first safe divisor and only increase after pre-flight confirms large headroom.; Keep batch_size at least 4 as required by the human directive; if VRAM is tight, reduce segmentation_size before reducing batch size.; Use plain CE and monitor output diversity, per-file completion, and predicted peak VRAM before making any quality-driven architectural changes.\nConstraints: Effective VRAM cap is 4.00 GiB; target predicted peak <=3.2 GiB at baseline to leave tuner headroom.; Do not exceed approximately 1M parameters; this baseline is intentionally far below that, around 80k parameters.; Avoid 24+ block stacks, wide transformers, FNO/spectral pyramids, multi-branch architectures, and gated residual mechanisms for this run.; Use a valid segmentation_size divisor of 10,000,000; baseline uses 4000.\nKnown failures: If segmentation_size is increased too aggressively, activation memory may still exceed the 4 GiB gate despite the small parameter count.; The local residual dilated receptive field may be too limited for high-quality broad-spectrum denoising, but the first objective is composed-chain completion.; Plain CE may produce locally smoothed or low-diversity outputs; if this happens after a successful run, it becomes evidence for a later loss or capacity experiment rather than a reason to complicate this baseline now.\nSuggested directions: First run: compact_residual_dilated_cnn_v5 with 10 blocks, 32 residual channels, batch_size=4, segmentation_size=4000, CE loss.; If pre-flight peak is comfortably below 3.2 GiB, try segmentation_size=5000 or 8000 before widening channels.; If training completes but quality is weak, compare 8 versus 10 versus 12 blocks within the same plain residual family rather than adding gates or spectral branches.; If outputs collapse or become low-diversity, next iteration should consider a conservative CE variant only after preserving this same architecture as a control.\nRationale: This guidance matches the memo's goal: produce the first valid, small, non-novel, full-spectrum classifier under a strict 4 GiB gate. The architecture intentionally tests execution reliability and basic trainability rather than maximizing score, so tuning should preserve the compact residual dilated CNN family and vary only safe memory-critical knobs first.\n[Human Guidance (high priority)]:\nUse conservative, obviously-safe hyperparameters. This is a wiring validation, not a tuning study.\nThe 4 GiB VRAM allowance is hard. Do not increase segmentation_size, channel width, depth, or batch size beyond what was proposed. If an attempt is refused for memory, REDUCE capacity rather than retrying the same shape.\nAccept the data portions the launcher supplies. Do not set trial, eval or train portions to 1.0 and do not request the full data scope: an attempt whose resolved optimizer-step count exceeds the runtime guardrail is refused before training and produces no record at all. The workload for this run is owned by the launcher, not by the plan.",
+                "hypothesis": "This compact plain residual dilated CNN should fit within the 4 GiB VRAM cap and complete the composed full-spectrum classifier training path without architectural complications. With only one epoch, quality may be modest, but the main expected outcome is a valid non-collapsed run with usable output diversity and a finite denoising_score.",
+                "conclusion": "Good as an initial benchmark: with no baseline_score or prior best_score_so_far, this is the first valid non-degenerate run and therefore the current best by definition. The denoising_score is finite (-1.2291), and its negative sign is not itself a failure because the metric is only meaningful relative to other runs. Training dynamics are inconclusive because this was a single epoch: train loss stayed at 3.03, validation loss at 2.31, with a final comparable-objective gap of -0.72.",
+                "key_factor": "The compact residual dilated CNN architecture trained with ce loss for only 1 epoch on trial_portion=0.1; the architecture enabled a valid low-parameter run, while the one-epoch/low-data setting limits conclusions about quality.",
+                "discovery": "The compact residual dilated CNN with 88,064 parameters can execute the full composed classifier path without degeneration and produce a finite denoising_score. However, one epoch gives no learning trend, ce loss has no same-loss prior comparison, and the missing score_table prevents Impact_Score-based per-file bottleneck analysis.",
+                "memory_update": "Use this run as the initial ce-loss baseline rather than judging the absolute score. Next, keep the compact residual dilated CNN architecture and increase evidence before changing hyperparameters: train for more epochs and preferably raise trial_portion above 0.1 to improve score reliability. Do not pivot based on small score differences at this data volume; first confirm whether the architecture improves with more training/data and request/ensure a complete score_table for Impact_Score-guided per-file analysis.",
+                "time_estimate_minutes": null,
+                "time_budget_minutes": null,
+                "time_mode": null,
+                "vram_estimate_gb": 0.427,
+                "vram_budget_gb": 4.0,
+                "inference_batch_uncalibrated": null,
+                "inference_per_psd_seg_ms_measured": 1255.398173746653,
+                "inference_warmup_aggregator": "median",
+                "inference_n_timed_files": 5,
+                "inference_warmup_fraction": 0.2,
+                "inference_process_startup_ms": 5851.733656134456,
+                "inference_ms_source": null,
+                "round_index": 1,
+                "attempt_in_round": 1
+            },
+            "is_trial": false,
+            "trial_strategy": null,
+            "trial_portion": null,
+            "eval_strategy": null,
+            "eval_portion": null,
+            "train_portion": null,
+            "target_files": null,
+            "validation_workload_ceiling": {
+                "enabled": false,
+                "configured_ceiling": null,
+                "planned": {
+                    "trial_portion": 0.1,
+                    "train_portion": 0.25,
+                    "eval_portion": 0.1
+                },
+                "resolved": {
+                    "trial_portion": 0.1,
+                    "train_portion": 0.25,
+                    "eval_portion": 0.1
+                }
+            },
+            "resolved_data_scope": [
+                4,
+                5,
+                6,
+                7,
+                8,
+                9
+            ],
+            "health_gate_enabled": false,
+            "planned_trial_strategy": null,
+            "planned_eval_strategy": null,
+            "strategy_normalization_reason": null,
+            "proposed_order_strategy": null,
+            "proposed_file_order": null,
+            "ordering_proposal_rejected": false,
+            "ordering_proposal_rejection_reason": null,
+            "override_order_strategy": null,
+            "override_file_order": null,
+            "resolved_order_strategy": "shuffle",
+            "resolved_file_order": null,
+            "ordering_resolution_source": "default",
+            "metric_result": {
+                "metric_id": "tidmad_denoising_score",
+                "direction": "higher",
+                "scalar": -1.229119191657453,
+                "per_sample": null,
+                "references_used": [
+                    "anchor_map"
+                ]
+            },
+            "metric_refusal": null,
+            "secondary_metric_results": [],
+            "secondary_metric_refusals": [],
+            "secondary_metric_errors": {}
+        }
+    ],
+    "gate_exhaustion": null,
+    "trial_validity_feedback": null,
+    "physical_rejections": [],
+    "attempts_per_round": 3,
+    "attempts_per_formal_round": 5,
+    "max_fail_rounds": 3,
+    "consecutive_fail_rounds_at_exit": 0,
+    "termination_reason": "completed",
+    "started_at": "2026-08-21 13:54:28",
+    "finished_at": "2026-08-21 14:10:54",
+    "metric_spec": {
+        "id": "tidmad_denoising_score",
+        "direction": "higher",
+        "aggregation": "tidmad_anchor_normalised_linear_grand_mean",
+        "transform": "log",
+        "transform_params": {
+            "log_base": 5.27
+        },
+        "references": [
+            "anchor_map",
+            "raw_baseline",
+            "ground_truth"
+        ],
+        "scoreability": {
+            "contract_id": "tidmad_denoised_h5",
+            "input_channel_group": "channel0001",
+            "required_attrs": [
+                "voltage_range_mV",
+                "sampling_frequency"
+            ],
+            "required_storage_dtype": "int8"
+        }
+    },
+    "secondary_metric_specs": null
+}

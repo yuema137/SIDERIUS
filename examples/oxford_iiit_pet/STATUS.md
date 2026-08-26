@@ -124,6 +124,16 @@ root as the data-path seam's `data_dir`. No cache.
 became false when the composed entrypoint landed —
 `--task_composition configs/task_composition/pets.yaml`. See the README.
 
+**Amended again at Step 12 / PR-12e.** That entrypoint now has a published
+form: `quickstart.sh` is the pack's ONE documented run command, and it is
+deliberately not a launcher — it is a thin adapter that supplies this pack's
+composition manifest and a set of bounded defaults to the NORMAL production
+launcher (`sdsc_submission_scripts/run_chain.sh`). No execution logic, no Pets
+semantics and no example-only control lives in it: remove the file and the
+same run is still expressible by typing `run_chain.sh` directly. Guarded by
+`tests/unit/examples/test_step12_pr12e_pets_quickstart.py`, which drives the
+command parsed out of `README.md` rather than a restatement of it.
+
 
 ## Runner role and L3 evidence freshness (Step 10 / P5+P6 C7)
 

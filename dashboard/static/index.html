@@ -88,11 +88,18 @@
   <!-- Charts -->
   <div class="charts-grid">
 
-    <!-- Chart 1: Denoising score -->
+    <!-- Chart 1: primary metric -->
     <div class="card">
-      <div class="card-title">Denoising score vs research loop</div>
+      <div class="card-title">Primary metric vs research loop</div>
+      <!-- Step 12 / PR-12e (F-12e-UX-3): this caption used to read
+           "Higher is better". It is a per-run FACT, not a page constant —
+           DAVIS's `mse` and Pets' declared `log_loss` are lower-is-better —
+           so the direction half is written by app.js from the identity the
+           API now carries (`RunSummary.metric`), and says so by name when no
+           direction was declared. -->
       <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-        Solid = cumulative best · Dashed = current experiment · Higher is better
+        Solid = cumulative best · Dashed = current experiment
+        <span id="score-direction-note"></span>
       </div>
       <div class="axis-controls">
         <span class="axis-label">X:</span>

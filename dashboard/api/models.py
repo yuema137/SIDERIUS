@@ -66,6 +66,59 @@ class TimingRecord(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class MetricIdentityMirror(BaseModel):
+    """The MINIMUM comparison identity a persisted record carries.
+
+    Step 12 / PR-12e (F-12e-UX-9). ``ExperimentRecord`` below sets
+    ``extra="ignore"``, so before this class existed the mirror silently
+    discarded ``metric_result`` — **the direction was dropped at the API
+    boundary, before it ever reached the browser.** Fixing the frontend's
+    hardcoded higher-is-better sites alone would have left it guessing from a
+    field it could not see.
+
+    Only ``(metric_id, direction)`` is mirrored, because that pair IS the
+    minimum comparison identity (``evaluation_metric.MetricIdentityKey``); the
+    scalar already crosses as ``denoising_score``. ``direction`` is typed as a
+    plain ``str`` on purpose: this is a WIRE MIRROR, and the
+    ``MetricDirection`` vocabulary is validated by ``evaluation_metric``, which
+    is the one module permitted to read it. Re-declaring the Literal here would
+    make the dashboard a second declaration site for the vocabulary.
+    """
+
+    metric_id: str | None = None
+    direction: str | None = None
+
+    model_config = ConfigDict(extra="ignore")
+
+
+class SeriesMetricIdentity(BaseModel):
+    """The ONE identity a whole series may be ranked by, or a named refusal.
+
+    Step 12 / PR-12e (F-12e-UX-9). Reconciled server-side by the authority
+    that owns it (``execute_tools.persisted_ranking``), never by the browser:
+    a series whose records mix two metrics, or declare none, must not be
+    ranked at all, and the frontend needs to be TOLD that rather than
+    inferring it.
+
+    ``direction`` present ⇒ the frontend may draw a cumulative-best curve and
+    label the axis. ``direction`` absent ⇒ it must draw the raw values only,
+    and show ``note``.
+    """
+
+    metric_id: str | None = None
+    direction: str | None = None
+    note: str | None = Field(
+        default=None,
+        description=(
+            "The canonical metric-identity-unavailable notice when no single "
+            "order could be established, or when some records were excluded "
+            "from ranking individually. Displayed verbatim."
+        ),
+    )
+
+    model_config = ConfigDict(extra="ignore")
+
+
 class ExperimentRecord(BaseModel):
     """
     Full experiment record as stored by the pipeline.
@@ -100,6 +153,12 @@ class ExperimentRecord(BaseModel):
     # file failed). Matches agent/schemas/hyperparam_tuning.py.
     file_vector: list[float | None] | None = None
 
+    #: Step 12 / PR-12e (F-12e-UX-9) — the identity this record was SCORED
+    #: under. Declared so ``extra="ignore"`` stops dropping it; ``None`` on a
+    #: legacy or unscored record, which the frontend must treat as "excluded
+    #: from ranking individually", never as a default direction.
+    metric_result: MetricIdentityMirror | None = None
+
     model_config = ConfigDict(extra="ignore")
 
 
@@ -115,6 +174,11 @@ class RunSummary(BaseModel):
     offset: int
     limit: int
     records: list[ExperimentRecord]
+    #: Step 12 / PR-12e (F-12e-UX-9) — the order this series may be ranked in,
+    #: reconciled SERVER-SIDE. Additive and defaulted, so every existing
+    #: consumer is unaffected; ``None`` means the direction could not be
+    #: established and the frontend must not rank.
+    metric: SeriesMetricIdentity | None = None
 
 
 # ---------------------------------------------------------------------------

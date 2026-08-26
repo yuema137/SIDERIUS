@@ -79,6 +79,33 @@ DIRECTORY_SCANS: dict[str, tuple[str, ...]] = {
         "core/runtime_control/gpu_measurement_worker_main.py",
     ),
     "tests/unit/agent/llm_bridge/test_all_calls_labeled.py": ("nodes/",),
+    # Step 12 / PR-12e -- the presentation-layer ordering census. It derives NO
+    # import edge (its subjects are `.js` and `.html`), and the selector's
+    # `_production_files()` indexes only py/md/txt/sh/json/jsonl/yaml, so its
+    # literal path references resolve to nothing either. Without this entry the
+    # census is unreachable: a change to `app.js` would NOT run the guard whose
+    # entire purpose is to constrain `app.js`.
+    #
+    # This is the F-12e-UX-8 shape ONE LEVEL UP. That defect was a census whose
+    # file set was `rglob("*.py")` while the code it guarded lived in `app.js`;
+    # this would have been a SELECTOR whose file set has the same blind spot.
+    # The fix for a census that cannot see the presentation layer is worth
+    # nothing if the thing that decides whether to RUN it shares the blindness.
+    #
+    # SCOPED TO `dashboard/static/`, NOT `dashboard/`, and the narrowing is
+    # load-bearing rather than tidiness. `resolver.py:295` consults AREA_OWNERS
+    # only `if not direct`, so ANY directory scan covering a file that nothing
+    # imports SUPPRESSES that file's area suite. `dashboard/main.py` is exactly
+    # such a file (a FastAPI entry point with no importer), and scanning
+    # `dashboard/` broadly made a change to it stop selecting
+    # `tests/unit/dashboard/` -- verified: it turned
+    # `test_an_area_owned_module_selects_its_area_not_everything` RED. Scoping
+    # to the presentation subtree keeps the census reachable while leaving
+    # every area fallback intact. The underlying "an explicit scan replaces
+    # rather than augments the area owner" behaviour is recorded as a finding.
+    "tests/unit/execute_tools/test_step12_pr12e_presentation_ordering_census.py": (
+        "dashboard/static/",
+    ),
     # Reaches the tuner through `importlib` with a computed name (`:36`), which
     # the AST cannot resolve -- found by the mutation oracle, not by review: a
     # change to `policy.py` would otherwise NOT have run the suite guarding its

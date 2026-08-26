@@ -1,0 +1,21 @@
+{
+  "resolved_data_scope": [
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "health_gate_enabled": false,
+  "health_config_sha256": null,
+  "ordering_override_strategy": null,
+  "ordering_override_file_order": null,
+  "structured_health_feedback_enabled": false,
+  "health_feedback_history_window_iterations": 3,
+  "health_feedback_history_max_entries_per_model": 8,
+  "runtime_estimator_identity": "runtime_estimator@1.0.0+7b74a26d6843",
+  "runtime_policy_identity": "runtime_decision_policy@1.0.0+78bba7be3a2b",
+  "task_composition_fingerprint": "d6628a93fcb3578ca32812f39246f2b51abeecbd24d21df56856ea0ef9c56d3a",
+  "created_at": "2026-08-21T20:52:45.387615+00:00"
+}

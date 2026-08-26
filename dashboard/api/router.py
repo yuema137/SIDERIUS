@@ -24,11 +24,59 @@ from dashboard.api.models import (
     ModelOverview,
     RunListResponse,
     RunSummary,
+    SeriesMetricIdentity,
     StatusCounts,
 )
 from dashboard.data_sources.base import DataSource
+from execute_tools.evaluation_metric import metric_identity_unavailable_notice
+from execute_tools.persisted_ranking import corpus_order, partition_by_metric_identity
 
 router = APIRouter()
+
+
+def _series_metric_identity(records: list[dict]) -> SeriesMetricIdentity:
+    """The ONE order a series of persisted records may be ranked in.
+
+    Step 12 / PR-12e (F-12e-UX-9). Reconciled HERE, server-side, by the
+    authority that owns it — the browser is TOLD the direction and never
+    infers it (§V.13e: the view must not own metric direction).
+
+    Both routes that return a :class:`RunSummary` feed the same two charts,
+    and before this the direction never crossed the wire at all: the mirror
+    dropped ``metric_result``, so ``app.js`` hardcoded higher-is-better at
+    three comparison sites and asserted it in two axis labels. A
+    lower-is-better run — DAVIS's ``mse``, Pets' declared ``log_loss`` —
+    rendered an inverted best-curve under a contradicting label.
+
+    Returns a value with ``direction`` set when one order covers the series,
+    and ``direction=None`` plus a NAMED ``note`` otherwise. Never a guess:
+    ``partition_by_metric_identity`` excludes identity-less records
+    individually (they stay fully readable, they simply never receive a rank),
+    and ``corpus_order`` refuses a corpus that mixes two known metrics.
+    """
+    rankable, unranked = partition_by_metric_identity(records)
+    order, conflict = corpus_order(rankable)
+    if order is None:
+        return SeriesMetricIdentity(
+            note=conflict
+            or metric_identity_unavailable_notice(
+                "this series",
+                detail="no record declares a metric identity, so it is not ranked",
+            )
+        )
+    identity = next(
+        (r["metric_result"] for r in rankable if isinstance(r.get("metric_result"), dict)),
+        {},
+    )
+    note = None
+    if unranked:
+        note = metric_identity_unavailable_notice(
+            f"{len(unranked)} of {len(records)} records in this series",
+            detail="excluded from ranking individually",
+        )
+    return SeriesMetricIdentity(
+        metric_id=identity.get("metric_id"), direction=order.direction, note=note
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +240,7 @@ def get_run(
         offset=offset,
         limit=limit,
         records=parsed,
+        metric=_series_metric_identity(records),
     )
 
 
@@ -436,6 +485,7 @@ def get_exploration_records(
         offset=0,
         limit=limit,
         records=parsed,
+        metric=_series_metric_identity(records),
     )
 
 

@@ -91,6 +91,21 @@ A "by design" absence list is exactly the kind of prose that keeps reading as
 true after the thing it denies has landed, which is why the D-FINAL doc-sync
 step checks it against the shipped tree rather than against memory.
 
+**Amended again at Step 12 / PR-12e** (issue #267, mirroring the Pets
+cleanup). The composed entrypoint now has a published form: `quickstart.sh` is
+the pack's ONE documented run command, and it is deliberately not a launcher —
+it is a thin adapter that supplies this pack's composition manifest
+(`configs/task_composition/davis.yaml`) and a set of bounded defaults to the
+NORMAL production launcher (`sdsc_submission_scripts/run_chain.sh`). No
+execution logic, no DAVIS semantics and no example-only control lives in it:
+remove the file and the same run is still expressible by typing `run_chain.sh`
+directly. Guarded by
+`tests/unit/examples/test_step12_pr12e_davis_quickstart.py`, which drives the
+command parsed out of `README.md` rather than a restatement of it. The
+standing rule the D-FINAL paragraph names is now executable as well:
+`tests/unit/examples/test_step12_pr12e_pack_absence_claims.py` fails when a
+pack's README or STATUS still asserts the absence of something the pack ships.
+
 
 ## Runner role and L3 evidence freshness (Step 10 / P5+P6 C7)
 

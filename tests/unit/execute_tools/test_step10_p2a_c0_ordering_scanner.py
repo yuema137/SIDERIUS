@@ -380,7 +380,23 @@ def scan_source(source: str, relative_path: str) -> list[Finding]:
 
 
 def production_files() -> list[Path]:
-    """Every production ``.py`` file the scanner is responsible for."""
+    """Every production ``.py`` file the scanner is responsible for.
+
+    ``.py`` ONLY — and that is a real limit, not an implementation detail.
+    ``dashboard/`` is in :data:`PRODUCTION_DIRS` but ``app.js`` is not a
+    Python file, so this walk could never see the frontend's hardcoded
+    higher-is-better sites, and it stayed green through all of P2a while they
+    were live (**F-12e-UX-8** — the ``F-12bc-9`` shape: a census whose FILE
+    SET omits where the code lives).
+
+    The presentation layer is covered by the sibling census
+    ``tests/unit/execute_tools/test_step12_pr12e_presentation_ordering_census.py``,
+    which owns ``.js`` and ``.html`` because they need a textual scanner
+    rather than ``ast.parse``. **The two together are the ordering census;
+    neither alone is.** That sibling asserts this pointer still exists, so a
+    reader who finds ``rglob("*.py")`` here cannot mistake it for the whole
+    surface.
+    """
     files: list[Path] = []
     for directory in PRODUCTION_DIRS:
         files += sorted((REPO_ROOT / directory).rglob("*.py"))

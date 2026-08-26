@@ -1,0 +1,39 @@
+{
+  "metric_spec": {
+    "id": "accuracy",
+    "direction": "higher",
+    "aggregation": "fraction_correct_over_final_eval_images",
+    "transform": null,
+    "transform_params": {},
+    "references": [],
+    "scoreability": {
+      "contract_id": "deliverable_presence"
+    }
+  },
+  "secondary_metric_specs": [
+    {
+      "id": "macro_f1",
+      "direction": "higher",
+      "aggregation": "unweighted_mean_of_per_class_f1_over_37_classes",
+      "transform": null,
+      "transform_params": {},
+      "references": [],
+      "scoreability": {
+        "contract_id": "deliverable_presence"
+      }
+    },
+    {
+      "id": "log_loss",
+      "direction": "lower",
+      "aggregation": "mean_natural_log_loss_over_final_eval_images",
+      "transform": null,
+      "transform_params": {},
+      "references": [],
+      "scoreability": {
+        "contract_id": "deliverable_presence"
+      }
+    }
+  ],
+  "task_composition_fingerprint": "2a5940a49d3709c2fb6d867b15807c0fb0dda5ce2d3b2d58f229583fb74478fc",
+  "health_config_sha256": "22804f138b17124f24bc30b33f73542d4f1d3d42f41daf93e7f6bf27b4c2602b"
+}
