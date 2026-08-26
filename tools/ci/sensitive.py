@@ -1,0 +1,92 @@
+"""The frozen sensitive-test manifest.
+
+FROZEN 2026-08-24 on CP-6 evidence, after CP-8 closed and confirmed no further
+environment-sensitive class exists (docs/audit/ci_parity_audit.md).
+
+Membership requires **semantic** sensitivity, established by reading the test.
+The presence of ``time.sleep``, a polling loop or a timeout literal is NOT
+sufficient and never was: a Phase-0 keyword scan flagged 107 files, and reading
+them reduced that to five.
+
+The discriminator is the DIRECTION of the assertion:
+
+    "the event must occur WITHIN T"      host saturation can exceed T   -> sensitive
+    "A happened before B", A and B on
+      different schedulers               saturation can invert it       -> sensitive
+    "the event must NOT occur within T"  saturation makes it MORE true  -> bulk
+    sleep only sequences, or lets a thread start                        -> bulk
+
+The ordering row was added after a 4-vCPU reproduction turned
+``test_gpu_measurement_runner.py`` RED while it passed on an unloaded 24-core
+host. The original discriminator looked for a wall-clock BOUND and would never
+have caught it: the assertion contains no timeout at all, only a ``<=`` between
+two independently-scheduled timestamps.
+
+``tests/unit/core/test_gpu_observer.py:233`` is the counter-example kept in mind:
+it sleeps and then asserts a counter did *not* advance, so contention only helps
+it pass. Quarantining it would cost parallelism and buy nothing.
+
+A RED here under violated load assumptions is INVALID_HARNESS_EVIDENCE, not a
+product regression, and the bound must never be inflated to make it pass — the
+bound is the thing under test.
+"""
+
+from __future__ import annotations
+
+from types import MappingProxyType
+
+#: file -> why it cannot run under an uncontrolled bulk lane.
+SENSITIVE_FILES: MappingProxyType[str, str] = MappingProxyType(
+    {
+        "tests/unit/core/test_probe_hard_timeout.py": (
+            "asserts measured wall time against an upper bound — "
+            "`elapsed < 10.0` (:122) and `elapsed < cap + grace + 5.0` (:144). "
+            "Under saturation the hard cap it verifies can be missed."
+        ),
+        "tests/unit/scripts/test_inspection_cost_study.py": (
+            "`elapsed < 3.5` (:152), guarding that the native alarm preempts. "
+            'Its own message — "a relaxation snuck in" — is why the bound must '
+            "not be widened to accommodate a loaded host."
+        ),
+        "tests/unit/agent/evaluate_vram_skill/test_isolated_preflight.py": (
+            "`elapsed < 45.0` (:120), asserting the memory bound fires well before the deadline."
+        ),
+        "tests/unit/core/test_formal_stability_controller.py": (
+            "deadline-poll loop (:412-416): waits up to 5.0 s for a watcher "
+            'thread, then asserts "the watcher thread never polled". Under '
+            "saturation that message is a false accusation. The only "
+            "deadline-loop shape of its kind in the suite."
+        ),
+        "tests/unit/core/test_gpu_measurement_runner.py": (
+            "ORDERING race, not an upper bound — `test_the_watch_is_open_before_"
+            "the_first_phase_begins` asserts `run.samples[0].at <= "
+            "run.phases[0].started_at` (:265), i.e. that a sampler thread got a "
+            "sample in before a worker finished booting. Under CPU contention "
+            "the sampler is scheduled late and the ordering inverts. Found by "
+            "reproducing a CI failure at a 4-vCPU budget, where it went RED "
+            "while passing on an unloaded 24-core host — the CP-6 discriminator "
+            "extended: a race two schedulers can lose is load-fragile even "
+            "though no wall-clock BOUND appears in the assertion."
+        ),
+        "tests/unit/scripts/test_pr3_l2p_preflight.py": (
+            "NOT timing — git state. `test_preflight_all_invariants` calls "
+            "`preflight_main()` unpatched (:11-12), which runs "
+            "`git diff --name-only` with cwd=REPO "
+            "(scripts/pr3_l2_calibration/preflight.py:297). It reads the LIVE "
+            "working tree, so it needs an exclusive, un-mutated checkout: a "
+            "sibling shard writing into the same tree fails it invalidly."
+        ),
+    }
+)
+
+#: Why each file is here, by lane. Timing files need a quiesced host; the
+#: git-state file needs an exclusive checkout. They are different requirements
+#: and the harness must not conflate them.
+GIT_STATE_FILES: frozenset[str] = frozenset({"tests/unit/scripts/test_pr3_l2p_preflight.py"})
+
+TIMING_FILES: frozenset[str] = frozenset(SENSITIVE_FILES) - GIT_STATE_FILES
+
+
+def sensitive_paths() -> frozenset[str]:
+    """The frozen set, as the shard planner's ``sensitive`` argument."""
+    return frozenset(SENSITIVE_FILES)

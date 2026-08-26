@@ -247,10 +247,58 @@ class TestTheWorkflowActuallyConsumesTheSelector:
         return (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
 
     def test_the_pytest_step_uses_the_selector_output(self):
+        """The selector's verdict must reach test EXECUTION.
+
+        The mechanism changed when `tools/ci/` became the execution authority:
+        the run step no longer interpolates `pytest_args` directly. It consumes
+        the selector's `full_suite` verdict plus the single changed-file list
+        the selector step wrote, and the harness then calls
+        `tools.ci_selection.resolver.select()` itself. The selector remains the
+        one authority for WHAT runs; only the transport moved.
+
+        What must never happen is the docstring's own scenario — the run step
+        "simplified" back to a hardcoded suite, leaving the selector computing
+        an answer nobody reads.
+        """
         wf = self._workflow()
         assert "python -m tools.ci_selection" in wf, "CI no longer invokes the selector"
-        assert "steps.selection.outputs.pytest_args" in wf, (
-            "the pytest step no longer consumes the selector's output"
+        assert "steps.selection.outputs.full_suite" in wf, (
+            "the execution step no longer consumes the selector's verdict"
+        )
+        assert "python -m tools.ci bulk" in wf, (
+            "the execution step no longer runs through the harness, which is what "
+            "composes the selector"
+        )
+        assert "--changed-from" in wf, (
+            "the harness is no longer handed the selector's changed-file list, so its "
+            "selection could diverge from the selector step's verdict"
+        )
+
+    def test_the_changed_file_list_is_computed_exactly_once(self):
+        """Two `git diff` invocations can disagree.
+
+        If the selector step and the execution step each derive the changed set,
+        the verdict recorded in `full_suite` can describe a different set from
+        the one actually executed — a divergence that would be invisible in a
+        green run. One computation, written once, consumed by both.
+        """
+        wf = self._workflow()
+        assert wf.count("git diff --name-only") == 1, (
+            "the changed-file list is derived more than once; the selector's verdict "
+            "and the executed set could diverge"
+        )
+
+    def test_the_execution_step_is_not_a_hardcoded_suite(self):
+        """The exact unwiring this class was written to prevent.
+
+        The original guard asserted only that an output variable was mentioned,
+        which a hardcoded `pytest tests/unit/` alongside it would have satisfied.
+        Assert the absence directly.
+        """
+        wf = self._workflow()
+        run_step = wf.split("repository CI harness")[1].split("- name:")[0]
+        assert "uv run pytest tests/unit/" not in run_step, (
+            "the execution step hardcodes the suite; the selector would run and be ignored"
         )
 
     def test_non_pull_request_events_run_everything(self):

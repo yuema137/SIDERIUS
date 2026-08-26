@@ -5,7 +5,11 @@ Data modes
 ----------
 By default all training tests use a tiny synthetic HDF5 file with random
 noise (fast, no real data required). Pass --real-data to switch to the
-actual TIDMAD file at /home/klz/Data/TIDMAD/abra_training_0000.h5:
+actual TIDMAD file, ``abra_training_0000.h5``, resolved from the
+``tidmad_data_dir`` configured in ``tidmad_data_config.yaml`` (the tracked
+template is ``tidmad_data_config.example.yaml``, which also lists the
+reference values for the known deployments). Absent or unconfigured, the
+real-data tests skip with the path they looked for:
 
     uv run pytest tests/integration/execute_tools/test_training_loop.py --real-data
 
@@ -33,10 +37,33 @@ import pytest
 try:
     from execute_tools.data_paths import TIDMAD_DATA_DIR
 
-    REAL_DATA_DIR = TIDMAD_DATA_DIR
+    REAL_DATA_DIR: str | None = TIDMAD_DATA_DIR
 except (FileNotFoundError, ImportError):
-    REAL_DATA_DIR = "/home/klz/Data/TIDMAD/"
+    # Reached only by a corrupted checkout: `data_paths` falls back to the
+    # TRACKED `tidmad_data_config.example.yaml` with a warning and only raises
+    # when that template is missing too (execute_tools/data_paths.py:27-43).
+    # `None` rather than any concrete path — a test must never silently fall
+    # back to a developer-specific location (CLAUDE.md). The two consumers
+    # below turn `None` into a named skip.
+    REAL_DATA_DIR = None
 REAL_DATA_FILE = "abra_training_0000.h5"
+
+
+def _require_real_data_dir(flag: str) -> str:
+    """The configured raw-TIDMAD directory, or an informative skip.
+
+    Only ever called from behind ``--real-data`` / ``--real-training``; the
+    default run never dereferences ``REAL_DATA_DIR`` at all.
+    """
+    if REAL_DATA_DIR is None:
+        pytest.skip(
+            f"{flag} requires TIDMAD_DATA_DIR, but execute_tools.data_paths "
+            "could not be imported — tidmad_data_config.yaml is absent AND the "
+            "tracked tidmad_data_config.example.yaml template is missing. "
+            "Restore the template or create the config."
+        )
+    return REAL_DATA_DIR
+
 
 # Number of consecutive samples forming one group in TIDMADDataset.
 # Use 1 for synthetic tests so the fixture only needs seg_size samples total.
@@ -257,13 +284,14 @@ def h5_source(request, synthetic_h5):
     --real-data is active, and skipped if the file is missing.
     """
     if request.config.getoption("--real-data"):
-        real_path = os.path.join(REAL_DATA_DIR, REAL_DATA_FILE)
+        data_dir = _require_real_data_dir("--real-data")
+        real_path = os.path.join(data_dir, REAL_DATA_FILE)
         if not os.path.exists(real_path):
             pytest.skip(f"Real data not found at {real_path}")
         request.node.add_marker(pytest.mark.real_data)
 
         def _real(seg_size: int):
-            return REAL_DATA_DIR, REAL_DATA_FILE
+            return data_dir, REAL_DATA_FILE
 
         return _real
     return synthetic_h5
@@ -346,7 +374,8 @@ def make_sandbox_factory(request, model_type: str, base_dir: str, run_name: str)
         ``HyperparamTuningAgent``.
     """
     if _is_real_training(request):
-        real_path = os.path.join(REAL_DATA_DIR, REAL_DATA_FILE)
+        data_dir = _require_real_data_dir("--real-training")
+        real_path = os.path.join(data_dir, REAL_DATA_FILE)
         if not os.path.exists(real_path):
             pytest.skip(f"--real-training requires TIDMAD data at {real_path}")
         from core.sandbox_executor import TidmadSandbox

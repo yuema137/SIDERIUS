@@ -80,12 +80,39 @@ class TestTemplateLookup:
     """§1.7 — the audited fresh-checkout defect must not come back."""
 
     def test_template_resolves_beside_the_module_not_under_dot_claude(self):
+        """The template must live inside the TRACKED module directory.
+
+        The invariant is repository-local: the template must not resolve into
+        the repository's gitignored ``.claude/``. It is NOT a claim about where
+        the checkout happens to sit on the filesystem — a checkout below an
+        ancestor named ``.claude`` (a scratch or job directory, say) is
+        perfectly valid, and an earlier form of this test asserted
+        ``".claude" not in path.parts`` against an ABSOLUTE path, so it failed
+        for such a checkout while the template had resolved correctly.
+
+        Anchoring on the module's own directory keeps the check environment-free:
+        no cwd, no ``CLAUDE_PROJECT_DIR``, no ``git rev-parse``.
+        """
         path = cs.template_path()
         assert path.is_file(), f"canonical template missing at {path}"
-        assert ".claude" not in path.parts, (
-            "the canonical template resolved into .claude/, which is gitignored — "
-            "a fresh checkout would get the guard without its template and every "
-            "compaction would block (mutation M-C8)"
+
+        module_dir = Path(cs.__file__).resolve().parent
+        try:
+            within = path.relative_to(module_dir)
+        except ValueError:
+            raise AssertionError(
+                f"the canonical template resolved OUTSIDE the tracked module "
+                f"directory — {path} is not under {module_dir}. All of "
+                f".claude/ is gitignored, so a fresh checkout would get the "
+                f"guard without its template and every compaction would block "
+                f"(mutation M-C8)"
+            ) from None
+
+        assert ".claude" not in within.parts, (
+            f"the canonical template resolved into a .claude/ directory INSIDE "
+            f"the tracked module ({within}), which is gitignored — a fresh "
+            f"checkout would get the guard without its template and every "
+            f"compaction would block (mutation M-C8)"
         )
         assert path.parent.name == cs.TEMPLATE_DIRNAME
         assert path.parent.parent.name == "claude_hooks"

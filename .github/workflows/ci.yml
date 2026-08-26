@@ -105,12 +105,115 @@ jobs:
           if [ -z "$CHANGED" ]; then
             full "empty diff"
           fi
+          # SINGLE SOURCE. The diff is computed exactly once and written here;
+          # the harness step consumes this file rather than recomputing it. Two
+          # independent `git diff` invocations could disagree, and the selector
+          # step's verdict would then differ from the set actually executed.
+          # Every `full` path above exits before this line, so the file is
+          # absent for a full-suite run — which the harness reads as "no
+          # changed-file input", its own fail-closed full suite.
+          printf '%s\n' "$CHANGED" > "$RUNNER_TEMP/ci_changed_files.txt"
           printf '%s\n' "$CHANGED" | uv run python -m tools.ci_selection \
             || full "the selector exited non-zero"
           grep -q '^pytest_args=' "$GITHUB_OUTPUT" \
             || full "the selector produced no pytest_args"
 
-      - name: Unit tests — pytest (no real_run, no integration)
+      # ---- unit tests via the repository-owned harness ---------------------
+      # The harness (`tools/ci/`) owns HOW tests execute: preflight, weighted
+      # file-level shards, per-shard TMPDIR and thread pinning, the sensitive
+      # lane, and result aggregation. It COMPOSES `tools.ci_selection` for WHAT
+      # runs — the selector remains the single authority and is not duplicated
+      # here. See docs/testing/ci_parity.md.
+      #
+      # CI RESOURCE PROFILE — explicit, not auto-detected. Python 3.12 has no
+      # os.process_cpu_count(), sched_getaffinity does not see cgroup quotas,
+      # and no repository helper reports an effective CPU budget, so an
+      # auto-detector would be guessing. ubuntu-latest is documented as 4 vCPU;
+      # 4 shards x 1 thread matches that without oversubscription. The shard cap
+      # is 4 because the measured floor is a single 460 s file — more shards
+      # cannot go faster. `cpu_count` is recorded in the manifest so the FIRST
+      # remote run corrects this profile with fact rather than assumption.
+      - name: Unit tests — repository CI harness (no real_run, no integration)
+        env:
+          CI_BULK_SHARDS: "4"
+          CI_SHARD_THREADS: "1"
         run: |
+          set -euo pipefail
           echo "full_suite=${{ steps.selection.outputs.full_suite }}"
-          uv run pytest ${{ steps.selection.outputs.pytest_args }}
+          # Consume the ONE changed-file list the selector step produced. The
+          # harness then asks tools.ci_selection itself, so the selector remains
+          # the single authority for WHAT runs and nothing is re-derived here.
+          # A full-suite verdict leaves that file unwritten, and the harness
+          # fail-closes to the full suite on a missing file.
+          CHANGED_ARG=""
+          if [ "${{ steps.selection.outputs.full_suite }}" != "true" ] \
+             && [ -s "$RUNNER_TEMP/ci_changed_files.txt" ]; then
+            CHANGED_ARG="--changed-from $RUNNER_TEMP/ci_changed_files.txt"
+          fi
+          uv run python -m tools.ci bulk \
+            --root . \
+            --shards "$CI_BULK_SHARDS" \
+            --threads "$CI_SHARD_THREADS" \
+            --workdir "$RUNNER_TEMP/ci_parity" \
+            $CHANGED_ARG
+
+      # The sensitive lane runs AFTER the bulk lane and alone. Its four timing
+      # files assert that a preemption mechanism fired within a wall-clock
+      # bound, so they must not compete with the shards; the fifth reads the
+      # live working tree and needs an unmutated checkout.
+      # `if: always()` because a RED bulk lane must not HIDE the sensitive
+      # lane's result. Run 32834492183 failed in bulk and skipped this step
+      # entirely, so a whole class of evidence was silently absent from a run
+      # that was supposed to produce the complete failure batch. Collecting
+      # everything in ONE run is the rule this lane exists to enforce; a
+      # workflow that stops at the first red step is the fix-one/rerun loop
+      # wearing different clothes.
+      - name: Unit tests — sensitive lane (serial, quiesced)
+        if: always()
+        env:
+          CI_SHARD_THREADS: "1"
+        run: |
+          set -euo pipefail
+          uv run python -m tools.ci sensitive \
+            --root . \
+            --threads "$CI_SHARD_THREADS" \
+            --workdir "$RUNNER_TEMP/ci_parity"
+
+      # Per-node JUnit is the structured evidence whole-run attribution needs,
+      # and the current workflow emits none: `-q` prints counts, so skipped and
+      # collected node identities never leave the runner. This is also what
+      # answers CP-10 (12,992 collected locally vs 12,989 outcomes remotely) at
+      # zero extra cost. `if: always()` because a RED run is exactly when the
+      # per-node detail matters most.
+      - name: Upload structured test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-parity-evidence
+          # $RUNNER_TEMP, NOT the workspace: a workdir inside the checkout puts
+          # every shard's TMPDIR in the repository, where one shard's fixture
+          # becomes another shard's "repository content". Two failures in run
+          # 32834492183 came from exactly that. The harness now refuses such a
+          # workdir, so this path and that guard must stay in agreement.
+          # EXACT paths, no `**`. Run 32834492183 uploaded 18,674 files of which
+          # SIX were evidence: `**` descends into every shard's TMPDIR and
+          # collected every JSON and XML any test happened to write in a
+          # fixture. Worse, it matched no `shard*.log` at all — the tracebacks,
+          # the single most useful artefact in a RED run, were the one thing
+          # missing. These patterns name only what the harness itself writes.
+          path: |
+            ${{ runner.temp }}/ci_parity/*.json
+            ${{ runner.temp }}/ci_parity/bulk/shard*.xml
+            ${{ runner.temp }}/ci_parity/bulk/shard*.log
+            ${{ runner.temp }}/ci_parity/sensitive/shard*.xml
+            ${{ runner.temp }}/ci_parity/sensitive/shard*.log
+          retention-days: 14
+          # `.ci_parity` is dot-prefixed, and upload-artifact@v4 EXCLUDES hidden
+          # paths by default — the first remote run uploaded nothing and logged
+          # "No files were found", leaving a RED run with no per-node evidence
+          # at all. The patterns above are scoped to *.xml / *.json under that
+          # one directory, so this does not widen what is collected.
+          include-hidden-files: true
+          # An empty evidence artifact is a harness failure, not a warning: the
+          # whole point of the upload is that a RED run stays attributable.
+          if-no-files-found: error
