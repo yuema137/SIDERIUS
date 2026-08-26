@@ -208,6 +208,53 @@ canonical/derived contract — is in this file and in the launcher headers
    `submit_iteration` (mode-aware) and then calls `run_chain` from the
    library.
 
+2a. **The chain's exit status IS its verdict, and automation gates on
+   it.** `v19_queue_runner.sh` captures `run_chain.sh`'s `$?` into an
+   `EXIT=<n>` marker, and a wave only advances when every chain's marker
+   reads `EXIT=0`. The codes:
+
+   | code | meaning |
+   |---|---|
+   | `0` | no manifest missing, no iteration failed, and **at least one iteration reached `status: "completed"`** |
+   | `1` | the loop finished but the chain produced no authoritative result, an iteration failed, or a manifest is missing |
+   | `3` | an iteration demanded a chain halt (`.chain_halted`, C9c) |
+   | `99` | an operator stop (`CHAIN_STOP_EXIT_CODE`) |
+   | `>= 128` | an iteration was terminated by a signal (`128 + signal`) |
+
+   **A manifest's STATUS is the verdict — its existence is not.**
+   `report_chain_outcome` reads each `manifest.json`'s `status` and
+   applies:
+
+   - every iteration non-`completed` ⇒ **must not** exit 0. The chain
+     produced no authoritative result and the queue should stop.
+   - a **mixed** chain (some `completed`, some `no_records`) **may** exit
+     0 — it did produce authoritative results, and `no_records` is a
+     designed chainable state — but the banner **names** the
+     non-`completed` iterations. Silence there is the same lie one level
+     quieter.
+   - any status the code does not recognise, and any manifest whose
+     status cannot be read, counts as non-`completed`. Fail closed.
+   - every per-iteration line carries its status
+     (`iter N → <path> [completed]`), so a reader never has to open the
+     file to learn what happened.
+
+   Two defects are pinned here, both of which made a dead chain look
+   alive to `v19_queue_runner.sh`. Until 2026-08-26 the loop discarded
+   every non-signal child status and the summary block sat past the
+   script's last `exit`, so a chain whose every iteration crashed printed
+   `iter N → MISSING` and still exited 0. And the summary tested only
+   whether the manifest FILE existed — while `run_one_iteration.py`
+   writes a `no_records` manifest and deliberately exits 0 on gate
+   exhaustion, so a chain that trained nothing and scored nothing
+   satisfied both halves of the old clean verdict and advanced the
+   campaign wave. See
+   `tests/unit/sdsc_submission_scripts/test_failure_honesty_chain_exit_status.py`.
+
+   **An ordinary failed iteration still does not stop the chain.** The
+   no-respawn rule is scoped to an operator-directed stop, and a later
+   iteration can still make progress from an earlier seed. What the
+   chain reports about itself changed; when it keeps going did not.
+
 3. **Every iter writes `iter_NNN/manifest.json` — exactly once.** The
    manifest is the chain's discoverable handoff between iters (status,
    output path, model name, best score). It is also the source of truth

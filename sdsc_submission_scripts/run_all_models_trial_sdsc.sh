@@ -118,10 +118,25 @@ echo "############################################################"
 echo "  SIDERIUS — RUN SUMMARY: $RUN_NAME"
 echo "  Finished   : $(date)"
 echo "------------------------------------------------------------"
+FAILED_MODELS=()
 for group in "${MODEL_GROUPS[@]}"; do
     IFS=' ' read -r -a models <<< "$group"
     for model in "${models[@]}"; do
         echo "  ${model} : ${STATUS[$model]}"
+        if [ "${STATUS[$model]}" != "SUCCESS" ]; then
+            FAILED_MODELS+=("$model")
+        fi
     done
 done
 echo "############################################################"
+
+# FAILURE HONESTY (2026-08-26). `wait_for_group` captured each model's exit
+# status into STATUS[] and printed it, and the script then ended on an
+# `echo` — which in bash is exit 0. Every model in the run could report
+# `FAILED (exit code N)` on screen while automation gating on `$?` recorded
+# the run as a pass. The summary text was always honest; the status was not.
+if [ "${#FAILED_MODELS[@]}" -gt 0 ]; then
+    echo "  RUN INCOMPLETE — failed models: ${FAILED_MODELS[*]}" >&2
+    exit 1
+fi
+exit 0

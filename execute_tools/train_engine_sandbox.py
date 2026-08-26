@@ -61,6 +61,7 @@ from execute_tools.task_data_path import (
     EpochSamplingParams,
     EvalMaterializationParams,
     TaskDataPath,
+    TrainingScopeError,
     bind_task_data_path,
     resolve_bound_task_data_path,
 )
@@ -862,6 +863,61 @@ def _build_training_history(
     )
 
 
+def _declared_len(dataset: object) -> int | None:
+    """The dataset's row count, or ``None`` when it does not declare one.
+
+    Diagnostic support for :func:`refuse_zero_optimizer_steps` only. An
+    iterable-style dataset legitimately has no length, and the refusal must
+    never depend on being able to read one — that would make the guard
+    silently inapplicable exactly where the step count is hardest to predict.
+    """
+    try:
+        return len(cast("Sized", dataset))
+    except TypeError:
+        return None
+
+
+def refuse_zero_optimizer_steps(
+    steps_taken: int,
+    *,
+    epoch: int,
+    batch_size: int,
+    rows: int | None,
+) -> None:
+    """Refuse an epoch that completed without executing a single optimizer step.
+
+    THE ground-truth zero-step guard for both engines: it reads the count of
+    steps actually executed, so it holds for any task, any dataset style and
+    any reason the epoch came up empty — not just the ``drop_last`` floor that
+    is its common cause. It is called at the ONE place each engine used to
+    fabricate ``float("nan")`` for an absent measurement.
+
+    Args:
+        steps_taken: optimizer steps executed in this epoch.
+        epoch: zero-based epoch index, for the diagnostic.
+        batch_size: the loader's batch size, for the diagnostic.
+        rows: dataset rows the epoch drew from, or ``None`` when the dataset
+            does not declare a length. Diagnostic only — never a condition.
+
+    Raises:
+        TrainingScopeError: when ``steps_taken`` is zero.
+    """
+    if steps_taken > 0:
+        return
+    geometry = (
+        f"{rows} rows // batch_size {batch_size} == 0 batches"
+        if rows is not None
+        else f"an empty loader at batch_size {batch_size}"
+    )
+    raise TrainingScopeError(
+        f"epoch {epoch} executed ZERO optimizer steps ({geometry}). "
+        "DataLoader(drop_last=True) discards a final partial batch, so a "
+        "training scope smaller than one batch trains nothing. Refusing "
+        "rather than reporting an untrained model as a completed round — "
+        "raise the scope or train_portion, or lower batch_size."
+    )
+
+
 def run_experiment(
     model_cfg,
     train_cfg: TrainConfig,
@@ -968,6 +1024,12 @@ def run_experiment(
                 )
                 break
 
+        refuse_zero_optimizer_steps(
+            len(batch_losses),
+            epoch=ep,
+            batch_size=train_cfg.batch_size,
+            rows=_declared_len(data_loader.dataset),
+        )
         avg_loss = np.mean(batch_losses)
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
@@ -1656,6 +1718,10 @@ def run_experiment_streaming(
             )
             verifier = None
 
+        # Captured BEFORE the epoch's dataset is released, so the zero-step
+        # refusal below can still name the geometry that produced the
+        # empty epoch.
+        epoch_rows = _declared_len(dataset)
         del dataset, loader
         gc.collect()
 
@@ -1665,7 +1731,13 @@ def run_experiment_streaming(
             gc.collect()
             return None
 
-        avg_loss = np.mean(batch_losses) if batch_losses else float("nan")
+        refuse_zero_optimizer_steps(
+            len(batch_losses),
+            epoch=ep,
+            batch_size=train_cfg.batch_size,
+            rows=epoch_rows,
+        )
+        avg_loss = np.mean(batch_losses)
         history.append(float(avg_loss))
         print(f"Epoch {ep} | Avg Loss: {avg_loss:.6f}")
 

@@ -126,11 +126,24 @@ class TestSignalTerminatedIteration:
     def test_an_ordinary_failure_keeps_the_frozen_continuation_behaviour(self, tmp_path):
         """No-respawn is scoped to an OPERATOR-DIRECTED stop. A plain
         non-zero iteration is an in-chain outcome and must not silently
-        become a new stop condition."""
+        become a new stop condition.
+
+        The two assertions below are the property: the later iterations
+        still run, and the failure is not recorded as a stop. The chain's
+        EXIT STATUS is a separate concern and is asserted separately --
+        this test used to require `code == 0`, which pinned the F8 defect
+        (a chain reporting success with a dead iteration) inside a test
+        about stop semantics. Continuation and honesty are independent,
+        and both are now checked.
+        """
         code, entered, ws = _run_chain(tmp_path, iterations=4, FAIL_ITER=2, FAIL_CODE=1)
-        assert entered == [1, 2, 3, 4]
-        assert code == 0
+        assert entered == [1, 2, 3, 4], "an ordinary failure must not stop the chain"
         assert not (ws / "chain_stopped.json").exists()
+        assert code != 0, (
+            "the chain continued past a failed iteration -- correct -- but it "
+            "must still report the failure; see "
+            "test_failure_honesty_chain_exit_status.py"
+        )
 
 
 class TestStopRecordContent:

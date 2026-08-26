@@ -845,17 +845,43 @@ record_chain_stop() {  # reason iteration detail
     echo "############################################################"
 }
 
+#: Exit code for a chain whose loop ran to the end with at least one
+#: FAILED iteration. Distinct from 0 (every iteration succeeded), from 3
+#: (an infrastructure abort halted the chain), and from
+#: CHAIN_STOP_EXIT_CODE (an operator stop).
+CHAIN_ITERATION_FAILED_EXIT_CODE=1
+#: Exit code an iteration uses to demand the CHAIN halt — the `.chain_halted`
+#: sentinel's companion (see run_one_iteration.py and C9c).
+CHAIN_HALT_EXIT_CODE=3
+#: Iterations whose child exited non-zero, as "ITER:STATUS" entries. The
+#: chain's terminal status is derived from this, never from log text.
+CHAIN_FAILED_ITERATIONS=()
+
 # Run all iterations. The caller must have defined a `submit_iteration`
 # function that takes the iteration number and uses the populated
 # SOURCE_PATHS and APP_ARGS arrays.
 #
-# Returns 0 normally, or CHAIN_STOP_EXIT_CODE when an operator stop ended
-# the loop early.
+# Returns 0 when every iteration succeeded; CHAIN_HALT_EXIT_CODE when an
+# iteration demanded a halt; the child's status when a signal ended it;
+# CHAIN_STOP_EXIT_CODE when an operator stop ended the loop early; and
+# CHAIN_ITERATION_FAILED_EXIT_CODE when the loop ran to the end but an
+# iteration failed.
+#
+# FAILURE HONESTY (2026-08-26). Until this was fixed the loop captured each
+# child's status, tested it ONLY for `>= 128`, and then returned 0 — so a
+# chain whose every iteration crashed reported success to its caller, and
+# fleet automation gating on `$?` recorded a failed chain as a pass. The
+# CONTINUATION behaviour below is deliberately unchanged: an ordinary
+# non-zero iteration still does not stop the chain (the no-respawn rule is
+# scoped to an OPERATOR-DIRECTED stop, and a later iteration can still make
+# progress from an earlier seed). What changed is only what the chain
+# REPORTS about itself.
 run_chain() {
     if [ "$DRY_RUN" -ne 1 ]; then
         mkdir -p "$WORKSPACE"
     fi
     install_chain_stop_traps
+    CHAIN_FAILED_ITERATIONS=()
     local ITER
     local first="${START_ITER:-1}"
     for ITER in $(seq "$first" "$NUM_ITERATIONS"); do
@@ -883,6 +909,11 @@ run_chain() {
         local status=0
         submit_iteration "$ITER" || status=$?
 
+        if [ "$status" -ne 0 ]; then
+            CHAIN_FAILED_ITERATIONS+=("${ITER}:${status}")
+            echo "[chain] iteration $ITER FAILED (exit $status)" >&2
+        fi
+
         if chain_stop_requested; then
             record_chain_stop "operator_stop_requested" "$((ITER + 1))" \
                 "stop observed after iteration $ITER (iteration exit $status)"
@@ -897,6 +928,124 @@ run_chain() {
                 "iteration $ITER exited $status (128 + signal $((status - 128)))"
             return "$status"
         fi
+        # An INFRASTRUCTURE ABORT (C9c): the iteration wrote
+        # `.chain_halted` and exited 3 precisely to stop this loop. The
+        # sentinel alone was doing the work — every later child read it and
+        # refused at startup — so the halt was real but the loop kept
+        # spawning children and the chain still called itself complete.
+        if [ "$status" -eq "$CHAIN_HALT_EXIT_CODE" ]; then
+            record_chain_stop "iteration_infrastructure_abort" "$((ITER + 1))" \
+                "iteration $ITER demanded a chain halt (exit $status)"
+            return "$status"
+        fi
     done
+    if [ "${#CHAIN_FAILED_ITERATIONS[@]}" -gt 0 ]; then
+        return "$CHAIN_ITERATION_FAILED_EXIT_CODE"
+    fi
     return 0
+}
+
+#: The ONLY manifest status that means the iteration produced an
+#: authoritative result. Everything else — `no_records`, `failed`, an
+#: unrecognised value, an unreadable file — is NOT completed. Fail closed:
+#: a status this code has never heard of is never added to a success list.
+CHAIN_COMPLETED_STATUS="completed"
+
+# One iteration manifest's status, or empty when it cannot be read.
+#
+# The manifest is written by `core/iteration_manifest.py` with
+# `json.dumps(..., indent=2)` and no `sort_keys`, and `status` is the first
+# key every writer inserts, so the FIRST `"status": "..."` in the file is
+# the top-level one. Compact single-line manifests parse identically.
+_manifest_status() {  # path -> status on stdout, empty if unreadable
+    grep -o '"status"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" 2>/dev/null \
+        | head -1 \
+        | sed 's/.*:[[:space:]]*"\([^"]*\)"$/\1/'
+}
+
+# The chain's terminal verdict, derived from ARTIFACTS and child statuses.
+#
+# Lives here, not in the entry script, so it is reachable by a test that
+# sources this library — the summary block it replaces sat past the last
+# `exit` in run_chain.sh, where the script simply ran off the end and
+# returned 0 no matter what it had just printed.
+#
+# EXISTENCE IS NOT A VERDICT (F-Q4-1). This used to test `-f "$MANIFEST"`
+# and nothing else. `run_one_iteration.py` writes a `no_records` manifest
+# and DELIBERATELY exits 0 on gate exhaustion (so the chain may continue
+# and the next iteration's LLM can adapt), which means neither half of the
+# old clean verdict could ever see it: the file existed, and the child's
+# exit status was 0. A chain whose every iteration exhausted its gates
+# trained nothing, scored nothing, printed CHAIN COMPLETE and exited 0 —
+# and `v19_queue_runner.sh` read `EXIT=0`, resolved `DISPOSITION=complete`
+# and advanced the campaign wave.
+#
+# `no_records` is a DESIGNED chainable state, not a crash, so it is not
+# treated as a failure on its own. The rules:
+#
+#   * every iteration non-`completed`  -> MUST NOT exit 0. The chain
+#     produced no authoritative result and the queue should stop.
+#   * a MIXED chain -> MAY exit 0, because it did produce authoritative
+#     results — but the banner MUST NAME the non-completed iterations.
+#     Silence there is the same lie one level quieter.
+#   * an unknown or unreadable status -> counted as non-completed.
+#
+# Returns 0 only when no manifest is missing, no child failed, and at
+# least one iteration reached `completed`.
+report_chain_outcome() {
+    local ITER MANIFEST STATUS
+    local missing=0
+    local completed=0
+    local lines=()
+    local not_completed=()
+    # Decide FIRST, announce second: the banner must not contradict the
+    # evidence printed under it.
+    for ITER in $(seq 1 "$NUM_ITERATIONS"); do
+        MANIFEST=$(printf "${WORKSPACE}/iter_%03d/manifest.json" "$ITER")
+        if [ ! -f "$MANIFEST" ]; then
+            lines+=("  iter $ITER → MISSING")
+            missing=$((missing + 1))
+            not_completed+=("${ITER}:missing")
+            continue
+        fi
+        STATUS="$(_manifest_status "$MANIFEST")"
+        [ -n "$STATUS" ] || STATUS="unreadable"
+        # The status is on the line so a reader never has to open the file
+        # to learn what the iteration actually did.
+        lines+=("  iter $ITER → $MANIFEST [$STATUS]")
+        if [ "$STATUS" = "$CHAIN_COMPLETED_STATUS" ]; then
+            completed=$((completed + 1))
+        else
+            not_completed+=("${ITER}:${STATUS}")
+        fi
+    done
+
+    if [ "$missing" -eq 0 ] && [ "${#CHAIN_FAILED_ITERATIONS[@]}" -eq 0 ] \
+        && [ "$completed" -gt 0 ]; then
+        if [ "${#not_completed[@]}" -eq 0 ]; then
+            echo "  CHAIN COMPLETE — ${NUM_ITERATIONS} iterations"
+            printf '%s\n' "${lines[@]}"
+        else
+            echo "  CHAIN COMPLETE — ${NUM_ITERATIONS} iterations, ${completed} authoritative"
+            printf '%s\n' "${lines[@]}"
+            echo "    NO authoritative result (iter:status): ${not_completed[*]}"
+        fi
+        return 0
+    fi
+
+    echo "  CHAIN INCOMPLETE — ${NUM_ITERATIONS} iterations planned, did NOT finish cleanly"
+    printf '%s\n' "${lines[@]}"
+    if [ "${#CHAIN_FAILED_ITERATIONS[@]}" -gt 0 ]; then
+        echo "    failed iterations (iter:exit):        ${CHAIN_FAILED_ITERATIONS[*]}"
+    fi
+    if [ "$missing" -gt 0 ]; then
+        echo "    iterations with no manifest:          $missing of $NUM_ITERATIONS"
+    fi
+    if [ "${#not_completed[@]}" -gt 0 ]; then
+        echo "    NO authoritative result (iter:status): ${not_completed[*]}"
+    fi
+    if [ "$completed" -eq 0 ]; then
+        echo "    NO iteration reached '${CHAIN_COMPLETED_STATUS}' — this chain produced no authoritative result"
+    fi
+    return "$CHAIN_ITERATION_FAILED_EXIT_CODE"
 }

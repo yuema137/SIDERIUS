@@ -428,27 +428,37 @@ print_chain_header "$HEADER_LABEL"
 CHAIN_STATUS=0
 run_chain || CHAIN_STATUS=$?
 
-# An operator-stopped chain reports the stop as its own outcome: it did
-# NOT complete, and printing a completion banner would misreport it.
-# run_chain has already written the stopped-chain state record.
-if [ "$CHAIN_STATUS" -ne 0 ]; then
+# A chain that STOPPED reports the stop as its own outcome: it did NOT
+# complete, and printing a completion banner would misreport it.
+# `run_chain` has already written the stopped-chain state record and
+# printed its banner.
+#
+# An ITERATION FAILURE is different and deliberately falls through. The
+# loop ran to the end, so the per-iteration summary is exactly what the
+# operator needs — and this early exit used to swallow it on precisely
+# the runs that needed it, making `report_chain_outcome`'s failure branch
+# unreachable from production. "Decide first, announce second" has to
+# hold on the failure path too, or it is only a success-path courtesy.
+if [ "$CHAIN_STATUS" -ne 0 ] && [ "$CHAIN_STATUS" -ne "$CHAIN_ITERATION_FAILED_EXIT_CODE" ]; then
     exit "$CHAIN_STATUS"
 fi
 
 echo ""
 echo "############################################################"
+# The chain's own verdict. `report_chain_outcome` decides it from the
+# manifests on disk — their STATUS, not merely their existence — plus the
+# recorded child statuses, and this script EXITS with it. The summary used
+# to be printed past the last `exit`, so the script ran off the end and
+# returned 0 even while printing that an iteration's manifest was missing.
+#
+# Seeded from CHAIN_STATUS so a mode that does not call
+# `report_chain_outcome` (SDSC submits rather than runs) still propagates a
+# loop-level failure instead of resetting it to 0.
+CHAIN_OUTCOME=$CHAIN_STATUS
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "  DRY-RUN COMPLETE — ${NUM_ITERATIONS} iterations walked, no side effects"
 elif [ "$MODE" = "lilab" ]; then
-    echo "  CHAIN COMPLETE — ${NUM_ITERATIONS} iterations"
-    for ITER in $(seq 1 "$NUM_ITERATIONS"); do
-        MANIFEST=$(printf "${WORKSPACE}/iter_%03d/manifest.json" "$ITER")
-        if [ -f "$MANIFEST" ]; then
-            echo "  iter $ITER → $MANIFEST"
-        else
-            echo "  iter $ITER → MISSING (this should not happen on a clean run)"
-        fi
-    done
+    report_chain_outcome || CHAIN_OUTCOME=$?
 else
     echo "  CHAIN SUBMITTED — ${NUM_ITERATIONS} iterations"
     JOB_IDS_ONLY=()
@@ -462,3 +472,6 @@ else
     echo "  Cancel chain: scancel ${JOB_IDS_ONLY[*]}"
 fi
 echo "############################################################"
+# The LAST statement, and the whole point of computing CHAIN_OUTCOME: the
+# script's exit status is the chain's verdict. Automation gates on `$?`.
+exit "$CHAIN_OUTCOME"

@@ -142,6 +142,31 @@ class ValidationScopeError(RuntimeError):
     """
 
 
+class TrainingScopeError(RuntimeError):
+    """A training epoch executed ZERO optimizer steps — the training twin of
+    :class:`ValidationScopeError`'s zero-requested-rows rule.
+
+    ``DataLoader(drop_last=True)`` yields ``rows // batch_size`` batches, so a
+    training scope smaller than one batch produces an EMPTY epoch: no forward,
+    no backward, no optimizer step. Every term of that arithmetic is already
+    known to the system — ``workload_resolvers`` computes the same
+    ``samples_per_epoch // batch_size`` floor and names ``drop_last`` in its own
+    comments — and until this type existed nothing refused when it evaluated
+    to 0.
+
+    Unrefused, the engine still wrote a checkpoint AND its ``_OK_<exp_id>``
+    success sentinel, reported ``Avg Loss: nan``, and the untrained weights
+    went on to inference and scoring, where the round was reported as
+    progress. The refusal fails the attempt closed (non-zero exit → the
+    executor's subprocess-error path → ``error_training``), so ``NaN`` stays
+    reserved for numerical evidence instead of standing in for work that never
+    happened.
+
+    Generic by construction: it is raised on the executed step count, not on
+    any task's row geometry, so it holds for every task the engines run.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Parameter carriers — framework-level knobs the existing call sites pass.
 # ---------------------------------------------------------------------------

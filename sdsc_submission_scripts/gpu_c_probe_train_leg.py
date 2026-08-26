@@ -252,9 +252,62 @@ def run_leg(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _load_leg(path: Path) -> dict:
-    with open(path, encoding="utf-8") as fh:
-        return json.load(fh)
+def _load_leg(path: Path) -> dict | None:
+    """One leg's record, or ``None`` when it left no usable one.
+
+    A leg that died before writing its JSON — or was killed partway
+    through the write — is the MOST severe failure the probe can have,
+    and it is exactly the case that must still be reportable. Raising
+    here killed the assembler before it could name anything, so the
+    orchestrator's promise ("the assembler will name the failed legs and
+    exit non-zero", ``gpu_c_coresidency_probe.sh``) was broken by the
+    reporter itself. Absence is DATA, returned to the caller, not an
+    exception thrown at it.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            record = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except (json.JSONDecodeError, OSError):
+        # A leg killed mid-write leaves a truncated file. Unreadable and
+        # absent are the same fact for reporting purposes: no usable
+        # record, and the leg must be named.
+        return None
+    # Valid JSON that is not a leg record (a list, a bare string) would
+    # reach `.get` and raise — putting the crash back one line further
+    # down, in the same reporter this exists to keep alive.
+    return record if isinstance(record, dict) else None
+
+
+def _leg_name(label: str, band: str) -> str:
+    """The stable name a leg is reported under, whether or not it wrote."""
+    return f"{label}_band{band}"
+
+
+def _leg_field(leg: dict | None, key: str) -> object:
+    """One recorded measurement, or ``None`` when the leg left no record.
+
+    A leg that never wrote has no measurements — which is reported as an
+    honest ``None``, not omitted and not defaulted to a number that would
+    read as a real observation.
+    """
+    return None if leg is None else leg.get(key)
+
+
+def _leg_wall(leg: dict | None) -> float | None:
+    """A leg's wall time as a float, or ``None`` when it has no usable one.
+
+    A record with no (or a non-numeric) ``wall_seconds`` is the same class
+    of hazard as an absent file: it must not raise inside the reporter,
+    and it must not contribute a number to the factor.
+    """
+    if leg is None:
+        return None
+    try:
+        return float(leg["wall_seconds"])
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def assemble(args: argparse.Namespace) -> int:
@@ -262,10 +315,27 @@ def assemble(args: argparse.Namespace) -> int:
     solo = _load_leg(work / "leg_solo.json")
     quad_legs = {band: _load_leg(work / f"leg_quad_band{band}.json") for band in CAMPAIGN_BANDS}
 
+    # A leg is failed if it recorded a non-success status OR left no record
+    # at all. The second arm is the one the probe used to crash on: a
+    # status test alone can only see legs that survived to write a file,
+    # so total failure was the one outcome it could not report.
+    named_legs: list[tuple[str, dict | None]] = [
+        (_leg_name("solo", REFERENCE_BAND), solo),
+        *((_leg_name("quad", band), quad_legs[band]) for band in CAMPAIGN_BANDS),
+    ]
+    missing = [name for name, leg in named_legs if leg is None]
     failures = [
-        f"{leg['leg_label']}_band{leg['band']}"
-        for leg in (solo, *quad_legs.values())
-        if leg.get("status") != "success"
+        # Prefer the leg's OWN self-report when it wrote one, so an existing
+        # record's label/band still names it exactly as before. A record
+        # missing either field falls back to the position it was loaded
+        # from, because a leg that cannot name itself must still be named.
+        (
+            _leg_name(leg.get("leg_label") or "", leg.get("band") or "")
+            if leg is not None and leg.get("leg_label") and leg.get("band")
+            else name
+        )
+        for name, leg in named_legs
+        if leg is None or leg.get("status") != "success"
     ]
 
     # Host MemAvailable samples recorded by the orchestrator ("<unix> <kib>").
@@ -280,9 +350,16 @@ def assemble(args: argparse.Namespace) -> int:
         if values:
             min_memavailable_gib = round(min(values) / (1024.0**2), 3)
 
-    solo_wall = float(solo["wall_seconds"])
-    matched_quad_wall = float(quad_legs[REFERENCE_BAND]["wall_seconds"])
-    factor = round(matched_quad_wall / solo_wall, 3) if solo_wall > 0 else None
+    # The factor needs BOTH matched-band walls. A missing leg makes it
+    # uncomputable — which is reported as `None`, never as a number derived
+    # from a leg that did not run.
+    solo_wall = _leg_wall(solo)
+    matched_quad_wall = _leg_wall(quad_legs[REFERENCE_BAND])
+    factor = (
+        round(matched_quad_wall / solo_wall, 3)
+        if solo_wall is not None and matched_quad_wall is not None and solo_wall > 0
+        else None
+    )
 
     result = {
         "probe": "gpu_c_coresidency",
@@ -295,20 +372,24 @@ def assemble(args: argparse.Namespace) -> int:
             "(matched band, so band sizes cannot skew the ratio)"
         ),
         "per_chain_peak_vram_gib": {
-            band: quad_legs[band].get("peak_tree_vram_gib") for band in CAMPAIGN_BANDS
+            band: _leg_field(quad_legs[band], "peak_tree_vram_gib") for band in CAMPAIGN_BANDS
         },
         "per_chain_peak_anon_rss_gib": {
-            band: quad_legs[band].get("peak_tree_anon_rss_gib") for band in CAMPAIGN_BANDS
+            band: _leg_field(quad_legs[band], "peak_tree_anon_rss_gib") for band in CAMPAIGN_BANDS
         },
         "sum_of_per_chain_rss_peaks_gib": round(
             sum(
-                float(quad_legs[band].get("peak_tree_anon_rss_gib") or 0.0)
+                float(_leg_field(quad_legs[band], "peak_tree_anon_rss_gib") or 0.0)
                 for band in CAMPAIGN_BANDS
             ),
             3,
         ),
         "min_host_memavailable_gib_during_quad": min_memavailable_gib,
         "failed_legs": failures,
+        # Named separately from `failed_legs` because "ran and failed" and
+        # "left no record at all" are different diagnoses, and the second
+        # is the one that used to be unreportable.
+        "legs_with_no_record": missing,
         "generated_unix": round(time.time(), 2),
     }
     out = Path(args.out)
@@ -319,23 +400,36 @@ def assemble(args: argparse.Namespace) -> int:
     print("=" * 68)
     print("GPU-C CO-RESIDENCY PROBE RESULT")
     print("=" * 68)
-    print(f"  solo   band {REFERENCE_BAND}: {solo_wall:.1f}s")
+    solo_wall_text = "NO RECORD" if solo_wall is None else f"{solo_wall:.1f}s"
+    print(f"  solo   band {REFERENCE_BAND}: {solo_wall_text}")
     for band in CAMPAIGN_BANDS:
         leg = quad_legs[band]
+        wall = _leg_wall(leg)
+        if wall is None:
+            print(f"  quad   band {band}: NO RECORD — leg wrote no usable result JSON")
+            continue
         print(
-            f"  quad   band {band}: {float(leg['wall_seconds']):.1f}s  "
-            f"vram_peak={leg.get('peak_tree_vram_gib')} GiB  "
-            f"rss_peak={leg.get('peak_tree_anon_rss_gib')} GiB"
+            f"  quad   band {band}: {wall:.1f}s  "
+            f"vram_peak={_leg_field(leg, 'peak_tree_vram_gib')} GiB  "
+            f"rss_peak={_leg_field(leg, 'peak_tree_anon_rss_gib')} GiB"
         )
     print(f"  4-way coresidency_factor (matched band {REFERENCE_BAND}): {factor}")
     print(f"  min host MemAvailable during quad leg: {min_memavailable_gib} GiB")
     if failures:
         print(f"  FAILED LEGS: {failures} — factor is NOT usable evidence")
+        if missing:
+            print(f"  LEGS WITH NO RECORD: {missing} — these wrote no result JSON")
     else:
         print("  Copy the factor into sdsc_submission_scripts/h100_posture.env:")
         print(f"    H100_CORESIDENCY_FACTOR={factor}   (+ bump H100_POSTURE_VERSION)")
     print(f"  Full result: {out}")
-    return 1 if failures else 0
+    # An uncomputable factor is a failed probe even when every leg claimed
+    # success: the run produced no usable evidence, and exiting 0 with
+    # `coresidency_factor: null` is the same false green this PR closes one
+    # layer down.
+    if factor is None and not failures:
+        print("  NO FACTOR — a matched-band wall time was missing; not usable evidence")
+    return 1 if (failures or factor is None) else 0
 
 
 def main() -> int:
