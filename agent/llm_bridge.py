@@ -1442,6 +1442,18 @@ class LLMBridge:
             # Context not set — silent no-op until set_run_context is called.
             return
 
+        # --- Pull what the provider REPORTED SERVING (D-LLM-1 / 66b) ---
+        # Read here, beside the usage capture, because this is the one place
+        # that already holds the raw response. `model_name` below is the
+        # CONFIGURED id the caller passed in; echoing that back as provenance
+        # would record what we asked for rather than what we got, and could
+        # never disagree with the request. This can.
+        # Deliberately NOT compared to `model_name` — see the field's own
+        # docstring; recording is the prerequisite for that decision, not it.
+        served_model = getattr(response, "model", None)
+        if not isinstance(served_model, str):
+            served_model = None
+
         # --- Pull provider-reported token counts (graceful if missing) ---
         usage = getattr(response, "usage", None)
         if usage is None:
@@ -1510,6 +1522,7 @@ class LLMBridge:
                     iter=self._iter,
                     label=label,
                     model=model_name,
+                    served_model=served_model,
                     provider=provider,
                     tokens=tokens,
                     chars=chars,

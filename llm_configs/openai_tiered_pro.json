@@ -1,38 +1,38 @@
 {
   "interpret": {
     "provider": "openai",
-    "model_id": "gpt-5.5"
+    "model_id": "gpt-5.5-2026-04-23"
   },
   "propose": {
     "comparison": {
       "provider": "openai",
-      "model_id": "gpt-5.5"
+      "model_id": "gpt-5.5-2026-04-23"
     },
     "reasoning": {
       "provider": "openai",
-      "model_id": "gpt-5.5"
+      "model_id": "gpt-5.5-2026-04-23"
     },
     "proposing": {
       "provider": "openai",
-      "model_id": "gpt-5.5"
+      "model_id": "gpt-5.5-2026-04-23"
     }
   },
   "implement": {
     "provider": "openai",
-    "model_id": "gpt-5.5"
+    "model_id": "gpt-5.5-2026-04-23"
   },
   "validate": {
     "provider": "openai",
-    "model_id": "gpt-5.5"
+    "model_id": "gpt-5.5-2026-04-23"
   },
   "tune": {
     "planner": {
       "provider": "openai",
-      "model_id": "gpt-5.5"
+      "model_id": "gpt-5.5-2026-04-23"
     },
     "reflector": {
       "provider": "openai",
-      "model_id": "gpt-5.5"
+      "model_id": "gpt-5.5-2026-04-23"
     }
   },
   "lit_review": {

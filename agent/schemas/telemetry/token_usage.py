@@ -137,6 +137,24 @@ class TokenUsageRow(BaseModel):
         description="Provider model id used for the call (e.g. 'gpt-4o-mini'). "
         "Optional only for marker rows.",
     )
+    served_model: str | None = Field(
+        default=None,
+        description="The model the PROVIDER REPORTED SERVING, read from the "
+        "response (`response.model`). Distinct from `model` above, which is "
+        "the model id the caller CONFIGURED.\n\n"
+        "The distinction is the whole point of this field (D-LLM-1 / 66b). "
+        "`model` is the configured value echoed back, so it reads the same "
+        "whether the provider honoured the request or served something "
+        "else — a provenance field that records what you ASKED FOR rather "
+        "than what you GOT cannot discriminate those cases, and therefore "
+        "can never fail. This one is an OBSERVATION, in the same sense the "
+        "config sha256 is: it comes from the response, so it moves when "
+        "what was served moves.\n\n"
+        "`None` when the provider returned no model field, and on marker "
+        "rows. Deliberately NOT validated against `model` — whether a "
+        "mismatch should refuse is a separate decision, and recording is "
+        "the prerequisite for making it.",
+    )
     provider: str | None = Field(
         default=None,
         description="Provider name (e.g. 'openai', 'deepseek', 'gemini'). "
