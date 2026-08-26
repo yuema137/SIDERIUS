@@ -38,6 +38,23 @@ def load_weights(path: Path | None = None) -> dict[str, float]:
     return {k: float(v) for k, v in doc.get("weights", {}).items()}
 
 
+@lru_cache(maxsize=1)
+def load_splits(path: Path | None = None) -> dict[str, dict[str, float]]:
+    """Measured per-node seconds for oversized files. Empty when absent.
+
+    Shape: ``{file: {"TestClass::test_name": seconds}}``. Consumed by
+    ``plan_shards(splits=...)`` to expand a file atom whose weight exceeds
+    ``total/count`` into node-id atoms.
+    """
+    target = path or WEIGHTS_PATH
+    if not target.is_file():
+        return {}
+    doc = json.loads(target.read_text(encoding="utf-8"))
+    return {
+        f: {n: float(c) for n, c in nodes.items()} for f, nodes in doc.get("splits", {}).items()
+    }
+
+
 def weight_provenance(path: Path | None = None) -> dict[str, object]:
     """The measurement's own record of how and where it was taken."""
     target = path or WEIGHTS_PATH

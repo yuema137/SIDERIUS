@@ -23,7 +23,7 @@ from tools.ci.provenance import build_manifest
 from tools.ci.selection import resolve_selection
 from tools.ci.sensitive import SENSITIVE_FILES, sensitive_paths
 from tools.ci.shards import plan_shards, verify_plan
-from tools.ci.weights import DEFAULT_WEIGHT, load_weights
+from tools.ci.weights import DEFAULT_WEIGHT, load_splits, load_weights
 
 
 def _preflight_or_exit(
@@ -43,6 +43,53 @@ def _preflight_or_exit(
     if not report.satisfied:
         raise SystemExit(2)
     return report.sha or "unknown"
+
+
+def _validate_splits_against_collection(
+    root: Path, splits: dict[str, dict[str, float]]
+) -> dict[str, dict[str, float]]:
+    """Drop any split whose measured atoms no longer match live collection.
+
+    The hazard is a test ADDED after the weights were measured: the expansion
+    replaces the file with its measured node ids, so an unmeasured node would
+    silently never run — a dropped-test hole wearing a green run. One
+    ``--collect-only`` per split file (there is one such file today) compares
+    the live node set; any mismatch falls back to the whole-file atom (old
+    behaviour, slower, SAFE) and says so.
+    """
+    import subprocess as _sp
+
+    kept: dict[str, dict[str, float]] = {}
+    for name, nodes in splits.items():
+        proc = _sp.run(
+            [
+                str(root / ".venv" / "bin" / "python"),
+                "-m",
+                "pytest",
+                "--collect-only",
+                "-q",
+                "-p",
+                "no:cacheprovider",
+                name,
+            ],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+        live = {
+            line.split("::", 1)[1].strip()
+            for line in proc.stdout.splitlines()
+            if line.startswith(f"{name}::")
+        }
+        if proc.returncode == 0 and live == set(nodes):
+            kept[name] = nodes
+        else:
+            print(
+                f"split for {name} DROPPED (stale or uncollectable): "
+                f"measured {len(nodes)} node(s), live {len(live)} — "
+                "falling back to the whole-file atom; regenerate weights.json"
+            )
+    return kept
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -108,11 +155,16 @@ def main(argv: list[str] | None = None) -> int:
     # Weighted by default: by-count balancing reported imbalance 1.004 and still
     # took 654 s, because it cannot see that one file is 460 s of the 1288.
     measured = {} if args.by_count else load_weights()
+    splits = {} if args.by_count else load_splits()
+    if splits:
+        splits = _validate_splits_against_collection(root, splits)
     weights = None
     if measured:
         weights = {f: measured.get(f, DEFAULT_WEIGHT) for f in files}
-    plan = plan_shards(files, count=args.shards, sensitive=sensitive_paths(), weights=weights)
-    problems = verify_plan(plan, files)
+    plan = plan_shards(
+        files, count=args.shards, sensitive=sensitive_paths(), weights=weights, splits=splits
+    )
+    problems = verify_plan(plan, files, splits=splits)
     if problems:
         print("SHARD PLAN INVALID:", *problems, sep="\n  ", file=sys.stderr)
         return 2
