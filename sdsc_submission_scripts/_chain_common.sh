@@ -110,7 +110,8 @@ FORMAL_VRAM_BUDGET_GB=""            # §3.2: empty == omit == Python None
 MAX_STEPS_PER_ATTEMPT=150000        # §3.2: matches Python default
 MIN_FORMAL_BATCH_SIZE=4             # §3.2: matches Python default
 ALLOW_EXTREME_STEPS=0
-RUNTIME_WATCHDOG=0
+RUNTIME_WATCHDOG=""                 # arXiv #261 tri-state: empty == omit == the (device, execution regime) runtime profile decides; 1 forwards --runtime_watchdog; 0 forwards --no-runtime_watchdog
+EXECUTION_REGIME=""                 # arXiv #261: empty == omit == Python default 'single'; the posture declares co-resident regimes
 ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=0  # V19 PR 1: consumption-only switch; matches Python default False
 ORDER_STRATEGY_OVERRIDE=""          # V19 PR 2: empty == omit == agent decides (default 'shuffle')
 FILE_ORDER_OVERRIDE=""              # V19 PR 2: empty == omit == ascending scope order
@@ -121,7 +122,7 @@ RUNTIME_SAFETY_FACTOR=1.0           # §3.2: matches Python default; V18 posture
 RUNTIME_TRIAL_SAFETY_FACTOR=""      # §3.2: empty == omit == Python None; effective V18r posture 3.0 (d8d4f1e)
 RUNTIME_FORMAL_SAFETY_FACTOR=""     # §3.2: empty == omit == Python None
 RUNTIME_WATCHDOG_SAFETY_FACTOR=""   # §3.2: empty == omit == Python None; V19 split — watchdog-only multiplier (5090 posture 3.5)
-RUNTIME_WATCHDOG_FLOOR_SECONDS=60.0 # §3.2: matches Python default; V18 posture 120
+RUNTIME_WATCHDOG_FLOOR_SECONDS=""   # arXiv #261: empty == omit == profile floor (legacy 60.0 when uncalibrated); explicit value overrides; V18 posture 120
 EXPLORATION_MODE="auto"             # §3.2: matches Python default
 MINIMUM_BOLDNESS="0.05"             # §3.2: matches Python default
 # §3.2 — Adaptive-tuning brakes (default-synced to run_one_iteration.py)
@@ -335,6 +336,8 @@ parse_chain_args() {
         --min_formal_batch_size)  MIN_FORMAL_BATCH_SIZE="$2"; shift 2 ;;
         --allow_extreme_steps)    ALLOW_EXTREME_STEPS=1; shift ;;
         --runtime_watchdog)       RUNTIME_WATCHDOG=1; shift ;;
+        --no-runtime_watchdog)    RUNTIME_WATCHDOG=0; shift ;;
+        --execution_regime)       EXECUTION_REGIME="$2"; shift 2 ;;
         --enable_chain_incumbent_formal_gates) ENABLE_CHAIN_INCUMBENT_FORMAL_GATES=1; shift ;;
         --order_strategy_override) ORDER_STRATEGY_OVERRIDE="$2"; shift 2 ;;
         --file_order_override)     FILE_ORDER_OVERRIDE="$2"; shift 2 ;;
@@ -578,12 +581,24 @@ build_app_args() {
     if [ -n "$RUNTIME_WATCHDOG_SAFETY_FACTOR" ]; then
         APP_ARGS+=(--runtime_watchdog_safety_factor "$RUNTIME_WATCHDOG_SAFETY_FACTOR")
     fi
-    APP_ARGS+=(--runtime_watchdog_floor_seconds "$RUNTIME_WATCHDOG_FLOOR_SECONDS")
+    # arXiv #261 — floor forwarded only when explicitly set, so an unset
+    # chain launch reaches the Python tri-state (profile floor) instead of
+    # pinning the legacy 60.0 as a field-level override.
+    if [ -n "$RUNTIME_WATCHDOG_FLOOR_SECONDS" ]; then
+        APP_ARGS+=(--runtime_watchdog_floor_seconds "$RUNTIME_WATCHDOG_FLOOR_SECONDS")
+    fi
     if [ "$ALLOW_EXTREME_STEPS" -eq 1 ]; then
         APP_ARGS+=(--allow_extreme_steps)
     fi
-    if [ "$RUNTIME_WATCHDOG" -eq 1 ]; then
+    # arXiv #261 tri-state: 1 -> explicit on, 0 -> explicit off, empty ->
+    # neither flag, the (device, regime) runtime profile decides in Python.
+    if [ "$RUNTIME_WATCHDOG" = "1" ]; then
         APP_ARGS+=(--runtime_watchdog)
+    elif [ "$RUNTIME_WATCHDOG" = "0" ]; then
+        APP_ARGS+=(--no-runtime_watchdog)
+    fi
+    if [ -n "$EXECUTION_REGIME" ]; then
+        APP_ARGS+=(--execution_regime "$EXECUTION_REGIME")
     fi
     # V19 PR 1 — consumption-only gate coupling (default OFF; forwarded
     # only when explicitly enabled, matching Python argparse store_true).

@@ -601,6 +601,40 @@ subprocess phases that caused the incident).
   toward the attempt budget; the round continues to its next attempt
   (existing brake machinery unchanged).
 
+### 4.1 Device-profiled launch defaults (arXiv #261 / Q-07c-6, 2026-08-25)
+
+The watchdog NUMBERS (enabled, watchdog-only safety factor, floor) are
+device-and-topology facts, not framework policy. The operator ruling makes
+them configuration keyed by `(device class, execution regime)`, resolved by
+ONE authority — `core/runtime_control/watchdog_profile.py`:
+
+- **Shipped defaults** `configs/runtime_profiles.yaml` (today: the RTX 5090
+  single-chain V19/V20 posture, `3.5` / floor `120`, enabled) and a
+  **measured overlay** `runtime_profiles_<gpu_slug>.json` in the existing
+  per-device calibration dir (`$SIDERIUS_CALIBRATION_DIR`, the
+  `evaluate_time_skill/calibration.py` machinery — no second profile
+  system). Overlay outranks shipped; qualification WRITES the overlay.
+- **Launch semantics** (`run_one_iteration.py`): `--runtime_watchdog` is
+  tri-state (`--runtime_watchdog` / `--no-runtime_watchdog` / neither).
+  Explicit flags are OPERATOR MODE — byte-identical legacy behavior, the
+  profile never consulted. With no enablement flag, the profile for
+  (probed device via `core.hardware_context.discover()`,
+  `--execution_regime`, default `single`) decides; a field-level flag still
+  overrides its field. Resolution + provenance are logged to stderr and
+  carried in the `--print_resolved_launch_config` JSON
+  (`runtime_watchdog_provenance`).
+- **UNCALIBRATED is explicit, never borrowed**: an unknown pair resolves
+  to `calibrated=false`, watchdog DISABLED, legacy floor 60.0 — exactly
+  the pre-#261 bare-launch triple — and the stderr banner names the state
+  and the qualification path. The runaway bound for such a run is the
+  outer `--trial/--formal_time_budget_minutes` envelope. H100 rows are
+  deliberately absent until measured on the box (h100_posture.env v3
+  passes `--execution_regime four_way_coresident` and NO watchdog flags).
+- Q-07c-6 (validation un-priced in admission) remains OPEN and is NOT
+  closed by this layer; the profile mechanism is what prevents its
+  INCONCLUSIVE-kill failure mode from being exported to new devices via
+  borrowed multipliers.
+
 ## 5. Guardrails (Phase 7) — runtime estimate is PRIMARY (rev 2)
 
 Runtime/schema — not prompts (prompt disclosure added separately as

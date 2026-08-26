@@ -157,4 +157,14 @@ class TestRT6CliMapping:
         assert defaults["max_steps_per_attempt"] == 150_000
         assert defaults["min_formal_batch_size"] == 4
         assert defaults["allow_extreme_steps"] is False
-        assert defaults["runtime_watchdog"] is False
+        # arXiv #261 (operator ruling 2026-08-25): the enablement flag is
+        # TRI-STATE — None means "the (device, execution regime) runtime
+        # profile decides at launch"; the pre-#261 hard False default moved
+        # into the UNCALIBRATED profile resolution, pinned by
+        # tests/unit/core/test_arxiv_261_watchdog_profile.py. This assert
+        # still catches the regression that matters here: someone restoring
+        # a hard boolean default, which would kill the profile path (False)
+        # or force the watchdog on everywhere (True).
+        assert defaults["runtime_watchdog"] is None
+        assert defaults["runtime_watchdog_floor_seconds"] is None
+        assert defaults["execution_regime"] == "single"

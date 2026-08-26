@@ -51,6 +51,7 @@ import warnings
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import get_args
 
 import yaml
 from dotenv import load_dotenv
@@ -74,6 +75,11 @@ from core.run_invariants import (
     RunInvariants,
     RunInvariantsViolation,
     build_run_invariants,
+)
+from core.runtime_control.watchdog_profile import (
+    ExecutionRegime,
+    ResolvedWatchdogSettings,
+    resolve_watchdog_launch_settings,
 )
 from execute_tools.data_paths import DatasetDirectoryUnavailable, resolve_dataset_dir
 from execute_tools.dataset_config import DataScope, resolve_dataset_profile
@@ -1444,9 +1450,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--runtime_watchdog",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=None,
         help="§4 runtime watchdog: deadline-kill training/inference "
-        "subprocess groups. Default off.",
+        "subprocess groups. Tri-state (arXiv #261 / Q-07c-6): "
+        "--runtime_watchdog forces on, --no-runtime_watchdog forces off, "
+        "and when NEITHER is passed the device/execution-regime runtime "
+        "profile decides (configs/runtime_profiles.yaml + the measured "
+        "overlay in $SIDERIUS_CALIBRATION_DIR). An uncalibrated pair "
+        "resolves to the legacy default: off.",
     )
     parser.add_argument(
         "--runtime_safety_factor",
@@ -1480,9 +1492,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--runtime_watchdog_floor_seconds",
         type=float,
-        default=60.0,
-        help="§4 watchdog deadline floor. Default 60.0 (schema-mirroring); "
-        "V18 production posture 120.0.",
+        default=None,
+        help="§4 watchdog deadline floor. Unset -> the device/execution "
+        "profile's floor when the profile governs, else the legacy 60.0 "
+        "(schema-mirroring); V18 production posture 120.0.",
+    )
+    parser.add_argument(
+        "--execution_regime",
+        type=str,
+        choices=sorted(get_args(ExecutionRegime)),
+        default="single",
+        help="arXiv #261 — the launch's DECLARED execution topology, one "
+        "half of the (device, regime) runtime-profile key. 'single' = one "
+        "resident chain per card (the legacy shape); co-resident fleets "
+        "declare their regime so watchdog numbers calibrated for one "
+        "topology are never borrowed by another. Consulted only when no "
+        "explicit --runtime_watchdog/--no-runtime_watchdog flag is passed.",
     )
     parser.add_argument(
         "--data_dir",
@@ -1828,6 +1853,36 @@ def parse_allowed_output_types(raw: str | None) -> "tuple[OutputTypeName, ...] |
     return cast("tuple[OutputTypeName, ...]", parts)
 
 
+def resolve_watchdog_policy(args: argparse.Namespace) -> ResolvedWatchdogSettings:
+    """arXiv #261 / Q-07c-6 — resolve the launch's watchdog policy ONCE.
+
+    Merges the operator's tri-state flags with the ``(device, regime)``
+    runtime profile (``core.runtime_control.watchdog_profile`` is the sole
+    authority; flags always win) and writes the FINAL values back onto
+    ``args``, so the single ``WorkflowLaunchConfig`` construction site and
+    the ``--print_resolved_launch_config`` view both read resolved truth.
+
+    Idempotent by construction: the resolved settings are cached on
+    ``args.runtime_watchdog_policy`` and returned verbatim on a second
+    call, so provenance can never degrade to "cli" after the write-back
+    turns the tri-state flag into a concrete bool.
+    """
+    cached = getattr(args, "runtime_watchdog_policy", None)
+    if cached is not None:
+        return cached
+    resolved = resolve_watchdog_launch_settings(
+        cli_enabled=args.runtime_watchdog,
+        cli_safety_factor=args.runtime_watchdog_safety_factor,
+        cli_floor_seconds=args.runtime_watchdog_floor_seconds,
+        execution_regime=args.execution_regime,
+    )
+    args.runtime_watchdog = resolved.enabled
+    args.runtime_watchdog_safety_factor = resolved.safety_factor
+    args.runtime_watchdog_floor_seconds = resolved.floor_seconds
+    args.runtime_watchdog_policy = resolved
+    return resolved
+
+
 def compute_expected_invariants(
     args: argparse.Namespace,
     *,
@@ -2080,6 +2135,11 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
     except ValueError as exc:
         print(f"[run_one_iteration] launch identity could not be resolved: {exc}", file=sys.stderr)
         return 1
+    # arXiv #261 — idempotent: in the main() path the policy is already
+    # resolved and cached on args; a direct caller gets the same one-shot
+    # resolution here so the printed values are final, never the raw
+    # tri-state defaults.
+    watchdog_policy = resolve_watchdog_policy(args)
     resolved = {
         "workspace": os.path.abspath(args.workspace),
         "run_name": args.run_name,
@@ -2093,6 +2153,15 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "advice_file": args.advice or args.human_advice_file or None,
         "healthgate_mode": args.healthgate_mode,
         "result_authority": args.result_authority,
+        # arXiv #261 — the resolved watchdog policy with its provenance, so
+        # a user can see WHICH values were selected and WHERE they came
+        # from (cli / shipped profile / measured overlay / uncalibrated)
+        # without reading framework source.
+        "execution_regime": args.execution_regime,
+        "runtime_watchdog_enabled": watchdog_policy.enabled,
+        "runtime_watchdog_safety_factor": watchdog_policy.safety_factor,
+        "runtime_watchdog_floor_seconds": watchdog_policy.floor_seconds,
+        "runtime_watchdog_provenance": watchdog_policy.provenance,
     }
     json.dump(resolved, sys.stdout, indent=2, sort_keys=True)
     sys.stdout.write("\n")
@@ -2128,6 +2197,31 @@ def main():
     except FormalLaunchPolicyError as exc:
         print(f"[run_one_iteration] FORMAL LAUNCH REFUSED: {exc}", file=sys.stderr)
         sys.exit(2)
+
+    # arXiv #261 / Q-07c-6 — resolve the watchdog policy (flags > device/
+    # regime profile > explicit uncalibrated state) BEFORE the dry-run view
+    # and before any consumer reads the watchdog args. The banner goes to
+    # STDERR: stdout is a parsed surface (the dry-run JSON, chain captures).
+    watchdog_policy = resolve_watchdog_policy(args)
+    print(
+        f"[watchdog_policy] enabled={watchdog_policy.enabled} "
+        f"safety_factor={watchdog_policy.safety_factor} "
+        f"floor_seconds={watchdog_policy.floor_seconds} "
+        f"source={watchdog_policy.provenance}",
+        file=sys.stderr,
+        flush=True,
+    )
+    if watchdog_policy.profile_calibrated is False:
+        print(
+            "[watchdog_policy] no calibrated runtime profile exists for this "
+            "device/execution regime — watchdog disabled; the outer time "
+            "budgets are the runaway bound. Run qualification (write the "
+            "measured overlay in $SIDERIUS_CALIBRATION_DIR), add a reviewed "
+            "row to configs/runtime_profiles.yaml, or pass explicit "
+            "--runtime_watchdog flags to change this.",
+            file=sys.stderr,
+            flush=True,
+        )
 
     # arXiv U3 (#259) — the resolved-configuration view. Placed AFTER the
     # policy refusal (a config that could not launch is not "resolved") and

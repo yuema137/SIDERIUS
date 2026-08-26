@@ -1,0 +1,44 @@
+# Device-profiled runtime/watchdog policy — SHIPPED defaults.
+#
+# Operator ruling (#261 / Q-07c-6, 2026-08-26): watchdog numbers are
+# configuration keyed by (device class, execution regime), resolved by the
+# ONE authority `core/runtime_control/watchdog_profile.py`. Framework code
+# carries no device-name conditionals.
+#
+# Key format: "<gpu_slug>/<execution_regime>" where gpu_slug is
+# `agent.skills.evaluate_time_skill.calibration.gpu_slug(device_name)` and
+# the regime is one of: single | dual_coresident | four_way_coresident.
+#
+# A pair ABSENT from this file (and from the machine's measured overlay,
+# `$SIDERIUS_CALIBRATION_DIR/runtime_profiles_<gpu_slug>.json`) resolves to
+# the explicit UNCALIBRATED profile: watchdog DISABLED, the launch's outer
+# wall-time budgets are the runaway bound. That absence is deliberate for
+# every H100 pair below: the H100 values are measured during platform
+# qualification on the frozen RC and recorded in the MEASURED overlay (or
+# promoted here in a narrow config change) — never invented here, never
+# borrowed from the 5090 rows.
+#
+# Provenance per row is mandatory: cite where the numbers were established.
+
+profiles:
+  # The V19/V20 production posture on the lilab RTX 5090, single chain per
+  # card — NOT invented here: these literals are what every calibrated 5090
+  # single-chain campaign launched with (launch_v20_campaign.sh:179-184,
+  # v19_queue_runner.sh:548-553, v19_gate0_pair_runner.sh:152-161; the
+  # run_one_iteration.py --runtime_watchdog_safety_factor help documents
+  # "V19 5090 posture: 3.5" and the floor's "V18 production posture 120.0").
+  nvidia_geforce_rtx_5090/single:
+    watchdog_enabled: true
+    watchdog_safety_factor: 3.5
+    watchdog_floor_seconds: 120
+
+  # The 5090 pair regime (two co-resident chains) was RUN historically
+  # (V19/V20 pair topology) but its watchdog behaviour was never separately
+  # calibrated — the recorded INCONCLUSIVE watchdog kills (07a Gate 2,
+  # Step-11 run 1, cause Q-07c-6) happened under borrowed single-chain
+  # numbers. Deliberately ABSENT ⇒ uncalibrated, until measured.
+
+  # H100 rows: deliberately ABSENT (see the header note). Qualification
+  # writes runtime_profiles_<h100_slug>.json on the box, verifies the
+  # resulting watchdog does not falsely kill legitimate execution, and only
+  # then may a narrow config change promote the measured values here.

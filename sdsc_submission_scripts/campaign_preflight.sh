@@ -14,6 +14,13 @@
 #       check reads the mount's fstype (findmnt, df -PT fallback) and
 #       FAILS on tmpfs/ramfs/overlay (pod-local ephemeral state); network
 #       or block filesystems (nfs*, lustre, ext4, xfs, ...) pass.
+#   R1b calibration store on a PERSISTENT mount (H100-prep finding,
+#       2026-08-25; same fstype logic as R1). $SIDERIUS_CALIBRATION_DIR
+#       (default ~/.siderius) holds the learned time-calibration k-tables
+#       and the measured runtime-profile overlay (#311) — on a pod, ~ is
+#       typically the ephemeral container overlay, so pod loss would
+#       silently destroy the very artifacts H100 qualification produces.
+#       Converts R8's former RETAIN-by-design assumption into a check.
 #   R2  authoritative code revision: `git rev-parse HEAD` printed
 #       (launch-packet row `repo_sha=`), compared against --revision
 #       (prefix >= 7 chars accepted); a DIRTY tree FAILS — commit first,
@@ -215,6 +222,34 @@ pf_main() {
         esac
     fi
 
+    # ---- R1b: calibration store persistence (H100-prep finding) ------------
+    # R1's fstype logic applied to the per-device calibration directory —
+    # the resolution mirrors calibration_dir() in
+    # agent/skills/evaluate_time_skill/calibration.py ($SIDERIUS_CALIBRATION_DIR
+    # override, else ~/.siderius). The dir may not exist yet on a fresh box,
+    # so the probe walks to the nearest existing ancestor: what persists (or
+    # doesn't) is the MOUNT, not the leaf.
+    local CAL_DIR="${SIDERIUS_CALIBRATION_DIR:-$HOME/.siderius}"
+    local CAL_PROBE="$CAL_DIR"
+    while [ ! -e "$CAL_PROBE" ] && [ "$CAL_PROBE" != "/" ]; do
+        CAL_PROBE="$(dirname "$CAL_PROBE")"
+    done
+    local CAL_FSTYPE=""
+    if command -v findmnt >/dev/null 2>&1; then
+        CAL_FSTYPE="$(findmnt -n -o FSTYPE --target "$CAL_PROBE" 2>/dev/null || true)"
+    fi
+    [ -z "$CAL_FSTYPE" ] && CAL_FSTYPE="$(df -PT "$CAL_PROBE" 2>/dev/null | awk 'NR==2 {print $2}')"
+    local CAL_MOUNT_SRC
+    CAL_MOUNT_SRC="$(df -P "$CAL_PROBE" 2>/dev/null | awk 'NR==2 {print $1 " on " $6}')"
+    case "$CAL_FSTYPE" in
+        tmpfs|ramfs|overlay)
+            pf_fail "R1b calibration store $CAL_DIR is on EPHEMERAL '$CAL_FSTYPE' ($CAL_MOUNT_SRC) — pod loss destroys the time-calibration k-tables and the measured runtime-profile overlay (#311); export SIDERIUS_CALIBRATION_DIR to a persistent mount" ;;
+        "")
+            pf_fail "R1b could not determine the filesystem type of $CAL_DIR (probe: $CAL_PROBE)" ;;
+        *)
+            pf_pass "R1b calibration store $CAL_DIR on persistent '$CAL_FSTYPE' ($CAL_MOUNT_SRC)" ;;
+    esac
+
     # ---- R2: authoritative revision ----------------------------------------
     local REPO_SHA DIRTY
     REPO_SHA="$(git -C "$PF_PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
@@ -385,7 +420,8 @@ pf_main() {
     fi
     pf_info "R8 item4 workspace plugins/ covered by item1 (fresh workspace)"
     pf_info "R8 items2/7 seeds + advice files: enforced by launcher refusals in both arms"
-    pf_info "R8 items5/6 root_papers_cache + runtime calibration store: RETAIN by design"
+    pf_info "R8 item5 root_papers_cache: RETAIN by design"
+    pf_info "R8 item6 runtime calibration store: RETAIN by design — persistence of its mount is CHECKED by R1b, not assumed"
 
     # ---- R9: LLM reachability + concurrency smoke --------------------------
     if [ "$SKIP_LLM" -eq 1 ]; then

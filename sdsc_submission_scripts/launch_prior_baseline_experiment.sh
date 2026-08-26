@@ -337,7 +337,7 @@ identity_flags() {
         case "${args[$i]}" in
             --task_composition|--ml_lit_review_config|--healthgate_mode|--result_authority|\
             --health_checks_config|--skip_formal_min_delta|--bypass_formal_time_budget_min_delta|\
-            --data_dir|--llm_config)
+            --data_dir|--llm_config|--execution_regime)
                 IDENTITY_FLAGS+=("${args[$i]}" "${args[$((i+1))]}"); i=$((i+2)) ;;
             --enable_chain_incumbent_formal_gates)
                 IDENTITY_FLAGS+=("${args[$i]}"); i=$((i+1)) ;;
