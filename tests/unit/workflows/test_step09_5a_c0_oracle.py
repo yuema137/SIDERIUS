@@ -174,6 +174,10 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   `repo_commit` there) and the golden carries the KEY at the reported path:
 
       .artifacts.run_invariants_lock.json.generated_library: ADDED ('<VOLATILE>')
+      .node_calls.proposal.run_inputs[0].allowed_output_types: ADDED (None)
+          — arXiv #259 (2026-08-26): ProposalInput gained the declared
+          output-type constraint field; an unconstrained run records None.
+          One-line textual insert into the golden, same precedent as above.
 
   — exactly one ADDED path, zero changed, zero removed. Edited SURGICALLY
   (one inserted line; the differ compares dicts, not order).

@@ -2791,6 +2791,10 @@ def run_workflow(
                 # arXiv U3 (#260) — the proposer's prompt surface names no
                 # bundled baseline under isolation.
                 propose_input.baseline_isolation = launch.baseline_isolation
+                # arXiv #259 — the declared output-type constraint, threaded
+                # post-hoc like hardware_context/mindset (established pattern).
+                if launch.allowed_output_types is not None:
+                    propose_input.allowed_output_types = tuple(launch.allowed_output_types)
                 # Task config injection (T3) — same pattern as T2's implementor
                 # injection. The loader is cached per-process so this is a dict
                 # lookup after the first iter. See

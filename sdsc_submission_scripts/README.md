@@ -43,7 +43,10 @@ bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
 | `run_chain.sh` | **ENTRY POINT** — `exec` this. Mode-aware: python resolution, auto-resume, slurm vs subprocess dispatch. |
 | `_chain_common.sh` | **SHARED LIBRARY** — `source`d by `run_chain.sh`. Mode-agnostic: defaults, CLI parser, iter loop body, per-iter app-arg builder. |
 | `run_one_iteration.py` | **PER-ITER PYTHON RUNNER** — executes one iteration of the 5-agent workflow. Called once per iter by both modes. Writes `iter_NNN/manifest.json`. |
-| `launch_prior_baseline_experiment.sh` | **TWO-ARM EXPERIMENT LAUNCHER** (arXiv X9) — wraps `run_chain.sh`; `--arm with-prior-art\|without-prior-art` decides the lit-review topology, the opaque arm label and (WITHOUT arm) `--baseline_isolation`. Refuses seeds and advice files; `--dry-run` prints the child argv AND the resolved launch config JSON; `--h100` sources `h100_posture.env`. |
+| `launch_prior_baseline_experiment.sh` | **TWO-ARM EXPERIMENT LAUNCHER** (arXiv X9) — wraps `run_chain.sh`; `--arm with-prior-art\|without-prior-art` decides the lit-review topology, the opaque arm label and (WITHOUT arm) `--baseline_isolation`. Refuses seeds and advice files; `--dry-run` prints the child argv AND the resolved launch config JSON; `--h100` sources `h100_posture.env`. **Campaign band mode** (arXiv launch topology): `--band 0-3\|4-9\|10-14\|15-19 --workspace-root DIR` maps the band to the DS8 pair (`--data_scope` + `--health_gate_files`), derives the per-chain workspace/run_name `${ARM}_band${BAND}` under the persistent-volume root, and (with `--h100`) refuses launch until `H100_CORESIDENCY_FACTOR` is probe-filled. **Fixed-candidate mode**: `--fixed-candidate PLAN.json` forwards the chain's existing `--validation_fixed_candidate_plan` seam (proposer bypassed, provenance recorded) and pins `--num_iterations 1` unless given. |
+| `launch_band_fleet.sh` | **BAND FLEET LAUNCHER** — the four band chains of ONE arm on one GPU: sequential `nohup` starts with a stagger, per-chain logs + PID manifest under `${WORKSPACE_ROOT}/fleet_logs/`, honors `CUDA_VISIBLE_DEVICES` (`--gpu N` pins). `--card A\|B` maps to the arm (`C` is refused toward the probe); `--fixed-candidate` fans the frozen champion across all four bands; `--dry-run` walks all four foreground. |
+| `campaign_preflight.sh` | **CAMPAIGN PREFLIGHT** — one launch-blocking gate, exit non-zero on any FAIL: persistent-mount check, revision (`repo_sha=` for the launch packet, dirty tree fails), per-band dataset presence, posture admission arithmetic + coresidency-factor filled, host-RAM headroom vs the recorded 47 GB 4-chain OOM, per-band identity dry-runs, the **#255 arm argv-symmetry check** (`campaign_arm_symmetry.py`), the #260 cold-start rows, and the LLM burst smoke (`campaign_llm_smoke.py`, 8 parallel one-word calls — reachability, never a quota guarantee). Chain flags after `--` forward to every dry-run. |
+| `gpu_c_coresidency_probe.sh` | **GPU-C CALIBRATION PROBE** (+ `gpu_c_probe_train_leg.py`) — bounded (~55 min) two-leg measurement of the 4-way co-residency slowdown: solo reference (band 0-3) then four co-resident band legs of REAL zero-LLM baseline-trial training; emits `gpu_c_probe_result.json` (matched-band factor, per-chain VRAM/RSS peaks, host MemAvailable min) + the exact posture line to fill. Refuses a busy GPU. |
 | `submit_one_iteration.slurm` | Slurm wrapper around `run_one_iteration.py`. Used by `run_chain.sh --mode sdsc`; chained via `--dependency=afterany:<prev_job>`. |
 
 The role split between `run_chain.sh` and `_chain_common.sh` keeps the
@@ -80,18 +83,71 @@ Each launcher owns its own control state; none of them reads another's.
 | `v19_queue_runner.sh` | **current production surface** | `$WS_ROOT/$CAMPAIGN_ID/{control,queue_state,pair_summaries}/` | `$WS_ROOT/$CAMPAIGN_ID/control/STOP`, or `SIGTERM`/`SIGINT`/`SIGHUP` |
 | `v19_gate0_pair_runner.sh` | **current production surface** (Gate) | `$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json`, `${GATE_RUN_PREFIX}_runner.log` | **none** — the Gate has no stop file; its summary is written on every exit path by an `EXIT` trap |
 | `v18r_queue_runner.sh` | **historical**, kept for reference | its own pre-V20 layout | unchanged; not modified by V20 PR E |
-| `h100_posture.env` | **H100 resource posture** (issue #261) — `source`d by the campaign launcher after `--h100`, never executed | none — it assigns `H100_POSTURE_VERSION`, exports the environment the runtime reads and defines the `H100_CHAIN_ARGS` array the launcher splats after its own args | n/a |
+| `h100_posture.env` | **H100 resource posture v2** (issues #259/#261, arXiv launch topology) — `source`d by the campaign launcher after `--h100`, never executed | none — it assigns `H100_POSTURE_VERSION`, the 4-way co-residency parameters (`H100_PER_CHAIN_VRAM_GB`, the derived aggregate ceiling, `H100_CORESIDENCY_FACTOR` — EMPTY until the GPU-C probe fills it), exports the environment the runtime reads and defines the `H100_CHAIN_ARGS` array the launcher splats after its own args | n/a |
 
-**Topology note.** The pair runners above (`v19_queue_runner.sh`,
-`v19_gate0_pair_runner.sh`) and `v20_queue_runner.py` (`--max_active 2`)
-implement the **pair topology**: two chains sharing one 32 GB card under a
-12 GB per-chain cap and a 28 GiB aggregate ceiling. The H100 campaign runs
-**one chain per card** (`MAX_ACTIVE=1` per card) and therefore does not use
-them; every H100 value and its provenance is in
-[`docs/guides/operating-a-run.md` — "Cross-hardware bring-up (H100 posture)"](../docs/guides/operating-a-run.md#cross-hardware-bring-up-h100-posture).
+**Topology note (arXiv launch topology, author ruling 2026-08-25).** The
+H100 campaign runs **FOUR co-resident band chains per card**: GPU A carries
+the WITH arm's four band chains (`0-3`, `4-9`, `10-14`, `15-19`), GPU B the
+WITHOUT arm's four (cold-start per #260), GPU C is calibration/support
+(`gpu_c_coresidency_probe.sh`, `campaign_preflight.sh`). Launch surface:
+`launch_band_fleet.sh` → `launch_prior_baseline_experiment.sh --band … --workspace-root …`.
+Campaign workspaces MUST live on persistent volume storage — pod loss must
+not destroy records/checkpoints/manifests/provenance (`campaign_preflight.sh`
+R1 verifies the mount).
+
+*Superseded, kept for history:* the previous **one chain per card**
+H100 posture (v1, `MAX_ACTIVE=1`) and the older 8-GPU/10-pod fleet plan are
+SUPERSEDED by the ruling above — do not reintroduce them. The pair runners
+(`v19_queue_runner.sh`, `v19_gate0_pair_runner.sh`) and `v20_queue_runner.py`
+(`--max_active 2`) remain the **32 GB pair topology** (two chains, 12 GB
+per-chain cap, 28 GiB aggregate) and are NOT used with the H100 posture.
+The H100 budget table in
+[`docs/guides/operating-a-run.md` — "Cross-hardware bring-up (H100 posture)"](../docs/guides/operating-a-run.md#cross-hardware-bring-up-h100-posture)
+still documents the v1 one-chain rows pending its own v2 sync (tracked by
+the posture file's DOC-SYNC NOTE).
 `h100_posture.env` is exempted from `.gitignore`'s `*.env` rule by an explicit
 negation (`!sdsc_submission_scripts/h100_posture.env`), so it is tracked and
 visible to gitignore-aware tools like any other source file.
+
+**H100 band-fleet campaign workflow.**
+
+```bash
+# 0. GPU C — measure the 4-way co-residency factor (once per posture rev):
+CUDA_VISIBLE_DEVICES=<gpu_c> bash sdsc_submission_scripts/gpu_c_coresidency_probe.sh
+#    then copy coresidency_factor from gpu_c_probe_result.json into
+#    h100_posture.env (H100_CORESIDENCY_FACTOR=…) and bump H100_POSTURE_VERSION.
+
+# 1. Preflight each arm (exit non-zero blocks the launch):
+bash sdsc_submission_scripts/campaign_preflight.sh \
+    --workspace-root /persist/siderius_campaign --arm with-prior-art \
+    --revision <sha> -- --healthgate_mode blocking --result_authority scientific
+
+# 2. Launch one arm's four band chains per card:
+bash sdsc_submission_scripts/launch_band_fleet.sh --card A \
+    --workspace-root /persist/siderius_campaign --gpu 0
+bash sdsc_submission_scripts/launch_band_fleet.sh --card B \
+    --workspace-root /persist/siderius_campaign --gpu 1
+
+# 3. Post-freeze finalization retrains (champion x 4 bands x 2 arms):
+bash sdsc_submission_scripts/launch_band_fleet.sh --card A \
+    --workspace-root /persist/siderius_finalize --gpu 0 \
+    --fixed-candidate /persist/champion_plan.json
+```
+
+**Output-type pin (gap CLOSED — arXiv #259).** The campaign ruling asks for
+`output_type: regressor` for proposed models in both arms. The knob now
+exists end to end: `--allowed_output_types classifier,regressor` on
+`run_one_iteration.py` (typo'd names refused at launch) → forwarded by
+`_chain_common.sh` → `WorkflowLaunchConfig.allowed_output_types` →
+`ProposalInput.allowed_output_types`. The proposer's prompts state the
+constraint ONLY when declared (unconstrained prompts are byte-identical),
+and the deterministic schema gate on `ProposalOutput.output_type` refuses an
+out-of-set proposal before implementation — the guarantee never rests on the
+LLM. Campaign-band mode pins `--allowed_output_types regressor` identically
+in both arms, and `campaign_arm_symmetry.py` requires the value be IDENTICAL
+across arms (present-in-one-only or differing values fails preflight). The
+fixed-candidate mode is unaffected (the frozen plan carries its own
+`output_type`).
 
 Despite the `v19_` filenames, both current launchers are
 campaign-parameterised: the campaign id and the Gate prefix come from

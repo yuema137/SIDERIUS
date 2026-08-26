@@ -103,9 +103,14 @@ class TestImmutability:
 #: * ``baseline_isolation`` — arXiv U3 (#260): the WITHOUT arm's explicit
 #:   behaviour flag (ruling R6), locked and forwarded to the interpreter,
 #:   proposer and tuner inputs. Default ``False`` = no isolation.
+#: * ``allowed_output_types`` — arXiv #259 (fleet ruling 2026-08-25): the
+#:   run's declared output-type constraint, pure transit (forwarded post-hoc
+#:   into ``ProposalInput``; the proposer's SCHEMA GATE enforces it — this
+#:   layer never interprets it). Default ``None`` = unconstrained legacy.
 POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "experiment_arm": None,
     "baseline_isolation": False,
+    "allowed_output_types": None,
 }
 
 

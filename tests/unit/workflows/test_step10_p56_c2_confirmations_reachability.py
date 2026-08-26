@@ -701,12 +701,21 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     # additions themselves (identity threading, isolation wiring) came in
     # as helper CALLS, costing zero branch-ish nodes here.
     #
+    # arXiv #259 (declared delta, 2026-08-26): 131 -> 132. The output-type
+    # constraint's post-hoc threading — `if launch.allowed_output_types is
+    # not None:` guarding ONE carrier assignment — the SAME post-hoc idiom as
+    # the hardware-context/previous_failures/mindset rows beside it. The
+    # constraint's SEMANTICS live in the proposer's schema gate
+    # (agent/schemas/proposal.py); run_workflow only forwards a declared
+    # value. One sibling-shaped branch, within the pre-registered limit.
+    #
     # All of it is the permitted shape: no new phase, no new branch family, no
     # task dispatch, no new mutable local accumulator, no new semantic owner.
-    assert branchish == 131, (
-        f"run_workflow branch-ish count is {branchish}, expected 131 "
+    assert branchish == 132, (
+        f"run_workflow branch-ish count is {branchish}, expected 132 "
         "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
-        "- 1 arXiv-U1 extraction of the lit-review path-resolution If; "
+        "- 1 arXiv-U1 extraction of the lit-review path-resolution If "
+        "+ 1 arXiv-#259 constraint-forwarding If; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "

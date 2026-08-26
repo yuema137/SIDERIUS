@@ -57,6 +57,7 @@ from dotenv import load_dotenv
 
 from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
+from agent.schemas.proposal import OutputTypeName
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.skills.evaluate_vram_skill.preflight_adapter import PREFLIGHT_EXECUTION_MODE
 from core.iteration_manifest import (
@@ -1682,6 +1683,21 @@ def build_parser() -> argparse.ArgumentParser:
             "is refused) and stamped on the manifest. Default: off."
         ),
     )
+
+    # arXiv #259 (fleet ruling 2026-08-25) — declared output-type constraint.
+    parser.add_argument(
+        "--allowed_output_types",
+        type=str,
+        default=None,
+        help=(
+            "Comma-separated set of output types proposed models may declare "
+            "(subset of: classifier,regressor). The proposer's prompt states "
+            "the constraint and the deterministic schema gate refuses an "
+            "out-of-set proposal before implementation. Omit for the "
+            "unconstrained legacy behavior. The X9 campaign pins 'regressor' "
+            "via the launcher."
+        ),
+    )
     parser.add_argument(
         "--print_resolved_launch_config",
         action="store_true",
@@ -1784,6 +1800,32 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
         ),
         baseline_isolation=bool(args.baseline_isolation),
     )
+
+
+def parse_allowed_output_types(raw: str | None) -> "tuple[OutputTypeName, ...] | None":
+    """``--allowed_output_types`` "a,b" -> ("a","b"); None/"" -> None.
+
+    arXiv #259. Refuses unknown names HERE so a typo fails at launch, not as
+    a permanently-refusing proposer loop. The legal set mirrors
+    ``ProposalOutput.output_type``'s Literal.
+    """
+    if raw is None or raw.strip() == "":
+        return None
+    from typing import cast, get_args
+
+    parts = tuple(p.strip() for p in raw.split(",") if p.strip())
+    legal = set(get_args(OutputTypeName))
+    unknown = [p for p in parts if p not in legal]
+    if unknown:
+        raise SystemExit(
+            f"--allowed_output_types: unknown output type(s) {unknown!r}; "
+            f"legal values: {sorted(legal)}"
+        )
+    if not parts:
+        return None
+    # The refusal above proves every element is a member of the Literal
+    # vocabulary; the cast records that guarantee for the type checker.
+    return cast("tuple[OutputTypeName, ...]", parts)
 
 
 def compute_expected_invariants(
@@ -2583,6 +2625,9 @@ def main():
                     experiment_arm=launch_identity.experiment_arm,
                     # arXiv U3 — the WITHOUT arm's explicit behaviour flag.
                     baseline_isolation=launch_identity.baseline_isolation,
+                    # arXiv #259 — output-type constraint, transit to the
+                    # proposer's schema gate.
+                    allowed_output_types=parse_allowed_output_types(args.allowed_output_types),
                 ),
                 measurement_capability=resolve_tidmad_measurement_capability(),
                 workspace=args.workspace,

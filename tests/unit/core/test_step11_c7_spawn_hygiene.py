@@ -230,14 +230,54 @@ class TestTheLaunchSplitIsUnchangedAndCorrectlyJustified:
         assert "install_chain_stop_traps()" in common
         assert "trap '_chain_note_signal SIGINT'  INT" in common
 
-    def test_no_shell_launcher_uses_timeout_signal(self):
-        """The finding itself, kept executable: if a launcher ever DOES
-        adopt `timeout --signal=INT`, this turns red and the corrected
+    def test_no_chain_lineage_launcher_uses_timeout_signal(self):
+        """The finding itself, kept executable — SCOPE REVISITED, as its own
+        docstring demanded, when a script DID adopt `timeout --signal`
+        (arXiv #259/#261: `gpu_c_coresidency_probe.sh`, 2026-08-26).
+
+        The C7 correction's claim was about the CHAIN-LAUNCHER LINEAGE: the
+        sandbox docstring had justified its session behaviour by citing a
+        chain-launcher `timeout --signal=INT` mechanism that did not exist;
+        the real chain stop story is `install_chain_stop_traps()`. That claim
+        is about scripts that launch PRODUCTION CHAINS, where a wall-clock
+        kill would truncate science and stop semantics must be the trap
+        chain. The GPU-C calibration probe is outside that claim: it is a
+        bounded measurement harness whose per-leg `timeout --signal=TERM
+        --kill-after=60` IS its boundedness contract — replacing it with
+        stop traps would remove the guarantee the probe exists to provide.
+
+        The scope is therefore DERIVED, not name-listed (the #304 `_EXEMPT`
+        lesson): a script is chain-lineage iff it references `run_chain.sh`
+        or `_chain_common.sh`. Every real chain launcher is in that set; a
+        harness that caps its own legs is not. If a CHAIN-LINEAGE script
+        ever adopts `timeout --signal`, this turns red and the corrected
         justification must be revisited rather than quietly re-inverted.
         """
-        hits = [
-            str(p.relative_to(REPO_ROOT))
-            for p in sorted(REPO_ROOT.rglob("*.sh"))
-            if ".venv" not in p.parts and "timeout --signal" in p.read_text(encoding="utf-8")
-        ]
-        assert hits == [], f"a launcher now uses `timeout --signal`: {hits}"
+        chain_lineage_hits = []
+        for p in sorted(REPO_ROOT.rglob("*.sh")):
+            if ".venv" in p.parts:
+                continue
+            text = p.read_text(encoding="utf-8")
+            if "timeout --signal" not in text:
+                continue
+            if "run_chain.sh" in text or "_chain_common.sh" in text:
+                chain_lineage_hits.append(str(p.relative_to(REPO_ROOT)))
+        assert chain_lineage_hits == [], (
+            f"a CHAIN-LINEAGE launcher now uses `timeout --signal`: {chain_lineage_hits} — "
+            "the C7 corrected justification must be revisited, not re-inverted"
+        )
+
+    def test_the_probe_is_genuinely_outside_the_chain_lineage(self):
+        """The scope-narrowing above is honest only while the probe stays
+        outside the derived set — the defect only this catches: the probe
+        growing a run_chain/_chain_common reference (becoming chain-lineage)
+        while keeping its timeout, which would put a wall-clock kill inside
+        a production-chain path again. Fails by: the probe entering the
+        lineage set."""
+        probe = REPO_ROOT / "sdsc_submission_scripts" / "gpu_c_coresidency_probe.sh"
+        text = probe.read_text(encoding="utf-8")
+        assert "timeout --signal" in text, "the probe's boundedness contract vanished"
+        assert "run_chain.sh" not in text and "_chain_common.sh" not in text, (
+            "the probe now references the chain lineage while using `timeout "
+            "--signal` — the scope-narrowing's premise is broken; revisit C7"
+        )

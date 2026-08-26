@@ -116,8 +116,15 @@ class TestContractShape:
         assert r.stdout == "", f"sourcing the posture must print nothing, got {r.stdout!r}"
 
     def test_version_and_topology_are_declared(self, sourced: dict[str, object]) -> None:
+        # Declared delta (2026-08-25): v1 pinned "1" (one chain per card). The
+        # author's fleet ruling (#261/#259 comments, 2026-08-25) moved the
+        # campaign to FOUR co-resident band chains per 80 GB H100; posture v2
+        # ships that topology, and this pin moves WITH the ruling — a drift
+        # back to 1 (or any other value) without a new ruling is the defect.
         assert re.fullmatch(r"\d+", str(sourced["version"])), sourced["version"]
-        assert sourced["max_active"] == "1", "one chain per card is the declared topology"
+        assert sourced["max_active"] == "4", (
+            "four co-resident band chains per card (fleet ruling 2026-08-25)"
+        )
 
     def test_the_array_is_defined_and_non_empty(self, sourced: dict[str, object]) -> None:
         r = _source_and_run("declare -p H100_CHAIN_ARGS")

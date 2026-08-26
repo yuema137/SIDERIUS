@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from agent.schemas.health_feedback import TrialValidityFeedback
 from agent.schemas.hyperparam_tuning import (
@@ -31,6 +31,11 @@ from execute_tools.dataset_config import (
     resolve_dataset_profile,
     tidmad_topology,
 )
+
+#: arXiv #259 — the output-type vocabulary, declared ONCE. The schema fields,
+#: the launch config and the CLI parser all read this alias; adding a type
+#: means changing exactly this line (and the science that admits it).
+OutputTypeName = Literal["classifier", "regressor"]
 
 # ---------------------------------------------------------------------------
 # Phase B schemas — three-stage reasoning pipeline
@@ -801,6 +806,30 @@ class ProposalInput(BaseModel):
         "block no longer offers the built-in branch. Every non-isolated render is "
         "byte-identical to before the flag existed.",
     )
+    allowed_output_types: tuple[OutputTypeName, ...] | None = Field(
+        default=None,
+        description="arXiv #259 (fleet ruling 2026-08-25) — the run's DECLARED "
+        "output-type constraint for proposed models, threaded from the launch "
+        "surface (--allowed_output_types). ``None`` = unconstrained: the legacy "
+        "behavior, byte-identical prompts, the LLM chooses. When set, the "
+        "proposer's prompt states the constraint AND the deterministic gate "
+        "refuses an out-of-set ``ProposalOutput.output_type`` before the "
+        "implementor is invoked — the guarantee never rests on the LLM reading "
+        "the prompt. An empty tuple is refused at validation (a constraint "
+        "that allows nothing is a configuration error, not a science choice).",
+    )
+
+    @field_validator("allowed_output_types", mode="after")
+    @classmethod
+    def _refuse_empty_constraint(cls, v):
+        """arXiv #259: () would silently forbid every proposal — refuse loudly."""
+        if v is not None and len(v) == 0:
+            raise ValueError(
+                "allowed_output_types must be None (unconstrained) or a non-empty "
+                "tuple; an empty constraint forbids every proposal."
+            )
+        return v
+
     task_description: str = Field(
         default="",
         description="Plain-English description of the research task, sourced from "
@@ -1121,7 +1150,7 @@ class ProposalOutput(BaseModel):
         description="Short, unique, snake_case identifier for the proposed model "
         "(e.g. 'attn_unet', 'dilated_rnn'). Must not clash with existing model types.",
     )
-    output_type: Literal["classifier", "regressor"] = Field(
+    output_type: OutputTypeName = Field(
         default="classifier",
         description="The output representation this proposal commits to — an "
         "INDEPENDENT design dimension from the backbone and the loss family.\n"
@@ -1245,6 +1274,34 @@ class ProposalOutput(BaseModel):
         "proposer is using one of the four built-in loss types and no "
         "implementor loss-generation step is triggered.",
     )
+
+    @field_validator("output_type", mode="after")
+    @classmethod
+    def _enforce_declared_output_type_constraint(cls, v: str, info: ValidationInfo) -> str:
+        """arXiv #259 — the run-declared output-type constraint, enforced HERE.
+
+        The launch surface has no knob over the LLM's choice; the constraint
+        travels as ``ProposalInput.allowed_output_types`` and reaches this
+        gate through ``model_validate(..., context={"allowed_output_types":
+        ...})`` at BOTH proposer parse sites (legacy and pipeline). Absent
+        context, or a ``None`` value, means unconstrained — every existing
+        construction site (tests, fixed-candidate plans, seeded fixtures)
+        validates exactly as before. The defect this alone catches: a
+        campaign declaring ``regressor`` receiving a classifier proposal that
+        then trains — the confound would be silent, because output_type is
+        otherwise a free LLM choice.
+        """
+        allowed = (
+            (info.context or {}).get("allowed_output_types") if info.context is not None else None
+        )
+        if allowed is not None and v not in allowed:
+            raise ValueError(
+                f"output_type {v!r} is refused: this run declares "
+                f"allowed_output_types={tuple(allowed)!r} (arXiv #259 launch "
+                "constraint). The proposal must commit to one of the declared "
+                "types; the constraint is a run property, not a model choice."
+            )
+        return v
 
     @model_validator(mode="after")
     def _validate_baseline_segmentation_size(self):

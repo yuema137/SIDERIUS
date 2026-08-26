@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from dataclasses import fields as dataclass_fields
 
 from agent.schemas.hyperparam_tuning import HealthGateMode, ResultAuthority
+from agent.schemas.proposal import OutputTypeName
 from core.runtime_control.admission import AdmissionEnforcement
 from workflows.strategy_modes import ExplorationMode, FormalRoundStrategy, StrategyMode
 
@@ -140,6 +141,11 @@ class WorkflowLaunchConfig:
     # the workflow locks it, forwards it to the interpreter / proposer /
     # tuner inputs and refuses a bundled built-in proposal under it.
     baseline_isolation: bool = False
+    # arXiv #259 (fleet ruling 2026-08-25) — the run's declared output-type
+    # constraint for proposed models. Transit only: threaded into
+    # ProposalInput.allowed_output_types, where the schema gate enforces it.
+    # None = unconstrained legacy behavior (byte-identical prompts).
+    allowed_output_types: tuple[OutputTypeName, ...] | None = None
 
     def __post_init__(self) -> None:
         """Refuse cross-iteration state (Amendment B).

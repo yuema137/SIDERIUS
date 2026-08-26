@@ -204,6 +204,7 @@ EXPERIMENT_ARM=""
 # arXiv U3 (#260) — the WITHOUT arm's explicit isolation flag. Default 0
 # forwards nothing; 1 forwards --baseline_isolation.
 BASELINE_ISOLATION=0
+ALLOWED_OUTPUT_TYPES=""
 START_ITER=""
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
@@ -364,6 +365,7 @@ parse_chain_args() {
         --no-ml_lit_review_enabled)  ML_LIT_REVIEW_ENABLED=0; shift ;;
         --experiment_arm)         EXPERIMENT_ARM="$2"; shift 2 ;;
         --baseline_isolation)     BASELINE_ISOLATION=1; shift ;;
+        --allowed_output_types)   ALLOWED_OUTPUT_TYPES="$2"; shift 2 ;;
         --start_iter)             START_ITER="$2"; shift 2 ;;
         # §3.2 — Adaptive-tuning brakes
         --attempts_per_round)        ATTEMPTS_PER_ROUND="$2"; shift 2 ;;
@@ -632,6 +634,10 @@ build_app_args() {
     # arXiv U3 — isolation forwarded only when requested.
     if [ "$BASELINE_ISOLATION" -eq 1 ]; then
         APP_ARGS+=(--baseline_isolation)
+    fi
+    # arXiv #259 — output-type constraint forwarded only when declared.
+    if [ -n "${ALLOWED_OUTPUT_TYPES:-}" ]; then
+        APP_ARGS+=(--allowed_output_types "$ALLOWED_OUTPUT_TYPES")
     fi
     # #258 refinement: forward auto-resume recovery intent only when the
     # inspector computed START_ITER (run_chain.sh sets the variable on that

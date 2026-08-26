@@ -692,6 +692,7 @@
       "run_inputs": [
         {
           "agent_cards": [],
+          "allowed_output_types": null,
           "baseline_isolation": false,
           "cold_start": false,
           "constraints": [],

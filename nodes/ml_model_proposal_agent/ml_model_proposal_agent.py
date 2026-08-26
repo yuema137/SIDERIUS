@@ -1319,7 +1319,47 @@ def _render_loss_legality(losses: frozenset[str]) -> str:
     return ", ".join(f"`{name}`" for name in sorted(losses))
 
 
-def _render_commit_system_prompt(fc: ForwardContract, blocks: Any = None) -> str:
+def _output_type_constraint_note(allowed: tuple[str, ...]) -> str:
+    """The run-declared output-type constraint block (arXiv #259).
+
+    ONE authority for both proposer modes (legacy commit prompt and the
+    pipeline proposing stage), so the two prompts cannot state different
+    constraints. Rendered ONLY when a constraint is declared — an
+    unconstrained run's prompts are byte-identical to before the feature.
+    The prompt is advisory; the deterministic gate on
+    ``ProposalOutput.output_type`` is what enforces it.
+    """
+    allowed_list = ", ".join(f'"{t}"' for t in allowed)
+    return (
+        "\n\n## RUN CONSTRAINT — output_type\n"
+        f"This run declares allowed output_type value(s): {allowed_list}. "
+        'Your proposal MUST set "output_type" to one of these; any other '
+        "value is refused deterministically before implementation (no retry "
+        "credit is returned). Choose the loss family accordingly — the "
+        "output_type/loss compatibility rule still applies.\n"
+    )
+
+
+def _default_output_type(allowed: tuple[str, ...] | None) -> str:
+    """The omitted-key fallback for a raw LLM proposal (arXiv #259).
+
+    Unconstrained runs keep the V21-PR-A legacy default ("classifier",
+    byte-identical behavior). A run constrained to exactly ONE type defaults
+    to that type — otherwise an LLM that simply omits the key would burn a
+    retry on a refusal the constraint already resolves. A multi-type
+    constraint keeps the legacy default and lets the gate decide.
+    """
+    if allowed is not None and len(allowed) == 1:
+        return allowed[0]
+    return "classifier"
+
+
+def _render_commit_system_prompt(
+    fc: ForwardContract,
+    blocks: Any = None,
+    *,
+    allowed_output_types: tuple[str, ...] | None = None,
+) -> str:
     """Render the legacy commit SYSTEM prompt from its declarations.
 
     Substitutes the tier-(i) verbatim-renderable task facts — those whose
@@ -1385,7 +1425,7 @@ def _render_commit_system_prompt(fc: ForwardContract, blocks: Any = None) -> str
         .replace(
             "{EVIDENCE_RATIONALE_CLAUSE}", _declared(blocks, "evidence_rationale_clause") or ""
         )
-    )
+    ) + ("" if not allowed_output_types else _output_type_constraint_note(allowed_output_types))
 
 
 def _build_commit_prompt(reasoning: str, existing_model_types: list) -> str:
@@ -1507,7 +1547,11 @@ class MLModelProposalAgent:
 
         commit_prompt = _build_commit_prompt(reasoning, inp.existing_model_types)
         raw = self.bridge.generate(
-            _render_commit_system_prompt(inp.forward_contract, inp.proposal_blocks),
+            _render_commit_system_prompt(
+                inp.forward_contract,
+                inp.proposal_blocks,
+                allowed_output_types=inp.allowed_output_types,
+            ),
             commit_prompt,
             label="proposer.legacy_commit",
         )
@@ -1526,7 +1570,9 @@ class MLModelProposalAgent:
                 # V21 PR A: the allow-list is explicit, so a field absent here is
                 # SILENTLY dropped and the schema default applies. Gate 1R caught
                 # exactly that: the agent complied, and output_type never arrived.
-                "output_type": raw.get("output_type", "classifier"),
+                "output_type": raw.get(
+                    "output_type", _default_output_type(inp.allowed_output_types)
+                ),
                 "model_description": raw.get("model_description", ""),
                 "mathematical_definition": raw.get("mathematical_definition", ""),
                 "motivation": raw.get("motivation", ""),
@@ -1538,6 +1584,7 @@ class MLModelProposalAgent:
             context={
                 "loss_registry_names": live_loss_registry_names(self._registry),
                 "model_registry_names": _live_model_registry_names(self._registry),
+                "allowed_output_types": inp.allowed_output_types,
             },
         )
 
@@ -2049,6 +2096,11 @@ class MLModelProposalAgent:
             template_vars=template_vars,
             baseline_isolation=inp.baseline_isolation,
         )
+        # arXiv #259 — same authority as the legacy commit prompt; appended
+        # ONLY when the run declares a constraint, so unconstrained pipeline
+        # prompts stay byte-identical.
+        if inp.allowed_output_types:
+            proposing_prompt += _output_type_constraint_note(inp.allowed_output_types)
 
         # Phase K.8 debug instrumentation: optionally dump the rendered
         # proposing-stage system prompt so smoke runs can audit the exact
@@ -2153,7 +2205,9 @@ class MLModelProposalAgent:
                     {
                         "model_name": proposed_name,
                         # V21 PR A — see the note at the other construction site.
-                        "output_type": raw.get("output_type", "classifier"),
+                        "output_type": raw.get(
+                            "output_type", _default_output_type(inp.allowed_output_types)
+                        ),
                         "model_description": raw.get("model_description", ""),
                         "mathematical_definition": raw.get("mathematical_definition", ""),
                         "motivation": raw.get("motivation", ""),
@@ -2171,6 +2225,7 @@ class MLModelProposalAgent:
                     context={
                         "loss_registry_names": live_loss_registry_names(self._registry),
                         "model_registry_names": _live_model_registry_names(self._registry),
+                        "allowed_output_types": inp.allowed_output_types,
                     },
                 )
                 # Citation discipline — warnings, not hard failures.
