@@ -66,8 +66,9 @@ optional `TaskScopeCapability` sibling — `build_training_scope`,
 must be **canonical**: the framework hashes it to verify the scope across the
 process boundary.
 
-> 🟡 Scopes built this way reach the **training** child today. Reaching the
-> inference and scoring children is owned by the unmerged PR-12d. See
+> ✅ Scopes built this way reach **all three** child processes — training,
+> inference and scoring — as a hash-verified artifact; each child recomputes the
+> digest before deserializing. See
 > [supported tasks](../concepts/supported-tasks.md).
 
 ## Step 3 — Write the task config
@@ -126,10 +127,18 @@ registration API, and it can live entirely outside the repository.
 Declare `task_health: {none: true}` if you genuinely have no health family.
 **Do not omit the section** — omission means TIDMAD's family.
 
-## Step 7 — Declare the deliverable naming
+## Step 7 — Decide who names the deliverables
 
-Do this even though it is optional. Omitting it gives you TIDMAD's naming
-template and a cleanup glob derived from it.
+Two legitimate shapes, and the framework distinguishes them honestly:
+
+- **Your data path names its own artifacts** (the usual case — Pets and DAVIS
+  both work this way): `write_deliverable` / `read_evaluation_payload` own the
+  filenames outright, alongside a declared deliverable name. **Omit the
+  `deliverable` section.** A composed run whose task names its own artifacts is
+  *refused* an indexed template rather than silently handed TIDMAD's — so no
+  cleanup glob can ever address files your run never wrote.
+- **Your task genuinely names artifacts by a zero-padded input index**: declare
+  the template explicitly.
 
 ```yaml
 deliverable:
@@ -157,15 +166,31 @@ Use `file:` references for your plugins if the package lives outside the SIDERIU
 tree. Paths resolve against the manifest's own directory, so the package is
 relocatable.
 
-## Step 9 — Provide a model plugin path
+## Step 9 — Declare your model and loss plugins
 
-Model and loss plugins are **not** declared in the manifest. Point
-`SIDERIUS_PLUGIN_DIRS` (and `SIDERIUS_LOSS_DIRS`, if you have custom losses) at
-your plugin directory.
+Declare them in the manifest:
 
-> 🟡 A composed run's *child processes* do not currently inherit a pack's plugin
-> directory automatically — the existing example harnesses set it themselves.
-> Automatic propagation is owned by the unmerged PR-12d.
+```yaml
+model_plugins:
+  dir: ./plugins            # manifest-relative; resolved and identity-pinned
+  require: [my_reference_model]   # model types this root MUST produce
+
+loss_plugins:               # only if you ship a custom loss
+  dir: ./plugins
+```
+
+`require:` is not decoration — without it, an unresolvable plugin would be
+indistinguishable from a directory that simply had nothing in it. The declared
+roots become a run-scoped binding whose content identities join the run's
+fingerprint, and every child subprocess receives them automatically: the spawn
+environment **unions** the declared roots into `SIDERIUS_PLUGIN_DIRS` /
+`SIDERIUS_LOSS_DIRS`, so a child can add to the set but can never drop what the
+run declared. (The environment variables still work on their own for
+un-composed runs.)
+
+If the task requires one specific training objective, also declare it —
+`objective:` names the loss plugin's own self-declaration symbol, and the
+resulting `LossConfig` overrides the planner's choice as a typed authority.
 
 ## Step 10 — Launch
 

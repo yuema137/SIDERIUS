@@ -1,9 +1,10 @@
 # Plugins, identity and provenance
 
 **Semantic owners**: `workflows/task_composition.py` (manifest-declared),
+`ml_models/plugin_binding.py` (declared model/loss roots),
 `ml_models/plugin_loader.py` and `agent_generated/_loss_loader.py`
 (directory-scanned), `execute_tools/health_checks/_plugin_binding.py` (health)
-**Status**: ✅ Current, with one stated propagation gap
+**Status**: ✅ Current
 
 ---
 
@@ -20,16 +21,20 @@ provenance names exactly what produced it.
 | **TaskScopeCapability** | `Protocol`, 4 methods | *not a section* — an optional sibling on the same object | duck-typed callability | ✅ rides the data path |
 | **TaskTrialAnchoring** | `Protocol`, 1 method | same object | `declares_trial_anchoring` TypeGuard | ✅ |
 | **EvaluationMetric** | ABC | manifest `metric` / `secondary_metrics[i]` | `_load_symbol`, instantiated with the declared spec, type-checked | ✅ via `file:` |
-| **ScoreabilityContract** | `BaseModel, ABC` | inside the metric declaration JSON | Pydantic, `SerializeAsAny` | ✅ shipped in the metric plugin |
+| **ScoreabilityContract** | `BaseModel, ABC` | inside the metric declaration JSON, by `contract_id` | rebuilt from a **closed** declaration lookup (`_SCOREABILITY_CONTRACT_TYPES`, `execute_tools/evaluation_metric.py:687`) | ❌ closed vocabulary, not a plugin surface — a new contract class is a framework contribution; an unknown id is refused by name |
 | **HealthCheckSkill** | `Protocol` | task health YAML `roster[].check` + `plugins:` | file/dir executed; plugin calls public `register()` | ✅ |
 | **HealthViewProvider** | `Protocol` | task health YAML `providers:` | resolved against what plugins registered | ✅ |
-| **Model plugin** | attribute contract | **not in the manifest** | directory scan | ✅ env var only |
-| **Loss plugin** | attribute contract | **not in the manifest** | directory scan | ✅ env var only |
+| **Model plugin** | attribute contract | manifest `model_plugins` (`dir` + `require`) *or* env var | directory scan over the declared/injected roots | ✅ |
+| **Loss plugin** | attribute contract | manifest `loss_plugins` (`dir`) *or* env var | directory scan; resolved by `loss_name` at training time | ✅ |
+| **Objective (authoritative loss)** | the loss plugin's own self-declaration symbol | manifest `objective.implementation` | `_load_symbol` returns the declared loss name → a validated `LossConfig` | ✅ via `file:` |
 | **DeliverableNaming** | `BaseModel` — a *declaration*, not code | manifest `deliverable` | direct Pydantic construction | ❌ no `module:`/`file:` form |
 
 ### The two directory-scanned families
 
-Model and loss plugins are the only kinds unreachable from the manifest:
+Model and loss plugins resolve by directory scan. A composed run declares the
+roots in the manifest (`model_plugins:` / `loss_plugins:` — PR-12d seams P/D4c,
+resolved by `resolve_declared_model_plugins` with content identities pinned);
+an un-composed run supplies them by environment variable:
 
 ```
 SIDERIUS_PLUGIN_DIRS   os.pathsep-separated   → PLUGIN_MODEL_TYPE / PLUGIN_CONFIG_CLASS / PLUGIN_MODEL_CLASS (+ PLUGIN_OUTPUT_TYPE)
@@ -64,9 +69,14 @@ production path writes into the checkout**. Each run's lock records the
 resolved root as `generated_library` provenance (`{root, source}`;
 recorded, never compared).
 
-> ⏳ A pack's plugin directory does **not** currently propagate to a composed
-> run's children — the two example harnesses set the env var themselves, and the
-> chain launchers contain zero injections. 🧭 PR-12d (seam P).
+> ✅ A pack's declared plugin roots propagate to a composed run's children
+> automatically (PR-12d seam P): `core/subprocess_env.py::subprocess_env`
+> **unions** the run-scoped declared roots into `SIDERIUS_PLUGIN_DIRS` /
+> `SIDERIUS_LOSS_DIRS` at every child spawn — a child or runtime default may
+> extend the set the run declared, but can never overwrite or drop it. The
+> ambient environment is deliberately *not* a third union source: with no
+> binding, the inherited value passes through byte-unchanged, so un-composed
+> plugin resolution is observably identical to the pre-seam behaviour.
 
 ## `module:` versus `file:`
 
@@ -137,10 +147,12 @@ plugins next to a scanned directory without them being picked up implicitly.
 
 | concern | location |
 |---|---|
-| symbol loading, digesting | `workflows/task_composition.py:420-514` |
-| fingerprint | `:961-1046` |
-| registration rollback | `:494-506`, `execute_tools/task_registration_scope.py` |
-| data-path registry | `execute_tools/task_data_path.py:668-691` |
+| symbol loading, digesting | `workflows/task_composition.py:451-547` (`_load_symbol`) |
+| fingerprint | `:1509` (`compute_semantic_fingerprint`) |
+| declared model/loss roots | `:1008` / `:1084`; binding + identities in `ml_models/plugin_binding.py` |
+| child env union | `core/subprocess_env.py::subprocess_env` |
+| registration rollback | `:525-527`, `execute_tools/task_registration_scope.py:114` |
+| data-path registry | `execute_tools/task_data_path.py:612-743` (`register_task_data_path` `:682`) |
 | model plugin loader | `ml_models/plugin_loader.py:9-13, 32, 110-199` |
 | loss plugin loader | `agent_generated/_loss_loader.py:8-10, 26-27, 99-136` |
 | health plugin binding | `execute_tools/health_checks/_plugin_binding.py:34-37, 86-91` |

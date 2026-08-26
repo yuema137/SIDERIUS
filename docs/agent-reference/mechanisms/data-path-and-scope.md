@@ -2,7 +2,7 @@
 
 **Semantic owners**: `execute_tools/task_data_path.py`,
 `execute_tools/dataset_config.py`, `execute_tools/scope_artifact.py`
-**Status**: ✅ Current, with one stated boundary (see *Maturity*)
+**Status**: ✅ Current
 
 ---
 
@@ -127,27 +127,32 @@ registration* and the child verifies it *before consuming*.
 | `TaskDataPath` four methods | ✅ |
 | `TaskScopeCapability` construction and serialisation | ✅ |
 | scope artifact reaching the **training** child | ✅ |
-| scope artifact reaching the **inference** child | ⏳ 🧭 PR-12d |
-| scope artifact reaching the **scoring** child | ⏳ 🧭 PR-12d |
-| generic (non-TIDMAD) inference iteration | ⏳ 🧭 PR-12d |
+| scope artifact reaching the **inference** child | ✅ PR-12d |
+| scope artifact reaching the **scoring** child | ✅ PR-12d |
+| generic (non-TIDMAD) inference iteration | ✅ PR-12d — a supplied scope ⇒ the child iterates the task's own evaluation scope |
 
-On landed master `_task_scope_argv` has exactly one call site,
-`core/sandbox_executor.py:1622`, inside `execute_training`.
+On landed master the emitter is `task_scope_argv`
+(`execute_tools/scope_artifact.py:252`), called at **all three** spawn sites in
+`core/sandbox_executor.py` — `execute_training` (`:1542`), `execute_inference`
+(`:1839`) and `execute_scoring` (`:2180`); it returns `[]` for an absent scope,
+so un-composed argv is unchanged. All three children accept
+`--task_scope_ref` / `--task_scope_digest` and recompute the digest before
+deserializing.
 
 ## Source map
 
 | concern | location |
 |---|---|
-| `TaskDataPath` | `execute_tools/task_data_path.py:335-376` |
-| `TaskScopeCapability` | `:379-435` |
-| `TaskTrialAnchoring` | `:438-471` |
-| registry lifecycle | `:668-691` |
+| `TaskDataPath` | `execute_tools/task_data_path.py:350` |
+| `TaskScopeCapability` | `:394` |
+| `TaskTrialAnchoring` | `:453` |
+| registry lifecycle | `:612-743` (`register_task_data_path` `:682`) |
 | `DatasetProfile` | `execute_tools/dataset_config.py:466-486` |
 | `DataScope` | `:186-336` |
 | TIDMAD topology | `:814` |
 | scope artifact contract | `execute_tools/scope_artifact.py:1-40` |
 | read/write/paths | `:81`, `:91`, `:137` |
-| child-side consumption | `execute_tools/train_engine_sandbox.py:1755-1767` |
+| child-side consumption (`load_transported_scope`, `execute_tools/scope_artifact.py:199`) | `train_engine_sandbox.py:2207-2210` · `inference_single.py:772` · `denoising_score_single.py:240` |
 | implementations | `execute_tools/{tidmad,pets,davis}_data_path.py` |
 
 ## Related

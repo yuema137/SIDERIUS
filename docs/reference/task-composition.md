@@ -2,8 +2,8 @@
 
 **Audience**: anyone authoring or debugging a composition manifest.
 **Authority**: `workflows/task_composition.py` — `_MANIFEST_KEYS` /
-`_REQUIRED_KEYS` (`:94-123`), resolvers (`:420-1083`),
-`compose_run_task_bindings` (`:1308`), `bind_run_task_composition` (`:1485`).
+`_REQUIRED_KEYS` (`:96-121`), resolvers (`:706-1643`),
+`compose_run_task_bindings` (`:1867`), `bind_run_task_composition` (`:2092`).
 
 If this page and that module disagree, the module is right. It is the single
 authority; this page is a human-readable projection of it.
@@ -25,7 +25,7 @@ Two properties worth knowing before you start:
 There is **no `version` field**. (Recorded as a known gap — see
 [DOC-F3](../audit/documentation_gap_audit.md#12-findings-recorded-deliberately-not-fixed-here).)
 
-## The ten sections
+## The thirteen sections
 
 | section | required | what it declares | absence means |
 |---|:---:|---|---|
@@ -38,7 +38,10 @@ There is **no `version` field**. (Recorded as a known gap — see
 | `proposal_blocks` | — | task science for the proposer's prompts | the proposer gets **no** task science |
 | `implementor_blocks` | — | task science for the implementor's prompts | the implementor renders nothing |
 | `interpretation_blocks` | — | task science for the interpreter's prompts | the interpreter renders no task blocks |
-| `deliverable` | — | deliverable file naming | ⚠ **silently resolves to TIDMAD's naming template** |
+| `model_plugins` | — | the pack's model-plugin root + the model types it must produce | nothing bound; legacy discovery only |
+| `loss_plugins` | — | the pack's loss-plugin root | nothing bound; legacy loss discovery only |
+| `objective` | — | the task's **authoritative** training objective (overrides the planner) | no override; the planner's choice governs |
+| `deliverable` | — | an indexed deliverable filename template | see below — a task that names its own artifacts is **refused** an indexed template, never handed TIDMAD's |
 
 ### Why `task_health` is required but may say "none"
 
@@ -56,16 +59,27 @@ task_health:
 
 Declaring both `none: true` and `config:` is refused.
 
-### The one hazardous default
+### What `deliverable` absence means — four states, keyed on capability
 
-`deliverable` is the only optional section whose absence means something other
-than "nothing". Omit it and the run uses the shipped TIDMAD naming template —
-including the cleanup glob derived from it, which can match files the run never
-wrote.
+`deliverable` absence is resolved by `resolve_deliverable_naming`
+(`execute_tools/deliverable_spec.py:380`), and the discriminator is a
+**declared capability** — does the task name its artifacts itself? — never a
+task identity:
 
-**Declare it explicitly for any non-TIDMAD task.** Narrowing this so absence
-means clean emptiness is owned by the unmerged PR-12d
-([DOC-F1](../audit/documentation_gap_audit.md#12-findings-recorded-deliberately-not-fixed-here)).
+1. a naming is **bound** (the section was declared) → it is used, composed or
+   not;
+2. not bound and **not composed** → the legacy path, byte-for-byte unchanged;
+3. composed, and the task declares **no** deliverable name of its own → the
+   shipped indexed template (this is what TIDMAD's composed manifest resolves);
+4. composed, and the task **names its own artifacts** through its data path
+   (Pets, DAVIS) → **refused**: no indexed template exists for such a run, and
+   handing it TIDMAD's would give the cleanup glob filenames the run never
+   wrote.
+
+State 4 closed the old hazard (F-A4-1, PR-12d seam E), under which absence
+silently resolved TIDMAD's template for every composed task. The historical
+finding record is
+[DOC-F1](../audit/documentation_gap_audit.md#12-findings-recorded-deliberately-not-fixed-here).
 
 ## Declaring code: `module:` versus `file:`
 
@@ -130,7 +144,17 @@ implementor_blocks:                            # optional
 interpretation_blocks:                         # optional
   config: ./declared/interpretation_blocks.yaml
 
-deliverable:                                   # optional — but declare it
+model_plugins:                                 # optional
+  dir: ./plugins                               # resolved, content-identity-pinned
+  require: [my_reference_model]                # model types this root MUST produce
+loss_plugins:                                  # optional
+  dir: ./plugins                               # no `require` — losses resolve by name
+objective:                                     # optional — the task's authoritative loss
+  implementation:
+    file: ./plugins/my_exact_loss.py
+    symbol: PLUGIN_LOSS_TYPE                   # the plugin's own self-declared loss name
+
+deliverable:                                   # only if the task names artifacts by index
   prefix: my_task_output
   extension: npz
   index_width: 4
@@ -157,13 +181,15 @@ would fall back to the import-time TIDMAD data directory.
 
 | thing | how it is supplied instead |
 |---|---|
-| model plugins | `SIDERIUS_PLUGIN_DIRS` environment variable (directory scan) |
-| loss / objective plugins | `SIDERIUS_LOSS_DIRS` environment variable |
-| framework health policy | `configs/health_checks.yaml` |
+| framework health policy | `configs/health_checks.yaml` (owned by the framework, never the task) |
 | data scope, budgets, rounds | CLI flags — see [entrypoints](entrypoints.md) |
+| the physical data root | `--data_dir` (below) |
 
-The model/loss plugin split is worth remembering: those two families are the only
-plugin kinds **not** reachable from the manifest.
+Model and loss plugins *are* manifest-declarable (`model_plugins:` /
+`loss_plugins:` above). The `SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS`
+environment variables remain the un-composed channel — and at every child spawn
+the declared roots are **unioned** into them, so a child may add to the set the
+run declared but can never drop it.
 
 ## What happens at composition time
 
@@ -183,10 +209,16 @@ un-composed path with byte-identical child argv.
 ## Worked example
 
 `configs/task_composition/tidmad.yaml` is the shipped reference manifest. It
-declares eight of the ten sections — no `secondary_metrics` (TIDMAD has none) and
-no `deliverable` (it *is* the TIDMAD default). Nothing in it is special-cased:
-the id `tidmad` is an ordinary declared id and the built-in metric class is
-reached by the same `module:`/`symbol:` mechanism an external task uses.
+declares eight of the thirteen sections — no `secondary_metrics` (TIDMAD has
+none), no `deliverable` (it *is* the shipped indexed default — resolution
+state 3 above), no `model_plugins`/`loss_plugins` (TIDMAD's models are the
+built-ins plus run-generated plugins) and no `objective` (the planner chooses).
+Nothing in it is special-cased: the id `tidmad` is an ordinary declared id and
+the built-in metric class is reached by the same `module:`/`symbol:` mechanism
+an external task uses. `configs/task_composition/pets.yaml` and `davis.yaml`
+are the shipped contrast manifests — both declare `model_plugins:`, and
+`davis.yaml` additionally declares `loss_plugins:` and an authoritative
+`objective:`.
 
 ---
 

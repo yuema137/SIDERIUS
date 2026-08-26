@@ -12,8 +12,12 @@ duration of a run so that every downstream consumer reads the same authority.
 
 ## Non-responsibilities
 
-- It does **not** load model or loss plugins — those come from
-  `SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS`. See [plugins](plugins.md).
+- It does **not** scan for or import model/loss plugin *code* — it resolves the
+  task's **declared roots** (`model_plugins:` / `loss_plugins:`, PR-12d seams
+  P/D4c) into a run-scoped binding with pinned content identities; the actual
+  loading stays with the directory scanners, reached through the
+  `SIDERIUS_PLUGIN_DIRS` / `SIDERIUS_LOSS_DIRS` env union at spawn. See
+  [plugins](plugins.md).
 - It does **not** bind the Health family or the interpretation blocks. Both are
   passed explicitly rather than ambiently — Health into `build_run_invariants`,
   interpretation blocks as a field on `InterpretationInput`.
@@ -36,8 +40,8 @@ takes the ⚠ legacy un-composed path with byte-identical child argv.
 
 ## Inputs
 
-A manifest path. Ten possible sections, five required; unknown keys refused by
-set difference. See the [composition reference](../../reference/task-composition.md)
+A manifest path. Thirteen possible sections, five required; unknown keys refused
+by set difference. See the [composition reference](../../reference/task-composition.md)
 for the table.
 
 ## Outputs
@@ -101,27 +105,32 @@ The semantic fingerprint is stamped on every persisted record. Two records with
 the same fingerprint were produced under the same declared semantics — including
 the same file-plugin contents, since those hashes are folded in.
 
-## Known hazard
+## Deliverable-absence semantics
 
-⚠ Omitting `deliverable` resolves to the shipped TIDMAD naming, and the cleanup
-glob derived from it can match files the run never wrote. Narrowing is owned by
-the unmerged PR-12d (seam E / F-A4-1).
+Omitting `deliverable` is resolved by declared **capability**
+(`resolve_deliverable_naming`, `execute_tools/deliverable_spec.py:380` —
+PR-12d seam E, closing F-A4-1): a composed task that names its own artifacts
+through its data path is **refused** an indexed template (so no cleanup glob can
+address files the run never wrote); a composed task that does not — TIDMAD's own
+manifest — still resolves the shipped naming; the un-composed path is
+byte-unchanged. Four states, keyed on capability, never on task identity.
 
 ## Source map
 
 | concern | location |
 |---|---|
-| key sets | `workflows/task_composition.py:94-123` |
-| resolved carrier | `:177-296` |
-| manifest read / validate | `:309-352` |
-| path resolution | `:371-377` |
-| symbol loading (`module:` / `file:`) | `:420-514` |
-| per-section resolvers | `:532-1083` |
-| semantic fingerprint | `:961-1046` |
-| compose entrypoint | `:1308` |
-| run-scoped binding | `:1485-1565` |
-| post-condition guard | `:1568-1628` |
-| shipped manifest | `configs/task_composition/tidmad.yaml` |
+| key sets | `workflows/task_composition.py:96-121` |
+| resolved carrier (`RunTaskComposition`) | `:183` |
+| manifest read / validate | `:340-383` |
+| path resolution | `:402` |
+| symbol loading (`module:` / `file:`) | `:451-547` |
+| per-section resolvers | `:706-1643` |
+| declared model/loss roots + objective | `:1008` / `:1084` / `:1220` |
+| semantic fingerprint | `:1509` |
+| compose entrypoint | `:1867` |
+| run-scoped binding | `:2092` |
+| post-condition guard | `:2188` |
+| shipped manifests | `configs/task_composition/{tidmad,pets,davis,quickstart}.yaml` |
 
 ## Related
 

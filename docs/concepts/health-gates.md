@@ -94,15 +94,18 @@ When several gates fire in one round, severity resolves
 
 ## Where the settings live
 
-Two files, two owners, and the split is the point:
+Two documents, two owners, and the split is the point:
 
 - **Your thresholds** live in your task's health config — the roster, the numbers,
-  the peek set, the prose explaining what a failure means scientifically.
-- **What a failure does** lives in framework policy (`configs/health_checks.yaml`)
-  — role, cadence, short-circuit, actions.
+  the peek set, the prose explaining what a failure means scientifically. It is
+  your file, anywhere on disk, named by your manifest's `task_health:` section.
+- **What a failure does** lives in framework policy — role, cadence,
+  short-circuit, actions. The framework ships its policy (with an
+  observational variant a run selects via `--healthgate_mode observe_only`),
+  and a run can substitute its own policy file with `--health_checks_config`.
 
-To change *how strict* a check is, edit your task config. To change *what
-failing does*, edit framework policy. Neither file can express the other's
+Strictness is a decision you write in your own task config; consequences are
+a run-level policy selection. Neither document can express the other's
 concern.
 
 At run start the two are composed into a single effective config that is written

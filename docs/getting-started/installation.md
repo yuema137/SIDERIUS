@@ -11,7 +11,8 @@
 - **[uv](https://docs.astral.sh/uv/)** package manager
 - An **NVIDIA GPU with CUDA** — required for real training, not for the test
   suite
-- At least one LLM API key: OpenAI, Gemini and/or DeepSeek
+- At least one LLM API key — OpenAI, Gemini and/or DeepSeek — for **real
+  runs only**: the full unit suite runs with no key at all
 - Optional: a Semantic Scholar key, only for the literature-review stage
 
 ## Install
@@ -24,6 +25,28 @@ uv sync && source .venv/bin/activate
 
 > Always use the project virtualenv (`.venv/bin/python`). Never the system
 > `python` / `python3`.
+
+### The one supported environment path
+
+The reproducible form of the install — including the `dev` group with the
+lint/type/test tools — is exactly what CI runs before every gate
+(`.github/workflows/ci.yml`):
+
+```bash
+uv sync --group dev --frozen
+```
+
+`--frozen` installs from the committed `uv.lock` without re-resolving, so the
+resulting environment is the one CI continuously verifies on every run. That
+CI job is where the reproducibility claim is checked — we do not certify
+ad-hoc variations (`pip install`, conda, unlocked `uv sync`). Use this form if
+you plan to run the contributor gate (`make check`, see
+[`CONTRIBUTING.md`](../../CONTRIBUTING.md)).
+
+Supported interpreter and accelerator, today: **Python 3.12** (the version CI
+installs) and **CUDA GPUs only** for real training. The broader accelerator
+matrix (CPU-only training, ROCm, MPS) is tracked in issue #291 — that issue,
+not this page, owns the deeper answer.
 
 ## Machine-local configuration
 
@@ -46,6 +69,10 @@ You do **not** need to precompute a scoring anchor map — it ships committed at
 `reference_data/segment_anchors.json`.
 
 ## API keys
+
+Needed for real runs, not for the test suite — you can defer this until you
+launch [a real run](first-run.md). Keys live in a gitignored `.env` at the
+repository root; the LLM bridge loads it automatically:
 
 ```bash
 cat > .env << 'EOF'

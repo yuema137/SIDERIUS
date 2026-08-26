@@ -29,12 +29,16 @@ dependency**.
 | a metric declaration JSON | metric id, direction, aggregation, scoreability |
 | a dataset profile JSON | partition count, anchors, peek set, opaque topology |
 
-### Framework policy — rarely yours
+### Framework policy — the framework's, selectable per run
 
-| file | declares | edit when |
+| file | declares | when a run gets it |
 |---|---|---|
-| `configs/health_checks.yaml` | what a health failure **does**: gate role, cadence, short-circuit, `on_pass`/`on_fail` | you want to change consequences, not thresholds |
-| `configs/health_checks_baseline_observe_mode.yaml` | the same, with blocking failures downgraded to observation | running a diagnostic campaign |
+| `configs/health_checks.yaml` | what a health failure **does**: gate role, cadence, short-circuit, `on_pass`/`on_fail` | the default |
+| `configs/health_checks_baseline_observe_mode.yaml` | the same, with blocking failures downgraded to observation | `--healthgate_mode observe_only` — a diagnostic campaign |
+
+A run that needs different consequences selects its own policy file with
+`--health_checks_config /path/to/policy.yaml`; the shipped pair is the
+framework's, not a per-task customization surface.
 
 The split is the point. **Thresholds are task policy; consequences are framework
 policy.** Neither file can express the other's concern, so a task and the
@@ -83,18 +87,19 @@ generated per workspace, pinned      →  effective health config, invariants lo
 
 > "I want the collapse check to be stricter."
 
-Edit `configs/task_health/<task>.yaml` — the threshold lives in the roster
-entry's `parameters`.
+The threshold lives in the roster entry's `parameters` in **your task's
+health config** — the file your manifest's `task_health:` section names,
+wherever it lives on disk. (The shipped TIDMAD reference is the in-repo
+example of the format.)
 
 > "I want a collapse to stop the round instead of just being recorded."
 
-Change that check's `disposition` to `blocking` in the same file. What *blocking*
-then does is framework policy and you do not write it.
+Flip that check's `disposition` to `blocking` in the same task health config.
+What *blocking* then does is framework policy and you do not write it.
 
 > "I want blocking failures to stop blocking, temporarily."
 
-Use `configs/health_checks_baseline_observe_mode.yaml`, or
-`--healthgate_mode observe_only`.
+Launch with `--healthgate_mode observe_only`.
 
 ---
 

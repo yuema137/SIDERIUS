@@ -4,7 +4,7 @@
 **Purpose**: get from an intent to the 1–3 documents that let you work safely,
 without reading the 170,000-line design archive.
 
-**Reflects landed `master` at `cfaa5572`.** Where a mechanism is in flight, the
+**Reflects landed `master` at `23276743`.** Where a mechanism is in flight, the
 document says so and names the owner.
 
 ---
@@ -70,12 +70,13 @@ Each node owns one stage. Its `.md` is the contract.
 | [`ml_code_validator_agent`](../../nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
 | [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1793` (parser and input builder in `cli.py`) |
 
-Five of the six nodes are standalone-capable — each exposes an `argparse`
-`main()` behind `if __name__ == "__main__":` at the line cited. The CLI column
-is verified by `tests/unit/docs/test_node_docs_contract.py`: the cited line
-must be a `def main` and a node marked workflow-only must have no `__main__`
-guard. Invocation examples for the tuner's CLI are deliberately not written
-here while its `cli.py` is changing in PR-12d.
+All six nodes are standalone-capable — each exposes an `argparse` `main()`
+behind `if __name__ == "__main__":` at the line cited
+(`ml_literature_review`'s CLI landed with #303/#305). The CLI column is
+verified by `tests/unit/docs/test_node_docs_contract.py`: exactly six
+`file:line` citations, each pointing at a `def main` line, and every node
+doc's declared type must match its module's `__main__` reality. Invocation
+details live in each node's own `.md`.
 
 Adding a node: [`nodes/NODE_TEMPLATE.md`](../../nodes/NODE_TEMPLATE.md) — all
 eight steps, including the connection audit.

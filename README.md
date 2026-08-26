@@ -41,7 +41,7 @@ surfacing recent papers as soft priors.
 ![What you declare versus what SIDERIUS provides](docs/assets/ownership-split.svg)
 
 Nothing about your task is hardcoded in framework source. A **task package** is
-one YAML manifest — ten possible sections, five required — plus whatever small
+one YAML manifest — thirteen possible sections, five required — plus whatever small
 amount of Python the framework cannot supply generically for your data. A package
 can live entirely outside this repository.
 
@@ -75,12 +75,15 @@ branches on a task name. Three example tasks exist as evidence of tested breadth
 | example | shape | status |
 |---|---|---|
 | **TIDMAD** | 1-D scientific signal denoising (SQUID time series, axion dark-matter search) | ✅ runs the full agent loop end-to-end through the production chain |
-| **Oxford-IIIT Pet** | RGB image, 37-way breed classification | 🟡 real data, training, inference and scoring — through a direct-execution harness, **not** the production chain |
-| **DAVIS 2017** | RGB spatiotemporal, 8→4 future-frame prediction | 🟡 same |
+| **Oxford-IIIT Pet** | RGB image, 37-way breed classification | ✅ real data, training, inference and scoring through the **composed production chain** (single-round witness; `examples/oxford_iiit_pet/quickstart.sh`) |
+| **DAVIS 2017** | RGB spatiotemporal, 8→4 future-frame prediction | ✅ same, including a task-declared training objective overriding the planner |
 
-The difference is real and this documentation states it everywhere it matters:
-the execution path below the composition edge is not yet task-neutral end to end,
-so the contrast tasks cannot currently run the chain. Closing that is in flight.
+A fourth proof exists beyond the shipped examples: an external task package
+living entirely outside this repository ran the composed workflow with the
+production source byte-identical before and after. The remaining honest
+asymmetry is depth, and the docs state it where it matters: TIDMAD has run
+multi-iteration research chains; the contrast tasks have each executed one
+composed round, and health gates do not yet fire on the composed path.
 
 → [Supported tasks and current maturity](docs/concepts/supported-tasks.md) —
 current state and target state in one table
@@ -213,6 +216,24 @@ Real-API and real-training tiers are opt-in (`--real-api-call`,
 `--real-training`, `-m real_run`) and skip automatically without the required
 keys. They never run in CI.
 
-## License
+## Contributing
 
-(To be added.)
+One command is the local gate — no GPU, no dataset, no API key:
+
+```bash
+make check   # ruff check · ruff format --check · pyright (when runnable) · unit tier
+```
+
+It runs the same commands as CI's quality job (`.github/workflows/ci.yml`),
+and the one supported environment for it is `uv sync --group dev --frozen` —
+exactly what CI installs. The runtime bound, the pyright skip rule, what the
+gate does *not* cover, and the pre-PR expectation:
+[`CONTRIBUTING.md`](CONTRIBUTING.md).
+
+## Availability and license
+
+SIDERIUS is in a **closed beta**: the source is shared with invited
+collaborators for research use, and is not yet licensed for redistribution
+or reuse outside that collaboration. An open-source license will be chosen
+before public release; until then, all rights are reserved and the package
+metadata deliberately carries no license field.

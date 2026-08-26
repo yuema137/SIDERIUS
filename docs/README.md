@@ -19,11 +19,18 @@ A progressive path. Each level assumes the one before it.
 - [What a task must provide](concepts/task-package.md)
 - [Objectives, metrics, and what "better" means](concepts/objectives-and-metrics.md)
 - [Health gates](concepts/health-gates.md) — validity, as distinct from quality
+- [Data paths](concepts/data-paths.md) — how a task's data is read, and by whom
+- [The execution model](concepts/execution-model.md) — parent, children, and what crosses the boundary
+- [Persistence and records](concepts/persistence-and-records.md) — what a run writes and why
+- [Plugins and generated code](concepts/plugins-and-generated-code.md) — task code, agent code, and the cross-run library
 - [Supported tasks and current maturity](concepts/supported-tasks.md)
 - [Glossary](concepts/glossary.md)
 
 **Bring your own task**
 - [Define your own task](guides/define-a-task.md)
+- [Bring your own metric](guides/bring-your-own-metric.md) — a worked, runnable example
+- [Bring your own health checks](guides/bring-your-own-health-checks.md) — a worked, runnable example
+- [Bring your own train/test split](guides/bring-your-own-split.md) — split declaration, the scope capability, and the comparability consequences
 - [Task composition reference](reference/task-composition.md) — required vs optional
 - [Configuration map](reference/configuration-map.md) — who owns which file
 
@@ -78,7 +85,8 @@ Node contracts:
 
 [TIDMAD](../examples/tidmad/README.md) ·
 [Oxford-IIIT Pet](../examples/oxford_iiit_pet/README.md) ·
-[DAVIS 2017](../examples/davis_future_prediction/README.md)
+[DAVIS 2017](../examples/davis_future_prediction/README.md) ·
+[quickstart](../examples/quickstart/README.md)
 
 Each carries a `STATUS.md` declaring its maturity and a `PROVENANCE.md`
 recording its dataset source and licence.

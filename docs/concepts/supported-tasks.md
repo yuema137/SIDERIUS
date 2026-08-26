@@ -1,7 +1,7 @@
 # Supported tasks and current maturity
 
 **Audience**: anyone deciding whether SIDERIUS can run *their* task today.
-**Reflects**: landed `master` at `cfaa5572` (2026-08-23).
+**Reflects**: landed `master` at `23276743` (2026-08-25).
 
 This page exists so that nobody has to reconstruct the answer from design
 documents. It states what works now, what is being built, and — where those
@@ -48,73 +48,78 @@ table below keeps them apart.
 | **primary metric** | denoising score, higher | accuracy, higher | global MSE, lower |
 | **expressible by current contracts** | ✅ | ✅ | ✅ |
 | **real data path implemented** | ✅ | ✅ | ✅ |
-| **real training / inference / scoring executed** | ✅ | ✅ *(via harness)* | ✅ *(via harness)* |
-| **runs through the production chain** | ✅ | ⏳ | ⏳ |
-| **full agent loop demonstrated** | ✅ | ⏳ | ⏳ |
+| **real training / inference / scoring executed** | ✅ | ✅ | ✅ |
+| **runs through the production chain** | ✅ | ✅ | ✅ |
+| **full agent loop demonstrated** | ✅ | 🟡 *(one composed iteration)* | 🟡 *(one composed iteration)* |
 | **persistent example pack** | ✅ *(read-only projection)* | ✅ | ✅ |
-| **declared maturity** | **L4** | **L2/L3 executable** | **L2/L3 executable** |
+| **declared maturity** | **L4** | **L4** | **L4** |
 
 ### What the Pets and DAVIS rows mean concretely
 
-Both contrast tasks execute real data loading, real training, real inference and
-real scoring against real downloaded datasets. They do so through **direct
-execution harnesses** (`scripts/run_pets_gate2.py`, `scripts/run_davis_gate2.py`)
-which call the experiment runner in-process.
+Both contrast tasks now run through the **normal composed production chain**
+across the real subprocess boundary — PR-12d landed this (`84d74280`, PR #274).
+All three child processes (training, inference, scoring) receive the task's
+scope as a hash-verified artifact; the inference child iterates the task's own
+evaluation scope; the scoring child resolves the run-bound `TaskDataPath` and
+the run's declared metric with no fallback; and the packs' model plugins are
+declared in the manifest and reach every child. The `G-12d` witness runs are
+persisted: one formal round each, `status: success`, with the primary and both
+declared secondaries evaluated (Pets `accuracy` 0.0946, `macro_f1`, `log_loss`;
+DAVIS `mse` 0.016067, `psnr`, `mae`) — recorded in each pack's `STATUS.md`.
 
-They do **not** currently run through the production chain, because the execution
-path below the composition edge is not yet task-neutral end to end:
+Three honesty caveats those runs do **not** erase:
 
-- only the *training* child process receives the task scope; the inference and
-  scoring children do not;
-- the scoring child is unconditionally TIDMAD-shaped — it derives its sample set
-  from TIDMAD topology at module level, and fails closed for any profile that has
-  none;
-- the inference child iterates partitions using TIDMAD's file/segment topology;
-- a task pack's model plugin is not made visible to a composed run's children.
+- **No scientific claim.** The recorded values are observations from a
+  single-round plumbing witness, not benchmark results. Pets' 0.0946 against a
+  37-way chance of 0.027 says the plumbing works, not that the model is good.
+- **Zero health gates fired on either composed run.** HealthGate evaluation is
+  still reached only on the legacy chain branch; this is declared debt in the
+  PR-12d ledger (§A1), stated the same way in
+  [bring your own health checks](../guides/bring-your-own-health-checks.md#an-honesty-note-about-enforcement-today).
+- **One round each, not a chain.** No multi-iteration composed behaviour for
+  either pack is evidenced yet — hence the 🟡 in the loop row above.
 
-Closing all four is the entire purpose of the unmerged **PR-12d**. Until it
-lands, a statement like "SIDERIUS runs image classification end to end" is true
-only of the harness, and this documentation will not say it any other way.
-
-Pets is also worth reading about for a second reason: its measured accuracy is
-0.027 — chance for 37 classes. That is a genuine, reproducible
-constant-prediction collapse, kept deliberately as health-gate evidence rather
-than tuned away.
+The earlier direct-execution harness era also left one artefact worth knowing:
+a genuine, reproducible Pets constant-prediction collapse (accuracy 0.027 —
+chance), kept deliberately as committed health-gate evidence rather than tuned
+away.
 
 ## Capability status
 
 | capability | status | note |
 |---|---|---|
-| task composition manifest binds a whole run | ✅ | five required sections; unknown keys refused |
+| task composition manifest binds a whole run | ✅ | thirteen known sections, five required; unknown keys refused |
 | out-of-tree plugin by `file:` reference | ✅ | data path, metric, health checks and view providers |
 | plugin content hashed into the run fingerprint | ✅ | an edited plugin is detected, not silently used |
 | declared secondary metrics carried through the lifecycle | ✅ | evaluated, recorded, rendered; never an ordering operand |
 | task-owned health family, thresholds and plugins | ✅ | external task needs no SIDERIUS edit |
-| task-owned scope construction (`TaskScopeCapability`) | ✅ | crosses to the **training** child as a hash-verified artifact |
-| task scope reaches inference and scoring children | ⏳ | 🧭 PR-12d |
-| generic (non-TIDMAD) inference iteration | ⏳ | 🧭 PR-12d |
-| generic scoring handoff | ⏳ | 🧭 PR-12d |
-| pack model plugin visible to a composed run | ⏳ | 🧭 PR-12d |
-| Pets `macro_f1` / `log_loss`, DAVIS `psnr` / `mae` evaluated | ⏳ | declared in the packs; 🧭 PR-12d implements them |
-| omitting `deliverable` means "nothing" rather than "TIDMAD's template" | ⏳ | ⚠ current absence resolves to TIDMAD naming; 🧭 PR-12d narrows it |
-| one documented run command per example pack | ⏳ | 📝 PR-12e (design **not frozen**) |
-| complete out-of-tree task *package* contract | ⏳ | 📝 PR-12e — the `file:` primitive exists; the package contract does not |
-| a fourth task running with zero framework edits | ⏳ | 📝 PR-12e — the graduation proof |
+| task-owned scope construction (`TaskScopeCapability`) | ✅ | crosses to **all three** children as a hash-verified artifact |
+| task scope reaches inference and scoring children | ✅ | emitted at all three spawn sites; the child verifies the digest before deserializing |
+| generic (non-TIDMAD) inference iteration | ✅ | with a scope artifact, the inference child iterates the task's own evaluation scope |
+| generic scoring handoff | ✅ | the scoring child resolves the run-bound data path + declared metric; **no fallback** |
+| pack model plugin visible to a composed run | ✅ | `model_plugins:` / `loss_plugins:` manifest sections; declared roots reach every child spawn |
+| Pets `macro_f1` / `log_loss`, DAVIS `psnr` / `mae` evaluated | ✅ | pack-local implementations; evaluated on the `G-12d` composed runs |
+| omitting `deliverable` means "nothing" rather than "TIDMAD's template" | ✅ | a composed task that names its own artifacts gets an honest refusal, never TIDMAD naming |
+| one documented run command per example pack | ✅ | `examples/<pack>/quickstart.sh` — a thin adapter over the normal chain launcher |
+| complete out-of-tree task *package* contract | ✅ | PR-12e — see [what a task must provide](task-package.md) |
+| a fourth task running with zero framework edits | ✅ | the `G-12e` graduation proof: an external event-sequence package ran the composed workflow with the production source byte-identical before and after |
+| health gates firing on the composed chain path | ⏳ | declared debt (PR-12d ledger §A1) — a composed run records zero gate results today |
 
 ## Where this is heading
 
-Step 12 of the framework roadmap is the *graduation* step: its goal is that a
+Step 12 of the framework roadmap was the *graduation* step: its goal was that a
 materially new scientific task package living **outside** the SIDERIUS source tree
 can declare all of its semantics through public mechanisms and run the normal
 workflow — parent process and every child process — with **zero** edits to
 SIDERIUS production source.
 
-Two of its four children have landed (12a, 12bc). PR-12d closes the contrast
-execution path; PR-12e is the graduation proof and its design is still a draft.
-
-When those land, the rows above move from ⏳ to ✅ — and updating this page should
-be a small mechanical edit, which is why the current and target states are kept in
-one table rather than in two documents that can disagree.
+All four of its children have landed — 12a (#248), 12bc (#249), 12d (#274) and
+12e (#306) — plus the C12-P composed admission/preflight closure (#295/#298/#296).
+The graduation claim is evidenced: the `G-12e` run executed an external
+event-sequence package through the composed workflow, across a real process
+restart, with the production-source sha256 manifest byte-identical before and
+after. The one deliberately open row above — health gates on the composed chain
+path — is named debt, not an oversight.
 
 ---
 

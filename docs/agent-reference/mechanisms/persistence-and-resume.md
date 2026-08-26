@@ -125,7 +125,7 @@ start.
 |---|---|
 | invariants + partitioning | `core/run_invariants.py` |
 | findings union authority | `core/resume.py::union_key_findings` |
-| lock construction ordering | `workflows/model_exploration.py:1948-1982` |
+| lock construction ordering | `workflows/model_exploration.py:2196` (`build_run_invariants`) → `:2281` (`ensure_run_invariants`) |
 | chain state carry | `workflows/model_exploration.py` (`ChainState`) |
 | resume inspector | `scripts/inspect_run_state.py` |
 

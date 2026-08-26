@@ -3,9 +3,9 @@
 **Audience**: a scientist or engineer bringing their own problem to SIDERIUS.
 **Answers**: "what do I actually have to write?"
 
-The short answer: **one YAML manifest with ten possible sections, five of which
-are required**, plus whatever small amount of Python the framework cannot supply
-generically for your data.
+The short answer: **one YAML manifest with thirteen possible sections, five of
+which are required**, plus whatever small amount of Python the framework cannot
+supply generically for your data.
 
 This page explains the concepts. The exact table — every section, required or
 optional, what absence means — is the
@@ -69,7 +69,11 @@ description is refused.
 
 What optimisation minimises during training. Most tasks use a built-in
 (cross-entropy, MSE, L1, focal loss, …). If your science needs something else,
-you supply a loss plugin — the same shape as a model plugin.
+you supply a loss plugin — the same shape as a model plugin — and the manifest
+names where it lives (`loss_plugins:`). If your science requires one *specific*
+objective, declare it authoritative (`objective:`): the task's declaration then
+overrides whatever the LLM planner would have chosen, as a typed value rather
+than a prompt suggestion.
 
 The objective is **not** the same thing as the evaluation metric, even when the
 mathematics is identical. See
@@ -139,11 +143,15 @@ and its content hash joins the run's semantic fingerprint, so an edited plugin i
 detected rather than silently used.
 
 > ✅ **Current**: `file:` plugin references, out-of-tree metric and data-path
-> implementations, and out-of-tree health plugins all work today.
-> 🧭 **Planned (PR-12e, design not yet frozen)**: a full *package* contract with a
-> single documented run command per package, and a demonstrated fourth task
-> living entirely outside the repository. See
-> [Supported tasks and current maturity](supported-tasks.md).
+> implementations, out-of-tree health plugins, manifest-declared model and loss
+> plugin roots (`model_plugins:` / `loss_plugins:`), and a task-declared
+> authoritative training objective (`objective:`) all work today. The full
+> package contract is demonstrated end to end: a fourth task living entirely
+> outside the repository ran the composed workflow with zero framework edits
+> (PR-12e's `G-12e` proof), and each shipped example pack carries one documented
+> run command (`examples/<pack>/quickstart.sh` —
+> [the pack index](../../examples/README.md) is the worked-example surface).
+> See [Supported tasks and current maturity](supported-tasks.md).
 
 ## What absence means
 
@@ -154,9 +162,16 @@ optional section usually means **nothing is supplied** — not "use a default":
 - no `proposal_blocks` → the proposer receives no task science
 - no `interpretation_blocks` → the interpreter renders no task blocks
 
-There is **one exception**, and it is a known hazard: omitting the `deliverable`
-section silently resolves to TIDMAD's file-naming template. Declare it explicitly
-for any non-TIDMAD task. (Narrowing this is owned by the unmerged PR-12d.)
+There is **one nuance**, and it used to be a hazard: the `deliverable` section
+(an indexed file-naming template). If your task names its own artifacts through
+its data path — `write_deliverable` / `read_evaluation_payload` with a declared
+deliverable name, as Pets and DAVIS do — omit the section: a composed run then
+gets an **honest refusal** wherever an indexed template would be consulted,
+never TIDMAD's template. Declare the section only if your task genuinely names
+its artifacts by a zero-padded input index. (Before PR-12d landed, absence
+silently resolved to TIDMAD's naming — that fallback is gone for tasks that own
+their names; a composed task that declares neither, like TIDMAD's own manifest,
+still resolves the shipped template.)
 
 ---
 

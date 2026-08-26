@@ -5,8 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "siderius"
 version = "0.1.0"
-description = "Add your description here"
+description = "Closed-loop research framework for supervised scientific machine learning: LLM agents propose, implement and interpret models; deterministic infrastructure trains, scores and guards them"
 readme = "README.md"
+authors = [{ name = "SIDERIUS developers" }]
+# CI runs on Python 3.12 exactly (`uv python install 3.12` in
+# .github/workflows/ci.yml); the range below is deliberately left as the
+# lock-compatible ">=3.12" — narrowing it would invalidate the committed
+# uv.lock, and 3.12 is the only continuously verified interpreter.
 requires-python = ">=3.12"
 dependencies = [
     "h5py>=3.16.0",

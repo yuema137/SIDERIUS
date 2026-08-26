@@ -272,9 +272,10 @@ Every node (leaf or orchestrator) must satisfy:
 - **Programmatic interface**: `run(input: NodeInput) -> NodeOutput` — called by
   orchestrators, demo scripts, and tests.
 - **CLI interface**: `argparse` entry point — called by humans for standalone use or
-  debugging. Five of the six built nodes expose one (`main()` behind
-  `if __name__ == "__main__":`); `ml_literature_review` is workflow-only and is
-  driven programmatically. The per-node `main()` locations are tabulated in
+  debugging. All six built nodes expose one (`main()` behind
+  `if __name__ == "__main__":`); `ml_literature_review`'s landed last (#303/#305),
+  reading its upstream record from disk by naming convention. The per-node
+  `main()` locations are tabulated in
   [`docs/agent-reference/README.md`](agent-reference/README.md).
 - **Schema validation**: input is validated via `model_validate()` at entry; output is
   validated via `model_validate()` before returning.
@@ -406,8 +407,9 @@ Human / Top-level CLI
 ```
 
 A human can substitute for any workflow or orchestrator at any level by manually
-applying protocols and calling nodes via CLI — for five of the six nodes;
-`ml_literature_review` has no CLI and must be driven from Python.
+applying protocols and calling nodes via CLI — all six nodes expose one
+(#303 gave `ml_literature_review` its `main()`; upstream records are read
+from disk by the same naming convention the other CLIs use).
 
 ### Workflows vs. Orchestrators
 
@@ -524,7 +526,7 @@ Load memory → Propose hypothesis + config (LLM) → Resource check
 | `ml_model_proposal_agent` | Reads interpretation → proposes new model architecture + expert advice | no | no | yes |
 | `ml_model_implementor` | Takes a model proposal → writes PyTorch code + unit tests | no | yes | yes |
 | `ml_code_validator_agent` | 7 checks: plugin load, pytest, description, config fields, instantiation, gradient flow, LLM code review with runtime diagnosis | no | no | yes |
-| `ml_literature_review` | Resolves root papers, searches Semantic Scholar around the current bottlenecks, synthesises findings as soft priors (optional stage; workflow-only, no CLI) | no | no | yes |
+| `ml_literature_review` | Resolves root papers, searches Semantic Scholar around the current bottlenecks, synthesises findings as soft priors (optional stage) | no | no | yes |
 | `data_analysis_agent` (**planned — not built**) | Profiles dataset properties, detects distribution shifts | no | no | yes |
 
 Six of these are built; `data_analysis_agent` is the intended data-analysis

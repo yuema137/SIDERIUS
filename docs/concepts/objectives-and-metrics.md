@@ -25,11 +25,13 @@ Everything else informs.
 
 ## Why the same formula appears twice
 
-DAVIS is the clearest illustration. Its training objective is MAE, its validation
-history is mean validation MAE per epoch, and MAE is also a declared terminal
-secondary metric — while the primary metric is MSE. Three roles, one formula, and
-that is correct: "what optimisation descends" and "what the science is judged on"
-are different questions that happen to have related answers.
+DAVIS is the clearest illustration. Its training objective is exact L1 (MAE) —
+declared *authoritative* by the pack, so the task's declaration overrides
+whatever loss the LLM planner picks — its validation history is mean validation
+MAE per epoch, and MAE is also a declared terminal secondary metric — while the
+primary metric is MSE. Three roles, one formula, and that is correct: "what
+optimisation descends" and "what the science is judged on" are different
+questions that happen to have related answers.
 
 This is why SIDERIUS does not distinguish losses from metrics by *name*. A metric
 identity is opaque — `log_loss` is as declarable as `accuracy`. What makes
@@ -88,11 +90,17 @@ refusal.
 | **validation history** | per-epoch validation loss | mean validation CE per epoch | mean validation MAE per epoch |
 | **primary metric** | denoising score — **higher**, negative-valued | accuracy — **higher** | MSE over all predicted pixels × channels × frames — **lower** |
 | **declared secondaries** | — | macro-F1 (higher), `log_loss` (lower) | PSNR (higher, `data_range=1.0`), MAE (lower) |
-| status of those secondaries | — | 🧭 **declared only — no production implementation** | 🧭 **declared only — no production implementation** |
+| status of those secondaries | — | ✅ **implemented pack-locally and evaluated** | ✅ **implemented pack-locally and evaluated** |
 
-The last row is important and is not a technicality: the Pets and DAVIS secondary
-metrics exist as declarations in their example packs, and implementing them is
-owned by the unmerged PR-12d. Declared is not evaluated.
+The last row earned its ✅ the honest way: the implementations live in the packs
+themselves (`examples/oxford_iiit_pet/plugins/_pets_metrics.py`,
+`examples/davis_future_prediction/plugins/_davis_metrics.py`), are resolved
+through the same manifest mechanism as the primary, and were evaluated on the
+real composed `G-12d` runs — each `ExperimentRecord` carries their values in
+`secondary_metric_results`, in both directions at once (Pets records a
+higher-is-better `macro_f1` beside a lower-is-better `log_loss`). Declared *and*
+evaluated — the earlier state, declarations with no production implementation,
+ended when PR-12d landed.
 
 TIDMAD's primary metric is a frozen scientific definition. It is the task's
 definition, not a tunable — it is never reweighted, clipped or renormalised to
