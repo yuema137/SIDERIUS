@@ -316,8 +316,13 @@ class TestDeliverableNamingIsNarrowed:
         composition = compose_run_task_bindings(
             str(REPO_ROOT / "configs" / "task_composition" / "tidmad.yaml")
         )
+        # Declared delta (arXiv #268, 2026-08-26): tidmad.yaml now DECLARES
+        # the same values explicitly (omission stopped being legal for a
+        # not-own-naming composed task) — the ACTIVE naming is the declared
+        # one and the resolved bytes are unchanged.
         with bind_run_task_composition(composition, physical_data_root=str(REPO_ROOT)):
-            assert active_deliverable_naming() is None
+            active = active_deliverable_naming()
+            assert active is not None and active.prefix == "abra_validation_denoised"
             assert resolve_deliverable_naming().prefix == "abra_validation_denoised"
 
     def test_the_optional_accessor_reports_the_absence_without_raising(self):

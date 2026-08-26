@@ -70,10 +70,10 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 #: neither new section — is UNCHANGED at its P2b literal, which is what
 #: separates "a declaration was added" from "the machinery moved".
 PRE_P2B_FINGERPRINTS = {
-    "tidmad": "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac",
-    "fourth_task": "fe00fd076153c847da65c71c72df5520bec902d6d17b43b9c7b1bb80e2ab099a",
-    "pets": "52a422b030bb896cc22862b687855101ed302f2e59792b523d353b7dc67d6086",
-    "davis": "9980a7a955c689a8f94ab048eee9c4715ce9a25fdaac7bf3a510197cf2e0ac26",
+    "tidmad": "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56",
+    "fourth_task": "cef7656eb958202ed10a806c45de1a8dfa06b2a063b95488f0fcd9aa0d973507",
+    "pets": "3ab1128a3d5d425568b74642c9cd6857d16a5c64904c1befe3731ecfc11a2672",
+    "davis": "396e767d5621390163e7ba0b16df401811379e758d7211e763eef50f5563ac43",
 }
 
 

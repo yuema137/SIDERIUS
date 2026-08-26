@@ -61,17 +61,32 @@ class TestTidmadNamingIsByteIdentical:
         )
         assert naming.experiment_glob(exp_id="e") == "abra_validation_denoised_*_e_*.h5"
 
-    def test_tidmads_manifest_declares_no_naming(self):
-        """Un-declared is a first-class state, not an omission to be filled."""
-        assert compose_deliverable_naming_from_manifest(str(TIDMAD_MANIFEST)) is None
-        assert compose_run_task_bindings(str(TIDMAD_MANIFEST)).deliverable_naming is None
+    def test_tidmads_manifest_declares_its_naming_byte_identically(self):
+        """Declared delta (arXiv #268, 2026-08-26): the anchor manifest now
+        DECLARES the previously-implicit shipped values — omission stopped
+        being a legal shape for a not-own-naming composed task (discussion
+        (13)'s repaired defect). The VALUES are pinned byte-identical to the
+        old shipped template, so nothing about TIDMAD's naming moved; only
+        the declaration requirement did."""
+        declared = compose_deliverable_naming_from_manifest(str(TIDMAD_MANIFEST))
+        assert declared is not None
+        assert (declared.prefix, declared.extension, declared.index_width) == (
+            "abra_validation_denoised",
+            ".h5",
+            4,
+        )
+        assert compose_run_task_bindings(str(TIDMAD_MANIFEST)).deliverable_naming == declared
 
-    def test_an_undeclared_composition_leaves_the_shipped_naming_in_force(self):
+    def test_the_declared_composition_binds_the_same_shipped_values(self):
+        """Declared delta (arXiv #268): the bound naming is now the DECLARED
+        one — byte-identical to the template the old omission path resolved,
+        proven by comparing against a directly-constructed default."""
+        from execute_tools.deliverable_spec import DeliverableNaming
         from workflows.task_composition import bind_run_task_composition
 
         composition = compose_run_task_bindings(str(TIDMAD_MANIFEST))
         with bind_run_task_composition(composition, physical_data_root=str(REPO_ROOT)):
-            assert active_deliverable_naming() is None
+            assert active_deliverable_naming() == DeliverableNaming()
             assert resolve_deliverable_naming().prefix == "abra_validation_denoised"
 
 

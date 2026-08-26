@@ -304,14 +304,14 @@ class TestManifestSection:
         )
         assert composition.model_plugins is None
         assert composition.semantic_fingerprint == (
-            "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+            "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
         )
 
     def test_an_explicit_none_binds_nothing_and_keeps_the_fingerprint(self, compose, tmp_path):
         composition = compose(tmp_path, "model_plugins:\n  none: true")
         assert composition.model_plugins is None
         assert composition.semantic_fingerprint == (
-            "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+            "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
         )
 
     def test_a_declared_section_resolves_through_the_production_path(self, compose, tmp_path):
@@ -331,7 +331,7 @@ class TestManifestSection:
         write_plugin(tmp_path / "plugins", "dp_fp_net", width=4)
         section = f"model_plugins:\n  dir: {tmp_path / 'plugins'}\n  require: [dp_fp_net]"
         first = compose(tmp_path, section).semantic_fingerprint
-        assert first != "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+        assert first != "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
         write_plugin(tmp_path / "plugins", "dp_fp_net", width=5)
         assert compose(tmp_path, section).semantic_fingerprint != first
 

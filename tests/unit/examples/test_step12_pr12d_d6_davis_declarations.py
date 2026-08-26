@@ -38,10 +38,16 @@ MANIFESTS = PACK / "data" / "manifests"
 MANIFEST_DIR = REPO_ROOT / "configs" / "task_composition"
 SHIPPED = MANIFEST_DIR / "davis.yaml"
 
+# Declared delta (arXiv #255, 2026-08-26): the fingerprint payload gained
+# task_data_path_content_identity (the registration-captured implementation
+# source identity), moving EVERY composed fingerprint once, uniformly — the
+# declared consequence (the 12a proposal_blocks precedent). The SEMANTIC of
+# this pin (additive keys leave undeclared manifests at a stable literal) is
+# unchanged; the literals are re-recorded at the #255 tree.
 #: TIDMAD's shipped composition identity, which D6 must not disturb. A pinned
 #: LITERAL, captured before this commit: recomputing it here would compare the
 #: composition authority to itself and pass for any value.
-TIDMAD_COMPOSITION_FINGERPRINT = "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+TIDMAD_COMPOSITION_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
 
 #: The §22.9a Track-C freeze, transcribed as literals. Read back from the
 #: composition these would prove nothing; hardcoded, they are the contract.

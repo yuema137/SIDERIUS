@@ -405,8 +405,12 @@ def resolve_deliverable_naming() -> DeliverableNaming:
     * a naming is BOUND — return it, composed or not;
     * NOT bound and NOT composed — the legacy path, byte-for-byte unchanged;
     * composed, and the task declares NO ``deliverable_name`` of its own —
-      the shipped indexed template, which is what TIDMAD's composed manifest
-      has always resolved and must keep resolving;
+      the shipped indexed template. Since arXiv #268 (2026-08-26) a FRESH
+      compose can no longer reach this state: `compose_run_task_bindings`
+      refuses a composed manifest that neither declares `deliverable:` nor
+      binds an own-naming implementation, and TIDMAD's manifest now declares
+      the same values explicitly. The branch stays as defense in depth for
+      any binding constructed outside the composer;
     * composed, and the task DOES name its own artifacts (Pets, DAVIS) —
       REFUSE. *Generic naming capability not applicable; physical artifact
       semantics are task-owned.* This is the F-A4-1 state, and the one where
@@ -438,6 +442,19 @@ def resolve_deliverable_naming() -> DeliverableNaming:
     return DeliverableNaming()
 
 
+def task_names_its_own_deliverables(impl: object) -> bool:
+    """Does THIS implementation own its artifact names outright? (arXiv #268)
+
+    The same declared-capability question `_task_names_its_own_deliverables`
+    asks of the ACTIVE binding, parameterized so compose-time callers can ask
+    it of the implementation they just resolved — one authority, two tenses.
+    """
+    import sys
+
+    module = sys.modules.get(type(impl).__module__)
+    return callable(getattr(module, "deliverable_name", None))
+
+
 def _task_names_its_own_deliverables() -> bool:
     """Does the run's bound task own its artifact names outright?
 
@@ -454,15 +471,12 @@ def _task_names_its_own_deliverables() -> bool:
     Returns ``False`` when nothing is bound, so an un-composed run never
     reaches the refusal.
     """
-    import sys
-
     from execute_tools.task_data_path import active_task_data_path
 
     impl = active_task_data_path()
     if impl is None:
         return False
-    module = sys.modules.get(type(impl).__module__)
-    return callable(getattr(module, "deliverable_name", None))
+    return task_names_its_own_deliverables(impl)
 
 
 def indexed_cleanup_naming() -> DeliverableNaming | None:

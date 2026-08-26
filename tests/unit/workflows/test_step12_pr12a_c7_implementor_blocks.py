@@ -232,9 +232,14 @@ class TestFingerprintParticipation:
     #: not the symbol composed. Two manifests binding different symbols out of
     #: the same file share one identity, and editing the file for one manifest
     #: silently reopens every other manifest's pinned fingerprint.
+    #: Declared delta (arXiv #255, 2026-08-26): the payload gained
+    #: task_data_path_content_identity (registration-captured impl source
+    #: identity) — every composed fingerprint moved once, uniformly. The
+    #: SEMANTIC here (the section key is additive-when-declared) is
+    #: unchanged; literals re-recorded at the #255 tree.
     PRE_SECTION_FINGERPRINT: ClassVar[dict[str, str]] = {
-        "davis": "48b5e53e389f349396b83446e398a9ad02b6b3c36146e83ab4e5e668584d3b94",
-        "pets": "600d7c2eea82fb03e56c41640d9837336259918293861eacdcc0c7d78a95bdfb",
+        "davis": "16aead4d1b8c040a8367527880293ec537fccc670a662f102c19aad8d52ead9a",
+        "pets": "1a71ea1b084aede96bad7c1d6218f984b295cb81c5a50b59dafd3f08a17dc085",
     }
 
     @pytest.mark.parametrize("task", ["davis", "pets"])

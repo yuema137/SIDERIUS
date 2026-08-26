@@ -38,7 +38,7 @@ TIDMAD = MANIFEST_DIR / "tidmad.yaml"
 PETS = MANIFEST_DIR / "pets.yaml"
 DAVIS = MANIFEST_DIR / "davis.yaml"
 
-TIDMAD_FINGERPRINT = "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+TIDMAD_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
 
 
 @pytest.fixture(autouse=True)

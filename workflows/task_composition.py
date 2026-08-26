@@ -1522,6 +1522,7 @@ def compute_semantic_fingerprint(
     proposal_blocks: Any = None,
     implementor_blocks: Any = None,
     task_data_path_config: dict[str, Any] | None = None,
+    task_data_path_content_identity: str | None = None,
 ) -> str:
     """sha256 over the composition's SEMANTIC content, and nothing else.
 
@@ -1602,6 +1603,22 @@ def compute_semantic_fingerprint(
     # byte-unchanged and its resume still validates.
     if task_data_path_config:
         payload["task_data_path_config"] = task_data_path_config
+    # arXiv #255 — the registered implementation's SOURCE CONTENT is semantic:
+    # changing Pets' CROP_SIZE changes every tensor the run sees, so two runs
+    # whose implementation bytes differ are not the same run (the paper's
+    # S13/S14 comparability discipline). The value is the identity CAPTURED at
+    # registration (`registered_content_identity`), NEVER a fresh file read —
+    # F-12bc-7: a spawn-time re-read follows the very edit it exists to catch.
+    # Mechanically additive-when-present like the six keys above, but state
+    # the consequence honestly: a composed run's implementation is ALWAYS
+    # registered by resolution time, so every PRE-EXISTING composed
+    # fingerprint MOVES under this key. That is the point — those
+    # fingerprints did not pin the content, so their runs are not provably
+    # comparable to post-#255 runs; the existing incomparable-resume
+    # machinery refuses the cross (acceptance row 3), the same declared
+    # consequence as PR-12a's `proposal_blocks:` precedent.
+    if task_data_path_content_identity is not None:
+        payload["task_data_path_content_identity"] = task_data_path_content_identity
     return hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()
 
 
@@ -2010,6 +2027,47 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         _require(task_config_section, "config", "task_config"), manifest_dir
     )
 
+    from execute_tools.deliverable_spec import task_names_its_own_deliverables
+    from execute_tools.task_data_path import registered_content_identity
+
+    # arXiv #268 (the paper's discussion (13): "a fail-open default
+    # inconsistent with the rest of the manifest's semantics; reported here
+    # as a defect under repair" — this is the repair). A COMPOSED manifest
+    # must either declare its indexed `deliverable:` naming or bind an
+    # implementation that names its artifacts itself (module-level
+    # `deliverable_name`, the F-A4-1 capability). Omission by a task with
+    # NEITHER used to resolve the anchor task's shipped template silently —
+    # the one manifest key whose omission took a default instead of refusing.
+    # The legacy un-composed path is untouched (it is the anchor task's own
+    # regime); every shipped composed manifest now satisfies one of the two
+    # legal shapes.
+    if deliverable_naming is None and not task_names_its_own_deliverables(impl):
+        raise TaskCompositionError(
+            f"manifest {resolved_manifest!r} declares no 'deliverable:' section and its "
+            f"task_data_path {impl.task_data_path_id!r} does not name its own artifacts "
+            "(no module-level deliverable_name). Omission used to resolve the anchor "
+            "task's indexed template silently — a fail-open default the manifest's "
+            "omission-vs-named-absence semantics forbid (arXiv #268). Declare "
+            "'deliverable:' explicitly, or implement deliverable_name beside the "
+            "task_data_path implementation."
+        )
+
+    # arXiv #255 — fail closed, never omit: by this line the implementation
+    # has been RESOLVED, so its registration capture must exist. An absent
+    # capture means the registration lifecycle broke; silently omitting the
+    # content key would ship a fingerprint without the pin (the quiet
+    # weakening the review criterion forbids), and recomputing from the file
+    # here would be F-12bc-7 one layer up. Refuse and say why.
+    impl_content_identity = registered_content_identity(impl.task_data_path_id)
+    if impl_content_identity is None:
+        raise TaskCompositionError(
+            f"task_data_path {impl.task_data_path_id!r} resolved but has no "
+            "registration-captured content identity; the fingerprint cannot "
+            "pin the implementation's bytes. This is a registration-lifecycle "
+            "defect, not a configuration error — refusing rather than "
+            "composing an unpinned fingerprint (arXiv #255)."
+        )
+
     fingerprint = compute_semantic_fingerprint(
         task_data_path_id=impl.task_data_path_id,
         dataset_profile=profile,
@@ -2027,6 +2085,7 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         proposal_blocks=proposal_blocks,
         implementor_blocks=implementor_blocks,
         task_data_path_config=task_data_path_config,
+        task_data_path_content_identity=impl_content_identity,
     )
 
     return RunTaskComposition(

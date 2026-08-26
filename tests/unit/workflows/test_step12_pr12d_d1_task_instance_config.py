@@ -56,7 +56,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANIFEST_DIR = REPO_ROOT / "configs" / "task_composition"
 SHIPPED_TIDMAD = MANIFEST_DIR / "tidmad.yaml"
 
-TIDMAD_FINGERPRINT = "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+TIDMAD_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
 
 _SHIPPED_TASK_DATA_PATH_SECTION = (
     "task_data_path:\n"

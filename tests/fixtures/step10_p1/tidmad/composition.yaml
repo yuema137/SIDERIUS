@@ -39,3 +39,10 @@ implementor_blocks:
 
 task_config:
   config: ../../../../configs/task_config.yaml
+
+# arXiv #268 fixture upgrade: binds the anchor implementation (not
+# own-naming), so the manifest declares the naming explicitly.
+deliverable:
+  prefix: abra_validation_denoised
+  extension: .h5
+  index_width: 4

@@ -31,3 +31,10 @@ interpretation_blocks:
 
 task_config:
   config: declared/task_config.yaml
+
+# arXiv #268 fixture upgrade: the fixture impl is not own-naming, so the
+# manifest declares its naming explicitly (the flip refuses omission).
+deliverable:
+  prefix: spectro_denoised
+  extension: .h5
+  index_width: 4

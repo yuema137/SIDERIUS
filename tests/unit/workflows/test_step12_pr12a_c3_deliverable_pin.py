@@ -89,18 +89,23 @@ class TestComposedDeliverableNaming:
 
         assert spec.naming.prefix == DECLARED_PREFIX
 
-    def test_an_un_declared_composition_keeps_the_shipped_naming(self, tmp_path):
-        """LEGACY PARITY inside composed mode: declaring no `deliverable:`
-        section must resolve the shipped TIDMAD naming byte-identically, or
-        every existing composed run's cleanup glob would move."""
-        manifest = write_complete_manifest(tmp_path)
-        composition = compose_run_task_bindings(str(manifest))
-        assert composition.deliverable_naming is None
+    def test_an_un_declared_composition_is_refused_not_defaulted(self, tmp_path):
+        """Declared delta (arXiv #268, 2026-08-26): this test used to pin the
+        OLD rule — composed omission resolving the shipped TIDMAD naming.
+        The paper's discussion (13) reports that rule as "a fail-open default
+        inconsistent with the rest of the manifest's semantics … a defect
+        under repair"; the repair landed, so the pin moves WITH it: a
+        composed manifest binding a not-own-naming implementation and
+        declaring no `deliverable:` is REFUSED at compose time, naming both
+        legal shapes. The shipped values live on in tidmad.yaml's now-
+        explicit declaration (asserted byte-identical in the c6 suite)."""
+        import pytest
 
-        with bind_run_task_composition(composition, physical_data_root=COMPOSED_TEST_DATA_ROOT):
-            spec = _acquire_as_the_tuner_does()
+        from workflows.task_composition import TaskCompositionError
 
-        assert spec.naming.prefix == "abra_validation_denoised"
+        manifest = write_complete_manifest(tmp_path, deliverable=None)
+        with pytest.raises(TaskCompositionError, match="declares no 'deliverable:' section"):
+            compose_run_task_bindings(str(manifest))
 
     def test_an_un_composed_run_keeps_the_shipped_naming(self):
         assert _acquire_as_the_tuner_does().naming.prefix == "abra_validation_denoised"

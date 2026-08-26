@@ -55,3 +55,12 @@ implementor_blocks:
 
 task_config:
   config: ../task_config.yaml
+
+# arXiv #268 — the anchor task now DECLARES its indexed naming like any other
+# task (these are the previously-implicit shipped defaults, stated). The
+# fail-open omission default is gone: a composed manifest either declares
+# this section or its implementation names its own artifacts.
+deliverable:
+  prefix: abra_validation_denoised
+  extension: .h5
+  index_width: 4

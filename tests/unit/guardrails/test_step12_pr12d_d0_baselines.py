@@ -573,7 +573,7 @@ class TestInvertedGuardB10:
 
 #: TIDMAD's shipped composition, at D0. Any seam that perturbs this changed
 #: the science of the only task with real production evidence.
-TIDMAD_COMPOSITION_FINGERPRINT = "9125bf587fea5bae1493800e9b50bafbb63164ff72ec1bfe3b08520ae1e72aac"
+TIDMAD_COMPOSITION_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
 
 #: Composed-only flags that must never appear on a legacy child's argv.
 FORBIDDEN_ON_LEGACY = (
@@ -600,7 +600,12 @@ class TestPreservedInvariants:
         assert composition.metric.spec.id == "tidmad_denoising_score"
         assert composition.metric.spec.direction == "higher"
         assert composition.dataset_profile.partition_count == 20
-        assert composition.deliverable_naming is None
+        # Declared delta (arXiv #268, 2026-08-26): tidmad.yaml now DECLARES
+        # its previously-implicit naming (omission stopped being legal for a
+        # not-own-naming composed task); the values are byte-identical to the
+        # old shipped template.
+        assert composition.deliverable_naming is not None
+        assert composition.deliverable_naming.prefix == "abra_validation_denoised"
 
     @patch("core.sandbox_executor._run_observed_subprocess")
     def test_no_composed_only_flag_reaches_a_legacy_training_argv(self, mock_run, sandbox):
