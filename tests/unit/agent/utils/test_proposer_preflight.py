@@ -369,18 +369,22 @@ class TestDefaultSampleSet:
         assert out["estimated_minutes"] > 0.0
 
     def test_trial_portion_kwarg_scales_default_sample_set(self):
-        """trial_portion=0.02 must shrink the synthesised sample_set vs
-        the 0.1 default — otherwise a caller that runs with
-        ``HyperparamTuningInput.trial_portion=0.02`` (e.g. the score-table
-        smoke gate) gets a 5x over-projected estimate even though its
-        actual training scope is 5x smaller."""
-        ss_default = _synthesise_default_sample_set()  # 0.1
+        """The kwarg must SCALE the synthesised sample_set — otherwise a
+        caller's actual scope is ignored and the estimate is a constant.
+        DECLARED DELTA (Lane F2): the module default moved 0.1 → 0.02
+        (``UNCONSTRAINED_TRIAL_PORTION``, the unconstrained-planner value
+        read from the ExperimentPlan schema), so the contrast pair is now
+        EXPLICIT 0.1-vs-0.02 — the same physical pair as before, with
+        neither leg riding the default (a leg equal to the default proves
+        nothing; the old test's "default" leg silently became the small
+        one, 80 == 80)."""
+        ss_big = _synthesise_default_sample_set(trial_portion=0.1)
         ss_small = _synthesise_default_sample_set(trial_portion=0.02)
-        n_default = sum(len(v) for v in ss_default.values())
+        n_big = sum(len(v) for v in ss_big.values())
         n_small = sum(len(v) for v in ss_small.values())
-        assert n_small < n_default, (
+        assert n_small < n_big, (
             f"trial_portion=0.02 sample_set ({n_small} segs) should be smaller "
-            f"than the 0.1 default ({n_default} segs)"
+            f"than the explicit 0.1 one ({n_big} segs)"
         )
 
     def test_estimate_proposal_time_respects_trial_portion(self):
@@ -414,7 +418,11 @@ class TestDefaultSampleSet:
             num_params=1_000_000,
             time_budget_minutes=20.0,
         )
-        out_default = estimate_proposal_time(**kwargs)  # trial_portion=0.1
+        # DECLARED DELTA (Lane F2): the module default is now 0.02 (the
+        # unconstrained-planner value), so the 0.1 leg is EXPLICIT — the
+        # ratio's physics and bounds are unchanged (same 0.1-vs-0.02 pair;
+        # train_portion still defaults 0.1).
+        out_default = estimate_proposal_time(**kwargs, trial_portion=0.1)
         out_small = estimate_proposal_time(**kwargs, trial_portion=0.02)
 
         actual_ratio = out_small["estimated_minutes"] / out_default["estimated_minutes"]

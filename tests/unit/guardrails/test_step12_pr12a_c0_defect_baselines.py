@@ -164,7 +164,17 @@ def _qualified_functions(path: pathlib.Path) -> dict[str, ast.FunctionDef | ast.
 #: that pinning them turns every unrelated edit red, which is a tripwire firing
 #: on the wrong signal.
 STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
-    "workflows/model_exploration.py::run_workflow": (369, 144, 1567, 21),
+    # RE-RECORDED 2026-08-26 (Lane F2) — the arithmetic ledger: era-pin
+    # 1567 LOC → landed master 8f0cc9f3 measured 1644 (+77 accumulated,
+    # three lines under MAX_LOC_GROWTH) → F2's +18 (the frozen-portion
+    # merge comment + the transit-resolution kwargs and their comments;
+    # branch count FLAT at 144 — §12.1's zero-branch-growth tripwire held
+    # via the module-level _portion_or) → 1662. Zero param growth.
+    # run_workflow is CLAUDE.md's §12.1-tracked orchestrator and joins
+    # prepare_attempt (OI-2) as decomposition debt — the second budget
+    # this week consumed to its ceiling by accumulation; deliberately NOT
+    # split in a narrow lane.
+    "workflows/model_exploration.py::run_workflow": (377, 144, 1662, 21),
     "workflows/model_exploration.py::_register_plugin": (60, 19, 175, 4),
     "workflows/model_exploration.py::should_run_literature_review": (4, 0, 29, 2),
     (

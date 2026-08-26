@@ -1542,13 +1542,20 @@ class HyperparamTuningInput(BaseModel):
         # as a sentinel; the intake bound was the outlier, not a feature.
         ge=0.01,
         le=1.0,
-        description="Fraction of segments per file for the training scope.",
+        description="Fraction of segments per file for the training scope. "
+        "TRANSIT ONLY (Lane F2 truth): the tuner's executed TRIAL workload "
+        "never reads this field — it reads the (possibly overridden) plan; "
+        "the operator lock for portions is plan_overrides. The chain "
+        "restores this schema default on bare launches so input bytes are "
+        "unchanged.",
     )
     train_portion: float = Field(
         default=0.1,
         ge=0.01,
         le=1.0,
-        description="Per-epoch subsample from training scope. Default 0.1 matches legacy TIDMAD.",
+        description="Per-epoch subsample from training scope. Default 0.1 matches "
+        "legacy TIDMAD. TRANSIT ONLY for trial execution — see trial_portion "
+        "(Lane F2).",
     )
 
     # Validation data
@@ -1556,7 +1563,9 @@ class HyperparamTuningInput(BaseModel):
         default=0.1,
         ge=0.0,
         le=1.0,
-        description="Fraction of segments per file for validation. Set to 1.0 for formal mode.",
+        description="Fraction of segments per file for validation. Set to 1.0 for "
+        "formal mode. TRANSIT ONLY for trial execution — see trial_portion "
+        "(Lane F2).",
     )
 
     # Alignment

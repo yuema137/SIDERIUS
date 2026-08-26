@@ -80,9 +80,24 @@ class WorkflowLaunchConfig:
     human_advice_tune: str | None = None
     human_advice_mindset: str | None = None
     is_trial: bool = False
-    trial_portion: float = 0.1
-    train_portion: float = 0.1
-    eval_portion: float = 0.1
+    # Lane F2 (campaign-portion authority, 2026-08-26) — TRI-STATE: a TYPED
+    # value is EXPERIMENT_FIXED (merged into the plan_overrides lock by
+    # `frozen_portion_overrides`, so trial planning cannot silently override
+    # it); None is AGENT_CONTROLLED (nothing merged; the planner's values
+    # execute). The old concrete 0.1 defaults made "typed" indistinguishable
+    # from "defaulted" — which is how the frozen campaign portions died in
+    # transit (the tuner-input portion fields have NO tuner consumer).
+    trial_portion: float | None = None
+    train_portion: float | None = None
+    # eval_portion joins the same tri-state/merge (Lane C's E1/E2/E3 audit
+    # verdict, 2026-08-26): per-epoch validation (E1) and round-end scoring
+    # (E2) SCALE with it; HealthGate (E3) consumes fixed prefix peeks and is
+    # insensitive. That insensitivity is E3's own property — the portion
+    # authority carries ONE value and never branches on which consumer
+    # reads it. FORMAL frozen portions are NOT carried here: they ride the
+    # existing formal_* fields (plan_overrides trial keys are DISCARDED on
+    # formal rounds — the F14 mechanism).
+    eval_portion: float | None = None
     train_validation_align: bool = True
     sampling_seed: int | None = None
     train_base_seed: int | None = None
@@ -170,3 +185,59 @@ class WorkflowLaunchConfig:
 def launch_config_field_names() -> frozenset[str]:
     """The carrier's field names — used by the structural censuses."""
     return frozenset(f.name for f in dataclass_fields(WorkflowLaunchConfig))
+
+
+#: Lane F2 — the three plan-portion fields a TYPED launch value freezes.
+#: Deliberately the LAUNCH-side trio (the plan fields the trial resolver
+#: reads); the schema's TRIAL_SCOPED_OVERRIDE_KEYS is the RESOLVER-side
+#: discard vocabulary (six keys incl. strategies + is_trial) — related
+#: subjects, different sets, named separately on purpose (SRI-1).
+FROZEN_PORTION_FIELDS: tuple[str, ...] = ("trial_portion", "train_portion", "eval_portion")
+
+
+def frozen_portion_overrides(launch: WorkflowLaunchConfig) -> dict | None:
+    """Lane F2 — merge EXPERIMENT_FIXED portions into the plan_overrides lock.
+
+    The campaign's frozen TRIAL portions used to die in transit: the chain
+    forwarded them into tuner-input fields no tuner code consumes, while
+    trial workload came exclusively from the LLM plan. The ONE working
+    operator authority is the ``plan_overrides`` lock (FU-10 validation,
+    ``TRIAL_SCOPED_OVERRIDE_KEYS``, the F14 satisfiability refusal and
+    mode-aware disclosure all apply to it unchanged) — so a TYPED portion
+    joins it here, and an untyped one (``None``) stays AGENT_CONTROLLED.
+
+    Conflict rule: the same key present in the operator's explicit
+    ``--plan_overrides`` JSON with a DIFFERENT value is two authorities for
+    one value — refused loudly. Identical values are fine.
+
+    FORMAL frozen portions never pass through here: ``plan_overrides``
+    trial keys are DISCARDED on formal rounds (the F14 mechanism), and the
+    formal freeze's working carrier is the existing ``formal_*`` fields.
+
+    Returns the merged dict (or the original/None when nothing is typed),
+    never mutating ``launch.plan_overrides``.
+
+    Raises:
+        ValueError: a typed portion conflicts with an explicit
+            ``plan_overrides`` entry for the same key.
+    """
+    typed = {
+        field: value
+        for field in FROZEN_PORTION_FIELDS
+        if (value := getattr(launch, field)) is not None
+    }
+    if not typed:
+        return launch.plan_overrides
+    existing = dict(launch.plan_overrides or {})
+    conflicts = {
+        key: (existing[key], value)
+        for key, value in typed.items()
+        if key in existing and existing[key] != value
+    }
+    if conflicts:
+        raise ValueError(
+            "frozen portion flag(s) conflict with explicit --plan_overrides "
+            f"entries for the same key(s) {{key: (plan_overrides, flag)}}: {conflicts}. "
+            "Two authorities for one value — pick one: drop the flag or fix the JSON."
+        )
+    return existing | typed

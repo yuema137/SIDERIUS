@@ -81,6 +81,7 @@ from agent.prompt_templates.proposal.task_blocks import load_proposal_task_block
 from agent.schemas.external_agents import ExternalAgentOutput
 from agent.schemas.hyperparam_tuning import (
     GateExhaustionInfo,
+    HyperparamTuningInput,
     HyperparamTuningOutput,
     PhysicalRejection,
 )
@@ -98,6 +99,10 @@ from agent.schemas.protocols.ml_model_valid_to_ml_model_tune import local_valida
 from agent.schemas.protocols.ml_result_interp_to_ml_model_propose import local_full_context
 from agent.schemas.storage import LocalStorageConfig, StorageConfig
 from agent.schemas.task_config import ForwardContract
+from agent.utils.proposer_preflight import (
+    UNCONSTRAINED_TRAIN_PORTION,
+    UNCONSTRAINED_TRIAL_PORTION,
+)
 from core.chain_state import ChainState
 from core.hardware_context import get_or_create as get_or_create_hardware_context
 
@@ -137,7 +142,7 @@ from nodes.result_interpretation_agent import (
 )
 from workflows.llm_config import ProposalLLMConfig, WorkflowLLMConfig
 from workflows.run_bindings import WorkflowRunBindings
-from workflows.run_config import WorkflowLaunchConfig
+from workflows.run_config import WorkflowLaunchConfig, frozen_portion_overrides
 from workflows.strategy_modes import (
     ExplorationMode,
     FormalRoundStrategy,
@@ -187,6 +192,22 @@ def _log_rss(step: str) -> None:
 ExplorationMode = ExplorationMode
 StrategyMode = StrategyMode
 FormalRoundStrategy = FormalRoundStrategy
+
+
+#: Lane F2 — the tuner-input portion fields are TRANSIT-ONLY (no tuner
+#: consumer; the executed lock is plan_overrides). A bare launch (None)
+#: restores each field's own schema default, keeping input bytes identical
+#: to pre-F2 runs. Derived from the schema, never restated.
+_TUNER_INPUT_PORTION_DEFAULTS: dict[str, float] = {
+    name: HyperparamTuningInput.model_fields[name].default
+    for name in ("trial_portion", "train_portion", "eval_portion")
+}
+
+
+def _portion_or(value: float | None, fallback: float) -> float:
+    """None -> fallback. Module-level so call sites inside ``run_workflow``
+    add ZERO branch nodes (the §12.1 frozen tripwire counts If/IfExp)."""
+    return fallback if value is None else value
 
 
 def _load_vocab_seed() -> list:
@@ -2776,8 +2797,14 @@ def run_workflow(
                     human_advice=launch.human_advice_propose,
                     is_trial=launch.is_trial,
                     data_scope=bindings.data_scope,
-                    trial_portion=launch.trial_portion,
-                    train_portion=launch.train_portion,
+                    # Lane F2 — FROZEN (typed) portions flow to the
+                    # proposer's estimate as-is; UNFROZEN (None) resolves to
+                    # the unconstrained-planner default at THIS boundary
+                    # (ProposalInput stays a concrete float; absence has one
+                    # meaning in one place). _portion_or is module-level so
+                    # run_workflow gains ZERO branch nodes (§12.1 tripwire).
+                    trial_portion=_portion_or(launch.trial_portion, UNCONSTRAINED_TRIAL_PORTION),
+                    train_portion=_portion_or(launch.train_portion, UNCONSTRAINED_TRAIN_PORTION),
                     sampling_seed=launch.sampling_seed,
                     trial_time_budget_minutes=launch.trial_time_budget_minutes,
                     formal_time_budget_minutes=launch.formal_time_budget_minutes,
@@ -3131,9 +3158,19 @@ def run_workflow(
             reflect_provider=tune_llm.get("reflect_provider"),
             reflect_model_id=tune_llm.get("reflect_model_id"),
             is_trial=launch.is_trial,
-            trial_portion=launch.trial_portion,
-            train_portion=launch.train_portion,
-            eval_portion=launch.eval_portion,
+            # Lane F2 — TRANSIT-ONLY fields (no tuner consumer); a bare
+            # launch restores the input-schema default so input bytes are
+            # byte-identical to pre-F2 runs. The EXECUTED lock is the
+            # plan_overrides merge above.
+            trial_portion=_portion_or(
+                launch.trial_portion, _TUNER_INPUT_PORTION_DEFAULTS["trial_portion"]
+            ),
+            train_portion=_portion_or(
+                launch.train_portion, _TUNER_INPUT_PORTION_DEFAULTS["train_portion"]
+            ),
+            eval_portion=_portion_or(
+                launch.eval_portion, _TUNER_INPUT_PORTION_DEFAULTS["eval_portion"]
+            ),
             train_validation_align=launch.train_validation_align,
             sampling_seed=launch.sampling_seed,
             train_base_seed=launch.train_base_seed,
@@ -3146,7 +3183,9 @@ def run_workflow(
             skip_formal_min_delta=launch.skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=launch.bypass_formal_time_budget_min_delta,
             max_retries=tune_llm.get("max_retries"),
-            plan_overrides=launch.plan_overrides,
+            # Lane F2 — EXPERIMENT_FIXED portions join the plan_overrides
+            # lock here (typed-only; conflict with explicit JSON refuses).
+            plan_overrides=frozen_portion_overrides(launch),
             trial_time_budget_minutes=launch.trial_time_budget_minutes,
             formal_time_budget_minutes=launch.formal_time_budget_minutes,
             data_dir=launch.data_dir,

@@ -107,6 +107,22 @@ class TestImmutability:
 #:   run's declared output-type constraint, pure transit (forwarded post-hoc
 #:   into ``ProposalInput``; the proposer's SCHEMA GATE enforces it — this
 #:   layer never interprets it). Default ``None`` = unconstrained legacy.
+#: Pre-refactor fields whose DECLARED DEFAULT deliberately changed after the
+#: golden was recorded — the parallel slot to the additions dict (the golden
+#: is history and is never edited). Each entry names its authority.
+#:
+#: * Lane F2 (campaign-portion authority, 2026-08-26): the three trial-side
+#:   portions became TRI-STATE — a TYPED value is EXPERIMENT_FIXED (merged
+#:   into the plan_overrides lock), ``None`` is AGENT_CONTROLLED. The old
+#:   concrete 0.1 defaults were dead transit (no tuner consumer) that made
+#:   "typed" indistinguishable from "defaulted", which is how the frozen
+#:   campaign portions failed to reach execution.
+POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
+    "trial_portion": None,
+    "train_portion": None,
+    "eval_portion": None,
+}
+
 POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "experiment_arm": None,
     "baseline_isolation": False,
@@ -166,6 +182,11 @@ class TestLaunchConfigIsTransitOnly:
                 # Declared AFTER the refactor: the golden cannot know it, so
                 # its default is pinned here, by hand, at its declaration.
                 expected = POST_REFACTOR_TRANSIT_ADDITIONS[f.name]
+            elif f.name in POST_REFACTOR_DEFAULT_CHANGES:
+                # Default DELIBERATELY changed after the golden (declared
+                # above with its authority) — pinned by hand, so an
+                # UNdeclared change still fails against the golden.
+                expected = POST_REFACTOR_DEFAULT_CHANGES[f.name]
             elif f.name in golden:
                 expected = ast.literal_eval(golden[f.name])
             else:

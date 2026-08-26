@@ -49,6 +49,18 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   guards a change is KNOWN to move — and this one is named in the paragraph
   directly above.
 
+* **Lane F2 (campaign-portion authority, 2026-08-26)** — the PROPOSER's run
+  input `trial_portion` moved `0.1 -> 0.02` on a bare launch: the launch
+  portions are now tri-state, and an UNFROZEN (None) portion resolves at the
+  transit boundary to what an unconstrained planner defaults to
+  (`UNCONSTRAINED_TRIAL_PORTION`, read from the ExperimentPlan schema) —
+  healing the estimation-vs-execution divergence in which the preflight
+  priced candidates against 5x the data campaigns actually executed.
+  Measured before re-baselining: **exactly one field** — the TUNER input's
+  portions are byte-identical (a bare launch restores the input-schema
+  defaults), and `train_portion` is unchanged because the unconstrained
+  default coincides with the old value (0.1).
+
 * **Step 11 / C3** — the run-invariants lock gained ONE key,
   `execution_calibration`: the per-role subprocess memory ceilings the run
   executed under, plus their provenance (R-11-6). Measured before the golden

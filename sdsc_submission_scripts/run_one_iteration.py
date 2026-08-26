@@ -1065,20 +1065,26 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["snapshot", "anchors", "target"],
         help="DEPRECATED no-op (DS7) — warns and is ignored. Use --data_scope.",
     )
+    # Lane F2 — the three trial-side portions are TRI-STATE: a TYPED value
+    # is EXPERIMENT_FIXED (merged into the plan_overrides lock at the
+    # workflow layer, so trial planning cannot silently override it);
+    # omitted (None) is AGENT_CONTROLLED — the planner's values execute.
     parser.add_argument(
         "--trial_portion",
         type=_portion_floor,
-        default=0.1,
-        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).",
+        default=None,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01). "
+        "Typed = EXPERIMENT_FIXED; omitted = agent-controlled (Lane F2).",
     )
     # F-RC-1: the shared parser floor (see `_portion_floor`); its target
     # `HyperparamTuningInput.train_portion` declares ge=0.01.
-    parser.add_argument("--train_portion", type=_portion_floor, default=0.1)
+    parser.add_argument("--train_portion", type=_portion_floor, default=None)
     parser.add_argument(
         "--eval_portion",
         type=_portion_floor,
-        default=0.1,
-        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01).",
+        default=None,
+        help="Floor 0.01 (segment-integrity; mirrors Pydantic ge=0.01). "
+        "Typed = EXPERIMENT_FIXED; omitted = agent-controlled (Lane F2).",
     )
     # --- Formal-mode training levers (Phase M, docs §12) + eval scope (Phase R, §13) ---
     # Formal eval strategy is locked to ``snapshot``; the portion defaults to

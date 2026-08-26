@@ -903,7 +903,7 @@
           },
           "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
           "train_portion": 0.1,
-          "trial_portion": 0.1,
+          "trial_portion": 0.02,
           "trial_time_budget_minutes": null,
           "vocab_seed": [
             {

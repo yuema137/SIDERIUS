@@ -82,9 +82,9 @@ HEALTH_GATE_ENABLED=1               # DS6c: --no-health_gate_enabled disables th
 HEALTH_GATE_FILES=""                # DS6c: shared monitored-file list; empty = YAML defaults
 REFLECT_PROVIDER=""
 REFLECT_MODEL_ID=""
-TRIAL_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 0.02)
-TRAIN_PORTION=0.1                   # §3.2: synced to Python default 0.1 (was 1.0)
-EVAL_PORTION=0.1                    # §3.2: synced to Python default 0.1 (was 0.02)
+TRIAL_PORTION=""                    # Lane F2 tri-state: empty == omit == AGENT_CONTROLLED; typed == EXPERIMENT_FIXED (plan_overrides lock)
+TRAIN_PORTION=""                    # Lane F2 tri-state: empty == omit == AGENT_CONTROLLED
+EVAL_PORTION=""                     # Lane F2 tri-state: empty == omit == AGENT_CONTROLLED
 HUMAN_ADVICE_FILE=""
 ADVICE=""
 PLAN_OVERRIDES=""
@@ -464,9 +464,11 @@ build_app_args() {
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"
         --bypass_formal_time_budget_min_delta "$BYPASS_FORMAL_TIME_BUDGET_MIN_DELTA"
         --llm_model "$LLM_MODEL"
-        --trial_portion "$TRIAL_PORTION"
-        --train_portion "$TRAIN_PORTION"
-        --eval_portion "$EVAL_PORTION"
+        # Lane F2 — forwarded only when TYPED (empty == omit == the
+        # Python tri-state's None == AGENT_CONTROLLED).
+        ${TRIAL_PORTION:+--trial_portion "$TRIAL_PORTION"}
+        ${TRAIN_PORTION:+--train_portion "$TRAIN_PORTION"}
+        ${EVAL_PORTION:+--eval_portion "$EVAL_PORTION"}
         --exploration_mode "$EXPLORATION_MODE"
         --minimum_boldness "$MINIMUM_BOLDNESS"
         --attempts_per_round "$ATTEMPTS_PER_ROUND"
@@ -718,9 +720,9 @@ print_chain_header() {
     # --- §3.2 plan flags (input contract) ---
     echo "  §3.2 plan flags:"
     echo "    Data dir       : $DATA_DIR"
-    echo "    Trial portion  : $TRIAL_PORTION"
-    echo "    Train portion  : $TRAIN_PORTION"
-    echo "    Eval portion   : $EVAL_PORTION"
+    echo "    Trial portion  : ${TRIAL_PORTION:-AGENT_CONTROLLED}"
+    echo "    Train portion  : ${TRAIN_PORTION:-AGENT_CONTROLLED}"
+    echo "    Eval portion   : ${EVAL_PORTION:-AGENT_CONTROLLED}"
     echo "    Exploration    : $EXPLORATION_MODE  (boldness>=$MINIMUM_BOLDNESS)"
     echo "    Round attempts : trial=$ATTEMPTS_PER_ROUND, formal=$ATTEMPTS_PER_FORMAL_ROUND, max_fail_rounds=$MAX_FAIL_ROUNDS"
     echo "    Propose retry  : max_proposal_attempts=$MAX_PROPOSAL_ATTEMPTS, max_impl_attempts=$MAX_IMPL_ATTEMPTS"

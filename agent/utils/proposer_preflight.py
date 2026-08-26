@@ -48,6 +48,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agent.schemas.hyperparam_tuning import ExperimentPlan
 from agent.skills.denoising_score_skill import estimator as _scoring_est
 from agent.skills.inference_skill import estimator as _inference_est
 from agent.skills.training_skill import estimator as _training_est
@@ -58,17 +59,23 @@ from execute_tools.dataset_config import (
 )
 from execute_tools.sample_set_builder import build_sample_set
 
-# The synthesised default ``sample_set`` mirrors the tuner's trial-mode
-# snapshot at ``trial_portion=0.1`` — the most common active scope. Seed
-# is fixed so the estimate is deterministic across proposer runs.
-_DEFAULT_TRIAL_PORTION: float = 0.1
-_DEFAULT_TRAIN_PORTION: float = 0.1
+# Lane F2 (2026-08-26) — what an UNFROZEN portion means for an estimate:
+# "assume what an unconstrained planner defaults to", read from the
+# planner's own schema (ExperimentPlan) so this subsystem cannot drift from
+# it. The previous hand-written 0.1 constants claimed to mirror "the most
+# common active scope" while the planner's actual default is 0.02 — so the
+# preflight ESTIMATED against 5x more data than campaigns EXECUTED,
+# overpricing large candidates (the estimation-vs-execution divergence).
+# When the launch FREEZES a portion (typed value), the caller passes it and
+# these defaults never apply.
+UNCONSTRAINED_TRIAL_PORTION: float = ExperimentPlan.model_fields["trial_portion"].default
+UNCONSTRAINED_TRAIN_PORTION: float = ExperimentPlan.model_fields["train_portion"].default
 _DEFAULT_SAMPLING_SEED: int = 0
 
 
 def _synthesise_default_sample_set(
     *,
-    trial_portion: float = _DEFAULT_TRIAL_PORTION,
+    trial_portion: float = UNCONSTRAINED_TRIAL_PORTION,
     seed: int = _DEFAULT_SAMPLING_SEED,
     scope: DataScope | None = None,
 ) -> dict[int, list[int]]:
@@ -102,8 +109,8 @@ def estimate_proposal_time(
     num_params: int,
     time_budget_minutes: float,
     sample_set: dict[Any, list[int]] | None = None,
-    train_portion: float = _DEFAULT_TRAIN_PORTION,
-    trial_portion: float = _DEFAULT_TRIAL_PORTION,
+    train_portion: float = UNCONSTRAINED_TRAIN_PORTION,
+    trial_portion: float = UNCONSTRAINED_TRIAL_PORTION,
     data_scope: DataScope | None = None,
 ) -> dict[str, Any]:
     """Estimate wall-time for a draft proposal, CPU-only.
