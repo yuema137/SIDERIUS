@@ -261,6 +261,13 @@ class PreparedAttempt:
     cfg_train_portion: Any
     cfg_eval_portion: Any
     _planned_portions: Any
+    #: Lane D / F15 — the ``ExecutionProvenance`` for this attempt: every plan
+    #: field whose AUTHORED value differs from the one that will EXECUTE.
+    #: Empty when resolution changed nothing. Belongs here by the same rule as
+    #: everything above — it is something planning RESOLVED, and it is the only
+    #: thing that makes ``hypothesis`` (authored earlier, never updated)
+    #: safe for a downstream narrator to read.
+    execution_provenance: Any
 
 
 @dataclass(frozen=True)

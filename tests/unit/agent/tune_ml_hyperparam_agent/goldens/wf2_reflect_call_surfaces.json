@@ -49,7 +49,8 @@
       "additive_kwargs": {
         "metric_spec": "MetricSpec",
         "task_render": "TunerTaskRender",
-        "training_diagnosis": "TrainingDiagnosis"
+        "training_diagnosis": "TrainingDiagnosis",
+        "execution_provenance": "ExecutionProvenance"
       }
     },
     {
@@ -97,7 +98,8 @@
       "additive_kwargs": {
         "metric_spec": "MetricSpec",
         "task_render": "TunerTaskRender",
-        "training_diagnosis": "TrainingDiagnosis"
+        "training_diagnosis": "TrainingDiagnosis",
+        "execution_provenance": "ExecutionProvenance"
       }
     }
   ]

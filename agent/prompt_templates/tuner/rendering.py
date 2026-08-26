@@ -47,6 +47,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from agent.schemas.execution_provenance import AUTHORITY_DESCRIPTIONS
+
 #: The efficiency-equivalence band, as a fraction of a run's observed score
 #: range. FRAMEWORK policy with a metric-independent definition (design §3.3
 #: row 4), and ONE symbol with two consumers that must never disagree: the
@@ -641,3 +643,46 @@ def render_reflector_dynamics_block(diagnosis: Any) -> str:
     return "### TRAINING DYNAMICS (this experiment)\n  " + render_training_dynamics_line(
         diagnosis, None
     )
+
+
+def render_execution_provenance_block(provenance: Any) -> str:
+    """What the framework RESOLVED after the plan was authored.
+
+    Renders the empty string in the common case — a run whose authored plan
+    survived resolution intact has nothing to correct, and its prompt bytes
+    must not move. The block appears only when the planner's prose and the
+    executed configuration actually DISAGREE.
+
+    The block is worded as an authority, not as a hint. The reflector is
+    reading a hypothesis written before any of these overrides happened; told
+    only the values, a model reconciles the two by averaging them, and the
+    witnessed defect (F15) is precisely a reflection that narrated a proposed
+    loss as though it had run. So the block states which side governs, and
+    names the step that overruled each field so the reflector can explain the
+    difference rather than paper over it.
+    """
+    if provenance is None or not getattr(provenance, "events", ()):
+        return ""
+
+    lines = [
+        "### RESOLVED EXECUTION AUTHORITY (governs — read this over the hypothesis)",
+        "",
+        "The hypothesis above is a PRE-EXECUTION PROPOSAL. The framework overruled",
+        "the following value(s) after it was written, so the hypothesis does NOT",
+        "describe what ran:",
+        "",
+    ]
+    for event in provenance.events:
+        described = AUTHORITY_DESCRIPTIONS.get(event.authority, event.authority)
+        lines.append(
+            f"  - {event.field_path}: proposed {event.proposed} "
+            f"-> EXECUTED {event.executed}   [{described}]"
+        )
+    lines += [
+        "",
+        "Describe and judge what EXECUTED. Do not attribute this outcome to a",
+        "proposed value that was overruled, and do not repeat such a value as if",
+        "it had been used. Where the proposal and the executed configuration",
+        "differ, the executed configuration is the fact.",
+    ]
+    return "\n".join(lines)

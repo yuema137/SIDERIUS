@@ -71,8 +71,25 @@ def _sha(text: str) -> str:
 #: Captured at the PR-12a base ``eeb073dc`` (source ``e4cd5c18``). Verified
 #: identical across three separate fresh interpreter processes before being
 #: frozen — a baseline that is not reproducible is a claim, not a proof.
+#:
+#: **DECLARED DELTA — Lane D / F15 (narrative provenance).** The reflector is
+#: now told what the framework RESOLVED after the plan was authored, because a
+#: research-memory reflection described a run using a loss and a beta that were
+#: overruled before training. The reflector's USER prompt therefore moves
+#: whenever a run's plan was actually overruled, and this pinned pseudo run is
+#: such a run twice over: ``--model`` overrides the stub planner's
+#: ``stub_arch_000_a``, and the second round is forced formal
+#: (``is_trial True -> False``). Both are true overrules, not artifacts.
+#:
+#: What did NOT move is the evidence that this delta is bounded: **all three
+#: ``tuner.planner`` rows are byte-identical**, and both reflector SYSTEM
+#: prompts are unchanged at 9677. Only the two reflector user prompts moved
+#: (2854 -> 3523, 3163 -> 3945). The C7 property this guard was written for —
+#: composition gating must not leak into the legacy branch — is intact; what
+#: changed is a deliberate, separately-witnessed LLM-facing improvement.
+#: Re-recorded from three fresh interpreter processes, as the original was.
 LEGACY_TUNER_PROMPT_MANIFEST_SHA = (
-    "6e8de64b660da36c4801bd0e9d590e206dcf4f1395701305d5115bfe753039d6"
+    "23e59e45abf388fd5e35aff23f5b9049aad7435a1e693feb0b874ab6256f0309"
 )
 
 #: The per-call shape, recorded beside the digest so a mismatch localizes to a
@@ -80,9 +97,9 @@ LEGACY_TUNER_PROMPT_MANIFEST_SHA = (
 LEGACY_TUNER_PROMPT_SHAPE: tuple[tuple[str, int, int], ...] = (
     ("tuner.planner", 14152, 16858),
     ("tuner.planner", 14152, 19162),
-    ("tuner.reflector", 9677, 2854),
+    ("tuner.reflector", 9677, 3523),
     ("tuner.planner", 18252, 36499),
-    ("tuner.reflector", 9677, 3163),
+    ("tuner.reflector", 9677, 3945),
 )
 
 

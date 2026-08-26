@@ -99,6 +99,7 @@ from nodes.ml_hyperparameter_tune_agent.feedback import (
     _collect_disallowed_patterns,
     _render_gate_exhaustion_summary,
     _render_gate_exhaustion_trigger_b_summary,
+    invoke_reflection,
 )
 from nodes.ml_hyperparameter_tune_agent.planning import prepare_attempt
 
@@ -1530,22 +1531,15 @@ class HyperparamTuningAgent:
                         order=run_order,
                     )
 
-                    # Pass both training and scoring results to the reflector
                     reflect_results = {**train_results, **score_results}
-                    reflection = brain.reflect(
-                        exp_id,
-                        hypothesis,
-                        reflect_results,
-                        reflection_context,
-                        # Step 07 PR 07b (P3) — sequencing only. The spec tells
-                        # the reflector which direction counts as GOOD; the
-                        # diagnosis is the one 07a already derived above, never
-                        # recomputed, and it is the ONLY diagnosis transport to
-                        # this surface (the raw TrainingHistory stays out).
+                    reflection = invoke_reflection(
+                        brain,
+                        exp_id=exp_id,
+                        prepared=prepared,
+                        reflect_results=reflect_results,
+                        reflection_context=reflection_context,
                         metric_spec=run_metric.spec,
                         training_diagnosis=training_diagnosis,
-                        # Step 12 / PR-12a C7 — the reflector's task-science
-                        # gating. Same run-scoped render the planner receives.
                         task_render=run_task_render,
                     )
 

@@ -36,6 +36,7 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _score_of,
     _validate_data_config,
 )
+from nodes.ml_hyperparameter_tune_agent.provenance import ResolutionTracker
 from nodes.ml_hyperparameter_tune_agent.runtime import (
     _apply_epoch_bound,
 )
@@ -84,6 +85,49 @@ def _apply_declared_objective(plan: Any, composition_ref: Any) -> Any:
         )
     plan.loss_cfg = effective
     return plan
+
+
+def _normalize_strategies_for_scope(
+    plan: Any,
+    *,
+    scope_is_partial: bool,
+    resolved_data_scope: Any,
+    resolution: ResolutionTracker,
+) -> tuple[Any, Any, str | None]:
+    """DataScope DS5 — snapshot-only sampling under a partial scope.
+
+    Extracted from ``prepare_attempt`` by Lane D under the structural budget
+    that guards it ("extract the responsibility first"). Behaviour is verbatim:
+    the same condition, the same ``[DATASCOPE]`` line, the same two writes and
+    the same reason string.
+
+    LLM plans are PROPOSALS — normalized with persisted provenance rather than
+    failed. Operator config was already validated at startup, and the sandbox
+    boundary still fails hard if anything slips through.
+
+    Returns the strategies as PLANNED (before normalization) and the reason,
+    which the record carries so a normalized round is distinguishable from one
+    that asked for ``snapshot`` itself.
+    """
+    planned_trial_strategy = plan.trial_strategy
+    planned_eval_strategy = plan.eval_strategy
+    strategy_normalization_reason: str | None = None
+    if (
+        scope_is_partial
+        and plan.is_trial
+        and (plan.trial_strategy != "snapshot" or plan.eval_strategy != "snapshot")
+    ):
+        print(
+            f"  [DATASCOPE] normalized strategies: "
+            f"trial {plan.trial_strategy} → snapshot, "
+            f"eval {plan.eval_strategy} → snapshot "
+            f"(partial scope {resolved_data_scope})"
+        )
+        plan.trial_strategy = "snapshot"
+        plan.eval_strategy = "snapshot"
+        strategy_normalization_reason = "partial_data_scope"
+        resolution.record(plan, "partial_scope_strategy_normalization")
+    return planned_trial_strategy, planned_eval_strategy, strategy_normalization_reason
 
 
 def _resolve_declared_segmentation_size(model_type: str, model_cfg: dict) -> int | None:
@@ -331,10 +375,14 @@ def prepare_attempt(
     # recorded rather than looking like agent silence.
     plan, rejected_ordering = ExperimentPlan.parse_with_fallback(decision)
 
+    # Lane D / F15 — see `provenance.py`; `plan.hypothesis` goes stale here.
+    resolution = ResolutionTracker(plan)
+
     # Apply hard overrides from operator config (before other
     # overrides). FU-10 — an invalid effective plan raises
     # PlanOverridesError (run-terminating); see the helper.
     plan = _apply_plan_overrides(plan, agent_input.plan_overrides)
+    resolution.record(plan, "operator_plan_overrides")
 
     # Override chain: trial-allowed lockout + last-round override
     # + forced-formal hyperparameter inheritance gated on
@@ -351,6 +399,7 @@ def prepare_attempt(
         # boundary above — not re-derived here.
         trial_winner=formal_trial_winner,
     )
+    resolution.record(plan, "round_mode_override_chain")
 
     # Step 12 / PR-12d, F-12d-31 wire B — the task's AUTHORITATIVE objective.
     #
@@ -364,29 +413,18 @@ def prepare_attempt(
     # A task that declares none leaves `objective` None and the planner's
     # choice stands, which is every run that exists today.
     plan = _apply_declared_objective(plan, agent_input.task_composition_ref)
+    resolution.record(plan, "task_declared_objective")
 
-    # DataScope DS5 — normalize LLM-planned strategies under a
-    # partial scope. LLM plans are proposals (normalized with
-    # persisted provenance, not failed); operator config was
-    # already validated at startup; the sandbox boundary
-    # still fails hard if anything slips through.
-    planned_trial_strategy = plan.trial_strategy
-    planned_eval_strategy = plan.eval_strategy
-    strategy_normalization_reason: str | None = None
-    if (
-        scope_is_partial
-        and plan.is_trial
-        and (plan.trial_strategy != "snapshot" or plan.eval_strategy != "snapshot")
-    ):
-        print(
-            f"  [DATASCOPE] normalized strategies: "
-            f"trial {plan.trial_strategy} → snapshot, "
-            f"eval {plan.eval_strategy} → snapshot "
-            f"(partial scope {resolved_data_scope})"
-        )
-        plan.trial_strategy = "snapshot"
-        plan.eval_strategy = "snapshot"
-        strategy_normalization_reason = "partial_data_scope"
+    (
+        planned_trial_strategy,
+        planned_eval_strategy,
+        strategy_normalization_reason,
+    ) = _normalize_strategies_for_scope(
+        plan,
+        scope_is_partial=scope_is_partial,
+        resolved_data_scope=resolved_data_scope,
+        resolution=resolution,
+    )
 
     # Enforce max_epochs hard cap (prevents LLM from choosing
     # excessively long training).
@@ -403,6 +441,7 @@ def prepare_attempt(
     # 1 > 1, declined to act, and the bound the harness owns
     # was decided by the planner's silence.
     _apply_epoch_bound(plan.train_cfg, agent_input.max_epochs)
+    resolution.record(plan, "max_epochs_bound")
 
     # Build and validate TrialConfig from plan + overrides
     if plan.is_trial:
@@ -680,6 +719,9 @@ def prepare_attempt(
     model_config = plan.model_cfg.copy()
     # Ensure model_config.model_type matches the forced model type
     model_config["model_type"] = model_type
+
+    # Lane D / F15 — close the tracker (the model channel is not plan-visible).
+    execution_provenance = resolution.finish_with_model(plan, executed_model_type=model_type)
     active_params = {
         "exp_id": exp_id,
         "run_name": run_name,
@@ -733,4 +775,5 @@ def prepare_attempt(
         cfg_train_portion=cfg_train_portion,
         cfg_eval_portion=cfg_eval_portion,
         _planned_portions=_planned_portions,
+        execution_provenance=execution_provenance,
     )

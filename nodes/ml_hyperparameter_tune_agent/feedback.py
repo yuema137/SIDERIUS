@@ -662,3 +662,51 @@ def _render_gate_exhaustion_trigger_b_summary(
         )
 
     return " ".join(parts)
+
+
+def invoke_reflection(
+    brain,
+    *,
+    exp_id: str,
+    prepared,
+    reflect_results: dict,
+    reflection_context: dict | None,
+    metric_spec,
+    training_diagnosis,
+    task_render,
+) -> dict:
+    """Ask the reflector to turn one attempt's results into memory.
+
+    Extracted from ``run()`` by Lane D under the structural budget that guards
+    it ("extract the responsibility first"). Behaviour is verbatim — same
+    arguments, same order, same single call.
+
+    It belongs in this module because this module is *what the next agent is
+    told*, and it is now the ONE place that decides what the reflector knows
+    about an attempt.
+
+    **Both narrative inputs come from ``prepared``, and they are not the same
+    kind of thing.** ``prepared.hypothesis`` is prose the planner authored
+    BEFORE the framework resolved the plan; ``prepared.execution_provenance``
+    is the typed record of what resolution then overruled. Passing the first
+    without the second is the F15 defect — a reflection that narrated a
+    proposed loss as though it had run. They travel together from here on.
+    """
+    return brain.reflect(
+        exp_id,
+        prepared.hypothesis,
+        reflect_results,
+        reflection_context,
+        # Step 07 PR 07b (P3) — sequencing only. The spec tells the reflector
+        # which direction counts as GOOD; the diagnosis is the one 07a already
+        # derived, never recomputed, and it is the ONLY diagnosis transport to
+        # this surface (the raw TrainingHistory stays out).
+        metric_spec=metric_spec,
+        training_diagnosis=training_diagnosis,
+        # Step 12 / PR-12a C7 — the reflector's task-science gating. Same
+        # run-scoped render the planner receives.
+        task_render=task_render,
+        # Lane D / F15 — what RESOLUTION overruled, so the reflector describes
+        # the run that executed rather than the one that was proposed.
+        execution_provenance=prepared.execution_provenance,
+    )

@@ -1316,6 +1316,40 @@ that declares none — in both cases the plan is returned unchanged. A
 substitution that does happen is announced with a `[objective]` print line
 naming the planner's choice and the value that replaced it.
 
+## The reflector is told what RESOLVED, not what was proposed (Lane D / F15)
+
+`plan.hypothesis` is free prose the planner authors **before** the framework
+resolves the plan. Six steps then overrule parts of it — operator
+`plan_overrides`, the mode-override chain, the task-declared objective,
+partial-scope strategy normalization, the `--max_epochs` bound, and the forced
+model type — and none of them revisits the prose. The reflector received that
+prose under the heading "Original Hypothesis" as the only description of the
+configuration, so it narrated proposals as though they had run: a research
+memory entry reported "custom Smooth L1 beta=0.5" for a run whose declared
+objective executed and whose `beta` was null.
+
+`provenance.py::ResolutionTracker` watches the whole planning window and emits
+a typed `ExecutionProvenance` (`agent/schemas/execution_provenance.py`) — one
+`ResolutionEvent` per plan field whose AUTHORED value differs from the EXECUTED
+one. It rides `PreparedAttempt.execution_provenance` to the one `brain.reflect`
+call site, and `render_execution_provenance_block` renders it above the
+hypothesis, which is relabelled a PROPOSAL when it was overruled.
+
+**Detection is structural, attribution is best-effort.** The tracker DIFFS the
+authored plan against the final plan rather than recording at each known
+override site, so a seventh resolution step added later is still reported —
+as `unattributed`, never as agreement. A hand-written recorder at each site
+would go silently blind, which is the census-blindness shape this repository
+has repeatedly been bitten by.
+
+**Nothing is rendered when nothing was overruled**, so an un-overruled run's
+reflector prompt is byte-identical to before. A key the planner never authored
+that resolves to a falsy schema default is suppressed as default
+materialization; one that resolves to a real value (`loss_name`) is kept.
+
+**Known limit**: a claim in free prose about a field the plan never declared
+structurally cannot be detected by a plan diff.
+
 ## Composed run's own scientific gate set governs best-track selection (Step 12 / PR-12d, F-12d-30)
 
 `finalize_run_output`'s `_select_best_records` (`policy.py`) resolves the
@@ -1414,6 +1448,7 @@ to new consumers.
 | Module | Responsibility |
 |---|---|
 | `contracts.py` | typed carriers only — no policy, execution, persistence or rendering |
+| `provenance.py` | what planning RESOLVED away from the authored plan (`ResolutionTracker`) |
 | `scope_acquisition.py` | task-owned scope acquisition (PR-12bc B5) and the package's ONE physical-topology decode (`AttemptTopologyFacts`, PR-12d seam B) |
 | `planning.py` | observe -> plan (LLM) -> overrides -> strategy/epoch clamps -> the round's sample sets |
 | `execution.py` | the physical work, in three coarse phases (admission/preflight, training, inference+scoring+health) |

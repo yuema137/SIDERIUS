@@ -1165,6 +1165,7 @@ class LLMBridge:
         metric_spec: MetricSpec | None = None,
         training_diagnosis: Any = None,
         task_render: TunerTaskRender | None = None,
+        execution_provenance: Any = None,
     ) -> dict:
         """
         Uses the Reflector logic to transform results into new Memory entries.
@@ -1235,6 +1236,7 @@ class LLMBridge:
             reflection_context,
             training_diagnosis=training_diagnosis,
             metric_spec=metric_spec,
+            execution_provenance=execution_provenance,
         )
 
         # Internal call site: label is fixed (§1.5). Provider is the

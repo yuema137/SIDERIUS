@@ -9,6 +9,7 @@ from typing import Any
 from agent.prompt_templates.tuner.rendering import (
     EFFICIENCY_BAND_PCT,
     render_builtin_model_roster,
+    render_execution_provenance_block,
     render_metric_identity_line,
     render_planner_dynamics_block,
     render_reflector_dynamics_block,
@@ -1370,6 +1371,7 @@ def get_reflector_user_prompt(
     reflection_context=None,
     training_diagnosis=None,
     metric_spec=None,
+    execution_provenance=None,
 ):
     """
     Constructs the prompt for the Reflector to summarize findings into Memory.
@@ -1395,6 +1397,19 @@ def get_reflector_user_prompt(
     # reflector actually reads. `denoising_score` stays the field (D1 is not
     # 07b's); what it MEASURES is now stated rather than assumed.
     metric_identity_line = render_metric_identity_line(metric_spec) if metric_spec else ""
+    # Lane D / F15 — the hypothesis is prose the planner wrote BEFORE the
+    # framework resolved the plan. When resolution overruled something, say so
+    # at the point of use: a reflector told only the corrected values still
+    # reads "Original Hypothesis" as a description of the run. An un-overruled
+    # run renders NOTHING here and its prompt bytes are unchanged.
+    provenance_block = render_execution_provenance_block(execution_provenance)
+    if provenance_block:
+        hypothesis_line = (
+            "- **Original Hypothesis** (PROPOSAL — overruled in part; see "
+            f"RESOLVED EXECUTION AUTHORITY below): {hypothesis}\n\n{provenance_block}\n"
+        )
+    else:
+        hypothesis_line = f"- **Original Hypothesis**: {hypothesis}"
     context_block = ""
     if reflection_context:
         c = reflection_context
@@ -1445,7 +1460,7 @@ def get_reflector_user_prompt(
 
     return f"""
 ### Experiment Outcome for {exp_id}:
-- **Original Hypothesis**: {hypothesis}
+{hypothesis_line}
 - **Actual Results**:
 {json.dumps(actual_results, indent=2)}
 {dynamics_block}
