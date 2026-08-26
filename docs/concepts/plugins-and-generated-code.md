@@ -43,6 +43,46 @@ A composed run's manifest can also name pack plugin directories
 (`model_plugins:` / `loss_plugins:`), which are unioned into every child
 process's scan path.
 
+### What a model plugin's config must declare
+
+The three `PLUGIN_*` attributes are not the whole contract. A plugin's
+**config class** is a plain `BaseModel`, so unlike every built-in it inherits
+nothing — and two obligations that built-ins get for free must be declared by
+hand:
+
+| declaration | why | if you omit it |
+|---|---|---|
+| `model_type` on the config | the framework injects `model_config["model_type"]` into **every** plan before execution (`nodes/ml_hyperparameter_tune_agent/planning.py`), because every built-in config inherits the field from `BaseConfig` | under the permissive `extra` default the injected key is **silently dropped**, and the run fails later in the trainer with `AttributeError` when it reads `model_cfg.model_type` |
+| `PLUGIN_OUTPUT_TYPE` on the module | optional, and defaults to `"classifier"` | a regression task is refused at admission for declaring a class alphabet its task does not have |
+
+Leave `extra` at Pydantic's permissive default, as `BaseConfig` and both
+contrast exemplars do. `extra="forbid"` turns that same injected `model_type`
+— and any other field the framework adds that your config does not model —
+into a hard plan rejection, and a rejected plan does **not** consume an
+attempt, so an unsatisfiable schema burns the whole round budget without
+training once.
+
+> **These are two separate defects, not one.** It is tempting to read them as
+> a single "the config disagrees with the plan" story; they are not, and the
+> difference decides what you look for.
+>
+> - `extra="forbid"` **alone** produces the loud failure: six consecutive
+>   rejected plans and a run that aborts having never trained.
+> - A missing `model_type` **alone** produces the quiet one: plans validate,
+>   nothing is rejected, and the failure surfaces a layer later inside the
+>   trainer.
+>
+> Both defaults are correct for a 2-class classifier and wrong for most
+> tasks, so both are invisible until a pack copies an exemplar that omitted
+> them. Every shipped exemplar now declares both, enforced across all of them
+> by `tests/unit/examples/test_lane_e_f10_plugin_model_config_contract.py`.
+
+A pack may also ship a `description.md` for its model beside the plugin, at
+`{declared model-plugin root}/{model_type}/description.md`. The tuner reads it
+into the planner prompt; without it the prompt is silently thinner. It is
+searched last, so it never shadows a workspace registration of the same model
+type.
+
 ## Registration: the two-phase rule
 
 Whatever the family, registration follows one lifecycle rule:

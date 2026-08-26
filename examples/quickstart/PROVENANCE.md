@@ -56,8 +56,9 @@ the landed naming keyword (`input_identity`).
 
 Every executed cell output in `quickstart.ipynb` was produced by running the
 cell's own source on the landed post-PR-12d integration source (CPU only, no
-LLM calls, no chain launch) — with three exceptions, whose outputs come from
-the REAL bounded live run:
+LLM calls, no chain launch) — with four exceptions, three whose outputs come
+from the REAL bounded live run and one recording a value that has since gone
+stale:
 
 - **§9 (launch)**: verbatim excerpts (trim points marked) of the
   FINAL-WITNESS launch log; **§8 and §10 (first cell)**: produced by
@@ -86,9 +87,43 @@ the REAL bounded live run:
      wall 3m54s — every attempt refused pre-training (flagged focal seam
      + weak-model conv geometry on 4 features); `no_records`. No further
      launch taken.
-  The §10 inspection cell reads launch 4's workspace (its lock matches
-  the committed pack's fingerprint); no scored record or deliverable
-  exists in any workspace, and none is claimed.
+  The §10 inspection cell reads launch 4's workspace; no scored record or
+  deliverable exists in any workspace, and none is claimed.
+
+- **FOURTH EXCEPTION — §10's two long hex values are STALE RUN ARTIFACTS,
+  and deliberately not corrected.** The first cell of §10 prints, from
+  launch 4's `run_invariants_lock.json`:
+
+  ```
+  task_composition_fingerprint : 9645c218f5a84b219beb23fba6c9afc2916bf89eea8924c0560e822ce96f5b7b
+  model plugin pinned          : quickstart_reference_mlp  sha256 ca5544db561c81c5…
+  ```
+
+  Both were true OF LAUNCH 4. Neither matches the pack as committed today,
+  for two separate reasons that should not be conflated:
+
+  * the **plugin sha** moved because `plugins/quickstart_reference_mlp.py`
+    was changed after launch 4 (Lane E / F10 + F11b: the config now declares
+    `model_type`, the module declares `PLUGIN_OUTPUT_TYPE`, and `extra` is
+    no longer `forbid`). Recomputed from the committed file it is now
+    `60fde910197c…`;
+  * the **fingerprint** was ALREADY drifted from `9645c218…` before that
+    change — independently reproduced at base `6b123947` — so its staleness
+    is not attributable to the plugin edit alone.
+
+  They are **not** hand-corrected here, and that is the point of this entry:
+  they are a RECORD OF WHAT A REAL RUN OBSERVED. Editing them to values
+  computed on a later tree would assert that launch 4 recorded something it
+  did not — falsifying provenance in the opposite direction from the
+  staleness it would hide. Re-deriving them honestly requires a NEW witness
+  launch against the merged tree, which is tracked separately and is not
+  part of this pack change.
+
+  The §8 composition cell, by contrast, IS pure recomputation and has been
+  re-derived from the committed pack (`60fde910197c…`, fingerprint
+  `1330d3991a98c48b…`). A reader comparing §8 against §10 will therefore
+  see them disagree; the disagreement is real, explained here, and the
+  §8 values are the ones that describe the pack you have.
 
 `quickstart.html` is a generated static rendering of the same notebook,
 labelled as such, and section-heading-synced by test.

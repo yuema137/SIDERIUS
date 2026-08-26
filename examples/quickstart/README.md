@@ -129,10 +129,14 @@ health-enforcement claim.
   `MetricResult 1.0` (oracle), `0.0` (all-wrong), and a structured
   `NotScoreableResult(completeness)` for a missing artifact.
 - **From the live runs (witnessed 2026-08-25):** a chain workspace with
-  `run_invariants_lock.json` carrying the composition fingerprint
-  byte-equal to the notebook-§8 composition (pinning the three plugin
-  content hashes; editing the codec moved it `ede74e70…` → `9645c218…`,
-  exactly as the fingerprint discipline promises), the task-owned
+  `run_invariants_lock.json` carrying that run's composition fingerprint
+  (`9645c218…`, pinning the three plugin content hashes; editing the codec
+  had moved it `ede74e70…` → `9645c218…`, exactly as the fingerprint
+  discipline promises). It is NOT equal to what §8 composes today — the
+  pack's model plugin has changed since that run, and the fingerprint had
+  already drifted before that; `PROVENANCE.md`'s fourth exception carries
+  the attribution. The lock records what the run saw, which is the point of
+  a lock. Also the task-owned
   `resolved_data_scope [0,1,2,3]`, the P1 `generated_library
   {root, source: env}` provenance with promoted capabilities landing under
   that root (the repo checkout byte-identical before/after),

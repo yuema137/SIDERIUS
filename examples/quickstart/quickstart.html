@@ -368,10 +368,10 @@ partitions        : 4
 health family     : explicit_none  (a NAMED absence, never TIDMAD&#x27;s)
 deliverable naming: quickstart_predictions_*.json
 model plugins     : (&#x27;quickstart_reference_mlp&#x27;,) from the pack&#x27;s plugins/ dir
-semantic fingerprint: 9645c218f5a84b21 …
+semantic fingerprint: 1330d3991a98c48b …
   plugin pinned: _quickstart_task.py efe279577fc9 …
   plugin pinned: _quickstart_metrics.py e36fd102dc7e …
-  plugin pinned: quickstart_reference_mlp.py ca5544db561c …
+  plugin pinned: quickstart_reference_mlp.py 60fde910197c …
 </pre>
 </div>
 <p>A note on <strong>health</strong>: <code>task_health: {none: true}</code> is 08b's <code>EXPLICIT_NONE</code> — a <em>named</em> absence. Omitting the section entirely would mean "resolve TIDMAD's health family", which is exactly the silent fallback a composition exists to prevent. When your real task has collapse modes worth watching, start from the generic checks (<code>sample_dispersion_floor</code>, <code>categorical_distinct_symbols</code>, <code>categorical_dominant_fraction</code>) per <code>docs/guides/define-a-task.md</code> step 6 — and note that composed runs currently fire ZERO health gates — the A1 declared debt on the landed PR-12d ledger — so never read a composed run as health-enforced yet.</p>
@@ -527,7 +527,7 @@ logits = model(batch)
 print(&quot;forward           :&quot;, tuple(batch.shape), str(batch.dtype), &quot;-&gt;&quot;, tuple(logits.shape), str(logits.dtype))
 </pre>
 <pre class="out">PLUGIN_MODEL_TYPE : quickstart_reference_mlp
-config defaults   : {&#x27;segmentation_size&#x27;: 4, &#x27;batch_size&#x27;: 32, &#x27;hidden_dim&#x27;: 16}
+config defaults   : {&#x27;model_type&#x27;: &#x27;quickstart_reference_mlp&#x27;, &#x27;segmentation_size&#x27;: 4, &#x27;batch_size&#x27;: 32, &#x27;hidden_dim&#x27;: 16}
 parameters        : 114
 forward           : (8, 4) torch.float32 -&gt; (8, 2) torch.float32
 </pre>
