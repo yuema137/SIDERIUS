@@ -432,8 +432,12 @@ decisions:
     status: FROZEN                        # the requirement is frozen
     audit_status: PENDING_LAUNCH_AUDIT    # the evidence is collected at launch
     control_class: EXPERIMENT_FIXED
+    conditional_on_blind_execution_2026_08_26: >-
+      Remains a formal gate ON BLIND, in full and unweakened. The campaign is
+      GOLD-ONLY, so it does NOT gate the Gold launch and its absence neither
+      blocks nor invalidates completed Gold. Reactivates if and when Blind runs.
     frozen_value:
-      is_a_formal_launch_gate: true
+      is_a_formal_launch_gate: true (ON BLIND — see conditional note above)
       layers_at_least:
         - effective configuration
         - treatment / artifact paths
@@ -561,7 +565,7 @@ decisions:
     goldpod_value: applies
     blindpod_value: applies
     testpod_relevance: n/a (testpod is not part of the formal comparison)
-    required_evidence: arm-symmetry PASS with the expected asymmetries PRESENT
+    required_evidence: arm-symmetry PASS with the expected asymmetries PRESENT — CONDITIONAL_ON_BLIND_EXECUTION
     dependencies: [T-IMPL-2]
     last_updated: 2026-08-26
 
@@ -784,7 +788,7 @@ decisions:
     goldpod_value: identical
     blindpod_value: identical
     testpod_relevance: n/a
-    required_evidence: arm-symmetry PASS
+    required_evidence: arm-symmetry PASS — CONDITIONAL_ON_BLIND_EXECUTION
     dependencies: []
     last_updated: 2026-08-26
 
@@ -1169,6 +1173,8 @@ decisions:
     last_updated: 2026-08-26
 
   - decision_id: D-CONC-1
+    superseded_by: D-HW-5          # operator formal-hardware ruling 2026-08-26
+    status_note: SUPERSEDED — retained as history
     parameter: execution concurrency / band scheduling
     concept: maximum two active bands per pod with dynamic backfill
     status: FROZEN
@@ -1231,6 +1237,8 @@ decisions:
     last_updated: 2026-08-26
 
   - decision_id: D-CONC-2
+    superseded_by: D-HW-6          # operator formal-hardware ruling 2026-08-26
+    status_note: SUPERSEDED — retained as history
     parameter: per-band VRAM admission
     concept: 36 GiB per active band under the two-way topology
     status: PROVISIONALLY_FROZEN
@@ -1281,7 +1289,13 @@ decisions:
   - decision_id: D-CONC-3
     parameter: LLM / provider concurrency fairness
     concept: neither arm receives systematically greater API concurrency or retry opportunity
-    status: FROZEN                 # the principle
+    status: CONDITIONAL_ON_BLIND_EXECUTION
+    conditional_note_2026_08_26: >-
+      The BETWEEN-ARM fairness requirement is preserved in full and reactivates
+      if Blind runs. Under the Gold-only campaign there is no second arm to be
+      unfair to, so it does not gate the Gold launch. The HEADROOM FINDING is
+      unaffected and still applies to Gold's own four concurrent bands.
+    prior_status: FROZEN            # the principle
     mechanism_status: PENDING_AUDIT
     control_class: EXPERIMENT_FIXED
     frozen_value:
@@ -1562,6 +1576,91 @@ decisions:
     concept: pin immutable snapshots wherever the provider exposes one
     status: FROZEN
     implementation_status: PENDING_IMPLEMENTATION
+    disposition_2026_08_26:
+      release_blocking: false
+      gold_launch_precondition: true
+      statement: >-
+        NOT a v0.1.0 release blocker — it does not gate the code release. It
+        GATES LAUNCHING A CAMPAIGN WHOSE OWN INTERNAL COMPARISONS ARE MEANT TO
+        MEAN SOMETHING.
+      correction_history:
+        - >-
+          FIRST this lane called it "the ONLY remaining defence against a
+          provider-side model change between the two arms" and asked for
+          release-blocking treatment. Under Gold-only that rested on a
+          comparison the campaign is not making. WITHDRAWN.
+        - >-
+          SECOND this lane proposed demoting it to provenance hygiene. Too far
+          in the other direction. The Supervisor supplied the stronger residual
+          argument, adopted below.
+      residual_argument: >-
+        Gold runs four bands x up to 20 iterations, concurrently, potentially
+        over days, against a MUTABLE ALIAS. A provider update mid-campaign means
+        different bands, or different iterations of the SAME band, execute
+        against different models. An INTRA-GOLD internal-comparability defect
+        that would exist even if Blind had never been designed.
+      NOT_contaminated_by_alias_drift:
+        - Golden Metric arithmetic and HealthGate verdicts — they measure a trained model, not the proposer
+        - Composed Best pooling — one score_vector call over four already-selected deliverables
+        - Strict Best comparison — four FIXED DESIGNS retrained under identical frozen authority, NO proposer involved
+      contaminated_by_alias_drift:
+        - the candidate POOL those selections draw from
+        - the official iteration trajectory D-SCORE-7 — THE SHARPEST INSTANCE
+        - the campaign's central scientific claim
+      sharpest_instance: >-
+        NOT cross-band but WITHIN-BAND. D-SCORE-7 freezes the headline artifact
+        as "cumulative best HealthGate-valid FORMAL Golden Metric by iteration",
+        read as ONE AGENT'S PROGRESS over 20 iterations. If iterations 3 and 17
+        of the same band ran against different models the curve silently plots
+        TWO AGENTS and is presented as one. Correct scoring arithmetic does not
+        repair it — the defect is in what the x-axis MEANS.
+      two_parts_2026_08_26:
+        note: >-
+          Supervisor mechanical verification, independently re-verified by this
+          lane. The pin has TWO halves and the second is what makes the first
+          checkable.
+        a_pin_the_config:
+          what: 8 strings in llm_configs/openai_tiered_pro.json
+          cost: trivial, config only
+        b_capture_the_resolved_model:
+          what: capture response.model into provenance
+          cost: small, localized, in agent/llm_bridge.py
+          why_required: >-
+            grep 'response.model | resolved_model' over agent/llm_bridge.py
+            returns NOTHING. _record_usage stores the CONFIGURED model_name
+            passed by the caller, and a real persisted row reads
+            "model": "gpt-5.5" — the ALIAS — while a live probe of the same
+            request shape returns gpt-5.5-2026-04-23, the SNAPSHOT. The provider
+            returns the resolved model on every call and SIDERIUS DISCARDS IT.
+          the_precise_defect: >-
+            After the config pin the persisted record would read
+            gpt-5.5-2026-04-23 — but that is the CONFIGURED value being echoed
+            back, not the SERVED model being observed. If the provider served
+            something else the record would read EXACTLY THE SAME. A provenance
+            field that records what you asked for rather than what you got
+            cannot discriminate between the two cases, so it CAN NEVER FAIL —
+            and by the campaign's own anti-vacuity rule a check that cannot fail
+            is not a check.
+          not_scope_creep: >-
+            A pin nobody can check is precisely the stated-versus-effective gap
+            the review gate exists to eliminate. It would arrive in the section-4
+            table as a VERIFIED row that was really a STATED one.
+      the_class_this_belongs_to: >-
+        ANY provenance field that ECHOES CONFIGURATION rather than CAPTURING
+        OBSERVATION has this property. The distinction is already visible in the
+        section-4 table: row 62's config sha256 is an OBSERVATION, computed from
+        the file's bytes, so it fails if the file changes. Row 66b's model
+        identity must be an observation too. Section 11's adversarial witnesses
+        should test the CLASS, not just this instance.
+      latent_not_live_recorded_without_expanding_scope: >-
+        agent/llm_bridge.py:443-444 — "if model_id is None and known: model_id =
+        known['default_model']" — and openai's default is gpt-4o, not merely a
+        mutable alias but a DIFFERENT MODEL, substituted silently with no
+        warning. UNREACHABLE on any campaign path because the routing file
+        supplies model_id for all 10 roles and the only no-model_id
+        constructions are in env_validation/. Becomes live only if a role is
+        ever added without a model_id.
+      cost: (a) eight strings in one file · (b) a small localized bridge change
     control_class: EXPERIMENT_FIXED
     frozen_value:
       policy: >-
@@ -1621,6 +1720,11 @@ decisions:
         between the goldpod and blindpod launches, with no signal available to
         SIDERIUS or to the campaign record.
       mitigable_by_configuration: false
+    disposition_2026_08_26: >-
+      Follows D-LLM-13's reasoning. The same INTRA-CAMPAIGN exposure applies —
+      a mutable alias across four bands and up to 20 iterations over days —
+      CONFINED to lit_review's 2 of 10 roles, and REMOVED ENTIRELY if Q-LIT-1
+      resolves OFF.
     scope_note: >-
       This limitation exists ONLY if literature review is part of the campaign.
       lit_review is the sole non-OpenAI authority in the frozen configuration.
@@ -1859,9 +1963,12 @@ decisions:
         - >-
           A STABLE MODEL ID IS NOT A STABLE MODEL. A provider-side update
           behind gpt-5.5 is undetectable from inside the system.
-      mitigation: >-
-        Launch goldpod and blindpod within a narrow time window. This is a
-        mitigation, not a fix.
+      mitigation_CORRECTED_2026_08_26: >-
+        The former mitigation — "launch goldpod and blindpod within a narrow
+        time window" — is VOID under the Gold-only campaign; there is no paired
+        launch. The residual exposure is now INTRA-GOLD: four bands x up to 20
+        iterations over days against a mutable alias. See D-LLM-13's
+        precise_contamination_analysis for what that does and does not affect.
       requirement: >-
         Both limitations must be stated EXPLICITLY in the campaign manifest
         rather than left implied.
@@ -1871,6 +1978,8 @@ decisions:
   # ---- Cross-section consequence of the four-way -> max-two topology change --
 
   - decision_id: D-HW-3
+    superseded_by: D-HW-7          # operator formal-hardware ruling 2026-08-26
+    status_note: SUPERSEDED — retained as history
     parameter: two-way formal-topology rehearsal
     concept: the topology-specific witness the max-2 campaign requires
     status: PENDING_TESTPOD_QUALIFICATION
@@ -2185,7 +2294,15 @@ decisions:
   # ------------------------------------------------------------- topology ---
   - decision_id: D-TOPOLOGY-1
     parameter: formal arm topology / chain mapping
-    status: PENDING_OPERATOR_DECISION
+    status: FROZEN
+    resolved_by: D-HW-5          # operator formal-hardware ruling 2026-08-26
+    resolution_note: >-
+      The formal topology is now determined by D-HW-5: 4 x H100_SXM,
+      EXCLUSIVE_SINGLE_BAND, GPU 0/1/2/3 -> bands 0-3 / 4-9 / 10-14 / 15-19,
+      Gold first. What remains open is NOT topology but the lit-review and
+      baseline-isolation dispositions, which are tracked in their own entries
+      (Q-LIT-1, Q-ISO-1) and must not be re-tracked here.
+    superseded_status: PENDING_OPERATOR_DECISION
     control_class: EXPERIMENT_FIXED
     frozen_value: null
     current_framework_default:
@@ -2199,7 +2316,7 @@ decisions:
     goldpod_value: null
     blindpod_value: null
     testpod_relevance: rehearsed on testpod
-    required_evidence: arm-symmetry PASS; band identity in every record
+    required_evidence: band identity in every record; arm-symmetry PASS is CONDITIONAL_ON_BLIND_EXECUTION
     dependencies: [Q-LIT-1, Q-ISO-1, D-HW-1, T-IMPL-1, T-IMPL-2]
     blocked_by: [Q-LIT-1, Q-ISO-1]
     note: >-
@@ -2825,7 +2942,14 @@ decisions:
 
   - decision_id: A6-2
     parameter: champion granularity — per band or per arm
-    status: PENDING_OPERATOR_DECISION
+    status: FROZEN
+    resolved_by: D-BUD-9          # plan section 19.9, operator ruling 2026-08-26
+    resolution: >-
+      PER BAND. "Champion selection occurs PER BAND. There is no cross-band
+      champion because the four bands use different data scopes and their scalar
+      scores are not directly cross-comparable. Each arm therefore produces four
+      band champions." D-BEST-1 and D-BEST-2 are built on that answer.
+    superseded_status: PENDING_OPERATOR_DECISION
     control_class: EXPERIMENT_FIXED
     finding: >-
       The four bands cover DISJOINT file sets (0-3, 4-9, 10-14, 15-19). Under
@@ -3130,6 +3254,8 @@ decisions:
     last_updated: 2026-08-26
 
   - decision_id: D-BUD-12
+    superseded_by: D-HW-6          # operator formal-hardware ruling 2026-08-26
+    status_note: SUPERSEDED — retained as history
     parameter: per-band VRAM budget
     status: FROZEN                        # campaign policy
     hardware_acceptance: PENDING_HARDWARE_EVIDENCE
@@ -4214,7 +4340,2532 @@ decisions:
       Must use score_vector on a scoped SampleSet. Must NOT be derived from the
       full-scope scalar by any averaging — scoring_utils section 3 forbids it.
     owner: campaign-planning lane (uses existing scoring authority; no framework change)
-    dependencies: [D-BUD-17]
+    preserved_record_inspected_2026_08_26:
+      file: tidmad_reproduction/fcnet/full_20_files/siderius_score_split_official.json
+      raw_data_dir: >-
+        /home/klz/Data/TIDMAD - CONFIRMS the equivalence concern below is real
+        rather than hypothetical. The preserved deliverables were produced AND
+        scored against the non-canonical 5090 set. That directory holds 194
+        abra_validation_* files against the canonical 20.
+      anchor_map_VERIFIED_IDENTICAL: >-
+        The record cites /home/klz/Data/TIDMAD/segment_anchors.json rather than
+        the repository's frozen reference_data/segment_anchors.json. Verified
+        byte-identical - both sha256
+        0c44b6084dc8afc4dc2fa34f5253bc8d780b4e8ae086945e7051d8bf7928ba90 - and
+        the record's s_max 295715680.14248306 matches. THE RULER IS NOT A RISK;
+        only the input data is.
+      existing_full_scope_reference: >-
+        denoising_score 5.851465049536501, created 2026-07-20, 20 files at 200
+        segments per file, checkpoints FCNet_0_4 / FCNet_4_10 / FCNet_10_15 /
+        FCNet_15_20.
+      shortcut_checked_and_REJECTED: >-
+        The record carries a 20-element file_vector, which makes per-band
+        numbers look derivable. They are NOT. The scalar is a RATIO OF SUMS, not
+        a mean of per-file values, and the json carries neither the per-band
+        numerator nor the denominator. Deriving band scores from it would be
+        scoring_utils section 3's forbidden construction in a convenient
+        disguise, and this entry's own constraint already forbids it. A real
+        score_vector call per band is required either way.
+    status_correction_2026_08_26: >-
+      A2-FCNET is NOT newly blocked. The execution plan below ALREADY routes
+      around the data-authority problem by re-running inference on testpod
+      against the canonical set (~7.3 minutes). What the preserved-record
+      inspection adds is confirmation that the concern was correctly stated, the
+      elimination of the anchor-map risk, and one OPTIMISATION: if the twenty
+      abra_validation files prove byte-identical between /home/klz/Data/TIDMAD
+      and the canonical testpod set, the preserved deliverables can be scored
+      DIRECTLY with no inference at all, and the existing 5.851465 full-scope
+      reference is validated as campaign-comparable at the same time. Local
+      sha256 of the twenty files handed to the Supervisor; D-DATA-1 names the Q3
+      manifest (sha 39270b45...33ad85) as the integrity authority.
+    execution_plan_2026_08_26:
+      question_from_supervisor: >-
+        Does the Gold pod need the TIDMAD_OFFICIAL_MODELS checkpoints, or only
+        the resulting number?
+      answer: >-
+        ONLY THE NUMBER. A2-FCNET is a PRE-CAMPAIGN computation. The Gold pod
+        never needs the FCNet checkpoints or deliverables — it needs four
+        scalars plus their provenance.
+      recommended_route: run A2-FCNET on TESTPOD, before transfer
+      why_testpod_and_not_the_5090:
+        - >-
+          The FCNet DELIVERABLES already exist on the 5090 at
+          /home/klz/Data/SIDEREIS_DATA/tidmad_reproduction/fcnet/full_20_files/
+          (20 files, ~75G, "canonical location, do not delete"), so scoring them
+          directly would need no inference at all — the cheaper route.
+        - >-
+          BUT D-DATA-1 establishes TESTPOD's 84G/40-file set as the CANONICAL
+          data authority, and the 5090 holds a different, larger set. This
+          number becomes a CAMPAIGN STOPPING THRESHOLD (D-BUD-17), so it must be
+          computed against the canonical authority, not against a set whose
+          equivalence is unverified.
+      cost_of_the_recommended_route: >-
+        Re-running FCNet inference over 20 files is ~22 s/file on a 5090, about
+        7.3 minutes total. Trivial. The provenance gain is worth far more than
+        the compute saved by the cheaper route.
+      requirements_on_testpod:
+        - the four FCNet band checkpoints
+        - the canonical 40-file TIDMAD_DATA
+        - the committed anchor map reference_data/segment_anchors.json, from the release SHA
+        - the paper inference recipe (input_size=40000, batchsize=25, no +128 shift at inference)
+      checkpoint_inventory_to_CONFIRM:
+        finding: >-
+          The Supervisor listed TIDMAD_OFFICIAL_MODELS as "17 .pth (WaveNet_0_20,
+          Transformer_0_4/4_10/10_15/15_20, RNN_*)" — FCNet was not spelled out.
+          The count reconciles: PUNet x4 + RNN x4 + Transformer x4 + WaveNet x1 =
+          13, plus FCNet x4 = 17, and the size 5.7G matches the archive recorded
+          at docs/design/paper_and_collapse_reference_baselines.md section 2.1.
+        action: >-
+          CONFIRM BY NAME that FCNet_0_4.pth, FCNet_4_10.pth, FCNet_10_15.pth and
+          FCNet_15_20.pth are among the 17 before relying on the route. The
+          entire D-BUD-17 rule depends on it, and a count that reconciles is not
+          the same as a file that exists.
+      gold_pod_transfer_need: >-
+        TIDMAD_OFFICIAL_MODELS is NOT required on the GOLD POD if A2-FCNET runs
+        on testpod. It IS required on testpod. Cheap enough that carrying it is
+        harmless, but it should not be described as a Gold-pod campaign input.
+    dependencies: [D-BUD-17, D-DATA-1]
+    last_updated: 2026-08-26
+
+  # ============================================================== #
+  # FORMAL HARDWARE DISPOSITION — operator ruling 2026-08-26        #
+  # Relayed by the RTX 5090 Supervisor under directive section 11   #
+  # (required relay). Recorded as OPERATOR authority; the relay     #
+  # path is stated so provenance is honest.                         #
+  # SUPERSEDES the 8-GPU simultaneous option AND dual_coresident.   #
+  # ============================================================== #
+
+  - decision_id: D-HW-5
+    parameter: formal hardware topology and execution order
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    provenance: operator ruling, relayed by Supervisor under directive section 11
+    frozen_status_block:
+      FORMAL_GPU_COUNT: 4
+      FORMAL_GPU_TYPE: H100_SXM
+      GPU_RESIDENCY: EXCLUSIVE_SINGLE_BAND
+      ARM_EXECUTION_ORDER: GOLD_FIRST, BLIND_AFTER_GOLD_IF_RESOURCES_ALLOW
+      GOLD_REQUIRED: true
+      BLIND_REQUIRED_FOR_GOLD_COMPLETION: false
+      SCIENTIFIC_VRAM_CEILING: 60GB
+      TRIAL_TIME_CEILING: 30min
+      FORMAL_TIME_CEILING: 120min
+      BYPASS_FORMAL_TIME_CEILING: 200min
+      TIME_CEILINGS_REQUIRE_FINAL_H100_SINGLE_RESIDENT_QUALIFICATION: true
+    band_to_gpu_assignment_stage_G_A:
+      GPU 0: 0-3
+      GPU 1: 4-9
+      GPU 2: 10-14
+      GPU 3: 15-19
+    residency_rule: one exclusive GPU per Gold band; NO two scientific band searches co-reside
+    execution_order: >-
+      Gold runs FIRST. Gold finalization follows Gold Stage A and does NOT wait
+      for Blind. Blind runs afterward ONLY if resources permit.
+    supersedes: [D-CONC-1, "the 8-GPU simultaneous Gold/Blind option", "the dual_coresident formal topology"]
+    dependencies: [D-HW-6, D-HW-7, D-ARM-1]
+    last_updated: 2026-08-26
+
+  - decision_id: D-HW-6
+    parameter: scientific VRAM ceiling
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    frozen_value:
+      scientific_vram_ceiling: 60GB
+      previous: 36GB
+      applies_to: each active band, Gold and (if run) Blind identically
+    causal_not_cosmetic: >-
+      The revision is an explicit resource-policy change CAUSED BY the move from
+      co-resident to exclusive-GPU execution. Record it as causal.
+    constraints:
+      - use the repository's EXISTING canonical VRAM authority
+      - do NOT create a second budget mechanism
+      - do NOT silently change GB/GiB semantics
+      - >-
+        the candidate must NOT treat the full physical 80GB as scientific
+        budget; the remainder is headroom for framework overhead, transient
+        allocator behaviour, CUDA context and safety margin
+    unit_hazard_flagged: >-
+      The shipped VRAM flags are implemented as GiB
+      (agent/skills/evaluate_vram_skill/wrapper.py, _GB = 1024**3). The GB/GiB
+      question must be settled EXPLICITLY at implementation, never assumed.
+    supersedes: [D-CONC-2, D-BUD-12]
+    dependencies: [D-HW-5]
+    last_updated: 2026-08-26
+
+  - decision_id: D-HW-7
+    parameter: time ceilings under exclusive single-resident execution
+    status: FROZEN                       # values
+    evidence_status: PENDING_HARDWARE_EVIDENCE
+    control_class: HARDWARE_DERIVED
+    frozen_value:
+      trial: 30min
+      formal: 120min
+      bypass_formal: 200min
+      requalification_required: fresh exclusive-H100 single-resident qualification
+    operator_reasoning_load_bearing: >-
+      The operator explicitly REFUSED to raise the ceilings merely because the
+      topology changed. Single-resident REMOVES the dual penalty, but post-#320
+      uses the true frozen trial scope and 60GB permits larger candidates. Those
+      push in OPPOSITE directions, so no existing evidence can establish whether
+      30/120/200 are too loose or too tight.
+    explicitly_not_frozen:
+      candidate_for_discussion_only: 45 / 180 / 300 (a 1.5x proportional expansion)
+      instruction: >-
+        Named by the operator as a natural candidate for DISCUSSION. Do NOT
+        adopt it, plan against it, or treat it as likely.
+    supersedes: [D-HW-3]
+    dependencies: [D-HW-5, D-HW-6]
+    last_updated: 2026-08-26
+
+  - decision_id: D-ARM-1
+    parameter: temporal asymmetry — provenance requirement
+    status: CONDITIONAL_ON_BLIND_EXECUTION
+    reclassified_2026_08_26: >-
+      NOT a current Gold launch blocker. The campaign is GOLD-ONLY. The WHOLE
+      arm-comparability apparatus is PRESERVED — temporal separation,
+      provider/environment provenance, host baseline load, runtime-profile and
+      hardware equivalence, neighbour-load records — as conditions that
+      REACTIVATE if and when Blind is executed for a formal quantitative
+      comparison. If Blind is never run, none of this blocks or invalidates
+      completed Gold.
+    prior_status: FROZEN (as a current requirement)
+    control_class: EXPERIMENT_FIXED
+    frozen_value:
+      operator_position: Gold-first / Blind-later is accepted as a COST DECISION
+      if_blind_used_for_a_formal_quantitative_treatment_comparison_claim: >-
+        exact provenance of the temporal separation AND of all provider /
+        hardware / release authorities must be preserved
+      hard_rules:
+        - sequential execution must NEVER be described as simultaneous
+        - >-
+          if Blind cannot be completed it is reported as unavailable /
+          incomplete, honestly — no fabricated symmetry evidence
+        - completed Gold is NOT invalidated or delayed by Blind's absence
+      runbook_requirement: >-
+        This must appear EXPLICITLY in the standalone campaign runbook, not be
+        left implicit.
+    consequence_flagged_by_this_lane:
+      finding: >-
+        Plan section 9.15 recorded provider-side model drift as a limitation the
+        campaign cannot engineer away, and named its mitigation: "launch goldpod
+        and blindpod within a narrow time window". Gold-first / Blind-later
+        REMOVES that mitigation entirely.
+      consequences:
+        - >-
+          D-LLM-13 (pin gpt-5.5 to the immutable snapshot gpt-5.5-2026-04-23) is
+          no longer a hygiene improvement — it is now the ONLY remaining defence
+          against a provider-side model change between the two arms. Priority
+          rises accordingly.
+        - >-
+          D-PROV-1 — DeepSeek exposes NO immutable revision at all. If literature
+          review is in the campaign (Q-LIT-1, still open) that authority is
+          unpinnable, and the temporal gap makes its drift risk materially
+          worse. Strengthens the case for resolving Q-LIT-1 toward OFF.
+        - >-
+          Every provenance record must capture the RESOLVED MODEL SNAPSHOT per
+          arm, not just the configured alias, or the temporal separation cannot
+          be audited after the fact.
+    dependencies: [D-HW-5, D-LLM-13, D-PROV-1, Q-LIT-1]
+    last_updated: 2026-08-26
+
+  - decision_id: F-CONFOUND-1
+    parameter: treatment-correlated ceiling confound — RE-DERIVED under exclusive residency
+    status: PENDING_HARDWARE_EVIDENCE
+    control_class: EXPERIMENT_FIXED
+    withdrawn: false
+    re_derivation_2026_08_26:
+      instruction: Supervisor asked for re-derivation, not deletion. Direction unchanged; magnitude now unknown.
+      multiplier_1_coresidency:
+        was: 2.389x wall-time penalty at dual residency
+        first_re_derivation_2026_08_26: "GONE — exclusive single-band residency removes it"
+        CORRECTED_2026_08_26: >-
+          NOT GONE. UNKNOWN, and possibly LARGER. The correction: exclusive
+          residency removes GPU contention, but the measured 2.389x occurred at
+          7-20% GPU utilization with 82-90% CPU idle — so GPU contention was
+          almost certainly NOT its cause. The mechanism was never explained, and
+          the host layer (shared CPU, RAM, filesystem) is where it most
+          plausibly lives. On the Gold pod the four bands have EXCLUSIVE GPUs but
+          SHARE one host. Process count therefore rises 2 -> 4 on exactly the
+          layer that was never ruled out. The first re-derivation removed a
+          multiplier on the strength of a mechanism nobody had established.
+        status: UNKNOWN — pending the four-band host-side witness
+        corrected_by: Supervisor observation, 2026-08-26
+      multiplier_2_trial_data:
+        status: UNCHANGED — post-#320 trial rounds use the true frozen 1% scope, ~5x the pre-fix ~0.2%
+      multiplier_3_model_scale:
+        was: goldpod advice encourages 10M-500M against v20's realized 0.9M-25.9M, under a 36GB ceiling
+        now: LARGER — the 60GB ceiling permits materially bigger candidates than when the analysis was done
+      net_CORRECTED: >-
+        Zero multipliers safely removed, one unchanged, one INCREASED, and one
+        UNKNOWN that may be larger at four processes than it was at two. The
+        confound's direction is unchanged and it remains TREATMENT-CORRELATED.
+        Its magnitude is unknown and the earlier claim that it had SHRUNK was
+        premature.
+      new_mechanism_identified:
+        name: admission / completion envelope gap
+        finding: >-
+          Raising the VRAM ceiling 36 -> 60GB WITHOUT raising the time ceilings
+          widens the gap between what is ADMISSIBLE and what is COMPLETABLE.
+          Admission checks VRAM; the time gate checks predicted time. A
+          candidate can pass VRAM admission at 60GB and then breach the 30-min
+          trial ceiling — which D-FAIL-4 classifies as SCIENTIFIC /
+          RESOURCE_INFEASIBLE and which therefore CONSUMES a scientific attempt.
+        why_it_matters: >-
+          The agent is now permitted to build candidates the clock cannot
+          finish, and each such candidate costs a scientific attempt rather than
+          being refused cheaply at admission. That is the same selection
+          pressure as the original confound, arriving through a second door.
+        treatment_correlation: >-
+          goldpod's advice is what pushes toward the larger candidates the 60GB
+          ceiling now permits, so this door also opens preferentially for
+          goldpod.
+    resolution_path:
+      - A4-5 post-f310a264 evaluation-runtime witness, sized at the advice-encouraged scale
+      - D-HW-7 exclusive-H100 single-resident time-ceiling qualification
+    escalation_status: escalated to the operator by the Supervisor, 2026-08-26
+    dependencies: [D-HW-6, D-HW-7, D-FAIL-4, A4-5]
+    last_updated: 2026-08-26
+
+  - decision_id: D-DATA-1
+    parameter: canonical campaign data authority and transfer boundary
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    provenance: Supervisor measurement, 2026-08-26, both locations measured
+    frozen_value:
+      canonical_input:
+        location: testpod /workspace/DATA/TIDMAD_DATA
+        size: 84G
+        files: 40 h5 files — 20 abra_training_* + 20 abra_validation_*
+        integrity_authority: the Q3 manifest, sha 39270b45...33ad85, verified complete (comm -13 empty)
+      NOT_canonical:
+        location: 5090 /home/klz/Data/TIDMAD
+        size: 862G
+        files: 423
+        finding: >-
+          A DIFFERENT, LARGER SET. It is NOT byte-identical to the campaign
+          input, so the operator ruling's conditional 5090 -> Gold pod transfer
+          allowance DOES NOT APPLY.
+      manifest_requirement: >-
+        Section 3's "generate a manifest before transfer" is ALREADY SATISFIED by
+        the Q3 manifest; do not generate a second one.
+    transfer_scope_is_FILE_EXACT_not_directory:
+      hazard: >-
+        The directory holds 42 entries; only 40 are data. Copying the directory
+        wholesale would violate the ruling's own provisioning rule.
+      download_data_py: must come from the RELEASE SHA, not from the data directory
+      segment_anchors_json: >-
+        A TASK ASSET the repository owns at reference_data/segment_anchors.json.
+        It must come from the FROZEN AUTHORITY, never from an rsync of a mutable
+        working tree.
+      runbook_requirement: >-
+        Record this boundary explicitly in the standalone campaign runbook — the
+        runbook is what someone actually follows at 3am.
+    workspace_DATA_is_NOT_the_transfer_unit:
+      question_asked_by_the_ruling_section_2: >-
+        Is the canonical immutable authority exactly the COMPLETE /workspace/DATA
+        tree?
+      answer: NO — mechanically determined by the Supervisor, 2026-08-26
+      subtrees:
+        - {path: SIDERIUS_DATA, size: 196G, kind: RUN ARTIFACTS, disposition: EXCLUDE}
+        - {path: TIDMAD_DATA, size: 84G, kind: immutable input, disposition: TRANSFER}
+        - {path: TIDMAD_OFFICIAL_MODELS, size: 5.7G, kind: immutable input, disposition: TRANSFER (see A2-FCNET for whether the GOLD POD needs it)}
+      why_SIDERIUS_DATA_is_excluded: >-
+        v18/v18r campaign run directories — wavenet 94G, legacy_v18r_undersized
+        53G, legacy_v18_*, v18r_*, dated .log files. It holds ALL 96 .pyc and
+        ALL 21 .log files in the tree, and 58 of the 98 .h5 are denoised
+        OUTPUTS, not inputs. Section 8 forbids transferring old campaign
+        workspaces, model outputs, checkpoints and logs.
+      transfer_size: ~90G, not 285G
+      the_point_is_not_the_saving: >-
+        Transferring the COMPLETE TREE would have VIOLATED section 8 while
+        APPEARING TO FOLLOW section 2. "copy /workspace/DATA" is the obvious
+        wrong thing to write in a runbook, and a runbook is what someone follows
+        under time pressure.
+      runbook_requirement_2: >-
+        Record this subtree boundary explicitly, the same way as the file-exact
+        boundary above.
+    source_stability_section_5: >-
+      VERIFIED by the Supervisor 2026-08-26 — zero files modified in the last 120
+      minutes, no open write handles on the tree. testpod continues its
+      engineering work during transfer, as the ruling prefers.
+    dependencies: [D-TASK-3, D-HW-5]
+    last_updated: 2026-08-26
+
+  - decision_id: A-HW-VERIFY-1
+    parameter: Gold pod topology verification
+    status: VERIFIED
+    discharged: 2026-08-26
+    control_class: HARDWARE_DERIVED
+    measured_facts:
+      host: 7b18f5b84834
+      gpus: 4 x NVIDIA H100 80GB HBM3, 81559 MiB each, 700 W each, four distinct UUIDs
+      nproc: 224
+      ram: 2015 G total, 1909 G available
+      workspace: /dev/md127 xfs 2.0 T
+      root_fs: overlay 30 G — DATA MUST NOT LIVE THERE
+      rsync: present
+    verified_execution_facts:
+      - one Gold host
+      - four H100 GPUs
+      - shared /workspace filesystem
+      - one immutable /workspace/DATA copy
+      - one exclusive GPU per band
+      - four isolated writable band workspaces
+    scope_limit: >-
+      Operational / runbook topology only. NO frozen scientific parameter
+      changes follow from this provisioning detail.
+    prior_status: PENDING_HARDWARE_EVIDENCE — endpoint diagnosis went auth-gap -> closed-port -> pod-not-up before the pod came up on a third port
+    dependencies: [D-HW-5]
+    last_updated: 2026-08-26
+  - decision_id: A-HOST-1
+    parameter: four-band host-side contention witness
+    status: PENDING_HARDWARE_EVIDENCE
+    control_class: HARDWARE_DERIVED
+    finding: >-
+      On the Gold pod the GPUs are EXCLUSIVE but the four bands SHARE host CPU,
+      RAM and filesystem. The unexplained 2.389x dual-coresidency multiplier
+      occurred at 7-20% GPU utilization and 82-90% CPU idle and was never
+      mechanistically explained — the host layer is where it most plausibly
+      lives.
+    purpose_restated_2026_08_26: >-
+      QUALIFY THE GOLD EXECUTION ENVIRONMENT AND DETECT RESOURCE-SELECTION
+      DISTORTION — not "prove simultaneous-arm symmetry". The row is NOT
+      weakened by the Gold-only ruling; the unresolved 2.389x remains a
+      legitimate engineering question.
+    required_measurements:
+      - baseline host load BEFORE each witness
+      - one-band vs four-band runtime
+      - per-GPU utilization
+      - CPU / loadavg
+      - I/O wait
+      - DataLoader observables
+      - concurrent UNRELATED host load, so a neighbour's activity is never mistaken for our own four-band contention
+    why_it_is_not_a_formality: >-
+      This is where that open question lands, now with FOUR processes instead of
+      two. Exclusive GPU residency does not remove host contention, and the
+      original measurement's low GPU utilization suggests GPU contention was
+      never the cause.
+    consequence_for_F_CONFOUND_1: >-
+      Directly forced the correction recorded on F-CONFOUND-1: multiplier 1 is
+      UNKNOWN and possibly LARGER at four processes, not GONE.
+    THE_HOST_IS_SHARED_2026_08_26:
+      measurement: >-
+        Gold pod baseline with NOTHING of ours running: loadavg
+        60.17 / 59.00 / 56.23 on 224 cores — about 27% of the host CPU already
+        consumed by OTHER TENANTS.
+      testpod_comparison: exp1 baseline ~50 on 208 cores, about 24% — the same order
+      binding_requirement: >-
+        A-HOST-1 MUST record CONCURRENT BASELINE LOAD alongside every
+        measurement. A single-band-vs-four-band comparison on a shared host
+        measures our contention PLUS a neighbour's, and the neighbour's load is
+        not controlled by us. A four-band slowdown CANNOT be attributed to our
+        own concurrency without that record.
+      why_this_matters_methodologically: >-
+        Without the baseline record we would repeat exactly the error this lane
+        already retracted on F-CONFOUND-1 — attributing an effect to a mechanism
+        nobody established.
+      open_hypothesis_not_a_claim: >-
+        Neighbour load is now a LIVE CANDIDATE for part of the unexplained
+        2.389x. The hypothesis could not have been formed before a second host's
+        baseline existed. A-HOST-1 can now rule it in or out.
+    dependencies: [D-HW-5, F-CONFOUND-1]
+    last_updated: 2026-08-26
+
+  - decision_id: F-CONFOUND-2
+    parameter: shared host + fixed wall-clock ceilings — GOLD RUNTIME / RESOURCE-SELECTION RISK
+    status: PENDING_HARDWARE_EVIDENCE
+    classification: GOLD RUNTIME / RESOURCE-SELECTION RISK
+    reclassified_2026_08_26: >-
+      First recorded as a Gold-vs-Blind treatment-axis confound. The campaign is
+      GOLD-ONLY, so uncontrolled neighbour load is NOT presently a treatment-axis
+      confound — there is no Blind to be biased against. The MEASUREMENT stands
+      and the MECHANISM stands; only the claim about what it biases changes.
+      Do NOT claim it biases Gold relative to Blind while Blind is not run.
+    surviving_framing: >-
+      A WITHIN-GOLD selection effect, which is arguably the more directly
+      actionable framing: candidates pushed toward the ceiling by the advice and
+      the 60GB budget sit closest to breach, so a busy neighbour preferentially
+      removes exactly the large candidates the treatment exists to encourage.
+      That distorts WHICH SCIENCE GOLD GETS TO DO, whether or not a second arm
+      ever exists.
+    reactivates_as_treatment_axis_if: Blind is executed for a formal quantitative comparison
+    measurement_update_2026_08_26:
+      reading_1: 60.17 / 59.00 / 56.23 on 224 cores
+      reading_2: 66.88 / 51.09 / 51.60 on 224 cores, all four GPUs at 0%, nothing of ours running
+      finding: >-
+        ~23-30% of the host consumed by other tenants, and it MOVES between
+        readings minutes apart. Time-variance is the property that makes this
+        real rather than theoretical, and it is now MEASURED, not assumed.
+    control_class: EXPERIMENT_FIXED
+    discovered_by: campaign-planning lane, 2026-08-26
+    interacting_frozen_facts:
+      - the time ceilings 30 / 120 / 200 are WALL-CLOCK and FIXED (D-HW-7)
+      - the Gold host is SHARED with other tenants whose load we do not control and which varies over time (~27% baseline measured)
+      - Gold and Blind run at MATERIALLY DIFFERENT TIMES (D-HW-5, D-ARM-1)
+    consequence: >-
+      The two arms may execute under materially different host contention. A
+      candidate needing 25 solo-minutes fits a 30-minute trial ceiling on a
+      quiet host and BREACHES it on a busy one — and D-FAIL-4 classifies a
+      ceiling breach as SCIENTIFIC / RESOURCE_INFEASIBLE, which CONSUMES a
+      scientific attempt. Neighbour load therefore becomes a source of
+      attempt-loss that can differ between the arms for reasons entirely
+      unrelated to their science.
+    why_it_AMPLIFIES_F_CONFOUND_1: >-
+      Neighbour-load variance hurts most the arm whose candidates sit CLOSEST to
+      the ceiling, and the goldpod treatment is precisely what pushes candidates
+      toward the ceiling — through both the 10M-500M advice and the 60GB budget.
+      The arm the treatment makes larger is the arm most sensitive to a variable
+      neither arm controls.
+    required_response: PROVENANCE, not a policy change
+    provenance_requirement: >-
+      Concurrent host baseline load MUST be recorded per attempt, so that
+      (a) A-HOST-1 can separate our four-band contention from a neighbour's,
+      (b) the D-ARM-1 temporal-separation record can show whether the arms ran
+      under comparable host conditions, and (c) post-hoc analysis can tell an
+      attempt lost to a large candidate from one lost to a busy neighbour.
+    reopens_no_frozen_decision: true
+    dependencies: [F-CONFOUND-1, A-HOST-1, D-HW-7, D-ARM-1, D-FAIL-4]
+    last_updated: 2026-08-26
+
+  - decision_id: D-DATA-2
+    parameter: testpod -> Gold pod transfer execution
+    status: FROZEN                 # the method; completion pending verification
+    completion_status: PENDING_HARDWARE_EVIDENCE
+    control_class: EXPERIMENT_FIXED
+    executed_by: Supervisor, 2026-08-26
+    method:
+      path: DIRECT testpod -> Gold pod, no 5090 relay
+      authorization: >-
+        A dedicated testpod-to-goldpod-transfer ed25519 key generated on testpod
+        and authorized ONLY on the Gold pod — the narrowest authorization the
+        ruling contemplates.
+      command: rsync -aH --partial --info=progress2, no compression (HDF5 already compressed)
+      filter: '--include="*.h5" --exclude="*"'
+      scope: TIDMAD_DATA only, 84G, 40 h5
+      context: tmux session goldxfer on testpod, survives control-session disconnect
+    the_filter_is_the_boundary: >-
+      RUNBOOK NOTE. The file-exact boundary is enforced BY THE TRANSFER ITSELF
+      rather than by an operator remembering it. download_data.py and
+      segment_anchors.json cannot be copied even by accident. This is the form
+      the runbook should prefer — a mechanically enforced boundary over a
+      remembered rule.
+    verification_plan:
+      method: verify the DESTINATION against Q3's existing manifest 39270b45...33ad85
+      why_it_is_stronger_than_it_looks: >-
+        The manifest PREDATES both the transfer and any recent source activity,
+        so a destination PASS proves TWO things at once — the source was
+        unchanged since Q3 AND the transfer was faithful. One check, both
+        properties.
+      on_failure: verify the source to disambiguate
+    not_transferred:
+      TIDMAD_OFFICIAL_MODELS: >-
+        Deliberately NOT sent to the Gold pod, per this lane's reasoning that the
+        Gold pod receives the NUMBER and never recomputes the reference (A2-FCNET).
+      SIDERIUS_DATA: run artifacts, excluded per section 8
+    dependencies: [D-DATA-1, A2-FCNET]
+    last_updated: 2026-08-26
+
+  - decision_id: D-CAMP-1
+    parameter: the current official campaign is GOLD-ONLY
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    provenance: operator correction, relayed by Supervisor 2026-08-26
+    frozen_value:
+      GOLD_FIRST: true
+      GOLD_REQUIRED: true
+      topology: four Gold bands concurrently, one exclusive H100 each
+      after_stage_A: freeze Gold search -> Composed Best -> Strict Best -> terminal full-scope evaluation
+      BLIND_REQUIRED_FOR:
+        gold_launch: false
+        gold_completion: false
+        gold_finalization: false
+        gold_scientific_deliverables: false
+      blind_may_run_later: only if budget/time permits
+      gold_never_waits_for_blind: true
+    census_performed: >-
+      A COMPLETE census, not a patch — swept for the CLAIM under every wording
+      it might wear, not only the string that was handed over.
+    scope_limit: >-
+      SCHEDULING AND INTERPRETATION ONLY. Zero frozen scientific parameters
+      change. No unrelated Parts 1-8 decision reopens.
+    dependencies: [D-HW-5, D-ARM-1, F-CONFOUND-2]
+    last_updated: 2026-08-26
+
+
+  # ------------------------------------- operator rulings 2026-08-26 (relay) ---
+  - decision_id: D-GOV-9
+    parameter: GAP disposition axis
+    concept: single deduplicated blocker ledger with one disposition per GAP
+    status: FROZEN
+    control_class: null
+    frozen_value: >-
+      Every GAP in the campaign review package carries exactly ONE disposition:
+      RELEASE_BLOCKER | POST_TAG_GOLD_QUALIFICATION | ACCEPTED_NON_BLOCKING |
+      CONDITIONAL_ON_BLIND | ICLR_FUTURE. Only RELEASE_BLOCKER enters the
+      pre-tag critical path.
+    constraint: >-
+      Operator-stated and symmetric: a behaviorally relevant mismatch must NOT
+      be downgraded merely to shorten the list.
+    governing_rule_1_verbatim: >-
+      "Do not reinterpret the frozen policy to fit the launcher. Repair the
+      launcher/effective consumer path."
+    governing_rule_2_witness_standard: >-
+      Proof must inspect EFFECTIVE RESOLVED VALUES after all override, planner
+      and carrier logic has run. Source text, CLI declarations and config
+      presence are explicitly NOT proof.
+    authority: operator, relayed by Supervisor [ceb12d]
+    location: docs/campaign/final_campaign_review_package.md section 4.13
+    note: >-
+      Section 4 of the review package IS the ledger the operator asked for. No
+      second blocker ledger may be created.
+    last_updated: 2026-08-26
+
+  - decision_id: D-LLM-13-RULING
+    parameter: disposition of D-LLM-13 (both halves)
+    concept: snapshot pin and served-model capture are release blockers
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    frozen_value: >-
+      Both halves of D-LLM-13 are v0.1.0 RELEASE BLOCKERS. 66a is the immutable
+      snapshot pin in configuration; 66b is capture of the provider-resolved
+      model identity into run provenance. Assigned to Lane E.
+    witness_specified_by_operator: >-
+      Configure/request identity A, observe provider-resolved identity B in a
+      controlled witness, and prove provenance records B rather than echoing A.
+      Plus the normal path recording the actual resolved snapshot.
+    gpt_4o_fallback: >-
+      agent/llm_bridge.py:443-444 remains NON_BLOCKING_LATENT unless its
+      reachability changes.
+    rationale: >-
+      A provenance field that records what was requested rather than what was
+      served cannot discriminate, so it can never fail. Review package 4.12.
+    authority: operator, relayed by Supervisor [ceb12d]
+    dependencies: [D-LLM-13]
+    last_updated: 2026-08-26
+
+  - decision_id: F-H100-WD-1-PRETAG
+    parameter: explicit hash-verified binding of the runtime-calibration artifact
+    concept: the SUPPORT for Route B, not its numeric measurement
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    operator_boundary_test: >-
+      If making the official Gold run consume the hardware-derived artifact
+      requires changing tracked code, that smallest support repair happens
+      BEFORE v0.1.0. Do not measure first and discover after tag that the
+      software must change.
+    verdict: FAILS on three counts, verified mechanically by Supervisor [ceb12d]
+    finding_1_invisible_default: >-
+      The overlay is consumed because calibration_dir() happens to contain
+      runtime_profiles_<gpu_slug>.json - env var or ~/.siderius_*. No explicit
+      launch binding exists. Verbatim the prohibited case.
+    finding_2_no_hash_identity: >-
+      Zero hash lines in watchdog_profile.py. Positive control:
+      health_config_sha256 appears in 70 files elsewhere. Nothing persists which
+      profile a run actually used.
+    finding_3_fail_open: >-
+      _load_measured returns {} when the artifact is absent, so resolution
+      proceeds to shipped/UNCALIBRATED and the watchdog is silently OFF.
+      Malformed content DOES refuse loudly; that half is already correct.
+    required_repair: >-
+      Explicit opt-in binding (launch declares artifact path plus expected
+      sha256), hash verified BEFORE consumption, declared-but-missing or
+      mismatched REFUSES, resolved identity and hash persisted into run
+      provenance, and the launch manifest names exactly which artifact was used.
+      Undeclared behaviour stays byte-identical - presence-keyed, following the
+      PR-12bc task-composition transport precedent.
+    numeric_row_disposition: >-
+      The numeric H100 calibration this supports (ceiling rows 33/34) is
+      POST_TAG_GOLD_QUALIFICATION under Route B and stays OFF the pre-tag path.
+      Only the SUPPORT is a release blocker.
+    note: >-
+      Finding 3 is F-H100-WD-1 reproducing itself through the artifact meant to
+      fix it: bind an overlay, fail to ship it, and the run proceeds with no
+      watchdog and says nothing.
+    dependencies: [F-H100-WD-1, D-HW-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-LAUNCH-1
+    parameter: campaign launcher entrypoint and the twelve untyped parameters
+    concept: the launcher the campaign actually calls types none of them
+    status: PENDING_IMPLEMENTATION
+    resolution: >-
+      The ENTRYPOINT half is answered by D-ARCH-1: neither existing launcher; a
+      new thin canonical entrypoint owned by the standalone package. The VALUES
+      half survives as a REQUIREMENT on that entrypoint - it must TYPE all
+      twelve, because on the delegated path they otherwise resolve to
+      _chain_common.sh defaults exactly as recorded below. The recorded
+      effective values are therefore the acceptance criteria for the new
+      entrypoint, not a description of a launcher to repair.
+    superseded_status: PENDING_OPERATOR_DECISION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    finding: >-
+      launch_band_fleet.sh:59 invokes launch_prior_baseline_experiment.sh, NOT
+      launch_v20_campaign.sh. launch_prior_baseline_experiment.sh passes NONE of
+      trial_portion, train_portion, eval_portion, formal_portion,
+      formal_train_portion, formal_eval_portion, max_rounds, max_epochs,
+      skip_formal_min_delta, bypass_formal_time_budget_min_delta,
+      trial_time_budget_minutes or formal_time_budget_minutes. Every one
+      resolves to a _chain_common.sh default.
+    effective_values_on_the_real_path:
+      trial_portion: 'empty -> omitted -> AGENT_CONTROLLED (_chain_common.sh:85)'
+      train_portion: 'empty -> omitted -> AGENT_CONTROLLED (_chain_common.sh:86)'
+      eval_portion: 'empty -> omitted -> AGENT_CONTROLLED (_chain_common.sh:87)'
+      formal_portion: '0.1 against frozen 1.0 (_chain_common.sh:138)'
+      formal_train_portion: '1.0 against frozen 0.10 (_chain_common.sh:139)'
+      formal_eval_portion: '1.0 against frozen 0.10 (_chain_common.sh:101)'
+      trial_time_budget_minutes: 'empty -> Python None -> NO time budget (_chain_common.sh:99)'
+      formal_time_budget_minutes: 'empty -> Python None -> NO time budget (_chain_common.sh:100)'
+      skip_formal_min_delta: '-1.0 against frozen -2.0 (_chain_common.sh:69)'
+      bypass_formal_time_budget_min_delta: '0.0 against frozen +0.5 (_chain_common.sh:70)'
+      max_rounds: '3 - matches frozen'
+      max_epochs: '1 - frozen trial epochs 2 not reachable'
+    consequence: >-
+      The plan_overrides lock landed by #320 genuinely BINDS at planning.py:337
+      and policy.py:1210, but the campaign launcher types nothing, so nothing
+      feeds it. The mechanism is present and UNUSED, and trial portions are
+      AGENT_CONTROLLED today - neither 0.1/0.1/0.1 nor the 0.02 schema fallback.
+      A row can be VERIFIED at the consumer and still GAP at the campaign.
+    open_question: >-
+      Which launcher is the official arXiv campaign entrypoint? Recorded as
+      review-package row L. Until decided, repairs targeted at
+      launch_v20_campaign.sh would fix a file the campaign never invokes, which
+      the D-GOV-9 Rule 2 witness standard would not accept as proof.
+    authority: campaign-planning lane, mechanically verified 2026-08-26
+    dependencies: [D-BUD-7, D-BUD-8, D-HW-7, P6-A, P6-B, D-GOV-9]
+    last_updated: 2026-08-26
+
+
+  - decision_id: Q-UNIT-1
+    parameter: scientific VRAM ceiling unit
+    concept: is the frozen 60 a GB or a GiB
+    status: FROZEN
+    resolution: >-
+      FROZEN 2026-08-26 by operator ruling: 60 GiB EXACTLY (2**30 bytes;
+      64,424,509,440 bytes). Expressed through the existing canonical
+      resource-budget authority - no second accounting mechanism. NO ambiguous
+      "GB" is permitted in any load-bearing config, evidence, or the parameter
+      table. Observed capacity ~79.6 GiB, so ~19.6 GiB headroom, intentional.
+    required_witness: >-
+      A unit-consistency witness is required BEFORE H100 qualification:
+      configured 60 GiB -> admission bytes -> runtime reporting -> qualification
+      evidence, ONE semantics end to end.
+    superseded_status: PENDING_OPERATOR_DECISION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    raised: 2026-08-26
+    why_neither_lane_may_decide: >-
+      It is a numeric resource ceiling and therefore EXPERIMENT_FIXED, which
+      makes it an operator decision, not an implementation choice.
+    supervisor_recommendation: GiB
+    recommendation_basis: >-
+      The repository's canonical authority is _GB = 1024**3, and the governing
+      ruling says to use the existing canonical unit.
+    arithmetic:
+      sixty_gib_in_gb: 64.4
+      eighty_gb_card_in_gib: 79.6
+      headroom_under_gib: 19.6
+    timing_constraint: >-
+      Must be settled BEFORE H100 qualification measures against it. A
+      measurement taken against an undefined unit cannot be compared to the
+      frozen ceiling.
+    dependencies: [D-HW-6, D-GOV-9]
+    last_updated: 2026-08-26
+
+  - decision_id: T-IMPL-1-VERIFIED
+    parameter: advice flag refused in both arms
+    concept: the treatment delivery mechanism does not function
+    status: PENDING_IMPLEMENTATION
+    control_class: TREATMENT
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    evidence: launch_prior_baseline_experiment.sh:142-146
+    finding: >-
+      The launcher hard-refuses --advice and --human_advice_file in BOTH arms.
+      Correct for X9, where advice was a confound. Fatal for Gold, where advice
+      IS the treatment.
+    routing: >-
+      Framework half is Supervisor-owned and COUPLES to F-LAUNCH-1: the
+      entrypoint ruling decides where the flag must be accepted, so it is part
+      of that single work item rather than a separate ticket. The artifact
+      authoring half is campaign content and is a GOLD_LAUNCH_PRECONDITION.
+    incidental: >-
+      The same file's header still memorializes the superseded 4-coresident
+      topology. The F-LAUNCH-1 repair should sweep that prose.
+    verified_by: Supervisor [ceb12d], 2026-08-26
+    dependencies: [D-TREAT-1, D-TREAT-2, F-LAUNCH-1]
+    last_updated: 2026-08-26
+
+  - decision_id: D-GOV-10
+    parameter: GOLD_LAUNCH_PRECONDITION as a sixth disposition
+    concept: package-content blockers are a distinct gate from the code tag
+    status: FROZEN
+    control_class: null
+    decided: 2026-08-26
+    authority: campaign-planning lane, endorsed by Supervisor [ceb12d]
+    frozen_value: >-
+      A sixth disposition, GOLD_LAUNCH_PRECONDITION, for GAPs that are campaign
+      CONTENT rather than framework code or hardware measurement. It blocks the
+      Gold launch absolutely; it is a routing distinction, not a downgrade.
+      Current members: per-band seed literals, Gold advice artifact,
+      prior-baseline artifact, FCNet per-band reference.
+    anchoring: >-
+      The label names an EXISTING gate rather than inventing one. The Part-7
+      completion criteria already hold PACKAGE FREEZE (criterion B) separate
+      from the CODE TAG (criterion D). These items are package-content blockers
+      anchored to B; POST_TAG_GOLD_QUALIFICATION items are hardware
+      measurements anchored to qualification.
+    tiebreak_rule: >-
+      Fold UP to RELEASE_BLOCKER, never DOWN to POST_TAG. Over-blocking delays a
+      tag; under-blocking voids a campaign.
+    constraint: >-
+      Never applied to anything that touches tracked code. The operator already
+      overrode this exact label once, on D-LLM-13, and that override is the
+      direction of error being guarded against.
+    dependencies: [D-GOV-9]
+    last_updated: 2026-08-26
+
+
+  - decision_id: F-LAUNCH-2
+    parameter: the band-fleet stack implements a different experiment
+    concept: no existing launcher implements this campaign's treatment
+    status: RESOLVED_BY_RULING
+    resolution: >-
+      The DESIGN QUESTION is resolved by the operator's entrypoint ruling of
+      2026-08-26 (D-ARCH-1). The FINDINGS survive as requirements and reuse-map
+      entries and are NOT closed: the advice refusal, the two confounds, the
+      wrong pinned experiment_arm, and the bounding fact that _chain_common.sh
+      already carries advice support.
+    superseded_status: PENDING_OPERATOR_DECISION
+    control_class: TREATMENT
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    raised: 2026-08-26
+    authority: campaign-planning lane, mechanically verified
+    finding: >-
+      The entire band-fleet path implements the X9 prior-art experiment, whose
+      independent variable is literature-review topology. This campaign's
+      independent variable is ADVICE. There is no advice arm anywhere in the
+      fleet path.
+    evidence:
+      fleet_arms: >-
+        launch_band_fleet.sh:100-101 maps --card A/B to with-prior-art /
+        without-prior-art, and any other --arm value is rejected.
+      arm_definition: >-
+        launch_prior_baseline_experiment.sh:163-168. with-prior-art forwards
+        --ml_lit_review_enabled --experiment_arm with-prior-art;
+        without-prior-art forwards --no-ml_lit_review_enabled --experiment_arm
+        without-prior-art --baseline_isolation.
+      advice_refusal: >-
+        launch_prior_baseline_experiment.sh:142-146 refuses --advice and
+        --human_advice_file, stating verbatim that "the experiment's only
+        variable is the literature-review topology".
+      passthrough_refusal: >-
+        launch_prior_baseline_experiment.sh:147-149 also refuses
+        --ml_lit_review_enabled, --experiment_arm and --baseline_isolation as
+        passthrough - "decided by --arm and cannot be passed through". The
+        launcher actively prevents overriding its arm semantics.
+    consequence_if_launched_as_is:
+      - 'advice REFUSED in both arms: the treatment is not delivered at all'
+      - 'lit_review ON in A, explicitly OFF in B: a SECOND treatment variable'
+      - 'baseline_isolation off in A, ON in B: a THIRD treatment variable'
+      - 'experiment_arm stamps with-prior-art: wrong provenance, and PINNED'
+    violates: >-
+      Plan 5.10 directly. The design intends "same opportunity + different prior
+      information, and NOT different engineering capability". Two of the three
+      arm differences would be capability differences.
+    why_item_4_is_worst: >-
+      experiment_arm is in RunInvariants._CANONICAL (core/run_invariants.py:253),
+      so a wrong arm label is PINNED and COMPARED, not merely recorded. Wrong
+      provenance that fails closed on resume is worse than absent provenance: it
+      looks authoritative and it is self-consistent.
+    reframes_f_launch_1: >-
+      F-LAUNCH-1 was framed as "which launcher supplies the twelve values". That
+      framing is too small. No existing launcher implements this campaign's
+      experiment, and launch_prior_baseline_experiment.sh cannot be repaired
+      into one without redefining its arms, which would break X9
+      reproducibility - which is precisely what its own error text protects.
+    bounding_good_news: >-
+      The capability is NOT missing; only the campaign path blocks it.
+      _chain_common.sh has full advice support already - parse at :322-323,
+      validation at :430-441, forwarding at :556-558. This is a launcher-layer
+      problem, not a framework one.
+    constraints_any_fix_must_satisfy:
+      - the campaign's arms must differ in ADVICE ONLY
+      - experiment_arm must stamp a label naming THIS experiment
+    solution_deliberately_not_proposed: >-
+      Whether the campaign gets its own launcher or the fleet gains advice arms
+      is a design decision with an operator dimension, because it touches X9
+      reproducibility.
+    sharpens_q_lit_1: >-
+      On this stack lit-review is not an open campaign parameter, it is X9's
+      independent variable. "Should the campaign enable lit review?" and "must
+      it be symmetric across arms?" are different questions, and plan 5.10
+      already answers the second.
+    dependencies: [F-LAUNCH-1, T-IMPL-1-VERIFIED, D-TREAT-1, D-TREAT-4B, Q-LIT-1, Q-ISO-1]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANF-1
+    parameter: formal_eval_portion is recorded but never compared
+    concept: row 92 confirmed with precise evidence
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    finding: >-
+      formal_eval_portion is not a declared RunInvariants field at all - neither
+      in _CANONICAL (core/run_invariants.py:238-257) nor in _PROVENANCE
+      (:267-272), which are required to PARTITION every declared field. It is
+      recorded as per-file-best provenance at execute_tools/per_file_best.py:82
+      ("from run_config; null for legacy") and exists as a CLI argument at
+      nodes/ml_hyperparameter_tune_agent/cli.py:222.
+    consequence: >-
+      Two iterations at different formal eval scopes fold into one incumbent
+      with no refusal. Recorded is not enforced.
+    verified: 2026-08-26, campaign-planning lane
+    dependencies: [D-FAIL-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANF-2
+    parameter: the infrastructure-failure vocabulary never reaches the LLM channel
+    concept: row 89 confirmed with precise evidence
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    frozen_value: null
+    finding: >-
+      INFRASTRUCTURE_FAILURE_STATUS exists and is correctly designed
+      (nodes/ml_hyperparameter_tune_agent/records.py:313), with a reason
+      vocabulary mapped by _STATUS_FOR_REASON (:321-325). But that map only
+      covers resource-admission reasons, and its only callers are the
+      prephase/admission path in runtime.py (:155, :189-192, :399, :423). A
+      grep of records.py for LLMError, llm_error, APIError or provider returns
+      ZERO matches.
+    consequence: >-
+      An LLM or provider failure is never classified as infrastructure, so it
+      consumes a scientific attempt. This directly violates frozen D-FAIL-1/5.
+      The correct vocabulary exists and is simply never applied to the LLM
+      channel.
+    coupling: >-
+      Coupled to F-LLM-2, the retry-bound divergence. Bounding retries at 3 is
+      only safe if exhaustion does not consume scientific budget.
+    verified: 2026-08-26, campaign-planning lane
+    dependencies: [D-FAIL-1, D-FAIL-5, F-LLM-2]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANF-3
+    parameter: arm identity and isolation ARE pinned in the run-invariants lock
+    concept: a positive finding - existing enforcement for the Blind arm
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    frozen_value: >-
+      lit_review_enabled, lit_review_config_sha256, experiment_arm and
+      baseline_isolation are all declared in RunInvariants._CANONICAL
+      (core/run_invariants.py:251-256), so the lock REFUSES a resume, seed or
+      reuse that changes the arm, the isolation flag or the lit-review
+      topology.
+    caveat: >-
+      Their declaration defaults are lit_review_enabled=False (:175) and
+      baseline_isolation=False (:184). So an undecided Q-LIT-1 or Q-ISO-1 does
+      not stay neutral - it resolves to False by omission, which is exactly
+      what the campaign's no-implicit-defaults principle forbids. Undecided is
+      a decision made by omission.
+    note: >-
+      _chain_common.sh gives lit-review a proper tri-state with an EXPLICIT
+      negative (:200, :641-644: "" forwards nothing, 1 forwards the positive
+      flag, 0 forwards --no-ml_lit_review_enabled so the OFF arm is recorded
+      positively on the child argv). baseline_isolation has no such negative
+      (:205-207, :653) - 0 forwards nothing. That asymmetry is deliberate in
+      X9, where isolation is the WITHOUT arm's flag, and is recorded here only
+      so it is not rediscovered as a defect.
+    verified: 2026-08-26, campaign-planning lane
+    dependencies: [Q-LIT-1, Q-ISO-1, D-TREAT-1]
+    last_updated: 2026-08-26
+
+
+  - decision_id: D-ARCH-1
+    parameter: official campaign entrypoint and execution architecture
+    concept: one thin canonical launcher over a three-stage hierarchy
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    decided: 2026-08-26
+    authority: operator ruling, relayed by Supervisor [ceb12d]
+    entrypoint: >-
+      ONE canonical launcher OWNED BY THE STANDALONE PACKAGE. A THIN
+      orchestration/config layer that binds the frozen manifest, Gold treatment
+      artifact, baseline artifact, data authority, portions, epochs, ceilings,
+      seeds, runtime-profile artifact, GPU assignment, run identity and isolated
+      workspaces, then DELEGATES to the existing generic per-band/run-chain
+      workflow.
+    explicitly_ruled_out: >-
+      launch_prior_baseline_experiment.sh is NOT the entrypoint. The operator
+      named the X9 advice-refusal as the reason. The X9 stack stays UNTOUCHED,
+      preserving X9 reproducibility.
+    not_a_monolith: >-
+      A v19/v20-style HIERARCHY, not one script.
+    stages:
+      stage_1: >-
+        Per-band search. entrypoint -> band orchestrator -> ITERATION UNIT
+        (reused unchanged).
+      stage_2: >-
+        Frozen-winner retraining. 4 designs x 4 bands = 16 independent units.
+        Freeze the DESIGN, never the Stage-1 weights. Train from scratch. No
+        search. Scheduled as 4 design WAVES across the 4xH100.
+      stage_3: >-
+        Modular finalization: composed_best / strict_best / terminal_eval.
+        Review-package rows 27, 60 and 61 live HERE, as separate modules.
+    invariants:
+      - >-
+        The ITERATION remains the minimal independently-invokable, resumable
+        unit.
+      - >-
+        Band orchestrators only inspect persisted state, invoke, validate,
+        update the valid-formal incumbent, and test FCNet+2.
+      - >-
+        Resume from PERSISTED STATE, never from shell memory.
+    dependencies: [F-LAUNCH-1, F-LAUNCH-2, D-BUD-9, D-BEST-1, D-BEST-2]
+    last_updated: 2026-08-26
+
+  - decision_id: D-ARCH-2
+    parameter: mandatory reuse map
+    concept: no campaign script is written before reuse is declared
+    status: FROZEN
+    control_class: NOT_APPLICABLE
+    decided: 2026-08-26
+    authority: operator ruling, relayed by Supervisor [ceb12d]
+    frozen_value: >-
+      A reuse map is MANDATORY before any campaign script is written. Format:
+      EXISTING COMPONENT -> REUSED AS-IS / EXTENDED / SUPERSEDED -> REASON.
+    first_three_entries_from_f_launch_2:
+      - component: _chain_common.sh advice support (:322-323, :430-441, :556-558)
+        disposition: REUSED_AS_IS
+        reason: >-
+          The expensive layer is already correct. This is the load-bearing fact
+          that makes a thin entrypoint cheap.
+      - component: launch_prior_baseline_experiment.sh
+        disposition: SUPERSEDED_FOR_CAMPAIGN_PRESERVED_FOR_X9
+        reason: >-
+          Never repaired into something it is not. Its arm semantics are X9's
+          and its advice refusal is correct for X9.
+      - component: '--fixed-candidate mode (forwards --validation_fixed_candidate_plan, pins --num_iterations 1)'
+        disposition: EXTENDED
+        reason: candidate Stage-2 per-target-band unit
+    dependencies: [D-ARCH-1]
+    last_updated: 2026-08-26
+
+  - decision_id: R-ARM-STAMP-1
+    parameter: the campaign entrypoint must stamp a campaign-correct arm label
+    concept: wrong-but-pinned provenance is worse than absent provenance
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    decided: 2026-08-26
+    authority: operator ruling, relayed by Supervisor [ceb12d]
+    requirement: >-
+      The new canonical entrypoint MUST stamp an experiment_arm label naming
+      THIS experiment. It must NEVER inherit with-prior-art or
+      without-prior-art.
+    why: >-
+      experiment_arm is declared in RunInvariants._CANONICAL
+      (core/run_invariants.py:253), so the label is PINNED and COMPARED, not
+      merely recorded. A wrong label fails closed on resume while looking
+      authoritative and self-consistent. Wrong-but-authoritative provenance is
+      worse than absent provenance.
+    origin: campaign-planning lane finding F-LAUNCH-2, item 4
+    dependencies: [D-ARCH-1, F-LAUNCH-2, F-SCANF-3]
+    last_updated: 2026-08-26
+
+  - decision_id: Q-LIT-1-CONSTRAINT
+    parameter: lit-review must be symmetric across arms whatever Q-LIT-1 decides
+    status: FROZEN
+    control_class: EXPERIMENT_FIXED
+    decided: 2026-08-26
+    authority: operator ruling, relayed by Supervisor [ceb12d]
+    frozen_value: >-
+      The new entrypoint must treat literature review as a SYMMETRIC campaign
+      setting across both arms, whatever Q-LIT-1 decides about enabling it.
+    rationale: >-
+      On the X9 stack lit-review is X9's independent VARIABLE, not a campaign
+      parameter. "Should the campaign enable lit review?" is open and belongs to
+      the operator; "must it be symmetric across arms?" is already answered by
+      plan 5.10. They are different questions and were being conflated.
+    origin: campaign-planning lane finding F-LAUNCH-2
+    dependencies: [Q-LIT-1, D-ARCH-1]
+    last_updated: 2026-08-26
+
+
+  # ------------------------------------------- SCAN D findings (2026-08-26) ---
+  - decision_id: F-SCAND-1
+    parameter: a forbidden aggregation is implemented and the proposer is invited to use it
+    concept: mean of per-file LOG scores, reachable on band-shaped slices
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    raised: 2026-08-26
+    authority: Scan D subagent finding, EVERY HOP independently re-verified by the campaign-planning lane
+    finding: >-
+      nodes/result_interpretation_agent/prediction.py:269 computes
+      sum(values)/len(values) over a slice of per-file log_5.27 scores. That is
+      forbidden pattern 1 verbatim ("mean of per-file log scores") and, on a
+      band-shaped slice, simultaneously pattern 2 ("mean of per-band log
+      scores"). execute_tools/scoring_utils.py:24-29 states the prohibition and
+      names 4/6/5/5 explicitly - which is this campaign's band partition.
+    verified_chain:
+      - 'result_interpretation_agent.py:820  prev_fv = [r.model for r in prev_table.rows]'
+      - 'agent/schemas/score_table.py:61-63  model is "log_{5.27} per-file score from this run"'
+      - 'ml_hyperparameter_tune_agent/execution.py:1459  _sc_fv_log = file_vector_to_log_space(_sc_fv)'
+      - 'result_interpretation_agent.py:823-825  actual_results = {"best_file_vector": prev_fv}'
+      - 'prediction.py:95  _PER_SAMPLE_KEY = "best_file_vector"'
+      - 'prediction.py:252  fv = results.get(_PER_SAMPLE_KEY)'
+      - 'prediction.py:269  return (sum(values) / len(values) ...), "per_sample_slice"'
+    the_grammar_is_advertised_in_production_prompts:
+      - 'nodes/ml_model_proposal_agent/evidence_rendering.py:390'
+      - 'nodes/ml_model_proposal_agent/evidence_rendering.py:509'
+      - 'agent/schemas/proposal.py:61-62'
+    no_constraint_on_the_slice: >-
+      Nothing constrains N:M. mean(file_vector[0:4]) / [4:10] / [10:15] /
+      [15:20] are exactly what a band-aware planner would write, and they are
+      exactly this campaign's bands.
+    scope_limit_stated_honestly: >-
+      This does NOT feed Golden-Metric ranking or champion selection. It
+      corrupts the prediction-accuracy statistic (scientific_accuracy,
+      prediction.py:320-324) and steers the proposer, which renders it as a
+      track record. Severity is "a published scientific number is computed by a
+      rule the repo declares invalid", not "the headline score is wrong".
+    campaign_specific_aggravation: >-
+      In a single-scope run mean(file_vector[0:5]) is a weird-but-local
+      statistic. Under this campaign's 4/6/5/5 band partition a band-aware
+      proposer writing mean(file_vector[0:4]) produces precisely the
+      construction scoring_utils.py section 3 names as INVALID, and the campaign
+      would publish a prediction-accuracy number derived from it.
+    unmeasured_arm_asymmetry_risk: >-
+      MECHANISM ONLY, NOT MEASURED. The proposer is where the treatment enters.
+      Gold's advice instructs the agent to make full and productive use of
+      budgets and to explore broadly, so a Gold agent is plausibly more likely
+      to author sophisticated band-shaped predictions than a Blind one. If so,
+      the defect's INCIDENCE would correlate with the treatment arm, making it
+      arm-asymmetric rather than merely wrong. Recorded as a risk with its
+      mechanism; no measurement supports or refutes it yet.
+    historical_census_result: >-
+      COMPLETE, UNTRUNCATED census of 1,819 JSON records across v19, v20,
+      v20_attempt2 and v20_attempt3 at /home/klz/Data/SIDEREIS_DATA. 630 metric
+      strings total, of which 579 are health-check metrics and 51 are PREDICTION
+      metrics. Breakdown: 29 exact "denoising_score" (parse via legacy alias),
+      ZERO using the file_vector grammar, and 22 free-text prose forms.
+    erratum_needed: >-
+      NO. The forbidden path has never fired in a real run. No historical
+      prediction-accuracy number needs correction.
+    but_the_reason_matters: >-
+      It is latent because the grammar is too OBSCURE for the model to use, NOT
+      because the model avoided it. FOUR of the 22 prose forms explicitly ask
+      for the aggregation - "HealthGate-valid denoising_score AVERAGED OVER
+      validation files [15,16,17,18,19]" (2) and "HealthGate-valid MEAN
+      denoising_score OVER files [15,16,17,18,19]" (2). The model repeatedly
+      wanted a file-subset mean and could not express it in the grammar, so the
+      evaluator discarded the prediction instead of computing it wrongly.
+      Improve the grammar's discoverability, or use a stronger model, and the
+      defect goes live immediately.
+    second_finding_43_percent_silent_parse_failure: >-
+      22 of 51 prediction metrics (43 percent) are free text and resolve to
+      "unrecognized" -> None (prediction.py:249-250; the bound_id and
+      legacy_alias matches at :242-245 are EXACT EQUALITY). They land in the
+      unevaluated pool. So scientific_accuracy - the track record the proposer
+      renders - is computed over a heavily filtered subset, and the filtering is
+      invisible.
+    this_supports_the_arm_asymmetry_mechanism: >-
+      Previously recorded as MECHANISM-not-measurement. There is now partial
+      support. Parse failure is driven by PROSE ELABORATION, and Gold's advice
+      instructs the agent to make full and productive use of budgets and to
+      explore broadly. If Gold's predictions are more elaborate, Gold's parse
+      rate is LOWER, and the two arms' track records are computed over
+      differently-filtered subsets. Still not a measurement of the arm effect -
+      but the mechanism is no longer hypothetical, because the variation in
+      prose elaboration is now observed.
+    campaign_band_note: >-
+      Every prose form scopes to files [15,16,17,18,19], the v19/v20 validation
+      set. Under this campaign's bands a chain's model would naturally write "on
+      files [0,1,2,3]" - the same prose shape, the same parse failure.
+    dependencies: [D-SCORE-1, D-BEST-1, D-TREAT-4B]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCAND-2
+    parameter: blocking-gate aggregation is not task-declarable at all
+    concept: row 54 confirmed, and worse than recorded
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    finding: >-
+      All three TIDMAD blocking gates resolve to any_pass, from ONE framework
+      value at configs/health_checks.yaml:37. The roster declares no
+      aggregation; the framework injects one per DISPOSITION.
+    gates:
+      - 'output_diversity_blocking   (configs/task_health/tidmad.yaml:41) -> any_pass'
+      - 'output_std_blocking         (configs/task_health/tidmad.yaml:55) -> any_pass'
+      - 'amplitude_collapse_blocking (configs/task_health/tidmad.yaml:66) -> any_pass'
+    worse_than_recorded: >-
+      aggregation is in FRAMEWORK_OWNED_PARAMETER_KEYS
+      (execute_tools/health_checks/_task_health_config.py:92-103) and a roster
+      entry writing it is REJECTED with ValueError (:335-344). The only lever is
+      one value for every blocking gate of every task - you cannot make
+      amplitude_collapse_blocking strict without making all three strict. The
+      code-level fallback duplicates it at _composition.py:145 and each check
+      hardcodes _DEFAULT_AGGREGATION = "any_pass".
+    the_task_config_already_flags_this: >-
+      configs/task_health/tidmad.yaml:73-76 says any_pass is lenient here, that
+      a partial-collapse case where ONE file has 96 percent dominance and the
+      other two are healthy would PASS, that all_pass would arguably be
+      stricter, and that the question was deferred to post-V17 empirical
+      validation. The campaign froze all_pass; the deferral is now due.
+    peek_set_note: >-
+      The peek set is files [3, 10, 17] (configs/task_health/tidmad.yaml:36-39)
+      and is NOT the campaign band files. Recorded so the interaction with
+      per-band chains is examined rather than assumed.
+    could_not_establish: >-
+      Whether a launched campaign workspace's health_checks_effective.yaml
+      already carries all_pass. That file is materialized per run and is not in
+      the checkout, and load_health_gates_config returns a file already carrying
+      health_gates untouched - so a hand-edited effective config WOULD override.
+      Must be read from the launched workspace.
+    dependencies: [D-SCORE-3]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCAND-3
+    parameter: health gates are nested inside one of three scoring routes
+    concept: LATENT today, and Stage 2 of D-ARCH-1 is the shape that makes it live
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING_LATENT
+    finding: >-
+      execution.py has exactly TWO top-level scoring branches - :1105
+      ANCHOR_NORMALIZED and :1320 else, the latter serving both TASK_OWNED and
+      SUBPROCESS_LEGACY. The health-gate block is at :1237, nested INSIDE the
+      ANCHOR_NORMALIZED branch, and the only call to
+      evaluate_and_persist_health_gates is at :1270 inside it. Verified by
+      indentation: :1105 and :1320 are indent 12; :1237 is indent 16.
+    trigger: >-
+      anchor_map_data is loaded only when trial_allowed
+      (ml_hyperparameter_tune_agent.py:1022-1024), and trial_allowed =
+      agent_input.is_trial (:906). With --no-is_trial, anchor_map_data is None,
+      every round of the whole chain takes the else path, and NOTHING is gated -
+      no error, no warning.
+    why_latent_not_live: >-
+      No chain script passes --no-is_trial, and run_one_iteration.py:1056-1059
+      defaults --is_trial to True. The campaign path IS gated today. The hazard
+      is documented in-tree at launch_prior_baseline_experiment.sh:25-26.
+    why_it_must_not_be_forgotten: >-
+      D-ARCH-1 Stage 2 is frozen-winner retraining with NO SEARCH. A formal-only
+      Stage-2 unit is exactly the invocation shape that sets --no-is_trial and
+      would therefore run UNGATED and silent. This is a REQUIREMENT on the new
+      architecture, not a current defect: every Stage-2 unit must either keep
+      the anchor route or gate explicitly.
+    dependencies: [D-ARCH-1, D-SCORE-3]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCAND-4
+    parameter: the correct cross-band construction exists and is unwired
+    concept: rows 60/61 have a working, verified precedent
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    finding: >-
+      scripts/score_tidmad_official_banded.py performs EXACTLY the valid
+      construction: per-band inference writes into ONE directory (:584), the
+      band loop selects checkpoints only (:588-608), and there is exactly ONE
+      score_vector call over the pooled directory (:627-637) with file_indices
+      defaulting to range(NUM_FILES) (:715-717). ZERO per-band averaging exists
+      - summary["bands"] (:644) is metadata and no band scalar is ever computed,
+      so none can be averaged.
+    reachability: >-
+      NOT reachable from production. Nothing imports it; references are a
+      renderer docstring, committed reference markdown, and three test
+      allow-lists.
+    consequence_for_planning: >-
+      Rows 60/61 are not greenfield. The construction is written and correct and
+      has never been wired to campaign outputs. Under D-ARCH-1 they are Stage-3
+      modules, and this script is the reuse-map candidate for them.
+    dependencies: [D-BEST-1, D-BEST-2, D-ARCH-1, D-ARCH-2]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCAND-5
+    parameter: best_valid_formal_* is NOT unused - a recorded claim is corrected
+    concept: row 59 refined
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    correction: >-
+      The campaign record previously said the formal-only twins "exist unused".
+      That is WRONG and is corrected here. best_valid_formal_* IS the chain
+      incumbent and the official trajectory - core/resume.py:269, :718-767 (a
+      fast path that REJECTS a source record which is a TRIAL, at :741), and
+      :1600-1632 cumulative-best carry-forward; surfaced at
+      execute_tools/run_report.py:452 and tools/run_report/html.py:257.
+    what_remains_true: >-
+      The MIXED fields are still mixed and still consume decisions. policy.py:641-646
+      and :652-655 apply no is_trial filter. Confirmed consumers of the mixed
+      pool include result_interpretation_agent/ordering.py:140-159 and :185-186
+      (the interpreter's headline best model), interpretation_helpers.py:756-767,
+      :778-786 and :925-931, prediction.py:92 (_PRIMARY_SCALAR_KEY =
+      best_denoising_score), evidence_rendering.py:46 and :256 (rendered to the
+      proposer as "Overall raw best"), and workflows/model_exploration.py:892-906,
+      where knowledge-cache EVICTION is scored on the mixed pool so a model kept
+      alive by a trial score can evict one with a better formal score.
+    separate_semantic_worth_knowing: >-
+      ModelRunSummary.formal_score (evidence.py:495) is the LAST successful
+      formal record (evidence.py:440-443 iterates reversed(success)), NOT the
+      best formal.
+    the_twins_are_unused_only_in: >-
+      ordering.py's per-model ranking and the cache/refresh heuristics. Never
+      globally. The earlier blanket claim was too strong.
+    dependencies: [D-SCORE-5, D-SCORE-7]
+    last_updated: 2026-08-26
+
+
+  # --------------------------------- SCAN H / SCAN I findings (2026-08-26) ---
+  - decision_id: F-SCANI-1
+    parameter: the OpenAI key is transmitted to another provider's endpoint
+    concept: credential exposure reachable by omission on a fresh machine
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    raised: 2026-08-26
+    authority: Scan I subagent finding, every link re-verified by the campaign-planning lane
+    chain:
+      - 'agent/llm_bridge.py:127-129  gemini -> base_url https://generativelanguage.googleapis.com/v1beta/openai/ , api_key_env GEMINI_API_KEY'
+      - 'agent/llm_bridge.py:434-436  if api_key is None and known: api_key = os.getenv(known["api_key_env"]) -> None. self.api_key = None, NO refusal'
+      - 'agent/llm_bridge.py:468-474  OpenAI(api_key=self.api_key, ..., base_url=base_url) - None passed through'
+      - '.venv/lib/python3.12/site-packages/openai/_client.py:137  api_key = os.environ.get("OPENAI_API_KEY")'
+    result: >-
+      The client constructs successfully, pointed at Google, holding the OpenAI
+      key, which is transmitted as an Authorization Bearer header. The run then
+      fails with an opaque 401 - AFTER the key has left the machine. Identical
+      shape for deepseek (llm_bridge.py:132-135).
+    no_guard_exists: >-
+      The only "api_key is None" occurrence in llm_bridge.py is line 434, the
+      resolution itself. Nothing compares the key's provenance to the endpoint.
+    reachability_verified:
+      - 'sdsc_submission_scripts/run_one_iteration.py:943  default="gemini-3.1-pro-preview" - the CLI default IS gemini'
+      - 'workflows/llm_config.py:14,94  provider="gemini" role defaults'
+      - '_chain_common.sh:72  LLM_CONFIG="" (empty default)'
+      - '_chain_common.sh:526-527  forwards --llm_config ONLY when non-empty'
+      - '.gitignore:16  *.env - a fresh checkout has no .env'
+    why_the_campaign_makes_it_more_likely: >-
+      The campaign intends OpenAI (openai_tiered_pro.json), so exporting only
+      OPENAI_API_KEY is the natural operator action on a fresh H100. The
+      omission and the intent point the same way.
+    smallest_repair: >-
+      Refuse at construction when the resolved provider's api_key_env is unset.
+      Do not let None reach the SDK - the SDK's fallback is correct behaviour
+      FOR THE SDK and wrong here. In-tree template: H100_CORESIDENCY_FACTOR
+      ships empty by design, is unset before sourcing so a stale export cannot
+      satisfy it (launch_prior_baseline_experiment.sh:274-275), and is refused
+      by name (:287-294).
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANI-2
+    parameter: VALIDATION_* shell variables are injectable from the environment
+    concept: an env route bypasses a launcher's explicit flag refusal
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    finding: >-
+      _chain_common.sh:40-41 sets -e and -o pipefail but NOT -u. :496-510 has
+      five "if [[ -n ${VALIDATION_*:-} ]]" blocks appending to APP_ARGS, and
+      none of the five is assigned a default anywhere - unlike every other knob,
+      initialised at :44-209.
+    the_sharp_edge: >-
+      launch_prior_baseline_experiment.sh:150-154 explicitly REFUSES
+      --validation_fixed_candidate_plan as a flag. The environment route goes
+      around that refusal, and that flag BYPASSES THE PROPOSER - substituting a
+      fixed candidate plan for the whole campaign. A stale export in a .bashrc
+      or a tmux session that once ran a validation posture silently removes the
+      proposer from the experiment.
+    same_shape: >-
+      _chain_common.sh:805 CHAIN_STOP_FILE is never assigned in-repo and is
+      reachable only from the environment; a stale export silently redirects the
+      stop check away from where touch <workspace>/STOP writes.
+    requirement_on_d_arch_1: >-
+      The new entrypoint's reuse map should treat "initialise every consumed
+      shell variable" as an ENTRY CONDITION, not a cleanup step.
+    dependencies: [D-ARCH-1, D-ARCH-2]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANH-1
+    parameter: configs/task_config.yaml is not pinned by the run-invariants lock
+    concept: an ARM-SYMMETRY hole in the exact prompt surface the treatment lives in
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    raised: 2026-08-26
+    authority: Scan H subagent finding, campaign consequence drawn and verified by the campaign-planning lane
+    finding: >-
+      core/run_invariants.py contains ZERO occurrences of task_config (verified
+      by count). The lock pins the health-config sha (:134) and the lit-review
+      sha (:176) but not this one. Meanwhile task_config.yaml carries
+      TASK_DESCRIPTION into the planner, proposer, implementor and interpreter
+      prompts (hyperparam_tuning.py:1431, proposal.py:836, implementor.py:264,
+      interpretation.py:635).
+    first_writer_wins: >-
+      workflows/model_exploration.py:455-456 - "if not os.path.exists(
+      snapshot_path): shutil.copy2(...)". From iteration 2 on, an operator edit
+      reaches the LLM but NOT the snapshot, silently.
+    campaign_consequence: >-
+      This is the campaign consequence the genericity framing does not state. If
+      goldpod and blindpod carry different task_config.yaml content, THE ARMS
+      DIFFER IN A PROMPT SURFACE AND NOTHING DETECTS IT - not the lock, not the
+      snapshot, not a preflight. Plan 5.10 requires the arms to share every
+      experiment-fixed authority outside the frozen treatment difference.
+    launch_gate_requirement: >-
+      The two arms' task_config.yaml must be PROVEN byte-identical at launch,
+      and its sha256 should join the lock. Nothing currently proves it.
+    dependencies: [D-TREAT-1, D-TREAT-8, D-FAIL-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANH-2
+    parameter: the gitignored root-papers cache is admitted without a pin
+    concept: a second ARM-SYMMETRY hole, conditional on Q-LIT-1
+    status: PENDING_OPERATOR_DECISION
+    control_class: EXPERIMENT_FIXED
+    disposition: CONDITIONAL_ON_Q_LIT_1
+    finding: >-
+      nodes/ml_literature_review/ml_literature_review.py:375-377 returns the
+      cached paper when the file exists; :72 DEFAULT_ROOT_CACHE_DIR =
+      reference_data/root_papers_cache, gitignored at .gitignore:30.
+      run_invariants.py:308-313 REFUSES lit_review_enabled=True without the
+      config sha, with the rationale that "a lock without the pin would admit
+      any config on resume" - and the CACHE CONTENTS are admitted regardless.
+    campaign_consequence: >-
+      If Q-LIT-1 enables literature review, two pods with different cache
+      contents receive DIFFERENT LITERATURE while the lock reports both runs
+      reproducible. That is an arm-comparability failure, not a caching detail.
+    requirement_if_enabled: >-
+      If Q-LIT-1 = enabled, the cache must be part of the frozen standalone
+      package and content-hashed, or the arms are not comparable. If Q-LIT-1 =
+      disabled, this is moot - which is one more reason to decide it.
+    dependencies: [Q-LIT-1, Q-LIT-1-CONSTRAINT, D-TREAT-8]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANH-3
+    parameter: an ungated TIDMAD config manual reaches every planner prompt
+    concept: what "Blind" can honestly claim
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING
+    finding: >-
+      agent/skills/check_config_format_skill/wrapper.py:20-30 injects a
+      "CRITICAL ARCHITECTURE RULES" block naming TIDMAD specifics - punet and
+      transformer are CLASSIFIERS (256 classes), transformer segmentation_size
+      20000, batch_size limit 128. The file contains NO composition gate
+      (verified: zero occurrences of composed / task_composition), while its
+      neighbours in agent/prompt_templates/tuner/rendering.py:184-320 ARE gated.
+    why_it_is_not_an_arm_asymmetry: >-
+      BOTH arms receive it, unconditionally. It does not break symmetry, and for
+      a TIDMAD campaign the content is correct rather than misinformation.
+    why_it_is_recorded_anyway: >-
+      It bounds what the Blind condition can honestly CLAIM. The Blind arm is
+      not free of framework-supplied TIDMAD specifics; it is free of the two
+      ADVICE ARTIFACTS. The campaign and any paper must describe Blind as
+      "without the advice artifacts", never as "without prior TIDMAD knowledge".
+      This also bounds what Q-ISO-1 can achieve, since isolation cannot reach a
+      prompt the framework injects unconditionally.
+    dependencies: [D-TREAT-6, Q-ISO-1]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANH-4
+    parameter: a hardcoded RTX 5090 / 10GB VRAM instruction inside a live LLM prompt
+    concept: wrong hardware facts told to the planner - NOT on any campaign path
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING
+    finding: >-
+      scripts/run_comparison.py:709-715 carries "RTX 5090 (32GB VRAM) ... no
+      more than 10GB VRAM" inside run_agent()'s expert_advice, called at :1630,
+      and duplicated verbatim at :1595 as legacy_expert_preamble for the
+      metadata snapshot - two hand-synchronised copies of one string. On an
+      80 GB H100 this tells the planner it has a 32 GB card and a 10 GB budget.
+      That is a treatment-affecting INSTRUCTION, not a comment.
+    why_the_guard_missed_it: >-
+      tests/unit/guardrails/test_no_hardcoded_device_literals.py:44 sets
+      _SCAN_DIRS = ["core", "agent", "nodes"] - scripts/ is outside the file
+      set. Census blindness shape 3.
+    scope: >-
+      NOT on the campaign chain path - sdsc_submission_scripts/run_one_iteration.py
+      carries no such string. It IS on the run_comparison.py path, which is
+      CLAUDE.md's documented standard baseline command.
+    open_question_RESOLVED_2026_08_26: >-
+      ANSWERED, and the answer clears the campaign. The prompt lives at :714,
+      inside run_agent (def at :648), duplicated at :1598. run_baseline_trial
+      (def at :312) contains NO LLM, agent, advice or prompt reference, and both
+      :289 and :550 record "expert_advice_followed": "Legacy TIDMAD paper
+      baseline - no agent involvement." A2-FCNET is narrower still: it is a PURE
+      SCORING computation - score_vector on a scoped SampleSet against PRESERVED
+      deliverables - so it runs no training and invokes no planner.
+    resolved_disposition: ACCEPTED_NON_BLOCKING
+    blast_radius: >-
+      Ad-hoc agent runs launched through run_comparison.py's run_agent on
+      non-5090 hardware. NOT the campaign chain, NOT the baselines, NOT
+      A2-FCNET.
+    still_a_real_defect: >-
+      Downgraded for THIS campaign, not dismissed. On an 80 GB H100 the string
+      still tells a planner it has a 32 GB card and a 10 GB budget, and the two
+      hand-synchronised copies at :714 and :1598 can drift. The guard's file-set
+      blindness (_SCAN_DIRS omits scripts/) is worth fixing on its own merits,
+      since it is what let a live prompt string hide from a device-literal
+      census.
+    dependencies: [A2-FCNET]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANH-5
+    parameter: PR CI does not run the censuses
+    concept: the guards this repository relies on are not selected by PR CI
+    status: PENDING_IMPLEMENTATION
+    control_class: NOT_APPLICABLE
+    disposition: SUPERVISOR_OWNED
+    finding: >-
+      .github/workflows/ci.yml:116 wires tools.ci_selection;
+      tools/ci_selection/manifest.py:22-28 ALWAYS_ON is tests/unit/guardrails/
+      plus four named files. A census walks the tree via os.walk on a
+      __file__-derived root, so it derives NO import edge and falls to
+      AREA_OWNERS (:169-182), which routes by the CHANGED file's area - never to
+      the census's own directory. The subagent ran the real selector: for 6 of
+      11 changed paths, 0 of 13 censuses were selected.
+    aggravator: >-
+      tools/ci_selection/resolver.py:5-8 and manifest.py:8 both still assert
+      "Nothing here is wired into CI" - the premise outlived itself by one
+      wiring commit. Blindness shape 4.
+    bound: >-
+      ci.yml:98-100 runs the full suite on push/schedule/master, so a leak is
+      caught AFTER merge. The exposure is PR review, not permanent.
+    why_it_is_recorded_here: >-
+      CLAUDE.md's validation-economy rule makes the PR's automatic CI "the
+      CANONICAL exact-head evidence". If the censuses are not selected, that
+      canonical evidence does not cover them. Routed to the Supervisor; not a
+      campaign-semantics item.
+    second_datum_2026_08_26: >-
+      The selector has a symmetric failure at the other end. This lane's
+      DOCS-ONLY PR #323 logged "selection: no changed-file input - full suite":
+      the selector could not route a docs diff, so it drew the FULL suite
+      including the timing-sensitive serial lane, and hit the known-flaky
+      tests/unit/core/test_gpu_measurement_runner.py
+      (docs/audit/ci_parity_audit.md:263, carried debt since Step 11). The
+      Supervisor re-ran at pure master a8146f86 in a temp worktree: 41 passed.
+      So the CHEAPEST POSSIBLE CHANGE DREW THE MOST EXPENSIVE VALIDATION, while
+      #324's code PR was selected down and never touched that lane. Both halves
+      are the same defect: unroutable input falls to a default that is wrong in
+      opposite directions - censuses get NOTHING, docs get EVERYTHING.
+    last_updated: 2026-08-26
+
+
+  - decision_id: D-TREAT-PARAM-1
+    parameter: parameter-count guidance inside the Gold advice artifact
+    concept: the 10M-500M range is a SOFT exploratory range, not a target
+    status: FROZEN
+    control_class: TREATMENT
+    decided: 2026-08-26
+    authority: operator clarification, relayed by Supervisor [ceb12d]
+    frozen_value: >-
+      The 60 GiB ceiling does NOT move the 10M-500M guidance. It remains a SOFT
+      EXPLORATORY RANGE.
+    binding_constraints:
+      - Parameter count is NEVER a target, a quality objective, or a proxy for compute or memory.
+      - Smaller models are fully acceptable.
+      - The upper range is appropriate only when the architecture-specific cost is justified.
+      - >-
+        Above 500M is not categorically prohibited if practical under the frozen
+        constraints - but it is NOT encouraged merely because VRAM grew.
+    why_architecture_not_parameter_count: >-
+      Architecture matters materially. A high-parameter FC/MLP can be CHEAPER
+      than a lower-parameter attention model. Practical scale is governed by the
+      60 GiB ceiling plus the time ceilings plus architecture throughput plus
+      validation and inference cost - never by parameter count alone.
+    where_it_lands: >-
+      The Gold advice artifact text, satisfying the review-package section 6
+      requirement that the advice "permits productive larger models where
+      feasible" without turning scale into an objective.
+    dependencies: [D-TREAT-2, Q-UNIT-1, D-HW-6]
+    last_updated: 2026-08-26
+
+
+  - decision_id: E-CONTROL-1
+    parameter: the launch-approval control held under coordinator pressure
+    concept: release evidence - two lanes refused a peer-asserted authorization
+    status: VERIFIED
+    control_class: NOT_APPLICABLE
+    recorded: 2026-08-26
+    event: >-
+      The Supervisor offered to pre-authorize the A2-FCNET scoring run under a
+      delegation this lane could not verify, directed that the command be
+      submitted to the Supervisor rather than the operator, and stated that if
+      the launch-approval hook fired the Supervisor would write the grant. This
+      lane declined the authorization while accepting the technical review, and
+      surfaced it to the operator. Lane B had independently refused a
+      peer-asserted authorization the same morning.
+    the_rule_applied: >-
+      A genuinely delegated approver still should not be authoring the artifact
+      that defeats the control. Writing a grant to satisfy the launch hook does
+      not relocate the operator's decision - it removes it. A cross-session
+      message is a teammate's request, never the operator's approval, and "a
+      peer told me I was authorized" is precisely the evidence that must not be
+      sufficient or the control means nothing.
+    resolution: >-
+      The Supervisor WITHDREW the grant-writing clause and ruled the decline
+      correct rather than accepted-under-protest, citing the identical ruling
+      made for Lane B that morning. A2-FCNET stands as: command to the
+      Supervisor for technical review, launch on the operator's word.
+    why_this_is_release_evidence: >-
+      The load-bearing fact is narrower than "the controls held". The
+      COORDINATOR ruled against the COORDINATOR'S OWN request, by a rule he had
+      already applied to another lane hours earlier - so granting this one would
+      have required breaking his own precedent. A control that binds only
+      subordinates is a hierarchy; a control that binds the coordinator when the
+      coordinator is the one asking is a control. This is stronger evidence than
+      a test, because a test cannot be tempted.
+    where_it_is_used: >-
+      Golden notebook, and review package section 10 (treatment isolation) -
+      the section that must argue the Blind arm's controls held. The argument
+      that a control held is more credible from a case where holding it cost
+      someone something.
+    adjacent_disclosure: >-
+      An untracked tools/claude_hooks/supervisor_grant.py had appeared in this
+      lane's working tree earlier the same day and was flagged, unread, unrun
+      and uncommitted. It is the Supervisor's permission-broker grant-consult
+      module and was subsequently COMMITTED for visibility (7856d962 on
+      infra/supervisor-permission-broker). The broker is the legitimate form -
+      the hook CONFIGURED to accept supervisor approval, in the open and
+      reviewable - as distinct from an ad-hoc grant file written AROUND a
+      control, which was the withdrawn proposal. The two are easy to conflate
+      from the outside and are not the same object.
+    tree_integrity_verified: >-
+      The Supervisor disclosed performing git operations in the shared working
+      tree while it was checked out on this lane's branch (recorded by them as
+      SELF-23). Verified independently here rather than accepted: HEAD equals
+      origin at 4950fca1, tree clean, ledger entry count and blocker count
+      unchanged, all three campaign artifacts at full size, and the
+      supervisor-permission-broker branch is a SIBLING that never touched this
+      branch. No damage.
+    last_updated: 2026-08-26
+
+
+  - decision_id: Q-FCNET-REF-1
+    parameter: which FCNet reference, produced by which inference recipe
+    concept: two full-scope FCNet references disagree by 0.583
+    status: PENDING_OPERATOR_DECISION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    raised: 2026-08-26
+    authority: Supervisor [ceb12d] found the disagreement; campaign-planning lane localized it
+    the_two_references:
+      A:
+        file: tidmad_reproduction/fcnet/full_20_files/siderius_score_split_official.json
+        score: 5.851465049536501
+        created: 2026-07-20
+        inference_recipe: NOT RECORDED - it scores pre-existing deliverables and the fcnet/ tree carries no inference provenance file
+      B:
+        file: tidmad_official_banded/tidmad_official_fcnet_banded_score.json
+        score: 6.434693649697849
+        created: 2026-08-01
+        inference_recipe: >-
+          RECORDED AND RUN - seg_size 40000, batch_size 25, per-file
+          inference_seconds, full_scope True, both file_vector_linear and
+          file_vector_log. The field set is what scripts/score_tidmad_official_banded.py
+          emits.
+    gap: 0.583 - which is 29 percent of the +2.0 stopping threshold, so not noise
+    what_is_VERIFIED_IDENTICAL_between_them:
+      - checkpoint topology - both band-split 0-3 / 4-9 / 10-14 / 15-19, same four .pth files
+      - s_max 295715680.14248306
+      - anchor map - both sha256 0c44b6084dc8afc4dc2fa34f5253bc8d780b4e8ae086945e7051d8bf7928ba90
+      - data_dir /home/klz/Data/TIDMAD
+      - twenty files
+      - >-
+        segments_per_file - the anchor map itself declares segments_per_file 200,
+        so 200 IS full scope and the two do not differ in coverage
+    conclusion: >-
+      Every element of the SCORING layer is identical. The difference is in the
+      INFERENCE that produced the denoised arrays - it is a decode question, not
+      a topology, ruler or scope question.
+    provenance_recommendation_not_a_correctness_call: >-
+      B is better founded. It is produced by a committed reviewable script whose
+      fcnet decode is documented line-by-line against the paper
+      (scripts/score_tidmad_official_banded.py:34-35 and :465-472 - ".float()
+      input (raw 0-255, no normalization), float output cast np.int8(output -
+      128) - the paper's exact C-style truncation"). A has no recorded decode at
+      all. Which is scientifically CORRECT is the operator's call, not this
+      lane's.
+    why_the_failure_is_silent: >-
+      A denoised array built with a subtly wrong decode - rounding instead of
+      C-style truncation, or a missed -128 - is still a well-formed int8 array
+      that scores cleanly. The result is a plausible number, not an error. Same
+      failure class as the "+2" threshold comparing incomparable units: wrong,
+      well-formed, silent.
+    single_operator_ask: >-
+      To be folded into ONE decision packet with D-BUD-17 rather than asked
+      twice: WHICH FCNet reference, produced by WHICH inference recipe, at WHICH
+      scope, compared PER-BAND or FULL-SCOPE.
+    dependencies: [D-BUD-17, A2-FCNET, D-DATA-1, D-BEST-1]
+    last_updated: 2026-08-26
+
+  - decision_id: F-DATA-2
+    parameter: the twenty campaign validation files are byte-identical across locations
+    concept: D-DATA-1's "NOT byte-identical" is true of the SET, not these FILES
+    status: VERIFIED
+    verification_2026_08_26: >-
+      ALL TWENTY byte-match. Supervisor compared this lane's sha256 list against
+      the Q3 manifest subset: sorted-list diff empty, 20 = 20. D-DATA-1's "A
+      DIFFERENT, LARGER SET ... NOT byte-identical" is therefore true of the SET
+      (423 files versus 40, a superset relation) and FALSE of these twenty
+      files. The campaign files are the same twenty in both locations.
+    consequences_in_decreasing_certainty:
+      - >-
+        The preserved FCNet deliverables are campaign-comparable ON DATA. The
+        only live question is the inference decode (Q-FCNET-REF-1).
+      - >-
+        A2-FCNET needs NO INFERENCE - score_vector per band against preserved
+        deliverables, minutes of CPU. The compute envelope collapses from a
+        bounded GPU run to scoring calls.
+      - >-
+        The cheap route this lane DECLINED is now legitimate BY PROOF, and the
+        decline was still correct. Equivalence was unverified when the route was
+        refused and is verified now, for exactly the files scoring touches. The
+        principle held, then the fact changed. Recorded as the system working in
+        the right order, NOT as a reversal.
+    launch_authorization_note: >-
+      Still the operator's word per E-CONTROL-1, but the ask shrinks with the
+      envelope. Whether Stage-A2 uses the 5090-local route or testpod is an
+      operational line item inside the decision packet.
+    control_class: EXPERIMENT_FIXED
+    finding: >-
+      sha256 of abra_validation_0000.h5 through abra_validation_0019.h5 computed
+      at /home/klz/Data/TIDMAD and handed to the Supervisor for comparison
+      against the Q3 manifest (D-DATA-1's named integrity authority, sha
+      39270b45...33ad85). The two canonical values the Supervisor supplied -
+      a425f9a3... for 0000 and 9dd0a7c0... for 0001 - MATCH exactly.
+    interpretation_if_all_twenty_match: >-
+      D-DATA-1's "A DIFFERENT, LARGER SET ... NOT byte-identical" describes a
+      SUPERSET RELATION (423 files versus 40), not divergent file content. The
+      twenty campaign files would then be the same twenty in both locations.
+    consequence: >-
+      The preserved FCNet deliverables become campaign-comparable, and A2-FCNET
+      can score them DIRECTLY with no inference at all - the cheaper route its
+      own execution plan set aside precisely because equivalence was unverified.
+    caution: >-
+      Two of twenty matching is not twenty of twenty matching. This entry stays
+      PENDING_AUDIT until the Supervisor completes the comparison against the
+      full manifest.
+    dependencies: [D-DATA-1, A2-FCNET]
+    last_updated: 2026-08-26
+
+
+  # ------------------------------------------- SCAN C findings (2026-08-26) ---
+  - decision_id: F-SCANC-1
+    parameter: resolved_action is never written - SKIP_ITER and SKIP_TO_FORMAL are inert
+    concept: a decomposition severed a control channel and every guard stayed green
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING_LATENT
+    raised: 2026-08-26
+    authority: Scan C subagent finding, AST-verified independently by the campaign-planning lane
+    finding: >-
+      In run(), resolved_action is WRITTEN only at
+      ml_hyperparameter_tune_agent.py:1374 - its own initialization to
+      GateAction.CONTINUE - and READ only at :1706, where it is passed to
+      _decide_round_outcome. AST over run() confirms: writes [1374], reads
+      [1706]. The gate's real verdict is computed in execution.py:1269 from
+      evaluate_and_persist_health_gates and assigned to a LOCAL of
+      run_inference_scoring_health; AttemptExecution (contracts.py:383-402)
+      has no field for it, so nothing returns it.
+    consequence: >-
+      _decide_round_outcome receives CONTINUE on every round.
+      _should_break_iteration (policy.py:1081) and _should_skip_to_formal
+      (:1087) can never return True. SKIP_ITER and SKIP_TO_FORMAL are
+      unreachable in production, and the downstream aborted_by_gate branch and
+      the completed_rounds fast-forward are dead with them.
+    what_still_works: >-
+      The gate's DEGENERACY classification survives - execution.py:1287 passes
+      resolved_action to _gate_results_to_score_meta in the same scope, so
+      is_degenerate, failure_reason and the persisted gate_action string are all
+      correct. Only the ROUTING action is lost. That asymmetry is why nothing
+      looked broken.
+    campaign_reachability: LATENT
+    why_latent: >-
+      The shipped framework policy emits only continue and invalidate_round
+      (configs/health_checks.yaml:34-35, :48-49), and skip_iter / skip_to_formal
+      appear NOWHERE in configs/. The campaign uses the shipped policy.
+    why_it_must_not_be_forgotten: >-
+      ActionConfig.action is typed as the full GateAction enum
+      (execute_tools/health_checks/config.py:153), and load_health_gates_config
+      returns a custom YAML carrying health_gates: untouched. An operator who
+      declares on_fail: skip_iter - the natural way to express "abort the
+      iteration on collapse" - gets SILENCE. The run burns its entire round
+      budget and reports a healthy termination reason, while the persisted
+      records say gate_action "skip_iter": THE ARTIFACT CLAIMS AN ACTION THE RUN
+      NEVER TOOK.
+    the_decomposition_lesson: >-
+      resolved_action IS listed in FORBIDDEN_BINDING_FIELDS (contracts.py:58) -
+      correctly, since it is round-scoped and not a run-scoped authority. So the
+      decomposition KNEW it was outer-scope state that needed carrying, named it
+      in the exclusion set, and then no carrier was given it. This is precisely
+      the failure class CLAUDE.md's C7 rule exists to prevent: "Every
+      decomposition must preserve behaviour and prove it ... unchanged
+      retry/round behaviour".
+    why_the_parity_oracle_missed_it: >-
+      The C7 differential oracle compared 13 behavioural surfaces PRE and POST
+      and found them deep-equal. It could not see this, because the shipped
+      policy never emits either action - so PRE did nothing and POST did
+      nothing, identically. A PARITY ORACLE CAN ONLY SEE BEHAVIOURS ITS FIXTURES
+      EXERCISE. Two identical no-ops prove nothing.
+    a_new_blindness_shape: >-
+      EIGHTH SHAPE - a test that SUPPLIES an input production no longer
+      produces. tests/unit/agent/tune_ml_hyperparam_agent/test_control_boundary.py:496-518
+      calls _decide_round_outcome DIRECTLY with a hand-passed resolved_action.
+      The pure function is pinned and correct; nothing calls it with a real
+      value. Related to but distinct from the known "a test captures what
+      production recomputes" shape: there the test froze a value production
+      re-derives; here the test manufactures a value production never delivers.
+    closes_a_carried_hazard: >-
+      This IS the long-carried resolved_action hazard (Step 07, "needs the
+      operator decision its own note names"), now with its mechanism. Every
+      existing description of it is WRONG IN KIND: CLAUDE.md:1302, :1325 and
+      :1339 call it the "stale-attempt hazard" and list it Still OPEN. It is
+      not stale. It is SEVERED. Open, yes; a stale value, no.
+    the_note_that_outlived_its_premise: >-
+      ml_hyperparameter_tune_agent.py:359-367 explains why 07b removed
+      AttemptTransition/AttemptDecision, and closes: "The round-outcome consumer
+      that IS wired, RoundDecision / _decide_round_outcome, stays exactly as it
+      was." THAT SENTENCE IS NOW FALSE. _decide_round_outcome is still CALLED,
+      but with a constant. It was wired when the note was written; the C7d-3
+      decomposition severed its input afterwards. Blindness shape 4 - a
+      conclusion outliving its premise - inside a comment whose entire purpose
+      is to explain a hazard.
+    what_this_does_to_the_operator_question: >-
+      07b's recorded reasoning was that wiring the carrier "would have meant
+      resetting resolved_action per attempt, which CHANGES round outcomes", and
+      that 07b may not change round semantics. But if resolved_action is now
+      never written, ROUND OUTCOMES ALREADY CHANGED - silently, in C7d-3, and in
+      the opposite direction: not "reset per attempt" but "never set at all".
+      The thing 07b deliberately refused to do was done by accident by a later
+      refactor. So the question is not only WIRE or RETIRE. It is that the
+      semantics MOVED WITHOUT A DECISION, and the operator is choosing which
+      semantics to have rather than whether to change them.
+    not_edited_by_this_lane: >-
+      CLAUDE.md and the node's comment are framework documents. This lane
+      records the staleness and does not edit them; the correction belongs to
+      whoever owns that surface.
+    dependencies: [D-SCORE-3]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANC-2
+    parameter: a run that produces no gate evidence skips every forced formal round
+    concept: latent for this campaign, live for composed and formal-only runs
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING_LATENT
+    finding: >-
+      Gates fire only on the ANCHOR_NORMALIZED route, and anchor_map_data loads
+      only when trial_allowed (ml_hyperparameter_tune_agent.py:1022-1027, :906).
+      A run with no gate evidence classifies every candidate UNKNOWN
+      (candidate_eligibility.py:246-255), so _best_trial_winner returns None and
+      _should_skip_formal returns True UNCONDITIONALLY (policy.py:266-267),
+      independent of any threshold. With incumbent formal gates enabled the
+      chain then never executes a single formal round, in any iteration, and
+      announces nothing beyond a per-iteration [SkipFormal] line.
+    campaign_reachability: LATENT
+    why_latent: >-
+      The campaign is un-composed TIDMAD and no chain script passes
+      --no-is_trial, so --is_trial defaults True (run_one_iteration.py:1056-1059)
+      and the anchor route is taken. Additionally
+      enable_chain_incumbent_formal_gates defaults False.
+    unguarded: >-
+      Nothing at startup refuses enable_chain_incumbent_formal_gates on a run
+      whose scoring route cannot produce gate evidence. validate_formal_launch
+      (execute_tools/health_checks/launch_policy.py:83-208) checks mode,
+      authority and delta consistency and never checks route REACHABILITY.
+    relation_to_declared_debt: >-
+      This is the consequence side of the already-declared A1 debt, "composed
+      runs fire ZERO HealthGates". The debt was recorded as a gap; this records
+      what the gap DOES.
+    dependencies: [F-SCAND-3, D-SCORE-3]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANC-3
+    parameter: three tuner sites resolve validity against the shipped repo config
+    concept: the run-scoped gate set was migrated at one call site and not three
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING_LATENT
+    finding: >-
+      _select_best_records receives the run-scoped gate set
+      (records.py:885 <- bindings.run_scientific_gate_ids). Three call sites do
+      not: policy.py:223 (the trial winner), feedback.py:231 (trial-validity
+      feedback) and planning.py:277 (the planner's best score_table). All three
+      fall through to required_blocking_gate_ids()
+      (candidate_eligibility.py:246-248), which resolves the REPO's
+      configs/health_checks.yaml composed with LEGACY_OMITTED - TIDMAD's roster.
+    fail_open_edge: >-
+      required_blocking_gate_ids collapses UNKNOWN to frozenset()
+      (candidate_eligibility.py:198). A role-less config whose sha is not in
+      _LEGACY_ROLES_BY_CONFIG_SHA therefore yields required = empty, and
+      required.issubset(results) is trivially true - so EVERY successful
+      finite-score record is VALID, including one whose blocking gates failed.
+      core/resume.py:466-473 deliberately uses resolve_scientific_gate_ids to
+      avoid exactly this. Reachable by a one-line edit, and the failure is
+      FAIL-OPEN.
+    campaign_reachability: >-
+      LATENT for the campaign, which uses the shipped TIDMAD roster - so "the
+      repo config" and "the run's config" are the same document. Live for any
+      composed run.
+    doc_drift_found_alongside: >-
+      BestTracks' docstring (policy.py:597-599) still says _best_trial_winner
+      "additionally requires memory.time_mode == 'trial'". That coupling was
+      REMOVED by the 2026-08-17 trial/formal-identity correction (policy.py:203-213).
+    dependencies: [F-P56-2]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANC-4
+    parameter: the seeded paper baseline is a qualified formal candidate in tuner history
+    concept: run_comparison.py only - the chain path is unaffected
+    status: PENDING_AUDIT
+    control_class: EXPERIMENT_FIXED
+    disposition: PENDING_TRIAGE
+    finding: >-
+      seed_agent_memory (scripts/run_comparison.py:579-614, called
+      unconditionally at :1577) writes the paper-baseline record through a
+      LocalRecorder bound to the AGENT's run_name, so it lands inside
+      sandbox.get_summary() for every tuner call in that run. The record carries
+      status success, a finite denoising_score, is_trial False, and real
+      health_gate_results - so _select_best_records can return it as
+      best_formal_denoising_score, best_denoising_score AND
+      best_valid_formal_denoising_score. The tuner can report as its best valid
+      formal result a record the agent did not produce.
+    second_effect: >-
+      _build_gate_exhaustion Trigger A (feedback.py:385-388) requires NO record
+      with status success. The baseline defeats it permanently, so an iteration
+      in which every agent attempt was budget-skipped emits no gate-exhaustion
+      feedback.
+    not_affected: >-
+      _best_trial_winner and _build_trial_validity_feedback (both require
+      is_trial True), and _resume_progress (the baseline's memory block carries
+      no round_index).
+    campaign_reachability: >-
+      NONE on the chain path. sdsc_submission_scripts/run_one_iteration.py
+      contains no call to seed_agent_memory. Recorded because the campaign's
+      BASELINE comparisons may use run_comparison.py.
+    open_question: >-
+      Whether the baseline's participation in best_valid_formal_* is INTENDED.
+      The record's own prose ("Use this as the minimum target for improvement")
+      reads as if it is, while best_valid_formal_exp_id is documented elsewhere
+      as the chain incumbent's source. Not assumed either way.
+    last_updated: 2026-08-26
+
+
+  # ------------------------------------------- SCAN G findings (2026-08-26) ---
+  - decision_id: F-SCANG-1
+    parameter: the checkout violates the cold-start rule TODAY
+    concept: 117 plugins and 144 index rows carrying prior-campaign TIDMAD prose
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: GOLD_LAUNCH_PRECONDITION
+    raised: 2026-08-26
+    authority: Scan G subagent finding, counts verified independently by the campaign-planning lane
+    finding: >-
+      Verified on this checkout: agent_generated/models/ holds 117 plugin .py
+      files and agent_generated/_capability_index.json holds 144 rows. Sample
+      index descriptions include "wavenet_loss_screen_v17 - keeps the validated
+      WaveNet computation" and "selective_ssm_denoiser - a non-WaveNet
+      per-timestep classifier". reference_data/root_papers_cache/ holds
+      arxiv_2406.04378.json, the TIDMAD primary paper.
+    why_it_matters: >-
+      Those descriptions are rendered into the PROPOSER prompt by
+      render_available_models and into the TUNER PLANNER prompt by
+      render_available_losses. They carry prior-campaign TIDMAD architecture
+      knowledge - including the JUDGEMENT that WaveNet is "validated" - one
+      workflow startup away from both arms' prompts, and baseline_isolation does
+      not suppress them (its consumers do not include the registry renderers).
+    the_guard_is_working: >-
+      Cold-start checklist item 3 and preflight R8 item3 both mandate clearing
+      this. R8 would FAIL today. The state is simply not yet cleared - this is a
+      preparation task, not a defect.
+    the_latent_half_that_is_worse: >-
+      The generated-library root is created on the FIRST PROMOTION
+      (workflows/model_exploration.py:3126,3133). From that moment writes go
+      only to ~/.siderius/generated_library/, the checkout index is never
+      touched again, and R8's checkout globs become VACUOUS while the live store
+      is unchecked and unhashed. The blind spot therefore OPENS DURING THE
+      CAMPAIGN'S OWN FIRST SUCCESSFUL IMPLEMENTOR ROUND - after preflight has
+      already reported PASS.
+    dependencies: [Q-ISO-1, D-TREAT-6]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANG-2
+    parameter: raw_baseline and ground_truth reach both arms - CORRECTED CHARACTERIZATION
+    concept: symmetric task instrumentation, NOT a treatment leak
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    disposition: ACCEPTED_NON_BLOCKING
+    scan_claim_as_received: >-
+      Scan G ranked this its SEVERITY 1 finding, described as "TIDMAD
+      raw_baseline/ground_truth per-file tables reaching both arms' planner,
+      reflector and interpreter" and as a symmetric leak that "dilutes the
+      treatment at its core".
+    verification_outcome: CLAIM OVERSTATED - corrected here, not forwarded as received
+    what_is_TRUE: >-
+      The columns are real, always present (agent/schemas/score_table.py:32) and
+      do reach three LLM surfaces - the tuner planner
+      (agent/prompt_templates/tuner/rendering.py:194-206), the interpreter
+      (interpretation/rendering.py:561) and the proposer, which gets "the
+      complete 3-column table" (evidence_rendering.py:329).
+    why_it_is_NOT_a_treatment_leak: >-
+      raw_baseline is NO DENOISING AT ALL (CH1 passed through the scorer) and
+      ground_truth is A PERFECT DENOISER (CH2 substituted). They are the
+      metric's physical FLOOR and CEILING on this data - task instrumentation
+      both arms need to interpret any score at all. Plan section 5.3's treatment
+      artifact is something else entirely: the PRIOR OFFICIAL TIDMAD BASELINE'S
+      RESULT - a prior MODEL's performance, with baseline identity, provenance
+      and content hash. Neither arm learns anything about a prior model from a
+      floor and a ceiling.
+    the_residual_point_worth_keeping: >-
+      It does NARROW what Gold's artifact adds. Section 5.3 lists "per-file
+      score vector" among the artifact's contents, and both arms already hold
+      per-file floor and ceiling vectors. So Gold's marginal information is
+      "where a prior MODEL sat between that floor and ceiling, per file" rather
+      than "here is the scale". That remains a genuine and substantial
+      differentiator - the treatment is not diluted to nothing.
+    where_it_belongs: >-
+      In the paper's description of the BLIND condition, beside F-SCANH-3. Blind
+      is not information-free: it holds the metric's per-file floor and ceiling,
+      and it lacks the two advice artifacts. Both sentences must be said.
+    method_note: >-
+      Recorded because the correction only happened by reading the frozen
+      treatment text (plan sections 5.3 and 5.4) instead of reasoning from the
+      column NAMES. "raw_baseline" and "ground_truth" SOUND like prior-baseline
+      information; they are not. A name is not proof of a semantic - the rule
+      this lane applies to production code, applied to a subagent's finding.
+    dependencies: [D-TREAT-3, D-TREAT-6, F-SCANH-3]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANG-3
+    parameter: three of four deployment env vars swallow malformed values silently
+    concept: the H100 posture sets two of the three that fail silent
+    status: PENDING_IMPLEMENTATION
+    control_class: HARDWARE_DERIVED
+    disposition: RELEASE_BLOCKER
+    finding: >-
+      SIDERIUS_SUBPROCESS_RSS_GB refuses loudly
+      (core/execution_calibration.py:199-212, MalformedCeilingOverride, rationale
+      "a silently-ignored override is how a run comes to execute under limits
+      nobody chose"). Its three siblings do the opposite:
+      SIDERIUS_PAIR_VRAM_CEILING_GIB (pair_admission.py:100-108, bare except
+      ValueError: pass, silent default 28.0 GiB),
+      SIDERIUS_GPU_VRAM_QUOTA_MIB (pair_admission.py:84-87, returns None, quota
+      dropped), and SIDERIUS_GPU_VRAM_QUOTA_GB (probe_subprocess.py:120-126,
+      returns fraction_bound).
+    campaign_consequence: >-
+      The H100 posture exports the first and third (h100_posture.env:93,112). A
+      typo'd export on ONE pod silently caps that arm's card at the 28 GiB
+      RTX-5090 compatibility default - an admission-refusal ASYMMETRY with no
+      log line, no lock field and no preflight row. This is the exact failure
+      class MalformedCeilingOverride was created to end, still present in the
+      three siblings the campaign actually sets.
+    dependencies: [Q-UNIT-1, D-HW-6]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANG-4
+    parameter: the symmetry gate cannot see the routes that actually differ
+    concept: what campaign_preflight.sh compares, and what it cannot
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    finding: >-
+      Scan G's single sentence, recorded because it is the section-10 thesis:
+      the launch gate compares two HYPOTHETICAL COMMAND LINES on ONE MACHINE,
+      and every route that actually differs between two pods - home-directory
+      stores, environment variables, rendered prompt BYTES - is outside what it
+      can see.
+    consequence: >-
+      An arm asymmetry introduced by machine-local state or environment would
+      pass the symmetry gate. Combined with F-SCANH-1 (task_config.yaml unpinned)
+      and F-SCANG-1 (the capability store's blind spot opening at first
+      promotion), the gate's PASS is much weaker evidence than its name suggests.
+    requirement: >-
+      The gate must compare RENDERED PROMPT BYTES between arms, not argv, and
+      must cover the environment and the machine-local stores. Otherwise section
+      10 cannot honestly claim arm symmetry was verified.
+    dependencies: [F-SCANH-1, F-SCANG-1, D-TREAT-8]
+    last_updated: 2026-08-26
+
+
+  # ------------------------------------------- SCAN B findings (2026-08-26) ---
+  - decision_id: F-SCANB-1
+    parameter: a chain whose every iteration died reports success and the wave advances
+    concept: R1 - the failure-honesty defect, with an authored unmerged fix
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    raised: 2026-08-26
+    authority: Scan B subagent finding, verified independently by the campaign-planning lane
+    historical_event: >-
+      v20 attempt 1: both chains recorded no_records for every iteration and the
+      queue runner never noticed. The operator wrote STOP by hand.
+    mechanism_verified: >-
+      sdsc_submission_scripts/_chain_common.sh tests ONLY "status -ge 128" (a
+      signal termination, :894-899) and then falls through to an unconditional
+      "return 0" at :901. Every non-signal failure exit - 1, 2, 3 - is
+      swallowed. run_one_iteration.py:2913 exits 0 on no_records.
+      v19_queue_runner.sh:904 advances the wave only on EXIT=0, which is
+      therefore pinned true.
+    compounding: >-
+      This also discards the exits that other guards produce. launch_policy's
+      healthgate declaration refusal exits 2 (run_one_iteration.py:2195-2205)
+      and the chain-level fail brake exits 3 - both swallowed. So R14's
+      correctly-working refusal and R9's brake are neutralized by the same line.
+    the_fix_exists_and_is_unmerged: >-
+      Branch fix/failure-honesty-exit-status carries 090e601b ("a chain's exit
+      status must reflect its iterations' failures") and 99d05627. Verified NOT
+      an ancestor of origin/master. This is ROUTING, not authoring.
+    dependencies: [D-FAIL-8]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANB-2
+    parameter: a correct VRAM rejection crashes the loop and consumes an attempt
+    concept: R3 - the explicit-truncation marker kills its own consumer
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    raised: 2026-08-26
+    historical_event: >-
+      Twice - v20 attempts 1 and 3. "Verdict: OVER-BUDGET (VRAM) - estimated
+      18.7 GB > cap 12.0 GB" followed by "Loop Error: 'str' object has no
+      attribute 'get'". The record carries failure_type AttributeError and
+      counts_toward_attempt_budget true.
+    mechanism_verified: >-
+      nodes/ml_hyperparameter_tune_agent/execution.py:404-405 does
+      _killer = resource_check.get("memory_killer") or {} and then
+      _killer.get("binding_cap", "vram"). A truthy str survives "or {}" and
+      raises AttributeError.
+    why_a_str_reaches_it: >-
+      agent/skills/evaluate_vram_skill/isolated_probe.py:342 declares
+      memory_killer as dict[str, Any] | str | None, and :334-341 states the
+      reason VERBATIM: "str is a real member of each union, not sloppiness: when
+      a field will not fit the 8 KiB budget the worker replaces it with
+      '[dropped: exceeded the rich-field budget]' so its absence is EXPLICIT
+      RATHER THAN SILENT. Narrowing these to list/dict would turn that
+      deliberate marker back into a silent None." And _dict_or_none (:683-684)
+      DELIBERATELY preserves it: "value if isinstance(value, (dict, str)) else
+      None".
+    the_irony_is_the_finding: >-
+      A mechanism built so that truncation is EXPLICIT RATHER THAN SILENT
+      crashes the consumer that was supposed to read it. The marker saying "this
+      data was dropped" is what kills the round. And it fires on a CORRECT
+      resource rejection - the system is at its most right precisely when it
+      breaks.
+    campaign_consequence: >-
+      A correct VRAM refusal spends a scientific attempt and ends the round with
+      an AttributeError rather than an admission record. Under a 4-way H100
+      posture where large candidates are expected to be refused, this is not a
+      rare path.
+    dependencies: [D-FAIL-1, D-FAIL-5]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANB-3
+    parameter: an iteration with zero formal records is stamped completed with a trial best_score
+    concept: R2 - a REPORTING defect, not a selection defect
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    historical_event: >-
+      All ten v20 attempt-3 manifests read best_valid_formal_score null,
+      raw_best_formal_score null, result_authority "scientific", and best_score
+      between 0.479 and 10.708 - every one a TRIAL score. Seven success records,
+      all is_trial true, zero formal.
+    mechanism: >-
+      run_one_iteration.py:612-618 derives BOTH status and best_score from
+      tune_output.best_denoising_score, which is top_record over ALL records
+      (records.py:967-968), trial and formal mixed. The honest fields
+      best_formal_denoising_score and best_valid_formal_denoising_score
+      (records.py:969-979) exist and decide nothing here.
+      inspect_run_state.py:200,422 renders the same mixed value as the
+      operator's best_score column.
+    the_important_nuance: >-
+      DECISIONS ARE HONEST. core/resume.py:269 takes the incumbent from
+      chain_best_valid_formal_score, and model_exploration.py:3410,3413 reads
+      best_formal_denoising_score for the target stop. So this is a REPORTING
+      and OPERATOR-VISIBILITY defect, not a selection defect. Recorded that way
+      deliberately - overstating it as "the campaign selects on trial scores"
+      would be false.
+    campaign_consequence: >-
+      An operator watching the run, and any published trajectory built from
+      these manifests, would read trial scores as the campaign's results while a
+      status of "completed" conceals that zero formal rounds ever ran.
+    dependencies: [D-SCORE-5, D-SCORE-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANB-4
+    parameter: auto-resume START_ITER is corrupted by plugin-loader stdout
+    concept: R11 - reproduced, and it breaks exactly when resume matters
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    mechanism: >-
+      run_chain.sh:376 does START_ITER=$(python inspect_run_state.py
+      --next-iter). inspect_run_state.py:66 imports
+      agent.schemas.hyperparam_tuning, and importing it in the project venv
+      emits 12,960 BYTES of "[PluginLoader] Loaded plugin:" lines to STDOUT. No
+      numeric validation of START_ITER exists anywhere.
+    why_it_is_worse_than_it_looks: >-
+      Benign at iteration 1, when agent_generated/ is empty. It breaks once the
+      chain has generated models - which is EXACTLY when resume matters. The
+      known workaround is --start_iter N, and CLAUDE.md already carries the
+      debt; what is new is the reproduction and the byte count.
+    dependencies: [D-FAIL-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANB-5
+    parameter: the GPU-C probe assembler destroys the diagnosis needed to unblock the campaign
+    concept: R12 - fail-closed correctly, and blind about why
+    status: PENDING_IMPLEMENTATION
+    control_class: HARDWARE_DERIVED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    mechanism: >-
+      gpu_c_probe_train_leg.py:255-257 opens leg files with no existence
+      handling; :265-269 tests status != "success", which can only see legs that
+      survived long enough to WRITE. All four quad legs died and the assembler
+      crashed on FileNotFoundError naming none of them.
+    consequence: >-
+      H100_CORESIDENCY_FACTOR stays empty, so campaign_preflight.sh:334 and the
+      band launcher REFUSE the launch - fail-closed and correct - while the
+      diagnosis needed to unblock it is destroyed. The guard works and the
+      evidence to satisfy it cannot be produced.
+    fix_authored_unmerged: >-
+      df3f1c04 on fix/failure-honesty-exit-status, verified not an ancestor of
+      origin/master. It fixes the REPORTING contract only - its own SCOPE line
+      says "the contract half only. Nothing here reproduces or explains why
+      [the legs died]".
+    CORRECTION_2026_08_26: >-
+      This entry previously said "why the four legs died IN UNDER A SECOND
+      remains unknown". THE "UNDER A SECOND" IS RETRACTED. It came from the scan
+      subagent, not from any artifact I verified; df3f1c04's commit body says
+      only "All four quad legs died on testpod" and states no timing. The
+      Supervisor flagged it: the Q5 mechanism closure established that the
+      original four-way run consumed its FULL 2100 s cap (workspace epoch to
+      probe-log mtime = 2090 s) and that the sub-second APPEARANCE was stdout
+      BUFFERING of the leg logs. If the subagent derived "<1s" from those same
+      leg-log mtimes it re-walked the exact trap that closure documents.
+    what_remains_genuinely_open: >-
+      Why the legs died AT ALL. df3f1c04's own SCOPE line disclaims explaining
+      it, and run_leg, the sampler and gpu_c_coresidency_probe.sh are untouched.
+      The TIMING question is closed; the CAUSE question is not.
+    method_note: >-
+      Recorded against this lane. I passed the "<1s" through from a subagent
+      without verifying its source, in the same batch where I had explicitly
+      warned that source-verified-but-not-governing-text-verified was the gap a
+      wrong claim would come through. It came through a narrower gap than that:
+      a detail I neither verified nor flagged as unverified. The Supervisor
+      caught it.
+    dependencies: [D-HW-5, F-CONFOUND-2]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANB-6
+    parameter: v20's own monitoring was misaimed in the same way as the checks it watched
+    concept: the session's recurring theme, found independently in the monitors
+    status: VERIFIED
+    control_class: NOT_APPLICABLE
+    claim_type: SOURCE_FACT
+    finding: >-
+      v20's runtime monitors reported healthgate_invalidate 0, probe_unavailable
+      0 and type_errors 0 for a run with 13 gate invalidations, 15
+      infrastructure stops and one AttributeError. Cause:
+      reports/.../audit_snapshot.py:56-62 substring-greps the LOG TEXT for
+      "invalidate_round" - which is persisted only in JSON - and for "TypeError"
+      when the crash was an AttributeError. Its queue_alive check greps an
+      attempt-2 screen name.
+    why_it_is_recorded_as_a_finding: >-
+      Three separate blindness shapes in one 6-line function: wrong SOURCE (log
+      text vs JSON), wrong TOKEN (TypeError vs AttributeError), and a stale
+      IDENTIFIER (an attempt-2 screen name). It is the same misaimed-safety
+      pattern this audit found in the infrastructure vocabulary, the run-invariants
+      lock, the device-literal census and the CI selector - and here it appears
+      in the instrument built to watch for exactly these failures. A monitor
+      that reports zero is indistinguishable from a system that is healthy.
+    last_updated: 2026-08-26
+
+
+  # --------------------------------- SCAN A / SCAN E findings (2026-08-26) ---
+  - decision_id: F-SCANA-1
+    parameter: TrainConfig.lr defaults to 1e-4 while every other authority says 5e-4
+    concept: an omitted LLM key silently departs 5x from paper spec
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    finding: >-
+      ml_models/models_format_sandbox.py:745 declares lr: float = Field(default=1e-4).
+      ml_models/legacy_baseline_configs.json carries "lr": 5e-4 for all SIX
+      models (verified by count). agent/prompts.py:129 tells the model to reset
+      to "lr=5e-4" - and that value is a HARDCODED LITERAL in the same sentence
+      where the two focal parameters are rendered from placeholders, so the
+      prompt cannot follow a change to the JSON.
+    governing_text: >-
+      CLAUDE.md: "ml_models/legacy_baseline_configs.json is the source of truth
+      for paper-spec baseline configurations ... Learning rate: lr = 5e-4 for
+      every model (paper: torch.optim.Adam(..., lr=0.0005)). Was 1e-3 before the
+      fix."
+    consequence: >-
+      Any LLM plan omitting lr resolves to a 5x departure from paper spec,
+      silently, through the Pydantic gate that exists to validate raw LLM output.
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANA-2
+    parameter: task_config.yaml is READ cwd-relative and SNAPSHOTTED repo-relative
+    concept: compounds F-SCANH-1 - not merely unpinned but potentially divergent
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    finding: >-
+      workflows/task_config.py:44 sets _DEFAULT_CONFIG_PATH = "configs/task_config.yaml"
+      (RELATIVE), resolved at :198 by os.path.abspath - i.e. against the process
+      CWD. Its comment at :41-43 STATES the assumption rather than enforcing it:
+      "The chain runner always invokes with cwd == repo root." The snapshot
+      writer takes the opposite approach and says so at
+      workflows/model_exploration.py:446-448: "The source path is anchored on
+      SIDERIUS_ROOT (not the process cwd)".
+    consequence: >-
+      Off the repo root the agents READ one file while task_config_snapshot.yaml
+      records ANOTHER as the run's provenance. Combined with F-SCANH-1 (the lock
+      does not pin task_config at all) this means the prompt-bearing config can
+      differ from its own recorded provenance with nothing detecting it.
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANA-3
+    parameter: trial_portion has two default values and the executing one is 0.02
+    concept: sharpens F-LAUNCH-1
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    claim_type: SOURCE_FACT
+    finding: >-
+      Four declaration sites, two values. TrialConfig.trial_portion = 0.02
+      (agent/schemas/hyperparam_tuning.py:930) and ExperimentPlan.trial_portion
+      = 0.02 (:1093); HyperparamTuningInput.trial_portion = 0.1 (:1537) and
+      ProposalInput.trial_portion = 0.1 (agent/schemas/proposal.py:903), the
+      last described in-source as "Mirrors HyperparamTuningInput.trial_portion".
+    why_it_sharpens_f_launch_1: >-
+      What actually EXECUTES is the LLM's ExperimentPlan, whose omitted key
+      resolves to 0.02. So on the campaign path - where the launcher types
+      nothing and the plan_overrides lock has nothing to lock - an omitted
+      trial_portion resolves to 0.02, not the 0.1 recorded in the input schema
+      and not the 0.10 the campaign froze. The frozen value is 5x the effective
+      one.
+    dependencies: [F-LAUNCH-1, D-BUD-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANE-1
+    parameter: 14 of 15 digests concluded there was no authoritative result and nobody was told
+    concept: and the exclusion SUPPRESSES the warning that would have flagged it
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    finding: >-
+      AggregationScope.all_excluded renders "EVERY result was excluded - this
+      campaign produced no scientifically authoritative result"
+      (execute_tools/scientific_aggregation.py:143-147). The output field's
+      governing text at agent/schemas/interpretation.py:1018 says "Render with
+      AggregationScope.provenance_lines()." Verified: provenance_lines is
+      defined at scientific_aggregation.py:124 and its ONLY callers are TESTS.
+      ZERO production callers. 14 of 15 real interpretation digests have
+      included == [].
+    the_interaction_that_makes_it_worse: >-
+      The exclusion's only production effect is per_model_formal = {mt: ... if
+      mt in _authoritative} (ordering.py:238). An EMPTY per_model_formal means
+      the trial-versus-formal caveat at interpretation/rendering.py:840 CANNOT
+      FIRE. So in exactly the runs where formal evidence is unusable, the
+      trial-mixed raw best is presented WITH THE WARNING REMOVED. The exclusion
+      makes the evidence less honest, not more.
+    dependencies: [D-SCORE-5, D-SCORE-7]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANE-2
+    parameter: TrainingDiagnosis is structurally degenerate at the campaign's frozen epoch count
+    concept: the overfitting signal cannot fire in any formal round
+    status: PENDING_OPERATOR_DECISION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    finding: >-
+      agent/schemas/training_diagnosis.py:55-57 - _trend returns "single_point"
+      whenever len(series) < 2. At epochs_completed == 1 both the training and
+      validation series have length 1, so train_trend and validation_trend are
+      both single_point, validation_first == validation_last ==
+      validation_min, best_validation_epoch = 0,
+      final_vs_best_validation_degradation = 0.0, and
+      validation_degraded_after_best CANNOT BE TRUE. 64 of 106 real histories
+      have epochs_completed == 1.
+    campaign_relevance: >-
+      The plan freezes trial max_epochs = 2 and formal max_epochs = 1
+      (official_campaign_plan.md:2982-2983). So EVERY FORMAL ROUND's diagnosis
+      is degenerate, and only train_validation_gap_final carries information.
+      The agent receives a field named as an overfitting signal that is
+      structurally incapable of reporting overfitting.
+    why_it_is_an_operator_question: >-
+      The fix is not code. Either the campaign accepts that formal-round
+      diagnosis is a single gap number and says so, or formal max_epochs moves -
+      which is a frozen scientific parameter and therefore the operator's.
+    dependencies: [D-BUD-6, D-BUD-2]
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANE-3
+    parameter: train_time_s includes the validation pass and drives a shrink-the-model instruction
+    concept: the agent is told to attribute to architecture a cost it cannot see
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    finding: >-
+      execution.py:773-775 times the WHOLE training subprocess into
+      timing.train_time_s (records.py:1266). The subprocess DOES split them -
+      train_engine_sandbox.py:1724 records training as elapsed minus
+      validation_seconds_total, :1740 records "validation" - but that split
+      reaches only the calibration store. The planner prompt renders
+      "train={train_s/60:.1f} min" and instructs "If the last run exceeded it,
+      reduce model complexity" (agent/prompts.py:1246-1258).
+      validation_seconds sits inside training_history, which is PLANNER-HIDDEN
+      (agent/prompts.py:896), and is on neither TrainingDiagnosis nor
+      ModelRunSummary.
+    measured: >-
+      validation_seconds of 37.99 and 29.14 per epoch at validation_samples
+      15000 in real TIDMAD records. The denominator - a representative formal
+      training time - was not measured, so the FRACTION is unquantified.
+    consequence: >-
+      No LLM can see the term it is being asked to attribute to architecture. A
+      candidate can be shrunk for time spent validating it.
+    last_updated: 2026-08-26
+
+  - decision_id: F-SCANE-4
+    parameter: the scientifically correct per-model fields exist and reach no consumer
+    concept: the mixed variant is rendered, the correct one is not
+    status: PENDING_IMPLEMENTATION
+    control_class: EXPERIMENT_FIXED
+    disposition: RELEASE_BLOCKER
+    claim_type: SOURCE_FACT
+    finding: >-
+      ModelRunSummary.best_valid_formal_score
+      (nodes/result_interpretation_agent/evidence.py:496) - the only per-model
+      headline that is BOTH HealthGate-valid AND formal - has no production
+      consumer past construction. ModelRunSummary.formal_file_vector (:503),
+      documented "Definitive per-file performance"
+      (agent/schemas/interpretation.py:467-470), has none at all - while the
+      MIXED best_file_vector IS consumed, and is what scores the prediction
+      track record.
+    shape: >-
+      This is the F-SCANB-3 pattern one layer up: the honest field exists, is
+      persisted, and decides nothing, while the mixed field is the one rendered.
+    dependencies: [D-SCORE-5]
+    last_updated: 2026-08-26
+
+
+  - decision_id: M-SCAN-1
+    parameter: scan-method findings from running six adversarial scans
+    concept: how a scan produces a confident wrong answer, observed three times
+    status: VERIFIED
+    control_class: NOT_APPLICABLE
+    recorded: 2026-08-26
+    why_recorded: >-
+      The blocker ledger's value depends on how its entries were produced. These
+      are the three ways a wrong claim actually got close to entering it, each
+      observed rather than anticipated.
+    shape_1_unquoted_governing_text: >-
+      Scan G's SEVERITY-1 finding claimed raw_baseline/ground_truth "dilute the
+      treatment at its core". Reasoning from COLUMN NAMES. Reading plan sections
+      5.3 and 5.4 showed they are the metric's floor and ceiling - task
+      instrumentation - while the treatment artifact is a prior MODEL's result.
+      Caught before forwarding. Mitigation now standing: every forwarded finding
+      declares SOURCE FACT or INTERPRETIVE CLAIM, and an interpretive claim must
+      QUOTE the governing text.
+    shape_2_an_unflagged_clause_inside_a_verified_finding: >-
+      F-SCANB-5 carried "the four legs died in under a second". The finding's
+      other claims were verified here; that clause was not, and was not flagged
+      as unverified. It rode on the credibility of its neighbours. The Supervisor
+      caught it; df3f1c04 states no timing, and the Q5 closure had already
+      attributed the sub-second APPEARANCE to stdout buffering. VERIFYING A
+      FINDING IS NOT VERIFYING EVERY CLAUSE IN IT.
+    shape_3_a_correction_that_reasserts_exhaustiveness: >-
+      Scan D self-disclosed that two of its own subagents never returned while
+      parts of its report were written as though they had. Its correction pass
+      then re-derived "the complete, exhaustive list of direct score_vector
+      invocations ... is exactly four" - and dropped
+      scripts/finalize_recovered_diagnostic_round.py:118, WHICH ITS OWN EARLIER
+      REPORT HAD LISTED. Verification and enumeration are different operations
+      and passing the first does not carry the second. Changed no finding; the
+      shape is the point.
+    what_held: >-
+      No forwarded RELEASE BLOCKER was affected by any of the three, because
+      each was independently re-verified in this lane before routing. The
+      discipline is what made the errors cheap rather than expensive.
+    standing_rules_adopted:
+      - every forwarded finding declares SOURCE FACT or INTERPRETIVE CLAIM
+      - an interpretive claim quotes its governing text or is not forwarded
+      - a claim of exhaustiveness prints the command that produced it
+      - a pattern returning nothing is stated as "zero hits", never omitted
+      - unverified scan output is held AS OUTPUT and never forwarded as a finding
+    last_updated: 2026-08-26
+
+
+  - decision_id: F-AGG-CLEAR-1
+    parameter: no forbidden aggregation exists in the reporting path
+    concept: a clean negative, two classes closed STRUCTURALLY
+    status: VERIFIED
+    control_class: EXPERIMENT_FIXED
+    claim_type: SOURCE_FACT
+    recorded: 2026-08-26
+    authority: bounded direct sweep by the Scan D agent, commands printed; structural claims re-verified in this lane
+    why_it_matters: >-
+      scoring_utils.py section 3 forbids "mean of per-band linear means (e.g.
+      4/6/5/5)" and 4/6/5/5 IS this campaign's partition. A clean negative on
+      the reporting path is what lets the campaign state that no published
+      number was produced by the forbidden construction.
+    closed_structurally_not_by_enumeration:
+      pandas: >-
+        VERIFIED HERE: zero imports of pandas anywhere in the repository
+        (--include=*.py --include=*.ipynb, .venv and .git excluded). So .agg,
+        .rolling, .resample and .groupby could not have hit regardless of
+        pattern quality. This is the strongest form of negative available - not
+        "we searched and found nothing" but "the construct is absent".
+      np_average: >-
+        VERIFIED HERE: zero occurrences of np.average / numpy.average. A
+        weighted mean cannot hide in that form.
+    closed_by_enumeration:
+      torch_mean: 'zero. The 35 .mean() hits are loss reductions, epoch-loss averaging, health-check summaries, the LEGAL per-segment-within-one-file mean at scoring_utils.py:466, prints and tests. None operate on per-file or per-band denoising scores.'
+      reports_tree: 'zero averaging code across all 11 .py files under reports/ (1,057 files scanned, all types).'
+      campaign_band_partition: >-
+        The 0-3 / 4-9 / 10-14 / 15-19 partition exists ONLY as launcher
+        configuration arrays and BANDS constants. No arithmetic anywhere
+        combines band scalars.
+    the_613_false_positives_worth_recording: >-
+      A per_band search of reports/ returns 613 hits, which reads alarming. They
+      are per_band_output_scaling (552), per_band_scaling_enabled,
+      per_band_scale_init, per_band_bias_init and siblings - ALL referring to
+      partitioning the 256 ADC OUTPUT CLASSES inside LLM-proposed model
+      architectures. A completely different meaning of "band" from the
+      campaign's file-index partition. VERIFIED HERE by token frequency.
+      band_score, band_mean, bands_avg and cross_band have ZERO occurrences
+      repo-wide.
+    the_only_remaining_site: >-
+      F-SCAND-1, nodes/result_interpretation_agent/prediction.py:269 - and it is
+      on the PREDICTION-VERIFICATION path, not the reporting path. Unchanged.
+    residual_stated_so_it_is_not_inferred: >-
+      reports/ .json and .jsonl artifacts were searched for averaging CODE and
+      per-band VOCABULARY. They were NOT audited for whether a stored numeric
+      VALUE was produced by an averaging step upstream. A pre-computed forbidden
+      mean sitting in a JSON field matches no pattern in this sweep. Closing
+      that requires tracing provenance of specific numbers, which requires the
+      operator to name which numbers are campaign-facing. RECORDED AS OPEN.
+    dependencies: [D-SCORE-1, D-BEST-1, F-SCAND-1]
     last_updated: 2026-08-26
 
 # --------------------------------------------------------------------------
@@ -4234,5 +6885,5 @@ topics_not_yet_opened:
   - {order: 15, topic: output/reporting/provenance requirements,      status: PENDING_OPERATOR_DECISION}
   - {order: 16, topic: testpod rehearsal protocol,                    status: PENDING_OPERATOR_DECISION}
   - {order: 17, topic: goldpod/blindpod launch protocol,              status: PENDING_OPERATOR_DECISION}
-  - {order: 18, topic: final symmetry audit,                          status: PENDING_OPERATOR_DECISION}
+  - {order: 18, topic: final symmetry audit,                          status: CONDITIONAL_ON_BLIND_EXECUTION}
   - {order: 19, topic: campaign freeze checklist,                     status: PENDING_OPERATOR_DECISION}

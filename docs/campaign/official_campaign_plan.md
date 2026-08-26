@@ -437,8 +437,11 @@ model saw. Only the rendered context proves what reached the model. And a
 search for a generic term can come back empty for the wrong reason — a
 discriminative control is a check that could actually have failed.
 
-**Status.** This is a **formal launch gate**. Launch is blocked until it
-passes. `PENDING_LAUNCH_AUDIT`.
+**Status.** `CONDITIONAL_ON_BLIND_EXECUTION` (corrected 2026-08-26). This
+remains a **formal gate on BLIND**, in full and unweakened — but the campaign is
+**GOLD-ONLY**, so **it does not gate the Gold launch** and its absence neither
+blocks nor invalidates completed Gold. It reactivates if and when Blind is
+executed. `PENDING_LAUNCH_AUDIT` at that point.
 
 **Who controls it.** Supervisor executes; operator accepts.
 
@@ -612,7 +615,7 @@ otherwise. Downstream choices are not silently frozen ahead of their turn.
 | 15 | Output / reporting / provenance requirements | PENDING_OPERATOR_DECISION |
 | 16 | testpod rehearsal protocol | PENDING_OPERATOR_DECISION |
 | 17 | goldpod / blindpod launch protocol | PENDING_OPERATOR_DECISION |
-| 18 | Final symmetry audit | PENDING_OPERATOR_DECISION |
+| 18 | Final symmetry audit | **`CONDITIONAL_ON_BLIND_EXECUTION`** — not a Gold-only requirement |
 | 19 | Campaign freeze checklist | PENDING_OPERATOR_DECISION |
 
 ---
@@ -1187,7 +1190,11 @@ attempt. That trace is bounded but real work. **`PENDING_AUDIT` — F-LLM-3.**
 
 **Status: `FROZEN_POLICY_PENDING_IMPLEMENTATION_AUDIT`.** Not patched here.
 
-### 9.10 Execution concurrency / band scheduling — FROZEN policy, **PENDING_IMPLEMENTATION**
+### 9.10 Execution concurrency / band scheduling — **SUPERSEDED by §21** (2026-08-26)
+
+> **SUPERSEDED.** Max-2-per-pod with dynamic backfill is replaced by four
+> exclusive H100 GPUs, one band each. Retained below as history.
+
 
 **Decision — this supersedes the four-way posture for the formal campaign.**
 
@@ -1252,7 +1259,10 @@ next queued band. That is release-lane work, reported not patched.
 **Status: concurrency policy `FROZEN`; band identities `VERIFIED`;
 scheduler `PENDING_IMPLEMENTATION`.**
 
-### 9.11 Per-band VRAM admission — PROVISIONALLY_FROZEN at 36 GiB
+### 9.11 Per-band VRAM admission — **SUPERSEDED by §21.4** (36 GiB → 60 GB)
+
+> **SUPERSEDED.** Retained below as history.
+
 
 **Decision.** Provisional target **36 GiB per active band**. Final value is
 `HARDWARE_DERIVED`, pending a bounded testpod witness using the actual **two-way**
@@ -1307,10 +1317,19 @@ figure, 35 is the answer — the number is not to be defended for its own sake.
 opportunity. Neither arm may receive systematically greater API concurrency or
 retry opportunity.
 
+> **`CONDITIONAL_ON_BLIND_EXECUTION` (2026-08-26).** The between-arm fairness
+> requirement is preserved in full and reactivates if Blind runs. Under the
+> Gold-only campaign there is no second arm to be unfair to, so this does not
+> gate the Gold launch. **The headroom finding below is unaffected and still
+> applies to Gold's own four concurrent bands.**
+
 **Audit result — the concurrency shape changes materially under §9.10.** The
 existing preflight smoke (`campaign_llm_smoke.py`) fires **8** parallel calls,
 sized for *"eight co-resident band chains (two fleets of four)"*. Under max-2
-per pod the campaign-wide simultaneous chain count drops from 8 to **4** (2
+per pod the campaign-wide simultaneous chain count drops from 8 to **4**. Under
+the Gold-only §21 topology it is **4 concurrent Gold bands on one host** rather
+than 2 pods x 2 bands — the peak count is unchanged, so the headroom conclusion
+stands. (Historical derivation follows: 2
 pods × 2 bands), so the smoke's default N is now an over-estimate rather than a
 match. It is a probe default, not a limiter, so nothing breaks — but it should
 be re-sized so the preflight tests the shape the campaign will actually have.
@@ -1454,9 +1473,17 @@ probe (§9.4, §9.5) narrows it substantially. Corrected record:
    snapshot itself, which is out of anyone's control and vanishingly less
    likely than alias movement.
 
-**Residual mitigation:** launch goldpod and blindpod within a narrow time
-window (§15). Limitations 2 and 3's residue must be stated explicitly in the
-campaign manifest rather than left implied.
+**Residual mitigation — CORRECTED 2026-08-26.** This previously read *"launch
+goldpod and blindpod within a narrow time window."* **That mitigation is void:
+the campaign is GOLD-ONLY (`D-CAMP-1`) and there is no paired launch.**
+
+The residual exposure is now **intra-Gold**, and it is real: Gold runs **four
+bands × up to 20 iterations, concurrently, potentially over days**, against a
+**mutable alias**. A provider update mid-campaign means different bands — or
+different iterations of the *same* band — run against different models. **See
+§21.7 for the precise statement of what that does and does not contaminate.**
+Limitations 2 and 3's residue must still be stated explicitly in the campaign
+manifest rather than left implied.
 
 ### 9.16 Decision Area 2 — status summary (updated after operator ruling + live probe)
 
@@ -1471,11 +1498,11 @@ campaign manifest rather than left implied.
 | token / spend budget | **FROZEN** | NONE — **VERIFIED ABSENT** |
 | context / truncation | **PENDING_AUDIT** | stateless; per-component char caps; largest observed prompt **151,459 tok, succeeded** |
 | API retry | **FROZEN_POLICY_PENDING_IMPLEMENTATION_AUDIT** | one divergence; four options in §9B |
-| max active bands per pod | **FROZEN** | 2, dynamic backfill |
+| max active bands per pod | ~~2, dynamic backfill~~ **SUPERSEDED by §21** | 4 exclusive GPUs, one band each |
 | **band queue order** | **FROZEN** | active `10-14`, `15-19`; queued `0-3`, `4-9` |
-| band scheduler | **PENDING_IMPLEMENTATION** | F-BAND-1 — no queue, no backfill exists |
-| per-band VRAM | **PROVISIONALLY_FROZEN** | 36 GiB; final `HARDWARE_DERIVED` |
-| **LLM concurrency fairness** | **FROZEN / VERIFIED** | 10,000 RPM · 4,000,000 TPM vs 4 concurrent chains — **F-LLM-4 CLOSED**, no scheduler needed |
+| band scheduler | ~~`F-BAND-1`~~ **MOOT under §21** | exclusive one-band-per-GPU needs no backfill queue |
+| per-band VRAM | ~~36 GiB~~ **SUPERSEDED by §21.4** | **60 GB**, `HARDWARE_DERIVED` |
+| **LLM concurrency fairness** | **FROZEN / VERIFIED** | 10,000 RPM · 4,000,000 TPM vs 4 concurrent chains — **F-LLM-4 CLOSED**. Under §21 the derivation changes (1 pod × 4 bands, not 2 × 2) but the peak count is unchanged at 4, so the headroom conclusion stands |
 | OpenAI tool availability | **NOT_APPLICABLE** | proven — zero production callers |
 | common prompt versioning | **FROZEN** | hash-identical; pinning `PENDING_IMPLEMENTATION` (F-PROMPT-1) |
 | **model alias vs snapshot** | **PENDING_OPERATOR_DECISION** | `gpt-5.5` → `gpt-5.5-2026-04-23`; §9C |
@@ -1929,7 +1956,11 @@ findings, per-file-best tables, promotion/calibration provenance) survives a
 fresh workspace. The checklist does not enumerate them. `PENDING_AUDIT` —
 deferred to the audit register per the workflow update.
 
-## 9A. CROSS-SECTION CONSEQUENCE — four-way → max-two
+## 9A. CROSS-SECTION CONSEQUENCE — four-way → max-two — **SUPERSEDED by §21.10**
+
+> **SUPERSEDED.** Both prior topologies are now non-applicable; §21.10 carries
+> the current evidence relevance map. Retained below as history.
+
 
 **This is a formal campaign design decision with consequences outside Decision
 Area 2, recorded immediately per the operator's instruction.**
@@ -2225,7 +2256,7 @@ rendered, and the following must be proven:
 
 1. no campaign-relevant implicit defaults remain;
 2. no unapproved environment inheritance remains;
-3. no goldpod/blindpod difference exists outside `TREATMENT`;
+3. no goldpod/blindpod difference exists outside `TREATMENT` — **`CONDITIONAL_ON_BLIND_EXECUTION`**; not a Gold-only freeze condition;
 4. every `AGENT_CONTROLLED` field grants equal authority in both arms;
 5. every `HARDWARE_DERIVED` field cites its evidence;
 6. every `EXPLICITLY_DISABLED` feature is genuinely disabled, not merely
@@ -2240,9 +2271,11 @@ The frozen plan must name an exact machine-readable campaign manifest.
 After the final release candidate and the campaign configuration are frozen,
 testpod runs a **bounded engineering rehearsal**.
 
-The rehearsal may verify: launch plumbing · treatment injection · blind absence
-· effective config · band identity · resource admission · persistence · restart
-behaviour · reporting · failure semantics.
+The rehearsal may verify: launch plumbing · treatment injection · effective
+config · band identity · resource admission · persistence · restart behaviour ·
+reporting · failure semantics. **Blind-absence verification is
+`CONDITIONAL_ON_BLIND_EXECUTION`** and is not required for a Gold-only
+rehearsal.
 
 **The rehearsal's scientific scores must NOT be used** to optimise advice,
 scientific thresholds, the action space, model choices, loss choices, or
@@ -2253,24 +2286,50 @@ are never part of the formal gold/blind comparison.
 
 ---
 
-## 15. Formal launch preconditions
+## 15. Formal launch preconditions — **GOLD-ONLY** (corrected 2026-08-26)
 
-Launch requires **all** of:
+> **SUPERSEDED SHAPE.** This section previously required a *paired* Gold+Blind
+> launch and listed Blind-dependent gates among the preconditions for launching
+> at all. **The current official campaign is GOLD-ONLY.** The old policy is
+> retained as history in §15.3 and is not deleted.
+
+### 15.1 GOLD launch preconditions — the operative list
+
+Launch of the Gold campaign requires **all** of:
 
 * final exact qualified release, tagged `v0.1.0`
 * campaign plan `FROZEN`
 * machine-readable campaign manifest `FROZEN`
 * testpod rehearsal PASS
-* gold/blind treatment audit PASS (§5.6)
+* **goldpod POSITIVE treatment audit PASS** (§5.8) — every Gold proposer round
+  receives the intended immutable artifacts, hashes match the frozen authority,
+  no round silently omits or mutates the treatment
+* Gold host topology verified (§21.2, `A-HW-VERIFY-1` — **DISCHARGED**)
+* canonical data present and manifest-verified at the destination (`D-DATA-2`)
+
+**No Blind-dependent condition gates the Gold launch.**
+
+### 15.2 BLIND preconditions — `CONDITIONAL_ON_BLIND_EXECUTION`
+
+The following are **preserved in full** and **reactivate if and only if** Blind
+is executed for a formal quantitative treatment comparison. **They do not block
+or invalidate completed Gold, and if Blind is never run none of them applies:**
+
+* blindpod NEGATIVE leakage audit PASS (§5.7)
 * gold/blind effective-config symmetry PASS
-* all expected treatment asymmetries PRESENT
-* no unexpected asymmetries
+* all expected treatment asymmetries PRESENT, no unexpected asymmetries
+* the §21.6 temporal-separation provenance record, including per-arm resolved
+  model snapshots and concurrent host baseline load
+* arm-comparability apparatus in `D-ARM-1`
 
-goldpod and blindpod are launched within a narrow time window where practical
-(§9 records why: provider-side model drift between two distant launches is
-undetectable from inside the system).
+### 15.3 Superseded — the previous paired-launch policy (history)
 
----
+The earlier text required: *"gold/blind treatment audit PASS · gold/blind
+effective-config symmetry PASS · all expected treatment asymmetries PRESENT · no
+unexpected asymmetries"* as launch preconditions, and *"goldpod and blindpod are
+launched within a narrow time window where practical."* **Both are superseded by
+the Gold-only ruling and by §21.3's Gold-first execution order.** Retained so the
+change is visible rather than silent.
 
 ---
 
@@ -3042,7 +3101,10 @@ runtime prediction, not a very loose wall-clock ceiling.
 **These must be explicitly materialized in the final campaign launcher/manifest.
 Do not rely on profile absence or defaults.**
 
-### 19.12 VRAM budget — campaign policy FROZEN, hardware acceptance pending
+### 19.12 VRAM budget — **SUPERSEDED by §21.4** (36 GiB → 60 GB)
+
+> **SUPERSEDED.** Retained below as history.
+
 
 ```text
 trial_vram_budget_gb  = 36
@@ -3730,6 +3792,284 @@ Not resolved in the planning lane. Recorded for later Supervisor routing.
 
 
 ---
+
+## 21. FORMAL HARDWARE DISPOSITION — **FROZEN** (operator ruling, 2026-08-26)
+
+**Provenance: operator ruling, relayed by the RTX 5090 Supervisor under standing
+directive §11 (required relay).** Recorded as operator authority. The relay path
+is stated so provenance is honest.
+
+**This supersedes both the 8-GPU simultaneous Gold/Blind option AND the
+`dual_coresident` formal topology.**
+
+### 21.1 Frozen status block — verbatim
+
+```text
+FORMAL_GPU_COUNT                                    = 4
+FORMAL_GPU_TYPE                                     = H100_SXM
+GPU_RESIDENCY                                       = EXCLUSIVE_SINGLE_BAND
+ARM_EXECUTION_ORDER   = GOLD_FIRST, BLIND_AFTER_GOLD_IF_RESOURCES_ALLOW
+GOLD_REQUIRED                                       = true
+BLIND_REQUIRED_FOR_GOLD_COMPLETION                  = false
+SCIENTIFIC_VRAM_CEILING                             = 60GB
+TRIAL_TIME_CEILING                                  = 30min
+FORMAL_TIME_CEILING                                 = 120min
+BYPASS_FORMAL_TIME_CEILING                          = 200min
+TIME_CEILINGS_REQUIRE_FINAL_H100_SINGLE_RESIDENT_QUALIFICATION = true
+```
+
+### 21.2 Band-to-GPU assignment — Stage G-A
+
+```text
+GPU 0  ->  band 0-3
+GPU 1  ->  band 4-9
+GPU 2  ->  band 10-14
+GPU 3  ->  band 15-19
+```
+
+**One exclusive GPU per Gold band. No two scientific band searches co-reside.**
+
+> **✅ VERIFIED 2026-08-26 — `A-HW-VERIFY-1` DISCHARGED.** Measured on the Gold
+> host `7b18f5b84834`: **4 × NVIDIA H100 80GB HBM3**, 81559 MiB each, 700 W
+> each, four distinct UUIDs · `nproc = 224` · RAM 2015 G total / 1909 G
+> available · `/workspace` = `/dev/md127` xfs **2.0 T** · `/` = overlay 30 G
+> (**data must NOT live there**) · `rsync` present.
+>
+> Verified execution facts: one Gold host · four H100 GPUs · **shared
+> `/workspace` filesystem** · one immutable `/workspace/DATA` copy · one
+> exclusive GPU per band · four isolated writable band workspaces.
+
+> **⚠️ Exclusive GPUs are not an isolated host — AND THE HOST IS SHARED WITH
+> OTHER TENANTS.** Measured on the freshly-started Gold pod with **nothing of
+> ours running**: loadavg **60.17 / 59.00 / 56.23 on 224 cores ≈ 27 % of the
+> host CPU already consumed by other tenants.** testpod's exp1 baseline was
+> ~50 on 208 cores ≈ 24 % — the same order.
+>
+> The four bands share host CPU, RAM and filesystem *and* share the physical
+> machine with neighbours we do not control. The unexplained 2.389× occurred at
+> 7–20 % GPU utilisation with 82–90 % CPU idle, so GPU contention was almost
+> certainly not its cause — and **neighbour load is now a live candidate for
+> part of it** (`A-HOST-1`, §21.11).
+
+### 21.3 Execution order
+
+Gold runs **first**. **Gold finalization follows Gold Stage A — it does NOT wait
+for Blind.** Blind runs afterward **only if resources permit**.
+
+### 21.4 VRAM ceiling 36 GB → 60 GB — **causal, not cosmetic**
+
+The revision is an explicit resource-policy change **caused by** the move from
+co-resident to exclusive-GPU execution.
+
+* Use the repository's **existing canonical VRAM authority**. **Do NOT create a
+  second budget mechanism.**
+* **Do NOT silently change GB/GiB semantics.** (Note the shipped flags are
+  implemented as GiB — `agent/skills/evaluate_vram_skill/wrapper.py`,
+  `_GB = 1024**3`. The unit question must be settled explicitly at
+  implementation, not assumed.)
+* The candidate must **not** treat the full physical 80 GB as scientific budget.
+  The remainder is headroom for framework overhead, transient allocator
+  behaviour, CUDA context and safety margin.
+* **Blind, if run, gets the same 60 GB.**
+
+### 21.5 Time ceilings — nominally frozen, requalification REQUIRED
+
+`30 / 120 / 200` remain **nominally frozen** and **require fresh
+exclusive-H100 single-resident qualification**.
+
+**The operator explicitly refused to raise them merely because the topology
+changed, and the reasoning is load-bearing:** single-resident *removes* the dual
+penalty, but post-#320 uses the true frozen trial scope and 60 GB permits larger
+candidates. **Those push in opposite directions, so no existing evidence can
+establish whether 30/120/200 are too loose or too tight.**
+
+> **A 1.5× proportional expansion to 45 / 180 / 300 was named by the operator as
+> a natural candidate for DISCUSSION and is explicitly NOT FROZEN. Do not adopt
+> it, plan against it, or treat it as likely.**
+
+Witness status: `PENDING_HARDWARE_EVIDENCE`. Values stay frozen meanwhile.
+
+### 21.6 Temporal asymmetry — a **provenance requirement**, not a scheduling note
+
+The operator accepts Gold-first / Blind-later as a **cost decision**.
+
+If Blind is ever used for a formal quantitative treatment-comparison claim,
+**exact provenance of the temporal separation and of all provider / hardware /
+release authorities must be preserved.**
+
+```text
+Sequential execution must NEVER be described as simultaneous.
+If Blind cannot be completed it is reported as unavailable / incomplete,
+  honestly — no fabricated symmetry evidence.
+Completed Gold is NOT invalidated or delayed by Blind's absence.
+```
+
+This statement must appear **explicitly** in the standalone campaign runbook,
+not be left implicit.
+
+### 21.7 Provider drift — **INTRA-GOLD**, and `D-LLM-13` is a GOLD LAUNCH PRECONDITION
+
+**Two reclassifications, in sequence, both recorded rather than edited away.**
+
+**First**, this lane called `D-LLM-13` *"the ONLY remaining defence against a
+provider-side model change between the two arms"* and asked for
+**release-blocking** treatment. Under Gold-only that rested on a comparison the
+campaign is not making. **Withdrawn.**
+
+**Second**, this lane then proposed demoting it to *provenance hygiene*. **That
+was too far in the other direction**, and the Supervisor supplied the stronger
+residual argument:
+
+> Gold runs **four bands × up to 20 iterations, concurrently, potentially over
+> days**, against a **mutable alias**. If the provider updates `gpt-5.5`
+> mid-campaign, different bands — or different iterations of the *same* band —
+> execute against **different models**.
+
+**Final disposition, adopted:**
+
+```text
+D-LLM-13 : NOT a v0.1.0 release blocker
+           FORMAL GOLD LAUNCH PRECONDITION
+```
+
+It does not gate the code release. **It gates launching a campaign whose own
+internal comparisons are meant to mean something.** Eight strings in one file,
+no code change.
+
+#### 21.7a Being precise about what alias drift does and does not contaminate
+
+The Supervisor's framing was *"Composed Best and Strict Best both compare
+candidates across bands and iterations, so an alias change contaminates the two
+selections the campaign exists to produce."* **That is right in direction and
+worth tightening, because two of those computations are actually robust:**
+
+| computation | contaminated by mid-campaign alias drift? |
+|---|---|
+| Golden Metric arithmetic, HealthGate verdicts | **NO** — they measure a trained model, not the proposer |
+| **Composed Best** pooling (§20A.9) | **NO** — one `score_vector` call over four already-selected deliverables; the arithmetic is indifferent to who proposed them |
+| **Strict Best** comparison (§20A.10) | **NO** — it compares four **fixed designs** retrained under identical frozen authority, with **no proposer involved** |
+| **the candidate POOL those selections draw from** | **YES** — the four band searches would have been conducted by materially different agents |
+| **the official iteration trajectory (§20A.7)** | **YES, and this is the sharpest instance** |
+| the campaign's central scientific claim | **YES** |
+
+**The strongest single case is not cross-band — it is within-band.** §20A.7
+freezes the campaign's headline quantitative artifact as *"cumulative best
+HealthGate-valid FORMAL Golden Metric by iteration."* That curve is read as **one
+agent's progress over 20 iterations.** If iterations 3 and 17 of the same band
+ran against different models, **the curve silently plots two agents and is
+presented as one.** No amount of correct scoring arithmetic repairs that,
+because the defect is in what the x-axis means.
+
+And the campaign's claim is of the form *"an LLM agent, given prior information,
+found X."* **If the agent changed mid-run, "the agent" is not one thing** — which
+is a claim-integrity defect, not a computational one.
+
+**So the argument for pinning survives the removal of the between-arm reading
+completely, and would exist even if Blind had never been designed.** It is
+cheap enough that the argument barely has to hold; it holds comfortably.
+
+**`D-PROV-1` follows the same reasoning.** DeepSeek exposes no immutable
+revision, so the same intra-campaign exposure applies — **confined to
+`lit_review`'s 2 of 10 roles**, and **removed entirely** if `Q-LIT-1` resolves
+OFF.
+
+**Unchanged requirement.** §21.6's provenance records must capture the
+**resolved model snapshot**, not the configured alias.
+
+### 21.8 Preserved unchanged by this ruling
+
+Explicitly untouched: max outer iterations **20** · band-local FCNet+2.0 early
+stop (pending `A2-FCNET`) · frozen trial/formal portions · frozen epoch
+semantics · `skip_formal_min_delta = −2.0` ·
+`bypass_formal_time_budget_min_delta = +0.5` · formal incumbent cold-start
+semantics · Golden Metric authority · HealthGate authority and `all_pass` ·
+failure / retry / resume semantics · candidate-design action space ·
+composed / strict scoring mathematics.
+
+### 21.9 What this ruling SUPERSEDES
+
+| superseded | by |
+|---|---|
+| §9.10 max 2 active bands per pod + dynamic backfill | §21.1–21.2 — four exclusive GPUs, one band each |
+| §9.11 / §19.12 36 GiB per active band | §21.4 — 60 GB |
+| `dual_coresident` formal topology | `EXCLUSIVE_SINGLE_BAND` |
+| §9A's four-way → max-two consequence map | §21.10 — **both** prior topologies are now wrong |
+| `D-HW-3` two-way formal-topology rehearsal | single-resident qualification |
+
+### 21.10 Evidence relevance map — **updated**
+
+Q5's four-way co-residency factor was already not the campaign authority. **The
+2.389× dual measurement is now also not the campaign authority.** Neither
+topology is the formal one.
+
+| evidence | class | status under §21 |
+|---|---|---|
+| Q1–Q4, Q8 | platform | **still valid** — topology-independent |
+| Q5 four-way co-residency factor | topology-specific | **not applicable** |
+| 2.389× dual-coresident measurement | topology-specific | **not applicable to the formal campaign** |
+| Q6 watchdog calibration | topology-specific | must target **single-resident** |
+| Q7 campaign topology semantics | topology-specific | must be re-read against §21 |
+| Q9 A/B launch rehearsal | topology-specific | must rehearse **Gold-first, exclusive-GPU** |
+
+**`F-H100-WD-1` is unchanged in substance and narrowed in target:**
+`configs/runtime_profiles.yaml` still has one row
+(`nvidia_geforce_rtx_5090/single`), so the watchdog remains disabled on every
+H100 path. The row now required is **H100 single-resident**, not
+`dual_coresident`. `ExecutionRegime` already types `single` first-class, so no
+vocabulary extension is needed.
+
+
+---
+
+### 21.11 Shared host + fixed wall-clock ceilings — **GOLD RUNTIME / RESOURCE-SELECTION RISK**
+
+> **RECLASSIFIED 2026-08-26.** First recorded as a treatment-axis confound
+> (`F-CONFOUND-2`). Under the Gold-only ruling it is **not presently a
+> Gold-vs-Blind confound**, because there is no Blind to be biased against. The
+> **measurement stands and the mechanism stands** — only the claim about what it
+> biases changes.
+
+**Measured.** Gold host baseline with **all four GPUs at 0 % and nothing of ours
+running**: loadavg **66.88 / 51.09 / 51.60 on 224 cores**, having read
+**60.17 / 59.00 / 56.23** minutes earlier. **~23–30 % of the host is consumed by
+other tenants, and it MOVES between readings.** testpod's exp1 baseline was ~50
+on 208 ≈ 24 % — the same order.
+
+**Time-variance is the property that matters**, and it is now **measured, not
+assumed**.
+
+**The mechanism, unchanged.** Ceilings are wall-clock and fixed; neighbour load
+is uncontrolled and varies; `D-FAIL-4` classifies a ceiling breach as
+**SCIENTIFIC / RESOURCE_INFEASIBLE**, which **consumes a scientific attempt**.
+Therefore **host load can affect which Gold candidates survive.**
+
+**The amplification argument survives — as a WITHIN-GOLD selection effect**,
+which is arguably the more directly actionable framing. Candidates pushed toward
+the ceiling by the advice and the 60 GB budget sit closest to breach, so **a busy
+neighbour preferentially removes exactly the large candidates the treatment
+exists to encourage.** That distorts *which science Gold gets to do*, whether or
+not a second arm ever exists.
+
+Illustrative only:
+
+| ceiling | host at 1.0× | at 1.2× | at 1.5× |
+|---|---|---|---|
+| trial 30 min | fits ≤ 30 solo-min | ≤ 25 | ≤ 20 |
+| formal 120 min | ≤ 120 solo-min | ≤ 100 | ≤ 80 |
+
+**Required response — provenance, not a policy change.** Record **concurrent
+host baseline load per attempt**, so that `A-HOST-1` can separate our four-band
+contention from a neighbour's, and so a resource-infeasible attempt can later be
+attributed to a large candidate rather than a busy host. **Without that record
+those two causes are indistinguishable after the fact.**
+
+**Reactivates as a treatment-axis concern** if Blind is executed — at which
+point the arms' differing host conditions become a between-arm confound as
+originally written.
+
+**Open hypothesis, not a claim.** Two hosts' baselines are the same order, so
+**neighbour load is a live candidate for part of the unexplained 2.389×**.
+`A-HOST-1` can now rule it in or out.
 
 ## 20. Decision history
 
