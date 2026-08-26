@@ -176,6 +176,40 @@ def _isolate_calibration_registry(tmp_path_factory):
             os.environ["SIDERIUS_CALIBRATION_DIR"] = previous
 
 
+@pytest.fixture(autouse=True, scope="session")
+def _isolate_generated_library(tmp_path_factory):
+    """No test may touch the operator's real generated-capability library.
+
+    arXiv P1: with no override, ``core.generated_library`` resolves to
+    ``$HOME/.siderius/generated_library`` — and production constructs paths
+    that way (capability-index default, promotion writers, preloads, the
+    loss-union scan). So ANY test that drives the workflow or the loaders —
+    not only the generated-library tests — would otherwise read whatever the
+    operator's real library has accumulated (nondeterministic absorption)
+    and could write promotions into it (the durable-state analogue of the
+    checkout pollution P1 removes).
+
+    Same failure class and same shape as ``_isolate_calibration_registry``
+    directly above: session-scoped and autouse so the protection does not
+    depend on each future test remembering it.
+
+    TESTING DEFAULT PATH RESOLUTION. This fixture pins the override, so a
+    test of the un-overridden rule must delete the variable itself (see
+    ``tests/unit/core/test_generated_library.py``). Every other test either
+    writes into this temporary root or pins its own.
+    """
+    root = tmp_path_factory.mktemp("generated_library_isolation")
+    previous = os.environ.get("SIDERIUS_GENERATED_LIBRARY_DIR")
+    os.environ["SIDERIUS_GENERATED_LIBRARY_DIR"] = str(root)
+    try:
+        yield root
+    finally:
+        if previous is None:
+            os.environ.pop("SIDERIUS_GENERATED_LIBRARY_DIR", None)
+        else:
+            os.environ["SIDERIUS_GENERATED_LIBRARY_DIR"] = previous
+
+
 @pytest.fixture
 def synthetic_h5(tmp_path):
     """

@@ -280,6 +280,12 @@ resolve_start_iter() {
         exit 1
     fi
     echo "Start: auto-resume — inspector computed START_ITER=$START_ITER"
+    # #258 refinement: ONLY this branch is auto-resume recovery intent —
+    # build_app_args forwards --auto_resume when this is 1, so the launcher
+    # may replace a failed/no_records manifest at the resumed iteration
+    # (with provenance). Manual --start_iter pins and --no_auto_resume
+    # never set it.
+    AUTO_RESUME_RECOVERY=1
 }
 
 check_idempotency() {

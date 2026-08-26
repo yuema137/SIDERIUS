@@ -76,7 +76,17 @@ def _isolated_run_scope():
 
 
 def _preflight_args(workspace: str) -> argparse.Namespace:
-    """The argparse surface ``compute_expected_invariants`` actually reads."""
+    """The argparse surface ``compute_expected_invariants`` actually reads.
+
+    arXiv U1 (integration): ``resolve_launch_identity`` now reads the four
+    launch-identity attributes off the parsed CLI, STRICTLY — a missing
+    attribute is a wiring bug, not a default. This hand-built Namespace
+    therefore mirrors the real parser's defaults for them (`--experiment_arm`
+    None · lit-review tri-state None · shipped config path ·
+    `--baseline_isolation` False), exactly as the parser registers them in
+    ``run_one_iteration.py``. Upgraded, never production-loosened — the
+    09a precedent.
+    """
     return argparse.Namespace(
         data_scope=None,
         health_gate_enabled=False,
@@ -88,6 +98,11 @@ def _preflight_args(workspace: str) -> argparse.Namespace:
         enable_structured_health_feedback=False,
         health_feedback_history_window_iterations=3,
         health_feedback_history_max_entries_per_model=8,
+        # arXiv U1/U3 launch-identity surface (parser defaults, verbatim).
+        experiment_arm=None,
+        ml_lit_review_enabled=None,
+        ml_lit_review_config="configs/lit_review_config.yaml",
+        baseline_isolation=False,
     )
 
 

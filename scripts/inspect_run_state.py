@@ -20,12 +20,19 @@ non-COMMITTED iteration on stdout (1 if no committed iters,
 ``run_chain.sh --auto_resume``. Errors and warnings still go to stderr;
 non-zero exit on legacy-layout detection or non-contiguous iters.
 
-The {COMMITTED, PARTIAL, CORRUPT, MISSING} predicate must agree with
-``core.resume._read_manifest`` + ``_validate_run_output`` — that is the
-contract auto-resume relies on. Both call sites encode the same rule:
-manifest.json exists, parses, ``status == "completed"``, ``output_path``
-points at a file, and that file validates against
-``HyperparamTuningOutput``.
+The {COMMITTED, PARTIAL, CORRUPT, TAMPERED, MISSING} predicate must agree
+with ``core.resume._read_manifest`` + replay integrity +
+``_validate_run_output`` — that is the contract auto-resume relies on. Both
+call sites encode the same rule: manifest.json exists, parses, ``status ==
+"completed"``, ``output_path`` points at a file, the manifest and artifact
+pass ``core.iteration_manifest.verify_iteration_manifest`` (the SAME
+predicate resume raises ``ReplayIntegrityError`` from), and that file
+validates against ``HyperparamTuningOutput``.
+
+``TAMPERED`` (S2 / U5) is what resume would STOP on: an edited manifest, a
+removed artifact hash, or a changed artifact. It is never advanced past —
+``--next-iter`` refuses with a non-zero exit, because relaunching would
+fail at ``restore_prior_state`` anyway, after the job was queued.
 
 Usage (legacy run layout):
     .venv/bin/python scripts/inspect_run_state.py \\
@@ -57,6 +64,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from core.iteration_manifest import verify_iteration_manifest
 from core.resume import ResumeError, validate_workspace_layout
 
 _RUN_ITER_RE = re.compile(r"^iteration_(\d+)$")
@@ -274,6 +282,23 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
     status = manifest.get("status")
     model_name = manifest.get("model_name")
     if status != "completed":
+        # S2 / U5 — a non-completed manifest names no artifact, but its own
+        # self-digest is still verified, exactly as resume does before it
+        # skips a no_records iter.
+        verdict = verify_iteration_manifest(
+            manifest, iter_idx=iter_idx, manifest_path=str(manifest_path), output_path=None
+        )
+        if verdict.problem is not None:
+            return IterationReport(
+                iter_idx,
+                iter_dir,
+                None,
+                None,
+                status="TAMPERED",
+                model_type=model_name,
+                best_score=None,
+                detail=f"REPLAY-INTEGRITY: {verdict.problem}",
+            )
         return IterationReport(
             iter_idx,
             iter_dir,
@@ -308,6 +333,27 @@ def inspect_chain_iteration(iter_dir: Path) -> IterationReport:
             model_type=model_name,
             best_score=None,
             detail=f"manifest output_path does not exist: {output_path}",
+        )
+
+    # S2 / U5 — replay integrity BEFORE the artifact is trusted, from the
+    # one predicate resume and per_file_best share. A manifest that resume
+    # would stop the chain on is never called COMMITTED here.
+    verdict = verify_iteration_manifest(
+        manifest,
+        iter_idx=iter_idx,
+        manifest_path=str(manifest_path),
+        output_path=str(output_path),
+    )
+    if verdict.problem is not None:
+        return IterationReport(
+            iter_idx,
+            iter_dir,
+            None,
+            output_path,
+            status="TAMPERED",
+            model_type=model_name,
+            best_score=None,
+            detail=f"REPLAY-INTEGRITY: {verdict.problem}",
         )
 
     parsed, err = _validate_run_output(output_path)
@@ -420,6 +466,15 @@ def compute_next_iter(
             f"compute_next_iter called with non-contiguous chain "
             f"(missing iter_{gap:03d}); refuse before this point."
         )
+    tampered = find_tampered_iters(reports)
+    if tampered:
+        # S2 / U5 — resume raises ReplayIntegrityError on ANY tampered prior
+        # iter, wherever it sits, so there is no index that could be
+        # launched next. Same contract as the gap: the caller refuses first.
+        raise ValueError(
+            f"compute_next_iter called with tampered iter(s) "
+            f"{', '.join(f'iter_{i:03d}' for i in tampered)}; refuse before this point."
+        )
     if not reports:
         return 1
     committed = [r for r in reports if r.status == "COMMITTED"]
@@ -432,6 +487,16 @@ def compute_next_iter(
     raise AssertionError(
         "unreachable: reports non-empty but no committed AND no non-committed entries"
     )
+
+
+def find_tampered_iters(reports: list[IterationReport]) -> list[int]:
+    """Iter indices whose manifest or artifact failed replay integrity.
+
+    Any such iter means ``restore_prior_state`` will raise
+    ``ReplayIntegrityError`` for every later launch; the operator must
+    restore the artifact or replace the iteration explicitly.
+    """
+    return sorted(r.iter_idx for r in reports if r.status == "TAMPERED")
 
 
 def find_dangling_broken_iters(
@@ -562,6 +627,24 @@ def _run_layout_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _print_tampered_refusal(
+    workspace: Path, reports: list[IterationReport], tampered: list[int]
+) -> None:
+    """stderr only — stdout must stay clean for the shell capture."""
+    names = ", ".join(f"iter_{i:03d}" for i in tampered)
+    print(
+        f"ERROR: replay integrity failed at {workspace} — {names}. "
+        f"restore_prior_state would raise ReplayIntegrityError for every later "
+        f"iteration; restore the original artifact(s) or replace the iteration "
+        f"explicitly (run_one_iteration.py --replace_iteration_manifest "
+        f"--replacement_reason '<why>') before resuming.",
+        file=sys.stderr,
+    )
+    for r in reports:
+        if r.status == "TAMPERED":
+            print(f"  iter_{r.iter_idx:03d}: {r.detail}", file=sys.stderr)
+
+
 def _run_layout_chain(args: argparse.Namespace) -> int:
     workspace: Path = args.workspace.resolve()
 
@@ -579,6 +662,7 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
     gap = find_iter_gap(reports)
 
     dangling = find_dangling_broken_iters(reports)
+    tampered = find_tampered_iters(reports)
 
     if args.next_iter:
         if gap is not None:
@@ -588,6 +672,9 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
                 f"resuming.",
                 file=sys.stderr,
             )
+            return 2
+        if tampered:
+            _print_tampered_refusal(workspace, reports, tampered)
             return 2
         if dangling:
             dangling_str = ", ".join(f"iter_{i:03d}" for i in dangling)
@@ -607,7 +694,7 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
 
     counts = {
         s: sum(1 for r in reports if r.status == s)
-        for s in ("COMMITTED", "PARTIAL", "CORRUPT", "MISSING")
+        for s in ("COMMITTED", "PARTIAL", "CORRUPT", "TAMPERED", "MISSING")
     }
     print(f"Summary: {len(reports)} iter(s) — " + ", ".join(f"{k}={v}" for k, v in counts.items()))
 
@@ -617,6 +704,9 @@ def _run_layout_chain(args: argparse.Namespace) -> int:
             f"Operator must inspect before resuming.",
             file=sys.stderr,
         )
+        return 2
+    if tampered:
+        _print_tampered_refusal(workspace, reports, tampered)
         return 2
 
     next_idx = compute_next_iter(reports, gap)

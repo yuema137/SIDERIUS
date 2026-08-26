@@ -358,7 +358,12 @@ class TestObservationOnly:
         # call may be spelled `_records._emit_record(...)` and the formatter
         # wraps its arguments. The anchor is the emission of the final record —
         # neither the module path in front of it nor the line breaks inside it.
-        emit_match = re.search(r"(?:_records\.)?_emit_record\(\s*sandbox,\s*final_record", src)
+        # Both emission spellings (arXiv structural-budget closure): the
+        # direct call, or the identity-threading helper the node's ONE
+        # emission idiom now uses.
+        emit_match = re.search(
+            r"(?:_records\.)?_emit(?:_attempt)?_record\(\s*sandbox,\s*final_record", src
+        )
         assert emit_match, "the final record is no longer emitted"
         emit_index = emit_match.start()
         preceding = src[max(0, emit_index - 400) : emit_index]

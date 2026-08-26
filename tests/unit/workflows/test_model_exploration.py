@@ -2069,13 +2069,27 @@ def _make_impl_output_with_loss_provenance(tmp_path, loss_name="promo_loss_a", a
 
 @pytest.fixture
 def l6c_global_losses_dir(tmp_path, monkeypatch):
-    """Redirect LOSSES_DIR to tmp_path/global_losses for promotion tests."""
+    """Pin the promotion DESTINATION — the resolved generated-library losses
+    dir (arXiv P1) — to a tmp root, and point the legacy checkout member
+    (``LOSSES_DIR``, read-only fallback) at a separate tmp dir so promotion
+    tests touch neither real location."""
     from agent_generated import _loss_loader
 
-    target = tmp_path / "global_losses"
-    target.mkdir()
-    monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(target))
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+    legacy = tmp_path / "legacy_losses"
+    legacy.mkdir()
+    monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(legacy))
+    target = tmp_path / "lib" / "losses"
+    target.mkdir(parents=True)
     return target
+
+
+@pytest.fixture
+def l6c_legacy_losses_dir(tmp_path):
+    """The legacy checkout losses dir the ``l6c_global_losses_dir`` fixture
+    pinned (same path — kept as its own fixture so tests that seed
+    pre-migration content name it explicitly)."""
+    return tmp_path / "legacy_losses"
 
 
 class TestL6cPromoteLossToGlobal:
@@ -2162,6 +2176,55 @@ class TestL6cPromoteLossToGlobal:
         assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
         # The existing-name file is untouched
         assert global_existing.read_text() == _L6C_PROMO_PLUGIN_SRC_A
+
+    def test_same_name_in_legacy_checkout_is_idempotent_skip(
+        self, tmp_path, l6c_global_losses_dir, l6c_legacy_losses_dir, capsys
+    ):
+        """arXiv P1 — first-writer-wins ACROSS library locations. A loss
+        promoted into the LEGACY checkout dir before the migration keeps its
+        bytes: re-promoting the same name skips the copy, and — decisively —
+        NOTHING is written into either location. Defect caught: promotion
+        re-copying a same-named loss into the resolved library (two
+        divergent copies of one declared loss_type in the scan union) or,
+        worse, overwriting the legacy checkout file (a repo-root write)."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        legacy_file = l6c_legacy_losses_dir / "promo_loss_a.py"
+        legacy_bytes = _L6C_PROMO_PLUGIN_SRC_A + "\n# pre-migration copy\n"
+        legacy_file.write_text(legacy_bytes)
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws)
+        _promote_loss_to_global(impl)
+
+        captured = capsys.readouterr()
+        assert "idempotent skip" in captured.out.lower()
+        assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
+        assert legacy_file.read_text() == legacy_bytes
+
+    def test_identical_content_in_legacy_checkout_dedups(
+        self, tmp_path, l6c_global_losses_dir, l6c_legacy_losses_dir, capsys
+    ):
+        """arXiv P1 — the SHA256 dedup scans the legacy checkout too. A
+        byte-identical loss already promoted there (under a different name)
+        must not be duplicated into the resolved library. Defect caught: the
+        dedup scanning only the resolved dir, so every pre-migration library
+        would be silently re-copied under new names on first post-migration
+        contact."""
+        from workflows.model_exploration import _promote_loss_to_global
+
+        (l6c_legacy_losses_dir / "promo_loss_b.py").write_text(_L6C_PROMO_PLUGIN_SRC_A)
+
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        impl = _make_impl_output_with_loss_provenance(ws, loss_name="promo_loss_a")
+        _promote_loss_to_global(impl)
+
+        captured = capsys.readouterr()
+        assert "identical content already exists" in captured.out.lower()
+        assert "promo_loss_b" in captured.out
+        assert not (l6c_global_losses_dir / "promo_loss_a.py").exists()
 
 
 # ---------------------------------------------------------------------------

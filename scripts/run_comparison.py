@@ -49,7 +49,7 @@ from core.run_invariants import (
     validate_run_invariants,
     validate_stamped_invariants,
 )
-from core.sandbox_executor import TidmadSandbox
+from core.sandbox_executor import LocalRecorder, TidmadSandbox, sandbox_records_dir
 from execute_tools.build_anchor_map import load_anchor_map
 from execute_tools.data_paths import (
     SIDERIUS_DATA_DIR,
@@ -578,26 +578,40 @@ def run_baseline_trial(
 
 def seed_agent_memory(baseline_record: dict, agent_workspace: str, agent_run_name: str):
     """
-    Writes the baseline record into the agent's summary_{run_name}.json so that
-    on round 1 the agent immediately sees the benchmark it must beat.
+    Writes the baseline record into the agent's memory so that on round 1 the
+    agent immediately sees the benchmark it must beat.
+
+    S2 / U5: routed through the SAME ``LocalRecorder`` the tuner opens on
+    this workspace (``TidmadSandbox(workspace=agent_workspace,
+    run_name=agent_run_name)`` builds the identical paths), so the baseline
+    enters the canonical ``records/<run>/records.jsonl`` and the
+    ``summary_<run>.json`` view is its projection. Writing the summary
+    directly — as this function used to — put a record in the view that
+    was in no history: the tuner's first save would have rebuilt the view
+    from the log and the baseline would have vanished.
+
+    Ordering preserved: in every production launch the agent workspace is
+    fresh when seeded (``run_dir`` must be empty, ``--resume``, or
+    ``--override_old_run``), so the baseline is the FIRST canonical record
+    and therefore index 0 of the view — exactly where the old
+    ``existing.insert(0, ...)`` put it. Re-seeding an already-seeded
+    workspace is a no-op, as before. The one path that differs is a
+    ``--resume`` of a workspace that already holds agent rounds under a
+    DIFFERENT baseline id: the baseline is then appended (recorded in
+    history order) rather than inserted at index 0. No reader depends on
+    the index — the dashboard filters baseline records by ``exp_id``, and
+    the tuner's resume counters key on the run-name prefix.
     """
-    os.makedirs(agent_workspace, exist_ok=True)
-    summary_path = os.path.join(agent_workspace, f"summary_{agent_run_name}.json")
+    workspace = os.path.abspath(agent_workspace)
+    os.makedirs(workspace, exist_ok=True)
+    summary_path = os.path.join(workspace, f"summary_{agent_run_name}.json")
+    recorder = LocalRecorder(sandbox_records_dir(workspace), summary_path, agent_run_name)
 
-    # If the agent has already run some rounds, prepend baseline only if not present
-    existing = []
-    if os.path.exists(summary_path):
-        try:
-            with open(summary_path, encoding="utf-8") as f:
-                existing = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            existing = []
-
-    already_seeded = any(r.get("exp_id") == baseline_record.get("exp_id") for r in existing)
+    already_seeded = any(
+        r.get("exp_id") == baseline_record.get("exp_id") for r in recorder.get_summary()
+    )
     if not already_seeded:
-        existing.insert(0, baseline_record)
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(existing, f, indent=4, ensure_ascii=False)
+        recorder.save_record(baseline_record)
         print(f"\n  Agent memory seeded with baseline record → {summary_path}")
     else:
         print("\n  Agent memory already contains baseline record — skipping seed.")

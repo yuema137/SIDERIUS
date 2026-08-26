@@ -30,15 +30,18 @@ Storage layout (run_name is consistent across all files):
   ├── workflow_{run_name}.json
   ├── iteration_001/
   │   ├── interpretation_{run_name}.json
-  │   ├── attempt_001/
+  │   ├── attempt_001_{model_name}/  (renamed from attempt_001 once proposed)
   │   │   ├── proposal_{run_name}.json
-  │   │   ├── implementor_{run_name}.json
-  │   │   ├── validation_{run_name}.json
-  │   │   ├── models/{model_name}.py
-  │   │   └── tests/test_{model_name}.py
+  │   │   ├── impl_001/              (one dir PER implement→validate attempt, S2 / U6)
+  │   │   │   ├── implementor_{run_name}.json
+  │   │   │   ├── validation_{run_name}.json
+  │   │   │   ├── models/{model_name}.py  (+ models/{model_name}/description.md)
+  │   │   │   ├── tests/test_{model_name}.py
+  │   │   │   └── losses/{loss_name}.py
+  │   │   └── impl_002/ ...          (a retry never overwrites impl_001)
   │   └── {model_name}/              (tuning output, named by proposed model)
   │       ├── run_output_{run_name}.json
-  │       ├── summary_{run_name}.json
+  │       ├── summary_{run_name}.json (derived view of records/{run_name}/records.jsonl)
   │       ├── run_config_{run_name}.json
   │       ├── cached_models/
   │       ├── configs/
@@ -58,6 +61,7 @@ Usage:
 
 import argparse
 import gc
+import hashlib
 import json
 import os
 import shutil
@@ -65,6 +69,7 @@ import time
 import warnings
 from collections.abc import Callable
 from contextlib import suppress
+from dataclasses import dataclass
 from typing import Any
 
 import psutil as _psutil
@@ -102,6 +107,7 @@ from core.hardware_context import get_or_create as get_or_create_hardware_contex
 # top-level imports again.
 from core.resume import RestoredState, union_key_findings
 from core.run_invariants import (
+    LockLaunchIdentity,
     build_run_invariants,
     ensure_run_invariants,
     validate_stamped_invariants,
@@ -116,6 +122,7 @@ from execute_tools.evaluation_metric import (
 )
 from execute_tools.health_checks._composition import HealthBindingState
 from execute_tools.health_checks.candidate_eligibility import resolve_run_scientific_gate_ids
+from execute_tools.impl_attempts import impl_attempt_dir
 from execute_tools.metric_order import MetricOrder
 from ml_models.plugin_loader import register_model_in_memory
 from nodes.ml_code_validator_agent import MLCodeValidatorAgent
@@ -366,6 +373,43 @@ def _make_storage(workspace: str, run_name: str) -> StorageConfig:
     )
 
 
+@dataclass(frozen=True)
+class ImplAttemptStorage:
+    """Where ONE implement→validate attempt persists (S2 / U6, #256).
+
+    Every field is derived from the nested ``impl_NNN`` directory the
+    ``execute_tools.impl_attempts`` authority names, so the implementor
+    record, the validation record and the three generated-source
+    directories of one retry can never overwrite another's.
+    """
+
+    impl_dir: str
+    storage: StorageConfig
+    plugin_dir: str
+    test_dir: str
+    loss_dir: str
+
+
+def impl_attempt_storage(attempt_dir: str, run_name: str, impl_attempt: int) -> ImplAttemptStorage:
+    """The typed persistence boundary for implementation attempt ``impl_attempt``.
+
+    Before U6 the loop reused the proposal attempt's storage and derived
+    ``models/`` / ``tests/`` / ``losses/`` from ``attempt_dir`` on every
+    retry, so a retry silently replaced the previous attempt's records and
+    sources. Extracted so the loop body only sequences; the layout is owned
+    here and read back by ``funnel_assembly`` / ``workflow_validation``
+    through the same authority.
+    """
+    impl_dir = impl_attempt_dir(attempt_dir, impl_attempt)
+    return ImplAttemptStorage(
+        impl_dir=impl_dir,
+        storage=_make_storage(impl_dir, run_name),
+        plugin_dir=os.path.join(impl_dir, "models"),
+        test_dir=os.path.join(impl_dir, "tests"),
+        loss_dir=os.path.join(impl_dir, "losses"),
+    )
+
+
 def _snapshot_task_config(run_dir: str) -> None:
     """Copy ``configs/task_config.yaml`` into ``run_dir`` as
     ``task_config_snapshot.yaml`` for replay provenance.
@@ -602,6 +646,49 @@ def merge_external_agent_outputs(
         "agent_cards": merged_cards,
         "mindset": last_mindset,
     }
+
+
+def resolve_lit_review_config_path(config_path: str) -> str:
+    """The ONE rule that turns a lit-review config path into a file to read.
+
+    Relative paths resolve against ``SIDERIUS_ROOT`` (the checkout), exactly
+    as the lit-review branch of ``run_workflow`` has always done; absolute
+    paths are taken as-is. Both the workflow's read and the chain runner's
+    ``enabled`` peek call this, so the lock's config pin can never describe
+    a file the run does not read.
+    """
+    if os.path.isabs(config_path):
+        return config_path
+    return os.path.join(SIDERIUS_ROOT, config_path)
+
+
+def lit_review_config_sha256(config_path: str, *, enabled: bool) -> str | None:
+    """sha256 of the resolved lit-review YAML bytes, or ``None`` when disabled.
+
+    arXiv U1 (#253): the lock pins the lit-review CONFIG, not just the
+    topology flag — two runs whose literature-review node read different
+    root-paper lists are not comparable. Hashed at pre-flight from the same
+    resolved path the node later opens.
+
+    Raises:
+        ValueError: lit-review is enabled but the resolved config cannot be
+            read. Refused here, before any LLM call, instead of crashing
+            inside the iteration after the interpreter has already run.
+    """
+    if not enabled:
+        return None
+    resolved = resolve_lit_review_config_path(config_path)
+    try:
+        with open(resolved, "rb") as f:
+            payload = f.read()
+    except OSError as exc:
+        raise ValueError(
+            f"lit-review is enabled but its config {resolved!r} cannot be read "
+            f"({exc}). The run-invariants lock pins the config's sha256, so an "
+            "unreadable config is refused at pre-flight rather than after the "
+            "first LLM call."
+        ) from exc
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _build_lit_review_input(
@@ -968,6 +1055,55 @@ def resolve_run_proposal_blocks(task_composition: Any) -> Any:
     return task_composition.proposal_blocks
 
 
+class BaselineIsolationViolation(ValueError):
+    """A run under ``--baseline_isolation`` reached for a bundled baseline."""
+
+
+def refuse_builtin_proposal_under_isolation(
+    proposal: ProposalOutput, *, baseline_isolation: bool
+) -> None:
+    """arXiv U3 (#260, ruling R6): no bundled built-in candidate under isolation.
+
+    The WITHOUT arm must not train, tune or reuse a shipped baseline
+    architecture, whether the proposer named it as the candidate
+    (``model_name``) or pointed the model config at it as a reuse target
+    (``baseline_config.model_config.model_name``). Refused fail-closed and
+    NAMED here — before the attempt directory is renamed, before the
+    implementor runs and long before the tuner. The attempt loop's existing
+    generic handler converts the raise into ``previous_failures`` feedback
+    for the NEXT proposal attempt (the LLM is told exactly why), and an
+    iteration that never yields a compliant candidate ends with none: no
+    bundled architecture is ever implemented or tuned under isolation.
+
+    Keyed on the explicit isolation FLAG, never on the arm label (R2). The
+    bundled set is the loader's own authority
+    (``ml_models.model_descriptions.BUNDLED_MODEL_TYPES``), so the two
+    refusals cannot name different baselines. A non-isolated run is untouched.
+
+    Raises:
+        BaselineIsolationViolation: naming every bundled type the proposal
+            reached for.
+    """
+    if not baseline_isolation:
+        return
+    from ml_models.model_descriptions import BUNDLED_MODEL_TYPES, is_bundled_model_type
+
+    reached: set[str] = {proposal.model_name}
+    model_cfg = (proposal.baseline_config or {}).get("model_config") or {}
+    reuse_target = model_cfg.get("model_name") if isinstance(model_cfg, dict) else None
+    if isinstance(reuse_target, str):
+        reached.add(reuse_target)
+    offending = sorted(name for name in reached if is_bundled_model_type(name))
+    if offending:
+        raise BaselineIsolationViolation(
+            f"baseline_isolation is ON and the proposal reached for the bundled "
+            f"built-in model type(s) {offending} (proposal.model_name="
+            f"{proposal.model_name!r}). The WITHOUT arm excludes every shipped "
+            f"baseline {sorted(BUNDLED_MODEL_TYPES)}; propose a new architecture "
+            "or reuse an agent-generated plugin."
+        )
+
+
 def refuse_legacy_lit_review_on_composed_run(
     *,
     task_composition: Any,
@@ -1247,7 +1383,13 @@ def _register_plugin(
 
 
 def _promote_loss_to_global(impl_output) -> None:
-    """Promote a generated loss plugin to the global ``agent_generated/losses/``.
+    """Promote a generated loss plugin to the global loss library.
+
+    arXiv P1 — the destination is the resolved generated-library losses dir
+    (``core.generated_library.generated_losses_dir()``), NEVER the repository
+    checkout. The legacy checkout ``agent_generated/losses/`` is consulted
+    read-only for dedup / idempotency so pre-migration promotions are neither
+    duplicated nor overwritten.
 
     L6c — called after the iteration's tuner completes so the loss is
     accessible to:
@@ -1267,21 +1409,23 @@ def _promote_loss_to_global(impl_output) -> None:
     Rule 9 constraints.
 
     Content-hash deduplication: before copying, compares SHA256 of the
-    source against every ``.py`` already in ``agent_generated/losses/``.
-    On match, skips promotion and logs which existing entry is the
-    duplicate. Catches the case where two iterations generate plugins
-    with different ``loss_name``s but byte-identical contents (e.g. an
-    LLM regenerating the same canonical loss).
+    source against every ``.py`` already in EITHER library location
+    (resolved library, then legacy checkout). On match, skips promotion and
+    logs which existing entry is the duplicate. Catches the case where two
+    iterations generate plugins with different ``loss_name``s but
+    byte-identical contents (e.g. an LLM regenerating the same canonical
+    loss).
 
     Registry update: after promotion, the capability registry entry's
-    ``file_path`` is rewritten to the global path via
+    ``file_path`` is rewritten to the promoted path via
     ``CapabilityRegistry.replace()`` so subsequent Branch B reuse and
     cross-process resume resolve to the stable location.
 
-    Idempotency: if the destination file already exists at the exact name
-    (e.g. a parallel chain promoted first), promotion skips silently —
-    first writer wins, registry update still fires so this chain's index
-    entry points at the global path too.
+    Idempotency: if a file with the destination name already exists in
+    EITHER library location (e.g. a parallel chain promoted first, or a
+    pre-migration run promoted into the checkout), promotion skips silently
+    — first writer wins — and the registry update still fires, pointing this
+    chain's index entry at the file that actually exists.
 
     No-op when ``loss_provenance is None`` (built-in loss path) or
     ``action == "reused"`` (already promoted by the originating iteration).
@@ -1292,6 +1436,7 @@ def _promote_loss_to_global(impl_output) -> None:
 
     from agent_generated._loss_loader import LOSSES_DIR
     from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
+    from core.generated_library import generated_losses_dir
 
     src = loss_prov.loss_file_path
     if not src or not os.path.isfile(src):
@@ -1301,33 +1446,55 @@ def _promote_loss_to_global(impl_output) -> None:
         )
         return
 
-    os.makedirs(LOSSES_DIR, exist_ok=True)
-    global_dest = os.path.join(LOSSES_DIR, f"{loss_prov.loss_name}.py")
+    # arXiv P1 — the promotion DESTINATION is the resolved generated-library
+    # losses dir, never the repository checkout. The legacy checkout dir
+    # (``LOSSES_DIR``) participates READ-ONLY below — in the content dedup
+    # and the same-name idempotency check — so a loss promoted before the
+    # migration is neither duplicated nor clobbered, and is never written to.
+    library_losses_dir = generated_losses_dir()
+    dest_basename = f"{loss_prov.loss_name}.py"
+    global_dest = os.path.join(library_losses_dir, dest_basename)
 
-    # Content-hash dedup: scan existing global plugins for byte-identical
-    # content under a different name. Caches src hash to avoid re-reading.
+    # Content-hash dedup: scan BOTH library locations for byte-identical
+    # content under a different name. Same-basename entries are excluded —
+    # the idempotency branch below owns that case. Caches src hash to avoid
+    # re-reading.
     src_hash = _sha256_file(src)
-    for fname in os.listdir(LOSSES_DIR):
-        if not fname.endswith(".py") or fname.startswith("_"):
+    for scan_dir in (library_losses_dir, LOSSES_DIR):
+        if not os.path.isdir(scan_dir):
             continue
-        existing_path = os.path.join(LOSSES_DIR, fname)
-        if existing_path == global_dest:
-            continue  # same-name match handled by the idempotency check below
-        if _sha256_file(existing_path) == src_hash:
-            existing_name = fname[:-3]  # strip .py
-            print(
-                f"  Loss '{loss_prov.loss_name}' not promoted — identical "
-                f"content already exists as '{existing_name}' "
-                f"({global_dest} skipped)."
-            )
-            return
+        for fname in os.listdir(scan_dir):
+            if not fname.endswith(".py") or fname.startswith("_"):
+                continue
+            if fname == dest_basename:
+                continue  # same-name match handled by the idempotency check below
+            existing_path = os.path.join(scan_dir, fname)
+            if _sha256_file(existing_path) == src_hash:
+                existing_name = fname[:-3]  # strip .py
+                print(
+                    f"  Loss '{loss_prov.loss_name}' not promoted — identical "
+                    f"content already exists as '{existing_name}' "
+                    f"({global_dest} skipped)."
+                )
+                return
 
-    if os.path.exists(global_dest):
+    # Same-name idempotency — first writer wins ACROSS both library
+    # locations: a copy already promoted (a parallel chain into the resolved
+    # library, or a pre-migration run into the checkout) keeps its bytes, and
+    # the registry below is pointed at the file that actually exists.
+    legacy_same_name = os.path.join(LOSSES_DIR, dest_basename)
+    existing_same_name = next(
+        (path for path in (global_dest, legacy_same_name) if os.path.isfile(path)),
+        None,
+    )
+    if existing_same_name is not None:
         print(
             f"  Loss '{loss_prov.loss_name}' already at global path "
-            f"{global_dest} (idempotent skip)."
+            f"{existing_same_name} (idempotent skip)."
         )
+        global_dest = existing_same_name
     else:
+        os.makedirs(library_losses_dir, exist_ok=True)
         shutil.copy2(src, global_dest)
         print(f"  Promoted loss '{loss_prov.loss_name}' → {global_dest}")
 
@@ -1394,7 +1561,13 @@ def _sha256_file(path: str) -> str:
 
 
 def _promote_model_to_global(impl_output) -> None:
-    """Promote a generated model plugin to the global ``agent_generated/models/``.
+    """Promote a generated model plugin to the global model library.
+
+    arXiv P1 — the destination is the resolved generated-library models dir
+    (``core.generated_library.generated_models_dir()``), NEVER the repository
+    checkout. The legacy checkout ``agent_generated/models`` is consulted
+    read-only (Branch-B detection, dedup, idempotency) so pre-migration
+    promotions are neither duplicated nor overwritten.
 
     Mirrors :func:`_promote_loss_to_global` for the model surface. Called
     by the workflow's iteration loop right after ``_register_plugin``
@@ -1412,16 +1585,19 @@ def _promote_model_to_global(impl_output) -> None:
     already correct).
 
     Content-hash deduplication: before copying, compares SHA256 of the
-    source against every ``.py`` already in the global models dir. On
-    match, skips the copy and logs which existing entry is the duplicate.
+    source against every ``.py`` already in EITHER library location
+    (resolved library, then legacy checkout). On match, skips the copy and
+    logs which existing entry is the duplicate.
 
     Registry update: after promotion, the capability registry entry's
-    ``file_path`` is rewritten to the global path via
+    ``file_path`` is rewritten to the promoted path via
     ``CapabilityRegistry.replace()``.
 
-    Idempotency: if the destination file already exists at the exact name
-    (e.g. a parallel chain promoted first, or Branch B reuse), the copy
-    is skipped silently and the registry update is still re-asserted.
+    Idempotency: if a file with the destination name already exists in
+    EITHER library location (e.g. a parallel chain promoted first, Branch B
+    reuse, or a pre-migration run promoted into the checkout), the copy is
+    skipped silently and the registry update is still re-asserted against
+    the file that actually exists.
 
     No-op when ``impl_output.model_file_path`` is empty (defensive) or
     when the model name is not in the registry (e.g. a built-in Branch A
@@ -1432,56 +1608,89 @@ def _promote_model_to_global(impl_output) -> None:
         return  # Built-in / Branch B with no fresh codegen / defensive guard.
 
     from agent_generated._registry import CapabilityMetadata, CapabilityRegistry
-    from ml_models.plugin_loader import AGENT_GENERATED_DIR as MODELS_DIR
+    from core.generated_library import generated_models_dir
+    from ml_models.plugin_loader import AGENT_GENERATED_DIR as LEGACY_MODELS_DIR
 
     model_name = getattr(impl_output, "model_type", None)
     if not model_name:
         print("  Warning: cannot promote model — impl_output.model_type is empty")
         return
 
-    # Branch B reuse path: model_file_path already points at the global
-    # directory (the implementor's Branch B short-circuit returns the
-    # registry's file_path verbatim). Nothing to copy or update.
+    # arXiv P1 — the promotion DESTINATION is the resolved generated-library
+    # models dir, never the repository checkout. The legacy checkout dir
+    # participates READ-ONLY below (Branch-B detection, content dedup,
+    # same-name idempotency), so a model promoted before the migration is
+    # neither duplicated nor clobbered — and is never written to.
+    library_models_dir = generated_models_dir()
+
+    # Branch B reuse path: model_file_path already points into EITHER library
+    # location (the implementor's Branch B short-circuit returns the
+    # registry's file_path verbatim — which is a legacy checkout path for a
+    # pre-migration promotion). Nothing to copy or update.
     abs_src = os.path.abspath(model_file_path)
-    if os.path.dirname(abs_src) == os.path.abspath(MODELS_DIR):
+    if os.path.dirname(abs_src) in (
+        os.path.abspath(library_models_dir),
+        os.path.abspath(LEGACY_MODELS_DIR),
+    ):
         return
 
-    os.makedirs(MODELS_DIR, exist_ok=True)
-    global_dest = os.path.join(MODELS_DIR, f"{model_name}.py")
+    dest_basename = f"{model_name}.py"
+    global_dest = os.path.join(library_models_dir, dest_basename)
 
-    # Content-hash dedup: scan existing global plugins for byte-identical
-    # content under a different name. Caches src hash to avoid re-reading.
+    # Content-hash dedup: scan BOTH library locations for byte-identical
+    # content under a different name. Same-basename entries are excluded —
+    # the idempotency branch below owns that case. Caches src hash to avoid
+    # re-reading.
     src_hash = _sha256_file(abs_src)
-    for fname in os.listdir(MODELS_DIR):
-        if not fname.endswith(".py") or fname.startswith("_"):
+    for scan_dir in (library_models_dir, LEGACY_MODELS_DIR):
+        if not os.path.isdir(scan_dir):
             continue
-        existing_path = os.path.join(MODELS_DIR, fname)
-        if os.path.abspath(existing_path) == os.path.abspath(global_dest):
-            continue  # same-name handled by the idempotency branch below
-        if _sha256_file(existing_path) == src_hash:
-            existing_name = fname[:-3]
-            print(
-                f"  Model '{model_name}' not promoted — identical content "
-                f"already exists as '{existing_name}' "
-                f"({global_dest} skipped)."
-            )
-            return
+        for fname in os.listdir(scan_dir):
+            if not fname.endswith(".py") or fname.startswith("_"):
+                continue
+            if fname == dest_basename:
+                continue  # same-name handled by the idempotency branch below
+            existing_path = os.path.join(scan_dir, fname)
+            if _sha256_file(existing_path) == src_hash:
+                existing_name = fname[:-3]
+                print(
+                    f"  Model '{model_name}' not promoted — identical content "
+                    f"already exists as '{existing_name}' "
+                    f"({global_dest} skipped)."
+                )
+                return
 
-    if os.path.exists(global_dest):
-        print(f"  Model '{model_name}' already at global path {global_dest} (idempotent skip).")
+    # Same-name idempotency — first writer wins ACROSS both library
+    # locations (a parallel chain into the resolved library, or a
+    # pre-migration run into the checkout); the registry below is pointed at
+    # the file that actually exists.
+    legacy_same_name = os.path.join(LEGACY_MODELS_DIR, dest_basename)
+    existing_same_name = next(
+        (path for path in (global_dest, legacy_same_name) if os.path.isfile(path)),
+        None,
+    )
+    if existing_same_name is not None:
+        print(
+            f"  Model '{model_name}' already at global path {existing_same_name} (idempotent skip)."
+        )
+        global_dest = existing_same_name
     else:
+        os.makedirs(library_models_dir, exist_ok=True)
         shutil.copy2(abs_src, global_dest)
         print(f"  Promoted model '{model_name}' → {global_dest}")
 
     # Also copy the description.md subdir so the proposer's
     # ``{available_models_block}`` and downstream readers find it at the
-    # canonical layout (``agent_generated/models/{name}/description.md``).
+    # canonical layout (``{models_dir}/{name}/description.md``). Written
+    # ONLY under the resolved library (never the checkout); skipped when a
+    # description already exists in EITHER location — same first-writer
+    # rule as the plugin file.
     desc_path = getattr(impl_output, "description_file_path", "") or ""
     if desc_path and os.path.isfile(desc_path):
-        desc_dest_dir = os.path.join(MODELS_DIR, model_name)
-        os.makedirs(desc_dest_dir, exist_ok=True)
-        desc_dest = os.path.join(desc_dest_dir, "description.md")
-        if not os.path.exists(desc_dest):
+        desc_dest = os.path.join(library_models_dir, model_name, "description.md")
+        legacy_desc = os.path.join(LEGACY_MODELS_DIR, model_name, "description.md")
+        if not os.path.exists(desc_dest) and not os.path.exists(legacy_desc):
+            os.makedirs(os.path.dirname(desc_dest), exist_ok=True)
             shutil.copy2(desc_path, desc_dest)
             print(f"  Promoted model description → {desc_dest}")
 
@@ -1590,6 +1799,28 @@ def _refuse_data_scope_for_a_foreign_topology(scope_is_partial: bool, task_compo
             f"list cannot be reinterpreted for a task with a different "
             f"partition concept."
         ) from exc
+
+
+def _workflow_lock_identity(launch) -> LockLaunchIdentity:
+    """The workflow's arXiv-U1/U3 lock identity, from the launch config.
+
+    Pure construction, extracted from ``run_workflow`` under the 12a
+    structural budget (the SE.2 idiom). An unlabelled, lit-review-OFF launch
+    yields the defaults, so its lock is byte-identical (the keys are
+    omitted, never null); the config sha is derived from the SAME resolved
+    path the lit-review branch later opens, so the lock always pins the file
+    the run reads.
+    """
+    return LockLaunchIdentity(
+        lit_review_enabled=launch.lit_review_enabled,
+        lit_review_config_sha256=lit_review_config_sha256(
+            launch.lit_review_config_path, enabled=launch.lit_review_enabled
+        ),
+        experiment_arm=launch.experiment_arm,
+        # arXiv U3 — the WITHOUT arm's isolation flag is a prompt-surface
+        # identity, so it is locked like the topology.
+        baseline_isolation=launch.baseline_isolation,
+    )
 
 
 def run_workflow(
@@ -1806,10 +2037,18 @@ def run_workflow(
             f"{'y' if _n_pruned == 1 else 'ies'} (missing file_path): "
             f"{_pruned_names}"
         )
+    # arXiv P1 — name the resolved generated-capability library once at
+    # startup (log provenance; the run-invariants lock records the same
+    # value durably via build_run_invariants). Promotions write here;
+    # the legacy checkout agent_generated/ stays a read-only fallback.
+    from core.generated_library import resolve_generated_library
+
+    _lib = resolve_generated_library()
+    print(f"  Generated library: {_lib.root} (source: {_lib.source})")
     # L6c — preload promoted losses into the in-memory LOSS_REGISTRY so
     # cross-process Branch B reuse (chain resume after restart) resolves
-    # without depending on SIDERIUS_LOSS_DIRS. Safe to call when
-    # agent_generated/losses/ is empty (returns []). See
+    # without depending on SIDERIUS_LOSS_DIRS. Safe to call when the
+    # library losses dirs are empty (returns []). See
     # docs/design/enable_loss_inventory.md § L6c.
     from ml_models.loss_models_sandbox import preload_global_losses
     from ml_models.plugin_loader import preload_global_models
@@ -1983,6 +2222,11 @@ def run_workflow(
         task_composition_fingerprint=(
             task_composition.semantic_fingerprint if task_composition is not None else None
         ),
+        # arXiv U1 (#253 / #254) — workflow topology + experiment arm,
+        # built by the ONE module-level helper (the SE.2 extraction under the
+        # 12a budget); the config sha is derived from the same resolved path
+        # the lit-review branch below opens.
+        launch_identity=_workflow_lock_identity(launch),
     )
     for _output in tuning_outputs:
         validate_stamped_invariants(
@@ -1994,6 +2238,9 @@ def run_workflow(
                 "task_composition_fingerprint": getattr(
                     _output, "task_composition_fingerprint", None
                 ),
+                # arXiv U1 (#254) — a labelled run refuses a seed/restored
+                # output it cannot certify as belonging to its arm.
+                "experiment_arm": getattr(_output, "experiment_arm", None),
             },
             _run_invariants,
             full_scope=list(range(_run_partitions)),
@@ -2317,6 +2564,9 @@ def run_workflow(
             # DISTINCT runs) was unreachable in production.
             vocab_link_confirmations=dict(state.current_vocab_link_confirmations),
             cold_start=is_cold_start,
+            # arXiv U3 (#260) — under isolation the interpreter refuses a
+            # bundled built-in description, so none reaches its carried cache.
+            baseline_isolation=launch.baseline_isolation,
             human_advice=launch.human_advice_interpret,
             runtime_vocab=state.current_runtime_vocab,
             previous_proposal=state.previous_proposal_data,
@@ -2382,9 +2632,9 @@ def run_workflow(
         # pre-Commit-6.
         external_outputs: list[ExternalAgentOutput] = []
         if should_run_literature_review(interpretation, enabled=launch.lit_review_enabled):
-            yaml_path = launch.lit_review_config_path
-            if not os.path.isabs(yaml_path):
-                yaml_path = os.path.join(SIDERIUS_ROOT, yaml_path)
+            # arXiv U1 — the same resolver the pre-flight hashed through, so
+            # the lock's `lit_review_config_sha256` pins THIS file.
+            yaml_path = resolve_lit_review_config_path(launch.lit_review_config_path)
             print(f"  [{iteration}] Running lit-review (config: {yaml_path})...")
             with open(yaml_path, encoding="utf-8") as _f:
                 lit_review_config = yaml.safe_load(_f)
@@ -2538,6 +2788,9 @@ def run_workflow(
                     enable_structured_health_feedback=(bindings.enable_structured_health_feedback),
                 )
                 propose_input.existing_model_types = list(state.all_model_types)
+                # arXiv U3 (#260) — the proposer's prompt surface names no
+                # bundled baseline under isolation.
+                propose_input.baseline_isolation = launch.baseline_isolation
                 # Task config injection (T3) — same pattern as T2's implementor
                 # injection. The loader is cached per-process so this is a dict
                 # lookup after the first iter. See
@@ -2594,6 +2847,12 @@ def run_workflow(
                     candidate_source = "llm_proposal"
                     print(f"    Proposed: {proposal.model_name}")
                 _log_rss(f"post-proposal (iter {iteration} attempt {attempt})")
+                # arXiv U3 (#260) — a bundled built-in candidate is refused
+                # under isolation BEFORE implementation or tuning, by a named
+                # authority (a call, not a branch: the §12.1 tripwire).
+                refuse_builtin_proposal_under_isolation(
+                    proposal, baseline_isolation=launch.baseline_isolation
+                )
 
                 # Rename attempt dir to include model name
                 named_dir = os.path.join(iter_dir, f"attempt_{attempt:03d}_{proposal.model_name}")
@@ -2638,16 +2897,22 @@ def run_workflow(
                         else ""
                     )
                     print(f"  [{iteration}.{attempt}] Implementing{impl_suffix}...")
-                    impl_input = local_full_spec(proposal, attempt_storage)
-                    impl_input.plugin_dir = os.path.join(attempt_dir, "models")
-                    impl_input.test_dir = os.path.join(attempt_dir, "tests")
+                    # S2 / U6 (#256): each implement→validate attempt gets
+                    # its own nested `impl_NNN/` — records and generated
+                    # sources of a retry never overwrite the previous one.
+                    impl_storage = impl_attempt_storage(
+                        attempt_dir, bindings.run_name, impl_attempt
+                    )
+                    impl_input = local_full_spec(proposal, impl_storage.storage)
+                    impl_input.plugin_dir = impl_storage.plugin_dir
+                    impl_input.test_dir = impl_storage.test_dir
                     # L4b — loss-plugin staging directory. Mirrors plugin_dir
                     # for run-scoped isolation. Concurrent iterations write
                     # to disjoint dirs so no clobbering occurs. The sandbox
                     # executor adds this to SIDERIUS_LOSS_DIRS at training
                     # time so load_loss_plugin can find the freshly-written
                     # plugin. See docs/design/enable_loss_inventory.md § L4.
-                    impl_input.loss_dir = os.path.join(attempt_dir, "losses")
+                    impl_input.loss_dir = impl_storage.loss_dir
                     # Task config injection (T2) — load + thread into the
                     # implementor input. The loader is cached per-process so
                     # this is a dict lookup after the first iter. See
@@ -2687,7 +2952,7 @@ def run_workflow(
                     print(f"  [{iteration}.{attempt}] Validating...")
                     valid_input = local_all_fields(
                         impl_output,
-                        attempt_storage,
+                        impl_storage.storage,
                         llm_provider=valid_llm.get("provider", "gemini"),
                         llm_model_id=valid_llm.get("model_id", "gemini-3.1-flash-lite-preview"),
                     )
@@ -2932,6 +3197,15 @@ def run_workflow(
             health_feedback_history_max_entries_per_model=(
                 launch.health_feedback_history_max_entries_per_model
             ),
+            # arXiv U1 (#253 / #254) — read from the ONE lock object this
+            # pre-flight built (never re-derived here), so the tuner's
+            # per-model lock and the chain lock cannot disagree — the
+            # F-11-C10-a lesson: two derivations of one identity are two
+            # chances to diverge.
+            experiment_arm=_run_invariants.experiment_arm,
+            lit_review_enabled=_run_invariants.lit_review_enabled,
+            lit_review_config_sha256=_run_invariants.lit_review_config_sha256,
+            baseline_isolation=_run_invariants.baseline_isolation,
         )
         if launch.human_advice_tune is not None:
             tune_input.human_advice = launch.human_advice_tune

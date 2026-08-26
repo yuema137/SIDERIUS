@@ -1,0 +1,27 @@
+{
+  "_comment": "Identity of the GENERATED quickstart dataset. No data files are committed; the seeded generator (plugins/_quickstart_task.py) regenerates them bit-identically and the materializer verifies these pins before writing a run bundle.",
+  "seed": 20260824,
+  "shards": 4,
+  "rows_per_shard": 64,
+  "feature_dim": 4,
+  "class_count": 2,
+  "label_flip_fraction": 0.03,
+  "csv_format": "header sample_id,x0,x1,x2,x3,label; floats rendered %.8f; LF line endings",
+  "roles": {
+    "train_shards": [0, 1],
+    "validation_shard": 2,
+    "final_eval_shard": 3
+  },
+  "class_counts_per_shard": {
+    "0": {"0": 35, "1": 29},
+    "1": {"0": 35, "1": 29},
+    "2": {"0": 37, "1": 27},
+    "3": {"0": 25, "1": 39}
+  },
+  "sha256": {
+    "shard_0000.csv": "bbba6d2ab2407d1c0495e04d36f880dd36500d2dd0d76d5c0a51514420743ac4",
+    "shard_0001.csv": "d0045de051ebaa4173fb2543b86b3a3a24786f85196e62f1c79b1cba6076eceb",
+    "shard_0002.csv": "9012854b2ffcaea693fd7d4a90cdb10d19d0bd55258d63f6e84021bbc5e1d144",
+    "shard_0003.csv": "6a21696e665c7fdb8fa8edea5dc4be66bd9a9c05b26b205aa4e67f5769a98789"
+  }
+}

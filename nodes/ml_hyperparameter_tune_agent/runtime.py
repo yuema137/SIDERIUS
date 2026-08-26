@@ -130,6 +130,7 @@ def _handle_admission_refusal(
     round_index: int,
     attempt_in_round: int,
     candidate_id: str | None = None,
+    experiment_arm: str | None = None,
 ) -> bool:
     """Record a phase the environment refused to start (B-C4c).
 
@@ -163,7 +164,7 @@ def _handle_admission_refusal(
         attempt_in_round=attempt_in_round,
         admission_evidence=admission,
     )
-    _records._emit_record(sandbox, record, candidate_id=candidate_id)
+    _records._emit_record(sandbox, record, candidate_id=candidate_id, experiment_arm=experiment_arm)
     print(
         f"  Saved admission refusal ({phase}): {record['status']} "
         f"[{record['memory']['reason_code']}]"
@@ -413,7 +414,12 @@ def _handle_prephase_gpu_measurement(
             "request_id": request_id,
         },
     )
-    _records._emit_record(sandbox, record, candidate_id=agent_input.candidate_id)
+    _records._emit_record(
+        sandbox,
+        record,
+        candidate_id=agent_input.candidate_id,
+        experiment_arm=agent_input.experiment_arm,
+    )
     _reason = _PREPHASE_REASON_CODE.get(outcome.disposition, "measurement_unavailable")
     if _reason == "insufficient_headroom":
         print(f"  Pre-phase GPU measurement stopped the attempt: {outcome.disposition}")
@@ -1360,7 +1366,12 @@ def _check_and_record_guardrail_skip(
         n_steps=n_steps,
         agent_input=agent_input,
     )
-    _records._emit_record(sandbox, record, candidate_id=agent_input.candidate_id)
+    _records._emit_record(
+        sandbox,
+        record,
+        candidate_id=agent_input.candidate_id,
+        experiment_arm=agent_input.experiment_arm,
+    )
     return True
 
 
@@ -1379,6 +1390,7 @@ def _handle_in_subprocess_rejection(
     round_index: int,
     attempt_in_round: int,
     candidate_id: str | None = None,
+    experiment_arm: str | None = None,
 ) -> bool:
     """RT2-G: a clean in-subprocess rejection — real setup was paid, so
     it CONSUMES an attempt (unlike the free pre-flight screen). Saves
@@ -1400,7 +1412,9 @@ def _handle_in_subprocess_rejection(
         rv_block=rv_block,
         fallback_message=train_status.get("message", "runtime verification rejected the attempt"),
     )
-    _records._emit_record(sandbox, reject_record, candidate_id=candidate_id)
+    _records._emit_record(
+        sandbox, reject_record, candidate_id=candidate_id, experiment_arm=experiment_arm
+    )
     _append_runtime_observation(sandbox, run_name, rv_block)
     return True
 

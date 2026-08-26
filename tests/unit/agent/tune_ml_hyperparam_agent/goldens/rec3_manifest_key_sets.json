@@ -1,7 +1,8 @@
 {
   "_captured_at": {
     "commit": "e9c9e91e3d53181b5e36429174438e4eca06d2a1",
-    "note": "captured at clean tree (Step-00 0C capture); design \u00a717 rule 4"
+    "note": "captured at clean tree (Step-00 0C capture); design \u00a717 rule 4",
+    "updated": "arXiv-readiness S2 / U5 (#258): every branch gains the manifest_sha256 self-digest stamped by core.iteration_manifest.publish_iteration_manifest; deliberate golden update, no other key moved"
   },
   "completed": {
     "status": "completed",
@@ -22,6 +23,7 @@
       "health_gate_enabled",
       "healthgate_mode",
       "iteration_dir",
+      "manifest_sha256",
       "model_name",
       "ordering_by_experiment",
       "output_path",
@@ -43,6 +45,7 @@
       "health_feedback_policy",
       "healthgate_mode",
       "iteration_dir",
+      "manifest_sha256",
       "model_name",
       "output_path",
       "preflight_execution_mode",
@@ -58,6 +61,7 @@
       "health_feedback_policy",
       "healthgate_mode",
       "iteration_dir",
+      "manifest_sha256",
       "model_name",
       "output_path",
       "preflight_execution_mode",

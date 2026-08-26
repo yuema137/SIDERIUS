@@ -479,3 +479,111 @@ def test_chain_invalid_arg_combinations_rejected(tmp_path: Path) -> None:
         _run_main(["--layout", "run"])
     with pytest.raises(SystemExit):
         _run_main(["--layout", "chain"])
+
+
+# ---------------------------------------------------------------------------
+# S2 / U5 (#258) — the COMMITTED predicate applies replay integrity, like resume
+# ---------------------------------------------------------------------------
+
+
+def _write_hashed_chain_iter(workspace: Path, iter_idx: int, *, best_score: float = -1.0) -> Path:
+    """Like ``_write_clean_chain_iter`` but committed the way the chain
+    runner commits since S2: ``run_output_sha256`` recorded and the
+    manifest PUBLISHED through the production authority (self-digest)."""
+    from core.iteration_manifest import publish_iteration_manifest, sha256_file
+
+    run_name = f"iter_{iter_idx:03d}"
+    iter_dir = workspace / run_name
+    sub = iter_dir / "iteration_001" / "wavenet"
+    sub.mkdir(parents=True)
+    output_path = sub / f"run_output_{run_name}.json"
+    output_path.write_text(
+        json.dumps(
+            _minimal_run_output(run_name=run_name, model_type="wavenet", best_score=best_score)
+        )
+    )
+    publish_iteration_manifest(
+        str(iter_dir),
+        {
+            "status": "completed",
+            "iteration_dir": str(iter_dir),
+            "output_path": str(output_path),
+            "model_name": "wavenet",
+            "best_score": best_score,
+            "completed_rounds": 1,
+            "run_output_sha256": sha256_file(str(output_path)),
+        },
+    )
+    return iter_dir
+
+
+def test_production_published_iters_are_committed(tmp_path: Path) -> None:
+    """Anti-vacuity for the refusals below."""
+    _write_hashed_chain_iter(tmp_path, 1)
+    _write_hashed_chain_iter(tmp_path, 2)
+    rc, stdout, stderr = _run_main(
+        ["--layout", "chain", "--workspace", str(tmp_path), "--next-iter"]
+    )
+    assert (rc, stdout.strip(), stderr) == (0, "3", "")
+
+
+def test_a_changed_artifact_is_tampered_and_next_iter_refuses(tmp_path: Path) -> None:
+    """Before S2 the inspector never hashed the artifact: a tampered iter was
+    COMMITTED and ``compute_next_iter`` advanced past it, so auto-resume
+    queued a job that ``restore_prior_state`` then killed. Fails if stdout
+    carries an integer or the exit is zero."""
+    iter1 = _write_hashed_chain_iter(tmp_path, 1)
+    _write_hashed_chain_iter(tmp_path, 2)
+    output = iter1 / "iteration_001" / "wavenet" / "run_output_iter_001.json"
+    output.write_text(output.read_text() + "\n")
+
+    report = ins.inspect_chain_iteration(iter1)
+    assert report.status == "TAMPERED"
+    assert "committed artifact changed" in report.detail
+
+    rc, stdout, stderr = _run_main(
+        ["--layout", "chain", "--workspace", str(tmp_path), "--next-iter"]
+    )
+    assert rc != 0
+    assert stdout == ""
+    assert "iter_001" in stderr and "replay integrity" in stderr
+    assert "--replace_iteration_manifest" in stderr
+
+
+def test_an_edited_manifest_field_is_tampered_even_with_an_intact_artifact(tmp_path: Path) -> None:
+    iter1 = _write_hashed_chain_iter(tmp_path, 1)
+    manifest_path = iter1 / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["best_score"] = 42.0
+    manifest_path.write_text(json.dumps(manifest))
+    report = ins.inspect_chain_iteration(iter1)
+    assert report.status == "TAMPERED"
+    assert "manifest changed after publication" in report.detail
+
+
+def test_human_view_shows_tampered_and_refuses(tmp_path: Path) -> None:
+    iter1 = _write_hashed_chain_iter(tmp_path, 1)
+    output = iter1 / "iteration_001" / "wavenet" / "run_output_iter_001.json"
+    output.write_text(output.read_text() + "\n")
+    rc, stdout, stderr = _run_main(["--layout", "chain", "--workspace", str(tmp_path)])
+    assert rc != 0
+    assert "TAMPERED" in stdout
+    assert "TAMPERED=1" in stdout
+    assert "iter_001" in stderr
+
+
+def test_compute_next_iter_refuses_tampered_reports() -> None:
+    """The unit-level contract auto-resume's shell relies on: a tampered
+    report is a refusal, never an index."""
+    tampered = ins.IterationReport(
+        1,
+        Path("iter_001"),
+        None,
+        None,
+        status="TAMPERED",
+        model_type=None,
+        best_score=None,
+        detail="x",
+    )
+    with pytest.raises(ValueError, match="tampered"):
+        ins.compute_next_iter([tampered], gap=None)

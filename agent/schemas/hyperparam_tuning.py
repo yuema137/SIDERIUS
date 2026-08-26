@@ -564,6 +564,20 @@ class ExperimentRecord(BaseModel):
             "certify as its own (Step 11 C8 / R-11-9, F-11-6)."
         ),
     )
+    experiment_arm: str | None = Field(
+        default=None,
+        description=(
+            "arXiv U1 (#254) — the OPAQUE experiment-arm label of the run "
+            "that produced this record, the same value the run-invariants "
+            "lock pins; None for an unlabelled run and for every record "
+            "written before U1. Stamped at the single validate-and-persist "
+            "seam ONLY when the run is labelled, so an unlabelled run's "
+            "on-disk record carries no key (byte-identical to pre-U1). "
+            "Checked at ingress under the same three-case rule as the "
+            "composition fingerprint: a labelled run refuses an unstamped "
+            "record. Never read to decide behaviour (ruling R2)."
+        ),
+    )
     resolved_data_scope: list[int] | None = Field(
         default=None,
         description=(
@@ -1785,6 +1799,45 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    # --- arXiv U1 (#253 / #254) — run-identity PASS-THROUGH. Same contract
+    #     as the V19 PR 3 block above: the tuner locks these into its
+    #     per-model run-invariants lock and stamps them onto its records /
+    #     output; it never CONSUMES them. `experiment_arm` is opaque (R2).
+    experiment_arm: str | None = Field(
+        default=None,
+        description=(
+            "arXiv U1 pass-through: the opaque experiment-arm label of the "
+            "chain this tuner invocation belongs to, or None (unlabelled). "
+            "Locked + stamped only — no tuner behaviour keys on it (R2)."
+        ),
+    )
+    lit_review_enabled: bool = Field(
+        default=False,
+        description=(
+            "arXiv U1 pass-through: whether the literature-review node is "
+            "part of the chain's workflow topology. Locked only; the tuner "
+            "has no lit-review behaviour of its own."
+        ),
+    )
+    lit_review_config_sha256: str | None = Field(
+        default=None,
+        description=(
+            "arXiv U1 pass-through: sha256 of the resolved lit-review YAML "
+            "when enabled, else None. Locked only; the tuner never reads the "
+            "config. The lock refuses enabled-without-sha at construction."
+        ),
+    )
+    baseline_isolation: bool = Field(
+        default=False,
+        description=(
+            "arXiv U3 (#260) — the WITHOUT arm's explicit isolation flag. "
+            "Locked into the per-model run-invariants lock and forwarded to "
+            "the model-description loader, which then refuses a BUNDLED "
+            "built-in description; the tuner has no other behaviour under it "
+            "(a built-in candidate is refused before it reaches the tuner)."
+        ),
+    )
+
     degenerate_penalty_score: float | None = Field(
         default=None,
         description=(
@@ -2959,6 +3012,17 @@ class HyperparamTuningOutput(BaseModel):
             "produced under a different task, so a composed run must refuse "
             "an unstamped record. Additive and defaulted, so a legacy output "
             "still validates and an un-composed run's outputs are unchanged."
+        ),
+    )
+    experiment_arm: str | None = Field(
+        default=None,
+        description=(
+            "arXiv U1 (#254) — the OPAQUE experiment-arm label this run was "
+            "launched under, echoed from the input on BOTH the healthy and "
+            "the degraded exit path (the candidate_id precedent), so a later "
+            "resume can certify that the output it restores belongs to its "
+            "arm. None for an unlabelled run and for every pre-U1 output. "
+            "Never read to decide behaviour (ruling R2)."
         ),
     )
     formal_reference_score: float | None = Field(

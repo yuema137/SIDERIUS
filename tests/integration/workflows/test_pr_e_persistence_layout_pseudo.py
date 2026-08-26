@@ -12,10 +12,13 @@ before E2 changes anything:
    or overwrite one;
 3. discovery by the ``attempt_*`` prefix needs no model name (P6.2:
    a name-dependent discovery would inherit name-keyed fragility);
-4. the inner implement→validate retry loop overwrites *within* one
-   attempt directory — the known limitation, pinned as tested fact
-   rather than assumption (under O-E-4 those retries are the same
-   candidate, so only the terminal outcome matters to the funnel).
+4. each node writes into whatever storage it is handed — the same storage
+   twice is the same file. Until S2 / U6 (#256) the workflow handed every
+   implement→validate retry the SAME storage, so retries overwrote each
+   other (the PR-E "known limitation"). The workflow now hands each retry
+   its own nested ``impl_KKK/`` storage; that inverted pin lives in
+   ``tests/unit/workflows/test_u6_impl_attempt_layout.py`` (CI), and the
+   funnel reads the terminal attempt.
 
 No LLM, no GPU, no production diff. Node LLM bridges are mocked at the
 bridge boundary so the REAL ``run()`` bodies — including their persistence
@@ -138,12 +141,16 @@ class TestNodePersistence:
         assert path.is_file(), "validator no longer persists validation_{run_name}.json"
         assert json.loads(path.read_text())["passed"] == out.passed
 
-    def test_inner_retry_overwrites_within_one_attempt_dir(self, tmp_path):
-        """The known limitation, pinned: same storage → same file, one file.
+    def test_the_node_writes_into_whatever_storage_it_is_handed(self, tmp_path):
+        """The NODE contract: same storage → same file, one file.
 
-        Under O-E-4 an implement retry is the SAME candidate, so the
-        terminal outcome is what survives — and E4 must not infer retry
-        counts from artifacts that were overwritten.
+        This is what makes per-retry storage sufficient: the node itself
+        does not version its output, so distinct retries survive only when
+        the WORKFLOW hands each one a distinct storage — which it does since
+        S2 / U6 (#256, ``impl_attempt_storage``; inverted pin in
+        ``tests/unit/workflows/test_u6_impl_attempt_layout.py``). Under
+        O-E-4 an implement retry is the SAME candidate, so the funnel still
+        reports the terminal outcome.
         """
         for name in ("first_try", "second_try"):
             agent = MLModelImplementor.__new__(MLModelImplementor)

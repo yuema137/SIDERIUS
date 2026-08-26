@@ -59,6 +59,26 @@ def test_global_loss_is_advertised_and_valid_for_branch_b(tmp_path, monkeypatch)
     assert "### `ordinal_transition_uncertainty_loss`" in render_available_losses(registry)
 
 
+def test_resolved_library_loss_is_advertised_and_valid_for_branch_b(tmp_path, monkeypatch):
+    """arXiv P1 — promotions land in the resolved generated-library losses
+    dir now, and training subprocesses scan it (union member 2). Defect
+    caught: ``live_loss_metadata`` still keying membership on the legacy
+    checkout dir alone, which would silently empty the proposer's AND the
+    tuner's AVAILABLE CUSTOM LOSSES inventory for every post-migration
+    promotion — the loss library would look permanently empty."""
+    lib_losses = tmp_path / "lib" / "losses"
+    lib_losses.mkdir(parents=True)
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+    # Legacy member pointed elsewhere so the resolved membership is what passes.
+    monkeypatch.setattr(proposal_prompts, "_GLOBAL_LOSS_DIR", str(tmp_path / "legacy_losses"))
+    plugin = lib_losses / "ordinal_transition_uncertainty_loss.py"
+    plugin.write_text("# loadable plugin promoted post-migration\n")
+    registry = _StubRegistry([_StubMeta("ordinal_transition_uncertainty_loss", str(plugin))])
+
+    assert live_loss_registry_names(registry) == ["ordinal_transition_uncertainty_loss"]
+    assert "### `ordinal_transition_uncertainty_loss`" in render_available_losses(registry)
+
+
 def test_missing_global_file_is_filtered(tmp_path, monkeypatch):
     global_dir = tmp_path / "agent_generated" / "losses"
     global_dir.mkdir(parents=True)

@@ -193,4 +193,4 @@ The low-frequency band is the natural weak point for any real-learning model on 
 - [`docs/design/tidmad_collapse_advice_and_forensics.md`](./tidmad_collapse_advice_and_forensics.md)
 - [`docs/design/collapse_detection_framework_generic.md`](./collapse_detection_framework_generic.md)
 - [`reports/health_metrics_scan.md`](../../reports/health_metrics_scan.md) — full scan methodology, raw logs, audit trail
-- [`reports/v16_20260630.md`](../../reports/v16_20260630.md) — earlier v16 forensic (5.5763 phantom)
+- `reports/v16_20260630.md` — earlier v16 forensic (5.5763 phantom); **unpublished** — the v16 report was never committed to the repository.

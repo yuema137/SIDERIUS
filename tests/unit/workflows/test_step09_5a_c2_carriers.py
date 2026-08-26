@@ -90,6 +90,25 @@ class TestImmutability:
         assert s.best_score_overall == 1.0
 
 
+#: Transit fields declared on ``WorkflowLaunchConfig`` AFTER the Step 09.5a
+#: refactor, with the default each was declared with. The pre-refactor golden
+#: is HISTORY (the 72 values ``run_workflow`` carried at the C2 head) and is
+#: never edited; a later addition is instead declared here, by hand, so the
+#: two census tests below keep catching an undeclared field or a drifted
+#: default while the historical record stays what it was.
+#:
+#: * ``experiment_arm`` — arXiv U1 (#254): the OPAQUE experiment-arm label,
+#:   pure transit (the workflow locks it and forwards it; never interprets
+#:   it, ruling R2). Default ``None`` = the unlabelled legacy run.
+#: * ``baseline_isolation`` — arXiv U3 (#260): the WITHOUT arm's explicit
+#:   behaviour flag (ruling R6), locked and forwarded to the interpreter,
+#:   proposer and tuner inputs. Default ``False`` = no isolation.
+POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
+    "experiment_arm": None,
+    "baseline_isolation": False,
+}
+
+
 class TestLaunchConfigIsTransitOnly:
     def test_it_carries_no_capability_reference(self):
         """Amendment B: capabilities live on the bindings carrier."""
@@ -135,19 +154,26 @@ class TestLaunchConfigIsTransitOnly:
 
         mismatched = []
         for f in dataclasses.fields(WorkflowLaunchConfig):
-            if f.name not in golden:
-                mismatched.append(f"{f.name}: absent from the pre-refactor record")
-                continue
             declared = (
                 f.default_factory() if f.default_factory is not dataclasses.MISSING else f.default
             )
-            expected = ast.literal_eval(golden[f.name])
+            if f.name in POST_REFACTOR_TRANSIT_ADDITIONS:
+                # Declared AFTER the refactor: the golden cannot know it, so
+                # its default is pinned here, by hand, at its declaration.
+                expected = POST_REFACTOR_TRANSIT_ADDITIONS[f.name]
+            elif f.name in golden:
+                expected = ast.literal_eval(golden[f.name])
+            else:
+                mismatched.append(f"{f.name}: absent from the pre-refactor record")
+                continue
             if declared != expected:
                 mismatched.append(f"{f.name}: carrier {declared!r} != pre-refactor {expected!r}")
         assert not mismatched, mismatched
 
     def test_the_carrier_covers_the_whole_pre_refactor_transit_surface(self):
-        """Every value that used to be a transit parameter still has a home."""
+        """Every value that used to be a transit parameter still has a home —
+        and nothing joins the carrier without being declared in
+        ``POST_REFACTOR_TRANSIT_ADDITIONS`` with its pinned default."""
         import json
         from pathlib import Path
 
@@ -156,7 +182,10 @@ class TestLaunchConfigIsTransitOnly:
                 Path(__file__).parent / "goldens" / "step09_5a_pre_refactor_launch_defaults.json"
             ).read_text()
         )
-        assert set(golden) == launch_config_field_names()
+        assert set(golden) | set(POST_REFACTOR_TRANSIT_ADDITIONS) == launch_config_field_names()
+        assert not set(golden) & set(POST_REFACTOR_TRANSIT_ADDITIONS), (
+            "a pre-refactor field cannot also be declared as a later addition"
+        )
 
 
 class TestBindingsMembership:

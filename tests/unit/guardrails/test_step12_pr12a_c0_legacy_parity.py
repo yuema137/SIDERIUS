@@ -193,8 +193,14 @@ PROMPT_SOURCE_SHA: dict[str, str] = {
     "implementor.IMPLEMENTOR_REPAIR_PROMPT": (
         "18d51cfe9ea87d6b3cced2fd10ec01565cff04175fda9aec8853770cf4731132"
     ),
+    # arXiv U3 (#260) — DECLARED delta: the worked example's `wavenet` /
+    # `5.57` literals became the tokens `{example_model_type}` /
+    # `{example_sota_score}`, so the SOURCE bytes moved. The legacy RENDER
+    # did not: substituting the legacy literals back reproduces the pre-U3
+    # sha `b1536956…` byte-exactly, pinned by
+    # `tests/unit/agent/prompt_templates/test_arxiv_u3_isolated_prompt_surface.py`.
     "prompt_templates/proposal/causal_reasoning_stage.md": (
-        "b153695681665b847e312a705985ad8654106e7bc932d18325640768420835f0"
+        "33227113c505dfd492076bef92d954c1c0930bece70a2dba68003229b680f8b9"
     ),
     "prompt_templates/proposal/causal_reasoning_stage_exploit.md": (
         "cbf18435eb5970f142d0bf89b9ac32c8dec2822edbc4d3a6da9a19d720a6f15b"
@@ -202,8 +208,11 @@ PROMPT_SOURCE_SHA: dict[str, str] = {
     "prompt_templates/proposal/causal_reasoning_stage_explore.md": (
         "654961f557aa98b1e22197f2403fabdcdf4b9cb413b5aa1671b6c951fcedcffa"
     ),
+    # arXiv U3 (#260) — same declared delta as causal_reasoning_stage.md:
+    # tokens replaced the example literals; the legacy render reproduces the
+    # pre-U3 sha `f4ef2657…` byte-exactly (same parity test).
     "prompt_templates/proposal/comparison_stage.md": (
-        "f4ef2657e9e499882bfabed0e47211abe802bcf88c38476427fe24aa7da04b48"
+        "6099820a60c90cae41dba61f328eef17951657da9c83b47b5e67e444ce98ba25"
     ),
     "prompt_templates/proposal/comparison_stage_exploit.md": (
         "4bd0e8106ec9225e5fa2a294d2055e52f26b59c2740089191557041b8e6d3d7c"
@@ -398,6 +407,15 @@ class TestTheProposingStageIsOneDeclaredEditFromEpochOne:
 
 #: The serialized key set of an un-composed lock. The composition key is
 #: OMITTED, never ``null`` — the property C2 must not disturb.
+#:
+#: DECLARED DELTA (arXiv P1): ``generated_library`` joined as a PROVENANCE
+#: key ({root, source}; recorded, never compared). It appears here because
+#: the suite's ``_isolate_generated_library`` fixture exports
+#: ``SIDERIUS_GENERATED_LIBRARY_DIR`` for every test (no test may touch the
+#: operator's real ``~/.siderius``), and an env-resolved root is stamped
+#: ``source: env``. The arXiv U1/U3 CANONICAL keys are deliberately NOT
+#: here — they are omitted at their defaults, which is exactly the legacy
+#: byte-parity this pin owns.
 LEGACY_LOCK_KEYS: frozenset[str] = frozenset(
     {
         "resolved_data_scope",
@@ -412,6 +430,7 @@ LEGACY_LOCK_KEYS: frozenset[str] = frozenset(
         "runtime_policy_identity",
         "created_at",
         "execution_calibration",
+        "generated_library",
     }
 )
 

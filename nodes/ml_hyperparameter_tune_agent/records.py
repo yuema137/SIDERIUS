@@ -14,7 +14,6 @@ this call site" is how status vocabularies drift apart, and the resume path
 reads exactly what this module wrote.
 """
 
-import json
 import os
 import time
 from typing import Any
@@ -24,6 +23,7 @@ from agent.schemas.hyperparam_tuning import (
     HyperparamTuningOutput,
 )
 from agent.skills.evaluate_time_skill.wrapper import _aggregate_inference_file_timings
+from core.durable_io import publish_json_atomically
 from core.run_invariants import (
     RunInvariants,
     ensure_run_invariants,
@@ -459,6 +459,7 @@ def _emit_record(
     *,
     status: dict | None = None,
     candidate_id: str | None = None,
+    experiment_arm: str | None = None,
 ) -> None:
     """Stamp evidence, validate, persist — in that order (B-C4a0 E3/E4).
 
@@ -486,6 +487,16 @@ def _emit_record(
     # legacy record byte-identical, and is precisely the state the ingress
     # validator refuses to treat as agreement for a COMPOSED run.
     record["task_composition_fingerprint"] = active_composition_fingerprint()
+    # arXiv U1 (#254) — the experiment-arm label, at the same seam and for
+    # the same reason. Unlike the two stamps above it is written ONLY when
+    # the run is labelled: an unlabelled run's on-disk record then carries no
+    # key at all (byte-identical to pre-U1), which is exactly the state the
+    # ingress validator reads as "unstamped" — readable by an unlabelled
+    # run, refused by a labelled one. Every emission site passes the value
+    # explicitly (the candidate_id precedent); a site that omits it would
+    # emit a record its own labelled run refuses at the next resume.
+    if experiment_arm is not None:
+        record["experiment_arm"] = experiment_arm
     ExperimentRecord.model_validate(record)
     sandbox.save_record(record)
 
@@ -938,6 +949,9 @@ def finalize_run_output(
         "result_authority": agent_input.result_authority,
         # V21 PR E — run-level candidate label, echoed like the two above.
         "candidate_id": agent_input.candidate_id,
+        # arXiv U1 (#254) — the arm label, echoed from the input like the
+        # candidate label above so output and launch cannot disagree.
+        "experiment_arm": agent_input.experiment_arm,
         "health_checks_config_source": health_checks_config_source,
         "health_config_sha256": health_config_sha256,
         # Step 11 C8 / R-11-9 — the run's composition identity on its OUTPUT,
@@ -1032,8 +1046,12 @@ def finalize_run_output(
         # non-standard ``-Infinity`` tokens that break the dashboard's
         # ``JSON.parse``.
         safe_output = coerce_nonfinite_to_none(agent_output.model_dump())
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(safe_output, f, indent=4)
+        # S2 / U5: serialise-first + atomic replace. `run_output` is the
+        # artifact the iteration manifest hashes, so a crash mid-write must
+        # leave either the previous file or the complete new one — never a
+        # truncated one that the next iteration's replay check then reports
+        # as a tamper.
+        publish_json_atomically(output_path, safe_output, indent=4)
         print(f"Output validated and saved -> {output_path}")
     except Exception as e:
         print(
@@ -1058,6 +1076,9 @@ def finalize_run_output(
             # V21 PR E — the degraded exit keeps the label too; losing it
             # here would make crashed candidates silently unjoinable.
             "candidate_id": agent_input.candidate_id,
+            # arXiv U1 — the degraded exit keeps the arm label too, so a
+            # crashed labelled run stays attributable to its arm.
+            "experiment_arm": agent_input.experiment_arm,
             "completed_rounds": completed_rounds,
             "total_attempts": total_attempts,
             "formal_reference_score": _json_safe_reference(formal_reference_score),
@@ -1087,8 +1108,7 @@ def finalize_run_output(
             ),
             "_partial_reason": f"{type(e).__name__}: {e}",
         }
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(partial_dict, f, indent=4, default=str)
+        publish_json_atomically(output_path, partial_dict, indent=4, default=str)
         print(f"  [DEGRADED] Partial output written -> {output_path}")
         # Also build a minimal-but-valid in-memory output so callers
         # downstream (run_one_iteration manifest writer) don't crash on

@@ -14,7 +14,6 @@ drift. See design doc §3.7 (contract) and §3.7.3 (file plan).
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -25,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from core.iteration_manifest import verify_iteration_manifest
 from core.resume import (
     CandidateHealthValidity,
     CommitTimeClassification,
@@ -47,19 +47,6 @@ def _iter_run_name(iter_idx: int) -> str:
     ``core.resume`` coupling is the single public boundary
     ``classify_committed_record``)."""
     return f"iter_{iter_idx:03d}"
-
-
-def _sha256_stream(path: str) -> str:
-    """Stream a file's SHA-256 hex digest.
-
-    Same integrity check as :func:`core.resume._sha256_file`; kept
-    local for the same coupling reason.
-    """
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -203,20 +190,19 @@ def _iter_committed_sources(workspace: str) -> Iterable[_SourceIter]:
         if not output_path or not os.path.isfile(output_path):
             iter_idx += 1
             continue
-        recorded_sha = manifest.get("run_output_sha256")
-        artifact_verified = False
-        if recorded_sha:
-            actual = _sha256_stream(output_path)
-            if actual != recorded_sha:
-                raise ReplayIntegrityError(
-                    f"[per_file_best] REPLAY-INTEGRITY: iter "
-                    f"{iter_idx:03d} committed artifact changed: "
-                    f"{output_path} expected sha256 {recorded_sha[:16]}… "
-                    f"but found {actual[:16]}…. Restore the original "
-                    f"artifact or regenerate a consistent manifest, then "
-                    f"rebuild the per-file best table."
-                )
-            artifact_verified = True
+        # S2 / U5 — the SAME predicate resume applies (manifest self-digest,
+        # hash removal, artifact bytes), from the one shared authority.
+        verdict = verify_iteration_manifest(
+            manifest, iter_idx=iter_idx, manifest_path=manifest_path, output_path=output_path
+        )
+        if verdict.problem is not None:
+            raise ReplayIntegrityError(
+                f"[per_file_best] REPLAY-INTEGRITY: {verdict.problem}. Restore the "
+                f"original artifact, or replace the iteration explicitly "
+                f"(run_one_iteration.py --replace_iteration_manifest "
+                f"--replacement_reason '<why>'), then rebuild the per-file best table."
+            )
+        artifact_verified = verdict.artifact_verified
         try:
             with open(output_path, encoding="utf-8") as f:
                 parsed = HyperparamTuningOutput.model_validate_json(f.read())

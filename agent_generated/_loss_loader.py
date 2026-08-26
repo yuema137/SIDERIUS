@@ -16,12 +16,15 @@ plugin file must define exactly three module-level symbols:
 
 Discovery: scans the directories returned by ``_resolve_loss_dirs()``:
 
-    1. ``SIDERIUS_LOSS_DIRS`` env var (``os.pathsep``-separated). When set,
-       this is the *exclusive* list — does NOT fall back to the global default.
-       Mirrors ``SIDERIUS_PLUGIN_DIRS`` semantics in
-       ``ml_models/plugin_loader.py``.
-    2. ``[LOSSES_DIR]`` (i.e. ``agent_generated/losses/``) — the global default
-       when the env var is unset or empty.
+    1. ``SIDERIUS_LOSS_DIRS`` env var (``os.pathsep``-separated), workspace-
+       scoped dirs set for training subprocesses. L6c union mode: the library
+       dirs below are appended after these, never replaced.
+    2. the resolved generated-library losses dir
+       (``core.generated_library.generated_losses_dir()`` — arXiv P1, the
+       non-checkout home every promotion now writes to).
+    3. ``LOSSES_DIR`` (the LEGACY CHECKOUT ``agent_generated/losses/``) —
+       read-only compatibility fallback so losses promoted before the P1
+       migration keep resolving. No production path writes here any more.
 
 CRITICAL: this is a SEPARATE env var from ``SIDERIUS_PLUGIN_DIRS``. Sharing
 would be unsafe — if ``SIDERIUS_PLUGIN_DIRS`` points at a run-scoped *model*
@@ -43,8 +46,13 @@ import os
 import sys
 from typing import Any
 
-# Default loss-plugin directory: ``agent_generated/losses/``. Computed from
-# this file's own location so the resolver works regardless of the caller's cwd.
+# LEGACY CHECKOUT loss-plugin directory: the repository's
+# ``agent_generated/losses/``, computed from this file's own location so the
+# resolver works regardless of the caller's cwd. arXiv P1: this is a READ-ONLY
+# compatibility fallback — promotions write to the resolved generated-library
+# root (``core.generated_library.generated_losses_dir()``), and this dir is
+# scanned LAST so a pre-migration checkout keeps resolving what it already
+# promoted while never being written to again.
 LOSSES_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "losses",
@@ -149,32 +157,42 @@ def _resolve_loss_dirs() -> list[str]:
     """Return the ordered list of directories to scan for loss plugins.
 
     L6c — **union mode**. When ``SIDERIUS_LOSS_DIRS`` is set, returns the
-    env-var dirs FIRST followed by the global ``LOSSES_DIR`` as a union.
-    Workspace dirs (set only for training subprocesses) win for in-flight
-    Branch C generated this run; the global default catches promoted
-    losses from prior runs for cross-process Branch B reuse.
+    env-var dirs FIRST followed by the library dirs as a union. Workspace
+    dirs (set only for training subprocesses) win for in-flight Branch C
+    generated this run; the library dirs catch promoted losses from prior
+    runs for cross-process Branch B reuse.
 
-    Priority:
+    Priority (first match wins in :func:`load_loss_plugin`'s walk):
       1. ``SIDERIUS_LOSS_DIRS`` env var entries (workspace-scoped), in order
-      2. ``LOSSES_DIR`` (``agent_generated/losses/``) — global library of
-         promoted losses, scanned regardless of the env var
+      2. the resolved generated-library losses dir (arXiv P1 —
+         ``core.generated_library.generated_losses_dir()``; where promotions
+         write now)
+      3. ``LOSSES_DIR`` (the legacy checkout ``agent_generated/losses/``) —
+         read-only compatibility fallback for losses promoted before the
+         P1 migration; scanned LAST so a resolved-library copy shadows a
+         same-named legacy one
 
-    When the env var is unset / empty, returns just ``[LOSSES_DIR]`` — the
-    pre-L6c default behavior for callers that never set the env (e.g. unit
-    tests, in-process pre-flight before any L6a copy has fired).
+    When the env var is unset / empty, returns just the two library dirs —
+    callers that never set the env (e.g. unit tests, in-process pre-flight
+    before any L6a copy has fired) resolve against the library alone.
 
     Whitespace-only or empty entries in the env var are filtered out so
     ``SIDERIUS_LOSS_DIRS=":dir_a::dir_b:"`` resolves to ``["dir_a", "dir_b"]``,
     matching how shells commonly compose path-like variables.
     """
+    # Lazy import (module-bottom registries import nothing from core, and the
+    # loader must stay importable in trimmed contexts exactly as before).
+    from core.generated_library import generated_losses_dir
+
+    library_dirs = [generated_losses_dir(), LOSSES_DIR]
     env = os.environ.get(_LOSS_DIRS_ENV_VAR, "").strip()
     if env:
         env_dirs = [p for p in env.split(os.pathsep) if p.strip()]
-        # L6c union: workspace dirs first, global last. Global is appended
-        # even when env_dirs is non-empty so promoted losses remain visible
-        # to subprocess callers.
-        return [*env_dirs, LOSSES_DIR]
-    return [LOSSES_DIR]
+        # L6c union: workspace dirs first, library dirs last. The library is
+        # appended even when env_dirs is non-empty so promoted losses remain
+        # visible to subprocess callers.
+        return [*env_dirs, *library_dirs]
+    return library_dirs
 
 
 def load_loss_plugin_from_path(plugin_path: str) -> dict[str, Any] | None:

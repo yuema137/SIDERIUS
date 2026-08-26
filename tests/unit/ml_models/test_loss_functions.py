@@ -541,23 +541,28 @@ def _l6c_clear_loss_registry():
 class TestL6cResolveLossDirsUnion:
     def test_union_mode_with_env_var(self, tmp_path, monkeypatch):
         """With SIDERIUS_LOSS_DIRS set, _resolve_loss_dirs returns env-var
-        dirs FIRST followed by the global LOSSES_DIR as a union."""
+        dirs FIRST, then the resolved generated-library losses dir (arXiv
+        P1), then the legacy checkout LOSSES_DIR as a union."""
         from agent_generated._loss_loader import LOSSES_DIR, _resolve_loss_dirs
 
         ws_dir = tmp_path / "ws_losses"
         ws_dir.mkdir()
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(ws_dir))
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
         result = _resolve_loss_dirs()
-        assert result == [str(ws_dir), LOSSES_DIR]
+        assert result == [str(ws_dir), str(tmp_path / "lib" / "losses"), LOSSES_DIR]
 
-    def test_no_env_returns_only_global(self, monkeypatch):
-        """With SIDERIUS_LOSS_DIRS unset, _resolve_loss_dirs returns just
-        [LOSSES_DIR] — unchanged pre-L6c behavior for that branch."""
+    def test_no_env_returns_library_then_legacy(self, tmp_path, monkeypatch):
+        """With SIDERIUS_LOSS_DIRS unset, _resolve_loss_dirs returns the
+        resolved library losses dir followed by the legacy checkout
+        LOSSES_DIR (arXiv P1 — the legacy dir is the read-only
+        compatibility fallback, scanned last)."""
         from agent_generated._loss_loader import LOSSES_DIR, _resolve_loss_dirs
 
         monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
         result = _resolve_loss_dirs()
-        assert result == [LOSSES_DIR]
+        assert result == [str(tmp_path / "lib" / "losses"), LOSSES_DIR]
 
 
 class TestL6cRegisterLossInMemory:
@@ -674,33 +679,73 @@ class TestL6cLoadCustomLossUsesInMemoryFirst:
 
 class TestL6cPreloadGlobalLosses:
     def test_preload_loads_all_plugins(self, tmp_path, monkeypatch):
-        """preload_global_losses scans LOSSES_DIR (monkeypatched to a tmp
-        dir for isolation) and registers every valid .py."""
+        """preload_global_losses scans the resolved library losses dir
+        (pinned to a tmp root) and registers every valid .py."""
         from agent_generated import _loss_loader
-        from ml_models import loss_models_sandbox
         from ml_models.loss_models_sandbox import LOSS_REGISTRY, preload_global_losses
 
-        # Redirect LOSSES_DIR to tmp_path for this test
-        monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(tmp_path))
-        # Also patch the lazy import used inside preload_global_losses
-        monkeypatch.setattr(loss_models_sandbox, "__name__", loss_models_sandbox.__name__)
+        lib_losses = tmp_path / "lib" / "losses"
+        lib_losses.mkdir(parents=True)
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        # Point the legacy checkout member somewhere empty for isolation.
+        monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(tmp_path / "legacy_empty"))
 
         # Write two valid plugins + one underscore-prefixed (skipped)
-        (tmp_path / "foo_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_FOO)
-        (tmp_path / "bar_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_BAR)
-        (tmp_path / "_template_loss.py").write_text("# should be skipped\n")
+        (lib_losses / "foo_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_FOO)
+        (lib_losses / "bar_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_BAR)
+        (lib_losses / "_template_loss.py").write_text("# should be skipped\n")
 
         loaded = preload_global_losses()
         assert sorted(loaded) == ["bar_loss_l6c", "foo_loss_l6c"]
         assert "foo_loss_l6c" in LOSS_REGISTRY
         assert "bar_loss_l6c" in LOSS_REGISTRY
 
-    def test_preload_returns_empty_when_dir_missing(self, tmp_path, monkeypatch):
-        """preload_global_losses is safe when LOSSES_DIR doesn't exist —
-        first-run / fresh-checkout case."""
+    def test_preload_scans_legacy_checkout_and_library_shadows_same_basename(
+        self, tmp_path, monkeypatch
+    ):
+        """arXiv P1 compatibility READ (matrix F): a loss promoted into the
+        LEGACY checkout dir before the migration still preloads; a
+        same-basename file in the resolved library SHADOWS the legacy one
+        entirely. Defect caught: dropping the legacy scan (pre-migration
+        promotions silently vanish from Branch-B reuse) or registering the
+        legacy copy after the library one (stale legacy bytes would win the
+        in-memory most-recent-registration rule)."""
+        from agent_generated import _loss_loader
+        from ml_models.loss_models_sandbox import LOSS_REGISTRY, preload_global_losses
+
+        lib_losses = tmp_path / "lib" / "losses"
+        lib_losses.mkdir(parents=True)
+        legacy = tmp_path / "legacy_losses"
+        legacy.mkdir()
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(legacy))
+
+        # Legacy-only loss: must preload through the compatibility scan.
+        (legacy / "foo_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_FOO)
+        # Same-basename pair: the legacy copy is a loadable decoy that
+        # declares a DIFFERENT target dtype ("float"; the library copy
+        # defaults to "long") so whichever registration wins is provable.
+        (lib_losses / "bar_loss_l6c.py").write_text(_L6C_PLUGIN_SRC_FOR_BAR)
+        (legacy / "bar_loss_l6c.py").write_text(
+            _L6C_PLUGIN_SRC_FOR_BAR + '\nPLUGIN_LOSS_TARGET_DTYPE = "float"\n'
+        )
+
+        loaded = preload_global_losses()
+        assert sorted(loaded) == ["bar_loss_l6c", "foo_loss_l6c"]
+        assert "foo_loss_l6c" in LOSS_REGISTRY
+        from agent_generated._loss_loader import LOSS_TARGET_DTYPE_REGISTRY
+
+        # The library copy (dtype default "long") won; the legacy decoy
+        # ("float") was shadowed by basename and never registered.
+        assert LOSS_TARGET_DTYPE_REGISTRY["bar_loss_l6c"] == "long"
+
+    def test_preload_returns_empty_when_dirs_missing(self, tmp_path, monkeypatch):
+        """preload_global_losses is safe when neither library location
+        exists — first-run / fresh-host case."""
         from agent_generated import _loss_loader
         from ml_models.loss_models_sandbox import preload_global_losses
 
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "no_lib"))
         monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(tmp_path / "does_not_exist"))
         loaded = preload_global_losses()
         assert loaded == []

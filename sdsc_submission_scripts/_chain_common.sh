@@ -172,6 +172,13 @@ DRY_RUN=0
 # non-empty workspace from iter 1.
 AUTO_RESUME=1
 FORCE_FRESH=0
+# #258 refinement: set to 1 by run_chain.sh ONLY on the resolve_start_iter
+# branch where the inspector actually computed START_ITER. build_app_args
+# then forwards --auto_resume, letting run_one_iteration.py replace a
+# failed/no_records same-iteration manifest through the explicit
+# replacement path (previous manifest kept, provenance recorded). Never
+# set for a manual --start_iter pin or --no_auto_resume.
+AUTO_RESUME_RECOVERY=0
 # Force the LAST round of each iteration to be a FORMAL training run
 # (full dataset, no --trial_portion clamp). Default ON to preserve the
 # pre-existing chain behavior. Pass --no-force_formal_round in smoke /
@@ -181,15 +188,22 @@ FORCE_FRESH=0
 # (--force_formal_round / --no-force_formal_round); this wrapper-side
 # forwarding closes the same bash-wrapper gap the lit-review flags hit.
 FORCE_FORMAL_ROUND=1
-# ml_literature_review enable flag (Risk 4 two-layer gate). Default 0
-# matches configs/lit_review_config.yaml's `enabled: false` baseline —
-# backward-compatible with pre-lit-review chain invocations. When the
-# operator passes --ml_lit_review_enabled at the chain level the wrapper
-# forwards it to run_one_iteration.py; otherwise nothing is forwarded
-# and the YAML's `enabled: false` keeps lit-review off. Closes the same
-# bash-wrapper gap as --no-force_formal_round, originally surfaced
-# during loss-inventory Gate 3.
-ML_LIT_REVIEW_ENABLED=0
+# ml_literature_review enable flag (Risk 4 two-layer gate). THREE states
+# (arXiv U3, #259): "" (default, unset) forwards nothing and the YAML's
+# `enabled: false` keeps lit-review off — byte-identical to pre-lit-review
+# chain argv; 1 (--ml_lit_review_enabled) forwards the positive flag; 0
+# (--no-ml_lit_review_enabled, EXPLICIT) forwards the negative flag so the
+# OFF arm of an experiment is recorded positively on the child argv rather
+# than inherited from a YAML default. Closes the same bash-wrapper gap as
+# --no-force_formal_round, originally surfaced during loss-inventory Gate 3.
+ML_LIT_REVIEW_ENABLED=""
+# arXiv U1 (#254) — opaque experiment-arm label. Empty = unlabelled (the
+# legacy default); forwarded to run_one_iteration.py ONLY when set, so an
+# unlabelled chain's child argv is byte-identical to pre-U1.
+EXPERIMENT_ARM=""
+# arXiv U3 (#260) — the WITHOUT arm's explicit isolation flag. Default 0
+# forwards nothing; 1 forwards --baseline_isolation.
+BASELINE_ISOLATION=0
 START_ITER=""
 
 # --- Slurm-only defaults (ignored by lilab caller) ---
@@ -348,6 +362,8 @@ parse_chain_args() {
         --no-force_formal_round)  FORCE_FORMAL_ROUND=0; shift ;;
         --ml_lit_review_enabled)     ML_LIT_REVIEW_ENABLED=1; shift ;;
         --no-ml_lit_review_enabled)  ML_LIT_REVIEW_ENABLED=0; shift ;;
+        --experiment_arm)         EXPERIMENT_ARM="$2"; shift 2 ;;
+        --baseline_isolation)     BASELINE_ISOLATION=1; shift ;;
         --start_iter)             START_ITER="$2"; shift 2 ;;
         # §3.2 — Adaptive-tuning brakes
         --attempts_per_round)        ATTEMPTS_PER_ROUND="$2"; shift 2 ;;
@@ -599,10 +615,32 @@ build_app_args() {
     if [ "$FORCE_FORMAL_ROUND" -eq 0 ]; then
         APP_ARGS+=(--no-force_formal_round)
     fi
-    # ML_LIT_REVIEW_ENABLED default 0 matches the YAML's enabled: false; only
-    # forward the flag when explicitly enabled at the chain level. When 0 we
-    # forward nothing and run_one_iteration.py reads the YAML.
-    [ "$ML_LIT_REVIEW_ENABLED" -eq 1 ] && APP_ARGS+=(--ml_lit_review_enabled)
+    # ML_LIT_REVIEW_ENABLED: "" (unset) forwards nothing and
+    # run_one_iteration.py reads the YAML; 1 forwards the positive flag; an
+    # EXPLICIT 0 forwards the negative flag (arXiv U3 — the OFF arm is stated
+    # on the child argv, never inherited silently).
+    if [ "$ML_LIT_REVIEW_ENABLED" = "1" ]; then
+        APP_ARGS+=(--ml_lit_review_enabled)
+    elif [ "$ML_LIT_REVIEW_ENABLED" = "0" ]; then
+        APP_ARGS+=(--no-ml_lit_review_enabled)
+    fi
+    # arXiv U1 — the arm label is forwarded only when set (unlabelled chains
+    # reproduce pre-U1 argv byte-identically).
+    if [ -n "$EXPERIMENT_ARM" ]; then
+        APP_ARGS+=(--experiment_arm "$EXPERIMENT_ARM")
+    fi
+    # arXiv U3 — isolation forwarded only when requested.
+    if [ "$BASELINE_ISOLATION" -eq 1 ]; then
+        APP_ARGS+=(--baseline_isolation)
+    fi
+    # #258 refinement: forward auto-resume recovery intent only when the
+    # inspector computed START_ITER (run_chain.sh sets the variable on that
+    # branch alone). The Python launcher then replaces a failed/no_records
+    # same-iteration manifest through the explicit replacement path with
+    # provenance; a completed manifest is never replaced by auto-resume.
+    if [ "${AUTO_RESUME_RECOVERY:-0}" -eq 1 ]; then
+        APP_ARGS+=(--auto_resume)
+    fi
     APP_ARGS+=(--formal_eval_portion "$FORMAL_EVAL_PORTION")
     if [ -n "$GPU_ADMISSION_MEASUREMENT_SOURCE" ]; then
         APP_ARGS+=(--gpu_admission_measurement_source "$GPU_ADMISSION_MEASUREMENT_SOURCE")

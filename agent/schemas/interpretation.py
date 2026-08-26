@@ -620,6 +620,15 @@ class InterpretationInput(BaseModel):
         "evidence' language instead of ranking non-existent history. Registries "
         "remain available options, not historical runs.",
     )
+    baseline_isolation: bool = Field(
+        default=False,
+        description="arXiv U3 (#260 / ruling R6) — the explicit, recorded flag of "
+        "the WITHOUT arm. When True the interpreter refuses to load a BUNDLED "
+        "built-in description (ml_models/*/description.md) and therefore never "
+        "carries one into the model_knowledge_cache `_stats`; plugin and "
+        "workspace descriptions resolve as before. Set by the workflow from its "
+        "launch config; the lock pins the same value.",
+    )
     task_description: str = Field(
         default="",
         description="Plain-English description of the research task, sourced from "
@@ -944,7 +953,8 @@ class InterpretationOutput(BaseModel):
 
     Covers all model types provided in the input. Per-model scores give
     the full performance picture; overall best/worst give the global range.
-    Consumed by ml_model_proposal_agent via interpretation_to_proposal_v1.
+    Consumed by ml_model_proposal_agent via ``local_full_context`` in
+    ``agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py``.
     """
 
     # --- Models covered ---

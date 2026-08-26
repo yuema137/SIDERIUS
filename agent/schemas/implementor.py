@@ -223,7 +223,8 @@ class ImplementorInput(BaseModel):
     """
     Input to ml_model_implementor.
 
-    Typically populated via the proposal_to_implementor_v1 protocol,
+    Typically populated via ``local_full_spec`` in
+    ``agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py``,
     which maps ProposalOutput → ImplementorInput.
     """
 
@@ -392,8 +393,10 @@ class ImplementorOutput(BaseModel):
     """
     Output of ml_model_implementor.
 
-    Paths to the written files. Consumed by code_validator_agent
-    via implementor_to_validator_v1 to confirm the plugin is valid.
+    Paths to the written files. Consumed by ml_code_validator_agent via
+    ``local_all_fields`` in
+    ``agent/schemas/protocols/ml_model_impl_to_ml_model_valid.py`` to
+    confirm the plugin is valid.
     """
 
     candidate_id: str | None = Field(

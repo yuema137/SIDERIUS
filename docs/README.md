@@ -29,7 +29,10 @@ A progressive path. Each level assumes the one before it.
 
 **Operate it**
 - [Operating a run](guides/operating-a-run.md) — scope, budgets, resume, refusals
+- [Workspaces and resume](guides/workspaces-and-resume.md) — what is in the run directory, fresh vs resume
 - [Entrypoints and CLI](reference/entrypoints.md)
+- [Troubleshooting](guides/troubleshooting.md) — symptom-first diagnosis
+- [Browsing results with the dashboard](guides/dashboard.md)
 
 ## For coding agents and framework developers
 
@@ -52,6 +55,16 @@ Mechanism references, by semantic owner:
 [execution](agent-reference/mechanisms/execution.md) ·
 [plugins](agent-reference/mechanisms/plugins.md) ·
 [persistence and resume](agent-reference/mechanisms/persistence-and-resume.md)
+
+Module maps (directory-level contracts, one
+[template](agent-reference/MODULE_README_TEMPLATE.md)):
+[`workflows/`](../workflows/README.md) · [`core/`](../core/README.md) ·
+[`execute_tools/`](../execute_tools/README.md) ·
+[`execute_tools/health_checks/`](../execute_tools/health_checks/README.md) ·
+[`ml_models/`](../ml_models/README.md) ·
+[`agent/schemas/`](../agent/schemas/README.md).
+Point-in-time UX audit:
+[dashboard first-run UX](agent-reference/dashboard_ux_audit.md).
 
 Node contracts:
 [interpreter](../nodes/result_interpretation_agent/result_interpretation_agent.md) ·

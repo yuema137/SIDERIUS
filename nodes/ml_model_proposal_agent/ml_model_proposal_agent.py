@@ -11,8 +11,11 @@ Uses a two-call chain-of-thought:
   2. Commit call (generate): given the reasoning, commit to a specific design as strict JSON
      matching ProposalOutput.
 
-Consumed by ml_model_implementor via proposal_to_implementor_v1, and by
-tune_ml_hyperparam_agent via proposal_to_hyperparam_seeded_v1.
+Consumed by ml_model_implementor via ``local_full_spec``
+(agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py), and by the
+tuner via the fan-in ``local_validated_model``
+(agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py), which takes the
+ProposalOutput beside the validator's output.
 
 Node contract:
   run(input: ProposalInput) -> ProposalOutput
@@ -1756,7 +1759,11 @@ class MLModelProposalAgent:
             # config when an existing plugin already implements the
             # intended architecture. Empty registry collapses to the
             # fallback message ("No custom models registered yet...").
-            "available_models_block": render_available_models(self._registry),
+            # arXiv U3 (#260): under isolation the block names no bundled
+            # built-in and offers no built-in branch; otherwise byte-identical.
+            "available_models_block": render_available_models(
+                self._registry, baseline_isolation=inp.baseline_isolation
+            ),
         }
 
         for stage in pipeline.stages:
@@ -1779,6 +1786,7 @@ class MLModelProposalAgent:
                 exploration_mode=mode,
                 template_vars=template_vars,
                 mindset=inp.mindset,
+                baseline_isolation=inp.baseline_isolation,
             )
 
             # Build user prompt in the P-d order:
@@ -1883,6 +1891,7 @@ class MLModelProposalAgent:
                                 exploration_mode=mode,
                                 template_vars=template_vars,
                                 mindset=inp.mindset,
+                                baseline_isolation=inp.baseline_isolation,
                             )
                             clamped_accumulated = clamp_and_backstop_accumulated(
                                 accumulated,
@@ -1979,6 +1988,7 @@ class MLModelProposalAgent:
                     exploration_mode=mode,
                     template_vars=template_vars,
                     mindset=inp.mindset,
+                    baseline_isolation=inp.baseline_isolation,
                 )
                 clamped_accumulated = clamp_and_backstop_accumulated(
                     accumulated,
@@ -2037,6 +2047,7 @@ class MLModelProposalAgent:
             "proposing_stage",
             exploration_mode=mode,
             template_vars=template_vars,
+            baseline_isolation=inp.baseline_isolation,
         )
 
         # Phase K.8 debug instrumentation: optionally dump the rendered

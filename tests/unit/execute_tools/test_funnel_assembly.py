@@ -318,3 +318,67 @@ class TestLegacyStageLocalSanityCheck:
         assert 7_280_256 in counts
         assert 8_409_280 in counts
         assert min(counts) >= 0
+
+
+# ---------------------------------------------------------------------------
+# S2 / U6 (#256) — nested per-retry layout: the funnel reads the TERMINAL attempt
+# ---------------------------------------------------------------------------
+
+
+def _nested_attempt(tmp_path, n, name, *, cid, verdicts, run="r1"):
+    """One proposal attempt whose implement→validate loop ran ``len(verdicts)``
+    times, each retry persisted in its own ``impl_KKK/``."""
+    d = tmp_path / f"attempt_{n:03d}_{name}"
+    _write(d / f"proposal_{run}.json", {"candidate_id": cid, "model_name": name})
+    for k, passed in enumerate(verdicts, start=1):
+        impl = d / f"impl_{k:03d}"
+        _write(
+            impl / f"implementor_{run}.json",
+            {"candidate_id": cid, "model_type": name, "impl_attempt": k},
+        )
+        _write(
+            impl / f"validation_{run}.json",
+            {"candidate_id": cid, "model_type": name, "passed": passed, "impl_attempt": k},
+        )
+    return d
+
+
+class TestNestedImplementationAttempts:
+    def test_the_terminal_retry_is_the_row_and_no_duplicate_id_conflict_is_raised(self, tmp_path):
+        """DEFECT: retries laid out as SIBLING attempt dirs would put one
+        candidate_id in two attempt directories and trip
+        DuplicateIdConflict (tuner evidence withheld); reading the FIRST
+        retry would report a failure the candidate recovered from."""
+        _nested_attempt(tmp_path, 1, "alpha", cid="cand_a", verdicts=(False, False, True))
+        _tuner(tmp_path, "alpha", cid="cand_a")
+        funnel = assemble_iteration_funnel(str(tmp_path))
+        assert funnel.duplicate_id_conflicts == []
+        assert len(funnel.rows) == 1 and not funnel.unjoinable
+        row = funnel.rows[0]
+        assert row.stopped_at_stage is None
+        assert row.stages["validation"].native is not None
+        assert row.stages["validation"].native["impl_attempt"] == 3
+        assert row.stages["implementation"].native is not None
+        assert row.stages["implementation"].native["impl_attempt"] == 3
+        assert row.stages["validation"].source_path is not None
+        assert os.sep + "impl_003" + os.sep in row.stages["validation"].source_path
+        # The proposal still comes from the attempt level.
+        assert row.stages["proposal"].source_path is not None
+        assert "impl_" not in row.stages["proposal"].source_path
+
+    def test_a_candidate_that_exhausted_its_retries_stops_at_validation(self, tmp_path):
+        _nested_attempt(tmp_path, 1, "beta", cid="cand_b", verdicts=(False, False))
+        row = assemble_iteration_funnel(str(tmp_path)).rows[0]
+        assert row.stopped_at_stage == "validation"
+        assert row.stop_reason_native is not None
+        assert row.stop_reason_native["impl_attempt"] == 2
+
+    def test_pre_u6_attempt_level_records_are_still_read(self, tmp_path):
+        """COMPATIBILITY: the legacy layout (records at the attempt level)
+        keeps producing the same rows — this is what every earlier test in
+        this module builds, restated here as the explicit guard."""
+        _attempt(tmp_path, 1, "gamma", cid="cand_c", validation_passed=False)
+        row = assemble_iteration_funnel(str(tmp_path)).rows[0]
+        assert row.stopped_at_stage == "validation"
+        assert row.stages["validation"].source_path is not None
+        assert "impl_" not in row.stages["validation"].source_path

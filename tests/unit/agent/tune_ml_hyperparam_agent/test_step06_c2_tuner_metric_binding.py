@@ -218,7 +218,11 @@ def test_the_helper_is_what_the_live_except_path_calls():
     m = re.search(r"except Exception as e:\n\s*scoring_time", source)
     assert m, "the scoring except path is no longer recognisable"
     start = m.start()
-    block = source[start : source.index("_emit_record(", start)]
+    # Both emission spellings: the direct call, or the identity-threading
+    # helper the structural-budget closure introduced (one emission idiom).
+    emit = re.search(r"_emit(?:_attempt)?_record\(", source[start:])
+    assert emit, "no emission call after the scoring except path"
+    block = source[start : start + emit.start()]
     assert "_build_scoring_failure_record(" in block
     assert '"status": "error_scoring"' not in block
 

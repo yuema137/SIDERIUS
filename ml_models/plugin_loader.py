@@ -2,8 +2,12 @@
 """
 Plugin loader for agent-generated models.
 
-Scans agent_generated/models/ for *.py files and extends MODEL_REGISTRY,
-PLUGIN_CONFIG_REGISTRY, and PLUGIN_OUTPUT_TYPE_REGISTRY with any valid plugins found.
+Scans the resolved plugin directories (run-scoped binding / env dirs /
+the generated-library models dir with the legacy checkout
+``agent_generated/models`` as read-only fallback — see
+``_resolve_plugin_dirs``) for *.py files and extends MODEL_REGISTRY,
+PLUGIN_CONFIG_REGISTRY, and PLUGIN_OUTPUT_TYPE_REGISTRY with any valid
+plugins found.
 
 Plugin interface — each plugin file must define:
     PLUGIN_MODEL_TYPE  : str   — unique model key (e.g. "attn_fcnet")
@@ -17,6 +21,12 @@ import importlib.util
 import os
 import sys
 
+# LEGACY CHECKOUT model-plugin directory: the repository's
+# ``agent_generated/models``. arXiv P1: this is a READ-ONLY compatibility
+# fallback — promotions write to the resolved generated-library root
+# (``core.generated_library.generated_models_dir()``), and this dir is
+# scanned AFTER it so a pre-migration checkout keeps resolving what it
+# already promoted while never being written to again.
 AGENT_GENERATED_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "agent_generated",
@@ -151,15 +161,22 @@ def _resolve_plugin_dirs() -> list[str]:
          they are the most run-specific statement of what should execute.
       2. ``SIDERIUS_PLUGIN_DIRS`` env var — ``os.pathsep``-separated list of
          directory paths. Per-run mode: scans exactly those directories,
-         does NOT fall back to ``AGENT_GENERATED_DIR``.
-      3. ``[AGENT_GENERATED_DIR]`` — legacy global-dir mode. Back-compat
-         default when neither of the above is present.
+         does NOT fall back to the global library.
+      3. ``[generated_models_dir(), AGENT_GENERATED_DIR]`` — global-library
+         mode when neither of the above is present (arXiv P1): the resolved
+         generated-library models dir first, then the LEGACY CHECKOUT
+         ``agent_generated/models`` as a read-only compatibility fallback so
+         pre-migration promotions keep loading. A ``model_type`` loadable
+         from BOTH locations refuses via :func:`_refuse_ambiguous_origins`
+         — that state is never produced by promotion (same-name promotion
+         is an idempotent skip across both locations), only by hand-copying,
+         and silently picking one copy is the seam-P failure mode.
 
-    **Nothing about (2) or (3) changed.** A process with no run-scoped
-    binding — every legacy and un-composed run, and every child of one —
-    resolves byte-identically to its pre-seam-P self. The binding only ever
-    ADDS, which is the whole propagation rule: a runtime default may extend
-    the declared set and may never overwrite or drop it.
+    Branch (2) is unchanged. A process with no run-scoped binding and no
+    env var — the parent workflow process — now scans the two library
+    locations instead of the checkout one; the binding rule is unchanged:
+    a runtime default may extend the declared set and may never overwrite
+    or drop it.
 
     Whitespace-only or empty entries in the env var are filtered out so
     that ``SIDERIUS_PLUGIN_DIRS=":dir_a::dir_b:"`` still resolves to
@@ -168,6 +185,7 @@ def _resolve_plugin_dirs() -> list[str]:
     ``plugin_binding.union_plugin_roots``, the ONE place root-set merging is
     expressed, so the loader and the transport cannot drift apart.
     """
+    from core.generated_library import generated_models_dir
     from ml_models.plugin_binding import active_run_model_plugin_roots, union_plugin_roots
 
     declared = active_run_model_plugin_roots()
@@ -176,7 +194,7 @@ def _resolve_plugin_dirs() -> list[str]:
         return list(union_plugin_roots(declared, env))
     if env:
         return [p for p in env.split(os.pathsep) if p.strip()]
-    return [AGENT_GENERATED_DIR]
+    return [generated_models_dir(), AGENT_GENERATED_DIR]
 
 
 def _refuse_ambiguous_origins(origins: dict[str, list[str]], scanned: list[str]) -> None:
@@ -194,10 +212,14 @@ def _refuse_ambiguous_origins(origins: dict[str, list[str]], scanned: list[str])
     same-named implementation from a directory it never declared, with
     nothing anywhere saying so.
 
-    **Legacy cannot reach this.** With a single scanned directory a
-    ``model_type`` can have only one origin, so the refusal never fires and
-    the pre-seam-P warn-and-overwrite behaviour within one directory is
-    untouched.
+    **Within one directory nothing changed** — the pre-seam-P
+    warn-and-overwrite behaviour for two files in the same dir is untouched.
+    Un-bound, un-env'd processes scan the two GLOBAL library locations since
+    arXiv P1 (resolved library + legacy checkout), so a ``model_type``
+    hand-copied into both now refuses here too — deliberately: promotion
+    never creates that state (same-name promotion is an idempotent skip
+    across both locations), and silently resolving it by scan order is the
+    exact failure this function exists to prevent.
     """
     if len(scanned) < 2:
         return
@@ -384,8 +406,7 @@ def register_model_in_memory(plugin_path: str) -> str | None:
 
 
 def preload_global_models() -> list[str]:
-    """Load all model plugins from ``agent_generated/models/`` into the
-    in-memory model registries.
+    """Load all promoted model plugins into the in-memory model registries.
 
     Mirrors ``ml_models.loss_models_sandbox.preload_global_losses`` for
     the model surface. Called at workflow startup so cross-process Branch B
@@ -394,22 +415,45 @@ def preload_global_models() -> list[str]:
     needing ``SIDERIUS_PLUGIN_DIRS``. Idempotent — safe to call multiple
     times; ``register_model_in_memory`` handles re-registration.
 
+    arXiv P1 — scans TWO locations, resolved library first:
+
+      1. the resolved generated-library models dir
+         (``core.generated_library.generated_models_dir()``), where every
+         promotion writes now;
+      2. the LEGACY CHECKOUT ``agent_generated/models``
+         (``AGENT_GENERATED_DIR``) — read-only compatibility, so models
+         promoted before the migration keep preloading.
+
+    A legacy file whose BASENAME already appeared in the resolved library is
+    skipped entirely — promotion names files ``{model_type}.py``, so a
+    same-named pair is the same declared model and the resolved-library copy
+    is authoritative. The shadow applies even when the resolved copy fails
+    to load: falling back to the legacy bytes there would silently register
+    a STALE implementation under the type name, when the honest outcome is
+    a loud loader log line and an absent type.
+
     Files starting with ``_`` are skipped (template / dunder convention,
     matching the existing ``_load_plugin`` scan in ``extend_registries``).
 
     Returns:
         List of ``model_type`` strings successfully loaded. Empty list when
-        ``AGENT_GENERATED_DIR`` does not exist or is empty (first-run /
-        fresh checkout).
+        neither directory exists or both are empty (first-run / fresh host).
     """
+    from core.generated_library import generated_models_dir
+
     loaded: list[str] = []
-    if not os.path.isdir(AGENT_GENERATED_DIR):
-        return loaded
-    for fname in sorted(os.listdir(AGENT_GENERATED_DIR)):
-        if not fname.endswith(".py") or fname.startswith("_"):
+    seen_basenames: set[str] = set()
+    for models_dir in (generated_models_dir(), AGENT_GENERATED_DIR):
+        if not os.path.isdir(models_dir):
             continue
-        plugin_path = os.path.join(AGENT_GENERATED_DIR, fname)
-        model_type = register_model_in_memory(plugin_path)
-        if model_type is not None:
-            loaded.append(model_type)
+        for fname in sorted(os.listdir(models_dir)):
+            if not fname.endswith(".py") or fname.startswith("_"):
+                continue
+            if fname in seen_basenames:
+                continue  # resolved-library copy shadows the legacy one
+            seen_basenames.add(fname)
+            plugin_path = os.path.join(models_dir, fname)
+            model_type = register_model_in_memory(plugin_path)
+            if model_type is not None:
+                loaded.append(model_type)
     return loaded

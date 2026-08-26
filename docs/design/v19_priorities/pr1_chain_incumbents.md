@@ -526,6 +526,60 @@ acceptable containment (operator rule, rev 2). Design:
   `enable_chain_incumbent_formal_gates` coupling, and mark the
   workspace integrity as degraded in every manifest it produces. A
   normal production chain never continues past a detected mismatch.
+- **arXiv-readiness S2 / U5 addendum (#257, #258; operator ruling:
+  normal iteration manifests are WRITE-ONCE).** The rev-2 design left
+  three things undetectable — a manifest FIELD edit, REMOVAL of
+  `run_output_sha256` (read as a pre-V19 legacy manifest and admitted),
+  and a plain rerun of the same iteration, which rewrote the manifest
+  with `open(path, "w")` and silently regenerated the hash. Closed by
+  ONE authority, `core/iteration_manifest.py`:
+  - every manifest gains **`manifest_sha256`**, a self-digest over the
+    canonical bytes (sorted keys, compact separators) of every other
+    field, stamped LAST by `publish_iteration_manifest` so any key a
+    producer adds is covered;
+  - `write_manifest` publishes **write-once** (`os.link`, the same
+    mechanism as `run_invariants_lock.json`); a second publish for the
+    same iteration is `ManifestAlreadyPublishedError` by name, and
+    `run_one_iteration.py` refuses the LAUNCH (`prepare_iteration_dir`,
+    exit 2) when `iter_NNN/manifest.json` already exists — before any
+    LLM, model or GPU work;
+  - the explicit replacement operation is
+    `--replace_iteration_manifest --replacement_reason '<why>'`: the
+    previous manifest is set aside as `manifest.replaced.<utc-stamp>.json`
+    (never deleted) and the new manifest records `manifest_replacement`
+    = `{replaced_at, replacement_reason, requested_at,
+    previous_manifest_sha256, previous_run_output_sha256,
+    previous_manifest_status, previous_manifest_path}`;
+    `run_output_sha256` is always computed for THIS publication's
+    artifact, never copied from the previous manifest. Refinement
+    (operator ruling, 2026-08-24): `run_one_iteration.py --auto_resume` —
+    forwarded by `run_chain.sh` only on the branch where the inspector
+    computed the start iteration — is recovery intent for a slot whose
+    existing manifest is terminally `failed`/`no_records`, routed through
+    this SAME replacement path with a recognizable `auto_resume recovery`
+    reason (the launcher classifies; the publish layer never inspects a
+    status). A `completed` or unclassifiable manifest is never replaced
+    by auto-resume;
+  - `verify_iteration_manifest` is the predicate `restore_prior_state`,
+    `per_file_best._iter_committed_sources` and
+    `scripts/inspect_run_state.py` all call (same message shape;
+    resume/per_file_best raise `ReplayIntegrityError`, the inspector
+    reports a fifth status **`TAMPERED`** and `--next-iter` refuses with
+    a non-zero exit): self-digest mismatch → STOP; a `completed` manifest
+    carrying `manifest_sha256` but no `run_output_sha256` → STOP (a
+    tamper, not a legacy downgrade); artifact bytes mismatch → STOP
+    (unchanged); a `no_records` manifest is self-digest-verified before
+    it is skipped. A pre-S2 manifest with neither digest stays admitted
+    and visibly unverified, exactly as rev 3 froze it.
+  - stated limit: a hand rewrite that recomputes EVERY digest is
+    indistinguishable from a legitimate publish — there is no secret.
+    The control against it is the write-once publish plus the
+    replacement provenance, which a rewrite through the sanctioned
+    producer cannot skip.
+  - `run_output_*.json` itself is now published serialise-first and
+    atomically (`core/durable_io.publish_json_atomically`), so a crash
+    mid-write can no longer leave a truncated artifact that the next
+    iteration reports as a tamper.
 - Incumbent derives only from `committed_iters` (which already
   excludes `no_records`); provenance pins
   `(iter_idx, round_index, exp_id)`. The incumbent is never cached

@@ -179,7 +179,7 @@ Re-run the diagnostic wavenet chain with the new YAML. Assert:
 - **Empirical calibration**: [`paper_and_collapse_reference_baselines.md`](./paper_and_collapse_reference_baselines.md) — three-way (FCNet / paper-spec baseline / agent_012) per-file reference data and threshold justifications
 - **Sibling execution plan**: [`m7_loss_implementor_contract_execution_plan.md`](./m7_loss_implementor_contract_execution_plan.md) (independent; unblocks Gate G5 real-run without workarounds)
 - **Superseded plans**: M1 and M4 execution plans were deleted alongside this doc's creation (DROPPED per §1.2)
-- **Post-V17**: [`analysis_tool_framework_generic_FUTURE.md`](./analysis_tool_framework_generic_FUTURE.md) (deferred pluggable Analysis Tool Framework)
+- **Post-V17**: `analysis_tool_framework_generic_FUTURE.md` (deferred pluggable Analysis Tool Framework) — **unpublished**: the deferred framework never received a design file in the repository.
 
 ## Appendix A — Empirical threshold calibration
 

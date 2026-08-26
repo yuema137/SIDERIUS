@@ -132,6 +132,14 @@ class WorkflowLaunchConfig:
     lit_review_enabled: bool = False
     lit_review_config_path: str = "configs/lit_review_config.yaml"
     require_probe_runner: bool = False
+    # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pure transit: the
+    # workflow locks it and forwards it to the tuner; it never interprets
+    # it (ruling R2). `None` is the unlabelled legacy run.
+    experiment_arm: str | None = None
+    # arXiv U3 (#260) — the WITHOUT arm's explicit isolation flag. Transit:
+    # the workflow locks it, forwards it to the interpreter / proposer /
+    # tuner inputs and refuses a bundled built-in proposal under it.
+    baseline_isolation: bool = False
 
     def __post_init__(self) -> None:
         """Refuse cross-iteration state (Amendment B).

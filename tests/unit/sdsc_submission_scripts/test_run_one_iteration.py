@@ -22,6 +22,7 @@ tests called out in design doc §3.5 Commit 8 live in the wiring layer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import pathlib
@@ -1320,7 +1321,8 @@ class TestComputeExpectedInvariants:
 class TestDataScopeChainWiring:
     """DS6c wiring through main(): invariants computed before restore, the
     three params reach run_workflow, and a conflicting second invocation
-    fails at startup with a crashed manifest."""
+    never reaches the workflow — refused at launch since S2 / U5 (#258),
+    or crashing on the immutability guard when the rerun is explicit."""
 
     def _main(self, tmp_path, *extra):
         argv = [
@@ -1347,17 +1349,194 @@ class TestDataScopeChainWiring:
         # Invariants were materialized into the chain root pre-restore.
         assert os.path.isfile(os.path.join(str(tmp_path), "health_checks_effective.yaml"))
 
-    def test_conflicting_second_invocation_crashes_before_workflow(self, tmp_path):
+    def test_a_second_launch_into_a_committed_iteration_is_refused_before_workflow(self, tmp_path):
+        """S2 / U5 (#258). Before write-once this test asserted that the
+        conflicting rerun wrote a ``failed`` manifest — i.e. that it
+        OVERWROTE the committed iteration's handoff. That is the hazard
+        #258 forbids. The committed manifest must survive byte-for-byte and
+        the rerun is refused at launch, before the invariants guard, the
+        restore or the workflow can run.
+
+        Re-scoped by the #258 refinement (operator ruling): this refusal is
+        a property of the COMPLETED manifest specifically — matrix row A in
+        ``TestAutoResumeRecovery`` proves ``--auto_resume`` does not lift
+        it, while a ``failed``/``no_records`` slot IS the auto-resume
+        recovery case (rows D/E)."""
         code, _ = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
         assert code == 0
-        # Same workspace, different monitored files → the materialized-config
-        # immutability guard fires inside compute_expected_invariants, before
-        # restore/run_workflow; the runner writes a crashed manifest.
+        manifest_path = tmp_path / "iter_001" / "manifest.json"
+        first = manifest_path.read_bytes()
+        assert json.loads(first)["status"] == "completed"
+
         code2, mock_wf2 = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "5,8")
+        assert code2 == 2
+        mock_wf2.assert_not_called()
+        assert manifest_path.read_bytes() == first
+
+    def test_an_explicit_replacement_still_crashes_on_the_conflicting_config(self, tmp_path):
+        """The original property, kept: with the replacement requested, the
+        materialized-config immutability guard fires inside
+        compute_expected_invariants before restore/run_workflow. The crashed
+        manifest now carries the replacement provenance, and the committed
+        one is set aside rather than destroyed."""
+        code, _ = self._main(tmp_path, "--data_scope", "4-9", "--health_gate_files", "4,7,9")
+        assert code == 0
+        first = (tmp_path / "iter_001" / "manifest.json").read_bytes()
+
+        code2, mock_wf2 = self._main(
+            tmp_path,
+            "--data_scope",
+            "4-9",
+            "--health_gate_files",
+            "5,8",
+            "--replace_iteration_manifest",
+            "--replacement_reason",
+            "conflicting rerun (test)",
+        )
         assert code2 == 1
         mock_wf2.assert_not_called()
         manifest = json.loads((tmp_path / "iter_001" / "manifest.json").read_text())
         assert manifest["status"] == "failed"
+        prov = manifest["manifest_replacement"]
+        assert prov["replacement_reason"] == "conflicting rerun (test)"
+        assert prov["previous_manifest_status"] == "completed"
+        assert prov["previous_manifest_sha256"] == hashlib.sha256(first).hexdigest()
+        assert (tmp_path / "iter_001" / prov["previous_manifest_path"]).read_bytes() == first
+
+    def test_the_replacement_flag_without_a_reason_is_refused_at_launch(self, tmp_path):
+        code, mock_wf = self._main(tmp_path, "--replace_iteration_manifest")
+        assert code == 2
+        mock_wf.assert_not_called()
+        assert not (tmp_path / "iter_001" / "manifest.json").exists()
+
+
+class TestAutoResumeRecovery:
+    """#258 refinement (operator ruling, 2026-08-24): ``--auto_resume`` is
+    recovery intent for a FAILED / NO_RECORDS same-iteration manifest ONLY,
+    routed through the EXISTING explicit replacement path with provenance.
+    A completed manifest stays immutable; without the flag, nothing changed.
+    Matrix rows A-E; row F is unit-level in ``test_manifest_write_once.py``.
+    """
+
+    def _main(self, tmp_path, *extra):
+        argv = [
+            "--workspace",
+            str(tmp_path),
+            "--start_iteration",
+            "1",
+            "--run_name",
+            "iter_001",
+            *extra,
+        ]
+        with patch.object(runner, "run_workflow") as mock_wf:
+            mock_wf.return_value = [_StubResult("c8_test_arch_a")]
+            code = _run_main(argv)
+        return code, mock_wf
+
+    def _seed(self, tmp_path, *, crashed):
+        """A terminal failed (crashed=True) or no_records manifest at iter_001."""
+        iter_dir = tmp_path / "iter_001"
+        iter_dir.mkdir()
+        runner.write_manifest(str(iter_dir), "iter_001", results=[], crashed=crashed)
+        return (iter_dir / "manifest.json").read_bytes()
+
+    @staticmethod
+    def _replaced_files(tmp_path):
+        return [n for n in os.listdir(tmp_path / "iter_001") if n.startswith("manifest.replaced.")]
+
+    def test_matrix_a_completed_plus_auto_resume_is_still_refused(self, tmp_path):
+        """Row A. PLANT TARGET: a naive rule that auto-replaces ANY existing
+        manifest turns this RED — the completed handoff would be set aside
+        and the iteration rerun."""
+        code, _ = self._main(tmp_path)
+        assert code == 0
+        manifest_path = tmp_path / "iter_001" / "manifest.json"
+        first = manifest_path.read_bytes()
+        assert json.loads(first)["status"] == "completed"
+
+        code2, wf2 = self._main(tmp_path, "--auto_resume")
+        assert code2 == 2
+        wf2.assert_not_called()
+        assert manifest_path.read_bytes() == first
+        assert self._replaced_files(tmp_path) == []
+
+    def test_matrix_b_failed_without_recovery_intent_is_refused(self, tmp_path):
+        """Row B: write-once holds — a failed slot still needs EXPLICIT
+        intent (the flag, or the operator's replacement op)."""
+        first = self._seed(tmp_path, crashed=True)
+        code, wf = self._main(tmp_path)
+        assert code == 2
+        wf.assert_not_called()
+        assert (tmp_path / "iter_001" / "manifest.json").read_bytes() == first
+
+    def test_matrix_c_no_records_without_recovery_intent_is_refused(self, tmp_path):
+        first = self._seed(tmp_path, crashed=False)
+        code, wf = self._main(tmp_path)
+        assert code == 2
+        wf.assert_not_called()
+        assert (tmp_path / "iter_001" / "manifest.json").read_bytes() == first
+
+    def test_matrix_d_failed_plus_auto_resume_replaces_with_provenance(self, tmp_path):
+        """Row D — the bounded flow: auto-resume + terminal 'failed' → the
+        EXISTING replacement path. The evidence establishes a prior manifest
+        existed, its prior terminal state, WHY this write happened (the
+        recognizable reason), and which bytes were replaced — a failed
+        manifest carries no artifact hash, but its history is not erasable."""
+        first = self._seed(tmp_path, crashed=True)
+        code, _ = self._main(tmp_path, "--auto_resume")
+        assert code == 0
+        manifest = json.loads((tmp_path / "iter_001" / "manifest.json").read_text())
+        assert manifest["status"] == "completed"
+        prov = manifest["manifest_replacement"]
+        assert prov["replacement_reason"].startswith("auto_resume recovery")
+        assert "'failed'" in prov["replacement_reason"]
+        assert prov["previous_manifest_status"] == "failed"
+        assert prov["previous_manifest_sha256"] == hashlib.sha256(first).hexdigest()
+        assert prov["previous_run_output_sha256"] is None
+        set_aside = tmp_path / "iter_001" / prov["previous_manifest_path"]
+        assert set_aside.read_bytes() == first
+
+    def test_matrix_e_no_records_plus_auto_resume_replaces_with_provenance(self, tmp_path):
+        first = self._seed(tmp_path, crashed=False)
+        code, _ = self._main(tmp_path, "--auto_resume")
+        assert code == 0
+        manifest = json.loads((tmp_path / "iter_001" / "manifest.json").read_text())
+        prov = manifest["manifest_replacement"]
+        assert prov["previous_manifest_status"] == "no_records"
+        assert prov["previous_manifest_sha256"] == hashlib.sha256(first).hexdigest()
+        assert prov["replacement_reason"].startswith("auto_resume recovery")
+        assert "'no_records'" in prov["replacement_reason"]
+        assert (tmp_path / "iter_001" / prov["previous_manifest_path"]).read_bytes() == first
+
+    def test_an_unclassifiable_manifest_fails_closed_under_auto_resume(self, tmp_path):
+        """Load-bearing beyond the matrix: a slot the launcher cannot
+        classify as failed/no_records is NOT authorized — malformed history
+        is never erased on a guess."""
+        iter_dir = tmp_path / "iter_001"
+        iter_dir.mkdir()
+        (iter_dir / "manifest.json").write_bytes(b"{not json")
+        code, wf = self._main(tmp_path, "--auto_resume")
+        assert code == 2
+        wf.assert_not_called()
+        assert (iter_dir / "manifest.json").read_bytes() == b"{not json"
+
+    def test_the_explicit_operator_reason_outranks_the_auto_reason(self, tmp_path):
+        """The destructive replacement stays the separate operator-visible
+        operation: given both, the provenance carries the operator's words,
+        never the auto template."""
+        self._seed(tmp_path, crashed=True)
+        code, _ = self._main(
+            tmp_path,
+            "--auto_resume",
+            "--replace_iteration_manifest",
+            "--replacement_reason",
+            "operator-directed rerun",
+        )
+        assert code == 0
+        prov = json.loads((tmp_path / "iter_001" / "manifest.json").read_text())[
+            "manifest_replacement"
+        ]
+        assert prov["replacement_reason"] == "operator-directed rerun"
 
 
 class TestManifestInvariantStamps:

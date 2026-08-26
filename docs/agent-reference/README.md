@@ -61,14 +61,21 @@ Cross-node concepts, documented by **semantic owner** rather than by file.
 
 Each node owns one stage. Its `.md` is the contract.
 
-| node | role | LLM |
-|---|---|:---:|
-| [`result_interpretation_agent`](../../nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ |
-| [`ml_literature_review`](../../nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ |
-| [`ml_model_proposal_agent`](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ |
-| [`ml_model_implementor`](../../nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ |
-| [`ml_code_validator_agent`](../../nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ |
-| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ |
+| node | role | LLM | CLI (`main()`) |
+|---|---|:---:|---|
+| [`result_interpretation_agent`](../../nodes/result_interpretation_agent/result_interpretation_agent.md) | synthesise evidence across records; state what it supports | ✅ | `nodes/result_interpretation_agent/result_interpretation_agent.py:1259` |
+| [`ml_literature_review`](../../nodes/ml_literature_review/ml_literature_review.md) | surface papers as soft priors (optional stage) | ✅ | `nodes/ml_literature_review/ml_literature_review.py:1055` (upstream record read from disk by naming convention — #303) |
+| [`ml_model_proposal_agent`](../../nodes/ml_model_proposal_agent/ml_model_proposal_agent.md) | propose an architecture and an explicit prediction | ✅ | `nodes/ml_model_proposal_agent/ml_model_proposal_agent.py:2297` |
+| [`ml_model_implementor`](../../nodes/ml_model_implementor/ml_model_implementor.md) | write the model plugin (and optional loss plugin) | ✅ | `nodes/ml_model_implementor/ml_model_implementor.py:2354` |
+| [`ml_code_validator_agent`](../../nodes/ml_code_validator_agent/ml_code_validator_agent.md) | deterministic checks + LLM review of generated code | ✅ | `nodes/ml_code_validator_agent/ml_code_validator_agent.py:896` |
+| [`ml_hyperparameter_tune_agent`](../../nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.md) | N rounds of plan → train → infer → score → health → reflect | ✅ | `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py:1793` (parser and input builder in `cli.py`) |
+
+Five of the six nodes are standalone-capable — each exposes an `argparse`
+`main()` behind `if __name__ == "__main__":` at the line cited. The CLI column
+is verified by `tests/unit/docs/test_node_docs_contract.py`: the cited line
+must be a `def main` and a node marked workflow-only must have no `__main__`
+guard. Invocation examples for the tuner's CLI are deliberately not written
+here while its `cli.py` is changing in PR-12d.
 
 Adding a node: [`nodes/NODE_TEMPLATE.md`](../../nodes/NODE_TEMPLATE.md) — all
 eight steps, including the connection audit.

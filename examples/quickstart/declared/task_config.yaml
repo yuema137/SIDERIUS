@@ -1,0 +1,52 @@
+# Quickstart — the pack's OWN task description + forward contract.
+#
+# Post-PR-12d home (README §7 step 2 executed). Q-12d-1: task-owned
+# declarations CO-LOCATE with the pack; `configs/task_composition/
+# quickstart.yaml` only POINTS here and carries no second copy of any of it.
+# Governance guard (a) exempts exactly this file BECAUSE that shipped
+# manifest binds it (`test_pack_governance.py::_composition_bound_task_configs`);
+# an identical YAML nobody binds is still a refused parallel copy.
+#
+# Loaded through the SAME `load_task_config` a legacy run uses, via
+# `_compose_task_config` under the composed dataset profile.
+
+task_description: |
+  Binary classification of tiny synthetic 4-feature vectors. Each sample is
+  x in R^4 drawn uniformly from [-1, 1]; the label is 1 exactly when
+  x0*x1 + sin(pi*x2) > x3, with 3% of labels deterministically flipped, so a
+  perfect score is impossible by construction. The golden metric is accuracy
+  over the held-out evaluation rows and HIGHER is better. The dataset is
+  256 rows in 4 shards, regenerated bit-identically from a pinned seed —
+  this task exists to demonstrate the SIDERIUS workflow mechanics on a CPU
+  in seconds, not to be a benchmark.
+
+forward_contract:
+  # Step 03 — `model_io:` is THE authority; `input_shape`/`output_shape`/
+  # `num_classes` are DERIVED from it and deliberately not authored here
+  # (the pets pack's precedent, and its hard-won lesson: with `model_io`
+  # undeclared, the admission resource-check's dtype resolution falls back
+  # to an int64 preference that is wrong for a float-native model).
+  # Composable since PR-12d closed F-12d-4 — before that, a composed
+  # non-TIDMAD task config declaring `model_io` was refused at composition.
+  model_io:
+    input:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {dimension: {fixed: 4}}
+      dtype: {admissible: ["float32"]}
+    output:
+      axes:
+        - {role: batch, dimension: {symbolic: "B"}}
+        - {role: class, dimension: {fixed: 2}}
+      dtype: {admissible: ["float32"]}
+  input_description: "a batch of 4-feature vectors, values in [-1, 1]"
+  output_description: "per-class logits for the two classes"
+  task_type: "classification"
+  output_head_note: >-
+    Output must be exactly [B, 2] — a final Linear(features, 2). Do NOT
+    apply softmax inside the model: the deliverable codec and the metric
+    own that decision.
+  task_note: >-
+    A deliberately tiny tabular problem: the useful signal is a smooth
+    nonlinear function of 4 features. There is no spatial or temporal
+    structure. Models should stay small (a 2-layer MLP suffices).

@@ -232,11 +232,19 @@ class TestInvertedGuardB0:
         Fails when a manifest is added or removed without this line moving —
         which is the point: a shipped composition manifest is an OPERATOR
         ENTRYPOINT, and one appearing unannounced is exactly what B0 watched
-        for. The set is now final for 12d; a fourth entry belongs to 12e's
-        out-of-tree graduation and must be argued there, not here.
+        for.
+
+        DECLARED DELTA (arXiv-readiness S5, announced — the guard fired at
+        final integration exactly as designed): ``quickstart.yaml`` joined
+        the set. It is the collaborator-onboarding pack's entrypoint
+        (`examples/quickstart/`), and it is ALSO what legitimizes the pack's
+        committed ``declared/task_config.yaml`` under the landed governance
+        guard (a) — the manifest's ``task_config.config:`` binding is the
+        exemption mechanism 12d re-scoped that guard to. A FIFTH entry still
+        needs its own announcement here.
         """
         shipped = sorted(p.name for p in (REPO_ROOT / "configs" / "task_composition").iterdir())
-        assert shipped == ["davis.yaml", "pets.yaml", "tidmad.yaml"]
+        assert shipped == ["davis.yaml", "pets.yaml", "quickstart.yaml", "tidmad.yaml"]
 
     def test_neither_pack_keeps_a_SECOND_dataset_profile_in_its_fixture(self):
         """The deletion, asserted — and it is the deletion that matters.

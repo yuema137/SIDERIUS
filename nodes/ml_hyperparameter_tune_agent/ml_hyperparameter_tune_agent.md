@@ -5,9 +5,9 @@
 ## Position in the pipeline
 
 - **Node type**: **standalone-capable** — `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py` exposes a CLI `main()` that takes the model + budgets + LLM config as flags, builds a `HyperparamTuningInput`, runs the full optimization loop, and writes `run_output_{run_name}.json` to the workspace. The CLI is the historical TIDMAD-style invocation and is what `scripts/run_comparison.py` calls.
-- **Upstream**: `ml_model_proposal_agent` (provides `model_type`, `expert_advice`, `baseline_config`, `parameter_count_estimate` via the `proposal_to_hyperparam_seeded_v1` protocol). Plus `ml_code_validator_agent` gates whether a plugin reaches the tuner (only `passed=True` plugins get tuned).
-- **Downstream**: `result_interpretation_agent` (consumes `HyperparamTuningOutput` per model, converted via `tuning_output_to_model_run_summary` into a `ModelRunSummary` that feeds the next interpretation iteration).
-- **Protocol (upstream)**: `proposal_to_hyperparam_seeded_v1` — maps `ProposalOutput.{model_name, expert_advice, baseline_config, parameter_count_estimate}` into this node's seed.
+- **Upstream**: `ml_code_validator_agent` and `ml_model_proposal_agent`, through ONE fan-in protocol — `local_validated_model` in `agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py` — which takes the validator's `ValidatorOutput` (the validated `model_type`; the workflow traverses this edge only when `passed=True`) beside the `ProposalOutput` (which supplies `expert_advice`, with the validator's deviation notes prepended, and `baseline_config`). There is no separate proposal→tuner protocol module.
+- **Downstream**: `result_interpretation_agent` (consumes `HyperparamTuningOutput` per model, converted via `tuning_output_to_model_run_summary` into a `ModelRunSummary` that feeds the next interpretation iteration; the edge's protocol module is `agent/schemas/protocols/ml_model_tune_to_ml_result_interp.py::local_all_records`).
+- **Protocol (upstream)**: `ml_model_valid_to_ml_model_tune.py::local_validated_model` — builds this node's `HyperparamTuningInput` from `ValidatorOutput.model_type` + `ProposalOutput.{expert_advice, baseline_config}` plus the run posture the workflow passes (budgets, scope, health, LLM config, task composition).
 
 ## Input
 
@@ -284,6 +284,10 @@ executes, without distorting what the planner is allowed to decide. See
 | `enable_structured_health_feedback` | `bool` | No | `False` | V19 PR 3 chain-policy PASS-THROUGH. The tuner has NO PR 3 behavior of its own: it passes this value into its run-invariants lock call and stamps it into `run_config` — nothing else reads it (a source regression test pins exactly two references). The flag's behavioral effect lives in the interpreter/proposer prompts. |
 | `health_feedback_history_window_iterations` | `int` (`>= 1`) | No | `3` | V19 PR 3 retention-policy pass-through (locked + stamped only; consumed by the interpreter's history merge, not by the tuner). |
 | `health_feedback_history_max_entries_per_model` | `int` (`>= 1`) | No | `8` | V19 PR 3 retention-policy pass-through (locked + stamped only). |
+| `experiment_arm` | `str \| None` | No | `None` | **arXiv U1 (#254)** — OPAQUE experiment-arm PASS-THROUGH. Locked into the per-model `run_invariants_lock.json` and stamped on every record (at `_emit_record`, ONLY when not `None`) and on the output (both exit paths). Never read to decide behaviour (ruling R2 — an AST census refuses any test expression in the node that mentions it). `None` = unlabelled legacy run. |
+| `lit_review_enabled` | `bool` | No | `False` | **arXiv U1 (#253)** — workflow-topology pass-through: whether the chain's `ml_literature_review` node ran. Locked only; the tuner has no lit-review behaviour. |
+| `lit_review_config_sha256` | `str \| None` | No | `None` | **arXiv U1 (#253)** — sha256 of the resolved lit-review YAML when enabled, else `None`. Locked only; the lock refuses `lit_review_enabled=True` without it, and a pin without the flag. |
+| `baseline_isolation` | `bool` | No | `False` | **arXiv U3 (#260)** — the WITHOUT arm's explicit isolation flag. Locked into the per-model lock and forwarded to `get_model_description(...)`, which then refuses a BUNDLED `ml_models/*/description.md`; the tuner has no other behaviour under it (a built-in candidate is refused upstream, before tuning). |
 
 ## Output
 
@@ -306,6 +310,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `all_records` | `list[ExperimentRecord]` | Complete experiment history including successful, failed, OOM-skipped, and (V20 PR B) admission-refused rounds — the last are phases that never started, so they carry no score and are not candidate failures. Each record contains params, results, timing, and any error message. **The dominant payload by size.** |
 | `gate_exhaustion` | `GateExhaustionInfo \| None` | Populated when **either** trigger fires. **Trigger A**: no attempt reached `status == "success"` AND ≥1 attempt was rejected by the pre-flight resource gate. **Trigger B**: the outer loop aborted on the consecutive-failure brake after `completed_rounds > 0` — so under Trigger B earlier rounds **did** succeed. Used by the downstream proposer's `recent_gate_exhaustions` field to learn from prior tuner-side gate failures. C12-P: the rendered `summary_message` and log line now state how many attempts **reached training**, because Trigger A's predicate ("no *successful* outcome") was being rendered as "never trained" — false for an attempt that trained and then failed HealthGate, and false unconditionally under Trigger B. |
 | `trial_validity_feedback` | `TrialValidityFeedback \| None` | **V20 PR D (D-C6)** — populated only when the iteration ran trial rounds but produced NO HealthGate-valid winner. Reaches the next proposer via `ProposalInput.recent_trial_validity`. Deliberately SEPARATE from `gate_exhaustion`, which reports BUDGET exhaustion: these trials ran and succeeded and then failed their scientific gates, so `gate_exhaustion`'s triggers never fire for them, and the two call for opposite responses (propose lighter vs propose something that does not collapse). `None` whenever any trial is valid. |
+| `experiment_arm` | `str \| None` | **arXiv U1 (#254)** — the opaque arm label echoed from the input on BOTH the healthy and the degraded exit path (the `candidate_id` precedent), so a later resume can certify the output it restores. `None` for an unlabelled run and for every pre-U1 output. |
 | `formal_comparison_reference_source` | `str \| None` | **V20 PR D (D-C3)** — provenance of `formal_reference_score`: `restored_valid_formal_incumbent`, `negative_infinity_bootstrap` (no incumbent existed; the reference resolved to `-inf` internally) or `gates_disabled`. Read it WITH the reference: `null` alone is ambiguous across all three. `-inf` is never serialised. |
 | `scientific_authority` (per record) | `dict \| None` | **V20 PR D (D-C2b/D-C4)** — on FORMAL records only, the authority verdict with its three facts beside its conclusions, so it is recomputable and therefore tamper-EVIDENT. Consumers must re-derive via `resolve_record_authority()` rather than trusting the stored conclusions. |
 | `metric_result` (per record) | `MetricResult \| None` | **Step 06 (2026-08)** — the evaluation metric's own result for the attempt, written by the metric handle on the live scoring route: `metric_id` (`tidmad_denoising_score`), `direction` (`higher`), `scalar` (== `denoising_score` on a `success` record — validated), `references_used`; `per_sample` is a POINTER to `file_vector` on the same record (not stored twice). `None` on records written before Step 06, on attempts that never reached scoring, and on the legacy single-file skill route. On a `failed_mode_collapse` record it is the metric's RAW value while `denoising_score` carries the gate policy's penalty. |
@@ -473,6 +478,17 @@ they change what its subprocesses read and what its records carry.
   `_emit_record`, the single validate-and-persist seam. `None` for an
   un-composed run. A composed run refuses at ingress any restored record or
   seed it cannot certify as its own.
+
+* **Every record of a LABELLED run carries `experiment_arm`** (arXiv U1,
+  #254). Stamped at the same `_emit_record` seam, but ONLY when the input
+  carries a label, so an unlabelled run's on-disk summary entries are
+  byte-identical to pre-U1. Every emission site passes it explicitly
+  (`experiment_arm=agent_input.experiment_arm` — the `candidate_id`
+  precedent; a census over the whole node refuses a site that omits it),
+  and the per-model lock pins the same value. A labelled run refuses at
+  ingress any restored record or seed that carries no label or a different
+  one; an unlabelled run is untouched by the rule. The label is opaque: the
+  tuner never reads its value.
 
 
 ### GPU admission and failure attribution (V20 PR B)

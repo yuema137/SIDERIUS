@@ -463,6 +463,27 @@ partial `--data_scope` (anything narrower than the full 20 files),
    seeded state matters — operator-approved on a case-by-case
    basis only.
 
+   **Cold-start checklist (arXiv U3, #259).** "Cold start" is more than
+   omitting `--seed_paths`: several caches survive a fresh workspace and
+   silently carry evidence or capability state between runs. Work the
+   list IN ORDER before any cold-start gate or experiment launch; the
+   right-hand column says what a genuinely cold run looks like.
+
+   | # | state | cold-start action |
+   |---|---|---|
+   | 1 | the chain workspace (`--workspace DIR`) | CLEAR — a fresh, empty (or absent) directory; a reused workspace resumes against its `run_invariants_lock.json` instead of starting cold |
+   | 2 | `--seed_paths` | OMIT entirely (the operator rule above) |
+   | 3 | `agent_generated/models/` + `agent_generated/_capability_index.json` | CLEAR for a cold CAPABILITY surface: the proposer advertises this registry (Branch B) and the plugin loader registers every `.py` here at import — leftover plugins from prior campaigns are prior evidence |
+   | 4 | `${SIDERIUS_CHAIN_WORKSPACE}/plugins/` | cleared BY step 1 when the workspace is fresh; listed separately because `get_model_description` resolves plugin descriptions from here across iterations |
+   | 5 | `reference_data/root_papers_cache/` | RETAIN by default — it caches per-paper EXTRACTS of the fixed root-paper set (deterministic inputs, not run evidence); clear only when the experiment's question includes the lit-review retrieval cost itself |
+   | 6 | the runtime-calibration store (`$SIDERIUS_CALIBRATION_DIR`, default `~/.siderius/runtime_calibration/`) | RETAIN — host calibration, not task evidence (the lock RECORDS it and never compares it); clear only for a cold-HOST measurement study |
+   | 7 | the advice file (`--advice` / `--human_advice_file`) | OMIT for a cold run; `launch_prior_baseline_experiment.sh` refuses advice files in BOTH arms because a V20 explorer file names FCNet's 323 M scale |
+
+   The two-arm prior-art experiment launches through
+   `sdsc_submission_scripts/launch_prior_baseline_experiment.sh`, which
+   already refuses `--seed_paths` and advice files; items 1 and 3 remain
+   the operator's manual pre-launch steps.
+
 ### Gate 2 parameter plans (Lite / Regular) — OPT-IN deeper shapes
 
 **These are not the default.** The canonical bounded command above is.

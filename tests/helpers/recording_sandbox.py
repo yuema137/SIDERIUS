@@ -19,8 +19,10 @@ Design principles (see ``docs/pseudo_test_infra.md`` §4B):
     real ``TidmadSandbox.execute_*()`` returns. Per-method FIFO queue,
     loud failure on exhaustion.
   * ``save_record`` keeps an in-memory list (``saved_records``) for fast
-    test assertions AND writes to the same ``summary_{run_name}.json`` path
-    the real sandbox uses, so any code that reads it back works.
+    test assertions AND persists through the real ``LocalRecorder`` — the
+    canonical ``records/<run_name>/records.jsonl`` plus the derived
+    ``summary_{run_name}.json`` view — so any code that reads either back
+    sees exactly what production writes (S2 / U5).
   * Public ``calls`` and ``saved_records`` lists for direct test
     inspection. No helper methods.
 """
@@ -227,31 +229,41 @@ class RecordingSandbox:
     # ------------------------------------------------------------------
 
     def get_summary(self) -> list[dict[str, Any]]:
-        """Mirror of :meth:`TidmadSandbox.get_summary`. Returns all records
-        saved so far, in order. Reads from the in-memory list (identical to
-        what's on disk in ``summary_{run_name}.json``)."""
-        return list(self.saved_records)
+        """Mirror of :meth:`TidmadSandbox.get_summary`.
+
+        S2 / U5: reads through the REAL ``LocalRecorder`` (the same
+        canonical-log projection production reads), so a test sees the
+        production semantics — latest-wins by ``exp_id``, first-insertion
+        order, ``-inf`` coerced to ``null`` — rather than the raw in-memory
+        list. ``saved_records`` remains the verbatim in-memory mirror for
+        direct assertions.
+        """
+        return self._recorder().get_summary()
 
     def save_record(self, record: dict[str, Any]) -> None:
         """Mirror of :meth:`TidmadSandbox.save_record`. Appends to the
-        in-memory ``saved_records`` list AND to the on-disk
-        ``summary_{run_name}.json`` file (creating it if absent), exactly
-        like the real sandbox.
+        in-memory ``saved_records`` list AND persists through the REAL
+        ``LocalRecorder`` — canonical ``records/<run_name>/records.jsonl``,
+        per-record detail file, and the derived ``summary_{run_name}.json``
+        projection — exactly like the real sandbox. The fake used to keep its
+        own append-only summary writer, which could not exhibit the upsert
+        contract production relies on.
         """
         self.calls.append(("save_record", record.get("exp_id", "<unknown>")))
         self.saved_records.append(record)
+        self._recorder().save_record(record)
+
+    def _recorder(self):
+        """The production recorder over this sandbox's own layout.
+
+        Constructed lazily and imported locally for the same reason the
+        plugin-dir authorities are: ``core.sandbox_executor`` pulls the model
+        registry in, and the fake must stay importable without it.
+        """
+        from core.sandbox_executor import LocalRecorder
 
         summary_path = os.path.join(self.base_dir, f"summary_{self.run_name}.json")
-        existing: list[dict[str, Any]] = []
-        if os.path.exists(summary_path):
-            with open(summary_path) as f:
-                try:
-                    existing = json.load(f)
-                except json.JSONDecodeError:
-                    existing = []
-        existing.append(record)
-        with open(summary_path, "w") as f:
-            json.dump(existing, f, indent=2)
+        return LocalRecorder(self.dirs["records"], summary_path, self.run_name)
 
     # ------------------------------------------------------------------
     # Internal helpers

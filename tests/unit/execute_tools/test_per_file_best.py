@@ -755,10 +755,12 @@ class TestTheProducerSerializationBoundary:
     """The bytes production writes, read by the consumer that must read them.
 
     The fixture above writes `output.model_dump_json()`. Production
-    (`nodes/ml_hyperparameter_tune_agent/records.py:952-954`) writes
-    `json.dump(coerce_nonfinite_to_none(output.model_dump()), ...)`, and its
-    own comment says why: `model_dump_json` emits non-standard `-Infinity`
-    tokens that break the dashboard's `JSON.parse`.
+    (`nodes/ml_hyperparameter_tune_agent/records.py`, `finalize_run_output`)
+    writes `publish_json_atomically(output_path,
+    coerce_nonfinite_to_none(output.model_dump()), indent=4)` — the
+    `json.dump(..., indent=4)` bytes, published atomically since S2 / U5 —
+    and its own comment says why it coerces: `model_dump_json` emits
+    non-standard `-Infinity` tokens that break the dashboard's `JSON.parse`.
 
     So the whole `-inf` no-signal path through `build_table` and the
     `run_output_sha256` byte check has only ever been exercised against a
@@ -779,19 +781,21 @@ class TestTheProducerSerializationBoundary:
 
     @staticmethod
     def _write_as_production_does(path: str, output: HyperparamTuningOutput) -> None:
+        from core.durable_io import publish_json_atomically
         from execute_tools.scoring_utils import coerce_nonfinite_to_none
 
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(coerce_nonfinite_to_none(output.model_dump()), f, indent=4)
+        publish_json_atomically(path, coerce_nonfinite_to_none(output.model_dump()), indent=4)
 
     def test_production_writes_through_the_coercion(self):
-        """Reachability. If `records.py` stops coercing, or coerces AFTER
-        serialising, the round-trip below stops describing production."""
+        """Reachability. If `records.py` stops coercing, coerces AFTER
+        serialising, or goes back to a truncating `open(path, "w")` write,
+        the round-trip below stops describing production."""
         src = (REPO_ROOT / "nodes" / "ml_hyperparameter_tune_agent" / "records.py").read_text(
             encoding="utf-8"
         )
         assert "coerce_nonfinite_to_none(agent_output.model_dump())" in src
-        assert "json.dump(safe_output" in src
+        assert "publish_json_atomically(output_path, safe_output, indent=4)" in src
+        assert "json.dump(safe_output" not in src
         assert "f.write(agent_output.model_dump_json())" not in src
 
     def test_a_no_signal_score_survives_as_null_not_as_a_nonstandard_token(self, tmp_path):
@@ -859,3 +863,43 @@ class TestTheProducerSerializationBoundary:
 
         table = build_table(workspace)
         assert table is not None
+
+
+# ---------------------------------------------------------------------------
+# S2 / U5 (#258) — the rebuild applies the SAME manifest predicate as resume
+# ---------------------------------------------------------------------------
+
+
+def test_an_edited_manifest_field_fails_the_rebuild_closed(tmp_path):
+    """Undetected before S2: only the artifact bytes were hashed, so a
+    hand-edited manifest still fed rows into the table. Fails if the
+    table is built (or the iteration silently skipped) instead of raising."""
+    from core.iteration_manifest import publish_iteration_manifest
+
+    ws = str(tmp_path)
+    _write_iter(
+        ws,
+        1,
+        [_record("a", file_vector=[0.5, None] + [None] * 18, logical_round=1)],
+        formal_eval_portion=1.0,
+        formal_strategy="snapshot",
+    )
+    iter_dir = os.path.join(ws, "iter_001")
+    manifest_path = os.path.join(iter_dir, "manifest.json")
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    os.remove(manifest_path)
+    publish_iteration_manifest(iter_dir, manifest)  # now carries manifest_sha256
+    assert build_table(ws)["rows"], "anti-vacuity: the untampered fixture must yield rows"
+
+    with open(manifest_path, encoding="utf-8") as f:
+        published = json.load(f)
+    published["model_name"] = "tampered"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(published, f)
+
+    with pytest.raises(ReplayIntegrityError) as exc:
+        build_table(ws)
+    assert "REPLAY-INTEGRITY" in str(exc.value)
+    assert "manifest changed after publication" in str(exc.value)
+    assert manifest_path in str(exc.value)

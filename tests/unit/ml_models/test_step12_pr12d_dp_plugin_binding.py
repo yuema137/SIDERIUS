@@ -713,11 +713,19 @@ class TestLegacyUnchanged:
         monkeypatch.delenv(PLUGIN_DIRS_ENV_VAR, raising=False)
         assert subprocess_env(plugin_dir="/legacy/dir")[PLUGIN_DIRS_ENV_VAR] == "/legacy/dir"
 
-    def test_no_binding_and_no_ambient_resolves_the_legacy_global_dir(self, monkeypatch):
+    def test_no_binding_and_no_ambient_resolves_the_global_library_dirs(self, monkeypatch):
+        """Seam-P concern preserved: with NO run-scoped binding and NO env
+        var, the scan must resolve to the GLOBAL library — never to a
+        declared root that isn't there. arXiv P1 amended what "the global
+        library" is: the resolved generated-library models dir first, then
+        the legacy checkout AGENT_GENERATED_DIR as read-only compatibility.
+        The binding-absence property this class owns is unchanged — the
+        list still contains no declared roots."""
+        from core.generated_library import generated_models_dir
         from ml_models.plugin_loader import AGENT_GENERATED_DIR, _resolve_plugin_dirs
 
         monkeypatch.delenv(PLUGIN_DIRS_ENV_VAR, raising=False)
-        assert _resolve_plugin_dirs() == [AGENT_GENERATED_DIR]
+        assert _resolve_plugin_dirs() == [generated_models_dir(), AGENT_GENERATED_DIR]
 
     def test_an_ambient_list_still_suppresses_the_legacy_global_dir(self, monkeypatch):
         from ml_models.plugin_loader import AGENT_GENERATED_DIR, _resolve_plugin_dirs

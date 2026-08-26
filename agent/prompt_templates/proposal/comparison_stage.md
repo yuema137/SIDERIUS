@@ -47,9 +47,9 @@ A JSON object with these fields:
 {
   "comparisons": [
     {
-      "model_type": "wavenet",
+      "model_type": "{example_model_type}",
       "source": "seed",
-      "best_score": 5.57,
+      "best_score": {example_sota_score},
       "key_mechanism": "One sentence: what makes this model tick. Must reference a specific feature from the vocabulary, e.g. 'dilated_causal_conv provides exponential receptive field growth.'",
       "strengths": ["Tied to file_vector evidence, e.g. 'strong on files 10-19 (high freq)'"],
       "weaknesses": ["Tied to file_vector evidence, e.g. 'near-zero on files 0-4 (low freq)'"],
@@ -60,7 +60,7 @@ A JSON object with these fields:
     {
       "feature": "dilated_causal_conv",
       "capability": "receptive_field",
-      "evidence": "Wavenet uses dilated_causal_conv and scores 5.57 on high-freq files. Models without this feature score below 2.0 on the same files.",
+      "evidence": "{example_model_type_capitalized} uses dilated_causal_conv and scores {example_sota_score} on high-freq files. Models without this feature score below 2.0 on the same files.",
       "status": "proposed"
     }
   ],
@@ -71,8 +71,8 @@ A JSON object with these fields:
       "description": "Gated FNO with log-spaced frequency bins — observed in 2 of top 3 models."
     }
   ],
-  "sota_model_type": "wavenet",
-  "sota_score": 5.57,
+  "sota_model_type": "{example_model_type}",
+  "sota_score": {example_sota_score},
   "sota_mechanism": "Why the SOTA works — reference specific features and their measured effects."
 }
 ```
@@ -136,7 +136,7 @@ A JSON object with these fields:
 
 6. **Suggest ablation experiments.** For the SOTA model's key features,
    note which ones could be ablated to test their isolated contribution.
-   E.g. "Removing dilated_causal_conv from wavenet and replacing with
+   E.g. "Removing dilated_causal_conv from {example_model_type} and replacing with
    standard convolutions would test whether the dilation pattern is
    the actual driver of the high-freq performance."
 

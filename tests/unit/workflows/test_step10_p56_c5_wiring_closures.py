@@ -456,7 +456,12 @@ class TestW7PreflightAndWorkflowAgree:
         runner = (REPO_ROOT / "sdsc_submission_scripts" / "run_one_iteration.py").read_text(
             encoding="utf-8"
         )
-        assert "compute_expected_invariants(args, run_composition=run_composition)" in runner
+        # Kwarg-tolerant (arXiv U1 added launch_identity= to the same call,
+        # and the formatter wraps it): the property owned here is that the
+        # COMPOSITION OBJECT is what crosses — not which siblings ride along.
+        assert re.search(
+            r"compute_expected_invariants\(\s*args,\s*run_composition=run_composition", runner
+        )
 
     def test_the_composition_is_resolved_before_the_preflight(self):
         """Ordering is the fix's substance: composing AFTER the pre-flight

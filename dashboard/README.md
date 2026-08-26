@@ -3,6 +3,14 @@
 A FastAPI-based live monitoring dashboard for SIDERIUS ML experiment runs.
 Read-only observer — requires no changes to the experiment pipeline.
 
+New here? Start from the user guide —
+[browsing results with the dashboard](../docs/guides/dashboard.md) — which
+covers pointing it at your results, the layouts it understands, and the
+known display caveats. The full defect ledger with post-PR-12e fix candidates
+is the [dashboard UX audit](../docs/agent-reference/dashboard_ux_audit.md).
+This file is the technical reference: structure, configuration, endpoints,
+tests.
+
 ## Structure
 
 ```
@@ -39,7 +47,7 @@ Key settings to verify before first run:
 data_source:
   type: local
   local:
-    root_data_dir: /home/klz/Data/SIDEREIS_DATA   # path to experiment outputs
+    root_data_dir: /path/to/experiment/outputs   # the directory ABOVE your runs
 
 server:
   host: 0.0.0.0    # 0.0.0.0 = accessible from other machines; 127.0.0.1 = local only

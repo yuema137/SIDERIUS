@@ -51,7 +51,7 @@ _PRESENT = "<present>"
 # detect it; the known-defect register is the guard.
 # ---------------------------------------------------------------------------
 
-EXPERIMENT_RECORD_FIELDS_62 = [
+EXPERIMENT_RECORD_FIELDS_63 = [
     "record_type",
     "exp_id",
     "status",
@@ -106,6 +106,15 @@ EXPERIMENT_RECORD_FIELDS_62 = [
     # so every record of an UN-composed run carries what these baselines
     # already pin.
     "task_composition_fingerprint",
+    # arXiv U1 (#254) — ADDITIVE: the OPAQUE experiment-arm label, stamped at
+    # the same validate-and-persist seam as the fingerprint above but ONLY
+    # when the run is labelled, so the on-disk summary entries of an
+    # unlabelled run (REC-3, pinned below) carry no key. 62 -> 63; positioned
+    # beside the other run-invariant stamp it is validated with, every
+    # earlier position unchanged. Defaults None, so every record of an
+    # unlabelled run still projects to what REC-2 pins (with one added
+    # `experiment_arm: null` — the same declared-delta shape as C8's).
+    "experiment_arm",
     "resolved_data_scope",
     "health_gate_enabled",
     "planned_trial_strategy",
@@ -194,7 +203,7 @@ def pseudo_run(tmp_path_factory):
 
 class TestREC1FieldLists:
     def test_experiment_record_ordered_fields(self):
-        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_62
+        assert list(ExperimentRecord.model_fields) == EXPERIMENT_RECORD_FIELDS_63
 
     def test_output_and_interpretation_field_counts_and_heads(self):
         """REC-3 schema part: HyperparamTuningOutput and

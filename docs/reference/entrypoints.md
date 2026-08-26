@@ -16,6 +16,7 @@ the flags that decide *what a run is*.
 | you want to | use |
 |---|---|
 | run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
+| run one arm of the prior-art baseline experiment (arXiv X9) | `sdsc_submission_scripts/launch_prior_baseline_experiment.sh` |
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
 | drive the workflow directly from Python | `workflows/model_exploration.py` |
 | compare a built-in TIDMAD model against baselines | `scripts/run_comparison.py` |
@@ -51,6 +52,8 @@ bash sdsc_submission_scripts/run_chain.sh \
 | `--auto_resume` / `--no_auto_resume` | default **ON**: pick up where a partial chain stopped |
 | `--start_iter N` | manual override of auto-resume |
 | `--dry-run` | walk the chain, print exact commands, no side effects |
+| `--experiment_arm LABEL` | opaque experiment-arm label (arXiv U1). Pinned into `run_invariants_lock.json` and stamped on every record, tuner output and manifest; forwarded only when set. **Omitted = unlabelled**, byte-identical argv. Drives no behaviour |
+| `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | the literature-review node's presence in the workflow topology. Both the resolved flag and, when ON, the sha256 of the resolved lit-review YAML are pinned in the lock |
 
 Everything else is pass-through to the iteration: `--data_scope`,
 `--health_gate_enabled` / `--no-health_gate_enabled`, `--health_gate_files`,
@@ -88,6 +91,33 @@ Other flags that define a run:
 | `--max_rounds` | `3` |
 | `--max_proposal_attempts` | `3` |
 | `--llm_config` | `None` |
+| `--experiment_arm` | `None` (unlabelled; an empty string is refused). Opaque label pinned in the lock and stamped on records / outputs / manifests (arXiv U1) |
+| `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | `None` → the YAML's `enabled` decides (shipped: `false`). The resolved flag and the config's sha256 are pinned in the lock; an enabled but unreadable config refuses the launch |
+| `--baseline_isolation` | off. Excludes the bundled baselines from the LLM-facing surface: bundled descriptions refused, prompt examples neutralised, built-in proposals refused by name (arXiv U3). Pinned in the lock |
+| `--print_resolved_launch_config` | off. Print the resolved launch configuration (arm, lit-review topology + config sha256, isolation, composition, workspace, advice file, declared posture) as ONE JSON object and exit 0 with no side effects |
+
+### `launch_prior_baseline_experiment.sh` — the two-arm experiment
+
+One launcher, two arms, one argument changed:
+
+```bash
+bash sdsc_submission_scripts/launch_prior_baseline_experiment.sh \
+    --arm with-prior-art|without-prior-art \
+    --workspace DIR [--run_name NAME] [--mode lilab|sdsc] \
+    [--dry-run] [--h100] [passthrough run_chain.sh flags...]
+```
+
+| arm | explicit child argv |
+|---|---|
+| `with-prior-art` | `--ml_lit_review_enabled --experiment_arm with-prior-art` |
+| `without-prior-art` | `--no-ml_lit_review_enabled --experiment_arm without-prior-art --baseline_isolation` |
+
+It wraps `run_chain.sh` (never the tuner node CLI); refuses `--seed_paths`
+(cold-start rule), advice files (a second variable in either arm) and every
+arm-decided flag; `--dry-run` prints the exact child argv AND the resolved
+launch configuration; `--h100` sources `h100_posture.env` (must define the
+`H100_CHAIN_ARGS` array, splatted after the launcher's own args) and refuses
+loudly by name when the file is missing.
 
 ## `workflows/model_exploration.py` — the module CLI
 

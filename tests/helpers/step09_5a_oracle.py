@@ -46,6 +46,13 @@ _VOLATILE_KEY_PATTERNS = (
     # — and a guard that cries wolf every commit gets re-baselined blind,
     # which is exactly how a real regression slips through.
     re.compile(r"^repo_commit$"),
+    # arXiv P1 — the lock's generated-library PROVENANCE ({root, source}).
+    # Under the suite's isolation fixture the root is a per-test tmp path, so
+    # its value changes every run by construction, exactly like repo_commit.
+    # The field is _PROVENANCE (recorded, never compared), so excluding it
+    # from the oracle diff drops no behavioural surface; the field's own
+    # stamping/omission semantics are owned by the P1 lock tests.
+    re.compile(r"^generated_library$"),
     re.compile(r"^duration.*"),
     re.compile(r".*_seconds$"),
 )

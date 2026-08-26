@@ -19,7 +19,6 @@ See ``docs/phase68_orchestrator_memory_and_resume.md`` §3.3 for the design.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 import os
@@ -45,6 +44,12 @@ from core.committed_digests import (
     digest_unusable_message,
     interpretation_digest_path,
     read_committed_digests,
+)
+from core.iteration_manifest import (
+    MANIFEST_BASENAME,
+    RUN_OUTPUT_DIGEST_KEY,
+    ManifestVerdict,
+    verify_iteration_manifest,
 )
 from core.run_invariants import (
     RunInvariants,
@@ -108,17 +113,24 @@ class ResumeError(RuntimeError):
 
 
 class ReplayIntegrityError(ResumeError):
-    """A committed artifact changed after its manifest hash was recorded.
+    """A committed artifact changed after its manifest hashes were recorded.
 
     V19 PR 1 §3.6 (docs/design/v19_priorities/pr1_chain_incumbents.md):
     a ``run_output_sha256`` mismatch means chain history is no longer
     trustworthy — excluding-and-continuing could still alter the chain
     incumbent and therefore future decisions, so the chain STOPS before
-    the next iteration launches. Recovery is an explicit operator action:
-    restore the original artifact, or regenerate a consistent
-    manifest+hash pair for the intentionally replaced one, then relaunch.
-    Not bypassed by ``enable_chain_incumbent_formal_gates`` — integrity
-    verification always runs.
+    the next iteration launches. S2 / U5 (#257, #258) widened the
+    predicate to the manifest's own ``manifest_sha256`` self-digest: an
+    edited manifest field, a removed ``run_output_sha256`` on a completed
+    iteration, or a rewritten artifact+hash pair with a stale self-digest
+    all stop the chain the same way (``core.iteration_manifest``). A
+    pre-S2 manifest carrying neither digest stays admitted and visibly
+    unverified. Recovery is an explicit operator action: restore the
+    original artifact, or replace the iteration through
+    ``run_one_iteration.py --replace_iteration_manifest --replacement_reason``
+    (which sets the old manifest aside and records its digests), then
+    relaunch. Not bypassed by ``enable_chain_incumbent_formal_gates`` —
+    integrity verification always runs.
     """
 
 
@@ -355,13 +367,32 @@ def _validate_run_output(
 # ---------------------------------------------------------------------------
 
 
-def _sha256_file(path: str) -> str:
-    """Stream a file's SHA-256 hex digest."""
-    digest = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _verify_manifest_or_stop(
+    manifest: dict,
+    *,
+    iter_idx: int,
+    manifest_path: str,
+    output_path: str | None,
+) -> ManifestVerdict:
+    """Raise :class:`ReplayIntegrityError` unless the manifest is trustworthy.
+
+    S2 / U5: the predicate lives in ``core.iteration_manifest`` so resume,
+    the per-file best table and the inspector cannot disagree about what
+    "committed" means; this wrapper only supplies resume's prefix and its
+    recovery advice.
+    """
+    verdict = verify_iteration_manifest(
+        manifest, iter_idx=iter_idx, manifest_path=manifest_path, output_path=output_path
+    )
+    if verdict.problem is not None:
+        raise ReplayIntegrityError(
+            f"[resume] REPLAY-INTEGRITY: {verdict.problem}. A committed artifact no "
+            f"longer matches its manifest hashes — chain history is not trustworthy. "
+            f"Restore the original artifact, or replace the iteration explicitly "
+            f"(run_one_iteration.py --replace_iteration_manifest --replacement_reason "
+            f"'<why>'), then relaunch."
+        )
+    return verdict
 
 
 def _scores_agree(a: float, b: float) -> bool:
@@ -1434,7 +1465,14 @@ def restore_prior_state(
     # and so any plugin shadow-warnings happen in the same order.
     for iter_idx in range(1, current_iter):
         manifest = _read_manifest(abs_workspace, iter_idx)
+        manifest_path = os.path.join(abs_workspace, _iter_run_name(iter_idx), MANIFEST_BASENAME)
         if manifest.get("status") == "no_records":
+            # S2 / U5 — a no_records manifest names no artifact, but its
+            # own self-digest is still verified: a hashed artifact that
+            # changed after publication stops the chain whatever it says.
+            _verify_manifest_or_stop(
+                manifest, iter_idx=iter_idx, manifest_path=manifest_path, output_path=None
+            )
             # Iter ran cleanly but produced no usable model (gate exhaustion
             # or all-rounds-failed). Skip output absorption + plugin
             # restoration entirely. Not appended to committed_iters because
@@ -1450,30 +1488,20 @@ def restore_prior_state(
 
         # V19 PR 1 §3.6 — replay integrity BEFORE trusting the artifact's
         # content. A recorded hash that no longer matches the bytes on disk
-        # STOPS the chain (fail closed); a legacy manifest without the hash
-        # is admitted but visibly unverified.
-        recorded_sha = manifest.get("run_output_sha256")
-        if recorded_sha:
-            if not os.path.isfile(output_path):
-                raise ResumeError(
-                    f"iter {iter_idx:03d}: manifest points at output_path "
-                    f"{output_path} but the file does not exist."
-                )
-            actual_sha = _sha256_file(output_path)
-            if actual_sha != recorded_sha:
-                raise ReplayIntegrityError(
-                    f"[resume] REPLAY-INTEGRITY: iter {iter_idx:03d} committed "
-                    f"artifact changed: {output_path} "
-                    f"expected sha256 {recorded_sha[:16]}… but found "
-                    f"{actual_sha[:16]}…. A committed run_output no longer "
-                    f"matches its manifest hash — chain history is not "
-                    f"trustworthy. Restore the original artifact, or "
-                    f"regenerate a consistent manifest for the intentionally "
-                    f"replaced one, then relaunch."
-                )
-            artifact_verified = True
-        else:
-            artifact_verified = False
+        # STOPS the chain (fail closed); a legacy manifest without any hash
+        # is admitted but visibly unverified. S2 / U5 widened the predicate
+        # (manifest self-digest; hash removal is a tamper) and moved it to
+        # the ONE authority every verifier shares:
+        # `core.iteration_manifest.verify_iteration_manifest`.
+        if manifest.get(RUN_OUTPUT_DIGEST_KEY) and not os.path.isfile(output_path):
+            raise ResumeError(
+                f"iter {iter_idx:03d}: manifest points at output_path "
+                f"{output_path} but the file does not exist."
+            )
+        verdict = _verify_manifest_or_stop(
+            manifest, iter_idx=iter_idx, manifest_path=manifest_path, output_path=output_path
+        )
+        artifact_verified = verdict.artifact_verified
 
         parsed = _validate_run_output(output_path, iter_idx)
 
@@ -1489,6 +1517,13 @@ def restore_prior_state(
                     "task_composition_fingerprint": getattr(
                         parsed, "task_composition_fingerprint", None
                     ),
+                    # arXiv U1 (#254) — the arm label travels to the SAME
+                    # three-case ingress rule. Without this key here a
+                    # labelled chain refused its own iteration-1 output at
+                    # restore time (found by the two-iteration pseudo chain,
+                    # the F-11-C10-a class: a stamp the writer emits but the
+                    # reader never forwards).
+                    "experiment_arm": getattr(parsed, "experiment_arm", None),
                 },
                 expected_invariants,
                 # Step 11 C8 (F-11-5) — the run's OWN profile, not TIDMAD's.

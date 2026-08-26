@@ -18,6 +18,12 @@ import pytest
 
 import core.resume as resume
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from core.iteration_manifest import (
+    MANIFEST_DIGEST_KEY,
+    RUN_OUTPUT_DIGEST_KEY,
+    manifest_self_digest,
+    publish_iteration_manifest,
+)
 from core.resume import ReplayIntegrityError, restore_prior_state
 from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
 from tests.helpers.metric_fixtures import shipped_spec
@@ -827,3 +833,113 @@ class TestScientificAuthorityAdmission:
         assert prov["iter_idx"] == 1
         assert prov["score"] == 5.0
         assert prov["authority_basis"] == "stored_verdict"
+
+
+# ---------------------------------------------------------------------------
+# S2 / U5 (#258) — manifest self-digest tamper matrix, through restore_prior_state
+# ---------------------------------------------------------------------------
+
+
+def _republish_through_production(workspace: str, iter_idx: int) -> str:
+    """Swap the fixture's hand-written manifest for one PUBLISHED by the
+    production authority, so it carries the ``manifest_sha256`` every real
+    post-S2 manifest carries. Returns the manifest path."""
+    iter_dir = os.path.join(workspace, f"iter_{iter_idx:03d}")
+    path = os.path.join(iter_dir, "manifest.json")
+    with open(path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    os.remove(path)
+    publish_iteration_manifest(iter_dir, manifest)
+    return path
+
+
+def _hand_rewrite(path: str, manifest: dict) -> None:
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+
+def _committed_iter1(ws: str) -> tuple[str, str]:
+    output_path = _write_iter(
+        ws, 1, [_record("f1", 1.2)], best_valid_formal_score=1.2, best_valid_formal_exp_id="f1"
+    )
+    return output_path, _republish_through_production(ws, 1)
+
+
+def test_a_production_published_manifest_restores_cleanly(tmp_path):
+    """Anti-vacuity for the matrix below: the same fixture, untampered,
+    restores with the artifact verified."""
+    ws = str(tmp_path)
+    _committed_iter1(ws)
+    state = _restore(ws, 2)
+    assert state.chain_best_valid_formal_score == 1.2
+    assert state.chain_best_valid_formal_provenance["artifact_verified"] is True
+
+
+def test_an_edited_manifest_field_stops_the_chain(tmp_path):
+    """Undetected before S2: the artifact hash stayed consistent, so a
+    hand edit to any manifest field replayed as committed history."""
+    ws = str(tmp_path)
+    _output_path, manifest_path = _committed_iter1(ws)
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    manifest["best_valid_formal_score"] = 9.9
+    _hand_rewrite(manifest_path, manifest)
+
+    with pytest.raises(ReplayIntegrityError) as exc:
+        _restore(ws, 2)
+    msg = str(exc.value)
+    assert "REPLAY-INTEGRITY" in msg
+    assert "manifest changed after publication" in msg
+    assert manifest_path in msg
+    assert "--replace_iteration_manifest" in msg
+
+
+def test_removing_the_artifact_hash_is_a_tamper_not_a_legacy_downgrade(tmp_path):
+    """Undetected before S2: with ``run_output_sha256`` removed, resume
+    admitted the iteration as pre-V19 legacy ("visibly unverified"). The
+    self-digest is recomputed here — the naive removal is caught one rule
+    earlier and is pinned in test_iteration_manifest."""
+    ws = str(tmp_path)
+    _output_path, manifest_path = _committed_iter1(ws)
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    del manifest[RUN_OUTPUT_DIGEST_KEY]
+    manifest.pop(MANIFEST_DIGEST_KEY)
+    manifest[MANIFEST_DIGEST_KEY] = manifest_self_digest(manifest)
+    _hand_rewrite(manifest_path, manifest)
+
+    with pytest.raises(ReplayIntegrityError) as exc:
+        _restore(ws, 2)
+    assert RUN_OUTPUT_DIGEST_KEY in str(exc.value)
+    assert "not a legacy manifest" in str(exc.value)
+
+
+def test_a_consistent_pair_rewrite_without_the_replacement_op_stops_the_chain(tmp_path):
+    """Undetected before S2: artifact bytes AND ``run_output_sha256``
+    rewritten together looked like a legitimate commit."""
+    ws = str(tmp_path)
+    output_path, manifest_path = _committed_iter1(ws)
+    with open(output_path, "a", encoding="utf-8") as f:
+        f.write("\n")
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    manifest[RUN_OUTPUT_DIGEST_KEY] = hashlib.sha256(open(output_path, "rb").read()).hexdigest()
+    _hand_rewrite(manifest_path, manifest)
+
+    with pytest.raises(ReplayIntegrityError) as exc:
+        _restore(ws, 2)
+    assert "manifest changed after publication" in str(exc.value)
+
+
+def test_a_no_records_manifest_is_verified_before_it_is_skipped(tmp_path):
+    """Before S2 a ``no_records`` manifest was skipped before any check ran."""
+    ws = str(tmp_path)
+    _write_iter(ws, 1, [], manifest_status="no_records")
+    manifest_path = _republish_through_production(ws, 1)
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    manifest["iteration_dir"] = "/somewhere/else"
+    _hand_rewrite(manifest_path, manifest)
+
+    with pytest.raises(ReplayIntegrityError):
+        _restore(ws, 2)

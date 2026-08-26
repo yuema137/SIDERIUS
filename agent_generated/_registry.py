@@ -9,10 +9,17 @@ loss function (see ``agent_generated/_loss_loader.py``). The registry is
 type-agnostic by design: each entry carries a ``capability_type`` field, and
 callers filter by it.
 
-Storage: a flat JSON array at ``agent_generated/_capability_index.json``.
-Reading it requires **only** ``json.load`` — no Python import of the plugin
-module is needed, so a future CLI (e.g. ``siderius capabilities list``) can
-inspect the registry even when individual plugin files are broken.
+Storage: a flat JSON array at ``{library}/_capability_index.json``, where
+``{library}`` is the resolved generated-library root
+(``core.generated_library`` — arXiv P1; env-overridable, defaults to
+``~/.siderius/generated_library``). The pre-P1 repo-checkout index at
+``agent_generated/_capability_index.json`` stays READABLE as a fallback
+when the resolved index does not exist yet, and its rows are carried into
+the resolved index by the first write — the checkout file itself is never
+written again. Reading requires **only** ``json.load`` — no Python import
+of the plugin module is needed, so a future CLI (e.g. ``siderius
+capabilities list``) can inspect the registry even when individual plugin
+files are broken.
 
 Writes are atomic via tmp-file rename — concurrent ``register()`` calls from
 two processes do not corrupt the JSON. The rename pattern matches the
@@ -30,10 +37,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-# Repo-relative default path. Resolved at call time (not import time) so a
-# test that monkeypatches ``os.getcwd`` or chdirs into a fixture dir sees the
-# updated cwd.
-_DEFAULT_INDEX_PATH = os.path.join(
+# LEGACY CHECKOUT index path: the repository's
+# ``agent_generated/_capability_index.json``, computed from this file's own
+# location. arXiv P1: this is a READ-ONLY compatibility fallback — the
+# default index lives in the resolved generated-library root
+# (``core.generated_library.capability_index_path()``, resolved at
+# CONSTRUCTION time so env changes and test monkeypatching take effect),
+# and this legacy file is consulted only when a default-constructed
+# registry finds no resolved index yet. It is never written.
+_LEGACY_CHECKOUT_INDEX_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "_capability_index.json",
 )
@@ -92,9 +104,16 @@ class CapabilityMetadata(BaseModel):
 class CapabilityRegistry:
     """Persistent registry of agent-generated capabilities.
 
-    Backed by ``agent_generated/_capability_index.json``. Each instance reads
-    that file on demand (no in-memory cache) so concurrent processes see
-    each other's writes via the filesystem.
+    Backed by ``{library}/_capability_index.json`` in the resolved
+    generated-library root (arXiv P1). Each instance reads that file on
+    demand (no in-memory cache) so concurrent processes see each other's
+    writes via the filesystem.
+
+    Legacy compatibility: a DEFAULT-constructed registry whose resolved
+    index does not exist yet falls back to READING the pre-P1 repo-checkout
+    index (``_LEGACY_CHECKOUT_INDEX_PATH``). Writes always target the
+    resolved index — the first read-modify-write therefore carries the
+    legacy rows forward, and the checkout file is never touched again.
 
     The registry is small (one row per ever-generated plugin, typically tens
     to low hundreds) so a full re-read per call is cheap. If profiling later
@@ -102,15 +121,27 @@ class CapabilityRegistry:
     """
 
     def __init__(self, index_path: str | None = None) -> None:
-        """Initialize with the index file path (defaults to the canonical one).
+        """Initialize with the index file path (defaults to the resolved one).
 
         Args:
-            index_path: Optional override. Defaults to
-                ``agent_generated/_capability_index.json``. Tests pass a
-                ``tmp_path`` location to avoid contaminating the canonical
-                index.
+            index_path: Optional override. When ``None`` (production
+                default), resolves ``core.generated_library.
+                capability_index_path()`` at construction time and enables
+                the legacy checkout READ fallback. An EXPLICIT path is
+                exact — no fallback — so tests passing a ``tmp_path``
+                location can never accidentally read the checkout index.
         """
-        self._index_path = index_path or _DEFAULT_INDEX_PATH
+        if index_path is not None:
+            self._index_path = index_path
+            self._legacy_read_path: str | None = None
+        else:
+            # Lazy import: the registry stays importable with only pydantic
+            # available, and the env read happens per construction so test
+            # monkeypatching and operator exports both take effect.
+            from core.generated_library import capability_index_path
+
+            self._index_path = capability_index_path()
+            self._legacy_read_path = _LEGACY_CHECKOUT_INDEX_PATH
 
     @property
     def index_path(self) -> str:
@@ -125,16 +156,26 @@ class CapabilityRegistry:
         either case is treated as "no capabilities yet" rather than a hard
         error so a freshly-created index doesn't need special-casing at every
         caller.
+
+        arXiv P1 — legacy READ fallback: a default-constructed registry whose
+        resolved index is MISSING reads the legacy checkout index instead
+        (when that exists). An index that exists — even holding an empty
+        list, e.g. after every row was pruned — is authoritative and
+        suppresses the fallback: a pruned-empty resolved index must not
+        resurrect legacy ghosts.
         """
-        if not os.path.isfile(self._index_path):
-            return []
-        with open(self._index_path, encoding="utf-8") as f:
+        read_path = self._index_path
+        if not os.path.isfile(read_path):
+            if self._legacy_read_path is None or not os.path.isfile(self._legacy_read_path):
+                return []
+            read_path = self._legacy_read_path
+        with open(read_path, encoding="utf-8") as f:
             raw = json.load(f)
         if raw is None:
             return []
         if not isinstance(raw, list):
             raise ValueError(
-                f"{self._index_path}: expected a JSON array at top level, "
+                f"{read_path}: expected a JSON array at top level, "
                 f"got {type(raw).__name__}. The registry index has been "
                 f"corrupted — restore from git or delete the file to reset."
             )

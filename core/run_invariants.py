@@ -20,10 +20,14 @@ The invariants are pinned by ``{workspace}/run_invariants_lock.json``:
   metadata (``created_at``) never participates.
 
 The current canonical set is ``resolved_data_scope`` +
-``health_gate_enabled`` + ``health_config_sha256``. The mechanism is
-deliberately generic: future run-defining settings (dataset version,
-execution policy, ...) join by adding a field to ``RunInvariants`` — the
-file format and validation logic need no redesign.
+``health_gate_enabled`` + ``health_config_sha256`` plus every later
+canonical field declared on ``RunInvariants._CANONICAL`` (ordering
+override, health-feedback policy, runtime identities, task composition,
+and — arXiv U1 — the workflow topology ``lit_review_enabled`` /
+``lit_review_config_sha256`` and the opaque ``experiment_arm`` label). The
+mechanism is deliberately generic: future run-defining settings (dataset
+version, execution policy, ...) join by adding a field to ``RunInvariants``
+— the file format and validation logic need no redesign.
 
 v1 policy: no escape hatch — a deliberate invariant change means a new
 workspace (FU-6 tracks an explicit migration path if a need appears).
@@ -38,9 +42,10 @@ import tempfile
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from core.execution_calibration import calibration_provenance
+from core.generated_library import generated_library_provenance
 
 RUN_INVARIANTS_BASENAME = "run_invariants_lock.json"
 
@@ -79,6 +84,24 @@ class RunInvariants(BaseModel):
         health_feedback_history_max_entries_per_model: Deterministic trim
             bound on retained history entries per model. Locked with the
             flag.
+        lit_review_enabled: Whether the ``ml_literature_review`` node is
+            part of this run's WORKFLOW TOPOLOGY (arXiv U1, #253). ``False``
+            means the node is never constructed and the proposer receives
+            the four-channel zero — not a "root-paper variant" (ruling R1).
+            Locked because two runs differing in topology are incomparable.
+            OMITTED from the serialized lock when ``False`` so a legacy lock
+            stays byte-identical and parses to ``False``.
+        lit_review_config_sha256: sha256 of the resolved lit-review YAML
+            bytes when the node is enabled; ``None`` when disabled (the
+            config is not read, so there is nothing to pin). Omitted from
+            the serialized lock when ``None``.
+        experiment_arm: OPAQUE canonical provenance label naming the
+            experiment arm this workspace belongs to (arXiv U1, #254;
+            ruling R2). Compared, never interpreted: no behaviour may key on
+            its value — any behaviour an arm needs is driven by its own
+            explicit, recorded flag. ``None`` is "unlabelled" (every legacy
+            run); an EMPTY string is refused, so absence is never spelled as
+            an empty-string default. Omitted from the lock when ``None``.
         created_at: ISO-8601 creation timestamp. Provenance only — never
             part of equality.
 
@@ -137,6 +160,28 @@ class RunInvariants(BaseModel):
     # from the serialized lock when None (see `write_run_invariants`), so a
     # legacy lock file stays byte-identical to its pre-P1 form.
     task_composition_fingerprint: str | None = None
+    # arXiv U1 (#253 / #254) — the run's WORKFLOW TOPOLOGY and its
+    # EXPERIMENT ARM. All three are CANONICAL: two workspaces that differ
+    # in whether the literature-review node ran, in WHICH lit-review config
+    # it ran under, or in the arm they belong to are not comparable, and the
+    # EXISTING lock comparison is what refuses the resume (no new
+    # machinery). Defaults are the legacy state, so a pre-U1 lock file
+    # parses into exactly the run it described; the keys are OMITTED from
+    # the serialized lock at their defaults (see `write_run_invariants`),
+    # so that legacy lock's bytes are unchanged too.
+    #
+    # `experiment_arm` is OPAQUE (ruling R2): the framework compares it and
+    # stamps it; nothing reads its VALUE to decide anything.
+    lit_review_enabled: bool = False
+    lit_review_config_sha256: str | None = None
+    experiment_arm: str | None = None
+    # arXiv U3 (#259 / #260) — BASELINE ISOLATION: the explicit, recorded
+    # flag that drives the WITHOUT arm's behaviour (ruling R2: never the arm
+    # label). Under it the bundled built-in model descriptions, the
+    # baseline-naming prompt literals and built-in proposals are excluded.
+    # Canonical: an isolated and a non-isolated run saw different prompt
+    # surfaces and are not comparable. Omitted from the lock at `False`.
+    baseline_isolation: bool = False
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -172,6 +217,22 @@ class RunInvariants(BaseModel):
     # Omitted from the serialized lock when None, like the two fields above,
     # so every pre-seam-P lock file stays byte-identical.
     model_plugin_identities: list[dict[str, str]] | None = None
+    # arXiv P1 — WHERE this run's generated-capability library resolved
+    # ({"root": ..., "source": "env"|"default"},
+    # ``core.generated_library.generated_library_provenance``). RECORDED,
+    # never compared: the library root is execution-HOST layout, not task
+    # semantics — the same scientific run resumed on a host whose library
+    # lives elsewhere must remain legal (promoted capabilities stay
+    # discoverable through the read-priority chain), exactly the
+    # ``execution_calibration`` precedent (R-11-6). What it buys: persisted
+    # evidence of which library this workspace's Branch-B reuse, promotions
+    # and capability index drew from, so "why did my resumed run stop
+    # seeing loss X" is answerable from the lock rather than from a
+    # transient log line.
+    #
+    # Omitted from the serialized lock when None, like the fields above,
+    # so every pre-P1 lock file stays byte-identical.
+    generated_library: dict[str, Any] | None = None
 
     # Fields participating in lock equality.
     _CANONICAL: ClassVar[tuple[str, ...]] = (
@@ -186,6 +247,12 @@ class RunInvariants(BaseModel):
         "runtime_estimator_identity",
         "runtime_policy_identity",
         "task_composition_fingerprint",
+        # arXiv U1 — topology + arm are compared, never interpreted.
+        "lit_review_enabled",
+        "lit_review_config_sha256",
+        "experiment_arm",
+        # arXiv U3 — the isolation flag is a prompt-surface identity.
+        "baseline_isolation",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -201,6 +268,7 @@ class RunInvariants(BaseModel):
         "created_at",
         "execution_calibration",
         "model_plugin_identities",
+        "generated_library",
     )
 
     #: C9d fields that a legacy lock cannot supply. Their absence is a
@@ -209,6 +277,46 @@ class RunInvariants(BaseModel):
         "runtime_estimator_identity",
         "runtime_policy_identity",
     )
+
+    @field_validator("experiment_arm")
+    @classmethod
+    def _refuse_empty_arm_label(cls, value: str | None) -> str | None:
+        """An arm label is present or absent — never an empty string.
+
+        ``None`` is the one spelling of "unlabelled" (every legacy run
+        carries it); accepting ``""`` would create a second, silent
+        spelling that a stamp comparison could confuse with a real label.
+        The value is otherwise opaque and is never normalized (R2).
+        """
+        if value is not None and not value.strip():
+            raise ValueError(
+                "experiment_arm must be a non-empty label or None (absent); an "
+                "empty string is refused so absence is never spelled as an "
+                "empty-string default."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _lit_review_sha_matches_topology(self) -> RunInvariants:
+        """The config pin and the topology flag must agree.
+
+        Enabled without a sha means a caller passed the flag and forgot the
+        pin (the lock would then accept ANY lit-review config on resume);
+        a sha without the flag pins a config the run never reads. Both are
+        refused at construction, before any lock is written.
+        """
+        if self.lit_review_enabled and self.lit_review_config_sha256 is None:
+            raise ValueError(
+                "lit_review_enabled=True requires lit_review_config_sha256 (the "
+                "sha256 of the resolved lit-review YAML this run reads); a lock "
+                "without the pin would admit any config on resume."
+            )
+        if not self.lit_review_enabled and self.lit_review_config_sha256 is not None:
+            raise ValueError(
+                "lit_review_config_sha256 is set but lit_review_enabled=False: a "
+                "disabled lit-review reads no config, so there is nothing to pin."
+            )
+        return self
 
     def canonical(self) -> dict:
         """The equality-defining subset of the invariants."""
@@ -283,6 +391,20 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # composed with nothing. Pydantic's default makes it parse back to None.
     if payload.get("task_composition_fingerprint") is None:
         payload.pop("task_composition_fingerprint", None)
+    # arXiv U1 — same rule for the topology + arm keys: an unlabelled,
+    # lit-review-OFF run (every run that predates them) writes none of the
+    # three, so its lock is byte-identical to its pre-U1 form and parses
+    # back to the defaults. `lit_review_enabled` is omitted at `False`, the
+    # two optional strings at `None`.
+    if payload.get("lit_review_enabled") is False:
+        payload.pop("lit_review_enabled", None)
+    if payload.get("lit_review_config_sha256") is None:
+        payload.pop("lit_review_config_sha256", None)
+    if payload.get("experiment_arm") is None:
+        payload.pop("experiment_arm", None)
+    # arXiv U3 — same rule for the isolation flag: omitted at `False`.
+    if payload.get("baseline_isolation") is False:
+        payload.pop("baseline_isolation", None)
     # Step 11 C3 — same rule, same reason: a lock written before execution
     # calibration was recorded stays byte-identical rather than gaining a
     # `null` for a concept it predates.
@@ -293,6 +415,11 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # byte-identical rather than gaining a `null` for a concept it predates.
     if payload.get("model_plugin_identities") is None:
         payload.pop("model_plugin_identities", None)
+    # arXiv P1 — same rule for the generated-library provenance: a lock
+    # written before the library migration stays byte-identical rather than
+    # gaining a `null` for a concept it predates.
+    if payload.get("generated_library") is None:
+        payload.pop("generated_library", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -404,6 +531,33 @@ def ensure_run_invariants(workspace: str, expected: RunInvariants) -> str:
         return "validated"
 
 
+class LockLaunchIdentity(BaseModel):
+    """The arXiv-U1/U3 launch-identity values, as ONE typed carrier.
+
+    Four CANONICAL lock fields travel together from every entry point —
+    workflow topology (``lit_review_enabled`` + its config sha), the opaque
+    ``experiment_arm`` label (ruling R2: compared, never read for behaviour)
+    and the WITHOUT arm's explicit ``baseline_isolation`` flag. Threading
+    them as four scalars grew :func:`build_run_invariants` past the frozen
+    12a parameter budget (13 → 17 vs +1 allowed), and the budget is right:
+    values with one origin and one destination are a carrier, not four
+    parameters. Defaults are the legacy/unlabelled state, so a caller that
+    omits the carrier gets a byte-identical pre-U1 lock.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    lit_review_enabled: bool = False
+    lit_review_config_sha256: str | None = None
+    experiment_arm: str | None = None
+    baseline_isolation: bool = False
+
+
+#: The unlabelled default — module-level so call sites can splat a shared
+#: legacy value without constructing per call.
+UNLABELLED_LAUNCH_IDENTITY = LockLaunchIdentity()
+
+
 def build_run_invariants(
     resolved_data_scope: list[int],
     health_gate_enabled: bool,
@@ -418,6 +572,7 @@ def build_run_invariants(
     include_runtime_identities: bool = True,
     task_health_binding: Any = None,
     task_composition_fingerprint: str | None = None,
+    launch_identity: LockLaunchIdentity | None = None,
 ) -> tuple[RunInvariants, str | None]:
     """Compute a run's invariants — the ONE shared path for every entry point.
 
@@ -449,6 +604,16 @@ def build_run_invariants(
             (locked policy).
         health_feedback_history_max_entries_per_model: PR 3 retention trim
             bound (locked policy).
+        lit_review_enabled: arXiv U1 — whether the literature-review node
+            is part of this run's topology (locked). Defaults keep every
+            pre-U1 call site producing an unchanged lock.
+        lit_review_config_sha256: sha256 of the resolved lit-review YAML
+            when enabled; ``None`` when disabled. Threaded EXPLICITLY by
+            every caller (never read ambiently) because it is compared.
+        experiment_arm: The opaque arm label, or ``None`` (unlabelled).
+            Compared, never interpreted.
+        baseline_isolation: arXiv U3 — whether the run excludes the bundled
+            baselines from its prompt surface (locked; defaults off).
 
     Returns:
         ``(invariants, effective_config_path)`` — the path is ``None`` when
@@ -458,6 +623,9 @@ def build_run_invariants(
     # without the health-check package for consumers that only need the
     # lock primitives (and avoids widening core→execute_tools coupling to
     # every importer of the lock).
+    _launch_identity = (
+        launch_identity if launch_identity is not None else UNLABELLED_LAUNCH_IDENTITY
+    )
     from execute_tools.health_checks.config import materialize_effective_config
 
     if health_gate_enabled:
@@ -498,6 +666,14 @@ def build_run_invariants(
             # runner, standalone tuner) locks the same identities — the
             # builder is the one shared path by contract.
             task_composition_fingerprint=task_composition_fingerprint,
+            # arXiv U1 — CANONICAL, so threaded explicitly by every caller
+            # (a compared value must never arrive ambiently); the defaults
+            # are the legacy state the documented default caller
+            # (`scripts/run_comparison.py`) relies on.
+            lit_review_enabled=_launch_identity.lit_review_enabled,
+            lit_review_config_sha256=_launch_identity.lit_review_config_sha256,
+            experiment_arm=_launch_identity.experiment_arm,
+            baseline_isolation=_launch_identity.baseline_isolation,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never
@@ -512,6 +688,12 @@ def build_run_invariants(
             # explicitly two lines up precisely because it is compared, and
             # a compared value must never arrive ambiently.
             model_plugin_identities=_model_plugin_identities(),
+            # arXiv P1 — same shape and same justification again: a
+            # PROVENANCE field read ambiently AT the shared builder, because
+            # "which generated-capability library was active when this lock
+            # was written" is exactly the question it answers. Recorded,
+            # never compared.
+            generated_library=generated_library_provenance(),
             **_runtime_identity_fields(include_runtime_identities),
         ),
         effective_path,
@@ -593,6 +775,13 @@ def validate_stamped_invariants(
     defaulting. An UN-composed run is untouched by all of it, which is what
     keeps every pre-Step-10 workspace readable.
 
+    **arXiv U1 (#254) — the experiment arm, the same three cases.** Keyed on
+    whether THIS RUN is labelled, never on the label's value (R2)::
+
+        unlabelled run + unstamped record     -> READABLE
+        labelled run + record carrying an arm -> must MATCH
+        labelled run + UNSTAMPED record       -> REFUSE (names the field)
+
     Raises:
         RunInvariantsViolation: any present-or-assumed stamp contradicts
             ``expected``; the message names ``source`` and the field.
@@ -642,6 +831,23 @@ def validate_stamped_invariants(
                 f"task_composition_fingerprint: record pinned "
                 f"{str(record_fingerprint)[:12]}… vs this run's "
                 f"{expected.task_composition_fingerprint[:12]}…"
+            )
+
+    # arXiv U1 (#254) — the experiment arm. Keyed on whether THIS RUN is
+    # labelled; the label itself is opaque and only ever compared (R2).
+    if expected.experiment_arm is not None:
+        record_arm = stamped.get("experiment_arm")
+        if record_arm is None:
+            problems.append(
+                f"experiment_arm: this run is LABELLED ({expected.experiment_arm!r}) "
+                "but the record carries no arm label. An unstamped record cannot "
+                "be certified as belonging to this arm — unstamped means nothing "
+                "was recorded, not that the record belongs to the same arm."
+            )
+        elif record_arm != expected.experiment_arm:
+            problems.append(
+                f"experiment_arm: record is labelled {record_arm!r} vs this run's "
+                f"{expected.experiment_arm!r}"
             )
 
     if problems:

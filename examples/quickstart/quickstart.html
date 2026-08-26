@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIDERIUS Quickstart</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; max-width: 60rem;
+         margin: 2rem auto; padding: 0 1.25rem; line-height: 1.55; color: #1a1a1a;
+         background: #fdfdfc; }
+  h1, h2 { font-family: Helvetica, Arial, sans-serif; line-height: 1.25; }
+  h2 { border-bottom: 1px solid #d8d5cc; padding-bottom: .25rem; margin-top: 2.2rem; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .92em;
+          background: #f0eee8; padding: .08em .3em; border-radius: 3px; }
+  pre { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .82rem;
+         overflow-x: auto; padding: .7rem .9rem; border-radius: 6px; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  pre.md { background: #f0eee8; }
+  pre.code { background: #21252b; color: #dcdfe4; margin: 0; }
+  pre.out { background: #f6f8f6; border-left: 3px solid #7aa87a; margin: 0; }
+  .cell { margin: 1rem 0 1.4rem; }
+  .cell-label { font-family: ui-monospace, Menlo, Consolas, monospace;
+                 font-size: .72rem; color: #777; margin-bottom: .2rem; }
+  .banner { background: #fff6df; border: 1px solid #e5d9a8; border-radius: 6px;
+             padding: .7rem 1rem; font-size: .9rem; margin-bottom: 1.5rem; }
+  table { border-collapse: collapse; margin: 1rem 0; font-size: .9rem; display: block;
+           overflow-x: auto; }
+  th, td { border: 1px solid #d8d5cc; padding: .35rem .6rem; text-align: left;
+            vertical-align: top; }
+  th { background: #f0eee8; font-family: Helvetica, Arial, sans-serif; }
+  blockquote { border-left: 3px solid #c9c4b4; margin: 1rem 0; padding: .1rem 1rem;
+                color: #555; }
+  a { color: #2a5d8f; }
+</style>
+</head>
+<body>
+<div class="banner">Static rendering of <code>quickstart.ipynb</code> — generated from the notebook, not executable. Open the notebook itself to run the tutorial. Executed cells below show REAL captured output; cells marked ⏳ POST-12D were not executed and show none.</div>
+<h1>SIDERIUS Quickstart — your first task in one notebook</h1>
+<h2>1. What are we building?</h2>
+<p>A complete, tiny <strong>task package</strong> for SIDERIUS — the framework that runs LLM agents to propose, implement, tune and interpret ML models against a task YOU define. The task here is deliberately trivial: <strong>binary classification of synthetic 4-feature vectors</strong> (256 rows, generated in under a second from a pinned seed, CPU-only, no downloads). It exists to demonstrate the <em>workflow mechanics</em> — the model does <strong>not</strong> need to train well, and this pack says so explicitly everywhere.</p>
+<p>Two honesty rules govern this notebook:</p>
+<ul><li><strong>Every executed cell below shows real output</strong> produced on the landed post-PR-12d SIDERIUS source this pack is built against — including the launch, artifact-inspection and resume sections (9, 10 and 12), whose outputs are verbatim excerpts from the operator-authorized bounded live runs of 2026-08-25 (1 iteration × 1 round, <code>certify_minimal.json</code>; run identity in <code>PROVENANCE.md</code>).</li><li>Nothing is mocked. Where the framework refuses, you will see the refusal.</li></ul>
+<p>What a task must provide (the five required manifest sections, from <code>workflows/task_composition.py::_REQUIRED_KEYS</code>): <code>task_data_path</code>, <code>dataset_profile</code>, <code>metric</code>, <code>task_health</code>, <code>task_config</code>. Read <code>docs/concepts/task-package.md</code> and <code>docs/guides/define-a-task.md</code> alongside this notebook — they are the framework's own reference for each decision.</p>
+<h2>2. Install and imports</h2>
+<p>Run this notebook from its own directory (<code>examples/quickstart/</code>) inside a SIDERIUS checkout, with the project virtualenv (<code>.venv/bin/python</code> — the system python is too old). There is nothing to install beyond the repo's own environment; the quickstart needs only <code>numpy</code>, <code>torch</code> (CPU), <code>pyyaml</code>.</p>
+<p>The provenance check matters on machines with several SIDERIUS checkouts: an editable install in the venv can silently shadow the checkout you are sitting in, and every result would then describe <em>another clone</em>.</p>
+<blockquote><p>Aside: on a fresh checkout the first framework import emits a <code>UserWarning</code> about <code>tidmad_data_config.yaml</code> falling back to its template. It is harmless here — the quickstart never reads TIDMAD's data directory.</p></blockquote>
+<div class="cell"><div class="cell-label">In [1]</div>
+<pre class="code">import importlib
+import json
+import os
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path.cwd().resolve().parents[1]          # examples/quickstart -&gt; repo root
+sys.path.insert(0, str(REPO_ROOT))                    # this checkout wins over any installed copy
+
+# Imported via importlib AFTER the sys.path pin above: the pin is the point
+# (this checkout must win), so the module load has to come after it.
+task_composition = importlib.import_module(&quot;workflows.task_composition&quot;)
+
+resolved = Path(task_composition.__file__).resolve()
+assert resolved.is_relative_to(REPO_ROOT), (
+    f&quot;IMPORTING ANOTHER CLONE: {resolved} — fix sys.path before trusting any cell below&quot;)
+print(&quot;repo root      :&quot;, REPO_ROOT.name)
+print(&quot;composition at :&quot;, resolved.relative_to(REPO_ROOT))
+print(&quot;python         :&quot;, sys.version.split()[0])
+</pre>
+<pre class="out">repo root      : siderius-arxiv-quickstart
+composition at : workflows/task_composition.py
+python         : 3.12.13
+</pre>
+</div>
+<h2>3. Generate tiny data</h2>
+<p>No data files are committed. The pack ships a <strong>seeded generator</strong> (<code>plugins/_quickstart_task.py</code>) and pins the identity of what it produces in <code>declared/data_manifest.json</code> (seed <code>20260824</code>, 4 shards x 64 rows, per-shard sha256). The materializer regenerates the CSVs bit-identically and <strong>refuses to write a bundle whose bytes disagree with the committed pins</strong> — a drifted generator fails here, not three steps later in a run.</p>
+<p>The generated CSVs land in a <strong>workspace outside the repository tree</strong> (<code>SIDERIUS_QUICKSTART_WORKSPACE</code>, defaulting under your home). Only DATA is generated — every declaration, including <code>task_config.yaml</code>, is committed with the pack (section 4 explains the governance rule that makes that legitimate).</p>
+<div class="cell"><div class="cell-label">In [2]</div>
+<pre class="code">import importlib.util
+
+WORKSPACE = Path(os.environ.get(&quot;SIDERIUS_QUICKSTART_WORKSPACE&quot;,
+                                str(Path.home() / &quot;siderius_quickstart_workspace&quot;)))
+
+# Load the pack plugin exactly the way the composition loader executes plugin
+# files: by path, under a synthetic module name — never a package import.
+_spec = importlib.util.spec_from_file_location(&quot;quickstart_task&quot;, Path.cwd() / &quot;plugins&quot; / &quot;_quickstart_task.py&quot;)
+qs = importlib.util.module_from_spec(_spec)
+sys.modules[&quot;quickstart_task&quot;] = qs
+_spec.loader.exec_module(qs)
+
+bundle = qs.materialize_run_bundle(Path.cwd(), WORKSPACE)
+print(&quot;workspace:&quot;, WORKSPACE)
+for name in sorted(p.name for p in WORKSPACE.iterdir()):
+    print(&quot;  &quot;, name)
+print(&quot;\nshards (sha-verified against declared/data_manifest.json):&quot;)
+for f in sorted(Path(bundle[&quot;data_dir&quot;]).iterdir()):
+    print(&quot;  &quot;, f.name, f.stat().st_size, &quot;bytes&quot;)
+print(&quot;\nfirst 3 rows of&quot;, qs.shard_filename(0), &quot;:&quot;)
+print(&quot;\n&quot;.join((Path(bundle[&quot;data_dir&quot;]) / qs.shard_filename(0)).read_text().splitlines()[:4]))
+</pre>
+<pre class="out">workspace: /tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396-834a-b89a0cce2662/scratchpad/quickstart_ws_exec
+   data
+
+shards (sha-verified against declared/data_manifest.json):
+   shard_0000.csv 3542 bytes
+   shard_0001.csv 3548 bytes
+   shard_0002.csv 3547 bytes
+   shard_0003.csv 3555 bytes
+
+first 3 rows of shard_0000.csv :
+sample_id,x0,x1,x2,x3,label
+s0r000,0.74723715,-0.39100042,0.12363672,-0.51339036,1
+s0r001,-0.97176385,-0.89249641,-0.55577463,0.85302526,0
+s0r002,0.19307469,0.70307106,-0.73112661,0.79268646,0
+</pre>
+</div>
+<h2>4. Define the task</h2>
+<p>A task is <strong>files, not framework edits</strong>. This pack's split:</p>
+<table><thead><tr><th>file</th><th>role</th><th>committed?</th></tr></thead><tbody><tr><td><code>declared/dataset_profile.json</code></td><td>generic identity (<code>partition_count</code>, anchors, health peeks) + <strong>opaque</strong> <code>topology</code> the framework never inspects</td><td>yes</td></tr><tr><td><code>declared/metric_accuracy.json</code></td><td>the metric's declaration: id, <strong>direction</strong>, aggregation, scoreability contract</td><td>yes</td></tr><tr><td><code>declared/data_manifest.json</code></td><td>identity pins of the generated data</td><td>yes</td></tr><tr><td><code>plugins/_quickstart_task.py</code></td><td><code>TaskDataPath</code> (4 methods) + optional <code>TaskScopeCapability</code> (4 methods) + generator + materializer</td><td>yes</td></tr><tr><td><code>plugins/_quickstart_metrics.py</code></td><td>the metric's <em>implementation</em> (an <code>EvaluationMetric</code>)</td><td>yes</td></tr><tr><td><code>plugins/quickstart_reference_mlp.py</code></td><td>reference model plugin (<code>PLUGIN_MODEL_TYPE</code> contract)</td><td>yes</td></tr><tr><td><code>declared/task_config.yaml</code></td><td>task description + <strong>structured <code>model_io</code> forward contract</strong> — what every LLM prompt is told</td><td>yes</td></tr><tr><td><code>configs/task_composition/quickstart.yaml</code></td><td>THE shipped manifest binding all of the above for a run (lives beside <code>tidmad.yaml</code>/<code>pets.yaml</code>/<code>davis.yaml</code>)</td><td>yes</td></tr></tbody></table>
+<p>A governance rule worth knowing: guard (a) (<code>tests/unit/examples/test_pack_governance.py</code>) refuses any YAML under <code>examples/</code> with a top-level <code>task_description</code>/<code>forward_contract</code> key — EXCEPT a file that a shipped <code>configs/task_composition/*.yaml</code> manifest actually binds (the PR-12d re-scope; pets/davis use exactly this). The quickstart's <code>declared/task_config.yaml</code> is legitimate because <code>quickstart.yaml</code> binds it; an identical file nobody binds is still a refused parallel copy. <strong>Your own out-of-tree task package has no such restriction</strong> — commit your <code>task_config.yaml</code> wherever your package lives.</p>
+<div class="cell"><div class="cell-label">In [3]</div>
+<pre class="code">print(&quot;--- declared/task_config.yaml (committed; model_io is the authority) ---&quot;)
+print((Path.cwd() / &quot;declared&quot; / &quot;task_config.yaml&quot;).read_text())
+print(&quot;--- configs/task_composition/quickstart.yaml (the SHIPPED manifest) ---&quot;)
+print((REPO_ROOT / &quot;configs&quot; / &quot;task_composition&quot; / &quot;quickstart.yaml&quot;).read_text())
+</pre>
+<pre class="out">--- declared/task_config.yaml (committed; model_io is the authority) ---
+# Quickstart — the pack&#x27;s OWN task description + forward contract.
+#
+# Post-PR-12d home (README §7 step 2 executed). Q-12d-1: task-owned
+# declarations CO-LOCATE with the pack; `configs/task_composition/
+# quickstart.yaml` only POINTS here and carries no second copy of any of it.
+# Governance guard (a) exempts exactly this file BECAUSE that shipped
+# manifest binds it (`test_pack_governance.py::_composition_bound_task_configs`);
+# an identical YAML nobody binds is still a refused parallel copy.
+#
+# Loaded through the SAME `load_task_config` a legacy run uses, via
+# `_compose_task_config` under the composed dataset profile.
+
+task_description: |
+  Binary classification of tiny synthetic 4-feature vectors. Each sample is
+  x in R^4 drawn uniformly from [-1, 1]; the label is 1 exactly when
+  x0*x1 + sin(pi*x2) &gt; x3, with 3% of labels deterministically flipped, so a
+  perfect score is impossible by construction. The golden metric is accuracy
+  over the held-out evaluation rows and HIGHER is better. The dataset is
+  256 rows in 4 shards, regenerated bit-identically from a pinned seed —
+  this task exists to demonstrate the SIDERIUS workflow mechanics on a CPU
+  in seconds, not to be a benchmark.
+
+forward_contract:
+  # Step 03 — `model_io:` is THE authority; `input_shape`/`output_shape`/
+  # `num_classes` are DERIVED from it and deliberately not authored here
+  # (the pets pack&#x27;s precedent, and its hard-won lesson: with `model_io`
+  # undeclared, the admission resource-check&#x27;s dtype resolution falls back
+  # to an int64 preference that is wrong for a float-native model).
+  # Composable since PR-12d closed F-12d-4 — before that, a composed
+  # non-TIDMAD task config declaring `model_io` was refused at composition.
+  model_io:
+    input:
+      axes:
+        - {role: batch, dimension: {symbolic: &quot;B&quot;}}
+        - {dimension: {fixed: 4}}
+      dtype: {admissible: [&quot;float32&quot;]}
+    output:
+      axes:
+        - {role: batch, dimension: {symbolic: &quot;B&quot;}}
+        - {role: class, dimension: {fixed: 2}}
+      dtype: {admissible: [&quot;float32&quot;]}
+  input_description: &quot;a batch of 4-feature vectors, values in [-1, 1]&quot;
+  output_description: &quot;per-class logits for the two classes&quot;
+  task_type: &quot;classification&quot;
+  output_head_note: &gt;-
+    Output must be exactly [B, 2] — a final Linear(features, 2). Do NOT
+    apply softmax inside the model: the deliverable codec and the metric
+    own that decision.
+  task_note: &gt;-
+    A deliberately tiny tabular problem: the useful signal is a smooth
+    nonlinear function of 4 features. There is no spatial or temporal
+    structure. Models should stay small (a 2-layer MLP suffices).
+
+--- configs/task_composition/quickstart.yaml (the SHIPPED manifest) ---
+# Quickstart — the SHIPPED task composition for the onboarding example pack.
+#
+# The operator entrypoint:
+#
+#     run_chain.sh ... --task_composition configs/task_composition/quickstart.yaml
+#
+# **This file is a POINTER, not a second copy of the task** (Q-12d-1). Every
+# semantic value the quickstart owns — its dataset profile, its task
+# description and forward contract, its metric declaration, its plugins —
+# lives under `examples/quickstart/`, co-located with the pack. What is
+# written here is only WHICH declaration each family resolves to.
+#
+# Binding `task_config.config:` here is ALSO what legitimizes the pack&#x27;s
+# committed `declared/task_config.yaml` under governance guard (a)
+# (`test_pack_governance.py`): a manifest-bound task config is a bound
+# declaration; an identical YAML nobody binds is a refused parallel copy.
+#
+# Paths resolve against THIS file&#x27;s directory (`workflows/task_composition.py`
+# resolves refs relative to the manifest), which is why they are `../`-rooted.
+#
+# The task&#x27;s DATA is not committed anywhere: run the pack&#x27;s materializer
+# (notebook §3, or examples/quickstart/README.md §3) to regenerate the four
+# sha-pinned shard CSVs, and point --data_dir at the directory it writes.
+
+task_data_path:
+  file: ../../examples/quickstart/plugins/_quickstart_task.py
+  symbol: QuickstartTaskDataPath
+  id: quickstart_tabular
+  # Seam A (PR-12d D1): task-instance configuration, handed to the
+  # implementation&#x27;s OWN constructor — the framework validates the shape and
+  # knows no field name. These are plain values, not paths, so no `{ref: ...}`
+  # envelope is needed (compare `configs/task_composition/pets.yaml`, whose
+  # manifest paths use the envelope to stay checkout-relative).
+  config:
+    train_shards: [0, 1]
+    eval_shard: 2
+
+dataset_profile:
+  config: ../../examples/quickstart/declared/dataset_profile.json
+
+metric:
+  declaration: ../../examples/quickstart/declared/metric_accuracy.json
+  # The PACK&#x27;S OWN implementation, in the composed scoring child&#x27;s calling
+  # vocabulary (`evaluation_payload`/`task_scope`/`data_dir`) — the PR-12d
+  # `_pets_metrics.py` convention.
+  implementation:
+    file: ../../examples/quickstart/plugins/_quickstart_metrics.py
+    symbol: QuickstartAccuracyMetric
+
+# A NAMED absence, not an omission: saying nothing at all would be the
+# LEGACY_OMITTED state that resolves TIDMAD&#x27;s Health family.
+task_health:
+  none: true
+
+interpretation_blocks:
+  none: true
+
+deliverable:
+  prefix: quickstart_predictions
+  extension: &quot;.json&quot;
+  index_width: 4
+
+task_config:
+  config: ../../examples/quickstart/declared/task_config.yaml
+
+# PR-12d D8a (seam P): the pack&#x27;s model plugin route into a composed run&#x27;s
+# registry — parent and children. The underscore-prefixed task/metric plugins
+# in the same directory are skipped by the scanner by convention.
+model_plugins:
+  dir: ../../examples/quickstart/plugins
+  require: [quickstart_reference_mlp]
+
+</pre>
+</div>
+<p><strong>Why <code>model_io:</code> matters.</strong> The typed block is THE authority — <code>input_shape</code>, <code>output_shape</code> and <code>num_classes</code> are DERIVED from it, and the admission resource check reads its dtype (without it, a float-native model hits an int64 fallback — the Pets pack learned this in a real launch). Composing a non-TIDMAD <code>model_io</code> task config only works because PR-12d closed <strong>F-12d-4</strong> (the class-count cross-check used to read TIDMAD topology unconditionally and refused every non-TIDMAD profile); the landed behaviour is pinned by <code>tests/unit/examples/test_quickstart_pack.py:: test_landed_pin_model_io_task_config_composes_f12d4_fixed</code>.</p>
+<h2>5. Train/validation/test split</h2>
+<p>The split is <strong>task-owned vocabulary</strong>: shards 0–1 train, shard 2 validation, shard 3 final-eval — declared in the profile's opaque <code>topology.roles</code> and enforced by the pack's own scope construction (the framework never learns what a "shard" is). The optional <code>TaskScopeCapability</code> builds scopes; note the eval scope can never be pointed at a training shard, and a <code>target</code> strategy naming the held-out shard is refused.</p>
+<div class="cell"><div class="cell-label">In [4]</div>
+<pre class="code">from execute_tools.task_data_path import ScopeBuildRequest
+
+impl = qs.QuickstartTaskDataPath()
+request = ScopeBuildRequest(round_kind=&quot;formal&quot;, selection_strategy=&quot;snapshot&quot;, portion=1.0, seed=7)
+train_scope = impl.build_training_scope(request)
+eval_scope = impl.build_eval_scope(request)
+print(&quot;train rows:&quot;, len(train_scope.rows), &quot;from shards&quot;, sorted({r.shard for r in train_scope.rows}))
+print(&quot;eval  rows:&quot;, len(eval_scope.rows), &quot;from shard&quot;, sorted({r.shard for r in eval_scope.rows}))
+balance = {}
+for r in train_scope.rows:
+    balance[r.label] = balance.get(r.label, 0) + 1
+print(&quot;train label balance:&quot;, dict(sorted(balance.items())))
+try:
+    impl.build_training_scope(ScopeBuildRequest(
+        round_kind=&quot;formal&quot;, selection_strategy=&quot;target&quot;, portion=1.0, target_partitions=(3,)))
+except ValueError as refusal:
+    print(&quot;refused:&quot;, refusal)
+</pre>
+<pre class="out">train rows: 128 from shards [0, 1]
+eval  rows: 64 from shard [2]
+train label balance: {0: 70, 1: 58}
+refused: target partitions [3] are not training shards [0, 1] — the validation/final shards must never leak into a training scope.
+</pre>
+</div>
+<h2>6. Metrics: primary + direction</h2>
+<p>A metric is a <strong>declaration</strong> (identity, <code>direction</code>, aggregation, an executable scoreability contract) plus an <strong>implementation</strong> (an <code>EvaluationMetric</code> that may not rewrite the declared id). Get the direction right — nothing infers it from a name or a sign, and a wrong one silently inverts an entire campaign.</p>
+<p>The scoreability contract runs BEFORE any arithmetic: an unscoreable deliverable is a <em>structured refusal</em> (<code>NotScoreableResult</code>), never a garbage number. On this base the contract vocabulary is closed — <code>deliverable_presence</code> and <code>tidmad_denoised_h5</code> (<code>evaluation_metric.py</code>); a custom contract class would be a framework edit, so this pack declares <code>deliverable_presence</code>.</p>
+<p>Secondary metrics are optional, <strong>observational only</strong> (they influence no ordering), and this pack declares none — an absent <code>secondary_metrics:</code> section IS the "task has none" state.</p>
+<div class="cell"><div class="cell-label">In [5]</div>
+<pre class="code">import importlib.util as _ilu
+
+from execute_tools.evaluation_metric import metric_spec_from_declaration
+
+declaration = json.loads((Path.cwd() / &quot;declared&quot; / &quot;metric_accuracy.json&quot;).read_text())
+spec = metric_spec_from_declaration(declaration)
+print(&quot;metric id:&quot;, spec.id, &quot;| direction:&quot;, spec.direction, &quot;| aggregation:&quot;, spec.aggregation)
+
+_mspec = _ilu.spec_from_file_location(&quot;quickstart_metrics&quot;, Path.cwd() / &quot;plugins&quot; / &quot;_quickstart_metrics.py&quot;)
+qm = _ilu.module_from_spec(_mspec)
+sys.modules[&quot;quickstart_metrics&quot;] = qm
+_mspec.loader.exec_module(qm)
+metric = qm.QuickstartAccuracyMetric(spec)
+
+probe = WORKSPACE / &quot;metric_probe.json&quot;           # a real file, so presence passes
+oracle = {r.sample_id: r.label for r in eval_scope.rows}
+probe.write_text(json.dumps(oracle))
+perfect = metric.evaluate({0: str(probe)}, evaluation_payload=oracle, task_scope=eval_scope, data_dir=None)
+wrong = metric.evaluate({0: str(probe)}, evaluation_payload={k: 1 - v for k, v in oracle.items()},
+                        task_scope=eval_scope, data_dir=None)
+missing = metric.evaluate({0: str(probe) + &quot;.gone&quot;}, evaluation_payload=oracle,
+                          task_scope=eval_scope, data_dir=None)
+print(&quot;oracle predictions -&gt;&quot;, type(perfect).__name__, perfect.scalar)
+print(&quot;all-wrong          -&gt;&quot;, type(wrong).__name__, wrong.scalar)
+print(&quot;missing deliverable-&gt;&quot;, type(missing).__name__, &quot;|&quot;,
+      missing.verdict.failures[0].requirement, &quot;|&quot;, missing.verdict.failures[0].detail)
+</pre>
+<pre class="out">metric id: accuracy | direction: higher | aggregation: fraction_correct_over_eval_rows
+oracle predictions -&gt; MetricResult 1.0
+all-wrong          -&gt; MetricResult 0.0
+missing deliverable-&gt; NotScoreableResult | completeness | deliverable not found at &#x27;/tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396-834a-b89a0cce2662/scratchpad/quickstart_ws_exec/metric_probe.json.gone&#x27;
+</pre>
+</div>
+<h2>7. LLM configuration</h2>
+<p>Facts from the source (<code>sdsc_submission_scripts/run_one_iteration.py</code>):</p>
+<ul><li><strong>If you specify nothing</strong>, the chain resolves <code>WorkflowLLMConfig.uniform("gemini", "gemini-3.1-pro-preview")</code> — every node on that Gemini model (the reflector defaults to <code>gemini-2.5-flash</code>). <code>--llm_model</code> alone is <strong>deprecated</strong>; nothing fails, but you get a provider you may not have keys for.</li><li><strong>The documented default for real work</strong>: `--llm_config llm_configs/openai_tiered_pro.json` (per-node routing; the repository's Gate standard uses exactly this file). API keys come from your <code>.env</code>.</li><li><code>llm_configs/certify_minimal.json</code> pins every agent role to <code>gpt-4o-mini</code> — its own header says: plumbing certification only, <em>not</em> model intelligence. It is the cheapest way to watch the mechanics move.</li><li>In both files the literature-review node routes to <code>deepseek-v4-pro</code> (visible in the audit below) — one more reason to read the config you pass rather than assume a single provider.</li></ul>
+<p>This notebook makes <strong>no LLM calls</strong>; the config only matters for the launch in section 9.</p>
+<div class="cell"><div class="cell-label">In [6]</div>
+<pre class="code">for f in sorted((REPO_ROOT / &quot;llm_configs&quot;).glob(&quot;*.json&quot;)):
+    payload = json.loads(f.read_text())
+    roles = {k: v for k, v in payload.items() if not k.startswith(&quot;_&quot;)}
+
+    def _models(node, out):
+        if isinstance(node, dict):
+            if &quot;model_id&quot; in node:
+                out.add(node[&quot;model_id&quot;])
+            else:
+                for v in node.values():
+                    _models(v, out)
+
+    models = set()
+    _models(roles, models)
+    print(f&quot;{f.name:28s} -&gt; {sorted(models)}&quot;)
+</pre>
+<pre class="out">certify_minimal.json         -&gt; [&#x27;deepseek-v4-pro&#x27;, &#x27;gpt-4o-mini&#x27;]
+deepseek_tiered_pro.json     -&gt; [&#x27;deepseek-v4-pro&#x27;]
+openai_tiered_pro.json       -&gt; [&#x27;deepseek-v4-pro&#x27;, &#x27;gpt-5.5&#x27;]
+openai_tiered_v1.json        -&gt; [&#x27;deepseek-v4-pro&#x27;, &#x27;gpt-5.4&#x27;, &#x27;gpt-5.4-mini&#x27;, &#x27;gpt-5.4-nano&#x27;]
+</pre>
+</div>
+<h2>8. Create a workspace and compose the run</h2>
+<p><code>compose_run_task_bindings(manifest)</code> is what the chain launcher runs before anything else: it resolves every declared family <strong>fail-closed</strong> (a missing file, a misspelled key, a plugin that raises, an id mismatch — each refuses by name; nothing ever falls back to TIDMAD) and pins a <strong>semantic fingerprint</strong> over the resolved values and plugin content hashes. That fingerprint goes into the workspace's <code>run_invariants_lock.json</code>: edit a plugin and a resume of the old workspace refuses, because it would no longer be the same scientific run.</p>
+<div class="cell"><div class="cell-label">In [7]</div>
+<pre class="code">from workflows.task_composition import compose_run_task_bindings
+
+SHIPPED_MANIFEST = REPO_ROOT / &quot;configs&quot; / &quot;task_composition&quot; / &quot;quickstart.yaml&quot;
+composition = compose_run_task_bindings(str(SHIPPED_MANIFEST))
+print(&quot;task_data_path_id :&quot;, composition.task_data_path_id)
+print(&quot;metric            :&quot;, composition.metric.spec.id, f&quot;({composition.metric.spec.direction} is better)&quot;)
+print(&quot;partitions        :&quot;, composition.dataset_profile.partition_count)
+print(&quot;health family     :&quot;, composition.task_health_binding, &quot; (a NAMED absence, never TIDMAD&#x27;s)&quot;)
+print(&quot;deliverable naming:&quot;, composition.deliverable_naming.prefix + &quot;_*&quot; + composition.deliverable_naming.extension)
+print(&quot;model plugins     :&quot;, tuple(composition.model_plugins.required_model_types), &quot;from the pack&#x27;s plugins/ dir&quot;)
+print(&quot;semantic fingerprint:&quot;, composition.semantic_fingerprint[:16], &quot;…&quot;)
+for ref in composition.provenance.plugins:
+    print(&quot;  plugin pinned:&quot;, ref.configured_ref.rsplit(&quot;/&quot;, 1)[-1], ref.content_sha256[:12], &quot;…&quot;)
+</pre>
+<pre class="out">task_data_path_id : quickstart_tabular
+metric            : accuracy (higher is better)
+partitions        : 4
+health family     : explicit_none  (a NAMED absence, never TIDMAD&#x27;s)
+deliverable naming: quickstart_predictions_*.json
+model plugins     : (&#x27;quickstart_reference_mlp&#x27;,) from the pack&#x27;s plugins/ dir
+semantic fingerprint: 9645c218f5a84b21 …
+  plugin pinned: _quickstart_task.py efe279577fc9 …
+  plugin pinned: _quickstart_metrics.py e36fd102dc7e …
+  plugin pinned: quickstart_reference_mlp.py ca5544db561c …
+</pre>
+</div>
+<p>A note on <strong>health</strong>: <code>task_health: {none: true}</code> is 08b's <code>EXPLICIT_NONE</code> — a <em>named</em> absence. Omitting the section entirely would mean "resolve TIDMAD's health family", which is exactly the silent fallback a composition exists to prevent. When your real task has collapse modes worth watching, start from the generic checks (<code>sample_dispersion_floor</code>, <code>categorical_distinct_symbols</code>, <code>categorical_dominant_fraction</code>) per <code>docs/guides/define-a-task.md</code> step 6 — and note that composed runs currently fire ZERO health gates — the A1 declared debt on the landed PR-12d ledger — so never read a composed run as health-enforced yet.</p>
+<h2>9. Launch one bounded workflow — executed live 2026-08-25</h2>
+<p>The command below is the real operator surface (<code>docs/guides/define-a-task.md</code> step 10), bounded to <strong>1 iteration x 1 round</strong>, executed as the operator-authorized bounded witness with ONE recorded substitution: <code>--llm_config llm_configs/certify_minimal.json</code> (README §7 step 5 — a bounded witness certifies plumbing, not model intelligence; every role pinned to gpt-4o-mini). The output below is verbatim excerpts from the final-witness launch.</p>
+<p>Witnessed mechanically, end to end: the SHIPPED manifest composed fail-closed; the cold-start propose → implement → validate ladder passed a generated model through the CONTRACT-AWARE validator (the generated-pytest geometry gap this pack's first live run exposed is fixed in the landed source — every probe surface of that ladder now renders from the task's <code>model_io</code>); the tuner leg ran 15 planned attempts with typed structured-failure records; and one attempt performed REAL TRAINING on the pack's data (cross-entropy, epoch losses below, checkpoint saved) with both pack plugins loaded inside the training and inference children.</p>
+<p>Two honest limits, both visible below. That attempt's inference then failed at THIS PACK's own deliverable codec — the codec predated the landed positional-pairing convention (seam C/B7) — batch item A, since FIXED in this pack with a mutation-proven regression test. The remaining attempts were refused by the resource probe whenever the planner chose the legacy focal-loss family, which is geometry-incompatible with a <code>[B,2]</code>-logit contract — batch item B, a FLAGGED framework seam (loss eligibility is not contract-filtered for composed tasks), outside this pack. The iteration therefore closed <code>no_records</code>, honestly: no scored result exists and none is claimed.</p>
+<p>Also visible: composed-run hygiene ("Reference scores: NOT LOADED — this run is COMPOSED"), the task-owned scope path ("no SampleSet is built for a task that declares no physical partition geometry"), and the TIDMAD-physical GPU probe declaring itself NOT APPLICABLE to a task that declares no TIDMAD topology. Composed runs still fire <strong>zero health gates</strong> (the A1 debt), so a passing run makes no health-enforcement claim.</p>
+<div class="cell"><div class="cell-label">In [12]</div>
+<pre class="code">%%bash
+# Executed 2026-08-25 as the operator-authorized bounded witness — swapping ONE
+# flag per README §7 step 5: --llm_config llm_configs/certify_minimal.json.
+# The output below is verbatim excerpts of the final-witness launch log.
+cd &quot;$(git rev-parse --show-toplevel)&quot;
+WS=&quot;${SIDERIUS_QUICKSTART_WORKSPACE:-$HOME/siderius_quickstart_workspace}&quot;
+
+bash sdsc_submission_scripts/run_chain.sh \
+    --mode lilab \
+    --workspace &quot;$WS/chain&quot; \
+    --run_name quickstart_v1 \
+    --num_iterations 1 \
+    --max_rounds 1 \
+    --task_composition configs/task_composition/quickstart.yaml \
+    --data_dir &quot;$WS/data&quot; \
+    --healthgate_mode blocking \
+    --result_authority diagnostic \
+    --llm_config llm_configs/openai_tiered_pro.json
+</pre>
+<pre class="out">Start: workspace does not exist yet — fresh chain at 1
+############################################################
+  SIDERIUS Iteration Chain — LILAB (foreground)
+  Workspace        : /tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396-834a-b89a0cce2662/scratchpad/quickstart_final_ws/chain
+  Num iterations   : 1
+  [... launch banner trimmed ...]
+  Task composition : configs/task_composition/quickstart.yaml
+[TOKEN] run_id = quickstart_v1-20260825T055108-1072411
+  Hardware      : NVIDIA GeForce RTX 5090 (31.34 GB total, 25.07 GB usable cap), budget=None GB
+  [... cold-start interpret; 2 proposal attempts failed codegen (weak certify model); attempt 3 below ...]
+    Proposed: simple_mlp_classifier
+  [1] Tuning &#x27;simple_mlp_classifier&#x27; for 1 rounds...
+Reference scores: NOT LOADED — this run is COMPOSED. The legacy TIDMAD reference tables are task-specific science and are never loaded implicitly for a composed run; score-comparison tables are omitted for this run.
+  [... attempt 1 skipped by the §5 min-batch guardrail; attempt 2 (cross-entropy) below ...]
+  Task-owned scope: no SampleSet is built for a task that declares no physical partition geometry
+  Pre-phase GPU measurement NOT APPLICABLE: this task declares no TIDMAD topology, and the bounded probe batch is TIDMAD-physical (h5 training family / declared input channel). No measured requirement is attached for this run; the VRAM capacity gate is unaffected. This is an applicability decision, not a probe failure.
+[Step 1/3] Training...
+Epoch 0 | Avg Loss: 0.686106
+Epoch 0 | Validation Loss: 0.708563 (64 ML segments)
+Model saved to: /tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396-834a-b89a0cce2662/scratc [...]
+[Step 2/3] Inference...
+    ValueError: quickstart deliverable outputs must be a mapping of sample_id -&gt; predicted class; got list.
+  [... the codec refusal above is final-witness batch item A — FIXED in this pack (see section 10&#x27;s
+       regression test); remaining attempts burned on the flagged legacy-loss probe seam (item B) ...]
+[gate-exhaustion] iteration ended without ever training; 0 VRAM-gated, 2 time-gated, 13 other failures. Surfacing to next proposer.
+Output validated and saved -&gt; /tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396- [...]
+[TOKEN_ITER] iter=01  calls=36  total_tok=247327  (implementor=16656  proposer=47939  tuner=181489  validator=1243)  cumulative_total=247327
+  Manifest   : /tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396-834a-b89a0cce2662/scratchpad/quickstart_final_ws/chain/iter_001/manifest.json (status=no_records)
+  CHAIN COMPLETE — 1 iterations
+</pre>
+</div>
+<h2>10. Inspect results and artifacts</h2>
+<p>What a chain workspace holds after a run (all names from the current source):</p>
+<ul><li><code>run_invariants_lock.json</code> — scope, health enablement, effective-config sha256 and the <strong>composition fingerprint</strong>; a mismatched resume fails closed at startup (that is the system working, not breaking).</li><li><code>health_checks_effective.yaml</code> — the composed health policy actually in force, sha-pinned by the lock.</li><li><code>{node}_{run_name}.json</code> — each node's output record (persistence/recovery log, never the inter-node channel).</li><li>the deliverables directory — files named by the <strong>declared</strong> template.</li></ul>
+<p>The final-witness run produced the chain-level artifacts for this task, and the first cell below reads them from the REAL workspace (its output is the witnessed run's): the lock's composition fingerprint is byte-equal to the one section 8 composed from the SHIPPED manifest, the reference-model plugin's content sha is pinned, and the lock RECORDS the generated-library provenance (<code>{root, source: "env"}</code>) — the promoted capabilities landed under that environment-resolved root, never inside the repository checkout, which stayed byte-identical before/after the run. The section-12 recovery evidence (manifest replacement + set-aside) was witnessed on the earlier live-fix workspace; this fresh workspace shows the plain single-manifest shape. What the workspace does NOT hold — a scored tuner record and a deliverable file — is exactly what the section-9 batch blocked. The deliverable/scoring lifecycle itself is executable NOW through the composed authorities (second cell), which is exactly what the chain's children do: bind the composition, verify the binding, persist a deliverable under the declared naming, read it back, and score it.</p>
+<div class="cell"><div class="cell-label">In [13]</div>
+<pre class="code">import json
+import os
+from pathlib import Path
+
+ws = Path(os.environ.get(&quot;SIDERIUS_QUICKSTART_WORKSPACE&quot;, str(Path.home() / &quot;siderius_quickstart_workspace&quot;)))
+chain = ws / &quot;chain&quot;
+if not chain.is_dir():
+    print(f&quot;(no chain workspace at {chain} — run section 9 first)&quot;)
+else:
+    lock = json.loads((chain / &quot;run_invariants_lock.json&quot;).read_text())
+    print(&quot;run_invariants_lock.json&quot;)
+    print(&quot;  task_composition_fingerprint :&quot;, lock[&quot;task_composition_fingerprint&quot;])
+    print(&quot;  resolved_data_scope          :&quot;, lock[&quot;resolved_data_scope&quot;])
+    for pin in lock[&quot;model_plugin_identities&quot;]:
+        print(f&quot;  model plugin pinned          : {pin[&#x27;model_type&#x27;]}  sha256 {pin[&#x27;content_sha256&#x27;][:16]}…&quot;)
+    print(&quot;  generated_library (P1)       :&quot;, lock.get(&quot;generated_library&quot;))
+    print(&quot;  health_checks_effective.yaml :&quot;, &quot;present&quot; if (chain / &quot;health_checks_effective.yaml&quot;).is_file() else &quot;MISSING&quot;)
+    manifest = json.loads((chain / &quot;iter_001&quot; / &quot;manifest.json&quot;).read_text())
+    print(&quot;iter_001/manifest.json&quot;)
+    print(&quot;  status                       :&quot;, manifest[&quot;status&quot;])
+    print(&quot;  healthgate_mode / authority  :&quot;, manifest[&quot;healthgate_mode&quot;], &quot;/&quot;, manifest[&quot;result_authority&quot;])
+    replacement = manifest.get(&quot;manifest_replacement&quot;)
+    if replacement:
+        print(&quot;  manifest_replacement         :&quot;, replacement[&quot;replacement_reason&quot;])
+    set_aside = sorted(p.name for p in (chain / &quot;iter_001&quot;).glob(&quot;manifest.replaced.*.json&quot;))
+    print(&quot;  set-aside prior manifests    :&quot;, set_aside or &quot;none&quot;)
+    print(&quot;  task_config_snapshot.yaml    :&quot;, &quot;present&quot; if (chain / &quot;iter_001&quot; / &quot;task_config_snapshot.yaml&quot;).is_file() else &quot;MISSING&quot;)</pre>
+<pre class="out">run_invariants_lock.json
+  task_composition_fingerprint : 9645c218f5a84b219beb23fba6c9afc2916bf89eea8924c0560e822ce96f5b7b
+  resolved_data_scope          : [0, 1, 2, 3]
+  model plugin pinned          : quickstart_reference_mlp  sha256 ca5544db561c81c5…
+  generated_library (P1)       : {&#x27;root&#x27;: &#x27;/tmp/claude-1004/-home-yuema137-SIDERIUS/f6b9131d-c11a-4396-834a-b89a0cce2662/scratchpad/quickstart_final_lib2&#x27;, &#x27;source&#x27;: &#x27;env&#x27;}
+  health_checks_effective.yaml : present
+iter_001/manifest.json
+  status                       : no_records
+  healthgate_mode / authority  : blocking / diagnostic
+  set-aside prior manifests    : none
+  task_config_snapshot.yaml    : present
+</pre>
+</div>
+<div class="cell"><div class="cell-label">In [8]</div>
+<pre class="code">from execute_tools.task_data_path import DeliverableWriteRequest, EvaluationReadRequest
+from workflows.task_composition import bind_run_task_composition, verify_composition_is_bound
+
+identity = dict(exp_id=&quot;exp0&quot;, run_name=&quot;quickstart_v1&quot;, model_type=&quot;quickstart_reference_mlp&quot;)
+deliverable_dir = WORKSPACE / &quot;deliverables&quot;
+
+with bind_run_task_composition(composition, physical_data_root=bundle[&quot;data_dir&quot;]):
+    verify_composition_is_bound(composition)      # a half-composed run refuses here
+    bound_impl = composition.task_data_path       # the COMPOSED instance (its own module load)
+    predictions = {r.sample_id: r.label for r in eval_scope.rows}   # stand-in model outputs
+    bound_impl.write_deliverable(predictions, DeliverableWriteRequest(output_dir=str(deliverable_dir), **identity))
+    decoded = bound_impl.read_evaluation_payload(EvaluationReadRequest(deliverable_dir=str(deliverable_dir), **identity))
+    artifact = deliverable_dir / bound_impl.deliverable_name(**identity)
+    outcome = composition.metric.evaluate({0: str(artifact)}, evaluation_payload=decoded,
+                                          task_scope=eval_scope, data_dir=None)
+
+print(&quot;deliverable :&quot;, artifact.name, f&quot;({artifact.stat().st_size} bytes)&quot;)
+print(&quot;round-trip  :&quot;, &quot;exact&quot; if decoded == predictions else &quot;MISMATCH&quot;)
+print(&quot;scored      :&quot;, type(outcome).__name__, &quot;=&quot;, outcome.scalar)
+</pre>
+<pre class="out">deliverable : quickstart_predictions_quickstart_reference_mlp_quickstart_v1_exp0_0000.json (962 bytes)
+round-trip  : exact
+scored      : MetricResult = 1.0
+</pre>
+</div>
+<h2>11. Inspect the model plugin</h2>
+<p>In a real chain the implementor agent <em>writes</em> model plugins into <code>agent_generated/models/</code> and the validator checks them against the plugin contract: a module defining <code>PLUGIN_MODEL_TYPE</code>, <code>PLUGIN_CONFIG_CLASS</code> (a pydantic config) and <code>PLUGIN_MODEL_CLASS</code> (the <code>nn.Module</code>). This pack ships a reference plugin in that exact shape, so the post-12d chain has a model to start from — and so you can see the contract concretely.</p>
+<div class="cell"><div class="cell-label">In [9]</div>
+<pre class="code">import torch
+
+from execute_tools.task_data_path import EpochSamplingParams
+
+_pspec = importlib.util.spec_from_file_location(&quot;quickstart_mlp&quot;, Path.cwd() / &quot;plugins&quot; / &quot;quickstart_reference_mlp.py&quot;)
+mlp_mod = importlib.util.module_from_spec(_pspec)
+sys.modules[&quot;quickstart_mlp&quot;] = mlp_mod
+_pspec.loader.exec_module(mlp_mod)
+
+config = mlp_mod.PLUGIN_CONFIG_CLASS()
+model = mlp_mod.PLUGIN_MODEL_CLASS(config)
+parameters = sum(p.numel() for p in model.parameters())
+print(&quot;PLUGIN_MODEL_TYPE :&quot;, mlp_mod.PLUGIN_MODEL_TYPE)
+print(&quot;config defaults   :&quot;, config.model_dump())
+print(&quot;parameters        :&quot;, parameters)
+
+dataset = impl.training_dataset(train_scope, EpochSamplingParams(data_dir=bundle[&quot;data_dir&quot;], epoch_seed=0))
+batch = torch.stack([dataset[i][0] for i in range(8)])
+logits = model(batch)
+print(&quot;forward           :&quot;, tuple(batch.shape), str(batch.dtype), &quot;-&gt;&quot;, tuple(logits.shape), str(logits.dtype))
+</pre>
+<pre class="out">PLUGIN_MODEL_TYPE : quickstart_reference_mlp
+config defaults   : {&#x27;segmentation_size&#x27;: 4, &#x27;batch_size&#x27;: 32, &#x27;hidden_dim&#x27;: 16}
+parameters        : 114
+forward           : (8, 4) torch.float32 -&gt; (8, 2) torch.float32
+</pre>
+</div>
+<h2>12. Resume (same workspace) — recovery resume executed live</h2>
+<p>Re-running the section-9 command with the <strong>same <code>--workspace</code> and <code>--run_name</code></strong> resumes: <code>--auto_resume</code> is the default (the launcher queries <code>scripts/inspect_run_state.py</code> for the next iteration; <code>--start_iter N</code> is the manual pin). The invariants lock makes resumes honest — same scope, same health enablement, same effective config, same composition fingerprint, or the launch refuses at startup. Editing any pack plugin changes the fingerprint, so a resume of the old workspace fails <strong>closed</strong>; that refusal is a feature, and the fresh-start section is the answer.</p>
+<p>The live witness exercised the RECOVERY case. After the first bounded run ended <code>no_records</code>, re-running the identical command was first REFUSED by the launcher's stale-fresh guard (real output):</p>
+<pre class="md">Start: auto-resume — inspector computed START_ITER=1
+ERROR: Workspace at .../quickstart_live_ws/chain is not empty. Use --force_fresh to clobber existing data, or specify --start_iter N to resume from a specific point.</pre>
+<p>Sharp edge, worth knowing: at <strong>iteration 1</strong> the guard cannot distinguish "fresh start pointed at the wrong directory" from "recovery of a terminally <code>failed</code>/<code>no_records</code> iteration 1" (the #258 case), so the recovery relaunch needs <code>--force_fresh</code> — which on the lilab path deletes NOTHING: the shell only bypasses the guard, and the launcher then replaces the terminal manifest through the explicit set-aside + provenance path. From the witnessed workspace (real artifact):</p>
+<pre class="md">&quot;manifest_replacement&quot;: {
+  &quot;replacement_reason&quot;: &quot;auto_resume recovery: prior iteration manifest was terminal &#x27;no_records&#x27; (#258)&quot;,
+  &quot;previous_manifest_sha256&quot;: &quot;c6e5ef80e51a955c…&quot;
+}</pre>
+<p>with the prior manifest set aside beside it as <code>manifest.replaced.20260825T035133099555Z.json</code>, the run identity carried unchanged (<code>quickstart_v1-20260825T034146-793953</code>), and the invariants lock byte-stable across the resume (that workspace's fingerprint, <code>ede74e70…</code>). A COMPLETED manifest is never replaced by auto-resume, and a fully complete chain exits at the launcher's idempotency check before any submission — recovery replacement is scoped to terminal <code>failed</code>/<code>no_records</code> slots only.</p>
+<h2>13. Fresh start (new workspace)</h2>
+<p>A fresh run is a new <code>--workspace</code> (and ideally a new <code>--run_name</code>). Nothing in the pack or the repository holds run state — the workspace IS the run. Delete or abandon the old directory, point the launch at a new one, done. <code>--no_auto_resume</code> starts from iteration 1, and in a non-empty existing directory the stale-fresh guard then also requires <code>--force_fresh</code> (section 12); prefer a new directory, so old evidence stays inspectable.</p>
+<p>The materializer is idempotent: re-running section 3 regenerates the same bytes (the pins guarantee it), so bundles are disposable.</p>
+<h2>14. Replace the example with your own task</h2>
+<p>Map each quickstart file to your task, in the order <code>docs/guides/define-a-task.md</code> walks them:</p>
+<ul><li><strong>Data + profile</strong> — your partitions, your <code>topology</code> payload (the framework never looks inside), your anchor/health-peek declarations.</li><li><strong><code>TaskDataPath</code></strong> — your four methods; add <code>TaskScopeCapability</code> if your data is not "N uniform partitions". Exact validation materialization is a hard obligation: fail, never pad.</li><li><strong><code>task_config.yaml</code></strong> — your science, with a structured <code>model_io:</code> block. Commit it with your package; an in-tree pack additionally binds it from a shipped <code>configs/task_composition/*.yaml</code> (the guard-(a) rule from section 4).</li><li><strong>Metric declaration + implementation</strong> — one number, one declared direction. Everything else is a secondary, and secondaries influence nothing.</li><li><strong>Health</strong> — <code>none: true</code> honestly, or generic checks with thresholds you can defend.</li><li><strong>Manifest</strong> — point every section at your files (<code>file:</code> refs make the package relocatable; paths resolve against the manifest's own directory). The base composes an out-of-tree package with <strong>zero framework edits</strong> — the repository proves that with its <code>fourth_task</code> fixture, and this pack is the same shape one directory over.</li><li><strong>Model plugin</strong> — ship a reference model in the plugin contract and declare it in your manifest's <code>model_plugins:</code> section (<code>require:</code> makes an unresolvable plugin a composition refusal, not a mid-run surprise).</li></ul>
+<p>Then compose it (section 8) — the fail-closed refusals are your checklist — and launch bounded (section 9). The pack's landed-boundary pins (<code>tests/unit/examples/test_quickstart_pack.py</code>) keep the composition behaviours you rely on — section-key refusal, seam-A <code>config:</code> delivery, <code>model_plugins</code> require-enforcement, <code>model_io</code> composability — executable evidence rather than prose.</p>
+</body>
+</html>

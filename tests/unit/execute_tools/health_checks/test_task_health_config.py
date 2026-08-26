@@ -477,7 +477,14 @@ class TestTaskHealthConfigIsConsumedOnlyThroughTheBindingSeam:
         assert proc.returncode in (0, 1), (
             f"git grep failed (rc={proc.returncode}) in {REPO_ROOT}: {proc.stderr.strip()}"
         )
-        return proc.stdout.splitlines()
+        # Documentation is PROSE, not a consumer — a module README naming the
+        # config type describes the seam; it cannot import or read it. Added
+        # when the S4 onboarding stream shipped READMEs inside the swept
+        # packages (the same principle the standard-views census applies to
+        # .py docstrings).
+        return [
+            line for line in proc.stdout.splitlines() if not line.split(":", 1)[0].endswith(".md")
+        ]
 
     def test_repo_root_resolves_to_this_checkout(self):
         """Guards the guard: a wrong root would make the grep below vacuous."""

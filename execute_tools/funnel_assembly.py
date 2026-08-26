@@ -5,11 +5,15 @@ no measurement — every number it reports lives in a stage-native file
 written by the stage that measured it:
 
 ```text
-{iter_dir}/attempt_{NNN}_{name}/proposal_{run}.json      proposal stage
-{iter_dir}/attempt_{NNN}_{name}/implementor_{run}.json   implementor stage
-{iter_dir}/attempt_{NNN}_{name}/validation_{run}.json    validator stage
-{iter_dir}/{model_type}/run_output_{run}.json            tuner stage
+{iter_dir}/attempt_{NNN}_{name}/proposal_{run}.json               proposal stage
+{iter_dir}/attempt_{NNN}_{name}/impl_{KKK}/implementor_{run}.json  implementor stage
+{iter_dir}/attempt_{NNN}_{name}/impl_{KKK}/validation_{run}.json   validator stage
+{iter_dir}/{model_type}/run_output_{run}.json                     tuner stage
 ```
+
+(S2 / U6, #256: ``impl_{KKK}`` is one directory per implement→validate
+retry; the funnel reads the TERMINAL one. A pre-U6 workspace keeps the
+two files at the attempt level and is read the same way.)
 
 **Join rule (O-E-4/O-E-5): only an explicit ``candidate_id`` joins
 records.** Identity is never inferred from ``model_name``, a directory
@@ -39,6 +43,8 @@ import os
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+from execute_tools.impl_attempts import stage_artifact_dir
 
 #: Stage names, in funnel order. ``stopped_at_stage`` is one of these or
 #: None for a candidate whose evidence reaches the tuner.
@@ -161,16 +167,27 @@ def _stage_artifacts(attempt_dir: str) -> dict[StageName, str]:
     """Map stage -> artifact path for whichever stage files exist.
 
     Matches on the ``{stage}_`` filename prefix — never on model_name.
+
+    S2 / U6 (#256): the proposal lives at the attempt level; the
+    implementor and validation artifacts live in the TERMINAL nested
+    ``impl_NNN/`` (``execute_tools.impl_attempts.stage_artifact_dir``),
+    which resolves to the attempt directory itself for a pre-U6 workspace.
+    Under O-E-4 every retry is the same candidate, so the terminal outcome
+    is the one the funnel reports; the earlier retries stay on disk as
+    evidence and are deliberately NOT rows.
     """
     found: dict[StageName, str] = {}
-    try:
-        entries = sorted(os.listdir(attempt_dir))
-    except OSError:
-        return found
+    listing: dict[str, list[str]] = {}
     for stage, prefix in _STAGE_FILES:
-        for entry in entries:
+        search_dir = attempt_dir if stage == "proposal" else stage_artifact_dir(attempt_dir)
+        if search_dir not in listing:
+            try:
+                listing[search_dir] = sorted(os.listdir(search_dir))
+            except OSError:
+                listing[search_dir] = []
+        for entry in listing[search_dir]:
             if entry.startswith(prefix) and entry.endswith(".json"):
-                found[stage] = os.path.join(attempt_dir, entry)
+                found[stage] = os.path.join(search_dir, entry)
                 break
     return found
 

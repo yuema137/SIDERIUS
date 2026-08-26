@@ -26,6 +26,18 @@ their ``run_output_*.json`` paths onto the seed list — operators no
 longer pass prior iters' run_outputs explicitly. The deprecated
 ``--iteration`` alias is still accepted for one release; use
 ``--start_iteration`` for new chains.
+
+Iteration manifests are WRITE-ONCE (arXiv-readiness S2 / U5, #258): a
+launch into an ``iter_NNN/`` that already holds a ``manifest.json`` is
+refused (exit 2) before any work. Rerun an iteration deliberately with
+``--replace_iteration_manifest --replacement_reason '<why>'`` — the
+previous manifest is set aside as ``manifest.replaced.<stamp>.json`` and
+its digests are recorded in the new manifest's ``manifest_replacement``.
+#258 refinement (operator ruling): ``--auto_resume`` — forwarded by
+``run_chain.sh`` only when the inspector computed the start iteration —
+authorizes that SAME replacement path for a manifest whose terminal
+status is ``failed`` or ``no_records``; a ``completed`` manifest is never
+replaced by auto-resume.
 """
 
 import argparse
@@ -36,6 +48,7 @@ import os
 import sys
 import traceback
 import warnings
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -46,8 +59,17 @@ from agent.schemas.health_feedback import HealthFeedbackRetentionPolicy
 from agent.schemas.ordering import ResolvedOrdering, parse_file_order_cli
 from agent.schemas.telemetry import LLMBridgeContextError
 from agent.skills.evaluate_vram_skill.preflight_adapter import PREFLIGHT_EXECUTION_MODE
+from core.iteration_manifest import (
+    ManifestAlreadyPublishedError,
+    ManifestReplacementError,
+    ManifestReplacementRequest,
+    classify_manifest_slot,
+    manifest_path,
+    publish_iteration_manifest,
+)
 from core.resume import ResumeError, restore_prior_state
 from core.run_invariants import (
+    LockLaunchIdentity,
     RunInvariants,
     RunInvariantsViolation,
     build_run_invariants,
@@ -59,7 +81,11 @@ from execute_tools.health_checks.launch_policy import (
     validate_formal_launch,
 )
 from workflows.llm_config import WorkflowLLMConfig
-from workflows.model_exploration import run_workflow
+from workflows.model_exploration import (
+    lit_review_config_sha256,
+    resolve_lit_review_config_path,
+    run_workflow,
+)
 from workflows.run_config import WorkflowLaunchConfig
 from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
 
@@ -456,6 +482,33 @@ def _ordering_by_experiment(tune_output) -> list[dict]:
     return entries
 
 
+@dataclass(frozen=True)
+class LaunchIdentity:
+    """The run-identity values this launch resolved ONCE (arXiv U1).
+
+    Built by :func:`resolve_launch_identity` before any manifest can be
+    written, and handed — as ONE object — to the invariants pre-flight, the
+    workflow launch config and every ``write_manifest`` call, so the three
+    cannot resolve the lit-review flag or the arm label differently (the W7
+    lesson, applied to identity instead of composition).
+
+    Attributes:
+        experiment_arm: The opaque arm label, or ``None`` (unlabelled).
+        lit_review_enabled: Resolved topology flag (CLI > YAML > ``False``).
+        lit_review_config_path: The operator's config path, as given.
+        lit_review_config_sha256: sha256 of the resolved config bytes when
+            enabled, else ``None``.
+        baseline_isolation: arXiv U3 — the WITHOUT arm's explicit isolation
+            flag, straight from ``--baseline_isolation``.
+    """
+
+    experiment_arm: str | None
+    lit_review_enabled: bool
+    lit_review_config_path: str
+    lit_review_config_sha256: str | None
+    baseline_isolation: bool = False
+
+
 def write_manifest(
     iter_dir: str,
     run_name: str,
@@ -468,12 +521,33 @@ def write_manifest(
     chain_incumbent_source: dict | None = None,
     health_feedback_policy: dict | None = None,
     fixed_candidate_provenance: dict | None = None,
+    launch_identity: LaunchIdentity | None = None,
+    replacement: ManifestReplacementRequest | None = None,
 ) -> dict:
     """
     Write a manifest.json summarizing this iteration's output.
 
     The manifest is the discoverable handoff between iterations: the next
     iteration's job reads it to find this iteration's tuning output path.
+
+    arXiv U1 — ``launch_identity`` stamps ``experiment_arm``,
+    ``lit_review_enabled`` and ``lit_review_config_sha256`` on EVERY branch
+    under the lock's own omission rule: a key is written only when it
+    departs from the legacy default (arm ``None``, lit-review ``False``, sha
+    ``None``), so an unlabelled lit-review-OFF iteration's manifest is
+    byte-identical to its pre-U1 form and a reader applies ONE rule to the
+    lock and the manifest alike (absent = the default). ``None`` (a caller
+    that predates the parameter) stamps nothing.
+
+    S2 / U5 (#258): the manifest is published WRITE-ONCE through
+    ``core.iteration_manifest.publish_iteration_manifest`` — it gains a
+    ``manifest_sha256`` self-digest, and a second write for the same
+    iteration is a named ``ManifestAlreadyPublishedError`` unless
+    ``replacement`` carries the explicit operator request, in which case
+    the previous manifest is set aside and its digests are recorded under
+    ``manifest_replacement``. ``run_output_sha256`` is always computed for
+    THIS publication's artifact; it is never copied from a previous
+    manifest.
 
     Status taxonomy (consumed by ``core/resume.py:_read_manifest``):
       * ``"completed"`` — workflow produced a real best_denoising_score.
@@ -645,11 +719,129 @@ def write_manifest(
         else getattr(tune_output, "result_authority", None)
     )
 
-    manifest_path = os.path.join(iter_dir, "manifest.json")
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2)
+    # arXiv U1 (#253 / #254) — run identity, on EVERY branch, under the
+    # lock's omission rule (see the docstring). A crashed labelled iteration
+    # is exactly when "which arm was this?" has to be answerable.
+    if launch_identity is not None:
+        if launch_identity.experiment_arm is not None:
+            manifest["experiment_arm"] = launch_identity.experiment_arm
+        if launch_identity.lit_review_enabled:
+            manifest["lit_review_enabled"] = True
+        if launch_identity.lit_review_config_sha256 is not None:
+            manifest["lit_review_config_sha256"] = launch_identity.lit_review_config_sha256
+        # arXiv U3 — the isolation flag, under the same omission rule.
+        if launch_identity.baseline_isolation:
+            manifest["baseline_isolation"] = True
+
+    # S2 / U5 — self-digest + write-once publish (+ explicit replacement
+    # provenance). Stamped LAST so every key above, including any a later
+    # producer change adds, is covered by the digest.
+    manifest_path = publish_iteration_manifest(iter_dir, manifest, replacement=replacement)
     print(f"Manifest written: {manifest_path}")
     return manifest
+
+
+@dataclass(frozen=True)
+class IterationDirPlan:
+    """The iteration's directory, run name and manifest-slot decision."""
+
+    run_name: str
+    iter_dir: str
+    #: ``None`` for a normal (first) publication; the explicit request when
+    #: the operator asked to replace an existing manifest.
+    manifest_replacement: ManifestReplacementRequest | None
+
+
+#: #258 refinement (operator ruling, 2026-08-24): the two TERMINAL states an
+#: auto-resume relaunch may replace. A ``completed`` manifest is immutable to
+#: auto-resume; anything unrecognisable is refused, never guessed.
+_AUTO_RESUME_REPLACEABLE_STATUSES = frozenset({"failed", "no_records"})
+
+#: Recognisable prefix of the provenance reason an auto-resume recovery
+#: records — the evidence that the replacement happened BECAUSE of
+#: auto-resume, not an operator's explicit destructive operation.
+AUTO_RESUME_REPLACEMENT_REASON_PREFIX = "auto_resume recovery"
+
+
+def _auto_resume_replacement(iter_dir: str) -> ManifestReplacementRequest | None:
+    """Classify the manifest slot for an auto-resume relaunch (#258 refinement).
+
+    Auto-resume counts as explicit recovery intent ONLY for a slot whose
+    existing manifest is terminally ``failed`` or ``no_records``; the
+    replacement then goes through the SAME explicit replacement path (set
+    aside + provenance) as ``--replace_iteration_manifest``. Everything else
+    returns ``None`` so ``classify_manifest_slot`` refuses exactly as it
+    would without the flag: a fresh slot needs no replacement, and a
+    ``completed`` — or unreadable / unrecognisable — manifest is never
+    replaced by auto-resume. The classification lives HERE, at the
+    orchestration boundary; the publish layer never inspects a status.
+    """
+    path = manifest_path(iter_dir)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            existing = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None  # unclassifiable — fail closed into the write-once refusal
+    status = existing.get("status") if isinstance(existing, dict) else None
+    if status not in _AUTO_RESUME_REPLACEABLE_STATUSES:
+        return None
+    return ManifestReplacementRequest(
+        reason=(
+            f"{AUTO_RESUME_REPLACEMENT_REASON_PREFIX}: prior iteration manifest was "
+            f"terminal {status!r} (#258)"
+        )
+    )
+
+
+def prepare_iteration_dir(
+    workspace: str,
+    start_iteration: int,
+    *,
+    replace_iteration_manifest: bool,
+    replacement_reason: str | None,
+    auto_resume_recovery: bool = False,
+) -> IterationDirPlan:
+    """Create ``{workspace}/iter_{N:03d}`` and decide its manifest slot (#258).
+
+    Refuses BEFORE any expensive work, so an hours-long iteration can never
+    end in a refused manifest publish. ``auto_resume_recovery`` (the
+    ``--auto_resume`` flag, forwarded by ``run_chain.sh`` only when the
+    inspector computed the start iteration) authorizes the SAME replacement
+    path for a manifest whose terminal status is ``failed`` or
+    ``no_records`` — and nothing else.
+
+    Raises:
+        ManifestAlreadyPublishedError: a manifest already exists for this
+            iteration and no replacement applies (write-once) — including a
+            ``completed`` or unclassifiable manifest under auto-resume.
+        ManifestReplacementError: ``--replace_iteration_manifest`` without a
+            non-empty ``--replacement_reason``, a reason without the flag, or
+            an explicit replacement requested where no manifest exists.
+    """
+    run_name = f"iter_{start_iteration:03d}"
+    iter_dir = os.path.join(workspace, run_name)
+    os.makedirs(iter_dir, exist_ok=True)
+    replacement: ManifestReplacementRequest | None = None
+    if replace_iteration_manifest:
+        try:
+            replacement = ManifestReplacementRequest(reason=replacement_reason or "")
+        except ValueError as exc:
+            raise ManifestReplacementError(
+                f"--replace_iteration_manifest requires --replacement_reason '<why>': {exc}"
+            ) from exc
+    elif replacement_reason:
+        raise ManifestReplacementError(
+            "--replacement_reason was given without --replace_iteration_manifest; a "
+            "replacement must be requested explicitly, not implied by a reason."
+        )
+    elif auto_resume_recovery:
+        # #258 refinement: recovery intent applies to a failed/no_records
+        # slot ONLY; None falls through to the write-once refusal.
+        replacement = _auto_resume_replacement(iter_dir)
+    classify_manifest_slot(iter_dir, replacement)
+    return IterationDirPlan(run_name=run_name, iter_dir=iter_dir, manifest_replacement=replacement)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -1458,13 +1650,147 @@ def build_parser() -> argparse.ArgumentParser:
             "2026-06-11)."
         ),
     )
+    # arXiv U1 (#254) — the OPAQUE experiment-arm label. Pinned into the
+    # workspace lock and stamped on every record / output / manifest; never
+    # read to decide behaviour (ruling R2). Absent = unlabelled legacy run.
+    parser.add_argument(
+        "--experiment_arm",
+        type=_experiment_arm_label,
+        default=None,
+        help=(
+            "Opaque experiment-arm label for this chain (e.g. "
+            "'with-prior-art' / 'without-prior-art'). Pinned into "
+            "run_invariants_lock.json and stamped on every record, tuner "
+            "output and manifest, so two workspaces differing in arm refuse "
+            "to be resumed into one another. Provenance only — it drives NO "
+            "behaviour; each arm's behaviour is set by its own explicit "
+            "flags. Default: absent (unlabelled). An empty string is refused."
+        ),
+    )
+    # arXiv U3 (#260) — the WITHOUT arm's EXPLICIT behaviour flag (ruling R6).
+    parser.add_argument(
+        "--baseline_isolation",
+        action="store_true",
+        default=False,
+        help=(
+            "Exclude the bundled baselines from this run's LLM-facing surface: "
+            "the interpreter and tuner refuse a bundled ml_models/*/description.md "
+            "(plugin descriptions still resolve), the proposer's prompts name no "
+            "built-in architecture and no baseline score, and a proposal whose "
+            "model_type is a bundled built-in is refused before implementation. "
+            "Pinned into run_invariants_lock.json (a toggle on the same workspace "
+            "is refused) and stamped on the manifest. Default: off."
+        ),
+    )
+    parser.add_argument(
+        "--print_resolved_launch_config",
+        action="store_true",
+        default=False,
+        help=(
+            "Print the resolved launch configuration (lit-review topology and "
+            "config sha256, experiment arm, baseline isolation, task "
+            "composition, workspace, advice file, declared posture) as ONE JSON "
+            "object and exit 0 with NO side effects: no workspace directory, "
+            "no LLM call, no lock. Used by the arm launcher's --dry-run."
+        ),
+    )
+    # --- S2 / U5 (#258): explicit same-iteration manifest replacement ---
+    parser.add_argument(
+        "--replace_iteration_manifest",
+        action="store_true",
+        default=False,
+        help=(
+            "Iteration manifests are write-once: launching into an iter_NNN/ that "
+            "already holds a manifest.json is REFUSED. Pass this flag (with "
+            "--replacement_reason) to rerun the iteration deliberately: the previous "
+            "manifest is kept as manifest.replaced.<stamp>.json and its digests are "
+            "recorded under the new manifest's 'manifest_replacement' provenance. "
+            "Integrity hashes are never regenerated silently."
+        ),
+    )
+    parser.add_argument(
+        "--replacement_reason",
+        type=str,
+        default=None,
+        help=(
+            "Why the iteration manifest is being replaced (required with "
+            "--replace_iteration_manifest; recorded verbatim in the provenance)."
+        ),
+    )
+    parser.add_argument(
+        "--auto_resume",
+        action="store_true",
+        default=False,
+        help=(
+            "Declares that this launch was selected by the chain's auto-resume "
+            "(run_chain.sh forwards it only when scripts/inspect_run_state.py "
+            "computed the start iteration). #258 refinement: with this flag, an "
+            "existing same-iteration manifest whose terminal status is 'failed' "
+            "or 'no_records' is replaced through the EXPLICIT replacement path — "
+            "previous manifest kept on disk, provenance recorded with a "
+            "recognizable 'auto_resume recovery' reason. A 'completed' manifest "
+            "is never replaced by auto-resume; that still requires "
+            "--replace_iteration_manifest --replacement_reason."
+        ),
+    )
     return parser
+
+
+def _experiment_arm_label(value: str) -> str:
+    """argparse type: an arm label is present and non-empty, or absent."""
+    if not value.strip():
+        raise argparse.ArgumentTypeError(
+            "--experiment_arm must be a non-empty label; omit the flag for an "
+            "unlabelled run (an empty string is never a label)."
+        )
+    return value
+
+
+def resolve_lit_review_enabled(cli_flag: bool | None, config_path: str) -> bool:
+    """Resolve the lit-review enable flag (Design Decisions 1 + 2, 2026-06-11).
+
+    Priority: CLI flag (when explicitly set) > the YAML's top-level
+    ``enabled`` key > ``False``. The workflow opens + parses the YAML
+    internally (only when enabled); this peeks at ``enabled`` only for the
+    CLI-fallback case. A missing or malformed YAML resolves to ``False``
+    (fail-safe: do not run lit-review). Pure — no side effects — so it can
+    run before the first manifest is written.
+    """
+    if cli_flag is not None:
+        return cli_flag
+    yaml_path = resolve_lit_review_config_path(config_path)
+    try:
+        with open(yaml_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return bool(data.get("enabled", False))
+    except (FileNotFoundError, yaml.YAMLError):
+        return False
+
+
+def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
+    """Resolve the launch's identity values from the parsed CLI (arXiv U1).
+
+    Raises:
+        ValueError: lit-review is enabled but its config cannot be read (the
+            lock must pin the config's sha256, so the launch is refused).
+    """
+    enabled = resolve_lit_review_enabled(args.ml_lit_review_enabled, args.ml_lit_review_config)
+    return LaunchIdentity(
+        experiment_arm=args.experiment_arm,
+        lit_review_enabled=enabled,
+        lit_review_config_path=args.ml_lit_review_config,
+        lit_review_config_sha256=lit_review_config_sha256(
+            args.ml_lit_review_config, enabled=enabled
+        ),
+        baseline_isolation=bool(args.baseline_isolation),
+    )
 
 
 def compute_expected_invariants(
     args: argparse.Namespace,
     *,
     run_composition: object | None = None,
+    launch_identity: LaunchIdentity | None = None,
 ) -> RunInvariants:
     """DS6c — compute this run's invariants via the ONE shared path.
 
@@ -1494,7 +1820,13 @@ def compute_expected_invariants(
 
     ``None`` reproduces the pre-W7 behaviour exactly, which is what every
     un-composed run gets.
+
+    arXiv U1: ``launch_identity`` follows the same rule — ``main`` resolves
+    it once and passes the OBJECT; ``None`` resolves it from ``args`` through
+    the same function, so a caller that predates the parameter still locks
+    the values the workflow will lock.
     """
+    identity = launch_identity if launch_identity is not None else resolve_launch_identity(args)
     run_scope = args.data_scope if args.data_scope is not None else DataScope.default()
     # Step 12 / PR-12a **F-12-1** — resolve against the RUN's topology.
     #
@@ -1541,6 +1873,13 @@ def compute_expected_invariants(
         ),
         task_composition_fingerprint=(
             run_composition.semantic_fingerprint if run_composition is not None else None
+        ),
+        # arXiv U1 — the identity the workflow's pre-flight will lock too.
+        launch_identity=LockLaunchIdentity(
+            lit_review_enabled=identity.lit_review_enabled,
+            lit_review_config_sha256=identity.lit_review_config_sha256,
+            experiment_arm=identity.experiment_arm,
+            baseline_isolation=identity.baseline_isolation,
         ),
     )
     return invariants
@@ -1685,6 +2024,39 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
+def print_resolved_launch_config(args: argparse.Namespace) -> int:
+    """arXiv U3 (#259) — print the resolved launch configuration as ONE JSON
+    object and return the process exit status. Pure: it resolves exactly
+    what :func:`main` would resolve and touches nothing on disk.
+
+    Returns ``0`` after printing; ``1`` (with the reason on stderr) when the
+    identity cannot be resolved — an enabled lit-review whose config cannot
+    be read has no resolved configuration to print.
+    """
+    try:
+        identity = resolve_launch_identity(args)
+    except ValueError as exc:
+        print(f"[run_one_iteration] launch identity could not be resolved: {exc}", file=sys.stderr)
+        return 1
+    resolved = {
+        "workspace": os.path.abspath(args.workspace),
+        "run_name": args.run_name,
+        "start_iteration": args.start_iteration,
+        "experiment_arm": identity.experiment_arm,
+        "lit_review_enabled": identity.lit_review_enabled,
+        "lit_review_config_path": resolve_lit_review_config_path(identity.lit_review_config_path),
+        "lit_review_config_sha256": identity.lit_review_config_sha256,
+        "baseline_isolation": identity.baseline_isolation,
+        "task_composition": args.task_composition or None,
+        "advice_file": args.advice or args.human_advice_file or None,
+        "healthgate_mode": args.healthgate_mode,
+        "result_authority": args.result_authority,
+    }
+    json.dump(resolved, sys.stdout, indent=2, sort_keys=True)
+    sys.stdout.write("\n")
+    return 0
+
+
 def main():
     args = normalize_args(build_parser().parse_args())
 
@@ -1714,6 +2086,13 @@ def main():
     except FormalLaunchPolicyError as exc:
         print(f"[run_one_iteration] FORMAL LAUNCH REFUSED: {exc}", file=sys.stderr)
         sys.exit(2)
+
+    # arXiv U3 (#259) — the resolved-configuration view. Placed AFTER the
+    # policy refusal (a config that could not launch is not "resolved") and
+    # BEFORE every side effect below: no halt marker, no workspace or iter
+    # directory, no run-id sidecar, no env var, no lock, no LLM.
+    if args.print_resolved_launch_config:
+        sys.exit(print_resolved_launch_config(args))
 
     # --- Consecutive-failure brake preflight (Stage 4 / Commit 4.6) ---
     # Two cheap on-disk checks before we touch anything else. Runs before
@@ -1812,10 +2191,24 @@ def main():
             file=sys.stderr,
         )
 
-    # Iteration directory: {workspace}/iter_{N:03d}
-    run_name = f"iter_{args.start_iteration:03d}"
-    iter_dir = os.path.join(args.workspace, run_name)
-    os.makedirs(iter_dir, exist_ok=True)
+    # Iteration directory: {workspace}/iter_{N:03d}. S2 / U5 (#258): the
+    # manifest slot is decided HERE — a second launch into an iteration that
+    # already committed a manifest is refused before any LLM, model or GPU
+    # work, unless the operator requested the explicit replacement.
+    try:
+        iteration_plan = prepare_iteration_dir(
+            args.workspace,
+            args.start_iteration,
+            replace_iteration_manifest=args.replace_iteration_manifest,
+            replacement_reason=args.replacement_reason,
+            auto_resume_recovery=args.auto_resume,
+        )
+    except (ManifestAlreadyPublishedError, ManifestReplacementError) as exc:
+        print(f"[run_one_iteration] LAUNCH REFUSED: {exc}", file=sys.stderr)
+        sys.exit(2)
+    run_name = iteration_plan.run_name
+    iter_dir = iteration_plan.iter_dir
+    manifest_replacement = iteration_plan.manifest_replacement
 
     # Process-global anchor — ``ml_models.model_descriptions.get_model_description``
     # reads this to resolve agent-generated plugin descriptions written under
@@ -1888,6 +2281,47 @@ def main():
             f"source={fixed_candidate_provenance['plan_path']})"
         )
 
+    # arXiv U1 (#253 / #254) — the launch IDENTITY (arm label + lit-review
+    # topology + config pin), resolved ONCE and before any manifest can be
+    # written, for the same reason as the fixed-plan provenance above: a
+    # launch fact that only survives the healthy path is absent exactly when
+    # it is most needed. The ONE object feeds the invariants pre-flight, the
+    # workflow launch config and every manifest, so they cannot diverge.
+    # An enabled lit-review whose config cannot be read is refused HERE —
+    # before any LLM call — and still leaves a `failed` manifest (carrying
+    # the fixed-plan provenance resolved above) for the consecutive-failure
+    # brake; the identity itself is what failed to resolve, so it is the one
+    # manifest that cannot carry it.
+    try:
+        launch_identity = resolve_launch_identity(args)
+    except ValueError as e:
+        print(f"FAIL: launch identity could not be resolved: {e}")
+        write_manifest(
+            iter_dir,
+            run_name,
+            results=[],
+            crashed=True,
+            # Integration (S1×S2): this branch was added by U1 after the S2
+            # write-once census froze at seven sites; like every other
+            # branch it publishes through the write-once path and must carry
+            # the operator's explicit replacement request (resolved at
+            # :2208, before any manifest can be written).
+            replacement=manifest_replacement,
+            healthgate_mode=args.healthgate_mode,
+            result_authority=args.result_authority,
+            fixed_candidate_provenance=fixed_candidate_provenance,
+        )
+        sys.exit(1)
+    print(f"  Experiment arm   : {launch_identity.experiment_arm or '(unlabelled)'}")
+    print(
+        f"  Lit-review       : {'ON' if launch_identity.lit_review_enabled else 'OFF'}"
+        + (
+            f" (config sha256 {launch_identity.lit_review_config_sha256[:12]}…)"
+            if launch_identity.lit_review_config_sha256 is not None
+            else ""
+        )
+    )
+
     # Step 1 — back-compat resolution of @manifest: indirection in the seed
     # list. The legacy chain shell still passes manifests this way; the new
     # run_chain.sh (Commit 11) won't, but we keep the resolver layered in
@@ -1906,6 +2340,8 @@ def main():
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
+            launch_identity=launch_identity,
+            replacement=manifest_replacement,
         )
         sys.exit(1)
 
@@ -1949,11 +2385,15 @@ def main():
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
+            launch_identity=launch_identity,
+            replacement=manifest_replacement,
         )
         sys.exit(1)
 
     try:
-        expected_invariants = compute_expected_invariants(args, run_composition=run_composition)
+        expected_invariants = compute_expected_invariants(
+            args, run_composition=run_composition, launch_identity=launch_identity
+        )
     except ValueError as e:
         print(f"FAIL: run-invariants computation refused to start: {e}")
         write_manifest(
@@ -1964,6 +2404,8 @@ def main():
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
+            launch_identity=launch_identity,
+            replacement=manifest_replacement,
         )
         sys.exit(1)
 
@@ -1984,6 +2426,8 @@ def main():
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
+            launch_identity=launch_identity,
+            replacement=manifest_replacement,
         )
         sys.exit(1)
 
@@ -2031,24 +2475,10 @@ def main():
             reflect_model_id=reflect_model_id,
         )
 
-    # Resolve lit-review enable flag per Design Decisions 1 + 2 (2026-06-11).
-    # Priority: CLI flag (when explicitly set) > YAML 'enabled' key >
-    # default False. The workflow opens + parses the YAML internally
-    # (only when lit_review_enabled=True); we peek at the 'enabled'
-    # key here only for the CLI-fallback case. Missing YAML or
-    # malformed YAML → False (fail-safe: do not run lit-review).
-    if args.ml_lit_review_enabled is not None:
-        ml_lit_review_enabled_resolved = args.ml_lit_review_enabled
-    else:
-        _yaml_path = args.ml_lit_review_config
-        if not os.path.isabs(_yaml_path):
-            _yaml_path = os.path.join(SIDERIUS_ROOT, _yaml_path)
-        try:
-            with open(_yaml_path, encoding="utf-8") as _f:
-                _yaml_data = yaml.safe_load(_f) or {}
-            ml_lit_review_enabled_resolved = bool(_yaml_data.get("enabled", False))
-        except (FileNotFoundError, yaml.YAMLError):
-            ml_lit_review_enabled_resolved = False
+    # The lit-review enable flag (Design Decisions 1 + 2, 2026-06-11) is
+    # resolved ONCE, above, inside `launch_identity` — arXiv U1 moved the
+    # peek into `resolve_lit_review_enabled` so the invariants pre-flight,
+    # this launch config and every manifest read one resolution.
 
     try:
         # The launcher is the layer that knows the task, so it resolves the
@@ -2147,8 +2577,12 @@ def main():
                     enable_chain_incumbent_formal_gates=args.enable_chain_incumbent_formal_gates,
                     health_feedback_history_window_iterations=args.health_feedback_history_window_iterations,
                     health_feedback_history_max_entries_per_model=args.health_feedback_history_max_entries_per_model,
-                    lit_review_enabled=ml_lit_review_enabled_resolved,
-                    lit_review_config_path=args.ml_lit_review_config,
+                    lit_review_enabled=launch_identity.lit_review_enabled,
+                    lit_review_config_path=launch_identity.lit_review_config_path,
+                    # arXiv U1 — opaque; locked + stamped, never interpreted.
+                    experiment_arm=launch_identity.experiment_arm,
+                    # arXiv U3 — the WITHOUT arm's explicit behaviour flag.
+                    baseline_isolation=launch_identity.baseline_isolation,
                 ),
                 measurement_capability=resolve_tidmad_measurement_capability(),
                 workspace=args.workspace,
@@ -2192,6 +2626,8 @@ def main():
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
+            launch_identity=launch_identity,
+            replacement=manifest_replacement,
         )
         sys.exit(2)
     except Exception as e:
@@ -2205,6 +2641,8 @@ def main():
             healthgate_mode=args.healthgate_mode,
             result_authority=args.result_authority,
             fixed_candidate_provenance=fixed_candidate_provenance,
+            launch_identity=launch_identity,
+            replacement=manifest_replacement,
         )
         sys.exit(1)
 
@@ -2234,6 +2672,10 @@ def main():
             "history_window_iterations": (args.health_feedback_history_window_iterations),
             "max_entries_per_model": (args.health_feedback_history_max_entries_per_model),
         },
+        # arXiv U1 — the same identity object every crash branch stamped.
+        launch_identity=launch_identity,
+        # S2 / U5 (#258): the operator's explicit replacement request, or None.
+        replacement=manifest_replacement,
     )
 
     # C9c — infrastructure ABORT halts the CHAIN, not just this attempt.

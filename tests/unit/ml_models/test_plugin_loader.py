@@ -251,26 +251,41 @@ class TestPluginModelCallable:
 
 class TestResolvePluginDirs:
     """Phase 1 of docs/run_scoped_plugins.md — env var drives the scan list,
-    with fallback to AGENT_GENERATED_DIR when unset. These tests pin down the
-    parsing contract so no caller can regress to the old single-dir scan."""
+    with fallback to the global library when unset. These tests pin down the
+    parsing contract so no caller can regress to the old single-dir scan.
 
-    def test_env_unset_falls_back_to_agent_generated_dir(self, monkeypatch):
+    arXiv P1: the no-env fallback is the resolved generated-library models
+    dir followed by the legacy checkout AGENT_GENERATED_DIR (read-only
+    compatibility). Defect the two fallback tests catch: dropping either
+    member — losing the resolved dir orphans every post-P1 promotion in
+    env-less processes; losing the legacy dir orphans every pre-migration
+    checkout library."""
+
+    def test_env_unset_falls_back_to_library_dirs(self, tmp_path, monkeypatch):
         monkeypatch.delenv(_PLUGIN_DIRS_ENV_VAR, raising=False)
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
         import ml_models.plugin_loader as pl
 
-        assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
+        assert _resolve_plugin_dirs() == [
+            str(tmp_path / "lib" / "models"),
+            pl.AGENT_GENERATED_DIR,
+        ]
 
-    def test_empty_env_falls_back_to_agent_generated_dir(self, monkeypatch):
+    def test_empty_env_falls_back_to_library_dirs(self, tmp_path, monkeypatch):
         """Empty and whitespace-only env var must behave identically to
         unset — otherwise a shell that exports the var without a value
         would silently disable plugin loading."""
-        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "")
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        expected = [str(tmp_path / "lib" / "models")]
         import ml_models.plugin_loader as pl
 
-        assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
+        expected.append(pl.AGENT_GENERATED_DIR)
+
+        monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "")
+        assert _resolve_plugin_dirs() == expected
 
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "   ")
-        assert _resolve_plugin_dirs() == [pl.AGENT_GENERATED_DIR]
+        assert _resolve_plugin_dirs() == expected
 
     def test_single_dir(self, monkeypatch):
         monkeypatch.setenv(_PLUGIN_DIRS_ENV_VAR, "/tmp/dir_a")

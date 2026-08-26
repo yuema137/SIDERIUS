@@ -115,6 +115,13 @@ def local_validated_model(
     enable_structured_health_feedback: bool = False,
     health_feedback_history_window_iterations: int = 3,
     health_feedback_history_max_entries_per_model: int = 8,
+    # arXiv U1 (#253 / #254) — run-identity pass-through, same contract as
+    # the PR 3 block above: the tuner locks + stamps, never consumes. Must
+    # match what the workflow locked for this workspace.
+    experiment_arm: str | None = None,
+    lit_review_enabled: bool = False,
+    lit_review_config_sha256: str | None = None,
+    baseline_isolation: bool = False,
     max_retries: int | None = None,
     plan_overrides: dict[str, Any] | None = None,
     # --- Time-budget gate (evaluate_time_skill, Phase I two-budget split) ---
@@ -324,6 +331,10 @@ def local_validated_model(
         health_feedback_history_max_entries_per_model=(
             health_feedback_history_max_entries_per_model
         ),
+        experiment_arm=experiment_arm,
+        lit_review_enabled=lit_review_enabled,
+        lit_review_config_sha256=lit_review_config_sha256,
+        baseline_isolation=baseline_isolation,
         max_retries=max_retries,
         plan_overrides=plan_overrides or {},
         trial_time_budget_minutes=trial_time_budget_minutes,

@@ -647,7 +647,18 @@ class TestCensusDLegacyLockKeySet:
 
         Membership here is what makes a composed resume fail closed on a
         changed fingerprint: ``validate_run_invariants`` compares exactly
-        these fields."""
+        these fields.
+
+        DECLARED DELTA (arXiv U1/U3, #253/#254/#260; the census fired again
+        at final integration — working as designed): four canonical fields
+        joined — ``lit_review_enabled`` + ``lit_review_config_sha256`` (the
+        run's workflow topology; a WITH/WITHOUT-arm resume must refuse to
+        cross), ``experiment_arm`` (the OPAQUE label — canonical so two arms
+        cannot be resumed into one another, never read for behaviour, ruling
+        R2), and ``baseline_isolation`` (the WITHOUT arm's explicit behaviour
+        flag; a toggle on one workspace is a different experiment). All four
+        are omitted-at-default in the serialized lock, so every legacy lock
+        file stays byte-identical."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -662,4 +673,9 @@ class TestCensusDLegacyLockKeySet:
             "runtime_estimator_identity",
             "runtime_policy_identity",
             "task_composition_fingerprint",
+            # arXiv U1/U3 — the declared delta documented above.
+            "lit_review_enabled",
+            "lit_review_config_sha256",
+            "experiment_arm",
+            "baseline_isolation",
         )

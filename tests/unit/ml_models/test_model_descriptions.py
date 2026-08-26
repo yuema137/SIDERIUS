@@ -81,3 +81,49 @@ def test_chain_lookup_skips_run_dir_without_matching_model(chain_workspace):
     other_run.mkdir(parents=True)
     (other_run / "description.md").write_text("unrelated\n", encoding="utf-8")
     assert model_descriptions._chain_workspace_candidates("missing_model") == []
+
+
+def test_resolved_library_description_wins_over_legacy_and_workspace(tmp_path, monkeypatch):
+    """arXiv P1 — the resolved generated-library description slots between
+    the bundled built-ins and the legacy checkout dir. Defect caught either
+    way the chain breaks: the resolved-library candidate missing entirely
+    (post-migration promoted descriptions unreachable — prompts would fall
+    back to stale legacy/workspace copies or raise), or ordered after the
+    legacy candidate (a pre-migration description permanently shadowing the
+    promoted one)."""
+    from ml_models import model_descriptions
+
+    lib_models = tmp_path / "lib" / "models"
+    (lib_models / "promo_desc_model").mkdir(parents=True)
+    (lib_models / "promo_desc_model" / "description.md").write_text("# resolved library copy\n")
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+
+    legacy = tmp_path / "legacy_models"
+    (legacy / "promo_desc_model").mkdir(parents=True)
+    (legacy / "promo_desc_model" / "description.md").write_text("# legacy checkout copy\n")
+    monkeypatch.setattr(model_descriptions, "_PLUGIN_DESCRIPTIONS_DIR", str(legacy))
+    monkeypatch.delenv("SIDERIUS_CHAIN_WORKSPACE", raising=False)
+
+    assert (
+        model_descriptions.get_model_description("promo_desc_model") == "# resolved library copy\n"
+    )
+
+
+def test_legacy_checkout_description_still_resolves(tmp_path, monkeypatch):
+    """arXiv P1 compatibility READ (matrix F): a description promoted into
+    the checkout before the migration keeps resolving when the resolved
+    library has none. Defect caught: dropping the legacy candidate — every
+    pre-migration plugin description would raise FileNotFoundError in the
+    interpretation/proposal prompts."""
+    from ml_models import model_descriptions
+
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib_empty"))
+    legacy = tmp_path / "legacy_models"
+    (legacy / "old_plugin_model").mkdir(parents=True)
+    (legacy / "old_plugin_model" / "description.md").write_text("# legacy checkout copy\n")
+    monkeypatch.setattr(model_descriptions, "_PLUGIN_DESCRIPTIONS_DIR", str(legacy))
+    monkeypatch.delenv("SIDERIUS_CHAIN_WORKSPACE", raising=False)
+
+    assert (
+        model_descriptions.get_model_description("old_plugin_model") == "# legacy checkout copy\n"
+    )

@@ -117,6 +117,72 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   the tokenized templates reproduces their pre-C7 sha256 byte-exactly, pinned
   by `test_step12_pr12a_c7_proposal_blocks.TestTheRelocationIsBYTE_EXACT`.
   The golden was edited SURGICALLY, one key at the reported path.
+
+* **arXiv U1 (#253 / #254)** — run identity: the tuner's run input gained
+  the three PASS-THROUGH fields the tuner locks and stamps but never
+  consumes, and the tuning RESULT plus each of its records gained the
+  opaque `experiment_arm`. Measured before the golden was touched, and the
+  report is quoted rather than paraphrased:
+
+      .node_calls.tuner.run_inputs[0].experiment_arm: ADDED (None)
+      .node_calls.tuner.run_inputs[0].lit_review_config_sha256: ADDED (None)
+      .node_calls.tuner.run_inputs[0].lit_review_enabled: ADDED (False)
+      .results[0].all_records[0].experiment_arm: ADDED (None)
+      .results[0].experiment_arm: ADDED (None)
+
+  — **exactly five ADDED paths, every value the legacy default, zero
+  changed, zero removed.** What did NOT move is the point:
+  `artifacts.run_invariants_lock.json` reported no delta at all, because the
+  three new CANONICAL lock fields are OMITTED at their defaults rather than
+  serialized as `null`/`false` — an unlabelled, lit-review-OFF run's lock is
+  byte-identical to its pre-U1 form. `None`/`False` are the unlabelled state
+  this oracle drives; a LABELLED run stamps its arm on every record and
+  output so a later resume can certify what it restores, under the same
+  three-case ingress rule as the composition fingerprint. The golden was
+  edited SURGICALLY, one key per reported path.
+
+* **arXiv U3 (#259 / #260)** — the WITHOUT arm's explicit isolation flag
+  reached the three node inputs that own an LLM-facing surface or a lock.
+  Measured before the golden was touched:
+
+      .node_calls.interpretation.run_inputs[0].baseline_isolation: ADDED (False)
+      .node_calls.proposal.run_inputs[0].baseline_isolation: ADDED (False)
+      .node_calls.tuner.run_inputs[0].baseline_isolation: ADDED (False)
+
+  — **exactly three ADDED paths, all `False`, zero changed, zero removed.**
+  `False` is the non-isolated state this oracle drives, under which every
+  prompt render is byte-identical to before the flag existed (pinned by the
+  U3 parity tests) and the lock omits the key. The golden was edited
+  SURGICALLY, one key per reported path.
+
+* **arXiv-readiness S2 / U6 (#256)** — the implement→validate retry loop
+  persists each retry in its own nested `impl_KKK/` instead of overwriting
+  within the proposal attempt directory. Measured before the golden was
+  touched, exactly five CHANGED paths, zero added, zero removed — the
+  implementor's `plugin_dir`, `test_dir`, `loss_dir` and `storage.local.
+  workspace`, and the validator's `storage.local.workspace`, each gaining
+  the `/impl_001` segment (the oracle's single attempt passes first time,
+  so its terminal attempt is `impl_001`). The artifact tree is unchanged:
+  the mocked nodes persist nothing, and the new directory holds no file.
+  Edited SURGICALLY at those five paths; the deliberate layout decision and
+  its falsifiers live in `tests/unit/workflows/test_u6_impl_attempt_layout.py`.
+
+* **arXiv P1 (`agent_generated/` migration)** — the workspace lock gained the
+  `generated_library` PROVENANCE key ({root, source}; `_PROVENANCE`, never
+  compared). Under the suite's isolation fixture the root is a per-test tmp
+  path, so the VALUE is normalised by the volatile list (it joins
+  `repo_commit` there) and the golden carries the KEY at the reported path:
+
+      .artifacts.run_invariants_lock.json.generated_library: ADDED ('<VOLATILE>')
+
+  — exactly one ADDED path, zero changed, zero removed. Edited SURGICALLY
+  (one inserted line; the differ compares dicts, not order).
+
+* **Integration note (landed-source reconciliation, 84d74280)** — the U1/U3
+  and U6 deltas above were measured independently on sibling branches from
+  the same base; the merged golden carries the UNION (eight ADDED keys at
+  their legacy defaults + five CHANGED `/impl_001` paths). This test run at
+  the integrated head is the proof the union is exact.
 """
 
 from __future__ import annotations

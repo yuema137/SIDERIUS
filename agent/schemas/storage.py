@@ -36,11 +36,12 @@ class LocalStorageConfig(BaseModel):
 
     Example layout produced by tune_ml_hyperparam_agent:
         {workspace}/
-        ├── summary_{run_name}.json
+        ├── summary_{run_name}.json        (derived view — projection of records.jsonl)
         ├── run_output_{run_name}.json
         ├── run_config_{run_name}.json
         ├── configs/{run_name}/
         ├── records/{run_name}/
+        │   └── records.jsonl              (canonical append-only record history)
         └── cached_models/
     """
 

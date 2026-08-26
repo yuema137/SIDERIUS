@@ -107,11 +107,28 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
     --workspace /path/to/workspace --run_name first_run_v1 \
     --task_composition configs/task_composition/tidmad.yaml \
     --data_dir /path/to/tidmad/data \
+    --llm_config llm_configs/openai_tiered_pro.json \
     --num_iterations 1 --max_rounds 1 --dry-run
 ```
 
+Always pass an explicit `--llm_config` (the file shown is the canonical
+example) — omitting it silently selects a deprecated all-Gemini default. A
+tiny synthetic quickstart example (`examples/quickstart/`) is in preparation.
+
 → [Installation](docs/getting-started/installation.md) ·
 [Your first run](docs/getting-started/first-run.md)
+
+## Fresh runs and resume
+
+Two verbs, decided by the workspace you point at: a new directory is a
+**fresh** run; re-running the same command against an existing workspace
+**resumes** it from the first incomplete iteration (auto-resume is the
+default). Changing the declared semantics — data scope, health configuration —
+against an existing workspace is **refused at startup** by the invariants
+lock, because aggregate scores are only comparable within one declared
+identity. New settings, new workspace.
+
+→ [Workspaces and resume](docs/guides/workspaces-and-resume.md)
 
 ## Extending SIDERIUS
 
@@ -135,6 +152,7 @@ used.
 | new here | [What SIDERIUS is](docs/concepts/overview.md) → [Quickstart](docs/getting-started/installation.md) |
 | building a task | [What a task must provide](docs/concepts/task-package.md) → [Define your own task](docs/guides/define-a-task.md) |
 | running experiments | [Operating a run](docs/guides/operating-a-run.md) → [Entrypoints](docs/reference/entrypoints.md) |
+| looking at a workspace, or debugging one | [Workspaces and resume](docs/guides/workspaces-and-resume.md) → [Troubleshooting](docs/guides/troubleshooting.md) → [Dashboard](docs/guides/dashboard.md) |
 | developing the framework | [Agent reference](docs/agent-reference/README.md) → [`CLAUDE.md`](CLAUDE.md) |
 
 Full map: [`docs/README.md`](docs/README.md). Glossary:
@@ -159,6 +177,14 @@ dashboard/      FastAPI + Plotly result browser
 docs/           documentation (see the map) + design history
 tests/          unit + integration tiers
 ```
+
+The major modules carry their own contract READMEs —
+[`workflows/`](workflows/README.md) · [`core/`](core/README.md) ·
+[`execute_tools/`](execute_tools/README.md) ·
+[`execute_tools/health_checks/`](execute_tools/health_checks/README.md) ·
+[`ml_models/`](ml_models/README.md) ·
+[`agent/schemas/`](agent/schemas/README.md) — all following one
+[template](docs/agent-reference/MODULE_README_TEMPLATE.md).
 
 ## Key invariants
 

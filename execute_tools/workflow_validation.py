@@ -14,6 +14,7 @@ import math
 import os
 
 from agent.schemas.hyperparam_tuning import HyperparamTuningOutput
+from execute_tools.impl_attempts import stage_artifact_dir
 
 # Defaults mirror the chain-test configuration. Callers may override per-run.
 _DEFAULT_SOURCE_MODELS: tuple[str, ...] = ("punet", "wavenet")
@@ -112,7 +113,11 @@ def validate_workflow_outputs(
     print(f"  [PASS] Proposal: model_name='{model_name}'")
 
     # --- 3. Implementation ---
-    impl_path = os.path.join(attempt_dir, f"implementor_{run_name}.json")
+    # S2 / U6 (#256): the implementor/validation records of the TERMINAL
+    # implement→validate attempt live in the nested `impl_NNN/`; a pre-U6
+    # workspace keeps them at the attempt level. One authority resolves both.
+    stage_dir = stage_artifact_dir(attempt_dir)
+    impl_path = os.path.join(stage_dir, f"implementor_{run_name}.json")
     assert os.path.exists(impl_path), f"Implementor output not found: {impl_path}"
     with open(impl_path) as f:
         impl = json.load(f)
@@ -129,7 +134,7 @@ def validate_workflow_outputs(
     print(f"  [PASS] Implementation: {model_file}")
 
     # --- 4. Validation ---
-    valid_path = os.path.join(attempt_dir, f"validation_{run_name}.json")
+    valid_path = os.path.join(stage_dir, f"validation_{run_name}.json")
     assert os.path.exists(valid_path), f"Validation output not found: {valid_path}"
     with open(valid_path) as f:
         validation = json.load(f)

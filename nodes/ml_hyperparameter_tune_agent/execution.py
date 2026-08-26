@@ -127,6 +127,40 @@ _records = _import_module("nodes.ml_hyperparameter_tune_agent.records")
 # snapshot, so a stub installed for one would silently miss the others.
 _runtime = _import_module("nodes.ml_hyperparameter_tune_agent.runtime")
 
+
+def _emit_attempt_record(sandbox, record: dict, agent_input, *, status: dict | None = None) -> None:
+    """Emit one attempt record with the run's identity kwargs attached.
+
+    Integration extraction (S1 x landed PR-12d, the SE.2 idiom): threading
+    ``candidate_id=`` + ``experiment_arm=`` at every emission site expanded
+    each call to six lines and pushed ``run_inference_scoring_health`` past
+    its frozen structural budget (474 + 80; landed master already sat at
+    552). The identity threading is ONE responsibility, so it gets ONE owner;
+    call sites shrink back to a line and a site that forgets the label
+    becomes impossible rather than censused.
+
+    Still routed through ``_records._emit_record`` — the node's ONE emission
+    point — so a stub installed on ``records`` intercepts every emission
+    exactly as before. Both branches pass the identity kwargs EXPLICITLY so
+    the U1 emission census reads them from this function's own AST.
+    """
+    if status is None:
+        _records._emit_record(
+            sandbox,
+            record,
+            candidate_id=agent_input.candidate_id,
+            experiment_arm=agent_input.experiment_arm,
+        )
+    else:
+        _records._emit_record(
+            sandbox,
+            record,
+            status=status,
+            candidate_id=agent_input.candidate_id,
+            experiment_arm=agent_input.experiment_arm,
+        )
+
+
 SIDERIUS_ROOT = str(_Path(__file__).resolve().parents[2])
 
 
@@ -354,7 +388,7 @@ def run_admission_preflight(
                 f"plugin's PLUGIN_CONFIG_CLASS."
             ),
         )
-        _records._emit_record(sandbox, schema_record, candidate_id=agent_input.candidate_id)
+        _emit_attempt_record(sandbox, schema_record, agent_input)
         return AdmissionOutcome.next_attempt()
 
     if not resource_check.get("feasible", True):
@@ -428,7 +462,7 @@ def run_admission_preflight(
             ),
             memory_extra=_vram_skip_memory_extra(resource_check, chosen_vram_budget),
         )
-        _records._emit_record(sandbox, oom_record, candidate_id=agent_input.candidate_id)
+        _emit_attempt_record(sandbox, oom_record, agent_input)
         return AdmissionOutcome.next_attempt()
 
     # Phase 6.6 A.11 — capture the batch the VRAM skill picked
@@ -634,7 +668,7 @@ def run_admission_preflight(
                 ),
                 memory_extra=_time_skip_memory_extra(time_check, plan),
             )
-            _records._emit_record(sandbox, time_record, candidate_id=agent_input.candidate_id)
+            _emit_attempt_record(sandbox, time_record, agent_input)
             return AdmissionOutcome.next_attempt()
 
     # RT2-G: operator runtime policy for the in-subprocess
@@ -754,6 +788,7 @@ def run_training(
         round_index=round_index,
         attempt_in_round=attempt_in_round,
         candidate_id=agent_input.candidate_id,
+        experiment_arm=agent_input.experiment_arm,
     ):
         return TrainingOutcome.next_attempt()
     if _handle_in_subprocess_rejection(
@@ -770,6 +805,7 @@ def run_training(
         round_index=round_index,
         attempt_in_round=attempt_in_round,
         candidate_id=agent_input.candidate_id,
+        experiment_arm=agent_input.experiment_arm,
     ):
         return TrainingOutcome.next_attempt()
     # Step 07a — typed training-results boundary (sequencing call
@@ -799,12 +835,7 @@ def run_training(
             round_index=round_index,
             attempt_in_round=attempt_in_round,
         )
-        _records._emit_record(
-            sandbox,
-            error_record,
-            status=train_status,
-            candidate_id=agent_input.candidate_id,
-        )
+        _emit_attempt_record(sandbox, error_record, agent_input, status=train_status)
         print(f"  Saved error record: {error_record['status']}")
         return TrainingOutcome.next_attempt()
 
@@ -1012,6 +1043,7 @@ def run_inference_scoring_health(
             round_index=round_index,
             attempt_in_round=attempt_in_round,
             candidate_id=agent_input.candidate_id,
+            experiment_arm=agent_input.experiment_arm,
         ):
             return AttemptExecution.next_attempt()
         # Step 11 C2 (F-11-1) — same authority as the training branch.
@@ -1032,12 +1064,7 @@ def run_inference_scoring_health(
                 round_index=round_index,
                 attempt_in_round=attempt_in_round,
             )
-            _records._emit_record(
-                sandbox,
-                error_record,
-                status=inf_status,
-                candidate_id=agent_input.candidate_id,
-            )
+            _emit_attempt_record(sandbox, error_record, agent_input, status=inf_status)
             print(f"  Saved error record: {error_record['status']}")
             return AttemptExecution.next_attempt()
 
@@ -1336,7 +1363,7 @@ def run_inference_scoring_health(
                 round_index=round_index,
                 attempt_in_round=attempt_in_round,
             )
-            _records._emit_record(sandbox, error_record, candidate_id=agent_input.candidate_id)
+            _emit_attempt_record(sandbox, error_record, agent_input)
             print(f"  Saved error record: {error_record['status']}")
             return AttemptExecution.next_attempt()
         scoring_time = round(time.time() - t0, 1)

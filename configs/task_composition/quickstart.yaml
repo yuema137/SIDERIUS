@@ -1,0 +1,71 @@
+# Quickstart — the SHIPPED task composition for the onboarding example pack.
+#
+# The operator entrypoint:
+#
+#     run_chain.sh ... --task_composition configs/task_composition/quickstart.yaml
+#
+# **This file is a POINTER, not a second copy of the task** (Q-12d-1). Every
+# semantic value the quickstart owns — its dataset profile, its task
+# description and forward contract, its metric declaration, its plugins —
+# lives under `examples/quickstart/`, co-located with the pack. What is
+# written here is only WHICH declaration each family resolves to.
+#
+# Binding `task_config.config:` here is ALSO what legitimizes the pack's
+# committed `declared/task_config.yaml` under governance guard (a)
+# (`test_pack_governance.py`): a manifest-bound task config is a bound
+# declaration; an identical YAML nobody binds is a refused parallel copy.
+#
+# Paths resolve against THIS file's directory (`workflows/task_composition.py`
+# resolves refs relative to the manifest), which is why they are `../`-rooted.
+#
+# The task's DATA is not committed anywhere: run the pack's materializer
+# (notebook §3, or examples/quickstart/README.md §3) to regenerate the four
+# sha-pinned shard CSVs, and point --data_dir at the directory it writes.
+
+task_data_path:
+  file: ../../examples/quickstart/plugins/_quickstart_task.py
+  symbol: QuickstartTaskDataPath
+  id: quickstart_tabular
+  # Seam A (PR-12d D1): task-instance configuration, handed to the
+  # implementation's OWN constructor — the framework validates the shape and
+  # knows no field name. These are plain values, not paths, so no `{ref: ...}`
+  # envelope is needed (compare `configs/task_composition/pets.yaml`, whose
+  # manifest paths use the envelope to stay checkout-relative).
+  config:
+    train_shards: [0, 1]
+    eval_shard: 2
+
+dataset_profile:
+  config: ../../examples/quickstart/declared/dataset_profile.json
+
+metric:
+  declaration: ../../examples/quickstart/declared/metric_accuracy.json
+  # The PACK'S OWN implementation, in the composed scoring child's calling
+  # vocabulary (`evaluation_payload`/`task_scope`/`data_dir`) — the PR-12d
+  # `_pets_metrics.py` convention.
+  implementation:
+    file: ../../examples/quickstart/plugins/_quickstart_metrics.py
+    symbol: QuickstartAccuracyMetric
+
+# A NAMED absence, not an omission: saying nothing at all would be the
+# LEGACY_OMITTED state that resolves TIDMAD's Health family.
+task_health:
+  none: true
+
+interpretation_blocks:
+  none: true
+
+deliverable:
+  prefix: quickstart_predictions
+  extension: ".json"
+  index_width: 4
+
+task_config:
+  config: ../../examples/quickstart/declared/task_config.yaml
+
+# PR-12d D8a (seam P): the pack's model plugin route into a composed run's
+# registry — parent and children. The underscore-prefixed task/metric plugins
+# in the same directory are skipped by the scanner by convention.
+model_plugins:
+  dir: ../../examples/quickstart/plugins
+  require: [quickstart_reference_mlp]

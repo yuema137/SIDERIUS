@@ -1190,10 +1190,10 @@ interpretation
 
 ```text
 {ws}/iter_NNN/iteration_NNN/attempt_NNN/proposal_iter_NNN.json
-{ws}/iter_NNN/iteration_NNN/attempt_NNN_<model>/models/<model>.py
-{ws}/iter_NNN/.../models/<model>/description.md
-{ws}/iter_NNN/.../tests/test_<model>.py
-{ws}/iter_NNN/.../implementor_iter_NNN.json
+{ws}/iter_NNN/iteration_NNN/attempt_NNN_<model>/impl_KKK/models/<model>.py   (S2 / U6: one impl_KKK per implement→validate retry)
+{ws}/iter_NNN/.../impl_KKK/models/<model>/description.md
+{ws}/iter_NNN/.../impl_KKK/tests/test_<model>.py
+{ws}/iter_NNN/.../impl_KKK/implementor_iter_NNN.json
 {ws}/plugin_source_sentinel/<model>.py
 {ws}/plugins/iter_NNN/<model>.py
 {ws}/iter_NNN/manifest.json , workflow_iter_NNN.json , *_hardware.json

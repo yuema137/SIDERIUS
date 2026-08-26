@@ -37,6 +37,7 @@ from agent.schemas.hyperparam_tuning import (
 )
 from core.hardware_context import get_or_create
 from core.run_invariants import (
+    LockLaunchIdentity,
     build_run_invariants,
     load_run_invariants,
     validate_run_invariants,
@@ -87,6 +88,7 @@ from nodes.ml_hyperparameter_tune_agent.contracts import (
     RunExitSnapshot,
 )
 from nodes.ml_hyperparameter_tune_agent.execution import (
+    _emit_attempt_record,
     run_admission_preflight,
     run_inference_scoring_health,
     run_training,
@@ -528,6 +530,22 @@ def _resolve_run_health_config(agent_input: Any) -> HealthChecksConfig:
     return config
 
 
+def _lock_launch_identity(agent_input) -> LockLaunchIdentity:
+    """The run's arXiv-U1/U3 lock identity, from the tuner's INPUT projection.
+
+    Pure construction, extracted from ``run()`` under the 12a structural
+    budget (the SE.2 idiom): pass-through values with one origin and one
+    destination are a carrier, not inline kwargs in a 1,100-line method.
+    Locked + stamped, never consumed by the tuner (ruling R2).
+    """
+    return LockLaunchIdentity(
+        experiment_arm=agent_input.experiment_arm,
+        lit_review_enabled=agent_input.lit_review_enabled,
+        lit_review_config_sha256=agent_input.lit_review_config_sha256,
+        baseline_isolation=agent_input.baseline_isolation,
+    )
+
+
 class HyperparamTuningAgent:
     """
     Hyperparameter tuning agent — optimizes model configs over N rounds.
@@ -819,6 +837,9 @@ class HyperparamTuningAgent:
                 if agent_input.task_composition_ref is not None
                 else None
             ),
+            # arXiv U1 (#253 / #254) — run-identity pass-through (locked +
+            # stamped, never consumed), same contract as the PR 3 block.
+            launch_identity=_lock_launch_identity(agent_input),
         )
         health_config_sha256 = run_invariants.health_config_sha256
         # Step 11 C8 / R-11-9 — read from the SAME resolved invariants the
@@ -1197,7 +1218,11 @@ class HyperparamTuningAgent:
         try:
             from ml_models.model_descriptions import get_model_description
 
-            model_description = get_model_description(model_type_setting)
+            # arXiv U3 (#260): the loader refuses a BUNDLED baseline under
+            # isolation (a built-in candidate never reaches the tuner there).
+            model_description = get_model_description(
+                model_type_setting, baseline_isolation=agent_input.baseline_isolation
+            )
             print(
                 f"Loaded model description for '{model_type_setting}' ({len(model_description)} chars)"
             )
@@ -1564,9 +1589,7 @@ class HyperparamTuningAgent:
                         final_record, resource_check, final_record["runtime_verification"]
                     )
 
-                    _records._emit_record(
-                        sandbox, final_record, candidate_id=agent_input.candidate_id
-                    )
+                    _emit_attempt_record(sandbox, final_record, agent_input)
                     _append_runtime_observation(
                         sandbox, run_name, final_record["runtime_verification"]
                     )
@@ -1668,9 +1691,7 @@ class HyperparamTuningAgent:
                         # The RAW dict is saved (validation is the gate, not
                         # the serializer): model_dump() drops extra keys, which
                         # would silently lose the §4 watchdog provenance.
-                        _records._emit_record(
-                            sandbox, failure_record, candidate_id=agent_input.candidate_id
-                        )
+                        _emit_attempt_record(sandbox, failure_record, agent_input)
                         print(f"  Saved structured attempt failure: {exp_id}")
                     except Exception as persist_error:
                         print(f"  [ERROR] Could not persist attempt failure: {persist_error}")

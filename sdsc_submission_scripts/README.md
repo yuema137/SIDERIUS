@@ -43,6 +43,7 @@ bash sdsc_submission_scripts/run_chain.sh --mode sdsc \
 | `run_chain.sh` | **ENTRY POINT** — `exec` this. Mode-aware: python resolution, auto-resume, slurm vs subprocess dispatch. |
 | `_chain_common.sh` | **SHARED LIBRARY** — `source`d by `run_chain.sh`. Mode-agnostic: defaults, CLI parser, iter loop body, per-iter app-arg builder. |
 | `run_one_iteration.py` | **PER-ITER PYTHON RUNNER** — executes one iteration of the 5-agent workflow. Called once per iter by both modes. Writes `iter_NNN/manifest.json`. |
+| `launch_prior_baseline_experiment.sh` | **TWO-ARM EXPERIMENT LAUNCHER** (arXiv X9) — wraps `run_chain.sh`; `--arm with-prior-art\|without-prior-art` decides the lit-review topology, the opaque arm label and (WITHOUT arm) `--baseline_isolation`. Refuses seeds and advice files; `--dry-run` prints the child argv AND the resolved launch config JSON; `--h100` sources `h100_posture.env`. |
 | `submit_one_iteration.slurm` | Slurm wrapper around `run_one_iteration.py`. Used by `run_chain.sh --mode sdsc`; chained via `--dependency=afterany:<prev_job>`. |
 
 The role split between `run_chain.sh` and `_chain_common.sh` keeps the
@@ -79,6 +80,18 @@ Each launcher owns its own control state; none of them reads another's.
 | `v19_queue_runner.sh` | **current production surface** | `$WS_ROOT/$CAMPAIGN_ID/{control,queue_state,pair_summaries}/` | `$WS_ROOT/$CAMPAIGN_ID/control/STOP`, or `SIGTERM`/`SIGINT`/`SIGHUP` |
 | `v19_gate0_pair_runner.sh` | **current production surface** (Gate) | `$GATE_ROOT/${GATE_RUN_PREFIX}_pair_summary.json`, `${GATE_RUN_PREFIX}_runner.log` | **none** — the Gate has no stop file; its summary is written on every exit path by an `EXIT` trap |
 | `v18r_queue_runner.sh` | **historical**, kept for reference | its own pre-V20 layout | unchanged; not modified by V20 PR E |
+| `h100_posture.env` | **H100 resource posture** (issue #261) — `source`d by the campaign launcher after `--h100`, never executed | none — it assigns `H100_POSTURE_VERSION`, exports the environment the runtime reads and defines the `H100_CHAIN_ARGS` array the launcher splats after its own args | n/a |
+
+**Topology note.** The pair runners above (`v19_queue_runner.sh`,
+`v19_gate0_pair_runner.sh`) and `v20_queue_runner.py` (`--max_active 2`)
+implement the **pair topology**: two chains sharing one 32 GB card under a
+12 GB per-chain cap and a 28 GiB aggregate ceiling. The H100 campaign runs
+**one chain per card** (`MAX_ACTIVE=1` per card) and therefore does not use
+them; every H100 value and its provenance is in
+[`docs/guides/operating-a-run.md` — "Cross-hardware bring-up (H100 posture)"](../docs/guides/operating-a-run.md#cross-hardware-bring-up-h100-posture).
+`h100_posture.env` is exempted from `.gitignore`'s `*.env` rule by an explicit
+negation (`!sdsc_submission_scripts/h100_posture.env`), so it is tracked and
+visible to gitignore-aware tools like any other source file.
 
 Despite the `v19_` filenames, both current launchers are
 campaign-parameterised: the campaign id and the Gate prefix come from
@@ -139,11 +152,34 @@ canonical/derived contract — is in this file and in the launcher headers
    `submit_iteration` (mode-aware) and then calls `run_chain` from the
    library.
 
-3. **Every iter writes `iter_NNN/manifest.json`.** The manifest is the
-   chain's discoverable handoff between iters (status, output path,
-   model name, best score). It is also the source of truth for
-   auto-resume (`scripts/inspect_run_state.py --layout chain
-   --next-iter`).
+3. **Every iter writes `iter_NNN/manifest.json` — exactly once.** The
+   manifest is the chain's discoverable handoff between iters (status,
+   output path, model name, best score). It is also the source of truth
+   for auto-resume (`scripts/inspect_run_state.py --layout chain
+   --next-iter`). Since arXiv-readiness S2 / U5 (#258) it carries a
+   `manifest_sha256` self-digest and is published **write-once**:
+   `run_one_iteration.py` refuses to LAUNCH into an `iter_NNN/` that
+   already holds a `manifest.json` (exit 2, before any LLM/model/GPU
+   work). To rerun an iteration deliberately pass
+   `--replace_iteration_manifest --replacement_reason '<why>'`: the
+   previous manifest is kept as `manifest.replaced.<stamp>.json` and its
+   digests are recorded under the new manifest's `manifest_replacement`
+   provenance. Integrity hashes are never regenerated silently.
+   **Auto-resume (#258 refinement, operator-approved)**: when the newest
+   iteration ended `failed` or `no_records`, `--next-iter` names that same
+   index. `run_chain.sh` forwards `--auto_resume` to the launcher ONLY on
+   the branch where the inspector actually computed the start iteration
+   (never for a manual `--start_iter` pin or `--no_auto_resume`); the
+   launcher then classifies the existing manifest itself and, only for a
+   terminal `failed`/`no_records` state, routes through the SAME explicit
+   replacement path — previous manifest set aside on disk, provenance
+   recorded with a recognizable `auto_resume recovery` reason and the
+   previous manifest's sha256 + status. A `completed` manifest is never
+   replaced by auto-resume: that still requires the explicit flags above.
+   An unclassifiable (malformed) manifest fails closed to the refusal.
+   Any TAMPERED prior iteration (edited manifest, removed artifact hash,
+   changed artifact) makes `--next-iter` refuse with a non-zero exit
+   instead of queueing a job that `restore_prior_state` would kill.
 
 4. **Manifest statuses:**
    * `completed` — workflow produced a real `best_denoising_score`.
@@ -234,6 +270,52 @@ canonical/derived contract — is in this file and in the launcher headers
    inspector's stdout can be polluted by plugin-loader prints, which makes
    the computed `START_ITER` non-numeric and aborts the launch. Passing
    `--start_iter N` explicitly is the workaround.
+
+10. **`--experiment_arm <label>` pins an OPAQUE arm label into the run's
+    identity** (arXiv U1, #253 / #254). Forwarded to `run_one_iteration.py`
+    only when set, so an unlabelled chain's child argv is byte-identical to
+    before the flag existed. The label joins `run_invariants_lock.json`
+    beside the WORKFLOW TOPOLOGY — `lit_review_enabled` (resolved as
+    `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` > the YAML's
+    `enabled` > `false`) and, when enabled, `lit_review_config_sha256`, the
+    sha256 of the resolved lit-review YAML's bytes. All three are CANONICAL:
+    a resume under a different arm, a toggled lit-review, or an edited
+    lit-review config fails closed at startup naming the field.
+
+    * every experiment record, tuner output and `manifest.json` of a
+      labelled iteration carries `experiment_arm`; the manifest also
+      carries `lit_review_enabled` (when ON) and the sha — on EVERY branch,
+      including `failed`
+    * the keys are OMITTED at their defaults (absent = unlabelled / OFF /
+      no pin), so every pre-U1 lock, record and manifest is byte-identical
+      and a reader applies ONE rule to all three artifacts
+    * the label drives NO behaviour (ruling R2): each arm's behaviour is
+      set by its own explicit flags, never by its name
+    * an enabled lit-review whose config cannot be read is refused at
+      launch — before any LLM call — with a `failed` manifest for the brake
+    * `run_one_iteration.py --experiment_arm ""` is refused; absence is
+      spelled by omitting the flag, never by an empty string
+
+11. **`--baseline_isolation` excludes the bundled baselines from the run's
+    LLM-facing surface** (arXiv U3, #260 — the WITHOUT arm's explicit
+    behaviour flag; the arm LABEL never drives behaviour, ruling R2).
+    Under it: the interpreter and tuner refuse a bundled
+    `ml_models/*/description.md` (plugin / workspace descriptions still
+    resolve, so no bundled prose can enter the interpreter's carried
+    cache); the proposer's registry block and the stage templates' worked
+    examples render neutral placeholders instead of `wavenet` / the `5.57`
+    SOTA figure (every NON-isolated render stays byte-identical — pinned
+    against the pre-U3 template sha256); and a proposal that names a
+    bundled built-in — as the candidate or as a Branch-B reuse target — is
+    refused fail-closed and NAMED (`BaselineIsolationViolation`) before
+    the implementor, with the reason fed to the next proposal attempt.
+    Locked (`run_invariants_lock.json`, omitted when off) and stamped on
+    the manifest, so an isolated and a non-isolated run can never share a
+    workspace. The two-arm launcher is
+    `launch_prior_baseline_experiment.sh`; its `--dry-run` prints the
+    exact child argv plus the resolved launch configuration
+    (`run_one_iteration.py --print_resolved_launch_config`) with zero side
+    effects.
 
 ---
 

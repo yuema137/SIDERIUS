@@ -191,45 +191,102 @@ class TestLoadLossPluginByName:
 
 
 class TestEnvVarResolution:
+    @pytest.fixture
+    def library_losses(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+        """Pin the resolved generated library (arXiv P1) to a tmp root so the
+        union assertions don't depend on this developer's ~/.siderius."""
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        return str(tmp_path / "lib" / "losses")
+
     def test_env_var_set_unions_with_default(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, library_losses: str
     ):
-        """L6c — union mode. Env-var dirs come FIRST followed by the global
-        LOSSES_DIR. Pre-L6c this was an EXCLUSIVE override (env-only). The
-        union ensures in-process pre-flight and subprocesses both see
-        promoted losses, while workspace dirs still win for in-flight
-        Branch C generated this run."""
+        """L6c — union mode; arXiv P1 adds the resolved library dir. Env-var
+        dirs come FIRST, then the resolved generated-library losses dir, then
+        the legacy checkout LOSSES_DIR LAST. Defect caught: any reordering —
+        a workspace loss losing to a promoted one, or a legacy checkout loss
+        shadowing the resolved-library copy of the same name (the walk is
+        first-match-wins)."""
         target = tmp_path / "alt_losses"
         target.mkdir()
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", str(target))
         dirs = _resolve_loss_dirs()
-        assert dirs == [str(target), _loss_loader.LOSSES_DIR]
-        # Env-var dir is first (highest priority for in-flight losses).
-        assert dirs[0] == str(target)
-        # Global LOSSES_DIR is appended for cross-process Branch B reuse.
-        assert dirs[-1] == _loss_loader.LOSSES_DIR
+        assert dirs == [str(target), library_losses, _loss_loader.LOSSES_DIR]
 
-    def test_env_var_unset_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch):
+    def test_env_var_unset_falls_back_to_library_dirs(
+        self, monkeypatch: pytest.MonkeyPatch, library_losses: str
+    ):
+        """Defect caught: the no-env branch dropping either library member —
+        losing the resolved dir breaks every post-P1 promotion read; losing
+        the legacy dir breaks pre-migration checkouts (compatibility READ)."""
         monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
         dirs = _resolve_loss_dirs()
-        assert dirs == [_loss_loader.LOSSES_DIR]
+        assert dirs == [library_losses, _loss_loader.LOSSES_DIR]
 
-    def test_env_var_empty_string_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch):
+    def test_env_var_empty_string_falls_back_to_library_dirs(
+        self, monkeypatch: pytest.MonkeyPatch, library_losses: str
+    ):
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", "")
         dirs = _resolve_loss_dirs()
-        assert dirs == [_loss_loader.LOSSES_DIR]
+        assert dirs == [library_losses, _loss_loader.LOSSES_DIR]
 
-    def test_env_var_pathsep_separated_list_parses_correctly(self, monkeypatch: pytest.MonkeyPatch):
-        """L6c union mode: env-var dirs (parsed) FIRST, global LOSSES_DIR LAST."""
+    def test_env_var_pathsep_separated_list_parses_correctly(
+        self, monkeypatch: pytest.MonkeyPatch, library_losses: str
+    ):
+        """L6c union mode: env-var dirs (parsed) FIRST, library dirs LAST."""
         joined = os.pathsep.join(["/a", "/b", "/c"])
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", joined)
-        assert _resolve_loss_dirs() == ["/a", "/b", "/c", _loss_loader.LOSSES_DIR]
+        assert _resolve_loss_dirs() == [
+            "/a",
+            "/b",
+            "/c",
+            library_losses,
+            _loss_loader.LOSSES_DIR,
+        ]
 
-    def test_env_var_with_empty_entries_filters_them(self, monkeypatch: pytest.MonkeyPatch):
+    def test_env_var_with_empty_entries_filters_them(
+        self, monkeypatch: pytest.MonkeyPatch, library_losses: str
+    ):
         """Shell-composed paths like ``:/a:/b:`` produce ["/a", "/b"] for the
-        env portion, then the global LOSSES_DIR is appended (L6c union)."""
+        env portion, then the library dirs are appended (L6c union)."""
         monkeypatch.setenv("SIDERIUS_LOSS_DIRS", os.pathsep.join(["", "/a", "", "/b", ""]))
-        assert _resolve_loss_dirs() == ["/a", "/b", _loss_loader.LOSSES_DIR]
+        assert _resolve_loss_dirs() == ["/a", "/b", library_losses, _loss_loader.LOSSES_DIR]
+
+    def test_legacy_checkout_dir_is_scanned_last_and_still_resolves(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """arXiv P1 compatibility READ (matrix F): a loss present ONLY in the
+        legacy checkout location must still resolve by name — and a same-named
+        loss in the resolved library must win over it. Defect caught: dropping
+        the legacy member (pre-migration promotions vanish) or scanning it
+        before the resolved dir (stale legacy bytes shadow the current
+        promotion)."""
+        legacy = tmp_path / "legacy_losses"
+        legacy.mkdir()
+        monkeypatch.setattr(_loss_loader, "LOSSES_DIR", str(legacy))
+        lib = tmp_path / "lib"
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(lib))
+        monkeypatch.delenv("SIDERIUS_LOSS_DIRS", raising=False)
+
+        # Legacy-only loss resolves through the fallback member.
+        _copy_stub(legacy, "stub_ce.py")
+        result = load_loss_plugin("stub_ce")
+        assert result is not None
+        assert result["target_dtype"] == "long"
+
+        # Same-named resolved-library copy wins (first-match-wins walk). The
+        # library variant is distinguishable by its declared target dtype.
+        lib_losses = lib / "losses"
+        lib_losses.mkdir(parents=True)
+        variant = (
+            (legacy / "stub_ce.py")
+            .read_text()
+            .replace('PLUGIN_LOSS_TARGET_DTYPE = "long"', 'PLUGIN_LOSS_TARGET_DTYPE = "float"')
+        )
+        (lib_losses / "stub_ce.py").write_text(variant)
+        result2 = load_loss_plugin("stub_ce")
+        assert result2 is not None
+        assert result2["target_dtype"] == "float"
 
     def test_loader_isolates_model_dir_misuse(self, loss_dir: Path, capsys: pytest.CaptureFixture):
         """When SIDERIUS_LOSS_DIRS points at a dir containing MODEL ``.py``
@@ -300,9 +357,7 @@ class TestI13TargetDtypeDeclaration:
         loaded with ``target_dtype == 'long'`` in the returned dict."""
         from agent_generated._loss_loader import load_loss_plugin_from_path
 
-        plugin_path = _write_plugin(
-            loss_dir, "long_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "long"'
-        )
+        plugin_path = _write_plugin(loss_dir, "long_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "long"')
         result = load_loss_plugin_from_path(str(plugin_path))
         assert result is not None
         assert result["target_dtype"] == "long"
@@ -312,9 +367,7 @@ class TestI13TargetDtypeDeclaration:
         loaded with ``target_dtype == 'float'``."""
         from agent_generated._loss_loader import load_loss_plugin_from_path
 
-        plugin_path = _write_plugin(
-            loss_dir, "float_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "float"'
-        )
+        plugin_path = _write_plugin(loss_dir, "float_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "float"')
         result = load_loss_plugin_from_path(str(plugin_path))
         assert result is not None
         assert result["target_dtype"] == "float"
@@ -337,9 +390,7 @@ class TestI13TargetDtypeDeclaration:
         ``'i64'``) — loader warns to stdout and clamps to ``'long'``."""
         from agent_generated._loss_loader import load_loss_plugin_from_path
 
-        plugin_path = _write_plugin(
-            loss_dir, "bad_decl_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "int64"'
-        )
+        plugin_path = _write_plugin(loss_dir, "bad_decl_loss", 'PLUGIN_LOSS_TARGET_DTYPE = "int64"')
         result = load_loss_plugin_from_path(str(plugin_path))
         assert result is not None
         assert result["target_dtype"] == "long"
@@ -382,17 +433,15 @@ class TestI13StubTemplateDeclaresDtype:
     moment we want a regressor-style custom loss."""
 
     def test_stub_template_declares_target_dtype(self):
-        from agent_generated._loss_loader import LOSSES_DIR  # noqa: F401 — anchor
+        from agent_generated._loss_loader import LOSSES_DIR
 
         template_path = (
-            Path(__file__).resolve().parents[3]
-            / "agent_generated"
-            / "_stub_loss_template.py"
+            Path(__file__).resolve().parents[3] / "agent_generated" / "_stub_loss_template.py"
         )
         text = template_path.read_text()
         assert 'PLUGIN_LOSS_TARGET_DTYPE = "long"' in text, (
-            f"_stub_loss_template.py is missing the I13 declaration "
-            f"PLUGIN_LOSS_TARGET_DTYPE = 'long'. Without it, the L4 implementor's "
-            f"assembled plugins would silently default to 'long' — which is the "
-            f"correct value today but hides intent. Restore the declaration."
+            "_stub_loss_template.py is missing the I13 declaration "
+            "PLUGIN_LOSS_TARGET_DTYPE = 'long'. Without it, the L4 implementor's "
+            "assembled plugins would silently default to 'long' — which is the "
+            "correct value today but hides intent. Restore the declaration."
         )

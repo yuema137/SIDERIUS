@@ -1,0 +1,22 @@
+{
+  "partition_count": 4,
+  "topology": {
+    "modality": "tabular",
+    "partition_unit": "shard",
+    "feature_dim": 4,
+    "class_cardinality": 2,
+    "rows_per_shard": 64,
+    "roles": {
+      "train_shards": [0, 1],
+      "validation_shard": 2,
+      "final_eval_shard": 3
+    },
+    "generator": {
+      "seed": 20260824,
+      "rule": "label = 1 iff x0*x1 + sin(pi*x2) > x3; features Uniform(-1,1); 3% deterministic label flips",
+      "authority": "plugins/_quickstart_task.py::generate_shard"
+    }
+  },
+  "anchor_selection_files": [0],
+  "health_peek_files": [0]
+}

@@ -14,6 +14,8 @@ __pycache__/
 venv/
 env/
 *.env
+# The H100 resource-posture contract sourced by the campaign launcher (issue #261) is source, not a secrets file.
+!sdsc_submission_scripts/h100_posture.env
 
 # Data and Binary files
 *.npy

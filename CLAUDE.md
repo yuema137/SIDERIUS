@@ -272,16 +272,21 @@ validate.
 - **Cold-start real-training gate runs (operator rule, 2026-07-27)**:
   every new real-training gate run (Gate 1 with real training, Gate 2,
   any smoke that invokes `run_chain.sh` or `run_one_iteration.py` with real
-  training) must be **cold-start** — do NOT pass `--seed_paths`. Rationale
-  and the twin DS8 partial-scope rule (paired `--data_scope` +
-  `--health_gate_files`) live in `docs/gates/gate_testing_standard.md`
-  "Partial-scope rules" section. The pre-DS8 canonical seed paths still
-  listed there are historical reference only. Exception: reproducing a
-  specific historical seeded run — operator-approved case-by-case only.
+  training) must be **cold-start** — do NOT pass `--seed_paths`. Rationale,
+  the twin DS8 partial-scope rule (paired `--data_scope` +
+  `--health_gate_files`), and the **cold-start checklist** (which state is
+  cleared vs retained, in order: workspace, seeds, `agent_generated`
+  models + capability index, workspace plugins, root-papers cache,
+  calibration store, advice file) live in
+  `docs/gates/gate_testing_standard.md` "Partial-scope rules" section. The
+  pre-DS8 canonical seed paths still listed there are historical reference
+  only. Exception: reproducing a specific historical seeded run —
+  operator-approved case-by-case only.
 - **Node/skill doc sync before merge (operator rule, 2026-07-28)**:
   every PR that updates a node or a skill must update the relevant
   `.md` (the node's `nodes/{node}/{node}.md`, the skill's doc, and any
-  operator-surface doc such as `docs/running_chain_test.md`) so CLI
+  operator-surface doc such as `docs/reference/entrypoints.md` or
+  `docs/guides/operating-a-run.md`) so CLI
   arguments, default values, and behavior explanations stay current —
   this codebase is large and the docs are the operator's map. If a
   touched skill has no `.md`, create a minimal one. Done as the very
@@ -433,7 +438,7 @@ sounds close.
 | Prefix | Module | Example agents |
 |--------|--------|----------------|
 | `ml_` | Machine learning pipeline | `ml_hyperparameter_tune_agent`, `ml_model_proposal_agent`, `ml_model_implementor`, `ml_code_validator_agent` |
-| `data_` | Data processing / analysis | `data_analysis_agent` |
+| `data_` | Data processing / analysis | `data_analysis_agent` (hypothetical — planned, not built; no such node exists yet) |
 
 When naming a new agent: identify which module it belongs to, use that
 module's prefix, then add a short snake_case descriptor of the specific task.
@@ -463,7 +468,10 @@ required API key is not set.
 **Dual-mode tests** (`@pytest.mark.dual_mode`) run in pseudo mode by default
 (predefined responses from `tests/pseudo_data/`) and switch to real mode only
 when `--real-api-call` is passed. New integration tests should be dual-mode by
-default. See `docs/pseudo_test_infra.md` for the full design.
+default. See `tests/pseudo_data/README.md` for the fixtures and
+`docs/architecture.md` ("Pseudo-full-loop tests") for the design — the
+original `docs/pseudo_test_infra.md` note was removed in the 2026-08-10 docs
+sweep (`6bc1f536`).
 
 Steps 5 and 6 in the node checklist correspond to Tier 1 and Tier 2
 respectively.
@@ -641,6 +649,33 @@ TIDMAD's `network.py:FocalLoss1D`.
 
 *Ephemeral section — update as work progresses.*
 
+- **STEP 12 / PR-12d — COMPLETE / MERGED (2026-08-24)**: PR #274, squash
+  **`84d74280`**; exact-head CI SUCCESS (12,941 passed / 48 skipped / 0
+  failed). **Pets and DAVIS reach L4** — the composed production chain ran
+  both end to end (`G-12d`, persisted PASS records in the design ledger
+  D-12d-62: Pets `accuracy` 0.0946 higher + `macro_f1`/`log_loss`; DAVIS
+  `mse` 0.01607 LOWER + `psnr`/`mae`, objective `custom/davis_exact_l1`
+  overriding the planner's `smooth_l1` — the task's declaration is
+  authoritative, F-12d-31). Both packs' `STATUS.md` promoted to **L4** at
+  D-FINAL. Manifest vocabulary grew: `model_plugins:` / `loss_plugins:` /
+  `objective` + task-instance `config:` with `{ref:}` envelopes; unknown
+  SECTION-level keys are now refused (`_refuse_unknown_section_keys` — at
+  the old base they were silently dropped); seam P unions pack plugin dirs
+  into every child; scope transport reaches all three children; seam E
+  narrowed `DeliverableNaming` to an indexed capability. **TIDMAD §J
+  witness: row 3 PROVEN; rows 4/5 `DEFERRED_TO_C12P`** (operator acceptance
+  exception — a pre-existing `run_comparison.py --data_dir` transport gap,
+  not PR-12d's). **Declared debt future work must not re-break or forget**:
+  composed runs fire ZERO HealthGates (ledger A1 — 08c's D14-runner
+  evidence stands, never restate it as composed-path); false
+  `tidmad_denoise` calibration provenance from composed runs (A4);
+  the tuner planner's prompt still names built-ins unconditionally (A2/A3
+  debt). Design + evidence:
+  `generic_framework_upgrade/step_12_external_extensibility_graduation/pr_12d_contrast_subprocess_closure.md`
+  §A / §Q (D-12d-62 the PASS records, D-12d-63 the closeout). **NEXT =
+  PR-12e** (out-of-tree graduation) per the frozen T5 topology, plus the
+  landed arXiv-readiness integration (issues #253–#268) tracked in its own
+  lane.
 - **STEP 12 / PR-12bc — COMPLETE / MERGED (2026-08-23)**: PR #249, squash
   `42d79b9d`; final executable head `486ea47f`, final PR head `06103e9a`
   (delta **docs-only**), authoritative exact-head CI **32657760919 SUCCESS**
@@ -1297,8 +1332,10 @@ TIDMAD's `network.py:FocalLoss1D`.
   subprocess, so no measurement-backed validation estimate exists when
   admission executes. Owner: admission / runtime-control (§7e); **OPEN after
   07c; NOT bound to D14**; and it must never be approximated from the training
-  measurement by a fixed ratio (the `× 2.7` pattern
-  `docs/refine_inference_time_estimator.md` removed).
+  measurement by a fixed ratio (the `× 2.7` pattern that the historical
+  `docs/refine_inference_time_estimator.md` removed — that note itself was
+  deleted in the 2026-08-10 docs sweep, `6bc1f536`; the surviving design is
+  `docs/design/runtime_estimation_and_calibration.md`).
   **`resolved_action` is NOT scheduled ahead of 07c (operator decision,
   2026-08-17)**: it is conceptually adjacent to the coupling just corrected but
   is a different defect, and adjacency is not a schedule. Do not open a

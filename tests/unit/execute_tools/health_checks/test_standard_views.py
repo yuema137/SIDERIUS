@@ -307,6 +307,14 @@ def _production_files_referencing(name: str, *, exact: bool) -> set[str]:
         if rel.endswith(".py"):
             if _references(_code_level_names(REPO_ROOT / rel), name, exact=exact):
                 offenders.add(rel)
+        elif rel.endswith(".md"):
+            # Documentation is PROSE — the same principle that excludes .py
+            # docstrings above ("Prose is excluded on purpose"). This branch
+            # was added when the S4 onboarding stream shipped module READMEs
+            # inside the swept packages: a README that NAMES a capability key
+            # is describing it, not defining or consuming it, and cannot be
+            # imported by an engine.
+            continue
         else:
             offenders.add(rel)
     return offenders

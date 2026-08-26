@@ -40,6 +40,30 @@ They extend `MODEL_REGISTRY` / `LOSS_REGISTRY` at runtime through
 `CapabilityRegistry`, and each run stages its plugins into
 `{workspace}/plugins/{run_name}/`.
 
+### The generated-capability library (arXiv P1)
+
+Cross-run durable state — promoted model/loss plugins and the capability
+index (`_capability_index.json`) — lives under ONE resolved, non-checkout
+**generated-library root** (`core/generated_library.py`):
+
+```
+SIDERIUS_GENERATED_LIBRARY_DIR   absolute path; "~" expanded; empty = unset;
+                                 non-empty RELATIVE path is refused loudly
+    else
+~/.siderius/generated_library    per-user default (the ~/.siderius precedent)
+```
+
+Layout mirrors the old checkout layout: `models/`, `losses/`,
+`_capability_index.json`. Promotion writes here; startup preloads and the
+no-env plugin/loss scans read here FIRST. The repository checkout's
+`agent_generated/` is a **read-only legacy fallback** (scanned after the
+resolved root; the index is read only until the resolved index exists, and
+its rows are carried into the resolved index by the first write) — a
+pre-migration checkout keeps resolving everything it promoted, and **no
+production path writes into the checkout**. Each run's lock records the
+resolved root as `generated_library` provenance (`{root, source}`;
+recorded, never compared).
+
 > ⏳ A pack's plugin directory does **not** currently propagate to a composed
 > run's children — the two example harnesses set the env var themselves, and the
 > chain launchers contain zero injections. 🧭 PR-12d (seam P).

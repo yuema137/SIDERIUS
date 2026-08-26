@@ -285,6 +285,22 @@ class TestRecordingSandbox:
             summary = json.load(f)
         assert [r["exp_id"] for r in summary] == ["e1", "e2", "e3"]
 
+    def test_save_record_upsert_matches_the_production_projection(self, tmp_path):
+        """S2 / U5: the fake persists through the REAL ``LocalRecorder``.
+        DEFECT: the fake regaining its own append-only summary writer, which
+        cannot exhibit the latest-wins-by-``exp_id`` contract the tuner's
+        resume and the recovery scripts rely on. Fails if ``get_summary``
+        returns three rows or the canonical log is missing."""
+        sb = RecordingSandbox(base_dir=str(tmp_path), run_name="my_run")
+        sb.save_record({"exp_id": "e1", "v": 1})
+        sb.save_record({"exp_id": "e2"})
+        sb.save_record({"exp_id": "e1", "v": 2})
+
+        assert [r["exp_id"] for r in sb.saved_records] == ["e1", "e2", "e1"]
+        assert sb.get_summary() == [{"exp_id": "e1", "v": 2}, {"exp_id": "e2"}]
+        log = tmp_path / "records" / "my_run" / "records.jsonl"
+        assert len(log.read_text(encoding="utf-8").splitlines()) == 3
+
     def test_calls_list_records_attempts_even_on_queue_exhaustion(self, tmp_path):
         """The call tuple is appended to ``self.calls`` BEFORE ``_pop`` raises,
         so a call that exhausted the queue still shows up in the assertion list.

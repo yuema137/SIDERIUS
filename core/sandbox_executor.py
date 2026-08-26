@@ -39,6 +39,11 @@ from core.execution_calibration import (
     resolve_role_ceiling_gb,
 )
 from core.inference_defaults import inference_batch_for
+
+# Re-export (R-11-11 recorder extraction): existing import paths keep working.
+from core.recorders import BaseRecorder as BaseRecorder
+from core.recorders import LocalRecorder as LocalRecorder
+from core.recorders import MongoRecorder as MongoRecorder
 from core.runtime_control.launch_argv import has_scope_to_launch_from, runtime_control_argv
 from core.runtime_control.records import MEASUREMENT_BACKED_SOURCES, RuntimeObservation
 from core.runtime_control.session import RuntimeControlPolicy
@@ -57,7 +62,14 @@ from execute_tools.evaluation_metric import (
     derive_tidmad_metric,
 )
 from execute_tools.scope_artifact import task_scope_argv, validation_rows_argv
-from execute_tools.scoring_utils import coerce_nonfinite_to_none, validate_sample_set
+
+# Same rule for the coercion helper the recorders use: before the extraction
+# this module IMPORTED it (scoring_utils owns it), which made it importable
+# FROM here — and #299's storage-image test does exactly that. Keep the
+# surface; the owner is unchanged. (Compatibility bridge — remove after the
+# consumers migrate to execute_tools.scoring_utils; tracked in the lane.)
+from execute_tools.scoring_utils import coerce_nonfinite_to_none as coerce_nonfinite_to_none
+from execute_tools.scoring_utils import validate_sample_set
 from execute_tools.training_history import (
     TRAINING_HISTORY_KEY,
     TrainingHistory,
@@ -336,78 +348,9 @@ def _subprocess_env(
 
 
 # --- Storage Strategies ---
-
-
-class BaseRecorder:
-    """Base class for experiment recording."""
-
-    def save_record(self, record: dict[str, Any]):
-        raise NotImplementedError
-
-    def get_summary(self) -> list:
-        raise NotImplementedError
-
-
-class LocalRecorder(BaseRecorder):
-    """File-based recording for persistent agent memory."""
-
-    def __init__(self, record_dir: str, summary_file: str, run_name: str):
-        self.summary_file = summary_file
-        self.record_dir = os.path.join(record_dir, run_name)
-        _ensure_dir(self.record_dir)
-
-    def save_record(self, record: dict[str, Any]):
-        exp_id = record["exp_id"]
-
-        # Coerce float('-inf') no-signal sentinels to JSON null so the on-disk
-        # record stays browser-safe (RFC-8259 doesn't allow Infinity / -Infinity).
-        safe_record = coerce_nonfinite_to_none(record)
-
-        # every detail json should stay in the run_name folder
-        detail_path = os.path.join(self.record_dir, f"{exp_id}.json")
-        with open(detail_path, "w", encoding="utf-8") as f:
-            json.dump(safe_record, f, indent=4, ensure_ascii=False)
-
-        summary = self.get_summary()
-        existing_idx = next(
-            (i for i, item in enumerate(summary) if item.get("exp_id") == exp_id), None
-        )
-
-        if existing_idx is not None:
-            summary[existing_idx] = safe_record
-        else:
-            summary.append(safe_record)
-
-        with open(self.summary_file, "w", encoding="utf-8") as f:
-            json.dump(summary, f, indent=4, ensure_ascii=False)
-
-    def get_summary(self) -> list:
-        if os.path.exists(self.summary_file):
-            try:
-                with open(self.summary_file, encoding="utf-8") as f:
-                    return json.load(f)
-            except (OSError, json.JSONDecodeError):
-                return []
-        return []
-
-
-class MongoRecorder(BaseRecorder):
-    """MongoDB-based recording for robust development."""
-
-    def __init__(self, uri: str, db_name: str):
-        from pymongo import MongoClient  # type: ignore[reportMissingImports]
-
-        self.client = MongoClient(uri)
-        self.db = self.client[db_name]
-        self.collection = self.db["experiments"]
-
-    def save_record(self, record: dict[str, Any]):
-        self.collection.update_one({"exp_id": record["exp_id"]}, {"$set": record}, upsert=True)
-
-    def get_summary(self) -> list:
-        # For MongoDB, we return more fields to support Agent reasoning
-        cursor = self.collection.find({}, {"_id": 0})
-        return list(cursor)
+# Extracted to ``core/recorders.py`` under the Step-11 file budget (R-11-11);
+# the classes are re-exported from this module's top import block so every
+# existing import path keeps working.
 
 
 # --- Main Executor ---

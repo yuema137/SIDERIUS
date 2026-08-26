@@ -282,6 +282,12 @@ def test_save_record_persists_pseudo_origin_marker_to_disk(
     with open(summary_path, encoding="utf-8") as f:
         summary = json.load(f)
     assert any(r.get("_pseudo_origin") == "stub_sandbox" for r in summary)
+    # S2 / U5: so must the canonical record log — the third grep surface,
+    # and the one the summary is now projected from.
+    log_path = os.path.join(str(tmp_path), "records", _RUN_NAME, "records.jsonl")
+    with open(log_path, encoding="utf-8") as f:
+        lines = [json.loads(line) for line in f.read().splitlines()]
+    assert [r["_pseudo_origin"] for r in lines] == ["stub_sandbox"]
 
 
 # ---------------------------------------------------------------------------

@@ -64,8 +64,10 @@ GPU UUID
 
 **An RTX 5090 measurement is not an H100 measurement.** Moving to new
 hardware invalidates every stored figure for admission purposes, even
-for a byte-identical candidate. See the cross-hardware bring-up runbook
-in [`docs/guides/operating-a-run.md`](../../../docs/guides/operating-a-run.md).
+for a byte-identical candidate. See the cross-hardware bring-up section
+["Cross-hardware bring-up (H100 posture)"](../../../docs/guides/operating-a-run.md#cross-hardware-bring-up-h100-posture)
+in the operator guide — the H100 budget table, its provenance classes and
+the measurements to take on the box before a pilot.
 
 **This skill does not promote anything.** It measures and returns. It
 does not decide whether a figure is applicable elsewhere, does not write

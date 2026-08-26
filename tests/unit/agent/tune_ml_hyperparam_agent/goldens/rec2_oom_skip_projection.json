@@ -99,6 +99,7 @@
   "strategy_normalization_reason": null,
   "target_files": null,
   "task_composition_fingerprint": null,
+  "experiment_arm": null,
   "timestamp": "<present>",
   "timing": null,
   "traceback_summary": null,

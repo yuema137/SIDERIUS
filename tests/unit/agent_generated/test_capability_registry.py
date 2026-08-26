@@ -371,3 +371,121 @@ class TestCapabilityMetadataMathematicalDefinition:
         assert raw["mathematical_definition"] == formula
         rebuilt = CapabilityMetadata.model_validate(raw)
         assert rebuilt.mathematical_definition == formula
+
+
+class TestGeneratedLibraryDefaultAndLegacyFallback:
+    """arXiv P1 — the registry default moved off the repository checkout.
+
+    Default construction resolves ``{library}/_capability_index.json``
+    through ``core.generated_library``; the pre-P1 checkout index stays
+    READABLE (fallback + first-write carry-forward) and is never written.
+    """
+
+    @pytest.fixture
+    def legacy_index(self, tmp_path, monkeypatch):
+        """Point the legacy checkout index at a tmp fixture file (matrix F:
+        a seeded fake legacy artifact — never the real checkout)."""
+        from agent_generated import _registry as registry_module
+
+        legacy = tmp_path / "legacy" / "_capability_index.json"
+        legacy.parent.mkdir()
+        monkeypatch.setattr(registry_module, "_LEGACY_CHECKOUT_INDEX_PATH", str(legacy))
+        return legacy
+
+    @staticmethod
+    def _row(name: str) -> dict:
+        return {
+            "name": name,
+            "capability_type": "loss",
+            "file_path": f"/tmp/{name}.py",
+            "created_at": "2026-06-23T00:00:00+00:00",
+            "source_iteration": None,
+            "description": "",
+            "mathematical_definition": "",
+        }
+
+    def test_default_construction_resolves_the_library_index(self, tmp_path, monkeypatch):
+        """Defect caught: the default index drifting back to the repository
+        checkout — every production reader/writer (tuner block, proposer
+        inventory, workflow post-validation register, promotion replace,
+        startup prune) constructs ``CapabilityRegistry()`` bare, so a wrong
+        default is index pollution restored everywhere at once."""
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        reg = CapabilityRegistry()
+        assert reg.index_path == str(tmp_path / "lib" / "_capability_index.json")
+
+    def test_legacy_index_readable_when_resolved_index_missing(
+        self, tmp_path, monkeypatch, legacy_index
+    ):
+        """Matrix F — compatibility READ. A checkout that accumulated index
+        rows before the migration must keep resolving them through a
+        default-constructed registry. Defect caught: dropping the fallback,
+        which silently erases every pre-migration Branch-B candidate from
+        the proposer/tuner inventories."""
+        import json as _json
+
+        legacy_index.write_text(_json.dumps([self._row("legacy_loss")]))
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+
+        reg = CapabilityRegistry()
+        assert [m.name for m in reg.list(capability_type="loss")] == ["legacy_loss"]
+
+    def test_first_write_carries_legacy_rows_into_resolved_index(
+        self, tmp_path, monkeypatch, legacy_index
+    ):
+        """Migration-on-first-write. Defect caught EITHER way it breaks:
+        a write that ignores the legacy rows (register() would persist only
+        the new row, losing pre-migration history the moment anything
+        writes) or a write that lands in the legacy checkout file (the
+        repo-root write this migration removes)."""
+        import json as _json
+
+        legacy_bytes = _json.dumps([self._row("legacy_loss")])
+        legacy_index.write_text(legacy_bytes)
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+
+        reg = CapabilityRegistry()
+        reg.register(
+            CapabilityMetadata(
+                name="fresh_loss",
+                capability_type="loss",
+                file_path="/tmp/fresh_loss.py",
+                created_at="2026-06-23T00:00:00+00:00",
+            )
+        )
+
+        resolved = tmp_path / "lib" / "_capability_index.json"
+        assert resolved.is_file()
+        names = [row["name"] for row in _json.loads(resolved.read_text())]
+        assert names == ["legacy_loss", "fresh_loss"]
+        # The legacy checkout file is byte-identical — never written.
+        assert legacy_index.read_text() == legacy_bytes
+
+    def test_existing_resolved_index_suppresses_the_fallback(
+        self, tmp_path, monkeypatch, legacy_index
+    ):
+        """Defect caught: a pruned-EMPTY resolved index falling back to the
+        legacy file — startup's stale-entry sweep would then resurrect the
+        very ghosts it just removed on the next read."""
+        import json as _json
+
+        legacy_index.write_text(_json.dumps([self._row("legacy_ghost")]))
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        resolved = tmp_path / "lib" / "_capability_index.json"
+        resolved.parent.mkdir(parents=True)
+        resolved.write_text("[]")
+
+        reg = CapabilityRegistry()
+        assert reg.list() == []
+
+    def test_explicit_index_path_never_falls_back(self, tmp_path, monkeypatch, legacy_index):
+        """Defect caught: the legacy fallback leaking into EXPLICIT-path
+        construction — a tmp_path test registry would silently read whatever
+        the checkout index holds, certifying behaviour against state the
+        test never seeded (the exact contamination class the fixture
+        convention exists to prevent)."""
+        import json as _json
+
+        legacy_index.write_text(_json.dumps([self._row("legacy_loss")]))
+        reg = CapabilityRegistry(index_path=str(tmp_path / "explicit.json"))
+        assert reg.list() == []

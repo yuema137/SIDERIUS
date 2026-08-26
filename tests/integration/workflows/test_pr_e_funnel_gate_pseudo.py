@@ -345,9 +345,20 @@ def test_complete_funnel_row_from_one_pseudo_iteration(tmp_path, request, monkey
     assert attempts == [f"attempt_001_{_MODEL_TYPE}"]
     attempt_dir = Path(iter_dir) / attempts[0]
 
+    # S2 / U6 (#256): the implementor/validation artifacts of the TERMINAL
+    # implement→validate attempt live in the nested `impl_KKK/`; the
+    # proposal stays at the attempt level. Resolved through the one authority
+    # the funnel itself uses.
+    from execute_tools.impl_attempts import stage_artifact_dir
+
+    stage_dir = Path(stage_artifact_dir(str(attempt_dir)))
     minted: set[str] = set()
-    for stem in ("proposal", "implementor", "validation"):
-        payload = json.loads((attempt_dir / f"{stem}_{run_name}.json").read_text())
+    for stem, where in (
+        ("proposal", attempt_dir),
+        ("implementor", stage_dir),
+        ("validation", stage_dir),
+    ):
+        payload = json.loads((where / f"{stem}_{run_name}.json").read_text())
         assert isinstance(payload.get("candidate_id"), str), f"{stem} JSON lost the id"
         minted.add(payload["candidate_id"])
     assert len(minted) == 1, f"stage artifacts disagree on identity: {minted}"

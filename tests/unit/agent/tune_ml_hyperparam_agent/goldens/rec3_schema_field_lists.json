@@ -16,6 +16,7 @@
     "health_checks_config_source",
     "health_config_sha256",
     "task_composition_fingerprint",
+    "experiment_arm",
     "formal_reference_score",
     "formal_comparison_reference_source",
     "resolved_skip_formal_threshold",

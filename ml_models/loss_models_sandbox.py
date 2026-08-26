@@ -112,32 +112,55 @@ def register_loss_in_memory(plugin_path: str) -> str | None:
 
 
 def preload_global_losses() -> list[str]:
-    """Load all loss plugins from ``agent_generated/losses/`` into ``LOSS_REGISTRY``.
+    """Load all promoted loss plugins into ``LOSS_REGISTRY``.
 
     L6c — called at workflow startup so cross-process Branch B reuse (e.g.
     chain resume after restart) finds previously-promoted losses in-memory
     without needing ``SIDERIUS_LOSS_DIRS``. Idempotent — safe to call
     multiple times; ``register_loss_in_memory`` handles re-registration.
 
+    arXiv P1 — scans TWO locations, resolved library first:
+
+      1. the resolved generated-library losses dir
+         (``core.generated_library.generated_losses_dir()``), where every
+         promotion writes now;
+      2. the LEGACY CHECKOUT ``agent_generated/losses/``
+         (``_loss_loader.LOSSES_DIR``) — read-only compatibility, so losses
+         promoted before the migration keep preloading.
+
+    A legacy file whose BASENAME already appeared in the resolved library is
+    skipped entirely — promotion names files ``{loss_type}.py``, so a
+    same-named pair is the same declared loss and the resolved-library copy
+    is authoritative. The shadow applies even when the resolved copy fails
+    to load: falling back to the legacy bytes there would silently register
+    a STALE implementation under the type name, when the honest outcome is
+    a loud loader log line and an absent type.
+
     Files starting with ``_`` are skipped (template / dunder convention,
     same as ``_loss_loader._load_loss_plugin``'s scan).
 
     Returns:
         List of ``loss_type`` strings successfully loaded. Empty list when
-        ``LOSSES_DIR`` does not exist or is empty (first-run / fresh checkout).
+        neither directory exists or both are empty (first-run / fresh host).
     """
     from agent_generated._loss_loader import LOSSES_DIR
+    from core.generated_library import generated_losses_dir
 
     loaded: list[str] = []
-    if not os.path.isdir(LOSSES_DIR):
-        return loaded
-    for fname in sorted(os.listdir(LOSSES_DIR)):
-        if not fname.endswith(".py") or fname.startswith("_"):
+    seen_basenames: set[str] = set()
+    for losses_dir in (generated_losses_dir(), LOSSES_DIR):
+        if not os.path.isdir(losses_dir):
             continue
-        plugin_path = os.path.join(LOSSES_DIR, fname)
-        loss_type = register_loss_in_memory(plugin_path)
-        if loss_type is not None:
-            loaded.append(loss_type)
+        for fname in sorted(os.listdir(losses_dir)):
+            if not fname.endswith(".py") or fname.startswith("_"):
+                continue
+            if fname in seen_basenames:
+                continue  # resolved-library copy shadows the legacy one
+            seen_basenames.add(fname)
+            plugin_path = os.path.join(losses_dir, fname)
+            loss_type = register_loss_in_memory(plugin_path)
+            if loss_type is not None:
+                loaded.append(loss_type)
     return loaded
 
 

@@ -693,11 +693,20 @@ def test_the_workflow_delta_stayed_sibling_shaped():
     # default, which is how every composed/un-composed fork in this function is
     # already written.
     #
+    # arXiv U1 (declared delta, the tripwire fired at final integration):
+    # 132 -> 131. U1 EXTRACTED the lit-review config-path resolution
+    # (`if not os.path.isabs(yaml_path)`) into the module-level helper the
+    # lock's sha derivation also needs — one If moved OUT of run_workflow.
+    # A shrink is the direction this tripwire exists to encourage; the U1
+    # additions themselves (identity threading, isolation wiring) came in
+    # as helper CALLS, costing zero branch-ish nodes here.
+    #
     # All of it is the permitted shape: no new phase, no new branch family, no
     # task dispatch, no new mutable local accumulator, no new semantic owner.
-    assert branchish == 132, (
-        f"run_workflow branch-ish count is {branchish}, expected 132 "
-        "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp; "
+    assert branchish == 131, (
+        f"run_workflow branch-ish count is {branchish}, expected 131 "
+        "(130 at C0 + 1 C2 unpack IfExp + 1 C5/W6 binding-selection IfExp "
+        "- 1 arXiv-U1 extraction of the lit-review path-resolution If; "
         "C3's union closure costs ZERO because the merge rule lives in "
         "core.resume.union_key_findings and this closure only calls it). "
         "If this grew further, the §12.1 tripwire requires re-running the "

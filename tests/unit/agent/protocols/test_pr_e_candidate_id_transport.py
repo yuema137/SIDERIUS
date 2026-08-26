@@ -392,17 +392,27 @@ class TestRecordStamp:
         # node's private modules since C7, and `_emit_record` is now reached
         # through its owning module — so the callee may be spelled as a bare
         # name OR as an attribute tail. Both are the same call site.
+        # DECLARED DELTA (arXiv integration, structural-budget closure): the
+        # per-site identity kwargs moved into ONE owner —
+        # ``execution._emit_attempt_record`` — whose two inner direct calls
+        # pass ``candidate_id`` explicitly, and eight former direct sites now
+        # call the helper (compliant by construction). Same property, two
+        # spellings: 6 direct + 8 helper = the same 12-then-14 emission
+        # surface, counted exactly so a lost site is still visible.
         tree = ast.parse(tuner_node_source())
         sites = []
+        helper_calls = 0
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Call)
-                and (getattr(node.func, "id", None) or getattr(node.func, "attr", None))
-                == "_emit_record"
-            ):
+            if not isinstance(node, ast.Call):
+                continue
+            name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            if name == "_emit_record":
                 kw = {k.arg for k in node.keywords}
                 sites.append((node.lineno, "candidate_id" in kw))
-        assert len(sites) == 12, f"expected 12 call sites, found {len(sites)}"
+            elif name == "_emit_attempt_record":
+                helper_calls += 1
+        assert len(sites) == 6, f"expected 6 direct call sites, found {len(sites)}"
+        assert helper_calls == 8, f"expected 8 helper call sites, found {helper_calls}"
         missing = [ln for ln, ok in sites if not ok]
         assert not missing, f"_emit_record call sites missing candidate_id=: {missing}"
 

@@ -51,8 +51,8 @@ def _write_plugin(tmp_dir, model_type: str) -> None:
 
 class TestPreloadGlobalModels:
     def test_preload_loads_all_plugins(self, tmp_path, monkeypatch):
-        """preload_global_models scans AGENT_GENERATED_DIR (monkeypatched
-        to a tmp dir for isolation) and registers every valid .py.
+        """preload_global_models scans the resolved library models dir
+        (pinned to a tmp root) and registers every valid .py.
 
         The model-side preload mirrors preload_global_losses: skip files
         prefixed with ``_``, return the loaded model_type list, and
@@ -66,11 +66,14 @@ class TestPreloadGlobalModels:
             preload_global_models,
         )
 
-        monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(tmp_path))
+        lib_models = tmp_path / "lib" / "models"
+        lib_models.mkdir(parents=True)
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(tmp_path / "legacy_empty"))
 
-        _write_plugin(tmp_path, "preload_alpha_v16")
-        _write_plugin(tmp_path, "preload_beta_v16")
-        (tmp_path / "_template_model.py").write_text("# should be skipped\n")
+        _write_plugin(lib_models, "preload_alpha_v16")
+        _write_plugin(lib_models, "preload_beta_v16")
+        (lib_models / "_template_model.py").write_text("# should be skipped\n")
 
         try:
             loaded = preload_global_models()
@@ -88,11 +91,59 @@ class TestPreloadGlobalModels:
                 PLUGIN_CONFIG_REGISTRY.pop(name, None)
                 PLUGIN_OUTPUT_TYPE_REGISTRY.pop(name, None)
 
-    def test_preload_returns_empty_when_dir_missing(self, tmp_path, monkeypatch):
-        """preload_global_models is safe when AGENT_GENERATED_DIR does
-        not exist — first-run / fresh-checkout case."""
+    def test_preload_scans_legacy_checkout_and_library_shadows_same_basename(
+        self, tmp_path, monkeypatch
+    ):
+        """arXiv P1 compatibility READ (matrix F): a model promoted into the
+        LEGACY checkout dir before the migration still preloads; a
+        same-basename file in the resolved library SHADOWS the legacy one
+        entirely. Defect caught: dropping the legacy scan (pre-migration
+        promotions vanish from Branch-B reuse) or registering the legacy
+        copy after the library one (stale legacy bytes would win
+        register_model_in_memory's most-recent rule)."""
+        from ml_models import plugin_loader
+        from ml_models.models_format_sandbox import PLUGIN_CONFIG_REGISTRY
+        from ml_models.models_sandbox import MODEL_REGISTRY
+        from ml_models.plugin_loader import (
+            PLUGIN_OUTPUT_TYPE_REGISTRY,
+            preload_global_models,
+        )
+
+        lib_models = tmp_path / "lib" / "models"
+        lib_models.mkdir(parents=True)
+        legacy = tmp_path / "legacy_models"
+        legacy.mkdir()
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+        monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(legacy))
+
+        # Legacy-only model: must preload through the compatibility scan.
+        _write_plugin(legacy, "preload_alpha_v16")
+        # Same-basename pair: the legacy copy is a loadable decoy declaring a
+        # DIFFERENT output contract, so whichever registration wins is provable.
+        _write_plugin(lib_models, "preload_beta_v16")
+        (legacy / "preload_beta_v16.py").write_text(
+            _VALID_MODEL_PLUGIN_SRC_TEMPLATE.format(model_type="preload_beta_v16")
+            + '\nPLUGIN_OUTPUT_TYPE = "regressor"\n'
+        )
+
+        try:
+            loaded = preload_global_models()
+            assert sorted(loaded) == ["preload_alpha_v16", "preload_beta_v16"]
+            # The library copy (legacy-omitted contract -> "classifier") won;
+            # the legacy decoy ("regressor") was shadowed by basename.
+            assert PLUGIN_OUTPUT_TYPE_REGISTRY.get("preload_beta_v16") == "classifier"
+        finally:
+            for name in ("preload_alpha_v16", "preload_beta_v16"):
+                MODEL_REGISTRY.pop(name, None)
+                PLUGIN_CONFIG_REGISTRY.pop(name, None)
+                PLUGIN_OUTPUT_TYPE_REGISTRY.pop(name, None)
+
+    def test_preload_returns_empty_when_dirs_missing(self, tmp_path, monkeypatch):
+        """preload_global_models is safe when neither library location
+        exists — first-run / fresh-host case."""
         from ml_models import plugin_loader
         from ml_models.plugin_loader import preload_global_models
 
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "no_lib"))
         monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(tmp_path / "does_not_exist"))
         assert preload_global_models() == []

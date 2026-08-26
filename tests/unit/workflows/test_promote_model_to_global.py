@@ -57,26 +57,45 @@ class _FakeImplOutput:
 
 @pytest.fixture
 def global_models_dir(tmp_path, monkeypatch):
-    """Redirect ``AGENT_GENERATED_DIR`` (the model loader's global dir)
-    to a tmp directory so these tests don't touch the canonical
-    ``agent_generated/models/``."""
+    """Pin the promotion DESTINATION — the resolved generated-library models
+    dir (arXiv P1) — to a tmp root, and point the legacy checkout member
+    (``AGENT_GENERATED_DIR``, read-only fallback) at a separate tmp dir so
+    these tests touch neither real location."""
     from ml_models import plugin_loader
 
-    target = tmp_path / "global_models"
-    target.mkdir()
-    monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(target))
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+    legacy = tmp_path / "legacy_models"
+    legacy.mkdir()
+    monkeypatch.setattr(plugin_loader, "AGENT_GENERATED_DIR", str(legacy))
+    target = tmp_path / "lib" / "models"
+    target.mkdir(parents=True)
     return target
 
 
 @pytest.fixture
+def legacy_models_dir(tmp_path):
+    """The legacy checkout models dir the ``global_models_dir`` fixture
+    pinned (same path — its own fixture so pre-migration seeding is
+    explicit)."""
+    return tmp_path / "legacy_models"
+
+
+@pytest.fixture
 def tmp_registry(tmp_path, monkeypatch):
-    """Use a tmp capability-index for the duration of the test so
-    promotion's ``registry.replace()`` doesn't pollute the real index."""
+    """Pin the default capability index to the per-test resolved library
+    (arXiv P1: the registry default is ``{library}/_capability_index.json``,
+    and ``global_models_dir`` already pins the library env to
+    ``{tmp}/lib``) and point the legacy checkout index at a nonexistent tmp
+    path so the read fallback can't reach the real checkout either."""
     from agent_generated import _registry as registry_module
 
-    idx = tmp_path / "_capability_index.json"
-    monkeypatch.setattr(registry_module, "_DEFAULT_INDEX_PATH", str(idx))
-    return idx
+    monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
+    monkeypatch.setattr(
+        registry_module,
+        "_LEGACY_CHECKOUT_INDEX_PATH",
+        str(tmp_path / "no_legacy" / "_capability_index.json"),
+    )
+    return tmp_path / "lib" / "_capability_index.json"
 
 
 def _register_pre_promotion(name, workspace_path, tmp_registry, math_def="x"):
@@ -208,4 +227,96 @@ class TestPromoteModelToGlobal:
         assert "identical content already exists" in captured
         assert "promo_model_beta" in captured
         # The new-name file MUST NOT have been copied.
+        assert not (global_models_dir / "promo_model_alpha.py").exists()
+
+
+class TestPromoteModelLegacyCheckoutCompatibility:
+    """arXiv P1 — the legacy checkout ``agent_generated/models`` is consulted
+    READ-ONLY by promotion: detected for Branch B, honoured for same-name
+    idempotency and content dedup, and never written to."""
+
+    def test_branch_b_no_op_when_source_in_legacy_checkout(
+        self, tmp_path, global_models_dir, legacy_models_dir, tmp_registry
+    ):
+        """Defect caught: the Branch-B detection comparing only against the
+        resolved library dir. A pre-migration registry entry hands the
+        implementor's short-circuit a LEGACY checkout path; without the
+        two-location check, promotion would copy that file into the resolved
+        library — churning every legacy Branch-B reuse into a duplicate."""
+        from workflows.model_exploration import _promote_model_to_global
+
+        legacy_path = legacy_models_dir / "promo_model_alpha.py"
+        legacy_path.write_text(_MODEL_PLUGIN_SRC_ALPHA)
+        registry = _register_pre_promotion("promo_model_alpha", str(legacy_path), tmp_registry)
+        original_mtime = legacy_path.stat().st_mtime
+
+        impl = _FakeImplOutput(
+            model_type="promo_model_alpha",
+            model_file_path=str(legacy_path),
+        )
+        _promote_model_to_global(impl)
+
+        assert list(global_models_dir.iterdir()) == []
+        assert legacy_path.stat().st_mtime == original_mtime
+        entries = registry.list(capability_type="model")
+        assert os.path.abspath(entries[0].file_path) == os.path.abspath(str(legacy_path))
+
+    def test_same_name_in_legacy_checkout_skips_and_repoints_registry(
+        self, tmp_path, global_models_dir, legacy_models_dir, tmp_registry, capsys
+    ):
+        """Defect caught: same-name idempotency checking only the resolved
+        dir. A model promoted into the checkout pre-migration would be
+        re-copied under the same name into the resolved library — two
+        divergent files for one model_type across the scan union (the exact
+        ambiguity _refuse_ambiguous_origins then refuses). First writer wins
+        ACROSS locations: no copy, no legacy write, and the registry points
+        at the legacy file that actually exists."""
+        from workflows.model_exploration import _promote_model_to_global
+
+        legacy_path = legacy_models_dir / "promo_model_alpha.py"
+        legacy_bytes = _MODEL_PLUGIN_SRC_ALPHA + "\n# pre-migration copy\n"
+        legacy_path.write_text(legacy_bytes)
+
+        ws_plugin = tmp_path / "ws" / "plugins" / "promo_model_alpha.py"
+        ws_plugin.parent.mkdir(parents=True)
+        ws_plugin.write_text(_MODEL_PLUGIN_SRC_ALPHA)
+        registry = _register_pre_promotion("promo_model_alpha", str(ws_plugin), tmp_registry)
+
+        impl = _FakeImplOutput(
+            model_type="promo_model_alpha",
+            model_file_path=str(ws_plugin),
+        )
+        _promote_model_to_global(impl)
+
+        captured = capsys.readouterr().out.lower()
+        assert "idempotent skip" in captured
+        assert not (global_models_dir / "promo_model_alpha.py").exists()
+        assert legacy_path.read_text() == legacy_bytes
+        entries = registry.list(capability_type="model")
+        assert os.path.abspath(entries[0].file_path) == os.path.abspath(str(legacy_path))
+
+    def test_identical_content_in_legacy_checkout_dedups(
+        self, tmp_path, global_models_dir, legacy_models_dir, tmp_registry, capsys
+    ):
+        """Defect caught: the SHA256 dedup scanning only the resolved dir —
+        every pre-migration library would be silently re-copied under new
+        names on first post-migration contact."""
+        from workflows.model_exploration import _promote_model_to_global
+
+        (legacy_models_dir / "promo_model_beta.py").write_text(_MODEL_PLUGIN_SRC_ALPHA)
+
+        ws_plugin = tmp_path / "ws" / "plugins" / "promo_model_alpha.py"
+        ws_plugin.parent.mkdir(parents=True)
+        ws_plugin.write_text(_MODEL_PLUGIN_SRC_ALPHA)
+        _register_pre_promotion("promo_model_alpha", str(ws_plugin), tmp_registry)
+
+        impl = _FakeImplOutput(
+            model_type="promo_model_alpha",
+            model_file_path=str(ws_plugin),
+        )
+        _promote_model_to_global(impl)
+
+        captured = capsys.readouterr().out.lower()
+        assert "identical content already exists" in captured
+        assert "promo_model_beta" in captured
         assert not (global_models_dir / "promo_model_alpha.py").exists()

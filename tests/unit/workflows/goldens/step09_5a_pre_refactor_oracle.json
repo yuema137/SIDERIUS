@@ -67,6 +67,7 @@
     },
     "run_invariants_lock.json": {
       "created_at": "<VOLATILE>",
+      "generated_library": "<VOLATILE>",
       "execution_calibration": {
         "override_env": null,
         "roles": {
@@ -245,25 +246,25 @@
           },
           "human_advice": null,
           "implementor_blocks": {"continuous_output_phrase": "continuous waveform regression", "science_domain": "signal denoising"},
-          "loss_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/losses",
+          "loss_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/impl_001/losses",
           "mathematical_definition": "Dilated causal convolutions with gating.",
           "max_retries": 2,
           "model_description": "A gated TCN for signal denoising.",
           "model_name": "gated_tcn",
           "output_type": "classifier",
-          "plugin_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/models",
+          "plugin_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/impl_001/models",
           "previous_validation_failure": null,
           "reference_code": {},
           "storage": {
             "backend": "local",
             "local": {
               "run_name": "c0_oracle",
-              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn"
+              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/impl_001"
             },
             "postgres": null
           },
           "task_description": "full-spectrum 1-D time-series denoising of SQUID dark-matter\ndetector data: map a noisy [B, T] integer signal to a clean\n[B, 256, T] reconstruction, trained across the whole frequency\nspectrum at once (not split into per-band models).",
-          "test_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/tests",
+          "test_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/impl_001/tests",
           "vram_budget_gb": null
         }
       ]
@@ -280,6 +281,7 @@
           "active_model_last_n": 2,
           "active_model_score_delta": 0.05,
           "active_model_top_k": 3,
+          "baseline_isolation": false,
           "cold_start": false,
           "collapse_fingerprint_history": {},
           "cumulative_information_gain": 0.0,
@@ -690,6 +692,7 @@
       "run_inputs": [
         {
           "agent_cards": [],
+          "baseline_isolation": false,
           "cold_start": false,
           "constraints": [],
           "data_dir": "<DATA>",
@@ -1172,6 +1175,7 @@
           "allow_extreme_steps": false,
           "attempts_per_formal_round": 5,
           "attempts_per_round": 3,
+          "baseline_isolation": false,
           "bypass_formal_time_budget_min_delta": 0.0,
           "candidate_id": null,
           "cleanup_denoised": false,
@@ -1184,6 +1188,7 @@
           "enable_chain_incumbent_formal_gates": false,
           "enable_structured_health_feedback": false,
           "eval_portion": 0.1,
+          "experiment_arm": null,
           "expert_advice": {
             "constraints": [
               "VRAM < 8 GB"
@@ -1217,6 +1222,8 @@
           "healthgate_mode": null,
           "human_advice": null,
           "is_trial": false,
+          "lit_review_config_sha256": null,
+          "lit_review_enabled": false,
           "llm_model_id": "gemini-3.1-flash-lite-preview",
           "llm_provider": "gemini",
           "max_epochs": null,
@@ -1294,7 +1301,7 @@
             "backend": "local",
             "local": {
               "run_name": "c0_oracle",
-              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn"
+              "workspace": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/impl_001"
             },
             "postgres": null
           },
@@ -1316,6 +1323,7 @@
           "eval_psd_segments": null,
           "eval_strategy": null,
           "exp_id": "gated_tcn_explore_v1_001",
+          "experiment_arm": null,
           "failure_attribution": null,
           "failure_reason": null,
           "failure_stage": null,
@@ -1400,6 +1408,7 @@
       "candidate_id": null,
       "completed_rounds": 3,
       "consecutive_fail_rounds_at_exit": 0,
+      "experiment_arm": null,
       "file_index": 6,
       "finished_at": "<VOLATILE>",
       "formal_comparison_reference_source": null,

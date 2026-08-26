@@ -180,19 +180,29 @@ def load_model_source(model_type: str) -> str | None:
     Load the source code for a model.
 
     Searches:
-      1. Built-in models: extracts the relevant class(es) from
+      1. Agent-generated plugins, resolved generated-library first (arXiv
+         P1 — where promotions write), then the LEGACY CHECKOUT
+         ``agent_generated/models`` (read-only compatibility for
+         pre-migration promotions); each location is tried at
+         ``{models_dir}/{model_type}/{model_type}.py`` then
+         ``{models_dir}/{model_type}.py``.
+      2. Built-in models: extracts the relevant class(es) from
          ``ml_models/models_sandbox.py`` by finding the class name
          associated with the model_type in MODEL_REGISTRY-style patterns.
-      2. Agent-generated plugins: reads from
-         ``agent_generated/models/{model_type}/{model_type}.py``
-         or ``agent_generated/models/{model_type}.py``.
 
     Returns the source code as a string, or None if not found.
     """
-    # Try agent-generated plugin first (more specific)
+    from core.generated_library import generated_models_dir
+
+    # Try agent-generated plugin first (more specific).
+    legacy_models_dir = os.path.join(_SIDERIUS_ROOT, "agent_generated", "models")
     plugin_candidates = [
-        os.path.join(_SIDERIUS_ROOT, "agent_generated", "models", model_type, f"{model_type}.py"),
-        os.path.join(_SIDERIUS_ROOT, "agent_generated", "models", f"{model_type}.py"),
+        candidate
+        for models_dir in (generated_models_dir(), legacy_models_dir)
+        for candidate in (
+            os.path.join(models_dir, model_type, f"{model_type}.py"),
+            os.path.join(models_dir, f"{model_type}.py"),
+        )
     ]
     for path in plugin_candidates:
         if os.path.isfile(path):

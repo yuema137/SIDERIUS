@@ -76,13 +76,17 @@ class TestConstructorDI:
         assert isinstance(agent._registry, CapabilityRegistry)
         assert agent._registry.index_path == index_path
 
-    def test_default_index_path_uses_canonical_location(self):
+    def test_default_index_path_uses_canonical_location(self, tmp_path, monkeypatch):
         """When ``capability_index_path`` is omitted, the proposer must fall
-        back to ``agent_generated/_capability_index.json`` so iterations
-        with no test override hit the production registry."""
+        back to the production registry — since arXiv P1 that is
+        ``{resolved generated library}/_capability_index.json``, NOT the
+        repository checkout. Defect caught: the proposer's default drifting
+        off the shared library index (iterations with no test override
+        would then stop seeing what the implementor registered)."""
+        monkeypatch.setenv("SIDERIUS_GENERATED_LIBRARY_DIR", str(tmp_path / "lib"))
         agent = MLModelProposalAgent.__new__(MLModelProposalAgent)
         agent._registry = CapabilityRegistry(index_path=None)
-        assert agent._registry.index_path.endswith("agent_generated/_capability_index.json")
+        assert agent._registry.index_path == str(tmp_path / "lib" / "_capability_index.json")
 
     def test_register_then_list_round_trip(self, index_path: str):
         """End-to-end smoke: a custom-path registry is functional —
@@ -159,7 +163,11 @@ class TestPipelineTemplateVarsWiring:
         # Capture the template_vars dict the proposer would have used.
         captured: dict = {}
 
-        def _fake_load_stage_prompt(stage_name, *, exploration_mode, template_vars, mindset):
+        # arXiv U3: the production call also passes `baseline_isolation`
+        # (keyword-only, default False); the fake mirrors the signature.
+        def _fake_load_stage_prompt(
+            stage_name, *, exploration_mode, template_vars, mindset, baseline_isolation=False
+        ):
             # Only capture on the first call so a multi-stage pipeline
             # doesn't overwrite earlier captures with later ones.
             if not captured:
@@ -209,7 +217,11 @@ class TestPipelineTemplateVarsWiring:
         class _AbortPipeline(Exception):
             pass
 
-        def _fake_load_stage_prompt(stage_name, *, exploration_mode, template_vars, mindset):
+        # arXiv U3: the production call also passes `baseline_isolation`
+        # (keyword-only, default False); the fake mirrors the signature.
+        def _fake_load_stage_prompt(
+            stage_name, *, exploration_mode, template_vars, mindset, baseline_isolation=False
+        ):
             if not captured:
                 captured.update(template_vars)
             raise _AbortPipeline()

@@ -54,6 +54,8 @@ class _Input:
     gpu_pair_ceiling_gib = 24.0
     # V21 PR E: the emission path stamps the candidate label from the input.
     candidate_id = None
+    # arXiv U1: the same emission path forwards the arm label from the input.
+    experiment_arm = None
 
 
 def _call(tmp_path, **over):

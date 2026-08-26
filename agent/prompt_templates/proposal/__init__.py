@@ -15,6 +15,10 @@ load_stage_prompt() and render_expert_context().
 import os
 
 _PROMPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# LEGACY CHECKOUT global losses dir (arXiv P1: read-only compatibility —
+# promotions now land in the resolved generated-library losses dir, and
+# ``live_loss_metadata`` accepts entries from EITHER location because both
+# are on the training subprocesses' scan union).
 _GLOBAL_LOSS_DIR = os.path.abspath(
     os.path.join(_PROMPT_DIR, "..", "..", "..", "agent_generated", "losses")
 )
@@ -27,11 +31,44 @@ def load_prompt(filename: str) -> str:
         return f.read()
 
 
+#: arXiv U3 (#260, ruling R6) — the worked examples inside
+#: ``comparison_stage.md`` / ``causal_reasoning_stage.md`` used to hardcode
+#: the shipped WaveNet baseline and its 5.57 score. They are now three named
+#: substitution tokens; the LEGACY values below reproduce the pre-U3 template
+#: bytes exactly (pinned by a byte-parity test), and the ISOLATED values name
+#: no bundled architecture and no baseline figure.
+LEGACY_EXAMPLE_LITERALS: dict[str, str] = {
+    "example_model_type": "wavenet",
+    "example_model_type_capitalized": "Wavenet",
+    "example_sota_score": "5.57",
+}
+
+ISOLATED_EXAMPLE_LITERALS: dict[str, str] = {
+    "example_model_type": "exemplar",
+    "example_model_type_capitalized": "Exemplar",
+    "example_sota_score": "1.23",
+}
+
+
+def proposal_example_literals(*, baseline_isolation: bool = False) -> dict[str, str]:
+    """The example-literal substitutions for the stage templates.
+
+    ``baseline_isolation=False`` (every legacy caller) yields the shipped
+    baseline literals, so the rendered prompt is byte-identical to the
+    pre-tokenized template. ``True`` yields neutral placeholders — an
+    illustrative name that is not a shipped architecture and an
+    illustrative score that is not the baseline's.
+    """
+    return dict(ISOLATED_EXAMPLE_LITERALS if baseline_isolation else LEGACY_EXAMPLE_LITERALS)
+
+
 def load_stage_prompt(
     stage_name: str,
     exploration_mode: str = "explore",
     template_vars: dict | None = None,
     mindset: str | None = None,
+    *,
+    baseline_isolation: bool = False,
 ) -> str:
     """
     Load and assemble a stage's full system prompt.
@@ -53,6 +90,10 @@ def load_stage_prompt(
         mindset: Optional mindset text from the advice file. When provided,
                  overrides the default ``_explore.md`` / ``_exploit.md`` block.
                  When absent, the mode file is used (backward compatible).
+        baseline_isolation: arXiv U3 — selects the example literals (see
+                 :func:`proposal_example_literals`). ``False`` renders the
+                 legacy bytes; a caller's ``template_vars`` may still
+                 override an example token explicitly.
 
     Returns:
         The assembled prompt string ready for the LLM.
@@ -70,10 +111,14 @@ def load_stage_prompt(
     # Inject mode block into placeholder
     prompt = base.replace("{# EXPLORATION_MODE_BLOCK #}", mode_block)
 
-    # Substitute template variables
-    if template_vars:
-        for key, value in template_vars.items():
-            prompt = prompt.replace(f"{{{key}}}", str(value))
+    # Substitute template variables — the example literals first, so a
+    # caller-supplied value for the same token still wins.
+    merged = {
+        **proposal_example_literals(baseline_isolation=baseline_isolation),
+        **(template_vars or {}),
+    }
+    for key, value in merged.items():
+        prompt = prompt.replace(f"{{{key}}}", str(value))
 
     return prompt
 
@@ -222,20 +267,38 @@ _MODEL_REGISTRY_EMPTY_FALLBACK = (
     "a built-in model_type (e.g. wavenet, punet, fcnet).\n"
 )
 
+#: arXiv U3 (#260, ruling R6) — the isolated fallback names no bundled
+#: architecture and offers no built-in branch (such a proposal is refused).
+_MODEL_REGISTRY_EMPTY_FALLBACK_ISOLATED = (
+    "## Available custom models\n\n"
+    "No custom models registered yet — propose a new architecture (bundled "
+    "built-in model types are not available in this run).\n"
+)
+
 
 def live_loss_metadata(registry) -> list:
     """Return custom losses that training subprocesses can load reliably.
 
     Capability-index entries are durable metadata, but older entries may
     point into an iteration workspace that still exists while being absent
-    from the global loss-plugin directory scanned by fresh subprocesses.
+    from the global loss-plugin directories scanned by fresh subprocesses.
     Such entries are not valid Branch-B reuse candidates.  Keep the prompt
     inventory and proposal-schema context aligned by using this helper for
     both surfaces.
 
+    arXiv P1 — "reliably loadable" means the entry's file sits in one of
+    the GLOBAL members of ``_resolve_loss_dirs``'s scan union: the resolved
+    generated-library losses dir (where promotions write now) or the legacy
+    checkout ``agent_generated/losses`` (pre-migration promotions, read-only
+    compatibility). Workspace paths remain excluded for the same reason as
+    before.
+
     Duck-typed test metadata without ``file_path`` remains accepted for
     backward compatibility; production ``CapabilityMetadata`` always has it.
     """
+    from core.generated_library import generated_losses_dir
+
+    global_loss_dirs = {os.path.abspath(generated_losses_dir()), _GLOBAL_LOSS_DIR}
     live = []
     for meta in registry.list(capability_type="loss"):
         file_path = getattr(meta, "file_path", None)
@@ -244,7 +307,7 @@ def live_loss_metadata(registry) -> list:
             continue
         absolute_path = os.path.abspath(file_path)
         if (
-            os.path.dirname(absolute_path) == _GLOBAL_LOSS_DIR
+            os.path.dirname(absolute_path) in global_loss_dirs
             and absolute_path.endswith(".py")
             and os.path.isfile(absolute_path)
         ):
@@ -333,8 +396,13 @@ def render_available_losses(registry) -> str:
     return "\n".join(lines)
 
 
-def render_available_models(registry) -> str:
+def render_available_models(registry, *, baseline_isolation: bool = False) -> str:
     """Render the model-registry block for the proposer's prompt context.
+
+    ``baseline_isolation`` (arXiv U3, #260 / ruling R6): when True the block
+    names no bundled built-in architecture and offers no built-in branch —
+    the empty-registry fallback and the header sentence change; every
+    per-entry line is unchanged. ``False`` renders the legacy bytes exactly.
 
     Symmetric to :func:`render_available_losses` but for the model surface.
     Pulls all entries with ``capability_type="model"`` from the registry,
@@ -381,19 +449,30 @@ def render_available_models(registry) -> str:
         metas = [m for m in metas if m.name in MODEL_REGISTRY]
 
     if not metas:
-        return _MODEL_REGISTRY_EMPTY_FALLBACK
+        return (
+            _MODEL_REGISTRY_EMPTY_FALLBACK_ISOLATED
+            if baseline_isolation
+            else _MODEL_REGISTRY_EMPTY_FALLBACK
+        )
 
     metas_sorted = sorted(metas, key=lambda m: m.created_at, reverse=True)
 
+    # The non-isolated sentence is the LEGACY bytes verbatim; the isolated one
+    # drops the built-in branch, which the WITHOUT arm refuses anyway.
+    branch_options = (
+        "OR **propose** a new architecture — bundled built-in model types are "
+        "not available in this run"
+        if baseline_isolation
+        else "OR **propose** a new architecture OR **use a built-in** model_type"
+    )
     lines = [
         "## Available custom models",
         "",
         "The agent-generated model registry currently contains the following "
         "models, sorted most-recent first. You may **reuse** an existing "
         "entry by name (set ``baseline_config.model_config.model_name`` to "
-        "the entry's name) OR **propose** a new architecture OR **use a "
-        "built-in** model_type — see the 3-branch rule in the Rules section "
-        "below.",
+        f"the entry's name) {branch_options} — see the 3-branch rule in the "
+        "Rules section below.",
         "",
         "**Branch B vs Branch C judgment**: compare the description and "
         "architecture below against the design you have in mind. If the "

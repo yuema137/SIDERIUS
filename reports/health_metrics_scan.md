@@ -10,7 +10,7 @@
 
 **Related**:
 - Design: [`docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md`](../docs/design/m8_gate_coverage_and_diversity_metrics_execution_plan.md)
-- Prior findings: [`reports/v16_20260630.md`](./v16_20260630.md) §9 (5.5763 phantom forensic)
+- Prior findings: `reports/v16_20260630.md` §9 (5.5763 phantom forensic) — **unpublished**: the v16 report was never committed to the repository
 - Diagnostic scripts: `scripts/fcnet_health_metrics_scan.py` (table below); historical inference helper `scripts/fcnet_full_file_scan.py` was not retained
 - Raw scan logs: `/tmp/fcnet_scan.log`, `/tmp/fcnet_diversity_pearson_scan.log`
 - FCNet denoised outputs (diagnostic, not committed): `/tmp/fcnet_full_scan/*.h5` (files 0-9, 15-19) + `/home/klz/Data/SIDEREIS_DATA/tidmad_reproduction/fcnet/official_10_15/inference/*.h5` (files 10-14)

@@ -268,7 +268,7 @@ Assert:
 - **Priorities**: [`docs/design/v17_priorities.md`](./v17_priorities.md) MUST-fix **M7**
 - **Advice workaround**: `advice/workflow/gate2_smoke_advice.json` — the current bypass, to be retired after this fix
 - **Sibling execution plans**:
-  - [`m1_file_vector_dedup_execution_plan.md`](./m1_file_vector_dedup_execution_plan.md) — orthogonal detection work; unblocked by M7 for realistic chain runs
-  - [`m4_phantom_score_table_execution_plan.md`](./m4_phantom_score_table_execution_plan.md) — orthogonal; benefits from M7 for cataloguing phantoms in unrestricted chains
+  - `m1_file_vector_dedup_execution_plan.md` — orthogonal detection work; unblocked by M7 for realistic chain runs. **Unpublished**: the M1 plan was DROPPED (M8 §1.2) and never landed in the repository, so there is no file to link.
+  - `m4_phantom_score_table_execution_plan.md` — orthogonal; benefits from M7 for cataloguing phantoms in unrestricted chains. **Unpublished**: same disposition as M1.
 - **Related HealthGate framework**: [`pluggable_health_checks.md`](./pluggable_health_checks.md) — the framework this fix restores full utility for
 - **Design pattern inspiration**: [`collapse_detection_framework_generic.md`](./collapse_detection_framework_generic.md) §7 — bad-vs-good example of config-injected vs hardcoded task specificity (M7's Option B echoes this pattern for loss registration)

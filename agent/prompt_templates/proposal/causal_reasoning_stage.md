@@ -112,8 +112,8 @@ A JSON object with these fields:
     {
       "component": "dilated_causal_conv",
       "source_type": "experiment",
-      "source_id": "wavenet",
-      "contribution_evidence": "Core mechanism of wavenet's 5.57 SOTA score."
+      "source_id": "{example_model_type}",
+      "contribution_evidence": "Core mechanism of {example_model_type}'s {example_sota_score} SOTA score."
     }
   ]
 }

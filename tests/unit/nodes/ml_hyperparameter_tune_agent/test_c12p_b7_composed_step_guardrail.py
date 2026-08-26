@@ -127,6 +127,11 @@ def _composed_agent_input():
         allow_extreme_steps=False,
         validation_max_train_samples=None,
         candidate_id=None,
+        # arXiv U1 (reconciliation upgrade, 12d-fixture precedent): the
+        # emission path stamps the run's experiment arm; a fixture predating
+        # the field carries its unlabelled default — never suppress the
+        # threading.
+        experiment_arm=None,
     )
 
 
@@ -150,7 +155,7 @@ def emitted(monkeypatch):
     """
     captured: list[dict] = []
 
-    def _spy(sandbox, record, *, status=None, candidate_id=None):
+    def _spy(sandbox, record, *, status=None, candidate_id=None, experiment_arm=None):
         captured.append(record)
 
     monkeypatch.setattr(runtime._records, "_emit_record", _spy)

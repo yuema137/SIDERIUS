@@ -19,7 +19,32 @@ import os
 
 _ML_MODELS_DIR = os.path.dirname(os.path.abspath(__file__))
 _SIDERIUS_ROOT = os.path.dirname(_ML_MODELS_DIR)
+# LEGACY CHECKOUT plugin-descriptions dir (arXiv P1: read-only compatibility
+# — promotion writes descriptions under the resolved generated-library
+# models dir now; this location keeps resolving pre-migration copies).
 _PLUGIN_DESCRIPTIONS_DIR = os.path.join(_SIDERIUS_ROOT, "agent_generated", "models")
+
+
+def _scan_bundled_model_types() -> frozenset[str]:
+    """Every model type that ships a ``description.md`` under ``ml_models/``."""
+    found: set[str] = set()
+    for name in os.listdir(_ML_MODELS_DIR):
+        if os.path.isfile(os.path.join(_ML_MODELS_DIR, name, "description.md")):
+            found.add(name)
+    return frozenset(found)
+
+
+#: The BUNDLED built-in model types (arXiv U3, #260) — the ONE authority for
+#: "is this a shipped baseline". Defined by the same fact the loader below
+#: reads (a ``description.md`` shipped under ``ml_models/``), so the loader's
+#: refusal and the proposal refusal cannot name different sets. Agent
+#: plugins never live under ``ml_models/``, so this is stable at import.
+BUNDLED_MODEL_TYPES: frozenset[str] = _scan_bundled_model_types()
+
+
+def is_bundled_model_type(model_type: str) -> bool:
+    """Whether ``model_type`` is one of the shipped built-in baselines."""
+    return model_type in BUNDLED_MODEL_TYPES
 
 
 def _chain_workspace_candidates(model_type: str) -> list[str]:
@@ -51,23 +76,38 @@ def _chain_workspace_candidates(model_type: str) -> list[str]:
     return matches
 
 
-def get_model_description(model_type: str) -> str:
+def get_model_description(model_type: str, *, baseline_isolation: bool = False) -> str:
     """
     Load and return the description.md for the given model_type.
 
     Searches in priority order:
       1. ml_models/{model_type}/description.md  (built-in models)
-      2. agent_generated/models/{model_type}/description.md  (legacy plugin global)
-      3. ${SIDERIUS_CHAIN_WORKSPACE}/plugins/*/{model_type}/description.md
+      2. {generated library}/models/{model_type}/description.md  (arXiv P1 —
+         the resolved library promotion writes to)
+      3. agent_generated/models/{model_type}/description.md  (legacy plugin
+         global — pre-migration promotions, read-only compatibility)
+      4. ${SIDERIUS_CHAIN_WORKSPACE}/plugins/*/{model_type}/description.md
          (chain workspace plugin tree, newest registration first; any
          subdir name is accepted — chain mode uses ``iter_NNN``,
          in-process workflows use whatever ``run_name`` the caller passed)
 
+    ``baseline_isolation`` (arXiv U3, #260 / ruling R6): when True, candidate
+    1 — the BUNDLED baseline description — is refused rather than searched,
+    so no shipped baseline prose can reach an LLM-facing prompt or the
+    interpreter's carried cache. Plugin and workspace descriptions resolve
+    exactly as before, and the failure shape is unchanged: a model type with
+    nothing left to resolve raises the same ``FileNotFoundError``, listing
+    what was searched and naming the refused bundled path.
+
     Raises:
         FileNotFoundError: if no description.md is found for the model_type.
     """
+    from core.generated_library import generated_models_dir
+
+    bundled = os.path.join(_ML_MODELS_DIR, model_type, "description.md")
     candidates = [
-        os.path.join(_ML_MODELS_DIR, model_type, "description.md"),
+        *([] if baseline_isolation else [bundled]),
+        os.path.join(generated_models_dir(), model_type, "description.md"),
         os.path.join(_PLUGIN_DESCRIPTIONS_DIR, model_type, "description.md"),
         *_chain_workspace_candidates(model_type),
     ]
@@ -77,8 +117,13 @@ def get_model_description(model_type: str) -> str:
             with open(path, encoding="utf-8") as f:
                 return f.read()
 
+    refused = (
+        f"Refused under baseline_isolation (not searched):\n  {bundled}\n"
+        if baseline_isolation
+        else ""
+    )
     raise FileNotFoundError(
         f"No description.md found for model_type '{model_type}'.\n"
-        f"Searched:\n" + "\n".join(f"  {p}" for p in candidates) + "\n"
+        f"Searched:\n" + "\n".join(f"  {p}" for p in candidates) + "\n" + refused + ""
         "Each model must have a description.md in its folder."
     )

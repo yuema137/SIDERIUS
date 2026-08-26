@@ -757,7 +757,8 @@ class ProposalInput(BaseModel):
     """
     Input to ml_model_proposal_agent.
 
-    Typically populated via the interpretation_to_proposal_v1 protocol,
+    Typically populated via ``local_full_context`` in
+    ``agent/schemas/protocols/ml_result_interp_to_ml_model_propose.py``,
     which maps InterpretationOutput → ProposalInput.
     """
 
@@ -789,6 +790,16 @@ class ProposalInput(BaseModel):
         "asks for a first experiment grounded in the task contract, available "
         "model/loss registries (as options, not history), advice, and resource "
         "constraints — without claiming improvement over non-existent results.",
+    )
+    baseline_isolation: bool = Field(
+        default=False,
+        description="arXiv U3 (#260 / ruling R6) — the explicit, recorded flag of "
+        "the WITHOUT arm. When True the proposer's prompt surface names no bundled "
+        "built-in architecture and no baseline score: the empty-registry fallback "
+        "and the stage templates' worked examples render neutral placeholders "
+        "instead of the shipped `wavenet` / `5.57` literals, and the registry "
+        "block no longer offers the built-in branch. Every non-isolated render is "
+        "byte-identical to before the flag existed.",
     )
     task_description: str = Field(
         default="",
@@ -1086,8 +1097,11 @@ class ProposalOutput(BaseModel):
     Output of ml_model_proposal_agent.
 
     A complete model specification ready for implementation and hyperparameter tuning.
-    Consumed by ml_model_implementor (via proposal_to_implementor_v1) and by
-    tune_ml_hyperparam_agent (via proposal_to_hyperparam_seeded_v1).
+    Consumed by ml_model_implementor via ``local_full_spec``
+    (``agent/schemas/protocols/ml_model_propose_to_ml_model_impl.py``) and by
+    the tuner via the fan-in ``local_validated_model``
+    (``agent/schemas/protocols/ml_model_valid_to_ml_model_tune.py``), which
+    takes this object beside the validator's output.
     """
 
     candidate_id: str | None = Field(

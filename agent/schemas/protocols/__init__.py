@@ -10,13 +10,21 @@ Each module contains protocol functions named {transport}_{data_scope}.
 
 Workflows and orchestrators import from this module and choose which protocol to apply.
 
-Implemented edges
+Implemented edges (six; the authoritative table is docs/architecture.md
+"Implemented protocols")
 -----------------
-ml_model_tune_to_ml_result_interp      tune_ml_hyperparam_agent -> result_interpretation_agent
-ml_result_interp_to_ml_model_propose   result_interpretation_agent -> ml_model_proposal_agent
-ml_model_propose_to_ml_model_impl      ml_model_proposal_agent -> ml_model_implementor
-ml_model_impl_to_ml_model_valid        ml_model_implementor -> ml_code_validator_agent
-ml_model_valid_to_ml_model_tune        ml_code_validator_agent -> tune_ml_hyperparam_agent (fan-in: also consumes ProposalOutput)
+ml_model_tune_to_ml_result_interp         ml_hyperparameter_tune_agent -> result_interpretation_agent
+ml_result_interp_to_ml_model_propose      result_interpretation_agent -> ml_model_proposal_agent
+ml_literature_review_to_ml_model_propose  ml_literature_review -> ml_model_proposal_agent
+                                          (fan-in with the interpretation edge: returns the four
+                                          external-agent kwargs the workflow spreads into
+                                          local_full_context; imported directly by
+                                          workflows/model_exploration.py, NOT re-exported here)
+ml_model_propose_to_ml_model_impl         ml_model_proposal_agent -> ml_model_implementor
+ml_model_impl_to_ml_model_valid           ml_model_implementor -> ml_code_validator_agent
+ml_model_valid_to_ml_model_tune           ml_code_validator_agent -> ml_hyperparameter_tune_agent
+                                          (fan-in: also consumes ProposalOutput; this is the ONLY
+                                          protocol that carries a proposal into the tuner)
 """
 
 from agent.schemas.protocols.ml_model_impl_to_ml_model_valid import (

@@ -136,6 +136,19 @@ Two properties worth stating because the join depends on them:
   terminal outcome survives and that is what the funnel needs. Intermediate
   retry attempts are not recoverable. **Recorded as a known limitation, not
   a defect to fix in PR E.**
+  **CLOSED by arXiv-readiness S2 / U6 (#256).** `run_workflow` now hands
+  every implement→validate retry its own storage NESTED under the proposal
+  attempt — `attempt_{NNN}_{name}/impl_{KKK}/` holds that retry's
+  `implementor_{run}.json`, `validation_{run}.json`, `models/`, `tests/`
+  and `losses/` (`workflows.model_exploration.impl_attempt_storage`,
+  naming authority `execute_tools/impl_attempts.py`). Nested rather than
+  sibling because the O-E-4 identity rule still holds: one `candidate_id`
+  in two *attempt* directories is a `DuplicateIdConflict`, and retries are
+  one candidate. The funnel, `workflow_validation` and the plugin
+  registration consume the TERMINAL `impl_KKK` (`stage_artifact_dir`);
+  pre-U6 workspaces, which keep the two files at the attempt level, are
+  read through the same authority. The proposal record and the
+  `candidate_id` stay at the attempt level, unchanged.
 
 **Binding consequence, per O-E-3.** Because stage-native evidence is
 available for every candidate, **no measurement is copied downstream.**
@@ -1204,7 +1217,7 @@ evidence, and **must not be launched without operator approval.**
 | Several tuner records share one `candidate_id` | **Expected** — one candidate has many rounds. The row is per candidate; assert the fan-in explicitly rather than assuming one-to-one |
 | Multiple `None` ids | Each stays separate. Merging them is the failure this commit must make impossible |
 | Stage reached but its number absent | Distinguish "stage not reached" from "reached, number absent" — §E.3d.4's four-state rule |
-| Inner-retry overwrite (§0.C) | Only the terminal implement/validate outcome exists. Report it as such; **do not** infer retry count from its absence |
+| Inner-retry overwrite (§0.C) | Only the terminal implement/validate outcome exists. Report it as such; **do not** infer retry count from its absence. *S2 / U6 (#256): every retry now persists in its own nested `impl_KKK/`; the funnel still reports the terminal one, and the earlier retries are on-disk evidence, never rows* |
 | Attempt dir exists but holds no proposal | The proposer emitted nothing, so there is **no candidate** (§0.D). Report the directory as "no candidate emitted", not as a stopped candidate |
 | Zero candidates | Empty result, not an error |
 

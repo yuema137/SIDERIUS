@@ -1,0 +1,11 @@
+{
+  "aggregation": "fraction_correct_over_eval_rows",
+  "direction": "higher",
+  "id": "accuracy",
+  "references": [],
+  "scoreability": {
+    "contract_id": "deliverable_presence"
+  },
+  "transform": null,
+  "transform_params": {}
+}

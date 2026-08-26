@@ -107,7 +107,7 @@ def local_full_spec(output: ProposalOutput, storage: StorageConfig) -> Implement
 - Every edge in the current DAG has a named protocol function.
 - Each protocol has `local_*` (in-process) and `database_*` (transport stub) variants.
 - All 6 protocols have unit tests in `tests/unit/agent/protocols/`.
-- All 6 protocols have integration tests in `tests/integration/protocols/`.
+- Five of the six have integration tests in `tests/integration/protocols/`; the lit-review edge (`ml_literature_review_to_ml_model_propose.py`) has none — its coverage is its unit test plus the workflow path that spreads its channels into `local_full_context`. (The original "all 6" claim was a historical overstatement, corrected 2026-08-24.)
 - The workflow at `workflows/model_exploration.py` imports and calls these by name — no field-mapping happens elsewhere.
 
 **Protocol conventions.**
