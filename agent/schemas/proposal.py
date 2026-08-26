@@ -58,9 +58,9 @@ class FalsifiablePrediction(BaseModel):
 
     metric: str = Field(
         description="What to measure. Free-text, guided by expert advice. "
-        "Examples: 'mean(file_vector[0:5])', 'denoising_score', "
-        "'file_vector[17]'. The reflector evaluates the prediction "
-        "by computing the metric from the actual results."
+        "Examples: 'denoising_score', 'file_vector[17]'. The reflector "
+        "evaluates the prediction by computing the metric from the actual "
+        "results."
     )
     current_value: float = Field(description="The SOTA's current value for this metric.")
     predicted_value: float = Field(description="What the new model should achieve.")

@@ -137,6 +137,30 @@ Two legitimate shapes, and the framework distinguishes them honestly:
   `deliverable` section.** A composed run whose task names its own artifacts is
   *refused* an indexed template rather than silently handed TIDMAD's — so no
   cleanup glob can ever address files your run never wrote.
+
+  > **Declare it as a MODULE-LEVEL function, beside your data path class.**
+  > The framework decides whether your task names its own artifacts by looking
+  > for a callable `deliverable_name` **on the module** the class is defined
+  > in (`execute_tools/deliverable_spec.py::task_names_its_own_deliverables`):
+  >
+  > ```python
+  > # my_task_data_path.py
+  > def deliverable_name(request) -> str:   # module level — this is what is read
+  >     ...
+  >
+  > class MyTaskDataPath:
+  >     ...
+  > ```
+  >
+  > It is the same function your `write_deliverable` and
+  > `read_evaluation_payload` already agree on, so asking for its presence
+  > asks exactly the right question.
+  >
+  > A `@staticmethod` of the same name on the class does not satisfy it. You
+  > will not silently get the wrong template, though: **omitting both — no
+  > `deliverable:` section and no module-level `deliverable_name` — is refused
+  > at compose time**, with a message naming both remedies
+  > (`workflows/task_composition.py`, arXiv #268).
 - **Your task genuinely names artifacts by a zero-padded input index**: declare
   the template explicitly.
 

@@ -115,8 +115,14 @@ bash sdsc_submission_scripts/run_chain.sh --mode lilab \
 ```
 
 Always pass an explicit `--llm_config` (the file shown is the canonical
-example) — omitting it silently selects a deprecated all-Gemini default. A
-tiny synthetic quickstart example (`examples/quickstart/`) is in preparation.
+example) — omitting it silently selects a deprecated all-Gemini default.
+
+**The fastest way in is the synthetic quickstart pack**,
+[`examples/quickstart/`](examples/quickstart/) — a 14-section executable
+notebook that composes a real manifest, materializes generated data, and
+walks the whole lifecycle on CPU in minutes, with no dataset download and no
+GPU. It ships complete: declarations, three plugins, a shipped manifest at
+`configs/task_composition/quickstart.yaml`, and its own pack tests.
 
 → [Installation](docs/getting-started/installation.md) ·
 [Your first run](docs/getting-started/first-run.md)

@@ -211,3 +211,13 @@ are exempt from the `examples/` governance; in-tree packs bind it from a
 shipped manifest), point every manifest section at your files, declare your
 model plugins with `require:`, compose (the fail-closed refusals are your
 checklist), launch bounded.
+
+**One place where copying this pack's shape is the wrong move.** This pack
+declares a `deliverable:` template in its manifest, so its `deliverable_name`
+is an ordinary `@staticmethod` that its own codec calls — correct here, and
+*not* a demonstration of the other route. If your task names its own artifacts
+and you therefore omit `deliverable:`, the framework looks for a callable
+`deliverable_name` **on the module**, not on the class
+(`execute_tools/deliverable_spec.py::task_names_its_own_deliverables`). A
+`@staticmethod` copied from here does not satisfy it. See
+[step 7 of the task guide](../../docs/guides/define-a-task.md).

@@ -387,7 +387,7 @@ def render_legacy_interpretation_section(
 #: "REPLACE WITH A NUMBER (not a string)" keeps the no-direction property while
 #: removing the type trap.
 _PREDICTION_EXAMPLE_WITHOUT_IDENTITY = """  "falsifiable_prediction": {
-    "metric": "What to measure, e.g. 'mean(file_vector[0:5])'",
+    "metric": "What to measure, e.g. 'file_vector[17]'",
     "current_value": "REPLACE WITH A NUMBER (not a string): the SOTA's current value",
     "predicted_value": "REPLACE WITH A NUMBER (not a string): what the new model should achieve. This run declares no metric direction, so do not assume which way is better — state the direction you intend in `rationale`",
     "threshold_for_refutation": "REPLACE WITH A NUMBER (not a string): the value on the REFUTED side of current_value",
@@ -506,7 +506,7 @@ def render_falsifiable_prediction_example(
     threshold = order.toward_worse(current, 0.3)
     return (
         '  "falsifiable_prediction": {\n'
-        f'    "metric": "What to measure, e.g. \'mean(file_vector[0:5])\' '
+        f'    "metric": "What to measure, e.g. \'file_vector[17]\' '
         f"or '{identity.id}'\",\n"
         f'    "current_value": {current},\n'
         f'    "predicted_value": {predicted},\n'

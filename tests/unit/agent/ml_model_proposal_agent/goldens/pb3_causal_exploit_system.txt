@@ -133,7 +133,7 @@ A JSON object with these fields:
   "proposed_change": "What the new model tries. Can be a targeted delta on the SOTA ('add Z', 'replace X with Y') or a novel architecture ('design from scratch using mechanism M'). Be specific and architecturally concrete.",
   "causal_hypothesis": "WHY this should improve the score. Must reference: (a) the bottleneck being addressed, (b) the mechanism that addresses it, (c) why existing models fail to address it. Max 600 chars.",
   "falsifiable_prediction": {
-    "metric": "What to measure, e.g. 'mean(file_vector[0:5])'",
+    "metric": "What to measure, e.g. 'file_vector[17]'",
     "current_value": "REPLACE WITH A NUMBER (not a string): the SOTA's current value",
     "predicted_value": "REPLACE WITH A NUMBER (not a string): what the new model should achieve. This run declares no metric direction, so do not assume which way is better — state the direction you intend in `rationale`",
     "threshold_for_refutation": "REPLACE WITH A NUMBER (not a string): the value on the REFUTED side of current_value",

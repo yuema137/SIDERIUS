@@ -135,7 +135,7 @@ A JSON object with these fields:
   "proposed_change": "What the new model tries. Can be a targeted delta on the SOTA ('add Z', 'replace X with Y') or a novel architecture ('design from scratch using mechanism M'). Be specific and architecturally concrete.",
   "causal_hypothesis": "WHY this should improve the score. Must reference: (a) the bottleneck being addressed, (b) the mechanism that addresses it, (c) why existing models fail to address it. Max 600 chars.",
   "falsifiable_prediction": {
-    "metric": "What to measure, e.g. 'mean(file_vector[0:5])' or 'fixture_mse'",
+    "metric": "What to measure, e.g. 'file_vector[17]' or 'fixture_mse'",
     "current_value": 1.5,
     "predicted_value": 0.5,
     "threshold_for_refutation": 1.8,

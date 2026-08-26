@@ -436,7 +436,7 @@ def resolve_deliverable_naming() -> DeliverableNaming:
             "(TaskDataPath.write_deliverable / read_evaluation_payload). Resolving the "
             "shipped TIDMAD template here would give the run a name it never writes — "
             "and a cleanup glob that matches files it never created. Declare "
-            "`deliverable_naming:` in the task manifest if this task genuinely names "
+            "`deliverable:` in the task manifest if this task genuinely names "
             "its artifacts by a zero-padded input index."
         )
     return DeliverableNaming()
