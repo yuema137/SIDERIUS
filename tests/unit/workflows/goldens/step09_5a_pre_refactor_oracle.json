@@ -1178,6 +1178,7 @@
           "attempts_per_round": 3,
           "baseline_isolation": false,
           "bypass_formal_time_budget_min_delta": 0.0,
+          "bypass_formal_time_budget_minutes": null,
           "candidate_id": null,
           "cleanup_denoised": false,
           "current_run_best_formal_score": null,

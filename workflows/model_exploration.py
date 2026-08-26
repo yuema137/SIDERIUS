@@ -3182,6 +3182,7 @@ def run_workflow(
             validation_max_phase_seconds=launch.validation_max_phase_seconds,
             skip_formal_min_delta=launch.skip_formal_min_delta,
             bypass_formal_time_budget_min_delta=launch.bypass_formal_time_budget_min_delta,
+            bypass_formal_time_budget_minutes=launch.bypass_formal_time_budget_minutes,
             max_retries=tune_llm.get("max_retries"),
             # Lane F2 — EXPERIMENT_FIXED portions join the plan_overrides
             # lock here (typed-only; conflict with explicit JSON refuses).

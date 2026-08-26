@@ -61,6 +61,12 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   defaults), and `train_portion` is unchanged because the unconstrained
   default coincides with the old value (0.1).
 
+* **Lane F3 / F-BYPASS-WD-1 (2026-08-26)** — the tuner's run input gained
+  `bypass_formal_time_budget_minutes` (ADDED, `null` on a bare run): the
+  elevated bypass ceiling, transported through the validator→tuner
+  protocol. Measured before re-baselining: **exactly one added field**,
+  no value moved.
+
 * **Step 11 / C3** — the run-invariants lock gained ONE key,
   `execution_calibration`: the per-role subprocess memory ceilings the run
   executed under, plus their provenance (R-11-6). Measured before the golden

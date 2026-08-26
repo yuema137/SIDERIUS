@@ -186,10 +186,20 @@ STRUCTURAL_BASELINE: dict[str, tuple[int, int, int, int]] = {
     # 557; branch 32 → 31. Same ledger as the 12bc B0 twin row; the
     # decomposition-debt flag lives there.
     "nodes/ml_hyperparameter_tune_agent/planning.py::prepare_attempt": (117, 31, 557, 7),
+    # RE-RECORDED 2026-08-26 (Lane F3 / F-BYPASS-WD-1) — the ledger:
+    # era-pin (107, 36, 521, 6) → landed master 8f0cc9f3-era measured 541
+    # LOC (+20 accumulated) → F3's bypass block +35 LOC and +7 branch
+    # nodes → (119, 43, 576, 6). The branch growth IS the fix's semantic
+    # content, not incidental: ONE unconditional in-place mutation
+    # (time_check['feasible'] = True — the P7-C defect) became a genuine
+    # three-way decision (no-ceiling / fits-elevated / exceeds-elevated),
+    # each arm printed and witnessed. Zero param growth. This function
+    # joins the decomposition-debt family (OI-2's siblings) — deliberately
+    # NOT split in a narrow lane.
     "nodes/ml_hyperparameter_tune_agent/execution.py::run_admission_preflight": (
-        107,
-        36,
-        521,
+        119,
+        43,
+        576,
         6,
     ),
     "nodes/ml_hyperparameter_tune_agent/execution.py::run_inference_scoring_health": (

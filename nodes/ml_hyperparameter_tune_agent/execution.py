@@ -595,26 +595,61 @@ def run_admission_preflight(
         ):
             _winner = formal_trial_winner
             _best_trial_score = _winner.get("denoising_score") if _winner is not None else None
-            print(
-                f"  [BypassTimeBudget] Trial "
-                f"{_best_trial_score:.4f} "
+            _qualified_msg = (
+                f"trial {_best_trial_score:.4f} "
                 f"{run_order.at_least_symbol} "
-                f"reference("
-                f"{_fmt_reference(formal_reference_score)}) "
-                f"+ delta("
-                f"{agent_input.bypass_formal_time_budget_min_delta:.4f}) "
-                f"= {_fmt_reference(resolved_bypass_formal_threshold)} — "
-                f"bypassing time gate for this "
-                f"formal attempt.",
-                flush=True,
+                f"reference({_fmt_reference(formal_reference_score)}) "
+                f"+ delta({agent_input.bypass_formal_time_budget_min_delta:.4f}) "
+                f"= {_fmt_reference(resolved_bypass_formal_threshold)}"
             )
-            # Force the feasibility flag so the
-            # downstream skipped_time_risk path is
-            # skipped. The estimator's verdict and
-            # suggestion stay in time_check for the
-            # downstream record, just not as a hard
-            # rejection.
-            time_check["feasible"] = True
+            # Lane F3 / F-BYPASS-WD-1 (supervisor ruling 2026-08-26): the
+            # bypass RAISES the ceiling and RE-APPLIES the same gate at it —
+            # it never forces `feasible`. The old in-place flip overrode the
+            # FORECAST only while the watchdog's operator_budget_seconds
+            # stayed at the normal budget: admitted on promised time, killed
+            # at the normal deadline. ONE resolved value now feeds BOTH
+            # consumers: `chosen_time_budget` is what the runtime policy
+            # reads below, so raising it HERE moves the watchdog ceiling
+            # with the admission verdict — nothing to drift against.
+            _bypass_ceiling = agent_input.bypass_formal_time_budget_minutes
+            _estimated = time_check.get("estimated_minutes")
+            if _bypass_ceiling is None:
+                print(
+                    f"  [BypassTimeBudget] score-QUALIFIED ({_qualified_msg}) "
+                    "but NO elevated ceiling is configured "
+                    "(--bypass_formal_time_budget_minutes unset) — no "
+                    "extension granted; the time refusal stands. The None "
+                    "default is load-bearing: a bypass can never become a "
+                    "global raise through a schema default.",
+                    flush=True,
+                )
+            elif _estimated is not None and _estimated <= _bypass_ceiling:
+                print(
+                    f"  [BypassTimeBudget] score-QUALIFIED ({_qualified_msg}) "
+                    f"and the forecast ({_estimated:.1f} min) FITS the "
+                    f"elevated ceiling ({_bypass_ceiling:.0f} min) — admission "
+                    "re-evaluated at the bypass ceiling; the watchdog ceiling "
+                    "moves WITH it.",
+                    flush=True,
+                )
+                # The one resolved value: the record's budget and the runtime
+                # policy's operator_budget_seconds both read this.
+                chosen_time_budget = _bypass_ceiling
+                # TRUE BY RE-EVALUATION at the elevated ceiling — never a
+                # forced flag. Provenance rides beside it.
+                time_check["feasible"] = True
+                time_check["bypass_ceiling_minutes"] = _bypass_ceiling
+            else:
+                print(
+                    f"  [BypassTimeBudget] score-QUALIFIED ({_qualified_msg}) "
+                    f"but the forecast "
+                    f"({_estimated if _estimated is not None else 'unavailable'} min) "
+                    f"exceeds even the elevated ceiling ({_bypass_ceiling:.0f} "
+                    "min) — REFUSED under bypass. The bypass raises the "
+                    "ceiling; it never removes the gate (an unavailable "
+                    "estimate fails closed).",
+                    flush=True,
+                )
 
         if not time_check.get("feasible", True):
             # M6: this lane now carries two different causes,

@@ -1789,6 +1789,25 @@ class HyperparamTuningInput(BaseModel):
         ),
     )
 
+    bypass_formal_time_budget_minutes: float | None = Field(
+        default=None,
+        gt=0.0,
+        description=(
+            "Lane F3 / F-BYPASS-WD-1: the ELEVATED wall-time ceiling (minutes) "
+            "a score-QUALIFIED bypass formal attempt may use — ONE resolved "
+            "value consumed by BOTH the admission time gate (feasibility is "
+            "RE-EVALUATED against it, never flag-forced: a forecast past even "
+            "this ceiling is refused under bypass) AND the runtime watchdog's "
+            "operator_budget_seconds, so the two can never disagree. "
+            "``None`` (default) is load-bearing safety: a qualified bypass "
+            "grants NO extension — the elevated ceiling must be explicitly "
+            "materialised at launch (campaign: 200; normal formal: "
+            "formal_time_budget_minutes 120), so this can never become a "
+            "global raise through a schema default. The watchdog is never "
+            "disabled by this value."
+        ),
+    )
+
     enable_chain_incumbent_formal_gates: bool = Field(
         default=False,
         description=(

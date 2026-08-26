@@ -993,6 +993,15 @@ def build_parser() -> argparse.ArgumentParser:
         "Set to 0.5 to only bypass when trial beats current best by >= 0.5 dB.",
     )
     parser.add_argument(
+        "--bypass_formal_time_budget_minutes",
+        type=float,
+        default=None,
+        help="Lane F3: ELEVATED wall-time ceiling (minutes) for a score-qualified "
+        "bypass formal attempt — one value drives BOTH re-evaluated admission and "
+        "the watchdog ceiling. Omitted (None) = a qualified bypass grants NO "
+        "extension. Campaign frozen value: 200.",
+    )
+    parser.add_argument(
         "--order_strategy_override",
         type=str,
         default=None,
@@ -2684,6 +2693,7 @@ def main():
                     validation_max_phase_seconds=args.validation_max_phase_seconds,
                     skip_formal_min_delta=args.skip_formal_min_delta,
                     bypass_formal_time_budget_min_delta=args.bypass_formal_time_budget_min_delta,
+                    bypass_formal_time_budget_minutes=args.bypass_formal_time_budget_minutes,
                     trial_time_budget_minutes=args.trial_time_budget_minutes,
                     formal_time_budget_minutes=args.formal_time_budget_minutes,
                     data_dir=args.data_dir,

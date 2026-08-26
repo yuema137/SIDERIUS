@@ -123,7 +123,12 @@ POST_REFACTOR_DEFAULT_CHANGES: dict[str, object] = {
     "eval_portion": None,
 }
 
+#: * ``bypass_formal_time_budget_minutes`` — Lane F3 / F-BYPASS-WD-1: the
+#:   elevated bypass ceiling, pure transit to the tuner input via the
+#:   validator→tuner protocol. Default ``None`` = a qualified bypass grants
+#:   NO extension (load-bearing safety semantics).
 POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
+    "bypass_formal_time_budget_minutes": None,
     "experiment_arm": None,
     "baseline_isolation": False,
     "allowed_output_types": None,

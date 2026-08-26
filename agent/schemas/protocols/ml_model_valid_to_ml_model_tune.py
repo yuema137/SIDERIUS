@@ -91,6 +91,9 @@ def local_validated_model(
     # CLI surface reproduces pre-v16 behaviour.
     skip_formal_min_delta: float = -1.0,
     bypass_formal_time_budget_min_delta: float = 0.0,
+    # Lane F3 — the elevated bypass ceiling; None = no extension (schema
+    # default's safety semantics travel through unchanged).
+    bypass_formal_time_budget_minutes: float | None = None,
     # V19 PR 1 (P1-C3) — chain formal-incumbent reference as a NAMED
     # protocol parameter (design §3.4; replaces the workflow's post-hoc
     # mutation of the constructed input). ``None`` = no incumbent (both
@@ -322,6 +325,7 @@ def local_validated_model(
         validation_max_phase_seconds=validation_max_phase_seconds,
         skip_formal_min_delta=skip_formal_min_delta,
         bypass_formal_time_budget_min_delta=bypass_formal_time_budget_min_delta,
+        bypass_formal_time_budget_minutes=bypass_formal_time_budget_minutes,
         current_run_best_formal_score=current_run_best_formal_score,
         enable_chain_incumbent_formal_gates=enable_chain_incumbent_formal_gates,
         order_strategy_override=order_strategy_override,

@@ -105,6 +105,9 @@ class WorkflowLaunchConfig:
     max_epochs: int | None = None
     skip_formal_min_delta: float = -1.0
     bypass_formal_time_budget_min_delta: float = 0.0
+    # Lane F3 — the elevated bypass ceiling; None = a qualified bypass
+    # grants NO extension (the schema default's safety semantics).
+    bypass_formal_time_budget_minutes: float | None = None
     plan_overrides: dict | None = None
     trial_time_budget_minutes: float | None = None
     formal_time_budget_minutes: float | None = None

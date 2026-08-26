@@ -184,6 +184,33 @@ class TestLocalValidatedModel:
         )
         assert getattr(result, attr) == value
 
+    def test_bypass_ceiling_arrives_through_the_mapping_lane_f3(
+        self,
+        validator_output,
+        proposal_output,
+        storage,
+    ):
+        """Lane F3 / F-BYPASS-WD-1 — the defect class this names: a value
+        DECLARED on the tuning input must arrive THROUGH this protocol's
+        mapping, because protocols are the ONLY field-mapping layer (the
+        graph architecture rule) — there is no other route from the
+        workflow to the tuner. The protocol omission WAS the branch's
+        actual in-flight defect (one cause x 39: the workflow forwarded
+        ``bypass_formal_time_budget_minutes`` and ``local_validated_model``
+        refused the kwarg, so nothing could arrive). Fails by: the typed
+        ceiling not landing verbatim (200.0), or the omitted case not
+        mapping the schema's None (whose no-extension semantics are
+        load-bearing safety)."""
+        typed = local_validated_model(
+            validator_output,
+            proposal_output,
+            storage,
+            bypass_formal_time_budget_minutes=200.0,
+        )
+        assert typed.bypass_formal_time_budget_minutes == 200.0
+        omitted = local_validated_model(validator_output, proposal_output, storage)
+        assert omitted.bypass_formal_time_budget_minutes is None
+
     def test_trial_mode_snapshot_kwargs_fan_out(
         self,
         validator_output,
