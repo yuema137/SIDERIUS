@@ -158,8 +158,13 @@ class TestEvaluatePrediction:
 
     # --- File vector metric ---
 
-    def test_file_vector_metric_confirmed(self):
-        """mean(file_vector[0:5]) above SOTA → confirmed."""
+    def test_file_vector_slice_metric_is_refused(self):
+        """UPGRADED by F-SCAND-1 — this asserted `confirmed` on a slice mean.
+
+        A prediction phrased against a forbidden aggregation can no longer be
+        CONFIRMED, because the number that would confirm it is one the
+        aggregation standard refuses to produce.
+        """
         pred = {
             "metric": "mean(file_vector[0:5])",
             "current_value": 1.5,
@@ -172,8 +177,9 @@ class TestEvaluatePrediction:
             order=_STEP09A_ORDER,
             bound_metric_id=_BOUND_METRIC_ID,
         )
-        assert result["actual_value"] == 2.0  # mean of [1, 1.5, 2, 2.5, 3]
-        assert result["outcome"] == "confirmed"  # 2.0 > 1.5 SOTA
+        assert result["actual_value"] is None
+        assert result["metric_resolution"] == "refused_forbidden_aggregation"
+        assert result["outcome"] == "unevaluated"
 
     # --- Missing data fallback ---
 

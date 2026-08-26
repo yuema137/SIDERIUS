@@ -235,8 +235,16 @@ class TestTheSameBoundariesServeThreeDeclarations:
             bound_metric_id=case["spec"].id,
         )
         if case["expected_per_sample"]:
-            assert result["metric_resolution"] == "per_sample_slice"
-            assert result["actual_value"] is not None
+            # UPGRADED by F-SCAND-1. This asserted the slice mean RESOLVED to
+            # a value. It is now refused: the values reaching the evaluator
+            # are per-file LOG scores, so a slice mean is a "mean of per-file
+            # log scores", which the aggregation standard forbids for
+            # Jensen's inequality gap. The rung's point is unchanged — a task WITH
+            # per-sample evidence is distinguishable from one without — but
+            # the distinguishing resolution is now the refusal rather than a
+            # computed number.
+            assert result["metric_resolution"] == "refused_forbidden_aggregation"
+            assert result["actual_value"] is None
         else:
             assert result["metric_resolution"] == "per_sample_unavailable"
             assert result["outcome"] == "unevaluated"

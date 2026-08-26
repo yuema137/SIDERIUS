@@ -234,7 +234,7 @@ def _compute_metric(
     |-----------------------------------------|-------------------------|
     | the run's bound id                      | ``bound_id``            |
     | a frozen legacy alias                   | ``legacy_alias``        |
-    | ``mean(file_vector[N:M])``              | ``per_sample_slice``    |
+    | ``mean(file_vector[N:M])``              | ``refused_forbidden_aggregation`` |
     | ``file_vector[N]``                      | ``per_sample_index``    |
     | a per-sample form, no per-sample evidence | ``per_sample_unavailable`` |
     | anything else                           | ``unrecognized``        |
@@ -256,19 +256,44 @@ def _compute_metric(
         return None, "per_sample_unavailable"
 
     if is_slice:
-        inner = metric[len("mean(file_vector[") : -len("])")].strip()
-        try:
-            parts = inner.split(":")
-            start = int(parts[0])
-            end = int(parts[1]) if len(parts) > 1 else start + 1
-            values = [
-                v
-                for v in fv[start:end]
-                if v is not None and not (isinstance(v, float) and math.isnan(v))
-            ]
-            return (sum(values) / len(values) if values else None), "per_sample_slice"
-        except (ValueError, IndexError):
-            return None, "unrecognized"
+        # F-SCAND-1 — REFUSED, not computed.
+        #
+        # This used to return the arithmetic mean of `fv[start:end]`.
+        # The values reaching here are per-file LOG_5.27 scores, so a slice
+        # mean is a "mean of per-file log scores" — the FIRST form the
+        # aggregation standard forbids by name, for JENSEN'S INEQUALITY GAP:
+        # the mean of logs is not the log of the mean, so the number is not
+        # the score of anything.
+        #
+        # Trace the value, not the producer: `score_vector` returns LINEAR
+        # per-file means, but they do not arrive here in that form. The
+        # tuner converts to log space (`file_vector_to_log_space`) before
+        # building the score table, the table's `model` field is declared
+        # log_5.27 (`agent/schemas/score_table.py`), and the sole caller of
+        # `evaluate_prediction` synthesizes this vector from exactly that
+        # field. Reading the producer and stopping is how this comment was
+        # first written the other way round.
+        #
+        # A band slice compounds it with a SECOND violation — "mean of
+        # per-band linear means", the third forbidden form — because the
+        # campaign's bands are 4/6/5/5 and averaging a 4-file band against a
+        # 6-file band gives each file in the smaller band 1.5x the influence.
+        #
+        # The value is refused rather than approximated. A returned number
+        # would be indistinguishable from a valid one downstream, which is
+        # the whole hazard: the prediction pool would carry an aggregate
+        # nobody could reproduce from the run's own scalar.
+        #
+        # `None` lands this in the EXISTING `unevaluated` pool (counted in
+        # NO pool) — the frozen behaviour class for a prediction that cannot
+        # be computed. No new outcome, no new pool.
+        #
+        # Deliberately NOT accompanied by an alternative aggregation: the
+        # metric authority is frozen, and inventing a "correct" band score
+        # here would be a second scoring authority. If a band breakdown is
+        # wanted, `score_vector` on a scoped SampleSet is the supported
+        # route.
+        return None, "refused_forbidden_aggregation"
 
     try:
         idx = int(metric[len("file_vector[") : -1])

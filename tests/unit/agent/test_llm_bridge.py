@@ -27,6 +27,31 @@ from agent.prompts import PLANNER_PROMPT, REFLECTOR_PROMPT
 from tests.helpers.metric_fixtures import shipped_spec
 from tests.unit.agent.llm_bridge.test_step00_prompt_goldens import tidmad_task_render
 
+
+@pytest.fixture(autouse=True)
+def _provider_keys_present(monkeypatch):
+    """Pin every provider key PRESENT for this module.
+
+    These tests construct bridges for gemini and deepseek to exercise
+    provider/model resolution, and mock the SDK so no call is ever made — so
+    they never needed a real key, and never said so either way. They simply
+    inherited whatever the machine happened to export.
+
+    That became load-bearing when F-SCANI-1 made the constructor refuse a
+    provider whose key env is unset: the suite then PASSED on a developer box
+    with keys exported and FAILED on a CI runner without them. Nothing in the
+    file changed; the ambient environment decided the result.
+
+    Pinning here makes the outcome the same on both. The refusal's own tests
+    pin the OTHER direction — ``monkeypatch.delenv`` — so neither suite is at
+    the mercy of the environment, and a dev box with keys exported cannot
+    hide a refusal that CI would hit.
+    """
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-deepseek-key")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

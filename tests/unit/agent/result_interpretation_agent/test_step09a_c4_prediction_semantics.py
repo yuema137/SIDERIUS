@@ -279,7 +279,15 @@ class TestTheMetricGrammar:
             "rebuilds the per-task vocabulary Step 09 exists to remove."
         )
 
-    def test_a_per_sample_form_resolves_when_the_evidence_exists(self):
+    def test_the_slice_mean_form_is_refused_even_when_the_evidence_exists(self):
+        """UPGRADED by F-SCAND-1 — this asserted the slice mean RESOLVED.
+
+        The evidence being present is exactly the dangerous case: the value
+        was computable, so nothing downstream could tell the resulting number
+        was a "mean of per-file LOG scores" — the aggregation the standard
+        forbids by name for Jensen's inequality gap. Refusing it lands the
+        prediction in the existing `unevaluated` pool.
+        """
         result = _evaluate(
             -2.43,
             1.5,
@@ -287,9 +295,9 @@ class TestTheMetricGrammar:
             metric="mean(file_vector[0:5])",
             per_sample=[1.0, 1.5, 2.0, 2.5, 3.0, *([None] * 15)],
         )
-        assert result["actual_value"] == 2.0
-        assert result["metric_resolution"] == "per_sample_slice"
-        assert result["outcome"] == "confirmed"
+        assert result["actual_value"] is None
+        assert result["metric_resolution"] == "refused_forbidden_aggregation"
+        assert result["outcome"] == OUTCOME_UNEVALUATED
 
     def test_a_single_index_form_resolves(self):
         result = _evaluate(
@@ -311,11 +319,18 @@ class TestTheMetricGrammar:
         assert result["outcome"] == OUTCOME_UNEVALUATED
         assert result["metric_resolution"] == "unrecognized"
 
-    def test_a_malformed_per_sample_form_is_unrecognized(self):
+    def test_a_malformed_slice_form_is_refused_rather_than_unrecognized(self):
+        """UPGRADED by F-SCAND-1 — this asserted `unrecognized`.
+
+        The refusal now precedes index parsing, deliberately: the form is
+        forbidden whether or not its indices are well-formed, and "fix your
+        typo" would be the wrong remedy to report for a request that would
+        be refused even when spelled correctly.
+        """
         result = _evaluate(
             -2.43, -2.55, order=HIGHER, metric="mean(file_vector[a:b])", per_sample=[1.0, 2.0]
         )
-        assert result["metric_resolution"] == "unrecognized"
+        assert result["metric_resolution"] == "refused_forbidden_aggregation"
 
 
 class TestTheRecordShapeIsUniform:
