@@ -64,9 +64,28 @@ NOT route through their arm logic. Frozen paths + winner rule:
 
 | file | role |
 |---|---|
-| `run_gold_campaign.sh` | **CANONICAL CAMPAIGN ENTRYPOINT** — thin: binds the frozen boundary (the thirteen typed chain values, `--arm goldpod\|blindpod` with the X9 labels refused, lit-review explicitly OFF in both arms, the `--gold_advice_file` treatment boundary, `--task_config` validated + sha-recorded, retention), writes the resolved launch manifest, dispatches `--stage 1\|2`. `--dry-run` prints the frozen table + every fully-resolved per-band/per-unit `run_chain.sh` argv, launches nothing, writes nothing. |
-| `_gold_campaign_lib.sh` | **CAMPAIGN SHARED BOUNDARY** (source-only) — the frozen-value table (one row per value; builder and printer both consult it, so a dropped row fails NAMING the key), band vocabulary + band→files + band→GPU maps (0-3→0, 4-9→1, 10-14→2, 15-19→3, single_resident), arm/advice pairing, reserved-passthrough refusals (incl. `--cleanup_denoised`, R-RETENTION-1), and the bypass-ceiling probe (`--bypass_formal_time_budget_minutes 200` emitted only once the chain parses it — parallel lane). |
-| `stage1_search.sh` | **STAGE-1 FAN-OUT** — one band per GPU per the frozen map; staggered `nohup` starts, per-band logs + PID manifest under `${WORKSPACE_ROOT}/gold_stage1_logs/`; `--only 0-3,4-9` selects bands; `--dry-run` walks each band foreground. |
+| `run_gold_campaign.sh` | **CANONICAL CAMPAIGN ENTRYPOINT** — thin: binds the frozen boundary (the thirteen typed chain values, the frozen LLM routing config, `--arm goldpod\|blindpod` with the X9 labels refused, lit-review explicitly OFF in both arms, the `--gold_advice_file` treatment boundary, `--task_config` validated + sha-recorded, retention), writes the resolved launch manifest (which records `llm_config` + `llm_config_sha256` beside `task_config`), dispatches `--stage 1\|2`. `--dry-run` prints the frozen table + every fully-resolved per-band/per-unit `run_chain.sh` argv, launches nothing, writes nothing. |
+| `_gold_campaign_lib.sh` | **CAMPAIGN SHARED BOUNDARY** (source-only) — the frozen-value table (one row per value; builder and printer both consult it, so a dropped row fails NAMING the key), the frozen LLM routing authority (`GOLD_LLM_CONFIG_RELPATH=llm_configs/openai_tiered_pro.json`, D-LLM-1 — see below), band vocabulary + band→files + band→GPU maps (0-3→0, 4-9→1, 10-14→2, 15-19→3, single_resident), arm/advice pairing, reserved-passthrough refusals (incl. `--cleanup_denoised`, R-RETENTION-1, and `--llm_config` / `--llm_model`), and the bypass-ceiling probe (`--bypass_formal_time_budget_minutes 200` emitted only once the chain parses it — parallel lane). |
+
+**LLM routing is bound, not defaulted (D-LLM-1; defect F-LLM-WIRE-1).**
+Every stage-1 band argv and every stage-2 unit argv carries
+`--llm_config <repo>/llm_configs/openai_tiered_pro.json`, resolved to an
+absolute path because `run_chain.sh` cd's to the project dir before exec.
+The value is bound once in `gold_frozen_chain_args`, the single builder both
+stages consume, so a stage-2 unit can never run on a different model than the
+stage-1 bands whose designs it retrains.
+
+This is a **refusal, not a default**: `--llm_config` is optional at every hop
+(`_chain_common.sh` `LLM_CONFIG=""` forwards nothing; `run_one_iteration.py`
+falls back to `WorkflowLLMConfig.uniform("gemini", --llm_model)`, whose
+`--llm_model` default is `gemini-3.1-pro-preview`). A campaign launched
+without the flag therefore runs every LLM role on the deprecated all-Gemini
+default, exits 0, and writes records that look entirely normal. So a campaign
+launch that cannot resolve the frozen config **refuses by name** rather than
+proceeding, and `--llm_config` / `--llm_model` are reserved passthroughs:
+operator tokens land *after* the frozen ones and the chain's parse loop is
+last-wins, so a passed-through value would silently override the pin.
+| `stage1_search.sh` | **STAGE-1 FAN-OUT** — one band per GPU per the frozen map; staggered `nohup` starts, per-band logs + PID manifest under `${WORKSPACE_ROOT}/gold_stage1_logs/`; `--only 0-3,4-9` selects bands (selection is order-insensitive and emitted in canonical band order — this is the per-band relaunch path when one band of a four-band campaign dies); `--dry-run` walks each band foreground. |
 | `stage1_run_band.sh` | **STAGE-1 BAND LOOP** — persisted-state orchestrator: scans with `gold_campaign_state.py band-state` (inspector verifiers + the contract winner rule), invokes `run_chain.sh` over the full frozen horizon with auto-resume, watches committed manifests, refreshes `{root}/{arm}_band{B}.gold_status.json` (sibling of the chain workspace), and requests a graceful C13 STOP when the FCNet+2 rule is evaluable and satisfied (`--fcnet_reference_json`; absent = A2-FCNET interim, full horizon). No-progress brake after 3 chain cycles without a new committed iteration. |
 | `stage2_strict_retrain.sh` | **STAGE-2 STRICT RETRAIN** — 4 designs x 4 bands = 16 units under `{root}/stage2/{design}_{band}/` (contract section 2); wave = one design across the four GPUs; each unit is `run_chain.sh --validation_fixed_candidate_plan <design>.json --num_iterations 1 --data_scope <band>` with the same frozen boundary; completed units (COMPLETE.json present) are skipped; finalization copies the unit's TARGET-BAND deliverables only (band file set derived via `DataScope.from_cli` from the unit's own band, count 4/6/5/5; `COMPLETE.json` carries the counted `deliverable_count` — Q-S3-2 ruling A) and writes COMPLETE.json LAST, atomically. `--design_registry DIR` must hold exactly four `<design>.json` plans. |
 | `gold_campaign_state.py` | **PERSISTED-STATE HELPER** — `band-state` (next iteration via the `inspect_run_state` functions, the cumulative HealthGate-valid FORMAL incumbent per the contract winner table under `MetricOrder`, the FCNet+2 verdict) and `stage2-finalize` (unit winner, deliverable copies via the `DeliverableNaming` authority, atomic COMPLETE.json). All diagnostics on stderr; the state JSON is written atomically to `--out`. |

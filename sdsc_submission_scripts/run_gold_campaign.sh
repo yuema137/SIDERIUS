@@ -35,6 +35,11 @@
 #
 # Frozen bindings (see _gold_campaign_lib.sh for the table + decisions):
 #   * the thirteen chain-boundary values, typed, never defaulted;
+#   * --llm_config llm_configs/openai_tiered_pro.json, resolved absolute and
+#     emitted on EVERY stage-1 band and stage-2 unit argv (D-LLM-1); an
+#     unavailable file REFUSES the launch, because omitting the flag does
+#     NOT fail — it silently routes every LLM role to run_one_iteration.py's
+#     deprecated gemini-3.1-pro-preview default (F-LLM-WIRE-1);
 #   * arm label goldpod|blindpod (X9 labels refused; R-ARM-STAMP-1);
 #   * lit-review EXPLICITLY OFF in both arms (Q-LIT-1 = OFF, symmetric);
 #   * the treatment boundary: --gold_advice_file -> --advice (goldpod only);
@@ -53,7 +58,13 @@ GOLD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${GOLD_SCRIPT_DIR}/_gold_campaign_lib.sh"
 
 gold_usage() {
-    sed -n '2,50p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Render the header comment block itself — every line from 2 until the
+    # first non-comment line — rather than a hardcoded range. The old
+    # '2,50p' predated the D-LLM-1 binding note and printed `set -e` /
+    # `set -o pipefail` into --help; a range that has to be re-counted every
+    # time the header grows either leaks the body or truncates the usage.
+    awk 'NR < 2 { next } /^#/ { print; next } { exit }' "${BASH_SOURCE[0]}" \
+        | sed 's/^# \{0,1\}//'
 }
 
 gold_main() {
@@ -86,6 +97,10 @@ gold_main() {
     gold_workspace_root_check "$WORKSPACE_ROOT" || return 1
     gold_arm_args "$ARM" "$ADVICE_FILE" || return 1
     gold_bind_task_config "$TASK_CONFIG" || return 1
+    # D-LLM-1 fail-fast: each stage re-derives its own argv from the same lib
+    # (so this is not the binding), but refusing HERE means an unavailable
+    # routing config never reaches the manifest write or the dispatch.
+    gold_llm_config_args || return 1
     if [ -n "$FCNET_REFERENCE_JSON" ] && [ ! -f "$FCNET_REFERENCE_JSON" ]; then
         echo "ERROR: --fcnet_reference_json not found: $FCNET_REFERENCE_JSON" >&2
         return 1
@@ -108,6 +123,7 @@ gold_main() {
 
     echo "[gold-campaign] arm=$ARM stage=$STAGE workspace_root=$WORKSPACE_ROOT dry_run=$DRY_RUN"
     echo "[gold-campaign] task_config=$GOLD_TASK_CONFIG_ABS sha256=$GOLD_TASK_CONFIG_SHA256"
+    echo "[gold-campaign] llm_config=$GOLD_LLM_CONFIG_ABS sha256=$GOLD_LLM_CONFIG_SHA256 (D-LLM-1, every role pinned)"
     if [ "$ARM" = "goldpod" ]; then
         echo "[gold-campaign] treatment: advice=$ADVICE_FILE (goldpod, injected every proposer round)"
     else
@@ -130,6 +146,8 @@ gold_main() {
             echo "  \"lit_review\": \"OFF (Q-LIT-1, explicit --no-ml_lit_review_enabled, symmetric)\","
             echo "  \"task_config\": \"${GOLD_TASK_CONFIG_ABS}\","
             echo "  \"task_config_sha256\": \"${GOLD_TASK_CONFIG_SHA256}\","
+            echo "  \"llm_config\": \"${GOLD_LLM_CONFIG_ABS}\","
+            echo "  \"llm_config_sha256\": \"${GOLD_LLM_CONFIG_SHA256}\","
             echo "  \"fcnet_reference_json\": $(if [ -n "$FCNET_REFERENCE_JSON" ]; then printf '"%s"' "$FCNET_REFERENCE_JSON"; else printf 'null'; fi),"
             echo "  \"frozen_values\": {"
             local row first=1

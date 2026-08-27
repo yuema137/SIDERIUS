@@ -22,6 +22,21 @@ Each test names the defect ONLY it can catch:
   Without it, the witness above could go green while the builder silently
   stopped consulting the table (printing from one copy, emitting from
   another).
+* ``TestFrozenLlmRouting`` — F-LLM-WIRE-1 (release blocker): the campaign
+  path BINDS ``--llm_config llm_configs/openai_tiered_pro.json`` (D-LLM-1)
+  on every stage-1 band AND every stage-2 unit, the runner's REAL parser +
+  ``WorkflowLLMConfig`` resolve the pinned snapshot model, an unavailable
+  frozen config REFUSES by name, a passed-through override is refused, and
+  the non-campaign chain default still legitimately omits the flag. The
+  defect class: ``--llm_config`` is optional at every hop, so omitting it
+  ran the entire official campaign on the deprecated all-Gemini default
+  while still exiting 0 — the pin was real and nothing consumed it.
+* ``TestOnlySelection`` — ``--only`` SELECTS correctly AND returns 0.
+  ``gold_select_bands`` fell off the end of its emission loop, so it
+  returned the status of ``[ "$name" = "$band" ] && printf`` on the LAST
+  band: every selection not containing ``15-19`` printed the right bands
+  and then refused the launch with NO message on any stream. No existing
+  test passed ``--only``, which is why it survived.
 * ``TestRetention`` — R-RETENTION-1 (release blocker): (a) the campaign
   argv carries the retention token and NO ``--cleanup_denoised``; (b) a
   passthrough ``--cleanup_denoised`` is refused BY NAME; (c) the
@@ -93,6 +108,48 @@ CANONICAL_THIRTEEN = {
     "--skip_formal_min_delta": "-2.0",
     "--bypass_formal_time_budget_min_delta": "0.5",
 }
+
+#: The campaign's frozen LLM routing authority (D-LLM-1). HARDCODED here for
+#: the same reason the thirteen are: reading the path back out of the lib
+#: would compare the declaration to itself.
+FROZEN_LLM_CONFIG_RELPATH = "llm_configs/openai_tiered_pro.json"
+FROZEN_LLM_CONFIG = REPO_ROOT / FROZEN_LLM_CONFIG_RELPATH
+
+#: The snapshot model D-LLM-1 pins every campaign LLM role to, and the
+#: deprecated default that silently stands in when --llm_config is omitted.
+PINNED_MODEL_ID = "gpt-5.5-2026-04-23"
+UNPINNED_DEFAULT_MODEL_ID = "gemini-3.1-pro-preview"
+
+
+def _install_frozen_llm_config(project_dir: Path) -> Path:
+    """Give a synthetic script tree the frozen routing config it now needs.
+
+    A tmp tree holding only the campaign scripts is no longer a faithful
+    checkout: the boundary binds ``--llm_config`` from
+    ``GOLD_PROJECT_DIR/llm_configs/`` and refuses when it is absent.
+    """
+    dest = project_dir / FROZEN_LLM_CONFIG_RELPATH
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(FROZEN_LLM_CONFIG, dest)
+    return dest
+
+
+#: (``--only`` selection, expected canonical-order bands). HARDCODED:
+#: reading the expectation back out of GOLD_BANDS would compare the lib to
+#: itself. `15-19` appears as the control that ALWAYS passed; the
+#: last-band-excluding rows are the ones that were red.
+ONLY_SELECTIONS = [
+    ("0-3", ["0-3"]),
+    ("4-9", ["4-9"]),
+    ("10-14", ["10-14"]),
+    ("15-19", ["15-19"]),
+    ("0-3,4-9", ["0-3", "4-9"]),
+    ("10-14,0-3", ["0-3", "10-14"]),  # canonical order, not input order
+    ("4-9,15-19", ["4-9", "15-19"]),
+    ("0-3,4-9,10-14", ["0-3", "4-9", "10-14"]),
+    ("0-3,4-9,10-14,15-19", ["0-3", "4-9", "10-14", "15-19"]),
+    (" 0-3 , 10-14 ", ["0-3", "10-14"]),  # whitespace tolerated
+]
 
 EXPECTED_GPU_MAP = {"0-3": "0", "4-9": "1", "10-14": "2", "15-19": "3"}
 EXPECTED_BAND_FILES = {
@@ -293,6 +350,12 @@ class TestFrozenThirteenWitness:
         (tree / "run_one_iteration.py").write_text(
             '# fixture\nPARSER_FLAGS = ["--bypass_formal_time_budget_minutes"]\n'
         )
+        # The fixture tree must be a faithful checkout for every binding the
+        # boundary makes, not only the one under test: the lib resolves
+        # GOLD_PROJECT_DIR to tree.parent and REFUSES when the frozen LLM
+        # routing config is missing (F-LLM-WIRE-1). Supplying the real file
+        # keeps this test measuring the BYPASS probe.
+        _install_frozen_llm_config(tmp_path)
         proc = _bash(
             str(tree / STAGE1_BAND.name),
             "--band",
@@ -345,6 +408,271 @@ class TestFrozenTableMutation:
         rows = {line.split("=")[0]: line.split("=", 1)[1] for line in proc.stdout.split()}
         expected = {k.lstrip("-"): v for k, v in CANONICAL_THIRTEEN.items()}
         assert rows == expected
+
+
+class TestFrozenLlmRouting:
+    """F-LLM-WIRE-1 — the campaign path BINDS the frozen LLM routing config.
+
+    The defect this closes is the declared-but-unconsumed class, and its
+    whole danger is that the failure mode is SILENT: `--llm_config` is
+    optional at every hop (`_chain_common.sh` LLM_CONFIG="" forwards
+    nothing; `run_one_iteration.py` falls back to
+    `WorkflowLLMConfig.uniform("gemini", --llm_model)`), so a campaign
+    launched without it runs every LLM role on the deprecated
+    all-Gemini default, exits 0, and produces records that look normal.
+    The pin was real and the config was correct — nothing on the campaign
+    path consumed it.
+    """
+
+    def test_every_stage1_band_argv_binds_the_frozen_config(self, campaign_root):
+        """Witness (a), stage 1: the EFFECTIVE per-band argv the launcher
+        would exec carries --llm_config at the frozen ABSOLUTE path.
+
+        Absolute because run_chain.sh cd's to the project dir before exec
+        (lilab mode), so a relative path would dangle — the same rule the
+        advice artifact follows. Asserted against the resolved argv, never
+        a grep of the script: a script may mention a flag it never emits."""
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _band_argvs(proc.stdout)
+        assert sorted(argvs) == sorted(EXPECTED_GPU_MAP), proc.stdout
+        for band, argv in argvs.items():
+            assert _pairs(argv).get("--llm_config") == str(FROZEN_LLM_CONFIG), (
+                f"band {band} would launch WITHOUT the frozen routing config — every "
+                f"LLM role silently resolves to {UNPINNED_DEFAULT_MODEL_ID}"
+            )
+
+    def test_every_stage2_unit_argv_binds_the_frozen_config(self, campaign_root, tmp_path):
+        """Witness (a), stage 2: all sixteen strict-retrain units too.
+
+        Stage 2 is a SEPARATE argv builder from stage 1. A stage that
+        silently runs on a different model than the bands it is retraining
+        designs from is the same defect one layer down, and it would be
+        invisible: Stage-3 pools the winners without ever seeing which
+        model proposed them."""
+        registry = tmp_path / "designs"
+        registry.mkdir()
+        for design in ("wavenetA", "punetB", "rnnC", "fnoD"):
+            (registry / f"{design}.json").write_text("{}\n")
+        proc = _bash(
+            str(ENTRYPOINT),
+            "--workspace_root",
+            str(campaign_root["root"]),
+            "--stage",
+            "2",
+            "--design_registry",
+            str(registry),
+            "--gold_advice_file",
+            str(campaign_root["advice"]),
+            "--dry-run",
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        lines = proc.stdout.splitlines()
+        units = {}
+        for i, line in enumerate(lines):
+            if "run_chain argv:" in line and "[gold-stage2]" in line:
+                unit = line.split("unit")[1].split("gpu")[0].strip()
+                units[unit] = shlex.split(lines[i + 1])
+        assert len(units) == 16, sorted(units)
+        for unit, argv in units.items():
+            assert _pairs(argv).get("--llm_config") == str(FROZEN_LLM_CONFIG), unit
+
+    def test_runner_resolves_the_pinned_model_not_the_gemini_default(self, campaign_root):
+        """Witness (b): drive the REAL transport, end to end.
+
+        The launcher's own emitted argv is walked through the production
+        hops — `_chain_common.sh` parse + `build_app_args`, then
+        `run_one_iteration.py`'s REAL argparse, then the SAME
+        `WorkflowLLMConfig.from_json` branch the runner takes at
+        `args.llm_config` — and every campaign-active role must land on the
+        pinned snapshot. Asserting on strings would prove only that a path
+        was copied around; this proves a model was actually selected.
+
+        The negative half is what makes it a witness rather than a
+        tautology: the identical parser with the flag ABSENT resolves every
+        one of those roles to the deprecated default, which is exactly what
+        the campaign was doing."""
+        pytest.importorskip("pydantic")
+        import importlib.util
+
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argv = _band_argvs(proc.stdout)["0-3"]
+        # argv = ["CUDA_VISIBLE_DEVICES=0", "bash", "<run_chain.sh>", ...]
+        chain_args = argv[3:]
+        built = _bash(
+            "-c",
+            f"source '{CHAIN_COMMON}'; "
+            f"parse_chain_args {' '.join(shlex.quote(a) for a in chain_args)}; "
+            'build_app_args 1; printf "%s\\n" "${APP_ARGS[@]}"',
+        )
+        assert built.returncode == 0, built.stderr
+        app_args = [tok for tok in built.stdout.splitlines() if tok]
+
+        spec = importlib.util.spec_from_file_location(
+            "roi_for_llm_wire_test", SDSC / "run_one_iteration.py"
+        )
+        roi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(roi)
+        from workflows.llm_config import WorkflowLLMConfig
+
+        ns = roi.build_parser().parse_args(app_args)
+        assert ns.llm_config == str(FROZEN_LLM_CONFIG)
+
+        # The production branch (run_one_iteration.py: `if args.llm_config`).
+        pinned = WorkflowLLMConfig.from_json(ns.llm_config)
+        # lit_review is deliberately excluded: Q-LIT-1 is OFF in both arms,
+        # and the shipped config routes it elsewhere on purpose.
+        campaign_roles = ("interpret", "propose", "implement", "validate", "tune")
+        for role in campaign_roles:
+            resolved = pinned.get(role)
+            model_ids = {v for k, v in resolved.items() if k.endswith("model_id")}
+            assert model_ids == {PINNED_MODEL_ID}, (role, resolved)
+
+        # The negative half — the same parser, the flag omitted.
+        bare = roi.build_parser().parse_args(["--workspace", "/tmp/x", "--run_name", "t"])
+        assert bare.llm_config is None
+        unpinned = WorkflowLLMConfig.uniform("gemini", bare.llm_model)
+        for role in campaign_roles:
+            resolved = unpinned.get(role)
+            model_ids = {v for k, v in resolved.items() if k.endswith("model_id")}
+            assert model_ids == {UNPINNED_DEFAULT_MODEL_ID}, (role, resolved)
+
+    def test_unavailable_frozen_config_refuses_naming_the_flag(self, campaign_root, tmp_path):
+        """Witness (c), the ANTI-SILENCE witness: a campaign launch that
+        cannot resolve the frozen routing config REFUSES, loudly, naming
+        `--llm_config`.
+
+        This is the test that would have caught the original defect, and it
+        is the one the fix exists for. Omission was survivable precisely
+        because it looked like success; a launch that cannot bind the pin
+        must not be allowed to proceed on a plausible-looking default.
+
+        The tree holds ONLY the campaign scripts, so GOLD_PROJECT_DIR
+        resolves to a directory with no llm_configs/ — the same fixture
+        shape the frozen-table mutation witness uses."""
+        tree = tmp_path / "no_llm_configs"
+        tree.mkdir()
+        shutil.copy2(STAGE1_BAND, tree / STAGE1_BAND.name)
+        shutil.copy2(LIB, tree / LIB.name)
+        assert not (tmp_path / "llm_configs").exists()
+        proc = _bash(
+            str(tree / STAGE1_BAND.name),
+            "--band",
+            "0-3",
+            "--workspace_root",
+            str(campaign_root["root"]),
+            "--gold_advice_file",
+            str(campaign_root["advice"]),
+            "--dry-run",
+        )
+        assert proc.returncode != 0, proc.stdout
+        assert "--llm_config" in proc.stderr
+        assert "F-LLM-WIRE-1" in proc.stderr
+        # The refusal must state the consequence, not merely the absence:
+        # "file missing" reads as cosmetic, "runs on the wrong model" does not.
+        assert UNPINNED_DEFAULT_MODEL_ID in proc.stderr
+        # And it must refuse BEFORE emitting an argv anyone could copy.
+        assert "run_chain argv" not in proc.stdout
+
+    def test_passthrough_llm_config_refused_by_name(self, campaign_root):
+        """An operator-supplied --llm_config would land AFTER the frozen
+        tokens, and `_chain_common.sh`'s parse loop is last-wins — so it
+        would silently override the pin. Same defect, one layer down."""
+        proc = _stage1_dry(campaign_root, "--llm_config", "/tmp/somewhere_else.json")
+        assert proc.returncode != 0
+        assert "--llm_config" in proc.stderr
+
+    def test_exploratory_chain_launch_still_omits_llm_config(self):
+        """Witness (d), the differential: LLM_CONFIG="" stays legal OFF the
+        campaign path.
+
+        The general chain default must not be dragged into the campaign's
+        refusal — exploratory and non-campaign runs legitimately launch
+        without a routing config, and forwarding an empty value would put a
+        bare `--llm_config` on the child argv and crash argparse."""
+        proc = _bash(
+            "-c",
+            f"source '{CHAIN_COMMON}'; "
+            "parse_chain_args --workspace /tmp/x --run_name t; "
+            'build_app_args 1; printf "%s\\n" "${APP_ARGS[@]}"',
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "--llm_config" not in proc.stdout.splitlines()
+
+    def test_frozen_relpath_is_the_declared_authority(self):
+        """A silently REPOINTED authority (a different file, or a typo that
+        happens to exist) keeps every argv witness above green, so the
+        declared path itself is pinned against the hardcoded canon — and
+        the file it names must actually pin the campaign's model."""
+        proc = _bash("-c", f"source '{LIB}'; printf '%s' \"$GOLD_LLM_CONFIG_RELPATH\"")
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout == FROZEN_LLM_CONFIG_RELPATH
+        assert FROZEN_LLM_CONFIG.is_file(), FROZEN_LLM_CONFIG
+        assert PINNED_MODEL_ID in FROZEN_LLM_CONFIG.read_text()
+
+
+class TestOnlySelection:
+    """``--only`` band selection SELECTS correctly AND succeeds.
+
+    No existing test passed ``--only`` at all, which is exactly why this
+    survived: ``gold_select_bands`` fell off the end of its emission loop,
+    so the function returned the status of
+    ``[ "$name" = "$band" ] && printf`` on the LAST band in ``GOLD_BANDS``.
+    Any selection not containing ``15-19`` therefore printed the right
+    bands and returned 1, and the caller's
+    ``SELECTED="$(gold_select_bands "$ONLY")" || return 1`` turned that
+    into a launch refusal with **no message on any stream**.
+
+    The operational shape is a recovery path: a four-band campaign loses
+    one band, the operator relaunches just that band with ``--only 0-3``,
+    and gets an unexplained exit 1 with nothing to read.
+
+    Both halves are asserted together on purpose — the selection was
+    always correct, so a test that only checked the printed bands would
+    have passed throughout.
+    """
+
+    @pytest.mark.parametrize("selection,expected", ONLY_SELECTIONS)
+    def test_selection_succeeds_and_is_canonically_ordered(self, selection, expected):
+        proc = _bash("-c", f"source '{LIB}'; gold_select_bands '{selection}'")
+        assert proc.returncode == 0, (
+            f"--only '{selection}' refused with rc={proc.returncode} and "
+            f"stderr={proc.stderr!r} — a silent launch refusal"
+        )
+        assert proc.stdout.split() == expected
+
+    def test_empty_selection_is_all_bands(self):
+        proc = _bash("-c", f"source '{LIB}'; gold_select_bands ''")
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.split() == ["0-3", "4-9", "10-14", "15-19"]
+
+    @pytest.mark.parametrize(
+        "bad,reason",
+        [
+            ("0-3,0-3", "duplicate"),
+            ("nope", "unknown"),
+            ("0-3,nope", "unknown"),
+            (",", "selected nothing"),
+        ],
+    )
+    def test_invalid_selection_still_refuses_by_name(self, bad, reason):
+        """The success fix must not turn a genuine refusal into a pass:
+        every refusal path keeps its explicit `return 1` and its message."""
+        proc = _bash("-c", f"source '{LIB}'; gold_select_bands '{bad}'")
+        assert proc.returncode != 0, proc.stdout
+        assert reason in proc.stderr
+
+    def test_launcher_only_flag_reaches_a_band_dry_run(self, campaign_root):
+        """End of the hop, through the real entrypoint: `--only 0-3` must
+        walk the band and print its resolved argv. This is the surface the
+        operator actually touches, and it exited 1 with an empty log."""
+        proc = _stage1_dry(campaign_root, "--only", "0-3")
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _band_argvs(proc.stdout)
+        assert sorted(argvs) == ["0-3"], proc.stdout
+        # And the band it selected still carries the frozen routing config.
+        assert _pairs(argvs["0-3"]).get("--llm_config") == str(FROZEN_LLM_CONFIG)
 
 
 class TestRetention:

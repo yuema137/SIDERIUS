@@ -10,6 +10,7 @@
 #          docs/campaign/official_campaign_decisions.yaml — D-BUD-2 horizon,
 #          D-BUD-6 epochs, D-BUD-7 trial portions, D-BUD-8 formal portions,
 #          D-BUD-11/13 time budgets, P6-A skip delta, P6-B bypass delta),
+#          the frozen LLM ROUTING authority (D-LLM-1, F-LLM-WIRE-1),
 #          the band vocabulary + band->files + band->GPU maps
 #          (EXCLUSIVE_SINGLE_BAND, operator hardware disposition 2026-08-26),
 #          the campaign arm vocabulary (D-NAME-1: goldpod / blindpod;
@@ -88,6 +89,28 @@ GOLD_STAGE2_NUM_ITERATIONS=1
 #: see gold_bypass_ceiling_args.
 GOLD_BYPASS_FORMAL_TIME_BUDGET_MINUTES=200
 
+#: THE FROZEN LLM ROUTING AUTHORITY (D-LLM-1; defect F-LLM-WIRE-1).
+#:
+#: The campaign pins every LLM role to the snapshot model in this file.
+#: It is stated RELATIVE to the executing repository and resolved to an
+#: ABSOLUTE path at bind time by gold_llm_config_args — run_chain.sh cd's
+#: to the project dir before exec (lilab mode), so a relative path would
+#: dangle (the same rule the advice artifact follows).
+#:
+#: WHY THIS IS A REFUSAL AND NOT A DEFAULT. `--llm_config` is optional all
+#: the way down (_chain_common.sh LLM_CONFIG="" forwards nothing;
+#: run_one_iteration.py falls back to WorkflowLLMConfig.uniform("gemini",
+#: --llm_model) whose default is "gemini-3.1-pro-preview"). So a campaign
+#: launch that simply OMITS the flag still exits 0 and still produces
+#: records — it just runs the entire official campaign on a different model
+#: than the frozen one, with nothing on any surface saying so. That is the
+#: declared-but-unconsumed class: the pin was real, the file was correct,
+#: and nothing on the campaign path consumed it. Emission is therefore
+#: MANDATORY on the campaign path and an unresolvable value REFUSES by
+#: name, rather than self-disabling the way the bypass ceiling above does
+#: (that flag may legitimately not be parseable yet; this one always is).
+GOLD_LLM_CONFIG_RELPATH="llm_configs/openai_tiered_pro.json"
+
 #: FCNet+2 band-local early-stop margin (golden notebook / D-BUD-17). The
 #: rule is only EVALUABLE once A2-FCNET produces per-band FCNet references;
 #: until then a band runs its full horizon (the notebook's recorded interim).
@@ -125,6 +148,7 @@ gold_print_frozen_table() {
     done
     echo "[gold-campaign]   frozen stage2_num_iterations=${GOLD_STAGE2_NUM_ITERATIONS} (D-ARCH-2 fixed-candidate pin)"
     echo "[gold-campaign]   frozen fcnet_stop_margin=${GOLD_FCNET_STOP_MARGIN} (evaluable only with a per-band reference; A2-FCNET)"
+    echo "[gold-campaign]   frozen llm_config=${GOLD_LLM_CONFIG_RELPATH} (D-LLM-1; resolved absolute at bind, REFUSES if absent)"
 }
 
 # gold_bypass_ceiling_args — sets GOLD_BYPASS_CEILING_ARGS.
@@ -148,6 +172,32 @@ gold_bypass_ceiling_args() {
         echo "  the transport is only half on disk (_chain_common.sh parses the flag at this tip; the run_one_iteration.py argparse half lands with #334);" >&2
         echo "  emission self-enables when both _chain_common.sh and run_one_iteration.py accept it." >&2
     fi
+}
+
+# gold_llm_config_args — sets GOLD_LLM_CONFIG_ARGS (plus the resolved
+# GOLD_LLM_CONFIG_ABS / GOLD_LLM_CONFIG_SHA256 the launch manifest records),
+# or REFUSES naming the flag.
+#
+# The anti-silence witness: omitting --llm_config is INDISTINGUISHABLE from
+# passing it, at every surface an operator looks at, until the run is over.
+# So the campaign path refuses instead of proceeding, and the refusal names
+# --llm_config, the file it expected, and what the omission would have done.
+gold_llm_config_args() {
+    local abs="${GOLD_PROJECT_DIR}/${GOLD_LLM_CONFIG_RELPATH}"
+    if [ ! -f "$abs" ] || [ ! -r "$abs" ]; then
+        echo "ERROR: the campaign's frozen LLM routing config is unavailable, so --llm_config" >&2
+        echo "  cannot be bound and this launch is REFUSED (F-LLM-WIRE-1):" >&2
+        echo "    expected: $abs" >&2
+        echo "    declared: GOLD_LLM_CONFIG_RELPATH=${GOLD_LLM_CONFIG_RELPATH} (_gold_campaign_lib.sh)" >&2
+        echo "  Launching without --llm_config does NOT fail — it silently resolves every LLM" >&2
+        echo "  role to run_one_iteration.py's deprecated all-Gemini default" >&2
+        echo "  (gemini-3.1-pro-preview) instead of the campaign's pinned snapshot model," >&2
+        echo "  and the run still exits 0. Restore the file or fix the declared path." >&2
+        return 1
+    fi
+    GOLD_LLM_CONFIG_ABS="$abs"
+    GOLD_LLM_CONFIG_SHA256="$(sha256sum "$abs" | awk '{print $1}')"
+    GOLD_LLM_CONFIG_ARGS=(--llm_config "$abs")
 }
 
 # gold_frozen_chain_args STAGE — sets GOLD_FROZEN_CHAIN_ARGS: the typed
@@ -184,6 +234,10 @@ gold_frozen_chain_args() {
     done
     gold_bypass_ceiling_args
     GOLD_FROZEN_CHAIN_ARGS+=(${GOLD_BYPASS_CEILING_ARGS[@]+"${GOLD_BYPASS_CEILING_ARGS[@]}"})
+    # D-LLM-1: bound HERE, in the ONE builder both stages consume, so a
+    # stage-2 unit can never run on a different model than a stage-1 band.
+    gold_llm_config_args || return 1
+    GOLD_FROZEN_CHAIN_ARGS+=("${GOLD_LLM_CONFIG_ARGS[@]}")
     GOLD_FROZEN_CHAIN_ARGS+=(--no-cleanup_denoised)
 }
 
@@ -265,6 +319,15 @@ gold_select_bands() {
             [ "$name" = "$band" ] && printf '%s\n' "$band"
         done
     done
+    # EXPLICIT, and load-bearing. Falling off the end returns the status of
+    # the last command run, which here is the emission loop's final
+    # `[ "$name" = "$band" ] && printf` — and that test FAILS whenever the
+    # last band in GOLD_BANDS was not selected. So `--only 0-3` returned 1
+    # while having printed the correct selection, and the caller's
+    # `SELECTED="$(gold_select_bands "$ONLY")" || return 1` turned that into
+    # a launch refusal with NO message on any stream. Every refusal above
+    # returns 1 by name; success must say 0 by name too.
+    return 0
 }
 
 # gold_arm_args ARM ADVICE_FILE — sets GOLD_ARM_ARGS.
@@ -329,6 +392,13 @@ gold_arm_args() {
 #: Flags an operator may NOT pass through to the chain: each is either a
 #: frozen value (typed once at this boundary), an arm/band/treatment-decided
 #: value, or the retention violation R-RETENTION-1 exists to refuse.
+#:
+#: --llm_config / --llm_model (D-LLM-1, F-LLM-WIRE-1): passthrough tokens are
+#: appended AFTER the frozen args and _chain_common.sh's parse loop is
+#: last-wins, so a passed-through --llm_config would silently OVERRIDE the
+#: campaign's pinned routing — the same defect one layer down. --llm_model is
+#: reserved for the reason --max_epochs is: no second model authority may
+#: reach the child argv, even one the config already shadows.
 GOLD_RESERVED_PASSTHROUGH=(
     --cleanup_denoised
     --num_iterations --trial_portion --train_portion --eval_portion
@@ -337,6 +407,7 @@ GOLD_RESERVED_PASSTHROUGH=(
     --trial_time_budget_minutes --formal_time_budget_minutes
     --skip_formal_min_delta --bypass_formal_time_budget_min_delta
     --bypass_formal_time_budget_minutes
+    --llm_config --llm_model
     --experiment_arm --ml_lit_review_enabled --no-ml_lit_review_enabled
     --advice --human_advice_file
     --data_scope --health_gate_files --band --workspace --run_name

@@ -16,7 +16,7 @@ the flags that decide *what a run is*.
 | you want to | use |
 |---|---|
 | run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
-| launch the official Gold campaign (stage 1 search / stage 2 strict retrain) | `sdsc_submission_scripts/run_gold_campaign.sh` (binds the frozen campaign values and delegates to `run_chain.sh`; see `sdsc_submission_scripts/README.md` "Gold campaign" and `docs/campaign/stage_artifact_contract.md`) |
+| launch the official Gold campaign (stage 1 search / stage 2 strict retrain) | `sdsc_submission_scripts/run_gold_campaign.sh` (binds the frozen campaign values — including `--llm_config llm_configs/openai_tiered_pro.json` on every band and unit, refusing the launch if it cannot be resolved — and delegates to `run_chain.sh`; see `sdsc_submission_scripts/README.md` "Gold campaign" and `docs/campaign/stage_artifact_contract.md`) |
 | run one arm of the prior-art baseline experiment (arXiv X9) | `sdsc_submission_scripts/launch_prior_baseline_experiment.sh` |
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
 | drive the workflow directly from Python | `workflows/model_exploration.py` |
@@ -95,7 +95,7 @@ Other flags that define a run:
 | `--max_epochs` | `1` (mode-agnostic epoch ceiling; must be >= 1) |
 | `--trial_max_epochs` / `--formal_max_epochs` | `None` — per-role epoch ceilings (D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence per round role: per-mode value → `--max_epochs` → no clamp; must be >= 1, refused at parse otherwise |
 | `--max_proposal_attempts` | `3` |
-| `--llm_config` | `None` |
+| `--llm_config` | `None` — **omitting it does not fail.** Empty forwards nothing (`_chain_common.sh:78`), and the runner then falls back to `WorkflowLLMConfig.uniform("gemini", --llm_model)` whose `--llm_model` default is `gemini-3.1-pro-preview` (`run_one_iteration.py:943`), so every LLM role silently resolves to the deprecated all-Gemini default and the run still exits 0. Pass an explicit routing config on any run whose model matters; the Gold campaign path binds `llm_configs/openai_tiered_pro.json` for you and refuses to launch if it cannot (F-LLM-WIRE-1) |
 | `--experiment_arm` | `None` (unlabelled; an empty string is refused). Opaque label pinned in the lock and stamped on records / outputs / manifests (arXiv U1) |
 | `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | `None` → the YAML's `enabled` decides (shipped: `false`). The resolved flag and the config's sha256 are pinned in the lock; an enabled but unreadable config refuses the launch |
 | `--baseline_isolation` | off. Excludes the bundled baselines from the LLM-facing surface: bundled descriptions refused, prompt examples neutralised, built-in proposals refused by name (arXiv U3). Pinned in the lock |
