@@ -38,8 +38,11 @@ prepare_iteration_dir`, `:805` — "Create `{workspace}/iter_{N:03d}`"):
 **FROZEN deliverable naming**: filenames resolve EXCLUSIVELY through the
 run's `DeliverableNaming` authority (`execute_tools/deliverable_spec.py`;
 construction helper `records._build_denoised_filename`). The shipped TIDMAD
-template renders `abra_validation_denoised_{model_type}_{run_name}_{exp_id}_file{NNNN}.h5`
-with `NNNN` = the input identity 0–19 zero-padded width 4. Deliverables are
+template renders `abra_validation_denoised_{model_type}_{run_name}_{exp_id}_{NNNN}.h5`
+with `NNNN` = the input identity 0–19 zero-padded width 4 (prose corrected
+to match the authority's live rendering — the earlier `_file{NNNN}` example
+contradicted the resolve-exclusively sentence above, which governs; found by
+writer C; Lane F owns the contract — flagged for its ack). Deliverables are
 ABRA-format HDF5, written into the iteration's tuner sandbox data dir
 (`base_dir`); every path a consumer receives from a record is ABSOLUTE
 (Bug-A contract, `records.py:573`).
@@ -62,7 +65,7 @@ records in the band workspace satisfying ALL of:
 | condition | field / authority |
 |---|---|
 | completed scoring | `status == "success"` |
-| FORMAL round | **absence of the `is_trial` key** (`BestTracks` authority, `policy.py`: "Formal records have no `is_trial` key … absence == formal"; the top-level `trial_portion` key is likewise trial-only — #316 B2) |
+| FORMAL round | **`is_trial` absent or `False`** (Q-S3-3 correction, 2026-08-26: the BUILDER sets the key only on trial records, but `HyperparamTuningOutput.all_records: list[ExperimentRecord]` re-validates and `model_dump()` MATERIALIZES the defaults `is_trial: False` + `trial_portion: None` onto every PERSISTED formal record — the shape Stage-3 reads; the `BestTracks` authority's own test is falsy-tolerant, `not r.get("is_trial", False)`, `policy.py:650`. The earlier "absence of the `is_trial` key" wording described only the in-memory dicts and made every real formal record refuse. A non-bool `is_trial`, or a non-`None` `trial_portion` on a formal-shaped record, remains a shape production never writes — #316 B2) |
 | HealthGate-valid | `is_valid_candidate(record)` == True (`execute_tools/health_checks/candidate_eligibility.py:310` — the ONE eligibility authority; never re-implement from gate fields) |
 | identity | `exp_id`, `model_type`, `iteration` (dir), `experiment_arm` (lock + manifest) |
 
@@ -80,9 +83,17 @@ waves (wave membership is launcher policy, not layout):
 ```
 {workspace_root}/stage2/{design}_{target_band}/     # e.g. wavenetA_0-3
   workspace/                                        # a normal single-iteration chain/tuner workspace (Stage-1 rules apply inside, incl. iter_001/)
-  deliverables/                                     # the unit's 20 ABRA-format HDF5 files, COPIED (not symlinked) from the workspace after completion, named by the SAME DeliverableNaming authority
+  deliverables/                                     # the unit's TARGET-BAND ABRA-format HDF5 files (that band's files ONLY), COPIED (not symlinked) from the workspace after completion, named by the SAME DeliverableNaming authority
   COMPLETE.json                                     # completion marker, written LAST (atomic rename), schema below
 ```
+
+Q-S3-2 ruling A (supervisor, 2026-08-26): a unit's `deliverables/` carries
+its TARGET-BAND files only — a band-scoped run under `--data_scope <band>`
+produces the scope's files ONLY (DS8's enforced behaviour), the paper's own
+band-split construction infers per band, and a design's four band dirs then
+partition 0..19 so strict_best's whole-dir pooling composes with zero
+duplicates. The earlier "20 files per unit" wording could never compose
+(the §4 composer refuses duplicate indices by frozen rule).
 
 `{design}` = the frozen-design identifier (16 total; the design registry is
 the campaign plan's, not this contract's). `{target_band}` uses the same
@@ -100,7 +111,7 @@ polls; absence == unit not done; partial dirs without it are ignored):
   "repo_sha": "<git sha the unit ran at>",
   "denoising_score": <float, the unit's own formal score>,
   "healthgate_valid": <bool, is_valid_candidate of its record>,
-  "deliverable_count": 20,
+  "deliverable_count": <int, the TARGET band's file count under the DS8 band vocabulary — Q-S3-2 ruling A>,
   "completed_utc": "<ISO8601>"
 }
 ```
@@ -123,7 +134,12 @@ polls; absence == unit not done; partial dirs without it are ignored):
   for THAT band's files only (winner identified per §1; files outside the
   winner's source band are never read from it).
 - `strict_best` reads Stage-2 `deliverables/` dirs, only from units whose
-  `COMPLETE.json` exists and has `healthgate_valid: true`.
+  `COMPLETE.json` exists and has `healthgate_valid: true`. §2's "ignored"
+  governs the POLLER while it waits; the strict_best FINALIZER fails
+  closed — any unit missing its marker, malformed, or
+  `healthgate_valid: false` at finalization time is one aggregated named
+  refusal (zero composer calls, no selection emitted) — Q-S3-1 ruling A
+  (supervisor, 2026-08-26; operator-overridable).
 - **Isolation rule for `terminal_eval` (FROZEN)**: nothing under
   `{workspace_root}/stage3/terminal_eval/` is ever read by any search,
   selection, tuning, or scoring-for-selection code path — structurally
@@ -147,8 +163,21 @@ def compose_and_score(
     *,
     files: range = range(20),         # the full 0..19 file set — full-scope by contract
     sample_set: None = None,          # None == the FULL sample set; partial scopes are not legal here
+    reconciled_spec: MetricSpec,      # §4 amendment (supervisor gate ruling, 2026-08-26): the caller's RECONCILED 09a stamp — identity transport for refusal envelopes, never derived
 ) -> tuple[list[float], float]:       # (file_vector, scalar) — score_vector's own 2-tuple
 ```
+
+§4 amendment (supervisor local-gate Step-09a ruling, 2026-08-26): the
+MetricSpec has ONE stamping authority — the tuner's derivation, persisted
+as `HyperparamTuningOutput.metric_spec`. Stage-3 consumers RECONCILE
+stamped specs through `execute_tools.evaluation_metric.reconcile_metric_specs`
+and never derive: composed_best across its four band winners' outputs,
+strict_best across its 16 units' chain-workspace outputs (read through the
+same manifest-verified loader), terminal_eval from the champion's stamped
+`metric_spec` field. An absent or divergent stamp is a NAMED fail-closed
+refusal — a pre-09a-shaped input refuses, never defaults. The reconciled
+spec is passed to `compose_and_score`, which uses it ONLY to name the
+metric in its refusal envelopes.
 
 Semantics, all FROZEN:
 - Wraps the existing `score_vector` authority (`execute_tools`/scoring)
