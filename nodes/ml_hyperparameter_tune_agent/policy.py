@@ -49,36 +49,41 @@ from execute_tools.metric_order import MetricOrder
 
 
 class RoundDecision(StrEnum):
-    """What the round loop does once its attempts are exhausted."""
+    """What the round loop does once its attempts are exhausted.
+
+    F-SCANC-1: ``SKIP_TO_FORMAL`` was retired with the gate actions that
+    produced it (operator decision packet v1, 2026-08-26) — see
+    ``_decide_round_outcome``.
+    """
 
     CONTINUE = "continue"
     BREAK_ITERATION = "break_iteration"
-    SKIP_TO_FORMAL = "skip_to_formal"
 
 
 def _decide_round_outcome(
     *,
     scope_violation_reason: str | None,
     evidence_channel_failure: str | None,
-    resolved_action: GateAction,
-    is_formal_round: bool,
 ) -> RoundDecision:
     """Arbitrate the end of a round (B-C4a0 E5).
 
-    A pure function over four already-computed inputs. The `break`, the
-    `completed_rounds` fast-forward and the operator-facing prints stay
-    in the caller — this decides, it does not act, so it can be tested
-    without a loop around it.
+    A pure function over already-computed inputs. The `break` and the
+    operator-facing prints stay in the caller — this decides, it does
+    not act, so it can be tested without a loop around it.
 
-    Order is load-bearing: a non-retryable termination outranks a gate
-    action, because a scope violation is deterministic on retry.
+    F-SCANC-1 (operator decision packet v1, 2026-08-26): the
+    ``resolved_action`` / ``is_formal_round`` inputs and the
+    SKIP_ITER / SKIP_TO_FORMAL branches are RETIRED, not wired. The C7
+    decomposition had severed the carrier (the gate verdict died as a
+    local in ``execution.py``; the run loop passed this function only its
+    own ``CONTINUE`` initializer), so those branches were unreachable —
+    dead inputs advertising round semantics the runtime did not
+    implement. Gate actions still reach the record surface
+    (``_gate_results_to_score_meta`` → ``ExperimentRecord.gate_action``);
+    they no longer claim loop control.
     """
     if scope_violation_reason or evidence_channel_failure:
         return RoundDecision.BREAK_ITERATION
-    if _should_break_iteration(resolved_action):
-        return RoundDecision.BREAK_ITERATION
-    if _should_skip_to_formal(resolved_action, is_formal_round):
-        return RoundDecision.SKIP_TO_FORMAL
     return RoundDecision.CONTINUE
 
 
@@ -1013,7 +1018,7 @@ def _gate_results_to_score_meta(
 
       * ``is_degenerate`` reflects only **blocking** gate failures — a
         failed gate whose ``action`` is in ``BLOCKING_ACTIONS``
-        (``INVALIDATE_ROUND``, ``SKIP_TO_FORMAL``, ``SKIP_ITER``). A
+        (``INVALIDATE_ROUND``; the skip actions were retired, F-SCANC-1). A
         recording-only gate that returns ``passed=False`` with
         ``action=CONTINUE`` never sets ``is_degenerate=True``, so it
         cannot silently zero-out a formal round's score via
@@ -1078,22 +1083,6 @@ def _merge_score_validity_failure(
     return True, validity_reason
 
 
-def _should_break_iteration(resolved_action: GateAction) -> bool:
-    """SKIP_ITER → break the tuner's outer while loop. Chain-level caller
-    of ``run()`` moves to the next chain iteration on return."""
-    return resolved_action is GateAction.SKIP_ITER
-
-
-def _should_skip_to_formal(
-    resolved_action: GateAction,
-    is_formal_round: bool,
-) -> bool:
-    """SKIP_TO_FORMAL → jump ``completed_rounds`` so the next while
-    iteration lands on the formal round. Guarded when already on the
-    formal round — no re-run."""
-    return resolved_action is GateAction.SKIP_TO_FORMAL and not is_formal_round
-
-
 def _non_retryable_termination_message(
     *, scope_violation_reason: str | None, evidence_channel_failure: str | None
 ) -> str:
@@ -1116,7 +1105,6 @@ def _compute_termination_state(
     max_rounds: int,
     consecutive_fails: int,
     max_fail_rounds: int,
-    gate_aborted: bool,
     scope_violation_reason: str | None = None,
     evidence_channel_failure: str | None = None,
 ) -> tuple[str, str]:
@@ -1130,16 +1118,20 @@ def _compute_termination_state(
          chain must halt rather than retry into the same environment.
       0. ``scope_violation_reason`` set (DataScope DS5) → ``("failed",
          "scope_violation")``. A configuration/invariant failure —
-         deterministic on retry, so it outranks even the deliberate gate
-         abort: nothing about this run's results is trustworthy.
-      1. ``gate_aborted=True`` (SKIP_ITER from a health gate) →
-         ``("partial", "aborted_by_gate")``. Wins over every other
-         condition because the gate signal is a deliberate abort, not a
-         boundary condition.
-      2. ``completed_rounds >= max_rounds`` → ``("completed", "completed")``.
-      3. ``consecutive_fails >= max_fail_rounds`` → ``("partial",
+         deterministic on retry: nothing about this run's results is
+         trustworthy.
+      1. ``completed_rounds >= max_rounds`` → ``("completed", "completed")``.
+      2. ``consecutive_fails >= max_fail_rounds`` → ``("partial",
          "aborted_fail_rounds")``.
-      4. Fallback → ``("partial", "completed")``.
+      3. Fallback → ``("partial", "completed")``.
+
+    F-SCANC-1 (operator decision packet v1, 2026-08-26): the
+    ``gate_aborted`` input and its ``("partial", "aborted_by_gate")``
+    branch are RETIRED with the SKIP_ITER action. The flag's only writer
+    was the run loop's unreachable SKIP_ITER branch (severed by the C7
+    decomposition), so the branch could never fire; the
+    ``aborted_by_gate`` Literal stays on the OUTPUT schema so historical
+    records remain readable, with no current producer.
 
     See ``docs/design/pluggable_health_checks.md`` §4 and the audit
     Gap #3 fix in the follow-up to commit-5b.
@@ -1148,8 +1140,6 @@ def _compute_termination_state(
         return "failed", "infrastructure_abort"
     if scope_violation_reason:
         return "failed", "scope_violation"
-    if gate_aborted:
-        return "partial", "aborted_by_gate"
     if completed_rounds >= max_rounds:
         return "completed", "completed"
     if consecutive_fails >= max_fail_rounds:

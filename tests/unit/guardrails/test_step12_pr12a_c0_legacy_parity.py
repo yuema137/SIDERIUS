@@ -88,8 +88,44 @@ def _sha(text: str) -> str:
 #: composition gating must not leak into the legacy branch — is intact; what
 #: changed is a deliberate, separately-witnessed LLM-facing improvement.
 #: Re-recorded from three fresh interpreter processes, as the original was.
+#:
+#: **DECLARED DELTA — F-SCANA-1 (wave-3), operator-approved 2026-08-26.**
+#: ``23e59e45…`` -> ``5984c438…``. The rendered ``ExperimentConfig`` JSON
+#: schema carries each field's DEFAULT, so the paper-spec repair of
+#: ``TrainConfig.lr`` moved four lines inside the ``TrainConfig`` block of all
+#: three ``tuner.planner`` USER prompts, and nothing else::
+#:
+#:         "lr": {
+#:     -     "default": 0.0001,
+#:     +     "default": 0.0005,
+#:           "maximum": 0.1,
+#:           "minimum": 1e-06,
+#:
+#: WHY THIS MOVE IS CORRECT RATHER THAN A PARITY BREAK: the prompt introduces
+#: that block as "PLUGIN CONFIG SCHEMA (authoritative — read validators
+#: carefully)". **The schema block the prompt labels authoritative must not
+#: contradict the runtime.** Holding the old bytes would have the prompt
+#: assert ``"default": 0.0001`` as authoritative while the validation path
+#: resolves ``0.0005`` — re-creating one layer up the prompt-vs-runtime
+#: divergence F-SCANA-1 exists to close, and putting the lie inside the very
+#: sentence that tells the model to trust the block. Prompt and runtime were
+#: consistent before (both departing paper spec) and are consistent after
+#: (both at it); byte-identity here would buy a FALSE invariant.
+#:
+#: ATTRIBUTION IS A COUNTERFACTUAL, NOT AN INFERENCE. Bisected across the
+#: wave-3 stack: master ``237260a4`` = ``23e59e45…``; the lr commit alone
+#: (``02547bb1``) = ``5984c438…``; and **master plus ONLY the one-line lr
+#: default edit reproduces ``5984c438…`` exactly**. The other three wave-3
+#: repairs (task-config resolution, START_ITER validation, the F-SCANC-1
+#: retirement) contribute ZERO prompt bytes — an initial hypothesis blaming
+#: the retirement's health-feedback prose was refuted by this bisection.
+#:
+#: What did NOT move: both reflector prompts, every SYSTEM prompt, every
+#: ``kwargs_sha256``, and the call count/order/labels/methods. The shape
+#: tuple below is UNCHANGED and was deliberately not touched.
+#: Re-recorded from three fresh interpreter processes, as the original was.
 LEGACY_TUNER_PROMPT_MANIFEST_SHA = (
-    "23e59e45abf388fd5e35aff23f5b9049aad7435a1e693feb0b874ab6256f0309"
+    "5984c4387f5ca09babb70eae3b327b7a698b88a0e1b10f8139accd33f3f2dd4b"
 )
 
 #: The per-call shape, recorded beside the digest so a mismatch localizes to a

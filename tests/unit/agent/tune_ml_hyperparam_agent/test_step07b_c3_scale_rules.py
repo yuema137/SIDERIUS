@@ -43,7 +43,7 @@ from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     _validate_penalty_for_direction,
 )
 from tests.helpers.metric_fixtures import accuracy_like_spec, error_like_spec, shipped_spec
-from tests.helpers.tuner_source import tuner_lifecycle_source
+from tests.helpers.tuner_source import tuner_lifecycle_source, tuner_node_source
 
 ACCURACY = MetricOrder(accuracy_like_spec())  # higher, values in [0, 1]
 MSE = MetricOrder(error_like_spec())  # lower, values near 0
@@ -305,18 +305,26 @@ def test_the_attempt_transition_types_are_gone_from_production():
     assert hasattr(tuner, "_decide_round_outcome")
 
 
-def test_the_resolved_action_hazard_is_recorded_beside_the_declaration():
-    """The defect the removed types described is real and unfixed. Deleting
-    them without leaving the hazard where the next reader of ``run()`` will
-    meet it would have destroyed the only record of it."""
-    import inspect
+def test_the_resolved_action_retirement_is_recorded_where_the_hazard_lived():
+    """UPGRADED for F-SCANC-1 (operator decision packet v1, 2026-08-26).
 
-    from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
-        HyperparamTuningAgent,
-    )
-
+    This test used to pin the OD-S7-6 hazard note beside the
+    ``resolved_action`` declaration — deleting the types without leaving
+    the hazard where the next reader of ``run()`` meets it would have
+    destroyed the only record of it. The hazard is now CLOSED by
+    retirement, and the same rule applies to the closure: removing the
+    declaration without recording WHY (severed carrier, operator ruling)
+    would leave the next reader to reinvent the wire. Fails when: the
+    F-SCANC-1 loop marker or the module-level closure note is dropped, or
+    the retired declaration quietly returns."""
     source = tuner_lifecycle_source()
-    declaration = source.index("resolved_action: GateAction = GateAction.CONTINUE")
-    note = source[max(0, declaration - 1400) : declaration]
-    assert "KNOWN DEFECT" in note
-    assert "never reset between attempts" in note
+    assert "resolved_action: GateAction = GateAction.CONTINUE" not in source, (
+        "the retired round-scoped declaration is back without an operator decision"
+    )
+    marker = source.index("F-SCANC-1")
+    note = source[marker : marker + 500]
+    assert "RETIRED" in note
+
+    node_source = tuner_node_source()
+    assert "F-SCANC-1 CLOSURE" in node_source
+    assert "RETIRE for v1" in node_source

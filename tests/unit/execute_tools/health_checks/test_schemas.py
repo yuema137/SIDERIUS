@@ -28,13 +28,15 @@ from execute_tools.health_checks.schemas import (
 
 class TestGateAction:
     def test_expected_members(self):
-        """The rev-6 action set is exactly four members — the runner's
-        severity resolution ordering (SKIP_ITER > SKIP_TO_FORMAL >
-        INVALIDATE_ROUND > CONTINUE) depends on this exact set."""
+        """F-SCANC-1 (operator decision packet v1, 2026-08-26): the action
+        vocabulary is EXACTLY these two members, hardcoded. SKIP_ITER and
+        SKIP_TO_FORMAL were retired, not wired — the C7 decomposition had
+        severed the tuner-side carrier, so they were advertised semantics
+        the runtime did not implement. Fails when: either retired member
+        is reintroduced without its own operator decision, or a live
+        member is dropped."""
         assert {a.name for a in GateAction} == {
             "CONTINUE",
-            "SKIP_ITER",
-            "SKIP_TO_FORMAL",
             "INVALIDATE_ROUND",
         }
 
@@ -42,8 +44,6 @@ class TestGateAction:
         """String values match the YAML action keys operators type into
         configs/health_checks.yaml."""
         assert GateAction.CONTINUE.value == "continue"
-        assert GateAction.SKIP_ITER.value == "skip_iter"
-        assert GateAction.SKIP_TO_FORMAL.value == "skip_to_formal"
         assert GateAction.INVALIDATE_ROUND.value == "invalidate_round"
 
     def test_no_record_score(self):
@@ -54,12 +54,24 @@ class TestGateAction:
         with pytest.raises(AttributeError):
             _ = GateAction.RECORD_SCORE  # type: ignore[attr-defined]
 
+    @pytest.mark.parametrize("retired", ["skip_iter", "skip_to_formal"])
+    def test_retired_actions_refuse_loudly(self, retired: str):
+        """F-SCANC-1: a config value naming a retired action must REFUSE at
+        the vocabulary, never resolve — the M-principle failure this
+        retirement closes is a config claiming semantics the runtime does
+        not implement. The ValueError is what surfaces through Pydantic as
+        a ValidationError naming the permitted values when a YAML declares
+        one. Fails when: a compatibility alias quietly maps a retired
+        value onto a live member."""
+        with pytest.raises(ValueError):
+            GateAction(retired)
+
     def test_string_enum_semantics(self):
         """GateAction is a StrEnum — instances compare equal to their str
         value. This is what lets the YAML loader produce
         `GateAction("continue")` directly."""
         assert GateAction.CONTINUE == "continue"
-        assert GateAction("skip_iter") is GateAction.SKIP_ITER
+        assert GateAction("invalidate_round") is GateAction.INVALIDATE_ROUND
 
 
 # ---------------------------------------------------------------------------
@@ -215,28 +227,14 @@ class TestGateResult:
             action=action,
         )
 
-    def test_should_skip_iter(self):
-        gr = self._make(GateAction.SKIP_ITER, passed=False)
-        assert gr.should_skip_iter is True
-        assert gr.should_skip_to_formal is False
-        assert gr.should_invalidate_round is False
-
-    def test_should_skip_to_formal(self):
-        gr = self._make(GateAction.SKIP_TO_FORMAL, passed=False)
-        assert gr.should_skip_iter is False
-        assert gr.should_skip_to_formal is True
-        assert gr.should_invalidate_round is False
-
     def test_should_invalidate_round(self):
+        """The surviving routing flag (the skip properties were retired
+        with their enum members, F-SCANC-1)."""
         gr = self._make(GateAction.INVALIDATE_ROUND, passed=False)
-        assert gr.should_skip_iter is False
-        assert gr.should_skip_to_formal is False
         assert gr.should_invalidate_round is True
 
     def test_continue_action_has_no_should_flag(self):
         gr = self._make(GateAction.CONTINUE, passed=True)
-        assert gr.should_skip_iter is False
-        assert gr.should_skip_to_formal is False
         assert gr.should_invalidate_round is False
 
     def test_round_index_propagation_at_schema_level(self):
@@ -264,7 +262,7 @@ class TestGateResult:
             gate_id="collapse_check_round_1",
             round_index=1,
             passed=False,
-            action=GateAction.SKIP_ITER,
+            action=GateAction.INVALIDATE_ROUND,
             failure_reason="output_diversity: only 1 unique int8 value",
             check_results=[
                 HealthCheckResult(

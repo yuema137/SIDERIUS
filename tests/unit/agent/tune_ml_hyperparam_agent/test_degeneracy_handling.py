@@ -110,11 +110,11 @@ def test_degenerate_formal_with_float_penalty_uses_penalty():
 def test_degenerate_trial_round_is_no_op():
     """Trial rounds never get penalized (AMB-5b-A → A). Post-commit-5b,
     tuner-side gate evaluation MAY flag is_degenerate=True on a trial
-    round — e.g. round-1 ``collapse_check_round_1`` firing SKIP_ITER
+    round — e.g. a round-1 blocking gate resolving INVALIDATE_ROUND
     still sets is_degenerate=True per ``_gate_results_to_score_meta``.
     The policy function ignores the signal for score mutation but still
-    returns the raw signal so the caller can log/audit and drive
-    loop control."""
+    returns the raw signal so the caller can log/audit it (gate actions
+    carry no loop control since the F-SCANC-1 retirement)."""
     plan = _make_plan(is_trial=True)
     score_results = {
         "denoising_score": 0.5,

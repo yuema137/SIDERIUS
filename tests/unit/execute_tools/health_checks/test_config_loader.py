@@ -83,12 +83,23 @@ class TestActionConfig:
     def test_action_accepts_string_value(self):
         """The YAML loader receives raw strings — Pydantic coerces to
         the GateAction StrEnum via its ``__init__``."""
-        ac = ActionConfig.model_validate({"action": "skip_iter"})
-        assert ac.action is GateAction.SKIP_ITER
+        ac = ActionConfig.model_validate({"action": "invalidate_round"})
+        assert ac.action is GateAction.INVALIDATE_ROUND
 
     def test_unknown_action_string_raises(self):
         with pytest.raises(ValidationError):
             ActionConfig.model_validate({"action": "not_a_real_action"})
+
+    @pytest.mark.parametrize("retired", ["skip_iter", "skip_to_formal"])
+    def test_retired_action_refuses_at_the_config_gate(self, retired: str):
+        """F-SCANC-1 — the config-surface witness: a YAML-shaped mapping
+        declaring a retired action REFUSES with a ValidationError naming
+        the permitted values, instead of composing a gate whose action the
+        runtime cannot act on (the pre-retirement state: declared-but-
+        unreachable semantics). Fails when: the vocabulary regains the
+        member or an alias maps it through."""
+        with pytest.raises(ValidationError, match=r"continue|invalidate_round"):
+            ActionConfig.model_validate({"action": retired})
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +114,7 @@ def _minimal_gate_kwargs(**overrides):
         "after_round": 1,
         "checks": [CheckRef(name="output_diversity")],
         "on_pass": ActionConfig(action=GateAction.CONTINUE),
-        "on_fail": ActionConfig(action=GateAction.SKIP_ITER),
+        "on_fail": ActionConfig(action=GateAction.INVALIDATE_ROUND),
     }
     base.update(overrides)
     return base
@@ -231,7 +242,7 @@ class TestLoadHealthGatesConfig:
                     on_pass:
                       action: continue
                     on_fail:
-                      action: skip_iter
+                      action: invalidate_round
                 """
             ).lstrip()
         )
@@ -242,7 +253,7 @@ class TestLoadHealthGatesConfig:
         assert g.after_round == 1
         assert g.checks[0].config["min_unique_int8_values"] == 5
         assert g.on_pass.action is GateAction.CONTINUE
-        assert g.on_fail.action is GateAction.SKIP_ITER
+        assert g.on_fail.action is GateAction.INVALIDATE_ROUND
 
     def test_a_rosterless_file_composes_the_task_roster_and_only_explicit_none_is_empty(
         self, tmp_path
@@ -280,7 +291,7 @@ class TestLoadHealthGatesConfig:
                     checks:
                       - name: output_diversity
                     on_pass: {action: continue}
-                    on_fail: {action: skip_iter}
+                    on_fail: {action: invalidate_round}
                 """
             ).lstrip()
         )
@@ -294,7 +305,7 @@ class TestLoadHealthGatesConfig:
                     checks:
                       - name: output_diversity
                     on_pass: {action: continue}
-                    on_fail: {action: skip_iter}
+                    on_fail: {action: invalidate_round}
                 """
             ).lstrip()
         )

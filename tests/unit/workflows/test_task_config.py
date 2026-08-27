@@ -15,6 +15,7 @@ Covers:
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
@@ -333,3 +334,117 @@ class TestCommittedConfigLoads:
         cfg = load_task_config(cfg_path)
         assert cfg["task_description"]
         assert cfg["forward_contract"]["num_classes"] == 256
+
+
+# ---------------------------------------------------------------------------
+# F-SCANA-2 — one resolution authority: read == pin == snapshot
+# ---------------------------------------------------------------------------
+
+
+class TestScanA2OneResolutionAuthority:
+    """F-SCANA-2 — the canonical config resolves the SAME file everywhere.
+
+    Pre-fix, ``load_task_config()`` (and ``task_config_file_sha256()``,
+    which mirrors it — the F-SCANH-1 lock pin) resolved
+    ``configs/task_config.yaml`` against the CALLER'S CWD, while
+    ``_snapshot_task_config`` resolved against SIDERIUS_ROOT; a comment
+    stated the cwd assumption instead of enforcing it. From a foreign cwd
+    that carries its own ``configs/task_config.yaml``, the LLM-facing read
+    and the pinned sha addressed the DECOY while the snapshot preserved
+    the repo file — the pin could be computed over a different file than
+    the one snapshotted.
+
+    The decoy fixture makes the test discriminating: every assertion would
+    have picked the decoy under cwd-relative resolution, so this class
+    FAILS on the pre-fix code rather than passing vacuously.
+    """
+
+    @pytest.fixture()
+    def foreign_cwd_with_decoy(self, tmp_path, monkeypatch):
+        """chdir into a tmp dir carrying a DECOY configs/task_config.yaml."""
+        decoy_dir = tmp_path / "configs"
+        decoy_dir.mkdir()
+        decoy = decoy_dir / "task_config.yaml"
+        decoy.write_text(
+            "task_description: DECOY — must never be read\n"
+            "forward_contract:\n"
+            '  input_shape: "[B, T] int64"\n'
+            '  input_description: "decoy"\n'
+            '  output_shape: "[B, 256, T] float32"\n'
+            '  output_description: "decoy"\n'
+            "  num_classes: 256\n"
+            '  physical_meaning: "decoy"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.chdir(tmp_path)
+        _clear_cache_for_tests()
+        yield decoy
+        _clear_cache_for_tests()
+
+    @staticmethod
+    def _independent_repo_config() -> str:
+        """The committed config, addressed from THIS TEST FILE's location.
+
+        An independent root derivation (never the module under test's), so
+        a wrong production anchor cannot certify itself.
+        """
+        here = os.path.dirname(os.path.abspath(__file__))
+        root = os.path.dirname(os.path.dirname(os.path.dirname(here)))
+        path = os.path.join(root, "configs", "task_config.yaml")
+        assert os.path.isfile(path), f"committed config missing at {path}"
+        return path
+
+    def test_read_ignores_a_foreign_cwd_decoy(self, foreign_cwd_with_decoy):
+        """Defect only this catches: the no-arg read following the cwd.
+
+        Fails when: ``load_task_config()`` resolves cwd-relative again —
+        the decoy's ``task_description`` is distinctive and would be
+        returned here.
+        """
+        cfg = load_task_config()
+        assert "DECOY" not in cfg["task_description"]
+
+    def test_pin_hashes_the_repo_file_not_the_decoy(self, foreign_cwd_with_decoy):
+        """Defect only this catches: the F-SCANH-1 lock pin hashing a
+        different file than the canonical one (the compounding defect —
+        a pinned sha computed over the decoy would let a mid-workspace
+        edit of the REAL config through the resume refusal).
+
+        Fails when: ``task_config_file_sha256()`` resolves cwd-relative;
+        the expected sha is recomputed here from the committed file at an
+        INDEPENDENTLY derived path, never read back from the module under
+        test.
+        """
+        from workflows.task_config import task_config_file_sha256
+
+        repo_bytes = Path(self._independent_repo_config()).read_bytes()
+        decoy_bytes = foreign_cwd_with_decoy.read_bytes()
+        assert repo_bytes != decoy_bytes, "fixture must be discriminating"
+
+        pinned = task_config_file_sha256()
+        assert pinned == hashlib.sha256(repo_bytes).hexdigest()
+        assert pinned != hashlib.sha256(decoy_bytes).hexdigest()
+
+    def test_read_pin_and_snapshot_resolve_the_same_file(self, foreign_cwd_with_decoy, tmp_path):
+        """The tri-surface identity, through the production entry points.
+
+        Fails when: ANY of the three surfaces (read / pin / snapshot)
+        resolves a different file from a foreign cwd — the exact
+        divergence F-SCANA-2 names.
+        """
+        from workflows.model_exploration import _snapshot_task_config
+        from workflows.task_config import task_config_file_sha256
+
+        run_dir = tmp_path / "ws" / "run_a"
+        run_dir.mkdir(parents=True)
+        _snapshot_task_config(str(run_dir))
+        snapshot_bytes = (run_dir / "task_config_snapshot.yaml").read_bytes()
+
+        # snapshot == pin (content identity across the two persistence
+        # surfaces), and the read parses that same content (its
+        # description appears verbatim in the loaded config).
+        assert hashlib.sha256(snapshot_bytes).hexdigest() == task_config_file_sha256()
+        loaded = load_task_config()
+        assert loaded["task_description"].strip() != "DECOY — must never be read"
+        repo_bytes = Path(self._independent_repo_config()).read_bytes()
+        assert snapshot_bytes == repo_bytes

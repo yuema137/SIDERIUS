@@ -272,9 +272,9 @@ class TestRung134ALitReviewHalf:
         path = _write_task_config_with(tmp_path, ALT_TASK)
         shipped_lit_cfg = yaml.safe_load(LIT_REVIEW_YAML.read_text(encoding="utf-8"))
 
-        monkeypatch.chdir(tmp_path)  # `load_task_config()` resolves cwd-relative
+        monkeypatch.setattr(tc, "_SIDERIUS_ROOT", str(tmp_path))  # F-SCANA-2 root redirection
         tc._clear_cache_for_tests()
-        assert Path("configs/task_config.yaml").resolve() == path.resolve()
+        assert Path(tc.default_task_config_path()).resolve() == path.resolve()
 
         inp = _build_lit_review_input(
             shipped_lit_cfg,
@@ -303,7 +303,7 @@ class TestRung134ALitReviewHalf:
         stale_cfg = yaml.safe_load(LIT_REVIEW_YAML.read_text(encoding="utf-8"))
         stale_cfg["task_description"] = "STALE-LOCAL-COPY: this value must never be used."
 
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(tc, "_SIDERIUS_ROOT", str(tmp_path))
         tc._clear_cache_for_tests()
 
         inp = _build_lit_review_input(
@@ -388,7 +388,7 @@ class TestCheckpointCProductionPath:
         lit-review doctrine legitimately discusses denoising and 1-D signals.
         """
         _write_task_config_with(tmp_path, ALT_TASK)
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(tc, "_SIDERIUS_ROOT", str(tmp_path))
         tc._clear_cache_for_tests()
 
         recorder = self._run_capture(tmp_path)

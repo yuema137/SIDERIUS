@@ -1069,3 +1069,38 @@ report_chain_outcome() {
     fi
     return "$CHAIN_ITERATION_FAILED_EXIT_CODE"
 }
+
+# ---------------------------------------------------------------------------
+# F-SCANB-4 — auto-resume inspector capture validation
+# ---------------------------------------------------------------------------
+# `scripts/inspect_run_state.py --layout chain --next-iter` prints ONLY the
+# integer index as its FINAL stdout write on the success path (every
+# diagnostic goes to stderr; see its `print(compute_next_iter(...))` /
+# `return 0`). The shell capture, however, can ALSO carry import-time
+# plugin-loader chatter emitted BEFORE that value (observed ~12,960 bytes),
+# so the raw capture is NOT the value: pre-fix, run_chain.sh assigned the
+# whole capture to START_ITER with no validation, and auto-resume broke
+# exactly when a resume mattered (known workaround: --start_iter N).
+#
+# The last line of an exit-0 capture is therefore the value channel — the
+# cheapest clean channel available without changing the inspector's stdout
+# contract, which human operators and this wrapper both consume. Anything
+# whose last line is not a bare non-negative integer must REFUSE loudly
+# upstream: a silently-defaulted or corrupted iteration index corrupts a
+# resumed campaign (a fresh START_ITER=1 on a populated workspace, or an
+# argparse crash deep in the runner).
+#
+#   $1     : raw captured stdout of the inspector (exit 0 path).
+#   stdout : the validated bare non-negative integer (the capture's last line).
+#   return : 0 when the last line is a bare non-negative integer; 1 otherwise
+#            (empty capture included). Prints nothing on failure — the caller
+#            owns the operator-facing refusal and names the workaround.
+extract_validated_next_iter() {
+    local raw="$1"
+    local last_line="${raw##*$'\n'}"
+    if [[ "$last_line" =~ ^[0-9]+$ ]]; then
+        printf '%s\n' "$last_line"
+        return 0
+    fi
+    return 1
+}

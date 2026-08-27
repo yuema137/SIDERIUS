@@ -73,7 +73,7 @@ class TestTheLabelStopsLying:
         A gate named without any suffix that DOES enforce must still read
         enforcing, and one named `_blocking` that does not must not.
         """
-        enforcing = _result(gate_name="quiet_name", configured_action=GateAction.SKIP_ITER)
+        enforcing = _result(gate_name="quiet_name", configured_action=GateAction.INVALIDATE_ROUND)
         observational = _result(gate_name="loud_blocking", configured_action=GateAction.CONTINUE)
         assert "enforcing" in enforcing.display_label
         assert "observational" in observational.display_label

@@ -541,9 +541,14 @@ tuning without polluting the scoring pipeline. Migration landed in PR #101
   is the built-ins' bootstrap, NOT the extension path** (Step 08b): an
   external task names plugin files in its own task health config, and they
   register through the same public `register` / `register_view_provider`.
-- **Gate actions**: `CONTINUE`, `INVALIDATE_ROUND`, `SKIP_TO_FORMAL`,
-  `SKIP_ITER`. Severity resolution when multiple gates fire in one round:
-  `SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE`.
+- **Gate actions**: `CONTINUE`, `INVALIDATE_ROUND`. Severity resolution
+  when multiple gates fire in one round:
+  `INVALIDATE_ROUND > CONTINUE`. (`SKIP_TO_FORMAL` / `SKIP_ITER` were
+  RETIRED from the vocabulary — F-SCANC-1, operator decision packet v1,
+  2026-08-26: the C7 decomposition had severed the tuner-side carrier,
+  so they were declared-but-unreachable loop control; a config declaring
+  either now refuses at validation. Gate actions classify the round;
+  they carry no loop control.)
 - **Firing point**: gates fire at **tuner round boundaries** in
   `nodes/ml_hyperparameter_tune_agent/ml_hyperparameter_tune_agent.py`, NOT
   inside `score_vector`.
@@ -1299,7 +1304,9 @@ TIDMAD's `network.py:FocalLoss1D`.
   `cb1a885a`; final PR head `307fa0ce917c0afbd6ee5425fae7ef902b267019` (documentation
   and gate-advice JSON only in between); PR #216; exact-head CI 31989125173 SUCCESS;
   clean tree. Deferred and UNCHANGED by 07b: the `memory.time_mode` /
-  disabled-time-budget coupling, the `resolved_action` stale-attempt hazard, and the
+  disabled-time-budget coupling, the `resolved_action` hazard (recorded then
+  as "stale-attempt"; the mechanism was a SEVERED carrier, CLOSED by the
+  F-SCANC-1 retirement, 2026-08-26), and the
   validation-time/watchdog accounting debt (07c).
 - **Step 07 trial/formal-identity correction — MERGED (PR #217, squash
   `a15d1366e5a86b1d3297cda65b0d3a5dfdb84a2e` / `a15d1366`, 2026-08-17; base
@@ -1322,8 +1329,11 @@ TIDMAD's `network.py:FocalLoss1D`.
   budgets unset → valid trial invisible → `[SkipFormal] reason=no_valid_trial_winner`
   → the forced formal round never ran. Unchanged: candidate validity, MetricOrder,
   skip/bypass threshold mathematics, retry/round semantics, record schema, prompts,
-  the node's public interface. Still OPEN: the `resolved_action` stale-attempt
-  hazard and 07c's validation-time/watchdog accounting debt.
+  the node's public interface. Still OPEN at the time: the `resolved_action`
+  hazard ("stale-attempt" was wrong in kind — the C7 decomposition had
+  SEVERED the carrier, so the variable was never written at all; CLOSED by
+  the F-SCANC-1 retirement, operator decision packet v1, 2026-08-26) and
+  07c's validation-time/watchdog accounting debt.
   **Runtime-control debt opened by the 07c design review (operator decision,
   2026-08-17, Q-07c-6 = B)**: *pre-run ADMISSION pricing of the validation
   workload*. 07c prices validation for runtime PREDICTION and the WATCHDOG
@@ -1338,9 +1348,12 @@ TIDMAD's `network.py:FocalLoss1D`.
   `docs/design/runtime_estimation_and_calibration.md`).
   **`resolved_action` is NOT scheduled ahead of 07c (operator decision,
   2026-08-17)**: it is conceptually adjacent to the coupling just corrected but
-  is a different defect, and adjacency is not a schedule. Do not open a
-  follow-up correction PR for it merely because this work surfaced it; it still
-  needs the operator decision its own note names. **07c detailed design is FROZEN — Revision 3, operator approved 2026-08-17** (`docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07c_tuner_measurement.md`, source audit at `ad176036`; seven commits C1–C7; Q-07c-1..9 all closed; three-track matrix = TIDMAD executable / Pets + DAVIS at current maturity only; Gate 1 NOT REQUIRED, Gate 2 REQUIRED bounded once at the final executable head, watchdog ON and counterfactual-discriminative). **NEXT = 07c IMPLEMENTATION**, to be
+  is a different defect, and adjacency is not a schedule. [Superseded: the
+  operator decision its note named arrived 2026-08-26 — F-SCANC-1, decision
+  packet v1, RETIRE for v1. The severed machinery, the `gate_aborted` carrier
+  and the `SKIP_ITER` / `SKIP_TO_FORMAL` vocabulary members are removed;
+  re-opening gate-driven loop control is ICLR-track work needing its own
+  decision and witness cycle.] **07c detailed design is FROZEN — Revision 3, operator approved 2026-08-17** (`docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07c_tuner_measurement.md`, source audit at `ad176036`; seven commits C1–C7; Q-07c-1..9 all closed; three-track matrix = TIDMAD executable / Pets + DAVIS at current maturity only; Gate 1 NOT REQUIRED, Gate 2 REQUIRED bounded once at the final executable head, watchdog ON and counterfactual-discriminative). **NEXT = 07c IMPLEMENTATION**, to be
   re-confirmed from the merged roadmap / current-state documents at the start of
   a fresh session — never from the conversation that produced this correction.
   See the Step-07 parent §17.1.

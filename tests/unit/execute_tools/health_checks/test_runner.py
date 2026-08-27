@@ -100,7 +100,7 @@ def _make_gate(
     *,
     short_circuit: bool = True,
     on_pass_action: GateAction = GateAction.CONTINUE,
-    on_fail_action: GateAction = GateAction.SKIP_ITER,
+    on_fail_action: GateAction = GateAction.INVALIDATE_ROUND,
 ) -> GateConfig:
     return GateConfig(
         id=gate_id,
@@ -138,16 +138,12 @@ class TestSeverityOf:
         assert len(seen) == len(list(GateAction))
 
     def test_ordering_matches_spec(self):
-        """SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE (design §8)."""
-        assert (
-            severity_of(GateAction.SKIP_ITER)
-            > severity_of(GateAction.SKIP_TO_FORMAL)
-            > severity_of(GateAction.INVALIDATE_ROUND)
-            > severity_of(GateAction.CONTINUE)
-        )
+        """INVALIDATE_ROUND > CONTINUE (design §8; the two skip actions
+        were retired from the vocabulary — F-SCANC-1)."""
+        assert severity_of(GateAction.INVALIDATE_ROUND) > severity_of(GateAction.CONTINUE)
 
-    def test_skip_iter_is_highest(self):
-        assert all(severity_of(GateAction.SKIP_ITER) >= severity_of(a) for a in GateAction)
+    def test_invalidate_round_is_highest(self):
+        assert all(severity_of(GateAction.INVALIDATE_ROUND) >= severity_of(a) for a in GateAction)
 
     def test_continue_is_lowest(self):
         assert all(severity_of(GateAction.CONTINUE) <= severity_of(a) for a in GateAction)
@@ -163,15 +159,15 @@ class TestResolveAction:
         assert resolve_action([]) is GateAction.CONTINUE
 
     def test_single_result_returns_that_action(self):
-        assert resolve_action([_gr(GateAction.SKIP_TO_FORMAL)]) is GateAction.SKIP_TO_FORMAL
+        assert resolve_action([_gr(GateAction.INVALIDATE_ROUND)]) is GateAction.INVALIDATE_ROUND
 
     def test_multiple_mixed_picks_most_severe(self):
         actions = [
             _gr(GateAction.CONTINUE),
             _gr(GateAction.INVALIDATE_ROUND),
-            _gr(GateAction.SKIP_TO_FORMAL),
+            _gr(GateAction.CONTINUE),
         ]
-        assert resolve_action(actions) is GateAction.SKIP_TO_FORMAL
+        assert resolve_action(actions) is GateAction.INVALIDATE_ROUND
 
     def test_all_continue_returns_continue(self):
         actions = [_gr(GateAction.CONTINUE) for _ in range(3)]
@@ -183,10 +179,10 @@ class TestResolveAction:
 
         def gen():
             yield _gr(GateAction.CONTINUE)
-            yield _gr(GateAction.SKIP_ITER)
             yield _gr(GateAction.INVALIDATE_ROUND)
+            yield _gr(GateAction.CONTINUE)
 
-        assert resolve_action(gen()) is GateAction.SKIP_ITER
+        assert resolve_action(gen()) is GateAction.INVALIDATE_ROUND
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +254,7 @@ class TestEvaluateGate:
                     after_round=1,
                     check_refs=[CheckRef(name="a"), CheckRef(name="b")],
                     on_pass_action=GateAction.CONTINUE,
-                    on_fail_action=GateAction.SKIP_ITER,
+                    on_fail_action=GateAction.INVALIDATE_ROUND,
                 ),
             ),
         )
@@ -282,14 +278,14 @@ class TestEvaluateGate:
                     "g",
                     after_round=1,
                     check_refs=[CheckRef(name="a"), CheckRef(name="b")],
-                    on_fail_action=GateAction.SKIP_ITER,
+                    on_fail_action=GateAction.INVALIDATE_ROUND,
                     short_circuit=True,
                 ),
             ),
         )
         gr = evaluate_gate("g", _ctx())
         assert gr.passed is False
-        assert gr.action is GateAction.SKIP_ITER
+        assert gr.action is GateAction.INVALIDATE_ROUND
         assert gr.failure_reason == "a: fail"
         assert a.run_calls == 1
         assert b.run_calls == 0  # short-circuited
@@ -313,14 +309,14 @@ class TestEvaluateGate:
                         CheckRef(name="b"),
                         CheckRef(name="c"),
                     ],
-                    on_fail_action=GateAction.SKIP_TO_FORMAL,
+                    on_fail_action=GateAction.INVALIDATE_ROUND,
                     short_circuit=False,
                 ),
             ),
         )
         gr = evaluate_gate("g", _ctx())
         assert gr.passed is False
-        assert gr.action is GateAction.SKIP_TO_FORMAL
+        assert gr.action is GateAction.INVALIDATE_ROUND
         assert a.run_calls == 1
         assert b.run_calls == 1
         assert c.run_calls == 1
@@ -641,7 +637,7 @@ class TestApplicabilityWiring:
 
         assert plain.run_calls == 1
         assert gr.passed is False
-        assert gr.action is GateAction.SKIP_ITER
+        assert gr.action is GateAction.INVALIDATE_ROUND
         assert gr.check_results[0].verdict is CheckVerdict.FAILED
         # Facts are never resolved when no check declares any.
         assert contrast_task["n"] == 0
@@ -678,7 +674,7 @@ class TestApplicabilityWiring:
                     1,
                     [CheckRef(name="int8_only")],
                     on_pass_action=GateAction.CONTINUE,
-                    on_fail_action=GateAction.SKIP_ITER,
+                    on_fail_action=GateAction.INVALIDATE_ROUND,
                 )
             ),
         )
@@ -708,7 +704,7 @@ class TestApplicabilityWiring:
 
         assert gr.passed is False
         assert gr.failure_reason == "flagger: collapsed"
-        assert gr.action is GateAction.SKIP_ITER
+        assert gr.action is GateAction.INVALIDATE_ROUND
 
     def test_inapplicable_does_not_trigger_short_circuit(
         self, clean_registry, monkeypatch, contrast_task

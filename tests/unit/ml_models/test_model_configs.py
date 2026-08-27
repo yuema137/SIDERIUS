@@ -281,3 +281,53 @@ class TestGatedFNOConfig:
     def test_field_below_min_raises(self, kwargs):
         with pytest.raises(ValidationError):
             GatedFNOConfig(**kwargs)
+
+
+# ==========================================
+# TrainConfig — paper-spec lr default (F-SCANA-1)
+# ==========================================
+
+
+class TestTrainConfigPaperSpecLrDefault:
+    """F-SCANA-1 — an OMITTED LLM ``lr`` key must resolve to paper spec.
+
+    The paper-spec source of truth (``ml_models/legacy_baseline_configs.json``,
+    cross-referenced against TIDMAD ``train.py``'s
+    ``torch.optim.Adam(..., lr=0.0005)``) pins ``lr = 5e-4`` for every model.
+    Pre-fix, ``TrainConfig.lr`` defaulted to ``1e-4``, so a plan that simply
+    omitted the key trained 5x below spec THROUGH the Pydantic gate that
+    exists to validate LLM output — the same silence-decides-the-bound class
+    as the V21 PR B1b epochs clamp bypass.
+
+    The expectation is HARDCODED to the paper literal in every assertion —
+    never read back from the schema under test — so a drifted default fails
+    here instead of being ratified.
+    """
+
+    def test_omitted_lr_resolves_to_paper_spec_through_the_production_path(self):
+        """Defect only this catches: the schema default departing 5e-4.
+
+        The construction below is the exact production validation
+        expression for an LLM plan's training config —
+        ``TrainConfig(**t_cfg)`` at ``core/sandbox_executor.py`` (parent
+        validation) and ``execute_tools/train_engine_sandbox.py`` (trainer
+        subprocess) — with ``lr`` absent, as an LLM that omits the key
+        produces it. Fails when: the declared default moves off 5e-4.
+        """
+        t_cfg = {"epochs": 1, "batch_size": 1, "device": "cpu"}  # no "lr" key
+        assert TrainConfig(**t_cfg).lr == 5e-4
+
+    def test_collapse_recovery_prompt_names_the_same_paper_baseline(self):
+        """Defect only this catches: the planner prompt's known-working
+        baseline drifting from the schema default (two authorities again).
+
+        The collapse-recovery block tells the LLM to "reset to the
+        known-working baseline: ... ``lr=5e-4``". That literal and the
+        schema default above are pinned to the SAME hardcoded paper value,
+        so whichever surface moves first fails one of these two tests
+        rather than silently disagreeing with the other. Fails when: the
+        prompt literal is edited or removed.
+        """
+        from agent.prompts import PLANNER_PROMPT
+
+        assert "`lr=5e-4`" in PLANNER_PROMPT

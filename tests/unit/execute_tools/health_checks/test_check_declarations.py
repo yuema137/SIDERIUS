@@ -349,7 +349,7 @@ class TestTheAxisCutsBothWays:
             short_circuit=True,
             checks=[CheckRef(name=cls.name) for cls in SHIPPED_CHECKS],
             on_pass=ActionConfig(action=GateAction.CONTINUE),
-            on_fail=ActionConfig(action=GateAction.SKIP_ITER),
+            on_fail=ActionConfig(action=GateAction.INVALIDATE_ROUND),
         )
         monkeypatch.setattr(
             runner,

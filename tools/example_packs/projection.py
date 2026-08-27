@@ -81,9 +81,11 @@ AUTHORITY_PATHS: dict[str, str] = {
 def _task_config_path(root: Path) -> str:
     """The shipped task YAML, addressed from the checkout root.
 
-    ``load_task_config`` defaults to a CWD-relative ``configs/task_config.yaml``;
-    the projection must not depend on the shell's working directory
-    (CLAUDE.md portability), so the path is made explicit here.
+    ``load_task_config`` now defaults to the SIDERIUS_ROOT-anchored
+    canonical file (F-SCANA-2; it used to be CWD-relative). The projection
+    keeps its own explicit path anyway: this tooling addresses whichever
+    checkout ``root`` names, which need not be the checkout the module was
+    imported from (CLAUDE.md portability).
     """
     return str(root / "configs" / "task_config.yaml")
 

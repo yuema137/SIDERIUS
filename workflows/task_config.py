@@ -42,10 +42,36 @@ from agent.schemas.model_io_contract import ModelIOContract
 from agent.schemas.model_io_resolution import resolve_model_io_contract
 from agent.schemas.task_config import ForwardContract
 
-# Repo-relative default path. Resolved at call time (not import time) so a
-# test that monkeypatches ``os.getcwd`` or chdirs into a fixture dir sees the
-# updated cwd. The chain runner always invokes with cwd == repo root.
-_DEFAULT_CONFIG_PATH = "configs/task_config.yaml"
+# F-SCANA-2 — repository root, derived from this file's own location (the
+# established root-derivation idiom, same as
+# ``workflows/model_exploration.py::SIDERIUS_ROOT``). The canonical config
+# used to be resolved against the CALLER'S CWD here while the workspace
+# snapshot (``model_exploration._snapshot_task_config``) resolved against
+# SIDERIUS_ROOT, with a comment asserting "the chain runner always invokes
+# with cwd == repo root" instead of enforcing it. From a foreign cwd the
+# read (and the F-SCANH-1 lock pin, which mirrors the read) could therefore
+# address a DIFFERENT file than the one the snapshot preserves. One
+# root-anchored resolution authority now serves all three; tests that need
+# a fixture config monkeypatch ``_SIDERIUS_ROOT`` instead of chdir'ing.
+_SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def default_task_config_path() -> str:
+    """The canonical ``configs/task_config.yaml`` location (F-SCANA-2).
+
+    The ONE resolution authority for the file: :func:`load_task_config`
+    (the read), :func:`task_config_file_sha256` (the run-invariants lock
+    pin) and ``workflows.model_exploration._snapshot_task_config`` (the
+    workspace snapshot) all address the canonical file through this
+    function, so they cannot diverge by construction. SIDERIUS_ROOT-
+    anchored — independent of the caller's working directory. Resolved at
+    call time so a test redirecting ``_SIDERIUS_ROOT`` is honoured.
+
+    Returns:
+        Absolute path of the canonical task-config file.
+    """
+    return os.path.join(_SIDERIUS_ROOT, "configs", "task_config.yaml")
+
 
 # Module-level cache: ``load_task_config()`` short-circuits to the cached
 # value on subsequent calls so the YAML is parsed once per process. Keyed by
@@ -173,8 +199,9 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
 
     Args:
         path: Optional override for the YAML location. Defaults to
-            ``configs/task_config.yaml`` resolved relative to the current
-            working directory.
+            :func:`default_task_config_path` — the canonical
+            SIDERIUS_ROOT-anchored ``configs/task_config.yaml``,
+            independent of the caller's working directory (F-SCANA-2).
 
     Returns:
         Parsed and validated YAML dict.
@@ -199,13 +226,13 @@ def load_task_config(path: str | None = None) -> dict[str, Any]:
         if bound is not None:
             return bound
 
-    resolved = os.path.abspath(path or _DEFAULT_CONFIG_PATH)
+    resolved = os.path.abspath(path or default_task_config_path())
 
     if resolved in _CACHE:
         return _CACHE[resolved]
 
     if not os.path.isfile(resolved):
-        raise FileNotFoundError(_MISSING_FILE_REMEDIATION.format(path=path or _DEFAULT_CONFIG_PATH))
+        raise FileNotFoundError(_MISSING_FILE_REMEDIATION.format(path=resolved))
 
     with open(resolved, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
@@ -286,7 +313,10 @@ def task_config_file_sha256(path: str | None = None) -> str:
     ``task_composition_fingerprint``.
 
     Resolution mirrors :func:`load_task_config` exactly
-    (``os.path.abspath(path or _DEFAULT_CONFIG_PATH)``). The digest is
+    (``os.path.abspath(path or default_task_config_path())`` — the one
+    SIDERIUS_ROOT-anchored authority, F-SCANA-2, so the pinned sha is
+    always computed over the same file the loader reads and the workspace
+    snapshot preserves). The digest is
     computed over the raw file bytes on EVERY call — deliberately no
     caching, because the lock pin must see fresh bytes at every startup;
     the loader's parse cache is a separate concern (it serves parsed
@@ -303,9 +333,9 @@ def task_config_file_sha256(path: str | None = None) -> str:
         FileNotFoundError: When the file does not exist on disk, carrying
             the same operator-facing remediation text as the loader.
     """
-    resolved = os.path.abspath(path or _DEFAULT_CONFIG_PATH)
+    resolved = os.path.abspath(path or default_task_config_path())
     if not os.path.isfile(resolved):
-        raise FileNotFoundError(_MISSING_FILE_REMEDIATION.format(path=path or _DEFAULT_CONFIG_PATH))
+        raise FileNotFoundError(_MISSING_FILE_REMEDIATION.format(path=resolved))
     with open(resolved, "rb") as f:
         return hashlib.sha256(f.read()).hexdigest()
 

@@ -135,10 +135,24 @@ class TestPrimarySelection:
         assert picked["gate_name"] == "amplitude_collapse_blocking"
 
     def test_severity_narrows(self):
+        # Live vocabulary (post-F-SCANC-1): invalidate_round (severity 1)
+        # outranks continue (severity 0) among failed gates.
+        g1 = _gate(resolved_action="continue")
+        g2 = _amplitude_gate(resolved_action="invalidate_round")
+        picked = select_primary_gate_outcome([g1, g2], None)
+        assert picked["gate_name"] == "amplitude_collapse_blocking"
+
+    def test_a_historical_retired_action_ranks_below_any_live_action(self):
+        """F-SCANC-1 reader tolerance: a persisted record from before the
+        retirement can carry "skip_iter" (a custom pre-v1 config); the
+        severity step must DEGRADE it below every live action instead of
+        raising — this is what keeps an old workspace's feedback restore
+        readable. Fails when: `_sev`'s except-degrade is removed, or the
+        retired string is mapped back onto a live severity."""
         g1 = _gate(resolved_action="invalidate_round")
         g2 = _amplitude_gate(resolved_action="skip_iter")
         picked = select_primary_gate_outcome([g1, g2], None)
-        assert picked["gate_name"] == "amplitude_collapse_blocking"
+        assert picked["gate_name"] == "output_diversity_blocking"
 
     def test_config_order_final_tiebreak(self):
         g1 = _gate()

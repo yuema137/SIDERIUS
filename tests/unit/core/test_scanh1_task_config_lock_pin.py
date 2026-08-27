@@ -35,6 +35,7 @@ from core.run_invariants import (
     ensure_run_invariants,
     write_run_invariants,
 )
+from workflows import task_config as _tc
 
 #: Known task-config bytes — realistic YAML (the sha helper hashes bytes and
 #: never parses, but the fixture mirrors the real file's shape).
@@ -53,7 +54,12 @@ EDITED_BODY = TASK_CONFIG_BODY + b"  task_note: retuned mid-workspace\n"
 
 
 def _write_task_config(tmp_path, body: bytes) -> None:
-    """Place ``configs/task_config.yaml`` with KNOWN bytes under the tmp cwd."""
+    """Place ``configs/task_config.yaml`` with KNOWN bytes under ``tmp_path``.
+
+    Paired with the ``_SIDERIUS_ROOT`` redirection below: F-SCANA-2 anchored
+    the canonical config on the repo root (it used to be cwd-relative), so
+    the fixture root is redirected instead of chdir'ing.
+    """
     cfg_dir = tmp_path / "configs"
     cfg_dir.mkdir(exist_ok=True)
     (cfg_dir / "task_config.yaml").write_bytes(body)
@@ -89,7 +95,7 @@ class TestScanH1TaskConfigLockPin:
         helper hashes something other than the raw file bytes, or
         ``write_run_invariants`` drops the populated key.
         """
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(_tc, "_SIDERIUS_ROOT", str(tmp_path))
         _write_task_config(tmp_path, TASK_CONFIG_BODY)
         workspace = tmp_path / "ws"
 
@@ -112,7 +118,7 @@ class TestScanH1TaskConfigLockPin:
         produces a different ``task_config_sha256``, so
         ``ensure_run_invariants`` raises instead of returning "validated".
         """
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(_tc, "_SIDERIUS_ROOT", str(tmp_path))
         _write_task_config(tmp_path, TASK_CONFIG_BODY)
         workspace = tmp_path / "ws"
 
@@ -134,7 +140,7 @@ class TestScanH1TaskConfigLockPin:
         field leaves ``_CANONICAL`` (comparison skipped), or the refusal
         stops naming ``task_config_sha256``.
         """
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(_tc, "_SIDERIUS_ROOT", str(tmp_path))
         _write_task_config(tmp_path, TASK_CONFIG_BODY)
         workspace = tmp_path / "ws"
         assert ensure_run_invariants(str(workspace), _build(workspace)) == "created"
@@ -146,20 +152,23 @@ class TestScanH1TaskConfigLockPin:
     def test_composed_run_pins_none_and_never_reads_the_file(self, tmp_path, monkeypatch):
         """F-SCANH-1 (d): a composed run's lock is untouched by the pin.
 
-        Defect only this catches: the builder hashing the cwd task-config
-        file for a COMPOSED run — whose task config arrives via
+        Defect only this catches: the builder hashing the canonical
+        task-config file for a COMPOSED run — whose task config arrives via
         ``bind_task_config`` and whose identity is owned by
         ``task_composition_fingerprint``. Pinning an unread file would (1)
-        crash composed runs launched where no ``configs/task_config.yaml``
-        exists, and (2) change composed lock bytes, breaking the
+        crash composed runs whose canonical root carries no
+        ``configs/task_config.yaml``, and (2) change composed lock bytes, breaking the
         omitted-when-``None`` byte-identity rule.
 
         Fails when: the composed build raises ``FileNotFoundError`` (it
-        read the file — no config exists in this cwd BY CONSTRUCTION), the
+        read the file — no config exists under the redirected root BY
+        CONSTRUCTION), the
         model carries a non-``None`` pin, or the serialized lock gains the
         key.
         """
-        monkeypatch.chdir(tmp_path)  # deliberately NO configs/ dir here
+        monkeypatch.setattr(
+            _tc, "_SIDERIUS_ROOT", str(tmp_path)
+        )  # deliberately NO configs/ dir here
         workspace = tmp_path / "ws"
 
         invariants, _ = build_run_invariants(
@@ -193,7 +202,7 @@ class TestScanH1TaskConfigLockPin:
         ``None`` locked pin as compatible, or the refusal stops naming
         ``task_config_sha256``.
         """
-        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(_tc, "_SIDERIUS_ROOT", str(tmp_path))
         _write_task_config(tmp_path, TASK_CONFIG_BODY)
         workspace = tmp_path / "ws"
 

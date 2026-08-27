@@ -55,6 +55,12 @@ FORBIDDEN_BINDING_FIELDS: frozenset[str] = frozenset(
         "active_params",
         "hypothesis",
         "exp_id",
+        # F-SCANC-1 (operator decision packet v1, 2026-08-26): the
+        # `resolved_action` round local and the `gate_aborted` carrier were
+        # RETIRED with the SKIP_ITER / SKIP_TO_FORMAL gate actions. The
+        # names STAY forbidden: the ruling is "no new wiring for a dead
+        # authority surface", and a binding field is exactly the wiring
+        # route this set exists to refuse.
         "resolved_action",
         "round_succeeded",
         "gate_aborted",
@@ -280,13 +286,14 @@ class RunExitSnapshot:
     explicit — they travel as a named set with a stated purpose rather than
     hiding inside a bindings object that claims to be stable.
 
-    Nine fields, each a fact only the finished loop can state.
+    Eight fields, each a fact only the finished loop can state.
+    (``gate_aborted`` was the ninth — retired with SKIP_ITER, F-SCANC-1:
+    its only writer was the run loop's unreachable skip branch.)
     """
 
     completed_rounds: int
     total_attempts: int
     consecutive_fails: int
-    gate_aborted: bool
     scope_violation_reason: str | None
     evidence_channel_failure: str | None
     skipped_formal_for_no_valid_winner: bool

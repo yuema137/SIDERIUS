@@ -1275,8 +1275,9 @@ def run_inference_scoring_health(
                 # score_vector is pure scoring post-5a; the HealthGate
                 # model runs here at the round boundary per
                 # docs/design/pluggable_health_checks.md §8.
-                # Loop control (SKIP_ITER, SKIP_TO_FORMAL) is applied
-                # after the attempts loop; see the block below.
+                # The resolved action feeds the record surface only
+                # (gate_action / is_degenerate); the skip loop-control
+                # actions were retired (F-SCANC-1).
                 # Target-signal path resolver for CH2-comparing
                 # recording checks (pearson_dispersion, etc.).
                 # M8 §3.4: the check module stays task-agnostic;

@@ -242,8 +242,8 @@ def local_validated_model(
       - degenerate_penalty_score :
         Operator policy for the agent's reaction when tuner-side gate
         evaluation produces a non-``CONTINUE`` ``GateAction``
-        (``INVALIDATE_ROUND`` / ``SKIP_TO_FORMAL`` / ``SKIP_ITER``) on a
-        formal round. ``None`` (default) nulls the ``denoising_score``
+        (``INVALIDATE_ROUND``; the skip actions were retired, F-SCANC-1)
+        on a formal round. ``None`` (default) nulls the ``denoising_score``
         so the round can never be picked as 'best'; a float value
         (typically large-negative) is used as the score so the planner
         can still rank-order the failure. In both cases the record is

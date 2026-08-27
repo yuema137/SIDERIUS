@@ -63,9 +63,6 @@ from execute_tools.health_checks.config import (
     load_composed_health_config,
     load_health_gates_config,
 )
-from execute_tools.health_checks.schemas import (
-    GateAction,
-)
 from execute_tools.metric_order import MetricOrder
 from execute_tools.sample_set_builder import build_sample_set
 from execute_tools.scoring_helpers import build_score_table
@@ -135,10 +132,8 @@ from nodes.ml_hyperparameter_tune_agent.policy import (
     _resolve_sample_set_cfg,
     _score_of,
     _select_best_records,
-    _should_break_iteration,
     _should_bypass_formal_time_budget,
     _should_skip_formal,
-    _should_skip_to_formal,
     _strategy_full_clone,
     _strategy_hybrid_params,
     _strategy_independent,
@@ -339,10 +334,8 @@ _COMPATIBILITY_REEXPORTS = (
     _runtime_phase_for,
     _score_of,
     _select_best_records,
-    _should_break_iteration,
     _should_bypass_formal_time_budget,
     _should_skip_formal,
-    _should_skip_to_formal,
     _strategy_full_clone,
     _strategy_hybrid_params,
     _strategy_independent,
@@ -360,12 +353,23 @@ SIDERIUS_ROOT = str(Path(__file__).resolve().parents[2])
 # `AttemptTransition` and `AttemptDecision` used to live here. Step 07 PR 07b
 # REMOVED them (§3.5, operator decision Q-07b-1): they had ZERO production
 # consumers — only their own unit tests — and wiring them would have meant
-# resetting `resolved_action` per attempt, which CHANGES round outcomes in the
-# crash-after-a-scored-attempt case (see the hazard note at the
-# `resolved_action` declaration in `run()`). 07b may not change retry or round
-# semantics, so "wire it" and "keep round semantics unchanged" could not both
-# be satisfied. The round-outcome consumer that IS wired, `RoundDecision` /
-# `_decide_round_outcome`, stays exactly as it was.
+# resetting `resolved_action` per attempt, which would have CHANGED round
+# outcomes in the crash-after-a-scored-attempt case. 07b may not change retry
+# or round semantics, so "wire it" and "keep round semantics unchanged" could
+# not both be satisfied.
+#
+# F-SCANC-1 CLOSURE (operator decision packet v1, 2026-08-26): what 07b
+# declined to wire, the C7 decomposition then silently SEVERED in the other
+# direction — the gate verdict died as a local in `execution.py`, so
+# `_decide_round_outcome` only ever saw the loop's own CONTINUE initializer
+# and SKIP_ITER / SKIP_TO_FORMAL were unreachable (the hazard was never
+# "stale", it was severed). The operator ruling is RETIRE for v1, not wire:
+# the `resolved_action` round local, the skip branches, the `gate_aborted`
+# carrier and the two skip members of `GateAction` are removed, and a config
+# declaring a retired action refuses at validation. Gate actions still reach
+# the record surface (`gate_action` on the round record) — they no longer
+# claim loop control. `RoundDecision` / `_decide_round_outcome` survives as
+# the non-retryable-termination arbiter.
 
 
 # --------------------------------------------------------------------- #
@@ -1267,11 +1271,6 @@ class HyperparamTuningAgent:
         # absence of a formal record — which cannot distinguish a
         # no-winner skip from a budget skip.
         _skipped_formal_for_no_valid_winner = False
-        # Set to True when a SKIP_ITER gate action breaks the outer while
-        # loop before max_rounds. Consumed by _compute_termination_state
-        # to distinguish gate-driven aborts from fail-round-driven aborts
-        # and healthy completions (audit Gap #3, follow-up to commit-5b).
-        _gate_aborted = False
         # DataScope DS5 — non-retryable configuration/invariant failure flag.
         # A scope violation reaching an executor means the scope plumbing has
         # a bug; it is deterministic on retry, so the run terminates instead
@@ -1353,26 +1352,12 @@ class HyperparamTuningAgent:
             is_formal_round = completed_rounds == max_rounds - 1
             N = attempts_per_formal_round_setting if is_formal_round else attempts_per_round_setting
             round_succeeded = False
-            # Per-round gate evaluation state (commit-5b). Updated inside
-            # the attempts loop on the score_vector success path and
-            # consumed after the attempts loop for SKIP_ITER /
-            # SKIP_TO_FORMAL loop control. Stays CONTINUE when all attempts
-            # crash (gates only fire on completed scoring outputs; failed
-            # rounds are handled by consecutive_fails).
-            #
-            # KNOWN DEFECT, recorded by Step 07 PR 07b (§3.5 / OD-S7-6), NOT
-            # fixed here. This variable is ROUND-scoped but is written seven
-            # nesting levels down, only on the branch that reaches health-gate
-            # evaluation, and is never reset between attempts. So an attempt
-            # that leaves early — admission refusal, OOM/time skip, an
-            # exception — lets `_decide_round_outcome` below read the LAST
-            # SCORED attempt's gate action as if it were this attempt's.
-            # Proposed fix: carry the action per attempt and treat "no action
-            # produced" as distinct from CONTINUE. That CHANGES round outcomes
-            # in the crash-after-a-scored-attempt case, so it needs an operator
-            # decision on the intended outcome and a dedicated round-semantics
-            # correction — it is neither 07b's nor 07c's.
-            resolved_action: GateAction = GateAction.CONTINUE
+            # F-SCANC-1: the per-round `resolved_action` local that used to
+            # be declared here (with the 07b OD-S7-6 hazard note) is
+            # RETIRED — see the closure note at the module's 07b comment.
+            # The C7 decomposition had already severed its only real
+            # writer, so it was a constant CONTINUE masquerading as loop
+            # control.
 
             # Post-v15 skip-formal gate: bail before starting the formal round
             # when the best trial score is well below the current run's best
@@ -1697,10 +1682,8 @@ class HyperparamTuningAgent:
             _round_decision = _decide_round_outcome(
                 scope_violation_reason=_scope_violation_reason,
                 evidence_channel_failure=_evidence_channel_failure,
-                resolved_action=resolved_action,
-                is_formal_round=is_formal_round,
             )
-            if _scope_violation_reason or _evidence_channel_failure:
+            if _round_decision is RoundDecision.BREAK_ITERATION:
                 print(
                     _non_retryable_termination_message(
                         scope_violation_reason=_scope_violation_reason,
@@ -1720,25 +1703,6 @@ class HyperparamTuningAgent:
                     f"(consecutive_fail_rounds={consecutive_fails}/"
                     f"{max_fail_rounds_setting})."
                 )
-
-            # Post-round gate-action loop control (commit-5b).
-            # SKIP_ITER: break the while loop entirely; chain-level caller
-            #   of tuner.run() moves to the next chain iteration.
-            # SKIP_TO_FORMAL: jump completed_rounds so the next while
-            #   iteration lands on the formal round. Guarded when already
-            #   on the formal round — no re-run.
-            # See docs/design/pluggable_health_checks.md §4 for action
-            # semantics and §8 for severity resolution.
-            if _round_decision is RoundDecision.BREAK_ITERATION:
-                print(f"  [HEALTH GATE] SKIP_ITER at round {round_index} — aborting iteration.")
-                _gate_aborted = True
-                break
-            if _round_decision is RoundDecision.SKIP_TO_FORMAL:
-                print(
-                    f"  [HEALTH GATE] SKIP_TO_FORMAL at round {round_index} — "
-                    f"jumping to formal round {max_rounds}."
-                )
-                completed_rounds = max_rounds - 1
 
             # Phase 6.8 §2 Layer C (Commit 4) — per-round cleanup. Drop
             # local refs to the largest per-round transients before the
@@ -1769,7 +1733,6 @@ class HyperparamTuningAgent:
                 completed_rounds=completed_rounds,
                 total_attempts=total_attempts,
                 consecutive_fails=consecutive_fails,
-                gate_aborted=_gate_aborted,
                 scope_violation_reason=_scope_violation_reason,
                 evidence_channel_failure=_evidence_channel_failure,
                 skipped_formal_for_no_valid_winner=_skipped_formal_for_no_valid_winner,

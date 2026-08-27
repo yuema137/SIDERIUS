@@ -21,7 +21,6 @@ from dataclasses import FrozenInstanceError
 import pytest
 from pydantic import ValidationError
 
-from execute_tools.health_checks.schemas import GateAction
 from nodes.ml_hyperparameter_tune_agent.ml_hyperparameter_tune_agent import (
     INFRASTRUCTURE_FAILURE_STATUS,
     RESOURCE_ADMISSION_REASONS,
@@ -463,18 +462,22 @@ class TestResourceAdmissionSurface:
 # wiring them would have required resetting the round-scoped
 # ``resolved_action`` per attempt — a change to round outcomes that 07b is not
 # permitted to make. Testing a type nothing calls proved nothing about the
-# tuner; the hazard those tests described is now recorded as a known defect
-# beside the ``resolved_action`` declaration in ``run()``, with a proposed fix
-# and an owner. ``TestRoundOutcome`` below is untouched: ``RoundDecision`` and
-# ``_decide_round_outcome`` ARE wired.
+# tuner.
+#
+# F-SCANC-1 (operator decision packet v1, 2026-08-26) then RETIRED the
+# ``resolved_action`` surface itself: the C7 decomposition had severed the
+# carrier, so this class's skip cases hand-passed values production could no
+# longer produce — the finding's "eighth blindness shape" (a test that
+# SUPPLIES an input production no longer produces). Those cases were deleted
+# with the machinery; ``RoundDecision`` / ``_decide_round_outcome`` survive
+# as the non-retryable-termination arbiter, and the cases below exercise the
+# inputs it still has.
 
 
 def _round_inputs(**over):
     base = dict(
         scope_violation_reason=None,
         evidence_channel_failure=None,
-        resolved_action=GateAction.CONTINUE,
-        is_formal_round=False,
     )
     base.update(over)
     return base
@@ -488,36 +491,6 @@ class TestRoundOutcome:
     def test_a_non_retryable_condition_breaks_the_iteration(self, field):
         assert (
             _decide_round_outcome(**_round_inputs(**{field: "boom"}))
-            is RoundDecision.BREAK_ITERATION
-        )
-
-    def test_skip_iter_breaks_the_iteration(self):
-        assert (
-            _decide_round_outcome(**_round_inputs(resolved_action=GateAction.SKIP_ITER))
-            is RoundDecision.BREAK_ITERATION
-        )
-
-    def test_skip_to_formal_only_outside_the_formal_round(self):
-        assert (
-            _decide_round_outcome(**_round_inputs(resolved_action=GateAction.SKIP_TO_FORMAL))
-            is RoundDecision.SKIP_TO_FORMAL
-        )
-        assert (
-            _decide_round_outcome(
-                **_round_inputs(resolved_action=GateAction.SKIP_TO_FORMAL, is_formal_round=True)
-            )
-            is RoundDecision.CONTINUE
-        )
-
-    def test_a_non_retryable_condition_outranks_a_gate_action(self):
-        """Order is load-bearing: a scope violation is deterministic on
-        retry, so it must not be overtaken by SKIP_TO_FORMAL."""
-        assert (
-            _decide_round_outcome(
-                **_round_inputs(
-                    scope_violation_reason="scope", resolved_action=GateAction.SKIP_TO_FORMAL
-                )
-            )
             is RoundDecision.BREAK_ITERATION
         )
 

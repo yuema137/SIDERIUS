@@ -851,7 +851,6 @@ def finalize_run_output(
     completed_rounds = exit_snapshot.completed_rounds
     total_attempts = exit_snapshot.total_attempts
     consecutive_fails = exit_snapshot.consecutive_fails
-    _gate_aborted = exit_snapshot.gate_aborted
     _scope_violation_reason = exit_snapshot.scope_violation_reason
     _evidence_channel_failure = exit_snapshot.evidence_channel_failure
     _skipped_formal_for_no_valid_winner = exit_snapshot.skipped_formal_for_no_valid_winner
@@ -860,15 +859,14 @@ def finalize_run_output(
 
     finished_at = time.strftime("%Y-%m-%d %H:%M:%S")
     # Phase L (§11) — termination_reason captures *why* the outer
-    # loop exited. Precedence: gate-driven abort (SKIP_ITER) wins
-    # over the fail-round brake wins over the max_rounds completion
-    # check. See _compute_termination_state.
+    # loop exited. Precedence: the fail-round brake wins over the
+    # max_rounds completion check (the gate-driven SKIP_ITER abort was
+    # retired, F-SCANC-1). See _compute_termination_state.
     run_status, termination_reason = _compute_termination_state(
         completed_rounds=completed_rounds,
         max_rounds=max_rounds,
         consecutive_fails=consecutive_fails,
         max_fail_rounds=max_fail_rounds_setting,
-        gate_aborted=_gate_aborted,
         scope_violation_reason=_scope_violation_reason,
         evidence_channel_failure=_evidence_channel_failure,
     )
@@ -1245,7 +1243,7 @@ def build_attempt_record(
         "metric_result": metric_payload,
         # Health-check failure reason from tuner-side gate
         # evaluation (commit-5b). Written unconditionally when
-        # non-None — trial-round SKIP_ITER also propagates its
+        # non-None — a failed trial-round gate also propagates its
         # reason string so the next planner iteration sees the
         # diagnostic even though _apply_degeneracy_reaction
         # preserves the trial score (audit Gap #1 fix,
@@ -1253,10 +1251,11 @@ def build_attempt_record(
         "failure_reason": failure_reason,
         # Resolved gate action string from tuner-side gate
         # evaluation. "continue" on healthy rounds where gates
-        # ran; "skip_iter" / "skip_to_formal" / "invalidate_round"
-        # on failed gates; None on error paths and single-file
-        # legacy mode where scoring didn't run through the gate
-        # path (audit Gap #2 fix, follow-up to commit-5b).
+        # ran; "invalidate_round" on failed blocking gates (the
+        # skip actions were retired, F-SCANC-1); None on error
+        # paths and single-file legacy mode where scoring didn't
+        # run through the gate path (audit Gap #2 fix, follow-up
+        # to commit-5b).
         "gate_action": score_results.get("gate_action"),
         "health_gate_results": score_results.get("health_gate_results", []),
         # Data volume

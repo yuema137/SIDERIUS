@@ -30,36 +30,46 @@ class GateAction(StrEnum):
     """Actions a HealthGate can route to on pass or fail.
 
     See ``docs/design/pluggable_health_checks.md`` §4 for semantics.
+
+    **F-SCANC-1 — ``skip_iter`` / ``skip_to_formal`` RETIRED for v1**
+    (operator decision packet v1, 2026-08-26). The C7 decomposition had
+    severed the tuner-side wire (the round verdict died as a local in
+    ``execution.py`` and the run-loop consumer only ever saw its
+    initializer), so both actions were UNREACHABLE advertised semantics:
+    a config could declare them, nothing could act on them. Per the
+    ruling — "no new wiring for a dead authority surface" — the two
+    members are retired from the vocabulary rather than wired: a config
+    declaring either now REFUSES at validation (``ActionConfig``) instead
+    of silently claiming semantics the runtime does not implement. No
+    shipped framework or task config ever declared them. Historical
+    persisted records cannot carry them either (the shipped policy only
+    ever emitted ``continue`` / ``invalidate_round``); a hand-rolled
+    pre-v1 artifact that does carry one fails its re-validation CLOSED —
+    the 12a precedent, no compatibility bypass.
     """
 
     CONTINUE = "continue"
     """Proceed normally. Next round runs, or iter closes if this was the
     last round — the tuner decides based on its own phase knowledge."""
 
-    SKIP_ITER = "skip_iter"
-    """Abort the current iteration. Move to the next iteration."""
-
-    SKIP_TO_FORMAL = "skip_to_formal"
-    """Skip remaining trial rounds. Jump to formal phase."""
-
     INVALIDATE_ROUND = "invalidate_round"
     """Mark this round's score as None. Continue to the next round."""
 
 
-BLOCKING_ACTIONS: frozenset[GateAction] = frozenset(
-    {GateAction.INVALIDATE_ROUND, GateAction.SKIP_TO_FORMAL, GateAction.SKIP_ITER}
-)
+BLOCKING_ACTIONS: frozenset[GateAction] = frozenset({GateAction.INVALIDATE_ROUND})
 """Actions that stop the round from being accepted as a valid experiment.
 
 Recording-only gates use ``CONTINUE`` on both ``on_pass`` and ``on_fail`` —
 they never appear here. The tuner uses this set to decide when a failed
 gate should flag ``is_degenerate`` (see ``_gate_results_to_score_meta`` in
 ``nodes/ml_hyperparameter_tune_agent``). Kept next to ``GateAction`` so
-future contributors see it when they read the enum."""
+future contributors see it when they read the enum. Since the F-SCANC-1
+retirement the set has one member; it stays a set because it IS the
+blocking-classification authority, not because the vocabulary is large."""
 
 
 # Severity table — most restrictive wins (design §8).
-#   SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE
+#   INVALIDATE_ROUND > CONTINUE   (post-F-SCANC-1 vocabulary)
 # Moved here from runner.py (V19 PR 3 CB1, pr3_healthgate_feedback.md
 # §2.5): this module is the side-effect-free canonical home for gate
 # vocabulary, so schema-level consumers (agent/schemas/health_feedback)
@@ -68,8 +78,6 @@ future contributors see it when they read the enum."""
 _SEVERITY: dict[GateAction, int] = {
     GateAction.CONTINUE: 0,
     GateAction.INVALIDATE_ROUND: 1,
-    GateAction.SKIP_TO_FORMAL: 2,
-    GateAction.SKIP_ITER: 3,
 }
 
 
@@ -681,14 +689,9 @@ class GateResult(BaseModel):
         ),
     )
 
-    @property
-    def should_skip_iter(self) -> bool:
-        return self.action == GateAction.SKIP_ITER
-
-    @property
-    def should_skip_to_formal(self) -> bool:
-        return self.action == GateAction.SKIP_TO_FORMAL
-
+    # F-SCANC-1: ``should_skip_iter`` / ``should_skip_to_formal`` were
+    # retired with their enum members (tuner-side loop control never read
+    # them; only their own unit tests did).
     @property
     def should_invalidate_round(self) -> bool:
         return self.action == GateAction.INVALIDATE_ROUND

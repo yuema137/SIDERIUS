@@ -326,7 +326,7 @@ executes, without distorting what the planner is allowed to decide. See
 | `secondary_metric_errors` (per record) | `dict[str, str]` | **Step 10 / P2b** — diagnostic PROVENANCE for a declared secondary whose evaluation CRASHED: metric id → a concise one-line diagnostic, also printed. Deliberately NOT a scientific state — a crash produced no contract verdict, so recording a `NotScoreableResult` would fabricate a measurement. The interpreter projects such a secondary as `unavailable`. A `ScopeViolationError` is NEVER recorded here: it is re-raised so the existing outer handler terminates the run, because "observational" bounds ordinary secondary outcomes, not framework-integrity failures. |
 | `per_sample_evidence` (HealthGate context) | `PerSampleEvidence` | **Step 08b C6 / D18 (2026-08-18)** — whether the round's metric produces per-sample evidence at all, carried into `HealthCheckContext` beside `file_vector` rather than collapsed into it. Derived once, by `PerSampleEvidence.for_per_sample(metric_result.per_sample)`: `None` → `scalar_only`, a list (even an empty one) → `available`, and the default `undeclared` for every pre-scoring gate. Before this, a scalar-only metric presented per-file checks with `[]`, which reads as "no files" and PASSES — inapplicability recorded as health. Health consumes this CAPABILITY only and never the metric scalar. Two of the three executable tracks (Pets accuracy, DAVIS global MSE) are scalar-only; TIDMAD is not, so TIDMAD behaviour is unchanged. |
 | `consecutive_fail_rounds_at_exit` | `int` | Terminal value of the loop's consecutive-failure counter. `0` on a healthy completion; equals `max_fail_rounds` when the loop aborted on the trigger. |
-| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
+| `termination_reason` | `Literal["completed", "aborted_fail_rounds", "aborted_by_gate", "scope_violation", "infrastructure_abort"]` | Why the loop exited. `"aborted_by_gate"` is HISTORICAL (pre-F-SCANC-1 records only; the SKIP_ITER producer was retired 2026-08-26 and the member stays so old records deserialize). `"infrastructure_abort"` (C9c, 2026-07-30) means the runtime EVIDENCE CHANNEL failed — registry, persistence, schema/protocol, probe executor, telemetry, communication, or a policy invariant. It outranks every other reason and halts the CHAIN: `run_one_iteration.py` writes the `.chain_halted` sentinel with `reason="infrastructure_abort"` and exits 3, so neither the foreground loop nor a queued SDSC `afterany` job runs another candidate on the same broken environment. A candidate-class rejection stays attempt-local. |
 | `started_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` entry. |
 | `finished_at` | `str` | ISO-8601 UTC timestamp at `agent.run(inp)` exit. |
 
@@ -1180,10 +1180,14 @@ layer.
 
 `AttemptTransition` and `AttemptDecision` had zero production consumers and
 could not be wired without changing round outcomes, which 07b is not permitted
-to do. They are deleted; the `resolved_action` hazard they documented is
-recorded as a KNOWN DEFECT beside its declaration inside `run()`, with the
-proposed fix and its owner (a dedicated round-semantics correction requiring an
-operator decision). `RoundDecision` / `_decide_round_outcome` are untouched.
+to do. They are deleted; the `resolved_action` hazard they documented was
+recorded as a KNOWN DEFECT beside its declaration inside `run()`. [F-SCANC-1
+closure, 2026-08-26: the hazard was in fact SEVERED, not stale — the C7
+decomposition left the verdict a local in `execution.py` — and the operator
+ruling (decision packet v1) RETIRED the surface for v1: the declaration, the
+skip branches, the `gate_aborted` carrier and the `SKIP_ITER` /
+`SKIP_TO_FORMAL` vocabulary members are gone; `RoundDecision` /
+`_decide_round_outcome` survive as the non-retryable-termination arbiter.]
 
 Design: `docs/design/generic_framework_upgrade/step_07_tuner_policy_and_training_diagnostics/pr_07b_tuner_policy.md`.
 
@@ -1548,11 +1552,16 @@ reachability claims about the run loop.
   "no evidence" branch.~~ **RESOLVED** by the Step 07 trial/formal-identity
   correction — PR #217, squash `a15d1366`, 2026-08-17. See the
   "Candidate role identity" section above.
-* The `resolved_action` round-scoped staleness hazard — recorded beside its
-  declaration in `run()`. Still OPEN, and deliberately **not** scheduled ahead
-  of 07c (operator decision 2026-08-17): it is conceptually adjacent to the
-  coupling fixed by #217 but is a different defect, and it still needs the
-  operator decision its own note names.
+* ~~The `resolved_action` round-scoped hazard (recorded as "staleness"
+  beside its declaration in `run()`; the mechanism was actually a SEVERED
+  carrier — C7d left the gate verdict a local in `execution.py`, so the
+  variable was never written at all).~~ **RESOLVED** by the F-SCANC-1
+  retirement — operator decision packet v1, 2026-08-26, RETIRE for v1:
+  the declaration, the skip loop-control branches, the `gate_aborted`
+  carrier and the `SKIP_ITER` / `SKIP_TO_FORMAL` action-vocabulary
+  members are removed; a config declaring a retired action refuses at
+  validation. Re-opening gate-driven loop control is ICLR-track work and
+  needs its own operator decision plus a witness cycle.
 * ~~07a's validation pass is missing from the watchdog deadline prediction
   (`T_deadline` needs a `T_val` term) — ADDED 07c scope. Until 07c lands,
   `--runtime_watchdog`-enabled real campaigns are not a reliable

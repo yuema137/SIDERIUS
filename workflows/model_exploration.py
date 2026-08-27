@@ -155,7 +155,11 @@ from workflows.task_composition import (
     compose_run_task_bindings,
     verify_composition_is_bound,
 )
-from workflows.task_config import get_task_description, load_task_config
+from workflows.task_config import (
+    default_task_config_path,
+    get_task_description,
+    load_task_config,
+)
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -443,9 +447,11 @@ def _snapshot_task_config(run_dir: str) -> None:
     config that was active when iter 1 ran, even if the operator edits
     ``configs/task_config.yaml`` mid-chain.
 
-    The source path is anchored on :data:`SIDERIUS_ROOT` (not the
-    process cwd) so integration tests that pass a tmp workspace without
-    ``chdir``'ing into the repo root still pick up the committed config.
+    The source path comes from :func:`default_task_config_path` — the ONE
+    SIDERIUS_ROOT-anchored resolution authority (F-SCANA-2) that also
+    serves ``load_task_config`` (the read) and ``task_config_file_sha256``
+    (the F-SCANH-1 lock pin) — so the snapshot, the read and the pinned
+    sha address the SAME file regardless of the process cwd.
 
     See ``docs/design/enable_global_task_config.md`` § "Run provenance —
     task config snapshot" + § Commit T1b for the design + chain-mode
@@ -453,7 +459,7 @@ def _snapshot_task_config(run_dir: str) -> None:
     """
     snapshot_path = os.path.join(run_dir, "task_config_snapshot.yaml")
     if not os.path.exists(snapshot_path):
-        shutil.copy2(os.path.join(SIDERIUS_ROOT, "configs", "task_config.yaml"), snapshot_path)
+        shutil.copy2(default_task_config_path(), snapshot_path)
 
 
 # ---------------------------------------------------------------------------

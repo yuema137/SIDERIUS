@@ -80,17 +80,22 @@ contradictory opinions about what a failure means.
 
 ## What a blocking failure does
 
-A fired gate resolves to one of four actions:
+A fired gate resolves to one of two actions:
 
 | action | effect |
 |---|---|
 | `continue` | proceed normally |
 | `invalidate_round` | this round's result is not a valid candidate |
-| `skip_to_formal` | stop trialling, promote to the formal phase |
-| `skip_iter` | abandon this model, return to the loop |
 
 When several gates fire in one round, severity resolves
-`skip_iter` > `skip_to_formal` > `invalidate_round` > `continue`.
+`invalidate_round` > `continue`.
+
+> Two further actions, `skip_iter` and `skip_to_formal`, were RETIRED from
+> the vocabulary for v1 (F-SCANC-1, operator decision packet v1,
+> 2026-08-26). The tuner-side wire that would have acted on them was
+> severed by the C7 decomposition, so they were declared-but-unreachable
+> semantics; a config declaring either now refuses at validation instead
+> of silently claiming loop control the runtime does not implement.
 
 ## Where the settings live
 

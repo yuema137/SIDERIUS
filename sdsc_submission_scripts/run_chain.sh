@@ -380,13 +380,29 @@ resolve_start_iter() {
         echo "Start: workspace does not exist yet — fresh chain at 1"
         return 0
     fi
-    # Inspector emits a single integer on stdout when successful, or a
-    # human-readable error on stderr with non-zero exit (legacy layout,
+    # Inspector emits the integer as its FINAL stdout line when successful,
+    # or a human-readable error on stderr with non-zero exit (legacy layout,
     # non-contiguous gap, ...). We let stderr flow through naturally and
     # halt with a wrapper-level message so operators see both signals.
-    if ! START_ITER=$("${PY_CMD[@]}" "${PROJECT_DIR}/scripts/inspect_run_state.py" \
+    local _raw_next_iter
+    if ! _raw_next_iter=$("${PY_CMD[@]}" "${PROJECT_DIR}/scripts/inspect_run_state.py" \
             --layout chain --workspace "$WORKSPACE" --next-iter); then
         echo "ERROR: inspector refused to compute --next-iter for workspace $WORKSPACE (see error above)" >&2
+        exit 1
+    fi
+    # F-SCANB-4 — the raw capture can carry import-time plugin-loader
+    # chatter ahead of the value, and pre-fix it was assigned to START_ITER
+    # unvalidated. extract_validated_next_iter (_chain_common.sh) takes the
+    # exit-0 capture's LAST line and accepts only a bare non-negative
+    # integer; anything else REFUSES here — never a silent default, because
+    # a wrong iteration index corrupts a resumed campaign.
+    if ! START_ITER=$(extract_validated_next_iter "$_raw_next_iter"); then
+        echo "ERROR: auto-resume could not read a valid iteration index from the inspector." >&2
+        echo "  The captured stdout does not end in a bare non-negative integer." >&2
+        echo "  Captured output (last 400 bytes):" >&2
+        printf '%s\n' "$_raw_next_iter" | tail -c 400 | sed 's/^/    | /' >&2
+        echo "  Workaround: pass --start_iter N explicitly (scripts/inspect_run_state.py" >&2
+        echo "  --layout chain --workspace \"$WORKSPACE\" shows the per-iteration state)." >&2
         exit 1
     fi
     echo "Start: auto-resume — inspector computed START_ITER=$START_ITER"

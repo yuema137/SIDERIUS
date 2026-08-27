@@ -40,10 +40,10 @@ what action follows a check result.
 
 ```
 Iteration
-  └── round 1 → [Gate: collapse_check_round_1]      → on_fail: skip_iter
+  └── round 1 → [Gate: collapse_check_round_1]      → on_fail: invalidate_round
   └── round 2 → (no gate)
-  └── round 3 → [Gate: quality_check_round_3]       → on_fail: skip_to_formal
-              → [Gate: score_check_round_3]         → on_fail: invalidate_round
+  └── round 3 → [Gate: quality_check_round_3]       → on_fail: invalidate_round
+              → [Gate: score_check_round_3]         → on_fail: continue (recording)
               → resolved action: most severe of the two
   └── round 4 → (no gate)
   └── round 5 → [Gate: formal_validation_round_5]   → on_fail: invalidate_round
@@ -165,7 +165,7 @@ health_gates:
     on_pass:
       action: continue
     on_fail:
-      action: skip_iter         # abort iter if round 1 collapses
+      action: invalidate_round  # round-1 collapse is not a valid candidate
 
   - id: "quality_check_round_3"
     after_round: 3
@@ -176,7 +176,7 @@ health_gates:
     on_pass:
       action: continue
     on_fail:
-      action: skip_to_formal    # skip remaining trial rounds, go to formal
+      action: invalidate_round  # a failed quality round is discarded
 
   - id: "formal_validation_round_5"
     after_round: 5              # formal round
@@ -202,24 +202,28 @@ different strictness.
 
 ## 4. Gate Actions
 
+> **F-SCANC-1 retirement (operator decision packet v1, 2026-08-26).**
+> The original rev-6 vocabulary carried four actions; `skip_iter` and
+> `skip_to_formal` are RETIRED for v1. The C7 decomposition severed the
+> tuner-side carrier (the round verdict died as a local in
+> `execution.py`), so both loop-control actions were advertised
+> semantics the runtime did not implement. Per the ruling — "no new
+> wiring for a dead authority surface" — the members were removed from
+> `GateAction`: a config declaring either refuses at validation. Gate
+> actions still classify the round (`invalidate_round` drives
+> `is_degenerate` and the persisted `gate_action`); they carry no loop
+> control. Re-opening gate-driven loop control is ICLR-track work
+> needing its own operator decision and witness cycle. Historical
+> sections below describing the four-action design are annotated where
+> they would otherwise mislead.
+
 ```python
-from enum import Enum
-
-
-class GateAction(str, Enum):
+class GateAction(StrEnum):
     CONTINUE = "continue"
     # Proceed normally. On on_pass: next round runs (or iter closes if
     # this was the last round — the tuner knows phase boundaries).
-    # On on_fail: same as INVALIDATE_ROUND for the current round,
-    # then continue.
-
-    SKIP_ITER = "skip_iter"
-    # Abort current iteration. Move to next iteration.
-    # No further rounds or phases run.
-
-    SKIP_TO_FORMAL = "skip_to_formal"
-    # Skip remaining trial rounds. Jump to formal phase.
-    # Tuner decides what "formal" means — the gate only signals intent.
+    # On on_fail: the failure is recorded (recording gates), and the
+    # round continues.
 
     INVALIDATE_ROUND = "invalidate_round"
     # Mark this round's score as None.
@@ -334,14 +338,6 @@ class GateResult(BaseModel):
     action: "GateAction"
     check_results: list[HealthCheckResult]
     failure_reason: str = ""    # empty when passed
-
-    @property
-    def should_skip_iter(self) -> bool:
-        return self.action == GateAction.SKIP_ITER
-
-    @property
-    def should_skip_to_formal(self) -> bool:
-        return self.action == GateAction.SKIP_TO_FORMAL
 
     @property
     def should_invalidate_round(self) -> bool:
@@ -669,7 +665,7 @@ When multiple gates fire at the same round, their actions are resolved
 by severity — **most restrictive wins**:
 
 ```
-SKIP_ITER > SKIP_TO_FORMAL > INVALIDATE_ROUND > CONTINUE
+INVALIDATE_ROUND > CONTINUE      (post-F-SCANC-1 vocabulary)
 ```
 
 The tuner should evaluate all gates for a given round and take the most
@@ -687,26 +683,20 @@ for gate_id in gate_ids:
     if severity(result.action) > severity(resolved_action):
         resolved_action = result.action
 
-# Apply resolved_action
-if resolved_action == GateAction.SKIP_ITER:
-    break                       # exit iteration loop
-elif resolved_action == GateAction.SKIP_TO_FORMAL:
-    goto_formal_phase()
-elif resolved_action == GateAction.INVALIDATE_ROUND:
+# Apply resolved_action (record surface only — F-SCANC-1 retired the
+# loop-control actions; the resolved action drives is_degenerate /
+# gate_action via _gate_results_to_score_meta, never the round loop)
+if resolved_action == GateAction.INVALIDATE_ROUND:
     round_score = None
 # CONTINUE: proceed normally
 ```
 
 Severity order is intentional:
 
-- `SKIP_ITER` is the most disruptive (aborts the whole iteration) so it
-  takes precedence over everything.
 - `CONTINUE` is the least disruptive (do nothing extra) so it never
   overrides a more restrictive action from a sibling gate.
-- `SKIP_TO_FORMAL` and `INVALIDATE_ROUND` sit in the middle — a
-  finetrial-quality gate that wants to jump to formal should not be
-  overridden by a per-round invalidator, but should defer to an
-  iter-level abort.
+- `INVALIDATE_ROUND` outranks it: one blocking failure among the round's
+  gates is enough to disqualify the round's score.
 
 **Discovery pattern.** The tuner does not enumerate all gates
 statically — it asks `get_gates_for_position` at each round boundary
@@ -956,8 +946,9 @@ constant input — not a measure of denoising ability.
 
 1. **`OutputDiversityCheck` at the pretrial gate** — catches the
    collapse before scoring runs. The round's score is invalidated
-   (`INVALIDATE_ROUND`) or, at the pretrial gate, the entire iteration
-   is skipped (`SKIP_ITER`).
+   (`INVALIDATE_ROUND`). (Originally the pretrial gate could also skip
+   the entire iteration via `SKIP_ITER`; that action was retired —
+   F-SCANC-1, §4.)
 2. **SNR noise floor guard** — `get_snr` returns `NaN` when
    `noise < 1e-10` (subnormal territory). Downstream `_collect_raw_pairs`
    and `score_vector` filter NaN pairs. Prevents the 2^17 ratio from

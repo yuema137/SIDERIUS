@@ -50,8 +50,8 @@ bash sdsc_submission_scripts/run_chain.sh \
 | `--data_dir DIR` | physical data root. **Required for any composed run**; a composed run without it fails closed before any LLM or GPU work |
 | `--num_iterations N` | default `2` |
 | `--seed_paths P [P…]` | prior run outputs to seed from. **Optional** — an empty list is a valid cold start |
-| `--auto_resume` / `--no_auto_resume` | default **ON**: pick up where a partial chain stopped |
-| `--start_iter N` | manual override of auto-resume |
+| `--auto_resume` / `--no_auto_resume` | default **ON**: pick up where a partial chain stopped. The inspector's captured value is VALIDATED (F-SCANB-4): only the exit-0 capture's last line, and only a bare non-negative integer, becomes `START_ITER`; anything else (e.g. plugin-loader stdout chatter with no trailing value line) refuses loudly and names the workaround below — never a silent default |
+| `--start_iter N` | manual override of auto-resume (also the refusal's named workaround) |
 | `--dry-run` | walk the chain, print exact commands, no side effects |
 | `--experiment_arm LABEL` | opaque experiment-arm label (arXiv U1). Pinned into `run_invariants_lock.json` and stamped on every record, tuner output and manifest; forwarded only when set. **Omitted = unlabelled**, byte-identical argv. Drives no behaviour |
 | `--ml_lit_review_enabled` / `--no-ml_lit_review_enabled` | the literature-review node's presence in the workflow topology. Both the resolved flag and, when ON, the sha256 of the resolved lit-review YAML are pinned in the lock |

@@ -58,7 +58,6 @@ class TestTerminationStatePrecedence:
             max_rounds=5,
             consecutive_fails=0,
             max_fail_rounds=3,
-            gate_aborted=False,
         )
         kwargs.update(over)
         return _compute_termination_state(**kwargs)
@@ -75,14 +74,14 @@ class TestTerminationStatePrecedence:
         assert self._compute(
             evidence_channel_failure="telemetry gone",
             scope_violation_reason="scope violated",
-            gate_aborted=True,
             completed_rounds=5,
             consecutive_fails=3,
         ) == ("failed", "infrastructure_abort")
 
     def test_without_it_the_existing_precedence_is_untouched(self):
+        # (the gate_aborted input was retired with SKIP_ITER — F-SCANC-1;
+        # "aborted_by_gate" survives only as a historical record value)
         assert self._compute(scope_violation_reason="x") == ("failed", "scope_violation")
-        assert self._compute(gate_aborted=True) == ("partial", "aborted_by_gate")
         assert self._compute(completed_rounds=5) == ("completed", "completed")
         assert self._compute(consecutive_fails=3) == ("partial", "aborted_fail_rounds")
         assert self._compute() == ("partial", "completed")
