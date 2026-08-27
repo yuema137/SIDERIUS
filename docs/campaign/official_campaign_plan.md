@@ -47,6 +47,66 @@ The last two statuses exist so that implementation and audit dependencies of a
 frozen decision can be tracked without ever making the decision itself look
 open. A `PENDING_IMPLEMENTATION` item is work, not a question.
 
+### 0.1 Finding and remediation rows — added 2026-08-27
+
+The vocabulary above opens *"every **configuration item** in this document"*,
+and it was authored for configuration items. The decisions ledger has since
+grown a **second population**: `F-` findings, `R-` requirements, `Q-` questions,
+`M-` method records and `A-` audits, whose lifecycle needs **closure verbs** a
+configuration item never needed. Nobody decided against declaring them; nobody
+was ever asked. The seven below were **already in use** across 53 rows of
+`official_campaign_decisions.yaml` while being declared nowhere — this section
+reconciles the vocabulary with reality rather than introducing anything new.
+
+| status | meaning |
+|---|---|
+| `DISCHARGED` | The work a frozen decision or a recorded finding required has LANDED, and the landed commit is cited on the row. The ledger obligation is closed. |
+| `IMPLEMENTED` | The code or config realising the row exists. Weaker than `DISCHARGED`: it claims the mechanism, not that every obligation on the row is closed — a row may be `IMPLEMENTED` and still carry a named residual. |
+| `VERIFIED` | An audit ran against source and its outcome is recorded on the row. **UNDER-SPECIFIED — see §0.2.** |
+| `RESOLVED_BY_RULING` | A **question** row answered by a ruling recorded on **another** row. The ruling is CITED, never restated as this row's own. Distinct from `FROZEN` (the row carries its own ruling and a binding value) and from `MOOT` (the question no longer arises). |
+| `MOOT` | The question no longer arises, because a ruling elsewhere removed its precondition. The underlying defect may be unfixed; `MOOT` says the campaign cannot reach it, never that it was repaired. |
+| `PENDING_HARDWARE_EVIDENCE` | The decision waits on a measurement of host or GPU conditions. **Probable duplicate — see §0.2.** |
+| `CONDITIONAL_ON_BLIND_EXECUTION` | Frozen in principle, but its obligations activate only if the Blind arm is actually executed for a formal quantitative comparison. Not open, and not unconditional. |
+
+**Which of these CLOSE a row** is not a matter of taste: it is declared once, in
+machine-readable form, as `terminal_statuses` in
+`docs/campaign/official_campaign_decisions.yaml`. Before 2026-08-27 that set
+lived only in an operator runbook and in a test's private constant — so the
+census and the authority could drift without either noticing. It now has exactly
+one home, and a guard asserts this section and that file agree.
+
+### 0.2 Declared now, proposed for a later pass — 2026-08-27
+
+Adopted at their **current spelling**, because a pass that declares a value
+should not also rename it; a rename changes what existing rows mean and needs
+its own evidence. Both are recorded so neither is mistaken for settled.
+
+**`VERIFIED` is under-specified and must not be read as one thing.** Its 15
+rows span at least three meanings, and the split is not cosmetic:
+
+* *a claim was checked and is TRUE — the mechanism or defect EXISTS*
+  (`F-SCANH-3`, `F-SCANH-4`, `F-SCANA-3`, `F-SCANB-6`, `F-SCANF-3`, `F-DATA-2`);
+* *a claim was checked and the thing is ABSENT* — `F-AGG-CLEAR-1` ("no
+  forbidden aggregation exists in the reporting path") and `F-COV-1` (LIGO and
+  TESS are phantom tasks). **This is exactly the `VERIFIED_ABSENT` semantic
+  already declared above**, reached under a different name;
+* *an event, correction or method observation was recorded* (`M-SCAN-1`,
+  `M-RECONCILE-1`, `M-INHERIT-1`, `E-CONTROL-1`, `F-SCAND-5`, `F-SCANG-2`).
+
+Declaring `VERIFIED` as if it meant one of these would make the merge
+permanent, so it is declared as what it demonstrably is: *an audit ran, read the
+row for its outcome*. **A `VERIFIED` status is not evidence of which way the
+audit came out.** Proposed split: retire bare `VERIFIED` in favour of
+`VERIFIED_PRESENT` / the existing `VERIFIED_ABSENT` / a `RECORDED` for method
+and event rows — per-row, with each row's own text as the evidence.
+
+**`PENDING_HARDWARE_EVIDENCE` is a probable duplicate** of the already-declared
+`PENDING_TESTPOD_QUALIFICATION` ("the value must come from a measurement on
+qualified hardware") or `PENDING_RUNTIME_EVIDENCE`. Its three rows
+(`F-CONFOUND-1`, `F-CONFOUND-2`, `A-HOST-1`) await *host-contention* readings,
+which is arguably neither. Proposed for reconciliation with those two; not
+renamed here.
+
 ---
 
 ## 1. Campaign naming — FROZEN

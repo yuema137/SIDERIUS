@@ -58,6 +58,7 @@ from agent.prompt_templates.timing_attribution import (
     TIMING_SPLIT_SEMANTICS,
 )
 from agent.prompts import get_planner_user_prompt
+from agent.schemas.hyperparam_tuning import ExperimentPlan
 from execute_tools.metric_order import MetricOrder
 from nodes.interpretation_helpers import generate_discoveries
 from tests.helpers.metric_fixtures import shipped_spec
@@ -453,38 +454,60 @@ class TestTheAttributionClaimIsTrue:
         assert (
             "`validation_time_s` is that pass, summed over epochs: once per epoch "
             "the model under test runs a forward pass over the round's EVALUATION "
-            "scope. It therefore shrinks with a smaller model, with fewer epochs, "
-            "and with a smaller `eval_portion`" in TIMING_SPLIT_SEMANTICS
+            "scope. It therefore scales with the model, with the number of epochs, "
+            "and with the size of that evaluation scope" in TIMING_SPLIT_SEMANTICS
         )
 
-    def test_the_note_does_not_claim_the_evaluation_scope_is_fixed(self):
-        """The clause that carries the finding on its own.
+    def test_the_note_states_mechanics_and_never_who_owns_the_evaluation_scope(self):
+        """The clause that carries the finding on its own — and the reason the
+        repair states MECHANICS without asserting OWNERSHIP.
 
-        In a trial round the evaluation scope IS the plan's ``eval_portion``.
-        Calling it fixed, immediately before "reduce model complexity", steers
-        an overrunning candidate toward capacity reduction instead of the
-        cheap, agent-owned eval reduction.
+        Calling the evaluation scope FIXED, immediately before "reduce model
+        complexity", steers an overrunning candidate toward capacity reduction.
+        But naming the planner as the scope's owner is equally wrong in the
+        other direction: SIDERIUS runs in two modes, and in the LOCKED mode a
+        typed ``--eval_portion`` becomes a ``plan_overrides`` entry that
+        overwrites the plan value before the resolver reads it (issue #372).
+        The Gold campaign is locked. So one authority rendered for both modes
+        must state what the cost RESPONDS TO and decline to say who sets it.
         """
-        assert "FIXED evaluation scope" not in TIMING_SPLIT_SEMANTICS
+        for banned in (
+            "FIXED evaluation scope",  # false in unlocked mode
+            "a lever you set",  # false in locked mode
+            "the plan's own value",
+            "you set",
+            "the planner sets",
+        ):
+            assert banned not in TIMING_SPLIT_SEMANTICS, (
+                f"the shared sentence asserts who owns the evaluation scope "
+                f"({banned!r}); that is true in at most one operating mode"
+            )
         assert (
-            "in a trial round that is the plan's own value, so the evaluation "
-            "scope is a lever you set, not a fixed cost (a formal round fixes "
-            "it)" in TIMING_SPLIT_SEMANTICS
+            "Whether any of these is yours to set in THIS run is decided by "
+            "the run's configuration, not by this note." in TIMING_SPLIT_SEMANTICS
         )
         # The levers validation genuinely does NOT respond to — named, so the
         # repair does not swing to "everything shrinks it".
         assert (
-            "What it does NOT respond to is `trial_portion` / `train_portion`: "
-            "those size the TRAINING scope only." in TIMING_SPLIT_SEMANTICS
+            "What it does NOT respond to is `trial_portion` / `train_portion` "
+            "or the number of optimizer steps: those size the TRAINING scope "
+            "only." in TIMING_SPLIT_SEMANTICS
         )
 
-    def test_the_trial_evaluation_scope_really_is_the_planners_own_value(self):
-        """Reachability for the claim the sentence now makes.
+    def test_the_trial_evaluation_scope_is_the_plans_value_UNLESS_frozen(self):
+        """Both halves of the mode distinction, driven through production.
 
-        Driven through the production resolver rather than asserted about it:
-        if the trial branch ever stops sourcing ``eval_portion`` from the plan,
-        the prompt's new sentence becomes the false one — in the other
-        direction — and this turns red.
+        UNLOCKED: the trial branch sources ``eval_portion`` from the plan, so
+        it really is an agent lever and a note calling it FIXED would be false.
+
+        LOCKED: a typed ``--eval_portion`` becomes a ``frozen_portion_overrides``
+        entry, and ``_apply_plan_overrides`` merges it OVER the plan
+        (``plan.model_dump(by_alias=True) | overrides`` — the right operand of
+        a dict union wins), so the frozen value reaches the resolver instead.
+        The Gold campaign is locked this way.
+
+        Stating only the first half is what made the previous wording false for
+        the campaign that actually ships. Issue #372.
         """
         from nodes.ml_hyperparameter_tune_agent.policy import _resolve_sample_set_cfg
 
@@ -510,6 +533,24 @@ class TestTheAttributionClaimIsTrue:
         formal = _resolve_sample_set_cfg("formal", _Input(), _Plan())  # type: ignore[arg-type]
         assert formal["eval_portion"] == 1.0
         assert formal["eval_strategy"] == "snapshot"
+
+        # LOCKED mode: a frozen portion overrides the plan before the resolver
+        # sees it, so the same trial round no longer carries the plan's value.
+        from nodes.ml_hyperparameter_tune_agent.policy import _apply_plan_overrides
+
+        plan = ExperimentPlan(
+            trial_strategy="snapshot",
+            trial_portion=0.05,
+            train_portion=0.1,
+            eval_strategy="snapshot",
+            eval_portion=0.37,
+        )
+        locked = _apply_plan_overrides(plan, {"eval_portion": 0.01})
+        assert locked.eval_portion == 0.01, (
+            "a typed campaign portion no longer overrides the plan — the note "
+            "must not then describe the evaluation scope as frozen"
+        )
+        assert _resolve_sample_set_cfg("trial", _Input(), locked)["eval_portion"] == 0.01
 
     def test_the_note_does_not_call_the_residual_the_architectures_cost(self):
         assert (
