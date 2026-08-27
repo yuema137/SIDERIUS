@@ -63,8 +63,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager, nullcontext
 from contextvars import ContextVar
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
@@ -367,6 +368,37 @@ def bind_deliverable_naming(naming: DeliverableNaming) -> Iterator[DeliverableNa
 def active_deliverable_naming() -> DeliverableNaming | None:
     """The bound naming, or ``None`` — no fallback. Step 11 C6."""
     return _ACTIVE_DELIVERABLE_NAMING.get()
+
+
+def declared_naming_binding(declared: DeliverableNaming | None) -> AbstractContextManager[Any]:
+    """Bind ``declared`` for a run-scoped region, or a NO-OP when there is none.
+
+    F-COV-8. ONE authority for the rule *"an absent declaration binds nothing,
+    it does not bind a default"* — the rule both subprocess children must
+    apply, and the rule whose two independent inline copies were the defect.
+
+    **Why a factory and not a context manager.** A child has SEVERAL naming
+    consumers on different routes, and a context manager cannot be entered
+    twice. The scoring child's original inline form built ONE ``_naming_ctx``
+    and entered it around a single statement, so every later consumer —
+    ``read_evaluation_payload``'s directory SCAN among them — ran unbound and
+    silently resolved the SHIPPED template while the same child's already
+    derived spec carried the DECLARED one. Two answers inside one child.
+
+    Callers compose the declaration ONCE (a value) and call this at each
+    region that needs it, so no two regions can read a differently-composed
+    manifest.
+
+    Args:
+        declared: the run's declared naming, or ``None`` for a run that
+            declares none (un-composed, or a task that names its artifacts
+            outright — whose honest ``NotApplicable`` refusal must stay
+            reachable).
+
+    Returns:
+        A context manager binding ``declared``, or ``contextlib.nullcontext``.
+    """
+    return nullcontext() if declared is None else bind_deliverable_naming(declared)
 
 
 class DeliverableNamingNotApplicableError(RuntimeError):

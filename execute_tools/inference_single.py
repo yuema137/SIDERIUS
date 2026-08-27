@@ -31,6 +31,7 @@ from core.runtime_control.gpu_milestone_trace import tracer_from_environment
 from core.runtime_control.session import RuntimeControlPolicy, RuntimeVerificationSession
 from execute_tools.array2h5 import create_abra_file
 from execute_tools.dataset_config import (
+    DatasetProfile,
     bind_dataset_profile,
     declares_tidmad_topology,
     load_dataset_profile,
@@ -38,7 +39,10 @@ from execute_tools.dataset_config import (
     tidmad_topology,
 )
 from execute_tools.deliverable_spec import (
+    DeliverableNaming,
+    DeliverableSpec,
     DeliverableStorage,
+    declared_naming_binding,
     default_deliverable_storage,
     derive_run_deliverable_spec,
 )
@@ -462,6 +466,75 @@ def _emit_generic_inference(args, data_path, model, task_eval_scope) -> None:
             json.dump(outcome.model_dump(), fh)
 
 
+def _declared_deliverable_naming(manifest_path: str | None) -> DeliverableNaming | None:
+    """The run's DECLARED indexed naming, composed from its manifest. F-COV-8.
+
+    The inference child's half of what the scoring child has done since
+    Step 11 C6 (``denoising_score_single.py:509``): the SAME authority, the
+    SAME transported manifest, the SAME PRESENCE discrimination. ``None``
+    means *this run declares no indexed naming* — an un-composed run, or a
+    composed one whose task names its artifacts outright — and the caller
+    binds nothing, so the honest ``NotApplicable`` refusal stays reachable.
+
+    **Why this child had nothing to bind.** ``--task_manifest`` has reached
+    all three children since Step 11 (``core/sandbox_executor.py:1444, 1831,
+    2181``); this one simply never used it for naming. So a composed task
+    that resolves its filename through the framework's own naming capability
+    reached ``resolve_deliverable_naming()`` with the ContextVar unset and
+    died with ``DeliverableNamingNotApplicableError`` — *while its manifest
+    declared the very section the message says is missing*. No shipped pack
+    consumes the capability (TIDMAD, Pets and DAVIS all hand-roll their
+    names), which is why every Gate passed over it.
+
+    This is the ``F-12d-28`` shape one capability over: an asymmetry between
+    two sibling children, not a missing transport.
+
+    Extracted rather than inlined because ``main`` is branch-capped
+    (``tests/unit/guardrails/test_step12_pr12d_d0_baselines.py``:
+    ``HARD_CAPPED_BRANCHES``), so a new route is paid for by extraction — the
+    precedent ``_emit_generic_inference`` and ``_resume_runtime_session`` set.
+
+    Args:
+        manifest_path: the transported ``--task_manifest``, or ``None``.
+
+    Returns:
+        The declared :class:`DeliverableNaming`, or ``None``.
+
+    Raises:
+        TaskCompositionError: the manifest was transported but its
+            ``deliverable:`` section could not be composed. Deliberately NOT
+            caught: a composed run must never fall back to TIDMAD's shipped
+            template, which is the C-P56-1 failure class one layer down.
+    """
+    if manifest_path is None:
+        return None
+    # Imported here, not at module scope, for the reason the sibling import
+    # at the `resolve_child_task_data_path` site states: the composition
+    # layer sits ABOVE this one, and only a composed run ever reaches it.
+    from workflows.task_composition import compose_deliverable_naming_from_manifest
+
+    return compose_deliverable_naming_from_manifest(manifest_path)
+
+
+def _derive_spec_under_declared_naming(
+    dataset_profile: DatasetProfile, declared: DeliverableNaming | None
+) -> DeliverableSpec | None:
+    """``derive_run_deliverable_spec`` with the run's DECLARED naming in force.
+
+    F-COV-8. The derivation reads the naming ContextVar rather than taking it
+    as an argument (``deliverable_spec.py:604`` —
+    ``active_deliverable_naming() or DeliverableNaming()``), so *when* it runs
+    decides *which* template the spec carries. Deriving it unbound handed a
+    composed run the shipped TIDMAD template silently, which is the half of
+    this defect that never raised.
+
+    Extracted so ``main`` gains a CALL rather than a ``with`` — the §E.1 H1
+    rule the branch cap enforces.
+    """
+    with declared_naming_binding(declared):
+        return derive_run_deliverable_spec(dataset_profile)
+
+
 def _resume_runtime_session(args, sample_set):
     """RT2-D: resume the attempt's observation sidecar, or return ``None``.
 
@@ -521,7 +594,14 @@ def main():
     # parent calls (§3.2a, Option A). One function, two callers, no duplicated
     # literal and no third IPC mechanism. Note this consumes `dataset_profile`
     # as resolved above — it adds no second `resolve_dataset_profile()` call.
-    deliverable_spec = derive_run_deliverable_spec(dataset_profile)
+    #
+    # F-COV-8 — composed ONCE here and bound around every naming consumer
+    # below. `derive_run_deliverable_spec` reads the naming ContextVar
+    # (`deliverable_spec.py:604`, `active_deliverable_naming() or
+    # DeliverableNaming()`), so an unbound derivation silently resolved the
+    # SHIPPED template for a run that declared its own.
+    _declared_naming = _declared_deliverable_naming(args.task_manifest)
+    deliverable_spec = _derive_spec_under_declared_naming(dataset_profile, _declared_naming)
     # Carried on `args` exactly as `_model_io` is, so `process_batch` can read
     # the persisted-output offset without a new parameter on every call site.
     args._deliverable_spec = deliverable_spec
@@ -768,7 +848,12 @@ def main():
         if args.task_data_path_id is not None
         else contextlib.nullcontext()
     )
-    with _binding_cm:
+    # F-COV-8 — the generic route is where an unbound naming STOPPED the run
+    # rather than merely mis-naming it: the task's own `write_deliverable` and
+    # `task_declared_deliverable_name` (`generic_inference.py:133, 138`) call
+    # `resolve_deliverable_naming()`, which REFUSES when the task names its
+    # own artifacts and nothing is bound.
+    with declared_naming_binding(_declared_naming), _binding_cm:
         task_eval_scope = load_transported_scope(
             args.task_eval_scope_ref, args.task_eval_scope_digest, leg="evaluation"
         )
@@ -1011,7 +1096,12 @@ def main():
             # profile binding scopes the implementation's spec derivation to
             # the profile THIS child transported.
             t_write = time.perf_counter()
-            with bind_dataset_profile(dataset_profile):
+            # F-COV-8: the implementation re-derives its spec inside the call
+            # (`tidmad_data_path.py:537`), so it reads the naming ContextVar
+            # LIVE — binding it only around `derive_run_deliverable_spec`
+            # above would leave the actual WRITE on the shipped template while
+            # `out_name` said otherwise.
+            with bind_dataset_profile(dataset_profile), declared_naming_binding(_declared_naming):
                 data_path.write_deliverable(
                     [(file_index, denoised, injected)],
                     DeliverableWriteRequest(
@@ -1173,7 +1263,8 @@ def main():
             # D14-1 C4: run-identified (agent) writes go through the seam —
             # the implementation resolves the SAME authority name as out_name
             # above, removes a stale file, and performs the identical write.
-            with bind_dataset_profile(dataset_profile):
+            # F-COV-8: same live ContextVar read as the trial-mode write.
+            with bind_dataset_profile(dataset_profile), declared_naming_binding(_declared_naming):
                 data_path.write_deliverable(
                     [(args.file_index, denoised, injected)],
                     DeliverableWriteRequest(

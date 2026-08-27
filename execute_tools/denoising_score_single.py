@@ -27,7 +27,6 @@ a warning is logged when they are used.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import logging
 import os
@@ -192,7 +191,7 @@ def _resolve_child_data_path(args):
     )
 
 
-def _emit_task_owned_score(args, dataset_profile, metric) -> None:
+def _emit_task_owned_score(args, dataset_profile, metric, *, declared_naming=None) -> None:
     """Score a composed task's OWN deliverable through its OWN metric.
 
     Step 12 / PR-12d D4b. The frozen rule (§D.D):
@@ -222,6 +221,7 @@ def _emit_task_owned_score(args, dataset_profile, metric) -> None:
     exactly as it does for TIDMAD.
     """
     from execute_tools.dataset_config import bind_dataset_profile
+    from execute_tools.deliverable_spec import declared_naming_binding
     from execute_tools.scope_artifact import load_transported_scope
     from execute_tools.task_data_path import (
         EvaluationReadRequest,
@@ -246,10 +246,24 @@ def _emit_task_owned_score(args, dataset_profile, metric) -> None:
         run_name=args.run_name,
         model_type=args.denoising_model,
     )
-    with bind_dataset_profile(dataset_profile):
+    # F-COV-8 — the run's DECLARED naming must be in force for BOTH of these.
+    # `read_evaluation_payload` is the task's own codec and
+    # `task_declared_deliverable_name` reads the task's own module-level namer;
+    # a task that resolves EITHER through the framework's naming capability
+    # reached `resolve_deliverable_naming()` unbound here and was refused —
+    # the same defect the inference child had, in the child that already knew
+    # how to bind. `main` composes the declaration ONCE and passes it in, so
+    # this route cannot read a differently-composed manifest than the spec
+    # derivation did.
+    #
+    # The two are under ONE `with` so the NAME reported and the payload SCANNED
+    # are resolved under the same binding — reporting a name the scan did not
+    # use is exactly the disagreement this fix exists to remove.
+    with bind_dataset_profile(dataset_profile), declared_naming_binding(declared_naming):
         payload = data_path.read_evaluation_payload(request)
-
-    deliverable = os.path.join(args.data_dir, task_declared_deliverable_name(data_path, request))
+        deliverable = os.path.join(
+            args.data_dir, task_declared_deliverable_name(data_path, request)
+        )
     print(f"Scoring task-owned deliverable: {os.path.basename(deliverable)}")
 
     # `data_dir` here is the task's PHYSICAL DATA ROOT, which on this leg
@@ -505,20 +519,26 @@ def main(argv: list[str] | None = None) -> None:
     # same PRESENCE discrimination; an un-composed run binds nothing and derives
     # byte-identically. The Deliverable Contract remains the naming owner — this
     # child reads a declaration, it does not invent one (R-11-3).
-    if args.task_manifest is not None:
-        from execute_tools.deliverable_spec import bind_deliverable_naming
-        from workflows.task_composition import compose_deliverable_naming_from_manifest
+    #
+    # F-COV-8 — composed ONCE, into a VALUE, and bound at every naming
+    # consumer in this child. The original form built a single `_naming_ctx`
+    # and entered it around the ONE statement below; a context manager cannot
+    # be entered twice, so every later consumer ran unbound. The directory
+    # SCAN in `read_evaluation_payload` re-derives its spec inside the call
+    # (`tidmad_data_path.py:571`) and therefore resolved the SHIPPED template
+    # while `deliverable_spec` here carried the DECLARED one — two answers
+    # inside one child, silent for every in-tree pack because they all
+    # hand-roll their names.
+    from execute_tools.deliverable_spec import declared_naming_binding
+    from workflows.task_composition import compose_deliverable_naming_from_manifest
 
-        _declared_naming = compose_deliverable_naming_from_manifest(args.task_manifest)
-        _naming_ctx = (
-            bind_deliverable_naming(_declared_naming)
-            if _declared_naming is not None
-            else contextlib.nullcontext()
-        )
-    else:
-        _naming_ctx = contextlib.nullcontext()
+    _declared_naming = (
+        compose_deliverable_naming_from_manifest(args.task_manifest)
+        if args.task_manifest is not None
+        else None
+    )
 
-    with _naming_ctx:
+    with declared_naming_binding(_declared_naming):
         deliverable_spec = derive_run_deliverable_spec(dataset_profile)
 
     # Step 11 C5 (R-11-4) — the METRIC half of that reconstruction is no longer
@@ -551,7 +571,7 @@ def main(argv: list[str] | None = None) -> None:
     # scope scores through ITS OWN metric instead, and the framework hands that
     # metric only what the framework legitimately owns.
     if args.task_eval_scope_ref is not None:
-        _emit_task_owned_score(args, dataset_profile, metric)
+        _emit_task_owned_score(args, dataset_profile, metric, declared_naming=_declared_naming)
         return
 
     if args.denoising_model == "none":
@@ -590,7 +610,16 @@ def main(argv: list[str] | None = None) -> None:
             if args.task_data_path_id is not None
             else resolve_task_data_path(None)
         )
-        with bind_dataset_profile(dataset_profile):
+        # F-COV-8 — THE SCAN. `read_evaluation_payload` re-derives its spec
+        # inside the call (`tidmad_data_path.py:571`), so it reads the naming
+        # ContextVar LIVE. Unbound, it scanned `deliverable_dir` for the
+        # SHIPPED `abra_validation_denoised_*` template while the `else`
+        # branch below builds its expected path from `deliverable_spec.naming`
+        # — the DECLARED one. The scan then matched nothing and the fallback
+        # quietly covered for it, so the disagreement never surfaced as an
+        # error; it just made the payload-resolution authority dead code for
+        # any run that declared its own template.
+        with bind_dataset_profile(dataset_profile), declared_naming_binding(_declared_naming):
             _payload = _data_path.read_evaluation_payload(
                 EvaluationReadRequest(
                     deliverable_dir=args.data_dir,
