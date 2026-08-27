@@ -267,3 +267,101 @@ def test_legacy_persisted_record_without_verdicts_still_validates():
     )
     assert legacy.check_verdicts is None
     assert "check_verdicts" in legacy.model_dump()
+
+
+# ---------------------------------------------------------------------------
+# M cleanup (2026-08-26) — aggregation_rule records what RAN, never the config
+# ---------------------------------------------------------------------------
+
+
+def _persist_one(monkeypatch, gate, check_result):
+    """Route one crafted gate result through the production persistence path."""
+    config = load_health_gates_config("configs/health_checks.yaml")
+    result = GateResult(
+        gate_id=gate.id,
+        round_index=1,
+        passed=check_result.passed,
+        action=GateAction.CONTINUE,
+        failure_reason="" if check_result.passed else check_result.reason,
+        check_results=[check_result],
+    )
+    monkeypatch.setattr(evaluation, "evaluate_gate", lambda *a, **k: result)
+    monkeypatch.setattr(
+        evaluation, "load_health_gates_config", lambda path=None: type(config)(health_gates=[gate])
+    )
+    ctx = HealthCheckContext(model_name="m", run_name="r", round_index=1)
+    _, persisted, _ = evaluation.evaluate_and_persist_health_gates(
+        ctx, config_path="configs/health_checks.yaml"
+    )
+    return persisted[0]
+
+
+def _production_gate(gate_id: str):
+    config = load_health_gates_config("configs/health_checks.yaml")
+    return next(g for g in config.health_gates if g.id == gate_id)
+
+
+class TestAggregationRuleIsEvidenceNotConfig:
+    """M cleanup (2026-08-26): ``aggregation_rule`` claims only what the
+    check actually applied — the ``peek_and_aggregate`` echo in its result
+    metrics. Before, ``_persist`` read the GATE CONFIG and fabricated a
+    default, so every persisted gate claimed a rule: recording gates a
+    made-up ``"recording"`` (not an AggregationMode at all), and a blocking
+    gate whose check ignores the injected policy key (the single-view
+    categorical checks) the config value the runtime never implemented for
+    it. Each test names the pre-fix wrong value it fails back to when
+    ``_persist`` is reverted to config-reading."""
+
+    def test_a_consuming_check_persists_the_rule_it_applied(self, monkeypatch):
+        gate = _production_gate("output_diversity_blocking")
+        check = HealthCheckResult(
+            check_name="output_diversity",
+            passed=False,
+            reason="output_diversity: collapsed",
+            metrics={
+                "aggregation": "all_pass",
+                "per_file": [
+                    {"file_index": 3, "metric_value": 52, "passed": True, "io_error": None},
+                    {"file_index": 10, "metric_value": 1, "passed": False, "io_error": None},
+                ],
+                "n_files_attempted": 2,
+                "n_files_io_failed": 0,
+            },
+        )
+        observation = _persist_one(monkeypatch, gate, check)
+        assert observation.aggregation["aggregation_rule"] == "all_pass"
+        assert observation.aggregation["files_passed"] == [3]
+        assert observation.aggregation["files_failed"] == [10]
+
+    def test_a_check_that_never_applied_a_rule_claims_none_despite_config(self, monkeypatch):
+        """THE defect witness. The blocking gate's composed check config
+        carries the injected ``aggregation`` policy key, but this result
+        carries no echo — the check never consumed it. Reverting
+        ``_persist`` to ``check_config.get("aggregation", ...)`` makes this
+        fail with ``aggregation_rule == "all_pass"``: a rule claimed on
+        evidence that no aggregation ever produced."""
+        gate = _production_gate("output_diversity_blocking")
+        assert gate.checks[0].config["aggregation"] == "all_pass"  # config DOES carry it
+        check = HealthCheckResult(
+            check_name="output_diversity",
+            passed=True,
+            reason="",
+            metrics={"n_files_attempted": 1, "n_files_io_failed": 0},
+        )
+        observation = _persist_one(monkeypatch, gate, check)
+        assert "aggregation_rule" not in observation.aggregation
+        assert observation.aggregation["aggregate_passed"] is True
+
+    def test_a_recording_check_no_longer_fabricates_the_recording_pseudo_rule(self, monkeypatch):
+        """Pre-fix value: ``"recording"`` — not a member of AggregationMode,
+        invented by the persistence layer when the config carried no key."""
+        gate = _production_gate("pearson_dispersion_recording")
+        assert "aggregation" not in gate.checks[0].config
+        check = HealthCheckResult(
+            check_name="pearson_dispersion",
+            passed=True,
+            reason="",
+            metrics={"pearson_dispersion": 0.048},
+        )
+        observation = _persist_one(monkeypatch, gate, check)
+        assert "aggregation_rule" not in observation.aggregation

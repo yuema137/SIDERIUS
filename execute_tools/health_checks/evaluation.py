@@ -286,14 +286,25 @@ def _persist(
     completed = [int(key) for key, row in per_file.items() if row["execution_status"] == "passed"]
     passed = [int(key) for key, row in per_file.items() if row.get("passed") is True]
     failed = [int(key) for key, row in per_file.items() if row.get("passed") is False]
-    aggregation = {
-        "aggregation_rule": check_config.get("aggregation", "recording"),
+    aggregation: dict[str, Any] = {
         "files_requested": requested or sorted(int(key) for key in per_file),
         "files_completed": completed,
         "files_passed": passed,
         "files_failed": failed,
         "aggregate_passed": result.passed,
     }
+    # M cleanup (2026-08-26): ``aggregation_rule`` records the rule the check
+    # ACTUALLY APPLIED — the ``peek_and_aggregate`` outcome the consuming
+    # checks echo into their result metrics — never the gate config. Reading
+    # the config here persisted claims the runtime did not implement: every
+    # recording gate got a fabricated ``"recording"`` (not an AggregationMode
+    # at all), and a blocking gate whose check ignores the injected policy
+    # key (the single-view categorical checks) got the config value as if a
+    # per-file rule had run. Absent key = named absence: no per-file
+    # aggregation rule was applied to this result.
+    applied_rule = metrics.get("aggregation")
+    if applied_rule is not None:
+        aggregation["aggregation_rule"] = applied_rule
     would_invalidate = bool(
         not result.passed
         and production_gate is not None

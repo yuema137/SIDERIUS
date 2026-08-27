@@ -34,9 +34,12 @@ health_policy:
     on_pass: continue
     on_fail: invalidate_round         # the score is discarded, chain continues
     check_config:
-      aggregation: any_pass           # M9: pass if ANY peeked file clears the
-                                      # threshold; collapse fails only when
-                                      # every peeked file degrades
+      aggregation: all_pass           # C2 flip (operator-frozen, 2026-08-26):
+                                      # EVERY peeked file must clear the
+                                      # threshold; one degraded file fails the
+                                      # gate. Supersedes M9's any_pass and
+                                      # discharges the post-V17 validation
+                                      # deferral (m9 execution plan §9 Q1).
 
   recording:
     # Measures and records only; never invalidates anything. The measured

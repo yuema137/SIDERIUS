@@ -54,10 +54,13 @@ TIDMAD = str(MANIFEST_DIR / "tidmad.yaml")
 # declared consequence (the 12a proposal_blocks precedent). The SEMANTIC of
 # this pin (additive keys leave undeclared manifests at a stable literal) is
 # unchanged; the literals are re-recorded at the #255 tree.
+# Declared delta (C2 aggregation flip, operator-frozen 2026-08-26): TIDMAD's
+# fingerprint re-recorded 3fd178b5… -> 9b497798… — the task health document's
+# aggregation prose moved with the any_pass -> all_pass policy flip.
 #: TIDMAD's fingerprint, pinned independently by Checkpoint B. Restating it
 #: here is deliberate: falsifier 8 is "TIDMAD unaffected", and comparing
 #: against a value this module computes would compare the change to itself.
-TIDMAD_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
+TIDMAD_FINGERPRINT = "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
 
 
 def _compose(manifest: str):

@@ -407,6 +407,29 @@ class TestEdgeCases:
                 peek_samples=10_000,
             )
 
+    def test_unknown_aggregation_with_all_peeks_failing_raises_not_silent_false(self, tmp_path):
+        """M cleanup (2026-08-26) — the defect only this catches: an
+        unrecognized mode used to be checked only AFTER the peeks, and the
+        empty-values early return sat in front of the check, so a config
+        typo combined with failing I/O came back as a quiet
+        ``passed=False`` outcome — a configuration error recorded as an
+        aggregation failure. Enforcement now runs at entry, before any
+        file is opened, and names the valid vocabulary. Remove the entry
+        guard in ``peek_and_aggregate`` and this test fails by receiving
+        an outcome object instead of the raise."""
+        ctx = _ctx(denoised_paths={0: str(tmp_path / "does_not_exist.h5")})
+        with pytest.raises(ValueError) as excinfo:
+            peek_and_aggregate(
+                ctx,
+                peek_file_indices=[0],
+                metric_fn=_metric_unique,
+                predicate=_predicate_gt_10,
+                aggregation="all_pas",  # type: ignore[arg-type]
+                peek_samples=10_000,
+            )
+        assert "unknown aggregation mode 'all_pas'" in str(excinfo.value)
+        assert "'all_pass'" in str(excinfo.value)  # the vocabulary is named
+
     def test_constant_channel_does_not_crash(self, tmp_path):
         """A constant int8 output (std=0) should still peek and compute
         metric normally — the helper doesn't inject any special-case

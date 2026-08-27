@@ -115,6 +115,29 @@ Consequences worth knowing before editing anything here:
   (`blocking.on_fail`), not a duplicated roster, so it cannot drift from
   production science.
 
+**Per-file aggregation for blocking gates is `all_pass`** (C2 flip,
+operator-frozen 2026-08-26): every peeked file must clear the check's
+threshold, and one degraded file fails the gate. From M9 (2026-06) until the
+flip it was `any_pass` — one clearing file passed the gate even when the
+other peeked files had collapsed — a documented leniency whose stricter
+alternative the TIDMAD config had deferred to post-V17 empirical validation
+(m9 execution plan §9 Q1; that deferral is now discharged). The value is
+stated in the framework policy's `check_config` and mirrored by the built-in
+fallback table (`_composition.DEFAULT_DISPOSITION_POLICY`); a guard test
+keeps the two in lockstep.
+
+Three enforcement facts travel with the aggregation key (M cleanup,
+2026-08-26): an unknown aggregation mode fails closed in
+`peek_and_aggregate` BEFORE any file I/O, with the valid vocabulary named
+(on a blocking gate the runner's guard turns that raise into
+`CheckVerdict.ERROR` → `on_fail`); `MultiFilePeekOutcome.aggregation` is
+typed as the `AggregationMode` Literal, so the runtime carrier itself
+refuses an unimplemented value; and the persisted `aggregation_rule` on
+`PersistedHealthGateResult.aggregation` records only a rule a check
+ACTUALLY applied (the `peek_and_aggregate` echo in its result metrics) —
+a check that consumes no aggregation persists no rule, where it previously
+inherited the config value or a fabricated `"recording"`.
+
 Full design: `docs/design/generic_framework_upgrade/
 step_08_health_check_task_profile/pr_08b_extension_architecture.md`.
 

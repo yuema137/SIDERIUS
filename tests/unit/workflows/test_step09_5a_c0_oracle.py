@@ -67,6 +67,31 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   protocol. Measured before re-baselining: **exactly one added field**,
   no value moved.
 
+* **C2 flip (operator-frozen, 2026-08-26)** — the blocking HealthGate
+  per-file ``aggregation`` moved ``any_pass`` → ``all_pass`` in the shipped
+  framework policy, with the aggregation prose in TIDMAD's three blocking
+  ``reason`` strings updated alongside it. The composed effective config is
+  what a run READS, so its identity legitimately moved. Measured before the
+  golden was touched, and the report is quoted rather than paraphrased:
+
+      .artifacts.health_checks_effective.yaml.<bytes>: 4884 -> 4920
+      .artifacts.run_invariants_lock.json.health_config_sha256:
+          '7a4debd6…' -> '8949578d…'
+
+  — **exactly two CHANGED values, zero added, zero removed** (structural
+  walk over the parsed golden). The golden was edited surgically on those
+  two keys; the flip itself is asserted per-gate in
+  ``tests/unit/execute_tools/health_checks/test_all_pass_aggregation_flip.py``,
+  and the frozen-contract meaning of ``health_config_sha256`` here is
+  unchanged: an ACCIDENTAL effective-config move stays red.
+=======
+* **Lane F3 / F-BYPASS-WD-1 (2026-08-26)** — the tuner's run input gained
+  `bypass_formal_time_budget_minutes` (ADDED, `null` on a bare run): the
+  elevated bypass ceiling, transported through the validator→tuner
+  protocol. Measured before re-baselining: **exactly one added field**,
+  no value moved.
+>>>>>>> origin/master
+
 * **Step 11 / C3** — the run-invariants lock gained ONE key,
   `execution_calibration`: the per-role subprocess memory ceilings the run
   executed under, plus their provenance (R-11-6). Measured before the golden

@@ -38,9 +38,15 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 # declared consequence (the 12a proposal_blocks precedent). The SEMANTIC of
 # this pin (additive keys leave undeclared manifests at a stable literal) is
 # unchanged; the literals are re-recorded at the #255 tree.
+# Declared delta (C2 aggregation flip, operator-frozen 2026-08-26): blocking
+# per-file aggregation moved any_pass -> all_pass and the aggregation prose in
+# configs/task_health/tidmad.yaml's blocking reason strings moved with it; the
+# task health document is composed identity, so TIDMAD's fingerprint
+# legitimately moved 3fd178b5… -> 9b497798…. A pre-C2 composed workspace
+# fails its resume closed — intended.
 #: TIDMAD's shipped composition identity. Every Checkpoint-A claim is worthless
 #: if the only task with real production evidence moved underneath it.
-TIDMAD_COMPOSITION_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
+TIDMAD_COMPOSITION_FINGERPRINT = "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
 
 
 #: The COMMITTED identity manifests — the honest scope authority. The Step-10

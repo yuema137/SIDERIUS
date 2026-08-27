@@ -477,19 +477,20 @@ class TestComposedChainEndToEnd:
         assert results["distinct_gate"].passed is True
         assert results["dominant_gate"].passed is True
 
-    def test_aggregation_any_pass_is_harmless_for_single_view_checks(
+    def test_aggregation_policy_key_is_harmless_for_single_view_checks(
         self, monkeypatch, clean_registry
     ):
-        """The blocking policy injects ``aggregation: any_pass`` into every
-        blocking gate's check config. These checks evaluate ONE stream, so
-        the key is inert — recorded here so the assumption is executable."""
+        """The blocking policy injects ``aggregation`` (``all_pass`` since
+        the C2 flip, 2026-08-26; ``any_pass`` before) into every blocking
+        gate's check config. These checks evaluate ONE stream, so the key
+        is inert — recorded here so the assumption is executable."""
         config = _pets_shaped_config(providers=[{"provider_id": "test.categorical_views"}])
         composed = resolve_composed_gates([], config)
-        assert composed[0]["checks"][0]["config"]["aggregation"] == "any_pass"
+        assert composed[0]["checks"][0]["config"]["aggregation"] == "all_pass"
 
         direct = CategoricalDistinctSymbolsCheck().run(
             _ctx(),
-            _cfg(min_distinct_symbols=PETS_FLOOR, aggregation="any_pass"),
+            _cfg(min_distinct_symbols=PETS_FLOOR, aggregation="all_pass"),
             view=_view(COLLAPSED_SYMBOLS),
         )
         bare = CategoricalDistinctSymbolsCheck().run(

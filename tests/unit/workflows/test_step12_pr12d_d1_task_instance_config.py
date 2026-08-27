@@ -56,7 +56,10 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 MANIFEST_DIR = REPO_ROOT / "configs" / "task_composition"
 SHIPPED_TIDMAD = MANIFEST_DIR / "tidmad.yaml"
 
-TIDMAD_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
+# Re-recorded at the C2 aggregation flip (operator-frozen 2026-08-26):
+# 3fd178b5… -> 9b497798… — the task health document's aggregation prose moved
+# with the any_pass -> all_pass policy flip.
+TIDMAD_FINGERPRINT = "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
 
 _SHIPPED_TASK_DATA_PATH_SECTION = (
     "task_data_path:\n"

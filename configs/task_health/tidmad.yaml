@@ -45,10 +45,11 @@ roster:
   reason: 'Blocking diversity gate. FCNet real-learning reproduction has unique_int8=127+;
     the worst observed non-collapse baseline had 15. Threshold of 25 gives 2.08×
     FCNet safety margin and 40% baseline rejection headroom. M9 peek: [3, 10,
-    17] + any_pass — file 3 is the narrowest-margin FCNet band (52 uniq), file
-    10 first mid-band exemplar (127), file 17 high-band exemplar (143). Any_pass
-    means a real learning model whose diversity clears the bar on ANY single peeked
-    file passes; collapse fails only when all three files degrade.'
+    17] + all_pass (C2 flip, 2026-08-26) — file 3 is the narrowest-margin FCNet
+    band (52 uniq), file 10 first mid-band exemplar (127), file 17 high-band
+    exemplar (143). All_pass means a real learning model must clear the bar on
+    EVERY peeked file; diversity collapse on any single peeked file fails the
+    gate.'
   uses_health_peek_files: true
 - gate_id: output_std_blocking
   check: output_std
@@ -59,7 +60,8 @@ roster:
   reason: 'Blocking std gate. Complements output_diversity — an output with many
     unique values but tight std (edge-case not observed but theoretically possible)
     would also fail here. 1.0 mV threshold gives ~5× margin above worst-observed
-    collapse (0.19 mV). M9 peek matches output_diversity: [3, 10, 17] + any_pass.'
+    collapse (0.19 mV). M9 peek matches output_diversity: [3, 10, 17] + all_pass
+    (C2 flip, 2026-08-26).'
   uses_health_peek_files: true
 - gate_id: amplitude_collapse_blocking
   check: amplitude_collapse
@@ -70,10 +72,10 @@ roster:
   reason: 'Blocking amplitude gate. Catches single-value-dominance collapse even
     when unique_count is above threshold (e.g. output has 40 unique values but
     96% are the same one). Threshold 0.95 unchanged from rev-6; extended to every
-    round. M9 peek: [3, 10, 17] + any_pass. Note: any_pass semantics are lenient
-    here — a partial-collapse case where ONE file has 96% dominance and the other
-    two are healthy would pass. all_pass would arguably be stricter; deferred
-    to post-V17 empirical validation (see m9 execution plan §9 Q1).'
+    round. M9 peek: [3, 10, 17] + all_pass (C2 flip, 2026-08-26): a partial-collapse
+    case where ONE peeked file has 96% dominance now fails the gate even when
+    the other two are healthy. The flip discharges the m9 execution plan §9 Q1
+    deferral of exactly this choice to post-V17 empirical validation.'
   uses_health_peek_files: true
 - gate_id: pearson_dispersion_recording
   check: pearson_dispersion

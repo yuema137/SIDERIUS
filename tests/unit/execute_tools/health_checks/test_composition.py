@@ -186,6 +186,13 @@ class TestTidmadOwnershipMigrationPreservesExecutedSemantics:
 
         This is the assertion that would catch a threshold mistyped during
         the migration — the single highest risk in Step 08 (R-08b-1).
+
+        ONE declared value delta, asserted rather than tolerated (the C2
+        flip, operator-frozen 2026-08-26): blocking ``aggregation`` moved
+        ``any_pass`` → ``all_pass``. The golden stays the honest pre-C5
+        capture, so the delta is pinned HERE — the golden must still say
+        ``any_pass`` and the composed config must now say ``all_pass``;
+        any other movement of the key, in either file, stays red.
         """
         expected = json.loads(PRE_C5_EXECUTED_SEMANTICS.read_text())["gates"]
         actual = self._composed_gates(tmp_path)
@@ -197,6 +204,10 @@ class TestTidmadOwnershipMigrationPreservesExecutedSemantics:
             assert set(after) - set(before) <= injected, want["id"]
             assert not set(before) - set(after), f"{want['id']}: keys lost"
             for key, value in before.items():
+                if key == "aggregation":
+                    assert value == "any_pass", f"{want['id']}: golden edited"
+                    assert after[key] == "all_pass", f"{want['id']}: C2 flip"
+                    continue
                 assert after[key] == value, f"{want['id']}: {key}"
 
     def test_the_scale_reaches_exactly_the_checks_that_declare_it(self, tmp_path):
@@ -353,7 +364,9 @@ class TestDispositionDerivesFrameworkPolicy:
                 "config": {
                     "min_unique_int8_values": 25,
                     "peek_samples": 100000,
-                    "aggregation": "any_pass",
+                    # C2 flip (operator-frozen, 2026-08-26): the blocking
+                    # policy injects all_pass; any_pass before.
+                    "aggregation": "all_pass",
                     "peek_file_indices": [3, 10, 17],
                 },
             }

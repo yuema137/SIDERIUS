@@ -44,7 +44,7 @@
       ]
     },
     "health_checks_effective.yaml": {
-      "<bytes>": 4884
+      "<bytes>": 4920
     },
     "memory_trace.jsonl": {
       "<probe_events>": [
@@ -67,7 +67,6 @@
     },
     "run_invariants_lock.json": {
       "created_at": "<VOLATILE>",
-      "generated_library": "<VOLATILE>",
       "execution_calibration": {
         "override_env": null,
         "roles": {
@@ -91,7 +90,8 @@
           }
         }
       },
-      "health_config_sha256": "7a4debd66f65e33fbe830e7f310f401a3184ab2d934d738c04a9d8e4eaf1dc5a",
+      "generated_library": "<VOLATILE>",
+      "health_config_sha256": "8949578d87a2efd3ae3ba62cd2f1a007b015d6d2244bd25aa7ca388cc7a36052",
       "health_feedback_history_max_entries_per_model": 8,
       "health_feedback_history_window_iterations": 3,
       "health_gate_enabled": true,
@@ -246,7 +246,10 @@
             ]
           },
           "human_advice": null,
-          "implementor_blocks": {"continuous_output_phrase": "continuous waveform regression", "science_domain": "signal denoising"},
+          "implementor_blocks": {
+            "continuous_output_phrase": "continuous waveform regression",
+            "science_domain": "signal denoising"
+          },
           "loss_dir": "<WS>/c0_oracle/iteration_001/attempt_001_gated_tcn/impl_001/losses",
           "mathematical_definition": "Dilated causal convolutions with gating.",
           "max_retries": 2,
@@ -871,7 +874,18 @@
           "is_trial": false,
           "mindset": null,
           "previous_failures": [],
-          "proposal_blocks": {"architect_role": "deep learning for signal denoising", "class_axis_note": "256 denoising bins per time step is contract-fixed, not a hyperparameter", "continuous_output_meaning": "the denoised waveform directly", "evidence_citation_clause": ", and the\n`Impact_Score` / `Linear_Weight` columns of the per-file score table", "evidence_rationale_clause": " and per-file lever distribution from the Impact_Score column", "evidence_reading": "   - Read each model's per-file score table by `Impact_Score` descending \u2014 that is\n     the per-iter opportunity ranking. Cite `Linear_Weight` as context, not as a\n     ranking metric on its own. Identify whether the largest remaining\n     `Impact_Score` levers concentrate on a small subset of files or are\n     distributed broadly, and whether the same files dominate across models \u2014\n     those are the cross-model opportunities the new architecture should target.\n     Do not assert that any file is universally weak from `headroom_vs_gt` alone\n     or from a fixed file-index label.", "input_semantics": "per-timestep ADC class indices", "output_contract_guidance": "Regression predicts the denoised waveform directly;\nclassification predicts a distribution over 256 amplitude bins per timestep.", "per_file_strategy_guidance": "Whether to use snapshot/target/anchors strategy based on the Impact_Score distribution\nWhich files (by Impact_Score ranking, not by fixed indices) to focus on if using target strategy", "target_strategy_selector_clause": " (concentrate on the\n       highest-Impact_Score files)"},
+          "proposal_blocks": {
+            "architect_role": "deep learning for signal denoising",
+            "class_axis_note": "256 denoising bins per time step is contract-fixed, not a hyperparameter",
+            "continuous_output_meaning": "the denoised waveform directly",
+            "evidence_citation_clause": ", and the\n`Impact_Score` / `Linear_Weight` columns of the per-file score table",
+            "evidence_rationale_clause": " and per-file lever distribution from the Impact_Score column",
+            "evidence_reading": "   - Read each model's per-file score table by `Impact_Score` descending \u2014 that is\n     the per-iter opportunity ranking. Cite `Linear_Weight` as context, not as a\n     ranking metric on its own. Identify whether the largest remaining\n     `Impact_Score` levers concentrate on a small subset of files or are\n     distributed broadly, and whether the same files dominate across models \u2014\n     those are the cross-model opportunities the new architecture should target.\n     Do not assert that any file is universally weak from `headroom_vs_gt` alone\n     or from a fixed file-index label.",
+            "input_semantics": "per-timestep ADC class indices",
+            "output_contract_guidance": "Regression predicts the denoised waveform directly;\nclassification predicts a distribution over 256 amplitude bins per timestep.",
+            "per_file_strategy_guidance": "Whether to use snapshot/target/anchors strategy based on the Impact_Score distribution\nWhich files (by Impact_Score ranking, not by fixed indices) to focus on if using target strategy",
+            "target_strategy_selector_clause": " (concentrate on the\n       highest-Impact_Score files)"
+          },
           "reasoning_pipeline": {
             "exploration_mode": "auto",
             "model_selection": {

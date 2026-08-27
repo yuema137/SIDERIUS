@@ -32,7 +32,7 @@ so tests / stubs that build empty contexts don't accidentally fail.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 from pydantic import BaseModel, Field
@@ -42,6 +42,20 @@ from execute_tools.health_checks._peek import peek_int8_at_channel
 from execute_tools.health_checks.schemas import HealthCheckContext
 
 AggregationMode = Literal["any_pass", "all_pass", "max", "min", "mean", "median"]
+
+VALID_AGGREGATION_MODES: frozenset[str] = frozenset(get_args(AggregationMode))
+"""Runtime mirror of ``AggregationMode``, derived from the Literal so the two
+can never drift.
+
+``peek_and_aggregate`` enforces membership BEFORE any file I/O (M cleanup,
+2026-08-26). The mode reaches this module as a bare string out of YAML/dict
+check config, so the ``AggregationMode`` annotation alone enforced nothing at
+runtime: an unrecognized value used to fail only after the peeks — or, when
+every peek failed, not at all, because ``_apply_aggregation`` returned a
+silent ``False`` that recorded a config typo as an aggregation failure. An
+unknown mode is a configuration error and fails closed with the valid
+vocabulary named; on a blocking gate the runner's guard turns the raise into
+``CheckVerdict.ERROR`` -> ``on_fail``, never a pass."""
 
 
 class PerFilePeekResult(BaseModel):
@@ -83,8 +97,12 @@ class MultiFilePeekOutcome(BaseModel):
     passed: bool = Field(
         description="Aggregated verdict after applying ``aggregation``.",
     )
-    aggregation: str = Field(
-        description="Aggregation mode used ('any_pass', 'all_pass', ...).",
+    aggregation: AggregationMode = Field(
+        description=(
+            "Aggregation mode used ('any_pass', 'all_pass', ...). Typed as "
+            "the ``AggregationMode`` Literal (M cleanup, 2026-08-26) so the "
+            "carrier itself refuses a value the runtime does not implement."
+        ),
     )
     per_file: list[PerFilePeekResult] = Field(
         default_factory=list,
@@ -206,7 +224,20 @@ def peek_and_aggregate(
         verdict. Callers should surface ``per_file`` via
         ``HealthCheckResult.metrics["per_file_json"]``
         (json-serialised) for record observability.
+
+    Raises:
+        ValueError: ``aggregation`` is not a member of ``AggregationMode``.
+            Raised BEFORE any file is opened — an unimplemented rule must
+            never be paid for with I/O, and must never resolve to a verdict.
     """
+    if aggregation not in VALID_AGGREGATION_MODES:
+        raise ValueError(
+            f"unknown aggregation mode {aggregation!r}; valid modes: "
+            f"{sorted(VALID_AGGREGATION_MODES)}. Aggregation is framework "
+            f"policy (health_policy.<disposition>.check_config in "
+            f"configs/health_checks.yaml) — failing closed rather than "
+            f"peeking under a rule the runtime does not implement."
+        )
     if channel is None:
         channel = default_deliverable_storage().input_channel_group
     resolved = _resolve_indices(ctx, peek_file_indices)

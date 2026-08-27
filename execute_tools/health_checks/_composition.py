@@ -14,7 +14,7 @@ KEY; the framework derives every operational consequence from it::
 
     blocking   -> gate_role=blocking,      after_round=every,
                   short_circuit=true,      on_pass=continue,
-                  on_fail=invalidate_round, aggregation=any_pass
+                  on_fail=invalidate_round, aggregation=all_pass
 
     recording  -> gate_role=observational, after_round=every,
                   short_circuit=false,     on_pass=continue,
@@ -23,7 +23,10 @@ KEY; the framework derives every operational consequence from it::
 A task cannot state any of those, so the conflicting-copies failure mode is
 structurally impossible rather than resolved by a precedence rule. The two
 shapes are not an invention: read verbatim at master ``a226495b``, the six
-shipped gates have exactly these two policy shapes and nothing else.
+shipped gates have exactly these two policy shapes and nothing else. (One
+VALUE inside the blocking shape has since moved by operator decision: the
+C2 flip, 2026-08-26, set ``aggregation`` from ``any_pass`` to ``all_pass``;
+the field set is unchanged.)
 
 **Three binding states, never two** (§3.10). "The caller did not mention a
 task binding" and "the caller states there is no task binding" are different
@@ -130,7 +133,9 @@ class DispositionPolicy(BaseModel):
             "Per-check policy keys the framework injects into every gate of "
             "this disposition. ``aggregation`` lives here: 08a deliberately "
             "excluded it from task thresholds, and every shipped blocking "
-            "gate carries ``any_pass`` while no recording gate carries it."
+            "gate carries ``all_pass`` (the C2 flip, operator-frozen "
+            "2026-08-26; ``any_pass`` before) while no recording gate "
+            "carries it."
         ),
     )
 
@@ -142,7 +147,7 @@ DEFAULT_DISPOSITION_POLICY: dict[str, DispositionPolicy] = {
         short_circuit=True,
         on_pass=GateAction.CONTINUE,
         on_fail=GateAction.INVALIDATE_ROUND,
-        check_config={"aggregation": "any_pass"},
+        check_config={"aggregation": "all_pass"},
     ),
     HealthDisposition.RECORDING.value: DispositionPolicy(
         gate_role="observational",

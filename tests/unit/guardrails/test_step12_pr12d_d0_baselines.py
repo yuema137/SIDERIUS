@@ -573,7 +573,10 @@ class TestInvertedGuardB10:
 
 #: TIDMAD's shipped composition, at D0. Any seam that perturbs this changed
 #: the science of the only task with real production evidence.
-TIDMAD_COMPOSITION_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
+#: Re-recorded at the C2 aggregation flip (operator-frozen 2026-08-26):
+#: 3fd178b5… -> 9b497798… — the task health document's aggregation prose
+#: moved with the any_pass -> all_pass policy flip.
+TIDMAD_COMPOSITION_FINGERPRINT = "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
 
 #: Composed-only flags that must never appear on a legacy child's argv.
 FORBIDDEN_ON_LEGACY = (

@@ -44,10 +44,13 @@ SHIPPED = MANIFEST_DIR / "davis.yaml"
 # declared consequence (the 12a proposal_blocks precedent). The SEMANTIC of
 # this pin (additive keys leave undeclared manifests at a stable literal) is
 # unchanged; the literals are re-recorded at the #255 tree.
+# Declared delta (C2 aggregation flip, operator-frozen 2026-08-26): TIDMAD's
+# fingerprint re-recorded 3fd178b5… -> 9b497798… — the task health document's
+# aggregation prose moved with the any_pass -> all_pass policy flip.
 #: TIDMAD's shipped composition identity, which D6 must not disturb. A pinned
 #: LITERAL, captured before this commit: recomputing it here would compare the
 #: composition authority to itself and pass for any value.
-TIDMAD_COMPOSITION_FINGERPRINT = "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56"
+TIDMAD_COMPOSITION_FINGERPRINT = "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d"
 
 #: The §22.9a Track-C freeze, transcribed as literals. Read back from the
 #: composition these would prove nothing; hardcoded, they are the contract.

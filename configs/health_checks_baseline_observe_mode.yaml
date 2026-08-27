@@ -30,7 +30,8 @@ health_policy:
     on_pass: continue
     on_fail: continue                 # THE observe-mode difference
     check_config:
-      aggregation: any_pass
+      aggregation: all_pass           # C2 flip — tracks configs/health_checks.yaml;
+                                      # on_fail above stays the ONLY difference
 
   recording:
     gate_role: observational

@@ -58,10 +58,13 @@ _VOLATILE_KEY_PATTERNS = (
 )
 
 #: NOT volatile, deliberately. ``health_config_sha256`` was measured stable
-#: across runs (7a4debd6…, matching the composed-config sha the Step-08b work
-#: recorded), and design §19 invariants 3-4 make it a FROZEN CONTRACT: a
-#: run-state refactor that changed the effective-config hash would have changed
-#: what the run reads. Normalising it away would delete the only signal.
+#: across runs (7a4debd6… at capture, matching the composed-config sha the
+#: Step-08b work recorded; 8949578d… since the C2 aggregation flip,
+#: operator-frozen 2026-08-26 — a DECLARED policy delta, recorded in the
+#: oracle test's docstring), and design §19 invariants 3-4 make it a FROZEN
+#: CONTRACT: a run-state refactor that changed the effective-config hash
+#: would have changed what the run reads. Normalising it away would delete
+#: the only signal.
 
 
 #: Fields that identify the MACHINE, not the workflow. The hardware context is

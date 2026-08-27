@@ -405,11 +405,16 @@ class TestW7PreflightAndWorkflowAgree:
         assert legacy_sha != composed_sha
 
     def test_the_legacy_document_is_unchanged(self, tmp_path):
-        """W7 must not have moved the un-composed path. This sha is the one
-        the failed Gate run actually wrote, recorded here as the parity pin.
+        """W7 must not have moved the un-composed path. The original pin
+        (``abced734…``) is the sha the failed Gate run actually wrote; the
+        C2 aggregation flip (operator-frozen, 2026-08-26 — blocking
+        ``any_pass`` → ``all_pass`` plus the three blocking reason strings)
+        legitimately moved the composed document, so the pin was re-recorded
+        at that declared delta. The test's job is unchanged: an UNDECLARED
+        move of the un-composed document stays red.
         """
         _p, sha = self._materialize(str(tmp_path))
-        assert sha == "abced73458b130968d7b0363fff7f4ad4ca21fb105fae18f8d079e557466629b"
+        assert sha == "8236043d6f152ffd08e787168680e0587416e3c7c35a366f2bcdd791e356120f"
 
     def test_the_preflight_passes_EVERY_composition_derived_invariant(self):
         """The census that prevents a THIRD occurrence of this defect.

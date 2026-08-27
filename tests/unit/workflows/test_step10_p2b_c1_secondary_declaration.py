@@ -69,8 +69,13 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "step10_p1"
 #: the manifest still declares no secondary, and `fourth_task` — which declares
 #: neither new section — is UNCHANGED at its P2b literal, which is what
 #: separates "a declaration was added" from "the machinery moved".
+#: **`tidmad` re-recorded at the C2 aggregation flip (operator-frozen
+#: 2026-08-26)** — 3fd178b5… -> 9b497798…: the task health document's
+#: aggregation prose moved with the any_pass -> all_pass policy flip. Not the
+#: additive rule leaking either: no secondary appeared, and the other three
+#: tasks' literals are untouched.
 PRE_P2B_FINGERPRINTS = {
-    "tidmad": "3fd178b532360c88d741d74748c34f915738b5202a84174b93f7e7816a2bfb56",
+    "tidmad": "9b497798a13a5cea3733f189b1dd69b5a61469fea4a63474d4b3e2906684486d",
     "fourth_task": "cef7656eb958202ed10a806c45de1a8dfa06b2a063b95488f0fcd9aa0d973507",
     "pets": "3ab1128a3d5d425568b74642c9cd6857d16a5c64904c1befe3731ecfc11a2672",
     "davis": "396e767d5621390163e7ba0b16df401811379e758d7211e763eef50f5563ac43",
