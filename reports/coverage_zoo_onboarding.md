@@ -3,13 +3,36 @@
 **Claim evidenced**: declaration expressiveness + lifecycle execution only —
 never discovery. Four task packages, each entirely **out of tree**, each
 adding at least one NEW axis value (format / task mode / metric plugin /
-direction) over the existing set {TIDMAD HDF5-denoising, LIGO
-HDF5-regression, TESS Parquet-classification, Pets images-classification,
-DAVIS video-regression}, each with a **measured** lifecycle run (real
+direction) over the existing set {TIDMAD HDF5-denoising, Pets
+images-classification, DAVIS video-regression, `session_event_stream`
+JSONL next-event-prediction}, each with a **measured** lifecycle run (real
 training → real inference → real scoring → health disposition) and a
 counted onboarding record. **Framework edits required: ZERO for all four**
 (verified: `git status --porcelain` on the framework checkout is empty
 after the whole campaign).
+
+> **CORRECTION (F-COV-1, 2026-08-27).** An earlier revision of the sentence
+> above named the existing set as `{TIDMAD HDF5-denoising, LIGO
+> HDF5-regression, TESS Parquet-classification, Pets images-classification,
+> DAVIS video-regression}`. **LIGO and TESS do not exist as SIDERIUS tasks.**
+> A mechanical sweep of the tree found that clause to be their only
+> occurrence anywhere: no package, no manifest, no `examples/` entry, no
+> declared metric or direction, no run record, no workspace. The clause was
+> inherited from issue #273's admission-rule prose and was never evidence.
+> They are removed here and must not appear in Results §5.2 or Appendix C.
+>
+> The **verified** existing set is the four named above — TIDMAD (HDF5,
+> denoising, `tidmad_denoising_score`, higher), Pets (images,
+> classification, `accuracy`, higher), DAVIS (video, future-frame
+> regression, `mse`, lower) and **`session_event_stream`** (JSONL event
+> shards, next-event prediction, `sequence_nll_loss`, lower), the last being
+> the real PR-12e out-of-tree graduation task, which the withdrawn clause
+> had misattributed as "LIGO/TESS". With the four packages recorded below,
+> the defensible coverage set is **eight tasks: N = 7 beyond TIDMAD**.
+>
+> Each package's admitted axis values were re-checked against this corrected
+> set and are unaffected: nothing they claim as new was covered by the
+> withdrawn rows.
 
 Also discharges the copyable-instantiation half of issue #283 for the
 out-of-tree case: each package is a complete `cp -r`-able artifact
