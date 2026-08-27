@@ -190,6 +190,15 @@ A composed run **requires** `--data_dir`. It fails closed before any LLM call or
 GPU work with `CompositionDataRootMissing`. Without it every child subprocess
 would fall back to the import-time TIDMAD data directory.
 
+That same root is what the run's **measurement capability** is resolved against,
+and the capability carries the composed task's own identity (its
+`task_data_path:` `id`) rather than TIDMAD's. So the launch guard's
+"can this environment measure?" verdict is about the dataset the run actually
+reads. A composed run that cannot supply a root is refused **by name** — the
+refusal states which task could not be measured, never TIDMAD's dataset.
+An un-composed run is unchanged: it resolves TIDMAD's capability against the
+import-time data directory exactly as before.
+
 ## Things the manifest does *not* declare
 
 | thing | how it is supplied instead |

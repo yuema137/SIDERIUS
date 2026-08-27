@@ -206,11 +206,34 @@ class TestTheWorkflowIsSuppliedACapability:
 
     def test_the_task_aware_launcher_supplies_it(self):
         """The other half: someone must actually pass one, or the parameter
-        is a boundary nobody uses."""
+        is a boundary nobody uses.
+
+        **F-MEASCAP-1 — UPGRADED.** This used to assert the exact substring
+        ``measurement_capability=resolve_tidmad_measurement_capability()``,
+        which was the DEFECT: an unconditional TIDMAD resolver, twenty-one
+        lines from ``task_composition=run_composition`` in the same call. A
+        source-text assertion cannot tell "someone supplies a capability" from
+        "someone supplies the WRONG capability", so this one held the hardwired
+        answer in place and would have gone red on the fix.
+
+        The intent survives; the mechanism does not. What is asserted here is
+        now only the structural half — the boundary has a supplier, and the
+        composed half exists. The VALUE is proven behaviourally, at the real
+        boundary and in both regimes, by
+        ``tests/unit/sdsc_submission_scripts/test_fmeascap1_measurement_capability_composition.py``,
+        whose composed witnesses are mutation-proven against exactly the line
+        this assertion used to pin.
+        """
         launcher = (
             Path(__file__).resolve().parents[3] / "sdsc_submission_scripts" / "run_one_iteration.py"
         ).read_text()
-        assert "measurement_capability=resolve_tidmad_measurement_capability()" in launcher
+        assert "measurement_capability=measurement_capability," in launcher, (
+            "the launcher no longer threads a capability into run_workflow"
+        )
+        assert "resolve_composed_measurement_capability(" in launcher, (
+            "the launcher resolves no composed capability; a composed run would "
+            "fall back to another task's measurement identity (F-MEASCAP-1)"
+        )
 
     def test_fail_closed_is_preserved_when_none_is_supplied(self):
         """Threading it in must not become a way to skip the check."""

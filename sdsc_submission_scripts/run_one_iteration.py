@@ -96,7 +96,11 @@ from workflows.model_exploration import (
     run_workflow,
 )
 from workflows.run_config import WorkflowLaunchConfig
-from workflows.task_composition import bind_run_task_composition, compose_run_task_bindings
+from workflows.task_composition import (
+    bind_run_task_composition,
+    compose_run_task_bindings,
+    resolve_composed_measurement_capability,
+)
 
 SIDERIUS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(dotenv_path=Path(SIDERIUS_ROOT) / ".env")
@@ -2802,6 +2806,28 @@ def main():
         # no-op and the run is byte-identical to its pre-Step-10 behaviour.
         # W7 — resolved once, above, before the invariants pre-flight.
         # ACTIVATION stays exactly where P1 put it.
+        # F-MEASCAP-1 — the measurement capability follows the SAME binding
+        # the composition does.
+        #
+        # It used to be `resolve_tidmad_measurement_capability()` written
+        # inline in the `run_workflow(...)` call below, twenty-one lines from
+        # `task_composition=run_composition`: one argument consulted the bound
+        # composition, its neighbour was hardwired to TIDMAD. So a composed
+        # non-TIDMAD run declared TIDMAD's identity and tested availability
+        # against the import-time `TIDMAD_DATA_DIR` instead of the root it
+        # binds — refused up front where TIDMAD data is absent, and silently
+        # ADMITTED on the strength of another task's dataset where it is
+        # present, which is every campaign host.
+        #
+        # The branch is on composition PRESENCE, exactly like the composition
+        # edge itself, never on a task name. Un-composed keeps the identical
+        # zero-argument legacy call, so its identity and its availability
+        # verdict are unchanged.
+        measurement_capability = (
+            resolve_composed_measurement_capability(run_composition, dataset_root=args.data_dir)
+            if run_composition is not None
+            else resolve_tidmad_measurement_capability()
+        )
         # Step 11 C4 — the run's resolved physical data root travels with
         # the composition binding. `args.data_dir` was already put through
         # `resolve_dataset_dir` above, so this is the SAME authority, not a
@@ -2887,7 +2913,7 @@ def main():
                     # proposer's schema gate.
                     allowed_output_types=parse_allowed_output_types(args.allowed_output_types),
                 ),
-                measurement_capability=resolve_tidmad_measurement_capability(),
+                measurement_capability=measurement_capability,
                 workspace=args.workspace,
                 run_name=run_name,
                 chain_run_name=chain_run_name,

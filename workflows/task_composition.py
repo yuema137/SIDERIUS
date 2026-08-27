@@ -77,6 +77,7 @@ from agent.schemas.hyperparam_tuning import TaskCompositionRef
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from agent.schemas.interpretation import InterpretationTaskBlocks
     from agent.schemas.task_config import ForwardContract
+    from core.runtime_control.measurement_capability import ResolvedMeasurementCapability
     from execute_tools.dataset_config import DatasetProfile
     from execute_tools.evaluation_metric import EvaluationMetric
     from execute_tools.health_checks._composition import TaskHealthBinding
@@ -2195,6 +2196,106 @@ def compose_run_task_bindings(manifest_path: str) -> RunTaskComposition:
         model_plugins=model_plugin_binding,
         loss_plugins=loss_plugin_roots or None,
         objective=composed_objective,
+    )
+
+
+# ---------------------------------------------------------------------------
+# The composed run's measurement identity (F-MEASCAP-1)
+# ---------------------------------------------------------------------------
+
+
+def _composed_data_shape_class(profile: DatasetProfile) -> str:
+    """A DECLARED shape identity for a composed run, WITHOUT interpreting topology.
+
+    ``data_shape_class`` answers "what makes two datasets interchangeable for
+    resource purposes". TIDMAD spells its own out as segment geometry
+    (``psd..._seg..._files...``) because ``execute_tools/data_paths.py`` IS the
+    TIDMAD data layer and legitimately knows that geometry. The framework does
+    not, for any other task: :attr:`DatasetProfile.topology` is OPAQUE and the
+    framework "NEVER inspects inside this payload".
+
+    Digesting is not inspecting. Two profiles declaring the same partition
+    count and the same physical layout ARE interchangeable for resource
+    purposes, and that is exactly what a stable hash over those two
+    declarations expresses — without the framework learning what a single key
+    inside the payload means. ``partition_count`` stays legible outside the
+    digest because it is the ONE topology fact framework infrastructure already
+    reasons about with the same semantics across tasks (Q-12-4).
+
+    Deliberately derived from ``partition_count`` and ``topology`` ONLY, not
+    from the whole profile dump: ``anchor_selection_files`` and
+    ``health_peek_files`` are task-owned file SETS, and changing which files a
+    run peeks at must not read as a change of dataset shape.
+    """
+    payload = {"partition_count": profile.partition_count, "topology": profile.topology}
+    digest = hashlib.sha256(_canonical(payload).encode("utf-8")).hexdigest()[:12]
+    return f"partitions{profile.partition_count}_topology{digest}"
+
+
+def resolve_composed_measurement_capability(
+    composition: RunTaskComposition,
+    *,
+    dataset_root: str | None,
+) -> ResolvedMeasurementCapability:
+    """What a COMPOSED run can measure — stated in ITS OWN identity.
+
+    **F-MEASCAP-1.** The launcher used to hand generic orchestration
+    ``resolve_tidmad_measurement_capability()`` unconditionally, twenty-one
+    lines from where it handed the same call the bound composition. So a
+    composed run of any task declared TIDMAD's ``task_identity``,
+    ``dataset_adapter`` and segment geometry, and — because the call took no
+    argument — tested availability against the import-time ``TIDMAD_DATA_DIR``
+    rather than the root the run actually binds.
+
+    That has two faces, and the quiet one is why it matters. With no TIDMAD
+    data present the availability test fails and the launch is refused up
+    front: loud, harmless, and how the defect was found. With TIDMAD data
+    present — every campaign host — the test SUCCEEDS, nothing warns, and a
+    composed non-TIDMAD run is admitted on the strength of a dataset it will
+    never read.
+
+    This is the wiring the call site was missing, not a new abstraction:
+    :func:`core.runtime_control.measurement_capability.resolve_measurement_capability`
+    was already generic and already keyword-only, with every task-specific
+    value arriving as an argument and ``dataset_root`` explicitly refused a
+    default. All four values come from authorities that already exist —
+    the implementation's own declared id, the declared dataset profile, and
+    the run's resolved physical root.
+
+    **No task-name branch, and none is needed.** A composed TIDMAD run takes
+    exactly this path too and states its own declared id; nothing downstream
+    of the launcher persists or compares these strings (the capability reaches
+    only ``run_launch_self_test``), and the tuner resolves its OWN capability
+    independently. Adding a "is this really TIDMAD?" special case here would
+    reintroduce, in generic code, precisely the coupling this repairs.
+
+    A composed task that cannot supply a root gets a NAMED refusal:
+    ``resolve_measurement_capability`` returns ``probe_available=False`` with a
+    reason, and ``task_identity`` still carries the COMPOSED task — so the
+    launch guard refuses naming the task that actually failed, instead of
+    naming TIDMAD's dataset for a run that never wanted it.
+
+    Args:
+        composition: the run's resolved authorities.
+        dataset_root: the run's resolved physical data root — the SAME value
+            handed to :func:`bind_run_task_composition`, so the availability
+            test is run against the bytes this run will actually read.
+
+    Returns:
+        `ResolvedMeasurementCapability` — available or not, always naming the
+        composed task.
+    """
+    from core.runtime_control.measurement_capability import resolve_measurement_capability
+
+    task_id = composition.task_data_path_id
+    return resolve_measurement_capability(
+        task_identity=task_id,
+        # The implementation that resolves this task's bytes IS its dataset
+        # adapter; the id is the declared name of that component. The
+        # framework never inspects its spelling (parent §3.1).
+        dataset_adapter=task_id,
+        data_shape_class=_composed_data_shape_class(composition.dataset_profile),
+        dataset_root=dataset_root,
     )
 
 
