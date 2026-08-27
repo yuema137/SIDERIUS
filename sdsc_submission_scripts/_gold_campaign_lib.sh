@@ -6,7 +6,7 @@
 #          are typed (D-ARCH-1, F-LAUNCH-1). Sourced by run_gold_campaign.sh
 #          and by every stage script under it; NEVER by the X9 launchers.
 #
-# Owns   : the frozen-value table (the twelve chain-boundary values from
+# Owns   : the frozen-value table (the thirteen chain-boundary values from
 #          docs/campaign/official_campaign_decisions.yaml — D-BUD-2 horizon,
 #          D-BUD-6 epochs, D-BUD-7 trial portions, D-BUD-8 formal portions,
 #          D-BUD-11/13 time budgets, P6-A skip delta, P6-B bypass delta),
@@ -35,7 +35,7 @@ GOLD_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GOLD_PROJECT_DIR="$(cd "${GOLD_LIB_DIR}/.." && pwd)"
 
 # ---------------------------------------------------------------------------
-# THE FROZEN-VALUE TABLE — the twelve typed chain-boundary values.
+# THE FROZEN-VALUE TABLE — the thirteen typed chain-boundary values.
 #
 # ONE row per value; the argv builder DERIVES its tokens from these rows via
 # gold_frozen_value, and the dry-run prints them verbatim, so deleting or
@@ -48,14 +48,19 @@ GOLD_PROJECT_DIR="$(cd "${GOLD_LIB_DIR}/.." && pwd)"
 # maximum, not a target; a band may stop earlier only under the FCNet+2
 # rule once A2-FCNET supplies a per-band reference).
 #
-# max_epochs=1 — DECLARED LIMITATION (D-BUD-6): the frozen campaign semantics
-# are trial_max_epochs=2 / formal_max_epochs=1, but the chain exposes ONE
-# mode-agnostic ceiling (`run_one_iteration.py --max_epochs`, "Hard cap on
-# epochs per round") and no trial/formal split exists anywhere in the
-# codebase ("historical_state", D-BUD-6). 1 is the SAFE value: it can violate
-# neither frozen ceiling; 2 could leak a second epoch into a formal round.
-# The trial-2 allowance is unreachable until the split lands (release lane).
-# Do NOT invent a second knob here.
+# trial_max_epochs=2 / formal_max_epochs=1 — the D-BUD-6 frozen split,
+# emitted since the chain grew the per-mode transport
+# (run_one_iteration.py --trial_max_epochs / --formal_max_epochs; the tuner
+# clamps at the plan boundary keyed on the round's is_trial authority).
+# These are CEILINGS / workflow authorities — agents may NOT increase them;
+# any legitimate training-validity mechanism may still terminate an invalid
+# run earlier (decision D-BUD-6). The pair is emitted INSTEAD of the old
+# mode-agnostic max_epochs=1 stand-in (the pre-split DECLARED LIMITATION):
+# with both per-mode values typed, --max_epochs is fully shadowed at the
+# clamp, and run_one_iteration.py's own default (--max_epochs 1) still
+# rides along as the mode-agnostic fallback — the same value the retired
+# row carried. --max_epochs stays RESERVED below so no passthrough can
+# reintroduce a third epoch authority.
 GOLD_FROZEN_ROWS=(
     "num_iterations=20"
     "trial_portion=0.1"
@@ -64,7 +69,8 @@ GOLD_FROZEN_ROWS=(
     "formal_portion=1.0"
     "formal_train_portion=0.1"
     "formal_eval_portion=0.1"
-    "max_epochs=1"
+    "trial_max_epochs=2"
+    "formal_max_epochs=1"
     "trial_time_budget_minutes=30"
     "formal_time_budget_minutes=120"
     "skip_formal_min_delta=-2.0"
@@ -170,7 +176,8 @@ gold_frozen_chain_args() {
     esac
     for key in trial_portion train_portion eval_portion \
         formal_portion formal_train_portion formal_eval_portion \
-        max_epochs trial_time_budget_minutes formal_time_budget_minutes \
+        trial_max_epochs formal_max_epochs \
+        trial_time_budget_minutes formal_time_budget_minutes \
         skip_formal_min_delta bypass_formal_time_budget_min_delta; do
         v="$(gold_frozen_value "$key")" || return 1
         GOLD_FROZEN_CHAIN_ARGS+=("--${key}" "$v")
@@ -326,7 +333,8 @@ GOLD_RESERVED_PASSTHROUGH=(
     --cleanup_denoised
     --num_iterations --trial_portion --train_portion --eval_portion
     --formal_portion --formal_train_portion --formal_eval_portion
-    --max_epochs --trial_time_budget_minutes --formal_time_budget_minutes
+    --max_epochs --trial_max_epochs --formal_max_epochs
+    --trial_time_budget_minutes --formal_time_budget_minutes
     --skip_formal_min_delta --bypass_formal_time_budget_min_delta
     --bypass_formal_time_budget_minutes
     --experiment_arm --ml_lit_review_enabled --no-ml_lit_review_enabled

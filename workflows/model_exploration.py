@@ -3182,6 +3182,10 @@ def run_workflow(
             train_base_seed=launch.train_base_seed,
             cleanup_denoised=launch.cleanup_denoised,
             max_epochs=launch.max_epochs,
+            # D-BUD-6 — per-mode epoch ceilings, carried through unchanged
+            # including `None` (None = mode-agnostic max_epochs governs).
+            trial_max_epochs=launch.trial_max_epochs,
+            formal_max_epochs=launch.formal_max_epochs,
             validation_max_portion=launch.validation_max_portion,
             validation_max_train_samples=launch.validation_max_train_samples,
             validation_max_samples=launch.validation_max_samples,

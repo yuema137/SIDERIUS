@@ -151,7 +151,11 @@ class TestTheMaxEpochsBoundIsNotBypassable:
         """Reachability: the fix must be on the path, not merely defined.
 
         Fails if the clamp reverts to reading the raw dict, which is the
-        exact bypass.
+        exact bypass — or (D-BUD-6) if it stops routing the bound through
+        the input schema's ONE mode-aware resolution authority keyed on
+        the round's ``plan.is_trial``: a call site that reads
+        ``agent_input.max_epochs`` directly again would silently disable
+        both per-mode ceilings while every legacy run stayed green.
         """
         import inspect
 
@@ -160,7 +164,12 @@ class TestTheMaxEpochsBoundIsNotBypassable:
             "the clamp is reading the planner's dict again; an omitted "
             "epochs would bypass --max_epochs"
         )
-        assert "_apply_epoch_bound(plan.train_cfg, agent_input.max_epochs)" in src
+        assert "epoch_cap = agent_input.resolve_epoch_cap(is_trial=plan.is_trial)" in src
+        assert "_apply_epoch_bound(plan.train_cfg, epoch_cap.cap" in src
+        assert "_apply_epoch_bound(plan.train_cfg, agent_input.max_epochs)" not in src, (
+            "the clamp is reading the mode-agnostic field directly again; "
+            "trial_max_epochs / formal_max_epochs would be silently ignored"
+        )
 
     def test_the_bound_is_applied_to_the_plan_the_run_carries(self):
         """The write-back, on the real object the run uses.

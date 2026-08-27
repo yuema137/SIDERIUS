@@ -666,6 +666,10 @@ def run_agent(
     order_strategy_override: str | None = None,
     file_order_override: str | None = None,
     max_epochs: int | None = None,
+    # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
+    # mode-agnostic max_epochs governs that role (legacy behavior).
+    trial_max_epochs: int | None = None,
+    formal_max_epochs: int | None = None,
     trial_time_budget_minutes: float | None = None,
     formal_time_budget_minutes: float | None = None,
     health_checks_config: str | None = None,
@@ -780,6 +784,12 @@ def run_agent(
     # Epoch cap + wall-time budgets (forwarded when set; None → tuner defaults).
     if max_epochs is not None:
         cmd.extend(["--max_epochs", str(max_epochs)])
+    # D-BUD-6 — per-mode epoch ceilings, forwarded only when set so an
+    # unset pair reproduces the legacy tuner argv exactly.
+    if trial_max_epochs is not None:
+        cmd.extend(["--trial_max_epochs", str(trial_max_epochs)])
+    if formal_max_epochs is not None:
+        cmd.extend(["--formal_max_epochs", str(formal_max_epochs)])
     if trial_time_budget_minutes is not None:
         cmd.extend(["--trial_time_budget_minutes", str(trial_time_budget_minutes)])
     if formal_time_budget_minutes is not None:
@@ -1074,7 +1084,33 @@ def main():
             "Optional epoch cap for Phase 2/3 planner rounds. When omitted, "
             "the planner may choose epochs within the TrainConfig bounds. "
             "Phase 1 baseline remains fixed at 1 epoch per paper authors "
-            "(direct communication)."
+            "(direct communication). Per-mode overrides: --trial_max_epochs "
+            "/ --formal_max_epochs take precedence for their round role "
+            "(D-BUD-6)."
+        ),
+    )
+    parser.add_argument(
+        "--trial_max_epochs",
+        type=int,
+        default=None,
+        help=(
+            "TRIAL-role epoch ceiling for the tuner rounds (campaign "
+            "decision D-BUD-6). Precedence for a trial round: this value -> "
+            "--max_epochs -> no clamp; formal rounds never read it. Must be "
+            ">= 1 (the tuner input schema refuses zero/negative loudly). "
+            "The Phase 1 baseline is unaffected."
+        ),
+    )
+    parser.add_argument(
+        "--formal_max_epochs",
+        type=int,
+        default=None,
+        help=(
+            "FORMAL-role epoch ceiling for the tuner rounds (campaign "
+            "decision D-BUD-6). Precedence for a formal round: this value -> "
+            "--max_epochs -> no clamp; trial rounds never read it. Must be "
+            ">= 1 (the tuner input schema refuses zero/negative loudly). "
+            "The Phase 1 baseline is unaffected."
         ),
     )
     parser.add_argument(
@@ -1647,6 +1683,8 @@ def main():
         order_strategy_override=args.order_strategy_override,
         file_order_override=args.file_order_override,
         max_epochs=args.max_epochs,
+        trial_max_epochs=args.trial_max_epochs,
+        formal_max_epochs=args.formal_max_epochs,
         trial_time_budget_minutes=args.trial_time_budget_minutes,
         formal_time_budget_minutes=args.formal_time_budget_minutes,
         health_checks_config=args.health_checks_config,

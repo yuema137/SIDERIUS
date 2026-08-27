@@ -103,6 +103,11 @@ class WorkflowLaunchConfig:
     train_base_seed: int | None = None
     cleanup_denoised: bool = False
     max_epochs: int | None = None
+    # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
+    # mode-agnostic max_epochs governs that role, byte-identical to the
+    # pre-split behavior. Validated ge=1 by HyperparamTuningInput.
+    trial_max_epochs: int | None = None
+    formal_max_epochs: int | None = None
     skip_formal_min_delta: float = -1.0
     bypass_formal_time_budget_min_delta: float = 0.0
     # Lane F3 — the elevated bypass ceiling; None = a qualified bypass

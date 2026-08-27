@@ -34,7 +34,7 @@
 #       --gold_advice_file ADVICE.json [--dry-run] [...]
 #
 # Frozen bindings (see _gold_campaign_lib.sh for the table + decisions):
-#   * the twelve chain-boundary values, typed, never defaulted;
+#   * the thirteen chain-boundary values, typed, never defaulted;
 #   * arm label goldpod|blindpod (X9 labels refused; R-ARM-STAMP-1);
 #   * lit-review EXPLICITLY OFF in both arms (Q-LIT-1 = OFF, symmetric);
 #   * the treatment boundary: --gold_advice_file -> --advice (goldpod only);

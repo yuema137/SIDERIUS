@@ -758,7 +758,14 @@ of your retry attempts. Pick valid values now.
 """
 
 
-def _format_fixed_params_block(plan_overrides=None, max_epochs=None, resolved_data_scope=None):
+def _format_fixed_params_block(
+    plan_overrides=None,
+    max_epochs=None,
+    resolved_data_scope=None,
+    *,
+    trial_max_epochs=None,
+    formal_max_epochs=None,
+):
     """
     Render a SYSTEM-FIXED PARAMETERS block for the planner prompt when the
     operator has frozen any plan fields via ``plan_overrides``, capped
@@ -779,11 +786,20 @@ def _format_fixed_params_block(plan_overrides=None, max_epochs=None, resolved_da
             ``anchors``/``target`` under a partial scope are normalized to
             ``snapshot`` with recorded provenance. See
             docs/design/enable_partial_file_list.md.
+        trial_max_epochs, formal_max_epochs: D-BUD-6 per-mode EFFECTIVE
+            epoch ceilings, already resolved by
+            ``HyperparamTuningInput.resolve_epoch_cap`` (so this renderer
+            never re-derives the precedence rule). When either is set, ONE
+            mode-aware pair line replaces the single ``max_epochs`` line —
+            the values shown are exactly what the clamp will apply per
+            round role. Both ``None`` renders the legacy block
+            byte-identically.
     """
     overrides = dict(plan_overrides) if plan_overrides else {}
     has_max_epochs = max_epochs is not None
+    has_mode_epoch_caps = trial_max_epochs is not None or formal_max_epochs is not None
     has_partial_scope = resolved_data_scope is not None
-    if not overrides and not has_max_epochs and not has_partial_scope:
+    if not overrides and not has_max_epochs and not has_mode_epoch_caps and not has_partial_scope:
         return ""
 
     lines = []
@@ -812,7 +828,17 @@ def _format_fixed_params_block(plan_overrides=None, max_epochs=None, resolved_da
     for k, v in overrides.items():
         if k not in rendered_keys:
             lines.append(f"  {k:16s} = {v}")
-    if has_max_epochs:
+    if has_mode_epoch_caps:
+        # D-BUD-6 — the pair line REPLACES the single-cap line: the values
+        # are the clamp-effective per-role ceilings, so rendering both
+        # would show the shadowed fallback as if it still governed.
+        trial_txt = f"≤ {trial_max_epochs}" if trial_max_epochs is not None else "unbounded"
+        formal_txt = f"≤ {formal_max_epochs}" if formal_max_epochs is not None else "unbounded"
+        lines.append(
+            f"  epochs (cap)     {trial_txt} (trial) / {formal_txt} (formal)"
+            "      ← per-round-mode ceilings; higher values are clamped"
+        )
+    elif has_max_epochs:
         lines.append(f"  epochs (cap)     ≤ {max_epochs}      ← higher values are clamped")
     if has_partial_scope:
         lines.append(
@@ -981,6 +1007,10 @@ def get_planner_user_prompt(
     force_formal_round=True,
     plan_overrides=None,
     max_epochs=None,
+    # D-BUD-6 — per-mode EFFECTIVE epoch ceilings (resolved upstream by
+    # HyperparamTuningInput.resolve_epoch_cap); None/None = legacy rendering.
+    trial_max_epochs=None,
+    formal_max_epochs=None,
     resolved_data_scope=None,
     # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
     trial_vram_budget_gb=None,
@@ -1019,6 +1049,14 @@ def get_planner_user_prompt(
                         a SYSTEM-FIXED PARAMETERS block is rendered so the LLM
                         does not waste reasoning on overridden knobs.
         max_epochs:     Hard cap on epochs. Rendered alongside plan_overrides.
+        trial_max_epochs,
+        formal_max_epochs:
+                        D-BUD-6 per-mode EFFECTIVE epoch ceilings. When either
+                        is set, the FIXED block renders one mode-aware pair
+                        line INSTEAD of the single max_epochs line — the pair
+                        already carries the clamp-effective values, so the
+                        prompt and the clamp cannot disagree. Both None keeps
+                        the legacy rendering byte-identical.
         resolved_data_scope:
                         Sorted allowed file indices when the run's DataScope
                         is partial (None = full scope, no disclosure).
@@ -1305,7 +1343,13 @@ def get_planner_user_prompt(
                 "- Use trial mode for fast exploration; switch to formal when you want a definitive score.\n"
             )
 
-    fixed_params_block = _format_fixed_params_block(plan_overrides, max_epochs, resolved_data_scope)
+    fixed_params_block = _format_fixed_params_block(
+        plan_overrides,
+        max_epochs,
+        resolved_data_scope,
+        trial_max_epochs=trial_max_epochs,
+        formal_max_epochs=formal_max_epochs,
+    )
 
     # Phase K (K.6) — per-round numeric resource block + static guidance.
     # Both blocks are blank-string when no budgets/estimates are configured,

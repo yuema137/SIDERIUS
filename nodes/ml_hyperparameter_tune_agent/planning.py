@@ -205,6 +205,25 @@ def _psd_segment_counts(
     return _count(train_sample_set), _count(eval_sample_set)
 
 
+def _disclosed_epoch_caps(agent_input: Any) -> tuple[int | None, int | None]:
+    """D-BUD-6 — the (trial, formal) epoch ceilings to DISCLOSE to the planner.
+
+    When a per-mode cap is configured, the prompt must show the SAME
+    effective values the clamp will apply — resolved by the ONE schema
+    authority ``HyperparamTuningInput.resolve_epoch_cap`` — because a prompt
+    that kept saying ``<= max_epochs`` would steer the planner under the
+    trial ceiling and make it unreachable. Returns ``(None, None)`` when no
+    per-mode cap is set, which renders the legacy FIXED block
+    byte-identically.
+    """
+    if agent_input.trial_max_epochs is None and agent_input.formal_max_epochs is None:
+        return (None, None)
+    return (
+        agent_input.resolve_epoch_cap(is_trial=True).cap,
+        agent_input.resolve_epoch_cap(is_trial=False).cap,
+    )
+
+
 def _no_sample_set_notice(mode: str, file_index: int | None) -> str:
     """What to print when no SampleSet was built.
 
@@ -326,6 +345,9 @@ def prepare_attempt(
         _best_rec = run_order.best(_records_with_table, key=_score_of)
         best_score_table_md = _best_rec["score_table"]["rendered_markdown"]
 
+    # D-BUD-6 — mode-aware ceiling disclosure (see the helper's docstring).
+    disclosed_epoch_caps = _disclosed_epoch_caps(agent_input)
+
     # B. THINK: Plan next experiment
     decision = brain.plan(
         memory_history,
@@ -341,6 +363,8 @@ def prepare_attempt(
         force_formal_round=agent_input.force_formal_round,
         plan_overrides=agent_input.plan_overrides,
         max_epochs=agent_input.max_epochs,
+        trial_max_epochs=disclosed_epoch_caps[0],
+        formal_max_epochs=disclosed_epoch_caps[1],
         # DS5c — partial-scope disclosure (None = full scope).
         resolved_data_scope=resolved_data_scope if scope_is_partial else None,
         trial_vram_budget_gb=trial_vram_budget,
@@ -426,7 +450,7 @@ def prepare_attempt(
         resolution=resolution,
     )
 
-    # Enforce max_epochs hard cap (prevents LLM from choosing
+    # Enforce the harness epoch cap (prevents LLM from choosing
     # excessively long training).
     #
     # V21 PR B1b — the cap applies to the RESOLVED training
@@ -440,7 +464,13 @@ def prepare_attempt(
     # epochs under ``--max_epochs 1`` — the clamp compared
     # 1 > 1, declined to act, and the bound the harness owns
     # was decided by the planner's silence.
-    _apply_epoch_bound(plan.train_cfg, agent_input.max_epochs)
+    #
+    # D-BUD-6: the cap is resolved per ROUND ROLE by the schema's ONE
+    # authority, keyed on ``plan.is_trial`` AFTER the override chain above
+    # — the same value that becomes ``record.is_trial`` (PR #217), never
+    # ``memory.time_mode``. See ``resolve_epoch_cap`` for the precedence.
+    epoch_cap = agent_input.resolve_epoch_cap(is_trial=plan.is_trial)
+    _apply_epoch_bound(plan.train_cfg, epoch_cap.cap, source=epoch_cap.source or "max_epochs")
     resolution.record(plan, "max_epochs_bound")
 
     # Build and validate TrialConfig from plan + overrides

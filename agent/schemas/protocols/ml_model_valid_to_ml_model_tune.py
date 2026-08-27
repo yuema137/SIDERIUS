@@ -75,6 +75,10 @@ def local_validated_model(
     train_base_seed: int | None = None,
     cleanup_denoised: bool = False,
     max_epochs: int | None = None,
+    # D-BUD-6 — per-mode epoch ceilings (trial/formal split). None = the
+    # mode-agnostic max_epochs governs that role (legacy behavior).
+    trial_max_epochs: int | None = None,
+    formal_max_epochs: int | None = None,
     # VALIDATION POSTURE ONLY (FU-D-12) — hard ceiling on the resolved
     # portions, for EVERY round mode. `None` leaves ordinary campaigns
     # unchanged.
@@ -319,6 +323,9 @@ def local_validated_model(
         train_base_seed=train_base_seed,
         cleanup_denoised=cleanup_denoised,
         max_epochs=max_epochs,
+        # D-BUD-6 — carried through unchanged, including `None`.
+        trial_max_epochs=trial_max_epochs,
+        formal_max_epochs=formal_max_epochs,
         validation_max_portion=validation_max_portion,
         validation_max_train_samples=validation_max_train_samples,
         validation_max_samples=validation_max_samples,

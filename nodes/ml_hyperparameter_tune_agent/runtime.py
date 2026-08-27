@@ -1567,7 +1567,9 @@ def _resolve_effective_epochs(train_cfg: dict) -> int:
     return resolve_train_field(train_cfg, "epochs", safety_margin=1)
 
 
-def _apply_epoch_bound(train_cfg: dict, max_epochs: int | None) -> int | None:
+def _apply_epoch_bound(
+    train_cfg: dict, max_epochs: int | None, *, source: str = "max_epochs"
+) -> int | None:
     """Apply the harness's epoch bound to the RESOLVED configuration.
 
     V21 PR B1b. Extracted rather than left inline for two reasons: the
@@ -1582,6 +1584,12 @@ def _apply_epoch_bound(train_cfg: dict, max_epochs: int | None) -> int | None:
     informs the admission decision leaves the trainer free to resolve an
     absent key to ``TrainConfig``'s declared 10, which is the bypass.
 
+    ``source`` names the input field that supplied the bound (D-BUD-6
+    mode-aware caps: ``trial_max_epochs`` / ``formal_max_epochs`` /
+    ``max_epochs``, resolved by ``HyperparamTuningInput.resolve_epoch_cap``).
+    It labels the log line ONLY — the clamp arithmetic is source-blind, and
+    the default keeps legacy callers' output byte-identical.
+
     Returns the effective epoch count, or ``None`` when no bound is set.
     """
     if max_epochs is None:
@@ -1589,7 +1597,7 @@ def _apply_epoch_bound(train_cfg: dict, max_epochs: int | None) -> int | None:
     resolved = _resolve_effective_epochs(train_cfg)
     effective = min(resolved, max_epochs)
     if effective != train_cfg.get("epochs"):
-        print(f"  Clamping epochs: {resolved} → {effective} (max_epochs)")
+        print(f"  Clamping epochs: {resolved} → {effective} ({source})")
     train_cfg["epochs"] = effective
     return effective
 

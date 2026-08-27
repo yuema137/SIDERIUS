@@ -58,7 +58,9 @@ bash sdsc_submission_scripts/run_chain.sh \
 
 Everything else is pass-through to the iteration: `--data_scope`,
 `--health_gate_enabled` / `--no-health_gate_enabled`, `--health_gate_files`,
-`--health_checks_config`, `--healthgate_mode`, `--max_rounds`, and the trial /
+`--health_checks_config`, `--healthgate_mode`, `--max_rounds`, the epoch
+ceilings (`--max_epochs`, and the per-role `--trial_max_epochs` /
+`--formal_max_epochs` — D-BUD-6, forwarded only when typed), and the trial /
 formal time and VRAM budgets.
 
 > The header comment inside `run_chain.sh` lists `--seed_paths` under "Required
@@ -90,6 +92,8 @@ Other flags that define a run:
 | `--health_gate_files` | `None` |
 | `--health_checks_config` | `None` (framework default) |
 | `--max_rounds` | `3` |
+| `--max_epochs` | `1` (mode-agnostic epoch ceiling; must be >= 1) |
+| `--trial_max_epochs` / `--formal_max_epochs` | `None` — per-role epoch ceilings (D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence per round role: per-mode value → `--max_epochs` → no clamp; must be >= 1, refused at parse otherwise |
 | `--max_proposal_attempts` | `3` |
 | `--llm_config` | `None` |
 | `--experiment_arm` | `None` (unlabelled; an empty string is refused). Opaque label pinned in the lock and stamped on records / outputs / manifests (arXiv U1) |

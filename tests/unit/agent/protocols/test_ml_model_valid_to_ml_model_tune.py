@@ -164,6 +164,25 @@ class TestLocalValidatedModel:
                 "enable_chain_incumbent_formal_gates",
                 id="incumbent_gates_flag_threads",
             ),
+            # D-BUD-6 — the per-mode epoch ceilings thread through the
+            # mapping. The defect ONLY these rows catch: the protocol
+            # ACCEPTING the kwargs while its constructor call drops them —
+            # signature checks stay green, no static rule flags an unused
+            # parameter, and the schema default (None) means every trial
+            # silently trains under the mode-agnostic fallback while the
+            # gold canon reads 2/1 (the F2 accept-and-drop shape).
+            pytest.param(
+                "trial_max_epochs",
+                2,
+                "trial_max_epochs",
+                id="dbud6_trial_max_epochs_threads",
+            ),
+            pytest.param(
+                "formal_max_epochs",
+                1,
+                "formal_max_epochs",
+                id="dbud6_formal_max_epochs_threads",
+            ),
         ],
     )
     def test_custom_kwarg_passes_through(

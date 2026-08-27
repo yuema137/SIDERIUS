@@ -277,6 +277,42 @@ class TestArgparseSurface:
                 self._minimal_argv("--start_iteration", "1", "--max_epochs", "-1")
             )
 
+    @pytest.mark.parametrize("flag", ["--trial_max_epochs", "--formal_max_epochs"])
+    @pytest.mark.parametrize("bad", ["0", "-1"])
+    def test_per_mode_epoch_cap_zero_or_negative_is_rejected(self, capsys, flag, bad):
+        """D-BUD-6 witness (d): a nonsensical per-mode ceiling refuses at
+        PARSE time, before any launch work — same ``_positive_int`` contract
+        as --max_epochs. A silently-accepted 0 would disable training for
+        one round role while the launch exits 0."""
+        with pytest.raises(SystemExit):
+            runner.build_parser().parse_args(
+                self._minimal_argv("--start_iteration", "1", flag, bad)
+            )
+        err = capsys.readouterr().err
+        assert ">= 1" in err or "positive integer" in err
+
+    def test_per_mode_epoch_caps_parse_and_default(self):
+        """D-BUD-6 witness (c), app-argparse layer: the campaign pair lands
+        as trial=2 / formal=1 on the Namespace, and the flags OMITTED land
+        as None (the mode-agnostic --max_epochs then governs both roles —
+        the legacy posture)."""
+        args = runner.build_parser().parse_args(
+            self._minimal_argv(
+                "--start_iteration",
+                "1",
+                "--trial_max_epochs",
+                "2",
+                "--formal_max_epochs",
+                "1",
+            )
+        )
+        assert args.trial_max_epochs == 2
+        assert args.formal_max_epochs == 1
+        bare = runner.build_parser().parse_args(self._minimal_argv("--start_iteration", "1"))
+        assert bare.trial_max_epochs is None
+        assert bare.formal_max_epochs is None
+        assert bare.max_epochs == 1
+
     def test_plan_overrides_json_string_becomes_dict(self):
         args = runner.build_parser().parse_args(
             self._minimal_argv(

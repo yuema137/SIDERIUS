@@ -373,7 +373,35 @@ def build_parser() -> argparse.ArgumentParser:
             "Hard cap on epochs per round. When set, the tuner clamps the "
             "LLM's planned epochs to min(planned_epochs, max_epochs). "
             "Wires into HyperparamTuningInput.max_epochs (already enforced "
-            "in the round loop). Default None = no clamp (LLM plan unchanged)."
+            "in the round loop). Default None = no clamp (LLM plan unchanged). "
+            "Per-mode overrides: --trial_max_epochs / --formal_max_epochs "
+            "take precedence for their round role (D-BUD-6)."
+        ),
+    )
+    parser.add_argument(
+        "--trial_max_epochs",
+        type=int,
+        default=None,
+        help=(
+            "TRIAL-role epoch ceiling (campaign decision D-BUD-6). Precedence "
+            "for a trial round: this value -> --max_epochs -> no clamp; "
+            "formal rounds never read it. Wires into "
+            "HyperparamTuningInput.trial_max_epochs (ge=1 — zero/negative "
+            "refuse loudly at input validation). Default None = trial rounds "
+            "keep the mode-agnostic --max_epochs."
+        ),
+    )
+    parser.add_argument(
+        "--formal_max_epochs",
+        type=int,
+        default=None,
+        help=(
+            "FORMAL-role epoch ceiling (campaign decision D-BUD-6). "
+            "Precedence for a formal round: this value -> --max_epochs -> no "
+            "clamp; trial rounds never read it. Wires into "
+            "HyperparamTuningInput.formal_max_epochs (ge=1 — zero/negative "
+            "refuse loudly at input validation). Default None = formal rounds "
+            "keep the mode-agnostic --max_epochs."
         ),
     )
     # --- RT6: runtime-control operator surface (design §4/§5) ---
@@ -616,6 +644,13 @@ def build_agent_input(
         input_dict["formal_time_budget_minutes"] = args.formal_time_budget_minutes
     if args.max_epochs is not None:
         input_dict["max_epochs"] = args.max_epochs
+    # D-BUD-6 — forwarded only when set, so an unset per-mode cap leaves the
+    # input on its schema default (None = the mode-agnostic max_epochs
+    # governs that role) and legacy invocations are byte-identical.
+    if args.trial_max_epochs is not None:
+        input_dict["trial_max_epochs"] = args.trial_max_epochs
+    if args.formal_max_epochs is not None:
+        input_dict["formal_max_epochs"] = args.formal_max_epochs
     if args.data_dir is not None:
         input_dict["data_dir"] = args.data_dir
     if args.trial_vram_budget_gb is not None:

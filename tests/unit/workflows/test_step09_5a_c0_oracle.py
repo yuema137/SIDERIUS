@@ -84,13 +84,6 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   ``tests/unit/execute_tools/health_checks/test_all_pass_aggregation_flip.py``,
   and the frozen-contract meaning of ``health_config_sha256`` here is
   unchanged: an ACCIDENTAL effective-config move stays red.
-=======
-* **Lane F3 / F-BYPASS-WD-1 (2026-08-26)** — the tuner's run input gained
-  `bypass_formal_time_budget_minutes` (ADDED, `null` on a bare run): the
-  elevated bypass ceiling, transported through the validator→tuner
-  protocol. Measured before re-baselining: **exactly one added field**,
-  no value moved.
->>>>>>> origin/master
 
 * **Step 11 / C3** — the run-invariants lock gained ONE key,
   `execution_calibration`: the per-role subprocess memory ceilings the run
@@ -230,6 +223,27 @@ Declared deltas to the golden (never a re-baseline to make a test green):
   the same base; the merged golden carries the UNION (eight ADDED keys at
   their legacy defaults + five CHANGED `/impl_001` paths). This test run at
   the integrated head is the proof the union is exact.
+
+* **D-BUD-6 mode-aware epoch caps (2026-08-26)** — the tuner's run input
+  gained the two per-mode epoch CEILINGS, transported through the
+  validator→tuner protocol beside the mode-agnostic `max_epochs` (the same
+  lane, and the same shape, as the Lane F3 bypass ceiling above). Measured
+  before the golden was touched, and the report is quoted rather than
+  paraphrased:
+
+      .node_calls.tuner.run_inputs[0].formal_max_epochs: ADDED (None)
+      .node_calls.tuner.run_inputs[0].trial_max_epochs: ADDED (None)
+
+  — **exactly two ADDED paths, both `None`, zero changed, zero removed.**
+  `None` is the UN-CONFIGURED state a bare run drives, and it is what makes
+  the clamp resolve to `max_epochs` for every round role — i.e. the
+  pre-D-BUD-6 mode-agnostic behaviour, which is why nothing else in the
+  envelope moved. A CAMPAIGN run is the configured state: the Gold launcher
+  supplies `--trial_max_epochs 2 --formal_max_epochs 1` (the frozen
+  `D-BUD-6` values), and the clamp then keys on the round's own
+  `plan.is_trial` role authority. The golden was edited SURGICALLY — the two
+  keys inserted at the reported path, one line each — rather than
+  regenerated, so nothing else could move under cover of a re-baseline.
 """
 
 from __future__ import annotations

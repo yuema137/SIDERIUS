@@ -929,6 +929,11 @@ class LLMBridge:
         force_formal_round: bool = True,
         plan_overrides: dict | None = None,
         max_epochs: int | None = None,
+        # D-BUD-6 — per-mode EFFECTIVE epoch ceilings for prompt disclosure
+        # (already resolved by HyperparamTuningInput.resolve_epoch_cap;
+        # None/None = no per-mode cap configured, legacy rendering).
+        trial_max_epochs: int | None = None,
+        formal_max_epochs: int | None = None,
         resolved_data_scope: list[int] | None = None,
         # --- Phase K (K.6) — [ACTIVE RESOURCE BUDGETS] block inputs ---
         trial_vram_budget_gb: float | None = None,
@@ -976,6 +981,13 @@ class LLMBridge:
                               renders a SYSTEM-FIXED PARAMETERS block so the LLM
                               knows which knobs it does not control.
             max_epochs:       Hard cap on epochs. Forwarded to the FIXED block.
+            trial_max_epochs,
+            formal_max_epochs:
+                D-BUD-6 per-mode EFFECTIVE epoch ceilings (resolved upstream
+                by HyperparamTuningInput.resolve_epoch_cap). When either is
+                set the FIXED block renders the mode-aware pair instead of
+                the single max_epochs line; both None keeps the legacy
+                rendering byte-identical.
             trial_vram_budget_gb,
             formal_vram_budget_gb,
             trial_time_budget_minutes,
@@ -1123,6 +1135,8 @@ class LLMBridge:
             force_formal_round=force_formal_round,
             plan_overrides=plan_overrides,
             max_epochs=max_epochs,
+            trial_max_epochs=trial_max_epochs,
+            formal_max_epochs=formal_max_epochs,
             resolved_data_scope=resolved_data_scope,
             trial_vram_budget_gb=trial_vram_budget_gb,
             formal_vram_budget_gb=formal_vram_budget_gb,

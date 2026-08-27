@@ -134,6 +134,10 @@ CONTRACT_FLAGS = [
     "train_portion",
     "eval_portion",
     "max_epochs",
+    # D-BUD-6 — per-mode epoch ceilings; shell "" ≡ Python None (forwarded
+    # only when typed), so an unset pair reproduces the legacy child argv.
+    "trial_max_epochs",
+    "formal_max_epochs",
     "target_files",
     "sampling_seed",
     "trial_time_budget_minutes",

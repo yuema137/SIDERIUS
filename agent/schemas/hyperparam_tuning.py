@@ -12,7 +12,7 @@ Both are accepted wherever ExpertAdviceInput is used.
 from __future__ import annotations
 
 import math
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -1406,6 +1406,19 @@ TRIAL_SCOPED_OVERRIDE_KEYS: frozenset[str] = frozenset(
 )
 
 
+class EpochCapResolution(NamedTuple):
+    """Resolved epoch ceiling for ONE round role (campaign decision D-BUD-6).
+
+    ``cap`` is the effective ceiling the clamp applies (``None`` = no clamp);
+    ``source`` names the :class:`HyperparamTuningInput` field that supplied
+    it, so the clamp's log line and any provenance can say WHICH bound fired.
+    ``source`` is ``None`` exactly when ``cap`` is ``None``.
+    """
+
+    cap: int | None
+    source: Literal["trial_max_epochs", "formal_max_epochs", "max_epochs"] | None
+
+
 class HyperparamTuningInput(BaseModel):
     """
     Full specification for a tune_ml_hyperparam_agent run.
@@ -2167,9 +2180,75 @@ class HyperparamTuningInput(BaseModel):
             "Hard cap on epochs per round. When set, the tuner clamps the LLM's "
             "planned epochs to min(planned_epochs, max_epochs). Use this to prevent "
             "the LLM from choosing excessively long training in integration tests "
-            "or resource-constrained environments."
+            "or resource-constrained environments. Mode-aware overrides: "
+            "trial_max_epochs / formal_max_epochs take precedence for their "
+            "round role when provided (D-BUD-6); this field is the fallback "
+            "for a role with no per-mode ceiling."
         ),
     )
+    trial_max_epochs: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "TRIAL-role epoch ceiling (campaign decision D-BUD-6: the frozen "
+            "campaign posture is trial 2 / formal 1). Precedence for a trial "
+            "round: this value when provided -> max_epochs -> no clamp; formal "
+            "rounds never read it. The round's role identity is plan.is_trial "
+            "AFTER the mode-override chain — the same authority that stamps "
+            "record.is_trial (PR #217) — and resolution happens ONLY in "
+            "resolve_epoch_cap(). The clamp arithmetic is unchanged "
+            "min(planned_epochs, cap); a ceiling can only reduce a planned "
+            "value, never raise one. None (default) leaves trial rounds on "
+            "the mode-agnostic max_epochs, byte-identical to pre-D-BUD-6 "
+            "behavior. Same per-mode split shape as "
+            "runtime_trial_safety_factor (Wave-1A)."
+        ),
+    )
+    formal_max_epochs: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "FORMAL-role epoch ceiling (campaign decision D-BUD-6). Precedence "
+            "for a formal round: this value when provided -> max_epochs -> no "
+            "clamp; trial rounds never read it. See trial_max_epochs for the "
+            "role-identity authority and the resolution rule; None (default) "
+            "leaves formal rounds on the mode-agnostic max_epochs."
+        ),
+    )
+
+    def resolve_epoch_cap(self, *, is_trial: bool) -> EpochCapResolution:
+        """THE resolution rule for a round's epoch ceiling (D-BUD-6).
+
+        Precedence for the round's role: the per-mode ceiling
+        (``trial_max_epochs`` / ``formal_max_epochs``) when provided -> the
+        mode-agnostic ``max_epochs`` -> no clamp. Every consumer of the cap
+        (the planning clamp, the planner-prompt disclosure, the clamp's log
+        label) calls THIS method — re-deriving the rule at a call site is
+        how a split value ships silently disabled (the F2 ownership-gap
+        lesson).
+
+        Args:
+            is_trial: the round's role identity — ``plan.is_trial`` AFTER
+                ``_apply_mode_override_chain``, the same authority that
+                stamps ``record.is_trial`` (PR #217). Never
+                ``memory.time_mode``, which is time-gate metadata.
+
+        Returns:
+            EpochCapResolution: the effective cap (``None`` = no clamp) and
+            the name of the field that supplied it. With both per-mode
+            fields unset this resolves to ``max_epochs`` for every round —
+            the legacy mode-agnostic behavior, byte-identical.
+        """
+        per_mode = self.trial_max_epochs if is_trial else self.formal_max_epochs
+        if per_mode is not None:
+            return EpochCapResolution(
+                cap=per_mode,
+                source="trial_max_epochs" if is_trial else "formal_max_epochs",
+            )
+        if self.max_epochs is not None:
+            return EpochCapResolution(cap=self.max_epochs, source="max_epochs")
+        return EpochCapResolution(cap=None, source=None)
+
     validation_max_portion: float | None = Field(
         default=None,
         # F-RC-1: `ge=0.01`, NOT `gt=0.0`. This ceiling is applied as

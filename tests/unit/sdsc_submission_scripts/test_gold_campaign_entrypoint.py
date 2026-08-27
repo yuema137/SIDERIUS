@@ -6,9 +6,11 @@ Each test names the defect ONLY it can catch:
   the three executables use the standard source-safe entry guard, so
   sourcing one for its functions can never launch a campaign (the
   2026-07-31 gate-runner incident class).
-* ``TestFrozenTwelveWitness`` — the effective-resolution witness: the
-  dry-run's fully-resolved per-band run_chain argv carries ALL TWELVE
-  frozen values TYPED (decisions D-BUD-2/6/7/8, D-BUD-11/13, P6-A, P6-B).
+* ``TestFrozenThirteenWitness`` — the effective-resolution witness: the
+  dry-run's fully-resolved per-band run_chain argv carries ALL THIRTEEN
+  frozen values TYPED (decisions D-BUD-2/6/7/8, D-BUD-11/13, P6-A, P6-B;
+  the D-BUD-6 row split ``max_epochs=1`` into ``trial_max_epochs=2`` /
+  ``formal_max_epochs=1`` when the per-mode transport landed, 2026-08-26).
   The expected pairs are HARDCODED here — asserting values read back from
   the lib would compare the table to itself and pass for any table. This
   is the defect class F-LAUNCH-1 closes: a chain default silently standing
@@ -71,9 +73,12 @@ CHAIN_COMMON = SDSC / "_chain_common.sh"
 RUN_CHAIN = SDSC / "run_chain.sh"
 STATE_HELPER = SDSC / "gold_campaign_state.py"
 
-#: The canonical twelve (decisions D-BUD-2 / D-BUD-6 / D-BUD-7 / D-BUD-8 /
+#: The canonical thirteen (decisions D-BUD-2 / D-BUD-6 / D-BUD-7 / D-BUD-8 /
 #: D-BUD-11/13 / P6-A / P6-B), HARDCODED on purpose — see module docstring.
-CANONICAL_TWELVE = {
+#: D-BUD-6 is the PAIR ``trial_max_epochs=2 / formal_max_epochs=1`` (the
+#: frozen trial/formal split; the retired mode-agnostic ``--max_epochs 1``
+#: stand-in is now a RESERVED passthrough, not an emitted value).
+CANONICAL_THIRTEEN = {
     "--num_iterations": "20",
     "--trial_portion": "0.1",
     "--train_portion": "0.1",
@@ -81,7 +86,8 @@ CANONICAL_TWELVE = {
     "--formal_portion": "1.0",
     "--formal_train_portion": "0.1",
     "--formal_eval_portion": "0.1",
-    "--max_epochs": "1",
+    "--trial_max_epochs": "2",
+    "--formal_max_epochs": "1",
     "--trial_time_budget_minutes": "30",
     "--formal_time_budget_minutes": "120",
     "--skip_formal_min_delta": "-2.0",
@@ -180,19 +186,23 @@ class TestSourceSafety:
         assert "source it" in proc.stderr
 
 
-class TestFrozenTwelveWitness:
-    def test_every_band_argv_carries_all_twelve_typed(self, campaign_root):
+class TestFrozenThirteenWitness:
+    def test_every_band_argv_carries_all_thirteen_typed(self, campaign_root):
         proc = _stage1_dry(campaign_root)
         assert proc.returncode == 0, proc.stderr + proc.stdout
         argvs = _band_argvs(proc.stdout)
         assert sorted(argvs) == sorted(EXPECTED_GPU_MAP), proc.stdout
         for band, argv in argvs.items():
             pairs = _pairs(argv)
-            for flag, value in CANONICAL_TWELVE.items():
+            for flag, value in CANONICAL_THIRTEEN.items():
                 assert pairs.get(flag) == value, (
                     f"band {band}: frozen value {flag} {value} missing or wrong "
                     f"(got {pairs.get(flag)!r})"
                 )
+            # D-BUD-6: the pair REPLACES the retired mode-agnostic
+            # stand-in — a re-emitted --max_epochs would be a third epoch
+            # authority on the child argv.
+            assert "--max_epochs" not in argv, band
 
     def test_band_identity_pair_and_arm_tokens(self, campaign_root):
         proc = _stage1_dry(campaign_root)
@@ -324,7 +334,7 @@ class TestFrozenTableMutation:
         assert "trial_time_budget_minutes" in proc.stderr
         assert "FROZEN TABLE MISSING VALUE" in proc.stderr
 
-    def test_lib_table_matches_the_canonical_twelve_exactly(self):
+    def test_lib_table_matches_the_canonical_thirteen_exactly(self):
         """A silently EDITED value (30 -> 20) keeps the dry-run green, so
         the table itself is pinned against the hardcoded canon."""
         proc = _bash(
@@ -333,7 +343,7 @@ class TestFrozenTableMutation:
         )
         assert proc.returncode == 0, proc.stderr
         rows = {line.split("=")[0]: line.split("=", 1)[1] for line in proc.stdout.split()}
-        expected = {k.lstrip("-"): v for k, v in CANONICAL_TWELVE.items()}
+        expected = {k.lstrip("-"): v for k, v in CANONICAL_THIRTEEN.items()}
         assert rows == expected
 
 
@@ -503,9 +513,17 @@ class TestStage2DryRun:
                 "--formal_portion",
                 "--formal_train_portion",
                 "--formal_eval_portion",
-                "--max_epochs",
+                # D-BUD-6: a stage-2 unit runs the SAME round machinery
+                # (Stage-1 rules apply inside the unit workspace), so it
+                # carries the same per-role pair; the FORMAL retrain round
+                # that COMPLETE.json scores and Stage-3 pools trains under
+                # formal_max_epochs=1 — identical to the retired
+                # mode-agnostic --max_epochs 1.
+                "--trial_max_epochs",
+                "--formal_max_epochs",
             ):
-                assert pairs[flag] == CANONICAL_TWELVE[flag], (unit, flag)
+                assert pairs[flag] == CANONICAL_THIRTEEN[flag], (unit, flag)
+            assert "--max_epochs" not in argv, unit
 
     def test_completed_unit_is_skipped(self, campaign_root, registry):
         unit = campaign_root["root"] / "stage2" / "punetB_4-9"

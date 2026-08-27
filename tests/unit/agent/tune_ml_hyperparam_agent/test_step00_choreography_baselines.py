@@ -7,8 +7,8 @@ LLMBridge").
 One bounded pseudo tuner iteration (the same production-path harness as
 REC-2) crosses the real ``plan()``/``reflect()`` call sites; the widened
 ``RecordingLLMBridge`` records the full surfaces. The ``plan()`` surface
-is 25 parameters excl. ``self`` — ``memory_history`` bound POSITIONALLY
-(itself part of the pinned surface, review F11) plus 24 keywords, all
+is 27 parameters excl. ``self`` — ``memory_history`` bound POSITIONALLY
+(itself part of the pinned surface, review F11) plus 26 keywords, all
 passed explicitly by the sole production call site.
 
 Justified exclusions (design §13, WF-1 row): ``registry`` is a live
@@ -50,6 +50,17 @@ DECLARED GOLDEN DELTAS (never a re-baseline to make a test green)
   ``tests/unit/guardrails/test_step12_pr12a_c0_legacy_parity.py``. These
   goldens pin the CALL SURFACE; that one pins what the LLM receives. Both
   had to be checked, and only the surface moved.
+
+* **D-BUD-6 mode-aware epoch caps (2026-08-26)** — two textual insertions
+  per golden, nothing regenerated: ``wf1_plan_call_round1_surface.json``
+  kwargs gained ``trial_max_epochs: null`` and ``formal_max_epochs: null``,
+  and ``wf1_plan_kwarg_key_set.json`` gained the same two names in sorted
+  position. The same ADDITIVE-kwarg shape ``metric_spec`` and
+  ``task_render`` arrived in: ``plan()`` now discloses the per-mode
+  EFFECTIVE epoch ceilings (resolved by
+  ``HyperparamTuningInput.resolve_epoch_cap``); both ``None`` — every
+  legacy run, including this bounded pseudo iteration — renders the FIXED
+  block byte-identically, which is why the values recorded here are null.
 """
 
 from __future__ import annotations

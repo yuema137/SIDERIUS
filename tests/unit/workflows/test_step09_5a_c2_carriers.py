@@ -132,6 +132,10 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     "experiment_arm": None,
     "baseline_isolation": False,
     "allowed_output_types": None,
+    # D-BUD-6 (2026-08-26) — per-mode epoch ceilings; None = the
+    # mode-agnostic max_epochs governs that role (legacy behavior).
+    "trial_max_epochs": None,
+    "formal_max_epochs": None,
 }
 
 

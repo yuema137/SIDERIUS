@@ -20,6 +20,8 @@
     "force_formal_round": true,
     "plan_overrides": {},
     "max_epochs": null,
+    "trial_max_epochs": null,
+    "formal_max_epochs": null,
     "resolved_data_scope": null,
     "trial_vram_budget_gb": 0.3,
     "formal_vram_budget_gb": null,

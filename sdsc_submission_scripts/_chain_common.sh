@@ -52,6 +52,11 @@ SEED_PATHS=()
 RUN_NAME=""
 MAX_ROUNDS=3                        # §3.2: matches run_one_iteration.py default 3
 MAX_EPOCHS=1                        # §3.2: matches run_one_iteration.py default 1
+# D-BUD-6 — per-mode epoch ceilings. "" ≡ omit ≡ run_one_iteration.py's
+# None (that role stays on the mode-agnostic MAX_EPOCHS); forwarded only
+# when typed, so an unset pair keeps the child argv byte-identical.
+TRIAL_MAX_EPOCHS=""
+FORMAL_MAX_EPOCHS=""
 # Tuner delta-gates (added in commit 8f1cf52). Defaults match the
 # HyperparamTuningInput schema defaults so omitting these flags
 # reproduces pre-v16 behaviour.
@@ -319,6 +324,8 @@ parse_chain_args() {
           ;;
         --max_rounds)             MAX_ROUNDS="$2"; shift 2 ;;
         --max_epochs)             MAX_EPOCHS="$2"; shift 2 ;;
+        --trial_max_epochs)       TRIAL_MAX_EPOCHS="$2"; shift 2 ;;
+        --formal_max_epochs)      FORMAL_MAX_EPOCHS="$2"; shift 2 ;;
         --healthgate_mode)                    HEALTHGATE_MODE="$2"; shift 2 ;;
         --result_authority)                   RESULT_AUTHORITY="$2"; shift 2 ;;
         --skip_formal_min_delta)              SKIP_FORMAL_MIN_DELTA="$2"; shift 2 ;;
@@ -473,6 +480,11 @@ build_app_args() {
         --start_iteration "$iter"
         --max_rounds "$MAX_ROUNDS"
         --max_epochs "$MAX_EPOCHS"
+        # D-BUD-6 — forwarded only when TYPED (empty == omit == the
+        # Python default None == the mode-agnostic MAX_EPOCHS governs
+        # that role), so an unset pair reproduces the legacy child argv.
+        ${TRIAL_MAX_EPOCHS:+--trial_max_epochs "$TRIAL_MAX_EPOCHS"}
+        ${FORMAL_MAX_EPOCHS:+--formal_max_epochs "$FORMAL_MAX_EPOCHS"}
         --healthgate_mode "$HEALTHGATE_MODE"
         --result_authority "$RESULT_AUTHORITY"
         --skip_formal_min_delta "$SKIP_FORMAL_MIN_DELTA"

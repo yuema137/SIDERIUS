@@ -972,7 +972,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--max_epochs",
         type=_positive_int,
         default=1,
-        help="Hard cap on epochs per round. Must be >= 1; None forbidden.",
+        help="Hard cap on epochs per round. Must be >= 1; None forbidden. "
+        "Per-mode overrides: --trial_max_epochs / --formal_max_epochs take "
+        "precedence for their round role (D-BUD-6).",
+    )
+    parser.add_argument(
+        "--trial_max_epochs",
+        type=_positive_int,
+        default=None,
+        help="TRIAL-role epoch ceiling (campaign decision D-BUD-6; frozen "
+        "campaign posture: trial 2 / formal 1). Precedence for a trial "
+        "round: this value -> --max_epochs -> no clamp; formal rounds never "
+        "read it. Must be >= 1; omit to keep the mode-agnostic --max_epochs.",
+    )
+    parser.add_argument(
+        "--formal_max_epochs",
+        type=_positive_int,
+        default=None,
+        help="FORMAL-role epoch ceiling (campaign decision D-BUD-6). "
+        "Precedence for a formal round: this value -> --max_epochs -> no "
+        "clamp; trial rounds never read it. Must be >= 1; omit to keep the "
+        "mode-agnostic --max_epochs.",
     )
     parser.add_argument(
         "--skip_formal_min_delta",
@@ -2687,6 +2707,10 @@ def main():
                     degenerate_penalty_score=args.degenerate_penalty_score,
                     cleanup_denoised=args.cleanup_denoised,
                     max_epochs=args.max_epochs,
+                    # D-BUD-6 — per-mode epoch ceilings, forwarded including
+                    # `None` (None = mode-agnostic max_epochs governs).
+                    trial_max_epochs=args.trial_max_epochs,
+                    formal_max_epochs=args.formal_max_epochs,
                     validation_max_portion=args.validation_max_portion,
                     validation_max_train_samples=args.validation_max_train_samples,
                     validation_max_samples=args.validation_max_samples,

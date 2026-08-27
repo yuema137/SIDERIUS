@@ -37,7 +37,9 @@
 | `attempts_per_round` | `int` | No | `3` | Per-round attempt budget for trial rounds. Each round retries up to this many times after a gate-skip or error before the round is recorded as a failure. |
 | `attempts_per_formal_round` | `int` | No | `5` | Per-round attempt budget for the formal-promotion round. Higher than trial (5 vs 3) because the formal round runs on the full dataset and a single retry is much more expensive. |
 | `max_fail_rounds` | `int` | No | `3` | Consecutive-failed-round abort trigger. When this many rounds in a row exhaust their attempt budget without a success, the tuner exits with `termination_reason="aborted_fail_rounds"`. |
-| `max_epochs` | `int \| None` | No | `None` | Hard cap on epochs per round. When set, the tuner clamps the LLM's planned epochs to `min(planned_epochs, max_epochs)`. |
+| `max_epochs` | `int \| None` | No | `None` | Hard cap on epochs per round. When set, the tuner clamps the LLM's planned epochs to `min(planned_epochs, max_epochs)`. Mode-agnostic fallback: `trial_max_epochs` / `formal_max_epochs` take precedence for their round role when provided (D-BUD-6). |
+| `trial_max_epochs` | `int \| None` | No | `None` | TRIAL-role epoch ceiling (campaign decision D-BUD-6; frozen campaign posture trial 2 / formal 1). Precedence for a trial round: this value → `max_epochs` → no clamp; formal rounds never read it. `ge=1` — zero/negative refuse at validation. Resolution happens only in `HyperparamTuningInput.resolve_epoch_cap(is_trial=...)`, keyed on `plan.is_trial` **after** the mode-override chain — the same authority that stamps `record.is_trial` (see "Candidate role identity"). |
+| `formal_max_epochs` | `int \| None` | No | `None` | FORMAL-role epoch ceiling (D-BUD-6). Precedence for a formal round: this value → `max_epochs` → no clamp; trial rounds never read it. `ge=1`. |
 | `force_formal_round` | `bool` | No | `True` | When `True` (default), the **last** round of every iteration forces `plan.is_trial = False` so it always runs in formal mode (full dataset) regardless of what the planner picked. |
 | `formal_round_strategy` | `Literal["full_clone", "hybrid_params", "independent", "inherit_best_train_plus_formal_eval"]` | No | `"full_clone"` | Orchestration policy for the forced formal round: `full_clone` re-runs the best trial verbatim on full data; `hybrid_params` carries trial-winner hyperparams + formal sampling; `independent` lets the planner propose a fresh formal config. |
 | `degenerate_penalty_score` | `float \| None` | No | `None` | Operator policy for the agent's reaction when scoring flags a degenerate output on a formal round (e.g. all-zeros prediction). When set, the degenerate run gets this penalty score and the tuner continues; when `None`, the run is recorded as-is. |
@@ -610,8 +612,9 @@ D-C2-20), but that control lives entirely in the validation harness. A
 production round trains for its planned epochs over its planned sample set,
 exactly as before: no step event is written, no stop signal is read, and no
 CLI flag or config key exposes the mechanism. If you are looking for a way
-to bound a production round's training, it is `--max_epochs` and the sample
-set — not anything in C2.
+to bound a production round's training, it is the epoch ceilings
+(`--max_epochs`, or the per-role `--trial_max_epochs` /
+`--formal_max_epochs`, D-BUD-6) and the sample set — not anything in C2.
 
 **Short phases are made observable (V20 PR C2 / D-C2-13).** A phase shorter
 than the driver-sampling cadence yields **zero** in-phase samples and is
@@ -1212,6 +1215,13 @@ all-trials-invalid planner report (`_build_trial_validity_feedback`) now use
 the same field and nothing else, so there is exactly one role authority in the
 node.
 
+The D-BUD-6 mode-aware epoch ceilings key on this same authority: the
+planning clamp resolves the round's cap via
+`HyperparamTuningInput.resolve_epoch_cap(is_trial=plan.is_trial)` — read
+AFTER the mode-override chain, i.e. the exact value that becomes
+`record.is_trial` — never a parallel derivation and never
+`memory.time_mode`.
+
 ### `memory.time_mode` is timing metadata, not a second authority
 
 `memory.time_mode` records **which wall-time budget was active** for a round.
@@ -1326,8 +1336,9 @@ naming the planner's choice and the value that replaced it.
 `plan.hypothesis` is free prose the planner authors **before** the framework
 resolves the plan. Six steps then overrule parts of it — operator
 `plan_overrides`, the mode-override chain, the task-declared objective,
-partial-scope strategy normalization, the `--max_epochs` bound, and the forced
-model type — and none of them revisits the prose. The reflector received that
+partial-scope strategy normalization, the mode-aware epoch bound
+(`--max_epochs` / `--trial_max_epochs` / `--formal_max_epochs`, D-BUD-6), and
+the forced model type — and none of them revisits the prose. The reflector received that
 prose under the heading "Original Hypothesis" as the only description of the
 configuration, so it narrated proposals as though they had run: a research
 memory entry reported "custom Smooth L1 beta=0.5" for a run whose declared
