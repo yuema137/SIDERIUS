@@ -35,6 +35,9 @@ stage1_main() {
     GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
     GOLD_REQUIRED_RUNTIME_PROFILE=""
     GOLD_REQUIRED_RUNTIME_PROFILE_SHA256=""
+    # D-HW-6 — command-line only; never inherited from the shell.
+    GOLD_TRIAL_VRAM_BUDGET_GB=""
+    GOLD_FORMAL_VRAM_BUDGET_GB=""
     local PASSTHROUGH=()
 
     while [[ $# -gt 0 ]]; do
@@ -46,6 +49,8 @@ stage1_main() {
             --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
             --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
             --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
+            --gold_trial_vram_budget_gb) GOLD_TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+            --gold_formal_vram_budget_gb) GOLD_FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
             --fcnet_reference_json) FCNET_REFERENCE_JSON="$2"; shift 2 ;;
             --only)                 ONLY="$2"; shift 2 ;;
             --stagger-seconds|--stagger_seconds) STAGGER="$2"; shift 2 ;;
@@ -102,6 +107,11 @@ stage1_main() {
         --gold_required_runtime_profile_path "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"
         --gold_required_runtime_profile "$GOLD_REQUIRED_RUNTIME_PROFILE"
         --gold_required_runtime_profile_sha256 "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256")
+    # D-HW-6 — forwarded to every band, so all four bands of a supplied
+    # campaign run under the SAME per-mode ceiling.
+    [ -n "$GOLD_TRIAL_VRAM_BUDGET_GB" ] && BAND_ARGS_COMMON+=(
+        --gold_trial_vram_budget_gb "$GOLD_TRIAL_VRAM_BUDGET_GB"
+        --gold_formal_vram_budget_gb "$GOLD_FORMAL_VRAM_BUDGET_GB")
     [ -n "$FCNET_REFERENCE_JSON" ] && BAND_ARGS_COMMON+=(--fcnet_reference_json "$FCNET_REFERENCE_JSON")
 
     if [ "$DRY_RUN" -eq 1 ]; then

@@ -129,6 +129,54 @@ scientific-policy fact of the campaign, not of the invocation.
 | `stage2_strict_retrain.sh` | **STAGE-2 STRICT RETRAIN** — 4 designs x 4 bands = 16 units under `{root}/stage2/{design}_{band}/` (contract section 2); wave = one design across the four GPUs; each unit is `run_chain.sh --validation_fixed_candidate_plan <design>.json --num_iterations 1 --data_scope <band>` with the same frozen boundary; completed units (COMPLETE.json present) are skipped; finalization copies the unit's TARGET-BAND deliverables only (band file set derived via `DataScope.from_cli` from the unit's own band, count 4/6/5/5; `COMPLETE.json` carries the counted `deliverable_count` — Q-S3-2 ruling A) and writes COMPLETE.json LAST, atomically. `--design_registry DIR` must hold exactly four `<design>.json` plans. |
 | `gold_campaign_state.py` | **PERSISTED-STATE HELPER** — `band-state` (next iteration via the `inspect_run_state` functions, the cumulative HealthGate-valid FORMAL incumbent per the contract winner table under `MetricOrder`, the FCNet+2 verdict) and `stage2-finalize` (unit winner, deliverable copies via the `DeliverableNaming` authority, atomic COMPLETE.json). The FORMAL predicate is the frozen contract rule — `is_trial` **absent OR `False`** (`_is_formal_role`; #316 B2), because `model_dump()` materializes `is_trial: False` onto every persisted formal record; the superseded key-absence test discarded every real formal record, leaving the champion permanently empty while Stage 1 still exited 0. All diagnostics on stderr; the state JSON is written atomically to `--out`. |
 
+**The VRAM ceiling is a transport seam carrying NO value (D-HW-6).**
+`--gold_trial_vram_budget_gb V` and `--gold_formal_vram_budget_gb V` on
+`run_gold_campaign.sh` forward verbatim to the chain's existing
+`--trial_vram_budget_gb` / `--formal_vram_budget_gb` on every stage-1 band
+and every stage-2 unit, bound once in `gold_frozen_chain_args` like the LLM
+config. **No number is frozen, defaulted or embedded anywhere on this path**:
+the campaign's ceiling is `HARDWARE_DERIVED / PENDING_H100_QUALIFICATION`, so
+the launcher accepts a measured value and never invents one. Before this seam
+the Gold layer had no VRAM surface at all — a qualified number had nothing to
+travel through, and applying one would have meant editing tagged code on the
+pod.
+
+*Supply both or neither.* They are two independent per-mode ceilings
+(qualification may measure trial and formal differently), so they are not
+collapsed into one operator value — that would assert `trial == formal`, which
+nobody decided. A **half** supply is refused at the boundary: a capped trial
+beside an uncapped formal on four co-resident bands is the exhaustion the
+ceiling exists to prevent, and the stage scripts fork one background chain per
+band, so a half-cap noticed downstream has already launched the fleet.
+Malformed values (non-numeric, zero, negative) are refused there too, rather
+than by `argparse` inside four already-running children — note `0` is **not**
+"disabled": `evaluate_vram_skill` computes `min(physical_cap, budget * _GB)`,
+so a zero budget is a zero-byte cap in which nothing fits.
+
+*Unsupplied is legal and inert* — no token reaches the child argv and the
+launch is byte-identical to a pre-seam one. This is deliberately **not** a
+refusal (unlike `SIDERIUS_GENERATED_LIBRARY_DIR`): omitting a ceiling diverges
+from no pinned authority — `_chain_common.sh` defaults both budgets to
+`"" == omit`, the state every campaign launch has run in — so refusing would
+block pre-M4 rehearsals to protect nothing. The absence is instead **printed**
+in the dry-run table and **recorded** in the launch manifest
+(`trial_vram_budget_gb: null` plus a `vram_budget_provenance` naming
+`PENDING_H100_QUALIFICATION`), so "no ceiling was supplied" is an observed fact
+rather than a silence.
+
+*Units are deliberately not settled here.* D-HW-6 records a live GB/GiB gap —
+the flags spell `_gb`, but `agent/skills/evaluate_vram_skill/wrapper.py`
+multiplies by `_GB = 1024**3` (GiB). The seam carries the operator's value
+**unchanged**, with no conversion, no normalisation and no unit-assuming
+validator; the only check is a unit-neutral shape check. A transport that
+silently interpreted units would acquire an authority nobody granted and would
+close D-HW-6's question by accident. The manifest therefore records what
+crossed, not an interpretation of it.
+`--trial_vram_budget_gb` / `--formal_vram_budget_gb` are reserved
+passthroughs: operator tokens land *after* the frozen ones and the chain parse
+is last-wins, so a passed-through value would override the supplied ceiling
+while the dry-run row and manifest still named the old one.
+
 ### Tier 3 integration test
 
 | file | role |

@@ -44,6 +44,9 @@ stage2_main() {
     GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
     GOLD_REQUIRED_RUNTIME_PROFILE=""
     GOLD_REQUIRED_RUNTIME_PROFILE_SHA256=""
+    # D-HW-6 — command-line only; never inherited from the shell.
+    GOLD_TRIAL_VRAM_BUDGET_GB=""
+    GOLD_FORMAL_VRAM_BUDGET_GB=""
     local PASSTHROUGH=()
 
     while [[ $# -gt 0 ]]; do
@@ -55,6 +58,8 @@ stage2_main() {
             --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
             --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
             --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
+            --gold_trial_vram_budget_gb) GOLD_TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+            --gold_formal_vram_budget_gb) GOLD_FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
             --design_registry)   DESIGN_REGISTRY="$2"; shift 2 ;;
             --dry-run|--dry_run) DRY_RUN=1; shift ;;
             *)                   PASSTHROUGH+=("$1"); shift ;;

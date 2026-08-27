@@ -16,7 +16,7 @@ the flags that decide *what a run is*.
 | you want to | use |
 |---|---|
 | run the full multi-iteration agent loop | `sdsc_submission_scripts/run_chain.sh` |
-| launch the official Gold campaign (stage 1 search / stage 2 strict retrain) | `sdsc_submission_scripts/run_gold_campaign.sh` (binds the frozen campaign values — including `--llm_config llm_configs/openai_tiered_pro.json` on every band and unit, refusing the launch if it cannot be resolved — and delegates to `run_chain.sh`; see `sdsc_submission_scripts/README.md` "Gold campaign" and `docs/campaign/stage_artifact_contract.md`) |
+| launch the official Gold campaign (stage 1 search / stage 2 strict retrain) | `sdsc_submission_scripts/run_gold_campaign.sh` (binds the frozen campaign values — including `--llm_config llm_configs/openai_tiered_pro.json` on every band and unit, refusing the launch if it cannot be resolved — and delegates to `run_chain.sh`; carries an OPERATOR-SUPPLIED VRAM ceiling via `--gold_trial_vram_budget_gb` / `--gold_formal_vram_budget_gb` — both or neither, no value defaulted, unsupplied is inert but recorded, D-HW-6; see `sdsc_submission_scripts/README.md` "Gold campaign" and `docs/campaign/stage_artifact_contract.md`) |
 | run one arm of the prior-art baseline experiment (arXiv X9) | `sdsc_submission_scripts/launch_prior_baseline_experiment.sh` |
 | run exactly one iteration (or debug one) | `sdsc_submission_scripts/run_one_iteration.py` |
 | drive the workflow directly from Python | `workflows/model_exploration.py` |

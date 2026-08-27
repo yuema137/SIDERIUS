@@ -163,6 +163,15 @@ gold_print_frozen_table() {
     else
         echo "[gold-campaign]   supplied required_runtime_profile=(none — legacy ladder: measured > shipped > uncalibrated; declare at M4 with --gold_required_runtime_profile[_sha256])"
     fi
+    # D-HW-6: ALWAYS printed, supplied or not. An UNCAPPED campaign on four
+    # co-resident bands is a launch fact an operator must be able to SEE; an
+    # absent line is indistinguishable from a seam that was never wired,
+    # which is exactly how this defect family stayed invisible.
+    if [ -n "${GOLD_TRIAL_VRAM_BUDGET_GB:-}" ]; then
+        echo "[gold-campaign]   supplied vram_budget=trial:${GOLD_TRIAL_VRAM_BUDGET_GB} formal:${GOLD_FORMAL_VRAM_BUDGET_GB:-(unset)} (D-HW-6; carried VERBATIM to --trial/--formal_vram_budget_gb — units NOT interpreted here)"
+    else
+        echo "[gold-campaign]   supplied vram_budget=(none — no operator ceiling; D-HW-6 is HARDWARE_DERIVED / PENDING_H100_QUALIFICATION, so the chain's free-VRAM default governs both modes)"
+    fi
     # F-GENLIB-WIRE-1: the launch REFUSES when this is unset, so by the time
     # the table prints it is always a declared value. Printed so the operator
     # can confirm WHICH root this campaign's promoted capabilities land in —
@@ -285,6 +294,103 @@ gold_required_profile_args() {
         --required_runtime_profile_path "$path"
         --required_runtime_profile "$key"
         --required_runtime_profile_sha256 "$sha"
+    )
+}
+
+# gold_vram_budget_args — sets GOLD_VRAM_BUDGET_ARGS from the
+# OPERATOR-SUPPLIED per-mode VRAM ceiling (D-HW-6).
+#
+# THIS FUNCTION CARRIES A VALUE AND NEVER SUPPLIES ONE. The campaign's
+# ceiling is HARDWARE_DERIVED / PENDING_H100_QUALIFICATION — deliberately
+# superseded from a frozen number so that no ceiling can acquire authority
+# in tagged code before it has been measured. So unlike every frozen row
+# above, there is no GOLD_*_VRAM_BUDGET constant here, and there must never
+# be one: a default would be indistinguishable from a measurement at every
+# surface an operator reads.
+#
+# WHY THE SEAM IS NEEDED AT ALL. The chain below has carried a complete
+# transport all along (_chain_common.sh parses --trial_vram_budget_gb /
+# --formal_vram_budget_gb and forwards each into APP_ARGS;
+# run_one_iteration.py binds them onto WorkflowLaunchConfig). The GOLD layer
+# had nothing: no flag, no forwarding, no reserved entry. A qualified number
+# therefore had no path onto the campaign argv, and the only way to apply
+# one would have been to edit tagged code on the pod — the outcome that must
+# FAIL qualification rather than be papered over.
+#
+# BOTH OR NEITHER. These are two INDEPENDENT per-mode ceilings, so they are
+# not collapsed into a single operator value: that would assert
+# trial == formal, which nobody decided, and qualification may measure them
+# differently (formal rounds are the larger). But a HALF supply is refused
+# here, at the boundary, for the same reason the profile triple is: the
+# stage scripts fork one background chain per band, so a half cap noticed
+# downstream has already launched the fleet — and a capped trial beside an
+# uncapped formal on four co-resident bands is precisely the exhaustion the
+# ceiling exists to prevent, while LOOKING like a configuration.
+#
+# ABSENT == UNSUPPLIED == no operator ceiling, and NO token reaches the
+# child argv, so a pre-qualification launch is byte-identical to a pre-seam
+# one. This is deliberately NOT a refusal, unlike the generated-library
+# root: omitting a ceiling diverges from no pinned authority (_chain_common
+# defaults both budgets to "" == omit — the state every campaign launch has
+# run in), so refusing would make the seam a launch blocker for a value the
+# campaign has deliberately not frozen. The absence is instead PRINTED by
+# gold_print_frozen_table and RECORDED in the launch manifest, so "no
+# ceiling was supplied" is an observed fact rather than a silence.
+#
+# UNITS ARE NOT SETTLED HERE, AND MUST NOT BE. D-HW-6 flags a live GB/GiB
+# gap: these flags spell '_gb', but agent/skills/evaluate_vram_skill/
+# wrapper.py computes min(physical_cap, budget * _GB) with _GB = 1024**3,
+# i.e. GiB. The value therefore crosses UNCHANGED — no conversion, no
+# normalisation, no unit-assuming validator — because a transport that
+# silently interprets units acquires an authority nobody granted and would
+# close D-HW-6's question by accident. The one check below is unit-NEUTRAL:
+# a strictly positive decimal is positive whether it is read as GB or GiB.
+#
+# PER-BAND CALL, NON-DIVERGENT BY CONSTRUCTION. Like every builder here this
+# runs once per forked band, not once per launch. That is safe ONLY because
+# the value is argv-transported: stage1_search.sh builds BAND_ARGS_COMMON
+# once and expands the identical array into every fork, and each band resets
+# the variables before parsing, so nothing ambient or on-disk can differ
+# between fork 1 and fork 4. A value DERIVED per band (a file digest, a
+# timestamp) would not have that property.
+gold_vram_budget_args() {
+    local trial="${GOLD_TRIAL_VRAM_BUDGET_GB:-}"
+    local formal="${GOLD_FORMAL_VRAM_BUDGET_GB:-}"
+    local label value
+    GOLD_VRAM_BUDGET_ARGS=()
+    if [ -z "$trial" ] && [ -z "$formal" ]; then
+        return 0
+    fi
+    if [ -z "$trial" ] || [ -z "$formal" ]; then
+        echo "ERROR: an INCOMPLETE VRAM ceiling was supplied, so this launch is" >&2
+        echo "  REFUSED (D-HW-6):" >&2
+        echo "    --gold_trial_vram_budget_gb  = ${trial:-(unset)}" >&2
+        echo "    --gold_formal_vram_budget_gb = ${formal:-(unset)}" >&2
+        echo "  Capping one mode and not the other is not a weaker ceiling, it is a" >&2
+        echo "  ceiling on the wrong half: the unbounded mode still runs unbounded," >&2
+        echo "  on the same card, beside three co-resident bands. Supply both or none." >&2
+        return 1
+    fi
+    for label in trial formal; do
+        if [ "$label" = trial ]; then value="$trial"; else value="$formal"; fi
+        # Unit-NEUTRAL shape check. Refused here rather than by the child's
+        # argparse, which would raise only after the fleet is already up.
+        # '0' is rejected on purpose: it is not "disabled" but a ZERO-BYTE
+        # cap (min(physical_cap, 0)) in which nothing fits, so an operator
+        # typing it to mean "no ceiling" would get "refuse everything".
+        if ! [[ "$value" =~ ^[0-9]+(\.[0-9]+)?$ ]] || [[ "$value" =~ ^0+(\.0+)?$ ]]; then
+            echo "ERROR: --gold_${label}_vram_budget_gb '${value}' is not a positive number" >&2
+            echo "  (D-HW-6). Supply a bare decimal — no unit suffix, no exponent: the" >&2
+            echo "  value is carried VERBATIM to the chain's --${label}_vram_budget_gb," >&2
+            echo "  and this launcher deliberately does not interpret its units (the" >&2
+            echo "  GB/GiB question is open at the decision record and must be settled" >&2
+            echo "  there, not by a transport quietly converting on the way past)." >&2
+            return 1
+        fi
+    done
+    GOLD_VRAM_BUDGET_ARGS=(
+        --trial_vram_budget_gb "$trial"
+        --formal_vram_budget_gb "$formal"
     )
 }
 
@@ -414,6 +520,12 @@ gold_frozen_chain_args() {
     # expansion keeps the undeclared child argv byte-identical.
     gold_required_profile_args || return 1
     GOLD_FROZEN_CHAIN_ARGS+=(${GOLD_REQUIRED_PROFILE_ARGS[@]+"${GOLD_REQUIRED_PROFILE_ARGS[@]}"})
+    # D-HW-6: bound HERE, in the ONE builder both stages consume, so a
+    # stage-2 retrain can never run under a different memory regime than the
+    # stage-1 band whose design it retrains. Empty when unsupplied — the
+    # guarded expansion keeps the unsupplied child argv byte-identical.
+    gold_vram_budget_args || return 1
+    GOLD_FROZEN_CHAIN_ARGS+=(${GOLD_VRAM_BUDGET_ARGS[@]+"${GOLD_VRAM_BUDGET_ARGS[@]}"})
     GOLD_FROZEN_CHAIN_ARGS+=(--no-cleanup_denoised)
 }
 
@@ -650,6 +762,15 @@ gold_arm_args() {
 #: dry-run row and the launch manifest RECORD; a passed-through chain-level
 #: spelling would rebind the requirement to something no recorded surface
 #: names — a pinned profile that the manifest misreports is worse than none.
+#:
+#: --trial_vram_budget_gb / --formal_vram_budget_gb (D-HW-6): same last-wins
+#: hazard, and the reason the reservation matters even though the campaign
+#: usually supplies NO ceiling. The operator ceiling enters through the
+#: entrypoint's --gold_*_vram_budget_gb, which the dry-run row and the launch
+#: manifest RECORD; a passed-through chain-level spelling lands AFTER the
+#: bound tokens and would silently win, leaving both recorded surfaces naming
+#: a ceiling the run is not using. It also defeats the both-or-neither rule,
+#: since a passthrough can rebind one mode alone.
 GOLD_RESERVED_PASSTHROUGH=(
     --cleanup_denoised
     --num_iterations --trial_portion --train_portion --eval_portion
@@ -662,6 +783,7 @@ GOLD_RESERVED_PASSTHROUGH=(
     --llm_config --llm_model
     --required_runtime_profile --required_runtime_profile_sha256
     --required_runtime_profile_path
+    --trial_vram_budget_gb --formal_vram_budget_gb
     --experiment_arm --ml_lit_review_enabled --no-ml_lit_review_enabled
     # --advice_sha256 (advice-invariant): the chain-level spelling of the
     # treatment identity. Reserved for the reason --llm_config is: the

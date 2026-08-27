@@ -30,6 +30,7 @@
 #       [--gold_required_runtime_profile_path ABS_PATH \
 #        --gold_required_runtime_profile KEY \
 #        --gold_required_runtime_profile_sha256 HEX] \
+#       [--gold_trial_vram_budget_gb V --gold_formal_vram_budget_gb V] \
 #       [--stagger-seconds S] [--dry-run] [passthrough run_chain.sh flags...]
 #
 #   bash sdsc_submission_scripts/run_gold_campaign.sh \
@@ -75,6 +76,45 @@
 #   read rather than an echo of the declared one. The chain-level spellings
 #   (--required_runtime_profile[_path|_sha256]) are RESERVED passthrough.
 #
+# OPERATOR-SUPPLIED (not frozen) — the per-mode VRAM ceiling (D-HW-6):
+#   --gold_trial_vram_budget_gb V and --gold_formal_vram_budget_gb V forward
+#   VERBATIM to the chain's EXISTING --trial_vram_budget_gb /
+#   --formal_vram_budget_gb on every stage-1 band and stage-2 unit. This is a
+#   TRANSPORT SEAM CARRYING NO VALUE: the campaign's ceiling is
+#   HARDWARE_DERIVED / PENDING_H100_QUALIFICATION, so no number is frozen,
+#   defaulted or embedded anywhere on this path. Before this seam existed the
+#   Gold layer had no VRAM surface at all, so a qualified number had nothing
+#   to travel through — the pin would have been real and unconsumed, the
+#   F-LLM-WIRE-1 class again.
+#
+#   SUPPLY BOTH OR NEITHER. They are two independent per-mode ceilings (M4
+#   may measure trial and formal differently, and formal rounds are the
+#   larger), so they are NOT collapsed into one operator value — that would
+#   assert trial == formal, an interpretation nobody granted. But a HALF
+#   supply is refused at this boundary: a capped trial beside an uncapped
+#   formal on four co-resident bands is precisely the exhaustion the ceiling
+#   exists to prevent, and the stage scripts fork one background chain per
+#   band, so a half-cap noticed downstream has already launched the fleet.
+#
+#   UNSUPPLIED IS LEGAL AND INERT — no token reaches the child argv and the
+#   launch is byte-identical to a pre-seam one. It does NOT refuse, unlike
+#   the generated-library root: omitting a ceiling diverges from no pinned
+#   authority (_chain_common.sh defaults both to empty == omit, which is the
+#   state every campaign launch has run in), and making the seam a launch
+#   blocker for a value the campaign deliberately has not frozen would block
+#   pre-M4 rehearsals to protect nothing. Absence is instead PRINTED in the
+#   dry-run table and RECORDED as null in the launch manifest, so "no ceiling
+#   was supplied" is an observed fact rather than a silence.
+#
+#   UNITS ARE NOT SETTLED HERE, DELIBERATELY. D-HW-6 flags a live GB/GiB gap
+#   (the flags spell '_gb' but agent/skills/evaluate_vram_skill/wrapper.py
+#   multiplies by _GB = 1024**3, i.e. GiB). This seam carries the operator's
+#   value UNCHANGED and adds no conversion, no normalisation and no
+#   unit-assuming validator: a transport that silently interprets units
+#   acquires an authority nobody granted, and would close D-HW-6's question
+#   by accident. The only check is a unit-NEUTRAL shape check (a strictly
+#   positive decimal). The chain-level spellings are RESERVED passthrough.
+#
 # --dry-run prints the frozen table and every fully-resolved per-band (or
 # per-unit) run_chain argv without launching anything or writing any file.
 # ---------------------------------------------------------------------------
@@ -109,6 +149,11 @@ gold_main() {
     GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
     GOLD_REQUIRED_RUNTIME_PROFILE=""
     GOLD_REQUIRED_RUNTIME_PROFILE_SHA256=""
+    # D-HW-6 — the operator-supplied per-mode VRAM ceiling. Reset for the same
+    # reason: an ambient GOLD_TRIAL_VRAM_BUDGET_GB must never cap a campaign
+    # that did not ask for it.
+    GOLD_TRIAL_VRAM_BUDGET_GB=""
+    GOLD_FORMAL_VRAM_BUDGET_GB=""
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -119,6 +164,8 @@ gold_main() {
             --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
             --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
             --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
+            --gold_trial_vram_budget_gb) GOLD_TRIAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
+            --gold_formal_vram_budget_gb) GOLD_FORMAL_VRAM_BUDGET_GB="$2"; shift 2 ;;
             --task_config)         TASK_CONFIG="$2"; shift 2 ;;
             --design_registry)     DESIGN_REGISTRY="$2"; shift 2 ;;
             --fcnet_reference_json) FCNET_REFERENCE_JSON="$2"; shift 2 ;;
@@ -144,6 +191,9 @@ gold_main() {
     # own argv, but a half or malformed declaration must be refused before
     # the manifest write and before any band is forked.
     gold_required_profile_args || return 1
+    # D-HW-6 fail-fast, same reasoning: a half or malformed VRAM ceiling must
+    # be refused before the manifest write and before any band is forked.
+    gold_vram_budget_args || return 1
     # F-GENLIB-WIRE-1: the campaign must have DECLARED where promoted
     # capabilities live. Refused here, before the manifest write and before
     # any band is forked, because an undeclared library silently accumulates
@@ -205,6 +255,13 @@ gold_main() {
             echo "  \"required_runtime_profile_path\": $(if [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH" ]; then printf '"%s"' "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"; else printf 'null'; fi),"
             echo "  \"required_runtime_profile\": $(if [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE" ]; then printf '"%s"' "$GOLD_REQUIRED_RUNTIME_PROFILE"; else printf 'null'; fi),"
             echo "  \"required_runtime_profile_sha256\": $(if [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256" ]; then printf '"%s"' "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256"; else printf 'null'; fi),"
+            # D-HW-6: recorded as the operator SUPPLIED it — a string, not a
+            # number, and with no unit stamped. The GB/GiB question is open at
+            # the decision record, so the manifest must report what crossed,
+            # never an interpretation of it. null == no ceiling was supplied.
+            echo "  \"trial_vram_budget_gb\": $(if [ -n "$GOLD_TRIAL_VRAM_BUDGET_GB" ]; then printf '"%s"' "$GOLD_TRIAL_VRAM_BUDGET_GB"; else printf 'null'; fi),"
+            echo "  \"formal_vram_budget_gb\": $(if [ -n "$GOLD_FORMAL_VRAM_BUDGET_GB" ]; then printf '"%s"' "$GOLD_FORMAL_VRAM_BUDGET_GB"; else printf 'null'; fi),"
+            echo "  \"vram_budget_provenance\": $(if [ -n "$GOLD_TRIAL_VRAM_BUDGET_GB" ]; then printf '"OPERATOR_SUPPLIED (D-HW-6; verbatim, unit as declared by the decision record — not normalised here)"'; else printf '"NOT_SUPPLIED (D-HW-6 HARDWARE_DERIVED / PENDING_H100_QUALIFICATION; chain default applies: no operator ceiling)"'; fi),"
             echo "  \"generated_library_dir\": \"${GOLD_GENERATED_LIBRARY_DIR}\","
             echo "  \"frozen_values\": {"
             local row first=1
@@ -241,6 +298,12 @@ gold_main() {
         --gold_required_runtime_profile_path "$GOLD_REQUIRED_RUNTIME_PROFILE_PATH"
         --gold_required_runtime_profile "$GOLD_REQUIRED_RUNTIME_PROFILE"
         --gold_required_runtime_profile_sha256 "$GOLD_REQUIRED_RUNTIME_PROFILE_SHA256")
+    # D-HW-6: threaded to BOTH stages, like the profile triple.
+    # gold_vram_budget_args above already refused a half supply, so these two
+    # are set together or not at all.
+    [ -n "$GOLD_TRIAL_VRAM_BUDGET_GB" ] && COMMON+=(
+        --gold_trial_vram_budget_gb "$GOLD_TRIAL_VRAM_BUDGET_GB"
+        --gold_formal_vram_budget_gb "$GOLD_FORMAL_VRAM_BUDGET_GB")
     [ "$DRY_RUN" -eq 1 ] && COMMON+=(--dry-run)
 
     case "$STAGE" in

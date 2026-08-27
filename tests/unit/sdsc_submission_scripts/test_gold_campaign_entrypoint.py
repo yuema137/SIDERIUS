@@ -69,6 +69,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -1121,6 +1122,426 @@ class TestRequiredRuntimeProfileDeclaration:
             assert proc.returncode != 0, flag
             assert flag in proc.stderr, flag
             assert "GOLD_RESERVED_PASSTHROUGH" in proc.stderr, flag
+
+
+#: ARBITRARY TRANSPORT PROBES — NOT the campaign's ceiling, and deliberately
+#: not near any value anybody has proposed for one. D-HW-6's ceiling is
+#: HARDWARE_DERIVED / PENDING_H100_QUALIFICATION, so no number is bound
+#: anywhere on the production path; these exist ONLY to be recognisable on
+#: the far side of the transport. They DIFFER from each other on purpose:
+#: identical probes could not tell a faithful two-value transport apart from
+#: one that carries the trial value into both slots.
+PROBE_TRIAL_VRAM = "7.5"
+PROBE_FORMAL_VRAM = "9.25"
+
+
+class TestVramCeilingTransportSeam:
+    """D-HW-6 — the Gold launch path can CARRY a measured VRAM ceiling.
+
+    The defect class this closes is the one F-LLM-WIRE-1 and
+    F-PROFILE-WIRE-1 already closed one surface at a time: a value that is
+    declared somewhere authoritative and consumed by nothing. Here it had
+    not even reached "declared" — before this seam ``grep -in vram`` across
+    all four Gold scripts was EMPTY, so when H100 qualification produces a
+    number there was no surface on the campaign path able to carry it, and
+    the only way to apply one would have been to edit tagged code on the
+    pod.
+
+    What is under test is the TRANSPORT, never a value. These tests must
+    never acquire a numeric expectation of their own: the probes above are
+    arbitrary, and a test asserting a *particular* ceiling would re-create
+    in the suite exactly the false authority the seam exists to avoid.
+
+    UNITS ARE OUT OF SCOPE BY DESIGN. D-HW-6 records a live GB/GiB gap (the
+    flags spell ``_gb``; ``evaluate_vram_skill/wrapper.py`` multiplies by
+    ``_GB = 1024**3``). The seam carries the operator's value unchanged, so
+    no test here may assert a converted or normalised number — that would
+    silently settle a question the decision record leaves open.
+    """
+
+    @pytest.fixture
+    def registry(self, tmp_path: Path) -> Path:
+        reg = tmp_path / "designs"
+        reg.mkdir()
+        for design in ("wavenetA", "punetB", "rnnC", "fnoD"):
+            (reg / f"{design}.json").write_text("{}\n")
+        return reg
+
+    def _supplied(self) -> list[str]:
+        return [
+            "--gold_trial_vram_budget_gb",
+            PROBE_TRIAL_VRAM,
+            "--gold_formal_vram_budget_gb",
+            PROBE_FORMAL_VRAM,
+        ]
+
+    def test_a_supplied_ceiling_reaches_every_stage1_band_argv(self, campaign_root):
+        """(d) The defect only this catches: the launcher ACCEPTING the
+        ceiling and then not forwarding it — an M4 operator would supply the
+        measured value, watch the launcher echo it, and still get four bands
+        whose chain argv carries no ceiling at all. That is the
+        declared-but-unconsumed shape, and it exits 0.
+
+        Also pins that the two values stay DISTINCT per mode: a seam that
+        collapsed them would assert trial == formal, which nobody decided.
+
+        Fails by: any band missing either token, the four bands disagreeing,
+        or the formal slot carrying the trial probe."""
+        proc = _stage1_dry(campaign_root, *self._supplied())
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _band_argvs(proc.stdout)
+        assert len(argvs) == 4, argvs.keys()
+        for band, argv in argvs.items():
+            pairs = _pairs(argv)
+            assert pairs["--trial_vram_budget_gb"] == PROBE_TRIAL_VRAM, band
+            assert pairs["--formal_vram_budget_gb"] == PROBE_FORMAL_VRAM, band
+            # R-RETENTION-1 unchanged: the new tokens were inserted before
+            # the retention terminator rather than displacing it.
+            assert "--no-cleanup_denoised" in argv, band
+            assert argv.index("--no-cleanup_denoised") > argv.index("--formal_vram_budget_gb"), band
+
+    def test_a_supplied_ceiling_reaches_every_stage2_unit_argv(self, campaign_root, registry):
+        """(d) The defect only this catches: the ceiling reaching stage 1 but
+        not stage 2. The two stages build argv in SEPARATE scripts, so one
+        binder feeding both is an assumption until witnessed. A stage-2
+        retrain running uncapped while its stage-1 band ran capped would
+        train the frozen designs under a different memory regime than the
+        search that selected them. Fails by: any of the 16 units missing a
+        token."""
+        proc = _bash(
+            str(ENTRYPOINT),
+            "--workspace_root",
+            str(campaign_root["root"]),
+            "--stage",
+            "2",
+            "--design_registry",
+            str(registry),
+            "--gold_advice_file",
+            str(campaign_root["advice"]),
+            "--dry-run",
+            *self._supplied(),
+        )
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argvs = _stage2_unit_argvs(proc.stdout)
+        assert len(argvs) == 16, argvs.keys()
+        for unit, argv in argvs.items():
+            pairs = _pairs(argv)
+            assert pairs["--trial_vram_budget_gb"] == PROBE_TRIAL_VRAM, unit
+            assert pairs["--formal_vram_budget_gb"] == PROBE_FORMAL_VRAM, unit
+
+    def test_a_the_value_ARRIVES_at_the_consumer_through_the_real_transport(self, campaign_root):
+        """(d) THE witness. The defect only this catches: a ceiling that is
+        present in argv and consumed by nothing.
+
+        Argv presence proves a string was assembled. It does NOT prove the
+        value survives ``_chain_common.sh``'s parse (which forwards each
+        budget only inside an ``if [ -n ... ]``), nor that the runner's
+        argparse binds it, nor that it lands on the typed object the
+        workflow actually reads. Each of those hops has an omission mode
+        that still exits 0 — which is precisely how every defect in this
+        release's family survived.
+
+        So the launcher's OWN emitted argv is walked through the production
+        hops: real ``parse_chain_args`` + ``build_app_args``, real
+        ``run_one_iteration.py`` argparse, real ``WorkflowLaunchConfig``
+        construction — the object ``model_exploration`` reads at the point
+        it picks the active budget.
+
+        Boundary stated honestly: this stops at ``WorkflowLaunchConfig``,
+        the last hop the SEAM owns. Enforcement beyond it (the tuner's
+        per-mode gate and ``evaluate_vram_skill``'s cap arithmetic) is
+        landed behaviour with its own tests and needs a sandbox/GPU.
+
+        The negative half is what makes it a witness and not a tautology:
+        the identical parsers with the flags ABSENT must yield ``None`` —
+        i.e. no operator ceiling — so a green assertion cannot be explained
+        by a default that was going to be there anyway.
+
+        Fails by: the value being dropped at any hop, or coerced to
+        something other than what was supplied."""
+        pytest.importorskip("pydantic")
+        import importlib.util
+
+        proc = _stage1_dry(campaign_root, *self._supplied())
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        argv = _band_argvs(proc.stdout)["0-3"]
+        # argv = ["CUDA_VISIBLE_DEVICES=0", "bash", "<run_chain.sh>", ...]
+        chain_args = argv[3:]
+        built = _bash(
+            "-c",
+            f"source '{CHAIN_COMMON}'; "
+            f"parse_chain_args {' '.join(shlex.quote(a) for a in chain_args)}; "
+            'build_app_args 1; printf "%s\\n" "${APP_ARGS[@]}"',
+        )
+        assert built.returncode == 0, built.stderr
+        app_args = [tok for tok in built.stdout.splitlines() if tok]
+        assert "--trial_vram_budget_gb" in app_args, app_args
+        assert "--formal_vram_budget_gb" in app_args, app_args
+
+        spec = importlib.util.spec_from_file_location(
+            "roi_for_vram_seam_test", SDSC / "run_one_iteration.py"
+        )
+        roi = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(roi)
+        from workflows.run_config import WorkflowLaunchConfig
+
+        ns = roi.build_parser().parse_args(app_args)
+        assert ns.trial_vram_budget_gb == float(PROBE_TRIAL_VRAM)
+        assert ns.formal_vram_budget_gb == float(PROBE_FORMAL_VRAM)
+
+        # The production construction site (run_one_iteration.py) — the
+        # typed object model_exploration reads.
+        launch = WorkflowLaunchConfig(
+            trial_vram_budget_gb=ns.trial_vram_budget_gb,
+            formal_vram_budget_gb=ns.formal_vram_budget_gb,
+        )
+        assert launch.trial_vram_budget_gb == float(PROBE_TRIAL_VRAM)
+        assert launch.formal_vram_budget_gb == float(PROBE_FORMAL_VRAM)
+
+        # The negative half — the same parsers, the flags omitted.
+        bare = roi.build_parser().parse_args(["--workspace", "/tmp/x", "--run_name", "t"])
+        assert bare.trial_vram_budget_gb is None
+        assert bare.formal_vram_budget_gb is None
+        assert WorkflowLaunchConfig().trial_vram_budget_gb is None
+        assert WorkflowLaunchConfig().formal_vram_budget_gb is None
+
+    def test_b_unsupplied_emits_no_token_and_says_so_out_loud(self, campaign_root):
+        """(d) The defect only this catches: an unsupplied campaign being
+        SILENT about running uncapped. Two properties, both load-bearing.
+
+        Byte-identity: a pre-M4 launch must emit NO new token, or every
+        existing campaign's child argv changes the day this seam lands.
+
+        Explicitness: the dry-run must nonetheless SAY that no ceiling is in
+        force. An absent line is indistinguishable from a feature that was
+        never wired — which is how this whole defect family survived. The
+        design deliberately does NOT refuse here (unlike the generated
+        library): omitting a ceiling diverges from no pinned authority, so
+        refusing would block pre-M4 rehearsals to protect nothing.
+
+        Fails by: a token appearing, or the '(none' row disappearing."""
+        proc = _stage1_dry(campaign_root)
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        for band, argv in _band_argvs(proc.stdout).items():
+            assert "--trial_vram_budget_gb" not in argv, band
+            assert "--formal_vram_budget_gb" not in argv, band
+        assert "supplied vram_budget=(none" in proc.stdout, (
+            "an unsupplied ceiling must be STATED, not omitted — silence here "
+            "is what made the missing seam invisible in the first place"
+        )
+
+    def test_b_a_supplied_campaign_says_so_in_the_dry_run_row(self, campaign_root):
+        """(d) The defect only this catches: the launcher forwarding a
+        ceiling it never displays, so an operator cannot confirm from the dry
+        run WHICH ceiling the campaign will run under. Fails by: either
+        probe missing from the printed row."""
+        proc = _stage1_dry(campaign_root, *self._supplied())
+        assert proc.returncode == 0, proc.stderr + proc.stdout
+        row = [line for line in proc.stdout.splitlines() if "supplied vram_budget=" in line]
+        assert row, proc.stdout
+        assert PROBE_TRIAL_VRAM in row[0], row
+        assert PROBE_FORMAL_VRAM in row[0], row
+
+    @pytest.mark.parametrize(
+        ("extra", "expected"),
+        [
+            # A HALF supply is the dangerous shape: a capped trial beside an
+            # uncapped formal on four co-resident bands is exactly the
+            # exhaustion the ceiling exists to prevent, and it LOOKS like a
+            # configuration. Refused at the boundary, before any band forks.
+            ((("--gold_trial_vram_budget_gb", PROBE_TRIAL_VRAM),), "INCOMPLETE"),
+            ((("--gold_formal_vram_budget_gb", PROBE_FORMAL_VRAM),), "INCOMPLETE"),
+            # Shape errors caught here rather than inside 4 forked children,
+            # where argparse's `type=float` would raise after the fleet is up.
+            (
+                (
+                    ("--gold_trial_vram_budget_gb", "60GB"),
+                    ("--gold_formal_vram_budget_gb", PROBE_FORMAL_VRAM),
+                ),
+                "not a positive number",
+            ),
+            (
+                (
+                    ("--gold_trial_vram_budget_gb", PROBE_TRIAL_VRAM),
+                    ("--gold_formal_vram_budget_gb", "abc"),
+                ),
+                "not a positive number",
+            ),
+            # 0 is NOT "disabled" — evaluate_vram_skill computes
+            # min(physical_cap, budget * _GB), so a zero budget is a
+            # zero-byte cap in which nothing fits. An operator typing it
+            # means "no ceiling"; the chain would hear "refuse everything".
+            (
+                (
+                    ("--gold_trial_vram_budget_gb", "0"),
+                    ("--gold_formal_vram_budget_gb", PROBE_FORMAL_VRAM),
+                ),
+                "not a positive number",
+            ),
+            (
+                (
+                    ("--gold_trial_vram_budget_gb", PROBE_TRIAL_VRAM),
+                    ("--gold_formal_vram_budget_gb", "-8"),
+                ),
+                "not a positive number",
+            ),
+        ],
+    )
+    def test_c_half_or_malformed_supply_refuses_before_launching(
+        self, campaign_root, extra, expected
+    ):
+        """(d) The defect only this catches: a bad ceiling discovered by the
+        CHILD. The stage scripts fork one background chain per band, so a
+        typo found downstream has already launched the fleet — and a half
+        supply found downstream never fails at all, it just runs one mode
+        uncapped. Fails by: a zero exit, or a refusal that does not say what
+        is wrong."""
+        flat = [tok for pair in extra for tok in pair]
+        proc = _stage1_dry(campaign_root, *flat)
+        assert proc.returncode != 0, proc.stdout
+        assert expected in proc.stderr, proc.stderr
+
+    def test_d_the_chain_level_spellings_are_reserved_passthrough(self, campaign_root):
+        """(d) The defect only this catches: an operator passing the CHAIN
+        spelling through. Passthrough tokens are appended AFTER the frozen
+        args and ``_chain_common.sh``'s parse loop is LAST-WINS, so a
+        passed-through --trial_vram_budget_gb would silently override the
+        supplied ceiling — leaving the dry-run row and the launch manifest
+        naming a ceiling the run is not using. A misreported ceiling is
+        worse than none. Fails by: the token being accepted."""
+        for flag in ("--trial_vram_budget_gb", "--formal_vram_budget_gb"):
+            proc = _stage1_dry(campaign_root, flag, "1")
+            assert proc.returncode != 0, flag
+            assert flag in proc.stderr, flag
+            assert "GOLD_RESERVED_PASSTHROUGH" in proc.stderr, flag
+
+    def test_d_the_override_is_refused_even_when_a_ceiling_was_supplied(self, campaign_root):
+        """(d) The defect only this catches: the reserved check being skipped
+        once the gold spelling is present. The refusal must not depend on
+        whether the campaign supplied a ceiling — the last-wins rebind is
+        MORE dangerous when a ceiling was supplied, because then a recorded
+        value exists for the manifest to misreport."""
+        proc = _stage1_dry(campaign_root, *self._supplied(), "--trial_vram_budget_gb", "1")
+        assert proc.returncode != 0, proc.stdout
+        assert "GOLD_RESERVED_PASSTHROUGH" in proc.stderr, proc.stderr
+
+    def test_e_the_launch_manifest_records_supplied_and_unsupplied(self, tmp_path):
+        """(d) The defect only this catches: the seam being observable only
+        in a dry run. The design's whole answer to "what if no ceiling is
+        supplied" is that the absence becomes a RECORDED FACT, and the
+        manifest is the durable half of that record — the dry-run row scrolls
+        past, the manifest is what a later reader has.
+
+        The manifest is written only on a live launch, so the entrypoint runs
+        against a synthetic tree whose stage-1 script is a stub: the manifest
+        is written, and the exec dispatches into a no-op instead of a fleet.
+
+        Fails by: the keys missing, a supplied value not round-tripping, or
+        an unsupplied campaign recording something other than an explicit
+        null + a provenance that names why."""
+        tree = tmp_path / "scripts"
+        tree.mkdir()
+        for src in (ENTRYPOINT, LIB):
+            shutil.copy2(src, tree / src.name)
+        # A stub stage-1: the entrypoint execs it AFTER writing the manifest.
+        (tree / STAGE1.name).write_text("#!/bin/bash\necho '[stub] dispatched'\nexit 0\n")
+        _install_frozen_llm_config(tmp_path)
+        # GOLD_PROJECT_DIR resolves to tree.parent, and gold_bind_task_config
+        # compares the supplied config against THAT tree's copy.
+        (tmp_path / "configs").mkdir()
+        shutil.copy2(REPO_ROOT / "configs" / "task_config.yaml", tmp_path / "configs")
+
+        root = tmp_path / "ws"
+        root.mkdir()
+        advice = tmp_path / "advice.json"
+        advice.write_text('{"propose": "placeholder"}\n')
+
+        def _launch(*extra: str) -> dict:
+            for stale in root.glob("gold_campaign_launch_*.json"):
+                stale.unlink()
+            proc = _bash(
+                str(tree / ENTRYPOINT.name),
+                "--workspace_root",
+                str(root),
+                "--stage",
+                "1",
+                "--gold_advice_file",
+                str(advice),
+                *extra,
+            )
+            assert proc.returncode == 0, proc.stderr + proc.stdout
+            written = sorted(root.glob("gold_campaign_launch_*.json"))
+            assert len(written) == 1, written
+            return json.loads(written[0].read_text())
+
+        supplied = _launch(*self._supplied())
+        # Recorded as the operator SUPPLIED it — a string, no unit stamped,
+        # no normalisation. D-HW-6's GB/GiB question stays open, so the
+        # record must report what crossed rather than an interpretation.
+        assert supplied["trial_vram_budget_gb"] == PROBE_TRIAL_VRAM
+        assert supplied["formal_vram_budget_gb"] == PROBE_FORMAL_VRAM
+        assert "OPERATOR_SUPPLIED" in supplied["vram_budget_provenance"]
+
+        unsupplied = _launch()
+        assert unsupplied["trial_vram_budget_gb"] is None
+        assert unsupplied["formal_vram_budget_gb"] is None
+        assert "NOT_SUPPLIED" in unsupplied["vram_budget_provenance"]
+        assert "PENDING_H100_QUALIFICATION" in unsupplied["vram_budget_provenance"], (
+            "the recorded absence must name WHY there is no ceiling, or a "
+            "later reader cannot tell a pending measurement from an oversight"
+        )
+
+    def test_f_no_numeric_ceiling_is_bound_anywhere_on_the_gold_path(self):
+        """(d) The defect only this catches: a future edit quietly giving the
+        seam a default. The seam's entire contract is that it carries a value
+        and never supplies one — a defaulted ceiling in tagged code would
+        acquire exactly the false authority the supersession to
+        HARDWARE_DERIVED / PENDING_H100_QUALIFICATION was made to prevent,
+        and it would be invisible because the launch would still exit 0.
+
+        Asserted structurally: no assignment or emission of a VRAM budget in
+        the Gold scripts may carry a literal number. Fails by: any
+        ``GOLD_*VRAM_BUDGET*=<digits>`` or a numeric literal appearing beside
+        a vram token in an emission."""
+        offenders = []
+        for script in (ENTRYPOINT, STAGE1, STAGE1_BAND, STAGE2, LIB):
+            for lineno, line in enumerate(script.read_text().splitlines(), 1):
+                code = line.split("#", 1)[0]
+                if "VRAM_BUDGET" not in code and "vram_budget" not in code:
+                    continue
+                # An assignment whose right-hand side begins with a digit.
+                if re.search(r"VRAM_BUDGET_GB=[\"']?\d", code):
+                    offenders.append(f"{script.name}:{lineno}: {line.strip()}")
+                # An emitted flag followed by a numeric literal.
+                if re.search(r"--(?:trial|formal)_vram_budget_gb[\"']?\s+[\"']?\d", code):
+                    offenders.append(f"{script.name}:{lineno}: {line.strip()}")
+        assert not offenders, (
+            "a numeric VRAM ceiling is bound on the Gold path; the seam must "
+            "carry a value, never supply one:\n" + "\n".join(offenders)
+        )
+
+    def test_g_the_non_campaign_chain_path_is_behaviourally_unchanged(self, tmp_path):
+        """(d) The defect only this catches: the seam leaking a ceiling into
+        NON-Gold chains. The obvious way to 'wire VRAM up' would have been to
+        give ``_chain_common.sh`` a default budget — which would silently cap
+        every exploratory run, every X9 launcher and every smoke on the box,
+        none of which asked for one.
+
+        This drives the chain parser DIRECTLY with a non-campaign argv (no
+        Gold script involved) and asserts the pre-existing 'empty == omit'
+        contract still holds. Fails by: either token appearing in APP_ARGS
+        for a chain that supplied no budget."""
+        built = _bash(
+            "-c",
+            f"source '{CHAIN_COMMON}'; "
+            f"parse_chain_args --workspace {shlex.quote(str(tmp_path / 'w'))} "
+            "--run_name t; "
+            'build_app_args 1; printf "%s\\n" "${APP_ARGS[@]}"',
+        )
+        assert built.returncode == 0, built.stderr
+        app_args = [tok for tok in built.stdout.splitlines() if tok]
+        assert "--trial_vram_budget_gb" not in app_args, app_args
+        assert "--formal_vram_budget_gb" not in app_args, app_args
 
 
 # ---------------------------------------------------------------------------
