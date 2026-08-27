@@ -164,6 +164,14 @@ class WorkflowLaunchConfig:
     # the workflow locks it, forwards it to the interpreter / proposer /
     # tuner inputs and refuses a bundled built-in proposal under it.
     baseline_isolation: bool = False
+    # Gold campaign (advice-invariant) — the advice artifact this launch
+    # OBSERVED. Pure transit: the workflow locks the pair and never reads it,
+    # exactly like `experiment_arm` above. The advice CONTENT travels
+    # separately in the `human_advice_*` fields; these two say WHICH bytes
+    # that content came from, so a resume under different advice refuses.
+    # `None` is the no-advice run (every legacy launch).
+    advice_path: str | None = None
+    advice_sha256: str | None = None
     # arXiv #259 (fleet ruling 2026-08-25) — the run's declared output-type
     # constraint for proposed models. Transit only: threaded into
     # ProposalInput.allowed_output_types, where the schema gate enforces it.

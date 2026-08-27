@@ -1847,6 +1847,14 @@ def _workflow_lock_identity(launch) -> LockLaunchIdentity:
         # arXiv U3 — the WITHOUT arm's isolation flag is a prompt-surface
         # identity, so it is locked like the topology.
         baseline_isolation=launch.baseline_isolation,
+        # Gold campaign — the advice pin the LAUNCHER observed, carried on
+        # the launch config and never re-derived here. Re-hashing the file at
+        # this point would describe whatever is on disk when the workflow
+        # starts rather than what the launch certified, which is the
+        # recomputation defect F-12bc-7 named: a pin that follows the very
+        # edit it exists to catch.
+        advice_sha256=launch.advice_sha256,
+        advice_path=launch.advice_path,
     )
 
 

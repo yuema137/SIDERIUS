@@ -75,7 +75,7 @@ gold_status_field() {  # file key -> raw scalar (quotes stripped)
 }
 
 stage1_band_main() {
-    local BAND="" WORKSPACE_ROOT="" ARM="goldpod" ADVICE_FILE=""
+    local BAND="" WORKSPACE_ROOT="" ARM="goldpod" ADVICE_FILE="" ADVICE_SHA256=""
     local FCNET_REFERENCE_JSON="" DRY_RUN=0
     # F-PROFILE-WIRE-1 — command-line only; never inherited from the shell.
     GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
@@ -89,6 +89,7 @@ stage1_band_main() {
             --workspace_root|--workspace-root) WORKSPACE_ROOT="$2"; shift 2 ;;
             --arm)                  ARM="$2"; shift 2 ;;
             --gold_advice_file)     ADVICE_FILE="$2"; shift 2 ;;
+            --gold_advice_sha256) ADVICE_SHA256="$2"; shift 2 ;;
             --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
             --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
             --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
@@ -106,7 +107,10 @@ stage1_band_main() {
     local GPU
     GPU="$(gold_band_gpu "$BAND")" || return 1
     gold_workspace_root_check "$WORKSPACE_ROOT" || return 1
-    gold_arm_args "$ARM" "$ADVICE_FILE" || return 1
+    # The campaign's ONE observed treatment identity (empty when this
+    # script was invoked directly): gold_arm_args refuses when its own
+    # read of the artifact disagrees.
+    gold_arm_args "$ARM" "$ADVICE_FILE" "$ADVICE_SHA256" || return 1
     # F-GENLIB-WIRE-1: enforced in EVERY stage, not only the entrypoint —
     # a stage script invoked directly must refuse the same undeclared
     # library root, and this is what makes GOLD_GENERATED_LIBRARY_DIR

@@ -524,7 +524,7 @@ gold_select_bands() {
 # so the OFF arm is recorded positively on the child argv — a NAMED absence,
 # never a YAML-default inheritance.
 gold_arm_args() {
-    local arm="$1" advice="$2" advice_abs
+    local arm="$1" advice="$2" expected_sha="${3:-}" advice_abs observed_sha
     case "$arm" in
         with-prior-art|without-prior-art)
             echo "ERROR: --arm '$arm' is the X9 experiment's label and is refused for the" >&2
@@ -548,7 +548,57 @@ gold_arm_args() {
             # so a relative path would dangle — same rule as the
             # fixed-candidate seam's abs-path conversion.
             advice_abs="$(cd "$(dirname "$advice")" && pwd)/$(basename "$advice")"
-            GOLD_ARM_ARGS=(--experiment_arm goldpod --no-ml_lit_review_enabled --advice "$advice_abs")
+            # OBSERVE the treatment identity here, off the path just resolved,
+            # so the bytes hashed are the bytes the child is told to read.
+            # `awk '{print $1}'` strips the FILE NAME `sha256sum` prints after
+            # the digest; without it the run's scientific identity would encode
+            # this machine's directory layout (run_one_iteration.py refuses
+            # such a value, but the refusal belongs here, at the boundary).
+            observed_sha="$(sha256sum "$advice_abs" | awk '{print $1}')"
+            if [ -z "$observed_sha" ]; then
+                echo "ERROR: could not hash the advice artifact at $advice_abs; the campaign's" >&2
+                echo "  treatment identity cannot be bound and this launch is REFUSED." >&2
+                return 1
+            fi
+            # THE CHECK THAT MAKES FOUR BANDS ONE TREATMENT.
+            #
+            # stage1_search.sh staggers four forks and each forked
+            # stage1_run_band.sh calls THIS function itself, so without an
+            # inherited value each band would hash the artifact at its own
+            # launch time, declare its own digest, and have its child certify
+            # against it -- trivially equal, always. Four bands would run into
+            # four SEPARATE workspaces that no per-workspace lock can ever
+            # compare, and an edit made during the stagger window would go
+            # undetected with every check reporting green.
+            #
+            # The campaign entrypoint computes the digest ONCE and threads it
+            # down (--gold_advice_sha256), exactly as F-PROFILE-WIRE-1 threads
+            # its declaration triple. Comparing this band's own observation
+            # against that single value is what converts a tautology into a
+            # check. Empty == no campaign-level declaration (a directly-invoked
+            # band, or a hand run): the observation still binds, there is just
+            # nothing to inherit.
+            if [ -n "$expected_sha" ] && [ "$expected_sha" != "$observed_sha" ]; then
+                echo "ERROR: the advice artifact is NOT the one this campaign bound, so this" >&2
+                echo "  band is REFUSED before it launches:" >&2
+                echo "    artifact : $advice_abs" >&2
+                echo "    campaign : $expected_sha  (computed once by run_gold_campaign.sh)" >&2
+                echo "    observed : $observed_sha  (this band, now)" >&2
+                echo "  The bands are staggered and write to SEPARATE workspaces, so two" >&2
+                echo "  different treatments would never meet in one invariants lock and" >&2
+                echo "  nothing downstream could tell the arms apart. Restore the artifact" >&2
+                echo "  or relaunch the campaign against the file you mean to test." >&2
+                return 1
+            fi
+            GOLD_ADVICE_ABS="$advice_abs"
+            GOLD_ADVICE_SHA256="$observed_sha"
+            # The OBSERVED digest is declared to the child, which certifies it
+            # against its OWN read and pins that observation. When a campaign
+            # value was inherited the refusal above proves the two are equal,
+            # so this is the campaign's identity; when none was, it is the only
+            # honest value there is.
+            GOLD_ARM_ARGS=(--experiment_arm goldpod --no-ml_lit_review_enabled \
+                --advice "$advice_abs" --advice_sha256 "$observed_sha")
             ;;
         blindpod)
             if [ -n "$advice" ]; then
@@ -557,6 +607,15 @@ gold_arm_args() {
                 echo "  of the artifact (plan section 5.6)." >&2
                 return 1
             fi
+            if [ -n "$expected_sha" ]; then
+                echo "ERROR: --arm blindpod refuses an inherited advice identity: blindpod is" >&2
+                echo "  the WITHOUT_ADVICE arm (D-NAME-1) and consumes no artifact, so a" >&2
+                echo "  digest reaching it means the control arm was launched from a treated" >&2
+                echo "  campaign binding. Refused rather than ignored." >&2
+                return 1
+            fi
+            GOLD_ADVICE_ABS=""
+            GOLD_ADVICE_SHA256=""
             GOLD_ARM_ARGS=(--experiment_arm blindpod --no-ml_lit_review_enabled)
             ;;
         *)
@@ -604,7 +663,13 @@ GOLD_RESERVED_PASSTHROUGH=(
     --required_runtime_profile --required_runtime_profile_sha256
     --required_runtime_profile_path
     --experiment_arm --ml_lit_review_enabled --no-ml_lit_review_enabled
-    --advice --human_advice_file
+    # --advice_sha256 (advice-invariant): the chain-level spelling of the
+    # treatment identity. Reserved for the reason --llm_config is: the
+    # parse loop is last-wins and passthrough tokens are appended AFTER
+    # the frozen args, so a passed-through digest would rebind the very
+    # value the launch manifest reports -- a pin the manifest misreports
+    # is worse than no pin.
+    --advice --advice_sha256 --human_advice_file
     --data_scope --health_gate_files --band --workspace --run_name
     --mode --seed_paths --start_iter
     --auto_resume --no_auto_resume --force_fresh

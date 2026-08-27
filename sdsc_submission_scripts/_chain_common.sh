@@ -101,6 +101,11 @@ TRAIN_PORTION=""                    # Lane F2 tri-state: empty == omit == AGENT_
 EVAL_PORTION=""                     # Lane F2 tri-state: empty == omit == AGENT_CONTROLLED
 HUMAN_ADVICE_FILE=""
 ADVICE=""
+# The launcher's OBSERVED sha256 of the advice artifact. Forwarded as a
+# DECLARATION: run_one_iteration.py certifies it against its own read and
+# pins the OBSERVED digest, never this one. Empty == undeclared, and the
+# child's argv is then byte-identical to a pre-feature chain.
+ADVICE_SHA256=""
 PLAN_OVERRIDES=""
 # DATA_DIR: unset by default. The TIDMAD data directory used for training,
 # inference, and scoring is resolved by the Python config layer
@@ -347,6 +352,7 @@ parse_chain_args() {
         --eval_portion)           EVAL_PORTION="$2"; shift 2 ;;
         --human_advice_file)      HUMAN_ADVICE_FILE="$2"; shift 2 ;;
         --advice)                 ADVICE="$2"; shift 2 ;;
+        --advice_sha256)          ADVICE_SHA256="$2"; shift 2 ;;
         --plan_overrides)         PLAN_OVERRIDES="$2"; shift 2 ;;
         --llm_config)             LLM_CONFIG="$2"; shift 2 ;;
         --required_runtime_profile_path) REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
@@ -612,6 +618,12 @@ build_app_args() {
     elif [ -n "$HUMAN_ADVICE_FILE" ]; then
         APP_ARGS+=(--human_advice_file "$HUMAN_ADVICE_FILE")
     fi
+    # Emitted only when DECLARED, and independently of which advice flag
+    # carried the path: --human_advice_file names an advice artifact too,
+    # and a digest declared for it must reach the child.
+    if [ -n "$ADVICE_SHA256" ]; then
+        APP_ARGS+=(--advice_sha256 "$ADVICE_SHA256")
+    fi
     if [ -n "$PLAN_OVERRIDES" ]; then
         APP_ARGS+=(--plan_overrides "$PLAN_OVERRIDES")
     fi
@@ -818,6 +830,9 @@ print_chain_header() {
         echo "    Advice file    : $ADVICE"
     elif [ -n "$HUMAN_ADVICE_FILE" ]; then
         echo "    Advice file    : $HUMAN_ADVICE_FILE  (legacy --human_advice_file)"
+    fi
+    if [ -n "$ADVICE_SHA256" ]; then
+        echo "    Advice sha256  : $ADVICE_SHA256  (declared; certified against the bytes read)"
     fi
     if [ "$MODE" = "lilab" ] && [ "${#PY_CMD[@]}" -gt 0 ]; then
         echo "  Python           : ${PY_CMD[*]}  (source: ${PY_SOURCE:-?})"

@@ -668,7 +668,21 @@ class TestCensusDLegacyLockKeySet:
         mid-workspace operator edit reached the LLM with no refusal.
         ``None`` for composed runs (identity = the fingerprint) and legacy
         locks; omitted-at-``None`` in the serialized lock, so those bytes
-        are unchanged."""
+        are unchanged.
+
+        DECLARED DELTA (Gold campaign, advice-invariant; the census fired
+        again — working as designed): ``advice_sha256`` joined — the
+        OBSERVED sha256 of the advice-artifact bytes a run consumed. The
+        campaign's arm LABEL was pinned while the treatment that label names
+        was not, so two workspaces reading different advice compared as one
+        experiment. Unlike ``task_config_sha256``, this field is OPTIONAL —
+        a run that consumes no advice resolves ``None`` and a legacy lock
+        parses to ``None``, so ordinary ``!=`` over ``str | None`` yields
+        the operator's required table (absent/absent COMPATIBLE; A/A
+        COMPATIBLE; A/B, A/absent and absent/A all REFUSE) and every
+        no-advice workspace stays resumable. Its sibling ``advice_path`` is
+        ``_PROVENANCE``, not here: path proves authority and reachability,
+        the observed digest proves treatment identity."""
         from core.run_invariants import RunInvariants
 
         assert RunInvariants._CANONICAL == (
@@ -690,4 +704,6 @@ class TestCensusDLegacyLockKeySet:
             "lit_review_config_sha256",
             "experiment_arm",
             "baseline_isolation",
+            # Gold campaign — the declared delta documented above.
+            "advice_sha256",
         )

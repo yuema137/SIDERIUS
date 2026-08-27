@@ -135,7 +135,9 @@ At startup a run writes (or validates against)
 
 - the resolved data scope,
 - whether health gates are enabled,
-- the sha256 of the effective health configuration.
+- the sha256 of the effective health configuration,
+- the sha256 of the **advice artifact** the run consumed, when it consumed one
+  (`advice_sha256`, from `--advice` / `--human_advice_file`).
 
 Any resume, seed or reuse with one of these different fails at startup with a
 message naming the mismatch. That failure is the guard working — see
@@ -146,6 +148,26 @@ for the exact semantics.
 Editing a **file-declared plugin** or the task health config between runs also
 moves the pinned digest, so the workspace refuses to continue under silently
 changed science. Same rule: new semantics, new workspace.
+
+The advice pin follows the same rule and adds two cases worth stating, because
+advice is optional where the fields above are not:
+
+| workspace lock | this run | outcome |
+|---|---|---|
+| no advice recorded | no advice | resumes — every workspace that predates the pin |
+| digest A | the same bytes (at any path) | resumes; the **path is recorded, not compared** |
+| digest A | different bytes, or none | refuses |
+| no advice recorded | advice | **refuses** |
+
+The last row is deliberate. "Nothing recorded" is not "nothing was consumed", so
+an existing workspace cannot be adopted into an advice-bound campaign: its
+treatment cannot be reconstructed. Start a new workspace.
+
+The digest is always computed from the bytes the run actually read. A launcher
+may additionally declare `--advice_sha256`; that value is *certified* against
+the run's own read and then discarded, so a file edited between two launches of
+one campaign refuses instead of running a second treatment under the first
+one's label.
 
 ## Seeding a new workspace from an old run
 

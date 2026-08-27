@@ -136,6 +136,12 @@ POST_REFACTOR_TRANSIT_ADDITIONS: dict[str, object] = {
     # mode-agnostic max_epochs governs that role (legacy behavior).
     "trial_max_epochs": None,
     "formal_max_epochs": None,
+    # Gold campaign (advice-invariant) — the advice artifact the launch
+    # OBSERVED, as pure transit to `_workflow_lock_identity`. `None` is the
+    # no-advice launch, which is what keeps the workspace lock byte-identical
+    # for every run that declares no advice.
+    "advice_path": None,
+    "advice_sha256": None,
 }
 
 

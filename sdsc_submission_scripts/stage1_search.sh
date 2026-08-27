@@ -29,7 +29,7 @@ GOLD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${GOLD_SCRIPT_DIR}/_gold_campaign_lib.sh"
 
 stage1_main() {
-    local WORKSPACE_ROOT="" ARM="goldpod" ADVICE_FILE="" FCNET_REFERENCE_JSON=""
+    local WORKSPACE_ROOT="" ARM="goldpod" ADVICE_FILE="" ADVICE_SHA256="" FCNET_REFERENCE_JSON=""
     local ONLY="" STAGGER=60 DRY_RUN=0
     # F-PROFILE-WIRE-1 — command-line only; never inherited from the shell.
     GOLD_REQUIRED_RUNTIME_PROFILE_PATH=""
@@ -42,6 +42,7 @@ stage1_main() {
             --workspace_root|--workspace-root) WORKSPACE_ROOT="$2"; shift 2 ;;
             --arm)                  ARM="$2"; shift 2 ;;
             --gold_advice_file)     ADVICE_FILE="$2"; shift 2 ;;
+            --gold_advice_sha256) ADVICE_SHA256="$2"; shift 2 ;;
             --gold_required_runtime_profile_path) GOLD_REQUIRED_RUNTIME_PROFILE_PATH="$2"; shift 2 ;;
             --gold_required_runtime_profile) GOLD_REQUIRED_RUNTIME_PROFILE="$2"; shift 2 ;;
             --gold_required_runtime_profile_sha256) GOLD_REQUIRED_RUNTIME_PROFILE_SHA256="$2"; shift 2 ;;
@@ -57,7 +58,10 @@ stage1_main() {
     gold_workspace_root_check "$WORKSPACE_ROOT" || return 1
     # Validates the arm + advice pairing up-front (each band re-derives its
     # own argv from the same lib, so this is a fail-fast, not the binding).
-    gold_arm_args "$ARM" "$ADVICE_FILE" || return 1
+    # The campaign's ONE observed treatment identity (empty when this
+    # script was invoked directly): gold_arm_args refuses when its own
+    # read of the artifact disagrees.
+    gold_arm_args "$ARM" "$ADVICE_FILE" "$ADVICE_SHA256" || return 1
     # F-GENLIB-WIRE-1: enforced in EVERY stage, not only the entrypoint —
     # a stage script invoked directly must refuse the same undeclared
     # library root, and this is what makes GOLD_GENERATED_LIBRARY_DIR
@@ -89,6 +93,9 @@ stage1_main() {
         --arm "$ARM"
     )
     [ -n "$ADVICE_FILE" ] && BAND_ARGS_COMMON+=(--gold_advice_file "$ADVICE_FILE")
+    # Inherited, never recomputed here: recomputing would restore exactly the
+    # per-band independent observation this threading exists to remove.
+    [ -n "$ADVICE_SHA256" ] && BAND_ARGS_COMMON+=(--gold_advice_sha256 "$ADVICE_SHA256")
     # F-PROFILE-WIRE-1 — forwarded to every band, so all four bands of a
     # declared campaign certify the SAME overlay.
     [ -n "$GOLD_REQUIRED_RUNTIME_PROFILE" ] && BAND_ARGS_COMMON+=(

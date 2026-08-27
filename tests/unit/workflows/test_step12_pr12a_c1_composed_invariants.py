@@ -86,6 +86,13 @@ def _preflight_args(workspace: str) -> argparse.Namespace:
     `--baseline_isolation` False), exactly as the parser registers them in
     ``run_one_iteration.py``. Upgraded, never production-loosened — the
     09a precedent.
+
+    Gold campaign (advice-invariant): the same rule now covers the advice
+    surface. ``resolve_launch_identity`` resolves the artifact through the
+    one caching authority, which reads ``--advice`` / ``--human_advice_file``
+    / ``--advice_sha256`` off the parsed CLI — STRICTLY, for the reason
+    above. All three parser defaults are ``None``, so an un-composed,
+    advice-free pre-flight resolves exactly the lock it did before.
     """
     return argparse.Namespace(
         data_scope=None,
@@ -103,6 +110,10 @@ def _preflight_args(workspace: str) -> argparse.Namespace:
         ml_lit_review_enabled=None,
         ml_lit_review_config="configs/lit_review_config.yaml",
         baseline_isolation=False,
+        # Gold-campaign advice surface (parser defaults, verbatim).
+        advice=None,
+        human_advice_file=None,
+        advice_sha256=None,
     )
 
 

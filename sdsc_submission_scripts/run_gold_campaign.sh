@@ -174,6 +174,9 @@ gold_main() {
     echo "[gold-campaign] llm_config=$GOLD_LLM_CONFIG_ABS sha256=$GOLD_LLM_CONFIG_SHA256 (D-LLM-1, every role pinned)"
     if [ "$ARM" = "goldpod" ]; then
         echo "[gold-campaign] treatment: advice=$ADVICE_FILE (goldpod, injected every proposer round)"
+        echo "[gold-campaign] treatment identity: sha256=$GOLD_ADVICE_SHA256"
+        echo "[gold-campaign]   observed ONCE here and inherited by every band; a band whose own"
+        echo "[gold-campaign]   read differs refuses before it launches (advice-invariant)."
     else
         echo "[gold-campaign] treatment: advice=EXPLICIT_NONE (blindpod, named absence)"
     fi
@@ -191,6 +194,8 @@ gold_main() {
             echo "  \"stage\": ${STAGE},"
             echo "  \"arm\": \"${ARM}\","
             echo "  \"advice_file\": $(if [ -n "$ADVICE_FILE" ]; then printf '"%s"' "$ADVICE_FILE"; else printf '"EXPLICIT_NONE"'; fi),"
+            echo "  \"advice_path\": $(if [ -n "$GOLD_ADVICE_ABS" ]; then printf '"%s"' "$GOLD_ADVICE_ABS"; else printf 'null'; fi),"
+            echo "  \"advice_sha256\": $(if [ -n "$GOLD_ADVICE_SHA256" ]; then printf '"%s"' "$GOLD_ADVICE_SHA256"; else printf 'null'; fi),"
             echo "  \"lit_review\": \"OFF (Q-LIT-1, explicit --no-ml_lit_review_enabled, symmetric)\","
             echo "  \"task_config\": \"${GOLD_TASK_CONFIG_ABS}\","
             echo "  \"task_config_sha256\": \"${GOLD_TASK_CONFIG_SHA256}\","
@@ -224,6 +229,11 @@ gold_main() {
         --arm "$ARM"
     )
     [ -n "$ADVICE_FILE" ] && COMMON+=(--gold_advice_file "$ADVICE_FILE")
+    # The ONE treatment identity, threaded to both stages exactly as the
+    # F-PROFILE-WIRE-1 triple below is. `gold_arm_args` above already
+    # observed it; every band inherits THIS value and refuses if its own
+    # read of the artifact disagrees.
+    [ -n "$GOLD_ADVICE_SHA256" ] && COMMON+=(--gold_advice_sha256 "$GOLD_ADVICE_SHA256")
     # F-PROFILE-WIRE-1: threaded to BOTH stages, like --gold_advice_file.
     # gold_required_profile_args above already refused a half declaration, so
     # these two are set together or not at all.

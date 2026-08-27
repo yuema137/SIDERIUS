@@ -495,6 +495,126 @@ def _ordering_by_experiment(tune_output) -> list[dict]:
     return entries
 
 
+class AdviceArtifactError(ValueError):
+    """A run's advice artifact is unreadable, unparseable, or not the one
+    the launcher certified.
+
+    Fail-CLOSED, on the ``RequiredProfileBindingError`` precedent: the advice
+    artifact is the Gold campaign's INDEPENDENT VARIABLE, so "the file moved
+    or changed since the launcher hashed it" must stop the launch rather than
+    quietly run a different treatment under the same arm label.
+    """
+
+
+@dataclass(frozen=True)
+class AdviceArtifact:
+    """The advice artifact this process actually read.
+
+    Attributes:
+        path: The resolved ABSOLUTE path the bytes came from.
+        sha256: The OBSERVED sha256 of those exact bytes. This — never a
+            declared value — is what reaches the workspace lock.
+        content: The parsed advice mapping, from the SAME bytes.
+    """
+
+    path: str
+    sha256: str
+    content: dict
+
+
+def load_advice_artifact(path: str, *, declared_sha256: str | None = None) -> AdviceArtifact:
+    """Read, certify and parse the advice artifact from ONE read of the file.
+
+    TOCTOU-safe by construction, the ``_load_bound_overlay`` precedent
+    (``core/runtime_control/watchdog_profile.py``): the file is read exactly
+    once with ``Path.read_bytes``, the sha256 is computed over that bytes
+    object, and ``json.loads`` parses the SAME object — never a re-open, so
+    no window exists in which a swapped file is hashed as one content and
+    parsed as another.
+
+    ``declared_sha256`` is the campaign launcher's OBSERVATION, forwarded on
+    argv as a cross-process integrity check. It is CERTIFIED against the
+    digest computed here and then discarded: the returned ``sha256`` is
+    always this process's own observation. That asymmetry is the point —
+    stamping the declared value would make the lock an ECHO, which is
+    behaviourally invisible right up until the day the two differ, and that
+    is exactly the day the record has to be true.
+
+    Args:
+        path: The advice artifact path, absolute or relative to this
+            process's working directory.
+        declared_sha256: The digest the launcher observed, or ``None`` when
+            nothing was declared (a hand-run chain).
+
+    Returns:
+        The artifact, carrying the resolved path, the observed digest and
+        the parsed content.
+
+    Raises:
+        AdviceArtifactError: the file is missing or unreadable, its bytes do
+            not parse as a JSON object, or its digest is not
+            ``declared_sha256``.
+    """
+    resolved = os.path.abspath(path)
+    try:
+        data = Path(resolved).read_bytes()
+    except FileNotFoundError:
+        raise AdviceArtifactError(
+            f"advice artifact not found: {resolved}. A declared advice file is "
+            f"the run's treatment — a missing one refuses the launch rather "
+            f"than running an untreated arm under a treated label."
+        ) from None
+    except OSError as exc:
+        raise AdviceArtifactError(f"advice artifact at {resolved} is unreadable: {exc}") from exc
+    observed = hashlib.sha256(data).hexdigest()
+    if declared_sha256 is not None and declared_sha256 != observed:
+        raise AdviceArtifactError(
+            f"advice artifact identity cannot be certified: the file at "
+            f"{resolved} hashes to sha256={observed}, but this launch declares "
+            f"sha256={declared_sha256}. The bytes are not the ones the "
+            f"launcher recorded — refuse, never consume them. Every band of a "
+            f"campaign must read one artifact; an edit between two band "
+            f"launches is exactly what this comparison exists to catch."
+        )
+    try:
+        content = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise AdviceArtifactError(
+            f"advice artifact at {resolved} (sha256={observed}) is not valid JSON: {exc}"
+        ) from exc
+    if not isinstance(content, dict):
+        raise AdviceArtifactError(
+            f"advice artifact at {resolved} (sha256={observed}) must be a JSON "
+            f"object of advice keys; got {type(content).__name__}."
+        )
+    return AdviceArtifact(path=resolved, sha256=observed, content=content)
+
+
+def resolve_advice_artifact(args: argparse.Namespace) -> AdviceArtifact | None:
+    """The ONE authority for "which advice artifact does this launch read".
+
+    Idempotent and cached on ``args``: ``normalize_args`` resolves it to get
+    the advice CONTENT, and ``resolve_launch_identity`` resolves it to get
+    the lock IDENTITY. Both must see the same bytes, so exactly one read
+    happens per process and both callers go through here — a second reader
+    with its own ``open()`` is how the content and the pinned identity would
+    come to describe different files.
+
+    Returns:
+        The artifact, or ``None`` when this launch declares no advice.
+    """
+    cached = getattr(args, "advice_artifact", None)
+    if cached is not None:
+        return cached
+    # --advice (4-key) takes precedence over --human_advice_file (5-key).
+    path = args.advice or args.human_advice_file
+    if not path:
+        return None
+    artifact = load_advice_artifact(path, declared_sha256=args.advice_sha256)
+    args.advice_artifact = artifact
+    return artifact
+
+
 @dataclass(frozen=True)
 class LaunchIdentity:
     """The run-identity values this launch resolved ONCE (arXiv U1).
@@ -513,6 +633,11 @@ class LaunchIdentity:
             enabled, else ``None``.
         baseline_isolation: arXiv U3 — the WITHOUT arm's explicit isolation
             flag, straight from ``--baseline_isolation``.
+        advice_path: Resolved absolute path of the advice artifact this
+            launch read, or ``None``. Recorded, never compared.
+        advice_sha256: The OBSERVED digest of that artifact's bytes, or
+            ``None``. This is the campaign's treatment identity and it is
+            CANONICAL in the workspace lock.
     """
 
     experiment_arm: str | None
@@ -520,6 +645,8 @@ class LaunchIdentity:
     lit_review_config_path: str
     lit_review_config_sha256: str | None
     baseline_isolation: bool = False
+    advice_path: str | None = None
+    advice_sha256: str | None = None
 
 
 def write_manifest(
@@ -1357,6 +1484,19 @@ def build_parser() -> argparse.ArgumentParser:
         "Overrides --human_advice_file when provided.",
     )
     parser.add_argument(
+        "--advice_sha256",
+        type=str,
+        default=None,
+        help=(
+            "DECLARED sha256 of the advice artifact's bytes, as observed by "
+            "the launcher. Certified against this process's own read and then "
+            "discarded — the workspace lock always pins the OBSERVED digest. "
+            "A mismatch refuses the launch, which is how an edit between two "
+            "band launches of one campaign is caught. Omit for hand-run "
+            "chains: the observed digest is still pinned."
+        ),
+    )
+    parser.add_argument(
         "--validation_max_portion",
         # F-RC-1: the SAME `_portion_floor` authority `--trial_portion` and
         # `--eval_portion` already use. This ceiling is clamped onto those
@@ -1895,9 +2035,16 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
 
     Raises:
         ValueError: lit-review is enabled but its config cannot be read (the
-            lock must pin the config's sha256, so the launch is refused).
+            lock must pin the config's sha256, so the launch is refused), or
+            the declared advice artifact cannot be certified
+            (:class:`AdviceArtifactError`).
     """
     enabled = resolve_lit_review_enabled(args.ml_lit_review_enabled, args.ml_lit_review_config)
+    # The advice pin comes from the SAME single read the advice CONTENT does
+    # (`resolve_advice_artifact` is the one authority and caches on `args`),
+    # so the identity locked and the advice injected into the proposer are
+    # provably the same bytes.
+    advice = resolve_advice_artifact(args)
     return LaunchIdentity(
         experiment_arm=args.experiment_arm,
         lit_review_enabled=enabled,
@@ -1906,6 +2053,8 @@ def resolve_launch_identity(args: argparse.Namespace) -> LaunchIdentity:
             args.ml_lit_review_config, enabled=enabled
         ),
         baseline_isolation=bool(args.baseline_isolation),
+        advice_path=None if advice is None else advice.path,
+        advice_sha256=None if advice is None else advice.sha256,
     )
 
 
@@ -2132,6 +2281,12 @@ def compute_expected_invariants(
             lit_review_config_sha256=identity.lit_review_config_sha256,
             experiment_arm=identity.experiment_arm,
             baseline_isolation=identity.baseline_isolation,
+            # Gold campaign — the OBSERVED advice identity. `run_workflow`
+            # locks this SAME workspace, so it must resolve the same pair or
+            # the two would write contradictory locks and abort every
+            # advice-bound run (the V19 PR 2 rule, one field family over).
+            advice_sha256=identity.advice_sha256,
+            advice_path=identity.advice_path,
         ),
     )
     return invariants
@@ -2209,12 +2364,14 @@ def normalize_args(args: argparse.Namespace) -> argparse.Namespace:
     if hasattr(args, "source_paths_legacy"):
         delattr(args, "source_paths_legacy")
 
-    # Load human advice: --advice (4-key) takes precedence over --human_advice_file (5-key).
-    # Both schemas are tolerated during transition; missing keys are None.
-    advice_path = args.advice or args.human_advice_file
-    if advice_path:
-        with open(advice_path) as f:
-            advice = json.load(f)
+    # Load human advice through the ONE artifact authority, which resolves
+    # the --advice / --human_advice_file precedence, certifies any declared
+    # digest and caches the OBSERVED one for `resolve_launch_identity`.
+    # Both advice schemas are tolerated during transition; missing keys are
+    # None.
+    artifact = resolve_advice_artifact(args)
+    if artifact is not None:
+        advice = artifact.content
         # Normalise list-of-lines form.
         advice = {k: ("\n".join(v) if isinstance(v, list) else v) for k, v in advice.items()}
         # 4-key schema: propose, implement, tune, mindset
@@ -2306,6 +2463,12 @@ def print_resolved_launch_config(args: argparse.Namespace) -> int:
         "baseline_isolation": identity.baseline_isolation,
         "task_composition": args.task_composition or None,
         "advice_file": args.advice or args.human_advice_file or None,
+        # The DECLARED path is above, as given. These two are what the launch
+        # RESOLVED and OBSERVED: an operator comparing four bands reads the
+        # digest, not the path, because the path is where the treatment lives
+        # and the digest is what the treatment IS.
+        "advice_path": identity.advice_path,
+        "advice_sha256": identity.advice_sha256,
         "healthgate_mode": args.healthgate_mode,
         "result_authority": args.result_authority,
         # arXiv #261 — the resolved watchdog policy with its provenance, so
@@ -2909,6 +3072,11 @@ def main():
                     experiment_arm=launch_identity.experiment_arm,
                     # arXiv U3 — the WITHOUT arm's explicit behaviour flag.
                     baseline_isolation=launch_identity.baseline_isolation,
+                    # Gold campaign — the OBSERVED advice identity, from the
+                    # same resolution the pre-flight lock used, because
+                    # `run_workflow` locks the SAME workspace.
+                    advice_path=launch_identity.advice_path,
+                    advice_sha256=launch_identity.advice_sha256,
                     # arXiv #259 — output-type constraint, transit to the
                     # proposer's schema gate.
                     allowed_output_types=parse_allowed_output_types(args.allowed_output_types),

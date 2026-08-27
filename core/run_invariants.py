@@ -23,8 +23,9 @@ The current canonical set is ``resolved_data_scope`` +
 ``health_gate_enabled`` + ``health_config_sha256`` plus every later
 canonical field declared on ``RunInvariants._CANONICAL`` (ordering
 override, health-feedback policy, runtime identities, task composition,
-and — arXiv U1 — the workflow topology ``lit_review_enabled`` /
-``lit_review_config_sha256`` and the opaque ``experiment_arm`` label). The
+arXiv U1's workflow topology ``lit_review_enabled`` /
+``lit_review_config_sha256`` and the opaque ``experiment_arm`` label, and
+the Gold campaign's observed ``advice_sha256`` treatment identity). The
 mechanism is deliberately generic: future run-defining settings (dataset
 version, execution policy, ...) join by adding a field to ``RunInvariants``
 — the file format and validation logic need no redesign.
@@ -102,6 +103,15 @@ class RunInvariants(BaseModel):
             explicit, recorded flag. ``None`` is "unlabelled" (every legacy
             run); an EMPTY string is refused, so absence is never spelled as
             an empty-string default. Omitted from the lock when ``None``.
+        advice_sha256: OBSERVED sha256 of the exact advice-artifact bytes
+            this run consumed, or ``None`` when it consumed none. CANONICAL:
+            the advice artifact IS the Gold campaign's independent variable,
+            so two workspaces that read different advice are not comparable
+            and a resume across them must refuse. Never an echo of a
+            declared value — see ``advice_path``.
+        advice_path: Resolved ABSOLUTE path the advice bytes were read from,
+            or ``None``. RECORDED, never compared: path proves authority and
+            reachability, the observed digest proves treatment identity.
         created_at: ISO-8601 creation timestamp. Provenance only — never
             part of equality.
 
@@ -198,6 +208,57 @@ class RunInvariants(BaseModel):
     # Canonical: an isolated and a non-isolated run saw different prompt
     # surfaces and are not comparable. Omitted from the lock at `False`.
     baseline_isolation: bool = False
+    # Gold campaign (advice-invariant) — the run's ADVICE TREATMENT identity:
+    # the OBSERVED sha256 of the exact advice-artifact bytes this run
+    # consumed, and the resolved absolute path they were read from.
+    #
+    # The split between the two is the operator's formulation: PATH PROVES
+    # AUTHORITY AND REACHABILITY; OBSERVED DIGEST PROVES TREATMENT IDENTITY.
+    # So `advice_sha256` is CANONICAL and `advice_path` is `_PROVENANCE`.
+    # Filesystem location is execution-HOST layout, not scientific semantics
+    # — the same advice bytes staged at two absolute paths are one treatment,
+    # which is the Q-P1-2 exclusion rule `model_plugin_identities` states
+    # above and the `generated_library` root states below. No frozen decision
+    # in this repository makes a file's location part of a run's semantics.
+    #
+    # WHY PLAIN `_CANONICAL` MEMBERSHIP *IS* THE CONDITIONAL COMPARISON, and
+    # why no second comparison surface was built for it. The required
+    # outcomes are:
+    #
+    #     stored absent + current absent -> COMPATIBLE (legacy regime)
+    #     stored A      + current A      -> COMPATIBLE
+    #     stored A      + current B      -> REFUSE
+    #     stored A      + current absent -> REFUSE
+    #     stored absent + current A      -> REFUSE
+    #
+    # `validate_run_invariants` compares `locked != expected` field by field
+    # over `_CANONICAL`. A legacy lock carries no advice key and parses to
+    # `None`; a run that consumed no advice resolves `None`. Those five rows
+    # are therefore exactly `!=` over `str | None` — the conditional
+    # behaviour is a PROPERTY of an optional canonical field, not machinery
+    # that has to be written.
+    #
+    # The contrast with `task_config_sha256` above is the whole reason this
+    # addition does not invalidate the repository's existing workspaces:
+    # that field is pinned UNCONDITIONALLY by every un-composed run, so a
+    # legacy lock's `None` met a real digest and refused (intended, and
+    # separately accepted). Advice is OPTIONAL, so the overwhelming case is
+    # `None` vs `None` and every no-advice workspace stays resumable. Only a
+    # workspace that is resumed WITH advice is refused — and that is the row
+    # the operator singled out: it is the case that would otherwise let an
+    # advice-bound campaign quietly inherit a workspace whose treatment
+    # nobody can reconstruct.
+    #
+    # A dedicated conditional-comparison mechanism would express the same
+    # five rows with more machinery AND would move the semantics back inside
+    # a validator — precisely what declaring the `_CANONICAL` / `_PROVENANCE`
+    # partition (R-11-6) exists to prevent.
+    #
+    # Both keys are OMITTED from the serialized lock at `None`, so every lock
+    # written by a run that consumed no advice — legacy or current — stays
+    # byte-identical.
+    advice_sha256: str | None = None
+    advice_path: str | None = None
     created_at: str | None = None
     # Step 11 C3 (R-11-6) — the per-role subprocess memory ceilings this
     # run executed under, plus their provenance. RECORDED, never compared.
@@ -274,6 +335,13 @@ class RunInvariants(BaseModel):
         "experiment_arm",
         # arXiv U3 — the isolation flag is a prompt-surface identity.
         "baseline_isolation",
+        # Gold campaign — the OBSERVED advice-artifact digest. The treatment
+        # itself, not the arm LABEL that describes it: `experiment_arm` two
+        # lines up is opaque provenance about which arm a workspace claims to
+        # belong to, and before this field nothing pinned what that arm
+        # actually received. Optional, so `None` vs `None` keeps every
+        # no-advice workspace resumable (see the field's declaration).
+        "advice_sha256",
     )
 
     #: Fields RECORDED for audit and never compared (Step 11 C3, R-11-6).
@@ -290,6 +358,11 @@ class RunInvariants(BaseModel):
         "execution_calibration",
         "model_plugin_identities",
         "generated_library",
+        # Gold campaign — WHERE the advice bytes were read from. Recorded so
+        # a refusal naming two digests can be traced back to an artifact,
+        # and never compared: staging the same advice at a different
+        # absolute path is not a different treatment (the Q-P1-2 rule).
+        "advice_path",
     )
 
     #: C9d fields that a legacy lock cannot supply. Their absence is a
@@ -316,6 +389,84 @@ class RunInvariants(BaseModel):
                 "empty-string default."
             )
         return value
+
+    @field_validator("advice_sha256")
+    @classmethod
+    def _advice_digest_is_a_bare_sha256(cls, value: str | None) -> str | None:
+        """The digest is 64 lowercase hex characters, or absent.
+
+        The defect this names: ``sha256sum FILE`` prints ``<hex>  <path>``,
+        and the campaign launcher strips the path with ``awk '{print $1}'``.
+        Drop the ``awk`` and the "identity" becomes a host-dependent string
+        that still compares equal to itself — a pin that looks authoritative
+        and silently encodes the machine's directory layout into the run's
+        scientific identity.
+        """
+        if value is None:
+            return value
+        if len(value) != 64 or any(c not in "0123456789abcdef" for c in value):
+            raise ValueError(
+                f"advice_sha256 must be 64 lowercase hex characters (a bare "
+                f"sha256 digest) or None; got {value!r}. `sha256sum` output "
+                f"includes the FILE NAME — hash the bytes, or strip it."
+            )
+        return value
+
+    @field_validator("advice_path")
+    @classmethod
+    def _advice_path_is_absolute(cls, value: str | None) -> str | None:
+        """A recorded advice path is absolute, or absent — never relative.
+
+        The consuming subprocess does not share the operator's working
+        directory (``run_chain.sh`` cd's to the project dir before exec), so
+        a relative path recorded in the lock names a different file for
+        whoever reads it back than for the run that wrote it. The
+        ``RequiredProfileBinding.artifact_path`` precedent, for the same
+        reason.
+        """
+        if value is None:
+            return value
+        if not value.strip():
+            raise ValueError(
+                "advice_path must be a non-empty absolute path or None "
+                "(absent); an empty string is refused so absence is never "
+                "spelled as an empty-string default."
+            )
+        if not os.path.isabs(value):
+            raise ValueError(
+                f"advice_path {value!r} is relative. The recorded path must be "
+                f"absolute: the run that wrote this lock and whoever reads it "
+                f"back do not share a working directory, so a relative path "
+                f"would name two different files."
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _advice_path_and_digest_travel_together(self) -> RunInvariants:
+        """The advice pin is the PAIR, or it is absent.
+
+        A path with no digest is the dangerous half: the COMPARED field is
+        then ``None``, so the lock admits ANY advice on resume while looking
+        pinned — the same fail-open ``_lit_review_sha_matches_topology``
+        refuses one field over. A digest with no path is unattributable: a
+        refusal shows the operator two hex strings and no artifact to go
+        and compare. Both are refused at construction, before any lock is
+        written.
+        """
+        if self.advice_path is not None and self.advice_sha256 is None:
+            raise ValueError(
+                "advice_path is set but advice_sha256 is None: a lock recording "
+                "WHERE the advice came from without WHAT it contained pins "
+                "nothing — the compared field is None, so the workspace would "
+                "admit any advice on resume while appearing bound."
+            )
+        if self.advice_sha256 is not None and self.advice_path is None:
+            raise ValueError(
+                "advice_sha256 is set but advice_path is None: a digest with no "
+                "artifact is unattributable — a resume refusal would name two "
+                "hex strings and no file to compare."
+            )
+        return self
 
     @model_validator(mode="after")
     def _lit_review_sha_matches_topology(self) -> RunInvariants:
@@ -447,6 +598,15 @@ def write_run_invariants(workspace: str, invariants: RunInvariants) -> str:
     # gaining a `null` for a concept it predates.
     if payload.get("generated_library") is None:
         payload.pop("generated_library", None)
+    # Gold campaign — same rule for the advice pin, and here it is doing more
+    # than cosmetics: the omission is what makes "this run consumed no
+    # advice" and "this lock predates the advice pin" the SAME stored value,
+    # which is what lets the ordinary canonical comparison produce the
+    # required legacy-compatible row without a second comparison surface.
+    if payload.get("advice_sha256") is None:
+        payload.pop("advice_sha256", None)
+    if payload.get("advice_path") is None:
+        payload.pop("advice_path", None)
     fd, tmp_path = tempfile.mkstemp(dir=workspace, suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -559,7 +719,14 @@ def ensure_run_invariants(workspace: str, expected: RunInvariants) -> str:
 
 
 class LockLaunchIdentity(BaseModel):
-    """The arXiv-U1/U3 launch-identity values, as ONE typed carrier.
+    """The launch-identity values a run's entry point resolves, as ONE carrier.
+
+    The Gold campaign's advice pin rides here too, for the reason the
+    carrier exists: it is resolved once at the launch boundary and has
+    exactly one destination, the lock. ``advice_sha256`` is CANONICAL and so
+    must be threaded explicitly by every caller that participates — a
+    compared value must never arrive ambiently — and ``advice_path`` travels
+    with it because it has no ambient authority to be read from.
 
     Four CANONICAL lock fields travel together from every entry point —
     workflow topology (``lit_review_enabled`` + its config sha), the opaque
@@ -578,6 +745,11 @@ class LockLaunchIdentity(BaseModel):
     lit_review_config_sha256: str | None = None
     experiment_arm: str | None = None
     baseline_isolation: bool = False
+    #: The OBSERVED advice-artifact digest and the path it was read from.
+    #: Defaults are the no-advice state, so a caller that omits them gets a
+    #: byte-identical lock.
+    advice_sha256: str | None = None
+    advice_path: str | None = None
 
 
 #: The unlabelled default — module-level so call sites can splat a shared
@@ -723,6 +895,14 @@ def build_run_invariants(
             lit_review_config_sha256=_launch_identity.lit_review_config_sha256,
             experiment_arm=_launch_identity.experiment_arm,
             baseline_isolation=_launch_identity.baseline_isolation,
+            # Gold campaign — CANONICAL, so threaded explicitly like the four
+            # above. The value handed in here is the OBSERVED digest of the
+            # bytes the run read; this builder never re-derives it, because a
+            # digest recomputed here would describe whatever is on disk NOW
+            # rather than what the run consumed (F-12bc-7's lesson: a pin
+            # that follows the edit it exists to catch is not a pin).
+            advice_sha256=_launch_identity.advice_sha256,
+            advice_path=_launch_identity.advice_path,
             # Step 11 C3 (R-11-6) — stamped at the SAME shared builder, for
             # the same reason C9d is: every entry point then records the
             # ceilings its children actually ran under. Provenance, never
