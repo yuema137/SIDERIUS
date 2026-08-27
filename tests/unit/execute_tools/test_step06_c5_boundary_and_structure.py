@@ -89,16 +89,43 @@ def test_the_tidmad_metric_identity_is_declared_in_exactly_one_executed_constant
     assert hits == {METRIC_MODULE: ["tidmad_denoising_score"]}, hits
 
 
-def test_per_file_best_still_emits_the_precedent_identity_through_the_import():
+def test_per_file_best_emits_the_precedent_identity_only_when_it_is_declared():
+    """UPGRADED (per-file-best identity fix).
+
+    The original test asserted that ``per_file_best`` emits TIDMAD's identity
+    "through the import" — and it did, unconditionally, as a literal imported
+    from the metric module. That made the artifact stamp TIDMAD's identity onto
+    every task's run; a composed California-housing run (metric ``mae``) wrote
+    ``metric_id: "tidmad_denoising_score"``.
+
+    The precedent identity is still emitted for TIDMAD, but now because the
+    committed artifacts DECLARE it. The C5 boundary property this test exists
+    to protect — the module never executes the identity as a literal — is
+    unchanged and still asserted.
+    """
     import tempfile
 
     from execute_tools.evaluation_metric import TIDMAD_METRIC_ID
     from execute_tools.per_file_best import build_table
     from tests.unit.core.test_step00_resume_replay import stage_workspace
+    from tests.unit.execute_tools.test_per_file_best import _record, _write_iter
 
+    # Declared: resolution reproduces the precedent identity.
+    declared_ws = str(Path(tempfile.mkdtemp(prefix="step06_c5_declared_")) / "ws")
+    _write_iter(
+        declared_ws,
+        1,
+        [_record("a", file_vector=[1.0, 2.0] + [None] * 18, logical_round=1)],
+        formal_eval_portion=1.0,
+        formal_strategy="snapshot",
+    )
+    assert build_table(declared_ws)["metric_id"] == "tidmad_denoising_score" == TIDMAD_METRIC_ID
+
+    # Undeclared (RES-1 holds zero records and no stamped spec): a named
+    # absence, never the precedent identity as a default.
     ws = stage_workspace(Path(tempfile.mkdtemp(prefix="step06_c5_")))
-    table = build_table(str(ws))
-    assert table["metric_id"] == "tidmad_denoising_score" == TIDMAD_METRIC_ID
+    assert build_table(str(ws))["metric_id"] is None
+
     assert "tidmad_denoising_score" not in _executed(
         REPO_ROOT / "execute_tools" / "per_file_best.py"
     )

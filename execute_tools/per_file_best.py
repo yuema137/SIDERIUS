@@ -32,7 +32,7 @@ from core.resume import (
     classify_committed_record,
 )
 from execute_tools.evaluation_metric import (
-    TIDMAD_METRIC_ID,
+    MetricIdentityKey,
     StampedMetricSpec,
     metric_identity_from_record,
     metric_identity_unavailable_notice,
@@ -55,7 +55,17 @@ def _iter_run_name(iter_idx: int) -> str:
 
 SCHEMA_VERSION = "1"
 TABLE_BASENAME = "per_file_best.json"
-LOG_BASE = 5.27  # TIDMAD `denoising_score` — persisted in the header
+# The base of the ONE transform this module applies: `_log` derives every
+# row's `best_log_score` from its `best_linear`, unconditionally, for every
+# workspace. `LOG_BASE` and the `score_transform` header field therefore
+# document THIS MODULE'S derived row column — they are not, and must not be
+# read as, the run metric's declared transform. The run's metric is reported
+# by the `metric_id` header field, which is RESOLVED (see `_table_identity`).
+# The value originates in TIDMAD's `denoising_score`; that a generic row
+# column is still transformed by it is the named capability gap recorded in
+# `_row_beats`, not a claim about the run.
+LOG_BASE = 5.27
+SCORE_TRANSFORM = "log"
 
 # Per A2 (design §3.7 rev 3): one stable gate_summary schema for both
 # raw and valid rows.
@@ -105,6 +115,21 @@ def build_table(workspace: str) -> dict[str, Any]:
     Returns:
         A dict conforming to the §3.7 A8 canonical header + row schema.
         Empty ``rows`` when no committed iterations exist.
+
+        Header ``metric_id`` is the metric the committed artifacts DECLARE
+        (:func:`_table_identity`), or ``null`` when none of them declares one.
+        Header ``score_transform``/``log_base`` describe :func:`_log`, the
+        transform applied to every row's ``best_log_score``; they document
+        this module's derived column and are constant across tasks.
+
+        The table is written for every run, including a task with no per-file
+        deliverable — such a run simply has no rows. Emptiness is not
+        task-shaped: a TIDMAD run whose scores are all non-positive, or one
+        whose first iteration produced no successful record, is equally
+        row-less, so suppressing the artifact on emptiness would change TIDMAD
+        behaviour while still not detecting "this task has no per-file
+        concept". The header states what is known and the empty ``rows`` and
+        ``files_covered`` state what is not.
 
     Raises:
         ReplayIntegrityError: a committed manifest's
@@ -271,11 +296,14 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
     iterations_included = sorted(s.iter_idx for s in sources)
     unverified = sum(1 for s in sources if not s.artifact_verified)
 
-    # Step 10 P2a C2 — one reconciled order for the whole table, built from
+    # Step 10 P2a C2 — one reconciled identity for the whole table, built from
     # what the artifacts DECLARE (§4.4). A set of iterations spanning two
     # metric bindings refuses here rather than ranking per-file rows across
-    # incomparable metrics.
-    row_order = _table_order(sources)
+    # incomparable metrics. The SAME resolution names the metric in the header
+    # and orders the rows, so the artifact cannot report one and rank by the
+    # other.
+    table_identity = _table_identity(sources)
+    row_order = MetricOrder(table_identity) if table_identity is not None else None
 
     # (file_index, phase, validity) -> best row candidate, tracked in
     # linear space so tie-breaks compare on the same units as the
@@ -386,10 +414,18 @@ def _assemble(sources: list[_SourceIter]) -> dict[str, Any]:
     rows = [candidates[k].as_row() for k in sorted(candidates)]
     return {
         "schema_version": SCHEMA_VERSION,
-        # Step 06 C5 — the identity is DECLARED once, in the metric module; this
-        # artifact was its precedent and now imports it (emitted value unchanged).
-        "metric_id": TIDMAD_METRIC_ID,
-        "score_transform": "log",
+        # The metric THIS RUN was scored under, RESOLVED from what the committed
+        # artifacts declare (`_table_identity`) — never a literal, never a
+        # default. `null` means the workspace declared no identity, which is
+        # also why it has no rows. Until this was resolved the field emitted
+        # `TIDMAD_METRIC_ID` unconditionally, so every composed non-TIDMAD run
+        # stamped TIDMAD's identity onto its own table.
+        "metric_id": table_identity.id if table_identity is not None else None,
+        # These two describe `_log`, the transform this module applies to every
+        # row's `best_log_score` — see the `LOG_BASE` declaration. They are a
+        # property of the derived row column, NOT of the run's metric, and are
+        # therefore constant across tasks.
+        "score_transform": SCORE_TRANSFORM,
         "log_base": LOG_BASE,
         "iterations_included": iterations_included,
         "files_covered": files_covered,
@@ -493,8 +529,28 @@ class _RowCandidate:
         }
 
 
-def _table_order(sources: list[_SourceIter]) -> MetricOrder | None:
-    """The ONE order every row in this table is selected by, or ``None``.
+def _table_identity(sources: list[_SourceIter]) -> MetricIdentityKey | None:
+    """The ONE metric identity this table describes, or ``None``.
+
+    This is the table's single metric authority. Its result feeds BOTH the
+    ``metric_id`` header field and the :class:`MetricOrder` every row is
+    selected by, so the artifact cannot name one metric while ranking under
+    another — which is exactly what it used to do: the header emitted
+    ``TIDMAD_METRIC_ID`` as a literal while this function resolved the real
+    identity from the artifacts and threw it away. A composed
+    California-housing run (metric ``mae``, direction ``lower``) wrote
+    ``metric_id: "tidmad_denoising_score"`` for that reason.
+
+    The identity granularity is ``(id, direction)`` and deliberately no more.
+    The pool below is HETEROGENEOUS — iteration outputs contribute whole
+    ``MetricSpec`` objects, scored records contribute ``MetricIdentityKey``
+    pairs — and ``reconcile_metric_specs`` compares whole declarations, so a
+    spec and a key for the SAME metric would never compare equal. Identity is
+    the only granularity that spans this pool, which is why the table can
+    report a resolved ``metric_id`` and cannot report a resolved transform
+    without opening a second reconciliation over a different pool. It does not
+    need one: ``score_transform``/``log_base`` describe ``_log``, this
+    module's own row column, not the run's metric.
 
     Step 10 P2a C2. Both declared sources §4.4 names for this module are
     offered to the SHARED reconciliation authority — each iteration's stamped
@@ -504,16 +560,19 @@ def _table_order(sources: list[_SourceIter]) -> MetricOrder | None:
 
     Returns ``None`` when NOTHING declares an identity (a pre-Step-06
     workspace). The table then reports no rows rather than ranking them on an
-    assumed direction.
+    assumed direction, and its ``metric_id`` is ``null`` — a named absence.
+    Emitting a metric name there would be a fabrication, not a default: the
+    workspace has said nothing about which metric it was scored under.
 
     **It deliberately does NOT derive a spec in that case.** An earlier draft
     fell back to ``derive_tidmad_metric_spec``, reasoning that this module
-    already emits ``metric_id: TIDMAD_METRIC_ID`` in its own header. That was
+    already emitted ``metric_id: TIDMAD_METRIC_ID`` in its own header. That was
     wrong twice over: P2a's frozen contract is that it derives metric identity
     NOWHERE, and Step 09a's executable census pins the exact set of production
     modules allowed to derive the TIDMAD metric — the fallback made this a
     fifth, and CI caught it. Emitting a metric's NAME is not the same as being
-    entitled to invent its direction.
+    entitled to invent its direction. The header literal that motivated that
+    draft is now itself gone; the premise it argued from no longer exists.
 
     Raises:
         MetricIdentityConflictError: sources declare different metrics.
@@ -532,8 +591,7 @@ def _table_order(sources: list[_SourceIter]) -> MetricOrder | None:
         for data in (_record_dict(rec) for rec in src.parsed.all_records)
         if (identity := metric_identity_from_record(data)) is not None
     ]
-    reconciled = reconcile_metric_identity(stamped)
-    return MetricOrder(reconciled) if reconciled is not None else None
+    return reconcile_metric_identity(stamped)
 
 
 def _consider(

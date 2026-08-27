@@ -266,18 +266,52 @@ class TestNUM6MechanismReplay:
 
 
 class TestNUM8PerFileBestKeySet:
-    def test_emitted_table_key_set_and_metric_id(self, tmp_path):
-        """The per_file_best artifact's key set incl. ``metric_id`` —
-        roadmap step-06 A-surface; produced by the REAL ``build_table``
-        over the RES-1 committed workspace fixture."""
+    def test_emitted_table_key_set(self, tmp_path):
+        """The per_file_best artifact's KEY SET — roadmap step-06 A-surface;
+        produced by the REAL ``build_table`` over the RES-1 committed
+        workspace fixture. The key set is frozen; the header VALUES are
+        resolved, and are asserted by the two tests below."""
         from execute_tools.per_file_best import build_table
         from tests.unit.core.test_step00_resume_replay import stage_workspace
 
         ws = stage_workspace(tmp_path)
         table = build_table(str(ws))
-        assert table["metric_id"] == "tidmad_denoising_score"
         assert_json_golden(
             sorted(table.keys()),
             GOLDENS / "num8_per_file_best_key_set.json",
             surface="NUM-8 per_file_best artifact key set",
         )
+
+    def test_metric_id_is_null_when_the_workspace_declares_no_metric(self, tmp_path):
+        """UPGRADED (per-file-best identity fix). This assertion previously
+        read ``== "tidmad_denoising_score"``, and it passed for the wrong
+        reason: the RES-1 fixture holds ZERO records and no stamped
+        ``metric_spec``, so it declares no metric whatsoever — the header was
+        simply emitting a literal. A workspace that has said nothing about its
+        metric must report ``null``, not a fabricated name.
+
+        Fails if the header ever reverts to emitting an unconditional
+        identity."""
+        from execute_tools.per_file_best import build_table
+        from tests.unit.core.test_step00_resume_replay import stage_workspace
+
+        ws = stage_workspace(tmp_path)
+        table = build_table(str(ws))
+        assert table["metric_id"] is None
+
+    def test_metric_id_is_the_declared_identity_for_a_tidmad_workspace(self, tmp_path):
+        """The positive half the old single assertion never had: a workspace
+        whose records DO declare TIDMAD still reports TIDMAD, so the fix above
+        cannot be satisfied by simply deleting the field."""
+        from execute_tools.per_file_best import build_table
+        from tests.unit.execute_tools.test_per_file_best import _record, _write_iter
+
+        ws = str(tmp_path / "tidmad_ws")
+        _write_iter(
+            ws,
+            1,
+            [_record("a", file_vector=[1.0, 2.0] + [None] * 18, logical_round=1)],
+            formal_eval_portion=1.0,
+            formal_strategy="snapshot",
+        )
+        assert build_table(ws)["metric_id"] == "tidmad_denoising_score"

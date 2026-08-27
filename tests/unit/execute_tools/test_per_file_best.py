@@ -93,12 +93,18 @@ def _record(
     train_portion: float | None = None,
     model_params: int | None = 100,
     timestamp: str = "2026-07-27 00:00:00",
+    metric_identity: tuple[str, str] = (TIDMAD_METRIC_ID, "higher"),
 ) -> dict:
     """Schema-valid ExperimentRecord dict.
 
     ``waiver=False`` stamps DS5 disabled-mode waiver (commit-time VALID
     without policy artifacts). Trial fields written only under
     ``is_trial=True``, mirroring production.
+
+    ``metric_identity`` is the ``(metric_id, direction)`` pair the record
+    declares it was scored under. It defaults to TIDMAD's, so every existing
+    caller is unchanged; a non-TIDMAD value builds the composed-run shape that
+    exposed the header's hardcoded identity.
     """
     rec: dict = {
         "exp_id": exp_id,
@@ -121,8 +127,8 @@ def _record(
     # coverage in tests/unit/execute_tools/test_step10_p2a_c2_resume_and_per_file.py.
     if status == "success" and rec["denoising_score"] is not None:
         rec["metric_result"] = {
-            "metric_id": TIDMAD_METRIC_ID,
-            "direction": "higher",
+            "metric_id": metric_identity[0],
+            "direction": metric_identity[1],
             "scalar": rec["denoising_score"],
             "per_sample": file_vector,
         }
@@ -749,6 +755,129 @@ def test_header_shape_and_schema_version(tmp_path):
     assert "generated_at" not in table
     assert table["schema_version"] == SCHEMA_VERSION
     assert table["log_base"] == LOG_BASE
+
+
+class TestTheHeaderNamesTheRunsOwnMetric:
+    """The header's ``metric_id`` is RESOLVED, never a literal.
+
+    The defect this class exists to catch, observed in a live composed
+    California-housing run (metric ``mae``, direction ``lower``, no log
+    transform): ``_assemble`` emitted ``"metric_id": TIDMAD_METRIC_ID`` as a
+    hardcoded literal, so every task's table claimed TIDMAD's metric identity.
+    The module already resolved the real identity a few lines earlier — to
+    order the rows — and discarded it. Two authorities, one file.
+
+    If this class were deleted, nothing would catch a regression to the
+    literal: every other assertion in this suite builds a TIDMAD workspace,
+    where the literal and the resolved value coincide. That coincidence is
+    exactly why the defect survived to production.
+
+    The distinction is drawn from the DECLARED binding the artifacts carry,
+    never from a task name.
+    """
+
+    _MAE = ("mae", "lower")
+
+    def _mae_workspace(self, tmp_path) -> str:
+        ws = str(tmp_path / "composed_ws")
+        _write_iter(
+            ws,
+            1,
+            [
+                _record(
+                    "h1",
+                    file_vector=[0.5, 1.5] + [None] * 18,
+                    logical_round=1,
+                    metric_identity=self._MAE,
+                )
+            ],
+            formal_eval_portion=1.0,
+            formal_strategy="snapshot",
+        )
+        return ws
+
+    def test_production_writer_stamps_the_declared_metric_not_tidmads(self, tmp_path):
+        """Drives ``write_table`` — the function
+        ``sdsc_submission_scripts/run_one_iteration.py`` calls after every
+        committed iteration — and reads the bytes back off disk, so the
+        assertion covers the artifact an operator actually finds in the
+        workspace, not an in-memory dict.
+
+        Fails with ``metric_id == 'tidmad_denoising_score'`` if the header
+        reverts to the literal.
+        """
+        ws = self._mae_workspace(tmp_path)
+        path = write_table(ws)
+        written = json.loads(Path(path).read_text(encoding="utf-8"))
+        assert written["metric_id"] == "mae"
+        assert written["metric_id"] != TIDMAD_METRIC_ID
+
+    def test_the_declared_direction_also_orders_the_rows(self, tmp_path):
+        """The header and the ranking come from ONE resolution, so a
+        ``lower``-is-better run must both SAY ``mae`` and RANK by ``mae``.
+        Hardcoded expectation: of 0.5 and 1.5 the better MAE is 0.5."""
+        ws = self._mae_workspace(tmp_path)
+        table = build_table(ws)
+        assert table["metric_id"] == "mae"
+        raw = [r for r in table["rows"] if r["validity"] == "raw"]
+        assert {r["file_index"]: r["best_linear"] for r in raw} == {0: 0.5, 1: 1.5}
+
+    def test_an_undeclared_workspace_reports_a_named_absence(self, tmp_path):
+        """No record declares an identity => ``null``. A metric name here
+        would be invented, and inventing TIDMAD's is the original defect."""
+        ws = str(tmp_path / "silent_ws")
+        _write_iter(
+            ws,
+            1,
+            [
+                _record(
+                    "s1",
+                    file_vector=[1.0, 2.0] + [None] * 18,
+                    logical_round=1,
+                    status="skipped_time_risk",
+                )
+            ],
+            formal_eval_portion=1.0,
+            formal_strategy="snapshot",
+        )
+        table = build_table(ws)
+        assert table["metric_id"] is None
+        assert table["rows"] == []
+
+    def test_a_tidmad_workspace_header_is_unchanged(self, tmp_path):
+        """The byte-identity guarantee, at header granularity: resolution must
+        reproduce TIDMAD's frozen header values exactly. Hardcoded, not read
+        back from the module."""
+        ws = str(tmp_path / "tidmad_ws")
+        _write_iter(
+            ws,
+            1,
+            [_record("t1", file_vector=[1.0, 2.0] + [None] * 18, logical_round=1)],
+            formal_eval_portion=1.0,
+            formal_strategy="snapshot",
+        )
+        table = build_table(ws)
+        assert table["metric_id"] == "tidmad_denoising_score"
+        assert table["score_transform"] == "log"
+        assert table["log_base"] == 5.27
+
+    def test_the_row_transform_is_the_modules_own_and_does_not_track_the_metric(self, tmp_path):
+        """``score_transform``/``log_base`` document ``_log``, the transform
+        this module applies to every row's ``best_log_score`` — NOT the run
+        metric's declared transform (``mae`` declares none).
+
+        Pinned deliberately: making these fields follow the metric's
+        declaration would need a second, spec-granularity reconciliation over
+        a different pool of sources, and would make the header contradict the
+        column it documents — the rows below really are log_5.27 values.
+        Hardcoded expectation: log_5.27(0.5) = -0.4171...
+        """
+        ws = self._mae_workspace(tmp_path)
+        table = build_table(ws)
+        assert table["score_transform"] == "log"
+        assert table["log_base"] == 5.27
+        row = next(r for r in table["rows"] if r["file_index"] == 0 and r["validity"] == "raw")
+        assert row["best_log_score"] == pytest.approx(math.log(0.5) / math.log(5.27))
 
 
 class TestTheProducerSerializationBoundary:
